@@ -1,0 +1,1126 @@
+{
+  "$schema": "../../../schemas/claims.schema.json",
+  "schema_version": 1,
+  "tool": "minio-mc",
+  "legacy_ledger": {
+    "source": "../research/tool-page.md",
+    "migration_map": "../research/claims-migration.md",
+    "expected_origins": [
+      "META-1",
+      "META-2",
+      "META-3",
+      "META-4",
+      "META-5",
+      "M1",
+      "M2",
+      "M3",
+      "T1",
+      "T2",
+      "T3",
+      "T4",
+      "N1",
+      "S1",
+      "S2",
+      "W1",
+      "W2",
+      "W3",
+      "V1",
+      "V2",
+      "PROSE-1",
+      "PROSE-2",
+      "PROSE-3",
+      "PROSE-4",
+      "PROSE-5",
+      "PROSE-6",
+      "PROSE-7",
+      "PROSE-8",
+      "PROSE-9",
+      "PROSE-10",
+      "PROSE-11",
+      "PROSE-12"
+    ]
+  },
+  "claims": [
+    {
+      "id": "repo-is-canonical-mc",
+      "statement": "The reviewed tool is the canonical minio/mc project, not a fork.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "minio/mc is the canonical AGPLv3 MinIO project; no fork was involved.",
+      "legacy_origins": [
+        "META-1"
+      ],
+      "evidence": [
+        {
+          "kind": "documentation",
+          "url": "https://github.com/minio/mc"
+        }
+      ]
+    },
+    {
+      "id": "language-is-go",
+      "statement": "mc is written in Go.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "go.mod declares go 1.23.0; the smoke binary self-reported go1.24.6.",
+      "legacy_origins": [
+        "META-2"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/minio/mc",
+          "commit": "7394ce0",
+          "path": "go.mod",
+          "lines": "3"
+        }
+      ]
+    },
+    {
+      "id": "license-is-agpl3",
+      "statement": "mc is licensed under the GNU Affero General Public License v3.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The source license header and the GitHub license metadata agree on AGPL-3.0.",
+      "legacy_origins": [
+        "META-3"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/minio/mc",
+          "commit": "7394ce0",
+          "path": "LICENSE",
+          "lines": "1"
+        },
+        {
+          "kind": "documentation",
+          "url": "https://github.com/minio/mc"
+        }
+      ]
+    },
+    {
+      "id": "pinned-version-identity",
+      "statement": "The reviewed subject is mc release RELEASE.2025-08-13T08-35-41Z at commit 7394ce0, the latest release tag.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "corrected",
+      "qualification": "The inherited page recorded the version as unknown; groundwork pinned it to the latest release tag.",
+      "legacy_origins": [
+        "META-4"
+      ],
+      "evidence": [
+        {
+          "kind": "documentation",
+          "path": "../research/report.md"
+        }
+      ]
+    },
+    {
+      "id": "version-identity-caller-supplied",
+      "statement": "The full-bucket smoke run records the mc version as caller-supplied metadata, not a value the receipt independently measured.",
+      "scope": "runtime",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "run.meta records tool_version_source=caller-supplied, so the release and commit identity of the ran image digest is not receipt-proven.",
+      "legacy_origins": [
+        "META-4"
+      ],
+      "evidence": [
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/recursive-json",
+          "artifact": "../receipts/smoke/recursive-json/run.meta"
+        }
+      ]
+    },
+    {
+      "id": "multiarch-image-available",
+      "statement": "Upstream publishes an official multi-arch mc image for amd64, arm64, and ppc64le, alongside prebuilt dl.min.io binaries.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Only the arm64 image was exercised; the other architectures and the dl.min.io binaries were not each run.",
+      "legacy_origins": [
+        "META-5"
+      ],
+      "evidence": [
+        {
+          "kind": "documentation",
+          "path": "../research/report.md"
+        }
+      ]
+    },
+    {
+      "id": "arm64-image-ran-natively",
+      "statement": "The full-bucket smoke listing ran on the native arm64 mc image with no emulation.",
+      "scope": "runtime",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "run.meta records image_arch=arm64 and host_arch=arm64 for the run.",
+      "legacy_origins": [
+        "META-5"
+      ],
+      "evidence": [
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/recursive-json",
+          "artifact": "../receipts/smoke/recursive-json/run.meta"
+        }
+      ]
+    },
+    {
+      "id": "testability-is-trivial",
+      "statement": "mc's testability is trivial: the official upstream image ran the listing modes anonymously with no patch, fork, or self-authored Dockerfile.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The 'Trivial' testability judgment is supported by the native arm64 official image running to a verifier PASS; the other architectures and the dl.min.io binaries were not each exercised.",
+      "legacy_origins": [
+        "META-5"
+      ],
+      "evidence": [
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/recursive-json",
+          "artifact": "../receipts/smoke/recursive-json/verify.md"
+        }
+      ]
+    },
+    {
+      "id": "recursive-lists-complete-bucket",
+      "statement": "mc ls --recursive lists the full AWS S3 bucket completely, with 148,917 keys and no missing, extra, or duplicate keys.",
+      "scope": "correctness",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "Exercised anonymously against AWS S3 only; the MinIO-server half of the inherited MinIO-and-generic-S3 claim is a separate unverified claim.",
+      "legacy_origins": [
+        "M1",
+        "M2",
+        "T1",
+        "T3"
+      ],
+      "evidence": [
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/recursive-json",
+          "artifact": "../receipts/smoke/recursive-json/verify.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/recursive",
+          "artifact": "../receipts/smoke/recursive/verify.md"
+        }
+      ]
+    },
+    {
+      "id": "json-mode-exact-fields",
+      "statement": "mc ls --recursive --json emits JSONL whose exact size, etag, mtime, and storageClass all match the manifest.",
+      "scope": "output",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "The full-bucket --json run matched all four fields across 148,917 keys; --json is the only faithful output contract.",
+      "legacy_origins": [
+        "T2",
+        "PROSE-3"
+      ],
+      "evidence": [
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/recursive-json",
+          "artifact": "../receipts/smoke/recursive-json/verify.md"
+        }
+      ]
+    },
+    {
+      "id": "all-smoke-modes-verified-pass",
+      "statement": "All ten anonymous smoke runs across the seven exercised listing modes PASS the study verifier for the fields each mode exposes.",
+      "scope": "correctness",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "The complete set of ten receipts — recursive and delimiter ls at four scopes, --versions, and mc find, in text and JSON — each verified dups=0 missing=0 extra=0 fields=0 for the fields the mode exposes.",
+      "legacy_origins": [
+        "M2",
+        "T1",
+        "T2",
+        "T4",
+        "PROSE-6"
+      ],
+      "evidence": [
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/recursive-json",
+          "artifact": "../receipts/smoke/recursive-json/verify.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/recursive",
+          "artifact": "../receipts/smoke/recursive/verify.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/shallow",
+          "artifact": "../receipts/smoke/shallow/verify.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/shallow-json",
+          "artifact": "../receipts/smoke/shallow-json/verify.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/recursive-json-hourly",
+          "artifact": "../receipts/smoke/recursive-json-hourly/verify.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/recursive-json-monthly1991",
+          "artifact": "../receipts/smoke/recursive-json-monthly1991/verify.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/recursive-json-annualaccess",
+          "artifact": "../receipts/smoke/recursive-json-annualaccess/verify.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/versions-json-hourly",
+          "artifact": "../receipts/smoke/versions-json-hourly/verify.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/find-json-hourly",
+          "artifact": "../receipts/smoke/find-json-hourly/verify.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/find-hourly",
+          "artifact": "../receipts/smoke/find-hourly/verify.md"
+        }
+      ]
+    },
+    {
+      "id": "find-lists-standard-objects",
+      "statement": "mc find and mc find --json list all STANDARD objects on the hourly prefix (2,549 keys) with no missing, extra, or duplicate keys.",
+      "scope": "correctness",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "The PASS is scoped to STANDARD objects because the smoke bucket is entirely STANDARD.",
+      "legacy_origins": [
+        "T4"
+      ],
+      "evidence": [
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/find-hourly",
+          "artifact": "../receipts/smoke/find-hourly/verify.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/find-json-hourly",
+          "artifact": "../receipts/smoke/find-json-hourly/verify.md"
+        }
+      ]
+    },
+    {
+      "id": "find-shares-serial-list-path",
+      "statement": "mc find is a second listing surface that drives the same serial List() path as ls --recursive.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "find is a distinct traversal command but shares the underlying serial listing path.",
+      "legacy_origins": [
+        "T4",
+        "M2"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/minio/mc",
+          "commit": "7394ce0",
+          "path": "cmd/find.go",
+          "lines": "275-284"
+        }
+      ]
+    },
+    {
+      "id": "find-skips-glacier",
+      "statement": "mc find unconditionally skips GLACIER objects, so it is not a faithful full lister on buckets with archived objects.",
+      "scope": "correctness",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The all-STANDARD smoke bucket cannot exercise this completeness hole, so the find PASS receipts cannot expose it.",
+      "legacy_origins": [
+        "T4"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/minio/mc",
+          "commit": "7394ce0",
+          "path": "cmd/find.go",
+          "lines": "304"
+        }
+      ]
+    },
+    {
+      "id": "find-emits-no-etag",
+      "statement": "mc find emits no ETag even under --json.",
+      "scope": "output",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "find's output contract omits ETag entirely; normalize.sh marks etag as '-' for both find modes.",
+      "legacy_origins": [
+        "T4"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/minio/mc",
+          "commit": "7394ce0",
+          "path": "cmd/find.go",
+          "lines": "275-284"
+        }
+      ]
+    },
+    {
+      "id": "listing-is-serial-single-goroutine",
+      "statement": "mc lists through a single goroutine that issues one ListObjectsV2 request at a time, advancing by continuation-token, with no concurrent LIST calls.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The debug trace shows serial pages each carrying the prior continuation-token and no concurrency; an [OBS] probe is not a run receipt, so packet-level proof is deferred to the replay phase.",
+      "legacy_origins": [
+        "M3",
+        "V1"
+      ],
+      "evidence": [
+        {
+          "kind": "documentation",
+          "url": "https://github.com/minio/minio-go/blob/68fb5ee339f2e3a798c14d12ca0e04c51f304d58/api-list.go#L100-L165"
+        },
+        {
+          "kind": "observation",
+          "artifact": "../receipts/smoke/_capability/debug-trace/mc-debug-normals-hourly.excerpt.txt"
+        }
+      ]
+    },
+    {
+      "id": "server-internal-parallelism-unverified",
+      "statement": "Whether AWS or a MinIO server serves each LIST request internally in parallel is neither confirmed nor refuted by the available client-side evidence.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "corrected",
+      "qualification": "The inherited 'server-internal parallelism' framing is not adopted as established fact; client evidence only shows no client-side fan-out. Rigorous proof is deferred to the replay-server phase.",
+      "legacy_origins": [
+        "M3",
+        "W1"
+      ],
+      "evidence": [
+        {
+          "kind": "none",
+          "reason": "Client-side source and trace cannot settle how a server serves each request internally; deferred to the replay-server phase."
+        }
+      ]
+    },
+    {
+      "id": "no-client-keyspace-sharding",
+      "statement": "mc does no client-side keyspace division or fan-out; recursion is server-side via the absence of a delimiter.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "No client-side prefix split or key-range sharding flag exists.",
+      "legacy_origins": [
+        "W1",
+        "W3"
+      ],
+      "evidence": [
+        {
+          "kind": "documentation",
+          "url": "https://github.com/minio/minio-go/blob/68fb5ee339f2e3a798c14d12ca0e04c51f304d58/api-list.go#L64-L69"
+        },
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/minio/mc",
+          "commit": "7394ce0",
+          "path": "cmd/client-s3.go",
+          "lines": "2385"
+        }
+      ]
+    },
+    {
+      "id": "maxkeys-hardwired-no-page-knob",
+      "statement": "mc hard-wires MaxKeys=-1 so it never sends max-keys, and no flag or env can change the server default page size of at most 1000.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The SDK sets max-keys only when maxkeys is greater than zero, so mc's -1 means the server default page size is always taken.",
+      "legacy_origins": [
+        "W1"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/minio/mc",
+          "commit": "7394ce0",
+          "path": "cmd/client-s3.go",
+          "lines": "2351"
+        },
+        {
+          "kind": "documentation",
+          "url": "https://github.com/minio/minio-go/blob/68fb5ee339f2e3a798c14d12ca0e04c51f304d58/api-list.go#L224-L227"
+        }
+      ]
+    },
+    {
+      "id": "concurrency-is-one-not-tunable",
+      "statement": "mc's listing concurrency is one and no fan-out flag exists in mc ls or mc find.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The single-goroutine paginator exposes neither page size nor concurrency as a tunable in mc ls's flag block or mc find's traversal, so there is nothing on the listing path for a benchmark to sweep. The absence rests on the recorded live --help inspection of both the ls and find surfaces and the pinned-source flag blocks, preserved in the research record; no help-surface receipt was committed.",
+      "legacy_origins": [
+        "W1"
+      ],
+      "evidence": [
+        {
+          "kind": "documentation",
+          "url": "https://github.com/minio/minio-go/blob/68fb5ee339f2e3a798c14d12ca0e04c51f304d58/api-list.go#L100-L165"
+        },
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/minio/mc",
+          "commit": "7394ce0",
+          "path": "cmd/ls-main.go",
+          "lines": "34-63"
+        },
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/minio/mc",
+          "commit": "7394ce0",
+          "path": "cmd/find.go",
+          "lines": "275-284"
+        },
+        {
+          "kind": "documentation",
+          "path": "../research/reconciliation.md"
+        },
+        {
+          "kind": "documentation",
+          "path": "../research/report.md"
+        }
+      ]
+    },
+    {
+      "id": "minio-server-endpoint-untested",
+      "statement": "mc was not exercised against a MinIO-server endpoint, so no AWS-vs-MinIO-server listing comparison exists.",
+      "scope": "runtime",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "No MinIO-server endpoint is registered in the study; standing one up is a benchmark-phase infrastructure decision.",
+      "legacy_origins": [
+        "M1",
+        "T3",
+        "V2"
+      ],
+      "evidence": [
+        {
+          "kind": "none",
+          "reason": "The study registers only AWS buckets; no MinIO-server endpoint was available to exercise the both-endpoints comparison."
+        }
+      ]
+    },
+    {
+      "id": "minio-server-advantage-untested",
+      "statement": "Whether mc has any MinIO-server-specific listing advantage that fails to generalize to AWS S3 is untested.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "This inherited performance question is not exercisable against the AWS-only smoke bucket.",
+      "legacy_origins": [
+        "W2"
+      ],
+      "evidence": [
+        {
+          "kind": "none",
+          "reason": "No MinIO server was run, so a MinIO-specific advantage could be neither reproduced nor refuted."
+        }
+      ]
+    },
+    {
+      "id": "designed-for-minio-servers",
+      "statement": "mc is inherited as designed to work well against MinIO servers specifically.",
+      "scope": "compatibility",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "This is an inherited design-intent assertion, distinct from the untested MinIO-specific performance advantage, and it was not exercisable against the AWS-only smoke bucket.",
+      "legacy_origins": [
+        "S1"
+      ],
+      "evidence": [
+        {
+          "kind": "none",
+          "reason": "The design-intent claim was not exercised; no MinIO-server endpoint was registered in the study."
+        }
+      ]
+    },
+    {
+      "id": "upstream-is-mature",
+      "statement": "mc is a mature project with a long release history of 317 release tags.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Maturity is corroborated by the release-tag history.",
+      "legacy_origins": [
+        "S2"
+      ],
+      "evidence": [
+        {
+          "kind": "documentation",
+          "path": "../research/reconciliation.md"
+        }
+      ]
+    },
+    {
+      "id": "upstream-is-archived",
+      "statement": "The minio/mc repository is archived (read-only) on GitHub as of the 2026-07-17 API snapshot.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "contradicted",
+      "qualification": "archived:true with last push 2025-11-20 contradicts the inherited 'actively maintained' claim.",
+      "legacy_origins": [
+        "S2"
+      ],
+      "evidence": [
+        {
+          "kind": "documentation",
+          "path": "../research/report.md"
+        },
+        {
+          "kind": "documentation",
+          "path": "../research/reconciliation.md"
+        }
+      ]
+    },
+    {
+      "id": "pinned-release-terminal-inference",
+      "statement": "The pinned mc release is inferred to be effectively terminal.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "An archived repository can be unarchived, so this is a maintenance-posture inference, not a permanence proof.",
+      "legacy_origins": [
+        "S2"
+      ],
+      "evidence": [
+        {
+          "kind": "documentation",
+          "path": "../research/reconciliation.md"
+        }
+      ]
+    },
+    {
+      "id": "no-parquet-or-columnar-output",
+      "statement": "mc has no Parquet or columnar listing output in mc ls or mc find.",
+      "scope": "output",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Neither listing surface exposes a Parquet or columnar output flag: mc ls's flag block offers only the text/JSON contract, and mc find's emit path prints only text or JSON. The absence rests on the recorded live --help inspection of both the ls and find surfaces and the pinned-source flag blocks, preserved in the research record; no help-surface receipt was committed.",
+      "legacy_origins": [
+        "W3"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/minio/mc",
+          "commit": "7394ce0",
+          "path": "cmd/ls-main.go",
+          "lines": "34-63"
+        },
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/minio/mc",
+          "commit": "7394ce0",
+          "path": "cmd/find.go",
+          "lines": "275-284"
+        },
+        {
+          "kind": "documentation",
+          "path": "../research/reconciliation.md"
+        },
+        {
+          "kind": "documentation",
+          "path": "../research/report.md"
+        }
+      ]
+    },
+    {
+      "id": "no-user-facing-resume",
+      "statement": "mc exposes no user-facing resume flag, so an interrupted listing restarts from the beginning.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "mc ls's flag block exposes no resume or checkpoint flag, and the continuation-token lives entirely inside the SDK loop and is never surfaced. The absence rests on the recorded live --help inspection of both the ls and find surfaces and the pinned-source flag blocks, preserved in the research record; no help-surface receipt was committed.",
+      "legacy_origins": [
+        "W3"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/minio/mc",
+          "commit": "7394ce0",
+          "path": "cmd/ls-main.go",
+          "lines": "34-63"
+        },
+        {
+          "kind": "documentation",
+          "url": "https://github.com/minio/minio-go/blob/68fb5ee339f2e3a798c14d12ca0e04c51f304d58/api-list.go#L100-L165"
+        },
+        {
+          "kind": "documentation",
+          "path": "../research/reconciliation.md"
+        },
+        {
+          "kind": "documentation",
+          "path": "../research/report.md"
+        }
+      ]
+    },
+    {
+      "id": "interrupt-resume-behavior-untested",
+      "statement": "mc's behavior on an interrupted or resumed listing was not exercised.",
+      "scope": "runtime",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "No receipt exercised an interrupt or resume.",
+      "legacy_origins": [
+        "W3"
+      ],
+      "evidence": [
+        {
+          "kind": "none",
+          "reason": "No interrupt or resume scenario was run during groundwork."
+        }
+      ]
+    },
+    {
+      "id": "no-inherited-or-added-throughput-numbers",
+      "statement": "No throughput figures were inherited for mc and groundwork adds none.",
+      "scope": "performance",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Recorded smoke durations are non-comparative facts about individual runs, per methodology.",
+      "legacy_origins": [
+        "N1"
+      ],
+      "evidence": [
+        {
+          "kind": "documentation",
+          "path": "../research/report.md"
+        }
+      ]
+    },
+    {
+      "id": "listing-logic-in-minio-go",
+      "statement": "Every meaningful LIST decision lives in the minio-go v7.0.90 SDK; mc contributes the CLI, alias and credential model, and output formatting.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "V1/V2 selection, delimiter, pagination, retry, encoding, and the truncated-token guard are all in the SDK, so auditing mc's listing means auditing minio-go.",
+      "legacy_origins": [
+        "PROSE-2"
+      ],
+      "evidence": [
+        {
+          "kind": "documentation",
+          "url": "https://github.com/minio/minio-go/blob/68fb5ee339f2e3a798c14d12ca0e04c51f304d58/api-list.go#L100-L165"
+        },
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/minio/mc",
+          "commit": "7394ce0",
+          "path": "cmd/client-s3.go",
+          "lines": "1564-1584"
+        }
+      ]
+    },
+    {
+      "id": "no-aws-env-signing",
+      "statement": "mc does not read AWS_ACCESS_KEY_ID or AWS_SECRET_ACCESS_KEY for signing; credentials come only from its alias, MC_HOST_*, or STS chain.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This is a genuine capability distinction from aws-cli and rclone: it changes what anonymous access means for mc.",
+      "legacy_origins": [
+        "PROSE-1"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/minio/mc",
+          "commit": "7394ce0",
+          "path": "cmd/client.go",
+          "lines": "269-311"
+        }
+      ]
+    },
+    {
+      "id": "anonymous-is-empty-cred-alias",
+      "statement": "Anonymous access is an alias with empty keys, which minio-go resolves to SignatureAnonymous and then issues unsigned requests.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The debug trace shows no Authorization header on any request, consistent with the empty-credential alias mechanism.",
+      "legacy_origins": [
+        "PROSE-1"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/minio/mc",
+          "commit": "7394ce0",
+          "path": "cmd/client.go",
+          "lines": "269-311"
+        },
+        {
+          "kind": "documentation",
+          "url": "https://github.com/minio/minio-go/blob/68fb5ee339f2e3a798c14d12ca0e04c51f304d58/pkg/credentials/static.go#L55-L58"
+        },
+        {
+          "kind": "observation",
+          "artifact": "../receipts/smoke/_capability/debug-trace/mc-debug-normals-hourly.excerpt.txt"
+        }
+      ]
+    },
+    {
+      "id": "text-output-lossy",
+      "statement": "mc's default text output humanizes sizes and prints no ETag, so exact size and ETag are available only via --json.",
+      "scope": "output",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The text-mode smoke run exposed neither exact size nor ETag, consistent with the humanized, ETag-free text format.",
+      "legacy_origins": [
+        "PROSE-3"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/minio/mc",
+          "commit": "7394ce0",
+          "path": "cmd/ls.go",
+          "lines": "60-95"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/recursive",
+          "artifact": "../receipts/smoke/recursive/verify.md"
+        }
+      ]
+    },
+    {
+      "id": "folders-are-synthetic",
+      "statement": "Delimiter-listing folders are synthetic CommonPrefixes fabricated client-side with time.Now() timestamps and zero size, not objects.",
+      "scope": "output",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "normalize.sh marks their mtime and size as '-'.",
+      "legacy_origins": [
+        "PROSE-4"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/minio/mc",
+          "commit": "7394ce0",
+          "path": "cmd/ls.go",
+          "lines": "60-86"
+        },
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/minio/mc",
+          "commit": "7394ce0",
+          "path": "cmd/client-s3.go",
+          "lines": "2284-2288"
+        }
+      ]
+    },
+    {
+      "id": "text-key-parse-best-effort",
+      "statement": "The text-mode key parse in the study adapter is best-effort, so *-json modes are authoritative for keys.",
+      "scope": "correctness",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "A key beginning with a storage-class token and a space is indistinguishable from the SC column; whitespace-free NOAA keys parse exactly and general weird-key fidelity is deferred (EDGE_BUCKET=none).",
+      "legacy_origins": [
+        "PROSE-5"
+      ],
+      "evidence": [
+        {
+          "kind": "documentation",
+          "path": "../adapter/normalize.sh"
+        },
+        {
+          "kind": "documentation",
+          "path": "../docs/running.md"
+        }
+      ]
+    },
+    {
+      "id": "versions-mode-ran-on-unversioned-bucket",
+      "statement": "mc ls --versions ran on the hourly prefix and returned each object once with the same key, size, etag, and mtime as the list-type=2 recursive listing of that prefix.",
+      "scope": "runtime",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "On this unversioned bucket the versions listing produced the same 2,549-object set as the list-type=2 recursive listing of the same prefix.",
+      "legacy_origins": [
+        "PROSE-6"
+      ],
+      "evidence": [
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/versions-json-hourly",
+          "artifact": "../receipts/smoke/versions-json-hourly/verify.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/recursive-json-hourly",
+          "artifact": "../receipts/smoke/recursive-json-hourly/verify.md"
+        }
+      ]
+    },
+    {
+      "id": "multi-version-fidelity-untested",
+      "statement": "Genuine multi-version collapse and delete-marker behavior were not exercised.",
+      "scope": "correctness",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "Every object on the smoke bucket has one null version, so the versions mode never exercised true multi-version rows; deferred to a versioned edge fixture.",
+      "legacy_origins": [
+        "PROSE-6"
+      ],
+      "evidence": [
+        {
+          "kind": "none",
+          "reason": "The smoke bucket is unversioned, so multi-version fidelity could not be exercised."
+        }
+      ]
+    },
+    {
+      "id": "truncated-without-token-guard",
+      "statement": "minio-go bails on a truncated response with an empty continuation token rather than looping, a guard shared by every minio-go-based tool.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The reachable guard raises a NotImplemented 'Truncated response should have continuation token set' error, so this is not an mc-specific or s3ls-rs-exclusive guard.",
+      "legacy_origins": [
+        "PROSE-7"
+      ],
+      "evidence": [
+        {
+          "kind": "documentation",
+          "url": "https://github.com/minio/minio-go/blob/68fb5ee339f2e3a798c14d12ca0e04c51f304d58/api-list.go#L253-L257"
+        },
+        {
+          "kind": "documentation",
+          "url": "https://github.com/minio/minio-go/blob/68fb5ee339f2e3a798c14d12ca0e04c51f304d58/api-list.go#L157-L163"
+        }
+      ]
+    },
+    {
+      "id": "memory-streaming-bounded",
+      "statement": "mc streams objects one at a time through channels and does not accumulate the full key set in memory for a plain listing.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "mc's contentCh is cap-0 and minio-go's objectStatCh is cap-1, so listing memory is bounded by design at smoke scale.",
+      "legacy_origins": [
+        "PROSE-8"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/minio/mc",
+          "commit": "7394ce0",
+          "path": "cmd/client-s3.go",
+          "lines": "1901-1911"
+        },
+        {
+          "kind": "documentation",
+          "url": "https://github.com/minio/minio-go/blob/68fb5ee339f2e3a798c14d12ca0e04c51f304d58/api-list.go#L63"
+        }
+      ]
+    },
+    {
+      "id": "full-bucket-smoke-peak-rss",
+      "statement": "The full-bucket smoke run sampled a 35.4 MB peak RSS and a 16.1 MB cgroup peak.",
+      "scope": "performance",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "This is a single-run high-water mark, not a scaling result or benchmark.",
+      "legacy_origins": [
+        "PROSE-8"
+      ],
+      "evidence": [
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/recursive-json",
+          "artifact": "../receipts/smoke/recursive-json/run.meta"
+        }
+      ]
+    },
+    {
+      "id": "memory-scaling-unconfirmed",
+      "statement": "mc's streaming memory footprint at millions of keys, and under --versions, is unconfirmed.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "The small groundwork runs cannot establish O(1) memory at scale; no object-count scaling campaign has been run.",
+      "legacy_origins": [
+        "PROSE-8"
+      ],
+      "evidence": [
+        {
+          "kind": "none",
+          "reason": "No object-count scaling campaign has been run."
+        }
+      ]
+    },
+    {
+      "id": "sdk-retry-policy",
+      "statement": "minio-go retries each HTTP request up to ten attempts total with a 200ms exponential-jitter base, then streams the error and aborts the listing.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "MaxRetry is 10 and DefaultRetryUnit is 200ms; a page error surviving all attempts stops the listing.",
+      "legacy_origins": [
+        "PROSE-9"
+      ],
+      "evidence": [
+        {
+          "kind": "documentation",
+          "url": "https://github.com/minio/minio-go/blob/68fb5ee339f2e3a798c14d12ca0e04c51f304d58/retry.go#L31"
+        },
+        {
+          "kind": "documentation",
+          "url": "https://github.com/minio/minio-go/blob/68fb5ee339f2e3a798c14d12ca0e04c51f304d58/retry.go#L41"
+        },
+        {
+          "kind": "documentation",
+          "url": "https://github.com/minio/minio-go/blob/68fb5ee339f2e3a798c14d12ca0e04c51f304d58/retry.go#L49-L92"
+        },
+        {
+          "kind": "documentation",
+          "url": "https://github.com/minio/minio-go/blob/68fb5ee339f2e3a798c14d12ca0e04c51f304d58/api-list.go#L116-L121"
+        }
+      ]
+    },
+    {
+      "id": "retry-throttle-behavior-untested",
+      "statement": "mc's retry and backoff behavior under 503 throttling was not exercised.",
+      "scope": "runtime",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "The SDK's 10x/200ms policy is untestable politely at smoke scale; no throttling or fault-injection run was performed.",
+      "legacy_origins": [
+        "PROSE-9"
+      ],
+      "evidence": [
+        {
+          "kind": "none",
+          "reason": "No 503 throttling or fault-injection run was performed at smoke scale."
+        }
+      ]
+    },
+    {
+      "id": "text-vs-json-cost-untested",
+      "statement": "The relative CPU and output cost of text versus --json formatting at scale was not measured.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "Smoke is not a comparative benchmark, so the per-format cost is a benchmark-phase question.",
+      "legacy_origins": [
+        "PROSE-10"
+      ],
+      "evidence": [
+        {
+          "kind": "none",
+          "reason": "No benchmark measured the per-output-format formatting cost."
+        }
+      ]
+    },
+    {
+      "id": "full-bucket-smoke-wall-clock",
+      "statement": "The full-bucket --json smoke run's container wall-clock was 91.8 seconds.",
+      "scope": "runtime",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "This is a non-comparative fact about one cross-internet run, not a benchmark result.",
+      "legacy_origins": [
+        "PROSE-11"
+      ],
+      "evidence": [
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/recursive-json",
+          "artifact": "../receipts/smoke/recursive-json/run.meta"
+        }
+      ]
+    },
+    {
+      "id": "serial-throughput-ceiling-untested",
+      "statement": "mc's serial full-bucket throughput ceiling has not been measured under benchmark conditions.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "With page size fixed at the server default and strict serial pagination, mc's full-bucket time is modelled as ceil(N/1000) x (RTT + page-parse); at 148,917 keys this was ~76-92s cross-internet, and in-region it is predicted to be RTT-bound and much faster though still serial. The serial wall-clock and per-page CPU are the benchmark-phase quantities to measure.",
+      "legacy_origins": [
+        "PROSE-11"
+      ],
+      "evidence": [
+        {
+          "kind": "none",
+          "reason": "No benchmark measured mc's serial throughput ceiling."
+        }
+      ]
+    },
+    {
+      "id": "rewind-incomplete-modes-untested",
+      "statement": "The --rewind, --incomplete, and --zip modes were recorded but not smoked.",
+      "scope": "runtime",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "The bucket is unversioned so --rewind has nothing to resolve, it has no in-progress multipart uploads for --incomplete, and --zip is MinIO-only and N/A on AWS S3.",
+      "legacy_origins": [
+        "PROSE-12"
+      ],
+      "evidence": [
+        {
+          "kind": "none",
+          "reason": "--rewind has nothing to resolve on the unversioned bucket, --incomplete finds no in-progress multipart uploads on it, and --zip is unavailable because the x-minio-extract header is MinIO-only and N/A on AWS S3."
+        }
+      ]
+    }
+  ]
+}

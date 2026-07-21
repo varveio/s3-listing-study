@@ -1,0 +1,11 @@
+panic: WebIdentityErr: role ARN is not set
+
+goroutine 1 [running]:
+github.com/aws/aws-sdk-go/aws/session.Must(...)
+	/go/pkg/mod/github.com/aws/aws-sdk-go@v1.30.16/aws/session/session.go:326
+main.getAwsSession()
+	/go/pkg/mod/github.com/sethkor/s3kor@v0.0.37/s3kor.go:190 +0x1b4
+main.switchCommand({0x5fbf44, 0x2})
+	/go/pkg/mod/github.com/sethkor/s3kor@v0.0.37/s3kor.go:204 +0x78
+main.main()
+	/go/pkg/mod/github.com/sethkor/s3kor@v0.0.37/s3kor.go:269 +0x16c

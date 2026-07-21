@@ -1,0 +1,11 @@
+normals-hourly/1981-2010/access/AQW00061705.csv	3184153
+normals-hourly/1981-2010/access/FMW00040308.csv	2471966
+normals-hourly/1981-2010/access/FMW00040504.csv	2139117
+normals-hourly/1981-2010/access/FMW00040505.csv	2512888
+normals-hourly/1981-2010/access/GQW00041414.csv	3043333
+normals-hourly/1981-2010/access/GQW00041415.csv	3058309
+normals-hourly/1981-2010/access/PSW00040309.csv	2440045
+normals-hourly/1981-2010/access/RMW00040604.csv	2909993
+normals-hourly/1981-2010/access/RMW00040710.csv	2315919
+normals-hourly/1981-2010/access/RQW00011641.csv	3194990
+None

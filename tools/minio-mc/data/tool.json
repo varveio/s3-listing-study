@@ -1,0 +1,30 @@
+{
+  "$schema": "../../../schemas/tool.schema.json",
+  "schema_version": 1,
+  "slug": "minio-mc",
+  "display_name": "MinIO Client (mc)",
+  "entry_type": "runnable_lister",
+  "upstream": { "repository": "https://github.com/minio/mc" },
+  "language": "Go",
+  "license": "GNU AGPL v3",
+  "tested": {
+    "variant": "upstream",
+    "repository": "https://github.com/minio/mc",
+    "version": {
+      "value": "RELEASE.2025-08-13T08-35-41Z",
+      "provenance": { "kind": "observation", "reference": "../receipts/smoke/_capability/debug-trace/mc-debug-normals-hourly.excerpt.txt" }
+    },
+    "revision": {
+      "value": "7394ce0dd2a80935aded936b09fa12cbb3cb8096",
+      "provenance": { "kind": "documentation", "reference": "../research/report.md" }
+    }
+  },
+  "study": {
+    "groundwork_status": "complete",
+    "smoke_execution_status": "ran",
+    "verification_status": "passed",
+    "auth_status": "anonymous",
+    "benchmark_eligibility": "planned"
+  },
+  "evidence_roots": ["../receipts/smoke"]
+}

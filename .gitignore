@@ -1,0 +1,24 @@
+# Session exhaust — absolute paths, SHAs, swath-private context. See AGENTS.md.
+notes/handoffs/
+
+# Agent-runner state. Same reasoning as notes/handoffs/ above: a .git/info/exclude
+# entry doesn't survive a fresh clone, so the first session from a new machine
+# would commit it.
+.claude/
+.agents/
+.codex/
+
+# Study output
+results/raw/
+*.log
+
+# Data artifacts never enter the repo (owner's rule) — manifests, raw listings,
+# large receipt payloads live in <data>/, bound by sha256 in
+# docs/smoke-bucket.md and the receipts. Safety net:
+harness/manifests/
+*.tsv.gz
+
+# Scratch
+out/
+tools/bin/
+.DS_Store

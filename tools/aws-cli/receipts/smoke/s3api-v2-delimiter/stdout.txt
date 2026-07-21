@@ -1,0 +1,31 @@
+{
+    "Contents": [
+        {
+            "Key": "index.html",
+            "LastModified": "2025-11-24T20:33:44+00:00",
+            "ETag": "\"0d6853386d167e668f7e862944150ab0\"",
+            "ChecksumAlgorithm": [
+                "CRC32"
+            ],
+            "ChecksumType": "FULL_OBJECT",
+            "Size": 36822,
+            "StorageClass": "STANDARD"
+        }
+    ],
+    "CommonPrefixes": [
+        {
+            "Prefix": "normals-annualseasonal/"
+        },
+        {
+            "Prefix": "normals-daily/"
+        },
+        {
+            "Prefix": "normals-hourly/"
+        },
+        {
+            "Prefix": "normals-monthly/"
+        }
+    ],
+    "RequestCharged": null,
+    "Prefix": ""
+}

@@ -1,0 +1,63 @@
+name: Help us get your tool right
+description: Share a better mode, a project update, a source correction, or useful context.
+title: "[tool feedback] <tool>: "
+labels: ["correction"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        We probably missed something somewhere: a better mode, a flag that matters,
+        a project update, or part of the implementation. If you know this tool well,
+        we'd love your help.
+
+        Tell us what could be better. A link or reproducible run is useful, but it
+        is not required to start the conversation. We're happy to do the digging.
+  - type: input
+    id: tool
+    attributes:
+      label: Tool
+      description: Which tool is this about?
+      placeholder: e.g. rclone
+    validations:
+      required: true
+  - type: input
+    id: page-or-observation
+    attributes:
+      label: Page or observation
+      description: Link to the page or briefly identify the part you are responding to.
+      placeholder: e.g. tools/rclone/README.md
+    validations:
+      required: false
+  - type: textarea
+    id: what-could-be-better
+    attributes:
+      label: What could be better?
+      description: Tell us what we missed or misunderstood, in whatever detail is useful.
+    validations:
+      required: true
+  - type: textarea
+    id: expected-setup-or-behavior
+    attributes:
+      label: Expected setup or behavior
+      description: If you know a better mode, command, or explanation, share it here.
+    validations:
+      required: false
+  - type: textarea
+    id: helpful-links
+    attributes:
+      label: Helpful links
+      description: Documentation, source, releases, issues, or run details are all welcome.
+    validations:
+      required: false
+  - type: dropdown
+    id: relationship
+    attributes:
+      label: Your relationship to the tool
+      description: Optional context; every kind of feedback is welcome.
+      options:
+        - Maintainer or contributor
+        - User
+        - Other community member
+        - Prefer not to say
+    validations:
+      required: false

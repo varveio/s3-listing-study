@@ -1,0 +1,61 @@
+PROVENANCE (reconstructed 2026-07-17; states what is bound and what is not)
+==========================================================================
+Evidence class : build-log TAIL — the cargo dependency-resolution failure and
+                 the final BUILD_EXIT, not a full build-context binding.
+What this shows: with rustc 1.86, cargo cannot resolve the (unlocked, loose-
+                 semver) transitive deps — several now require rustc >= 1.94.1
+                 (aws-smithy-*, aws-types@1.4.0) — so `cargo build --release`
+                 exits 101 and the image build fails (BUILD_EXIT=1 below).
+Reconstructed context (from the repo + the OK-build receipt, not from this log):
+  - Source     : pinned checkout 6c72f59 (upstream base b11e385 + no-sign patch).
+  - Dockerfile : upstream's own, with its pinned `FROM rust:1.86-slim` (the OK
+                 build in build-rust1.94-bookworm-OK.txt is the same Dockerfile
+                 with only the `FROM` bumped to rust:1.94-slim-bookworm).
+  - Box        : arm64 runner (same box as the OK build and the smoke runs).
+NOT recorded in this file (do not infer): the exact `docker build` invocation
+  line, the Dockerfile content hash, the builder-image digest, and the run date/
+  time for THIS rust:1.86 attempt. The OK build's invocation + image digest are
+  in image.txt / build-rust1.94-bookworm-OK.txt; this failing attempt has only
+  the tail below.
+--------------------------------------------------------------------------
+#11 1.633   aws-smithy-runtime-api-macros@1.1.0 requires rustc 1.94.1
+#11 1.633   aws-smithy-schema@0.2.0 requires rustc 1.94.1
+#11 1.633   aws-smithy-types@1.6.1 requires rustc 1.94.1
+#11 1.633   aws-smithy-xml@0.61.1 requires rustc 1.94.1
+#11 1.633   aws-types@1.4.0 requires rustc 1.94.1
+#11 1.633   aws-types@1.4.0 requires rustc 1.94.1
+#11 1.633   aws-types@1.4.0 requires rustc 1.94.1
+#11 1.633   crc-fast@1.10.0 requires rustc 1.89
+#11 1.633   time@0.3.53 requires rustc 1.88.0
+#11 1.633   time-core@0.1.9 requires rustc 1.88.0
+#11 1.633 Either upgrade rustc or select compatible dependency versions with
+#11 1.633 `cargo update <name>@<current-ver> --precise <compatible-ver>`
+#11 1.633 where `<compatible-ver>` is the latest version supporting rustc 1.86.0
+#11 1.633 
+#11 ERROR: process "/bin/sh -c cargo build --release" did not complete successfully: exit code: 101
+------
+ > [builder 5/5] RUN --mount=type=cache,target=/usr/local/cargo/registry     --mount=type=cache,target=/usr/local/cargo/git     cargo build --release:
+1.633   aws-types@1.4.0 requires rustc 1.94.1
+1.633   aws-types@1.4.0 requires rustc 1.94.1
+1.633   aws-types@1.4.0 requires rustc 1.94.1
+1.633   crc-fast@1.10.0 requires rustc 1.89
+1.633   time@0.3.53 requires rustc 1.88.0
+1.633   time-core@0.1.9 requires rustc 1.88.0
+1.633 Either upgrade rustc or select compatible dependency versions with
+1.633 `cargo update <name>@<current-ver> --precise <compatible-ver>`
+1.633 where `<compatible-ver>` is the latest version supporting rustc 1.86.0
+1.633 
+------
+
+ [33m1 warning found (use docker --debug to expand):
+[0m - FromAsCasing: 'as' and 'FROM' keywords' casing do not match (line 1)
+Dockerfile:14
+--------------------
+  13 |     # Cache Cargo deps and build with optimal caching
+  14 | >>> RUN --mount=type=cache,target=/usr/local/cargo/registry \
+  15 | >>>     --mount=type=cache,target=/usr/local/cargo/git \
+  16 | >>>     cargo build --release
+  17 |     
+--------------------
+ERROR: failed to build: failed to solve: process "/bin/sh -c cargo build --release" did not complete successfully: exit code: 101
+BUILD_EXIT=1

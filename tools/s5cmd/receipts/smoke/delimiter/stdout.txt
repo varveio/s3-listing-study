@@ -1,0 +1,5 @@
+                                                                       DIR  normals-annualseasonal/
+                                                                       DIR  normals-daily/
+                                                                       DIR  normals-hourly/
+                                                                       DIR  normals-monthly/
+2025/11/24 20:33:44 STANDARD 0d6853386d167e668f7e862944150ab0              36822  index.html

@@ -1,0 +1,810 @@
+<string>:34: (WARNING/2) Inline literal start-string without end-string.
+LIST-OBJECTS-V2()                                            LIST-OBJECTS-V2()
+
+
+
+1mNAME0m
+       list-objects-v2 -
+
+1mDESCRIPTION0m
+       Returns  some or all (up to 1,000) of the objects in a bucket with each
+       request. You can use the request parameters as  selection  criteria  to
+       return  a subset of the objects in a bucket. A 1m200 OK 22mresponse can con-
+       tain valid or invalid XML. Make sure  to  design  your  application  to
+       parse  the  contents  of  the response and handle it appropriately. For
+       more information about listing objects, see 4mListing24m  4mobject24m  4mkeys24m  4mpro-0m
+       4mgrammatically24m in the 4mAmazon24m 4mS324m 4mUser24m 4mGuide24m . To get a list of your buck-
+       ets, see 4mListBuckets24m .
+
+       1mNOTE:0m
+
+          o 1mGeneral purpose bucket 22m-  For  general  purpose  buckets,  1mListOb-0m
+            1mjectsV2   22mdoesn't   return  prefixes  that  are  related  only  to
+            in-progress multipart uploads.
+
+          o 1mDirectory buckets 22m- For directory buckets, 1mListObjectsV2  22mresponse
+            includes  the prefixes that are related only to in-progress multi-
+            part uploads.
+
+          o 1mDirectory buckets 22m- For directory buckets, you must make  requests
+            for this API operation to the Zonal endpoint. These endpoints sup-
+            port virtual-hosted-style requests in the format
+            ``
+            4mhttps://amzn-s3-demo-bucket24m   .s3express-4mzone-id24m    .*region-code*
+            .amazonaws.com/4mkey-name24m  ``  .  Path-style  requests  are not sup-
+            ported. For  more  information  about  endpoints  in  Availability
+            Zones,  see  4mRegional24m 4mand24m 4mZonal24m 4mendpoints24m 4mfor24m 4mdirectory24m 4mbuckets24m 4min0m
+            4mAvailability24m 4mZones24m in the 4mAmazon24m 4mS324m 4mUser24m 4mGuide24m . For more informa-
+            tion  about  endpoints  in Local Zones, see 4mConcepts24m 4mfor24m 4mdirectory0m
+            4mbuckets24m 4min24m 4mLocal24m 4mZones24m in the 4mAmazon24m 4mS324m 4mUser24m 4mGuide24m .
+
+          System Message: WARNING/2 (<string>:, line 34)
+            Inline literal start-string without end-string.
+
+          Permissions
+
+       o 1mGeneral purpose bucket permissions 22m- To use this operation, you  must
+         have  READ  access to the bucket. You must have permission to perform
+         the 1ms3:ListBucket 22maction. The bucket owner has this permission by de-
+         fault  and  can grant this permission to others. For more information
+         about permissions, see 4mPermissions24m 4mRelated24m 4mto24m 4mBucket24m 4mSubresource24m  4mOp-0m
+         4merations24m  and 4mManaging24m 4mAccess24m 4mPermissions24m 4mto24m 4mYour24m 4mAmazon24m 4mS324m 4mResources0m
+         in the 4mAmazon24m 4mS324m 4mUser24m 4mGuide24m .
+
+       o 1mDirectory bucket permissions 22m- To grant access to this API  operation
+         on  a directory bucket, we recommend that you use the ` 1mCreateSession0m
+         4mhttps://docs.aws.amazon.com/AmazonS3/latest/API/API_CreateSession24m.html`__
+         API  operation  for  session-based  authorization.  Specifically, you
+         grant the 1ms3express:CreateSession 22mpermission to the directory  bucket
+         in  a  bucket  policy or an IAM identity-based policy. Then, you make
+         the 1mCreateSession 22mAPI call on the bucket to obtain a  session  token.
+         With  the  session token in your request header, you can make API re-
+         quests to this operation. After the session token expires,  you  make
+         another  1mCreateSession  22mAPI  call to generate a new session token for
+         use. Amazon Web Services CLI or SDKs create session and  refresh  the
+         session  token  automatically  to  avoid service interruptions when a
+         session expires. For more information about authorization, see ` 1mCre-0m
+         1mateSession0m
+         4mhttps://docs.aws.amazon.com/AmazonS3/latest/API/API_CreateSession24m.html`__
+         .
+
+         Sorting order of returned objects
+
+       o 1mGeneral  purpose  bucket 22m- For general purpose buckets, 1mListObjectsV20m
+         returns objects in lexicographical order based on their key names.
+
+       o 1mDirectory bucket 22m- For directory buckets, 1mListObjectsV2 22mdoes not  re-
+         turn objects in lexicographical order.
+
+         HTTP Host header syntax
+          1mDirectory  buckets  22m-  The HTTP Host header syntax is `` 4mBucket-name0m
+          .s3express-4mzone-id24m .*region-code* .amazonaws.com`` .
+
+       1mWARNING:0m
+          This section describes the latest revision of this action. We recom-
+          mend  that you use this revised API operation for application devel-
+          opment. For backward compatibility, Amazon S3 continues  to  support
+          the prior version of this API operation, 4mListObjects24m .
+
+       The following operations are related to 1mListObjectsV2 22m:
+
+       o 4mGetObject0m
+
+       o 4mPutObject0m
+
+       o 4mCreateBucket0m
+
+       1mWARNING:0m
+          You  must  URL  encode any signed header values that contain spaces.
+          For example, if your header value is 1mmy file.txt  22m,  containing  two
+          spaces after 1mmy 22m, you must URL encode this value to 1mmy%20%20file.txt0m
+          .
+
+       See also: AWS API Documentation
+
+       1mlist-objects-v2 22mis a paginated operation. Multiple API calls may be is-
+       sued  in order to retrieve the entire data set of results. You can dis-
+       able pagination by providing the 1m--no-paginate  22margument.   When  using
+       1m--output  text  22mand  the  1m--query 22margument on a paginated response, the
+       1m--query 22margument must extract data from the results  of  the  following
+       query expressions: 1mContents22m, 1mCommonPrefixes0m
+
+1mSYNOPSIS0m
+            list-objects-v2
+          --bucket <value>
+          [--delimiter <value>]
+          [--encoding-type <value>]
+          [--prefix <value>]
+          [--fetch-owner | --no-fetch-owner]
+          [--start-after <value>]
+          [--request-payer <value>]
+          [--expected-bucket-owner <value>]
+          [--optional-object-attributes <value>]
+          [--cli-input-json | --cli-input-yaml]
+          [--starting-token <value>]
+          [--page-size <value>]
+          [--max-items <value>]
+          [--generate-cli-skeleton <value>]
+          [--debug]
+          [--endpoint-url <value>]
+          [--no-verify-ssl]
+          [--no-paginate]
+          [--output <value>]
+          [--query <value>]
+          [--profile <value>]
+          [--region <value>]
+          [--version <value>]
+          [--color <value>]
+          [--no-sign-request]
+          [--ca-bundle <value>]
+          [--cli-read-timeout <value>]
+          [--cli-connect-timeout <value>]
+          [--cli-binary-format <value>]
+          [--no-cli-pager]
+          [--cli-auto-prompt]
+          [--no-cli-auto-prompt]
+          [--cli-error-format <value>]
+
+1mOPTIONS0m
+       1m--bucket 22m(string) [required]
+              1mDirectory buckets 22m- When you use this operation with a directory
+              bucket, you must use virtual-hosted-style requests in the format
+              ``   4mBucket-name24m   .s3express-4mzone-id24m   .*region-code*  .amazon-
+              aws.com`` . Path-style requests  are  not  supported.  Directory
+              bucket  names  must  be  unique in the chosen Zone (Availability
+              Zone or Local Zone). Bucket names  must  follow  the  format  ``
+              4mbucket-base-name24m    --4mzone-id24m    --x-s3``   (for   example,   ``
+              4mamzn-s3-demo-bucket24m --4musw2-az124m --x-s3`` ). For information about
+              bucket naming restrictions, see 4mDirectory24m 4mbucket24m 4mnaming24m 4mrules24m in
+              the 4mAmazon24m 4mS324m 4mUser24m 4mGuide24m .
+
+              1mAccess points 22m- When you use this action with  an  access  point
+              for  general  purpose buckets, you must provide the alias of the
+              access point in place of the bucket name or specify  the  access
+              point ARN. When you use this action with an access point for di-
+              rectory buckets, you must provide the access point name in place
+              of  the  bucket  name. When using the access point ARN, you must
+              direct requests to the access point hostname. The  access  point
+              hostname  takes  the form 4mAccessPointName24m -4mAccountId24m .s3-access-
+              point.*Region* .amazonaws.com. When using this  action  with  an
+              access  point  through the Amazon Web Services SDKs, you provide
+              the access point ARN in place of the bucket name. For  more  in-
+              formation  about  access  point ARNs, see 4mUsing24m 4maccess24m 4mpoints24m in
+              the 4mAmazon24m 4mS324m 4mUser24m 4mGuide24m .
+
+          1mNOTE:0m
+                 Object Lambda access points are not  supported  by  directory
+                 buckets.
+
+              1mS3  on  Outposts 22m- When you use this action with S3 on Outposts,
+              you must direct requests to the S3 on Outposts hostname. The  S3
+              on  Outposts hostname takes the form `` 4mAccessPointName24m -4mAccoun-0m
+              4mtId24m .*outpostID* .s3-outposts.*Region* .amazonaws.com``  .  When
+              you  use this action with S3 on Outposts, the destination bucket
+              must be the Outposts access point ARN or the access point alias.
+              For  more  information  about  S3 on Outposts, see 4mWhat24m 4mis24m 4mS324m 4mon0m
+              4mOutposts?24m in the 4mAmazon24m 4mS324m 4mUser24m 4mGuide24m .
+
+       1m--delimiter 22m(string)
+          A delimiter is a character that you use to group keys.
+              1mCommonPrefixes 22mis filtered out from results if it is not lexico-
+              graphically greater than the 1mStartAfter 22mvalue.
+
+          1mNOTE:0m
+
+              o 1mDirectory  buckets 22m- For directory buckets, 1m/ 22mis the only sup-
+                ported delimiter.
+
+              o 1mDirectory buckets 22m- When you query 1mListObjectsV2 22mwith a delim-
+                iter  during in-progress multipart uploads, the 1mCommonPrefixes0m
+                response parameter contains the prefixes that  are  associated
+                with  the  in-progress multipart uploads. For more information
+                about multipart uploads, see 4mMultipart24m 4mUpload24m 4mOverview24m in  the
+                4mAmazon24m 4mS324m 4mUser24m 4mGuide24m .
+
+       1m--encoding-type 22m(string)
+          Encoding type used by Amazon S3 to encode the 4mobject24m 4mkeys24m in the re-
+          sponse. Responses are encoded only in UTF-8. An object key can  con-
+          tain  any Unicode character. However, the XML 1.0 parser can't parse
+          certain characters, such as characters with an ASCII value from 0 to
+          10.  For  characters  that  aren't supported in XML 1.0, you can add
+          this parameter to request that Amazon S3 encode the keys in the  re-
+          sponse. For more information about characters to avoid in object key
+          names, see 4mObject24m 4mkey24m 4mnaming24m 4mguidelines24m .
+
+          1mNOTE:0m
+              When using the URL encoding type, non-ASCII characters that  are
+              used  in  an object's key name will be percent-encoded according
+              to UTF-8 code values. For example, the  object  1mtest_file(3).png0m
+              will appear as 1mtest_file%283%29.png 22m.
+
+          Possible values:
+
+          o 1murl0m
+
+       1m--prefix 22m(string)
+          Limits the response to keys that begin with the specified prefix.
+
+          1mNOTE:0m
+              1mDirectory  buckets  22m-  For directory buckets, only prefixes that
+              end in a delimiter (1m/ 22m) are supported.
+
+       1m--fetch-owner 22m| 1m--no-fetch-owner 22m(boolean)
+          The owner field is not present in 1mListObjectsV2 22mby default.  If  you
+          want to return the owner field with each key in the result, then set
+          the 1mFetchOwner 22mfield to 1mtrue 22m.
+
+          1mNOTE:0m
+              1mDirectory buckets 22m- For directory buckets, the bucket  owner  is
+              returned as the object owner for all objects.
+
+       1m--start-after 22m(string)
+          StartAfter is where you want Amazon S3 to start listing from. Amazon
+          S3 starts listing after this specified key. StartAfter  can  be  any
+          key in the bucket.
+
+          1mNOTE:0m
+              This functionality is not supported for directory buckets.
+
+       1m--request-payer 22m(string)
+          Confirms that the requester knows that she or he will be charged for
+          the list objects request in V2 style. Bucket owners need not specify
+          this parameter in their requests.
+
+          1mNOTE:0m
+              This functionality is not supported for directory buckets.
+
+          Possible values:
+
+          o 1mrequester0m
+
+       1m--expected-bucket-owner 22m(string)
+          The  account ID of the expected bucket owner. If the account ID that
+          you provide does not match the actual owner of the bucket,  the  re-
+          quest fails with the HTTP status code 1m403 Forbidden 22m(access denied).
+
+       1m--optional-object-attributes 22m(list)
+          Specifies  the  optional  fields  that  you want returned in the re-
+          sponse. Fields that you do not specify are not returned.
+
+          1mNOTE:0m
+              This functionality is not supported for directory buckets.
+
+          (string)
+              Possible values:
+
+              o 1mRestoreStatus0m
+
+       Syntax:
+
+          "string" "string" ...
+
+       1m--cli-input-json 22m| 1m--cli-input-yaml 22m(string) Reads arguments  from  the
+       JSON  string  provided.  The JSON string follows the format provided by
+       1m--generate-cli-skeleton22m. If other arguments are provided on the command
+       line,  those  values  will override the JSON-provided values. It is not
+       possible to pass arbitrary binary values using a JSON-provided value as
+       the  string  will  be  taken literally. This may not be specified along
+       with 1m--cli-input-yaml22m.
+
+       1m--starting-token 22m(string)
+          A token to specify where to start paginating. This is the  1mNextToken0m
+          from a previously truncated response.
+
+          For usage examples, see 4mPagination24m in the 4mAWS24m 4mCommand24m 4mLine24m 4mInterface0m
+          4mUser24m 4mGuide24m .
+
+       1m--page-size 22m(integer)
+          The size of each page to get in the AWS service call. This does  not
+          affect the number of items returned in the command's output. Setting
+          a smaller page size results in more calls to the  AWS  service,  re-
+          trieving  fewer  items  in  each call. This can help prevent the AWS
+          service calls from timing out.
+
+          For usage examples, see 4mPagination24m in the 4mAWS24m 4mCommand24m 4mLine24m 4mInterface0m
+          4mUser24m 4mGuide24m .
+
+       1m--max-items 22m(integer)
+          The  total number of items to return in the command's output. If the
+          total number of items available is more than the value specified,  a
+          1mNextToken 22mis provided in the command's output. To resume pagination,
+          provide the 1mNextToken 22mvalue in the 1mstarting-token 22margument of a sub-
+          sequent  command. 1mDo not 22muse the 1mNextToken 22mresponse element directly
+          outside of the AWS CLI.
+
+          For usage examples, see 4mPagination24m in the 4mAWS24m 4mCommand24m 4mLine24m 4mInterface0m
+          4mUser24m 4mGuide24m .
+
+       1m--generate-cli-skeleton  22m(string)  Prints  a  JSON skeleton to standard
+       output without sending an API request. If provided with no value or the
+       value 1minput22m, prints a sample input JSON that can be used as an argument
+       for 1m--cli-input-json22m. Similarly, if provided 1myaml-input 22mit will print a
+       sample  input  YAML that can be used with 1m--cli-input-yaml22m. If provided
+       with the value 1moutput22m, it validates the command inputs  and  returns  a
+       sample output JSON for that command. The generated JSON skeleton is not
+       stable between versions of the AWS CLI and there are no backwards  com-
+       patibility guarantees in the JSON skeleton generated.
+
+1mGLOBAL OPTIONS0m
+       1m--debug 22m(boolean)
+
+       Turn on debug logging.
+
+       1m--endpoint-url 22m(string)
+
+       Override command's default URL with the given URL.
+
+       1m--no-verify-ssl 22m(boolean)
+
+       By  default, the AWS CLI uses SSL when communicating with AWS services.
+       For each SSL connection, the AWS CLI will verify SSL certificates. This
+       option overrides the default behavior of verifying SSL certificates.
+
+       1m--no-paginate 22m(boolean)
+
+       Disable  automatic pagination. If automatic pagination is disabled, the
+       AWS CLI will only make one call, for the first page of results.
+
+       1m--output 22m(string)
+
+       The formatting style for command output.
+
+       o json
+
+       o text
+
+       o table
+
+       o yaml
+
+       o yaml-stream
+
+       o off
+
+       1m--query 22m(string)
+
+       A JMESPath query to use in filtering the response data.
+
+       1m--profile 22m(string)
+
+       Use a specific profile from your credential file.
+
+       1m--region 22m(string)
+
+       The region to use. Overrides config/env settings.
+
+       1m--version 22m(string)
+
+       Display the version of this tool.
+
+       1m--color 22m(string)
+
+       Turn on/off color output.
+
+       o on
+
+       o off
+
+       o auto
+
+       1m--no-sign-request 22m(boolean)
+
+       Do not sign requests. Credentials will not be loaded if  this  argument
+       is provided.
+
+       1m--ca-bundle 22m(string)
+
+       The CA certificate bundle to use when verifying SSL certificates. Over-
+       rides config/env settings.
+
+       1m--cli-read-timeout 22m(int)
+
+       The maximum socket read time in seconds. If the value is set to 0,  the
+       socket  read  will be blocking and not timeout. The default value is 60
+       seconds.
+
+       1m--cli-connect-timeout 22m(int)
+
+       The maximum socket connect time in seconds. If the value is set  to  0,
+       the  socket connect will be blocking and not timeout. The default value
+       is 60 seconds.
+
+       1m--cli-binary-format 22m(string)
+
+       The formatting style to be used for binary blobs. The default format is
+       base64.  The  base64  format  expects  binary blobs to be provided as a
+       base64 encoded string. The raw-in-base64-out format preserves  compati-
+       bility with AWS CLI V1 behavior and binary values must be passed liter-
+       ally. When providing contents from a file that map  to  a  binary  blob
+       1mfileb:// 22mwill always be treated as binary and use the file contents di-
+       rectly regardless of the 1mcli-binary-format 22msetting. When using  1mfile://0m
+       the  file  contents  will need to properly formatted for the configured
+       1mcli-binary-format22m.
+
+       o base64
+
+       o raw-in-base64-out
+
+       1m--no-cli-pager 22m(boolean)
+
+       Disable cli pager for output.
+
+       1m--cli-auto-prompt 22m(boolean)
+
+       Automatically prompt for CLI input parameters.
+
+       1m--no-cli-auto-prompt 22m(boolean)
+
+       Disable automatically prompt for CLI input parameters.
+
+       1m--cli-error-format 22m(string)
+
+       The formatting style for error output. By default, errors are displayed
+       in enhanced format.
+
+       o legacy
+
+       o json
+
+       o yaml
+
+       o text
+
+       o table
+
+       o enhanced
+
+1mEXAMPLES0m
+       1mNOTE:0m
+          To  use  the following examples, you must have the AWS CLI installed
+          and configured. See the 4mGetting24m 4mstarted24m 4mguide24m in the  4mAWS24m  4mCLI24m  4mUser0m
+          4mGuide24m for more information.
+
+          Unless  otherwise  stated,  all  examples  have  unix-like quotation
+          rules. These examples will need to be  adapted  to  your  terminal's
+          quoting rules. See 4mUsing24m 4mquotation24m 4mmarks24m 4mwith24m 4mstrings24m in the 4mAWS24m 4mCLI0m
+          4mUser24m 4mGuide24m .
+
+       1mTo get a list of objects in a bucket0m
+
+       The following 1mlist-objects-v2 22mexample lists the objects in  the  speci-
+       fied bucket.
+
+          aws s3api list-objects-v2 \
+              --bucket amzn-s3-demo-bucket
+
+       Output:
+
+          {
+              "Contents": [
+                  {
+                      "LastModified": "2019-11-05T23:11:50.000Z",
+                      "ETag": "\"621503c373607d548b37cff8778d992c\"",
+                      "StorageClass": "STANDARD",
+                      "Key": "doc1.rtf",
+                      "Size": 391
+                  },
+                  {
+                      "LastModified": "2019-11-05T23:11:50.000Z",
+                      "ETag": "\"a2cecc36ab7c7fe3a71a273b9d45b1b5\"",
+                      "StorageClass": "STANDARD",
+                      "Key": "doc2.rtf",
+                      "Size": 373
+                  },
+                  {
+                      "LastModified": "2019-11-05T23:11:50.000Z",
+                      "ETag": "\"08210852f65a2e9cb999972539a64d68\"",
+                      "StorageClass": "STANDARD",
+                      "Key": "doc3.rtf",
+                      "Size": 399
+                  },
+                  {
+                      "LastModified": "2019-11-05T23:11:50.000Z",
+                      "ETag": "\"d1852dd683f404306569471af106988e\"",
+                      "StorageClass": "STANDARD",
+                      "Key": "doc4.rtf",
+                      "Size": 6225
+                  }
+              ]
+          }
+
+1mOUTPUT0m
+       IsTruncated -> (boolean)
+          Set  to  1mfalse  22mif  all of the results were returned. Set to 1mtrue 22mif
+          more keys are available to return. If the number of results  exceeds
+          that  specified  by  1mMaxKeys  22m,  all of the results might not be re-
+          turned.
+
+       Contents -> (list)
+          Metadata about each object returned.
+
+          (structure)
+              An object consists of data and its descriptive metadata.
+
+              Key -> (string)
+                 The name that you assign to an object. You use the object key
+                 to retrieve the object.
+
+                 Constraints:
+
+                 o min: 1m10m
+
+              LastModified -> (timestamp)
+                 Creation date of the object.
+
+              ETag -> (string)
+                 The  entity  tag  is  a hash of the object. The ETag reflects
+                 changes only to the contents of an object, not its  metadata.
+                 The  ETag may or may not be an MD5 digest of the object data.
+                 Whether or not it is depends on how the  object  was  created
+                 and how it is encrypted as described below:
+
+                 o Objects created by the PUT Object, POST Object, or Copy op-
+                   eration, or through the Amazon Web Services Management Con-
+                   sole,  and are encrypted by SSE-S3 or plaintext, have ETags
+                   that are an MD5 digest of their object data.
+
+                 o Objects created by the PUT Object, POST Object, or Copy op-
+                   eration, or through the Amazon Web Services Management Con-
+                   sole, and are encrypted by SSE-C  or  SSE-KMS,  have  ETags
+                   that are not an MD5 digest of their object data.
+
+                 o If  an  object is created by either the Multipart Upload or
+                   Part Copy operation, the ETag is not an MD5 digest, regard-
+                   less  of  the  method of encryption. If an object is larger
+                   than 16 MB, the Amazon Web Services Management Console will
+                   upload  or  copy  that  object  as  a Multipart Upload, and
+                   therefore the ETag will not be an MD5 digest.
+
+                 1mNOTE:0m
+                     1mDirectory buckets 22m- MD5 is  not  supported  by  directory
+                     buckets.
+
+              ChecksumAlgorithm -> (list)
+                 The  algorithm  that was used to create a checksum of the ob-
+                 ject.
+
+                 (string)
+                     Possible values:
+
+                     o 1mCRC320m
+
+                     o 1mCRC32C0m
+
+                     o 1mSHA10m
+
+                     o 1mSHA2560m
+
+                     o 1mCRC64NVME0m
+
+                     o 1mSHA5120m
+
+                     o 1mMD50m
+
+                     o 1mXXHASH640m
+
+                     o 1mXXHASH30m
+
+                     o 1mXXHASH1280m
+
+              ChecksumType -> (string)
+                 The checksum type that  is  used  to  calculate  the  objects
+                 checksum value. For more information, see 4mChecking24m 4mobject24m 4min-0m
+                 4mtegrity24m in the 4mAmazon24m 4mS324m 4mUser24m 4mGuide24m .
+
+                 Possible values:
+
+                 o 1mCOMPOSITE0m
+
+                 o 1mFULL_OBJECT0m
+
+              Size -> (long)
+                 Size in bytes of the object
+
+              StorageClass -> (string)
+                 The class of storage used to store the object.
+
+                 1mNOTE:0m
+                     1mDirectory buckets 22m- Directory buckets  only  support  1mEX-0m
+                     1mPRESS_ONEZONE  22m(the S3 Express One Zone storage class) in
+                     Availability Zones and 1mONEZONE_IA 22m(the S3 One Zone-Infre-
+                     quent Access storage class) in Dedicated Local Zones.
+
+                 Possible values:
+
+                 o 1mSTANDARD0m
+
+                 o 1mREDUCED_REDUNDANCY0m
+
+                 o 1mGLACIER0m
+
+                 o 1mSTANDARD_IA0m
+
+                 o 1mONEZONE_IA0m
+
+                 o 1mINTELLIGENT_TIERING0m
+
+                 o 1mDEEP_ARCHIVE0m
+
+                 o 1mOUTPOSTS0m
+
+                 o 1mGLACIER_IR0m
+
+                 o 1mSNOW0m
+
+                 o 1mEXPRESS_ONEZONE0m
+
+                 o 1mFSX_OPENZFS0m
+
+                 o 1mFSX_ONTAP0m
+
+              Owner -> (structure)
+                 The owner of the object
+
+                 1mNOTE:0m
+                     1mDirectory  buckets  22m- The bucket owner is returned as the
+                     object owner.
+
+                 DisplayName -> (string)
+
+                 ID -> (string)
+                     Container for the ID of the owner.
+
+              RestoreStatus -> (structure)
+                 Specifies the restoration status of  an  object.  Objects  in
+                 certain  storage  classes must be restored before they can be
+                 retrieved. For more information about these  storage  classes
+                 and  how  to  work  with  archived  objects, see 4mWorking24m 4mwith0m
+                 4marchived24m 4mobjects24m in the 4mAmazon24m 4mS324m 4mUser24m 4mGuide24m .
+
+                 1mNOTE:0m
+                     This functionality is not supported for  directory  buck-
+                     ets.  Directory buckets only support 1mEXPRESS_ONEZONE 22m(the
+                     S3 Express One Zone storage class) in Availability  Zones
+                     and 1mONEZONE_IA 22m(the S3 One Zone-Infrequent Access storage
+                     class) in Dedicated Local Zones.
+
+                 IsRestoreInProgress -> (boolean)
+                     Specifies whether the object is currently being restored.
+                     If  the object restoration is in progress, the header re-
+                     turns the value 1mTRUE 22m. For example:
+                        1mx-amz-optional-object-attributes:         IsRestoreIn-0m
+                        1mProgress="true"0m
+
+                     If  the  object restoration has completed, the header re-
+                     turns the value 1mFALSE 22m. For example:
+                        1mx-amz-optional-object-attributes:         IsRestoreIn-0m
+                        1mProgress="false",                       RestoreExpiry-0m
+                        1mDate="2012-12-21T00:00:00.000Z"0m
+
+                     If the object hasn't been restored, there  is  no  header
+                     response.
+
+                 RestoreExpiryDate -> (timestamp)
+                     Indicates  when the restored copy will expire. This value
+                     is populated only if the  object  has  already  been  re-
+                     stored. For example:
+                        1mx-amz-optional-object-attributes:         IsRestoreIn-0m
+                        1mProgress="false",                       RestoreExpiry-0m
+                        1mDate="2012-12-21T00:00:00.000Z"0m
+
+       Name -> (string)
+          The bucket name.
+
+       Prefix -> (string)
+          Keys that begin with the indicated prefix.
+
+          1mNOTE:0m
+              1mDirectory  buckets  22m-  For directory buckets, only prefixes that
+              end in a delimiter (1m/ 22m) are supported.
+
+       Delimiter -> (string)
+          Causes keys that contain the same string between the 1mprefix 22mand  the
+          first  occurrence of the delimiter to be rolled up into a single re-
+          sult element in the 1mCommonPrefixes 22mcollection. These rolled-up  keys
+          are  not  returned  elsewhere in the response. Each rolled-up result
+          counts as only one return against the 1mMaxKeys 22mvalue.
+
+          1mNOTE:0m
+              1mDirectory buckets 22m- For directory buckets, 1m/ 22mis  the  only  sup-
+              ported delimiter.
+
+       MaxKeys -> (integer)
+          Sets  the  maximum  number  of keys returned in the response. By de-
+          fault, the action returns up to 1,000 key names. The response  might
+          contain fewer keys but will never contain more.
+
+       CommonPrefixes -> (list)
+          All of the keys (up to 1,000) that share the same prefix are grouped
+          together. When counting the total numbers of returns by this API op-
+          eration, this group of keys is considered as one item.
+
+          A  response  can contain 1mCommonPrefixes 22monly if you specify a delim-
+          iter.
+              1mCommonPrefixes 22mcontains all (if there are any) keys between 1mPre-0m
+              1mfix  22mand the next occurrence of the string specified by a delim-
+              iter.
+
+              1mCommonPrefixes 22mlists keys that act like  subdirectories  in  the
+              directory specified by 1mPrefix 22m.
+
+          For example, if the prefix is 1mnotes/ 22mand the delimiter is a slash (1m/0m
+          ) as in 1mnotes/summer/july 22m, the common prefix is 1mnotes/summer/ 22m. All
+          of  the keys that roll up into a common prefix count as a single re-
+          turn when calculating the number of returns.
+
+          1mNOTE:0m
+
+              o 1mDirectory buckets 22m- For directory buckets, only prefixes  that
+                end in a delimiter (1m/ 22m) are supported.
+
+              o 1mDirectory buckets 22m- When you query 1mListObjectsV2 22mwith a delim-
+                iter during in-progress multipart uploads, the  1mCommonPrefixes0m
+                response  parameter  contains the prefixes that are associated
+                with the in-progress multipart uploads. For  more  information
+                about  multipart uploads, see 4mMultipart24m 4mUpload24m 4mOverview24m in the
+                4mAmazon24m 4mS324m 4mUser24m 4mGuide24m .
+
+          (structure)
+              Container for all (if there are any) keys between Prefix and the
+              next  occurrence of the string specified by a delimiter. Common-
+              Prefixes lists keys that act like subdirectories in  the  direc-
+              tory  specified  by Prefix. For example, if the prefix is notes/
+              and the delimiter is a slash (/) as  in  notes/summer/july,  the
+              common prefix is notes/summer/.
+
+              Prefix -> (string)
+                 Container for the specified common prefix.
+
+       EncodingType -> (string)
+          Encoding  type  used  by Amazon S3 to encode object key names in the
+          XML response.
+
+          If you specify the 1mencoding-type 22mrequest parameter,  Amazon  S3  in-
+          cludes  this  element  in the response, and returns encoded key name
+          values in the following response elements:
+              1mDelimiter, Prefix, Key, 22mand 1mStartAfter 22m.
+
+          Possible values:
+
+          o 1murl0m
+
+       KeyCount -> (integer)
+          1mKeyCount 22mis the number of keys returned with this request.  1mKeyCount0m
+          will always be less than or equal to the 1mMaxKeys 22mfield. For example,
+          if you ask for 50 keys, your result will include 50 keys or fewer.
+
+       ContinuationToken -> (string)
+          If 1mContinuationToken 22mwas sent with the request, it  is  included  in
+          the response. You can use the returned 1mContinuationToken 22mfor pagina-
+          tion of the list response.
+
+       NextContinuationToken -> (string)
+          1mNextContinuationToken 22mis sent when 1misTruncated 22mis true, which  means
+          there  are more keys in the bucket that can be listed. The next list
+          requests to Amazon S3 can be continued with this 1mNextContinuationTo-0m
+          1mken 22m. 1mNextContinuationToken 22mis obfuscated and is not a real key
+
+       StartAfter -> (string)
+          If  StartAfter  was sent with the request, it is included in the re-
+          sponse.
+
+          1mNOTE:0m
+              This functionality is not supported for directory buckets.
+
+       RequestCharged -> (string)
+          If present, indicates that the requester  was  successfully  charged
+          for  the  request.  For  more  information, see 4mUsing24m 4mRequester24m 4mPays0m
+          4mbuckets24m 4mfor24m 4mstorage24m 4mtransfers24m 4mand24m 4musage24m in the 4mAmazon24m 4mSimple24m 4mStorage0m
+          4mService24m 4muser24m 4mguide24m .
+
+          1mNOTE:0m
+              This functionality is not supported for directory buckets.
+
+          Possible values:
+
+          o 1mrequester0m
+
+
+
+                                                             LIST-OBJECTS-V2()

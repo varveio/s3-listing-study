@@ -1,0 +1,10 @@
+DEBUG: Request s3/HeadBucket Details:
+DEBUG: Response s3/HeadBucket Details:
+DEBUG: Request s3/ListObjectsV2 Details:
+DEBUG: Response s3/ListObjectsV2 Details:
+DEBUG: Request s3/ListObjectsV2 Details:
+GET /?continuation-token=1HI6A7bO15SSsnkr%2FQgUzjgcEckHpgnEBg0m3%2FsUR5H1ejxYcCrvSzDwsZpuyhOGO%2F%2Fmxddrmj7NDO7Ce3s74IqiAyguIHkEu1TwGh9mSFxo%3D&list-type=2&prefix=normals-hourly%2F HTTP/1.1
+DEBUG: Response s3/ListObjectsV2 Details:
+DEBUG: Request s3/ListObjectsV2 Details:
+GET /?continuation-token=1MUxdj3NYGXiX%2F%2FItAqaruZShW6Owo8pLzWrGOwWnOsW%2BuqiqU8ox0amH7RmKj3lpmN5vYjsVpyhe50D%2FjYRI4oTRQIvTRwV38di2y10hdVQ%3D&list-type=2&prefix=normals-hourly%2F HTTP/1.1
+DEBUG: Response s3/ListObjectsV2 Details:

@@ -1,0 +1,11 @@
+exit_code=0
+invocation=pS3 list-objects-v2 --bucket noaa-normals-pds --region us-east-1
+env=AWS_EC2_METADATA_DISABLED=true (BARE — no config/creds-file redirect; NOT the wrapper's full starvation)
+image=ps3-study@sha256:c0d7b655163832bf769af0dd5da037c17f6b7b1b519724b8291297b5ae539663
+emulated=yes (amd64 on arm64/qemu)
+network=host
+date_utc=2026-07-17T13:01:38Z
+note=[OBS] not a wrapper receipt; raw capture of the exit-0 silent-empty path
+stdout_bytes=0
+stdout_sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+stderr_bytes=0

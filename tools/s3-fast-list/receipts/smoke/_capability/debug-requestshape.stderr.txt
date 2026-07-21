@@ -1,0 +1,23 @@
+[2026-07-17T12:08:06Z INFO  s3_fast_list] fast list tools v1.1.0 starting:
+[2026-07-17T12:08:06Z INFO  s3_fast_list]   - mode List, threads 10, concurrent tasks 100
+[2026-07-17T12:08:06Z INFO  s3_fast_list]   - start prefix normals-hourly/
+[2026-07-17T12:08:06Z INFO  s3_fast_list]   - region us-east-1
+[2026-07-17T12:08:06Z INFO  s3_fast_list]   - NO ks hints found
+[2026-07-17T12:08:06Z INFO  s3_fast_list::data_map] Data Map Task - started
+[2026-07-17T12:08:06Z INFO  s3_fast_list::mon] Mon Task - started
+[2026-07-17T12:08:06Z INFO  s3_fast_list::tasks_s3] Flat List S3 Task - noaa-normals-pds - started
+[2026-07-17T12:08:06Z DEBUG s3_fast_list::tasks_s3] Sending S3 request: bucket=noaa-normals-pds, prefix=normals-hourly/, start_after=
+[2026-07-17T12:08:06Z DEBUG s3_fast_list::tasks_s3] input pair start , end None
+[2026-07-17T12:08:06Z DEBUG s3_fast_list::tasks_s3] Waiting for S3 response with timeout of 5 seconds
+[2026-07-17T12:08:07Z DEBUG s3_fast_list::tasks_s3] Waiting for S3 response with timeout of 5 seconds
+[2026-07-17T12:08:07Z DEBUG s3_fast_list::tasks_s3] Waiting for S3 response with timeout of 5 seconds
+[2026-07-17T12:08:07Z DEBUG s3_fast_list::tasks_s3] Waiting for S3 response with timeout of 5 seconds
+[2026-07-17T12:08:07Z DEBUG s3_fast_list::tasks_s3] finished pair start , end None
+[2026-07-17T12:08:07Z INFO  s3_fast_list::tasks_s3] Flat List S3 Task - noaa-normals-pds - completed
+[2026-07-17T12:08:07Z INFO  s3_fast_list::data_map] Data Map Task - final map stats prefix count 12, object count 2549
+[2026-07-17T12:08:07Z INFO  s3_fast_list::data_map] Data Map Task - dumping all object keys to /dev/stdout, include_eq: false
+[2026-07-17T12:08:07Z INFO  s3_fast_list::data_map] Data Map Task - dumping ks to /dev/null
+[2026-07-17T12:08:07Z INFO  s3_fast_list::data_map] Data Map Task - quit
+[2026-07-17T12:08:08Z INFO  s3_fast_list::tasks_s3] Flat List S3 Task - noaa-normals-pds - quit
+[2026-07-17T12:08:11Z INFO  s3_fast_list::mon] Mon Task - quit
+[2026-07-17T12:08:11Z INFO  s3_fast_list] All Tasks quit

@@ -1,0 +1,5 @@
+2025-11-24T20:33:44Z	36822	STANDARD	0d6853386d167e668f7e862944150ab0	index.html
+	PRE			normals-annualseasonal/
+	PRE			normals-daily/
+	PRE			normals-hourly/
+	PRE			normals-monthly/

@@ -1,0 +1,16 @@
+12:56:19.421 INFO  i.v.s.c.ListCommand - list_command_start bucket=noaa-normals-pds prefix= args_hash=aaac9f3b16b6a291c6c4518c38bdeec4e082676d68ed94ce6369b7d393cde803 checkpoint_path=none strategy=WORK_STEALING max_parallel_listings=8 engine_toggles_default=true
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::load has been called by org.sqlite.SQLiteJDBCLoader in an unnamed module (file:/opt/swath/swath.jar)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+12:56:19.822 INFO  i.v.s.s.FirstRequestMarkerFetcher - list_first_request_issued elapsed_ms=405
+12:56:20.179 INFO  i.v.s.s.FirstRequestMarkerFetcher - list_first_page_returned elapsed_ms=762
+12:56:21.647 INFO  i.v.s.e.SeedStep - seed_shallow run_id=1 probes=32 cut_points=30 synthesized_cuts=0 seed_ranges=31
+12:56:21.649 INFO  i.v.s.c.ListCommand - list_seed run_id=1 seed=SHALLOW seed_count=31
+12:56:21.662 INFO  i.v.s.r.ListRunner - list_run_start strategy=WORK_STEALING checkpointed=true run_id=1 output_format=TSV worker_count=8
+12:56:21.667 INFO  i.v.s.e.WorkStealingScan - work_stealing_scan_start run_id=1 worker_count=8 seed_count=31 max_keys=1000
+12:56:25.836 INFO  i.v.s.e.WorkStealingScan - quiescence_reached run_id=1 outstanding=0
+12:56:25.840 INFO  i.v.s.e.WorkStealingScan - work_stealing_scan_exit run_id=1 outstanding=0
+12:56:25.849 INFO  i.v.s.r.ListRunner - list_run_summary run_id=1 objects=148917 duration_ms=4180 strategy=WORK_STEALING api_calls=339 cost_usd=0.0016950000000000001 output_files=1 compressed_size_bytes=18547181 keys=148917 pages=172 peak_in_flight=8 steals=98 splits=7 errors=0 keys_per_sec=35619.18995106439 api_calls_per_1k_objects=2.276435866959447 peak_rss_bytes=557285376 peak_heap_bytes=316323424 cpu_seconds=5.32 cpu_efficiency=1.2724812515674004
+12:56:25.852 INFO  i.v.s.r.ListRunner - list_run_diagnostics run_id=1 duration_ms=4180 strategy=WORK_STEALING strategy_why=checkpointed_resumable_nodes steal_reasons={OWNER_SPLIT.demand_gated=19, OWNER_SPLIT.self_published=1, OWNER_SPLIT.pivot_reflect_clamped=1, NO_VICTIM.no_splittable_victim=65, SEED_SCHED.distinct_seed_worker=8, CHILD_MASS.tiny=18, RETRY.cursor_passed_pivot=13, CHILD_MASS.empty=6, RETRY.retry_pivot_adjacent=1, PIVOT.adaptive_structure=1, PIVOT.far_ahead=1, OWNER_SPLIT_CHILD.confetti=1, AIMD.slow_start_double=1, TOGGLE.mass_aware_seed_on=1, CHILD_CREATED.split_committed=6, ALPHABET.alphabet_fallback=34, SEED.top_complete=1, PIVOT.step_back=4, PIVOT.reflect_empty=1, PIVOT.bisect=1, ALPHABET.fallback_no_room=1, PIVOT_BYTE.other=3, STEAL.attempted=98, CHILD_MASS.small=9, CHILD_MASS.large=5, SEED.mass_weighted_subsample=1, PIVOT.structure_probe=3, STEAL.futility_paced=4, ALPHABET.fallback_out_of_window=23, SEED.frontier_reordered=1, ALPHABET.window_gap=10, PIVOT_BYTE.dead_zone=2, RETRY.bound_moved=13, PIVOT_BYTE.hex_alpha=2, SEED.delimiter_seeded=1} probe_fetches=97 empty_upper_bisections=60 splits_committed=7 unsplittable_victims=0 split_guard_aborts=0 peak_in_flight=8 time_to_first_steal_ms=2126 time_to_peak_in_flight_ms=141 pages=178 fetched_keys=172892 mean_keys_per_page=971.3033707865169 short_truncated_pages=0 throttle_events=0 transient_events=0 aimd_votes=0 aimd_target_reductions=0

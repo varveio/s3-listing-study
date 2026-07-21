@@ -1,0 +1,401 @@
+### s7cmd --version
+s7cmd 1.5.0 ( aarch64-unknown-linux-gnu), rustc 1.97.1 (8bab26f4f 2026-07-14)
+
+### s7cmd ls --help
+List S3 objects
+
+Usage: s7cmd ls [OPTIONS] [TARGET]
+
+Arguments:
+  [TARGET]
+          S3 target path: s3://<BUCKET_NAME>[/prefix] (omit to list buckets)
+          
+          [env: TARGET=]
+          [default: ""]
+
+Options:
+  -v, --verbose...
+          Increase logging verbosity
+
+  -q, --quiet...
+          Decrease logging verbosity
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+  -V, --version
+          Print version
+
+General:
+  -r, --recursive
+          List all objects recursively (enables parallel listing)
+          
+          [env: RECURSIVE=]
+
+      --all-versions
+          List all versions including delete markers
+          
+          [env: LIST_ALL_VERSIONS=]
+
+      --hide-delete-markers
+          Hide delete markers from version listing (requires --all-versions)
+          
+          [env: HIDE_DELETE_MARKERS=]
+
+      --max-depth <MAX_DEPTH>
+          Maximum depth for recursive listing (requires --recursive)
+          
+          [env: MAX_DEPTH=]
+
+Bucket Listing:
+      --bucket-name-prefix <BUCKET_NAME_PREFIX>
+          Filter buckets by name prefix (bucket listing only)
+          
+          [env: BUCKET_NAME_PREFIX=]
+
+      --list-express-one-zone-buckets
+          List only Express One Zone directory buckets (bucket listing only)
+          
+          [env: LIST_EXPRESS_ONE_ZONE_BUCKETS=]
+
+      --show-bucket-arn
+          Show bucket ARN column (bucket listing only)
+          
+          [env: SHOW_BUCKET_ARN=]
+
+Filtering:
+      --filter-include-regex <FILTER_INCLUDE_REGEX>
+          List only objects whose key matches the given regular expression.
+          
+          Example: --filter-include-regex '\.csv$'
+          
+          [env: FILTER_INCLUDE_REGEX=]
+
+      --filter-exclude-regex <FILTER_EXCLUDE_REGEX>
+          Skip objects whose key matches the given regular expression.
+          
+          Example: --filter-exclude-regex '^temp/'
+          
+          [env: FILTER_EXCLUDE_REGEX=]
+
+      --filter-mtime-before <FILTER_MTIME_BEFORE>
+          List only objects modified before the given time (RFC 3339 format).
+          Example: 2023-02-19T12:00:00Z
+          
+          [env: FILTER_MTIME_BEFORE=]
+
+      --filter-mtime-after <FILTER_MTIME_AFTER>
+          List only objects modified at or after the given time (RFC 3339 format).
+          Example: 2023-02-19T12:00:00Z
+          
+          [env: FILTER_MTIME_AFTER=]
+
+      --filter-smaller-size <FILTER_SMALLER_SIZE>
+          List only objects smaller than the given size.
+          Supported suffixes: KB, KiB, MB, MiB, GB, GiB, TB, TiB
+          
+          [env: FILTER_SMALLER_SIZE=]
+
+      --filter-larger-size <FILTER_LARGER_SIZE>
+          List only objects larger than or equal to the given size.
+          Supported suffixes: KB, KiB, MB, MiB, GB, GiB, TB, TiB
+          
+          [env: FILTER_LARGER_SIZE=]
+
+      --storage-class <STORAGE_CLASS>
+          List only objects whose storage class is in the given list.
+          Multiple classes can be separated by commas.
+          
+          Example: --storage-class STANDARD,GLACIER,DEEP_ARCHIVE
+          
+          [env: STORAGE_CLASS=]
+
+Sort:
+      --sort <SORT>
+          Sort results by field(s), comma-separated (default: key for objects, bucket for bucket
+          listing)
+          
+          [env: SORT=]
+          [possible values: key, size, date, bucket, region]
+
+      --reverse
+          Reverse the sort order
+          
+          [env: REVERSE=]
+
+      --no-sort
+          Disable sorting and stream results directly in arbitrary order (reduces memory usage)
+          
+          [env: NO_SORT=]
+
+Display:
+      --summarize
+          Append summary line (total count, total size)
+          
+          [env: SUMMARIZE=]
+
+      --human-readable
+          Human-readable sizes (e.g. 1.2KiB)
+          
+          [env: HUMAN_READABLE=]
+
+      --show-relative-path
+          Show key relative to prefix instead of full path
+          
+          [env: SHOW_RELATIVE_PATH=]
+
+      --show-etag
+          Show ETAG column
+          
+          [env: SHOW_ETAG=]
+
+      --show-storage-class
+          Show STORAGE_CLASS column
+          
+          [env: SHOW_STORAGE_CLASS=]
+
+      --show-checksum-algorithm
+          Show CHECKSUM_ALGORITHM column
+          
+          [env: SHOW_CHECKSUM_ALGORITHM=]
+
+      --show-checksum-type
+          Show CHECKSUM_TYPE column
+          
+          [env: SHOW_CHECKSUM_TYPE=]
+
+      --show-is-latest
+          Show IS_LATEST column (requires --all-versions)
+          
+          [env: SHOW_IS_LATEST=]
+
+      --show-owner
+          Show OWNER_DISPLAY_NAME and OWNER_ID columns
+          
+          [env: SHOW_OWNER=]
+
+      --show-restore-status
+          Show IS_RESTORE_IN_PROGRESS and RESTORE_EXPIRY_DATE columns
+          
+          [env: SHOW_RESTORE_STATUS=]
+
+      --show-local-time
+          Display timestamps in local time instead of UTC
+          
+          [env: SHOW_LOCAL_TIME=]
+
+      --header
+          Add a header row to each column
+          
+          [env: HEADER=]
+
+      --json
+          Output as NDJSON (one JSON object per line)
+          
+          [env: JSON=]
+
+      --show-objects-only
+          Show only objects, hiding common prefixes (directory markers) from output
+          
+          [env: SHOW_OBJECTS_ONLY=]
+
+      --raw-output
+          Emit raw S3 key/prefix bytes without escaping control characters.
+          
+          By default, text-mode output replaces control characters (\x00-\x1f, \x7f) in keys,
+          prefixes, and owner fields with `\xNN` hex escapes. This prevents a maliciously-named S3
+          object from injecting newlines, tabs, or ANSI terminal escape sequences into the output.
+          Use this flag to disable escaping when you trust the bucket contents and need byte-exact
+          keys for piping.
+          
+          [env: RAW_OUTPUT=]
+
+      --tsv
+          Emit tab-separated text (TSV) instead of the default whitespace-aligned columns.
+          
+          By default, s3ls pads each non-KEY column to a fixed width and uses two spaces as the
+          column separator, producing output that lines up on screen and is easy for a human to
+          scan.
+          
+          `--tsv` switches to tab-separated output, which is machine-friendly: `cut`, `awk`, `sort`,
+          and other Unix tools can process it directly without custom delimiters or quoting rules.
+          Columns won't line up visually in a terminal because tabs align to tab stops, not to
+          content.
+          
+          Independent of `--human-readable`: - `--human-readable` makes individual values
+          human-friendly (e.g., `1.2KiB` rather than raw bytes). - `--tsv` changes the layout
+          (tab-separated columns instead of fixed-width columns).
+          
+          `--tsv` cannot be combined with `--json`.
+          
+          [env: TSV=]
+
+  -1, --one
+          Display only the key (or bucket name), one per line, with no other columns. All `--show-*`
+          options are ignored. For object listings, common prefixes are emitted unless
+          `--show-objects-only` is set
+          
+          [env: ONE_LINE=]
+
+Tracing/Logging:
+      --json-tracing
+          Output structured logs in JSON format
+          
+          [env: JSON_TRACING=]
+
+      --aws-sdk-tracing
+          Include AWS SDK internal traces in log output
+          
+          [env: AWS_SDK_TRACING=]
+
+      --span-events-tracing
+          Include span open/close events in log output
+          
+          [env: SPAN_EVENTS_TRACING=]
+
+      --disable-color-tracing
+          Disable colored output in logs
+          
+          [env: DISABLE_COLOR_TRACING=]
+
+AWS Configuration:
+      --aws-config-file <AWS_CONFIG_FILE>
+          Path to the AWS config file
+          
+          [env: AWS_CONFIG_FILE=]
+
+      --aws-shared-credentials-file <AWS_SHARED_CREDENTIALS_FILE>
+          Path to the AWS shared credentials file
+          
+          [env: AWS_SHARED_CREDENTIALS_FILE=]
+
+      --target-profile <TARGET_PROFILE>
+          Target AWS CLI profile
+          
+          [env: TARGET_PROFILE=]
+
+      --target-access-key <TARGET_ACCESS_KEY>
+          Target access key
+          
+          [env: TARGET_ACCESS_KEY=]
+
+      --target-secret-access-key <TARGET_SECRET_ACCESS_KEY>
+          Target secret access key
+          
+          [env: TARGET_SECRET_ACCESS_KEY=]
+
+      --target-session-token <TARGET_SESSION_TOKEN>
+          Target session token
+          
+          [env: TARGET_SESSION_TOKEN=]
+
+      --target-region <TARGET_REGION>
+          AWS region for the target
+          
+          [env: TARGET_REGION=]
+
+      --target-endpoint-url <TARGET_ENDPOINT_URL>
+          Custom S3-compatible endpoint URL (e.g. MinIO, Wasabi)
+          
+          [env: TARGET_ENDPOINT_URL=]
+
+      --target-force-path-style
+          Use path-style access (required by some S3-compatible services)
+          
+          [env: TARGET_FORCE_PATH_STYLE=]
+
+      --target-accelerate
+          Enable S3 Transfer Acceleration
+          
+          [env: TARGET_ACCELERATE=]
+
+      --target-request-payer
+          Enable requester-pays for the target bucket
+          
+          [env: TARGET_REQUEST_PAYER=]
+
+      --target-no-sign-request
+          Do not sign the request. If this argument is specified, credentials will not be loaded
+          
+          [env: TARGET_NO_SIGN_REQUEST=]
+
+      --disable-stalled-stream-protection
+          Disable stalled stream protection
+          
+          [env: DISABLE_STALLED_STREAM_PROTECTION=]
+
+Performance:
+      --max-parallel-listings <MAX_PARALLEL_LISTINGS>
+          Number of concurrent listing operations (1-65535)
+          
+          [env: MAX_PARALLEL_LISTINGS=]
+          [default: 64]
+
+      --max-parallel-listing-max-depth <MAX_PARALLEL_LISTING_MAX_DEPTH>
+          Maximum depth for parallel listing operations
+          
+          [env: MAX_PARALLEL_LISTING_MAX_DEPTH=]
+          [default: 2]
+
+      --object-listing-queue-size <OBJECT_LISTING_QUEUE_SIZE>
+          Internal queue size for object listing
+          
+          [env: OBJECT_LISTING_QUEUE_SIZE=]
+          [default: 200000]
+
+      --allow-parallel-listings-in-express-one-zone
+          Allow parallel listings in Express One Zone storage
+          
+          [env: ALLOW_PARALLEL_LISTINGS_IN_EXPRESS_ONE_ZONE=]
+
+      --rate-limit-api <RATE_LIMIT_API>
+          Maximum S3 API requests per second for object listing operations
+          
+          [env: RATE_LIMIT_API=]
+
+      --parallel-sort-threshold <PARALLEL_SORT_THRESHOLD>
+          Minimum number of entries to trigger parallel sorting
+          
+          [env: PARALLEL_SORT_THRESHOLD=]
+          [default: 1000000]
+
+Retry Options:
+      --aws-max-attempts <AWS_MAX_ATTEMPTS>
+          Maximum retry attempts for AWS SDK operations
+          
+          [env: AWS_MAX_ATTEMPTS=]
+          [default: 10]
+
+      --initial-backoff-milliseconds <INITIAL_BACKOFF_MILLISECONDS>
+          Initial backoff in milliseconds for retries
+          
+          [env: INITIAL_BACKOFF_MILLISECONDS=]
+          [default: 100]
+
+Timeout Options:
+      --operation-timeout-milliseconds <OPERATION_TIMEOUT_MILLISECONDS>
+          Overall operation timeout in milliseconds
+          
+          [env: OPERATION_TIMEOUT_MILLISECONDS=]
+
+      --operation-attempt-timeout-milliseconds <OPERATION_ATTEMPT_TIMEOUT_MILLISECONDS>
+          Per-attempt operation timeout in milliseconds
+          
+          [env: OPERATION_ATTEMPT_TIMEOUT_MILLISECONDS=]
+
+      --connect-timeout-milliseconds <CONNECT_TIMEOUT_MILLISECONDS>
+          Connection timeout in milliseconds
+          
+          [env: CONNECT_TIMEOUT_MILLISECONDS=]
+
+      --read-timeout-milliseconds <READ_TIMEOUT_MILLISECONDS>
+          Read timeout in milliseconds
+          
+          [env: READ_TIMEOUT_MILLISECONDS=]
+
+Advanced:
+      --max-keys <MAX_KEYS>
+          Maximum number of objects returned in a single list object request (1-1000)
+          
+          [env: MAX_KEYS=]
+          [default: 1000]

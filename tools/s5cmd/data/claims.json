@@ -1,0 +1,693 @@
+{
+  "$schema": "../../../schemas/claims.schema.json",
+  "schema_version": 1,
+  "tool": "s5cmd",
+  "legacy_ledger": {
+    "source": "../research/tool-page.md",
+    "migration_map": "../research/claims-migration.md",
+    "expected_origins": [
+      "META-1",
+      "NOTE-1",
+      "NOTE-2",
+      "NOTE-3",
+      "NOTE-4",
+      "NOTE-5",
+      "NOTE-6",
+      "NOTE-7",
+      "NOTE-8",
+      "NOTE-9",
+      "NOTE-10",
+      "NOTE-11",
+      "NOTE-12",
+      "NOTE-13",
+      "NOTE-14",
+      "NOTE-15",
+      "NOTE-16",
+      "NOTE-17",
+      "NOTE-18",
+      "NOTE-19",
+      "PROSE-1",
+      "PROSE-2",
+      "PROSE-3",
+      "PROSE-4",
+      "PROSE-5",
+      "PROSE-6"
+    ]
+  },
+  "claims": [
+    {
+      "id": "ls-is-one-serial-list-chain",
+      "statement": "A single s5cmd ls issues one serial ListObjectsV2 continuation chain per source URL and consumes it with a plain serial loop, with no worker pool or fan-out over the listing.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Source establishes the serial chain; a captured --log trace of one prefix corroborates it at runtime as one continuation-token chain, but that probe is not a smoke-run receipt and binds only that one ls.",
+      "legacy_origins": [
+        "NOTE-1"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/peak/s5cmd",
+          "commit": "991c9fb",
+          "path": "storage/s3.go",
+          "lines": "309,317"
+        },
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/peak/s5cmd",
+          "commit": "991c9fb",
+          "path": "command/ls.go",
+          "lines": "197"
+        },
+        {
+          "kind": "observation",
+          "artifact": "../receipts/smoke/_capability/observability/logtrace-multipage.requests.txt"
+        }
+      ]
+    },
+    {
+      "id": "no-native-keyspace-division",
+      "statement": "s5cmd performs no keyspace bisection, cut-point, or prefix-sharding to parallelize a listing; a wildcard becomes one recursive List plus a client-side regex filter.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The prefix sent to S3 is only the literal portion before the first glob character; the wildcard tail is filtered client-side per key.",
+      "legacy_origins": [
+        "NOTE-1"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/peak/s5cmd",
+          "commit": "991c9fb",
+          "path": "storage/url/url.go",
+          "lines": "259-285"
+        },
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/peak/s5cmd",
+          "commit": "991c9fb",
+          "path": "storage/s3.go",
+          "lines": "299-341"
+        }
+      ]
+    },
+    {
+      "id": "serial-listing-at-scale-unverified",
+      "statement": "Whether the serial single-stream listing model dominates wall-clock at 10^6 to 10^8 keys, and how it compares against parallel-capable tools, is not settled.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "Serial-versus-parallel behavior at scale is a timing comparison outside smoke scope; source reading is not a receipt and no benchmark has run.",
+      "legacy_origins": [
+        "NOTE-1"
+      ],
+      "evidence": [
+        {
+          "kind": "none",
+          "reason": "No comparative or at-scale benchmark of the listing chain has been run."
+        }
+      ]
+    },
+    {
+      "id": "list-issued-in-storage-not-ls-consumer",
+      "statement": "The LIST request and its pagination are issued in storage/s3.go, while command/ls.go only consumes the resulting object channel.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "corrected",
+      "qualification": "The inherited page named command/ls.go as where the serial LIST lived; groundwork located the request and pagination in storage/s3.go instead.",
+      "legacy_origins": [
+        "NOTE-2"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/peak/s5cmd",
+          "commit": "991c9fb",
+          "path": "storage/s3.go",
+          "lines": "299-341"
+        },
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/peak/s5cmd",
+          "commit": "991c9fb",
+          "path": "command/ls.go",
+          "lines": "197"
+        }
+      ]
+    },
+    {
+      "id": "parallelism-is-transfer-side-for-lone-ls",
+      "statement": "For a single ls the worker pool has no effect on the LIST chain; the pool parallelizes only the downstream cp/rm/mv operations.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "corrected",
+      "qualification": "The blanket claim that all parallelism is transfer-side holds for a lone ls but not for s5cmd run, which dispatches its ls lines through the same pool; see claim numworkers-sizes-run-fanout-concurrency.",
+      "legacy_origins": [
+        "NOTE-3"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/peak/s5cmd",
+          "commit": "991c9fb",
+          "path": "command/app.go",
+          "lines": "18"
+        },
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/peak/s5cmd",
+          "commit": "991c9fb",
+          "path": "command/ls.go",
+          "lines": "197"
+        }
+      ]
+    },
+    {
+      "id": "speed-reputation-is-about-transfers",
+      "statement": "s5cmd's published speed reputation and its own benchmarks describe transfer throughput driven by a worker pool, not listing.",
+      "scope": "performance",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This is a documentation fact about upstream's own material; the transfer speed itself is out of listing scope and was not measured here.",
+      "legacy_origins": [
+        "NOTE-4",
+        "NOTE-15"
+      ],
+      "evidence": [
+        {
+          "kind": "documentation",
+          "url": "https://github.com/peak/s5cmd"
+        }
+      ]
+    },
+    {
+      "id": "ls-vs-aws-s3api-magnitude-unverified",
+      "statement": "The magnitude of s5cmd ls speed relative to aws s3api is not settled.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "This is a timing comparison outside smoke scope; the inherited 1.5x figure was itself a self-reported comparison in the seed notes and was never run here.",
+      "legacy_origins": [
+        "NOTE-4",
+        "NOTE-11"
+      ],
+      "evidence": [
+        {
+          "kind": "none",
+          "reason": "No comparative timing run against aws s3api has been performed."
+        }
+      ]
+    },
+    {
+      "id": "recursive-ls-runs-as-baseline",
+      "statement": "A native recursive s5cmd ls of the full smoke bucket runs and completes.",
+      "scope": "runtime",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "The receipted full-bucket recursive run listed 148,917 keys and passed the verifier.",
+      "legacy_origins": [
+        "NOTE-5"
+      ],
+      "evidence": [
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/recursive",
+          "artifact": "../receipts/smoke/recursive/verify.md"
+        }
+      ]
+    },
+    {
+      "id": "output-flags-are-formatting-only",
+      "statement": "The output flags -e (etag), -H (humanize), and --json change only the printed format and do not change the ListObjectsV2 request or listing mechanism.",
+      "scope": "output",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The JSON mode was smoked and produces the same key set as recursive; the text flags are source-established as formatting-only.",
+      "legacy_origins": [
+        "NOTE-6"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/peak/s5cmd",
+          "commit": "991c9fb",
+          "path": "command/ls.go",
+          "lines": "71,75"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/json",
+          "artifact": "../receipts/smoke/json/verify.md"
+        }
+      ]
+    },
+    {
+      "id": "fanout-completeness-verified",
+      "statement": "A hand-built per-prefix fan-out of s5cmd ls invocations, unioned over four prefix shards plus the unprefixed remainder, covers the smoke bucket completely with no duplicates.",
+      "scope": "correctness",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "The --scope union verification passed at 148,917 keys with 0 cross-shard duplicates, 0 missing, and 0 extra; this settles completeness only, not speed.",
+      "legacy_origins": [
+        "NOTE-7",
+        "NOTE-18"
+      ],
+      "evidence": [
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/fanout/union",
+          "artifact": "../receipts/smoke/fanout/union/union-verify.md"
+        }
+      ]
+    },
+    {
+      "id": "run-takes-file-positionally-no-f-flag",
+      "statement": "s5cmd v2.3.0 run takes its commands file positionally or on stdin and has no -f flag.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "corrected",
+      "qualification": "The inherited page called for run -f <file>; run -f fails with an unknown-flag error and exit 1, observed in the run-fanout probe.",
+      "legacy_origins": [
+        "NOTE-7"
+      ],
+      "evidence": [
+        {
+          "kind": "observation",
+          "artifact": "../receipts/smoke/_capability/run-fanout/README.md"
+        }
+      ]
+    },
+    {
+      "id": "numworkers-sizes-run-fanout-concurrency",
+      "statement": "--numworkers sizes how many command lines s5cmd run executes concurrently, so it governs the fan-out's prefix-listing concurrency even though it does not affect a single ls.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The default is 256; it is the fan-out's concurrency knob, not a listing knob for a lone ls.",
+      "legacy_origins": [
+        "NOTE-8"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/peak/s5cmd",
+          "commit": "991c9fb",
+          "path": "command/app.go",
+          "lines": "18"
+        },
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/peak/s5cmd",
+          "commit": "991c9fb",
+          "path": "command/run.go",
+          "lines": "76"
+        }
+      ]
+    },
+    {
+      "id": "numworkers-sweep-unverified",
+      "statement": "The effect of sweeping --numworkers on fan-out listing throughput is not settled.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "The sweep is a benchmark-phase question; smoke produces no comparative numbers.",
+      "legacy_origins": [
+        "NOTE-8"
+      ],
+      "evidence": [
+        {
+          "kind": "none",
+          "reason": "No --numworkers sweep has been run."
+        }
+      ]
+    },
+    {
+      "id": "cp-sync-transfer-separation-unverified",
+      "statement": "Whether s5cmd cp/sync transfer speed separates fast transfers from fast listing is not settled here.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "cp/sync are out of listing scope and mutating; the study guardrail forbids running them, so they were not smoked.",
+      "legacy_origins": [
+        "NOTE-9"
+      ],
+      "evidence": [
+        {
+          "kind": "none",
+          "reason": "cp/sync were not run; they are out of listing scope and mutating."
+        }
+      ]
+    },
+    {
+      "id": "swath-survey-15m-733s-unverified",
+      "statement": "The inherited survey figure of 15M objects in 733 s at about 20.5K objects per second is not settled.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "This is a scale and timing claim; the smoke bucket is 148,917 keys and produces no comparative numbers.",
+      "legacy_origins": [
+        "NOTE-10"
+      ],
+      "evidence": [
+        {
+          "kind": "none",
+          "reason": "No at-scale timing run has been performed."
+        }
+      ]
+    },
+    {
+      "id": "sync-400k-ram-report-unverified",
+      "statement": "The inherited report of about 11 GB RAM syncing 400k files, and the broader low-resource-use characterization, is not settled.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "The report concerns sync at scale, not listing, and was not reproduced; the listing-path smoke memory is recorded separately as ls-streaming-memory-at-smoke.",
+      "legacy_origins": [
+        "NOTE-12",
+        "NOTE-17"
+      ],
+      "evidence": [
+        {
+          "kind": "none",
+          "reason": "The sync memory report was not reproduced; sync is out of listing scope."
+        }
+      ]
+    },
+    {
+      "id": "ls-streaming-memory-at-smoke",
+      "statement": "Streaming ls held a low peak RSS at smoke, about 40 MB for the full recursive listing and about 53 MB for the all-versions listing on the 148,917-key bucket.",
+      "scope": "performance",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "These are peak-RSS facts from single smoke runs, consistent with the source-established streaming model, not a scaling claim above 148,917 keys.",
+      "legacy_origins": [
+        "NOTE-12"
+      ],
+      "evidence": [
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/recursive",
+          "artifact": "../receipts/smoke/recursive/run.meta"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/allversions",
+          "artifact": "../receipts/smoke/allversions/run.meta"
+        }
+      ]
+    },
+    {
+      "id": "killed-at-15m-objects-unverified",
+      "statement": "The inherited report of s5cmd being killed at 15M objects is not settled.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "This is a scale claim; it was not attempted against the 148,917-key smoke bucket.",
+      "legacy_origins": [
+        "NOTE-13"
+      ],
+      "evidence": [
+        {
+          "kind": "none",
+          "reason": "The 15M-object scale scenario was not attempted."
+        }
+      ]
+    },
+    {
+      "id": "retest-2025-pointer-unverified",
+      "statement": "The 2025 re-testing pointer for s5cmd's published speed results (a Hacker News thread versus a BigGo aggregator) is not settled.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "Neither source has been read, and both concern transfer speed outside listing scope; it remains a pointer, not a result.",
+      "legacy_origins": [
+        "NOTE-14"
+      ],
+      "evidence": [
+        {
+          "kind": "none",
+          "reason": "Neither the Hacker News thread nor the BigGo aggregator has been read; both concern transfer speed."
+        }
+      ]
+    },
+    {
+      "id": "glob-wildcard-support",
+      "statement": "s5cmd supports glob and wildcard listing, applied as a client-side filter over a recursive List.",
+      "scope": "operability",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "Scoped globs were smoked and passed; the wildcard is compiled to a regex applied per key as pages arrive.",
+      "legacy_origins": [
+        "NOTE-16"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/peak/s5cmd",
+          "commit": "991c9fb",
+          "path": "storage/url/url.go",
+          "lines": "259-285"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/recursive-hourly",
+          "artifact": "../receipts/smoke/recursive-hourly/verify.md"
+        }
+      ]
+    },
+    {
+      "id": "fanout-speed-vs-native-unverified",
+      "statement": "The speed of the hand-built fan-out relative to a native parallel lister is not settled.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "Fan-out completeness is confirmed separately; its comparative speed is a benchmark-phase question.",
+      "legacy_origins": [
+        "NOTE-18"
+      ],
+      "evidence": [
+        {
+          "kind": "none",
+          "reason": "No comparative speed run of the fan-out against a native parallel lister has been performed."
+        }
+      ]
+    },
+    {
+      "id": "page-size-1000-is-s3-ceiling",
+      "statement": "s5cmd never sets MaxKeys, so S3 returns its own 1,000-key page maximum, which is S3's own ceiling rather than an s5cmd deficit.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "corrected",
+      "qualification": "The inherited page framed 1,000 as an s5cmd disadvantage; because 1,000 is S3's hard ceiling, no real-S3 client can exceed it, and it only matters versus tools that parallelize pages across sharded prefixes.",
+      "legacy_origins": [
+        "NOTE-19"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/peak/s5cmd",
+          "commit": "991c9fb",
+          "path": "storage/s3.go",
+          "lines": "299-341"
+        },
+        {
+          "kind": "documentation",
+          "url": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html"
+        }
+      ]
+    },
+    {
+      "id": "prebuilt-binaries-published-per-release",
+      "statement": "s5cmd publishes prebuilt binaries per release across the supported platforms.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The release pipeline targets amd64 and arm64 for Linux, macOS, and Windows; groundwork itself ran the upstream published container image rather than a bare binary.",
+      "legacy_origins": [
+        "META-1"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/peak/s5cmd",
+          "commit": "991c9fb",
+          "path": ".goreleaser.yml"
+        }
+      ]
+    },
+    {
+      "id": "log-trace-exposes-per-request-pages",
+      "statement": "--log trace writes the full AWS SDK request and response records to stdout, so the per-request page count is obtainable even though s5cmd exposes no built-in numeric counter.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "corrected",
+      "qualification": "An earlier probe wrongly concluded there was no per-request logging by checking stderr; --log trace writes to stdout, where a 3-page trace shows one HeadBucket probe and sequential ListObjectsV2 pages. --stat only tallies operations and --log debug emits nothing per-request. Correction history is in research/codex-review.md.",
+      "legacy_origins": [
+        "PROSE-1",
+        "PROSE-6"
+      ],
+      "evidence": [
+        {
+          "kind": "observation",
+          "artifact": "../receipts/smoke/_capability/observability/logtrace.stdout.txt"
+        }
+      ]
+    },
+    {
+      "id": "all-smoked-modes-passed-anonymous",
+      "statement": "Every smoked listing mode ran unsigned against the public bucket and passed completeness and correctness.",
+      "scope": "correctness",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "All modes ran --no-sign-request against noaa-normals-pds at its 2026-07-17 snapshot; these are single-run groundwork facts, not benchmark results.",
+      "legacy_origins": [
+        "PROSE-2"
+      ],
+      "evidence": [
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/recursive",
+          "artifact": "../receipts/smoke/recursive/verify.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/delimiter",
+          "artifact": "../receipts/smoke/delimiter/verify.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/json",
+          "artifact": "../receipts/smoke/json/verify.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/listv1",
+          "artifact": "../receipts/smoke/listv1/verify.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/allversions",
+          "artifact": "../receipts/smoke/allversions/verify.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/fullpath",
+          "artifact": "../receipts/smoke/fullpath/verify.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/fanout",
+          "artifact": "../receipts/smoke/fanout/union/union-verify.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/recursive-annual",
+          "artifact": "../receipts/smoke/recursive-annual/verify.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/recursive-hourly",
+          "artifact": "../receipts/smoke/recursive-hourly/verify.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/recursive-monthly",
+          "artifact": "../receipts/smoke/recursive-monthly/verify.md"
+        }
+      ]
+    },
+    {
+      "id": "adapter-whitespace-key-fidelity-loss",
+      "statement": "The study's normalize.sh text branches split on whitespace and rejoin fields with a single space, so a key containing runs of spaces, tabs, or an embedded newline is not reproduced byte-for-byte.",
+      "scope": "correctness",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This is a limitation of the study adapter, exact for the whitespace-free NOAA smoke keyspace; general weird-key fidelity is deferred with the edge-case fixture (EDGE_BUCKET=none).",
+      "legacy_origins": [
+        "PROSE-3"
+      ],
+      "evidence": [
+        {
+          "kind": "documentation",
+          "path": "../adapter/normalize.sh"
+        },
+        {
+          "kind": "documentation",
+          "path": "../docs/mechanism.md"
+        }
+      ]
+    },
+    {
+      "id": "allversions-validates-request-contract-only",
+      "statement": "The all-versions smoke PASS validates that s5cmd issues the ListObjectVersions request and produces the expected output shape on a non-versioned bucket.",
+      "scope": "correctness",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The adapter discards the trailing versionID token, which is sound only because the smoke bucket is non-versioned.",
+      "legacy_origins": [
+        "PROSE-4"
+      ],
+      "evidence": [
+        {
+          "kind": "documentation",
+          "path": "../adapter/normalize.sh"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/allversions",
+          "artifact": "../receipts/smoke/allversions/verify.md"
+        }
+      ]
+    },
+    {
+      "id": "allversions-multiversion-fidelity-unverified",
+      "statement": "Multi-version and delete-marker fidelity of the all-versions mode is not settled.",
+      "scope": "correctness",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "On a versioned bucket multiple versions of one key would collapse into duplicate records; this needs a versioned fixture and is deferred with the edge cases (EDGE_BUCKET=none).",
+      "legacy_origins": [
+        "PROSE-4"
+      ],
+      "evidence": [
+        {
+          "kind": "none",
+          "reason": "No versioned-bucket fixture was configured or run."
+        }
+      ]
+    },
+    {
+      "id": "receipt-double-prefix-cosmetic-defect",
+      "statement": "Every prefix-scoped receipt.md renders its Prefix scope cell twice, a cosmetic wrapper-template defect.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The wrapper bug was fixed harness-side in commit 014f74a; run.meta, which the verifier reads, was always correct, so no verdict was affected. The already-committed receipts keep the malformed cell as an accurate record of what the wrapper rendered.",
+      "legacy_origins": [
+        "PROSE-5"
+      ],
+      "evidence": [
+        {
+          "kind": "observation",
+          "artifact": "../receipts/smoke/recursive-annual/receipt.md"
+        }
+      ]
+    }
+  ]
+}

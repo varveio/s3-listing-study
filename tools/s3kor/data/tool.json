@@ -1,0 +1,30 @@
+{
+  "$schema": "../../../schemas/tool.schema.json",
+  "schema_version": 1,
+  "slug": "s3kor",
+  "display_name": "s3kor",
+  "entry_type": "runnable_lister",
+  "upstream": { "repository": "https://github.com/sethkor/s3kor" },
+  "language": "Go",
+  "license": "GPL-3.0",
+  "tested": {
+    "variant": "upstream",
+    "repository": "https://github.com/sethkor/s3kor",
+    "version": {
+      "value": "v0.0.37",
+      "provenance": { "kind": "run", "reference": "../receipts/smoke/_capability/list/stderr.txt" }
+    },
+    "revision": {
+      "value": "844fe3d7931fcca415c8b8a4e22f048886e6b82b",
+      "provenance": { "kind": "documentation", "reference": "../research/report.md" }
+    }
+  },
+  "study": {
+    "groundwork_status": "complete",
+    "smoke_execution_status": "blocked",
+    "verification_status": "blocked",
+    "auth_status": "credentials-required",
+    "benchmark_eligibility": "conditional"
+  },
+  "evidence_roots": ["../receipts/smoke"]
+}

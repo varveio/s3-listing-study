@@ -1,0 +1,5 @@
+ls s3://noaa-normals-pds/normals-monthly/*
+ls s3://noaa-normals-pds/normals-daily/*
+ls s3://noaa-normals-pds/normals-annualseasonal/*
+ls s3://noaa-normals-pds/normals-hourly/*
+ls s3://noaa-normals-pds/index.html

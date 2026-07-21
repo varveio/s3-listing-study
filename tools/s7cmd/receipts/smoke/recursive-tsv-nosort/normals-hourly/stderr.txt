@@ -1,0 +1,8 @@
+2026-07-17T08:12:19.183669Z DEBUG listing pipeline start.
+2026-07-17T08:12:19.183689Z DEBUG Starting listing pipeline target=s3://noaa-normals-pds/normals-hourly/ recursive=true
+2026-07-17T08:12:19.183752Z DEBUG no-sign-request: disabling credential loading and request signing
+2026-07-17T08:12:19.189646Z DEBUG list target objects has started.
+2026-07-17T08:12:19.189673Z DEBUG Using parallel listing bucket=noaa-normals-pds max_parallel=16 max_depth=2
+2026-07-17T08:12:19.704433Z DEBUG list target objects has been completed.
+2026-07-17T08:12:19.704506Z DEBUG Listing pipeline completed api_calls=17
+2026-07-17T08:12:19.704591Z DEBUG s7cmd ls has been completed. duration_sec="0.521"

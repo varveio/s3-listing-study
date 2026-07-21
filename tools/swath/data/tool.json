@@ -1,0 +1,30 @@
+{
+  "$schema": "../../../schemas/tool.schema.json",
+  "schema_version": 1,
+  "slug": "swath",
+  "display_name": "Swath",
+  "entry_type": "runnable_lister",
+  "upstream": { "repository": "https://github.com/varveio/swath" },
+  "language": "Java",
+  "license": "None present at f1009db",
+  "tested": {
+    "variant": "upstream",
+    "repository": "https://github.com/varveio/swath",
+    "version": {
+      "value": "0.1.0-SNAPSHOT",
+      "provenance": { "kind": "run", "reference": "../receipts/smoke/recursive-tsv/full/run.meta" }
+    },
+    "revision": {
+      "value": "f1009db599861a7e905a539778d915f1bb5426eb",
+      "provenance": { "kind": "observation", "reference": "../receipts/smoke/_build/build.md" }
+    }
+  },
+  "study": {
+    "groundwork_status": "complete",
+    "smoke_execution_status": "ran",
+    "verification_status": "passed",
+    "auth_status": "anonymous",
+    "benchmark_eligibility": "planned"
+  },
+  "evidence_roots": ["../receipts/smoke"]
+}

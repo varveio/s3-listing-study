@@ -1,0 +1,33 @@
+(node:1) Warning: NodeVersionSupportWarning: The AWS SDK for JavaScript (v3)
+versions published after the first week of January 2027
+will require node >=22. You are running node v20.20.2.
+
+To continue receiving updates to AWS services, bug fixes,
+and security updates please upgrade to node >=22.
+
+More information can be found at: https://a.co/c895JFp
+(Use `node --trace-warnings ...` to show where the warning was created)
+[31mS3.list-error:
+  bucket:     :noaa-normals-pds
+  prefix:     undefined
+  startAfter: :normals-hourly/O
+  limit:      1000
+  error:      Error:
+    class: class CredentialsProviderError
+    stack:
+      CredentialsProviderError: Could not load credentials from any providers
+          at /usr/local/lib/node_modules/s3p/node_modules/@aws-sdk/credential-provider-node/dist-cjs/index.js:153:15
+          at /usr/local/lib/node_modules/s3p/node_modules/@aws-sdk/credential-provider-node/dist-cjs/index.js:80:26
+[39m
+[31mS3.list-error:
+  bucket:     :noaa-normals-pds
+  prefix:     undefined
+  startAfter: :normals-hourly/
+  limit:      1000
+  error:      Error:
+    class: class CredentialsProviderError
+    stack:
+      CredentialsProviderError: Could not load credentials from any providers
+          at /usr/local/lib/node_modules/s3p/node_modules/@aws-sdk/credential-provider-node/dist-cjs/index.js:153:15
+          at /usr/local/lib/node_modules/s3p/node_modules/@aws-sdk/credential-provider-node/dist-cjs/index.js:80:26
+[39m

@@ -1,0 +1,30 @@
+{
+  "$schema": "../../../schemas/tool.schema.json",
+  "schema_version": 1,
+  "slug": "ps3",
+  "display_name": "pS3",
+  "entry_type": "runnable_lister",
+  "upstream": { "repository": "https://github.com/jboothomas/ps3" },
+  "language": "Go",
+  "license": "GPL-3.0",
+  "tested": {
+    "variant": "upstream",
+    "repository": "https://github.com/jboothomas/ps3",
+    "version": {
+      "value": "0.1.16",
+      "provenance": { "kind": "run", "reference": "../receipts/smoke/_capability/help/help.txt" }
+    },
+    "revision": {
+      "value": "9428492291ef3aa824dba0b495583279c3d33760",
+      "provenance": { "kind": "documentation", "reference": "../research/report.md" }
+    }
+  },
+  "study": {
+    "groundwork_status": "complete",
+    "smoke_execution_status": "blocked",
+    "verification_status": "blocked",
+    "auth_status": "credentials-required",
+    "benchmark_eligibility": "conditional"
+  },
+  "evidence_roots": ["../receipts/smoke"]
+}

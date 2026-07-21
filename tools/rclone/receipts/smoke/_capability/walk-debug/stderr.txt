@@ -1,0 +1,310 @@
+2026/07/17 14:38:50 NOTICE: Automatically setting -vv as --dump is enabled
+2026/07/17 14:38:50 DEBUG : rclone: Version "v1.74.4" starting with parameters ["rclone" "lsjson" "--files-only" "--use-server-modtime" "--no-mimetype" "--disable" "ListR" "--checkers" "4" "-R" "-vv" "--dump" "headers" ":s3,provider=AWS,region=us-east-1:noaa-normals-pds/normals-annualseasonal/1981-2010/"]
+2026/07/17 14:38:50 DEBUG : Creating backend with remote ":s3,provider=AWS,region=us-east-1:noaa-normals-pds/normals-annualseasonal/1981-2010/"
+2026/07/17 14:38:50 NOTICE: Config file "/config/rclone/rclone.conf" not found - using defaults
+2026/07/17 14:38:50 DEBUG : :s3: detected overridden config - adding "{h1pBU}" suffix to name
+2026/07/17 14:38:50 DEBUG : You have specified to dump information. Please be noted that the Accept-Encoding as shown may not be correct in the request and the response may not show Content-Encoding if the go standard libraries auto gzip encoding was in effect. In this case the body of the request will be gunzipped before showing it.
+2026/07/17 14:38:50 DEBUG : Using anonymous credentials - did you mean to set env_auth=true?
+2026/07/17 14:38:50 DEBUG : You have specified to dump information. Please be noted that the Accept-Encoding as shown may not be correct in the request and the response may not show Content-Encoding if the go standard libraries auto gzip encoding was in effect. In this case the body of the request will be gunzipped before showing it.
+2026/07/17 14:38:50 DEBUG : Reset feature "ListR"
+2026/07/17 14:38:50 DEBUG : fs cache: renaming cache item ":s3,provider=AWS,region=us-east-1:noaa-normals-pds/normals-annualseasonal/1981-2010/" to be canonical ":s3{h1pBU}:noaa-normals-pds/normals-annualseasonal/1981-2010"
+2026/07/17 14:38:50 DEBUG : >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+2026/07/17 14:38:50 DEBUG : HTTP REQUEST (req 0x3beb2aa96640)
+2026/07/17 14:38:50 DEBUG : GET /?delimiter=%2F&encoding-type=url&list-type=2&max-keys=1000&prefix=normals-annualseasonal%2F1981-2010%2F HTTP/1.1
+Host: noaa-normals-pds.s3.us-east-1.amazonaws.com
+User-Agent: rclone/v1.74.4
+Accept-Encoding: identity
+Amz-Sdk-Invocation-Id: 5ebc43c9-14d3-4ef3-aee6-a0153664eb40
+Amz-Sdk-Request: attempt=1; max=10
+X-Amz-Content-Sha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+
+2026/07/17 14:38:50 DEBUG : >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+2026/07/17 14:38:50 DEBUG : <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+2026/07/17 14:38:50 DEBUG : HTTP RESPONSE (req 0x3beb2aa96640)
+2026/07/17 14:38:50 DEBUG : HTTP/1.1 200 OK
+Transfer-Encoding: chunked
+Content-Type: application/xml
+Date: Fri, 17 Jul 2026 14:38:51 GMT
+Server: AmazonS3
+X-Amz-Bucket-Region: us-east-1
+X-Amz-Id-2: R2MJ7r2ym7Vy+KPPVKC12M6Xzmvrk8iSralcZqidzofHKcSxkAccTnTQ0HybfIOYuJjfbHqL0Dg=
+X-Amz-Request-Id: 08YVPTSJGRY109H5
+
+2026/07/17 14:38:50 DEBUG : <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+2026/07/17 14:38:50 DEBUG : >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+2026/07/17 14:38:50 DEBUG : HTTP REQUEST (req 0x3beb2ad34280)
+2026/07/17 14:38:50 DEBUG : GET /?delimiter=%2F&encoding-type=url&list-type=2&max-keys=1000&prefix=normals-annualseasonal%2F1981-2010%2Farchive%2F HTTP/1.1
+Host: noaa-normals-pds.s3.us-east-1.amazonaws.com
+User-Agent: rclone/v1.74.4
+Accept-Encoding: identity
+Amz-Sdk-Invocation-Id: ced3e139-8ab4-48e0-be89-370f02aa4bee
+Amz-Sdk-Request: attempt=1; max=10
+X-Amz-Content-Sha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+
+2026/07/17 14:38:50 DEBUG : >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+2026/07/17 14:38:50 DEBUG : >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+2026/07/17 14:38:50 DEBUG : HTTP REQUEST (req 0x3beb2ac96280)
+2026/07/17 14:38:50 DEBUG : GET /?delimiter=%2F&encoding-type=url&list-type=2&max-keys=1000&prefix=normals-annualseasonal%2F1981-2010%2Fdoc%2F HTTP/1.1
+Host: noaa-normals-pds.s3.us-east-1.amazonaws.com
+User-Agent: rclone/v1.74.4
+Accept-Encoding: identity
+Amz-Sdk-Invocation-Id: 39f43155-9498-4adb-84e6-8731a7fdaaa9
+Amz-Sdk-Request: attempt=1; max=10
+X-Amz-Content-Sha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+
+2026/07/17 14:38:50 DEBUG : >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+2026/07/17 14:38:50 DEBUG : >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+2026/07/17 14:38:50 DEBUG : HTTP REQUEST (req 0x3beb2adf6280)
+2026/07/17 14:38:50 DEBUG : GET /?delimiter=%2F&encoding-type=url&list-type=2&max-keys=1000&prefix=normals-annualseasonal%2F1981-2010%2Faccess%2F HTTP/1.1
+Host: noaa-normals-pds.s3.us-east-1.amazonaws.com
+User-Agent: rclone/v1.74.4
+Accept-Encoding: identity
+Amz-Sdk-Invocation-Id: bb6e2333-674e-4ce2-a5a6-adfaf2179578
+Amz-Sdk-Request: attempt=1; max=10
+X-Amz-Content-Sha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+
+2026/07/17 14:38:50 DEBUG : >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+2026/07/17 14:38:50 DEBUG : <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+2026/07/17 14:38:50 DEBUG : HTTP RESPONSE (req 0x3beb2ad34280)
+2026/07/17 14:38:50 DEBUG : HTTP/1.1 200 OK
+Transfer-Encoding: chunked
+Content-Type: application/xml
+Date: Fri, 17 Jul 2026 14:38:51 GMT
+Server: AmazonS3
+X-Amz-Bucket-Region: us-east-1
+X-Amz-Id-2: 1q7wAEiUKmxgxaBaga5up4vyM726D4a6WE0t/3X+VpC02+fjExlryX5CwUSm11p7BGp7DUWn+i0=
+X-Amz-Request-Id: 08YJ7258TPXQA5PM
+
+2026/07/17 14:38:50 DEBUG : <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+2026/07/17 14:38:50 DEBUG : <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+2026/07/17 14:38:50 DEBUG : HTTP RESPONSE (req 0x3beb2ac96280)
+2026/07/17 14:38:50 DEBUG : HTTP/1.1 200 OK
+Transfer-Encoding: chunked
+Content-Type: application/xml
+Date: Fri, 17 Jul 2026 14:38:51 GMT
+Server: AmazonS3
+X-Amz-Bucket-Region: us-east-1
+X-Amz-Id-2: VrxmvaikBKBm0XshQWFaYDnBXfhMghVVuzfvmY4YfDib63LorXPIhmPdjMbvOoS3GzOAlUISUSA=
+X-Amz-Request-Id: 08YYZ77J90DGD6C7
+
+2026/07/17 14:38:50 DEBUG : <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+2026/07/17 14:38:50 DEBUG : <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+2026/07/17 14:38:50 DEBUG : HTTP RESPONSE (req 0x3beb2adf6280)
+2026/07/17 14:38:50 DEBUG : HTTP/1.1 200 OK
+Transfer-Encoding: chunked
+Content-Type: application/xml
+Date: Fri, 17 Jul 2026 14:38:51 GMT
+Server: AmazonS3
+X-Amz-Bucket-Region: us-east-1
+X-Amz-Id-2: fturvftk901miLHexA/kH8anCh8s28+Mt6cuDOqqinrYV3IIj2yiGomUd9Q6Y6iJbxVBP/CBM3c=
+X-Amz-Request-Id: 08YVRARRBQKF5HN5
+
+2026/07/17 14:38:50 DEBUG : <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+2026/07/17 14:38:50 DEBUG : >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+2026/07/17 14:38:50 DEBUG : HTTP REQUEST (req 0x3beb2ad34280)
+2026/07/17 14:38:50 DEBUG : GET /?continuation-token=1QdzR%2Fqeo0nCQEQH0xImkXVoKqDla%2F8vqVCG86p9L69zgbExeMrSyUZ9SAe%2FZc62eu0Xuo7zdC56KnPcj64ia%2Br1y0FJoByIjeFGJFFFGnSk3aO%2B7WEFkhg%3D%3D&delimiter=%2F&encoding-type=url&list-type=2&max-keys=1000&prefix=normals-annualseasonal%2F1981-2010%2Faccess%2F HTTP/1.1
+Host: noaa-normals-pds.s3.us-east-1.amazonaws.com
+User-Agent: rclone/v1.74.4
+Accept-Encoding: identity
+Amz-Sdk-Invocation-Id: fbd2d122-4823-4bf1-ab7f-d849f4bd1678
+Amz-Sdk-Request: attempt=1; max=10
+X-Amz-Content-Sha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+
+2026/07/17 14:38:50 DEBUG : >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+2026/07/17 14:38:50 DEBUG : <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+2026/07/17 14:38:50 DEBUG : HTTP RESPONSE (req 0x3beb2ad34280)
+2026/07/17 14:38:50 DEBUG : HTTP/1.1 200 OK
+Transfer-Encoding: chunked
+Content-Type: application/xml
+Date: Fri, 17 Jul 2026 14:38:51 GMT
+Server: AmazonS3
+X-Amz-Bucket-Region: us-east-1
+X-Amz-Id-2: o48KeB2vQLk+CiAdlRXOllFz8DrI0FCpWZibd4ZZ5CmX4TKIu+RKlU7PV7jSuz6yBKhOfJnNRdM=
+X-Amz-Request-Id: 08YSYG7A0DZQ0XEY
+
+2026/07/17 14:38:50 DEBUG : <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+2026/07/17 14:38:50 DEBUG : >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+2026/07/17 14:38:50 DEBUG : HTTP REQUEST (req 0x3beb2ad34500)
+2026/07/17 14:38:50 DEBUG : GET /?continuation-token=1YPUUCPFSLOjNOrLNCiHnJ3hinV9v5v%2Fu76mcB%2F3iyod8bQ62hFwzUbetpeQ4QuVDls8SbVnzk1sx25sVTXChsk6qBdvX0IKd2qpbCUiQBWVtPxCV9ma9og%3D%3D&delimiter=%2F&encoding-type=url&list-type=2&max-keys=1000&prefix=normals-annualseasonal%2F1981-2010%2Faccess%2F HTTP/1.1
+Host: noaa-normals-pds.s3.us-east-1.amazonaws.com
+User-Agent: rclone/v1.74.4
+Accept-Encoding: identity
+Amz-Sdk-Invocation-Id: 29446d73-5d03-46fa-9154-1c104d43b3ee
+Amz-Sdk-Request: attempt=1; max=10
+X-Amz-Content-Sha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+
+2026/07/17 14:38:50 DEBUG : >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+2026/07/17 14:38:50 DEBUG : <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+2026/07/17 14:38:50 DEBUG : HTTP RESPONSE (req 0x3beb2ad34500)
+2026/07/17 14:38:50 DEBUG : HTTP/1.1 200 OK
+Transfer-Encoding: chunked
+Content-Type: application/xml
+Date: Fri, 17 Jul 2026 14:38:51 GMT
+Server: AmazonS3
+X-Amz-Bucket-Region: us-east-1
+X-Amz-Id-2: va5vaRgJrbvw+Izi/71TK6WIqj0qoZP1lltMBAXACBEtP0t8eqgNvn/O6nFs8TM1nIBA9Hxl6GY=
+X-Amz-Request-Id: 08YPQXY7WVCB3CCJ
+
+2026/07/17 14:38:50 DEBUG : <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+2026/07/17 14:38:50 DEBUG : >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+2026/07/17 14:38:50 DEBUG : HTTP REQUEST (req 0x3beb2ad34dc0)
+2026/07/17 14:38:50 DEBUG : GET /?continuation-token=1rXv%2Bj4fFo83uixGBX9qt0RhXWPsz%2BOnPFk3GlRgZxpE91WIxeWRfEdmyBFiMQZeK8aB26A3wSG8UsGePamxNURllM2JGYbHLe15iAa61gzrbAXzPf3XZaQ%3D%3D&delimiter=%2F&encoding-type=url&list-type=2&max-keys=1000&prefix=normals-annualseasonal%2F1981-2010%2Faccess%2F HTTP/1.1
+Host: noaa-normals-pds.s3.us-east-1.amazonaws.com
+User-Agent: rclone/v1.74.4
+Accept-Encoding: identity
+Amz-Sdk-Invocation-Id: 95fde882-6f7e-458f-9cf8-f5e28fa8e00c
+Amz-Sdk-Request: attempt=1; max=10
+X-Amz-Content-Sha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+
+2026/07/17 14:38:50 DEBUG : >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+2026/07/17 14:38:50 DEBUG : <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+2026/07/17 14:38:50 DEBUG : HTTP RESPONSE (req 0x3beb2ad34dc0)
+2026/07/17 14:38:50 DEBUG : HTTP/1.1 200 OK
+Transfer-Encoding: chunked
+Content-Type: application/xml
+Date: Fri, 17 Jul 2026 14:38:51 GMT
+Server: AmazonS3
+X-Amz-Bucket-Region: us-east-1
+X-Amz-Id-2: 7MUBniC0NtysRw+btQrRRbNNBFrKqHTaaPV6jno7QuqNv+TW2Z7BGgK0+IRlAx4Mur/Pge5O9cg=
+X-Amz-Request-Id: 08YM903BR87NG2Z9
+
+2026/07/17 14:38:50 DEBUG : <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+2026/07/17 14:38:50 DEBUG : >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+2026/07/17 14:38:50 DEBUG : HTTP REQUEST (req 0x3beb2ad34280)
+2026/07/17 14:38:50 DEBUG : GET /?continuation-token=1jEHYDWJc6iCv7GZnt9jI2mpZz4hgxdQr0MJCmQiFpYNv9HQ%2FUyAyEKH1W%2BYjIPfnBgBFOQN6GLhbjbqXSYCWl2PRQyaL%2Fc0bZOkzJS74PYCG9qRAfeQA5w%3D%3D&delimiter=%2F&encoding-type=url&list-type=2&max-keys=1000&prefix=normals-annualseasonal%2F1981-2010%2Faccess%2F HTTP/1.1
+Host: noaa-normals-pds.s3.us-east-1.amazonaws.com
+User-Agent: rclone/v1.74.4
+Accept-Encoding: identity
+Amz-Sdk-Invocation-Id: e83f0543-80b8-4efc-9668-fcb4b4ec24f1
+Amz-Sdk-Request: attempt=1; max=10
+X-Amz-Content-Sha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+
+2026/07/17 14:38:50 DEBUG : >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+2026/07/17 14:38:50 DEBUG : <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+2026/07/17 14:38:50 DEBUG : HTTP RESPONSE (req 0x3beb2ad34280)
+2026/07/17 14:38:50 DEBUG : HTTP/1.1 200 OK
+Transfer-Encoding: chunked
+Content-Type: application/xml
+Date: Fri, 17 Jul 2026 14:38:51 GMT
+Server: AmazonS3
+X-Amz-Bucket-Region: us-east-1
+X-Amz-Id-2: VGLn1MQ9P/rskbxNRYOZFy9/TpF3yzjjQ8VDrWQCrQbwXnaV+CvPvyD32Z+EMNNjg0VIEDuNxgQ=
+X-Amz-Request-Id: 08YTVHQ9EDPATPNF
+
+2026/07/17 14:38:50 DEBUG : <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+2026/07/17 14:38:50 DEBUG : >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+2026/07/17 14:38:50 DEBUG : HTTP REQUEST (req 0x3beb2ad34500)
+2026/07/17 14:38:50 DEBUG : GET /?continuation-token=1t4KVkxf7%2BJS538%2BusuO58e7snJ51r1TmiQrlfN4Ua3bvuKQ7dzRdJ%2BMycoGwret%2B20gjS0wGpeeYm8sCWqQErQg5zBIOAk1vT%2Be3q8d7WT05%2F96ngUphag%3D%3D&delimiter=%2F&encoding-type=url&list-type=2&max-keys=1000&prefix=normals-annualseasonal%2F1981-2010%2Faccess%2F HTTP/1.1
+Host: noaa-normals-pds.s3.us-east-1.amazonaws.com
+User-Agent: rclone/v1.74.4
+Accept-Encoding: identity
+Amz-Sdk-Invocation-Id: b85da807-ca77-4f8f-a0b0-8f1fe35e8300
+Amz-Sdk-Request: attempt=1; max=10
+X-Amz-Content-Sha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+
+2026/07/17 14:38:50 DEBUG : >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+2026/07/17 14:38:50 DEBUG : <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+2026/07/17 14:38:50 DEBUG : HTTP RESPONSE (req 0x3beb2ad34500)
+2026/07/17 14:38:50 DEBUG : HTTP/1.1 200 OK
+Transfer-Encoding: chunked
+Content-Type: application/xml
+Date: Fri, 17 Jul 2026 14:38:51 GMT
+Server: AmazonS3
+X-Amz-Bucket-Region: us-east-1
+X-Amz-Id-2: cf29sD5WF+7yWWhjsJU5zaP9ibbh4bddhrw38ilWgARAtCcpT7/KzZEQDh5SkUqmW37huw/tGEU=
+X-Amz-Request-Id: 08YSR436DGVNWQY6
+
+2026/07/17 14:38:50 DEBUG : <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+2026/07/17 14:38:50 DEBUG : >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+2026/07/17 14:38:50 DEBUG : HTTP REQUEST (req 0x3beb2ad34dc0)
+2026/07/17 14:38:50 DEBUG : GET /?continuation-token=108CP6rY8zWMYT30jXNITgLuDGRjyjuSrBVzwLAMzdP7GkQ5khra1ZHVL4639fTcz5NbCYKHo9CvI4F5hst%2BzvVA%2BNj8mZ3Et85ILjgIODlfqQdhwKQq%2ByQ%3D%3D&delimiter=%2F&encoding-type=url&list-type=2&max-keys=1000&prefix=normals-annualseasonal%2F1981-2010%2Faccess%2F HTTP/1.1
+Host: noaa-normals-pds.s3.us-east-1.amazonaws.com
+User-Agent: rclone/v1.74.4
+Accept-Encoding: identity
+Amz-Sdk-Invocation-Id: fa743b56-ba13-4f48-aa37-0eb98a26592d
+Amz-Sdk-Request: attempt=1; max=10
+X-Amz-Content-Sha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+
+2026/07/17 14:38:50 DEBUG : >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+2026/07/17 14:38:50 DEBUG : <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+2026/07/17 14:38:50 DEBUG : HTTP RESPONSE (req 0x3beb2ad34dc0)
+2026/07/17 14:38:50 DEBUG : HTTP/1.1 200 OK
+Transfer-Encoding: chunked
+Content-Type: application/xml
+Date: Fri, 17 Jul 2026 14:38:51 GMT
+Server: AmazonS3
+X-Amz-Bucket-Region: us-east-1
+X-Amz-Id-2: 48PdObICClYCma+/Ckh/qG1QeuAZ2qORm6Tprxfafg9hZ7AJE4HK/Iw0LfzVgEPYcbMuFEG8pA4=
+X-Amz-Request-Id: 08YZBCQKM38Z1V7G
+
+2026/07/17 14:38:50 DEBUG : <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+2026/07/17 14:38:50 DEBUG : >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+2026/07/17 14:38:50 DEBUG : HTTP REQUEST (req 0x3beb2aafc280)
+2026/07/17 14:38:50 DEBUG : GET /?continuation-token=1jHxulJENZbiTrEyomBDzxfRACY2%2BRm3QyB8p%2BIVOcFRypcCVCAKNAZMLPk%2FM%2FXmPNa17sysW3h4%2B7Q8DKETWaCHjyTvhYa09ZQDCx0Pg3M0KEd6xvOVeOw%3D%3D&delimiter=%2F&encoding-type=url&list-type=2&max-keys=1000&prefix=normals-annualseasonal%2F1981-2010%2Faccess%2F HTTP/1.1
+Host: noaa-normals-pds.s3.us-east-1.amazonaws.com
+User-Agent: rclone/v1.74.4
+Accept-Encoding: identity
+Amz-Sdk-Invocation-Id: adad18c8-5157-44ac-9db3-25dcbbb833c8
+Amz-Sdk-Request: attempt=1; max=10
+X-Amz-Content-Sha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+
+2026/07/17 14:38:50 DEBUG : >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+2026/07/17 14:38:50 DEBUG : <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+2026/07/17 14:38:50 DEBUG : HTTP RESPONSE (req 0x3beb2aafc280)
+2026/07/17 14:38:50 DEBUG : HTTP/1.1 200 OK
+Transfer-Encoding: chunked
+Content-Type: application/xml
+Date: Fri, 17 Jul 2026 14:38:51 GMT
+Server: AmazonS3
+X-Amz-Bucket-Region: us-east-1
+X-Amz-Id-2: tWtAVBaGJ7OEnBFJpo6F+eSOIv4vgpQzYJnPFr5GRVyHHpjFzXadjeAOiVpltdqWIcQaD65YTJ4=
+X-Amz-Request-Id: 08YV77Z6PCSVVX2T
+
+2026/07/17 14:38:50 DEBUG : <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+2026/07/17 14:38:50 DEBUG : >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+2026/07/17 14:38:50 DEBUG : HTTP REQUEST (req 0x3beb2ad34280)
+2026/07/17 14:38:50 DEBUG : GET /?continuation-token=1HddRzqztPBs%2FizFx0mjBsNcPwdHXXto6nBbgOsuFPdPY8Oi9yhpQG5Q8dRTaNI17BqTU8ErCFWqGujYR9GuSrrjcjJlDR%2Br6ZN3B16cuVcliBrwgRutKdg%3D%3D&delimiter=%2F&encoding-type=url&list-type=2&max-keys=1000&prefix=normals-annualseasonal%2F1981-2010%2Faccess%2F HTTP/1.1
+Host: noaa-normals-pds.s3.us-east-1.amazonaws.com
+User-Agent: rclone/v1.74.4
+Accept-Encoding: identity
+Amz-Sdk-Invocation-Id: b6417598-8489-44df-9e5e-a1e5054748da
+Amz-Sdk-Request: attempt=1; max=10
+X-Amz-Content-Sha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+
+2026/07/17 14:38:50 DEBUG : >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+2026/07/17 14:38:51 DEBUG : <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+2026/07/17 14:38:51 DEBUG : HTTP RESPONSE (req 0x3beb2ad34280)
+2026/07/17 14:38:51 DEBUG : HTTP/1.1 200 OK
+Transfer-Encoding: chunked
+Content-Type: application/xml
+Date: Fri, 17 Jul 2026 14:38:51 GMT
+Server: AmazonS3
+X-Amz-Bucket-Region: us-east-1
+X-Amz-Id-2: DUlXI5A3aHV7IiUbULMNTqxM6creJI0/KwOAiqjfnmo4Z6eur/AIzhJWqlg5CeN4ksqBvmPUtrI=
+X-Amz-Request-Id: 08YJZSZ78Q96RWAE
+
+2026/07/17 14:38:51 DEBUG : <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+2026/07/17 14:38:51 DEBUG : >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+2026/07/17 14:38:51 DEBUG : HTTP REQUEST (req 0x3beb2ad34b40)
+2026/07/17 14:38:51 DEBUG : GET /?continuation-token=1Y9xFqhkRbD0rWwqrUUW7HDnLv%2Bgpe0%2FqkXrZfoMpB%2FT60wiDZ4VUVodVehlFlsOEQ43eLnwi30yeJXppcvoDf1BML3Hhohw5Rgdaq%2FlAUnFc76wlkrH2vg%3D%3D&delimiter=%2F&encoding-type=url&list-type=2&max-keys=1000&prefix=normals-annualseasonal%2F1981-2010%2Faccess%2F HTTP/1.1
+Host: noaa-normals-pds.s3.us-east-1.amazonaws.com
+User-Agent: rclone/v1.74.4
+Accept-Encoding: identity
+Amz-Sdk-Invocation-Id: 2c63cd88-6dc5-4ad4-9166-d536b3617dec
+Amz-Sdk-Request: attempt=1; max=10
+X-Amz-Content-Sha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+
+2026/07/17 14:38:51 DEBUG : >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+2026/07/17 14:38:51 DEBUG : <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+2026/07/17 14:38:51 DEBUG : HTTP RESPONSE (req 0x3beb2ad34b40)
+2026/07/17 14:38:51 DEBUG : HTTP/1.1 200 OK
+Transfer-Encoding: chunked
+Content-Type: application/xml
+Date: Fri, 17 Jul 2026 14:38:52 GMT
+Server: AmazonS3
+X-Amz-Bucket-Region: us-east-1
+X-Amz-Id-2: Ok1Q3BgysTNZkOxd6ZpWquI+yXGR7jEDP0uySrbUxVPXDovDazX7xtT+UEhyYR8Mx7+lqGqnrLI=
+X-Amz-Request-Id: 6YMH2YES8T5B9KR3
+
+2026/07/17 14:38:51 DEBUG : <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+2026/07/17 14:38:51 DEBUG : 9 go routines active

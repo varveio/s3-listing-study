@@ -1,0 +1,3 @@
+{"key":"s3://noaa-normals-pds/index.html","etag":"0d6853386d167e668f7e862944150ab0","last_modified":"2025-11-24T20:33:44Z","type":"file","size":36822,"storage_class":"STANDARD"}
+{"key":"s3://noaa-normals-pds/normals-daily/1981-2010/access/AQC00914000.csv","etag":"195be44823ea5256365f1dfc4e2106a6","last_modified":"2026-03-16T14:31:33Z","type":"file","size":92580,"storage_class":"STANDARD"}
+{"key":"s3://noaa-normals-pds/normals-daily/1981-2010/access/AQW00061705.csv","etag":"7436c711416e6966a026099aa094ac51","last_modified":"2026-03-16T14:37:19Z","type":"file","size":214764,"storage_class":"STANDARD"}

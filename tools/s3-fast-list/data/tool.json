@@ -1,0 +1,34 @@
+{
+  "$schema": "../../../schemas/tool.schema.json",
+  "schema_version": 1,
+  "slug": "s3-fast-list",
+  "display_name": "s3-fast-list",
+  "entry_type": "runnable_lister",
+  "upstream": { "repository": "https://github.com/aws-samples/s3-fast-list" },
+  "language": "Rust",
+  "license": "MIT-0",
+  "tested": {
+    "variant": "fork",
+    "repository": "https://github.com/sagiba/s3-fast-list",
+    "version": {
+      "value": "1.1.0",
+      "provenance": { "kind": "run", "reference": "../receipts/smoke/list/full/stderr.txt" }
+    },
+    "revision": {
+      "value": "6c72f596e2ffe7311dec8cb7de29b114c0251207",
+      "provenance": { "kind": "documentation", "reference": "../research/report.md" }
+    },
+    "upstream_base": {
+      "value": "b11e385ec6e32122aa01b98a3465a99e96df8b09",
+      "provenance": { "kind": "documentation", "reference": "../research/report.md" }
+    }
+  },
+  "study": {
+    "groundwork_status": "complete",
+    "smoke_execution_status": "ran",
+    "verification_status": "blocked",
+    "auth_status": "anonymous-via-fork",
+    "benchmark_eligibility": "planned"
+  },
+  "evidence_roots": ["../receipts/smoke"]
+}

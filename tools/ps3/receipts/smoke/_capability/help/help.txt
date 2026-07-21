@@ -1,0 +1,116 @@
+# [RUN] pS3 --version and --help capture
+Image: ps3-study@sha256:c0d7b655163832bf769af0dd5da037c17f6b7b1b519724b8291297b5ae539663 (amd64, run under qemu emulation on arm64 runner — emulated=yes)
+Network: none. Date (UTC): 2026-07-17T13:01:20Z
+Not a wrapper receipt (help/version, no bucket); committed as the raw artifact behind the report's [RUN --help] claims.
+
+## $ pS3 --version
+pS3 version 0.1.16
+
+## $ pS3 --help
+A CLI tool to replace certain S3 operations with faster versions when 
+used on buckets with millions of objects.
+
+Usage:
+  pS3 [flags]
+  pS3 [command]
+
+Available Commands:
+  completion           Generate the autocompletion script for the specified shell
+  head-objects         List Head information for all objects in a bucket.
+  help                 Help about any command
+  list-object-versions Returns metadata about all versions of the objects in a bucket
+  list-objects-v2      Returns some or all of the objects in a bucket.
+  list-test            A brief description of your command
+
+Flags:
+      --endpoint-url string   Override command’s default URL with the given URL
+  -h, --help                  help for pS3
+      --no-verify-ssl         Override SSL certificate verification
+      --output string         The formatting style for command output: json, text. (default "text")
+      --profile string        Use a specific profile from your credential file
+      --region string         The region to use. Overrides config/env settings.
+      --verbose               Turn on verbose output.
+      --version               Display version information.
+
+Use "pS3 [command] --help" for more information about a command.
+
+## $ pS3 list-objects-v2 --help
+To use this action you must have permissions to perform the s3:ListBucket action.
+
+Usage:
+  pS3 list-objects-v2 [flags]
+
+Flags:
+      --bucket string      Bucket name to list (required)
+  -h, --help               help for list-objects-v2
+      --prefix-count int   Prefix count for distribution calculation. The number is the point where prefixes above 1000 objects are passed for processing. (default 500)
+
+Global Flags:
+      --endpoint-url string   Override command’s default URL with the given URL
+      --no-verify-ssl         Override SSL certificate verification
+      --output string         The formatting style for command output: json, text. (default "text")
+      --profile string        Use a specific profile from your credential file
+      --region string         The region to use. Overrides config/env settings.
+      --verbose               Turn on verbose output.
+
+## $ pS3 list-object-versions --help
+To use this operation, you must have permissions to perform the s3:ListBucketVersions action. Be aware of the name difference
+
+Usage:
+  pS3 list-object-versions [flags]
+
+Flags:
+      --bucket string      Bucket name to list (required)
+  -h, --help               help for list-object-versions
+      --prefix-count int   Prefix count for distribution calculation. The number is the point where prefixes above 1000 objects are passed for processing. (default 500)
+
+Global Flags:
+      --endpoint-url string   Override command’s default URL with the given URL
+      --no-verify-ssl         Override SSL certificate verification
+      --output string         The formatting style for command output: json, text. (default "text")
+      --profile string        Use a specific profile from your credential file
+      --region string         The region to use. Overrides config/env settings.
+      --verbose               Turn on verbose output.
+
+## $ pS3 head-objects --help
+List Head information for all objects in a bucket.
+
+Usage:
+  pS3 head-objects [flags]
+
+Flags:
+      --bucket string      Bucket name to list (required)
+  -h, --help               help for head-objects
+      --prefix-count int   Prefix count to create (default 500)
+
+Global Flags:
+      --endpoint-url string   Override command’s default URL with the given URL
+      --no-verify-ssl         Override SSL certificate verification
+      --output string         The formatting style for command output: json, text. (default "text")
+      --profile string        Use a specific profile from your credential file
+      --region string         The region to use. Overrides config/env settings.
+      --verbose               Turn on verbose output.
+
+## $ pS3 list-test --help
+A longer description that spans multiple lines and likely contains examples
+and usage of using your command. For example:
+
+Cobra is a CLI library for Go that empowers applications.
+This application is a tool to generate the needed files
+to quickly create a Cobra application.
+
+Usage:
+  pS3 list-test [flags]
+
+Flags:
+      --bucket string      Bucket name to list (required)
+  -h, --help               help for list-test
+      --prefix-count int   Prefix count to create (default 500)
+
+Global Flags:
+      --endpoint-url string   Override command’s default URL with the given URL
+      --no-verify-ssl         Override SSL certificate verification
+      --output string         The formatting style for command output: json, text. (default "text")
+      --profile string        Use a specific profile from your credential file
+      --region string         The region to use. Overrides config/env settings.
+      --verbose               Turn on verbose output.

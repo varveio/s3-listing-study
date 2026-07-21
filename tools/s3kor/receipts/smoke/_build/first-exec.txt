@@ -1,0 +1,64 @@
+# Non-mode evidence — s3kor container first-execution (Stage B)
+# Run directly against the pinned image (NOT via smoke-run.sh wrapper);
+# labeled [OBS] in report.md. Image: s3kor@sha256:b021869dfa78b7af85506a5d566ec6c7e7ed49d940b20d9e110a04fa5006f37c
+# UTC: 2026-07-17T12:49:02Z   host arch: aarch64
+# entrypoint:
+["/usr/local/bin/s3kor"]
+
+=== s3kor --version ===
+dev-local-version none unknown
+
+=== s3kor --help ===
+usage: s3kor [<flags>] <command> [<args> ...]
+
+s3 tools using golang concurency
+
+Flags:
+  --help             Show context-sensitive help (also try --help-long and
+                     --help-man).
+  --custom-endpoint-url=CUSTOM-ENDPOINT-URL  
+                     AWS S3 Custom Endpoint URL
+  --profile=PROFILE  AWS credentials/config file profile to use
+  --region=REGION    AWS region
+  --detect-region    Auto detect region for the buckets
+  --verbose          Verbose Logging
+  --version          Show application version.
+
+Commands:
+  help [<command>...]
+    Show help.
+
+  rm [<flags>] <S3Uri>
+    remove
+
+  ls [<flags>] <S3Uri>
+    list
+
+  cp [<flags>] <source> <destination>
+    copy
+
+  sync [<flags>] <source> <destination>
+    sync
+
+
+
+=== s3kor ls --help ===
+usage: s3kor ls [<flags>] <S3Uri>
+
+list
+
+Flags:
+  --help             Show context-sensitive help (also try --help-long and
+                     --help-man).
+  --custom-endpoint-url=CUSTOM-ENDPOINT-URL  
+                     AWS S3 Custom Endpoint URL
+  --profile=PROFILE  AWS credentials/config file profile to use
+  --region=REGION    AWS region
+  --detect-region    Auto detect region for the buckets
+  --verbose          Verbose Logging
+  --version          Show application version.
+  --all-versions     List all versions
+
+Args:
+  <S3Uri>  S3 URL
+

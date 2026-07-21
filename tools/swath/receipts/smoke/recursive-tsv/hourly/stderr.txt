@@ -1,0 +1,16 @@
+12:54:36.749 INFO  i.v.s.c.ListCommand - list_command_start bucket=noaa-normals-pds prefix=normals-hourly/ args_hash=5ea01a6b3e8565c4a5baf263dd2648cd0a7cad9182678f585d43a68a29b75698 checkpoint_path=none strategy=WORK_STEALING max_parallel_listings=8 engine_toggles_default=true
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::load has been called by org.sqlite.SQLiteJDBCLoader in an unnamed module (file:/opt/swath/swath.jar)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+12:54:37.288 INFO  i.v.s.s.FirstRequestMarkerFetcher - list_first_request_issued elapsed_ms=543
+12:54:37.766 INFO  i.v.s.s.FirstRequestMarkerFetcher - list_first_page_returned elapsed_ms=1021
+12:54:38.624 INFO  i.v.s.e.SeedStep - seed_shallow run_id=1 probes=14 cut_points=47 synthesized_cuts=32 seed_ranges=48
+12:54:38.627 INFO  i.v.s.c.ListCommand - list_seed run_id=1 seed=SHALLOW seed_count=48
+12:54:38.641 INFO  i.v.s.r.ListRunner - list_run_start strategy=WORK_STEALING checkpointed=true run_id=1 output_format=TSV worker_count=8
+12:54:38.649 INFO  i.v.s.e.WorkStealingScan - work_stealing_scan_start run_id=1 worker_count=8 seed_count=48 max_keys=1000
+12:54:39.493 INFO  i.v.s.e.WorkStealingScan - quiescence_reached run_id=1 outstanding=0
+12:54:39.881 INFO  i.v.s.e.WorkStealingScan - work_stealing_scan_exit run_id=1 outstanding=0
+12:54:39.893 INFO  i.v.s.r.ListRunner - list_run_summary run_id=1 objects=2549 duration_ms=1242 strategy=WORK_STEALING api_calls=112 cost_usd=5.600000000000001E-4 output_files=1 compressed_size_bytes=317119 keys=2549 pages=18 peak_in_flight=8 steals=6 splits=0 errors=0 keys_per_sec=2051.2736275467937 api_calls_per_1k_objects=43.93879952922715 peak_rss_bytes=399876096 peak_heap_bytes=225894848 cpu_seconds=2.48 cpu_efficiency=1.995746801222459
+12:54:39.896 INFO  i.v.s.r.ListRunner - list_run_diagnostics run_id=1 duration_ms=1242 strategy=WORK_STEALING strategy_why=checkpointed_resumable_nodes steal_reasons={STEAL.attempted=6, PIVOT.step_back=1, SEED.dense_root_radix_banded=1, ALPHABET.alphabet_fallback=4, SEED.radix_bands=32, PIVOT.reflect_empty=4, CHILD_MASS.small=4, RETRY.retry_pivot_adjacent=5, AIMD.slow_start_double=1, CHILD_MASS.tiny=13, SEED_SCHED.distinct_seed_worker=8, TOGGLE.mass_aware_seed_on=1, CHILD_MASS.empty=31, NO_VICTIM.no_splittable_victim=1, ALPHABET.window_gap=4, SEED.frontier_reordered=1, SEED.top_complete=1} probe_fetches=45 empty_upper_bisections=40 splits_committed=0 unsplittable_victims=0 split_guard_aborts=0 peak_in_flight=8 time_to_first_steal_ms=-1 time_to_peak_in_flight_ms=169 pages=49 fetched_keys=37524 mean_keys_per_page=765.795918367347 short_truncated_pages=0 throttle_events=0 transient_events=0 aimd_votes=0 aimd_target_reductions=0

@@ -1,0 +1,485 @@
+{
+  "$schema": "../../../schemas/claims.schema.json",
+  "schema_version": 1,
+  "tool": "swath",
+  "legacy_ledger": {
+    "source": "../research/tool-page.md",
+    "migration_map": "../research/claims-migration.md",
+    "expected_origins": [
+      "META-1", "META-2", "META-3", "META-4",
+      "M1", "M2", "P1", "P2", "P3", "P4", "P5", "P6",
+      "S1", "N1", "N2",
+      "W1", "W2", "W3", "W4", "W5", "W6",
+      "PROSE-1", "PROSE-2", "PROSE-3", "PROSE-4", "PROSE-5",
+      "PROSE-6", "PROSE-7", "PROSE-8", "PROSE-9"
+    ]
+  },
+  "claims": [
+    {
+      "id": "repo-is-private-prerelease",
+      "statement": "Swath's canonical repository is github.com/varveio/swath, private and pre-release at research time.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "GitHub reported visibility=private for the repository at the 2026-07-17 research date.",
+      "legacy_origins": ["META-1"],
+      "evidence": [{"kind": "documentation", "url": "https://github.com/varveio/swath"}]
+    },
+    {
+      "id": "language-is-java",
+      "statement": "Swath is written in Java on a JDK 25 toolchain.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The Gradle Java-conventions build logic pins the JDK 25 toolchain.",
+      "legacy_origins": ["META-2"],
+      "evidence": [{"kind": "source", "subject": "tested-variant", "repository": "https://github.com/varveio/swath", "commit": "f1009db", "path": "build-logic/.../swath.java-conventions.gradle.kts", "lines": "24"}]
+    },
+    {
+      "id": "no-license-dangling-reference",
+      "statement": "At f1009db the repository carries no LICENSE file, and THIRD_PARTY_NOTICES.md references a repository LICENSE that does not exist.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "corrected",
+      "qualification": "This corrects the inherited License: TBD row; GitHub reports license=null and the dangling reference is a real gap for a repository slated to go public.",
+      "legacy_origins": ["META-3"],
+      "evidence": [
+        {"kind": "source", "subject": "tested-variant", "repository": "https://github.com/varveio/swath", "commit": "f1009db", "path": "THIRD_PARTY_NOTICES.md", "lines": "13"},
+        {"kind": "documentation", "url": "https://github.com/varveio/swath"}
+      ]
+    },
+    {
+      "id": "reported-version-is-snapshot",
+      "statement": "The built image reports version 0.1.0-SNAPSHOT.",
+      "scope": "structure",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "The --version string proves the version only, not the source SHA; the image carries no source-SHA label.",
+      "legacy_origins": ["META-4"],
+      "evidence": [{"kind": "run", "receipt": "../receipts/smoke/recursive-tsv/full", "artifact": "../receipts/smoke/recursive-tsv/full/run.meta"}]
+    },
+    {
+      "id": "no-releases-or-tags",
+      "statement": "The upstream repository publishes no releases or version tags and describes itself as pre-release, Phase 8 partial.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Only backup/* refs exist; the reviewed HEAD is f1009db.",
+      "legacy_origins": ["META-4"],
+      "evidence": [{"kind": "documentation", "url": "https://github.com/varveio/swath"}]
+    },
+    {
+      "id": "full-run-reported-parallel-listings",
+      "statement": "The full-bucket recursive-tsv smoke run reported eight concurrent listings in flight, with seven splits and ninety-eight steals.",
+      "scope": "runtime",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "These are Swath's own self-reported counters, internally consistent with the manifest-verified output but not an independent wire capture; scoped to this run, version, and bucket.",
+      "legacy_origins": ["M1"],
+      "evidence": [{"kind": "run", "receipt": "../receipts/smoke/recursive-tsv/full", "artifact": "../receipts/smoke/recursive-tsv/full/receipt.md"}]
+    },
+    {
+      "id": "peak-concurrency-is-scope-dependent",
+      "statement": "Peak in-flight concurrency is scope-dependent: the 2,549-key hourly run reached the eight cap through steals alone with zero splits, while the un-seeded full and monthly runs peaked at six and four.",
+      "scope": "runtime",
+      "status": "confirmed",
+      "disposition": "corrected",
+      "qualification": "These are Swath's own self-reported counters, not an independent wire capture; this corrects any reading that a smaller scope means less parallelism, since hourly still hit the cap.",
+      "legacy_origins": ["M1"],
+      "evidence": [
+        {"kind": "run", "receipt": "../receipts/smoke/recursive-tsv/full", "artifact": "../receipts/smoke/recursive-tsv/full/receipt.md"},
+        {"kind": "run", "receipt": "../receipts/smoke/recursive-tsv/hourly", "artifact": "../receipts/smoke/recursive-tsv/hourly/receipt.md"},
+        {"kind": "run", "receipt": "../receipts/smoke/seed-none/full", "artifact": "../receipts/smoke/seed-none/full/receipt.md"},
+        {"kind": "run", "receipt": "../receipts/smoke/seed-none/monthly1991", "artifact": "../receipts/smoke/seed-none/monthly1991/receipt.md"}
+      ]
+    },
+    {
+      "id": "listing-is-adaptive-density-aware",
+      "statement": "Swath's listing is adaptive and density-aware.",
+      "scope": "mechanism",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "The adaptive, density-aware characterization is an upstream design claim; the internal sampling and tiling it rests on are not receipt-settled and are covered by claim internal-tiling-is-disjoint.",
+      "legacy_origins": ["M1"],
+      "evidence": [{"kind": "none", "reason": "Smoke output settles parallelism, not that range placement is adaptive or density-proportional; no run isolates the sampling behavior."}]
+    },
+    {
+      "id": "parallelism-ratio-at-higher-concurrency",
+      "statement": "The observed parallelism ratio holds at concurrency above the smoke cap of eight and at larger scopes.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "Smoke capped --max-parallel-listings at 8; the ratio at Swath's default 64 and on larger buckets is unmeasured and is the primary benchmark-phase sweep.",
+      "legacy_origins": ["M1"],
+      "evidence": [{"kind": "none", "reason": "No concurrency sweep above the smoke cap of 8 has been run."}]
+    },
+    {
+      "id": "internal-tiling-is-disjoint",
+      "statement": "Swath's internal key ranges are disjoint and cover the keyspace with no gap or overlap.",
+      "scope": "correctness",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "Byte-exact smoke output proves no missing, extra, or duplicate rows for the tested runs, but does not establish that internal ranges were disjoint or that the invariant holds for other keyspace shapes; the critical cross-check explicitly removed the smoke-to-tiling promotion.",
+      "legacy_origins": ["M2"],
+      "evidence": [{"kind": "none", "reason": "The internal range invariant is a design claim; no run instruments the internal tiling."}]
+    },
+    {
+      "id": "sampling-replaces-blind-midpoints",
+      "statement": "The default keyspace cut is a byte-midpoint bisection running alongside default-on mass-aware sampling; sampling does not replace blind midpoints.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "corrected",
+      "qualification": "The inherited samples-rather-than-blind-midpoints wording overstates the default: the base pivot is a byte-midpoint, with density-reflected placement, demand-driven stealing, and mass-aware sampling coexisting.",
+      "legacy_origins": ["M2", "P1"],
+      "evidence": [
+        {"kind": "source", "subject": "tested-variant", "repository": "https://github.com/varveio/swath", "commit": "f1009db", "path": "docs/design/algorithms.md", "lines": "235-380"},
+        {"kind": "source", "subject": "tested-variant", "repository": "https://github.com/varveio/swath", "commit": "f1009db", "path": "docs/usage.md", "lines": "322-389"},
+        {"kind": "source", "subject": "tested-variant", "repository": "https://github.com/varveio/swath", "commit": "f1009db", "path": "ListCommand.java", "lines": "257-281"}
+      ]
+    },
+    {
+      "id": "smoke-output-complete-no-duplicates",
+      "statement": "Every verified smoke mode and scope listed the bucket with no duplicate, missing, or extra rows.",
+      "scope": "correctness",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "dups=0 missing=0 extra=0 on this ASCII-keyed clean public bucket; this settles output completeness for clean single-shot runs at smoke scale only, not the internal mechanism and not exactly-once under crash.",
+      "legacy_origins": ["P2", "W5"],
+      "evidence": [
+        {"kind": "run", "receipt": "../receipts/smoke/recursive-tsv/full", "artifact": "../receipts/smoke/recursive-tsv/full/verify.md"},
+        {"kind": "run", "receipt": "../receipts/smoke/recursive-tsv/hourly", "artifact": "../receipts/smoke/recursive-tsv/hourly/verify.md"},
+        {"kind": "run", "receipt": "../receipts/smoke/recursive-tsv/monthly1991", "artifact": "../receipts/smoke/recursive-tsv/monthly1991/verify.md"},
+        {"kind": "run", "receipt": "../receipts/smoke/recursive-tsv/asaccess1981", "artifact": "../receipts/smoke/recursive-tsv/asaccess1981/verify.md"},
+        {"kind": "run", "receipt": "../receipts/smoke/recursive-jsonl/full", "artifact": "../receipts/smoke/recursive-jsonl/full/verify.md"},
+        {"kind": "run", "receipt": "../receipts/smoke/recursive-jsonl/monthly1991", "artifact": "../receipts/smoke/recursive-jsonl/monthly1991/verify.md"},
+        {"kind": "run", "receipt": "../receipts/smoke/recursive-aligned/full", "artifact": "../receipts/smoke/recursive-aligned/full/verify.md"},
+        {"kind": "run", "receipt": "../receipts/smoke/recursive-aligned/monthly1991", "artifact": "../receipts/smoke/recursive-aligned/monthly1991/verify.md"},
+        {"kind": "run", "receipt": "../receipts/smoke/seed-none/full", "artifact": "../receipts/smoke/seed-none/full/verify.md"},
+        {"kind": "run", "receipt": "../receipts/smoke/seed-none/monthly1991", "artifact": "../receipts/smoke/seed-none/monthly1991/verify.md"}
+      ]
+    },
+    {
+      "id": "exactly-once-under-crash",
+      "statement": "Swath produces exactly-once output across a crash and resume.",
+      "scope": "correctness",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "Smoke ran --checkpoint none, which is not resumable; no SIGKILL or resume run was performed, so crash-path exactly-once is unsettled.",
+      "legacy_origins": ["P2", "W5"],
+      "evidence": [{"kind": "none", "reason": "No crash, SIGKILL, or resume run was performed."}]
+    },
+    {
+      "id": "no-dedup-pass-by-construction",
+      "statement": "Swath's disjoint half-open key ranges are designed to produce exactly-once output by construction, needing no separate deduplication pass.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This is the documented range-model design; smoke settles output completeness for clean runs (claim smoke-output-complete-no-duplicates), but the internal disjointness (claim internal-tiling-is-disjoint) and crash-path exactly-once (claim exactly-once-under-crash) are not receipt-settled.",
+      "legacy_origins": ["P2"],
+      "evidence": [
+        {"kind": "source", "subject": "tested-variant", "repository": "https://github.com/varveio/swath", "commit": "f1009db", "path": "docs/design/algorithms.md", "lines": "53-70"}
+      ]
+    },
+    {
+      "id": "checkpoint-resume-design-exists",
+      "statement": "Swath's resume design uses an SQLite checkpoint whose listing_node table is the worklist, serialized by a single checkpoint-writer thread.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This is the documented design; Parquet resume is exactly-once and stdout/text is at-most-once by design.",
+      "legacy_origins": ["P3"],
+      "evidence": [{"kind": "source", "subject": "tested-variant", "repository": "https://github.com/varveio/swath", "commit": "f1009db", "path": "docs/design/algorithms.md", "lines": "611-748"}]
+    },
+    {
+      "id": "crash-resume-works",
+      "statement": "Swath resumes a crashed or interrupted listing from its SQLite checkpoint.",
+      "scope": "runtime",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "This is a design read only; no crash, SIGKILL, or mid-checkpoint resume run was performed, and smoke used --checkpoint none.",
+      "legacy_origins": ["P3", "W4"],
+      "evidence": [{"kind": "none", "reason": "No SIGKILL or resume run was performed."}]
+    },
+    {
+      "id": "parquet-modes-execute",
+      "statement": "The parquet and sorted-parquet capability probes executed to exit 0 with a self-reported objects=15625.",
+      "scope": "runtime",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "The objects=15625 count is Swath's own self-reported counter, recorded in each probe's list_run_summary stderr line and not an independent wire capture. The file-sink modes write a dataset directory the stdout-only wrapper neither mounts nor captures, so this proves the paths execute, not that the dataset contains all keys.",
+      "legacy_origins": ["P4"],
+      "evidence": [
+        {"kind": "run", "receipt": "../receipts/smoke/_capability/parquet-probe", "artifact": "../receipts/smoke/_capability/parquet-probe/stderr.txt"},
+        {"kind": "run", "receipt": "../receipts/smoke/_capability/sort-probe", "artifact": "../receipts/smoke/_capability/sort-probe/stderr.txt"}
+      ]
+    },
+    {
+      "id": "parquet-output-byte-exact",
+      "statement": "Swath's Parquet and sorted-parquet output faithfully contains every listed key.",
+      "scope": "output",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "The dataset output is uncapturable by the stdout-only wrapper; verifying fidelity needs a volume-mounting harness path deferred to the benchmark phase.",
+      "legacy_origins": ["P4"],
+      "evidence": [{"kind": "none", "reason": "No verifier ran on the discarded dataset output."}]
+    },
+    {
+      "id": "bounded-memory-at-scale",
+      "statement": "Swath's memory stays bounded by configuration rather than bucket size at large scale.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "Smoke peak RSS held ~320-560 MB across every scope, JVM-baseline-dominated at this scale and not a scale claim; sort-memory and bounded-memory at scale must be reproduced under this harness.",
+      "legacy_origins": ["P5"],
+      "evidence": [{"kind": "none", "reason": "The 148k-key receipt scope cannot test large-scale bounded-memory behavior; no scale campaign has run."}]
+    },
+    {
+      "id": "aimd-adapts-to-503",
+      "statement": "Swath's AIMD controller adapts live concurrency to 503 throttling, multiplicatively decreasing the permit gauge on a 503 or Retry-After and additively re-increasing it across clean windows.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The control path is present in source and design docs; whether it was ever exercised is separate, since it stayed idle at smoke (claim aimd-idle-at-smoke), as is whether it is dead weight (claim aimd-necessity).",
+      "legacy_origins": ["P6"],
+      "evidence": [
+        {"kind": "source", "subject": "tested-variant", "repository": "https://github.com/varveio/swath", "commit": "f1009db", "path": "docs/design/algorithms.md", "lines": "752-831"},
+        {"kind": "source", "subject": "tested-variant", "repository": "https://github.com/varveio/swath", "commit": "f1009db", "path": "S3PageFetcher.java", "lines": "300-331"}
+      ]
+    },
+    {
+      "id": "aimd-idle-at-smoke",
+      "statement": "The smoke runs recorded zero throttle events, zero AIMD votes, and zero errors on this clean public bucket.",
+      "scope": "runtime",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "These zeros are Swath's own self-reported counters, and aimd_votes is recorded only in each run's list_run_diagnostics stderr line, not an independent wire capture. AIMD never engaged because 503s were absent; this settles that it did not fire, not whether it is dead weight. The set enumerates every smoke run, the ten verified text runs and both capability probes.",
+      "legacy_origins": ["P6", "W6"],
+      "evidence": [
+        {"kind": "run", "receipt": "../receipts/smoke/recursive-tsv/full", "artifact": "../receipts/smoke/recursive-tsv/full/stderr.txt"},
+        {"kind": "run", "receipt": "../receipts/smoke/recursive-tsv/hourly", "artifact": "../receipts/smoke/recursive-tsv/hourly/stderr.txt"},
+        {"kind": "run", "receipt": "../receipts/smoke/recursive-tsv/monthly1991", "artifact": "../receipts/smoke/recursive-tsv/monthly1991/stderr.txt"},
+        {"kind": "run", "receipt": "../receipts/smoke/recursive-tsv/asaccess1981", "artifact": "../receipts/smoke/recursive-tsv/asaccess1981/stderr.txt"},
+        {"kind": "run", "receipt": "../receipts/smoke/recursive-jsonl/full", "artifact": "../receipts/smoke/recursive-jsonl/full/stderr.txt"},
+        {"kind": "run", "receipt": "../receipts/smoke/recursive-jsonl/monthly1991", "artifact": "../receipts/smoke/recursive-jsonl/monthly1991/stderr.txt"},
+        {"kind": "run", "receipt": "../receipts/smoke/recursive-aligned/full", "artifact": "../receipts/smoke/recursive-aligned/full/stderr.txt"},
+        {"kind": "run", "receipt": "../receipts/smoke/recursive-aligned/monthly1991", "artifact": "../receipts/smoke/recursive-aligned/monthly1991/stderr.txt"},
+        {"kind": "run", "receipt": "../receipts/smoke/seed-none/full", "artifact": "../receipts/smoke/seed-none/full/stderr.txt"},
+        {"kind": "run", "receipt": "../receipts/smoke/seed-none/monthly1991", "artifact": "../receipts/smoke/seed-none/monthly1991/stderr.txt"},
+        {"kind": "run", "receipt": "../receipts/smoke/_capability/parquet-probe", "artifact": "../receipts/smoke/_capability/parquet-probe/stderr.txt"},
+        {"kind": "run", "receipt": "../receipts/smoke/_capability/sort-probe", "artifact": "../receipts/smoke/_capability/sort-probe/stderr.txt"}
+      ]
+    },
+    {
+      "id": "aimd-necessity",
+      "statement": "Swath's AIMD 503 controller may be dead weight if listing is latency-bound rather than throttle-bound.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "This is the inherited hypothesis at its original polarity; 503s were absent at smoke so AIMD never engaged (claim aimd-idle-at-smoke), and whether it is dead weight is a scale and concurrency question smoke at T<=8 cannot reach.",
+      "legacy_origins": ["P6", "W6"],
+      "evidence": [{"kind": "none", "reason": "No throttling or high-concurrency scenario exercised the controller."}]
+    },
+    {
+      "id": "no-tool-combines-all-features",
+      "statement": "No other listing tool combines zero-config operation, streaming bounded memory, crash resume, and Parquet output.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "A comparative claim spanning all tools; groundwork scope is Swath only and it is routed to cross-cutting review.",
+      "legacy_origins": ["S1"],
+      "evidence": [{"kind": "none", "reason": "Comparative across every tool; not settled by Swath-only groundwork."}]
+    },
+    {
+      "id": "throughput-within-10pct-of-s3-fast-list",
+      "statement": "Swath's throughput comes within about ten percent of s3-fast-list at equal concurrency.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "An upstream self-published design target, not a comparative result; no throughput comparison has run on this harness.",
+      "legacy_origins": ["N1"],
+      "evidence": [{"kind": "none", "reason": "No comparative throughput run has been performed."}]
+    },
+    {
+      "id": "s3-fast-list-published-throughput",
+      "statement": "s3-fast-list published 3.1 million objects per second at concurrency 1000.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "A published figure about another tool, used only as inherited context, routed to the s3-fast-list page and not settled here.",
+      "legacy_origins": ["N2"],
+      "evidence": [{"kind": "none", "reason": "A number about another tool, not reproduced on this harness and not Swath's to verify."}]
+    },
+    {
+      "id": "may-lose-to-s3-fast-list-hinted",
+      "statement": "Swath may underperform s3-fast-list on hinted throughput.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "A comparative and scale hypothesis for the benchmark phase.",
+      "legacy_origins": ["W1"],
+      "evidence": [{"kind": "none", "reason": "No comparative hinted-throughput run has been performed."}]
+    },
+    {
+      "id": "java-handicap-at-high-rates",
+      "statement": "Java startup and garbage collection handicap Swath at high list rates.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "Not tested at high list rates; a smoke wall floor of ~3.4-4.0 s even on a 2,549-key prefix is consistent with JVM startup but is not a high-rate result.",
+      "legacy_origins": ["W2"],
+      "evidence": [{"kind": "none", "reason": "No high-list-rate run has been performed."}]
+    },
+    {
+      "id": "seed-cost-comparison",
+      "statement": "Swath's zero-config sampling carries a throughput cost worth comparing against s3-fast-list cold and hinted.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "The hypothesis concerns s3-fast-list's two arms; comparative, benchmark phase.",
+      "legacy_origins": ["W3"],
+      "evidence": [{"kind": "none", "reason": "No comparative cold-versus-hinted run has been performed."}]
+    },
+    {
+      "id": "seed-hints-unimplemented",
+      "statement": "Swath has no hinted seed mode: --seed hints throws as unimplemented.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "A standalone finding; there is no Swath-hinted mode, unlike the two-pass hinted path of some other tools. This also conserves the inherited M2 characterization that Swath avoids requiring up-front hints.",
+      "legacy_origins": ["W3", "PROSE-1", "M2"],
+      "evidence": [
+        {"kind": "source", "subject": "tested-variant", "repository": "https://github.com/varveio/swath", "commit": "f1009db", "path": "ListCommand.java", "lines": "257-260"},
+        {"kind": "source", "subject": "tested-variant", "repository": "https://github.com/varveio/swath", "commit": "f1009db", "path": "docs/usage.md", "lines": "322"}
+      ]
+    },
+    {
+      "id": "seed-cost-direction-at-smoke",
+      "statement": "On this flat-root corpus the up-front shallow seed made fewer API calls than no seed: 339 with --seed shallow versus 516 with --seed none on the full bucket.",
+      "scope": "runtime",
+      "status": "confirmed",
+      "disposition": "corrected",
+      "qualification": "These api_calls are Swath's own self-reported counters, not an independent wire capture. Both runs PASS; one run per arm settles the observed counts, not that the seed choice caused the gap, and it corrects the expectation that discovery costs extra calls.",
+      "legacy_origins": ["W3"],
+      "evidence": [
+        {"kind": "run", "receipt": "../receipts/smoke/recursive-tsv/full", "artifact": "../receipts/smoke/recursive-tsv/full/receipt.md"},
+        {"kind": "run", "receipt": "../receipts/smoke/seed-none/full", "artifact": "../receipts/smoke/seed-none/full/receipt.md"}
+      ]
+    },
+    {
+      "id": "inspect-diff-are-stubs",
+      "statement": "The inspect and diff subcommands are stubs that print not yet implemented.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Both appear in --help but are unimplemented.",
+      "legacy_origins": ["PROSE-2"],
+      "evidence": [
+        {"kind": "source", "subject": "tested-variant", "repository": "https://github.com/varveio/swath", "commit": "f1009db", "path": "InspectCommand.java", "lines": "25"},
+        {"kind": "source", "subject": "tested-variant", "repository": "https://github.com/varveio/swath", "commit": "f1009db", "path": "DiffCommand.java", "lines": "28"}
+      ]
+    },
+    {
+      "id": "no-shallow-listing-mode",
+      "statement": "Swath has no ls-style delimiter or CommonPrefix output mode; swath list always fully enumerates objects and uses delimiter=/ only internally.",
+      "scope": "output",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "A caller wanting a shallow one-level listing has no such mode.",
+      "legacy_origins": ["PROSE-3"],
+      "evidence": [{"kind": "source", "subject": "tested-variant", "repository": "https://github.com/varveio/swath", "commit": "f1009db", "path": "ListCommand.java"}]
+    },
+    {
+      "id": "probe-overhead-higher-on-small-prefix",
+      "statement": "Probe overhead was far higher on the small prefix: 43.9 api_calls per 1k on the 2,549-key hourly prefix versus 2.28 per 1k on the full bucket.",
+      "scope": "runtime",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "These api_calls-per-1k ratios derive from Swath's own self-reported counters, not an independent wire capture. These two runs vary both size and keyspace shape with no repeats, so they settle the two observed ratios, not a general overhead-versus-scale law.",
+      "legacy_origins": ["PROSE-4"],
+      "evidence": [
+        {"kind": "run", "receipt": "../receipts/smoke/recursive-tsv/hourly", "artifact": "../receipts/smoke/recursive-tsv/hourly/receipt.md"},
+        {"kind": "run", "receipt": "../receipts/smoke/recursive-tsv/full", "artifact": "../receipts/smoke/recursive-tsv/full/receipt.md"}
+      ]
+    },
+    {
+      "id": "text-sink-key-fidelity-ascii-only",
+      "statement": "Byte-exact key fidelity holds only for control-character-free keys, because the text sinks escape control bytes as backslash-xHH by default and JSONL's jq @tsv escapes embedded tabs and newlines while the normalize adapters do not de-escape.",
+      "scope": "correctness",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "On the whitespace-free NOAA corpus this is the identity, but byte-exactness is not proven for keys containing control characters (EDGE_BUCKET=none).",
+      "legacy_origins": ["PROSE-5"],
+      "evidence": [
+        {"kind": "documentation", "path": "../adapter/normalize.sh"},
+        {"kind": "source", "subject": "tested-variant", "repository": "https://github.com/varveio/swath", "commit": "f1009db", "path": "TsvFormatter.java", "lines": "53-55"},
+        {"kind": "source", "subject": "tested-variant", "repository": "https://github.com/varveio/swath", "commit": "f1009db", "path": "JsonlFormatter.java", "lines": "13-17"}
+      ]
+    },
+    {
+      "id": "aligned-fixed-column-timestamp-assumption",
+      "statement": "The aligned adapter assumes S3's second-precision timestamp in fixed column offsets; a sub-second ISO_INSTANT would shift columns.",
+      "scope": "output",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Safe for S3 today, flagged as a hardening item for other stores.",
+      "legacy_origins": ["PROSE-5"],
+      "evidence": [
+        {"kind": "source", "subject": "tested-variant", "repository": "https://github.com/varveio/swath", "commit": "f1009db", "path": "Fields.java", "lines": "13-21"},
+        {"kind": "documentation", "path": "../adapter/normalize.sh"}
+      ]
+    },
+    {
+      "id": "control-char-key-fidelity-untested",
+      "statement": "Swath's native output faithfully preserves keys containing control characters.",
+      "scope": "correctness",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "Not exercised (EDGE_BUCKET=none); settling it would need --raw-output in run.sh plus de-escaping in the adapter.",
+      "legacy_origins": ["PROSE-5"],
+      "evidence": [{"kind": "none", "reason": "No control-character key corpus was configured or run."}]
+    },
+    {
+      "id": "image-source-binding-agent-asserted",
+      "statement": "The source-to-image link is an agent-asserted build fact recorded in the build receipt, not a binding embedded in each run receipt.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "A run.meta read in isolation proves this digest and --version 0.1.0-SNAPSHOT, not that it was built from f1009db; a future build should stamp the source SHA into an OCI label.",
+      "legacy_origins": ["PROSE-6"],
+      "evidence": [{"kind": "observation", "artifact": "../receipts/smoke/_build/build.md"}]
+    },
+    {
+      "id": "first-party-private-source-basis",
+      "statement": "The groundwork read Swath's own source at the pinned SHA while the repository was private and pre-release, a first-party source basis unlike the public-docs basis used for the other tools.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The Varve-familiarity difference described in the maintainer disclosure still applies.",
+      "legacy_origins": ["PROSE-7"],
+      "evidence": [{"kind": "documentation", "path": "../research/report.md"}]
+    },
+    {
+      "id": "error-classification-is-specific",
+      "statement": "Transient S3 error classes are individually classified and retried, and only exact status-and-code pairs get a typed fatal subtype while any other 4xx falls through to the generic fatal ListingException.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Not every 403 or 404 is specifically typed.",
+      "legacy_origins": ["PROSE-8"],
+      "evidence": [
+        {"kind": "source", "subject": "tested-variant", "repository": "https://github.com/varveio/swath", "commit": "f1009db", "path": "S3PageFetcher.java", "lines": "300-478"},
+        {"kind": "source", "subject": "tested-variant", "repository": "https://github.com/varveio/swath", "commit": "f1009db", "path": "S3PageFetcher.java", "lines": "633-671"}
+      ]
+    },
+    {
+      "id": "amd64-support-inferred",
+      "statement": "Swath builds and runs on amd64.",
+      "scope": "compatibility",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "amd64 support is inferred from the Dockerfile's arch-neutral bytecode, all-arch native deps, and multi-arch base, but was not demonstrated; smoke ran natively on arm64 only.",
+      "legacy_origins": ["PROSE-9"],
+      "evidence": [{"kind": "none", "reason": "No amd64 build or run was performed."}]
+    }
+  ]
+}

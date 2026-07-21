@@ -1,0 +1,5 @@
+{"status":"success","type":"file","lastModified":"2025-11-24T20:33:44Z","size":36822,"key":"index.html","etag":"0d6853386d167e668f7e862944150ab0","url":"https://s3.amazonaws.com/noaa-normals-pds/","versionOrdinal":1,"storageClass":"STANDARD"}
+{"status":"success","type":"folder","lastModified":"2026-07-17T12:27:45.460988405Z","size":0,"key":"normals-annualseasonal/","etag":"","url":"https://s3.amazonaws.com/noaa-normals-pds/","versionOrdinal":1}
+{"status":"success","type":"folder","lastModified":"2026-07-17T12:27:45.461261297Z","size":0,"key":"normals-daily/","etag":"","url":"https://s3.amazonaws.com/noaa-normals-pds/","versionOrdinal":1}
+{"status":"success","type":"folder","lastModified":"2026-07-17T12:27:45.461265024Z","size":0,"key":"normals-hourly/","etag":"","url":"https://s3.amazonaws.com/noaa-normals-pds/","versionOrdinal":1}
+{"status":"success","type":"folder","lastModified":"2026-07-17T12:27:45.461352131Z","size":0,"key":"normals-monthly/","etag":"","url":"https://s3.amazonaws.com/noaa-normals-pds/","versionOrdinal":1}

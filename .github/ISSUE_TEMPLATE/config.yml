@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: How this project works
+    url: https://github.com/varveio/s3-listing-study/blob/main/README.md
+    about: Varve maintains this repo and builds Swath. Read about our setup and approach.
+  - name: Contributing and run records
+    url: https://github.com/varveio/s3-listing-study/blob/main/CONTRIBUTING.md
+    about: How to help and what details make a result easier to reproduce.

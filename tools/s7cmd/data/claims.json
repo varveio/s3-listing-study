@@ -1,0 +1,1558 @@
+{
+  "$schema": "../../../schemas/claims.schema.json",
+  "schema_version": 1,
+  "tool": "s7cmd",
+  "legacy_ledger": {
+    "source": "../research/tool-page.md",
+    "migration_map": "../research/claims-migration.md",
+    "expected_origins": [
+      "META-1",
+      "META-2",
+      "META-3",
+      "META-4",
+      "META-5",
+      "META-6",
+      "META-7",
+      "A1",
+      "A2",
+      "A3",
+      "A4",
+      "A5",
+      "A6",
+      "A7",
+      "A8",
+      "A9",
+      "A10",
+      "A11",
+      "A12",
+      "A13",
+      "A14",
+      "B1",
+      "B2",
+      "B3",
+      "B4",
+      "B5",
+      "B6",
+      "B7",
+      "B8",
+      "B9",
+      "B10",
+      "B11",
+      "B12",
+      "B13",
+      "B14",
+      "B15",
+      "B16",
+      "B17",
+      "B18",
+      "B19",
+      "B20",
+      "B21",
+      "B22",
+      "B23",
+      "B24",
+      "B25",
+      "B26",
+      "B27",
+      "PROSE-1",
+      "PROSE-2",
+      "PROSE-3",
+      "PROSE-4",
+      "PROSE-5",
+      "PROSE-6"
+    ]
+  },
+  "claims": [
+    {
+      "id": "repo-is-canonical",
+      "statement": "The tool's canonical repository is github.com/nidor1998/s7cmd, published on crates.io as s7cmd by author nidor1998.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The inherited row was not independently confirmed; groundwork cloned the repository and matched the crates.io publication.",
+      "legacy_origins": [
+        "META-1",
+        "A1"
+      ],
+      "evidence": [
+        {
+          "kind": "documentation",
+          "url": "https://github.com/nidor1998/s7cmd"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/_build",
+          "artifact": "../receipts/smoke/_build/help-and-version.txt"
+        }
+      ]
+    },
+    {
+      "id": "language-is-rust",
+      "statement": "s7cmd is written in Rust, edition 2024, rust-version 1.91.1.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The inherited row presumed Rust; the pinned manifest confirms the edition and minimum toolchain.",
+      "legacy_origins": [
+        "META-2",
+        "A2"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/nidor1998/s7cmd",
+          "commit": "d589df7",
+          "path": "Cargo.toml"
+        }
+      ]
+    },
+    {
+      "id": "license-is-apache-2",
+      "statement": "s7cmd is licensed Apache-2.0.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The inherited license row was unconfirmed; the pinned LICENSE resolves it.",
+      "legacy_origins": [
+        "META-3",
+        "A3"
+      ],
+      "evidence": [
+        {
+          "kind": "documentation",
+          "url": "https://github.com/nidor1998/s7cmd"
+        }
+      ]
+    },
+    {
+      "id": "version-is-1-5-0",
+      "statement": "The tested s7cmd version is v1.5.0 (commit d589df7), the latest release.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "corrected",
+      "qualification": "The inherited version was unknown. The build receipt records the in-image string s7cmd 1.5.0; the commit and latest-release facet are source- and documentation-established, not receipt-recorded (the --version git-hash field was blank).",
+      "legacy_origins": [
+        "META-4",
+        "A4"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/nidor1998/s7cmd",
+          "commit": "d589df7",
+          "path": "Cargo.toml"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/_build",
+          "artifact": "../receipts/smoke/_build/help-and-version.txt"
+        }
+      ]
+    },
+    {
+      "id": "ls-is-s3ls-rs-crate",
+      "statement": "s7cmd's ls subcommand builds s3ls_rs::ListingPipeline directly from the s3ls-rs crate pinned at exactly =1.0.3; it is a crate dependency, not a separate reimplementation.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "corrected",
+      "qualification": "The inherited notes speculated a possibly redundant or separately reimplemented listing engine; the pinned manifest and wrapper source establish a direct crate dependency.",
+      "legacy_origins": [
+        "META-5",
+        "A6",
+        "A7"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/nidor1998/s7cmd",
+          "commit": "d589df7",
+          "path": "Cargo.toml"
+        },
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/nidor1998/s7cmd",
+          "commit": "d589df7",
+          "path": "src/ls_bin/mod.rs",
+          "lines": "15-88"
+        },
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/nidor1998/s7cmd",
+          "commit": "d589df7",
+          "path": "src/dispatch.rs",
+          "lines": "61-72"
+        }
+      ]
+    },
+    {
+      "id": "engine-version-is-1-0-3",
+      "statement": "The pinned s3ls-rs listing-engine crate is v1.0.3 (commit bf42067).",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "corrected",
+      "qualification": "The inherited s3ls-rs review was at v1.0.1; s7cmd depends on =1.0.3, and anchors were re-checked at that tag.",
+      "legacy_origins": [
+        "META-5",
+        "B25"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/nidor1998/s7cmd",
+          "commit": "d589df7",
+          "path": "Cargo.toml"
+        },
+        {
+          "kind": "documentation",
+          "url": "https://github.com/nidor1998/s3ls-rs"
+        }
+      ]
+    },
+    {
+      "id": "is-umbrella-cli",
+      "statement": "s7cmd is an umbrella CLI composing four of its author's Rust crates (s3sync, s3util-rs, s3rm-rs, and s3ls-rs), exposing ls, cp, mv, rm, sync, and clean plus bucket administration; only ls is in study scope.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "s3sync is the project's one human-written reference implementation; the other capabilities are out of this study's listing scope.",
+      "legacy_origins": [
+        "A9"
+      ],
+      "evidence": [
+        {
+          "kind": "documentation",
+          "url": "https://github.com/nidor1998/s7cmd"
+        },
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/nidor1998/s7cmd",
+          "commit": "d589df7",
+          "path": "Cargo.toml"
+        }
+      ]
+    },
+    {
+      "id": "author-recommends-s7cmd-over-s3ls-rs",
+      "statement": "The author now points users to s7cmd over standalone s3ls-rs, asking that new issues be filed in the s7cmd repository.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This is an upstream documentation statement in the s3ls-rs README.",
+      "legacy_origins": [
+        "A8"
+      ],
+      "evidence": [
+        {
+          "kind": "documentation",
+          "url": "https://github.com/nidor1998/s3ls-rs"
+        }
+      ]
+    },
+    {
+      "id": "s7cmd-is-umbrella-successor",
+      "statement": "s7cmd is the umbrella successor to the earlier standalone tools, while s3ls-rs is still released as a standalone crate.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This resolves the inherited open question of successor versus separate project.",
+      "legacy_origins": [
+        "A11"
+      ],
+      "evidence": [
+        {
+          "kind": "documentation",
+          "url": "https://github.com/nidor1998/s3ls-rs"
+        }
+      ]
+    },
+    {
+      "id": "s3ls-rs-still-released-standalone",
+      "statement": "Standalone s3ls-rs remains maintained and released, with v1.0.3 tagged and not frozen.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The standalone crate belongs to the archived s3ls-rs dossier; its continued release is documentation-supported.",
+      "legacy_origins": [
+        "A12"
+      ],
+      "evidence": [
+        {
+          "kind": "documentation",
+          "url": "https://github.com/nidor1998/s3ls-rs"
+        }
+      ]
+    },
+    {
+      "id": "engine-identical-by-construction",
+      "statement": "Because s7cmd's ls compiles the same s3ls-rs crate version, the listing engine, its defaults, and its output formatters are identical to standalone s3ls by construction.",
+      "scope": "compatibility",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This is the source-established engine-transfer part of the inherited open question; it does not extend to the CLI surface or to unmeasured full runtime equivalence.",
+      "legacy_origins": [
+        "A13"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/nidor1998/s7cmd",
+          "commit": "d589df7",
+          "path": "Cargo.toml"
+        },
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/nidor1998/s7cmd",
+          "commit": "d589df7",
+          "path": "src/ls_bin/mod.rs",
+          "lines": "15-88"
+        }
+      ]
+    },
+    {
+      "id": "cli-surface-omits-auto-complete-shell",
+      "statement": "s7cmd's ls CLI surface matches the s3ls flag set except that s7cmd deliberately hides each subcommand's inherited --auto-complete-shell in favor of one top-level flag; the committed ls --help receipt lacks it while standalone s3ls exposes it.",
+      "scope": "compatibility",
+      "status": "supported",
+      "disposition": "contradicted",
+      "qualification": "This contradicts the inherited byte-identical / no-divergence wording flagged as an overclaim in review; the divergence is a CLI-surface difference, not an engine difference.",
+      "legacy_origins": [
+        "META-7",
+        "A13"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/nidor1998/s7cmd",
+          "commit": "d589df7",
+          "path": "src/cli.rs",
+          "lines": "400-449"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/_build",
+          "artifact": "../receipts/smoke/_build/help-and-version.txt"
+        },
+        {
+          "kind": "documentation",
+          "url": "https://github.com/nidor1998/s3ls-rs"
+        }
+      ]
+    },
+    {
+      "id": "runtime-equivalence-is-inferred",
+      "statement": "Full runtime equivalence between s7cmd ls and standalone s3ls beyond the shared crate and the two known divergences is inferred from the dependency pin, not established by a side-by-side comparative run.",
+      "scope": "compatibility",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "Standalone s3ls was not run side-by-side; equivalence beyond the shared crate is an inference from the dependency pin, not a measured result.",
+      "legacy_origins": [
+        "A13"
+      ],
+      "evidence": [
+        {
+          "kind": "none",
+          "reason": "Standalone s3ls was not run side-by-side to confirm behavioral identity."
+        }
+      ]
+    },
+    {
+      "id": "process-wrapper-drops-exit-helper",
+      "statement": "s7cmd's ls_bin wrapper drops upstream s3ls-rs's load_config_exit_if_err helper (which called std::process::exit), so a bad Ls config inside a batch-run script does not kill the whole batch.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This is the second of the two known CLI/process divergences from a stock s3ls-rs consumer.",
+      "legacy_origins": [
+        "A13"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/nidor1998/s7cmd",
+          "commit": "d589df7",
+          "path": "src/ls_bin/mod.rs",
+          "lines": "1-12"
+        }
+      ]
+    },
+    {
+      "id": "builds-from-own-dockerfile",
+      "statement": "The committed _build receipt records a binary that self-reports s7cmd 1.5.0 for the aarch64-unknown-linux-gnu target, with its full ls --help option surface captured.",
+      "scope": "runtime",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "The inherited testability row was unknown. The receipt records only the resulting binary's self-report and help output; that this binary was built from s7cmd's own Dockerfile at the pinned SHA (arm64, native) is recorded in research/report.md section 7, not in a committed build log. No upstream image channel was confirmed (Docker Hub 404; GHCR unenumerable) per claim no-container-image-found-check-incomplete.",
+      "legacy_origins": [
+        "META-7",
+        "A5"
+      ],
+      "evidence": [
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/_build",
+          "artifact": "../receipts/smoke/_build/help-and-version.txt"
+        },
+        {
+          "kind": "documentation",
+          "path": "../research/report.md"
+        }
+      ]
+    },
+    {
+      "id": "smoke-modes-all-pass",
+      "statement": "All twelve exercised s7cmd ls smoke mode/scope runs against noaa-normals-pds exited zero and the verifier returned PASS.",
+      "scope": "correctness",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "PASS means normalized output matched the manifest for each exercised scope and is recorded in each run's verify.md; the exit-zero facet is recorded in each run's receipt.md. These are anonymous single-run groundwork facts, not benchmark results; the full mode-and-tunable inventory is claim modes-and-tunables-inventoried.",
+      "legacy_origins": [
+        "META-7",
+        "A5",
+        "A10"
+      ],
+      "evidence": [
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/recursive-tsv/full",
+          "artifact": "../receipts/smoke/recursive-tsv/full/verify.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/recursive-tsv/normals-monthly-1991-2020",
+          "artifact": "../receipts/smoke/recursive-tsv/normals-monthly-1991-2020/verify.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/recursive-tsv/normals-annualseasonal-1981-2010-access",
+          "artifact": "../receipts/smoke/recursive-tsv/normals-annualseasonal-1981-2010-access/verify.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/recursive-tsv/normals-hourly",
+          "artifact": "../receipts/smoke/recursive-tsv/normals-hourly/verify.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/recursive-tsv-nosort/normals-hourly",
+          "artifact": "../receipts/smoke/recursive-tsv-nosort/normals-hourly/verify.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/recursive-aligned/normals-hourly",
+          "artifact": "../receipts/smoke/recursive-aligned/normals-hourly/verify.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/recursive-json/normals-hourly",
+          "artifact": "../receipts/smoke/recursive-json/normals-hourly/verify.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/recursive-one/normals-hourly",
+          "artifact": "../receipts/smoke/recursive-one/normals-hourly/verify.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/all-versions/normals-hourly",
+          "artifact": "../receipts/smoke/all-versions/normals-hourly/verify.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/max-depth/root",
+          "artifact": "../receipts/smoke/max-depth/root/verify.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/shallow-tsv/normals-hourly",
+          "artifact": "../receipts/smoke/shallow-tsv/normals-hourly/verify.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/shallow-tsv/root",
+          "artifact": "../receipts/smoke/shallow-tsv/root/verify.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/recursive-tsv/full",
+          "artifact": "../receipts/smoke/recursive-tsv/full/receipt.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/recursive-tsv/normals-monthly-1991-2020",
+          "artifact": "../receipts/smoke/recursive-tsv/normals-monthly-1991-2020/receipt.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/recursive-tsv/normals-annualseasonal-1981-2010-access",
+          "artifact": "../receipts/smoke/recursive-tsv/normals-annualseasonal-1981-2010-access/receipt.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/recursive-tsv/normals-hourly",
+          "artifact": "../receipts/smoke/recursive-tsv/normals-hourly/receipt.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/recursive-tsv-nosort/normals-hourly",
+          "artifact": "../receipts/smoke/recursive-tsv-nosort/normals-hourly/receipt.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/recursive-aligned/normals-hourly",
+          "artifact": "../receipts/smoke/recursive-aligned/normals-hourly/receipt.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/recursive-json/normals-hourly",
+          "artifact": "../receipts/smoke/recursive-json/normals-hourly/receipt.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/recursive-one/normals-hourly",
+          "artifact": "../receipts/smoke/recursive-one/normals-hourly/receipt.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/all-versions/normals-hourly",
+          "artifact": "../receipts/smoke/all-versions/normals-hourly/receipt.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/max-depth/root",
+          "artifact": "../receipts/smoke/max-depth/root/receipt.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/shallow-tsv/normals-hourly",
+          "artifact": "../receipts/smoke/shallow-tsv/normals-hourly/receipt.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/shallow-tsv/root",
+          "artifact": "../receipts/smoke/shallow-tsv/root/receipt.md"
+        }
+      ]
+    },
+    {
+      "id": "modes-and-tunables-inventoried",
+      "statement": "The full s7cmd ls surface was inventoried, resolving the inherited empty modes/tunables table: four output formatters (aligned, TSV, one-line, NDJSON); the recursive, shallow-delimiter, all-versions, max-depth, and bucket-listing modes; and the concurrency, fan-out-depth, queue-size, sort-threshold, max-keys, rate-limit, retry, and timeout tunables. The twelve smoke runs exercised the mode surface, while the tunable sweeps are deferred to the benchmark phase.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "corrected",
+      "qualification": "The inherited modes/tunables table was empty; this inventories the surface from the committed --help capture and the pinned engine config without sweeping the tunables, which is benchmark-phase work.",
+      "legacy_origins": [
+        "A10"
+      ],
+      "evidence": [
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/_build",
+          "artifact": "../receipts/smoke/_build/help-and-version.txt"
+        },
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/nidor1998/s3ls-rs",
+          "commit": "bf42067",
+          "path": "config/args/mod.rs",
+          "lines": "23-29,501-560"
+        }
+      ]
+    },
+    {
+      "id": "s7cmd-is-sole-benchmark-subject",
+      "statement": "Per the owner's 2026-07-17 decision, s7cmd is the s3ls-rs family's sole benchmark representative; standalone s3ls-rs is not separately benchmarked and s7cmd's results generalize to the crate, subject to the CLI-surface divergences that do not touch the listing engine.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This is the study owner's 2026-07-17 scope decision, recorded in research/tool-page.md; the generalization it rests on is the =1.0.3 dependency pin established by claim ls-is-s3ls-rs-crate. The reconciliation record marks the inherited row unaddressed and routed to the orchestrator; the settled owner decision is recorded on the frozen tool page.",
+      "legacy_origins": [
+        "META-6",
+        "A14"
+      ],
+      "evidence": [
+        {
+          "kind": "documentation",
+          "path": "../research/tool-page.md"
+        }
+      ]
+    },
+    {
+      "id": "upstream-health",
+      "statement": "Upstream is active and self-described as functionally complete: created 2026-03-27, last pushed 2026-07-11, v1.5.0 tagged 2026-07-11, 221 commits, zero open issues and PRs, eight stars, zero forks, not archived, maintained with monthly dependency bumps.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "These are third-party GitHub API and README figures captured 2026-07-17.",
+      "legacy_origins": [
+        "PROSE-6"
+      ],
+      "evidence": [
+        {
+          "kind": "documentation",
+          "url": "https://github.com/nidor1998/s7cmd"
+        }
+      ]
+    },
+    {
+      "id": "fully-ai-generated",
+      "statement": "The project states that all s7cmd, s3ls-rs, s3util-rs, and s3rm-rs source, tests, and docs are AI-generated (Claude Code) under human review with a stated 96%-plus test-coverage policy, with s3sync alone the human-written reference.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Flagged as unusual provenance worth the study owner's attention given this study's own do-not-trust-unverified-prose premise, though the source read during groundwork was coherent and well-tested.",
+      "legacy_origins": [
+        "PROSE-2"
+      ],
+      "evidence": [
+        {
+          "kind": "documentation",
+          "url": "https://github.com/nidor1998/s7cmd"
+        }
+      ]
+    },
+    {
+      "id": "no-container-image-found-check-incomplete",
+      "statement": "No upstream container-image channel was found (Docker Hub returned 404), but the check is incomplete: GitHub Packages and GHCR could not be enumerated, so this is not a confirmed universal negative; the smoke image was built from s7cmd's own Dockerfile instead.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "corrected",
+      "qualification": "This softens the inherited categorical no-image-published-anywhere wording: GHCR returned 403 for a missing read:packages scope and an anonymous GHCR token was denied, so that channel remains unverified. research/report.md records the Docker Hub 404 and the GHCR 403/denied-token probes.",
+      "legacy_origins": [
+        "PROSE-3"
+      ],
+      "evidence": [
+        {
+          "kind": "documentation",
+          "path": "../research/report.md"
+        }
+      ]
+    },
+    {
+      "id": "api-calls-is-page-fetch-count",
+      "statement": "The engine's api_calls counter is an AtomicU64 incremented once immediately before each fetch_page call in both the sequential and parallel paths, so it counts logical page-fetch operations, not wire-level S3 HTTP requests; because the client uses the AWS SDK standard retry mode (up to ten attempts by default), one counted page fetch can correspond to more than one chargeable HTTP request.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "corrected",
+      "qualification": "This corrects an inherited framing of api_calls as a request count; establishing an exact wire-level request count needs SDK tracing or an external counter and is handed to the study's Phase 2 replay instrument.",
+      "legacy_origins": [
+        "PROSE-1"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/nidor1998/s3ls-rs",
+          "commit": "bf42067",
+          "path": "src/storage/s3/mod.rs",
+          "lines": "466,604"
+        },
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/nidor1998/s3ls-rs",
+          "commit": "bf42067",
+          "path": "src/storage/s3/client_builder.rs",
+          "lines": "154-160"
+        },
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/nidor1998/s3ls-rs",
+          "commit": "bf42067",
+          "path": "src/pipeline.rs",
+          "lines": "109-112"
+        }
+      ]
+    },
+    {
+      "id": "full-bucket-took-204-page-fetches",
+      "statement": "The full-bucket recursive smoke run recorded 204 counted page fetches against an approximately 149-page sequential floor (148,917 keys divided by 1000 max_keys).",
+      "scope": "runtime",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "This is a page-fetch count from one anonymous smoke run, not a wire-level request count or a benchmark result. The excess over the sequential floor reflects the engine's delimiter-discovery pages mixing objects and prefixes on top of the leaf drain, the source-established shape (claim flat-bucket-collapses-to-sequential; anchor cited below), not a receipt-recorded cause.",
+      "legacy_origins": [
+        "PROSE-1"
+      ],
+      "evidence": [
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/recursive-tsv/full",
+          "artifact": "../receipts/smoke/recursive-tsv/full/receipt.md"
+        },
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/nidor1998/s3ls-rs",
+          "commit": "bf42067",
+          "path": "src/storage/s3/mod.rs",
+          "lines": "590-674"
+        }
+      ]
+    },
+    {
+      "id": "page-fetch-counts-track-prefix-shape",
+      "statement": "Counted page fetches vary with prefix scope across individual smoke runs: a depth-3 leaf prefix of 9,839 keys recorded 10 page fetches, a shallower prefix of 15,625 keys recorded 19, and the shallow and --max-depth 1 root listings each recorded exactly one API call.",
+      "scope": "runtime",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "These are page-fetch counts from individual anonymous smoke runs, not benchmark measurements. That the counts track leaf-versus-branch prefix shape is the source-established drain behavior (claim flat-bucket-collapses-to-sequential), not a measured cross-run result.",
+      "legacy_origins": [
+        "PROSE-1"
+      ],
+      "evidence": [
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/recursive-tsv/normals-annualseasonal-1981-2010-access",
+          "artifact": "../receipts/smoke/recursive-tsv/normals-annualseasonal-1981-2010-access/receipt.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/recursive-tsv/normals-monthly-1991-2020",
+          "artifact": "../receipts/smoke/recursive-tsv/normals-monthly-1991-2020/receipt.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/shallow-tsv/root",
+          "artifact": "../receipts/smoke/shallow-tsv/root/receipt.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/max-depth/root",
+          "artifact": "../receipts/smoke/max-depth/root/receipt.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/recursive-tsv/normals-annualseasonal-1981-2010-access",
+          "artifact": "../receipts/smoke/recursive-tsv/normals-annualseasonal-1981-2010-access/verify.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/recursive-tsv/normals-annualseasonal-1981-2010-access",
+          "artifact": "../receipts/smoke/recursive-tsv/normals-annualseasonal-1981-2010-access/stderr.txt"
+        }
+      ]
+    },
+    {
+      "id": "all-versions-omits-is-latest-by-default",
+      "statement": "The -r --all-versions mode switches the API to ListObjectVersions and adds VersionId and possible delete-marker rows, but the IsLatest column is not part of the default output: it requires the separate --show-is-latest flag, and the committed all-versions smoke run invoked --all-versions --tsv without --show-is-latest.",
+      "scope": "output",
+      "status": "supported",
+      "disposition": "corrected",
+      "qualification": "This corrects an inherited overclaim about the all-versions output contract; --show-is-latest itself requires all_versions and the aligned formatter emits IS_LATEST only when that flag and a version id are present. The source anchors back the output contract; the run receipt records the invocation. The run's full TSV stdout (VersionId column, no IsLatest) is an external release-asset payload, not a committed artifact.",
+      "legacy_origins": [
+        "PROSE-4"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/nidor1998/s3ls-rs",
+          "commit": "bf42067",
+          "path": "src/storage/s3/mod.rs",
+          "lines": "156-246"
+        },
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/nidor1998/s3ls-rs",
+          "commit": "bf42067",
+          "path": "config/args/mod.rs",
+          "lines": "303-312"
+        },
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/nidor1998/s3ls-rs",
+          "commit": "bf42067",
+          "path": "display/columns.rs",
+          "lines": "163-172"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/all-versions/normals-hourly",
+          "artifact": "../receipts/smoke/all-versions/normals-hourly/receipt.md"
+        }
+      ]
+    },
+    {
+      "id": "versioned-bucket-fidelity-deferred",
+      "statement": "Versioned-bucket fidelity for all-versions mode is deferred, not settled: the smoke bucket has only single null-version objects, so multi-version collapse, delete-marker rows, and IsLatest semantics were never exercised, and the mode passed only because there was nothing to collapse.",
+      "scope": "correctness",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "EDGE_BUCKET=none for this pass; a version-aware manifest and a versioned reference bucket are prerequisites, handed to the benchmark phase.",
+      "legacy_origins": [
+        "PROSE-5"
+      ],
+      "evidence": [
+        {
+          "kind": "none",
+          "reason": "The smoke bucket has only single null-version objects and EDGE_BUCKET=none, so genuine multi-version collapse, delete markers, and IsLatest were never exercised."
+        }
+      ]
+    },
+    {
+      "id": "mode-splits-on-bucket-presence",
+      "statement": "The engine chooses between a bucket-listing path and an object-listing pipeline based on whether a target bucket is present.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The split is made in the s7cmd wrapper before dispatching to the s3ls-rs pipeline.",
+      "legacy_origins": [
+        "B1"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/nidor1998/s7cmd",
+          "commit": "d589df7",
+          "path": "src/ls_bin/mod.rs",
+          "lines": "34-49"
+        }
+      ]
+    },
+    {
+      "id": "pipeline-uses-bounded-mpsc",
+      "statement": "The engine connects its async stages with bounded tokio::mpsc channels whose object-listing-queue-size defaults to 200000.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The bound provides backpressure between the lister, aggregator, and display stages.",
+      "legacy_origins": [
+        "B2"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/nidor1998/s3ls-rs",
+          "commit": "bf42067",
+          "path": "src/pipeline.rs",
+          "lines": "57-65"
+        },
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/nidor1998/s3ls-rs",
+          "commit": "bf42067",
+          "path": "config/args/mod.rs",
+          "lines": "23-29,509-511"
+        }
+      ]
+    },
+    {
+      "id": "pipeline-awaits-terminal-stage-first",
+      "statement": "The pipeline awaits its stages terminal-first (display then aggregator then lister), with a writer error flipping the cancellation token and error precedence running display over aggregator over lister.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Cancellation is driven by the awaiting code and the lister rather than by the error-precedence ordering itself.",
+      "legacy_origins": [
+        "B3"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/nidor1998/s3ls-rs",
+          "commit": "bf42067",
+          "path": "src/pipeline.rs",
+          "lines": "68-107"
+        }
+      ]
+    },
+    {
+      "id": "parallel-decision-conditions",
+      "statement": "Parallel listing is used only when max_parallel_listings is greater than one, the delimiter is None (recursive mode), and the bucket is not Express One Zone unless the opt-in flag is set.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Non-recursive listings always set a slash delimiter and run sequentially regardless of the concurrency flag.",
+      "legacy_origins": [
+        "B4"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/nidor1998/s3ls-rs",
+          "commit": "bf42067",
+          "path": "src/storage/s3/mod.rs",
+          "lines": "409-413"
+        }
+      ]
+    },
+    {
+      "id": "sequential-path-loop",
+      "statement": "The sequential listing path checks cancellation, applies the rate limit, bumps the page counter, fetches a page, sends results, and loops while the response is truncated.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This is the single-level paginated path used for non-recursive and forced-sequential listings.",
+      "legacy_origins": [
+        "B5"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/nidor1998/s3ls-rs",
+          "commit": "bf42067",
+          "path": "src/storage/s3/mod.rs",
+          "lines": "443-555"
+        }
+      ]
+    },
+    {
+      "id": "parallel-path-algorithm",
+      "statement": "The parallel path uses a tokio JoinSet bounded by a semaphore sized to max_parallel_listings, paginates each prefix with a slash delimiter, drops the parent permit before spawning child tasks, and switches to sequential drain once recursion passes the fan-out depth.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Dropping the parent permit before spawning children is the deadlock-avoidance rule; the parent must not hold a worker permit while blocked on children that also need permits. The semaphore is sized to max_parallel_listings at :789 and constructed at :825.",
+      "legacy_origins": [
+        "B6"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/nidor1998/s3ls-rs",
+          "commit": "bf42067",
+          "path": "src/storage/s3/mod.rs",
+          "lines": "558-746,789,825"
+        }
+      ]
+    },
+    {
+      "id": "two-depth-concepts",
+      "statement": "Two distinct depth concepts exist: the internal fan-out depth max_parallel_listing_max_depth (default 2) versus the user-facing --max-depth content limit, which synthesizes a CommonPrefix entry at the boundary instead of recursing further.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The two are easy to conflate but govern fan-out versus output depth respectively.",
+      "legacy_origins": [
+        "B7"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/nidor1998/s3ls-rs",
+          "commit": "bf42067",
+          "path": "src/storage/s3/mod.rs",
+          "lines": "333-350,682-699"
+        }
+      ]
+    },
+    {
+      "id": "max-depth-one-emits-pre-one-call",
+      "statement": "At the bucket root, --max-depth 1 makes exactly one API call and emits PRE rows at the boundary without recursing.",
+      "scope": "runtime",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "This settles the boundary-synthesis path against the registered smoke bucket in a single anonymous run; the receipt records api_calls=1 and the stdout records the boundary PRE rows.",
+      "legacy_origins": [
+        "B7"
+      ],
+      "evidence": [
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/max-depth/root",
+          "artifact": "../receipts/smoke/max-depth/root/receipt.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/max-depth/root",
+          "artifact": "../receipts/smoke/max-depth/root/stdout.txt"
+        }
+      ]
+    },
+    {
+      "id": "express-one-zone-opt-in",
+      "statement": "Express One Zone buckets are detected via a --x-s3 name suffix, and parallel listing on them is rejected by default and requires an explicit opt-in flag.",
+      "scope": "compatibility",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This is source-confirmed but not runtime-tested; no Express One Zone bucket was available.",
+      "legacy_origins": [
+        "B8",
+        "B23"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/nidor1998/s3ls-rs",
+          "commit": "bf42067",
+          "path": "src/storage/s3/mod.rs",
+          "lines": "302-303,409-413"
+        }
+      ]
+    },
+    {
+      "id": "object-lister-deadlock-avoidance",
+      "statement": "The ObjectLister drops the fetcher channel's receive side before joining the storage task, a deliberate deadlock-avoidance pattern pinned by a named regression test.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The named test is lister_does_not_deadlock_when_cancelled_with_full_queue.",
+      "legacy_origins": [
+        "B9"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/nidor1998/s3ls-rs",
+          "commit": "bf42067",
+          "path": "src/lister.rs",
+          "lines": "70-74,161"
+        }
+      ]
+    },
+    {
+      "id": "aggregator-streams-or-buffers",
+      "statement": "The aggregator forwards each entry immediately in --no-sort streaming mode or buffers every entry and sorts before emitting in the default mode.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The pipeline only wires the aggregator config through; the aggregator itself implements streaming versus buffering.",
+      "legacy_origins": [
+        "B10"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/nidor1998/s3ls-rs",
+          "commit": "bf42067",
+          "path": "src/aggregate.rs",
+          "lines": "33-83"
+        }
+      ]
+    },
+    {
+      "id": "sort-uses-rayon-past-threshold",
+      "statement": "Default-mode sorting uses rayon par_sort_by only past --parallel-sort-threshold (default 1,000,000); below the threshold, the stdlib stable sort_by runs instead.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The threshold governs the stdlib-versus-rayon switch inside the aggregator.",
+      "legacy_origins": [
+        "B10",
+        "B24"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/nidor1998/s3ls-rs",
+          "commit": "bf42067",
+          "path": "src/aggregate.rs",
+          "lines": "144-168"
+        },
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/nidor1998/s3ls-rs",
+          "commit": "bf42067",
+          "path": "config/args/mod.rs",
+          "lines": "26,523"
+        }
+      ]
+    },
+    {
+      "id": "smoke-never-crossed-sort-threshold",
+      "statement": "The smoke run logged parallel_sort_threshold=1000000 with entry counts far below it, so the parallel-sort switch was never exercised.",
+      "scope": "runtime",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The 2,549-key run's stderr records the threshold and entry count directly; that staying below the threshold means the stdlib sort ran rather than rayon is the source-established branch (claim sort-uses-rayon-past-threshold), not a receipt-recorded fact, so this is supported rather than confirmed.",
+      "legacy_origins": [
+        "B10"
+      ],
+      "evidence": [
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/recursive-tsv/normals-hourly",
+          "artifact": "../receipts/smoke/recursive-tsv/normals-hourly/stderr.txt"
+        },
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/nidor1998/s3ls-rs",
+          "commit": "bf42067",
+          "path": "src/aggregate.rs",
+          "lines": "144-168"
+        }
+      ]
+    },
+    {
+      "id": "display-writer-picks-formatter-once",
+      "statement": "The DisplayWriter selects one of four formatters (aligned, TSV, one-line, or JSON) once and writes to a buffered stdout sink.",
+      "scope": "output",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Formatter selection happens once at pipeline construction.",
+      "legacy_origins": [
+        "B11"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/nidor1998/s3ls-rs",
+          "commit": "bf42067",
+          "path": "src/pipeline.rs",
+          "lines": "170-186"
+        }
+      ]
+    },
+    {
+      "id": "control-char-escaping",
+      "statement": "The text formatters escape control characters below 0x20 and 0x7f to hex, use a borrowed-Cow fast path when no escaping is needed, allow opt-out via --raw-output, and exempt JSON output, which uses serde.",
+      "scope": "output",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The smoke bucket's keys are plain ASCII, so the escaping path was not stressed at runtime. The JSON-exemption facet is anchored in display/json.rs, which formats via serde rather than the text escaper.",
+      "legacy_origins": [
+        "B12"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/nidor1998/s3ls-rs",
+          "commit": "bf42067",
+          "path": "display/mod.rs",
+          "lines": "78-108"
+        },
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/nidor1998/s3ls-rs",
+          "commit": "bf42067",
+          "path": "display/json.rs",
+          "lines": "15-66"
+        }
+      ]
+    },
+    {
+      "id": "bucket-listing-blocked-anonymously",
+      "statement": "s7cmd ls with no target calls ListBuckets; anonymously S3 returns a 307 redirect and the tool exits 1, so bucket listing is blocked rather than silently skipped.",
+      "scope": "runtime",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "This is a capability probe under CREDS=none: the receipt records exit 1, the stderr records the 307 redirect and that no-sign-request disabled credential loading and signing, and the wrapper's bucket-versus-object split selects ListBuckets when no target is given.",
+      "legacy_origins": [
+        "B13"
+      ],
+      "evidence": [
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/_capability/bucket-list",
+          "artifact": "../receipts/smoke/_capability/bucket-list/receipt.md"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/_capability/bucket-list",
+          "artifact": "../receipts/smoke/_capability/bucket-list/stderr.txt"
+        },
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/nidor1998/s7cmd",
+          "commit": "d589df7",
+          "path": "src/ls_bin/mod.rs",
+          "lines": "34-49"
+        }
+      ]
+    },
+    {
+      "id": "bucket-listing-internals-unread",
+      "statement": "The bucket-listing mode's max_buckets and use_max_buckets internals were not source-read.",
+      "scope": "mechanism",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "The anonymous probe established only that listing buckets is blocked; the internal parameters were not audited.",
+      "legacy_origins": [
+        "B13"
+      ],
+      "evidence": [
+        {
+          "kind": "none",
+          "reason": "The bucket-listing max_buckets and use_max_buckets internals were not source-read."
+        }
+      ]
+    },
+    {
+      "id": "bucket-listing-mode-parameters",
+      "statement": "The bucket-listing mode issues a single async list_buckets call and exposes a max_buckets default of 1000, a --bucket-name-prefix filter, and a use_max_buckets flag for custom endpoints.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This conserves the inherited dossier's bucket-listing-mode description at its base documentation strength; s7cmd groundwork did not independently source-read the max_buckets and use_max_buckets internals, which stays a separate observation (claim bucket-listing-internals-unread).",
+      "legacy_origins": [
+        "B13"
+      ],
+      "evidence": [
+        {
+          "kind": "documentation",
+          "path": "../research/tool-page.md"
+        }
+      ]
+    },
+    {
+      "id": "anti-stuck-token-bails",
+      "statement": "The engine guards pagination with two deliberate bails rather than looping forever: a truncated page with no continuation token, or the same continuation token returned twice in a row.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "These guards are source-confirmed but were not runtime-triggered against well-behaved real S3.",
+      "legacy_origins": [
+        "B14",
+        "B21"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/nidor1998/s3ls-rs",
+          "commit": "bf42067",
+          "path": "src/storage/s3/mod.rs",
+          "lines": "506-522,637-666"
+        }
+      ]
+    },
+    {
+      "id": "stuck-token-incompleteness-risk-untested",
+      "statement": "Whether the stuck-continuation-token bail yields an incomplete listing against a misbehaving endpoint is untested.",
+      "scope": "runtime",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "Real S3 did not produce a stuck token, so the bail path was never runtime-triggered.",
+      "legacy_origins": [
+        "B21"
+      ],
+      "evidence": [
+        {
+          "kind": "none",
+          "reason": "The bail path was not runtime-triggered; real S3 was well-behaved."
+        }
+      ]
+    },
+    {
+      "id": "retry-uses-sdk-standard",
+      "statement": "The engine implements no self-retry loop; it configures the AWS SDK standard retry mode with exponential backoff and jitter, defaulting to ten attempts and a 100 ms initial backoff, and leaves the SDK to own retries.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Stalled-stream protection is on by default and no operation, connect, or read timeout is set unless the user passes one.",
+      "legacy_origins": [
+        "B15"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/nidor1998/s3ls-rs",
+          "commit": "bf42067",
+          "path": "src/storage/s3/client_builder.rs",
+          "lines": "154-160"
+        }
+      ]
+    },
+    {
+      "id": "tunable-defaults",
+      "statement": "The engine's tunable defaults (max_parallel_listings 64, fan-out depth 2, queue size 200000, sort threshold 1,000,000, max_keys 1000, retry attempts 10, backoff 100 ms, and a rate-limit floor and refill of one-tenth) are declared and consumed as described and remain current at v1.0.3.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The constants are declared in the argument config and consumed in semaphore sizing and limiter construction.",
+      "legacy_origins": [
+        "B16"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/nidor1998/s3ls-rs",
+          "commit": "bf42067",
+          "path": "config/args/mod.rs",
+          "lines": "23-29,501-560"
+        },
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/nidor1998/s3ls-rs",
+          "commit": "bf42067",
+          "path": "src/storage/s3/mod.rs",
+          "lines": "789,791-806"
+        }
+      ]
+    },
+    {
+      "id": "default-mode-buffers-all",
+      "statement": "The default sorted mode buffers every entry into a vector before sorting or emitting anything, while --no-sort streams at near-constant memory.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This is the source-established memory behavior, distinct from any scale measurement.",
+      "legacy_origins": [
+        "B17"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/nidor1998/s3ls-rs",
+          "commit": "bf42067",
+          "path": "src/aggregate.rs",
+          "lines": "33-83"
+        }
+      ]
+    },
+    {
+      "id": "memory-scaling-unmeasured",
+      "statement": "The approximately linear RSS growth of the buffering mode and the documented roughly ninefold sorted-versus-nosort gap are not settled at smoke scale.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "The smoke peaks are consistent with the linear model but do not measure it; the gap appears only near the 1,000,000-key threshold and needs a scale campaign.",
+      "legacy_origins": [
+        "B17"
+      ],
+      "evidence": [
+        {
+          "kind": "none",
+          "reason": "No object-count scaling campaign was run; smoke peaks do not establish scaling or the sorted-versus-nosort gap."
+        }
+      ]
+    },
+    {
+      "id": "full-bucket-smoke-peak-rss",
+      "statement": "The full-bucket recursive smoke run sampled a 120.8 MB peak RSS at 148,917 keys.",
+      "scope": "performance",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "This is a main-process high-water mark from one anonymous smoke run, consistent with the linear model but not itself a measurement of it at scale, and not a benchmark result.",
+      "legacy_origins": [
+        "B17"
+      ],
+      "evidence": [
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/recursive-tsv/full",
+          "artifact": "../receipts/smoke/recursive-tsv/full/receipt.md"
+        }
+      ]
+    },
+    {
+      "id": "billion-object-regime-unaddressed",
+      "statement": "Whether whole-bucket listing of a billion-object bucket is the worst regime is unaddressed.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "This is a scale-only hypothesis that is not settleable at smoke.",
+      "legacy_origins": [
+        "B18"
+      ],
+      "evidence": [
+        {
+          "kind": "none",
+          "reason": "Scale-only hypothesis; not settleable at smoke."
+        }
+      ]
+    },
+    {
+      "id": "no-crash-resume",
+      "statement": "s7cmd ls is a one-shot CLI with no persisted state; SIGINT cancels the pipeline via a cancellation token and exits 0, and no resume or checkpoint of any kind exists.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This confirms the inherited no-crash-resume hypothesis from the wrapper source and the upstream Non-Goals.",
+      "legacy_origins": [
+        "B19"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/nidor1998/s7cmd",
+          "commit": "d589df7",
+          "path": "src/ls_bin/mod.rs",
+          "lines": "52-88"
+        },
+        {
+          "kind": "documentation",
+          "url": "https://github.com/nidor1998/s3ls-rs"
+        }
+      ]
+    },
+    {
+      "id": "flat-bucket-collapses-to-sequential",
+      "statement": "A bucket with no slash hierarchy discovers zero sub-prefixes in the delimiter-discovery loop and the whole listing collapses to sequential pagination; the default fan-out depth is 2.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The keyspace is divided by delimiter-based common-prefix recursion to a fixed depth, then a flat sequential drain of each leaf, not by bisection or cut-points.",
+      "legacy_origins": [
+        "B20"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/nidor1998/s3ls-rs",
+          "commit": "bf42067",
+          "path": "src/storage/s3/mod.rs",
+          "lines": "590-674"
+        },
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/nidor1998/s3ls-rs",
+          "commit": "bf42067",
+          "path": "config/args/mod.rs",
+          "lines": "24,506-507"
+        }
+      ]
+    },
+    {
+      "id": "flat-bucket-speedup-unmeasured",
+      "statement": "The reduced speedup a flat or shallow-layout bucket gets from fan-out is unmeasured at smoke scale.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "The registered smoke bucket is hierarchical; the flat-keyspace regression is handed to the benchmark phase.",
+      "legacy_origins": [
+        "B20"
+      ],
+      "evidence": [
+        {
+          "kind": "none",
+          "reason": "The smoke bucket is hierarchical; no flat-bucket run was performed."
+        }
+      ]
+    },
+    {
+      "id": "rate-limit-floor-and-refill",
+      "statement": "The --rate-limit-api control has a floor of 10 requests per second enforced by a CLI validator and refills at one-tenth of the configured value.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The floor is a CLI validator and the refill fraction is set at limiter construction.",
+      "legacy_origins": [
+        "B22"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/nidor1998/s3ls-rs",
+          "commit": "bf42067",
+          "path": "config/args/mod.rs",
+          "lines": "517-519"
+        },
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/nidor1998/s3ls-rs",
+          "commit": "bf42067",
+          "path": "src/storage/s3/mod.rs",
+          "lines": "791-806"
+        }
+      ]
+    },
+    {
+      "id": "sort-threshold-latency-step-unmeasured",
+      "statement": "The latency step at the 1,000,000-key sort threshold, where the stdlib sort gives way to rayon, is unmeasured.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "Smoke entry counts stayed far below the threshold, so the runtime step in the latency curve was never observed.",
+      "legacy_origins": [
+        "B24"
+      ],
+      "evidence": [
+        {
+          "kind": "none",
+          "reason": "Smoke entry counts stayed far below the 1,000,000-key threshold; the latency step was not measured."
+        }
+      ]
+    },
+    {
+      "id": "anchors-rechecked-at-v1-0-3",
+      "statement": "The inherited v1.0.1 line anchors were re-checked at v1.0.3; most land within a few lines, and drifted anchors such as the semaphore-size and max-depth-boundary sites were corrected.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "corrected",
+      "qualification": "This is an anchor-location correction carried into mechanism.md and research/report.md, not a behavior change.",
+      "legacy_origins": [
+        "B26"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/nidor1998/s3ls-rs",
+          "commit": "bf42067",
+          "path": "src/storage/s3/mod.rs",
+          "lines": "682,789"
+        }
+      ]
+    },
+    {
+      "id": "dependency-inventory",
+      "statement": "The engine's declared dependencies include tokio, aws-sdk-s3, rayon, leaky-bucket, fancy-regex, and zeroize among others.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The dependency set is read from the s3ls-rs manifest at v1.0.3.",
+      "legacy_origins": [
+        "B27"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/nidor1998/s3ls-rs",
+          "commit": "bf42067",
+          "path": "Cargo.toml"
+        }
+      ]
+    },
+    {
+      "id": "zeroize-on-drop-unverified",
+      "statement": "Whether access keys are zeroized on drop via the zeroize dependency was not source-verified.",
+      "scope": "mechanism",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "zeroize appears in the dependency inventory, but the on-drop behavior of access keys was not read.",
+      "legacy_origins": [
+        "B27"
+      ],
+      "evidence": [
+        {
+          "kind": "none",
+          "reason": "The zeroize-on-drop behavior of access keys was not source-verified."
+        }
+      ]
+    }
+  ]
+}

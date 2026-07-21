@@ -1,0 +1,60 @@
+HARNESS INCOMPATIBILITY — s3-fast-list binary Parquet vs `docker logs` capture
+==============================================================================
+Finding class: harness/tool interaction (NOT a tool defect, NOT a normalize.sh defect).
+
+WHAT
+  s3-fast-list emits its object listing ONLY as a binary Parquet file. The study
+  harness (harness/smoke-run.sh) captures container output with `docker logs`
+  (Docker's json-file log driver), then redacts/scans/hashes those bytes. run.sh
+  routes the Parquet to /dev/stdout so it reaches that capture.
+
+  `docker logs` is NOT binary-safe: bytes that are not valid UTF-8 are mangled
+  (invalid sequences become the 3-byte U+FFFD replacement char), so the captured
+  "stdout" is a corrupted, unparseable Parquet.
+
+EVIDENCE (this campaign, image s3-fast-list@sha256:6246ee51..., 2026-07-17)
+  full-bucket run:
+    - wrapper stdout payload (via docker logs): 7,994,739 bytes, magic PAR1, but
+      duckdb `parquet_schema()` -> "Invalid Error: don't know what type:".
+      non-ASCII bytes: 5,878,380.
+    - direct capture (`docker run > file`, intended to replicate the wrapper
+      argv; the direct command itself was not independently logged — see
+      direct-capture.provenance.md): 4,283,829 bytes, valid Parquet, 148,917
+      rows. non-ASCII bytes: 2,167,018.
+    - `cmp` differs at byte 8 (first non-UTF-8 byte in the Parquet header region).
+  hourly scoped run (2,549 keys): wrapper payload 127,252 bytes ALSO unparseable
+  ("don't know what type"); direct capture 69,439 bytes parses to 2,549 rows.
+  => corruption is universal, independent of payload size.
+
+CONSEQUENCE
+  The standard receipt->verify-listing.sh path cannot issue a verdict for this
+  tool: the verifier binds to run.meta's stdout payload (the corrupted one) and
+  refuses a substituted --input whose sha256 does not match the receipt. So every
+  wrapper receipt here is VALID for run facts (exit code, wall-clock, peak_rss,
+  cgroup_peak, auth=anonymous — all captured before/around the corrupted payload)
+  but its stdout payload is unusable for correctness.
+
+WHAT WAS DONE INSTEAD (labelled [OBS] manifest-diff in the report — NOT a
+verifier PASS; the standard verifier never returned a verdict)
+  Correctness checked out-of-band against direct captures (`docker run > file`),
+  normalized by tools/s3-fast-list/normalize.sh, diffed against the registry
+  manifest (sha256 c78a8273...) with the verifier's own canonicalization
+  (LC_ALL=C, tolower(etag), mtime tz-canonical). The direct-run command was not
+  independently logged; what is bound by evidence (payload sha256, row count,
+  byte size, valid-parse) and what is not recorded is stated in
+  direct-capture.provenance.md. Results:
+    full          : 148,917 == 148,917 ; 0 missing / 0 extra / 0 field-mismatch / 0 dup
+    normals-hourly/                          : 2,549  == 2,549  ; all clean
+    normals-monthly/1991-2020/               : 15,625 == 15,625 ; all clean
+    normals-annualseasonal/1981-2010/access/ : 9,839  == 9,839  ; all clean
+  Direct-capture Parquets + sha256 are staged under
+  <data>/receipts/s3-fast-list/direct-capture/ (see
+  _capability/direct-capture.sha256).
+
+FOR THE ORCHESTRATOR (harness gap to close before the benchmark phase)
+  A binary-safe output channel is required to benchmark this tool through the
+  shared harness. Options: (a) capture via `docker attach`/`docker cp` or a
+  bind-mounted output file instead of `docker logs`; (b) let a tool declare a
+  file output the wrapper collects. Both also enable the parallel `-k` hints mode
+  (which additionally needs an INPUT file mounted into the container). Neither is
+  improvised here — the harness is shared and owner-controlled.

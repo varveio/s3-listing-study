@@ -1,0 +1,30 @@
+{
+  "$schema": "../../../schemas/tool.schema.json",
+  "schema_version": 1,
+  "slug": "aws-cli",
+  "display_name": "AWS CLI",
+  "entry_type": "runnable_lister",
+  "upstream": { "repository": "https://github.com/aws/aws-cli" },
+  "language": "Python",
+  "license": "Apache-2.0",
+  "tested": {
+    "variant": "upstream",
+    "repository": "https://github.com/aws/aws-cli",
+    "version": {
+      "value": "2.36.1",
+      "provenance": { "kind": "run", "reference": "../receipts/smoke/_build/version-help.md" }
+    },
+    "revision": {
+      "value": "12d962d239b9fd0669951c4d27dc366388abba2d",
+      "provenance": { "kind": "documentation", "reference": "../research/report.md" }
+    }
+  },
+  "study": {
+    "groundwork_status": "complete",
+    "smoke_execution_status": "ran",
+    "verification_status": "passed",
+    "auth_status": "anonymous",
+    "benchmark_eligibility": "planned"
+  },
+  "evidence_roots": ["../receipts/smoke"]
+}

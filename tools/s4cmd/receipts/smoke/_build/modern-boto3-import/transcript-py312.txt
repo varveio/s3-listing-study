@@ -1,0 +1,29 @@
+Unable to find image 'python:3.12-slim' locally
+3.12-slim: Pulling from library/python
+e11779a4584d: Pulling fs layer
+d8ee943bca38: Pulling fs layer
+ba2b6cc1d0cb: Pulling fs layer
+e11779a4584d: Download complete
+d8ee943bca38: Download complete
+c967e4758aa7: Download complete
+ba2b6cc1d0cb: Download complete
+d8ee943bca38: Pull complete
+159430a0bdce: Download complete
+e11779a4584d: Pull complete
+ba2b6cc1d0cb: Pull complete
+Digest: sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de
+Status: Downloaded newer image for python:3.12-slim
+=== versions ===
+Name: s4cmd
+Version: 2.1.0
+Name: botocore
+Version: 1.43.50
+Name: boto3
+Version: 1.43.50
+=== import + run ===
+IMPORT_OK
+import_exit=0
+s4cmd version 2.1.0
+version_exit=0
+=== vendored.requests? ===
+sh: 6: Bad substitution

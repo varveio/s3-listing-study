@@ -1,0 +1,608 @@
+{
+  "$schema": "../../../schemas/claims.schema.json",
+  "schema_version": 1,
+  "tool": "rclone",
+  "legacy_ledger": {
+    "source": "../research/tool-page.md",
+    "migration_map": "../research/claims-migration.md",
+    "expected_origins": [
+      "M1", "M2", "M3", "M4", "M5", "M6", "M7",
+      "T1", "T2", "T3", "T4", "T5", "T6", "T7",
+      "W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8",
+      "STR-1", "STR-2", "STR-3", "STR-4",
+      "ADD-1", "ADD-2", "ADD-3", "ADD-4", "ADD-5", "ADD-6",
+      "META-1", "PROSE-1", "PROSE-2", "PROSE-3"
+    ]
+  },
+  "claims": [
+    {
+      "id": "listing-is-first-class-subcommand",
+      "statement": "rclone exposes bucket listing as first-class ls* subcommands (lsjson, lsf, ls, lsl, lsd), not only as an internal step of sync.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "contradicted",
+      "qualification": "This contradicts the inherited framing that listing is merely an internal precursor to sync; the ls* commands are dedicated listing entry points.",
+      "legacy_origins": ["M1"],
+      "evidence": [
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/rclone/rclone","commit":"5bc93a2a7","path":"fs/operations/lsjson.go","lines":"248"}
+      ]
+    },
+    {
+      "id": "two-distinct-request-patterns",
+      "statement": "rclone's S3 backend has two distinct listing request patterns: a flat undelimited ListR and a per-directory hierarchical walk with Delimiter=/.",
+      "scope": "mechanism",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "Both patterns were run and traced on the wire at smoke scale.",
+      "legacy_origins": ["M2", "T1"],
+      "evidence": [
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/rclone/rclone","commit":"5bc93a2a7","path":"backend/s3/s3.go","lines":"2428-2432"},
+        {"kind":"run","receipt":"../receipts/smoke/recursive-fastlist"},
+        {"kind":"run","receipt":"../receipts/smoke/recursive-walk"},
+        {"kind":"run","receipt":"../receipts/smoke/_capability/debug"},
+        {"kind":"run","receipt":"../receipts/smoke/_capability/walk-debug"}
+      ]
+    },
+    {
+      "id": "mode-selector-is-not-fast-list",
+      "statement": "For the ls* listing commands a plain lsjson -R is already the flat ListR; the genuine per-directory walk must be forced with --disable ListR or --max-depth, and --fast-list does not select between the two.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "corrected",
+      "qualification": "walk.ListR, called directly by lsjson/lsf/ls/lsl, never consults ci.UseListR; the --fast-list gate lives in the separate walk.Walk entry point used by sync/copy. This corrects the inherited model that the default is a delimiter walk selected by --fast-list.",
+      "legacy_origins": ["M2", "T1", "ADD-5"],
+      "evidence": [
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/rclone/rclone","commit":"5bc93a2a7","path":"fs/operations/lsjson.go","lines":"248"},
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/rclone/rclone","commit":"5bc93a2a7","path":"fs/walk/walk.go","lines":"149-163"}
+      ]
+    },
+    {
+      "id": "forced-walk-under-disable-listr-traced",
+      "statement": "Forcing the walk with --disable ListR produces per-directory delimited listing chains. It was run as recursive-walk (PASS 9841/9841); a separate --dump headers probe (walk-debug) traced 13 ListObjectsV2 page requests, every one carrying delimiter=%2F, across four directory chains (the parent directory 1 page, access/ 10 continuation pages, archive/ 1, doc/ 1). The PASS run and the header trace are different executions.",
+      "scope": "mechanism",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "--disable ListR nils the ListR feature so walk.ListR falls back to the per-directory Walk.",
+      "legacy_origins": ["M2", "ADD-5"],
+      "evidence": [
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/rclone/rclone","commit":"5bc93a2a7","path":"fs/walk/walk.go","lines":"152-160"},
+        {"kind":"run","receipt":"../receipts/smoke/recursive-walk"},
+        {"kind":"run","receipt":"../receipts/smoke/_capability/walk-debug"}
+      ]
+    },
+    {
+      "id": "plain-recursive-r-is-flat-obs",
+      "statement": "Re-running a plain lsjson -R (no --fast-list) emitted zero delimiter= requests — a single undelimited chain — consistent with the source finding that a plain -R is already the flat ListR.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This is an ad-hoc side-by-side trace recorded in the recursive-hierarchical receipt's correction block, not a committed --dump headers receipt, so it corroborates rather than independently confirms the runtime shape.",
+      "legacy_origins": ["ADD-5"],
+      "evidence": [
+        {"kind":"observation","artifact":"../receipts/smoke/recursive-hierarchical/receipt.md"}
+      ]
+    },
+    {
+      "id": "flat-listr-is-serial-undelimited-chain",
+      "statement": "The flat ListR path issues a single undelimited ListObjectsV2 continuation chain, paged serially (list-type=2, max-keys=1000, chained by continuation-token).",
+      "scope": "mechanism",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "Traced on the wire and run as recursive-fastlist and lsf.",
+      "legacy_origins": ["M3", "T2"],
+      "evidence": [
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/rclone/rclone","commit":"5bc93a2a7","path":"backend/s3/s3.go","lines":"2428-2432"},
+        {"kind":"run","receipt":"../receipts/smoke/_capability/debug"},
+        {"kind":"run","receipt":"../receipts/smoke/recursive-fastlist"}
+      ]
+    },
+    {
+      "id": "fast-list-tradeoff-fewer-calls-more-memory",
+      "statement": "Per upstream documentation, --fast-list uses more memory but fewer transactions.",
+      "scope": "performance",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This is the documented design tradeoff, not a measured study result.",
+      "legacy_origins": ["M4"],
+      "evidence": [
+        {"kind":"documentation","url":"https://rclone.org/s3/"}
+      ]
+    },
+    {
+      "id": "s3-listr-streams-entries",
+      "statement": "At the source level the S3 ListR streams entries to the caller through list.NewHelper tranche flush rather than accumulating the whole object list; --fast-list's extra memory is the walker's dirMap of directory paths retained to synthesize parents.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "corrected",
+      "qualification": "This corrects the inherited 'nothing discarded until the listing finishes' framing at the source level and rebuts the W2 allegation that --fast-list holds the whole listing in RAM; whether memory stays bounded at scale is a separate unsettled question.",
+      "legacy_origins": ["M4", "W2"],
+      "evidence": [
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/rclone/rclone","commit":"5bc93a2a7","path":"backend/s3/s3.go","lines":"2745-2764"},
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/rclone/rclone","commit":"5bc93a2a7","path":"fs/walk/walk.go","lines":"256-346"}
+      ]
+    },
+    {
+      "id": "fast-list-memory-at-scale",
+      "statement": "The inherited allegation that --fast-list holds the whole listing in RAM and runs out of memory at roughly 100 million objects at the bucket root is not settled by smoke; whether --fast-list stays memory-bounded or hits an out-of-memory cliff on a deep or enormous keyspace is a scale question.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "Smoke peaked near 70 MB for 148,917 broad-shallow keys, a data point consistent with streaming, not a scale refutation. The streaming --fast-list listing path also differs from the v1.67-era sync path the OOM reports concern; see claim oom-exit-zero-report.",
+      "legacy_origins": ["M4", "W2"],
+      "evidence": [
+        {"kind":"none","reason":"No cgroup-capped, scaled, or deep-keyspace run has been performed; smoke cannot reach a memory cliff."}
+      ]
+    },
+    {
+      "id": "no-intra-prefix-keyspace-sharding",
+      "statement": "Neither request pattern shards the keyspace within a prefix; the only parallelism is the hierarchical walk fanning distinct directories across --checkers.",
+      "scope": "mechanism",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "Traced: the flat ListR is a single serial chain, and the walk's access/ directory paged serially in 10 continuation-token requests with no intra-directory sharding.",
+      "legacy_origins": ["M5", "W1"],
+      "evidence": [
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/rclone/rclone","commit":"5bc93a2a7","path":"fs/walk/walk.go","lines":"380,393"},
+        {"kind":"run","receipt":"../receipts/smoke/_capability/debug"},
+        {"kind":"run","receipt":"../receipts/smoke/_capability/walk-debug"}
+      ]
+    },
+    {
+      "id": "pagination-is-serial-within-prefix",
+      "statement": "Within any one prefix, the default ListObjectsV2 pagination is a serial cursor-chained loop: page N+1 requires page N's continuation token.",
+      "scope": "mechanism",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "Traced on the wire as a chained continuation-token sequence; the page loop stops when IsTruncated is false.",
+      "legacy_origins": ["M5"],
+      "evidence": [
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/rclone/rclone","commit":"5bc93a2a7","path":"backend/s3/s3.go","lines":"2472-2593"},
+        {"kind":"run","receipt":"../receipts/smoke/_capability/debug"}
+      ]
+    },
+    {
+      "id": "pagination-v1-serial-marker",
+      "statement": "The legacy ListObjects v1 path pages the same way, serially: each request carries the previous response's NextMarker or last returned key as the Marker.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Source-established; v1 was smoked for completeness but its serial marker chaining was not separately header-traced, so it is source-supported rather than receipt-confirmed.",
+      "legacy_origins": ["M5"],
+      "evidence": [
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/rclone/rclone","commit":"5bc93a2a7","path":"backend/s3/s3.go","lines":"2147-2162"}
+      ]
+    },
+    {
+      "id": "s3-pacer-is-error-driven",
+      "statement": "The S3 backend pacer keys entirely on error and retry state (LastError and ConsecutiveRetries), never on latency; on success it decays inter-request sleep and drops it to zero once the decayed value falls below minSleep.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "corrected",
+      "qualification": "This corrects the inherited 'AIMD on delay' characterization: the pacer reacts to explicit error signals, not response latency, and it uses the S3 calculator, not the Default calculator's floor-at-minSleep behavior.",
+      "legacy_origins": ["M6", "W8"],
+      "evidence": [
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/rclone/rclone","commit":"5bc93a2a7","path":"lib/pacer/pacers.go","lines":"220,233,270-294"}
+      ]
+    },
+    {
+      "id": "pacer-adapts-sleep-not-concurrency",
+      "statement": "The pacer adapts inter-request sleep (backoff), not concurrency; listing calls are serial regardless of pacer state.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "corrected",
+      "qualification": "This corrects the inherited claim that the pacer is an adaptive concurrency mechanism.",
+      "legacy_origins": ["M7"],
+      "evidence": [
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/rclone/rclone","commit":"5bc93a2a7","path":"lib/pacer/pacers.go","lines":"270-294"},
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/rclone/rclone","commit":"5bc93a2a7","path":"backend/s3/s3.go","lines":"2476"}
+      ]
+    },
+    {
+      "id": "checkers-bounds-walk-fanout",
+      "statement": "--checkers (default 8) bounds the concurrent-directory fan-out of the genuine hierarchical walk and is inert on the flat ListR.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "corrected",
+      "qualification": "The walk's per-directory fan-out is run-traced; --checkers is the chan listJob worker-pool width. This corrects the inherited 'shouldn't affect pure listing' claim for --checkers on the walk while leaving it true for the flat path.",
+      "legacy_origins": ["T3", "W1"],
+      "evidence": [
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/rclone/rclone","commit":"5bc93a2a7","path":"fs/walk/walk.go","lines":"380,393"},
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/rclone/rclone","commit":"5bc93a2a7","path":"fs/config.go","lines":"60-61"},
+        {"kind":"run","receipt":"../receipts/smoke/recursive-walk"},
+        {"kind":"run","receipt":"../receipts/smoke/_capability/walk-debug"}
+      ]
+    },
+    {
+      "id": "checkers-nondefault-timing-unsmoked",
+      "statement": "Whether a non-default --checkers count changes the genuine walk's wall-clock or request count is not settled by smoke.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "Only --checkers 4 (one non-default value) was run, and smoke produces no comparative timing; a checker sweep is a benchmark item.",
+      "legacy_origins": ["T3"],
+      "evidence": [
+        {"kind":"none","reason":"No --checkers sweep was run and smoke yields no comparative numbers."}
+      ]
+    },
+    {
+      "id": "transfers-irrelevant-to-listing",
+      "statement": "--transfers (default 4) governs transfer concurrency only and has no effect on listing.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Source-supported; corroborates the inherited expectation for --transfers.",
+      "legacy_origins": ["T3"],
+      "evidence": [
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/rclone/rclone","commit":"5bc93a2a7","path":"fs/config.go","lines":"65-66"}
+      ]
+    },
+    {
+      "id": "list-chunk-default-1000-observed",
+      "statement": "The default --s3-list-chunk page size (max-keys=1000) was observed on the wire for ListObjectsV2.",
+      "scope": "mechanism",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "Only the default value was exercised.",
+      "legacy_origins": ["T4"],
+      "evidence": [
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/rclone/rclone","commit":"5bc93a2a7","path":"backend/s3/s3.go","lines":"426-434"},
+        {"kind":"run","receipt":"../receipts/smoke/_capability/debug"}
+      ]
+    },
+    {
+      "id": "list-chunk-effect-unsmoked",
+      "statement": "The effect of a non-default --s3-list-chunk on request count or wall-clock is not settled by smoke.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "No non-default chunk value was run; AWS caps max-keys at 1000, so only values at or below it are meaningful.",
+      "legacy_origins": ["T4"],
+      "evidence": [
+        {"kind":"none","reason":"No non-default --s3-list-chunk value was run."}
+      ]
+    },
+    {
+      "id": "tpslimit-is-separate-token-bucket",
+      "statement": "--tpslimit and --tpslimit-burst form a separate token-bucket transactions-per-second limiter, distinct from the S3 backoff pacer, and --low-level-retries bounds retry attempts.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "corrected",
+      "qualification": "This clarifies the inherited grouping of these flags with the pacer; the token-bucket limiter and the S3 backoff pacer are different mechanisms.",
+      "legacy_origins": ["T5"],
+      "evidence": [
+        {"kind":"documentation","url":"https://rclone.org/docs/"}
+      ]
+    },
+    {
+      "id": "output-formats-lsf-lsjson-run",
+      "statement": "The lsf and lsjson structured output formats were exercised at smoke.",
+      "scope": "output",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "lsjson (JSON array) and lsf (delimited) were both run and verified.",
+      "legacy_origins": ["T6", "STR-3"],
+      "evidence": [
+        {"kind":"run","receipt":"../receipts/smoke/lsf"},
+        {"kind":"run","receipt":"../receipts/smoke/delimiter-shallow"}
+      ]
+    },
+    {
+      "id": "no-parquet-output",
+      "statement": "No rclone list command emits Parquet; listing output is JSON, delimited text, or CSV only.",
+      "scope": "output",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "A documented capability gap, not a behavioral defect.",
+      "legacy_origins": ["T6", "W7"],
+      "evidence": [
+        {"kind":"documentation","path":"../research/reconciliation.md"}
+      ]
+    },
+    {
+      "id": "constrained-memory-fastlist-run",
+      "statement": "A constrained-memory --fast-list run under a cgroup cap on a scaled bucket has not been performed.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "This is the scale failure-mode test the memory and exit-code hypotheses depend on; it is deferred to the benchmark phase.",
+      "legacy_origins": ["T7"],
+      "evidence": [
+        {"kind":"none","reason":"No cgroup-capped constrained-memory run was performed; it is deferred to the benchmark."}
+      ]
+    },
+    {
+      "id": "fastlist-smoke-peak-rss",
+      "statement": "The full-bucket fast-list smoke run sampled a 69.6 MB peak RSS for the container's main process while listing 148,917 keys.",
+      "scope": "performance",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "This is a main-process high-water mark from one smoke run, not a scale curve or benchmark result.",
+      "legacy_origins": ["W2"],
+      "evidence": [
+        {"kind":"run","receipt":"../receipts/smoke/recursive-fastlist","artifact":"../receipts/smoke/recursive-fastlist/run.meta"}
+      ]
+    },
+    {
+      "id": "list-cutoff-external-sort",
+      "statement": "v1.74.4 carries the v1.70 --list-cutoff fix: directory listings above the default 1,000,000-entry threshold are sorted on disk (external sort) via github.com/lanrat/extsort rather than in RAM.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This distinguishes the pinned version's listing memory behavior from the v1.67-era sync path the OOM reports concern.",
+      "legacy_origins": ["W2"],
+      "evidence": [
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/rclone/rclone","commit":"5bc93a2a7","path":"fs/config.go","lines":"281"},
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/rclone/rclone","commit":"5bc93a2a7","path":"fs/list/sorter.go","lines":"26"}
+      ]
+    },
+    {
+      "id": "oom-exit-zero-report",
+      "statement": "OOM-killed rclone runs have been reported to exit with status 0 — a silent failure reported as success.",
+      "scope": "runtime",
+      "status": "unverified",
+      "disposition": "corrected",
+      "qualification": "Sourced from two distinct GitHub issue records by the same reporter (#7966 and #7974) alleging exit 0 on the sync path in v1.67-era code, which the pinned v1.74.4 listing path postdates; only the citation provenance was corrected and the behavior is unsettled. The full record is owned by running.md, section The exit-0-on-OOM report and its caveats.",
+      "legacy_origins": ["W3"],
+      "evidence": [
+        {"kind":"none","reason":"Not reproduced: no OOM was induced under a memory cap this phase and every groundwork run exited 0 normally. Settling it needs a sync-shaped workload on a scaled bucket under a cgroup memory cap with a recorded exit code, and even then it speaks to v1.74.4, not the reporter's v1.67."}
+      ]
+    },
+    {
+      "id": "three-hour-stall-before-transfer",
+      "statement": "A reported stall of more than 3 hours before transfers begin at 100 million objects concerns the sync/copy pipeline, not a pure listing command.",
+      "scope": "runtime",
+      "status": "unverified",
+      "disposition": "corrected",
+      "qualification": "This reclassifies the inherited stall claim: the cited issue #5859 is an open, acknowledged-by-design feature request (start transfer of objects while paginating), not a bug report about listing.",
+      "legacy_origins": ["W4"],
+      "evidence": [
+        {"kind":"none","reason":"Timing-to-first-transfer at scale on the sync pipeline was not run and is not a pure-listing behavior."}
+      ]
+    },
+    {
+      "id": "seven-gb-rss-large-listings",
+      "statement": "A reported roughly 7 GB resident-memory figure on large listings is an at-scale RSS claim.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "Cited from the closed issue #2157; smoke RSS near 70 MB is not comparable and settles nothing at scale.",
+      "legacy_origins": ["W5"],
+      "evidence": [
+        {"kind":"none","reason":"No scaled RSS measurement was performed."}
+      ]
+    },
+    {
+      "id": "no-list-checkpoint-state-in-source",
+      "statement": "Source shows no checkpoint or cursor state in Fs.list, so an interrupted lsjson would restart enumeration from scratch (rclone's resume machinery is for transfers, not listing).",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This is a source-level observation, not a runtime test.",
+      "legacy_origins": ["W6"],
+      "evidence": [
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/rclone/rclone","commit":"5bc93a2a7","path":"backend/s3/s3.go","lines":"2419-2609"}
+      ]
+    },
+    {
+      "id": "list-crash-resume-run",
+      "statement": "Whether a killed listing actually restarts from zero with no crash-resume is not confirmed by a run.",
+      "scope": "runtime",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "The source observation is recorded in claim no-list-checkpoint-state-in-source; a positive answer needs the SIGKILL-and-resume protocol.",
+      "legacy_origins": ["W6"],
+      "evidence": [
+        {"kind":"none","reason":"No SIGKILL-and-resume run was performed."}
+      ]
+    },
+    {
+      "id": "upstream-star-count",
+      "statement": "Upstream rclone is a mature, widely adopted project, recorded at 58,380 GitHub stars on 2026-07-17.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Star count is time-varying; it is recorded as an adoption and maturity data point, not a study behavior. The 58,380 @ 2026-07-17 figure is frozen in research/reconciliation.md rather than read live.",
+      "legacy_origins": ["STR-1"],
+      "evidence": [
+        {"kind":"documentation","path":"../research/reconciliation.md"}
+      ]
+    },
+    {
+      "id": "broad-backend-support",
+      "statement": "rclone supports roughly 70 storage backends, of which S3 is one.",
+      "scope": "compatibility",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Context for the tool's scope; S3 listing is one backend among many.",
+      "legacy_origins": ["STR-2"],
+      "evidence": [
+        {"kind":"documentation","url":"https://rclone.org/"}
+      ]
+    },
+    {
+      "id": "pacer-exists-adaptive-backoff",
+      "statement": "rclone's S3 backend includes a genuine adaptive backoff pacer, a distinctive rate-control mechanism among listing tools.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The mechanism exists and is distinctive; its exact control law is stated in claim s3-pacer-is-error-driven, which corrects the inherited characterization.",
+      "legacy_origins": ["STR-4"],
+      "evidence": [
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/rclone/rclone","commit":"5bc93a2a7","path":"lib/pacer/pacers.go","lines":"220,233"}
+      ]
+    },
+    {
+      "id": "head-per-object-suppressed-at-smoke",
+      "statement": "Nine lsjson invocations passed --use-server-modtime --no-mimetype to suppress the per-object HEAD — the seven verifier-checked lsjson modes plus the two capability probes — and the seven verifier-checked runs each recorded fields=0.",
+      "scope": "runtime",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "The suppressed correct path is receipt-backed; the study never ran rclone the wrong way. The two capability probes carry the flags but are verifier-exempt, so fields=0 is recorded on the seven verified runs only.",
+      "legacy_origins": ["ADD-1"],
+      "evidence": [
+        {"kind":"run","receipt":"../receipts/smoke/recursive-fastlist"},
+        {"kind":"run","receipt":"../receipts/smoke/recursive-fastlist-monthly1991"},
+        {"kind":"run","receipt":"../receipts/smoke/recursive-fastlist-access"},
+        {"kind":"run","receipt":"../receipts/smoke/recursive-walk"},
+        {"kind":"run","receipt":"../receipts/smoke/recursive-hierarchical"},
+        {"kind":"run","receipt":"../receipts/smoke/delimiter-shallow"},
+        {"kind":"run","receipt":"../receipts/smoke/listv1"},
+        {"kind":"run","receipt":"../receipts/smoke/_capability/debug"},
+        {"kind":"run","receipt":"../receipts/smoke/_capability/walk-debug"}
+      ]
+    },
+    {
+      "id": "head-per-object-storm-mechanism",
+      "statement": "By default lsjson and lsl compute ModTime and MimeType, each of which does a HEAD per object, so a naive listing of this bucket would fire 148,917 HEADs on top of the LIST requests; proper listing must pass --use-server-modtime --no-mimetype.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The HEAD-storm magnitude is source-established across three functions and inferred; it was never run, so there is no receipt for the wrong way.",
+      "legacy_origins": ["ADD-1"],
+      "evidence": [
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/rclone/rclone","commit":"5bc93a2a7","path":"backend/s3/s3.go"},
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/rclone/rclone","commit":"5bc93a2a7","path":"fs/operations/lsjson.go","lines":"181-185"}
+      ]
+    },
+    {
+      "id": "anonymous-is-absence-of-credentials",
+      "statement": "rclone has no --no-sign-request flag; it installs aws.AnonymousCredentials when no keys are set and env_auth is false, and every smoke run executed under the wrapper's credential-starved environment (auth=anonymous).",
+      "scope": "runtime",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "Anonymity is the absence of credentials; the wrapper empties every AWS_* value and points credential/config files at a nonexistent path. Wire-level confirmation that no request carried an Authorization header is the separate claim anonymous-no-authorization-on-wire, established only by the two header-inspecting probes.",
+      "legacy_origins": ["ADD-2"],
+      "evidence": [
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/rclone/rclone","commit":"5bc93a2a7","path":"backend/s3/s3.go","lines":"1508-1511"},
+        {"kind":"run","receipt":"../receipts/smoke/recursive-fastlist"},
+        {"kind":"run","receipt":"../receipts/smoke/recursive-fastlist-monthly1991"},
+        {"kind":"run","receipt":"../receipts/smoke/recursive-fastlist-access"},
+        {"kind":"run","receipt":"../receipts/smoke/recursive-walk"},
+        {"kind":"run","receipt":"../receipts/smoke/recursive-hierarchical"},
+        {"kind":"run","receipt":"../receipts/smoke/delimiter-shallow"},
+        {"kind":"run","receipt":"../receipts/smoke/listv1"},
+        {"kind":"run","receipt":"../receipts/smoke/lsf"},
+        {"kind":"run","receipt":"../receipts/smoke/_capability/debug"},
+        {"kind":"run","receipt":"../receipts/smoke/_capability/walk-debug"}
+      ]
+    },
+    {
+      "id": "anonymous-no-authorization-on-wire",
+      "statement": "The two capability probes that inspect request headers (_capability/debug, _capability/walk-debug) confirmed no Authorization header on any request.",
+      "scope": "runtime",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "Only the two --dump headers probes inspect the wire; the ordinary mode receipts record credential starvation but not request headers.",
+      "legacy_origins": ["ADD-2"],
+      "evidence": [
+        {"kind":"run","receipt":"../receipts/smoke/_capability/debug"},
+        {"kind":"run","receipt":"../receipts/smoke/_capability/walk-debug"}
+      ]
+    },
+    {
+      "id": "storage-class-from-list-response",
+      "statement": "storage_class (lsjson's .Tier) comes straight from the ListObjectsV2 response with no per-object HEAD, and was verified equal to the manifest StorageClass on all 148,917 keys.",
+      "scope": "output",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "Confirmed on the full-bucket fast-list receipt with fields=0.",
+      "legacy_origins": ["ADD-3"],
+      "evidence": [
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/rclone/rclone","commit":"5bc93a2a7","path":"fs/operations/lsjson.go"},
+        {"kind":"run","receipt":"../receipts/smoke/recursive-fastlist"}
+      ]
+    },
+    {
+      "id": "legacy-v1-list-api-distinct",
+      "statement": "The legacy --s3-list-version 1 (ListObjects v1, Marker paging) is a distinct list API from the default ListObjectsV2; it was smoked PASS on 2,549 keys.",
+      "scope": "mechanism",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "The inherited tool page omitted this API; it is an additive finding.",
+      "legacy_origins": ["ADD-4"],
+      "evidence": [
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/rclone/rclone","commit":"5bc93a2a7","path":"backend/s3/s3.go","lines":"2147-2162"},
+        {"kind":"run","receipt":"../receipts/smoke/listv1"}
+      ]
+    },
+    {
+      "id": "v1-vs-v2-parity-unsmoked",
+      "statement": "Whether the legacy v1 and default v2 list APIs match in wall-clock and request count at scale is not settled by smoke; both completed identically on 2,549 keys, which is not a comparative measurement.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "A v1-vs-v2 parity sweep is a benchmark item; smoke produces no comparative numbers.",
+      "legacy_origins": ["ADD-4"],
+      "evidence": [
+        {"kind":"none","reason":"No v1-vs-v2 timing or request-count comparison was run; smoke yields no comparative numbers."}
+      ]
+    },
+    {
+      "id": "noaa-bucket-drift-event",
+      "statement": "During the 2026-07-17 session NOAA re-uploaded objects under normals-hourly/ and normals-monthly/ (their LastModified advanced to that day), and a harness re-list returned DRIFT — a third-party bucket event, not an rclone behavior.",
+      "scope": "runtime",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The genuine walk was re-verified on the still-un-drifted normals-annualseasonal/1981-2010/ scope; the mtime drift was flagged to the manifest owner. This is an event record, not a tool claim.",
+      "legacy_origins": ["ADD-6"],
+      "evidence": [
+        {"kind":"documentation","path":"../docs/running.md"}
+      ]
+    },
+    {
+      "id": "smoke-listing-correct-all-modes",
+      "statement": "At smoke scale every verifier-checked mode PASSed (0 duplicates, 0 missing, 0 extra, 0 field mismatches) and the full bucket re-listed byte-exact against the manifest of 148,917 keys.",
+      "scope": "correctness",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "For lsjson modes the verifier checked key, size, mtime, and storage_class (etag exempt by adapter policy); lsf checked key and size only. These are single-run groundwork facts, not benchmark results.",
+      "legacy_origins": ["PROSE-1"],
+      "evidence": [
+        {"kind":"run","receipt":"../receipts/smoke/recursive-fastlist"},
+        {"kind":"run","receipt":"../receipts/smoke/recursive-fastlist-monthly1991"},
+        {"kind":"run","receipt":"../receipts/smoke/recursive-fastlist-access"},
+        {"kind":"run","receipt":"../receipts/smoke/recursive-walk"},
+        {"kind":"run","receipt":"../receipts/smoke/recursive-hierarchical"},
+        {"kind":"run","receipt":"../receipts/smoke/delimiter-shallow"},
+        {"kind":"run","receipt":"../receipts/smoke/listv1"},
+        {"kind":"run","receipt":"../receipts/smoke/lsf"}
+      ]
+    },
+    {
+      "id": "install-is-trivial",
+      "statement": "rclone is trivial to install: upstream publishes ready-to-run multi-arch container images and prebuilt static binaries, and this study ran the pinned image with no local build.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "An ease-of-install judgment inherited from the tool page; the memory and exit-code questions still require a constrained-memory harness, conserved by claims constrained-memory-fastlist-run, fast-list-memory-at-scale, and oom-exit-zero-report.",
+      "legacy_origins": ["META-1"],
+      "evidence": [
+        {"kind":"documentation","url":"https://rclone.org/downloads/"}
+      ]
+    },
+    {
+      "id": "versions-api-unsmoked",
+      "statement": "The ListObjectVersions API (--s3-versions) was not smoked because the smoke bucket is unversioned.",
+      "scope": "runtime",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "A distinct request and output shape that no run exercised; it is deferred coverage, not a settled behavior.",
+      "legacy_origins": ["PROSE-2"],
+      "evidence": [
+        {"kind":"none","reason":"The smoke bucket is unversioned, so the versions API was never exercised."}
+      ]
+    },
+    {
+      "id": "ls-lsl-lsd-not-separately-timed",
+      "statement": "The ls, lsl, and lsd output-format commands issue the same S3 requests as lsjson and were not separately timed.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "They are output-format variants over the same request pattern; smoke did not run or time them separately, and smoke produces no comparative numbers regardless.",
+      "legacy_origins": ["PROSE-3"],
+      "evidence": [
+        {"kind":"none","reason":"ls/lsl/lsd were not run or separately timed; smoke yields no comparative numbers."}
+      ]
+    }
+  ]
+}

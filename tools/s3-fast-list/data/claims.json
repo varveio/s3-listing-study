@@ -1,0 +1,865 @@
+{
+  "$schema": "../../../schemas/claims.schema.json",
+  "schema_version": 1,
+  "tool": "s3-fast-list",
+  "legacy_ledger": {
+    "source": "../research/tool-page.md",
+    "migration_map": "../research/claims-migration.md",
+    "expected_origins": [
+      "M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8", "M9",
+      "M10", "M11", "M12", "M13", "M14", "M15", "M16", "M17",
+      "MODE-1", "MODE-2", "MODE-3", "MODE-4", "MODE-5", "MODE-6",
+      "MODE-7", "MODE-8", "NUMBER-1", "NUMBER-2", "NUMBER-3",
+      "NUMBER-4", "NUMBER-5", "NUMBER-6", "NUMBER-7", "W1", "W2",
+      "W3", "W4", "W5", "W6", "W7", "W8", "W9", "W10", "W11",
+      "PROSE-1", "PROSE-2", "PROSE-3", "PROSE-4", "PROSE-5", "PROSE-6"
+    ]
+  },
+  "claims": [
+    {
+      "id": "range-start-is-exclusive",
+      "statement": "Each noninitial range begins strictly after its start hint.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "corrected",
+      "qualification": "The legacy row described a half-open lower bound. ListObjectsV2 StartAfter is exclusive.",
+      "legacy_origins": ["M1"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/tasks_s3.rs","lines":"111-114"}]
+    },
+    {
+      "id": "range-end-is-exclusive",
+      "statement": "A range stops before inserting the first key greater than or equal to its end hint.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The upper boundary check runs before insertion.",
+      "legacy_origins": ["M1"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/tasks_s3.rs","lines":"261-269"}]
+    },
+    {
+      "id": "ranges-are-disjoint",
+      "statement": "Adjacent hinted ranges do not overlap.",
+      "scope": "correctness",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This source-level property does not imply complete coverage because boundary keys can be absent from both ranges.",
+      "legacy_origins": ["M1"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/tasks_s3.rs","lines":"111-114,261-269"}]
+    },
+    {
+      "id": "workspace-has-two-crates",
+      "statement": "The Cargo workspace builds the s3-fast-list and ks-tool crates.",
+      "scope": "structure",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "Both crates compiled in the receipted groundwork build.",
+      "legacy_origins": ["M2"],
+      "evidence": [
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"Cargo.toml"},
+        {"kind":"run","receipt":"../receipts/smoke/_build","artifact":"../receipts/smoke/_build/build-rust1.94-bookworm-OK.txt"}
+      ]
+    },
+    {
+      "id": "hint-count-creates-range-count",
+      "statement": "N sorted deduplicated hints create N plus one listing ranges.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This describes range construction, not complete boundary coverage.",
+      "legacy_origins": ["M3"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/data_map.rs","lines":"279-301"}]
+    },
+    {
+      "id": "hint-boundary-key-can-be-omitted",
+      "statement": "A key exactly equal to a range hint can be omitted by both adjacent ranges.",
+      "scope": "correctness",
+      "status": "supported",
+      "disposition": "contradicted",
+      "qualification": "This is source-derived and has not yet been reproduced in a run; it contradicts the inherited correctness-regardless-of-balance claim.",
+      "legacy_origins": ["M3"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/tasks_s3.rs","lines":"111-114,261-269"}]
+    },
+    {
+      "id": "hinted-correctness-run",
+      "statement": "Hinted listing preserves complete key coverage in a real run.",
+      "scope": "correctness",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "The hinted path was blocked because the smoke harness could not mount an input hints file.",
+      "legacy_origins": ["M3"],
+      "evidence": [{"kind":"none","reason":"No hinted listing run was possible with the frozen smoke harness."}]
+    },
+    {
+      "id": "no-hints-creates-one-range",
+      "statement": "Without a hints file, listing uses one keyspace range.",
+      "scope": "runtime",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Source establishes the one-range path. A separate debug capture is consistent with it, but that capture has no independently recorded invocation, image binding, or exit status and therefore does not confirm the runtime proposition.",
+      "legacy_origins": ["M4", "MODE-1"],
+      "evidence": [
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/main.rs","lines":"191-218"},
+        {"kind":"observation","artifact":"../receipts/smoke/_capability/debug-requestshape.stderr.txt"}
+      ]
+    },
+    {
+      "id": "concurrency-needs-multiple-ranges",
+      "statement": "The concurrency setting cannot fan out a no-hints listing because only one range exists.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The reactor can run no more tasks than the supplied range list contains.",
+      "legacy_origins": ["M4", "MODE-2"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/tasks_s3.rs","lines":"18-89"}]
+    },
+    {
+      "id": "listing-accumulates-before-dump",
+      "statement": "Listing accumulates object records in memory before writing output.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The data map is drained to Parquet only after listing completes.",
+      "legacy_origins": ["M4", "W1"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/data_map.rs","lines":"104-163,337-386"}]
+    },
+    {
+      "id": "memory-grows-with-bucket-size",
+      "statement": "Peak memory grows proportionally with listed object count.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "The mechanism suggests this relationship, but smoke peaks of 19 to 65 MB do not establish scaling.",
+      "legacy_origins": ["M4"],
+      "evidence": [{"kind":"none","reason":"No object-count scaling campaign has been run."}]
+    },
+    {
+      "id": "hints-have-three-input-sources",
+      "statement": "Hints can come from a prior keyspace file, S3 Inventory, or hand-written lines.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The input surfaces exist; the ks-tool algorithms were not independently audited.",
+      "legacy_origins": ["M5"],
+      "evidence": [{"kind":"documentation","url":"https://github.com/aws-samples/s3-fast-list"}]
+    },
+    {
+      "id": "ks-tool-input-generation-internals",
+      "statement": "The documented ks-tool split and inventory algorithms behave as described on real inputs.",
+      "scope": "runtime",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "The subcommands exist, but their internals were not read and neither mode was run.",
+      "legacy_origins": ["M5", "MODE-7"],
+      "evidence": [{"kind":"none","reason":"No source audit or run covers the ks-tool algorithms."}]
+    },
+    {
+      "id": "tokio-runtime-is-multithreaded",
+      "statement": "The program creates a custom multithreaded Tokio runtime.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The runtime worker count is configurable.",
+      "legacy_origins": ["M6"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/main.rs","lines":"28-30"}]
+    },
+    {
+      "id": "mode-task-counts",
+      "statement": "List mode joins three top-level tasks and Diff mode joins four.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The counts describe top-level task roles, not listing concurrency.",
+      "legacy_origins": ["M6", "MODE-6"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/main.rs","lines":"120-141,248-345"}]
+    },
+    {
+      "id": "barrier-synchronizes-task-start",
+      "statement": "A Tokio barrier synchronizes task start.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This is source-established and was not separately instrumented.",
+      "legacy_origins": ["M7"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/core.rs","lines":"455-461,509-511"}]
+    },
+    {
+      "id": "reactor-uses-task-vector",
+      "statement": "The range reactor manages a vector of tasks rather than a semaphore.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The implementation refills the task vector as ranges finish.",
+      "legacy_origins": ["M8"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/tasks_s3.rs","lines":"18-89"}]
+    },
+    {
+      "id": "concurrency-default-is-100",
+      "statement": "The default range concurrency is 100.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The setting limits active range tasks when enough ranges exist.",
+      "legacy_origins": ["M8", "MODE-2"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/main.rs","lines":"32-34"}]
+    },
+    {
+      "id": "page-timeout-is-five-seconds",
+      "statement": "Each next-page wait has a five-second timeout.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "A timeout participates in the application-level resume path.",
+      "legacy_origins": ["M9", "NUMBER-4"],
+      "evidence": [
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/core.rs","lines":"22"},
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/tasks_s3.rs","lines":"128-130"}
+      ]
+    },
+    {
+      "id": "page-loop-resumes-from-last-key",
+      "statement": "The per-range page loop can resume from the last seen key.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This resume state exists only within a running process.",
+      "legacy_origins": ["M9", "PROSE-4"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/tasks_s3.rs","lines":"91-136"}]
+    },
+    {
+      "id": "result-channel-is-unbounded",
+      "statement": "Lister tasks send results through an unbounded channel.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This establishes the absence of channel backpressure, not its scale effect.",
+      "legacy_origins": ["M9", "W2"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/main.rs","lines":"258"}]
+    },
+    {
+      "id": "error-threshold-is-hex-10",
+      "statement": "Error values below hexadecimal 10 are continuable and values at or above it are fatal.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The threshold is represented by an unsigned eight-bit error code.",
+      "legacy_origins": ["M9", "W6"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/error.rs","lines":"4-11,36-37"}]
+    },
+    {
+      "id": "fatal-slice-error-can-exit-zero",
+      "statement": "A fatal slice error can produce partial output and a zero process exit status.",
+      "scope": "correctness",
+      "status": "supported",
+      "disposition": "corrected",
+      "qualification": "This source-derived silent-incompleteness path has not yet been fault-injected in a run.",
+      "legacy_origins": ["M9"],
+      "evidence": [
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/tasks_s3.rs","lines":"95-104"},
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/data_map.rs","lines":"372-376"},
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/main.rs","lines":"346"}
+      ]
+    },
+    {
+      "id": "sdk-retry-policy",
+      "statement": "The SDK retry policy allows ten attempts with a thirty-second initial backoff.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This is one of two retry layers.",
+      "legacy_origins": ["M10", "NUMBER-4", "W5"],
+      "evidence": [
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/core.rs","lines":"30-31"},
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/core.rs","lines":"649-659"}
+      ]
+    },
+    {
+      "id": "application-retry-layer",
+      "statement": "The application adds a last-seen-key resume layer above SDK retries.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The interaction of the two layers under throttling remains untested.",
+      "legacy_origins": ["M10", "W5"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/tasks_s3.rs","lines":"91-106"}]
+    },
+    {
+      "id": "global-state-uses-atomics",
+      "statement": "Global state uses an atomic bitmap and an atomic quit flag.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Cancellation is cooperatively polled.",
+      "legacy_origins": ["M11"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/core.rs","lines":"485-544"}]
+    },
+    {
+      "id": "no-structured-cancellation-token",
+      "statement": "The program does not use a structured cancellation token.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This source fact does not establish shutdown latency.",
+      "legacy_origins": ["M11", "W3"],
+      "evidence": [
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/main.rs","lines":"242-246"},
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/core.rs","lines":"558-564"}
+      ]
+    },
+    {
+      "id": "three-error-counters",
+      "statement": "Global state tracks three atomic error counters that are not surfaced prominently.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The counters cover next-stream timeout, S3 client timeout, and generic S3 client error.",
+      "legacy_origins": ["M11"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/core.rs","lines":"490-492"}]
+    },
+    {
+      "id": "object-map-has-two-lock-levels",
+      "statement": "Object accumulation uses an outer read-write-locked map and inner mutex-protected maps.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This is the in-memory accumulation structure.",
+      "legacy_origins": ["M12"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/data_map.rs","lines":"18-56,173-243"}]
+    },
+    {
+      "id": "object-props-is-packed-and-aligned",
+      "statement": "ObjectProps uses fixed fields and eight-byte alignment.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Its fields total forty bytes under the represented layout.",
+      "legacy_origins": ["M13"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/core.rs","lines":"190-206"}]
+    },
+    {
+      "id": "etag-stored-as-md5-and-part-count",
+      "statement": "ETags are stored as a raw sixteen-byte MD5 value plus a multipart part count.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The in-memory representation is not the original quoted string.",
+      "legacy_origins": ["M14"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/core.rs","lines":"256-264,413-453"}]
+    },
+    {
+      "id": "unsupported-etag-format-panics",
+      "statement": "ETag conversion panics for formats outside hexadecimal MD5 with an optional part count.",
+      "scope": "compatibility",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The panic site exists, but no unusual real object was exercised.",
+      "legacy_origins": ["M14", "W4"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/core.rs","lines":"428-437"}]
+    },
+    {
+      "id": "unusual-etag-runtime-behavior",
+      "statement": "A real object with an unsupported ETag format crashes a listing run.",
+      "scope": "runtime",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "No edge-case bucket was available during groundwork.",
+      "legacy_origins": ["M14", "W4"],
+      "evidence": [{"kind":"none","reason":"EDGE_BUCKET was not configured."}]
+    },
+    {
+      "id": "diff-classifies-object-matches",
+      "statement": "Diff mode classifies duplicate, equal, mismatched, left-only, and right-only object states.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Diff mode itself was not run.",
+      "legacy_origins": ["M15"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/core.rs","lines":"324-410"}]
+    },
+    {
+      "id": "rhai-filter-application-points",
+      "statement": "Rhai filtering runs during matching in Diff mode and during output in List mode.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The filter was not exercised in smoke runs.",
+      "legacy_origins": ["M15"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/data_map.rs","lines":"104-163"}]
+    },
+    {
+      "id": "parquet-output-contract",
+      "statement": "The main output is a GZIP level 6 Parquet file containing key, size, modification time, ETag, and diff flag.",
+      "scope": "output",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The writer uses a one-hundred-MiB buffer.",
+      "legacy_origins": ["M16", "MODE-8", "NUMBER-5"],
+      "evidence": [
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/utils.rs","lines":"20-93"},
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/data_map.rs","lines":"104-108"}
+      ]
+    },
+    {
+      "id": "parquet-uses-dictionary-encoding",
+      "statement": "Produced Parquet files include PLAIN, RLE, and RLE_DICTIONARY encodings.",
+      "scope": "output",
+      "status": "supported",
+      "disposition": "corrected",
+      "qualification": "The PLAIN writer setting is a hint and does not disable dictionary encoding. The independent review records inspection of the direct payload metadata; that raw metadata output is not committed separately.",
+      "legacy_origins": ["M16"],
+      "evidence": [{"kind":"documentation","path":"../research/codex-review.md"}]
+    },
+    {
+      "id": "keyspace-csv-output-contract",
+      "statement": "The companion keyspace output is a BTreeMap-sorted CSV written through a ten-MiB buffer.",
+      "scope": "output",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The keyspace CSV is a distribution feed, not the object listing.",
+      "legacy_origins": ["M16", "MODE-8", "NUMBER-5"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/data_map.rs","lines":"78-101"}]
+    },
+    {
+      "id": "rhai-expression-allowlist",
+      "statement": "Rhai expressions are checked against an AST allowlist.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Only the documented source and target object fields are accepted.",
+      "legacy_origins": ["M17"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/core.rs","lines":"59-124"}]
+    },
+    {
+      "id": "rhai-resource-limits",
+      "statement": "Rhai is configured for at most two variables and map size two.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "These are static engine limits.",
+      "legacy_origins": ["M17", "NUMBER-6"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/core.rs","lines":"729-755"}]
+    },
+    {
+      "id": "hint-file-is-optional",
+      "statement": "The keyspace hints option is optional.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The serial no-hints path was run; the hinted path was not.",
+      "legacy_origins": ["MODE-1"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/main.rs","lines":"36-38"}]
+    },
+    {
+      "id": "hinted-mode-run",
+      "statement": "The hinted parallel mode runs correctly through the study harness.",
+      "scope": "runtime",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "The frozen harness has no input-file mount for a hints file.",
+      "legacy_origins": ["MODE-1"],
+      "evidence": [{"kind":"none","reason":"The required hints file could not be mounted."}]
+    },
+    {
+      "id": "thread-default-is-10",
+      "statement": "The default Tokio worker-thread count is ten.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The setting is independent from range concurrency.",
+      "legacy_origins": ["MODE-3"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/main.rs","lines":"28-30"}]
+    },
+    {
+      "id": "filter-exposes-two-object-maps",
+      "statement": "The filter surface exposes source and target maps with size and last-modified properties.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The option exists but was not exercised.",
+      "legacy_origins": ["MODE-4"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/core.rs","lines":"49-50"}]
+    },
+    {
+      "id": "custom-endpoint-forces-path-style",
+      "statement": "Supplying a custom endpoint enables path-style addressing.",
+      "scope": "compatibility",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "No custom endpoint was exercised.",
+      "legacy_origins": ["MODE-5", "W10"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/main.rs","lines":"146-147"}]
+    },
+    {
+      "id": "custom-endpoint-has-no-virtual-hosted-override",
+      "statement": "No option can select virtual-hosted addressing while a custom endpoint is set.",
+      "scope": "compatibility",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The force-path-style flag is enable-only, so it cannot negate the endpoint behavior.",
+      "legacy_origins": ["MODE-5", "W10"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/main.rs","lines":"52-54,146-147"}]
+    },
+    {
+      "id": "ks-tool-subcommands-exist",
+      "statement": "ks-tool provides split and inventory subcommands.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Existence is source-established; behavior is not run-established.",
+      "legacy_origins": ["M5", "MODE-7"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"ks-tool/src/main.rs","lines":"15-39"}]
+    },
+    {
+      "id": "no-alternate-listing-output",
+      "statement": "The tool has no alternate text or standard-output listing format.",
+      "scope": "output",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The smoke adapter routed the Parquet output file to standard output.",
+      "legacy_origins": ["MODE-8"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/utils.rs","lines":"20-93"}]
+    },
+    {
+      "id": "parquet-routed-to-stdout-at-smoke",
+      "statement": "Groundwork routed the Parquet output path to standard output.",
+      "scope": "runtime",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "Docker log capture corrupted the binary payload, so the standard verifier remained blocked.",
+      "legacy_origins": ["MODE-8"],
+      "evidence": [{"kind":"run","receipt":"../receipts/smoke/list/full","artifact":"../receipts/smoke/list/full/run.meta"}]
+    },
+    {
+      "id": "vendor-concurrency-ladder-is-published",
+      "statement": "Upstream publishes times of 8214, 924, 102, and 32 seconds at concurrency 1, 10, 100, and 1000 for a 100-million-object case on m6i.8xlarge.",
+      "scope": "performance",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This is a vendor self-report, not a study result.",
+      "legacy_origins": ["NUMBER-1"],
+      "evidence": [{"kind":"documentation","url":"https://github.com/aws-samples/s3-fast-list"}]
+    },
+    {
+      "id": "vendor-concurrency-ladder-reproduced",
+      "statement": "The published concurrency ladder reproduces on the study setup.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "The hinted parallel mode was blocked during smoke and no benchmark has run.",
+      "legacy_origins": ["NUMBER-1"],
+      "evidence": [{"kind":"none","reason":"No comparative or hinted-mode benchmark has run."}]
+    },
+    {
+      "id": "m6i-8xlarge-has-128-gib",
+      "statement": "The m6i.8xlarge instance type has 128 GiB of memory.",
+      "scope": "performance",
+      "status": "supported",
+      "disposition": "corrected",
+      "qualification": "The legacy row said 128 GB. The provider specification uses 128 GiB, and the memory figure comes from that specification rather than the upstream performance table.",
+      "legacy_origins": ["NUMBER-1"],
+      "evidence": [{"kind":"documentation","url":"https://aws.amazon.com/ec2/instance-types/m6i/"}]
+    },
+    {
+      "id": "object-props-size-is-40-bytes",
+      "statement": "ObjectProps occupies exactly forty bytes under its declared layout.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The field arithmetic and eight-byte alignment agree.",
+      "legacy_origins": ["NUMBER-2"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/core.rs","lines":"190-206"}]
+    },
+    {
+      "id": "object-props-100m-memory-estimate",
+      "statement": "ObjectProps alone requires approximately four GB for 100 million objects.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "This is arithmetic from the structure size, not an empirical peak-memory result.",
+      "legacy_origins": ["NUMBER-3"],
+      "evidence": [{"kind":"none","reason":"The estimate has not been measured at 100 million objects."}]
+    },
+    {
+      "id": "binary-etag-memory-saving",
+      "statement": "Binary MD5 ETag storage reduces ETag memory by approximately fifty percent.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "The inherited estimate was not measured.",
+      "legacy_origins": ["NUMBER-3"],
+      "evidence": [{"kind":"none","reason":"No controlled memory comparison was run."}]
+    },
+    {
+      "id": "ks-tool-split-reader-buffer",
+      "statement": "ks-tool split uses a one-hundred-MiB reader buffer.",
+      "scope": "mechanism",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "The split implementation was not independently read.",
+      "legacy_origins": ["NUMBER-5"],
+      "evidence": [{"kind":"none","reason":"The ks-tool split reader implementation was outside the completed source audit."}]
+    },
+    {
+      "id": "dependency-versions-are-unbounded-above",
+      "statement": "The workspace declares aws-sdk-s3 1.11, aws-config 1.1, and Hyper 0.14 without upper bounds and commits no Cargo lockfile.",
+      "scope": "compatibility",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The manifest records aws-sdk-s3 1.11.0 and aws-config 1.1.1; the ledger retains the coarser 1.11 and 1.1 version claims rather than inventing extra precision for Hyper.",
+      "legacy_origins": ["NUMBER-7", "W9"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"Cargo.toml"}]
+    },
+    {
+      "id": "oom-at-smaller-memory-limit",
+      "statement": "Unbounded accumulation causes an out-of-memory failure on a smaller runner.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "The accumulation mechanism exists, but the smoke corpus did not reach a memory cliff.",
+      "legacy_origins": ["W1"],
+      "evidence": [{"kind":"none","reason":"No memory-limit sweep or scale campaign has run."}]
+    },
+    {
+      "id": "unbounded-channel-worsens-high-concurrency-memory",
+      "statement": "The unbounded result channel increases peak memory at high range concurrency.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "Channel type is source-established; its measured effect is not.",
+      "legacy_origins": ["W2"],
+      "evidence": [{"kind":"none","reason":"The hinted concurrency path was not run."}]
+    },
+    {
+      "id": "ctrl-c-shutdown-is-sluggish",
+      "statement": "Cooperative cancellation produces sluggish Ctrl-C shutdown.",
+      "scope": "runtime",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "No signal-to-exit latency measurement exists.",
+      "legacy_origins": ["W3"],
+      "evidence": [{"kind":"none","reason":"Cancellation latency was not exercised."}]
+    },
+    {
+      "id": "none-code-and-key-count-can-panic",
+      "statement": "A missing service error code and a key-count mismatch can trigger panic paths.",
+      "scope": "compatibility",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "These located sites supplement the inherited panic surface.",
+      "legacy_origins": ["W4"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/tasks_s3.rs","lines":"172-174,254"}]
+    },
+    {
+      "id": "match-enum-panic-site",
+      "statement": "An out-of-range match-result value triggers a panic.",
+      "scope": "compatibility",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "The inherited panic site was not independently located.",
+      "legacy_origins": ["W4"],
+      "evidence": [{"kind":"none","reason":"The claimed source site was not found during reconciliation."}]
+    },
+    {
+      "id": "channel-send-panic-site",
+      "statement": "A channel-send failure triggers a panic.",
+      "scope": "compatibility",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "The inherited panic site was not independently located.",
+      "legacy_origins": ["W4"],
+      "evidence": [{"kind":"none","reason":"The claimed source site was not found during reconciliation."}]
+    },
+    {
+      "id": "retry-behavior-under-throttling",
+      "statement": "The interaction between the two retry layers is hard to reason about under throttling.",
+      "scope": "runtime",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "This preserves the inherited risk as unverified; no throttling or fault-injection run has been performed.",
+      "legacy_origins": ["W5"],
+      "evidence": [{"kind":"none","reason":"No throttling scenario was run."}]
+    },
+    {
+      "id": "error-threshold-misclassifies-errors",
+      "statement": "The hexadecimal-10 error threshold misclassifies unusual S3 errors.",
+      "scope": "runtime",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "The threshold exists, but no unusual error was injected.",
+      "legacy_origins": ["W6"],
+      "evidence": [{"kind":"none","reason":"No unusual S3 error case was run."}]
+    },
+    {
+      "id": "blocking-runtime-bridges-exist",
+      "statement": "The codebase uses block_in_place and block_on runtime bridges.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "No performance conclusion is attached to the source-level observation.",
+      "legacy_origins": ["W7"],
+      "evidence": [
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/core.rs","lines":"666"},
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/data_map.rs","lines":"61"},
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/stats.rs","lines":"42,52"}
+      ]
+    },
+    {
+      "id": "main-crate-has-one-unit-test",
+      "statement": "The s3-fast-list crate contains one unit test.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This statement is scoped to the main crate.",
+      "legacy_origins": ["W8"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/core.rs","lines":"821"}]
+    },
+    {
+      "id": "workspace-has-more-than-one-unit-test",
+      "statement": "The whole workspace contains more than one unit test because ks-tool adds four ARN tests.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "contradicted",
+      "qualification": "This narrows and corrects the inherited whole-codebase claim.",
+      "legacy_origins": ["W8"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"ks-tool/src/arn.rs","lines":"96,112,128,134"}]
+    },
+    {
+      "id": "rust-1-86-build-failure-observed",
+      "statement": "A captured build-log tail records rustc 1.86 dependency-resolution failure with exit 101.",
+      "scope": "compatibility",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The artifact lacks a full build-context binding, so it only partially settles the exact upstream-build claim.",
+      "legacy_origins": ["W9"],
+      "evidence": [{"kind":"observation","artifact":"../receipts/smoke/_build/build-rust1.86-FAIL.txt"}]
+    },
+    {
+      "id": "ctrl-c-output-can-be-inconsistent",
+      "statement": "The source warns that interruption during accumulation may produce inconsistent Parquet.",
+      "scope": "correctness",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This is a source warning, not an observed interrupted run.",
+      "legacy_origins": ["W11"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/data_map.rs","lines":"367-370"}]
+    },
+    {
+      "id": "ctrl-c-output-behavior-run",
+      "statement": "Interrupting a real listing produces incomplete or inconsistent Parquet without a completeness indicator.",
+      "scope": "correctness",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "No interruption run has been performed.",
+      "legacy_origins": ["W11"],
+      "evidence": [{"kind":"none","reason":"Kill behavior was not exercised during groundwork."}]
+    },
+    {
+      "id": "no-client-side-rate-limiting",
+      "statement": "The tested variant has no client-side rate limiter beyond the AWS SDK retry policy.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This is source-supported and does not establish behavior under throttling.",
+      "legacy_origins": ["PROSE-1"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"s3-fast-list/src/core.rs","lines":"649-659"}]
+    },
+    {
+      "id": "express-one-zone-roadmap-only",
+      "statement": "Express One Zone support is described only as roadmap work.",
+      "scope": "compatibility",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This is an upstream documentation claim, not a runtime observation.",
+      "legacy_origins": ["PROSE-2"],
+      "evidence": [{"kind":"documentation","url":"https://github.com/aws-samples/s3-fast-list"}]
+    },
+    {
+      "id": "small-prefix-high-fixed-overhead",
+      "statement": "Small prefixes are the worst regime because fixed overhead dominates.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "No comparative timing campaign has tested this inherited performance hypothesis.",
+      "legacy_origins": ["PROSE-3"],
+      "evidence": [{"kind":"none","reason":"Smoke is not a comparative benchmark and no prefix-size sweep has run."}]
+    },
+    {
+      "id": "tool-non-ascii-key-fidelity",
+      "statement": "The tool preserves non-ASCII object keys through listing and Parquet output.",
+      "scope": "correctness",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "EDGE_BUCKET was not configured. Plain ASCII keys in the smoke corpus do not establish non-ASCII fidelity.",
+      "legacy_origins": ["PROSE-5"],
+      "evidence": [{"kind":"none","reason":"No edge-key bucket was configured or run."}]
+    },
+    {
+      "id": "tool-control-character-key-fidelity",
+      "statement": "The tool preserves tab- and newline-containing object keys through listing and Parquet output.",
+      "scope": "correctness",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "EDGE_BUCKET was not configured. The tool's native Parquet behavior for these keys was not exercised independently of the study adapter.",
+      "legacy_origins": ["PROSE-5"],
+      "evidence": [{"kind":"none","reason":"No control-character key corpus was configured or run."}]
+    },
+    {
+      "id": "adapter-tab-newline-key-loss",
+      "statement": "The current tab-delimited normalizer cannot faithfully represent object keys containing a literal tab or newline.",
+      "scope": "correctness",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This is a limitation of the study adapter, not an established defect in the tool's native Parquet output. No smoke key contained either byte.",
+      "legacy_origins": ["PROSE-5"],
+      "evidence": [
+        {"kind":"documentation","path":"../adapter/normalize.sh"},
+        {"kind":"documentation","path":"../docs/running.md"}
+      ]
+    },
+    {
+      "id": "limited-direct-capture-manifest-match",
+      "statement": "The four limited direct-capture comparisons matched the manifest for their scopes, including 148,917 objects for the full bucket and clean results for three scoped prefixes.",
+      "scope": "correctness",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This is an observation, not a certified verifier PASS. The exact direct-run commands, exit codes, timing, image binding, and verification transcript were not recorded. The separately receipted harness timing and memory facts are not execution-bound to these direct captures.",
+      "legacy_origins": ["PROSE-6"],
+      "evidence": [
+        {"kind":"observation","artifact":"../receipts/smoke/_capability/direct-capture.provenance.md"},
+        {"kind":"observation","artifact":"../receipts/smoke/list/full/receipt.md"},
+        {"kind":"observation","artifact":"../receipts/smoke/list/hourly/receipt.md"},
+        {"kind":"observation","artifact":"../receipts/smoke/list/monthly-1991-2020/receipt.md"},
+        {"kind":"observation","artifact":"../receipts/smoke/list/annualseasonal-1981-2010-access/receipt.md"}
+      ]
+    },
+    {
+      "id": "full-bucket-smoke-exited-zero",
+      "statement": "The receipted full-bucket harness smoke process exited with status zero.",
+      "scope": "runtime",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "This is a fact about one smoke execution, not a correctness verdict or benchmark result, and it is not execution-bound to the later direct-capture comparison.",
+      "legacy_origins": ["PROSE-6"],
+      "evidence": [{"kind":"run","receipt":"../receipts/smoke/list/full","artifact":"../receipts/smoke/list/full/receipt.md"}]
+    },
+    {
+      "id": "full-bucket-smoke-wall-clock",
+      "statement": "The receipted full-bucket harness smoke container lifetime was 20.062 seconds.",
+      "scope": "runtime",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "This is a fact about one smoke execution, not a comparative benchmark, and it is not execution-bound to the later direct-capture comparison.",
+      "legacy_origins": ["PROSE-6"],
+      "evidence": [{"kind":"run","receipt":"../receipts/smoke/list/full","artifact":"../receipts/smoke/list/full/receipt.md"}]
+    },
+    {
+      "id": "full-bucket-smoke-peak-rss",
+      "statement": "The receipted full-bucket harness smoke sampled a 65.1 MB peak RSS for the container's main process.",
+      "scope": "performance",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "This is a main-process high-water mark from one smoke execution, not a comparative benchmark, and it is not execution-bound to the later direct-capture comparison.",
+      "legacy_origins": ["PROSE-6"],
+      "evidence": [{"kind":"run","receipt":"../receipts/smoke/list/full","artifact":"../receipts/smoke/list/full/receipt.md"}]
+    }
+  ]
+}

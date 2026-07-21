@@ -1,0 +1,876 @@
+{
+  "$schema": "../../../schemas/claims.schema.json",
+  "schema_version": 1,
+  "tool": "aws-cli",
+  "legacy_ledger": {
+    "source": "../research/tool-page.md",
+    "migration_map": "../research/claims-migration.md",
+    "expected_origins": [
+      "MD1",
+      "MD2",
+      "MD3",
+      "MD4",
+      "MD5",
+      "MD6",
+      "M1",
+      "M2",
+      "M3",
+      "M4",
+      "M5",
+      "M6",
+      "M7",
+      "T1",
+      "T2",
+      "T3",
+      "T4",
+      "T5",
+      "T6",
+      "T7",
+      "T8",
+      "N1",
+      "N2",
+      "N3",
+      "S1",
+      "S2",
+      "S3",
+      "W1",
+      "W2",
+      "W3",
+      "W4",
+      "W5",
+      "PROSE-1",
+      "PROSE-2"
+    ]
+  },
+  "claims": [
+    {
+      "id": "upstream-repo-is-canonical",
+      "statement": "aws-cli's upstream is the canonical AWS-owned repository github.com/aws/aws-cli.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Repository identity; the canonical machine-readable record is data/tool.json.",
+      "legacy_origins": [
+        "MD1"
+      ],
+      "evidence": [
+        {
+          "kind": "documentation",
+          "url": "https://github.com/aws/aws-cli"
+        }
+      ]
+    },
+    {
+      "id": "language-is-python",
+      "statement": "aws-cli is implemented in Python.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The pinned checkout declares requires-python >= 3.9.",
+      "legacy_origins": [
+        "MD2"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/aws/aws-cli",
+          "commit": "12d962d2",
+          "path": "pyproject.toml"
+        }
+      ]
+    },
+    {
+      "id": "license-is-apache-2",
+      "statement": "aws-cli is distributed under the Apache-2.0 license.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "License text is in the pinned checkout.",
+      "legacy_origins": [
+        "MD3"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/aws/aws-cli",
+          "commit": "12d962d2",
+          "path": "LICENSE.txt"
+        }
+      ]
+    },
+    {
+      "id": "tested-version-is-2-36-1",
+      "statement": "The smoke image reports aws-cli version 2.36.1 in-container.",
+      "scope": "structure",
+      "status": "confirmed",
+      "disposition": "corrected",
+      "qualification": "The inherited page recorded the version as unknown; the receipted in-container self-report is 2.36.1.",
+      "legacy_origins": [
+        "MD4"
+      ],
+      "evidence": [
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/_build/version-help.md"
+        }
+      ]
+    },
+    {
+      "id": "tested-commit-is-pinned",
+      "statement": "The reviewed source is tag 2.36.1 at commit 12d962d239b9fd0669951c4d27dc366388abba2d.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "corrected",
+      "qualification": "The commit SHA is recorded in the groundwork report; the version-help receipt records the version string but not the git SHA.",
+      "legacy_origins": [
+        "MD4"
+      ],
+      "evidence": [
+        {
+          "kind": "documentation",
+          "path": "../research/report.md"
+        }
+      ]
+    },
+    {
+      "id": "tier-assignment-is-study-design",
+      "statement": "aws-cli is assigned study Tier 1 as a primary comparison baseline.",
+      "scope": "operability",
+      "status": "unverifiable",
+      "disposition": "retained",
+      "qualification": "A study-design tier assignment is not a testable property of the tool.",
+      "legacy_origins": [
+        "MD5"
+      ],
+      "evidence": [
+        {
+          "kind": "none",
+          "reason": "Tier assignment is a study-design decision, not a testable observation about aws-cli."
+        }
+      ]
+    },
+    {
+      "id": "runs-unmodified-in-official-image",
+      "statement": "aws-cli's testability is trivial: no patch or fork was required to exercise it.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Supported by its running unmodified in the official upstream image during groundwork, anonymously and with no self-authored Dockerfile. The receipted run confirms unmodified official-image execution; the testability judgment itself is supported by that observation, not independently confirmed.",
+      "legacy_origins": [
+        "MD6"
+      ],
+      "evidence": [
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/_build/version-help.md"
+        }
+      ]
+    },
+    {
+      "id": "both-surfaces-paginate-listobjectsv2",
+      "statement": "Both s3 ls and s3api list-objects-v2 list through a paginated ListObjectsV2 continuation-token chain.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Source establishes both paginator paths; a single --debug probe of one s3api invocation observed the chain. Every-mode verifier PASS proves completeness, not concurrency.",
+      "legacy_origins": [
+        "M1"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/aws/aws-cli",
+          "commit": "12d962d2",
+          "path": "awscli/customizations/s3/subcommands.py",
+          "lines": "852,917"
+        },
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/aws/aws-cli",
+          "commit": "12d962d2",
+          "path": "awscli/clidriver.py",
+          "lines": "1105-1107"
+        },
+        {
+          "kind": "observation",
+          "artifact": "../receipts/smoke/_capability/debug-hourly.stderr.raw.gz"
+        }
+      ]
+    },
+    {
+      "id": "serial-single-thread-one-probe",
+      "statement": "A --debug probe of one s3api list-objects-v2 invocation issued serial single-MainThread requests, each carrying the prior response's continuation token.",
+      "scope": "runtime",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This is one s3api invocation, not an exhaustive per-surface or per-flag sweep.",
+      "legacy_origins": [
+        "M2"
+      ],
+      "evidence": [
+        {
+          "kind": "observation",
+          "artifact": "../receipts/smoke/_capability/debug-hourly.stderr.raw.gz"
+        }
+      ]
+    },
+    {
+      "id": "s3-ls-serial-by-source",
+      "statement": "s3 ls consumes its paginator in a synchronous loop with no threads, so it lists serially.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Source-established; the s3 ls surface was not separately debug-probed.",
+      "legacy_origins": [
+        "M2"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/aws/aws-cli",
+          "commit": "12d962d2",
+          "path": "awscli/customizations/s3/subcommands.py",
+          "lines": "852,865"
+        }
+      ]
+    },
+    {
+      "id": "server-caps-page-at-1000",
+      "statement": "S3 caps a single listing page at 1,000 keys, the server-side MaxKeys limit.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The 1,000-key cap is the S3 ListObjectsV2 server limit; --page-size is an upper bound the server will not exceed.",
+      "legacy_origins": [
+        "M3"
+      ],
+      "evidence": [
+        {
+          "kind": "documentation",
+          "url": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html"
+        }
+      ]
+    },
+    {
+      "id": "probe-observed-three-requests-for-2549-keys",
+      "statement": "The --debug probe issued three ListObjectsV2 requests to list a 2,549-key prefix, consistent with the 1,000-key page cap.",
+      "scope": "runtime",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "One observed probe; the request count ceil(2549/1000)=3 is consistent with the server cap but is not an exhaustive page-size sweep.",
+      "legacy_origins": [
+        "M3"
+      ],
+      "evidence": [
+        {
+          "kind": "observation",
+          "artifact": "../receipts/smoke/_capability/debug-hourly.stderr.raw.gz"
+        }
+      ]
+    },
+    {
+      "id": "no-listing-parallelism",
+      "statement": "Neither s3 ls nor s3api has any listing parallelism; the only concurrency in aws-cli is in transfers such as s3 cp and s3 sync.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Source-primary across both surfaces; the single-thread observation covers one probed s3api invocation, and 'regardless of flags' is a source extrapolation, not an exhaustive smoke.",
+      "legacy_origins": [
+        "M4",
+        "W1",
+        "T8"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/aws/aws-cli",
+          "commit": "12d962d2",
+          "path": "awscli/customizations/s3/subcommands.py",
+          "lines": "852-889"
+        },
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/aws/aws-cli",
+          "commit": "12d962d2",
+          "path": "awscli/clidriver.py",
+          "lines": "1105-1107"
+        },
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/aws/aws-cli",
+          "commit": "12d962d2",
+          "path": "awscli/customizations/s3/factory.py"
+        },
+        {
+          "kind": "observation",
+          "artifact": "../receipts/smoke/_capability/debug-hourly.stderr.raw.gz"
+        }
+      ]
+    },
+    {
+      "id": "billion-objects-serial-roundtrips",
+      "statement": "Listing one billion objects would require roughly one million sequential ListObjectsV2 round trips.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "Arithmetic extrapolation from the 1,000-key page cap; no billion-object run was performed.",
+      "legacy_origins": [
+        "M5",
+        "N3"
+      ],
+      "evidence": [
+        {
+          "kind": "none",
+          "reason": "The arithmetic derivation was not run at scale."
+        }
+      ]
+    },
+    {
+      "id": "resume-token-not-persisted",
+      "statement": "aws-cli emits the continuation token only to stdout and persists nothing, so a killed unbounded run leaves no token to resume from.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Source-established; killing a process cannot demonstrate the absence of saved state, so this half was not probed.",
+      "legacy_origins": [
+        "M6",
+        "W3"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/aws/aws-cli",
+          "commit": "12d962d2",
+          "path": "awscli/customizations/paginate.py",
+          "lines": "155-165"
+        }
+      ]
+    },
+    {
+      "id": "resume-primitive-round-trips",
+      "statement": "The --max-items to NextToken to --starting-token resume primitive round-tripped cleanly, returning 1,000 plus 1,549 = 2,549 distinct keys with zero duplicates and no gap.",
+      "scope": "runtime",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "This is deliberate chunked continuation; no process was killed, so it is not a crash-resume test.",
+      "legacy_origins": [
+        "M6",
+        "T4",
+        "W3"
+      ],
+      "evidence": [
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/_capability/resume-README.md"
+        }
+      ]
+    },
+    {
+      "id": "docs-redirect-to-inventory",
+      "statement": "AWS guidance redirects large-scale listing away from a live LIST toward S3 Inventory.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The Inventory redirect is an AWS re:Post knowledge-base article; the CLI user guide covers only the narrower pagination-knob point.",
+      "legacy_origins": [
+        "M7",
+        "W5"
+      ],
+      "evidence": [
+        {
+          "kind": "documentation",
+          "url": "https://repost.aws/knowledge-center/s3-troubleshoot-unresponsive-list"
+        }
+      ]
+    },
+    {
+      "id": "s3-ls-recursive-full-run",
+      "statement": "s3 ls --recursive listed the full 148,917-key bucket and passed the verifier.",
+      "scope": "runtime",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "One anonymous smoke run against noaa-normals-pds; a completeness verdict, not a benchmark result.",
+      "legacy_origins": [
+        "T1"
+      ],
+      "evidence": [
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/s3-ls-recursive"
+        }
+      ]
+    },
+    {
+      "id": "s3api-v2-text-full-run",
+      "statement": "s3api list-objects-v2 --output text listed the full 148,917-key bucket and three scoped prefixes, all verifier PASS.",
+      "scope": "runtime",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "Anonymous smoke runs against noaa-normals-pds; completeness verdicts, not benchmark results.",
+      "legacy_origins": [
+        "T2"
+      ],
+      "evidence": [
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/s3api-v2-text"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/s3api-v2-text-hourly"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/s3api-v2-text-monthly1991"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/s3api-v2-text-annualaccess"
+        }
+      ]
+    },
+    {
+      "id": "page-size-maps-to-maxkeys",
+      "statement": "The --page-size flag maps to PaginationConfig.PageSize and is sent to the server as MaxKeys.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "It is an upper bound on keys per request, not a guarantee, and the server caps it at 1,000.",
+      "legacy_origins": [
+        "T3"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/aws/aws-cli",
+          "commit": "12d962d2",
+          "path": "awscli/customizations/paginate.py",
+          "lines": "182-193"
+        },
+        {
+          "kind": "documentation",
+          "url": "https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html"
+        }
+      ]
+    },
+    {
+      "id": "page-size-ceiling-sweep",
+      "statement": "Whether page sizes above 1,000 have any effect, and whether sub-1,000 sizes only add requests, was not tested.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "No page-size sweep was run; flagged for the benchmark phase.",
+      "legacy_origins": [
+        "T3"
+      ],
+      "evidence": [
+        {
+          "kind": "none",
+          "reason": "No above-1000 or sub-1000 page-size sweep was run."
+        }
+      ]
+    },
+    {
+      "id": "s3api-has-resume-flags",
+      "statement": "s3api exposes --starting-token and --max-items, while s3 ls exposes neither and offers only --page-size.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Source establishes the flag tables and the s3 ls help capture confirms its narrower argument set.",
+      "legacy_origins": [
+        "T4"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/aws/aws-cli",
+          "commit": "12d962d2",
+          "path": "awscli/customizations/paginate.py",
+          "lines": "155-165,195-205"
+        },
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/aws/aws-cli",
+          "commit": "12d962d2",
+          "path": "awscli/customizations/s3/subcommands.py",
+          "lines": "790-805"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/_build/help-s3_ls.txt"
+        }
+      ]
+    },
+    {
+      "id": "output-formats-include-yaml-stream-and-off",
+      "statement": "The --output flag supports json (default), text, table, yaml, yaml-stream, and off, more members than the inherited json/text/table/yaml list.",
+      "scope": "output",
+      "status": "supported",
+      "disposition": "corrected",
+      "qualification": "The inherited list omitted yaml-stream and off.",
+      "legacy_origins": [
+        "T5",
+        "W4"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/aws/aws-cli",
+          "commit": "12d962d2",
+          "path": "awscli/data/cli.json",
+          "lines": "23-33"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/_build/help-s3api_list-objects-v2.txt"
+        }
+      ]
+    },
+    {
+      "id": "anonymous-via-no-sign-request",
+      "statement": "Every smoke mode ran anonymously via --no-sign-request, a global flag that sets botocore signature to UNSIGNED for both s3 and s3api, with zero credentials supplied.",
+      "scope": "operability",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "A --debug probe observed auth_type 'none' and zero Authorization headers; the flag applies to both surfaces.",
+      "legacy_origins": [
+        "T6"
+      ],
+      "evidence": [
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/s3api-v2-text"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/s3api-v2-text-hourly"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/s3api-v2-text-monthly1991"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/s3api-v2-text-annualaccess"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/s3api-v2-json-hourly"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/s3api-v2-yamlstream-hourly"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/s3api-v1-text-hourly"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/s3api-versions-text-hourly"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/s3-ls-recursive"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/s3-ls-delimiter"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/s3api-v2-delimiter"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/fanout/shard-monthly"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/fanout/shard-daily"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/fanout/shard-annualseasonal"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/fanout/remainder"
+        },
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/aws/aws-cli",
+          "commit": "12d962d2",
+          "path": "awscli/customizations/globalargs.py",
+          "lines": "99-104"
+        },
+        {
+          "kind": "observation",
+          "artifact": "../receipts/smoke/_capability/debug-hourly.stderr.raw.gz"
+        }
+      ]
+    },
+    {
+      "id": "timeout-and-retry-defaults",
+      "statement": "aws-cli's --cli-read-timeout and --cli-connect-timeout default to 60 seconds, and botocore retries default to max_attempts=3.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Defaults read from source; a value of 0 disables the timeout, and aws-cli itself adds no --max-attempts flag.",
+      "legacy_origins": [
+        "T7"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/aws/aws-cli",
+          "commit": "12d962d2",
+          "path": "awscli/customizations/globalargs.py",
+          "lines": "117"
+        },
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/aws/aws-cli",
+          "commit": "12d962d2",
+          "path": "awscli/data/cli.json",
+          "lines": "61"
+        },
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/aws/aws-cli",
+          "commit": "12d962d2",
+          "path": "awscli/botocore/configprovider.py",
+          "lines": "153"
+        }
+      ]
+    },
+    {
+      "id": "timeout-retry-behavior-under-fault",
+      "statement": "How the timeouts and retries behave under fault injection was not tested.",
+      "scope": "runtime",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "No fault injection was performed at smoke; deferred to the replay-server phase.",
+      "legacy_origins": [
+        "T7"
+      ],
+      "evidence": [
+        {
+          "kind": "none",
+          "reason": "No fault injection was performed at smoke."
+        }
+      ]
+    },
+    {
+      "id": "fanout-union-reconstructs-bucket",
+      "statement": "A manual four-shard-plus-remainder prefix fan-out reconstructed the full 148,917-key bucket with zero cross-shard duplicates and zero missing or extra keys.",
+      "scope": "runtime",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "Fan-out is caller-owned; aws-cli has no internal listing concurrency, and the shards were run serially.",
+      "legacy_origins": [
+        "T8",
+        "W1"
+      ],
+      "evidence": [
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/fanout/union",
+          "artifact": "../receipts/smoke/fanout/union/union-verify.md"
+        }
+      ]
+    },
+    {
+      "id": "throughput-15m-1110s-secondhand",
+      "statement": "A secondhand survey reports aws-cli listing 15 million objects in 1110 seconds, about 13,500 objects per second, from the PS3 author's own comparison table.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "Smoke makes no comparative timing claim; this inherited secondhand figure has not been reproduced.",
+      "legacy_origins": [
+        "N1"
+      ],
+      "evidence": [
+        {
+          "kind": "none",
+          "reason": "No comparative benchmark has reproduced this secondhand throughput figure."
+        }
+      ]
+    },
+    {
+      "id": "twelve-million-midrun-failure-thirdparty",
+      "statement": "A third-party report, aws/aws-cli issue 1118, describes a roughly 12-million-object listing running one to two hours and then failing mid-run.",
+      "scope": "runtime",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "A third-party report at scale and fault-injection scope, not reproduced; the exact invocation must be reproduced before it ships as a finding.",
+      "legacy_origins": [
+        "N2",
+        "W2"
+      ],
+      "evidence": [
+        {
+          "kind": "none",
+          "reason": "The third-party mid-run failure was not reproduced."
+        }
+      ]
+    },
+    {
+      "id": "billion-objects-eight-hour-estimate",
+      "statement": "One billion objects at roughly one million calls and about 30 ms round-trip time gives an approximately eight-hour best-case listing.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "Arithmetic derivation from the page cap and an assumed round-trip time; not run at scale.",
+      "legacy_origins": [
+        "N3"
+      ],
+      "evidence": [
+        {
+          "kind": "none",
+          "reason": "The eight-hour estimate was not measured at scale."
+        }
+      ]
+    },
+    {
+      "id": "universally-available-both-arches",
+      "statement": "aws-cli is officially distributed as an image and installers for both amd64 and arm64.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The native arm64 run is receipted; amd64 availability rests on the upstream distribution matrix, not a groundwork run. The inherited 'no install friction' judgment was not evidence-recorded and is dropped. The amd64 distribution facet is documentation-supported by the preserved architecture matrix in research/report.md (upstream Dockerfile uses the x86_64 installer zip; the aarch64 zip exists).",
+      "legacy_origins": [
+        "S1"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/aws/aws-cli",
+          "commit": "12d962d2",
+          "path": "docker/Dockerfile",
+          "lines": "2"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/_build/version-help.md"
+        },
+        {
+          "kind": "documentation",
+          "path": "../research/report.md"
+        }
+      ]
+    },
+    {
+      "id": "simple-surface-with-memory-caveat",
+      "statement": "aws-cli is simple, well-documented, and predictable in its output formats at the surface, but its memory model is not evident from surface documentation.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The caveat is the buffering-versus-streaming memory split recorded as claim memory-format-split.",
+      "legacy_origins": [
+        "S2"
+      ],
+      "evidence": [
+        {
+          "kind": "documentation",
+          "path": "../research/reconciliation.md"
+        }
+      ]
+    },
+    {
+      "id": "memory-format-split",
+      "statement": "Listing memory behavior splits by output format: s3 ls, s3api --output text, and s3api --output yaml-stream stream page-by-page and hold no key set, while s3api --output json (default), --output yaml, and --output table buffer the entire result via build_full_result().",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "corrected",
+      "qualification": "Corrects the 'nothing hidden' surface claim and an earlier draft and merge-commit that placed text among the buffering formats. Whether the buffered path OOMs at scale is not settled by smoke.",
+      "legacy_origins": [
+        "S3",
+        "PROSE-1",
+        "PROSE-2"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/aws/aws-cli",
+          "commit": "12d962d2",
+          "path": "awscli/formatter.py",
+          "lines": "65,76,94,141,154,197,330-355"
+        },
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/aws/aws-cli",
+          "commit": "12d962d2",
+          "path": "awscli/customizations/s3/subcommands.py",
+          "lines": "865-889"
+        }
+      ]
+    },
+    {
+      "id": "s3-ls-nonrecursive-lists-first-level",
+      "statement": "s3 ls s3://bucket/ without --recursive lists only the first delimiter level, showing folders as PRE rollups rather than the whole bucket.",
+      "scope": "output",
+      "status": "supported",
+      "disposition": "corrected",
+      "qualification": "Corrects the 'nothing hidden' claim; a common footgun, source-established and confirmed by the delimiter-root smoke run.",
+      "legacy_origins": [
+        "S3"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/aws/aws-cli",
+          "commit": "12d962d2",
+          "path": "awscli/customizations/s3/subcommands.py",
+          "lines": "853-857"
+        },
+        {
+          "kind": "run",
+          "receipt": "../receipts/smoke/s3-ls-delimiter"
+        }
+      ]
+    },
+    {
+      "id": "no-parquet-output",
+      "statement": "aws-cli has no Parquet output format.",
+      "scope": "output",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The 'no Parquet' capability gap holds; the output choices are json, text, table, yaml, yaml-stream, and off.",
+      "legacy_origins": [
+        "W4"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/aws/aws-cli",
+          "commit": "12d962d2",
+          "path": "awscli/data/cli.json",
+          "lines": "23-33"
+        }
+      ]
+    }
+  ]
+}

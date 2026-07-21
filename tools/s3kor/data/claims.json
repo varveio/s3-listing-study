@@ -1,0 +1,368 @@
+{
+  "$schema": "../../../schemas/claims.schema.json",
+  "schema_version": 1,
+  "tool": "s3kor",
+  "legacy_ledger": {
+    "source": "../research/tool-page.md",
+    "migration_map": "../research/claims-migration.md",
+    "expected_origins": [
+      "M1", "M2", "M3", "M4", "M5",
+      "X1", "X2", "X3", "X4",
+      "D1", "D2", "D3",
+      "S1", "S2", "S3",
+      "W1", "W2", "V1",
+      "N1", "N2", "N3", "N4", "N5", "N6", "N7",
+      "PROSE-1", "PROSE-2", "PROSE-3"
+    ]
+  },
+  "claims": [
+    {
+      "id": "repository-identity",
+      "statement": "s3kor's canonical repository is github.com/sethkor/s3kor.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The identity was confirmed by cloning and pinning the repository at the reviewed commit.",
+      "legacy_origins": ["M1"],
+      "evidence": [{"kind": "documentation", "url": "https://github.com/sethkor/s3kor"}]
+    },
+    {
+      "id": "written-in-go",
+      "statement": "s3kor is written in Go (module github.com/sethkor/s3kor, go 1.14).",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The go.mod module path and language version establish this; the inherited dossier already stated Go.",
+      "legacy_origins": ["M2"],
+      "evidence": [{"kind": "source", "subject": "tested-variant", "repository": "https://github.com/sethkor/s3kor", "commit": "844fe3d", "path": "go.mod", "lines": "1-5"}]
+    },
+    {
+      "id": "license-is-gpl3",
+      "statement": "s3kor is licensed under GPL-3.0.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The LICENSE file is GPLv3.",
+      "legacy_origins": ["M3"],
+      "evidence": [{"kind": "source", "subject": "tested-variant", "repository": "https://github.com/sethkor/s3kor", "commit": "844fe3d", "path": "LICENSE", "lines": "1-2"}]
+    },
+    {
+      "id": "reviewed-version-is-v0037",
+      "statement": "The reviewed s3kor build is module version v0.0.37, but because the go-install build omits goreleaser ldflags the binary self-reports its version as dev-local-version none unknown.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "corrected",
+      "qualification": "The inherited dossier recorded the version as unknown. The running binary's panic stack embeds the github.com/sethkor/s3kor@v0.0.37 module path, while --version self-reports dev-local-version none unknown because go install injects no version ldflags; receipts also carry v0.0.37 as caller-supplied metadata.",
+      "legacy_origins": ["M4"],
+      "evidence": [
+        {"kind": "run", "receipt": "../receipts/smoke/_capability/list", "artifact": "../receipts/smoke/_capability/list/stderr.txt"},
+        {"kind": "observation", "artifact": "../receipts/smoke/_build/first-exec.txt"}
+      ]
+    },
+    {
+      "id": "reviewed-subject-pinned-commit",
+      "statement": "The reviewed subject is s3kor pinned at commit 844fe3d7931fcca415c8b8a4e22f048886e6b82b, which corresponds to the latest release tag v0.0.37.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "corrected",
+      "qualification": "The inherited dossier recorded the version as unknown; groundwork pins the reviewed subject at this commit, identified with release tag v0.0.37 (the latest release, tagged 2021-10-02), as recorded in the groundwork report.",
+      "legacy_origins": ["M4"],
+      "evidence": [{"kind": "documentation", "path": "../research/report.md"}]
+    },
+    {
+      "id": "install-is-trivial",
+      "statement": "Installing s3kor is trivial: goreleaser release binaries and go install both work.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "corrected",
+      "qualification": "This narrows the inherited unqualified trivial claim to installation only; listing was untestable in this campaign (see credential-starved-listing-blocked).",
+      "legacy_origins": ["M5"],
+      "evidence": [
+        {"kind": "source", "subject": "tested-variant", "repository": "https://github.com/sethkor/s3kor", "commit": "844fe3d", "path": ".goreleaser.yml"},
+        {"kind": "source", "subject": "tested-variant", "repository": "https://github.com/sethkor/s3kor", "commit": "844fe3d", "path": "Makefile"}
+      ]
+    },
+    {
+      "id": "credential-starved-listing-blocked",
+      "statement": "Under the study's credential-starved anonymous environment, both s3kor listing modes were blocked, each producing no listing output, issuing zero S3 requests, and exiting with status 2.",
+      "scope": "runtime",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "Both the list and list-versions capability receipts record the same blocked outcome; this settles that s3kor cannot list under CREDS=none, not any correctness verdict.",
+      "legacy_origins": ["M5", "N1"],
+      "evidence": [
+        {"kind": "run", "receipt": "../receipts/smoke/_capability/list", "artifact": "../receipts/smoke/_capability/list/receipt.md"},
+        {"kind": "run", "receipt": "../receipts/smoke/_capability/list-versions", "artifact": "../receipts/smoke/_capability/list-versions/receipt.md"}
+      ]
+    },
+    {
+      "id": "no-unsigned-listing-path",
+      "statement": "s3kor's listing client always uses the signing credential chain; neither of the two AnonymousCredentials uses (region detection and the S3-to-S3 copy download) is the listing client, so there is no unsigned listing path.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Source establishes the absence of an unsigned listing path; the behavioral consequence is confirmed separately by credential-starved-listing-blocked.",
+      "legacy_origins": ["N1"],
+      "evidence": [
+        {"kind": "source", "subject": "tested-variant", "repository": "https://github.com/sethkor/s3kor", "commit": "844fe3d", "path": "s3kor.go", "lines": "179-197"},
+        {"kind": "source", "subject": "tested-variant", "repository": "https://github.com/sethkor/s3kor", "commit": "844fe3d", "path": "list.go", "lines": "264-273"},
+        {"kind": "source", "subject": "tested-variant", "repository": "https://github.com/sethkor/s3kor", "commit": "844fe3d", "path": "common.go", "lines": "15-84"},
+        {"kind": "source", "subject": "tested-variant", "repository": "https://github.com/sethkor/s3kor", "commit": "844fe3d", "path": "multicopy.go", "lines": "513"}
+      ]
+    },
+    {
+      "id": "session-build-panic",
+      "statement": "Under the harness's credential-starved environment the failure manifests as a Go panic during AWS session construction (session.Must), before command dispatch, identical for both modes.",
+      "scope": "runtime",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "The panic is scoped to this session-build-error condition (a web-identity token file set while the role ARN is empty); a bare empty-credential environment would instead fail at request time, but either way listing cannot run unsigned.",
+      "legacy_origins": ["N2"],
+      "evidence": [
+        {"kind": "run", "receipt": "../receipts/smoke/_capability/list", "artifact": "../receipts/smoke/_capability/list/stderr.txt"},
+        {"kind": "run", "receipt": "../receipts/smoke/_capability/list-versions", "artifact": "../receipts/smoke/_capability/list-versions/stderr.txt"}
+      ]
+    },
+    {
+      "id": "is-aws-s3-reimplementation",
+      "statement": "s3kor is a Go re-implementation of a subset of the aws s3 CLI (cp, rm, ls, sync), marketed as a drop-in replacement using multiple threads for fast parallel actions.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The four subcommands are source-visible; the multiple-threads headline is transfer-side and does not describe listing.",
+      "legacy_origins": ["X1"],
+      "evidence": [
+        {"kind": "documentation", "url": "https://github.com/sethkor/s3kor"},
+        {"kind": "source", "subject": "tested-variant", "repository": "https://github.com/sethkor/s3kor", "commit": "844fe3d", "path": "s3kor.go", "lines": "32-94"}
+      ]
+    },
+    {
+      "id": "transfer-concurrency-flags-not-listing",
+      "statement": "cp and sync expose -c/--concurrent flags (defaults 30 and 20) while ls has no concurrency flag; the transfer worker code was not read, so worker spawning is documentation-attested only.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The flag split is source-visible; the transfer-side parallel behavior is documentation-attested, not source-verified, and is out of listing scope.",
+      "legacy_origins": ["X2", "D3", "S1"],
+      "evidence": [
+        {"kind": "source", "subject": "tested-variant", "repository": "https://github.com/sethkor/s3kor", "commit": "844fe3d", "path": "s3kor.go", "lines": "39-41,48,76"},
+        {"kind": "documentation", "url": "https://github.com/sethkor/s3kor"}
+      ]
+    },
+    {
+      "id": "listing-is-serial-paginator",
+      "statement": "The ls subcommand is s3kor's only listing surface and lists through a single serial ListObjectsV2Pages continuation-token chain with only Bucket and Prefix; per-page goroutines only format output and issue no LIST requests.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Source confirms the serial mechanism, upgrading the inherited analogy-only hypothesis; it does not settle serial listing's cost at scale.",
+      "legacy_origins": ["X3", "D1", "W1", "V1"],
+      "evidence": [
+        {"kind": "source", "subject": "tested-variant", "repository": "https://github.com/sethkor/s3kor", "commit": "844fe3d", "path": "list.go", "lines": "172-213"},
+        {"kind": "source", "subject": "tested-variant", "repository": "https://github.com/sethkor/s3kor", "commit": "844fe3d", "path": "list.go", "lines": "177-194"}
+      ]
+    },
+    {
+      "id": "serial-listing-scale-cost-unverified",
+      "statement": "Whether serial listing is a performance weakness at scale is unestablished.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "Source settles the mechanism, not the cost at 10^6 to 10^8 keys; no benchmark or listing run exists and every listing was credential-blocked.",
+      "legacy_origins": ["X3", "W1"],
+      "evidence": [{"kind": "none", "reason": "Listing was credential-blocked and smoke is not a benchmark, so no scale timing exists."}]
+    },
+    {
+      "id": "not-a-s5cmd-corollary",
+      "statement": "s3kor's findings do not collapse into the s5cmd hypothesis: it has distinct findings including no unsigned listing path, a session-build panic, and a source-visible ls concurrency race.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "corrected",
+      "qualification": "This corrects the inherited claim that the serial-listing inference would collapse s3kor into a one-line s5cmd corollary; the distinct findings are source-visible.",
+      "legacy_origins": ["X4", "W2"],
+      "evidence": [
+        {"kind": "source", "subject": "tested-variant", "repository": "https://github.com/sethkor/s3kor", "commit": "844fe3d", "path": "s3kor.go", "lines": "179-197,190"},
+        {"kind": "source", "subject": "tested-variant", "repository": "https://github.com/sethkor/s3kor", "commit": "844fe3d", "path": "list.go", "lines": "187-194"}
+      ]
+    },
+    {
+      "id": "list-versions-flag-is-all-versions",
+      "statement": "The version-listing flag is --all-versions, not --versions; it uses ListObjectVersionsPages and emits one line per version as versionId then key.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "corrected",
+      "qualification": "This corrects the inherited --versions flag name; --versions does not exist, confirmed by source and live --help.",
+      "legacy_origins": ["D2"],
+      "evidence": [
+        {"kind": "source", "subject": "tested-variant", "repository": "https://github.com/sethkor/s3kor", "commit": "844fe3d", "path": "s3kor.go", "lines": "40"},
+        {"kind": "source", "subject": "tested-variant", "repository": "https://github.com/sethkor/s3kor", "commit": "844fe3d", "path": "list.go", "lines": "109-160"},
+        {"kind": "observation", "artifact": "../receipts/smoke/_build/first-exec.txt"}
+      ]
+    },
+    {
+      "id": "list-versions-perf-unverified",
+      "statement": "Whether list-versions has different performance characteristics than plain list is unestablished.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "The inherited quick-check sub-hypothesis is unrun; both listing modes were credential-blocked, so no comparison exists.",
+      "legacy_origins": ["D2"],
+      "evidence": [{"kind": "none", "reason": "Both listing modes were credential-blocked, so no perf comparison between the modes was run."}]
+    },
+    {
+      "id": "cross-account-copy-supported",
+      "statement": "s3kor documents cross-account bucket-to-bucket copy via --dest-profile.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This is a transfer feature, documentation-attested and source-visible as a flag; it was not run (out of listing scope and mutating).",
+      "legacy_origins": ["S2"],
+      "evidence": [
+        {"kind": "documentation", "url": "https://github.com/sethkor/s3kor"},
+        {"kind": "source", "subject": "tested-variant", "repository": "https://github.com/sethkor/s3kor", "commit": "844fe3d", "path": "s3kor.go", "lines": "69"}
+      ]
+    },
+    {
+      "id": "go-performance-comparable-unverified",
+      "statement": "The claim that s3kor has Go performance characteristics similar to s5cmd and rclone is unestablished.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "No performance was measured; smoke is not a benchmark and listing was blocked. The comparative claim is vague.",
+      "legacy_origins": ["S3"],
+      "evidence": [{"kind": "none", "reason": "No performance was measured; listing was blocked and smoke is not a benchmark."}]
+    },
+    {
+      "id": "ls-concurrency-race-source",
+      "statement": "The ls printer path carries a source-visible data race: per-page goroutines write a shared channel (non-deterministic cross-page order), and List starts the printer before reassigning the channel it ranges over and mis-sequences the WaitGroup, giving an abandoned-channel hang or a Done-before-Add panic.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The race is source-visible; its runtime manifestation was not observed (see ls-race-runtime-behavior-unverified).",
+      "legacy_origins": ["N3"],
+      "evidence": [
+        {"kind": "source", "subject": "tested-variant", "repository": "https://github.com/sethkor/s3kor", "commit": "844fe3d", "path": "list.go", "lines": "187-194"},
+        {"kind": "source", "subject": "tested-variant", "repository": "https://github.com/sethkor/s3kor", "commit": "844fe3d", "path": "list.go", "lines": "216-234"}
+      ]
+    },
+    {
+      "id": "ls-race-runtime-behavior-unverified",
+      "statement": "Whether the ls concurrency race manifests as a hang or a panic in a real run is unestablished.",
+      "scope": "runtime",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "Every listing run was credential-blocked, so the race's runtime behavior was never observed.",
+      "legacy_origins": ["N3"],
+      "evidence": [{"kind": "none", "reason": "Every listing was credential-blocked, so no run exercised the race."}]
+    },
+    {
+      "id": "region-flag-doc-drift",
+      "statement": "The upstream README documents a nonexistent --auto-region flag; the actual region auto-detection flag is --detect-region.",
+      "scope": "compatibility",
+      "status": "supported",
+      "disposition": "corrected",
+      "qualification": "This corrects the documented flag name; --auto-region does not exist, confirmed by source and live --help.",
+      "legacy_origins": ["N4"],
+      "evidence": [
+        {"kind": "source", "subject": "tested-variant", "repository": "https://github.com/sethkor/s3kor", "commit": "844fe3d", "path": "s3kor.go", "lines": "29"},
+        {"kind": "documentation", "url": "https://github.com/sethkor/s3kor"},
+        {"kind": "observation", "artifact": "../receipts/smoke/_build/first-exec.txt"}
+      ]
+    },
+    {
+      "id": "verbose-logs-to-temp-file",
+      "statement": "--verbose writes zap DevelopmentConfig logs to a temp file inside the container, not to stdout or stderr, so it provides no visible request trace.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This is source-corroborated and was not separately observed at runtime.",
+      "legacy_origins": ["N5"],
+      "evidence": [{"kind": "source", "subject": "tested-variant", "repository": "https://github.com/sethkor/s3kor", "commit": "844fe3d", "path": "s3kor.go", "lines": "110-151"}]
+    },
+    {
+      "id": "upstream-dormant",
+      "statement": "Upstream is dormant: the last commit was 2022-06-14 (docs-only), the last release v0.0.37 was tagged 2021-10-02, and four issues are open.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This is a dated third-party observation as of 2026-07-17, not a receipt.",
+      "legacy_origins": ["N6"],
+      "evidence": [
+        {"kind": "documentation", "path": "../research/report.md"},
+        {"kind": "documentation", "url": "https://github.com/sethkor/s3kor/commits/master"},
+        {"kind": "documentation", "url": "https://github.com/sethkor/s3kor/releases"},
+        {"kind": "documentation", "url": "https://github.com/sethkor/s3kor/issues"}
+      ]
+    },
+    {
+      "id": "no-upstream-image-or-dockerfile",
+      "statement": "Upstream ships neither a published container image nor a Dockerfile; distribution is a Homebrew tap and goreleaser release binaries, so the study builds from source.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The distribution channels are source-visible; the absence of an image is partly an absence-of-evidence sweep (no sethkor/s3kor image found on Docker Hub or GHCR on 2026-07-17), not a cited document.",
+      "legacy_origins": ["N7"],
+      "evidence": [
+        {"kind": "source", "subject": "tested-variant", "repository": "https://github.com/sethkor/s3kor", "commit": "844fe3d", "path": ".goreleaser.yml"},
+        {"kind": "source", "subject": "tested-variant", "repository": "https://github.com/sethkor/s3kor", "commit": "844fe3d", "path": "Makefile"},
+        {"kind": "documentation", "path": "../research/report.md"}
+      ]
+    },
+    {
+      "id": "memory-streaming-not-backpressured",
+      "statement": "Listing is streaming but not back-pressured: the paginator callback spawns a goroutine per page and returns immediately, so the 50-slot channel caps blocked sends, not the count of blocked sender goroutines, and peak memory can grow with the number of in-flight pages.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This is a source structural read, not a measured memory claim; the earlier bounded-by-backpressure reading was corrected in groundwork.",
+      "legacy_origins": ["PROSE-1"],
+      "evidence": [
+        {"kind": "source", "subject": "tested-variant", "repository": "https://github.com/sethkor/s3kor", "commit": "844fe3d", "path": "list.go", "lines": "154-170,187-194"},
+        {"kind": "source", "subject": "tested-variant", "repository": "https://github.com/sethkor/s3kor", "commit": "844fe3d", "path": "s3kor.go", "lines": "216"}
+      ]
+    },
+    {
+      "id": "memory-oom-at-scale-unverified",
+      "statement": "Whether the non-back-pressured design runs out of memory on million-object listings is unestablished.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "No scale run exists; the capability smoke recorded no memory number because the process panicked at startup.",
+      "legacy_origins": ["PROSE-1"],
+      "evidence": [{"kind": "none", "reason": "No scale listing ran; the capability smoke panicked at startup and captured no memory sample."}]
+    },
+    {
+      "id": "list-versions-manifest-comparable-only-unversioned",
+      "statement": "list-versions is manifest-comparable only on an unversioned bucket: ListObjectVersions returns every version and delete marker and normalize.sh drops the version id to a bare key, so on a versioned bucket it legitimately emits duplicate and delete-marker-only keys.",
+      "scope": "correctness",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The smoke bucket's versioning state is unrecorded and normalize.sh does not enforce it, so this precondition is unestablished; the mode was credential-blocked regardless.",
+      "legacy_origins": ["PROSE-2"],
+      "evidence": [
+        {"kind": "source", "subject": "tested-variant", "repository": "https://github.com/sethkor/s3kor", "commit": "844fe3d", "path": "list.go", "lines": "109-151"},
+        {"kind": "documentation", "path": "../adapter/normalize.sh"}
+      ]
+    },
+    {
+      "id": "amd64-native-support",
+      "statement": "s3kor supports linux amd64 and arm64 natively on every distribution channel, both the goreleaser release binaries and the pure-Go source build.",
+      "scope": "compatibility",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The Windows architecture set is ambiguous between the README and .goreleaser.yml, but that is not load-bearing; the benchmark denominator is linux amd64/arm64, both native.",
+      "legacy_origins": ["PROSE-3"],
+      "evidence": [{"kind": "source", "subject": "tested-variant", "repository": "https://github.com/sethkor/s3kor", "commit": "844fe3d", "path": ".goreleaser.yml"}]
+    },
+    {
+      "id": "smoke-ran-arm64-native",
+      "statement": "The capability smoke ran on arm64 natively, with image architecture arm64 on an arm64 host and no emulation.",
+      "scope": "runtime",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "This is a fact about the smoke execution environment, recorded in run.meta, not a performance result.",
+      "legacy_origins": ["PROSE-3"],
+      "evidence": [{"kind": "run", "receipt": "../receipts/smoke/_capability/list", "artifact": "../receipts/smoke/_capability/list/run.meta"}]
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+[Exception] Unable to locate credentials
+[Thread Failure] Unable to locate credentials
+[Runtime Exception] 1
+Traceback (most recent call last):
+  File "/usr/local/bin/s4cmd.py", line 1928, in main
+    CommandHandler(opt).run(args)
+  File "/usr/local/bin/s4cmd.py", line 1557, in run
+    CommandHandler.__dict__[cmd + '_handler'](self, args)
+  File "/usr/local/bin/s4cmd.py", line 129, in wrapper
+    ret = func(*args, **kargs)
+  File "/usr/local/bin/s4cmd.py", line 1632, in ls_handler
+    self.pretty_print(self.s3handler().s3walk(args[1]))
+  File "/usr/local/bin/s4cmd.py", line 129, in wrapper
+    ret = func(*args, **kargs)
+  File "/usr/local/bin/s4cmd.py", line 724, in s3walk
+    pool.join()
+  File "/usr/local/bin/s4cmd.py", line 594, in join
+    self.tasks.join()
+  File "/usr/local/bin/s4cmd.py", line 469, in join
+    fail('[Thread Failure] ', exc_info=self.exc_info)
+  File "/usr/local/bin/s4cmd.py", line 189, in fail
+    raise RuntimeError(status)
+RuntimeError: 1
+

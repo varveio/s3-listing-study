@@ -1,0 +1,2 @@
+built image id/repodigest: sha256:6246ee511116608864fab260aec1198c2761e42203316178a89ac1031664f2cc arch=arm64 os=linux
+run: DOCKER_BUILDKIT=1 docker build -f tools/s3-fast-list/Dockerfile -t s3-fast-list:groundwork-6c72f59 <checkout @ 6c72f59>

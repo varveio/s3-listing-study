@@ -1,0 +1,480 @@
+{
+  "$schema": "../../../schemas/claims.schema.json",
+  "schema_version": 1,
+  "tool": "ps3",
+  "legacy_ledger": {
+    "source": "../research/tool-page.md",
+    "migration_map": "../research/claims-migration.md",
+    "expected_origins": [
+      "M1", "M2", "M3", "M4", "M5", "M6",
+      "A1", "A2", "A3", "A4", "A5", "A6",
+      "T1", "T2", "T3", "T4",
+      "N1", "N2", "N3",
+      "W1", "W2", "W3", "W4",
+      "META-1", "META-2",
+      "PROSE-1", "PROSE-2", "PROSE-3", "PROSE-4", "PROSE-5", "PROSE-6", "PROSE-7"
+    ]
+  },
+  "claims": [
+    {
+      "id": "license-is-gpl-3",
+      "statement": "The pS3 repository is licensed under the GNU General Public License v3, not the inherited MIT.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "contradicted",
+      "qualification": "The LICENSE file at the pinned revision is verbatim GPL-3.0; this is an editorial correction that promotes no runtime behavior.",
+      "legacy_origins": ["M1"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/jboothomas/ps3","commit":"9428492","path":"LICENSE"}]
+    },
+    {
+      "id": "version-is-0-1-16",
+      "statement": "pS3 self-reports version 0.1.16.",
+      "scope": "structure",
+      "status": "confirmed",
+      "disposition": "contradicted",
+      "qualification": "The shipped binary printed pS3 version 0.1.16 under --version; the inherited row recorded the version as unknown.",
+      "legacy_origins": ["M2"],
+      "evidence": [
+        {"kind":"run","receipt":"../receipts/smoke/_capability/help","artifact":"../receipts/smoke/_capability/help/help.txt"},
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/jboothomas/ps3","commit":"9428492","path":"cmd/root.go","lines":"16"}
+      ]
+    },
+    {
+      "id": "pinned-to-head-no-releases",
+      "statement": "The project publishes no releases or tags, so groundwork pinned default-branch HEAD 9428492 as the reviewed revision.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "HEAD is pinned because there is no tag or release to pin to.",
+      "legacy_origins": ["M3"],
+      "evidence": [{"kind":"documentation","url":"https://github.com/jboothomas/ps3"}]
+    },
+    {
+      "id": "repository-is-minimal-and-dormant",
+      "statement": "The pS3 repository is minimal and dormant: it ships no README, no docs, and no go.mod, and holds 16 commits from a single author, last updated 2024-01-02.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "These repository-shape and staleness facts were recorded from the public repository during groundwork; they bear on provenance, not runtime behavior.",
+      "legacy_origins": ["PROSE-7"],
+      "evidence": [{"kind":"documentation","path":"../research/report.md"}]
+    },
+    {
+      "id": "repo-is-jboothomas-ps3-go",
+      "statement": "pS3 is the Go command-line tool published at github.com/jboothomas/ps3.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The repository identity and language were confirmed by an independent clone and source read; no runtime behavior is implied.",
+      "legacy_origins": ["M4"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/jboothomas/ps3","commit":"9428492","path":"cmd/root.go"}]
+    },
+    {
+      "id": "source-does-not-compile",
+      "statement": "The pinned pS3 source does not compile.",
+      "scope": "compatibility",
+      "status": "confirmed",
+      "disposition": "contradicted",
+      "qualification": "A native arm64 build attempt failed with BUILD_EXIT=1 on missing log and sync/atomic imports, an unused os import, and a selector/type error at cmd/listObjectsV2.go:186; the inherited row called the build straightforward, and the committed prebuilt binary is the only working artifact the project ships.",
+      "legacy_origins": ["M5"],
+      "evidence": [
+        {"kind":"run","receipt":"../receipts/smoke/_build","artifact":"../receipts/smoke/_build/build-output.txt"},
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/jboothomas/ps3","commit":"9428492","path":"cmd/listObjectsV2.go","lines":"9,66,102,130,165,186,218,316"}
+      ]
+    },
+    {
+      "id": "source-independently-read",
+      "statement": "The pinned pS3 source was confirmed to exist and be publicly obtainable, then independently cloned and fully read.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The source read is firsthand; every code anchor cites the pinned checkout obtained from the public repository.",
+      "legacy_origins": ["M6"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/jboothomas/ps3","commit":"9428492","path":"cmd/listObjectsV2.go"}]
+    },
+    {
+      "id": "discovery-is-brute-force-char-walk",
+      "statement": "pS3 discovers prefixes by a brute-force character-by-character walk rather than S3P-style key bisection, computing no key midpoint anywhere.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Source establishes the mechanism and the author's blog corroborates it; no runtime listing confirmed it.",
+      "legacy_origins": ["A1"],
+      "evidence": [
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/jboothomas/ps3","commit":"9428492","path":"cmd/listObjectsV2.go","lines":"190-289"},
+        {"kind":"documentation","url":"https://jboothomas.medium.com/fast-listing-s3-objects-from-buckets-with-millions-billions-of-items-380052fb6faf"}
+      ]
+    },
+    {
+      "id": "recursion-extends-prefix-on-overflow",
+      "statement": "When a prefix listing overflows a page, discovery recurses on each extension by computing nextPrefix := currentPrefix + c and launching go discoverPrefixes.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This is the recursion body at the pinned source; it was not observed in a run.",
+      "legacy_origins": ["A2"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/jboothomas/ps3","commit":"9428492","path":"cmd/listObjectsV2.go","lines":"213-241"}]
+    },
+    {
+      "id": "overflow-branch-tests-999-not-truncated",
+      "statement": "The overflow branch tests len(Contents) > 999 and never checks IsTruncated, so an exactly-1000-key non-truncated prefix is misclassified as large and needlessly recursed while 1-to-999-key prefixes are emitted directly.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "corrected",
+      "qualification": "The inherited threshold-1000 leaf rule is only almost correct because of the missing truncation check.",
+      "legacy_origins": ["A3"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/jboothomas/ps3","commit":"9428492","path":"cmd/listObjectsV2.go","lines":"222-224,243"}]
+    },
+    {
+      "id": "alphabet-is-fixed-81-char-var",
+      "statement": "The discovery alphabet is a fixed 81-element package var (not a compile-time const), is not configurable, and is not every printable byte: it omits several punctuation characters and all non-ASCII bytes.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "contradicted",
+      "qualification": "The inherited row described a configurable per-printable-byte alphabet; --help exposes no flag for it.",
+      "legacy_origins": ["A4"],
+      "evidence": [
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/jboothomas/ps3","commit":"9428492","path":"cmd/root.go","lines":"36-39"},
+        {"kind":"run","receipt":"../receipts/smoke/_capability/help","artifact":"../receipts/smoke/_capability/help/help.txt"}
+      ]
+    },
+    {
+      "id": "discover-prefixes-anchor-accurate",
+      "statement": "The discoverPrefixes closure is defined at cmd/listObjectsV2.go:196 with its character-loop recursion body at lines 213-241, matching the inherited code anchor.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The inherited anchor was accurate, which is unusual among the inherited anchors.",
+      "legacy_origins": ["A5"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/jboothomas/ps3","commit":"9428492","path":"cmd/listObjectsV2.go","lines":"196,213-241"}]
+    },
+    {
+      "id": "discovery-needs-no-bootstrap",
+      "statement": "Discovery starts from the empty prefix and needs no hints, bootstrap, or prior keyspace knowledge.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Source establishes the zero-input start; this is the property behind the inherited zero-config strength claim.",
+      "legacy_origins": ["A6"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/jboothomas/ps3","commit":"9428492","path":"cmd/listObjectsV2.go","lines":"190-289"}]
+    },
+    {
+      "id": "pager-concurrency-is-256-var",
+      "statement": "The parallel pager fan-out and the printer-worker count are both bounded by a package var maxSemaphore set to 256 and never reassigned.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "contradicted",
+      "qualification": "The inherited row assumed an unknown but presumably existing concurrency knob.",
+      "legacy_origins": ["T1"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/jboothomas/ps3","commit":"9428492","path":"cmd/root.go","lines":"44"}]
+    },
+    {
+      "id": "discovery-goroutines-unbounded",
+      "statement": "Prefix-discovery goroutines are launched with no semaphore, so discovery concurrency is unbounded.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "contradicted",
+      "qualification": "The maxSemaphore bound applies only to the pager, not to go discoverPrefixes.",
+      "legacy_origins": ["T1"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/jboothomas/ps3","commit":"9428492","path":"cmd/listObjectsV2.go","lines":"241"}]
+    },
+    {
+      "id": "no-concurrency-flag-uncappable",
+      "statement": "No command-line flag exposes either concurrency source, so pS3 listing concurrency cannot be capped to the shared CONCURRENCY_CAP of 8.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "contradicted",
+      "qualification": "Both the 256 pager var and the unbounded discovery goroutines are unexposed; --help shows no concurrency flag.",
+      "legacy_origins": ["T1"],
+      "evidence": [
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/jboothomas/ps3","commit":"9428492","path":"cmd/root.go","lines":"44"},
+        {"kind":"run","receipt":"../receipts/smoke/_capability/help","artifact":"../receipts/smoke/_capability/help/help.txt"}
+      ]
+    },
+    {
+      "id": "output-flag-inert-in-source",
+      "statement": "A --output json-or-text flag exists, but readObjectsV2 ignores it and always prints one fixed line, so the flag is inert in the HEAD source.",
+      "scope": "output",
+      "status": "supported",
+      "disposition": "corrected",
+      "qualification": "The flag is present in --help but has no effect in the pinned source; the shipped binary may differ.",
+      "legacy_origins": ["T2"],
+      "evidence": [
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/jboothomas/ps3","commit":"9428492","path":"cmd/listObjectsV2.go","lines":"155-188"},
+        {"kind":"run","receipt":"../receipts/smoke/_capability/help","artifact":"../receipts/smoke/_capability/help/help.txt"}
+      ]
+    },
+    {
+      "id": "output-flag-binary-behavior",
+      "statement": "Whether --output json produces different output in the shipped binary.",
+      "scope": "output",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "The committed binary diverges from the source and was never run to a listing, so text-versus-json cannot be treated as two real modes.",
+      "legacy_origins": ["T2"],
+      "evidence": [{"kind":"none","reason":"The binary was never run to a listing, so its --output behavior is untested and blocked under CREDS=none."}]
+    },
+    {
+      "id": "page-size-is-1000-var",
+      "statement": "The recursion page-fit threshold and the ListObjectsV2 page size are maxKeys, a package var set to 1000.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "1000 is S3's own page ceiling, so this is not a pS3-specific deficit.",
+      "legacy_origins": ["T3"],
+      "evidence": [
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/jboothomas/ps3","commit":"9428492","path":"cmd/root.go","lines":"42"},
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/jboothomas/ps3","commit":"9428492","path":"cmd/listObjectsV2.go","lines":"224"}
+      ]
+    },
+    {
+      "id": "full-flag-surface-captured",
+      "statement": "The full flag and subcommand surface was captured from the binary's --version and --help output.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The inherited table was flagged as incomplete; the captured help resolves it.",
+      "legacy_origins": ["T4"],
+      "evidence": [{"kind":"run","receipt":"../receipts/smoke/_capability/help","artifact":"../receipts/smoke/_capability/help/help.txt"}]
+    },
+    {
+      "id": "blog-throughput-160s",
+      "statement": "The author's Medium post reports 15,000,000 objects listed in 160 seconds, about 94,000 objects per second, on local non-AWS S3.",
+      "scope": "performance",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This is a single third-party blog data point (one bucket, one box, one run) and has not been reproduced by this study.",
+      "legacy_origins": ["N1"],
+      "evidence": [{"kind":"documentation","url":"https://jboothomas.medium.com/fast-listing-s3-objects-from-buckets-with-millions-billions-of-items-380052fb6faf"}]
+    },
+    {
+      "id": "blog-aws-cli-7x",
+      "statement": "The same post reports pS3 about seven times faster than aws s3api, which it times at 1110 seconds.",
+      "scope": "performance",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Same single third-party data point; not reproduced.",
+      "legacy_origins": ["N2"],
+      "evidence": [{"kind":"documentation","url":"https://jboothomas.medium.com/fast-listing-s3-objects-from-buckets-with-millions-billions-of-items-380052fb6faf"}]
+    },
+    {
+      "id": "blog-s5cmd-5x",
+      "statement": "The same post reports pS3 about five times faster than s5cmd, which it times at 733 seconds, on local S3.",
+      "scope": "performance",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Same single third-party data point on local non-AWS S3; not reproduced.",
+      "legacy_origins": ["N3"],
+      "evidence": [{"kind":"documentation","url":"https://jboothomas.medium.com/fast-listing-s3-objects-from-buckets-with-millions-billions-of-items-380052fb6faf"}]
+    },
+    {
+      "id": "speculative-lists-exist",
+      "statement": "Discovery issues speculative per-character LIST calls, up to alphabet-to-the-N calls to resolve an N-character prefix depth.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Source confirms the speculative LISTs exist; their cost is a separate scale question.",
+      "legacy_origins": ["W1"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/jboothomas/ps3","commit":"9428492","path":"cmd/listObjectsV2.go","lines":"190-289"}]
+    },
+    {
+      "id": "discovery-tax-cost-at-scale",
+      "statement": "The discovery-LIST overhead at scale, worst on sparse deep-shared-prefix keyspaces, degrades listing cost.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "No benchmark measured API-calls-per-unique-key; the cost at scale is unrun.",
+      "legacy_origins": ["W1"],
+      "evidence": [{"kind":"none","reason":"No scale benchmark of the discovery tax has run, blocked under CREDS=none."}]
+    },
+    {
+      "id": "out-of-alphabet-keys-dropped",
+      "statement": "Because discovery only extends a prefix with bytes from the fixed 81-character alphabet, any key whose next distinguishing byte is outside that set is never discovered and is silently dropped.",
+      "scope": "correctness",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Source proves the drop by construction; keys under an already-emitted small prefix are safe. This is also the qualifier on the inherited arbitrary-keyspace strength claim. The inherited framing that such out-of-alphabet keys are rare in practice was only an assertion, not established.",
+      "legacy_origins": ["W2"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/jboothomas/ps3","commit":"9428492","path":"cmd/root.go","lines":"36-39"}]
+    },
+    {
+      "id": "flat-keyspace-no-degeneration",
+      "statement": "Because discovery is a byte-by-byte prefix walk that needs no delimiter hierarchy, pS3 does not degenerate on flat buckets the way delimiter-based listing does, so it works on arbitrary keyspaces in principle.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This is a source-corroborated structural property; it is bounded by the fixed 81-character alphabet, so out-of-alphabet keys are still silently dropped (claim out-of-alphabet-keys-dropped).",
+      "legacy_origins": ["W2"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/jboothomas/ps3","commit":"9428492","path":"cmd/listObjectsV2.go","lines":"190-289"}]
+    },
+    {
+      "id": "out-of-alphabet-drop-runtime",
+      "statement": "A live listing silently drops out-of-alphabet keys on a non-ASCII or arbitrary-byte bucket.",
+      "scope": "correctness",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "Demonstration needs an edge fixture (EDGE_BUCKET=none, deferred) and credentials, which were blocked.",
+      "legacy_origins": ["W2"],
+      "evidence": [{"kind":"none","reason":"No edge-key bucket was configured and no credentialed run was possible."}]
+    },
+    {
+      "id": "headline-figures-reproduce",
+      "statement": "The headline throughput and speedup multipliers reproduce off the author's box.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "Blocked: no benchmark has run; this is the benchmark phase's job.",
+      "legacy_origins": ["W3"],
+      "evidence": [{"kind":"none","reason":"No comparative benchmark has run, blocked under CREDS=none."}]
+    },
+    {
+      "id": "multipliers-internally-falsifiable",
+      "statement": "The published speedup multipliers can be checked internally because aws-cli and s5cmd are themselves study subjects.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "Correct in principle and deferred to the benchmark phase; nothing is promoted now.",
+      "legacy_origins": ["W4"],
+      "evidence": [{"kind":"none","reason":"No comparative benchmark against the study's own aws-cli and s5cmd baselines has run."}]
+    },
+    {
+      "id": "binary-build-metadata-versions",
+      "statement": "The shipped binary's build metadata records Go 1.20.3 with aws-sdk-go v1.44.249, cobra v1.7.0, and viper v1.15.0.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "These versions were read from the committed binary's build metadata and recorded in the build receipt.",
+      "legacy_origins": ["META-1"],
+      "evidence": [{"kind":"run","receipt":"../receipts/smoke/_build","artifact":"../receipts/smoke/_build/receipt.md"}]
+    },
+    {
+      "id": "binary-amd64-only-ran-under-qemu",
+      "statement": "The only working artifact is upstream's committed prebuilt binary, which is amd64; because the source does not compile there is no native arm64 build, so every probe that ran the binary ran the amd64 image under qemu emulation on the arm64 runner.",
+      "scope": "compatibility",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Emulation was acceptable for the smoke probes but is disqualifying for benchmark timing, which needs one natively-common architecture; the source-compile attempt itself ran natively on arm64.",
+      "legacy_origins": ["META-2"],
+      "evidence": [
+        {"kind":"run","receipt":"../receipts/smoke/_build","artifact":"../receipts/smoke/_build/receipt.md"},
+        {"kind":"run","receipt":"../receipts/smoke/_capability/help","artifact":"../receipts/smoke/_capability/help/help.txt"}
+      ]
+    },
+    {
+      "id": "no-unsigned-request-path",
+      "statement": "pS3 builds its AWS session with the default shared-config credential chain only, with no --no-sign-request flag and no anonymous-credentials path.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Source establishes the absence and a no-credentials trace shows NoCredentialProviders; the general no-unsigned-path claim is source-and-observation supported, not settled by the single committed receipt.",
+      "legacy_origins": ["PROSE-1"],
+      "evidence": [
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/jboothomas/ps3","commit":"9428492","path":"cmd/listObjectsV2.go","lines":"90-99"},
+        {"kind":"observation","artifact":"../receipts/smoke/_capability/silent-empty-obs.md"}
+      ]
+    },
+    {
+      "id": "list-anon-exit-1-narrow",
+      "statement": "Under the harness anonymous environment, the single list-objects-v2 --bucket noaa-normals-pds --region us-east-1 invocation of pS3 v0.1.16 exited 1 and produced no listing.",
+      "scope": "runtime",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "The committed receipt settles exactly this one invocation, which failed at S3 session creation. The general no-unsigned-path conclusion and the 5-of-5 non-trace plus 3-of-3 trace determinism are separate observations, not this receipt.",
+      "legacy_origins": ["PROSE-1"],
+      "evidence": [{"kind":"run","receipt":"../receipts/smoke/_capability/list-anon","artifact":"../receipts/smoke/_capability/list-anon/receipt.md"}]
+    },
+    {
+      "id": "other-modes-blocked-by-inference",
+      "statement": "The list-object-versions and head-objects modes were not run and are blocked by the same shared session path.",
+      "scope": "runtime",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "Their blocked state is inferred from the shared session code path, not from their own receipts.",
+      "legacy_origins": ["PROSE-1"],
+      "evidence": [{"kind":"none","reason":"Neither mode was run; the block is inferred from the shared session path."}]
+    },
+    {
+      "id": "silent-exit-0-on-bare-no-creds",
+      "statement": "With a bare no-credentials environment (only AWS_EC2_METADATA_DISABLED=true, no config or credentials-file redirect), pS3 exits 0 with zero objects and no error, a false success indistinguishable from an empty bucket.",
+      "scope": "correctness",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This is an observation, not a committed wrapper receipt; the harness's stricter starvation instead fails at session creation with exit 1, and only that exit-1 half is receipt-backed.",
+      "legacy_origins": ["PROSE-2"],
+      "evidence": [{"kind":"observation","artifact":"../receipts/smoke/_capability/silent-empty-obs.md"}]
+    },
+    {
+      "id": "binary-not-reproducible-from-source",
+      "statement": "The repository at HEAD cannot reproduce its own shipped binary: pS3.0-1-16 exposes head-objects, list-object-versions, and list-test subcommands whose source files are absent from the checkout, and the present source does not compile.",
+      "scope": "compatibility",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "The file-set mismatch and compile failure are receipt-backed; the inference that the binary came from a newer or never-pushed tree is not.",
+      "legacy_origins": ["PROSE-3"],
+      "evidence": [
+        {"kind":"run","receipt":"../receipts/smoke/_build","artifact":"../receipts/smoke/_build/receipt.md"},
+        {"kind":"run","receipt":"../receipts/smoke/_capability/help","artifact":"../receipts/smoke/_capability/help/help.txt"}
+      ]
+    },
+    {
+      "id": "get-bucket-location-region-bug",
+      "statement": "On the list-objects-v2 path, once an AWS session is created, pS3 first calls GetBucketLocation, and its fallback sets the region to empty when --region us-east-1 is passed and to us-west-1 when no region is passed for a us-east-1 bucket.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The region-selection bug is source-level; the harness anonymous run failed at session creation before reaching GetBucketLocation, so its receipt does not exercise the fallback, while a bare-no-credentials observation traced the fallback firing to an empty region.",
+      "legacy_origins": ["PROSE-4"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/jboothomas/ps3","commit":"9428492","path":"cmd/listObjectsV2.go","lines":"107-117"}]
+    },
+    {
+      "id": "error-swallowing-nil-deref",
+      "statement": "The discovery helper s3ListObjectsWithBackOff returns its response with a nil error on any failure, making the backoff below it dead code and handing callers a nil or partial response they then dereference.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This error-swallowing nil-dereference risk was not triggered at smoke because the run died earlier at session creation.",
+      "legacy_origins": ["PROSE-4"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/jboothomas/ps3","commit":"9428492","path":"cmd/s3SDKfunctions.go","lines":"74-77"}]
+    },
+    {
+      "id": "debug-trace-suppress-output",
+      "statement": "The --debug and --trace flags suppress object output and print only a count, so listing objects and request-level logging cannot be obtained together.",
+      "scope": "output",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Source-level behavior in readObjectsV2; not exercised in a listing run.",
+      "legacy_origins": ["PROSE-4"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/jboothomas/ps3","commit":"9428492","path":"cmd/listObjectsV2.go","lines":"164-169"}]
+    },
+    {
+      "id": "streaming-bounds-object-memory",
+      "statement": "pS3 streams objects from the producer through an unbuffered channel to a printer pool rather than building a full in-memory slice of all keys; the discovered prefix list, bounded by --prefix-count, is the only such accumulation.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Source establishes the streaming channel mechanics only; whether this bounds object memory at scale is an unverified hypothesis carried by claim memory-throughput-at-scale, and no scale run measured memory.",
+      "legacy_origins": ["PROSE-5"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/jboothomas/ps3","commit":"9428492","path":"cmd/listObjectsV2.go","lines":"155-188"}]
+    },
+    {
+      "id": "memory-throughput-at-scale",
+      "statement": "Memory and throughput with the in-memory prefix list and 256 printer workers at millions of keys.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "The streaming model suggests bounded object memory, but scale behavior is untested and blocked.",
+      "legacy_origins": ["PROSE-5"],
+      "evidence": [{"kind":"none","reason":"No scale run was possible, blocked under CREDS=none."}]
+    },
+    {
+      "id": "prefix-count-is-primary-knob",
+      "statement": "The --prefix-count flag, default 500, is the primary discovery cutoff: once the large-prefix target is reached, further descent stops and prefixes are handed to the parallel pager.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Source establishes the cutoff and default; the knob was not swept.",
+      "legacy_origins": ["PROSE-6"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/jboothomas/ps3","commit":"9428492","path":"cmd/listObjectsV2.go","lines":"45,205"}]
+    }
+  ]
+}

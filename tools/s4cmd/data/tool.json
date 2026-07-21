@@ -1,0 +1,30 @@
+{
+  "$schema": "../../../schemas/tool.schema.json",
+  "schema_version": 1,
+  "slug": "s4cmd",
+  "display_name": "s4cmd",
+  "entry_type": "runnable_lister",
+  "upstream": { "repository": "https://github.com/bloomreach/s4cmd" },
+  "language": "Python",
+  "license": "Apache-2.0",
+  "tested": {
+    "variant": "upstream",
+    "repository": "https://github.com/bloomreach/s4cmd",
+    "version": {
+      "value": "2.1.0",
+      "provenance": { "kind": "run", "reference": "../receipts/smoke/_build/build.md" }
+    },
+    "revision": {
+      "value": "80059bfa4451f513a8f314fb6300e5ecc51587b2",
+      "provenance": { "kind": "documentation", "reference": "../research/report.md" }
+    }
+  },
+  "study": {
+    "groundwork_status": "complete",
+    "smoke_execution_status": "blocked",
+    "verification_status": "not-attempted",
+    "auth_status": "credentials-required",
+    "benchmark_eligibility": "conditional"
+  },
+  "evidence_roots": ["../receipts/smoke"]
+}

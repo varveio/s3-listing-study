@@ -1,0 +1,43 @@
+# Curated excerpt of: mc --debug ls --recursive s3/noaa-normals-pds/normals-hourly/
+# image minio/mc@sha256:a7fe349...  version RELEASE.2025-08-13T08-35-41Z  arm64  anonymous
+# Captured 2026-07-17 via direct 'docker run' (NOT the wrapper) as a request-shape probe [OBS].
+# continuation-token VALUES redacted to <CURSOR> (opaque base64 pagination cursors, not secrets;
+#   harness scan-tree.sh reported the full trace clean). Full trace regenerable from the invocation above.
+# Observations: 3 serial GET requests for 2549 keys (pages of 1000/1000/549); each request after the
+#   first carries the PRIOR response's continuation-token => strictly serial, unparallelizable. No
+#   Authorization header on any request (grep Authorization/AKIA/X-Amz-Signature = 0) => unsigned/anonymous.
+#   Virtual-host addressing (GET /?... ; bucket in Host). delimiter= empty when --recursive.
+
+## The three LIST request lines (tokens redacted):
+mc: <DEBUG> GET /?location HTTP/1.1
+mc: <DEBUG> GET /?delimiter=&encoding-type=url&fetch-owner=true&list-type=2&prefix=normals-hourly%2F HTTP/1.1
+mc: <DEBUG> GET /?continuation-token=<CURSOR>&delimiter=&encoding-type=url&fetch-owner=true&list-type=2&prefix=normals-hourly%2F HTTP/1.1
+mc: <DEBUG> GET /?continuation-token=<CURSOR>&delimiter=&encoding-type=url&fetch-owner=true&list-type=2&prefix=normals-hourly%2F HTTP/1.1
+
+## First request's full header block (Host shows virtual-host style; note absence of Authorization):
+mc: <DEBUG>  >> Organization: Amazon
+mc: <DEBUG>  >> Expires: 2030-08-23 22:26:35 +0000 UTC
+mc: <DEBUG> TLS Certificate found: 
+mc: <DEBUG>  >> Country: US
+mc: <DEBUG>  >> Organization: Starfield Technologies, Inc.
+mc: <DEBUG>  >> Expires: 2037-12-31 01:00:00 +0000 UTC
+mc: <DEBUG> Response Time:  79.556639ms
+
+mc: <DEBUG> GET /?delimiter=&encoding-type=url&fetch-owner=true&list-type=2&prefix=normals-hourly%2F HTTP/1.1
+Host: noaa-normals-pds.s3.dualstack.us-east-1.amazonaws.com
+User-Agent: MinIO (linux; arm64) minio-go/v7.0.90 mc/RELEASE.2025-08-13T08-35-41Z
+Accept-Encoding: zstd,gzip
+
+mc: <DEBUG> HTTP/1.1 200 OK
+Transfer-Encoding: chunked
+Content-Type: application/xml
+Date: Fri, 17 Jul 2026 12:32:30 GMT
+Server: AmazonS3
+X-Amz-Bucket-Region: us-east-1
+X-Amz-Id-2: GlmkRxXbfhike0OYwZF63QSvarKcOENcuzTONjG0b32GLDEWWgkSAlT4PVt2ne/81lDLx0vgG15Ky8haMg+2xTEAsr0I9BMi
+X-Amz-Request-Id: 65DMFTE3DBYC0F8Y
+
+mc: <DEBUG> TLS Certificate found: 
+mc: <DEBUG>  >> Country: US
+mc: <DEBUG>  >> Organization: Amazon
+mc: <DEBUG>  >> Expires: 2026-11-06 23:59:59 +0000 UTC

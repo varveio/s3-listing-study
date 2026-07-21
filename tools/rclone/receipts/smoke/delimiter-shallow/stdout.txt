@@ -1,0 +1,7 @@
+[
+{"Path":"index.html","Name":"index.html","Size":36822,"ModTime":"2025-11-24T20:33:44.000000000Z","IsDir":false,"Tier":"STANDARD"},
+{"Path":"normals-annualseasonal","Name":"normals-annualseasonal","Size":0,"ModTime":"2000-01-01T00:00:00.000000000Z","IsDir":true},
+{"Path":"normals-daily","Name":"normals-daily","Size":0,"ModTime":"2000-01-01T00:00:00.000000000Z","IsDir":true},
+{"Path":"normals-hourly","Name":"normals-hourly","Size":0,"ModTime":"2000-01-01T00:00:00.000000000Z","IsDir":true},
+{"Path":"normals-monthly","Name":"normals-monthly","Size":0,"ModTime":"2000-01-01T00:00:00.000000000Z","IsDir":true}
+]

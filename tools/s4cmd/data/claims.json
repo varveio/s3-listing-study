@@ -1,0 +1,359 @@
+{
+  "$schema": "../../../schemas/claims.schema.json",
+  "schema_version": 1,
+  "tool": "s4cmd",
+  "legacy_ledger": {
+    "source": "../research/tool-page.md",
+    "migration_map": "../research/claims-migration.md",
+    "expected_origins": [
+      "M4", "M6", "C1", "C2", "C3", "C4", "T1", "T2", "T3", "S1", "S2",
+      "W1", "W2", "W3", "WV", "N1",
+      "PROSE-1", "PROSE-2", "PROSE-3", "PROSE-4", "PROSE-5",
+      "PROSE-6", "PROSE-7", "PROSE-8"
+    ]
+  },
+  "claims": [
+    {
+      "id": "parallelism-unit-is-delimiter-recursion",
+      "statement": "s4cmd's listing parallelism comes from client-side delimiter recursion, re-queuing each discovered CommonPrefix as a new thread-pool task, not from a caller-supplied prefix shard list.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "contradicted",
+      "qualification": "This contradicts the inherited model of a threadpool across distinct CLI-supplied prefixes with manual sharding. It is source-established; no listing mode was run.",
+      "legacy_origins": ["C2", "C4", "S1", "W2"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/bloomreach/s4cmd","commit":"80059bf","path":"s4cmd.py","lines":"1176,1184-1185"}]
+    },
+    {
+      "id": "ls-always-sends-delimiter",
+      "statement": "The listing worker always sends Delimiter='/', even in recursive mode, so ls -r walks the pseudo-directory tree rather than issuing a flat delimiter-less scan.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Source-established from the s3walk paginate call; not run-confirmed.",
+      "legacy_origins": ["C2", "C3"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/bloomreach/s4cmd","commit":"80059bf","path":"s4cmd.py","lines":"1173-1206"}]
+    },
+    {
+      "id": "one-list-objects-v1-per-pseudo-directory",
+      "statement": "A recursive listing performs one paginated legacy list_objects (v1) traversal (a continuation chain) per pseudo-directory in the subtree.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The API is legacy list_objects v1, not list_objects_v2. Source-established; not run-confirmed.",
+      "legacy_origins": ["C2"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/bloomreach/s4cmd","commit":"80059bf","path":"s4cmd.py","lines":"1173,1176,1184-1185"}]
+    },
+    {
+      "id": "single-prefix-substructure-parallelizes",
+      "statement": "A single CLI prefix containing '/'-substructure parallelizes automatically, each sub-directory becoming a separate thread task.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "contradicted",
+      "qualification": "This contradicts the inherited 'serial within any single prefix, serial baseline' claim; it is source-established, not run-confirmed.",
+      "legacy_origins": ["C3", "T1", "W1"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/bloomreach/s4cmd","commit":"80059bf","path":"s4cmd.py","lines":"1184-1185"}]
+    },
+    {
+      "id": "flat-prefix-collapses-to-serial",
+      "statement": "A delimiter-free flat prefix with no sub-delimiter collapses to a single serial paginated scan on one thread.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This is the residual truth of the inherited 'serial within a single prefix' claim, holding only for the degenerate flat shape. Source-established.",
+      "legacy_origins": ["C3"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/bloomreach/s4cmd","commit":"80059bf","path":"s4cmd.py","lines":"1184-1185"}]
+    },
+    {
+      "id": "flat-prefix-serial-collapse-unverified",
+      "statement": "That a single sub-delimiter-free prefix collapses to one serial thread regardless of -c is not confirmed in a real run.",
+      "scope": "runtime",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "No listing mode could execute; s4cmd has no anonymous path and the campaign was CREDS=none. Settling this needs a credentialed run.",
+      "legacy_origins": ["C3"],
+      "evidence": [{"kind":"none","reason":"No listing mode could run; requires a credentialed run at scale."}]
+    },
+    {
+      "id": "ls-accepts-exactly-one-path",
+      "statement": "s4cmd ls accepts exactly one path argument and rejects more than one, so 'multiple distinct prefixes on one invocation' is not a supported invocation.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "contradicted",
+      "qualification": "This contradicts the inherited multi-prefix 'best mode'. The rejection ([Invalid Argument] Invalid number of parameters, exit 1) was observed but not recorded through the smoke wrapper.",
+      "legacy_origins": ["C4", "T2", "S1", "W2"],
+      "evidence": [
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/bloomreach/s4cmd","commit":"80059bf","path":"s4cmd.py","lines":"1625-1632"},
+        {"kind":"observation","artifact":"../receipts/smoke/_capability/obs-multiprefix.stderr.txt"}
+      ]
+    },
+    {
+      "id": "delimiter-recursion-scaling-benchmark",
+      "statement": "How delimiter-recursion parallelism scales with -c and tree shape, and how many LIST pages ls -r issues versus a flat scan, is an unsettled benchmark question.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "contradicted",
+      "qualification": "The inherited 'verify whether threadpool-across-prefixes is real' premise is false; the real question is delimiter-recursion scaling. It requires credentials and scale, and true page counts require the replay-server phase.",
+      "legacy_origins": ["WV", "PROSE-2"],
+      "evidence": [{"kind":"none","reason":"No benchmark has run; s4cmd cannot be exercised anonymously and requires credentials plus scale."}]
+    },
+    {
+      "id": "num-threads-flag-present",
+      "statement": "s4cmd exposes a -c/--num-threads flag, with a S4CMD_NUM_THREADS environment alias, controlling the thread-pool size.",
+      "scope": "operability",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "Confirmed present in the built image's --help output; flagged for the benchmark concurrency sweep.",
+      "legacy_origins": ["T3"],
+      "evidence": [
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/bloomreach/s4cmd","commit":"80059bf","path":"s4cmd.py","lines":"121,1859"},
+        {"kind":"run","receipt":"../receipts/smoke/_build/build.md"}
+      ]
+    },
+    {
+      "id": "num-threads-default-is-cpu-count-times-four",
+      "statement": "The default thread count is cpu_count times four, which is 32 on the eight-core runner, four times the campaign CONCURRENCY_CAP of eight.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Any real run must pin -c to at most eight; the smoke run.sh pins -c 4 and rejects overrides outside 1..8. Source-established default.",
+      "legacy_origins": ["T3"],
+      "evidence": [
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/bloomreach/s4cmd","commit":"80059bf","path":"s4cmd.py","lines":"121"},
+        {"kind":"observation","artifact":"../receipts/smoke/_capability/anon-nocredentials/receipt.md"},
+        {"kind":"documentation","path":"../adapter/run.sh"}
+      ]
+    },
+    {
+      "id": "upstream-is-dormant",
+      "statement": "Upstream is dormant: the 2.1.0 release tag is dated 2018-08-14 and the default branch is only about fourteen commits further, so the last released version is roughly eight years old.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Dormant describes release cadence, not brokenness; the tool still installs and runs (see installs-imports-runs-under-current-boto3).",
+      "legacy_origins": ["W3"],
+      "evidence": [{"kind":"documentation","path":"../research/report.md"}]
+    },
+    {
+      "id": "v1-current-s3-compatibility-unverified",
+      "statement": "Whether s4cmd's legacy list_objects v1 listing path still lists correctly against live current S3 is unsettled.",
+      "scope": "compatibility",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "Listing was blocked at smoke (CREDS=none), so only install and startup are settled, not listing behavior against the current S3 API. A credentialed run settles it.",
+      "legacy_origins": ["W3"],
+      "evidence": [{"kind":"none","reason":"Listing was blocked (CREDS=none); v1 listing against live S3 was not exercised."}]
+    },
+    {
+      "id": "no-unsigned-request-support",
+      "statement": "s4cmd has no --no-sign-request equivalent and constructs its boto3 client without signature_version=UNSIGNED, so a credential-less run cannot list.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Source-established; users requested unsigned access about eight years ago (issue #139) and it was never added.",
+      "legacy_origins": ["N1"],
+      "evidence": [
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/bloomreach/s4cmd","commit":"80059bf","path":"s4cmd.py","lines":"380-386"},
+        {"kind":"documentation","url":"https://github.com/bloomreach/s4cmd/issues/139"}
+      ]
+    },
+    {
+      "id": "recursive-blocked-without-credentials",
+      "statement": "Under the harness credential-starved environment, s4cmd's recursive mode fails at BotoClient.__init__ before any S3 request, exiting 1 and producing no keys.",
+      "scope": "runtime",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "This is the capability block for one mode, not a listing run. The exact exception text is an interaction with the wrapper's web-identity neutralization; the root cause is s4cmd building no unsigned client.",
+      "legacy_origins": ["N1"],
+      "evidence": [{"kind":"run","receipt":"../receipts/smoke/_capability/anon-nocredentials","artifact":"../receipts/smoke/_capability/anon-nocredentials/receipt.md"}]
+    },
+    {
+      "id": "other-modes-share-blocked-constructor-path",
+      "statement": "The shallow, show-directory, and du modes build the same credential-less client through the shared s3handler and connect path, so they are blocked identically.",
+      "scope": "runtime",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This is a source inference from the shared constructor path, not four independent receipts; only the recursive block carries a run receipt.",
+      "legacy_origins": ["N1"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/bloomreach/s4cmd","commit":"80059bf","path":"s4cmd.py","lines":"674-688,1557,1563"}]
+    },
+    {
+      "id": "bare-env-fails-at-first-list-call",
+      "statement": "In a plain bare environment the client constructs and the failure moves to the first list_objects call in the s3walk worker thread, surfaced as a thread failure from NoCredentialsError.",
+      "scope": "runtime",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This was observed outside the smoke wrapper and is bound only as an [OBS] probe; it produces zero keys, like the wrapper path.",
+      "legacy_origins": ["N1"],
+      "evidence": [
+        {"kind":"observation","artifact":"../receipts/smoke/_capability/OBS-probes.md"},
+        {"kind":"observation","artifact":"../receipts/smoke/_capability/direct-bare-env.stderr.txt"}
+      ]
+    },
+    {
+      "id": "positioned-for-large-file-workflows",
+      "statement": "s4cmd positions itself as a Super S3 command line tool, an s3cmd alternative for large-file and data-intensive scripted workflows.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This is the tool's own documented positioning, corroborated verbatim from the README.",
+      "legacy_origins": ["C1", "S2"],
+      "evidence": [{"kind":"documentation","url":"https://github.com/bloomreach/s4cmd"}]
+    },
+    {
+      "id": "installs-imports-runs-under-current-boto3",
+      "statement": "s4cmd 2.1.0 installs, imports, and runs (s4cmd --version exits 0) under a current boto3, including the latest botocore 1.43.50 on Python 3.12.",
+      "scope": "compatibility",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "The inherited 'Trivial - pip install s4cmd' testability held. This also corrects an earlier untested study-draft note that it would not import under modern boto3, so the image's 2018-era boto3 pin is reproducibility-only, not a necessity.",
+      "legacy_origins": ["M6"],
+      "evidence": [{"kind":"run","receipt":"../receipts/smoke/_build/modern-boto3-import","artifact":"../receipts/smoke/_build/modern-boto3-import/transcript-py312.txt"}]
+    },
+    {
+      "id": "tested-version-corrected-to-2-1-0",
+      "statement": "The reviewed s4cmd version, unrecorded in the inherited notes, is corrected to 2.1.0, which the built image self-reports.",
+      "scope": "structure",
+      "status": "confirmed",
+      "disposition": "corrected",
+      "qualification": "The inherited version was unknown; the built image's own s4cmd --version output (s4cmd version 2.1.0, exit 0) settles it.",
+      "legacy_origins": ["M4"],
+      "evidence": [{"kind":"run","receipt":"../receipts/smoke/_build/build.md"}]
+    },
+    {
+      "id": "accumulate-then-sort-then-dump",
+      "statement": "Every matching object is appended to a shared result list and, only after the whole walk joins, the entire list is sorted client-side and then printed, so nothing is streamed and peak memory scales with the total number of keys returned.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The output is therefore not in S3 return order. Source-established, corroborated by the README's 'memory is the limit' note.",
+      "legacy_origins": ["PROSE-1"],
+      "evidence": [
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/bloomreach/s4cmd","commit":"80059bf","path":"s4cmd.py","lines":"722-741,1208-1223,1592"},
+        {"kind":"documentation","url":"https://github.com/bloomreach/s4cmd"}
+      ]
+    },
+    {
+      "id": "memory-ceiling-oom-unverified",
+      "statement": "At what key count accumulate-then-sort exhausts memory, and how peak RSS scales with key count, is unsettled at smoke scale.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "The accumulate-then-sort mechanism is source-established, but no scale campaign has run; settling it requires credentials plus scale.",
+      "legacy_origins": ["PROSE-1"],
+      "evidence": [{"kind":"none","reason":"No scale campaign has run; requires credentials plus scale."}]
+    },
+    {
+      "id": "request-amplification-on-deep-trees",
+      "statement": "Because ls -r issues one paginated LIST per pseudo-directory, a broad or deep tree produces far more LIST requests than a flat delimiter-less scan of the same keys, trading request count for parallelism.",
+      "scope": "performance",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Source-established as a mechanism; the actual amplification factor at scale is an open benchmark question (see delimiter-recursion-scaling-benchmark).",
+      "legacy_origins": ["PROSE-2"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/bloomreach/s4cmd","commit":"80059bf","path":"s4cmd.py","lines":"1176,1184-1185"}]
+    },
+    {
+      "id": "http-503-not-in-retryable-set",
+      "statement": "The pool worker retries only a fixed set of socket and read-timeout errors; any other exception, including HTTP 503 SlowDown, terminates the pool immediately.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Throttling retries, if any, come only from botocore's own built-in retry layer, not from s4cmd. Source-established.",
+      "legacy_origins": ["PROSE-3"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/bloomreach/s4cmd","commit":"80059bf","path":"s4cmd.py","lines":"271-276,520-542"}]
+    },
+    {
+      "id": "throttling-behavior-unverified",
+      "statement": "How s4cmd behaves under aggressive fan-out when S3 returns 503 SlowDown is unsettled.",
+      "scope": "runtime",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "No throttling or fan-out run was possible at smoke; settling it requires credentials plus scale.",
+      "legacy_origins": ["PROSE-3"],
+      "evidence": [{"kind":"none","reason":"No throttling scenario was run; requires credentials plus scale."}]
+    },
+    {
+      "id": "client-cpu-cost-unverified",
+      "statement": "The client-CPU cost of per-line formatting plus a full client-side sort at large key counts is unmeasured.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "No scale campaign has captured CPU time; settling it requires credentials plus scale.",
+      "legacy_origins": ["PROSE-4"],
+      "evidence": [{"kind":"none","reason":"No scale campaign has measured client-CPU cost."}]
+    },
+    {
+      "id": "pure-python-architecture-neutral",
+      "statement": "s4cmd is pure Python and architecture-neutral, running natively on whichever architecture the Python base image supports.",
+      "scope": "compatibility",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Smoke ran on arm64 natively with no emulation; amd64 is the expected benchmark common denominator and is expected to run natively, but no amd64 build or run was performed.",
+      "legacy_origins": ["PROSE-5"],
+      "evidence": [
+        {"kind":"source","subject":"tested-variant","repository":"https://github.com/bloomreach/s4cmd","commit":"80059bf","path":"s4cmd.py"},
+        {"kind":"run","receipt":"../receipts/smoke/_build/build.md"}
+      ]
+    },
+    {
+      "id": "retry-can-duplicate-keys",
+      "statement": "The pool retries a failed task by re-queuing the whole directory from page one without rolling back already-appended objects or already-queued child directories, so a retryable error mid-directory followed by a successful retry can emit duplicate keys and re-walk subtrees.",
+      "scope": "correctness",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This is a source-derived hypothesis; the verifier counts duplicates, so it would surface as a FAIL at benchmark scale. Not observed at smoke.",
+      "legacy_origins": ["PROSE-6"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/bloomreach/s4cmd","commit":"80059bf","path":"s4cmd.py","lines":"529-539,1184-1185,1195-1206"}]
+    },
+    {
+      "id": "retry-duplication-run-unverified",
+      "statement": "Whether retry actually duplicates keys in a real listing run is unobserved.",
+      "scope": "correctness",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "No listing mode could execute, so the duplication hypothesis was not exercised; settling it requires a credentialed fault-injection run.",
+      "legacy_origins": ["PROSE-6"],
+      "evidence": [{"kind":"none","reason":"No listing mode ran; retry duplication was not exercised."}]
+    },
+    {
+      "id": "s3apicall-cannot-count-list-pages",
+      "statement": "s4cmd --debug raises only s4cmd's own logger, and its S3APICALL lines wrap get_paginator once per pseudo-directory rather than the per-page list_objects the paginator issues against the raw boto3 client, so they count directories walked, not LIST pages.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "True per-page LIST counting is deferred to the study's replay-server phase. Source-established.",
+      "legacy_origins": ["PROSE-7"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/bloomreach/s4cmd","commit":"80059bf","path":"s4cmd.py","lines":"102,393-408,1173-1176"}]
+    },
+    {
+      "id": "key-byte-fidelity-tool-side-loss",
+      "statement": "s4cmd rstrips each output line, so a key with trailing whitespace loses it before the adapter sees it and a newline-bearing key is split across lines by the line-oriented formatter.",
+      "scope": "output",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This is a tool-side output limit, not adapter fidelity; such keys cannot be faithfully normalized. Source-established.",
+      "legacy_origins": ["PROSE-8"],
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/bloomreach/s4cmd","commit":"80059bf","path":"s4cmd.py","lines":"1622"}]
+    },
+    {
+      "id": "adapter-fixtures-are-synthetic",
+      "statement": "The normalize.sh adapter was exercised only on synthetic fixtures with checked-in expected outputs, a construction check of the parser rather than a run against real tool output.",
+      "scope": "output",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "No listing mode could execute, so no real s4cmd output was normalized. The fixtures are adapter QA, kept under adapter/fixtures/.",
+      "legacy_origins": ["PROSE-8"],
+      "evidence": [{"kind":"documentation","path":"../adapter/fixtures/README.md"}]
+    },
+    {
+      "id": "edge-key-fidelity-deferred",
+      "statement": "Full weird-key, unicode, and multipart-ETag fidelity is deferred and unexercised.",
+      "scope": "correctness",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "EDGE_BUCKET was not configured; edge-key fidelity was recorded as deferred, not run.",
+      "legacy_origins": ["PROSE-8"],
+      "evidence": [{"kind":"none","reason":"EDGE_BUCKET=none; edge-key fidelity was deferred."}]
+    }
+  ]
+}

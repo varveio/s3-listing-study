@@ -1,0 +1,41 @@
+[Runtime Exception] Unable to connect to s3: The provided profile or the current environment is configured to assume role with web identity but has no role ARN configured. Ensure that the profile has the role_arnconfiguration set or the AWS_ROLE_ARN env var is set.
+Traceback (most recent call last):
+  File "/usr/local/bin/s4cmd.py", line 686, in connect
+    self.s3 = BotoClient(self.opt)
+  File "/usr/local/bin/s4cmd.py", line 386, in __init__
+    self.client = self.boto3.client('s3', endpoint_url=opt.endpoint_url)
+  File "/usr/local/lib/python3.7/site-packages/boto3/__init__.py", line 91, in client
+    return _get_default_session().client(*args, **kwargs)
+  File "/usr/local/lib/python3.7/site-packages/boto3/session.py", line 263, in client
+    aws_session_token=aws_session_token, config=config)
+  File "/usr/local/lib/python3.7/site-packages/botocore/session.py", line 827, in create_client
+    credentials = self.get_credentials()
+  File "/usr/local/lib/python3.7/site-packages/botocore/session.py", line 426, in get_credentials
+    'credential_provider').load_credentials()
+  File "/usr/local/lib/python3.7/site-packages/botocore/credentials.py", line 1934, in load_credentials
+    creds = provider.load()
+  File "/usr/local/lib/python3.7/site-packages/botocore/credentials.py", line 1630, in load
+    return self._assume_role_with_web_identity()
+  File "/usr/local/lib/python3.7/site-packages/botocore/credentials.py", line 1667, in _assume_role_with_web_identity
+    raise InvalidConfigError(error_msg=error_msg)
+botocore.exceptions.InvalidConfigError: The provided profile or the current environment is configured to assume role with web identity but has no role ARN configured. Ensure that the profile has the role_arnconfiguration set or the AWS_ROLE_ARN env var is set.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/usr/local/bin/s4cmd.py", line 1928, in main
+    CommandHandler(opt).run(args)
+  File "/usr/local/bin/s4cmd.py", line 1557, in run
+    CommandHandler.__dict__[cmd + '_handler'](self, args)
+  File "/usr/local/bin/s4cmd.py", line 129, in wrapper
+    ret = func(*args, **kargs)
+  File "/usr/local/bin/s4cmd.py", line 1632, in ls_handler
+    self.pretty_print(self.s3handler().s3walk(args[1]))
+  File "/usr/local/bin/s4cmd.py", line 1563, in s3handler
+    return S3Handler(self.opt)
+  File "/usr/local/bin/s4cmd.py", line 674, in __init__
+    self.connect()
+  File "/usr/local/bin/s4cmd.py", line 688, in connect
+    raise RetryFailure('Unable to connect to s3: %s' % e)
+s4cmd.RetryFailure: Unable to connect to s3: The provided profile or the current environment is configured to assume role with web identity but has no role ARN configured. Ensure that the profile has the role_arnconfiguration set or the AWS_ROLE_ARN env var is set.
+

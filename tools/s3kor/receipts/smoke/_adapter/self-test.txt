@@ -1,0 +1,24 @@
+# Non-mode evidence — normalize.sh / run.sh adapter self-tests
+# Run on host AFTER any measurement clock (adapters are never timed);
+# labeled [OBS] in report.md. UTC: 2026-07-17T12:49:02Z
+
+=== run.sh list (argv, NUL shown as newline) ===
+ls
+--region
+us-east-1
+s3://EXAMPLEBUCKET
+
+=== run.sh list-versions with prefix ===
+ls
+--all-versions
+--region
+us-east-1
+s3://EXAMPLEBUCKET/some/prefix/
+
+=== normalize.sh list (input has a key with a space + blank line) ===
+a/b/key1	-	-	-	-
+a/b/key with space	-	-	-	-
+
+=== normalize.sh list-versions (input '<versionId> <key>', key has space) ===
+a/b/key1	-	-	-	-
+a/key with space	-	-	-	-

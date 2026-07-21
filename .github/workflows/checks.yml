@@ -1,0 +1,94 @@
+# Static and fake-host gates only. Nothing here touches Docker, the network
+# path to any bucket, or host firewall state: the live activation sequence is
+# owner-run on a disposable runner (docs/operating/runner-security.md) and must never
+# ride on pull-request CI.
+name: checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install pinned shellcheck (user path — no privileged host mutation)
+        run: |
+          set -euo pipefail
+          curl -sSL -o /tmp/shellcheck.tar.xz \
+            https://github.com/koalaman/shellcheck/releases/download/v0.10.0/shellcheck-v0.10.0.linux.x86_64.tar.xz
+          echo "6c881ab0698e4e6ea235245f22832860544f17ba386442fe7e9d629f8cbedf87  /tmp/shellcheck.tar.xz" | sha256sum -c -
+          tar -xJf /tmp/shellcheck.tar.xz -C /tmp
+          mkdir -p "$HOME/.local/bin"
+          install -m 0755 /tmp/shellcheck-v0.10.0/shellcheck "$HOME/.local/bin/shellcheck"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/shellcheck" --version
+
+      - name: Install pinned jsonschema closure
+        # A venv sidesteps PEP 668 on the runner's externally-managed system
+        # Python without privileged mutation. The full dependency closure is
+        # version-pinned and installed with --no-deps so the resolver can
+        # never float a transitive package (typing-extensions is required by
+        # referencing on Python < 3.13; the runner is 3.12). PyPI never
+        # re-serves a changed artifact under the same name/version/filename,
+        # so version pins bound the executable code.
+        run: |
+          set -euo pipefail
+          python3 -m venv "$HOME/.venv"
+          "$HOME/.venv/bin/pip" install --no-deps \
+            jsonschema==4.26.0 \
+            attrs==26.1.0 \
+            jsonschema-specifications==2025.9.1 \
+            referencing==0.37.0 \
+            rpds-py==0.30.0 \
+            typing-extensions==4.15.0
+          echo "$HOME/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: bash -n over every tracked shell script
+        run: |
+          set -euo pipefail
+          git ls-files '*.sh' | while read -r f; do bash -n "$f"; done
+
+      - name: Mask docker for the static gates
+        # The suites are designed to run without Docker, but one regression
+        # path issues a read-only `docker image inspect` that would reach the
+        # hosted runner's daemon. A failing PATH shim keeps every step below
+        # provably daemon-free.
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/no-docker
+          printf '#!/bin/sh\necho "docker is masked in pull-request CI (static gates only)" >&2\nexit 1\n' > /tmp/no-docker/docker
+          chmod +x /tmp/no-docker/docker
+          echo "/tmp/no-docker" >> "$GITHUB_PATH"
+
+      - name: Harness regression suite (includes the harness shellcheck gate)
+        run: harness/tests/run-regressions.sh
+
+      - name: Secret-scanner fixtures
+        run: harness/tests/scan-fixtures-run.sh
+
+      - name: Full-tree secret scan
+        run: harness/scan-tree.sh .
+
+      - name: Tool adapter shellcheck
+        run: shellcheck -S warning tools/*/adapter/*.sh tools/*/adapter/fixtures/*.sh
+
+      - name: s3p adapter fixture QA
+        run: tools/s3p/adapter/fixtures/check.sh
+
+      - name: Current capsule validation (all runnable tools)
+        run: |
+          set -euo pipefail
+          for tool in aws-cli minio-mc ps3 rclone s3-fast-list s3kor s3p s4cmd s5cmd s7cmd swath; do
+            python3 scripts/validate-tool-capsule.py --tool "$tool"
+          done
+
+      - name: Markdown link check (current-state surfaces)
+        run: python3 scripts/check-links.py

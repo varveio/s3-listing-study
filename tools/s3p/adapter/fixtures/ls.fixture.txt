@@ -1,0 +1,4 @@
+normals-hourly/a.csv
+index.html
+
+normals-monthly/b.csv

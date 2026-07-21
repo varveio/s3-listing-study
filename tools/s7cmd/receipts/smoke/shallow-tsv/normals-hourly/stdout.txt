@@ -1,0 +1,6 @@
+	PRE			normals-hourly/1981-2010/
+	PRE			normals-hourly/1991-2020/
+	PRE			normals-hourly/2006-2020/
+	PRE			normals-hourly/access/
+	PRE			normals-hourly/archive/
+	PRE			normals-hourly/doc/

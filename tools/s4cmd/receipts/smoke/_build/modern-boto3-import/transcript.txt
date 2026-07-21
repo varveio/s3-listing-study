@@ -1,0 +1,13 @@
+=== versions ===
+Name: s4cmd
+Version: 2.1.0
+Name: botocore
+Version: 1.33.13
+Name: boto3
+Version: 1.33.13
+=== import s4cmd (real exit) ===
+IMPORT_OK
+python_exit=0
+=== botocore.vendored.requests present? ===
+vendored.requests present
+vendored_exit=0

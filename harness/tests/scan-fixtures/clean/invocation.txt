@@ -1,0 +1,5 @@
+docker run -d --network s3-listing-study-subjects --cap-drop ALL --security-opt no-new-privileges:true -e AWS_EC2_METADATA_DISABLED=true -e TZ=UTC \
+  -e AWS_ACCESS_KEY_ID= -e AWS_SECRET_ACCESS_KEY= -e AWS_SESSION_TOKEN= \
+  -e AWS_SHARED_CREDENTIALS_FILE=/nonexistent-by-harness \
+  amazon/aws-cli@sha256:eb85b2c72442c9eab0bdbe608095b9b909bc2a7136924124d63fe0c03b2ec334 \
+  s3api list-objects-v2 --bucket noaa-normals-pds --region us-east-1 --no-sign-request

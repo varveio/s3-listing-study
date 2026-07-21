@@ -1,0 +1,75 @@
++ cd /tmp
++ cp -r /src ps3build
++ cd ps3build
++ rm -f pS3.0-1-16
++ go mod init pS3
+go: creating new go.mod: module pS3
+go: to add module requirements and sums:
+	go mod tidy
++ go get github.com/aws/aws-sdk-go@v1.44.249
+go: downloading github.com/aws/aws-sdk-go v1.44.249
+go: downloading github.com/jmespath/go-jmespath v0.4.0
+go: module github.com/aws/aws-sdk-go is deprecated: aws-sdk-go is deprecated. Use aws-sdk-go-v2.
+go: added github.com/aws/aws-sdk-go v1.44.249
+go: added github.com/jmespath/go-jmespath v0.4.0
++ go get github.com/spf13/cobra@v1.7.0
+go: downloading github.com/spf13/cobra v1.7.0
+go: downloading github.com/inconshreveable/mousetrap v1.1.0
+go: downloading github.com/spf13/pflag v1.0.5
+go: added github.com/inconshreveable/mousetrap v1.1.0
+go: added github.com/spf13/cobra v1.7.0
+go: added github.com/spf13/pflag v1.0.5
++ go get github.com/spf13/viper@v1.15.0
+go: downloading github.com/spf13/viper v1.15.0
+go: downloading github.com/spf13/cast v1.5.0
+go: downloading github.com/fsnotify/fsnotify v1.6.0
+go: downloading github.com/spf13/afero v1.9.3
+go: downloading github.com/mitchellh/mapstructure v1.5.0
+go: downloading github.com/spf13/jwalterweatherman v1.1.0
+go: downloading github.com/subosito/gotenv v1.4.2
+go: downloading github.com/hashicorp/hcl v1.0.0
+go: downloading gopkg.in/ini.v1 v1.67.0
+go: downloading github.com/magiconair/properties v1.8.7
+go: downloading github.com/pelletier/go-toml/v2 v2.0.6
+go: downloading gopkg.in/yaml.v3 v3.0.1
+go: downloading golang.org/x/text v0.5.0
+go: downloading golang.org/x/sys v0.3.0
+go: added github.com/fsnotify/fsnotify v1.6.0
+go: added github.com/hashicorp/hcl v1.0.0
+go: added github.com/magiconair/properties v1.8.7
+go: added github.com/mitchellh/mapstructure v1.5.0
+go: added github.com/pelletier/go-toml/v2 v2.0.6
+go: added github.com/spf13/afero v1.9.3
+go: added github.com/spf13/cast v1.5.0
+go: added github.com/spf13/jwalterweatherman v1.1.0
+go: added github.com/spf13/viper v1.15.0
+go: added github.com/subosito/gotenv v1.4.2
+go: upgraded golang.org/x/sys v0.1.0 => v0.3.0
+go: upgraded golang.org/x/text v0.4.0 => v0.5.0
+go: added gopkg.in/ini.v1 v1.67.0
++ go get golang.org/x/net/http2
+go: downloading golang.org/x/net v0.57.0
+go: downloading golang.org/x/text v0.40.0
+golang.org/x/net/http2 imports
+	slices: package slices is not in GOROOT (/usr/local/go/src/slices)
+note: imported by a module that requires go 1.25
+go: downloading golang.org/x/sys v0.47.0
+=== go build ./... ===
++ echo '=== go build ./... ==='
++ go build ./...
+go: downloading golang.org/x/net v0.4.0
+# pS3/cmd
+cmd/listObjectsV2.go:9:2: "os" imported and not used
+cmd/listObjectsV2.go:66:3: undefined: log
+cmd/listObjectsV2.go:102:3: undefined: log
+cmd/listObjectsV2.go:130:3: undefined: log
+cmd/listObjectsV2.go:165:5: undefined: atomic
+cmd/listObjectsV2.go:186:37: "debug: item count=".atomic undefined (type untyped string has no field or method atomic)
+cmd/listObjectsV2.go:218:5: undefined: log
+cmd/listObjectsV2.go:316:5: undefined: log
++ echo '=== go vet ./cmd (exit 1) ==='
++ go vet ./cmd
+=== go vet ./cmd (exit 1) ===
+# pS3/cmd
+vet: cmd/listObjectsV2.go:66:3: undefined: log
+BUILD_EXIT=1

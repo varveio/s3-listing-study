@@ -1,0 +1,47 @@
+DEBUG: Request s3/HeadBucket Details:
+---[ REQUEST POST-SIGN ]-----------------------------
+HEAD / HTTP/1.1
+Host: noaa-normals-pds.s3.amazonaws.com
+User-Agent: aws-sdk-go/1.44.298 (go1.22.10; linux; arm64)
+
+
+-----------------------------------------------------
+DEBUG: Response s3/HeadBucket Details:
+---[ RESPONSE ]--------------------------------------
+HTTP/1.1 200 OK
+Transfer-Encoding: chunked
+Content-Type: application/xml
+Date: Fri, 17 Jul 2026 08:17:24 GMT
+Server: AmazonS3
+X-Amz-Access-Point-Alias: false
+X-Amz-Bucket-Arn: arn:aws:s3:::noaa-normals-pds
+X-Amz-Bucket-Region: us-east-1
+X-Amz-Id-2: gEOYLPreDR7xW9qmRKRAl8q2DABAvRYvAyznJsLWkQ3AX7G3CtRqwN3AkGL95mh5bV+VK3XJhdM=
+X-Amz-Request-Id: NS1ZZGGWCC3FXKFD
+
+
+
+-----------------------------------------------------
+DEBUG: Request s3/ListObjectsV2 Details:
+---[ REQUEST POST-SIGN ]-----------------------------
+GET /?list-type=2&prefix=normals-hourly%2Faccess%2FAQW HTTP/1.1
+Host: noaa-normals-pds.s3.amazonaws.com
+User-Agent: aws-sdk-go/1.44.298 (go1.22.10; linux; arm64)
+Accept-Encoding: gzip
+
+
+-----------------------------------------------------
+DEBUG: Response s3/ListObjectsV2 Details:
+---[ RESPONSE ]--------------------------------------
+HTTP/1.1 200 OK
+Transfer-Encoding: chunked
+Content-Type: application/xml
+Date: Fri, 17 Jul 2026 08:17:24 GMT
+Server: AmazonS3
+X-Amz-Bucket-Region: us-east-1
+X-Amz-Id-2: ck1rp7IwuHtDvzVDRA9fckH7iDeVPzUjv5iOaHdgv2TF8hidF3aM64qCZdYjStRaLS20qHHEt4w=
+X-Amz-Request-Id: NS1N0JG9BX7H2583
+
+
+-----------------------------------------------------
+2026/03/16 14:41:15           3184153  AQW00061705.csv

@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://varve.io/s3-listing-study/schemas/claims.schema.json",
+  "title": "Runnable tool capsule claims",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "schema_version", "tool", "legacy_ledger", "claims"],
+  "properties": {
+    "$schema": { "type": "string", "const": "../../../schemas/claims.schema.json" },
+    "schema_version": { "type": "integer", "const": 1 },
+    "tool": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+    "legacy_ledger": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "migration_map", "expected_origins"],
+      "properties": {
+        "source": { "type": "string", "const": "../research/tool-page.md" },
+        "migration_map": { "type": "string", "const": "../research/claims-migration.md" },
+        "expected_origins": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*$" }
+        }
+      }
+    },
+    "claims": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/claim" } }
+  },
+  "$defs": {
+    "claim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "statement", "scope", "status", "disposition", "qualification", "legacy_origins", "evidence"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+        "statement": { "type": "string", "minLength": 1 },
+        "scope": { "type": "string", "enum": ["structure", "mechanism", "runtime", "correctness", "performance", "output", "compatibility", "operability"] },
+        "status": { "type": "string", "enum": ["confirmed", "supported", "unverified", "unverifiable"] },
+        "disposition": { "type": "string", "enum": ["retained", "corrected", "contradicted"] },
+        "qualification": { "type": "string", "minLength": 1 },
+        "legacy_origins": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" } },
+        "evidence": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/evidence" } }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "confirmed" } }, "required": ["status"] },
+          "then": {
+            "properties": {
+              "evidence": {
+                "items": { "properties": { "kind": { "enum": ["source", "documentation", "run", "observation"] } } },
+                "contains": { "properties": { "kind": { "const": "run" } }, "required": ["kind"] }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "status": { "const": "supported" } }, "required": ["status"] },
+          "then": {
+            "properties": {
+              "evidence": {
+                "items": { "properties": { "kind": { "enum": ["source", "documentation", "run", "observation"] } } }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "status": { "enum": ["unverified", "unverifiable"] } }, "required": ["status"] },
+          "then": {
+            "properties": {
+              "evidence": {
+                "items": {
+                  "properties": { "kind": { "const": "none" } },
+                  "required": ["kind", "reason"]
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "evidence": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "subject", "repository", "commit", "path"],
+          "properties": {
+            "kind": { "const": "source" },
+            "subject": { "type": "string", "enum": ["tested-variant", "upstream"] },
+            "repository": { "type": "string", "format": "uri" },
+            "commit": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+            "path": { "type": "string", "minLength": 1 },
+            "lines": { "type": "string", "pattern": "^[0-9]+(?:-[0-9]+)?(?:,[0-9]+(?:-[0-9]+)?)*$" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": {
+            "kind": { "const": "documentation" },
+            "url": { "type": "string", "format": "uri" },
+            "path": { "type": "string", "minLength": 1 }
+          },
+          "anyOf": [{ "required": ["url"] }, { "required": ["path"] }]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "receipt"],
+          "properties": {
+            "kind": { "const": "run" },
+            "receipt": { "type": "string", "pattern": "^\\.\\./receipts(?:/|$)" },
+            "artifact": { "type": "string", "pattern": "^\\.\\./receipts(?:/|$)" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "artifact"],
+          "properties": {
+            "kind": { "const": "observation" },
+            "artifact": { "type": "string", "pattern": "^\\.\\./receipts(?:/|$)" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "reason"],
+          "properties": {
+            "kind": { "const": "none" },
+            "reason": { "type": "string", "minLength": 1 }
+          }
+        }
+      ]
+    }
+  }
+}

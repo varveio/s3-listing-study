@@ -1,0 +1,30 @@
+{
+  "$schema": "../../../schemas/tool.schema.json",
+  "schema_version": 1,
+  "slug": "rclone",
+  "display_name": "rclone",
+  "entry_type": "runnable_lister",
+  "upstream": { "repository": "https://github.com/rclone/rclone" },
+  "language": "Go",
+  "license": "MIT",
+  "tested": {
+    "variant": "upstream",
+    "repository": "https://github.com/rclone/rclone",
+    "version": {
+      "value": "1.74.4",
+      "provenance": { "kind": "run", "reference": "../receipts/smoke/_build/version.md" }
+    },
+    "revision": {
+      "value": "5bc93a2a7ab0ebd0a11352bc4968eabeffb18027",
+      "provenance": { "kind": "documentation", "reference": "../research/report.md" }
+    }
+  },
+  "study": {
+    "groundwork_status": "complete",
+    "smoke_execution_status": "ran",
+    "verification_status": "passed",
+    "auth_status": "anonymous",
+    "benchmark_eligibility": "planned"
+  },
+  "evidence_roots": ["../receipts/smoke"]
+}

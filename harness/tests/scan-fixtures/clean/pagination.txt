@@ -1,0 +1,4 @@
+<ListBucketResult><IsTruncated>true</IsTruncated>
+<NextContinuationToken>1P8x9K2mQ0vZ7jL5nR3wT6yU8iO1pA4sD9fG2hJ5kL8mN0bV3cX6zQ9wE2rT5yU==</NextContinuationToken>
+<Contents><Key>normals-hourly/access/AQW00061705.csv</Key><Size>30316</Size></Contents>
+DEBUG - MainThread - botocore.endpoint - Sending http request over anonymous unsigned connection

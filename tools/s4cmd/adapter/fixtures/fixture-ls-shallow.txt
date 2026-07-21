@@ -1,0 +1,2 @@
+                  DIR s3://noaa-normals-pds/normals-hourly/
+2019-11-01 00:00          1 s3://noaa-normals-pds/index.html

@@ -1,0 +1,30 @@
+{
+  "$schema": "../../../schemas/tool.schema.json",
+  "schema_version": 1,
+  "slug": "s5cmd",
+  "display_name": "s5cmd",
+  "entry_type": "runnable_lister",
+  "upstream": { "repository": "https://github.com/peak/s5cmd" },
+  "language": "Go",
+  "license": "MIT",
+  "tested": {
+    "variant": "upstream",
+    "repository": "https://github.com/peak/s5cmd",
+    "version": {
+      "value": "v2.3.0",
+      "provenance": { "kind": "run", "reference": "../receipts/smoke/_capability/observability/version.stdout.txt" }
+    },
+    "revision": {
+      "value": "991c9fb",
+      "provenance": { "kind": "run", "reference": "../receipts/smoke/_capability/observability/version.stdout.txt" }
+    }
+  },
+  "study": {
+    "groundwork_status": "complete",
+    "smoke_execution_status": "ran",
+    "verification_status": "passed",
+    "auth_status": "anonymous",
+    "benchmark_eligibility": "planned"
+  },
+  "evidence_roots": ["../receipts/smoke"]
+}

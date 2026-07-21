@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://varve.io/s3-listing-study/schemas/tool.schema.json",
+  "title": "Runnable tool capsule identity",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "schema_version", "slug", "display_name", "entry_type", "upstream", "language", "license", "tested", "study", "evidence_roots"],
+  "properties": {
+    "$schema": { "type": "string", "const": "../../../schemas/tool.schema.json" },
+    "schema_version": { "type": "integer", "const": 1 },
+    "slug": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+    "display_name": { "type": "string", "minLength": 1 },
+    "entry_type": { "type": "string", "const": "runnable_lister" },
+    "upstream": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository"],
+      "properties": {
+        "repository": { "type": "string", "format": "uri", "pattern": "^https://" }
+      }
+    },
+    "language": { "type": "string", "minLength": 1 },
+    "license": { "type": "string", "minLength": 1 },
+    "tested": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["variant", "repository"],
+      "properties": {
+        "variant": { "type": "string", "enum": ["upstream", "fork"] },
+        "repository": { "type": "string", "format": "uri", "pattern": "^https://" },
+        "version": { "$ref": "#/$defs/versionValue" },
+        "revision": { "$ref": "#/$defs/revisionValue" },
+        "upstream_base": { "$ref": "#/$defs/revisionValue" }
+      }
+    },
+    "study": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["groundwork_status", "smoke_execution_status", "verification_status", "auth_status", "benchmark_eligibility"],
+      "properties": {
+        "groundwork_status": { "type": "string", "enum": ["not-started", "in-progress", "complete"] },
+        "smoke_execution_status": { "type": "string", "enum": ["not-run", "ran", "blocked"] },
+        "verification_status": { "type": "string", "enum": ["not-attempted", "passed", "failed", "blocked"] },
+        "auth_status": { "type": "string", "enum": ["anonymous", "anonymous-via-fork", "credentials-required", "credentialed"] },
+        "benchmark_eligibility": { "type": "string", "enum": ["planned", "conditional", "excluded", "undecided"] }
+      }
+    },
+    "evidence_roots": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^\\.\\./receipts(?:/|$)" }
+    }
+  },
+  "$defs": {
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "reference"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["source", "documentation", "run", "observation"] },
+        "reference": { "type": "string", "pattern": "^(?:https://|\\.\\./).+" }
+      }
+    },
+    "versionValue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "provenance"],
+      "properties": {
+        "value": { "type": "string", "minLength": 1 },
+        "provenance": { "$ref": "#/$defs/provenance" }
+      }
+    },
+    "revisionValue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "provenance"],
+      "properties": {
+        "value": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+        "provenance": { "$ref": "#/$defs/provenance" }
+      }
+    }
+  }
+}

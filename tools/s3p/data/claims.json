@@ -1,0 +1,465 @@
+{
+  "$schema": "../../../schemas/claims.schema.json",
+  "schema_version": 1,
+  "tool": "s3p",
+  "legacy_ledger": {
+    "source": "../research/tool-page.md",
+    "migration_map": "../research/claims-migration.md",
+    "expected_origins": [
+      "M1", "M2", "M3", "M4", "M5",
+      "X1", "X2", "X3", "X4", "X5", "X6", "X7", "X8",
+      "N1",
+      "W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8",
+      "ANCHORS", "HAUTH", "V1", "V2", "V3",
+      "PROSE-1", "PROSE-2", "PROSE-3"
+    ]
+  },
+  "claims": [
+    {
+      "id": "repo-is-generalui-s3p",
+      "statement": "The canonical upstream repository is github.com/generalui/s3p.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The latest git release tag is v3.6.0 while the npm latest dist-tag is 3.7.2.",
+      "legacy_origins": ["M1"],
+      "evidence": [{"kind":"documentation","url":"https://github.com/generalui/s3p"}]
+    },
+    {
+      "id": "language-is-caffeinescript-on-node",
+      "statement": "s3p is written in CaffeineScript compiled to JavaScript and runs on Node.js using the AWS SDK for JavaScript v3 client-s3.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "CaffeineScript is a CoffeeScript-family language distributed as prebuilt JavaScript in the npm tarball.",
+      "legacy_origins": ["M2"],
+      "evidence": [{"kind":"source","subject":"upstream","repository":"https://github.com/generalui/s3p","commit":"5a23b22e","path":"package.json"}]
+    },
+    {
+      "id": "license-is-isc",
+      "statement": "The license is ISC.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "corrected",
+      "qualification": "The inherited page recorded MIT; LICENSE.md and package.json both declare ISC.",
+      "legacy_origins": ["M3"],
+      "evidence": [{"kind":"source","subject":"upstream","repository":"https://github.com/generalui/s3p","commit":"5a23b22e","path":"LICENSE.md"}]
+    },
+    {
+      "id": "tested-version-is-3-7-2",
+      "statement": "The smoked artifact is s3p 3.7.2, the npm latest dist-tag, while source anchors use git tag v3.6.0.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "corrected",
+      "qualification": "The inherited page left the version unconfirmed. The capability receipts recorded the version as caller-supplied metadata, but the build note independently captured the tool's own s3p version self-report of 3.7.2.",
+      "legacy_origins": ["M4"],
+      "evidence": [{"kind":"observation","artifact":"../receipts/smoke/_build/build-notes.md"}]
+    },
+    {
+      "id": "listing-is-isolable",
+      "statement": "Listing is a first-class isolable operation because ls and summarize are standalone, non-mutating, list-only subcommands.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "corrected",
+      "qualification": "This reframes the inherited testability open question and corrects the inherited claim that listing might not be separately invokable. Install for the tagged version is not straightforward (claim v3-6-0-cannot-start) and timing is blocked by authentication (claim anonymous-listing-blocked-at-auth). The credential-starved ls probe reached and issued real listObjectsV2 calls before the auth failure.",
+      "legacy_origins": ["M5", "X7"],
+      "evidence": [
+        {"kind":"source","subject":"upstream","repository":"https://github.com/generalui/s3p","commit":"5a23b22e","path":"source/S3Parallel/S3PCliCommands.caf","lines":"11-39"},
+        {"kind":"observation","artifact":"../receipts/smoke/_capability/anon-ls/stderr.txt"}
+      ]
+    },
+    {
+      "id": "bisects-unknown-keyspace",
+      "statement": "s3p discovers an unknown keyspace by recursive bisection with synthetic midpoint keys rather than a continuation-token page loop.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The recursive engine eachRecursive was re-pinned to S3Comprehensions.caf:361-503 during review.",
+      "legacy_origins": ["X1", "ANCHORS"],
+      "evidence": [{"kind":"source","subject":"upstream","repository":"https://github.com/generalui/s3p","commit":"5a23b22e","path":"source/S3Parallel/S3Comprehensions.caf","lines":"361-503"}]
+    },
+    {
+      "id": "bisection-unique-among-survey",
+      "statement": "s3p is the only key-space bisector among the surveyed tools.",
+      "scope": "compatibility",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "The mechanism is source-confirmed, but the comparative uniqueness is the author's framing; the other study tools' listing strategies were not audited this phase.",
+      "legacy_origins": ["X1"],
+      "evidence": [{"kind":"none","reason":"The other study tools' listing strategies were not audited, so the comparative claim cannot be established from s3p's source alone."}]
+    },
+    {
+      "id": "bisect-key-is-arithmetic-no-sampling",
+      "statement": "getBisectKey selects a synthetic midpoint by walking to the first divergent character and choosing the middle alphabet character, without sampling any real keys.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The selection has special cases for adjacent characters and for incrementing to the next key.",
+      "legacy_origins": ["X2", "ANCHORS"],
+      "evidence": [{"kind":"source","subject":"upstream","repository":"https://github.com/generalui/s3p","commit":"5a23b22e","path":"source/S3Parallel/Lib/S3Keys.caf","lines":"46-90"}]
+    },
+    {
+      "id": "two-lists-per-node",
+      "statement": "Each split node issues two concurrent ListObjectsV2 calls, one at startAfter and one at the computed midpoint, and recurses a side only when its page returned a full 1000 keys.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "A full 1000-key page means the range still holds more keys; a non-full page means that half is exhausted. The tool page frames this full-page-then-split heuristic as a claimed strength that is simple and requires no tuning; that positive framing is not receipt-settled.",
+      "legacy_origins": ["X3", "ANCHORS"],
+      "evidence": [{"kind":"source","subject":"upstream","repository":"https://github.com/generalui/s3p","commit":"5a23b22e","path":"source/S3Parallel/S3Comprehensions.caf","lines":"381-384,440-441,244"}]
+    },
+    {
+      "id": "probe-scheduled-two-lists",
+      "statement": "The credential-starved ls probe scheduled two listObjectsV2 attempts with distinct StartAfter values before both aborted at credential resolution.",
+      "scope": "runtime",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This shows the fan-out logic executes; it does not show simultaneous on-the-wire execution because both attempts aborted before any HTTP LIST and the receipt carries no timestamps.",
+      "legacy_origins": ["X3"],
+      "evidence": [{"kind":"observation","artifact":"../receipts/smoke/_capability/anon-ls/stderr.txt"}]
+    },
+    {
+      "id": "per-node-kept-sets-disjoint",
+      "statement": "The two per-node LIST calls keep disjoint kept-sets, the left filtered to Key<=middleKey and the right to Key<=stopAt.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "corrected",
+      "qualification": "The inherited fifty-percent kept-set overlap is corrected: any overlap is redundant raw fetching in dense ranges, not a fifty-fifty kept-set overlap.",
+      "legacy_origins": ["X4"],
+      "evidence": [{"kind":"source","subject":"upstream","repository":"https://github.com/generalui/s3p","commit":"5a23b22e","path":"source/S3Parallel/S3Comprehensions.caf","lines":"389-390"}]
+    },
+    {
+      "id": "list-waste-fraction",
+      "statement": "The fraction of wasted LIST work is around fifty percent.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "The waste fraction is scale-dependent and was not measured; a benchmark would count logical LIST requests against unique keys returned. The tool page frames the eager double-LIST-per-node as a claimed strength that trades this extra LIST work for lower discovery latency with no full-scan prepass; that advantage is unverified.",
+      "legacy_origins": ["X4", "W1"],
+      "evidence": [{"kind":"none","reason":"No instrumented request-count run was possible; listing was auth-blocked."}]
+    },
+    {
+      "id": "lifo-pool-default-100",
+      "statement": "A LIFO PromiseWorkerPool caps simultaneous LIST requests at listConcurrency, which defaults to 100.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The pool location was re-pinned to PromiseWorkerPool.caf:26-48 (push at :30, pop at :40) and the default to S3Comprehensions.caf:246. It is exposed as --list-concurrency.",
+      "legacy_origins": ["X5", "ANCHORS"],
+      "evidence": [
+        {"kind":"source","subject":"upstream","repository":"https://github.com/generalui/s3p","commit":"5a23b22e","path":"source/S3Parallel/Lib/PromiseWorkerPool.caf","lines":"26-48"},
+        {"kind":"source","subject":"upstream","repository":"https://github.com/generalui/s3p","commit":"5a23b22e","path":"source/S3Parallel/S3Comprehensions.caf","lines":"246"}
+      ]
+    },
+    {
+      "id": "prefix-bisect-is-library-internal",
+      "statement": "The usePrefixBisect mode is library-internal and auto-triggered when a right page returns zero items, not a user-selectable CLI flag.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "corrected",
+      "qualification": "The inherited page described it as opt-in; there is no CLI flag and it is absent from all --help output.",
+      "legacy_origins": ["X6"],
+      "evidence": [
+        {"kind":"source","subject":"upstream","repository":"https://github.com/generalui/s3p","commit":"5a23b22e","path":"source/S3Parallel/S3Comprehensions.caf","lines":"448"},
+        {"kind":"source","subject":"upstream","repository":"https://github.com/generalui/s3p","commit":"5a23b22e","path":"source/S3Parallel/Lib/S3Keys.caf","lines":"29-35"}
+      ]
+    },
+    {
+      "id": "prefix-bisect-no-faster",
+      "statement": "Prefix bisection does not improve performance.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "This is the author's own unreproduced finding; benchmarking it would require an API driver because there is no CLI flag.",
+      "legacy_origins": ["X6"],
+      "evidence": [{"kind":"none","reason":"The author's no-faster finding was not independently reproduced."}]
+    },
+    {
+      "id": "alphabet-is-95-chars",
+      "statement": "The supported key alphabet is exactly 95 printable-ASCII characters, from space 0x20 through tilde 0x7E.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "corrected",
+      "qualification": "The inherited page disputed 94 versus 96; the count is 0x7E minus 0x20 plus 1, which is 95.",
+      "legacy_origins": ["X8", "ANCHORS"],
+      "evidence": [{"kind":"source","subject":"upstream","repository":"https://github.com/generalui/s3p","commit":"5a23b22e","path":"source/S3Parallel/Lib/S3Keys.caf","lines":"5"}]
+    },
+    {
+      "id": "throughput-numbers-are-author-self-reported",
+      "statement": "The published throughput and speedup figures for s3p are all author self-reports with no third-party reproduction.",
+      "scope": "performance",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The figures trace to distinct sources with distinct provenance strength: about 20,000 items per second is the GenUI accelerators page; about 35,000 items per second peak and the 5-to-50-times overall multiplier are the author's Medium post, which also gives a 9 GB/s copy rate; an independently read README figure of almost 50,000 items per second as of v3.5 and an 8-to-9 GB/s copy rate were found in the same author lineage; a separate secondhand summary table carries an unanchored about 35,000 objects per second with no bucket size or wall-clock; and the conflicting 15-to-100-times multiplier is a landscape survey. The 9 GB/s figure is a copy rate, not a listing rate; the two multipliers conflict; and both multipliers trace to the author.",
+      "legacy_origins": ["N1"],
+      "evidence": [
+        {"kind":"documentation","url":"https://medium.com/@shanebdavis/s3p-massively-parallel-s3-copying-9a9e466d0d74"},
+        {"kind":"documentation","path":"../research/report.md"}
+      ]
+    },
+    {
+      "id": "throughput-numbers-reproduced",
+      "statement": "The published throughput figures reproduce on the study setup.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "No third-party reproduction exists; smoke produces no comparative numbers and listing was auth-blocked.",
+      "legacy_origins": ["N1"],
+      "evidence": [{"kind":"none","reason":"No benchmark or comparative run has been performed."}]
+    },
+    {
+      "id": "request-counter-is-logical-not-http",
+      "statement": "The requests and listRequests counters count logical s3.list operations, incremented by two per node before the call, not underlying HTTP attempts.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "SDK-level retries are invisible to the counter, so true wire cost must be measured by counting HTTP requests independently.",
+      "legacy_origins": ["W1"],
+      "evidence": [{"kind":"source","subject":"upstream","repository":"https://github.com/generalui/s3p","commit":"5a23b22e","path":"source/S3Parallel/S3Comprehensions.caf","lines":"296,378,524"}]
+    },
+    {
+      "id": "skewed-keyspace-extra-rounds",
+      "statement": "Blind ASCII-midpoint bisection costs extra rounds on skewed keyspaces.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "This is a benchmark-phase question, falsifiable by running a skewed layout against a uniform bucket of the same size; not run.",
+      "legacy_origins": ["W2"],
+      "evidence": [{"kind":"none","reason":"No skewed-keyspace run has been performed."}]
+    },
+    {
+      "id": "single-core-node-process",
+      "statement": "s3p runs as a single-core Node.js process.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The author states s3p is still only a single-core Node.js application; a single Node event loop drives up to listConcurrency concurrent SDK calls.",
+      "legacy_origins": ["W3"],
+      "evidence": [{"kind":"documentation","url":"https://github.com/generalui/s3p"}]
+    },
+    {
+      "id": "single-core-throughput-plateau",
+      "statement": "Throughput plateaus well below multi-core tools at high listConcurrency.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "The single-core architecture is corroborated, but the plateau is scale-dependent and not settleable at smoke scale.",
+      "legacy_origins": ["W3"],
+      "evidence": [{"kind":"none","reason":"No concurrency sweep or plateau measurement has been performed."}]
+    },
+    {
+      "id": "cli-ls-streams",
+      "statement": "The CLI ls path streams each item as it arrives and releases page arrays as they are consumed.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This is a source-structure observation about the CLI path holding no in-memory key buffer; it does not show the CLI cannot run out of memory at scale.",
+      "legacy_origins": ["W4"],
+      "evidence": [
+        {"kind":"source","subject":"upstream","repository":"https://github.com/generalui/s3p","commit":"5a23b22e","path":"source/S3Parallel/S3PCliCommands.caf","lines":"20-25"},
+        {"kind":"source","subject":"upstream","repository":"https://github.com/generalui/s3p","commit":"5a23b22e","path":"source/S3Parallel/S3Comprehensions.caf","lines":"418-428"}
+      ]
+    },
+    {
+      "id": "library-api-accumulates",
+      "statement": "The library ls and list API accumulates all keys into one array.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This is a memory footgun at scale for API users but does not apply to the streaming CLI path.",
+      "legacy_origins": ["W4"],
+      "evidence": [{"kind":"source","subject":"upstream","repository":"https://github.com/generalui/s3p","commit":"5a23b22e","path":"source/S3Parallel/S3P.caf","lines":"36-38"}]
+    },
+    {
+      "id": "oom-at-100m-objects",
+      "statement": "s3p runs out of memory at around 100 million objects as reported in issue 23.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "Issue 23 was not read this phase and the reported OOM is unattributed; the source establishes only that the library API accumulates, not that it causes the reported failure. That scale is unreachable while listing is auth-blocked.",
+      "legacy_origins": ["W4"],
+      "evidence": [{"kind":"none","reason":"The reported OOM scale could not be reached and issue 23 was not investigated."}]
+    },
+    {
+      "id": "no-s3p-level-retry-sdk-defaults-remain",
+      "statement": "s3p adds no retry of its own but does not disable the AWS SDK v3 client's default retries.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "corrected",
+      "qualification": "The inherited no-retry weakness is corrected: list only wraps the call with a tapCatch that logs and re-throws, and the S3Client is built with no retry override, so retries are not absent.",
+      "legacy_origins": ["W5"],
+      "evidence": [
+        {"kind":"source","subject":"upstream","repository":"https://github.com/generalui/s3p","commit":"5a23b22e","path":"source/S3Parallel/Lib/S3.caf","lines":"26-29,55-68"}
+      ]
+    },
+    {
+      "id": "transient-503-crashes-run",
+      "statement": "A transient 503 or SlowDown response during a run crashes or corrupts the run rather than being absorbed.",
+      "scope": "runtime",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "This is the inherited weakness hypothesis, carried in full. Its no-retry premise is corrected by source because the AWS SDK v3 default retries remain (claim no-s3p-level-retry-sdk-defaults-remain), but whether the run survives sustained throttling is unrun and falsifiable by inducing throttling and observing whether the run survives.",
+      "legacy_origins": ["W5"],
+      "evidence": [{"kind":"none","reason":"No throttling or fault-injection run has been performed."}]
+    },
+    {
+      "id": "non-ascii-key-throws",
+      "statement": "A key containing any character outside the 95-character alphabet makes getKeyCharIndex return -1 and getBisectKey throw \"Invalid character found in inputs\".",
+      "scope": "correctness",
+      "status": "supported",
+      "disposition": "contradicted",
+      "qualification": "This source correction contradicts the earlier secondhand claim that s3p works on any keyspace including non-printable bytes. The throw site was re-pinned to S3Keys.caf:57-58.",
+      "legacy_origins": ["W6", "ANCHORS"],
+      "evidence": [{"kind":"source","subject":"upstream","repository":"https://github.com/generalui/s3p","commit":"5a23b22e","path":"source/S3Parallel/Lib/S3Keys.caf","lines":"11,54-58"}]
+    },
+    {
+      "id": "non-ascii-runtime-behavior",
+      "statement": "Bisection actually throws or mis-partitions keys on a real bucket containing non-ASCII keys.",
+      "scope": "correctness",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "EDGE_BUCKET was not configured, so the character-set boundary was not exercised against a live listing.",
+      "legacy_origins": ["W6"],
+      "evidence": [{"kind":"none","reason":"No edge-case bucket was configured or listed; listing was auth-blocked."}]
+    },
+    {
+      "id": "utf16-ordering-runs-before-throw",
+      "statement": "Native UTF-16 comparisons run before the alphabet-lookup throw, so a BMP-then-astral boundary pair can mis-decide a range empty and return before the throw.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "corrected",
+      "qualification": "This corrects the earlier read that the UTF-16 divergence was subsumed by the non-ASCII throw: getBisectKey opens with if startAfter < stopAt and eachRecursive guards on startAfter >= stopAt, both before the charIndex-below-zero throw.",
+      "legacy_origins": ["W7", "ANCHORS"],
+      "evidence": [
+        {"kind":"source","subject":"upstream","repository":"https://github.com/generalui/s3p","commit":"5a23b22e","path":"source/S3Parallel/Lib/S3Keys.caf","lines":"46,57-58,87"},
+        {"kind":"source","subject":"upstream","repository":"https://github.com/generalui/s3p","commit":"5a23b22e","path":"source/S3Parallel/S3Comprehensions.caf","lines":"362"}
+      ]
+    },
+    {
+      "id": "utf16-ordering-runtime-behavior",
+      "statement": "A real astral-character boundary pair produces an observable mis-ordering or early return during a listing.",
+      "scope": "correctness",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "The observable effect was not run; EDGE_BUCKET was not configured.",
+      "legacy_origins": ["W7"],
+      "evidence": [{"kind":"none","reason":"No astral-character edge bucket was configured or listed."}]
+    },
+    {
+      "id": "bisect-key-postcondition-assertion",
+      "statement": "The author's self-flagged bisectKey-after-stopAt bug is guarded by a runtime post-condition assertion that throws \"Whoops!\" unless startAfter <= bisectKey <= stopAt.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The verbatim author comment is at S3Keys.caf:36 and the guarding assertion at S3Keys.caf:87-88.",
+      "legacy_origins": ["W8", "ANCHORS"],
+      "evidence": [{"kind":"source","subject":"upstream","repository":"https://github.com/generalui/s3p","commit":"5a23b22e","path":"source/S3Parallel/Lib/S3Keys.caf","lines":"36,87-88"}]
+    },
+    {
+      "id": "bisect-key-postcondition-runtime",
+      "statement": "The guarded bisectKey post-condition produces an observable failure once the bisection path is exercised.",
+      "scope": "runtime",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "What observable failure, if any, the assertion produces was not run.",
+      "legacy_origins": ["W8"],
+      "evidence": [{"kind":"none","reason":"The bisection path was not exercised against a live listing."}]
+    },
+    {
+      "id": "no-anonymous-access-path",
+      "statement": "s3p has no anonymous or unsigned request path: the S3Client is built with region and endpoint only, and no --no-sign-request or credentials hook exists in the source or CLI.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The absence was confirmed in the v3.6.0 source and against the live 3.7.2 help.",
+      "legacy_origins": ["HAUTH"],
+      "evidence": [
+        {"kind":"source","subject":"upstream","repository":"https://github.com/generalui/s3p","commit":"5a23b22e","path":"source/S3Parallel/Lib/S3.caf","lines":"26-29"},
+        {"kind":"observation","artifact":"../receipts/smoke/_build/build-notes.md"}
+      ]
+    },
+    {
+      "id": "anonymous-listing-blocked-at-auth",
+      "statement": "Under credential-starved anonymous mode the ls, ls --raw, and summarize probes all failed at AWS-SDK credential resolution with exit 1 before any LIST completed.",
+      "scope": "runtime",
+      "status": "confirmed",
+      "disposition": "retained",
+      "qualification": "The block is command-independent across two subcommands; ls --long shares the same code path and was marked blocked-by-inheritance rather than re-run. Scoped to s3p 3.7.2, anonymous mode, and the registered smoke bucket.",
+      "legacy_origins": ["HAUTH"],
+      "evidence": [
+        {"kind":"run","receipt":"../receipts/smoke/_capability/anon-ls","artifact":"../receipts/smoke/_capability/anon-ls/receipt.md"},
+        {"kind":"run","receipt":"../receipts/smoke/_capability/anon-ls-raw","artifact":"../receipts/smoke/_capability/anon-ls-raw/receipt.md"},
+        {"kind":"run","receipt":"../receipts/smoke/_capability/anon-summarize","artifact":"../receipts/smoke/_capability/anon-summarize/receipt.md"}
+      ]
+    },
+    {
+      "id": "git-tags-lag-npm",
+      "statement": "Git tags and GitHub releases lag npm: the latest tag is v3.6.0, master HEAD is 16 untagged commits ahead at version 3.6.1, and npm latest 3.7.2 has no corresponding git commit.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "A reader trusting GitHub releases would pin a version that cannot start.",
+      "legacy_origins": ["V1"],
+      "evidence": [{"kind":"documentation","path":"../research/report.md"}]
+    },
+    {
+      "id": "v3-6-0-cannot-start",
+      "statement": "The published v3.6.0 npm artifact cannot start: s3p version throws Cannot find module 'colors' because colors is required at runtime but absent from the published dependency closure; it was fixed in 3.6.1.",
+      "scope": "compatibility",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This was observed via a direct docker run of an s3p@3.6.0 image documented in a build note, not a wrapper smoke receipt, so it does not carry confirmed run status.",
+      "legacy_origins": ["V2"],
+      "evidence": [
+        {"kind":"observation","artifact":"../receipts/smoke/_build/build-notes.md"},
+        {"kind":"source","subject":"upstream","repository":"https://github.com/generalui/s3p","commit":"5a23b22e","path":"package.json"}
+      ]
+    },
+    {
+      "id": "v3-7-x-adds-flags",
+      "statement": "s3p 3.7.x adds --max-sockets, --endpoint and S3_ENDPOINT, --group-by, and a mutating delete command, none present in the v3.6.0 source.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The --max-sockets, --group-by, and delete additions were observed from the live help captured in the build note; the --endpoint and S3_ENDPOINT override is not in that build note and is recorded in the research report from the 3.7.2 build. None is a wrapper smoke receipt.",
+      "legacy_origins": ["V3"],
+      "evidence": [
+        {"kind":"observation","artifact":"../receipts/smoke/_build/build-notes.md"},
+        {"kind":"documentation","path":"../research/report.md"}
+      ]
+    },
+    {
+      "id": "max-list-requests-is-soft-cap",
+      "statement": "The --max-list-requests option is a soft cap: it is checked before each increment of two, so it can overshoot the budget by up to one pair.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "On hitting the budget the run aborts nicely, finishing in-flight calls, logging, and throwing with stats.",
+      "legacy_origins": ["PROSE-1"],
+      "evidence": [{"kind":"source","subject":"upstream","repository":"https://github.com/generalui/s3p","commit":"5a23b22e","path":"source/S3Parallel/S3Comprehensions.caf","lines":"362,378"}]
+    },
+    {
+      "id": "ls-long-is-lossy",
+      "statement": "The ls --long mode emits a human-rounded size in a space-joined line, so it is lossy and not a verification mode.",
+      "scope": "output",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "A key is recoverable from this format only when it contains no spaces; ls --raw is the exact mode.",
+      "legacy_origins": ["PROSE-2"],
+      "evidence": [{"kind":"source","subject":"upstream","repository":"https://github.com/generalui/s3p","commit":"5a23b22e","path":"source/S3Parallel/S3PCliCommands.caf","lines":"22"}]
+    },
+    {
+      "id": "normalize-validated-against-synthetic-fixtures",
+      "statement": "The normalize.sh mode contracts are source-derived and were validated only against synthetic adapter fixtures because live listing was auth-blocked.",
+      "scope": "output",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The fixtures under adapter/fixtures cover ls-raw, ls, ls-long, summarize, and empty input; no live tool output could be captured.",
+      "legacy_origins": ["PROSE-3"],
+      "evidence": [
+        {"kind":"documentation","path":"../adapter/normalize.sh"},
+        {"kind":"documentation","path":"../adapter/fixtures/README.md"}
+      ]
+    }
+  ]
+}

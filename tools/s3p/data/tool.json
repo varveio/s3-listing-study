@@ -1,0 +1,30 @@
+{
+  "$schema": "../../../schemas/tool.schema.json",
+  "schema_version": 1,
+  "slug": "s3p",
+  "display_name": "s3p",
+  "entry_type": "runnable_lister",
+  "upstream": { "repository": "https://github.com/generalui/s3p" },
+  "language": "JavaScript (CaffeineScript)",
+  "license": "ISC",
+  "tested": {
+    "variant": "upstream",
+    "repository": "https://github.com/generalui/s3p",
+    "version": {
+      "value": "3.7.2",
+      "provenance": { "kind": "observation", "reference": "../receipts/smoke/_build/build-notes.md" }
+    },
+    "upstream_base": {
+      "value": "5a23b22e3f551a12de278491eebea5eb6d952eff",
+      "provenance": { "kind": "documentation", "reference": "../research/report.md" }
+    }
+  },
+  "study": {
+    "groundwork_status": "complete",
+    "smoke_execution_status": "blocked",
+    "verification_status": "blocked",
+    "auth_status": "credentials-required",
+    "benchmark_eligibility": "conditional"
+  },
+  "evidence_roots": ["../receipts/smoke"]
+}

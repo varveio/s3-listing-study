@@ -1,0 +1,5 @@
+[2025-11-24 20:33:44 UTC]  36KiB STANDARD index.html
+[2026-07-17 12:27:44 UTC]     0B normals-annualseasonal/
+[2026-07-17 12:27:44 UTC]     0B normals-daily/
+[2026-07-17 12:27:44 UTC]     0B normals-hourly/
+[2026-07-17 12:27:44 UTC]     0B normals-monthly/

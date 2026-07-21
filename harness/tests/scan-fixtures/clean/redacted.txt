@@ -1,0 +1,6 @@
+Authorization: <REDACTED>
+GET /?list-type=2 HTTP/1.1
+X-Amz-Signature=<REDACTED>
+X-Amz-Credential=<REDACTED>
+arn:aws:iam::<REDACTED-ACCOUNT-ID>:role/example
+Access key id: <REDACTED-AWS-KEY-ID>
