@@ -1,33 +1,35 @@
-#!/usr/bin/env python3
 """Check relative Markdown links on the repo's current-state surfaces.
 
-Scope: root-level Markdown, docs/, harness/README.md, scripts/README.md,
-tools/README.md, and the README-only contextual tool directories (those with
-no data/ capsule, e.g. pure-storage and s3-inventory) — the pages a reader
-navigates today. Capsule-internal pages are already covered by
-validate-tool-capsule.py, and internal working notes (not published) are
-dated history whose links describe the tree as it was, so neither is checked
-here.
+Scope: root-level Markdown, docs/, harness/README.md, tools/README.md, and the
+README-only contextual tool directories (those with no data/ capsule, e.g.
+pure-storage and s3-inventory) — the pages a reader navigates today.
+Capsule-internal pages are already covered by :mod:`s3_listing_study.capsule`,
+and internal working notes (not published) are dated history whose links
+describe the tree as it was, so neither is checked here.
 
 Checks that every relative link target exists and that every fragment resolves
 to a real heading, using the same GitHub slug rules as the capsule validator.
 External http(s)/mailto links are out of scope: this gate must not depend on
 the network.
+
+Reached as ``s3-listing-study check-links``.
 """
 
 from __future__ import annotations
 
+import argparse
 import re
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parent.parent
+REPO = Path(__file__).resolve().parents[2]
+"""The repo root, two levels above this package — this gate reads the working tree."""
 
 SURFACE_GLOBS = [
     "*.md",
     "docs/*.md",
     "harness/README.md",
-    "scripts/README.md",
     "tools/README.md",
 ]
 
@@ -49,7 +51,7 @@ def heading_ids(text: str) -> set[str]:
 
 
 def contextual_tool_pages() -> list[Path]:
-    pages = []
+    pages: list[Path] = []
     for entry in sorted((REPO / "tools").iterdir()):
         readme = entry / "README.md"
         if entry.is_dir() and readme.is_file() and not (entry / "data").is_dir():
@@ -57,7 +59,12 @@ def contextual_tool_pages() -> list[Path]:
     return pages
 
 
-def main() -> int:
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="s3-listing-study check-links",
+        description="Check relative Markdown links on the repo's current-state surfaces.",
+    )
+    parser.parse_args(None if argv is None else list(argv))
     errors: list[str] = []
     pages = sorted(
         {p for g in SURFACE_GLOBS for p in REPO.glob(g) if p.is_file()}
@@ -84,7 +91,3 @@ def main() -> int:
         print(f"ERROR: {error}", file=sys.stderr)
     print(f"check-links: {len(pages)} page(s), {len(errors)} error(s)")
     return 1 if errors else 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

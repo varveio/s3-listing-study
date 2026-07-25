@@ -31,26 +31,6 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           "$HOME/.local/bin/shellcheck" --version
 
-      - name: Install pinned jsonschema closure
-        # A venv sidesteps PEP 668 on the runner's externally-managed system
-        # Python without privileged mutation. The full dependency closure is
-        # version-pinned and installed with --no-deps so the resolver can
-        # never float a transitive package (typing-extensions is required by
-        # referencing on Python < 3.13; the runner is 3.12). PyPI never
-        # re-serves a changed artifact under the same name/version/filename,
-        # so version pins bound the executable code.
-        run: |
-          set -euo pipefail
-          python3 -m venv "$HOME/.venv"
-          "$HOME/.venv/bin/pip" install --no-deps \
-            jsonschema==4.26.0 \
-            attrs==26.1.0 \
-            jsonschema-specifications==2025.9.1 \
-            referencing==0.37.0 \
-            rpds-py==0.30.0 \
-            typing-extensions==4.15.0
-          echo "$HOME/.venv/bin" >> "$GITHUB_PATH"
-
       - name: bash -n over every tracked shell script
         run: |
           set -euo pipefail
@@ -94,14 +74,18 @@ jobs:
         run: tools/s3p/adapter/fixtures/check.sh
 
       - name: Current capsule validation (all runnable tools)
+        # The validator and the link checker are packaged subcommands, so they
+        # run from the locked environment: jsonschema is a declared dependency
+        # of this project, pinned by uv.lock, not a closure the workflow
+        # provisions on the side.
         run: |
           set -euo pipefail
           for tool in aws-cli minio-mc ps3 rclone s3-fast-list s3kor s3p s4cmd s5cmd s7cmd swath; do
-            python3 scripts/validate-tool-capsule.py --tool "$tool"
+            uv run s3-listing-study validate-capsule --tool "$tool"
           done
 
       - name: Markdown link check (current-state surfaces)
-        run: python3 scripts/check-links.py
+        run: uv run s3-listing-study check-links
 
   python-package:
     runs-on: ubuntu-latest

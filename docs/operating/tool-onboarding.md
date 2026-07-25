@@ -32,7 +32,7 @@ map, no legacy origins.
    The migration playbook does **not** apply — it converts legacy directories,
    which a new tool never has.
 4. **Validate and review.** Run
-   `python3 scripts/validate-tool-capsule.py --tool <tool> --base <ref>`,
+   `uv run s3-listing-study validate-capsule --tool <tool> --base <ref>`,
    subject to the machinery gap below. Independent review (a different-model
    reviewer plus the standard one) and the owner-reviewed `tools/` PR apply
    exactly as for every `tools/` change ([`../AGENTS.md`](../AGENTS.md)
@@ -46,7 +46,7 @@ owner-approved machinery change is needed:
 
 - `schemas/claims.schema.json` requires `legacy_ledger` (source, migration
   map, expected origins) at the root; a born-canonical ledger has none.
-- `scripts/validate-tool-capsule.py` requires `research/tool-page.md` and
+- `s3_listing_study.capsule` requires `research/tool-page.md` and
   `research/claims-migration.md` and runs conservation and frozen-page checks
   against the base ref; a born-canonical tool has neither file and no legacy
   base.

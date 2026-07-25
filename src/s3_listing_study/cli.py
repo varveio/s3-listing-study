@@ -1,7 +1,8 @@
 """Command-line entry point: ``s3-listing-study``.
 
 Will grow subcommands ``smoke | build-manifest | scan-tree`` as the
-corresponding units land; ``verify`` is here.
+corresponding units land; ``verify``, ``receipt``, ``validate-capsule``, and
+``check-links`` are here.
 """
 
 import argparse
@@ -9,6 +10,7 @@ import sys
 from collections.abc import Sequence
 
 from s3_listing_study import __version__
+from s3_listing_study.links import main as links_main
 from s3_listing_study.receipt.cli import main as receipt_main
 from s3_listing_study.verify import main as verify_main
 
@@ -29,6 +31,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     # place for a field to go missing.
     if args and args[0] == "receipt":
         return receipt_main(args[1:])
+    if args and args[0] == "check-links":
+        return links_main(args[1:])
+    # `validate-capsule` is imported here rather than at module scope: it is the
+    # one subcommand that needs `jsonschema`, and a missing install must not take
+    # the other subcommands down with it.
+    if args and args[0] == "validate-capsule":
+        from s3_listing_study.capsule import main as capsule_main
+
+        return capsule_main(args[1:])
 
     parser = argparse.ArgumentParser(prog="s3-listing-study")
     parser.add_argument(
@@ -37,7 +48,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         version=f"%(prog)s {__version__}",
     )
     parser.add_argument(
-        "command", nargs="?", choices=["verify", "receipt"], help="subcommand to run"
+        "command",
+        nargs="?",
+        choices=["verify", "receipt", "validate-capsule", "check-links"],
+        help="subcommand to run",
     )
     parser.parse_args(args)
     return 0

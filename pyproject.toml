@@ -8,6 +8,10 @@ license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 dependencies = [
     "duckdb>=1.1",
+    # s3_listing_study.capsule validates tool.json/claims.json against the
+    # Draft 2020-12 schemas in schemas/; the capsule gate is a real dependency
+    # of this package, not something the CI runner provisions on the side.
+    "jsonschema>=4.23",
     # tools/aws-cli/adapter/normalize.sh (s3api-v2-yamlstream) shells out to
     # `python3 -c 'import yaml'`. Declared here so `uv run` replays the corpus
     # the same way a bare `python3` does; the oracle preflight also refuses to
@@ -23,6 +27,10 @@ dev = [
     "pytest>=8.3",
     "ruff>=0.8",
     "mypy>=1.13",
+    # The capsule gate's only third-party import. Stubs rather than an
+    # ignore_missing_imports override: the validator's schema calls are worth
+    # type-checking.
+    "types-jsonschema>=4.23",
 ]
 
 [build-system]
@@ -36,9 +44,6 @@ packages = ["src/s3_listing_study"]
 target-version = "py311"
 line-length = 100
 src = ["src", "tests"]
-# scripts/ predates this package and is ported into src/s3_listing_study by a
-# later unit; it is not linted here until then.
-extend-exclude = ["scripts"]
 
 [tool.ruff.lint]
 select = [
