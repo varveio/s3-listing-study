@@ -23,10 +23,16 @@ that never produced a verdict — there is nothing to replay them against.
 python3 -m tests.differential          # from the repo root; ~4 minutes
 ```
 
-Stdlib Python 3 only. No network, no docker, no security gate: both
-`security_preflight` calls in `harness/verify-listing.sh` sit inside the
-discrepancy/union re-list branches, and every committed verdict is a PASS, so the
-replay never reaches them.
+No network, no docker, no security gate: both `security_preflight` calls in
+`harness/verify-listing.sh` sit inside the discrepancy/union re-list branches,
+and every committed verdict is a PASS, so the replay never reaches them.
+
+The replay itself is stdlib-only, but the reference adapters it re-runs are not:
+`tools/aws-cli/adapter/normalize.sh` mode `s3api-v2-yamlstream` shells out to
+bare `python3` and imports `yaml`. `pyyaml` is a declared project dependency for
+that reason, so `uv run python -m tests.differential` and a bare `python3` judge
+the same corpus, and the preflight refuses to judge at all (42) rather than
+charging a missing interpreter dependency to the implementation under test.
 
 Useful flags:
 
@@ -79,7 +85,9 @@ prior unit's record — and a state file that cannot be written turns a would-be
 opinion, and the unit that depends on it halts rather than degrading to green.
 It is raised when the data directory is absent, when the reference manifest does
 not hash to `c78a8273…92adb`, when the committed registry fixture does not hash to
-`254c8cfe…bbced`, or when **any raw payload the corpus names** is missing or does
+`254c8cfe…bbced`, when bare `python3` cannot import a module the reference
+adapters use (`tools/aws-cli/adapter/normalize.sh` mode `s3api-v2-yamlstream`
+imports `yaml`), or when **any raw payload the corpus names** is missing or does
 not hash to the digest its own `run.meta` cites. That last check is what keeps a
 partial restore of the data directory from surfacing as exit 1 — "your port is
 wrong" — when the truth is that the oracle is incomplete.
@@ -112,6 +120,34 @@ run against a registry the run never saw, so the replay exports
 the oracle from every later registry edit: the fixture is what the runs saw, and
 that does not change. It was recovered from the pre-squash repo at
 `32951ff6:docs/smoke-bucket.md` and is sha-verified on every run.
+
+### The fixture is markdown, and stays markdown (decision for U3)
+
+`254c8cfe…` is the sha256 of a **markdown** registry. `data/registry.toml` is a
+different file with a different sha, so the digest guard at
+`harness/verify-listing.sh:658-663` — which compares `$LOOKUP --digest` against
+the `registry_sha256` line in each `run.meta` — can never be satisfied from the
+TOML. The format change does not preserve this fixture; nothing could, short of
+a preimage. That is not a defect to be worked around, it is what binding a
+receipt to exact bytes means.
+
+The decision, so a later reader does not relitigate it:
+
+- The ported verifier takes `--registry PATH` and computes its digest as
+  `sha256(raw file bytes)`, **format-agnostically**. Pointing it at
+  `tests/fixtures/registry-254c8cfe.md` then reproduces `254c8cfe…` naturally,
+  because the digest is of the bytes and not of a parse.
+- **Field parsing** dispatches on file type: TOML for `data/registry.toml`, and
+  a narrow legacy markdown reader retained *solely* for replaying historical
+  receipts. Those receipts were made against a markdown registry; replaying them
+  exactly requires reading one. The legacy reader is not a second supported
+  registry format and nothing new may be written in it.
+- `replay.py:101` currently injects the fixture through the `SMOKE_REGISTRY`
+  environment variable, because that is the only hook the shell verifier offers.
+  When U3 lands, that injection **must become an explicit `--registry` argument**.
+  Making the oracle point somewhere else is a deliberate change to the oracle
+  with its own justification, recorded here — not a silent edit that happens to
+  turn a gate green.
 
 ## How a replay works
 

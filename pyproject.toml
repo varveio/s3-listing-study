@@ -8,6 +8,11 @@ license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 dependencies = [
     "duckdb>=1.1",
+    # tools/aws-cli/adapter/normalize.sh (s3api-v2-yamlstream) shells out to
+    # `python3 -c 'import yaml'`. Declared here so `uv run` replays the corpus
+    # the same way a bare `python3` does; the oracle preflight also refuses to
+    # judge without it rather than reporting a missing import as a port bug.
+    "pyyaml>=6.0",
 ]
 
 [project.scripts]
@@ -32,7 +37,7 @@ target-version = "py311"
 line-length = 100
 src = ["src", "tests"]
 # scripts/ predates this package and is ported into src/s3_listing_study by a
-# later unit (notes/2026-07-25-cleanup-plan.md); it is not linted here until then.
+# later unit; it is not linted here until then.
 extend-exclude = ["scripts"]
 
 [tool.ruff.lint]

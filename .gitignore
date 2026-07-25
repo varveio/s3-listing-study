@@ -1,9 +1,10 @@
 # Session exhaust — absolute paths, SHAs, swath-private context. See AGENTS.md.
-notes/handoffs/
-
-# Agent gate state: the differential gate writes cleanup.json + cleanup.log.jsonl
-# here by default. Machine-local run records, not repo content.
-notes/agent-state/
+# The whole tree, not just its known subdirectories: AGENTS.md § Knowledge system
+# states Notes are not part of this repository, so a plan or handoff committed by
+# accident would leave every citation of it dangling for anyone who clones. The
+# differential gate also writes its machine-local run records under
+# notes/agent-state/ by default.
+notes/
 
 # Agent-runner state. Same reasoning as notes/handoffs/ above: a .git/info/exclude
 # entry doesn't survive a fresh clone, so the first session from a new machine

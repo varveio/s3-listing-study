@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import subprocess
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -34,6 +35,12 @@ REGISTRY_SHA256 = "254c8cfedd06b1b8671c5bbabc753bfe45462124821eacf44bd27b43c67bb
 REGISTRY_FIXTURE = "tests/fixtures/registry-254c8cfe.md"
 
 DEFAULT_DATA_DIR = "~/s3-list-study-data"
+
+# Interpreter dependencies of the reference side. `tools/aws-cli/adapter/
+# normalize.sh:64-82` (mode `s3api-v2-yamlstream`) shells out to bare `python3`
+# and imports these; whichever `python3` is first on PATH is the one that runs,
+# so the probe has to be a subprocess, not an `import` here.
+ADAPTER_MODULES = ("yaml",)
 
 
 class OracleUnavailable(Exception):
@@ -70,6 +77,8 @@ def preflight(repo: Path) -> Oracle:
     existed in the committed receipts. Bytes may come from anywhere; a broken
     source cannot fake a preimage. Reject on mismatch — never accept-and-explain.
     """
+    _check_adapter_modules()
+
     root = data_dir()
     if not root.is_dir():
         raise OracleUnavailable(
@@ -110,6 +119,31 @@ def preflight(repo: Path) -> Oracle:
         receipts=receipts,
         registry=registry,
     )
+
+
+def _check_adapter_modules() -> None:
+    """Require every module the reference adapters import, or raise OracleUnavailable.
+
+    Without this the replay of a `python3`-dependent adapter mode fails for want
+    of an import and the gate reports exit 1 — "the implementation under test is
+    wrong" — about an interpreter the implementation does not control. A missing
+    dependency of the *oracle side* is ORACLE_UNAVAILABLE, exactly like a missing
+    payload: the harness declined to form an opinion, it did not form a bad one.
+    """
+    for module in ADAPTER_MODULES:
+        probe = subprocess.run(
+            ["python3", "-c", f"import {module}"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if probe.returncode != 0:
+            detail = probe.stderr.strip().splitlines()[-1] if probe.stderr.strip() else ""
+            raise OracleUnavailable(
+                f"the reference adapters import {module!r} under bare `python3`, and this "
+                f"`python3` cannot: {detail} (it is a declared project dependency — install "
+                f"it, or run the gate under an interpreter that has it)"
+            )
 
 
 def resolve_payload(oracle: Oracle, path: str) -> Path:
