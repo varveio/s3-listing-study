@@ -1,8 +1,10 @@
 """``python3 -m tests.adapters <tool>…`` — report shell/Python adapter equivalence.
 
 Exit 0 = every committed payload for every named tool normalised to identical
-bytes under both adapters. Exit 1 = at least one did not, or the corpus is not
-the pinned one. Exit 42 = ORACLE_UNAVAILABLE: a payload the corpus names could
+bytes under both adapters, or differed in a way `SANCTIONED_DEVIATIONS` names —
+printed as DEVIATION with its reason, never silently. Exit 1 = at least one
+differed with no such entry, or the corpus is not the pinned one. Exit 42 =
+ORACLE_UNAVAILABLE: a payload the corpus names could
 not be read or did not match its recorded digest, so part of the corpus was not
 judged at all. The same 0/1/42 contract `tests/differential` speaks, and for the
 same reason — 42 is never a pass and never a skip.
@@ -56,6 +58,9 @@ def main(argv: list[str] | None = None) -> int:
         for comparison in report.comparisons:
             if comparison.identical:
                 print(f"   ok   {comparison.case.name} ({len(comparison.shell_stdout)} bytes)")
+            elif comparison.deviation:
+                print(f"   DEVIATION {comparison.case.name}: {comparison.detail()}")
+                print(f"        sanctioned: {comparison.deviation}")
             else:
                 failed += 1
                 print(f"   DIFF {comparison.case.name}: {comparison.detail()}", file=sys.stderr)
@@ -65,8 +70,9 @@ def main(argv: list[str] | None = None) -> int:
             unavailable += 1
             print(f"   UNAVAILABLE {case.name}: {reason}", file=sys.stderr)
         print(
-            f"   {len(report.comparisons)} judged, "
-            f"{len(report.differing)} mismatched, {len(report.unavailable)} unavailable"
+            f"   {len(report.comparisons)} judged, {len(report.differing)} mismatched, "
+            f"{len(report.deviations)} sanctioned deviation(s), "
+            f"{len(report.unavailable)} unavailable"
         )
 
     if failed:

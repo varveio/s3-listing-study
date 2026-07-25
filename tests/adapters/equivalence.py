@@ -14,20 +14,22 @@ it. That includes the capability probes, whose mode no adapter implements: both
 sides must *reject* them, and identically, or a future port has quietly widened
 the mode set.
 
-Payload paths are spelled the way ``run.meta`` spells them (``receipts/…`` for
-the external data directory, ``tools/…`` for an in-repo one) and are resolved
-through :func:`tests.differential.oracle.resolve_payload`, so this harness and
-the replay oracle agree on which bytes a case names — and each one is checked
-against the sha256 its own ``run.meta`` binds it to before either adapter reads
-it, so "byte-identical over N payloads" names the bytes the receipts recorded
-and not whatever is on this disk.
+Payload paths are spelled the way ``run.meta`` spells them, under either of the
+two conventions the corpus carries — see :func:`payload_candidates` — and each
+one is checked against the sha256 its own ``run.meta`` binds it to before either
+adapter reads it, so "byte-identical over N payloads" names the bytes the
+receipts recorded and not whatever is on this disk.
 
 A payload that cannot be used — absent, or off its digest — is never a skip and
 never a pass. It is ORACLE_UNAVAILABLE, the same 0/1/42 contract tier 1 speaks
 (``tests/differential/README.md``): the cases that CAN be resolved are still
 compared and still fail on a mismatch, and the ones that cannot are reported
-separately, because a checkout without ``$S3_STUDY_DATA`` still holds five
+separately, because a checkout without ``$S3_STUDY_DATA`` still holds twenty-two
 in-repo payloads whose judgement is real.
+
+Where the two adapters differ ON PURPOSE, the difference is named in
+:data:`SANCTIONED_DEVIATIONS` and shown, never routed around: a deviation with
+no entry there is a mismatch and fails the gate.
 """
 
 from __future__ import annotations
@@ -54,7 +56,42 @@ from tests.differential.oracle import Oracle, data_dir, resolve_payload, sha256_
 # of committed payloads for that tool genuinely changed, and it belongs in the
 # same commit that adds or removes the receipt, with the reason in the message.
 # Never adjust one to make a red gate go green.
-EXPECTED_PAYLOADS = {"aws-cli": 15, "rclone": 10}
+EXPECTED_PAYLOADS = {
+    "aws-cli": 15,
+    "minio-mc": 10,
+    "ps3": 1,
+    "rclone": 10,
+    "s3-fast-list": 4,
+    "s3kor": 2,
+    "s3p": 3,
+    "s4cmd": 1,
+    "s5cmd": 14,
+    "s7cmd": 13,
+    "swath": 12,
+}
+
+
+# The (tool, mode) pairs whose two adapters differ ON PURPOSE, each with the
+# reason. Everything not listed here must be byte-identical: a difference with no
+# entry is a mismatch and fails the gate, so widening this map is how a port
+# regression would be let through, and it is never the way to make a red run
+# green. `tests/test_adapters.py` pins WHAT each difference is — the shell's
+# output, the port's exit and stderr — so an entry cannot decay into "these two
+# disagree somehow".
+SANCTIONED_DEVIATIONS = {
+    ("s3kor", "list"): (
+        "the only committed `list` payload is a capability probe that failed to "
+        "authenticate, so the stream the corpus selects is a Go panic whose stack "
+        "frames are TAB-indented. `list` treats a whole line as a key, so those "
+        "frames normalise to keys CONTAINING a TAB: normalize.sh emits them as "
+        "records the five-column framing cannot carry — the verifier's own field "
+        "split reads them as six columns — while the ported adapter refuses the "
+        "payload at the emit boundary (ContractViolation, exit 1, empty stdout), "
+        "which the verifier reports as ERROR: no verdict was formed, which is the "
+        "truth about a stack trace. Same class as the rclone `jq @tsv` C-escaping "
+        "the port removed; see `s3_listing_study.contract`."
+    ),
+}
 
 
 class PayloadUnavailable(Exception):
@@ -96,6 +133,11 @@ class Comparison:
     def identical(self) -> bool:
         return self.shell_status == self.python_status and self.shell_stdout == self.python_stdout
 
+    @property
+    def deviation(self) -> str:
+        """Why this pair is allowed to differ, or ``""`` if it is not — see above."""
+        return SANCTIONED_DEVIATIONS.get((self.case.tool, self.case.mode), "")
+
     def detail(self) -> str:
         if self.shell_status != self.python_status:
             return f"exit {self.shell_status} (sh) vs {self.python_status} (py)"
@@ -129,7 +171,13 @@ class ToolReport:
 
     @property
     def differing(self) -> list[Comparison]:
-        return [c for c in self.comparisons if not c.identical]
+        """The unsanctioned differences — the ones that fail the gate."""
+        return [c for c in self.comparisons if not c.identical and not c.deviation]
+
+    @property
+    def deviations(self) -> list[Comparison]:
+        """The differences :data:`SANCTIONED_DEVIATIONS` names, still reported, never hidden."""
+        return [c for c in self.comparisons if not c.identical and c.deviation]
 
 
 def oracle_for(repo: Path) -> Oracle:
@@ -185,10 +233,37 @@ def run_adapter(adapter: Path, case: AdapterCase, payload: Path) -> tuple[int, b
     return done.returncode, done.stdout, done.stderr
 
 
+def payload_candidates(oracle: Oracle, case: AdapterCase) -> list[Path]:
+    """The paths a ``run.meta`` payload spelling can name, in the order they are tried.
+
+    The corpus carries two conventions, both legitimate. Nearly every receipt
+    spells its payload for the link farm — ``receipts/<tool>/…`` into
+    ``$S3_STUDY_DATA``, ``tools/…`` into the repo — which is what
+    :func:`~tests.differential.oracle.resolve_payload` resolves, so this harness
+    and the replay oracle agree on those. The capability probes spell it relative
+    to their OWN tool directory instead (``receipts/smoke/_capability/…``,
+    committed in-repo under ``tools/<tool>/``), and resolving that against the
+    data directory names a file no data directory holds.
+
+    Order is fixed, and existence — not content — picks between them: the sha256
+    check in :func:`compare_case` binds whichever path this returns, so resolving
+    to the wrong file is ORACLE_UNAVAILABLE rather than a quiet pass. Nothing here
+    goes looking for a file that happens to hash right.
+    """
+    return [
+        resolve_payload(oracle, case.payload),
+        oracle.repo / "tools" / case.tool / case.payload,
+    ]
+
+
 def compare_case(repo: Path, oracle: Oracle, case: AdapterCase) -> Comparison:
-    payload = resolve_payload(oracle, case.payload)
-    if not payload.is_file():
-        raise PayloadUnavailable(f"{case.payload} is not on disk (resolved to {payload})")
+    candidates = payload_candidates(oracle, case)
+    payload = next((candidate for candidate in candidates if candidate.is_file()), None)
+    if payload is None:
+        raise PayloadUnavailable(
+            f"{case.payload} is not on disk under either convention "
+            f"(tried {', '.join(str(candidate) for candidate in candidates)})"
+        )
     if not case.sha256:
         raise PayloadUnavailable(f"{case.receipt}/run.meta records no sha256 for {case.payload}")
     got = sha256_file(payload)
