@@ -6,6 +6,7 @@ export LC_ALL=C
 
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 HARNESS="$(cd -- "$HERE/.." && pwd)"
+REPO_ROOT="$(cd -- "$HARNESS/.." && pwd)"
 # shellcheck source=harness/runner-security-lib.sh
 . "$HARNESS/runner-security-lib.sh"
 work="$(mktemp -d)"; trap 'rm -rf -- "$work"' EXIT
@@ -579,7 +580,15 @@ fi
 # Drive smoke-run through a fully fake Docker lifecycle.  This exercises the
 # actual create/start/wait/logs/inspect/cleanup argv without Docker or a network.
 smoke_repo="$work/smoke-repo"; mkdir -p "$smoke_repo/harness" "$smoke_repo/docs"
-cp "$HARNESS/smoke-run.sh" "$HARNESS/runner-security-lib.sh" "$HARNESS/scan-lib.sh" "$smoke_repo/harness/"
+cp "$HARNESS/smoke-run.sh" "$HARNESS/runner-security-lib.sh" "$smoke_repo/harness/"
+# The staged copy computes REPO_ROOT from its own location and imports the
+# wrapper's offline half from $REPO_ROOT/src, so src/ is staged too: everything
+# this fake-Docker harness needs lives inside $smoke_repo. Leaving it out would
+# make the suite pass only where an editable install happens to be present and
+# fail on a clean checkout — and it would resolve the redactor and the credential
+# scanner through the ambient interpreter, which is the very shadowing seam the
+# wrapper pins with `-P`.
+cp -R "$REPO_ROOT/src" "$smoke_repo/src"
 cat >"$smoke_repo/harness/runner-security-check.sh" <<'SH'
 #!/usr/bin/env bash
 exit 0
@@ -587,29 +596,29 @@ SH
 chmod +x "$smoke_repo/harness/runner-security-check.sh"
 smoke_manifest="$work/smoke.manifest"; : >"$smoke_manifest"
 smoke_manifest_sha="$(sha256sum "$smoke_manifest" | cut -d' ' -f1)"
-cat >"$smoke_repo/harness/registry-lookup.sh" <<SH
-#!/usr/bin/env bash
-case "\$1" in
-  --path) printf '%s\n' '$work/registry.md' ;;
-  --digest) printf '%064d\n' 1 ;;
-  --list-buckets) printf 'testbucket\n' ;;
-  *) case "\$2" in
-       region) printf 'us-east-1\n' ;;
-       manifest) printf '%s\n' '$smoke_manifest' ;;
-       manifest_sha256) printf '%s\n' '$smoke_manifest_sha' ;;
-       snapshot_date) printf '2026-07-20\n' ;;
-       keys) printf '0\n' ;;
-       shape) printf 'synthetic\n' ;;
-     esac ;;
-esac
-SH
-chmod +x "$smoke_repo/harness/registry-lookup.sh"
+# A synthetic registry, in the real format, read by the real resolver — the
+# staged copy of smoke-run.sh is pointed at it through the same file-level seam
+# used below for SECURITY_STATE and PROC_ROOT. No environment override and no
+# argument reaches it; the two cases below pin that.
+smoke_registry="$work/registry.toml"
+{
+  printf '[harness_client]\n'
+  printf 'image = "example/harness@sha256:%064d"\n\n' 3
+  printf '[buckets.testbucket]\n'
+  printf 'region = "us-east-1"\n'
+  printf 'manifest = "%s"\n' "$smoke_manifest"
+  printf 'manifest_sha256 = "%s"\n' "$smoke_manifest_sha"
+  printf 'snapshot_date = "2026-07-20"\n'
+  printf 'keys = 0\n'
+  printf 'shape = "synthetic"\n'
+} >"$smoke_registry"
 smoke_ready="$work/smoke-ready.env"
 {
   printf 'profile_id=s3-listing-study-v1\nprovider=local\nmtu=1500\n'
   printf 'live_policy_sha256=%064d\n' 2
 } >"$smoke_ready"
 sed -i "s|SECURITY_STATE=/etc/s3-listing-study/runner-ready.env|SECURITY_STATE=$smoke_ready|" "$smoke_repo/harness/smoke-run.sh"
+sed -i "s|^REGISTRY=.*|REGISTRY=\"$smoke_registry\"|" "$smoke_repo/harness/smoke-run.sh"
 fake_proc="$work/fake-proc"; mkdir -p "$fake_proc/4242"
 sed -i "s|PROC_ROOT=/proc|PROC_ROOT=$fake_proc|" "$smoke_repo/harness/smoke-run.sh"
 smoke_run_script="$work/smoke-run-adapter.sh"
@@ -670,11 +679,17 @@ run_fake_smoke() {
   local -a version_args=(--tool-version fake)
   [ "${FAKE_USE_AUTO_VERSION:-no}" = yes ] && version_args=()
   smoke_rc=0
-  env -u AWS_PROFILE -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
-    PATH="$smoke_bin:$PATH" S3_STUDY_DATA="$work/data" FAKE_DOCKER_LOG="$work/smoke-docker.log" \
-    "$smoke_repo/harness/smoke-run.sh" --tool minio-mc --mode recursive --image "$smoke_image" \
-      --run-script "$smoke_run_script" --bucket testbucket --auth anonymous --out "$out" \
-      "${version_args[@]}" --env MC_HOST_s3=https://s3.amazonaws.com "$@" >"$out.stdout" 2>"$out.stderr" || smoke_rc=$?
+  # The working directory is a parameter because it is part of the wrapper's
+  # attack surface: `python3 -m` puts the invocation directory on sys.path ahead
+  # of the wrapper's own src/, so one case below runs from a directory carrying a
+  # planted `s3_listing_study/`. Every path handed to the wrapper is absolute.
+  ( cd -- "${FAKE_SMOKE_CWD:-$PWD}" \
+    && env -u AWS_PROFILE -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
+      PATH="$smoke_bin:$PATH" S3_STUDY_DATA="$work/data" FAKE_DOCKER_LOG="$work/smoke-docker.log" \
+      "$smoke_repo/harness/smoke-run.sh" --tool minio-mc --mode recursive --image "$smoke_image" \
+        --run-script "$smoke_run_script" --bucket testbucket --auth anonymous --out "$out" \
+        "${version_args[@]}" --env MC_HOST_s3=https://s3.amazonaws.com "$@" \
+  ) >"$out.stdout" 2>"$out.stderr" || smoke_rc=$?
 }
 : >"$work/smoke-docker.log"; run_fake_smoke "$work/smoke-ok"
 if [ "$smoke_rc" -eq 0 ] \
@@ -686,6 +701,67 @@ if [ "$smoke_rc" -eq 0 ] \
   ok "fake smoke enforces exact unlimited local-log create contract"
 else
   bad "fake smoke unlimited local-log contract rc=$smoke_rc: $(tail -3 "$work/smoke-ok.stderr" | tr '\n' ' ')"
+fi
+
+# --- the import path is not redirectable -------------------------------------
+# The wrapper's offline half owns the redactor and the credential scanner, so
+# replacing the MODULE is strictly worse than redirecting the registry: it
+# forges the whole receipt, scan included, and still exits 0. Two seams, both
+# pinned here — the invocation directory, which `python3 -m` would place at
+# sys.path[0], and an ambient PYTHONPATH, which precedes the standard library
+# and can shadow `tomllib` itself.
+plant="$work/plant"
+mkdir -p "$plant/s3_listing_study/receipt" "$plant/stdlib-shadow"
+: >"$plant/s3_listing_study/__init__.py"
+: >"$plant/s3_listing_study/receipt/__init__.py"
+cat >"$plant/s3_listing_study/receipt/__main__.py" <<'PY'
+import os
+open(os.environ["PLANT_MARKER"], "a").write("planted module ran\n")
+raise SystemExit(0)
+PY
+printf 'raise SystemExit("planted tomllib won")\n' >"$plant/stdlib-shadow/tomllib.py"
+/bin/rm -f -- "$work/plant.marker"
+FAKE_SMOKE_CWD="$plant" PLANT_MARKER="$work/plant.marker" PYTHONPATH="$plant/stdlib-shadow" \
+  run_fake_smoke "$work/smoke-plant"
+if [ "$smoke_rc" -eq 0 ] && [ ! -e "$work/plant.marker" ] \
+   && grep -qF "registry_path=$smoke_registry" "$work/smoke-plant/run.meta"; then
+  ok "planted s3_listing_study/ in cwd and ambient PYTHONPATH cannot replace the offline half"
+else
+  bad "wrapper import path is shadowable rc=$smoke_rc: $(tail -3 "$work/smoke-plant.stderr" | tr '\n' ' ')"
+fi
+
+# --- the registry is not redirectable ----------------------------------------
+# A valid decoy, not a broken file: if any of these seams worked the run would
+# succeed and cite the decoy's snapshot date, which is the failure that looks
+# like evidence.
+decoy_registry="$work/decoy-registry.toml"
+{
+  printf '[harness_client]\n'
+  printf 'image = "example/harness@sha256:%064d"\n\n' 3
+  printf '[buckets.testbucket]\n'
+  printf 'region = "us-east-1"\n'
+  printf 'manifest = "%s"\n' "$smoke_manifest"
+  printf 'manifest_sha256 = "%s"\n' "$smoke_manifest_sha"
+  printf 'snapshot_date = "1999-12-31"\n'
+  printf 'keys = 0\n'
+  printf 'shape = "decoy"\n'
+} >"$decoy_registry"
+SMOKE_REGISTRY="$decoy_registry" S3_STUDY_REGISTRY="$decoy_registry" REGISTRY="$decoy_registry" \
+  run_fake_smoke "$work/smoke-registry-env"
+if [ "$smoke_rc" -eq 0 ] \
+   && grep -qF "registry_path=$smoke_registry" "$work/smoke-registry-env/run.meta" \
+   && grep -q '^snapshot_date=2026-07-20$' "$work/smoke-registry-env/run.meta" \
+   && ! grep -q '1999-12-31' "$work/smoke-registry-env/run.meta"; then
+  ok "registry constant is not redirectable through the environment"
+else
+  bad "environment redirected the registry rc=$smoke_rc: $(tail -3 "$work/smoke-registry-env.stderr" | tr '\n' ' ')"
+fi
+
+run_fake_smoke "$work/smoke-registry-arg" --registry "$decoy_registry"
+if [ "$smoke_rc" -eq 2 ] && grep -q 'unknown argument: --registry' "$work/smoke-registry-arg.stderr"; then
+  ok "registry constant is not redirectable through argv"
+else
+  bad "argv redirected the registry rc=$smoke_rc: $(tail -3 "$work/smoke-registry-arg.stderr" | tr '\n' ' ')"
 fi
 
 run_fake_smoke "$work/smoke-caller-control" --mode "$(printf 'recursive\nforged=yes')"

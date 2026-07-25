@@ -263,6 +263,11 @@ def _stage_regressions(root: Path, python: str) -> Path:
     """A copy of the shipped harness tree, with the suite's VERIFY= repointed."""
     harness = root / "harness"
     shutil.copytree(REPO / "harness", harness)
+    # The suite stages a hermetic fake-Docker copy of smoke-run.sh, which imports
+    # the wrapper's offline half from its own ../src. Copied here too, so this
+    # staged tree resolves it exactly as the repo does and never through whatever
+    # `s3_listing_study` the ambient interpreter happens to have.
+    shutil.copytree(REPO / "src", root / "src")
     shim = harness / SHIM_NAME
     shim.write_text(SHIM.format(python=python))
     shim.chmod(0o755)

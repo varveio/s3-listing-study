@@ -4,5 +4,137 @@ Ports the scan half of ``harness/scan-lib.sh`` and ``harness/scan-tree.sh``.
 Preserves the three-way outcome that must never be conflated: clean /
 flagged / scanner-broke. Validated against ``harness/tests/scan-fixtures/``.
 
-Lands in U4 (smoke-run split, offline halves).
+gitleaks is deliberately NOT used (owner's call, 2026-07-16): its entropy rules
+fire on S3 pagination cursors, so every paginating tool's ``--debug`` receipt
+trips it. This scan matches credential VALUES by shape — AKIA/ASIA key ids, hex
+signatures, long base64 assignments — not variable names. Two consequences:
+
+* a receipt legitimately containing ``-e AWS_SECRET_ACCESS_KEY=`` with an EMPTY
+  value is the wrapper's credential starvation made visible, NOT a leak, and the
+  shape requirement (a value of real length must follow) keeps it clean;
+* it does not fire on the ContinuationToken entropy that blocked real evidence.
+
+Re-enable gitleaks — with the pagination-cursor allowlist that was tested and
+works — before ever setting CREDS, where signatures and account IDs appear.
 """
+
+from __future__ import annotations
+
+import os
+import re
+from enum import IntEnum
+from pathlib import Path
+
+# ``[[:space:]]`` in the C locale, spelled out: a bytes pattern's ``\s`` is the
+# same set, but the shell's regex is quoted here character-for-character so the
+# two can be diffed by eye at cutover.
+_SPACE = rb"[ \t\n\r\f\v]"
+
+# The pattern requires a credential-SHAPED VALUE, not merely "something after
+# =". Match the shape (AKIA + 16, a hex signature, 20+ base64 chars) and the two
+# historic false positives — the wrapper's own empty starving flag, and a ``-``
+# of the next argv element being read as a value — both disappear without losing
+# teeth.
+SCAN_SECRET_RE = re.compile(
+    rb"AKIA[A-Z0-9]{16}"
+    rb"|ASIA[A-Z0-9]{16}"
+    rb"|X-Amz-Signature=[A-Fa-f0-9]{16,}"
+    rb"|X-Amz-Credential=[A-Za-z0-9%/+-]{10,}"
+    rb"|X-Amz-Security-Token=[A-Za-z0-9%/+=]{20,}"
+    rb"|(AWS_SESSION_TOKEN|AWS_SECRET_ACCESS_KEY)=[A-Za-z0-9/+=]{16,}"
+    rb"|aws_secret_access_key" + _SPACE + rb"*=" + _SPACE + rb"*[A-Za-z0-9/+=]{20,}"
+    rb"|Authorization:" + _SPACE + rb"*(AWS4-HMAC-SHA256|Bearer|Basic)" + _SPACE,
+    re.IGNORECASE,
+)
+
+
+class Outcome(IntEnum):
+    """The three outcomes, never conflated — and the exit codes that carry them.
+
+    ``grep`` exits 1 on no-match and 2 on error; treating rc=2 as "no match"
+    turns a broken scan into a pass. That bug shipped in the first draft of the
+    wrapper's scanner and must not return, so the error case is a value of its
+    own rather than the absence of a match.
+    """
+
+    CLEAN = 0
+    FLAGGED = 1
+    ERROR = 2
+
+
+def scan_bytes(data: bytes) -> bool:
+    """True when ``data`` carries a credential-shaped value."""
+    return SCAN_SECRET_RE.search(data) is not None
+
+
+def scan_file(path: Path) -> Outcome:
+    """Classify ONE file. Unreadable is :attr:`Outcome.ERROR`, never CLEAN.
+
+    Scanned line by line, as ``grep`` scans it: a pattern's ``[[:space:]]`` can
+    never span a line break, so a header split across two lines must not match
+    here either.
+    """
+    try:
+        with open(path, "rb") as handle:
+            for line in handle:
+                if SCAN_SECRET_RE.search(line):
+                    return Outcome.FLAGGED
+    except OSError:
+        return Outcome.ERROR
+    return Outcome.CLEAN
+
+
+class TreeScanError(Exception):
+    """The tree scan could not run. Never a pass, never a leak."""
+
+
+def scan_tree(root: Path) -> tuple[list[Path], int]:
+    """Scan every regular file under ``root``; return (flagged, scanned).
+
+    Skips only ``.git``. There is NO name-based exclusion: a ``scan-fixtures``
+    prune would let anyone bypass the scan by naming a directory
+    ``scan-fixtures``. The scanner's own dirty corpus does not need excluding
+    because it carries no credential-shaped bytes on disk — the dirty fixtures
+    are stored base64-obfuscated and decoded only at test time.
+
+    A traversal failure is a :class:`TreeScanError`, not a clean pass: a scan
+    that cannot read a directory has not cleared the tree under it. Symlinks are
+    not followed, matching ``find -type f`` under its default ``-P``.
+    """
+    if not root.is_dir():
+        raise TreeScanError(f"not a directory: {root}")
+    flagged: list[Path] = []
+    scanned = 0
+    stack = [root]
+    while stack:
+        directory = stack.pop()
+        try:
+            entries = sorted(os.scandir(directory), key=lambda entry: entry.name)
+        except OSError as exc:
+            raise TreeScanError(
+                f"cannot traverse {directory} ({exc.strerror}) "
+                "— a traversal failure is not a clean pass"
+            ) from None
+        for entry in entries:
+            if entry.name == ".git":
+                continue
+            path = Path(entry.path)
+            try:
+                if entry.is_dir(follow_symlinks=False):
+                    stack.append(path)
+                    continue
+                if not entry.is_file(follow_symlinks=False):
+                    continue
+            except OSError as exc:
+                raise TreeScanError(
+                    f"cannot stat {path} ({exc.strerror}) — a traversal failure is not a clean pass"
+                ) from None
+            scanned += 1
+            outcome = scan_file(path)
+            if outcome is Outcome.FLAGGED:
+                flagged.append(path)
+            elif outcome is Outcome.ERROR:
+                raise TreeScanError(
+                    f"scanner error on {path} — a scan that cannot read a file is not a pass"
+                )
+    return flagged, scanned

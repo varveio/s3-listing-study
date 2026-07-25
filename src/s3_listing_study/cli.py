@@ -9,6 +9,7 @@ import sys
 from collections.abc import Sequence
 
 from s3_listing_study import __version__
+from s3_listing_study.receipt.cli import main as receipt_main
 from s3_listing_study.verify import main as verify_main
 
 
@@ -23,6 +24,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     # handed the tail untouched rather than re-declared here.
     if args and args[0] == "verify":
         return verify_main(args[1:])
+    # `receipt` likewise: its `finish` subcommand carries one flag per run fact
+    # the wrapper measured, and re-declaring that surface here would be a second
+    # place for a field to go missing.
+    if args and args[0] == "receipt":
+        return receipt_main(args[1:])
 
     parser = argparse.ArgumentParser(prog="s3-listing-study")
     parser.add_argument(
@@ -30,7 +36,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="version",
         version=f"%(prog)s {__version__}",
     )
-    parser.add_argument("command", nargs="?", choices=["verify"], help="subcommand to run")
+    parser.add_argument(
+        "command", nargs="?", choices=["verify", "receipt"], help="subcommand to run"
+    )
     parser.parse_args(args)
     return 0
 
