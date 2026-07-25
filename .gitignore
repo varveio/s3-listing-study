@@ -1,6 +1,10 @@
 # Session exhaust — absolute paths, SHAs, swath-private context. See AGENTS.md.
 notes/handoffs/
 
+# Agent gate state: the differential gate writes cleanup.json + cleanup.log.jsonl
+# here by default. Machine-local run records, not repo content.
+notes/agent-state/
+
 # Agent-runner state. Same reasoning as notes/handoffs/ above: a .git/info/exclude
 # entry doesn't survive a fresh clone, so the first session from a new machine
 # would commit it.
@@ -22,3 +26,17 @@ harness/manifests/
 out/
 tools/bin/
 .DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+# Anchored: unanchored `build/` would match at any depth and silently ignore new
+# files under the tracked tools/*/build/ vendored artifacts — a provenance hazard
+# in a repo whose rules turn on what is committed (see NOTICE).
+/build/
+/dist/
