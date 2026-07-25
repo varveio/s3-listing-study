@@ -1,9 +1,13 @@
 #!/bin/bash
-# Installed root-owned by runner-security-provision.sh. It exposes only the
+# Installed root-owned by the operator setup procedure. It exposes only the
 # canonicalized complete filter-table state so the unprivileged harness can
 # detect a rule inserted before a study hook, without receiving a general
 # privileged command surface. A dedicated runner has no unrelated policy that
 # should drift.
+#
+# The only grant the runner user needs, and the exact line the setup procedure
+# installs — the trailing "" is what forbids arguments:
+#   <runner-user> ALL=(root) NOPASSWD: /usr/local/libexec/s3-study-firewall-state ""
 set -euo pipefail
 export LC_ALL=C
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin

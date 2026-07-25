@@ -14,8 +14,8 @@ Shared measurement and verification infrastructure for the smoke campaign
 | --- | --- | --- |
 | 1 | `docs/smoke-bucket.md` — bucket registry | **live** — `noaa-normals-pds`, snapshot 2026-07-17 (contract-v2 re-baseline) |
 | 2 | Reference manifest, pinned harness client | **live** — 148,917 keys, **contract v2** (`key/size/etag/mtime/storage_class`), sha256 in the registry, in `<data>/manifests/` |
-| 3 | `smoke-run.sh` — run wrapper | **requires provisioned runner** — contained-network security profile must pass its activation gate |
-| 4 | `s3_listing_study.verify` — output verifier | **requires provisioned runner for reference re-lists** — same contained-network profile and gate |
+| 3 | `smoke-run.sh` — run wrapper | **requires a set-up runner** — the contained-network security profile must pass its per-run gate |
+| 4 | `s3_listing_study.verify` — output verifier | **requires a set-up runner for reference re-lists** — same contained-network profile and gate |
 | 5 | `base.Dockerfile` — shared base layer | **not built** — deliberately. The brief marks it optional and it is only needed by a tool that ships no upstream image. The first such tool builds it; speculative infrastructure for nobody is worse than none. |
 
 Campaign parameters currently in force: `CREDS=none` (every run anonymous),
@@ -23,17 +23,24 @@ Campaign parameters currently in force: `CREDS=none` (every run anonymous),
 
 ## Mandatory runner boundary
 
-Further networked execution requires the provisioned
+Further networked execution requires the
 [`s3-listing-study-v1`](../docs/operating/runner-security.md) profile. The container
 hardening, host firewall, identity claims, and build/pull boundary are
 specified there; that document is the authoritative contract.
 
 `smoke-run.sh` and each reference re-list fail closed through
-`runner-security-check.sh`. The check binds a root-owned readiness record to the
-current host, boot, Docker daemon, complete Docker-network inventory, bridge
-configuration, firewall backend, policy artifacts, and canonical live rules. It
-also rejects recognized cloud metadata in the `local` profile and probes
-link-local denial plus public S3 from the subject bridge.
+`runner-security-check.sh`. The check enforces one property per run — that the
+run is anonymous by construction — by verifying live that no ambient credential
+variables are set, that no cloud metadata service answers on the host, that the
+subject bridge is the fixed profile on an `iptables` backend, that the live
+firewall carries exactly the deny policy rendered from
+`harness/security/policy.v1.env` plus the current Docker network subnets, and
+that a digest-pinned probe on that bridge finds link-local denied and public S3
+reachable. There is no readiness record: the expected policy comes from this
+repository, so nothing has to be re-hashed or boot-bound. Runner setup is a
+documented operator procedure in
+[`docs/operating/runner-security.md`](../docs/operating/runner-security.md),
+whose last step is this same gate.
 
 ## Contract
 

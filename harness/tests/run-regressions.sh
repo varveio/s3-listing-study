@@ -367,7 +367,7 @@ printf '  * union missing/extra/field-mismatch FAIL vs DRIFT — the reference r
 printf '    docker s3api list against the bucket; run one scoped real union to exercise it.\n'
 printf '  * single-receipt smoke-run.sh -> verify end-to-end PASS (needs docker + bucket).\n'
 printf '  * payload 64 MiB truncation + full-raw secret scan on live output (needs a real run).\n'
-printf '  * live runner boundary controls (opt-in: harness/runner-security-live-test.sh).\n'
+printf '  * live runner boundary controls (operator setup: docs/operating/runner-security.md).\n'
 
 if [ "$fail" -eq 0 ]; then printf '\nALL REGRESSIONS PASS\n'; exit 0; fi
 printf '\nREGRESSION FAILURE\n'; exit 1

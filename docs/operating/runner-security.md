@@ -1,7 +1,7 @@
 # Runner security
 
 This is the authoritative security contract for running third-party subject
-images. Anyone provisioning a runner or executing networked subjects must
+images. Anyone setting up a runner or executing networked subjects must
 follow it. It applies to future runs; historical receipts describe the profile
 that was active when they were produced and are not rewritten.
 
@@ -35,10 +35,10 @@ can be compatibility-tested across all upstream images.
 
 This profile covers networked run, trusted-reference, and security-probe
 containers. It does not sandbox `docker build`, image pulls, or BuildKit. Every
-digest-pinned campaign image must already be present before provisioning. Prefer
-a separate disposable, identity-free builder; the acceptable fallback is the
-same disposable host used sequentially for build/pull first and provisioned
-execution second. During a campaign, no build and no mutable-tag pull occurs.
+digest-pinned campaign image must already be present before setup. Prefer a
+separate disposable, identity-free builder; the acceptable fallback is the same
+disposable host used sequentially for build/pull first and gated execution
+second. During a campaign, no build and no mutable-tag pull occurs.
 
 Harness Docker control-plane calls are finite: ordinary inspect/create/start/
 wait/log/probe operations have a 30-second bound and cleanup operations have a
@@ -81,108 +81,141 @@ capacity remains an operator responsibility.
 The bridge alone is not the security boundary. The host firewall rejects
 bridge-originated access to the host, loopback, link-local/metadata, RFC 1918,
 carrier-grade NAT, internal IPv6 ranges, and every Docker network present when
-the runner is provisioned. Ordinary public egress remains available. Denials use
+the rules are rendered. Ordinary public egress remains available. Denials use
 `REJECT` so a forbidden request fails promptly instead of consuming a benchmark
 timeout.
 
-## What the harness proves
+## What the gate proves
 
-Provisioning and execution have separate responsibilities:
+The gate enforces one property, on every networked invocation: **this run is
+anonymous by construction.** It is not a host-integrity attestation and does not
+verify a recorded snapshot of a provisioned box.
+[`runner-security-check.sh`](../harness/runner-security-check.sh) runs before
+every networked harness container and checks, live:
 
-- [`runner-security-provision.sh`](../harness/runner-security-provision.sh)
-  creates/verifies the bridge, installs the versioned iptables policy, runs the
-  live controls, and atomically mints a root-owned, host-and-boot-bound readiness
-  record only after all checks pass.
-- [`runner-security-check.sh`](../harness/runner-security-check.sh) runs before
-  every networked harness invocation. It checks the host, boot, Docker daemon,
-  complete Docker-network inventory, bridge configuration, firewall backend,
-  policy and installed-helper digests, canonical live firewall state, absence of
-  recognized cloud metadata and ambient credential variables, link-local denial
-  from the subject bridge, and public S3 reachability from that bridge.
-- [`runner-security-live-test.sh`](../harness/runner-security-live-test.sh) is an
-  operator-run integration validator. On disposable control resources it proves
-  the probe can detect host and peer reachability, then proves the production
-  bridge denies host, same-bridge peer, other-network, and metadata access while
-  retaining public S3 HTTPS.
+- **no ambient credentials** — the AWS/GCP/Azure credential variables an SDK
+  would silently pick up are absent from the environment this run inherits;
+- **no instance-metadata service on the host** — recognized GCP, AWS, and Azure
+  metadata endpoints do not answer, so the `local` adapter refuses a cloud
+  runner;
+- **the subject bridge is the fixed profile** — `s3-listing-study-subjects` is
+  an IPv4-only bridge on `s3study0` with the fixed subnet/gateway and
+  inter-container communication disabled, and Docker's firewall backend is
+  `iptables`. The firewall hooks are keyed on the bridge interface, so a bridge
+  that is not this one would leave the policy covering nothing;
+- **the private-network deny is in force** —
+  [`render-policy.sh`](../harness/security/render-policy.sh) renders the
+  expected owned-chain bodies from
+  [`policy.v1.env`](../harness/security/policy.v1.env) plus the Docker network
+  subnets that exist right now, and
+  [`validate-firewall-state.sh`](../harness/security/validate-firewall-state.sh)
+  requires the live filter table to carry exactly those bodies, reached through
+  a bridge-specific jump that is rule 1 of both `INPUT` and `FORWARD`, unique,
+  in both IPv4 and IPv6. Live state is read through a root-owned, no-argument
+  helper the runner may call with passwordless `sudo`;
+- **the canary agrees** — a digest-pinned probe container on that bridge finds
+  `169.254.169.254:80` unreachable and public S3 reachable over HTTPS.
 
-The readiness check requires the bridge-specific jump to be rule 1 of both
-`INPUT` and `FORWARD` for IPv4 and IPv6, requires each jump to be unique, and
-compares the exact owned-chain bodies with the installed rendered policy. The
-canonicalized IPv4 and IPv6 **filter-table** hash is additional drift detection,
-including rule order. `iptables-save` timestamp comments are removed and mutable
-chain counters are zeroed before hashing; neither is policy state. The hash does
-not cover NAT/mangle tables and is not a complete host-firewall attestation. It
-is not the safety proof by itself. Probes are canaries for the canonical policy,
-not proof by absence. A Docker network created or removed after provisioning
-changes the inventory digest and stops the harness until the policy is
-reprovisioned.
-A reboot also invalidates readiness because this MVP deliberately does not
-pretend its live rules are a persistent boot policy.
+The expected policy is rendered per run from files in this repository, so there
+is no readiness record to drift, no host/boot binding, and no digest of one
+box's `iptables-save` output that a reader could not re-derive. A Docker network
+created or removed after the rules were installed changes the rendered policy,
+which no longer matches the live one, and the run stops until the rules are
+reinstalled. The rules are not a persistent boot policy: after a reboot they are
+gone, the live table no longer matches, and the gate fails closed.
+
+What this does *not* prove: it is not a complete host-firewall attestation (the
+comparison covers the filter table's study path, not NAT/mangle), the probe is a
+canary for the canonical policy rather than proof by absence, and the bridge is
+IPv4-only so the IPv6 path is validated structurally with no behavioral canary.
+Receipts cite `firewall_policy_sha256` — the digest of the versioned policy
+source found in force, not of a live capture.
 
 The current MVP supports Docker's `iptables` firewall backend only. It detects
 the backend and refuses nftables or an unreportable backend. Adding nftables
 requires an equivalent, inspectable forward/input hook; silently falling back to
 a bridge without host policy is forbidden.
 
-The bridge itself is IPv4-only. Both IPv4 and IPv6 filter paths are validated
-structurally, but this profile has no behavioral IPv6 network canary.
-
 ## Operator procedure: local runner
 
-Before provisioning:
+Setup is a documented human procedure, not a script: it runs once per runner,
+needs root, and every property it establishes is re-verified per run by the gate
+above. Before starting:
 
-- Use a disposable host and quiesce subject execution while provisioning.
-  Never run provisioning on a shared workstation.
+- Use a disposable host and quiesce subject execution while setting it up.
+  Never run this on a shared workstation.
 - Install Docker, `iptables`/`ip6tables`, `jq`, `curl`, Python 3, and `sudo`.
-- Pull or build all campaign images first.
+- Pull or build all campaign images first, including the probe image.
 - Select a small trusted probe image that contains POSIX `sh`, `wget`, and an
-  `nc` implementation supporting `-z`, `-l`, `-k`, and `-p`, and pass it by
-  digest—never by a mutable tag. Plain BusyBox `nc` is not sufficient.
+  `nc` implementation supporting `-z`, and pass it by digest — never by a
+  mutable tag.
 - Disable `firewalld` and any other manager that can rewrite iptables while a
-  campaign is running; provisioning refuses an active `firewalld` service.
+  campaign is running.
 
-Run as root, substituting the actual unprivileged harness user and a registered
-public bucket:
+Run as root, substituting the actual unprivileged harness user, the probe image
+digest, and the host's default-uplink MTU:
 
 ```sh
-sudo harness/runner-security-provision.sh \
-  --runner-user study-runner \
-  --probe-image example/probe@sha256:<64-hex-digest> \
-  --bucket <registered-public-bucket> \
+# 1. the study bridge: IPv4-only, ICC off, MTU pinned to the uplink
+docker network create --driver bridge \
+  --subnet 172.30.0.0/24 --gateway 172.30.0.1 \
+  --opt com.docker.network.bridge.name=s3study0 \
+  --opt com.docker.network.bridge.enable_icc=false \
+  --opt com.docker.network.driver.mtu=<uplink-mtu> \
+  --ipv6=false s3-listing-study-subjects
+
+# 2. the deny policy, rendered from the versioned source and the current
+#    Docker networks — the same rendering the gate compares against
+harness/security/render-policy.sh /tmp/rules.v4 /tmp/rules.v6
+iptables  -w -N S3STUDY_FWD; iptables  -w -N S3STUDY_IN
+ip6tables -w -N S3STUDY_FWD; ip6tables -w -N S3STUDY_IN
+iptables-restore  --wait --noflush </tmp/rules.v4
+ip6tables-restore --wait --noflush </tmp/rules.v6
+iptables  -w -I INPUT   1 -i s3study0 -j S3STUDY_IN
+iptables  -w -I FORWARD 1 -i s3study0 -j S3STUDY_FWD
+ip6tables -w -I INPUT   1 -i s3study0 -j S3STUDY_IN
+ip6tables -w -I FORWARD 1 -i s3study0 -j S3STUDY_FWD
+
+# 3. the read-only state helper and its no-argument sudo grant
+install -d -o root -g root -m 0755 /usr/local/libexec /etc/s3-listing-study
+install -o root -g root -m 0755 harness/security/firewall-state.sh \
+  /usr/local/libexec/s3-study-firewall-state
+printf '%s ALL=(root) NOPASSWD: /usr/local/libexec/s3-study-firewall-state ""\n' \
+  <runner-user> >/etc/sudoers.d/s3-listing-study-runner-security
+chmod 0440 /etc/sudoers.d/s3-listing-study-runner-security
+visudo -c
+
+# 4. which probe image carries the canary
+printf 'probe_image=example/probe@sha256:<64-hex-digest>\n' \
+  >/etc/s3-listing-study/runner.env
+chmod 0644 /etc/s3-listing-study/runner.env
+
+# 5. prove it, as the harness user
+harness/runner-security-check.sh --bucket <registered-public-bucket> \
   --region <bucket-region>
 ```
+
+Step 5 is the acceptance test: it is the same gate every run passes through, so
+a successful setup and a successful run are the same evidence. Re-run steps 1–4
+after a reboot, after adding or removing a Docker network, or after changing
+the policy source — the gate fails closed until you do.
 
 The S3 canary uses virtual-hosted HTTPS and intentionally supports only dotless
 3–63 character bucket names made from lowercase letters, digits, and hyphens;
 this avoids wildcard-certificate ambiguity. All current registered buckets fit
 that contract.
 
-The script refuses known cloud metadata, a non-iptables Docker backend, a
-conflicting fixed subnet, a mutable/missing probe image, or a mismatched existing
-bridge. It installs only study-named chains and hooks. Initial hook creation is
-performed while the runner is quiescent; each owned chain body is then applied
-with `iptables-restore`/`ip6tables-restore`, and no readiness record exists until
-both families and the live validator pass.
+`/etc/s3-listing-study/runner.env` is operator configuration, not an
+attestation: it names the probe image and nothing else. It stays root-owned and
+not group/world writable so an unprivileged process cannot swap the canary for
+an image that always exits 0. The runner user gets passwordless access only to
+the argument-less helper that prints filter-table state, never to general
+`iptables`. Deleting the config immediately fails closed without changing
+firewall state.
 
-The unprivileged runner gets passwordless access only to a root-owned helper that
-prints the filter-table state. It does not get general passwordless `iptables`
-access. The readiness and rendered policy files
-live under `/etc/s3-listing-study/`; deleting the readiness record immediately
-fails closed without changing firewall state.
-
-To show the integration-test plan without touching Docker:
-
-```sh
-harness/runner-security-live-test.sh \
-  --probe-image example/probe@sha256:<64-hex-digest> \
-  --bucket <registered-public-bucket> --region <bucket-region> --print-plan
-```
-
-The policy intentionally blocks
-the study bridge from all Docker networks known at provisioning and requires the
-network inventory to remain fixed for the campaign. BuildKit/build networks and
-mutable-tag resolution are therefore outside the execution phase, not exceptions
-to the boundary.
+The policy blocks the study bridge from every Docker network present when the
+rules are rendered. BuildKit/build networks and mutable-tag resolution are
+therefore outside the execution phase, not exceptions to the boundary.
 
 ## Orchestrator workspace staging
 
@@ -240,8 +273,8 @@ are additions to this contract, not properties of `s3-listing-study-v1`.
 
 Future CI has two distinct lanes: ordinary pull-request checks run the static and
 fake-host suites without privileged mutation; a manual or scheduled integration
-runs the full activation sequence on an ephemeral disposable runner matching
-this profile. A generic hosted CI VM is useful for experimentation but is not
+runs the full setup procedure and gate on an ephemeral disposable runner
+matching this profile. A generic hosted CI VM is useful for experimentation but is not
 identity or firewall proof unless an adapter validates that environment.
 
 ## Benchmark gate

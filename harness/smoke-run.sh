@@ -249,16 +249,21 @@ actual_sha="$(sha256sum "$MANIFEST" | cut -d' ' -f1)"
         Registry and data directory disagree; the orchestrator re-baselines. Not a tool finding."
 
 # Fail closed before inspecting/pulling or executing the subject image. This
-# validates the host-bound readiness record, bridge/firewall state, metadata
-# denial, and public S3 path; it never provisions or repairs the runner.
+# validates the ambient credential environment, metadata denial, bridge and
+# live firewall state, and the public S3 path; it never provisions or repairs
+# the runner.
 security_preflight "$BUCKET" "$REGION" \
   || die "runner security preflight failed; no subject container was started"
-SECURITY_STATE=/etc/s3-listing-study/runner-ready.env
-security_state_field() { sed -n "s/^$1=//p" "$SECURITY_STATE"; }
-SECURITY_PROFILE="$(security_state_field profile_id)"
-SECURITY_PROVIDER_VALUE="$(security_state_field provider)"
-SECURITY_MTU="$(security_state_field mtu)"
-SECURITY_POLICY_SHA="$(security_state_field live_policy_sha256)"
+# The receipt cites the boundary the preflight just proved: the profile
+# constants this build enforces, the MTU of the bridge the subject attaches to,
+# and the digest of the versioned deny policy found in force — not a hash of one
+# box's firewall dump, which no reader could re-derive.
+SECURITY_PROFILE="$SECURITY_PROFILE_ID"
+SECURITY_PROVIDER_VALUE="$SECURITY_PROVIDER"
+SECURITY_MTU="$(security_docker_control network inspect "$SECURITY_NETWORK" \
+  -f '{{index .Options "com.docker.network.driver.mtu"}}')" \
+  || die "cannot read the study bridge MTU $(security_docker_status $?)"
+SECURITY_POLICY_SHA="$(sha256sum "$SECURITY_POLICY_FILE" | cut -d' ' -f1)"
 
 # ------------------------------------------------------- owner's bucket rule
 # Scans against EVERY registered bucket, not just this run's. A run.sh that
