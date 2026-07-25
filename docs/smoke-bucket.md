@@ -6,6 +6,12 @@ as parameters resolved from this file — a bucket name hardcoded anywhere
 executable is a defect. The smoke protocol this registry serves is
 [`tool-research-brief.md`](operating/tool-research-brief.md).
 
+**The machine-read source is [`data/registry.toml`](../data/registry.toml).**
+Code resolves bucket facts from there, not from the tables below; the tables
+state the same values for a human reader, and `tests/test_registry.py` fails if
+the two ever disagree. Change both, or change the TOML and let the guard tell
+you what is stale.
+
 Snapshots are taken with the pinned harness client, **anonymously**, and the
 manifest is the reference listing every smoke run is verified against. A
 drifted bucket (pre-flight or mid-campaign reference re-list disagreeing with
@@ -14,7 +20,9 @@ every receipt cites the manifest sha256 it was checked against.
 
 ## Harness client
 
-Image: `amazon/aws-cli@sha256:eb85b2c72442c9eab0bdbe608095b9b909bc2a7136924124d63fe0c03b2ec334`
+| | |
+| --- | --- |
+| Image | `amazon/aws-cli@sha256:eb85b2c72442c9eab0bdbe608095b9b909bc2a7136924124d63fe0c03b2ec334` |
 
 Invocation shape, run only after the mandatory
 [`runner-security`](operating/runner-security.md) preflight:
