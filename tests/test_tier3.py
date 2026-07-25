@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 
+from s3_listing_study import verify
 from tests.tier3 import make_fixtures
 from tests.tier3 import stage as tier3
 from tests.tier3.stage import Stage
@@ -75,9 +76,17 @@ def alpha_receipt(stage: Stage, rows: list[str]) -> Path:
     return stage.receipt("alpha", tier3.ALPHA_META, rows, prefix=tier3.ALPHA_PREFIX)
 
 
-def test_the_verifier_under_test_is_the_shipped_one(stage: Stage) -> None:
-    """A rig that quietly edited the verifier would prove nothing about it."""
+def test_the_staged_harness_is_byte_identical_to_the_shipped_one(stage: Stage) -> None:
+    """A rig that quietly edited the verifier would prove nothing about it.
+
+    Under `S3STUDY_VERIFIER=python` the staged shell file is never executed, so
+    its digest proves nothing about what ran; the implementation under test is
+    then pinned the only way it can be — the package the entry point imports has
+    to be this checkout's, not a stale install that happens to be on the path.
+    """
     assert stage.staged_sha256 == tier3.sha256_file(tier3.VERIFIER)
+    if tier3.IMPLEMENTATION == "python":
+        assert Path(verify.__file__).resolve().is_relative_to(tier3.REPO / "src")
 
 
 def test_a_clean_receipt_passes_without_re_listing(stage: Stage) -> None:
@@ -269,6 +278,30 @@ def test_union_mtime_only_overwrite_is_drift_and_not_fail(stage: Stage) -> None:
     assert outcome.returncode == 4
     assert "| Field mismatches | 1 |" in outcome.report
     assert "This is not a tool finding." in outcome.report
+
+
+def test_a_union_refusal_still_leaves_the_durable_artifact(stage: Stage) -> None:
+    """`errors.py` invariant: a union ERROR lands in `union-verify.md`, not only on stderr.
+
+    An adapter that exits non-zero is the cheapest way to reach a refusal raised
+    below the union's own `union_die` equivalent. Routing that through a handler
+    that converted the error without writing left the union verdict nowhere
+    durable — and named a staged temp path instead of the shard.
+    """
+    adapter = stage.root / "failing-normalize.sh"
+    adapter.write_text("#!/usr/bin/env bash\nexit 7\n")
+    adapter.chmod(0o755)
+    shards = union_shards(stage, tier3.alpha_rows(), tier3.beta_rows())
+    remainder = union_remainder(stage)
+
+    outcome = stage.verify_union(
+        [*shards, remainder], remainder=remainder, reference=None, normalize=adapter
+    )
+
+    assert outcome.returncode == 3
+    assert outcome.verdict == "ERROR"
+    assert "union shard 0" in outcome.report
+    assert "shard.0.stdout.raw" not in outcome.report
 
 
 def test_union_re_list_that_cannot_run_is_error(stage: Stage) -> None:

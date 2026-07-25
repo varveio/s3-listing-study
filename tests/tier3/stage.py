@@ -19,9 +19,19 @@ Tier 3 makes them reachable without weakening a single check:
   environment variables and argv alone.
 
 Nothing here knows the verifier is written in bash except `_stage_harness`,
-which is where a ported verifier would be pointed instead. The reference
-listing, the receipts, the manifest, and the fake docker are the oracle, and
-they are implementation-agnostic by construction.
+which is where a ported verifier is pointed instead. The reference listing, the
+receipts, the manifest, and the fake docker are the oracle, and they are
+implementation-agnostic by construction.
+
+`S3STUDY_VERIFIER` selects which implementation the tier judges — `shell` (the
+reference) or `python`. It is a parameter, not a one-way switch, so both can be
+run against the identical cases and compared. The shipped shell verifier is
+staged byte-identical either way, which is what `staged_sha256` proves: `harness/`
+is never written to, because it is the reference side of the port's differential.
+The one shell-specific piece of the rig is `runner-security-lib.stub.sh`. The
+ported verifier's equivalent seam is `tests/tier3/verifier_entry.py`, which is
+not installed and passes `PreflightSkipped()` in process — the port has no
+argv that disables the preflight, exactly as the shell has none.
 """
 
 from __future__ import annotations
@@ -31,6 +41,7 @@ import hashlib
 import os
 import shutil
 import subprocess
+import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -59,6 +70,8 @@ ENV_STDERR = "S3STUDY_FAKE_DOCKER_STDERR"
 ALPHA_META = REPO / "tools/aws-cli/receipts/smoke/s3api-v2-text-hourly/run.meta"
 BETA_META = REPO / "tools/aws-cli/receipts/smoke/fanout/shard-monthly/run.meta"
 REMAINDER_META = REPO / "tools/aws-cli/receipts/smoke/fanout/remainder/run.meta"
+
+IMPLEMENTATION = os.environ.get("S3STUDY_VERIFIER", "shell")
 
 ALPHA_PREFIX = "alpha/"
 BETA_PREFIX = "beta/"
@@ -166,6 +179,7 @@ class Stage:
         self.root = root
         self.harness = root / "harness"
         self.bin = root / "bin"
+        self.verifier: list[str] = []
         self._stage_harness()
         self.manifest = self._stage_manifest(manifest if manifest is not None else manifest_rows())
         self.manifest_sha256 = sha256_file(self.manifest)
@@ -181,6 +195,27 @@ class Stage:
         self.bin.mkdir(parents=True)
         shutil.copy2(TIER3 / "fake-docker.sh", self.bin / "docker")
         (self.bin / "docker").chmod(0o755)
+        self.verifier = self._verifier_argv()
+
+    @staticmethod
+    def _verifier_argv() -> list[str]:
+        """The command the cases drive. The rig is otherwise identical either way."""
+        if IMPLEMENTATION == "shell":
+            return []
+        if IMPLEMENTATION != "python":
+            raise ValueError(
+                f"S3STUDY_VERIFIER must be 'shell' or 'python', not {IMPLEMENTATION!r}"
+            )
+        # --registry is the explicit redirection the port takes in place of the
+        # SMOKE_REGISTRY environment hook. The preflight seam is the entry point
+        # itself, not an argument: see tests/tier3/verifier_entry.py.
+        return [
+            sys.executable,
+            "-m",
+            "tests.tier3.verifier_entry",
+            "--registry",
+            str(REGISTRY_FIXTURE),
+        ]
 
     def _stage_manifest(self, rows: Sequence[str]) -> Path:
         path = self.root / "manifest" / "tier3.tsv.gz"
@@ -230,12 +265,17 @@ class Stage:
         env = dict(os.environ)
         env["SMOKE_REGISTRY"] = str(REGISTRY_FIXTURE)
         env["PATH"] = f"{self.bin}{os.pathsep}{env['PATH']}"
+        # REPO as well as REPO/src: `-m tests.tier3.verifier_entry` is deliberately
+        # importable only from a checkout.
+        env["PYTHONPATH"] = os.pathsep.join(
+            [str(REPO / "src"), str(REPO), env.get("PYTHONPATH", "")]
+        ).rstrip(os.pathsep)
         env[ENV_RC] = str(rc)
         env[ENV_STDERR] = message
         if reference is not None:
             env[ENV_REFERENCE] = str(reference)
         proc = subprocess.run(
-            [str(self.harness / "verify-listing.sh"), *args],
+            [*(self.verifier or [str(self.harness / "verify-listing.sh")]), *args],
             cwd=self.root,
             env=env,
             stdout=subprocess.PIPE,
@@ -283,9 +323,10 @@ class Stage:
         docker_rc: int = 0,
         docker_stderr: str = "fake docker: reference re-list refused",
         out: str = "union",
+        normalize: Path = NORMALIZE,
     ) -> Outcome:
         out_dir = self.root / "out" / out
-        args = ["--scope", "union", "--normalize", str(NORMALIZE), "--out", str(out_dir)]
+        args = ["--scope", "union", "--normalize", str(normalize), "--out", str(out_dir)]
         for receipt in receipts:
             args += ["--receipt", str(receipt)]
         if remainder is not None:

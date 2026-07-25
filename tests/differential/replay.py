@@ -16,6 +16,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -96,9 +97,44 @@ def unstamp(receipt_md: Path) -> None:
     receipt_md.write_text(_STAMP.sub(_PLACEHOLDER, text, count=1))
 
 
+IMPLEMENTATION = os.environ.get("S3STUDY_VERIFIER", "shell")
+"""Which verifier the oracle judges: ``shell`` (the reference) or ``python``.
+
+A parameter rather than a one-way switch, so the two implementations can be run
+against the same corpus and compared. Repointing the oracle is a deliberate
+change with its own justification (`README.md` § "The fixture is markdown"), not
+a silent edit that happens to turn a gate green: nothing else about the replay
+moves — same staging, same argv, same byte comparison.
+"""
+
+
+def verifier_argv(repo: Path, registry: Path) -> list[str]:
+    """The command that issues the verdict, and how the registry reaches it.
+
+    The shell verifier offers only the `SMOKE_REGISTRY` environment hook. The
+    ported one takes `--registry PATH` and digests its raw bytes, so pointing it
+    at the committed markdown fixture reproduces `254c8cfe…` naturally — the
+    injection becomes an explicit argument rather than inherited environment.
+    """
+    if IMPLEMENTATION == "python":
+        return [
+            sys.executable,
+            "-m",
+            "s3_listing_study.verify",
+            "--registry",
+            str(registry),
+        ]
+    if IMPLEMENTATION != "shell":
+        raise RuntimeError(f"S3STUDY_VERIFIER must be 'shell' or 'python', not {IMPLEMENTATION!r}")
+    return [str(repo / "harness" / "verify-listing.sh")]
+
+
 def _run(cmd: list[str], cwd: Path, registry: Path) -> tuple[int, str]:
     env = dict(os.environ)
     env["SMOKE_REGISTRY"] = str(registry)
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(Path(__file__).resolve().parents[2] / "src"), env.get("PYTHONPATH", "")]
+    ).rstrip(os.pathsep)
     proc = subprocess.run(
         cmd,
         cwd=cwd,
@@ -129,7 +165,7 @@ def replay_single(case: SingleCase, oracle: Oracle, farm: Path, work: Path) -> R
 
     normalize = oracle.repo / "tools" / case.tool / "adapter" / "normalize.sh"
     cmd = [
-        str(oracle.repo / "harness" / "verify-listing.sh"),
+        *verifier_argv(oracle.repo, oracle.registry),
         "--receipt",
         str(staged),
         "--input",
@@ -170,7 +206,7 @@ def replay_union(case: UnionCase, oracle: Oracle, farm: Path, work: Path) -> Res
     out.mkdir(parents=True)
 
     cmd = [
-        str(oracle.repo / "harness" / "verify-listing.sh"),
+        *verifier_argv(oracle.repo, oracle.registry),
         "--scope",
         "union",
         "--normalize",
