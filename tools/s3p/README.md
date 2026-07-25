@@ -102,7 +102,7 @@ resolve in [`data/claims.json`](data/claims.json).
 
 - No mode produced a listing, so the manifest verifier was never exercised;
   verification is blocked, not passed.
-- The `normalize.sh` mode contracts are source-derived and validated only against
+- The `normalize.py` mode contracts are source-derived and validated only against
   synthetic adapter fixtures; canonical claim
   `normalize-validated-against-synthetic-fixtures` in [`data/claims.json`](data/claims.json).
 - `ls --long` is lossy and cannot serve verification; use `ls --raw`.

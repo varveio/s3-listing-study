@@ -61,7 +61,7 @@ UNEXERCISED = {
 
 # A mode whose input is a BINARY stream, where a lone newline is not an empty
 # listing but a corrupt payload. Only a 0-byte stream means "zero objects" for
-# s3-fast-list, and `normalize.sh` refuses the newline the same way — see
+# s3-fast-list, and the adapter refuses the newline — see
 # `test_a_newline_only_parquet_stream_is_refused`, which pins that half.
 BINARY_MODES = {("s3-fast-list", "list")}
 
@@ -627,16 +627,16 @@ def test_the_committed_payload_corpus_is_the_pinned_one(tool: str) -> None:
 
 
 def test_s3kor_list_refuses_a_panic_whose_frames_are_tab_indented() -> None:
-    """The one payload where the port deliberately parts company with the shell.
+    """The one payload the adapter refuses rather than normalises.
 
     s3kor's only `list` receipt is a capability probe that panicked, so the stream
     the corpus selects is a Go stack trace whose frames are TAB-indented. `list`
-    reads a whole line as a key, so the shell adapter emitted four records whose
-    KEY contained a TAB — 6 fields where the framing declares 5, which the
-    verifier's own field split read as an extra column. The port refuses the
-    payload at the emit boundary instead, which the verifier reports as ERROR: no
-    verdict was formed, which is the truth about a stack trace. In-repo bytes, so
-    this holds with no data directory.
+    reads a whole line as a key, so emitting those frames would produce records
+    whose KEY contains a TAB — 6 fields where the framing declares 5, and a field
+    split downstream reads the surplus as an extra column. The adapter refuses at
+    the emit boundary instead, which the verifier reports as ERROR: no verdict was
+    formed, which is the truth about a stack trace. In-repo bytes, so this holds
+    with no data directory.
     """
     payload = (REPO / S3KOR_LIST_PROBE).read_bytes()
     done = run("s3kor", "list", "", payload)

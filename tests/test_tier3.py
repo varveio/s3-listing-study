@@ -115,7 +115,7 @@ def test_dropped_key_with_the_reference_agreeing_is_fail(stage: Stage) -> None:
     assert tier3.key_of(dropped) in outcome.report
     # A FAIL names two suspects and does not choose between them: the adapter is
     # newer than the tool and written by us.
-    assert "the tool or in this mode's `normalize.sh` adapter" in outcome.report
+    assert "the tool or in this mode's `normalize.py` adapter" in outcome.report
     assert "**FAIL** — see `verify.md`" in outcome.receipt
 
 
@@ -252,7 +252,7 @@ def test_union_dropped_key_with_the_reference_agreeing_is_fail(stage: Stage) -> 
     assert "| Missing | 1 |" in outcome.report
     assert tier3.key_of(beta[-1]) in outcome.report
     assert "shard 1 (prefix='beta/'): missing=1 extra=0" in outcome.report
-    assert "the tool or in this mode's `normalize.sh` adapter" in outcome.report
+    assert "the tool or in this mode's `normalize.py` adapter" in outcome.report
 
 
 def test_union_mtime_only_overwrite_is_drift_and_not_fail(stage: Stage) -> None:

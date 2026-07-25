@@ -1,8 +1,8 @@
 """Secret scanning: classify a redacted stream as clean, flagged, or broken.
 
-Ports the scan half of ``harness/scan-lib.sh`` and ``harness/scan-tree.sh``.
-Preserves the three-way outcome that must never be conflated: clean /
-flagged / scanner-broke. Validated against ``harness/tests/scan-fixtures/``.
+The three outcomes must never be conflated: clean / flagged / scanner-broke.
+A scanner that broke is not a clean scan. Validated against
+``harness/tests/scan-fixtures/``.
 
 gitleaks is deliberately NOT used (owner's call, 2026-07-16): its entropy rules
 fire on S3 pagination cursors, so every paginating tool's ``--debug`` receipt
@@ -25,9 +25,8 @@ import re
 from enum import IntEnum
 from pathlib import Path
 
-# ``[[:space:]]`` in the C locale, spelled out: a bytes pattern's ``\s`` is the
-# same set, but the shell's regex is quoted here character-for-character so the
-# two can be diffed by eye at cutover.
+# ``[[:space:]]`` in the C locale, spelled out rather than left to ``\s``: the
+# byte set is pinned here, so it cannot widen under a locale or an interpreter.
 _SPACE = rb"[ \t\n\r\f\v]"
 
 # The pattern requires a credential-SHAPED VALUE, not merely "something after

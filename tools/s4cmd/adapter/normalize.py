@@ -36,10 +36,10 @@ line (``s4cmd.py:1622``), so a key with TRAILING whitespace loses it before this
 adapter ever sees it, and a key containing a NEWLINE is split across lines by the
 line-oriented formatter. Such keys cannot be faithfully normalised by anything
 downstream — a limit of the tool's output, recorded so it is not mistaken for
-adapter fidelity. What the port does remove is the adapter-side half of it: the
-shell predecessor took byte positions with ``substr`` and no ``LC_ALL=C``, so a
-multi-byte key could be cut mid-character; here the key is carried as text to the
-emit boundary, and a key the framing cannot carry is refused rather than mangled.
+adapter fidelity. The adapter-side half of the same hazard is avoided: taking
+byte positions with ``substr`` and no ``LC_ALL=C`` would cut a multi-byte key
+mid-character, so the key is carried as text to the emit boundary instead, and a
+key the framing cannot carry is refused rather than mangled.
 
 The adapter runs on the HOST, AFTER the wrapper's clock stops, so a DuckDB query
 is fair game here — never inside a timed window.

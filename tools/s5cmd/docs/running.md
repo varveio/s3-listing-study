@@ -154,7 +154,7 @@ Swap `--mode` for any row in `run.sh`'s case statement (`recursive`,
 is not a single wrapper invocation — it is the wrapper run once per shard
 (four `recursive`-mode calls with different `--prefix` values, plus one
 `rootkeys`-mode call for the remainder), followed by
-`harness/verify-listing.sh --scope union` over the resulting receipts to
+`s3-listing-study verify --scope union` over the resulting receipts to
 produce `union-verify.md`. The in-process `s5cmd run <file>` capability probe
 in `../receipts/smoke/_capability/run-fanout/` is reproduced by mounting a
 commands file (one `ls` line per shard) read-only into the container and

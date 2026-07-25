@@ -33,8 +33,8 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures" / "receipt"
 # credential, and the file they are written into never leaves a tmp dir.
 KEY_ID = "AKIA" + "Q" * 16
 SECRET = "AWS_SECRET_ACCESS_KEY=" + "Z" * 40
-# Split for the same reason: `harness/scan-tree.sh` scans the whole repo, this
-# scheme name followed by a space IS the value-shape the scanner looks for, and a
+# Split for the same reason: the tree scan covers the whole repo, this scheme
+# name followed by a space IS the value-shape the scanner looks for, and a
 # tracked test file that trips the tree scan makes the gate cry wolf about
 # itself.
 SIGV4 = "Authorization: AWS4-HMAC" + "-SHA256 stuff"

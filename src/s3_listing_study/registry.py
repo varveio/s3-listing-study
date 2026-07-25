@@ -1,24 +1,24 @@
 """Registry access: read ``data/registry.toml``.
 
-Replaces the markdown-table scraping in ``harness/registry-lookup.sh``, and
-keeps the two properties that script's strictness existed for.
+Two properties decide whether a receipt can be trusted, and both are enforced
+here.
 
-**All ambiguity is fatal.** The old resolver hand-rolled duplicate detection
-because a second ``Manifest sha256`` row silently resolving to whichever came
-first would put a plausible wrong digest in a receipt — worse than no receipt at
-all. TOML gets that for free: redefining a table or a key is a parse error, so
-duplication cannot reach the lookup. Everything the format does not enforce is
-validated on load — required fields, digest shape, date shape, key count, and an
-outright rejection of unknown fields, since an unknown field is a misspelling of
-a real one and a misspelling that parses is the same silent-wrong-value bug.
+**All ambiguity is fatal.** A second ``Manifest sha256`` entry silently
+resolving to whichever came first would put a plausible wrong digest in a
+receipt — worse than no receipt at all. TOML gets that for free: redefining a
+table or a key is a parse error, so duplication cannot reach the lookup.
+Everything the format does not enforce is validated on load — required fields,
+digest shape, date shape, key count, and an outright rejection of unknown
+fields, since an unknown field is a misspelling of a real one and a misspelling
+that parses is the same silent-wrong-value bug.
 
 **A receipt can prove which registry produced it.** :attr:`Registry.path` and
 :attr:`Registry.digest` are the ``--path`` / ``--digest`` equivalents; the digest
 is the sha256 of the data file itself, so a receipt citing it binds to exact
 bytes. There is deliberately no environment override of the registry location:
-the old ``SMOKE_REGISTRY`` hole — a leftover test override producing
-official-looking evidence from a registry nobody reviewed — is closed by making
-redirection an explicit argument at the call site.
+an environment variable is how official-looking evidence gets produced from a
+registry nobody reviewed, so redirection is an explicit argument at the call
+site or nothing.
 """
 
 from __future__ import annotations
@@ -183,9 +183,8 @@ def _bucket(name: str, buckets: dict[str, Any], path: Path) -> Bucket:
     if not DATE_RE.fullmatch(snapshot_date):
         raise RegistryError(f"snapshot_date for {name!r} is not YYYY-MM-DD: {snapshot_date!r}")
 
-    # 0 is legal: the shell resolver accepts any number the Keys row states
-    # (``harness/registry-lookup.sh:164``), and a registered bucket that is
-    # legitimately empty must stay resolvable rather than be refused as malformed.
+    # 0 is legal: a registered bucket that is legitimately empty must stay
+    # resolvable rather than be refused as malformed.
     keys = table.get("keys")
     if not isinstance(keys, int) or isinstance(keys, bool) or keys < 0:
         raise RegistryError(f"keys for {name!r} is not a non-negative integer: {keys!r}")

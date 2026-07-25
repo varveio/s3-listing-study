@@ -12,7 +12,7 @@ same instant).
 
 Every adapter emits through :func:`emit` and every consumer reads through
 :func:`parse_line`, so the framing rules live here once instead of being
-re-derived in eleven ``normalize.sh`` scripts.
+re-derived in eleven adapters.
 
 Bytes, not text
 ---------------
@@ -20,19 +20,19 @@ A key is ``bytes`` throughout — it is copied from the listing response and nev
 decoded, so a key that is not valid UTF-8 survives byte-for-byte. The other four
 fields are ASCII by construction (digits, hex, a timestamp, a storage-class
 token) and are carried as ``str``. This split is what makes the three documented
-key-fidelity bugs structurally impossible rather than merely fixed:
-``tools/rclone/adapter/normalize.sh`` (``jq @tsv`` C-escapes TAB/NL/CR/backslash),
-``tools/s3-fast-list/adapter/normalize.sh`` (unquoted DuckDB ``-list`` output uses
-TAB and NEWLINE as its own delimiters) and ``tools/s4cmd/adapter/normalize.sh``
-(byte-position ``substr`` without ``LC_ALL=C``) all mangle keys because they pass
-them through a text layer that reserves those bytes.
+key-fidelity bugs structurally impossible rather than merely fixed. Each of the
+three came from an adapter passing keys through a text layer that reserves the
+bytes a key may contain: rclone's ``jq @tsv`` C-escapes TAB/NL/CR/backslash,
+unquoted DuckDB ``-list`` output for s3-fast-list uses TAB and NEWLINE as its own
+delimiters, and s4cmd's fixed-width columns cut by byte position without
+``LC_ALL=C`` split multi-byte keys mid-character.
 
 Keys the framing cannot carry: rejected, not escaped
 ----------------------------------------------------
 A key containing TAB, NEWLINE or CR cannot be represented by a 5-column,
 one-record-per-line format. The choice here is to **reject it loudly** with
 :class:`ContractViolation` — an adapter-contract violation in the same category
-as a malformed mtime (``harness/verify-listing.sh:59-68``): never a tool FAIL,
+as a malformed mtime: never a tool FAIL,
 never a PASS. Defining an escape was rejected for three reasons:
 
 * The manifest is written in the same format and is the thing an adapter's output
@@ -40,7 +40,7 @@ never a PASS. Defining an escape was rejected for three reasons:
   invalidate the committed manifest binding — and with it the differential
   oracle's byte-identical acceptance bar.
 * An escape is lossy in the only way that matters here: every downstream consumer
-  that does not decode it (``sort``/``comm``/``join`` in the shell verifier, a
+  that does not decode it (a ``sort``/``comm``/``join`` over the stream, a
   DuckDB read, a human reading ``verify.md``) then sees a key that is not the key
   the bucket holds — the exact failure mode this module exists to eliminate,
   moved rather than removed.
@@ -87,7 +87,7 @@ UNFRAMEABLE_BYTES = b"\t\n\r"
 MTIME_RE = re.compile(
     r"\A[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(Z|\+00:00|\+0000)\Z"
 )
-"""The mtime shape gate, mirroring ``MTIME_RE_AWK`` (``harness/verify-listing.sh:51``).
+"""The mtime shape gate, mirroring the frozen ``MTIME_RE_AWK`` in ``tests/test_contract.py``.
 
 Asserted BEFORE :func:`canon_mtime`, because canonicalisation keeps digits only
 and therefore also equates garbage that happens to share those digits.
@@ -128,8 +128,8 @@ class ContractViolation(Exception):
 def canon_mtime(value: str) -> str:
     """Canonical comparison form of a contract-v2 mtime: the digits of the instant.
 
-    Semantics are lifted exactly from the verifier's ``canon_mt``
-    (``harness/verify-listing.sh:80``)::
+    Semantics are exactly the awk ``canon_mt`` the committed verdicts were
+    issued under, frozen as ``CANON_MT_AWK`` in ``tests/test_contract.py``::
 
         function canon_mt(s){ sub(/(Z|\\+00:00|\\+0000)$/,"",s); gsub(/[^0-9]/,"",s); return s }
 
@@ -137,8 +137,8 @@ def canon_mtime(value: str) -> str:
     Python's ``$`` would also strip a zone sitting before a trailing newline)
 
     so ``…Z``, ``…+00:00`` and ``…+0000`` denoting the same second compare equal.
-    This is deliberately not "improved": the verifier's committed verdicts were
-    issued under it and must be reproducible byte-for-byte.
+    This is deliberately not "improved": the committed verdicts were issued
+    under it and must be reproducible byte-for-byte.
 
     Because it keeps digits only, it also equates garbage sharing those digits.
     Gate the shape with :data:`MTIME_RE` first — :func:`parse_line` and
@@ -308,7 +308,7 @@ def read_records(stream: IO[bytes]) -> Iterator[Record]:
     """Parse a contract-v2 stream, one record per line.
 
     A final record without a trailing newline counts — undercounting it is how a
-    duplicate slips past a completeness check (``harness/verify-listing.sh:801``).
+    duplicate slips past a completeness check.
     """
     for line_number, raw in enumerate(stream, start=1):
         line = raw[: -len(RECORD_SEPARATOR)] if raw.endswith(RECORD_SEPARATOR) else raw

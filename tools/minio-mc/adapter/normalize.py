@@ -38,9 +38,9 @@ Text parsing is BEST-EFFORT by construction: the columns are space-separated wit
 no quoting, so a key beginning with a known storage-class token followed by a
 space is indistinguishable from the storage-class column. The storage-class set
 below is kept current with the AWS enum for exactly that reason. Use a ``*-json``
-mode for authoritative keys, sizes and ETags. Keys are compared as TEXT where
-``normalize.sh`` compared bytes under ``LC_ALL=C``; every key the study lists is
-ASCII, so the two agree.
+mode for authoritative keys, sizes and ETags. Keys are compared as TEXT rather
+than as bytes under ``LC_ALL=C``; every key the study lists is ASCII, so the two
+orderings agree.
 
 The adapter runs on the HOST, AFTER the wrapper's clock stops, so a DuckDB query
 is fair game here — never inside a timed window.

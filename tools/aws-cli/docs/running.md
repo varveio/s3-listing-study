@@ -71,10 +71,10 @@ credential injection or starving, timeout, cleanup, RSS/cgroup sampling, and
 the receipt (`receipt.md` + `run.meta`). It refuses a non-digest-pinned
 image and enforces the 300s/mode guardrail regardless of what `--timeout` is
 asked for. Output is checked against the registered smoke-bucket manifest
-(`docs/smoke-bucket.md`) by `harness/verify-listing.sh` via
-`tools/aws-cli/adapter/normalize.sh`, which projects each mode's raw output into the
+(`docs/smoke-bucket.md`) by `s3-listing-study verify` via
+`tools/aws-cli/adapter/normalize.py`, which projects each mode's raw output into the
 common `key\tsize\tetag\tmtime\tstorage_class` shape the verifier compares.
-Do not edit `adapter/normalize.sh`; it's an immutable input to this consolidation.
+Do not edit `adapter/normalize.py`; it's an immutable input to this consolidation.
 
 ## Fan-out union procedure
 
@@ -94,7 +94,7 @@ actually run, 2026-07-17:
 3. Shards were run **serially** here (each invocation's own listing
    concurrency is 1 regardless; aws-cli has no internal listing concurrency
    to bound, so the study's `CONCURRENCY_CAP=4` was never approached).
-4. `harness/verify-listing.sh --scope union` merges the shard outputs,
+4. `s3-listing-study verify --scope union` merges the shard outputs,
    checks for cross-shard duplicates, and confirms the union against the
    manifest: 148,917 distinct, 0 duplicates, 0 missing, 0 extra, structurally
    complete. Result: `receipts/smoke/fanout/union/union-verify.md`; per-shard
@@ -104,7 +104,7 @@ actually run, 2026-07-17:
 To reproduce: run each shard through `smoke-run.sh` exactly as in
 "Reproducing a receipt" above with the shard's `--prefix` (or the delimiter
 flags for the remainder), then invoke
-`harness/verify-listing.sh --scope union` pointed at the shard receipt
+`s3-listing-study verify --scope union` pointed at the shard receipt
 directories — see `receipts/smoke/fanout/union/union-verify.md` for the
 exact shard list it was pointed at.
 

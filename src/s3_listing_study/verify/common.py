@@ -95,7 +95,7 @@ def manifest_field_count(data: bytes) -> int:
 
 
 def normalize(adapter: str, mode: str, prefix: str, payload: Path) -> bytes:
-    """Run a mode's ``normalize.sh`` over one payload and return its records.
+    """Run a mode's normalize adapter over one payload and return its records.
 
     The run's prefix (from ``run.meta``) is the second argument so a mode that
     prints path-relative names can reconstruct full keys; empty for a

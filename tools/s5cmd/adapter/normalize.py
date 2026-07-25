@@ -26,14 +26,14 @@ UNQUOTED.
 
 KEY-BYTE FIDELITY — scope. The text sinks are whitespace-separated with no
 quoting, so a key containing runs of spaces, a TAB or a newline is not
-recoverable from them; the shell predecessor rejoined split fields with a single
-space and its ``jq @tsv`` JSON path C-escaped TAB/NEWLINE/BACKSLASH. Here a key
-the framing cannot carry is REFUSED at the emit boundary rather than altered, and
+recoverable from them, and a ``jq @tsv`` JSON path would C-escape
+TAB/NEWLINE/BACKSLASH. So a key the framing cannot carry is REFUSED at the emit
+boundary rather than altered, and
 a key with interior single spaces still round-trips. This is exact for the NOAA
 smoke keyspace (``[A-Za-z0-9._/-]``, no whitespace); full weird-key fidelity is
 deferred with the edge-case fixture (``EDGE_BUCKET=none``). Keys are compared as
-TEXT where ``normalize.sh`` compared bytes under ``LC_ALL=C``; every key the
-study lists is ASCII, so the two agree.
+TEXT rather than as bytes under ``LC_ALL=C``; every key the study lists is ASCII,
+so the two orderings agree.
 
 The adapter runs on the HOST, AFTER the wrapper's clock stops, so a DuckDB query
 is fair game here — never inside a timed window.
@@ -61,8 +61,8 @@ MODES = RECURSIVE_MODES | {"allversions", "delimiter", "fullpath", "json"}
 
 LINES = "(SELECT unnest(str_split(content, chr(10))) AS line FROM read_text($path))"
 
-# Whitespace-split, the way the shell predecessor's awk split: leading and
-# trailing blanks ignored, runs collapsed. A DIR row is `<blanks> DIR <relkey/>`.
+# Whitespace-split the way awk splits: leading and trailing blanks ignored,
+# runs collapsed. A DIR row is `<blanks> DIR <relkey/>`.
 FIELDS = rf"""
     (SELECT str_split_regex(trim(line), '[ \t]+') AS f FROM {LINES} WHERE trim(line) <> '')"""
 

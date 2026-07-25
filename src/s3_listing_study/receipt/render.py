@@ -1,11 +1,10 @@
 """``receipt.md`` generation.
 
-Ports the receipt markdown generator tail of ``harness/smoke-run.sh``, byte for
-byte. Golden regeneration from a committed ``run.meta`` is **not** possible and
-never was: ``run.meta`` does not carry the invocation, the box spec, the payload
-byte sizes, the emulation note or the registry shape, so the acceptance bar here
-is a fixture of the shell renderer's own output over synthetic values
-(``tests/fixtures/receipt/``).
+Golden regeneration from a committed ``run.meta`` is **not** possible: ``run.meta``
+does not carry the invocation, the box spec, the payload byte sizes, the
+emulation note or the registry shape. The acceptance bar is therefore a frozen
+fixture over synthetic values (``tests/fixtures/receipt/``), whose bytes this
+renderer must reproduce exactly.
 
 Every dynamic value goes through ONE escaper. HTML entities are safe in Markdown
 table cells and cannot terminate a code span, create a new cell, or inject HTML.
@@ -19,7 +18,11 @@ from .meta import RunFacts, reject_control
 from .redact import PAYLOAD_CAP, Payload
 
 VERDICT_PLACEHOLDER = "_(filled in by `harness/verify-listing.sh`)_"
-"""The verdict slot a fresh receipt carries; the verifier splices over it."""
+"""The verdict slot a fresh receipt carries; the verifier splices over it.
+
+Frozen wording: every committed receipt carries these exact bytes, and the
+replay oracle restores the slot by matching them.
+"""
 
 _ENTITIES = (("&", "&amp;"), ("<", "&lt;"), (">", "&gt;"), ("|", "&#124;"), ("`", "&#96;"))
 

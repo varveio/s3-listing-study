@@ -1,7 +1,6 @@
 """Redaction, truncation, hashing and placement of a captured stream.
 
-Ports the payload half of ``harness/smoke-run.sh``. The order is fixed and
-load-bearing: **redact, then scan, then truncate, then hash** — redaction and
+The order is fixed and load-bearing: **redact, then scan, then truncate, then hash** — redaction and
 the scan over the FULL stream, so a credential the redaction did not catch is
 still flagged when it sits beyond the 64 MiB cap instead of being silently
 dropped with the truncated tail; and hashing last, because the hash freezes the

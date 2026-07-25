@@ -173,7 +173,7 @@ Fields exposed: **key, size, mtime**. **Not exposed: ETag, storage class.**
 
 **Adapter fidelity — the embedded-newline gap is real; the leading-space loss
 was retracted.** The `printf` inserts exactly **one** space after the final tab,
-so `normalize.sh` strips that single delimiter space and **genuine leading
+so `normalize.py` strips that single delimiter space and **genuine leading
 spaces survive** — the format is *not* lossy for leading-space keys (an earlier
 draft wrongly claimed it was; **do not resurrect that claim**). The real adapter
 gap is **embedded newlines**: S3 keys may legally contain `\n`
@@ -181,7 +181,7 @@ gap is **embedded newlines**: S3 keys may legally contain `\n`
 which pS3 prints into a `\n`-terminated line, so the line-oriented adapter would
 split/drop such a key. Untested (the fixture has no newline key).
 
-`normalize.sh` (this repo, `tools/ps3/adapter/normalize.sh`) parses `^Object: ` lines →
+`normalize.py` (this repo, `tools/ps3/adapter/normalize.py`) parses `^Object: ` lines →
 `key<TAB>size<TAB>-<TAB>mtime<TAB>-` (etag/storage_class `-`; mtime canonicalized
 to `YYYY-MM-DDTHH:MM:SSZ`, UTC by construction under `TZ=UTC`). Validated only
 against a synthetic fixture (`receipts/smoke/_adapter/list-sample.txt`) because

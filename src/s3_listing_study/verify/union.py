@@ -60,7 +60,7 @@ DRIFT_NOTE = (
 FAIL_NOTE = (
     "reference agrees with the manifest (the bucket did not move): the union has missing/extra "
     "keys, field mismatches, or a shard that fails its own scope, so the discrepancy is **in the "
-    "tool or in this mode's `normalize.sh` adapter**. Confirm the adapter before any negative "
+    "tool or in this mode's `normalize.py` adapter**. Confirm the adapter before any negative "
     "finding."
 )
 
@@ -440,7 +440,7 @@ def _run(options: Options, work: Path) -> int:
         verdict = "FAIL"
         note = (
             f"cross-shard duplicates ({duplicates}) with no missing/extra/field discrepancy — "
-            "attributable to the tool or this mode's `normalize.sh` adapter, not bucket drift "
+            "attributable to the tool or this mode's `normalize.py` adapter, not bucket drift "
             "(duplication cannot be drift)."
         )
     else:

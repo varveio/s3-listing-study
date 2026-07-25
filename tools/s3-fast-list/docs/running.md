@@ -107,7 +107,7 @@ Scoped runs add `--prefix <scope>`.
 wrapper captures container stdout via `docker logs` (json-file driver), which is
 **not binary-safe**; this tool emits **binary Parquet** on stdout (routed there
 by `--output-parquet-file /dev/stdout`), so non-UTF-8 bytes become U+FFFD and
-the stored payload is an unparseable Parquet. `verify-listing.sh`/duckdb cannot
+the stored payload is an unparseable Parquet. The verifier's duckdb read cannot
 issue a verdict, and the verifier refuses a substituted `--input` whose sha256
 does not match the receipt. Universal across payload sizes (127 KB and 8 MB both
 corrupted). Run-facts (exit code, wall, peak_rss, cgroup, anonymous access) are
@@ -133,7 +133,7 @@ transcript. "Identical invocation to the wrapper argv" is the *intent*, not an
 independently logged fact. Full record:
 `../receipts/smoke/_capability/direct-capture.provenance.md`.
 
-**normalize.sh caveat.** Claim `adapter-tab-newline-key-loss`.
+**Adapter caveat.** Claim `adapter-tab-newline-key-loss`.
 `../adapter/normalize.py` reads the Parquet on stdin
 (spooled to a temp file — Parquet needs random access) and emits
 `key<TAB>size<TAB>etag<TAB>mtime<TAB>storage_class` via DuckDB `-list` with a

@@ -1,11 +1,10 @@
 """The runner-security boundary, as an injectable seam.
 
-The shell verifier reaches its FAIL / DRIFT / ERROR branches only through
-``docker``, behind ``security_preflight``; ``tests/tier3`` makes those branches
-reachable offline by replacing the sourced ``runner-security-lib.sh``. A port
-with no equivalent seam makes all four verdicts unreachable again, so the seam
-is part of the contract rather than a testing convenience
-(``tests/tier3/README.md`` § "The stub is the oracle").
+The verifier reaches its FAIL / DRIFT / ERROR branches only through ``docker``,
+behind the preflight, so without an injectable seam those verdicts are
+unreachable offline and cannot be tested at all. The seam is therefore part of
+the contract rather than a testing convenience (``tests/tier3/README.md``
+§ "The stub is the oracle").
 
 What is injectable is the **preflight** — runner readiness is a property of the
 box, not of the implementation under test, and it has its own suite in
@@ -57,8 +56,6 @@ def security_check() -> Path:
 _PREFLIGHT_UNSET = (
     "S3_STUDY_SECURITY_STATE_FILE",
     "S3_STUDY_SECURITY_INSTALLED_HELPER",
-    "S3_STUDY_SECURITY_RULES_V4",
-    "S3_STUDY_SECURITY_RULES_V6",
     "S3_STUDY_SECURITY_ALLOW_UNPRIVILEGED_STATE",
 )
 

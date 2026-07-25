@@ -8,14 +8,14 @@ Verdicts:
 
 * ``PASS`` (0)  — complete, no duplicates, fields match where the mode exposes them.
 * ``FAIL`` (1)  — a real discrepancy, and a reference re-list says the bucket did
-  not move — so it belongs to the tool OR to this mode's ``normalize.sh``
+  not move — so it belongs to the tool OR to this mode's ``normalize.py``
   adapter. This verdict does not distinguish them.
 * ``DRIFT`` (4) — the bucket moved since the snapshot. STOP. Not a tool finding.
 * ``ERROR`` (3) — the verifier could not run. Not a pass.
 
-The argument surface is the shell verifier's, plus one seam the port owns:
-``--registry PATH`` — identity is ``sha256`` of the file's raw bytes, so a
-receipt binds to exact bytes and no environment variable can redirect it.
+``--registry PATH`` is the only way to redirect the registry, and identity is
+``sha256`` of the file's raw bytes, so a receipt binds to exact bytes and no
+environment variable can point the verifier at a registry nobody reviewed.
 
 The security boundary is deliberately NOT on that surface. It is a keyword
 argument to :func:`run`, so the shipped entry point always runs the mandatory

@@ -26,8 +26,7 @@ REPO_ROOT="$(cd -- "$HARNESS/.." && pwd)"
 SMOKE="$HARNESS/smoke-run.sh"
 NORMALIZE="$HERE/adapters/normalize.sh"
 
-# The verifier is the Python package: there is no shell verifier left to drive.
-# Its field comparison runs on DuckDB, a declared project dependency, so the
+# The verifier is the Python package, and its field comparison runs on DuckDB, a declared project dependency, so the
 # suite runs against the PROJECT environment rather than whatever `python3` the
 # box happens to carry — `$S3STUDY_PYTHON` if set, else `.venv/` if `uv sync`
 # made one, else `python3`. A missing dependency stops the suite here, loudly:
@@ -106,8 +105,8 @@ run_union() {  # <out> <args...> -> sets RC
   local out="$1"; shift
   mkdir -p "$out"   # ensure the parent exists before the stderr redirect below
   RC=0
-  # --registry is the explicit redirection the port takes in place of the
-  # SMOKE_REGISTRY environment hook the shell verifier offered.
+  # --registry is the only redirection of the registry, and it is an argument,
+  # never an environment variable.
   PYTHONPATH="$REPO_ROOT/src" "$PYTHON" -P -m s3_listing_study.verify \
     --scope union --registry "$REG" --normalize "$NORMALIZE" --out "$out" "$@" \
     >/dev/null 2>"$out.err" || RC=$?

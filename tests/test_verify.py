@@ -117,11 +117,9 @@ def test_the_verdict_stamp_is_a_literal_splice() -> None:
 
 # ------------------------------------------------------- the security boundary
 
-# What tier 2 used to prove by grepping the shell verifier's text, asserted here
-# (`runner-security-regressions.sh:818-821`) — that both re-list constructors
-# carry the explicit evidence-log and no-pull arguments. That guard reads a file
-# the port does not execute, so it evaporates at cutover unless it is restated
-# against the port's own construction.
+# Both re-list constructors must carry the explicit evidence-log and no-pull
+# arguments. Asserted against the constructed argv rather than by grepping a
+# script's text, so the guard holds against what actually runs.
 
 PRODUCTION_RUN_PREFIX = [
     "timeout",

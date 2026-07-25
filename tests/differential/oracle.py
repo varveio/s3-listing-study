@@ -36,10 +36,11 @@ REGISTRY_FIXTURE = "tests/fixtures/registry-254c8cfe.md"
 
 DEFAULT_DATA_DIR = "~/s3-list-study-data"
 
-# Interpreter dependencies of the reference side. `tools/aws-cli/adapter/
-# normalize.sh:64-82` (mode `s3api-v2-yamlstream`) shells out to bare `python3`
-# and imports these; whichever `python3` is first on PATH is the one that runs,
-# so the probe has to be a subprocess, not an `import` here.
+# Interpreter dependencies of the reference side. The adapters run as
+# subprocesses, so whichever `python3` their shebang resolves to is the one that
+# imports these: every adapter reads its payload with `duckdb`, and mode
+# `s3api-v2-yamlstream` in `tools/aws-cli/adapter/normalize.py` also needs
+# `yaml`. So the probe has to be a subprocess, not an `import` here.
 ADAPTER_MODULES = ("duckdb", "yaml")
 
 

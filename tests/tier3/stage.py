@@ -189,10 +189,9 @@ class Stage:
     def _verifier_argv() -> list[str]:
         """The command the cases drive.
 
-        `--registry` is the explicit redirection the port takes in place of the
-        `SMOKE_REGISTRY` environment hook the shell verifier offered. The
-        preflight seam is the entry point itself, not an argument: see
-        `tests/tier3/verifier_entry.py`.
+        `--registry` is the only redirection of the registry, and it is an
+        argument, never an environment variable. The preflight seam is the entry
+        point itself, not an argument: see `tests/tier3/verifier_entry.py`.
         """
         return [
             sys.executable,

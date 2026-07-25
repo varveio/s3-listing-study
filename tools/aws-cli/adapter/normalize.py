@@ -24,12 +24,11 @@ YAML parse are fair game here — never inside a timed window.
 
 Ragged rows: the one deliberate deviation
 -----------------------------------------
-The bar for this port is byte-identical output against ``normalize.sh``, and it
-is met on every payload the study has captured. It is NOT met on a text-family
-row carrying fewer than five TAB fields, which only a TRUNCATED payload produces:
-``normalize.sh``'s awk prints ``$5`` of a 4-field row as the empty string, emitting
-a record whose storage_class is neither a value nor the ``-`` that means
-"unexposed". This adapter refuses the payload instead (non-zero exit, which the
+A text-family row carrying fewer than five TAB fields, which only a TRUNCATED
+payload produces, has no faithful reading. An awk-style ``$5`` of a 4-field row
+is the empty string, which would emit a record whose storage_class is neither a
+value nor the ``-`` that means "unexposed". This adapter refuses the payload
+instead (non-zero exit, which the
 verifier reports as ERROR). That is the deviation, taken on purpose: an ERROR
 says "no verdict was formed", which is the truth about a truncated listing,
 whereas the empty field is a fabricated record. The verifier already refuses a

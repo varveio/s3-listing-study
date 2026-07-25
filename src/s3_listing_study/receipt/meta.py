@@ -1,8 +1,7 @@
 """``run.meta`` writing, and the control-byte guard every field passes through.
 
-Ports the ``meta_field`` emission path of ``harness/smoke-run.sh`` (the
-line-oriented, control-byte-rejecting ``run.meta`` format that the verifier
-treats as the single source of truth it refuses to second-guess).
+The single emission path for ``run.meta``, the record the verifier treats as
+the source of truth it refuses to second-guess.
 
 ``run.meta`` is line-oriented and its parsers take the FIRST match, so an
 embedded newline in a caller-supplied value — an ``--env`` value, a

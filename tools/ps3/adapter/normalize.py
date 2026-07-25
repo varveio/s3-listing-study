@@ -47,9 +47,9 @@ printer in the shipped binary's ``--help`` surface, but its source is absent fro
 the pinned checkout, so its exact line format is UNVERIFIED and this adapter
 assumes the list-objects-v2 shape for it.
 
-That mode set is also the one deliberate deviation from ``normalize.sh``, which
-accepted ANY mode string because every mode shares one format. An unknown mode is
-refused here, as it is by every other adapter in the study: a mode nothing
+The mode set is also closed, even though every mode shares one format and any
+mode string could be accepted. An unknown mode is refused here, as it is by every
+other adapter in the study: a mode nothing
 declares is a verifier invoking something this port never reviewed, and answering
 it with a confident 0 records would be a fabricated verdict. No committed payload
 reaches that branch — the only receipt names ``list``.

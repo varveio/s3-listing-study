@@ -29,17 +29,16 @@ the current-object manifest lacks — a property of the mode, not a tool fault.
 prints absolute keys. The adapter runs on the HOST, AFTER the wrapper's clock
 stops, so a DuckDB query is fair game here — never inside a timed window.
 
-Keys are compared as TEXT where ``normalize.sh`` compared bytes under
-``LC_ALL=C``; every key in every bucket the study lists is ASCII, so the two
-agree.
+Keys are compared as TEXT rather than as bytes under ``LC_ALL=C``; every key in
+every bucket the study lists is ASCII, so the two orderings agree.
 
 A line the framing cannot carry: refused, not emitted
 -----------------------------------------------------
 ``list`` treats a whole line as a key, which is exact for a listing and wrong for
 anything else. s3kor's only committed receipts are capability probes that failed
 to authenticate, so the stream the corpus selects for them is a Go stack trace —
-whose lines are TAB-indented. ``normalize.sh`` emits those as records whose key
-contains a TAB, i.e. rows the verifier's own field split reads as six columns and
+whose lines are TAB-indented. Emitting those would produce records whose key
+contains a TAB, i.e. rows a field split reads as six columns and
 :func:`~s3_listing_study.contract.parse_line` rejects. This adapter refuses the
 payload instead (non-zero exit, which the verifier reports as ERROR), the same
 refusal ``contract`` documents as the reason keys are bytes and TAB is reserved.

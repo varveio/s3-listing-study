@@ -32,10 +32,10 @@ and the filter follows each: TSV keeps a row whose ``row_type`` is empty, JSONL
 defaults a missing ``row_type`` to ``OBJECT``. The TSV filter also drops the
 header line, whose sixth field is the literal ``row_type``.
 
-Keys are compared as TEXT here where ``normalize.sh`` compared bytes under
-``LC_ALL=C``: ``substr`` on the aligned format counts characters, not bytes. Every
-key in every bucket the study lists is ASCII, so the two agree; a multi-byte key
-would need the aligned sink's column arithmetic revisited in either language.
+Keys are compared as TEXT here rather than as bytes under ``LC_ALL=C``, and
+``substr`` on the aligned format counts characters, not bytes. Every key in every
+bucket the study lists is ASCII, so the two orderings agree; a multi-byte key
+would need the aligned sink's column arithmetic revisited.
 """
 
 from __future__ import annotations

@@ -97,13 +97,13 @@ bisection *logic* fans out; it does **not** show simultaneous wire execution
 `probe-scheduled-two-lists`). No counter value exists to record: the run aborted
 before any heartbeat or final-stats line.
 
-**No `verify-listing.sh` verdict.** No mode produced a listing to verify, so the
+**No verifier verdict.** No mode produced a listing to verify, so the
 manifest pre-flight/verification path was not exercised (nothing to compare
 against). This is why `tool.json` records `verification_status: blocked`.
 
 ## Adapter validation (no live data)
 
-`normalize.sh` `ls-raw`/`ls`/`ls-long` and `summarize`/empty paths are validated
+`normalize.py` `ls-raw`/`ls`/`ls-long` and `summarize`/empty paths are validated
 against **synthetic fixtures** under [`../adapter/fixtures/`](../adapter/fixtures/)
 (committed `*.expected.tsv` + `check.sh` → all PASS) — ETag unquoted,
 `LastModified` millis stripped to whole-second `…Z`, key-only modes correct,

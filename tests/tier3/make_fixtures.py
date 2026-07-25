@@ -79,8 +79,8 @@ def payload_row(key: str, index: int) -> str:
 def canonicalize(row: str) -> str:
     """`s3api ... --output text` row -> the manifest's canonical 5-field form.
 
-    The same two rewrites the verifier applies to a reference re-list
-    (`harness/verify-listing.sh:890-891`): unquote the ETag, `+00:00` -> `Z`.
+    The same two rewrites the verifier applies to a reference re-list: unquote
+    the ETag, `+00:00` -> `Z`.
     """
     key, row_size, row_etag, row_mtime, storage_class = row.split("\t")
     row_etag = row_etag.replace('"', "")

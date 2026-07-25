@@ -49,7 +49,7 @@ MANIFEST_MTIME = (
 
 FAIL_NOTE = (
     "reference re-list agrees with the manifest for this scope, so the bucket did not move. "
-    "The discrepancy is therefore **in the tool or in this mode's `normalize.sh` adapter** — "
+    "The discrepancy is therefore **in the tool or in this mode's `normalize.py` adapter** — "
     "this verdict does not distinguish them. Before recording any negative finding about the "
     "tool, confirm the adapter faithfully represents the raw output (methodology: negative "
     "findings ship with exact invocation and raw output, or they don't ship)."

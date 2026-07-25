@@ -31,7 +31,7 @@ TIMEOUT_CEILING=300        # brief § Guardrails: 300s per mode, no exceptions
 PROC_ROOT=/proc
 # The registry this run binds to. A constant here, never an argument and never an
 # environment variable: a redirectable registry is how official-looking evidence
-# gets produced from a registry nobody reviewed (the old SMOKE_REGISTRY hole).
+# gets produced from a registry nobody reviewed.
 # The fake-Docker regression harness rewrites it in a STAGED COPY of this file —
 # the same file-level seam it already uses for SECURITY_STATE and PROC_ROOT.
 # Editing the seam requires write access to a copy of this script, which is a

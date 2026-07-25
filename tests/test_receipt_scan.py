@@ -1,9 +1,8 @@
 """The credential value-shape scan, against the fixtures that prove it has teeth.
 
-Ports ``harness/tests/scan-fixtures-run.sh`` onto the Python scanner, keeping
-the fixtures exactly as they are. The dirty fixtures stay base64-obfuscated on
-disk so a whole-repo tree scan needs no name-based exclusion — the very bypass
-that removal closed — and are decoded into a tmp dir here, at test time.
+The dirty fixtures stay base64-obfuscated on disk so a whole-repo tree scan
+needs no name-based exclusion — a name-based exclusion is a bypass anything else
+can hide behind — and are decoded into a tmp dir here, at test time.
 
 The third outcome is the point of the file. ``grep`` exits 2 on error, and
 treating that as "no match" turns a broken scanner into a pass; that bug shipped

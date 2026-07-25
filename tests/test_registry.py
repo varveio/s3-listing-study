@@ -3,12 +3,12 @@
 Two sources of bucket facts exist — ``data/registry.toml``, which code reads, and
 ``docs/smoke-bucket.md``, which people read. Two sources that must agree, can
 disagree, so the drift guard here parses both independently and fails on the
-first field where they differ. It uses its own markdown reader on purpose: it was
-written to outlive ``harness/registry-lookup.sh``, and now has.
+first field where they differ. It uses its own markdown reader on purpose: a
+guard that shared the reader under test would agree with it by construction.
 
-The equivalence half — the shell resolver answering the same bytes — went with
-that script. What it proved is now carried by the differential replay, which
-re-issues all 67 committed verdicts against registry bytes the receipts name.
+That the registry resolves to the bytes the receipts name is proved elsewhere,
+by the differential replay, which re-issues all 67 committed verdicts against
+those bytes.
 """
 
 from __future__ import annotations

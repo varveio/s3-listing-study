@@ -804,11 +804,11 @@
     },
     {
       "id": "adapter-tab-newline-key-loss",
-      "statement": "The current tab-delimited normalizer cannot faithfully represent object keys containing a literal tab or newline.",
+      "statement": "The tab-delimited normalizer cannot faithfully represent object keys containing a literal tab or newline. The observation was made against the study's previous shell adapter (normalize.sh), which has since been removed.",
       "scope": "correctness",
       "status": "supported",
       "disposition": "retained",
-      "qualification": "This is a limitation of the study adapter, not an established defect in the tool's native Parquet output. No smoke key contained either byte.",
+      "qualification": "This is a limitation of the study adapter, not an established defect in the tool's native Parquet output. No smoke key contained either byte. Whether it still holds is unsettled: the current normalize.py refuses a key the five-column framing cannot carry rather than altering it, but no committed receipt re-tests the claim against that adapter, so the claim is left as recorded rather than demoted.",
       "legacy_origins": ["PROSE-5"],
       "evidence": [
         {"kind":"documentation","path":"../adapter/normalize.py"},

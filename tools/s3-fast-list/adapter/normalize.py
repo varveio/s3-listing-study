@@ -21,13 +21,12 @@ so it is `-`.
 ``prefix`` (argv[2]) is accepted per the adapter contract and unused: the ``Key``
 column is already absolute.
 
-This adapter is the port's cleanest win. The shell predecessor spooled stdin to a
-temp file and shelled out to the ``duckdb`` CLI, then read back its ``-list``
-output — which is unquoted and uses TAB as the field separator and NEWLINE as the
-record separator, so a key containing either byte silently became an extra field
-or an extra record. Reading the parquet in-process removes that round trip
-entirely: the key goes from the file to the emit boundary, where a key the
-framing cannot carry is REFUSED rather than mangled. It also removes the host's
+The parquet is read in-process. Going out to the ``duckdb`` CLI and reading back
+its ``-list`` output would not work here: that output is unquoted and uses TAB as
+the field separator and NEWLINE as the record separator, so a key containing
+either byte silently becomes an extra field or an extra record. In-process, the
+key goes from the file to the emit boundary, where a key the framing cannot carry
+is REFUSED rather than mangled. It also removes the host's
 ``duckdb`` binary from the adapter's dependencies.
 
 An EMPTY stream is zero keys, not a broken payload: a run that listed nothing

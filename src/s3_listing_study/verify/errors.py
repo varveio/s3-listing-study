@@ -1,11 +1,11 @@
 """The two refusals the verifier can make, and how they reach the caller.
 
-``harness/verify-listing.sh`` has exactly two death shapes and the port keeps
-both. :class:`VerifierError` is ``die`` — the verifier could not run, so it
-issues no verdict and exits 3. :class:`UnionError` is ``union_die`` — the same
-refusal on the ``--scope union`` path, which additionally owes a durable
-``union-verify.md`` carrying ERROR, because the README promises the union
-verdict lands in that artifact even for the early deaths.
+There are exactly two death shapes. :class:`VerifierError` is the plain refusal:
+the verifier could not run, so it issues no verdict and exits 3.
+:class:`UnionError` is the same refusal on the ``--scope union`` path, which
+additionally owes a durable ``union-verify.md`` carrying ERROR, because the
+README promises the union verdict lands in that artifact even for the early
+deaths.
 """
 
 from __future__ import annotations

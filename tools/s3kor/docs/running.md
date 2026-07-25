@@ -113,7 +113,7 @@ full-bucket and the three registry scoped-prefix checks (`normals-hourly/`,
 `normals-monthly/1991-2020/`, `normals-annualseasonal/1981-2010/access/`) are
 all blocked for the same reason.
 
-**Adapter validation (non-mode evidence).** `normalize.sh` was self-tested on
+**Adapter validation (non-mode evidence).** The adapter was self-tested on
 synthetic fixtures for both modes, including keys containing spaces, confirming
 the 5-field `key/-/-/-/-` contract (only the key column is populated; for
 `list-versions` the leading version-id token is stripped; the leading-token
@@ -175,7 +175,7 @@ harness/smoke-run.sh \
 Swap `--mode list-versions` (and `--out …/list-versions`) for the other
 receipt. Rebuilding the image first requires the pinned checkout at
 `844fe3d7931fcca415c8b8a4e22f048886e6b82b` and the `docker build` above.
-`adapter/run.sh`/`adapter/normalize.sh` and everything under `../research/` and
+`adapter/run.sh`/`adapter/normalize.py` and everything under `../research/` and
 `../receipts/` are immutable inputs to this page; a rerun adds a new receipt
 rather than editing an existing one.
 

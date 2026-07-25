@@ -251,7 +251,7 @@ bucket (`noaa-normals-pds`) is not itself a versioned bucket in the sense
 that matters here: every object has a single `null` version, so
 `all-versions` mode cannot exercise genuine multi-version collapse,
 delete-marker rows, or `IsLatest` semantics against it. The study's
-`normalize.sh` contract and verifier are keyed on `key` alone (no version
+`normalize.py` contract and verifier are keyed on `key` alone (no version
 axis), which is why the `all-versions` smoke run **PASSED** — there was
 nothing to collapse. `EDGE_BUCKET=none` for this groundwork pass, so a
 genuinely versioned/edge bucket was never exercised; a version-aware

@@ -258,8 +258,8 @@ def test_a_worker_crash_records_error_and_cleans_up(
 def test_a_missing_payload_is_oracle_unavailable(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    # A partial restore of the data directory must never read as "the port is
-    # wrong": it is the oracle that is incomplete.
+    # A partial restore of the data directory must never read as "the verifier
+    # is wrong": it is the oracle that is incomplete.
     _stub_gate(monkeypatch, tmp_path)
 
     def missing(oracle: Oracle, payloads: Any) -> int:

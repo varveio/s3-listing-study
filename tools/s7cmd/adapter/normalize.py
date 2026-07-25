@@ -33,10 +33,10 @@ single record, so the mode is validated only against the non-versioned smoke
 bucket. A versioned corpus needs a version-aware manifest first
 (``EDGE_BUCKET=none``).
 
-Keys are compared as TEXT here where ``normalize.sh`` compared bytes under
-``LC_ALL=C``. Every key in every bucket the study lists is ASCII, so the two
-agree. s7cmd also escapes control bytes to ``\\xNN`` by default, which is an
-identity on this corpus and is NOT de-escaped here.
+Keys are compared as TEXT here rather than as bytes under ``LC_ALL=C``. Every key
+in every bucket the study lists is ASCII, so the two orderings agree. s7cmd also
+escapes control bytes to ``\\xNN`` by default, which is an identity on this
+corpus and is NOT de-escaped here.
 """
 
 from __future__ import annotations

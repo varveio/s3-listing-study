@@ -100,11 +100,9 @@ def unstamp(receipt_md: Path) -> None:
 def verifier_argv(registry: Path) -> list[str]:
     """The command that issues the verdict, and how the registry reaches it.
 
-    The shell verifier this replay was built to compare against is gone, so there
-    is one implementation left to judge. It takes `--registry PATH` and digests
-    the file's raw bytes, so pointing it at the committed markdown fixture
-    reproduces `254c8cfe…` naturally — an explicit argument rather than the
-    inherited `SMOKE_REGISTRY` environment the shell offered.
+    The verifier takes `--registry PATH` and digests the file's raw bytes, so
+    pointing it at the committed markdown fixture reproduces `254c8cfe…`
+    naturally — an explicit argument, never an environment variable.
     """
     return [
         sys.executable,

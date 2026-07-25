@@ -28,11 +28,11 @@ and the ListObjectsV2 ``Contents`` shape)::
 FULL keys in every mode. The adapter runs on the HOST, AFTER the wrapper's clock
 stops, so a DuckDB query is fair game here — never inside a timed window.
 
-The shell predecessor decoded ``ls-raw`` through ``jq -j`` with explicit
-separators rather than ``@tsv``, because ``@tsv`` escapes BACKSLASH and backslash
-is inside s3p's 95-character supported alphabet, so a legal key came back
-altered. Here the key travels from the JSON to the emit boundary, where a key the
-framing cannot carry is refused rather than escaped.
+``ls-raw`` must not be decoded through a ``@tsv``-style escaper: that escapes
+BACKSLASH, and backslash is inside s3p's 95-character supported alphabet, so a
+legal key would come back altered. The key travels from the JSON to the emit
+boundary instead, where a key the framing cannot carry is refused rather than
+escaped.
 
 Provenance: these contracts are [SRC]-derived. They could not be confirmed
 against a live listing — s3p cannot make anonymous requests and the campaign ran

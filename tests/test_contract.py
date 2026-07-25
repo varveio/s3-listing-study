@@ -1,10 +1,9 @@
 """Contract v2: the emit/parse boundary, and the awk semantics it inherited.
 
-The mtime tests are differential against the awk the shell verifier ran —
-they lift the live ``canon_mt`` function and ``MTIME_RE_AWK`` out of that script
-and run them under ``awk``. The verifier's 67 committed verdicts were issued
-under those exact semantics, so "agrees with what I think awk does" is not
-enough: this asserts against the awk that is actually shipped.
+The mtime tests are differential against awk: they take the ``canon_mt``
+function and ``MTIME_RE_AWK`` frozen below and run them under the real ``awk``.
+The 67 committed verdicts were issued under those exact semantics, so "agrees
+with what I think awk does" is not enough.
 """
 
 from __future__ import annotations
