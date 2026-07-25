@@ -261,7 +261,7 @@ Once the owner has read and accepted a tool's groundwork branch, its
 `README.md` is rebuilt — it stays the tool's landing page, but the stale
 tool page text does not survive into the benchmark period. **Run this at deep
 tier** (owner's call): the inputs are all prepared, so it's cheap, but the
-  output is the public summary of what we learned about someone else's tool — a
+  output is the public summary of what we learned about another project's tool — a
 mis-carried status or a quietly narrowed hypothesis here is exactly the kind
 of error the study exists to avoid. **This step does no new research and
 re-verifies no claims** — the groundwork already did both and was itself

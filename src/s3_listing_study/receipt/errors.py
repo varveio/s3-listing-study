@@ -2,8 +2,8 @@
 
 Every refusal here is a *harness* error, never a tool result — a flagged scan, a
 control byte in a field, a payload that changed under its own hash. The wrapper
-exits 2 on all of them, because blaming a tool for the harness's own error is a
-false accusation about someone else's work.
+exits 2 on all of them, because recording the harness's own error as a tool
+result would misreport someone else's work.
 """
 
 from __future__ import annotations

@@ -1,8 +1,8 @@
 """``s3-listing-study verify`` — the only thing that issues a verdict.
 
-Centralised because a negative verdict here is an accusation about someone
-else's software, and because twelve agents each rolling their own diff is
-twelve chances to blame a tool for a bucket that moved.
+Centralised because a FAIL here is a finding this study publishes about
+another project's tool, and because twelve agents each rolling their own diff
+is twelve chances to record a moving bucket as a tool defect.
 
 Verdicts:
 
@@ -179,9 +179,9 @@ def run(argv: Sequence[str], security: SecurityBoundary | None = None) -> int:
 def main(argv: Sequence[str] | None = None, security: SecurityBoundary | None = None) -> int:
     """Every death is ERROR (3). A crash is not a verdict.
 
-    Exit 1 is FAIL — a public accusation about someone else's software. An
+    Exit 1 is FAIL — a published finding about another project's tool. An
     unhandled exception escaping here would exit 1 through the interpreter and
-    say FAIL about a tool the verifier never finished judging, so anything that
+    say FAIL about a tool the verifier never finished checking, so anything that
     is not a :class:`VerifierError` is reported with its traceback and mapped to
     the same ERROR the shell's ``die`` reaches.
     """

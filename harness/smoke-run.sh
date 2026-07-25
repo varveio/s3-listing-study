@@ -9,8 +9,8 @@
 #
 # Two rules this file exists to keep, both learned the hard way:
 #   1. A receipt records what RAN. Not a plausible reconstruction of it.
-#   2. A harness failure is never recorded as a tool result. Blaming a tool for
-#      the harness's own error is a false accusation about someone else's work.
+#   2. A harness failure is never recorded as a tool result. Recording the
+#      harness's own error as a tool result misreports someone else's work.
 #
 # Usage:
 #   smoke-run.sh --tool NAME --mode MODE --image REF@sha256:... \

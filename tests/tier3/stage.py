@@ -2,10 +2,10 @@
 
 Every committed verdict in this repo is a PASS, so the differential replay
 (tier 1) never enters the branch that matters most: on any discrepancy the
-verifier re-lists the reference bucket *before* blaming anyone, and splits the
-outcome three ways — reference agrees (FAIL, an accusation about a third party's
-software), reference disagrees (DRIFT, explicitly not a tool finding), re-list
-did not run (ERROR, no attribution possible). That branch shells out to `docker`
+verifier re-lists the reference bucket *before* attributing anything, and splits
+the outcome three ways — reference agrees (FAIL, a finding about another
+project's tool), reference disagrees (DRIFT, explicitly not a tool finding),
+re-list did not run (ERROR, no attribution possible). That branch shells out to `docker`
 against real S3 behind the runner-security gate, so offline it dies rc=3 and all
 three verdicts are untested.
 

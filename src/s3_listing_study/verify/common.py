@@ -2,7 +2,7 @@
 
 Nothing here forms a verdict. It is the plumbing the single-receipt path and
 the union path share, kept in one place so the two cannot drift apart on the
-things that decide a public claim — how the reference is re-listed, how its
+things that decide a published finding — how the reference is re-listed, how its
 output is canonicalised, and how a payload is bound to the bytes its receipt
 cites.
 """
@@ -44,7 +44,7 @@ def sha256_file(path: Path) -> str:
 
 
 def snapshot(source: str | Path, destination: Path) -> str:
-    """Copy first, then hash the copy, then judge the copy — no TOCTOU window.
+    """Copy first, then hash the copy, then check the copy — no TOCTOU window.
 
     Hashing a path and reopening it lets the file be replaced, or a symlink
     retargeted, in between; the verdict would then be derived from bytes whose
@@ -55,7 +55,7 @@ def snapshot(source: str | Path, destination: Path) -> str:
 
 
 def bind_streams(run_meta: Path, meta: dict[str, str]) -> list[Stream]:
-    """Every payload stream one ``run.meta`` records, resolved and unjudged.
+    """Every payload stream one ``run.meta`` records, resolved and unchecked.
 
     BOTH streams: mapping only stdout made any tool that emits its listing to
     stderr unverifiable. A stream missing either its path or its digest is not
@@ -163,8 +163,8 @@ def relist(
     """Re-list the reference with the pinned client. Returns (rc, records, stderr).
 
     The verifier's first move on ANY discrepancy. A third-party bucket can move
-    under us mid-campaign, and recording drift as a tool failure would be a
-    false public accusation.
+    under us mid-campaign, and recording drift as a tool failure would report a
+    defect that isn't there.
     """
     name = f"s3study-reference-{os.getpid()}-{random.randint(0, 32767)}"
     argv = security.run_prefix(name, image)

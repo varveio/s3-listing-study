@@ -181,7 +181,7 @@ Without that install, a Python adapter invoked as `--normalize` fails with
 `ModuleNotFoundError` and the verifier reports it as a finding about the *tool*,
 which it is not. `tests/differential` and `tests/adapters` speak the same exit
 contract: `0` green, `1` a real mismatch, `42` ORACLE_UNAVAILABLE — the inputs
-could not be read, so nothing was judged. `42` is never a pass.
+could not be read, so nothing was verified. `42` is never a pass.
 
 The two gates above that replay committed receipts need the external data
 directory (`$S3_STUDY_DATA`, holding `manifests/` and `receipts/`); see

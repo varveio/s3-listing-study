@@ -264,7 +264,7 @@ mt_case "compare_fields mtime non-UTC offset -> ERROR" "2026-07-17T00:00:00+0100
 d="$WORK/mt-extra"; mk_shard "$d" "" rootlisting no no "$(mkline k1 10 etag1 2026-07-17T00:00:00Z STANDARD; mkline kX 9 etagx 'garbage-mtime' STANDARD)" "$MT_GZ" "$MT_SHA"
 run_union "$d/out" --receipt "$d" --remainder "$d"
 assert_rc "compare_fields malformed mtime on EXTRA key -> ERROR" 3 "$RC"
-grep -qi 'non-contract-v2 mtime' "$d/out.err" 2>/dev/null && ok "extra-key malformed mtime blamed on adapter" || bad "extra-key malformed mtime message missing"
+grep -qi 'non-contract-v2 mtime' "$d/out.err" 2>/dev/null && ok "extra-key malformed mtime attributed to adapter" || bad "extra-key malformed mtime message missing"
 
 # Finding 4: a malformed MANIFEST mtime (a later row, not just the first) is a
 # corrupt snapshot -> ERROR naming the manifest, never a tool finding.
@@ -274,7 +274,7 @@ BADMAN_GZ="$WORK/badman.tsv.gz"; gzip -c "$BADMAN_TSV" >"$BADMAN_GZ"; BADMAN_SHA
 d="$WORK/mt-badman"; mk_shard "$d" "" rootlisting no no "$(mkline k1 10 etag1 2026-07-17T00:00:00Z STANDARD; mkline k2 20 etag2 2026-07-17T00:00:00Z STANDARD)" "$BADMAN_GZ" "$BADMAN_SHA"
 run_union "$d/out" --receipt "$d" --remainder "$d"
 assert_rc "compare_fields malformed MANIFEST mtime -> ERROR" 3 "$RC"
-grep -qi 'manifest mtime is not contract-v2' "$d/out.err" 2>/dev/null && ok "malformed manifest mtime blamed on manifest" || bad "malformed manifest mtime message missing"
+grep -qi 'manifest mtime is not contract-v2' "$d/out.err" 2>/dev/null && ok "malformed manifest mtime attributed to manifest" || bad "malformed manifest mtime message missing"
 
 # --- per-tool env matrix (smoke-run.sh dies before any docker) ----------------
 RS="$WORK/run.sh"

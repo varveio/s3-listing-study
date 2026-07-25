@@ -7,8 +7,8 @@ non-``-`` value, duplicates-before-dedup a ``GROUP BY key HAVING count(*) > 1``
 over the concatenated multiset. Stating it as SQL removes the hazard the shell
 had to shout about: ``LC_ALL=C`` had to hold for ``sort``, ``comm`` and
 ``join`` to agree on byte order, and a locale that broke that agreement made
-the diff *invent* missing and extra keys — a finding against a tool that did
-nothing wrong.
+the diff *invent* missing and extra keys — a reported discrepancy in a tool
+that did nothing wrong.
 
 Keys travel as **hex**
 ----------------------
@@ -114,17 +114,17 @@ def _stage(rows: Sequence[Row], *, sentinel: bool) -> bytes:
     A row that is not 5-field is refused here rather than unpacked. The
     field-count gate reads the manifest's FIRST record only, in both
     implementations, so a TAB inside a key on any later row reaches this point;
-    unpacking it raised ``ValueError``, which escaped as exit 1 — FAIL, an
-    accusation — where the shell reaches ``die`` and exits 3.
+    unpacking it raised ``ValueError``, which escaped as exit 1 — FAIL, a
+    finding about the tool — where the shell reaches ``die`` and exits 3.
     """
-    side, blame = _SIDE[sentinel]
+    side, attribution = _SIDE[sentinel]
     out = bytearray()
     for number, row in enumerate(rows, start=1):
         if len(row) != FIELD_COUNT:
             raise VerifierError(
                 f"{side} record {number} has {len(row)} field(s), not {FIELD_COUNT} "
                 "(key<TAB>size<TAB>etag<TAB>mtime<TAB>storage_class) — most likely a literal TAB "
-                f"inside a key. {blame}"
+                f"inside a key. {attribution}"
             )
         key, size, etag, mtime, storage_class = row
         canon = canon_mtime(mtime.decode("latin-1")).encode("latin-1")

@@ -41,9 +41,9 @@ replay never reaches them.
 The replay itself is stdlib-only, but the adapters it re-runs are not: every
 `tools/*/adapter/normalize.py` reads its payload with `duckdb`, and mode
 `s3api-v2-yamlstream` additionally imports `yaml`. Both are declared project
-dependencies, so `uv run python -m tests.differential` and a bare `python3` judge
-the same corpus, and the preflight refuses to judge at all (42) rather than
-charging a missing interpreter dependency to the implementation under test.
+dependencies, so `uv run python -m tests.differential` and a bare `python3` check
+the same corpus, and the preflight refuses to run at all (42) rather than
+attributing a missing interpreter dependency to the implementation under test.
 
 Useful flags:
 

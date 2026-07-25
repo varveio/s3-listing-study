@@ -2,8 +2,8 @@
 
 Tier 1 (`tests/differential/`) replays every committed verdict in the repo. All
 67 of them are PASS, so the branch that matters most has no coverage at all: on
-any discrepancy the verifier re-lists the reference bucket **before blaming the
-tool** (`s3_listing_study.verify.single`, union equivalent in `.union`) and
+any discrepancy the verifier re-lists the reference bucket **before attributing
+anything to the tool** (`s3_listing_study.verify.single`, union equivalent in `.union`) and
 splits the outcome three ways.
 
 | Re-list says | Verdict | Exit | Means |
@@ -13,9 +13,9 @@ splits the outcome three ways.
 | could not run | `ERROR` | 3 | no attribution is possible. Not a pass |
 
 That split is the fairness mechanism of the whole study, and `FAIL` is the one
-output of this codebase that becomes a public claim about someone else's
-software — including software Varve does not maintain, judged by a harness Varve
-does. It must be built before the verifier is ported, not after.
+output of this codebase that becomes a published finding about another project's
+tool — including tools Varve does not maintain, checked by a harness Varve does.
+It must be built before the verifier is ported, not after.
 
 ## Why it needs a rig at all
 

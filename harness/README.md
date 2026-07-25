@@ -172,17 +172,17 @@ keys (e.g. `index.html`) that live under no prefix.
   coverage defect in the fan-out **plan**, reported as **`ERROR` (exit 3)**,
   distinct from and never mistaken for the tool dropping keys (`FAIL`).
 
-The union mirrors the single-receipt path everywhere it judges: it **binds mode
+The union mirrors the single-receipt path everywhere it verifies: it **binds mode
 across the prefix shards** (they must share one `mode`; a caller `--mode` must
 equal it; the remainder is exempt as above), **refuses** any shard with
 `redaction_changed_bytes=yes` or a **truncated** verified stream, and
-copies-then-hashes-then-judges. **Stream selection**: by default it picks each
+copies-then-hashes-then-checks. **Stream selection**: by default it picks each
 shard's verified stream by heuristic — stdout unless stdout is empty and stderr is
 non-empty — which is a guess; a tool that prints a banner on stdout and its
 listing on stderr needs **`--stream stdout|stderr`**, which pins the stream for
 **all** shards (a fan-out set shares tool+mode, so it shares the stream). It
 **re-lists the reference before issuing any `FAIL`** — missing/extra keys, field
-mismatches, or a shard failing its own scope — so bucket drift is never charged to
+mismatches, or a shard failing its own scope — so bucket drift is never attributed to
 the tool; only pure duplication (dups > 0, everything else clean) may `FAIL`
 without a re-list, since a bucket cannot drift into duplicates. Every plan-defect
 death after `--out` is parsed still writes a durable `union-verify.md` with

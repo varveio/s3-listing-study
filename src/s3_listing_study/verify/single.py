@@ -221,7 +221,7 @@ def run(options: Options) -> int:
     bound = _bind_receipts(options, meta)
     _check_inputs(options, bound)
 
-    # Redaction rewrites bytes. If it changed anything, the verifier is judging
+    # Redaction rewrites bytes. If it changed anything, the verifier is checking
     # our scrubber's output, not the tool's — a legitimate key shaped like a
     # credential would be altered and then failed against the manifest.
     if meta.get("redaction_changed_bytes", "") != "no":
@@ -310,7 +310,7 @@ def _verdict(
 
     # Snapshot the inputs as well, and re-verify the hash against the snapshot:
     # hashing an input and reopening it later lets a concurrent rerun or a
-    # symlink retarget swap the bytes being judged for bytes nobody checked.
+    # symlink retarget swap the bytes being checked for bytes nobody verified.
     snapshots = []
     for index, path in enumerate(options.inputs):
         destination = work / f"input.{index}"
@@ -422,7 +422,7 @@ def _verdict(
     drift_note = ""
     discrepancy = bool(missing or extra or dup_count > 0 or mismatches)
     if discrepancy:
-        say("discrepancy found — re-listing the reference before blaming the tool")
+        say("discrepancy found — re-listing the reference before attributing it to the tool")
         if not options.security.image_present(harness_image):
             raise VerifierError(
                 "digest-pinned harness image is not present locally; campaign execution never pulls"

@@ -46,7 +46,7 @@ never a PASS. Defining an escape was rejected for three reasons:
   moved rather than removed.
 * Such a key cannot currently be *checked* either: no reference manifest contains
   one (``EDGE_BUCKET=none``), so emitting one would manufacture a record the
-  manifest can never match, i.e. a guaranteed FAIL charged to a tool that did
+  manifest can never match, i.e. a guaranteed FAIL attributed to a tool that did
   nothing wrong. Refusing is the honest verdict: ERROR, not FAIL.
 
 The escape/framing question reopens when the study owns its reference bucket and

@@ -36,9 +36,9 @@ def security_check() -> Path:
     A fixed ``parents[3]`` is correct only in a source tree: under the shipped
     console script it resolves inside the install prefix, the missing file
     raises ``OSError``, and the process exits 1 — the FAIL code — about a tool
-    that may be innocent. Not finding the script is a :class:`VerifierError`,
-    because a verifier that cannot run its own readiness gate has not formed an
-    opinion about anyone's software.
+    that may be perfectly correct. Not finding the script is a
+    :class:`VerifierError`, because a verifier that cannot run its own readiness
+    gate has not checked anyone's software.
     """
     here = Path(__file__).resolve()
     for parent in here.parents:

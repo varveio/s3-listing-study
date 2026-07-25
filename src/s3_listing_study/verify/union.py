@@ -14,8 +14,8 @@ binds mode across the PREFIX shards (the designated remainder is exempt —
 covering the unprefixed remainder legitimately needs a different request shape,
 so it is normalized under its OWN mode against the orphan keys), refuses
 redaction-altered or truncated payloads, selects each shard's verified stream
-from ``run.meta``, copies-then-hashes-then-judges, and re-lists the reference
-before ANY FAIL so bucket drift is never charged to the tool.
+from ``run.meta``, copies-then-hashes-then-checks, and re-lists the reference
+before ANY FAIL so bucket drift is never attributed to the tool.
 """
 
 from __future__ import annotations
@@ -98,7 +98,7 @@ def _select_stream(
 
     A tool that emits its listing on stderr records both streams; the union
     picks the one carrying the listing. Copy FIRST, then hash the copy, then
-    judge the copy — no window to swap the payload between the hash and the
+    check the copy — no window to swap the payload between the hash and the
     read.
     """
     try:
@@ -289,7 +289,7 @@ def _bind_mode(options: Options) -> str:
 def _check_overlap(prefixes: list[str]) -> None:
     """Overlapping prefixes make a correct tool double-emit the nested keys.
 
-    That then reads as cross-shard duplicates and a FAIL wrongly charged to the
+    That then reads as cross-shard duplicates and a FAIL wrongly attributed to the
     tool. Compared over NON-empty prefixes only — the remainder's empty prefix
     is a string-prefix of everything, by design.
     """
@@ -409,7 +409,7 @@ def _run(options: Options, work: Path) -> int:
         verdict = "ERROR"
         note = STRUCTURAL_NOTE.format(orphan=len(orphan_rows))
     elif needs_relist:
-        say("union discrepancy — re-listing the reference before blaming the tool")
+        say("union discrepancy — re-listing the reference before attributing it to the tool")
         image = options.registry.harness_image()
         if not options.security.image_present(image):
             raise UnionError(

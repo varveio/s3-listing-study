@@ -205,7 +205,7 @@ def test_a_tab_inside_a_key_on_a_later_row_is_error_not_fail(tmp_path: Path) -> 
     """The field-count gate reads row 1 only, in both implementations.
 
     A literal TAB in a key on any later row reached the unpack and raised
-    `ValueError`, which leaves the interpreter at exit 1 — FAIL, an accusation
+    `ValueError`, which leaves the interpreter at exit 1 — FAIL, a finding
     about a tool — where the shell's `die` exits 3.
     """
     rows = compare.split_records(b"a\t1\te\t-\tS\nkey\twith\ttab\t1\te\t-\tS\n")
@@ -216,7 +216,7 @@ def test_a_tab_inside_a_key_on_a_later_row_is_error_not_fail(tmp_path: Path) -> 
 
 
 def test_a_crash_is_reported_as_error_and_never_as_fail(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    """Exit 1 is a public accusation. A verifier that crashed formed no opinion."""
+    """Exit 1 is a published finding about a tool. A verifier that crashed checked nothing."""
 
     def boom(argv: object, security: object = None) -> int:
         raise RuntimeError("unexpected")

@@ -1,4 +1,4 @@
-"""Which registry a verdict is judged against, and how it is identified.
+"""Which registry a verdict is checked against, and how it is identified.
 
 Two properties, decided in ``tests/differential/README.md`` § "The fixture is
 markdown, and stays markdown":
@@ -6,7 +6,7 @@ markdown, and stays markdown":
 * **Identity is the raw bytes.** ``--registry PATH`` is digested as
   ``sha256(file bytes)``, format-agnostically. All 85 committed ``run.meta``
   cite ``254c8cfe…`` — the sha of a *markdown* registry — and the verifier
-  refuses to judge a run against a registry it never saw. Digesting bytes
+  refuses to verify a run against a registry it never saw. Digesting bytes
   rather than a parse is what lets the committed fixture reproduce that digest
   naturally; nothing short of a preimage could make the TOML do it.
 * **Field parsing dispatches on file type.** ``.toml`` goes through

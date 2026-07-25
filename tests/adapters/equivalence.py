@@ -10,7 +10,7 @@ Cases are discovered from ``run.meta``, never from directory layout — the
 so a case here names exactly what the verifier would normalise. That includes the
 capability probes, whose mode no adapter implements.
 
-The bytes each adapter produces over these payloads are still judged, by the
+The bytes each adapter produces over these payloads are still checked, by the
 differential replay (``tests/differential/``): every committed ``verify.md`` is
 re-issued through the real adapter and required back unchanged, so an adapter
 that emits different records fails there. This module supplies the denominator —

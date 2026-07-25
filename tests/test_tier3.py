@@ -2,9 +2,9 @@
 
 All 67 replayed verdicts are PASS, so FAIL, DRIFT and ERROR — the three outcomes
 of the reference re-list that decides whether a discrepancy is *the tool's* —
-have no coverage at all. They are also the ones that become public claims about
-someone else's software, so they are the last place in this repo where a port
-should be trusted on inspection.
+have no coverage at all. They are also the ones that become published findings
+about another project's tool, so they are the last place in this repo where a
+port should be trusted on inspection.
 
 Each case runs the shipped verifier — this checkout's `s3_listing_study.verify`,
 asserted below — inside a staged tree. The only substitutions are the runner
@@ -113,8 +113,8 @@ def test_dropped_key_with_the_reference_agreeing_is_fail(stage: Stage) -> None:
     assert outcome.verdict == "FAIL"
     assert "| Missing | 1 |" in outcome.report
     assert tier3.key_of(dropped) in outcome.report
-    # A FAIL names two suspects and does not choose between them: the adapter is
-    # newer than the tool and written by us.
+    # A FAIL names both candidates and does not choose between them: the adapter
+    # is newer than the tool and written by us.
     assert "the tool or in this mode's `normalize.py` adapter" in outcome.report
     assert "**FAIL** — see `verify.md`" in outcome.receipt
 
@@ -126,7 +126,7 @@ def test_mtime_only_overwrite_is_drift_and_not_fail(stage: Stage) -> None:
     ETag, later mtime. The tool reports what the bucket now holds and disagrees
     with the snapshot. Every key-based check says "no drift" — the key sets are
     identical, asserted here — so a drift comparison over anything less than the
-    full record would issue a FAIL against a tool that is exactly right.
+    full record would issue a FAIL for a tool that is exactly right.
     """
     rows = tier3.alpha_rows()
     moved = tier3.bump_mtime(rows[3])
@@ -171,7 +171,7 @@ def test_an_object_added_after_the_snapshot_is_drift(stage: Stage) -> None:
 def test_a_re_list_that_cannot_run_is_error_not_a_verdict(
     stage: Stage, docker_rc: int, expected: str
 ) -> None:
-    """No re-list, no attribution. ERROR is not a pass and not an accusation."""
+    """No re-list, no attribution. ERROR is not a pass and not a finding."""
     rows = tier3.alpha_rows()
     receipt = alpha_receipt(stage, rows[1:])
     outcome = stage.verify(
@@ -207,8 +207,8 @@ def union_remainder(stage: Stage) -> Path:
 def test_union_without_a_remainder_shard_is_a_structural_error(stage: Stage) -> None:
     """The root-level key lives under no shard prefix: a defect in the FAN-OUT PLAN.
 
-    A union of prefixes never lists a root-level key. Charging that to the tool
-    would be blaming it for a key nobody asked it to list, so it is an ERROR
+    A union of prefixes never lists a root-level key. Attributing that to the tool
+    would report a defect for a key nobody asked it to list, so it is an ERROR
     about the plan — reported before any re-list, which is why this case needs
     no docker at all.
     """
