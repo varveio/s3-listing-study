@@ -117,4 +117,8 @@ jobs:
         run: uv run mypy
 
       - name: pytest
-        run: uv run pytest
+        # Deselect the oracle-backed gates: the reference data they read is
+        # deliberately not in the repo, so CI cannot judge them. Deselecting
+        # here states that where it is configured, rather than letting a test
+        # self-skip and read as a pass. Run them locally with `-m oracle`.
+        run: uv run pytest -m "not oracle"

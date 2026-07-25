@@ -163,6 +163,39 @@ capture, and fault injection. Because the endpoint is part of Swath, it must be
 checked against real-S3 captures before it is used to describe other tools. It
 reports observations; it does not decide correctness by itself.
 
+## Running the checks in this repo
+
+The harness and the verifier are POSIX shell and need only the usual command-line
+tools (`bash`, `awk`, `jq`, `sha256sum`). **The Python side needs the project
+installed**, because the listing adapters and the test harnesses import
+`s3_listing_study`:
+
+```sh
+uv sync                     # or: python3 -m venv .venv && .venv/bin/pip install -e .
+uv run pytest               # offline: no bucket, no network, no data directory
+python3 -m tests.differential          # replays every committed verdict (exit 0/1/42)
+python3 -m tests.adapters aws-cli rclone   # shell vs Python adapters, byte-for-byte
+```
+
+Without that install, a Python adapter invoked as `--normalize` fails with
+`ModuleNotFoundError` and the verifier reports it as a finding about the *tool*,
+which it is not. `tests/differential` and `tests/adapters` speak the same exit
+contract: `0` green, `1` a real mismatch, `42` ORACLE_UNAVAILABLE — the inputs
+could not be read, so nothing was judged. `42` is never a pass.
+
+The two gates above that replay committed receipts need the external data
+directory (`$S3_STUDY_DATA`, holding `manifests/` and `receipts/`); see
+[`tests/differential/README.md`](tests/differential/README.md). `uv run pytest`
+alone needs none of it — its fixtures are synthetic and committed.
+
+Adapters are mid-port. `docs/operating/tool-structure.md` and
+`harness/README.md` still describe a tool's adapter as `adapter/normalize.sh`,
+which is accurate today: `normalize.sh` is still what the receipts were verified
+with, and `normalize.py` is held to producing its bytes exactly. At cutover —
+when a tool's receipts are re-verified through `normalize.py` — those two
+documents, and the `ADAPTER_MODULES` interpreter probe in
+`tests/differential/oracle.py`, are what must change with it.
+
 ## Results
 
 Comparative results have not been published yet. When available, versioned

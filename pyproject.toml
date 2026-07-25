@@ -68,3 +68,8 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+# `oracle` marks a test that reads the reference data in $S3_STUDY_DATA. That
+# data is deliberately not in the repo, so CI deselects the marker rather than
+# letting the test self-skip: a gate that cannot run must say so where it is
+# configured, not quietly report a pass. Run them locally with `-m oracle`.
+markers = ["oracle: needs the reference data in $S3_STUDY_DATA"]
