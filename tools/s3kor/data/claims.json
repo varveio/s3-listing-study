@@ -341,7 +341,7 @@
       "legacy_origins": ["PROSE-2"],
       "evidence": [
         {"kind": "source", "subject": "tested-variant", "repository": "https://github.com/sethkor/s3kor", "commit": "844fe3d", "path": "list.go", "lines": "109-151"},
-        {"kind": "documentation", "path": "../adapter/normalize.sh"}
+        {"kind": "documentation", "path": "../adapter/normalize.py"}
       ]
     },
     {

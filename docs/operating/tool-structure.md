@@ -46,7 +46,7 @@ tools/<tool>/
     running.md               how this study built, ran, and checked it
   adapter/                   shared-harness integration
     run.sh                   prints tool argv; never launches the tool
-    normalize.sh             converts native output to the smoke contract
+    normalize.py             converts native output to the smoke contract
     fixtures/                synthetic adapter QA, only where applicable
   build/                     optional local image construction
     Dockerfile               study build recipe
@@ -280,7 +280,7 @@ always linking back to the source record.
 NUL-delimited argv and never runs Docker or the tool; the harness owns
 execution, credentials, timeouts, and measurement.
 
-`adapter/normalize.sh` converts the tool's native output into the frozen smoke
+`adapter/normalize.py` converts the tool's native output into the frozen smoke
 harness's normalized stream. That stream is an executable compatibility
 boundary, not a stored canonical result. The future benchmark design may use
 JSON Lines, but this structure migration does not rewrite the frozen smoke

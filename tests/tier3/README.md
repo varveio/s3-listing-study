@@ -3,7 +3,7 @@
 Tier 1 (`tests/differential/`) replays every committed verdict in the repo. All
 67 of them are PASS, so the branch that matters most has no coverage at all: on
 any discrepancy the verifier re-lists the reference bucket **before blaming the
-tool** (`harness/verify-listing.sh:864-891`, union equivalent at `:405-431`) and
+tool** (`s3_listing_study.verify.single`, union equivalent in `.union`) and
 splits the outcome three ways.
 
 | Re-list says | Verdict | Exit | Means |
@@ -26,10 +26,9 @@ the repo exercises these paths.
 
 `stage.py` makes them reachable without weakening a check:
 
-- the shipped `harness/verify-listing.sh` is copied **byte-identical** into a
-  staged tree, and `test_the_verifier_under_test_is_the_shipped_one` asserts the
-  sha256. `harness/` is never written to — it is the reference side of the port's
-  differential.
+- the verifier under test is this checkout's `s3_listing_study.verify`, and
+  `test_the_verifier_under_test_is_this_checkouts` asserts that — a stale install
+  on the path would otherwise be judged instead. `harness/` is never written to.
 - `runner-security-lib.stub.sh` replaces only the sourced security library. It
   keeps the production argv construction verbatim (the `timeout -k 2s 30s`
   wrapper, `--pull=never`, the network profile, the evidence log driver) and the

@@ -1,18 +1,15 @@
-"""Conformance and equivalence for the ported ``normalize.py`` adapters.
-
-Two questions, kept apart on purpose:
+"""Conformance and coverage for the ``normalize.py`` adapters.
 
 * **Conformance** — does the adapter's output satisfy contract v2 at all? Answered
   offline from synthetic rows, so it holds on a checkout with no data directory
   and states the bar a future port is held to.
-* **Equivalence** — does it produce the *same bytes* as the ``normalize.sh`` it
-  replaces, over every committed payload? Answered by
-  :mod:`tests.adapters.equivalence`. Payloads that resolve are always compared;
-  payloads that do not are ORACLE_UNAVAILABLE — reported as a failure, never a
-  skip, because a skip here is indistinguishable from a pass and that is exactly
-  how a checkout with no ``$S3_STUDY_DATA`` came back green. The one pair that
-  differs on purpose is named in ``SANCTIONED_DEVIATIONS`` and pinned below by
-  what the difference IS, not by permission to differ.
+* **Coverage** — which committed payloads exist per tool, and which declared modes
+  no payload reaches. Answered by :mod:`tests.adapters.equivalence`.
+
+The bytes these adapters produce over the committed payloads are judged by the
+differential replay, which re-issues all 67 committed verdicts through them and
+requires ``verify.md`` back unchanged. The shell adapters that used to provide a
+second opinion are gone; the committed artifacts are the oracle now.
 """
 
 from __future__ import annotations
@@ -28,11 +25,7 @@ import pytest
 from s3_listing_study.contract import FIELD_COUNT, MTIME_RE, ContractViolation, read_records
 from s3_listing_study.duckdb_adapter import emit_result
 from tests.adapters.equivalence import (
-    SANCTIONED_DEVIATIONS,
-    ToolReport,
-    compare_tool,
     corpus_shortfall,
-    discover_cases,
     load_adapter,
     repo_root,
     unexercised_modes,
@@ -74,8 +67,8 @@ BINARY_MODES = {("s3-fast-list", "list")}
 
 REPO = repo_root()
 
-# The committed payload behind the one sanctioned deviation: s3kor's `list`
-# capability probe, whose selected stream is the panic it exited with.
+# s3kor's `list` capability probe, whose selected stream is the panic it exited
+# with — the payload the emit boundary refuses.
 S3KOR_LIST_PROBE = "tools/s3kor/receipts/smoke/_capability/list/stderr.txt"
 
 # One synthetic input per ported mode, in the tool's own raw output shape, plus
@@ -437,12 +430,6 @@ FIXTURES[("s3-fast-list", "list")] = (
 )
 
 
-@functools.cache
-def report_for(tool: str) -> ToolReport:
-    """The equivalence run for one tool, computed once: it re-reads ~90 MB of payload."""
-    return compare_tool(REPO, tool)
-
-
 def adapter_path(tool: str) -> Path:
     return REPO / "tools" / tool / "adapter" / "normalize.py"
 
@@ -458,7 +445,7 @@ def run(tool: str, mode: str, prefix: str, payload: bytes) -> subprocess.Complet
 
 @pytest.mark.parametrize("tool", PORTED)
 def test_adapter_is_an_executable_the_verifier_can_invoke(tool: str) -> None:
-    """``verify-listing.sh:529`` refuses a ``--normalize`` that is not executable."""
+    """The verifier refuses a ``--normalize`` that is not executable (`verify/cli.py`)."""
     path = adapter_path(tool)
     assert path.is_file()
     assert path.stat().st_mode & 0o111
@@ -520,10 +507,10 @@ def test_an_empty_listing_normalises_to_nothing(tool: str, mode: str, payload: b
 
     A `--scope prefix` verify over a prefix holding no objects, and a fan-out
     whose shards cover every key (an empty remainder), both hand the adapter an
-    empty payload. Every `normalize.sh` answers with exit 0 and no output; the
-    ported adapter must too, or a clean 0-row PASS becomes an ERROR about the
-    tool. The four s3api text modes regressed here once, on DuckDB's CSV sniffer
-    reading zero columns where five were declared.
+    empty payload. The adapter must answer with exit 0 and no output, or a clean
+    0-row PASS becomes an ERROR about the tool. The four s3api text modes
+    regressed here once, on DuckDB's CSV sniffer reading zero columns where five
+    were declared.
     """
     prefix = FIXTURES[(tool, mode)][1]
     done = run(tool, mode, prefix, payload)
@@ -536,8 +523,8 @@ def test_a_newline_only_parquet_stream_is_refused() -> None:
 
     s3-fast-list emits parquet, so only a 0-BYTE stream is "this run listed
     nothing" — a run that listed zero objects still writes a valid 0-row parquet
-    file. A lone newline is a corrupt payload, and both adapters refuse it at exit
-    1 rather than reporting an empty listing that was never observed.
+    file. A lone newline is a corrupt payload, refused at exit 1 rather than
+    reported as an empty listing that was never observed.
     """
     done = run("s3-fast-list", "list", "", b"\n")
     assert done.returncode == 1
@@ -546,9 +533,9 @@ def test_a_newline_only_parquet_stream_is_refused() -> None:
 
 
 def test_a_short_text_row_is_refused_rather_than_padded() -> None:
-    """The deliberate deviation from ``normalize.sh`` — see the adapter's docstring.
+    """The deliberate deviation from the shell adapter — see the adapter's docstring.
 
-    A 4-field row only comes from a TRUNCATED payload. The shell adapter prints
+    A 4-field row only comes from a TRUNCATED payload. The shell adapter printed
     ``$5`` of it as the empty string, emitting a record whose storage_class is
     neither a value nor the ``-`` that means "unexposed"; this adapter refuses
     the payload, which the verifier reports as ERROR — "no verdict was formed",
@@ -616,7 +603,7 @@ def test_unknown_mode_is_refused(tool: str) -> None:
 
 
 def test_rclone_refuses_a_key_the_framing_cannot_carry() -> None:
-    """The fidelity bug ``normalize.sh:10-17`` documents, made structural.
+    """The fidelity bug the shell adapter documented, made structural.
 
     ``jq -r … @tsv`` C-escaped a TAB in a key and emitted a record whose key was
     not the key the bucket holds. Reading the JSON with DuckDB and handing the
@@ -639,58 +626,19 @@ def test_the_committed_payload_corpus_is_the_pinned_one(tool: str) -> None:
     assert corpus_shortfall(REPO, tool) == ""
 
 
-@pytest.mark.oracle
-@pytest.mark.parametrize("tool", PORTED)
-def test_shell_and_python_adapters_are_byte_identical(tool: str) -> None:
-    """The acceptance bar for the port: identical bytes on every payload that resolves.
-
-    Every payload, minus the pairs ``SANCTIONED_DEVIATIONS`` names — and a pair
-    that differs without an entry there fails here, which is what stops the
-    allow-list from being the place a regression goes to hide.
-    """
-    assert discover_cases(REPO, tool), f"no committed payload discovered for {tool}"
-    report = report_for(tool)
-    assert report.comparisons, f"no payload for {tool} could be read; nothing was compared"
-    assert not report.differing, "\n".join(
-        f"{comparison.case.name}: {comparison.detail()}" for comparison in report.differing
-    )
-
-
-def test_the_sanctioned_deviations_are_the_known_ones() -> None:
-    """One pair, and adding a second is a decision — see ``SANCTIONED_DEVIATIONS``.
-
-    The allow-list is the only thing standing between "the port deviates here, on
-    purpose, and here is why" and "the port deviates". Pinned as a set so a new
-    entry cannot arrive as a side effect of making something else pass.
-    """
-    assert set(SANCTIONED_DEVIATIONS) == {("s3kor", "list")}
-    for reason in SANCTIONED_DEVIATIONS.values():
-        assert reason.strip()
-
-
-def test_s3kor_list_refuses_the_tab_bearing_keys_normalize_sh_emits() -> None:
-    """WHAT the one sanctioned deviation is, over the committed payload that causes it.
+def test_s3kor_list_refuses_a_panic_whose_frames_are_tab_indented() -> None:
+    """The one payload where the port deliberately parts company with the shell.
 
     s3kor's only `list` receipt is a capability probe that panicked, so the stream
     the corpus selects is a Go stack trace whose frames are TAB-indented. `list`
-    reads a whole line as a key, so `normalize.sh` emits four records whose KEY
-    contains a TAB — 6 fields where the framing declares 5, which the verifier's
-    own field split reads as an extra column. The port refuses the payload at the
-    emit boundary instead. In-repo bytes, so this holds with no data directory.
+    reads a whole line as a key, so the shell adapter emitted four records whose
+    KEY contained a TAB — 6 fields where the framing declares 5, which the
+    verifier's own field split read as an extra column. The port refuses the
+    payload at the emit boundary instead, which the verifier reports as ERROR: no
+    verdict was formed, which is the truth about a stack trace. In-repo bytes, so
+    this holds with no data directory.
     """
     payload = (REPO / S3KOR_LIST_PROBE).read_bytes()
-
-    shell = subprocess.run(
-        [str(REPO / "tools/s3kor/adapter/normalize.sh"), "list", ""],
-        input=payload,
-        capture_output=True,
-        check=False,
-    )
-    assert shell.returncode == 0
-    malformed = [row for row in shell.stdout.splitlines() if len(row.split(b"\t")) != FIELD_COUNT]
-    assert [len(row.split(b"\t")) for row in malformed] == [6, 6, 6, 6]
-    assert all(row.startswith(b"\t/go/pkg/mod/") for row in malformed)
-
     done = run("s3kor", "list", "", payload)
     assert done.returncode == 1
     assert done.stdout == b""
@@ -698,43 +646,13 @@ def test_s3kor_list_refuses_the_tab_bearing_keys_normalize_sh_emits() -> None:
     assert rb"key contains b'\t'" in done.stderr
 
 
-@pytest.mark.oracle
-@pytest.mark.parametrize(("tool", "mode"), sorted(SANCTIONED_DEVIATIONS))
-def test_every_sanctioned_deviation_is_still_a_deviation(tool: str, mode: str) -> None:
-    """An entry that no longer describes a difference is a stale exemption.
-
-    If the two sides agree here again, the allow-list is granting permission
-    nothing needs — and the next real difference on that pair would inherit it
-    silently. Removing the entry is then the fix.
-    """
-    deviating = {comparison.case.mode for comparison in report_for(tool).deviations}
-    assert mode in deviating, (
-        f"{tool}:{mode} no longer differs — drop it from SANCTIONED_DEVIATIONS"
-    )
-
-
-@pytest.mark.oracle
-@pytest.mark.parametrize("tool", PORTED)
-def test_every_committed_payload_was_actually_judged(tool: str) -> None:
-    """A payload that cannot be read is ORACLE_UNAVAILABLE, and that is not a pass.
-
-    Skipping here made a missing data directory look like success while the
-    comparison above judged nothing at all — the false green this pair exists to
-    prevent. Failing is the honest report: the bar was not met because it was not
-    measured. ``python3 -m tests.adapters`` says the same thing as exit 42.
-    """
-    report = report_for(tool)
-    reasons = "\n".join(reason for _, reason in report.unavailable)
-    assert not report.unavailable, f"ORACLE_UNAVAILABLE: {reasons}"
-
-
 @pytest.mark.parametrize("tool", PORTED)
 def test_the_modes_no_committed_payload_reaches_are_the_known_ones(tool: str) -> None:
     """Pins today's coverage, per tool — see ``UNEXERCISED``.
 
     Seven adapters have a payload for every mode they declare. Four modes across
-    three tools have none, and for those the equivalence run says nothing however
-    green it is: their port rests on the fixture alone. If this fails, either
-    coverage arrived or the equivalence run stopped judging a mode it used to.
+    three tools have none, and for those the differential replay says nothing
+    however green it is: their port rests on the fixture alone. If this fails,
+    either coverage arrived or the corpus stopped reaching a mode it used to.
     """
     assert unexercised_modes(REPO, tool) == UNEXERCISED.get(tool, set())

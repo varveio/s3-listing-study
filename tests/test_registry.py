@@ -1,21 +1,20 @@
-"""Tests for the registry: drift against the prose, and equivalence with the shell.
+"""Tests for the registry: drift against the prose, and the TOML contract itself.
 
-Two sources of bucket facts exist during the port — ``data/registry.toml``, which
-code reads, and ``docs/smoke-bucket.md``, which people read. Two sources that must
-agree, can disagree, so the drift guard here parses both independently and fails
-on the first field where they differ. It uses its own markdown reader rather than
-``harness/registry-lookup.sh`` on purpose: the guard has to outlive that script.
+Two sources of bucket facts exist — ``data/registry.toml``, which code reads, and
+``docs/smoke-bucket.md``, which people read. Two sources that must agree, can
+disagree, so the drift guard here parses both independently and fails on the
+first field where they differ. It uses its own markdown reader on purpose: it was
+written to outlive ``harness/registry-lookup.sh``, and now has.
 
-The equivalence half does call the script, and dies with it when U3 removes it.
-Until then it is the proof that the TOML resolver returns the same bytes the
-committed receipts were produced with.
+The equivalence half — the shell resolver answering the same bytes — went with
+that script. What it proved is now carried by the differential replay, which
+re-issues all 67 committed verdicts against registry bytes the receipts name.
 """
 
 from __future__ import annotations
 
 import hashlib
 import re
-import subprocess
 import tomllib
 from collections.abc import Callable
 from pathlib import Path
@@ -26,7 +25,6 @@ from s3_listing_study.registry import FIELDS, Registry, RegistryError, default_p
 
 REPO = Path(__file__).resolve().parents[1]
 MARKDOWN = REPO / "docs/smoke-bucket.md"
-LOOKUP = REPO / "harness/registry-lookup.sh"
 FIXTURE = REPO / "tests/fixtures/registry-254c8cfe.md"
 
 REGISTRY = Registry.load()
@@ -119,52 +117,11 @@ def test_toml_and_markdown_agree_on_the_harness_image() -> None:
     assert REGISTRY.harness_image == _markdown_harness_image()
 
 
-# --- equivalence with the shell resolver (transitional; removed with it) ---
-
-
-def _lookup(*args: str, registry: Path | None = None) -> subprocess.CompletedProcess[str]:
-    env = {"PATH": "/usr/bin:/bin", "HOME": str(Path.home())}
-    if registry is not None:
-        env["SMOKE_REGISTRY"] = str(registry)
-    return subprocess.run(
-        [str(LOOKUP), *args], cwd=REPO, env=env, capture_output=True, text=True, check=False
-    )
-
-
-@pytest.mark.parametrize("bucket", BUCKETS)
-@pytest.mark.parametrize("field", FIELDS)
-def test_python_resolves_what_the_shell_resolved(bucket: str, field: str) -> None:
-    got = _lookup(bucket, field)
-    assert got.returncode == 0, got.stderr
-    assert got.stdout == REGISTRY.field(bucket, field) + "\n"
-
-
-def test_python_lists_the_buckets_the_shell_listed() -> None:
-    got = _lookup("--list-buckets")
-    assert got.returncode == 0, got.stderr
-    assert got.stdout == "".join(f"{name}\n" for name in BUCKETS)
-
-
-@pytest.mark.parametrize("registry", [None, FIXTURE], ids=["live", "fixture"])
-def test_python_resolves_the_harness_image_the_shell_resolved(registry: Path | None) -> None:
-    # The live markdown must answer this, not only the pinned fixture: the
-    # verifier resolves --harness-image on the discrepancy re-list path, so a
-    # markdown that cannot state its own image kills the verifier there.
-    got = _lookup("--harness-image", registry=registry)
-    assert got.returncode == 0, got.stderr
-    assert got.stdout == REGISTRY.harness_image + "\n"
-
-
 def test_path_and_digest_bind_a_receipt_to_exact_bytes() -> None:
-    # Not byte-equal to the shell's --path/--digest by design: each binds to its
-    # own file. What must hold is that the pair names bytes a reader can check.
+    # What must hold is that the pair names bytes a reader can check: the path
+    # resolves and the digest is of exactly those bytes.
     assert REGISTRY.path == default_path()
     assert REGISTRY.digest == hashlib.sha256(REGISTRY.path.read_bytes()).hexdigest()
-
-    shell = _lookup("--digest")
-    assert shell.returncode == 0, shell.stderr
-    assert shell.stdout == hashlib.sha256(MARKDOWN.read_bytes()).hexdigest() + "\n"
-    assert _lookup("--path").stdout == f"{MARKDOWN}\n"
 
 
 # --- strictness: every ambiguity is fatal ---------------------------------

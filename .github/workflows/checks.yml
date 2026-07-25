@@ -68,17 +68,27 @@ jobs:
           chmod +x /tmp/no-docker/docker
           echo "/tmp/no-docker" >> "$GITHUB_PATH"
 
+      - name: Full-tree secret scan
+        # Before `uv sync`: the scan reads every file under the tree, and a
+        # populated `.venv/` puts third-party binaries in front of it.
+        run: PYTHONPATH=src python3 -P -m s3_listing_study.receipt scan-tree .
+
+      - name: Install uv
+        # The harness suite drives the packaged verifier, whose field comparison
+        # runs on DuckDB. It gets the locked project environment rather than
+        # whatever the runner's python3 happens to import.
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+
+      - name: Sync (locked)
+        run: uv sync --locked
+
       - name: Harness regression suite (includes the harness shellcheck gate)
         run: harness/tests/run-regressions.sh
 
-      - name: Secret-scanner fixtures
-        run: harness/tests/scan-fixtures-run.sh
-
-      - name: Full-tree secret scan
-        run: harness/scan-tree.sh .
-
       - name: Tool adapter shellcheck
-        run: shellcheck -S warning tools/*/adapter/*.sh tools/*/adapter/fixtures/*.sh
+        run: shellcheck -S warning tools/*/adapter/run.sh tools/*/adapter/fixtures/*.sh
 
       - name: s3p adapter fixture QA
         run: tools/s3p/adapter/fixtures/check.sh

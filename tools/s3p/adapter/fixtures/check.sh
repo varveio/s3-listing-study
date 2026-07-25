@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Reproducible validation of ../normalize.sh against staged fixtures.
+# Reproducible validation of ../normalize.py against staged fixtures.
 # Runs AFTER any measurement clock (adapters are never on the clock). No S3 /
 # credentials needed — these are synthetic inputs shaped like s3p's real output,
 # used because the live listing modes are auth-blocked (see report §8).
 #   usage: ./check.sh   (exit 0 = all modes match their .expected.tsv)
 set -euo pipefail
 cd "$(dirname "$0")"
-N=../normalize.sh
+N=../normalize.py
 fail=0
 run() { # <mode> <fixture> <expected>
   local got; got="$("$N" "$1" < "$2")"

@@ -22,7 +22,7 @@ ALLOWED_ROOT = REQUIRED_DIRS | {"README.md", "build"}
 REQUIRED_FILES = {
     "data/tool.json", "data/claims.json", "docs/mechanism.md",
     "docs/running.md", "research/claims-migration.md", "adapter/run.sh",
-    "adapter/normalize.sh", "research/tool-page.md",
+    "adapter/normalize.py", "research/tool-page.md",
 }
 REQUIRED_H2 = {
     "At a glance", "How it works", "Modes and study coverage", "What we learned",
@@ -307,7 +307,7 @@ def main() -> int:
     for relative in sorted(REQUIRED_FILES):
         if not (capsule / relative).is_file():
             errors.append(f"missing required file: {relative}")
-    for name in sorted({"mechanism.md", "running.md", "run.sh", "normalize.sh", "Dockerfile"} & actual_root):
+    for name in sorted({"mechanism.md", "running.md", "run.sh", "normalize.sh", "normalize.py", "Dockerfile"} & actual_root):
         errors.append(f"legacy mixed-responsibility root file remains: {name}")
     if (capsule / "docs" / "claims-migration.md").is_file():
         errors.append("legacy docs/claims-migration.md remains; the conservation audit lives in research/")

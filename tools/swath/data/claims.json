@@ -410,7 +410,7 @@
       "qualification": "On the whitespace-free NOAA corpus this is the identity, but byte-exactness is not proven for keys containing control characters (EDGE_BUCKET=none).",
       "legacy_origins": ["PROSE-5"],
       "evidence": [
-        {"kind": "documentation", "path": "../adapter/normalize.sh"},
+        {"kind": "documentation", "path": "../adapter/normalize.py"},
         {"kind": "source", "subject": "tested-variant", "repository": "https://github.com/varveio/swath", "commit": "f1009db", "path": "TsvFormatter.java", "lines": "53-55"},
         {"kind": "source", "subject": "tested-variant", "repository": "https://github.com/varveio/swath", "commit": "f1009db", "path": "JsonlFormatter.java", "lines": "13-17"}
       ]
@@ -425,7 +425,7 @@
       "legacy_origins": ["PROSE-5"],
       "evidence": [
         {"kind": "source", "subject": "tested-variant", "repository": "https://github.com/varveio/swath", "commit": "f1009db", "path": "Fields.java", "lines": "13-21"},
-        {"kind": "documentation", "path": "../adapter/normalize.sh"}
+        {"kind": "documentation", "path": "../adapter/normalize.py"}
       ]
     },
     {

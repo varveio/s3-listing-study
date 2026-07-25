@@ -11,27 +11,20 @@ three verdicts are untested.
 
 Tier 3 makes them reachable without weakening a single check:
 
-* the verifier is **copied byte-identical** into a staged harness tree
-  (`staged_sha256` proves it), so what runs is the shipped implementation;
-* only `runner-security-lib.sh` is replaced, by a stub that keeps the production
-  argv construction and neuters just the runner preflight;
+* the verifier under test is the shipped one — this checkout's
+  `s3_listing_study.verify`, asserted by `test_the_verifier_under_test_is_this_checkouts`;
+* only `runner-security-lib.sh` is replaced in the staged tree, by a stub that
+  keeps the production argv construction and neuters just the runner preflight;
 * `docker` is a fixture replayer on PATH (`fake-docker.sh`), driven by
   environment variables and argv alone.
 
-Nothing here knows the verifier is written in bash except `_stage_harness`,
-which is where a ported verifier is pointed instead. The reference listing, the
-receipts, the manifest, and the fake docker are the oracle, and they are
-implementation-agnostic by construction.
+The reference listing, the receipts, the manifest, and the fake docker are the
+oracle, and they are implementation-agnostic by construction.
 
-`S3STUDY_VERIFIER` selects which implementation the tier judges — `shell` (the
-reference) or `python`. It is a parameter, not a one-way switch, so both can be
-run against the identical cases and compared. The shipped shell verifier is
-staged byte-identical either way, which is what `staged_sha256` proves: `harness/`
-is never written to, because it is the reference side of the port's differential.
-The one shell-specific piece of the rig is `runner-security-lib.stub.sh`. The
-ported verifier's equivalent seam is `tests/tier3/verifier_entry.py`, which is
-not installed and passes `PreflightSkipped()` in process — the port has no
-argv that disables the preflight, exactly as the shell has none.
+The preflight seam is `tests/tier3/verifier_entry.py`, which is not installed and
+passes `PreflightSkipped()` in process — the shipped entry point has no argv that
+disables the preflight, and `test_no_argv_can_disable_the_preflight` holds it to
+that. `harness/` is never written to.
 """
 
 from __future__ import annotations
@@ -50,10 +43,8 @@ REPO = Path(__file__).resolve().parents[2]
 TIER3 = Path(__file__).resolve().parent
 FIXTURES = REPO / "tests" / "fixtures" / "tier3"
 
-VERIFIER = REPO / "harness" / "verify-listing.sh"
-REGISTRY_LOOKUP = REPO / "harness" / "registry-lookup.sh"
 REGISTRY_FIXTURE = REPO / "tests" / "fixtures" / "registry-254c8cfe.md"
-NORMALIZE = REPO / "tools" / "aws-cli" / "adapter" / "normalize.sh"
+NORMALIZE = REPO / "tools" / "aws-cli" / "adapter" / "normalize.py"
 
 PLACEHOLDER = "_(filled in by `harness/verify-listing.sh`)_"
 RECEIPT_MD = f"# Receipt (tier-3 fixture)\n\n- Verdict: {PLACEHOLDER}\n"
@@ -71,7 +62,6 @@ ALPHA_META = REPO / "tools/aws-cli/receipts/smoke/s3api-v2-text-hourly/run.meta"
 BETA_META = REPO / "tools/aws-cli/receipts/smoke/fanout/shard-monthly/run.meta"
 REMAINDER_META = REPO / "tools/aws-cli/receipts/smoke/fanout/remainder/run.meta"
 
-IMPLEMENTATION = os.environ.get("S3STUDY_VERIFIER", "shell")
 
 ALPHA_PREFIX = "alpha/"
 BETA_PREFIX = "beta/"
@@ -118,7 +108,7 @@ def bump_mtime(row: str, mtime: str = "2026-07-24T09:15:00+00:00") -> str:
     Same size, same ETag, same key: a drift check over key sets (or even over
     key/size/etag) sees no drift at all, the reference is read as agreeing with
     the manifest, and the tool eats a FAIL for correctly reporting the new
-    mtime. `harness/verify-listing.sh:878-885` exists to stop exactly that.
+    mtime. The verifier's mtime comparison exists to stop exactly that.
     """
     key, size, etag, _, storage_class = row.split("\t")
     return "\t".join((key, size, etag, mtime, storage_class))
@@ -187,8 +177,6 @@ class Stage:
     # ---------------------------------------------------------------- staging
     def _stage_harness(self) -> None:
         self.harness.mkdir(parents=True)
-        for src in (VERIFIER, REGISTRY_LOOKUP):
-            shutil.copy2(src, self.harness / src.name)
         # The one substitution. harness/ itself is never written to: the shipped
         # tree is the reference side of the port's differential.
         shutil.copy2(TIER3 / "runner-security-lib.stub.sh", self.harness / "runner-security-lib.sh")
@@ -199,16 +187,13 @@ class Stage:
 
     @staticmethod
     def _verifier_argv() -> list[str]:
-        """The command the cases drive. The rig is otherwise identical either way."""
-        if IMPLEMENTATION == "shell":
-            return []
-        if IMPLEMENTATION != "python":
-            raise ValueError(
-                f"S3STUDY_VERIFIER must be 'shell' or 'python', not {IMPLEMENTATION!r}"
-            )
-        # --registry is the explicit redirection the port takes in place of the
-        # SMOKE_REGISTRY environment hook. The preflight seam is the entry point
-        # itself, not an argument: see tests/tier3/verifier_entry.py.
+        """The command the cases drive.
+
+        `--registry` is the explicit redirection the port takes in place of the
+        `SMOKE_REGISTRY` environment hook the shell verifier offered. The
+        preflight seam is the entry point itself, not an argument: see
+        `tests/tier3/verifier_entry.py`.
+        """
         return [
             sys.executable,
             "-m",
@@ -223,11 +208,6 @@ class Stage:
         with gzip.open(path, "wt") as fh:
             fh.write("".join(f"{row}\n" for row in rows))
         return path
-
-    @property
-    def staged_sha256(self) -> str:
-        """Digest of the verifier that actually runs — asserted against the shipped one."""
-        return sha256_file(self.harness / "verify-listing.sh")
 
     def receipt(
         self,
@@ -275,7 +255,7 @@ class Stage:
         if reference is not None:
             env[ENV_REFERENCE] = str(reference)
         proc = subprocess.run(
-            [*(self.verifier or [str(self.harness / "verify-listing.sh")]), *args],
+            [*self.verifier, *args],
             cwd=self.root,
             env=env,
             stdout=subprocess.PIPE,

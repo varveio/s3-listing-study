@@ -1,22 +1,12 @@
 """The ported verifier's own tests, plus tier 2 driven against it.
 
 Tier 2 is `harness/tests/run-regressions.sh`, which is offline by design and
-drives `$HARNESS/verify-listing.sh` over synthetic fixtures it builds at
-runtime. Its single `$VERIFY` call site (`run-regressions.sh:90`) passes
-`--scope union`, so tier 2 exercises the union path only and never the
-single-receipt path — whose FAIL/DRIFT/ERROR branches are tier 3's job and
-whose refusals are covered here. `harness/` is never written to — it is the reference side of the
-port's differential — so the suite is repointed the same way tiers 1 and 3 are:
-a staged copy of the tree, with the suite's own `VERIFY=` line pointed at a shim
-onto the package. Every case, message and exit code the suite asserts is the
-shipped one.
-
-The shipped `verify-listing.sh` stays in the staged tree byte-identical rather
-than being overwritten, because one of the suites it chains to
-(`runner-security-regressions.sh`) reads that file's *text* to prove both
-reference re-list constructors carry the evidence-log and no-pull arguments.
-Overwriting it would fail a check about the shell implementation while proving
-nothing about the port.
+drives this package's `--scope union` path over synthetic fixtures it builds at
+runtime, so tier 2 exercises the union path only and never the single-receipt
+path — whose FAIL/DRIFT/ERROR branches are tier 3's job and whose refusals are
+covered here. The suite is run from a staged copy of the tree so nothing it does
+touches `harness/`, and it is pointed at THIS checkout's interpreter and sources
+rather than whatever `s3_listing_study` the box has installed.
 """
 
 from __future__ import annotations
@@ -24,6 +14,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -35,15 +26,6 @@ from s3_listing_study.verify.registry_source import RegistrySource
 REPO = Path(__file__).resolve().parents[1]
 REGRESSIONS = REPO / "harness" / "tests" / "run-regressions.sh"
 REGISTRY_FIXTURE = REPO / "tests" / "fixtures" / "registry-254c8cfe.md"
-
-SHIM = """#!/usr/bin/env bash
-# Tier-2 shim: the ported verifier behind the shell verifier's argv. --registry
-# is the explicit redirection the port takes in place of the SMOKE_REGISTRY
-# environment hook the suite exports.
-exec {python} -m s3_listing_study.verify --registry "$SMOKE_REGISTRY" "$@"
-"""
-
-SHIM_NAME = "verify-listing-port.sh"
 
 
 def test_the_registry_fixture_digests_to_the_sha_every_receipt_cites() -> None:
@@ -135,7 +117,7 @@ def test_the_verdict_stamp_is_a_literal_splice() -> None:
 
 # ------------------------------------------------------- the security boundary
 
-# What tier 2 proved by grepping `harness/verify-listing.sh`'s text
+# What tier 2 used to prove by grepping the shell verifier's text, asserted here
 # (`runner-security-regressions.sh:818-821`) — that both re-list constructors
 # carry the explicit evidence-log and no-pull arguments. That guard reads a file
 # the port does not execute, so it evaporates at cutover unless it is restated
@@ -259,25 +241,16 @@ def test_a_duplicated_registry_row_is_refused_rather_than_guessed(tmp_path: Path
 # ------------------------------------------------------------------------ tier 2
 
 
-def _stage_regressions(root: Path, python: str) -> Path:
-    """A copy of the shipped harness tree, with the suite's VERIFY= repointed."""
+def _stage_regressions(root: Path) -> Path:
+    """A copy of the shipped harness tree, run against this checkout's sources."""
     harness = root / "harness"
     shutil.copytree(REPO / "harness", harness)
-    # The suite stages a hermetic fake-Docker copy of smoke-run.sh, which imports
-    # the wrapper's offline half from its own ../src. Copied here too, so this
-    # staged tree resolves it exactly as the repo does and never through whatever
+    # The suite stages a hermetic fake-Docker copy of smoke-run.sh, and resolves
+    # the verifier itself, from its own ../src. Copied here too, so this staged
+    # tree resolves both exactly as the repo does and never through whatever
     # `s3_listing_study` the ambient interpreter happens to have.
     shutil.copytree(REPO / "src", root / "src")
-    shim = harness / SHIM_NAME
-    shim.write_text(SHIM.format(python=python))
-    shim.chmod(0o755)
-
-    script = harness / "tests" / "run-regressions.sh"
-    text = script.read_text()
-    old = 'VERIFY="$HARNESS/verify-listing.sh"'
-    assert text.count(old) == 1, "run-regressions.sh no longer names the verifier once"
-    script.write_text(text.replace(old, f'VERIFY="$HARNESS/{SHIM_NAME}"'))
-    return script
+    return harness / "tests" / "run-regressions.sh"
 
 
 @pytest.mark.skipif(shutil.which("gzip") is None, reason="the suite builds gzip fixtures")
@@ -288,11 +261,11 @@ def test_tier2_regressions_pass_against_the_ported_verifier(tmp_path: Path) -> N
     the stream selection heuristic and `--stream` override, the mtime cases, and
     the redaction/truncation refusals — the paths no committed receipt reaches.
     """
-    script = _stage_regressions(tmp_path, "python3")
+    script = _stage_regressions(tmp_path)
     env = dict(os.environ)
-    env["PYTHONPATH"] = os.pathsep.join([str(REPO / "src"), env.get("PYTHONPATH", "")]).rstrip(
-        os.pathsep
-    )
+    # The suite would otherwise pick an interpreter off the box; this pins it to
+    # the one running the tests, which is the one whose dependencies are locked.
+    env["S3STUDY_PYTHON"] = sys.executable
     proc = subprocess.run(
         ["bash", str(script)],
         env=env,

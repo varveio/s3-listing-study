@@ -1,6 +1,6 @@
-"""Contract v2: the emit/parse boundary, and equivalence with the shell verifier.
+"""Contract v2: the emit/parse boundary, and the awk semantics it inherited.
 
-The mtime tests are differential against ``harness/verify-listing.sh`` itself —
+The mtime tests are differential against the awk the shell verifier ran —
 they lift the live ``canon_mt`` function and ``MTIME_RE_AWK`` out of that script
 and run them under ``awk``. The verifier's 67 committed verdicts were issued
 under those exact semantics, so "agrees with what I think awk does" is not
@@ -10,7 +10,6 @@ enough: this asserts against the awk that is actually shipped.
 from __future__ import annotations
 
 import io
-import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -28,18 +27,25 @@ from s3_listing_study.contract import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-VERIFIER = REPO_ROOT / "harness" / "verify-listing.sh"
 
 CANON_MT_AWK = (
     r'function canon_mt(s){ sub(/(Z|\+00:00|\+0000)$/,"",s); '
     r'gsub(/[^0-9]/,"",s); return s }'
 )
-"""The verifier's live ``canon_mt``, pinned character for character.
+"""The shell verifier's ``canon_mt``, character for character.
 
-Pinned rather than probed: a test that only looks for ``function canon_mt(``
-passes against any body at all, so it cannot notice the one thing it is named
-for — a change to the semantics the 67 committed verdicts were issued under.
+The file it was lifted from is gone, so this constant is now the only copy: it
+records the semantics **the 67 committed verdicts were issued under**, and the
+tests below run it through the real awk. It is a frozen historical fact, not a
+mirror of live code — changing it asserts that those verdicts were formed some
+other way, which they were not.
 """
+
+MTIME_RE_AWK = (
+    r"^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]"
+    r"T[0-9][0-9]:[0-9][0-9]:[0-9][0-9](Z|[+]00:00|[+]0000)$"
+)
+"""The shell verifier's shape gate, frozen on the same terms as ``CANON_MT_AWK``."""
 
 MTIMES = [
     "2026-07-17T12:34:56Z",
@@ -70,10 +76,6 @@ MTIMES = [
     "2026-07-17T12:34:56Z\r",
     "\n",
 ]
-
-
-def _verifier_source() -> str:
-    return VERIFIER.read_text(encoding="utf-8")
 
 
 def _awk(program: str, value: str, *, args: list[str] | None = None) -> str:
@@ -110,11 +112,6 @@ def test_the_awk_harness_can_express_a_value_containing_a_newline() -> None:
     assert _awk("function main(s){ return length(s) }", "\r") == "1"
 
 
-def test_canon_mt_is_lifted_from_the_verifier_unchanged() -> None:
-    """The awk source this suite compares against is the verifier's live line."""
-    assert CANON_MT_AWK in [line.strip() for line in _verifier_source().splitlines()]
-
-
 def test_canon_mtime_matches_the_verifiers_awk() -> None:
     program = CANON_MT_AWK + "\nfunction main(s){ return canon_mt(s) }"
     expected = [_awk(program, value) for value in MTIMES]
@@ -129,17 +126,13 @@ def test_canon_mtime_equates_the_three_utc_spellings() -> None:
 
 
 def test_canon_mtime_also_equates_garbage_sharing_those_digits() -> None:
-    """Why the shape is gated first (``harness/verify-listing.sh:46-51``)."""
+    """Why the shape is gated first, before ``canon_mt`` ever runs."""
     assert canon_mtime("2026/07/17 12.34.56") == canon_mtime("2026-07-17T12:34:56Z")
     assert canon_mtime("not a timestamp") == canon_mtime("-") == ""
 
 
 def test_mtime_re_matches_the_verifiers_shape_gate() -> None:
-    awk_re = next(
-        re.fullmatch(r"MTIME_RE_AWK='(.*)'", line.strip()).group(1)  # type: ignore[union-attr]
-        for line in _verifier_source().splitlines()
-        if line.strip().startswith("MTIME_RE_AWK=")
-    )
+    awk_re = MTIME_RE_AWK
     program = 'function main(s){ return (s ~ re) ? "1" : "0" }'
     expected = [_awk(program, value, args=["-v", f"re={awk_re}"]) for value in MTIMES]
     # ``match``, not ``fullmatch``: this asserts the *pattern* is anchored the way

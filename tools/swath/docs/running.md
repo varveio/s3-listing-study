@@ -162,7 +162,7 @@ harness/smoke-run.sh \
 
 Swap `--mode` for any row in `../adapter/run.sh`'s case statement and add `--prefix <p>`
 for a scoped listing. Rebuilding the image first requires the pinned checkout at
-`f1009db` and the `docker build` above. `../adapter/run.sh`/`../adapter/normalize.sh` and
+`f1009db` and the `docker build` above. `../adapter/run.sh`/`../adapter/normalize.py` and
 everything under `../research/` and `../receipts/` are **immutable** inputs — they
 were not modified for this consolidation; a rerun adds a new receipt rather than
 editing one.

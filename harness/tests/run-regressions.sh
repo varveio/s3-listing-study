@@ -2,8 +2,8 @@
 # harness/tests/run-regressions.sh — durable regression suite for the harness.
 #
 # Covers everything runnable WITHOUT the real bucket or docker, by driving the
-# actual scripts (verify-listing.sh --scope union, smoke-run.sh --env guard) over
-# synthetic registry/manifest/receipt fixtures built here at runtime:
+# actual verifier (`s3_listing_study.verify --scope union`) and smoke-run.sh's
+# --env guard over synthetic registry/manifest/receipt fixtures built at runtime:
 #
 #   * union scenarios (PASS, structural-ERROR, dup-FAIL, overlap-ERROR,
 #     undesignated-empty-prefix-ERROR, mixed-mode-ERROR, redaction-refusal,
@@ -14,7 +14,6 @@
 #     through the union verifier;
 #   * per-tool env allowlist accept/reject matrix — smoke-run.sh dies at the
 #     guard before any Docker call; asserts exit code and message;
-#   * the scan fixtures (delegates to scan-fixtures-run.sh).
 #
 # Every case prints PASS/FAIL; the script exits nonzero if any case fails. Cases
 # that genuinely need the bucket or docker are listed at the end as not-covered.
@@ -23,9 +22,30 @@ export LC_ALL=C
 
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 HARNESS="$(cd -- "$HERE/.." && pwd)"
-VERIFY="$HARNESS/verify-listing.sh"
+REPO_ROOT="$(cd -- "$HARNESS/.." && pwd)"
 SMOKE="$HARNESS/smoke-run.sh"
 NORMALIZE="$HERE/adapters/normalize.sh"
+
+# The verifier is the Python package: there is no shell verifier left to drive.
+# Its field comparison runs on DuckDB, a declared project dependency, so the
+# suite runs against the PROJECT environment rather than whatever `python3` the
+# box happens to carry — `$S3STUDY_PYTHON` if set, else `.venv/` if `uv sync`
+# made one, else `python3`. A missing dependency stops the suite here, loudly:
+# unresolvable is not the same as failing, and a wall of red union cases would
+# read as the verifier being wrong.
+PYTHON="${S3STUDY_PYTHON:-}"
+if [ -z "$PYTHON" ]; then
+  if [ -x "$REPO_ROOT/.venv/bin/python3" ]; then
+    PYTHON="$REPO_ROOT/.venv/bin/python3"
+  else
+    PYTHON="python3"
+  fi
+fi
+if ! PYTHONPATH="$REPO_ROOT/src" "$PYTHON" -P -c 'import s3_listing_study.verify, duckdb' 2>/dev/null; then
+  printf 'REGRESSION SUITE CANNOT RUN: %s cannot import the verifier and duckdb.\n' "$PYTHON" >&2
+  printf '  Run `uv sync` in the repo root, or point S3STUDY_PYTHON at an interpreter that has them.\n' >&2
+  exit 2
+fi
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
@@ -50,7 +70,6 @@ REG="$WORK/registry.md"
   printf '| Image | `busybox@sha256:%064d` |\n' 0
 } >"$REG"
 REG_SHA="$(sha256sum "$REG" | cut -d' ' -f1)"
-export SMOKE_REGISTRY="$REG"
 
 # Primary manifest: two prefixes (a/, b/) plus a root-level key (index.html) that
 # only an explicit remainder shard can cover.
@@ -87,7 +106,11 @@ run_union() {  # <out> <args...> -> sets RC
   local out="$1"; shift
   mkdir -p "$out"   # ensure the parent exists before the stderr redirect below
   RC=0
-  "$VERIFY" --scope union --normalize "$NORMALIZE" --out "$out" "$@" >/dev/null 2>"$out.err" || RC=$?
+  # --registry is the explicit redirection the port takes in place of the
+  # SMOKE_REGISTRY environment hook the shell verifier offered.
+  PYTHONPATH="$REPO_ROOT/src" "$PYTHON" -P -m s3_listing_study.verify \
+    --scope union --registry "$REG" --normalize "$NORMALIZE" --out "$out" "$@" \
+    >/dev/null 2>"$out.err" || RC=$?
 }
 
 # --- union: PASS -------------------------------------------------------------
@@ -280,7 +303,7 @@ env_accept() {  # <label> <tool> <ENV=VALUE>
     --bucket bogusbucket --auth anonymous --out "$WORK/envout.$RANDOM" \
     --env "$3" >/dev/null 2>"$out" || rc=$?
   if [ "$rc" -ne 0 ] && ! grep -qiE 'refused|credential class|denylist|control character' "$out"; then
-    ok "env-guard accepts $1 (passed guard, failed later at $(grep -oiE 'not registered|registry-lookup' "$out" | head -1))"
+    ok "env-guard accepts $1 (passed guard, failed later at $(grep -oiE 'not registered|registry resolution failed' "$out" | head -1))"
   else
     bad "env-guard should accept $1 — exit $rc; $(head -1 "$out")"
   fi
@@ -317,13 +340,6 @@ env_reject "PATH redirection" s3-fast-list "PATH=/tmp/bin"
 env_reject "LD_PRELOAD loader injection" s3-fast-list "LD_PRELOAD=/tmp/x.so"
 env_reject "control-char newline in value" s3-fast-list "$(printf 'RUST_LOG=a\nb')"
 
-# --- scan fixtures -----------------------------------------------------------
-if "$HERE/scan-fixtures-run.sh" >/dev/null 2>&1; then
-  ok "scan fixtures (scan-fixtures-run.sh)"
-else
-  bad "scan fixtures (scan-fixtures-run.sh) — see: $HERE/scan-fixtures-run.sh"
-fi
-
 # --- runner security (faked; never changes Docker/firewall) ------------------
 if "$HERE/runner-security-regressions.sh" >/dev/null 2>&1; then
   ok "runner security faked regressions"
@@ -349,7 +365,7 @@ fi
 printf '\n--- not covered here (needs the real bucket or docker) ---\n'
 printf '  * union missing/extra/field-mismatch FAIL vs DRIFT — the reference re-list runs a real\n'
 printf '    docker s3api list against the bucket; run one scoped real union to exercise it.\n'
-printf '  * single-receipt smoke-run.sh -> verify-listing.sh end-to-end PASS (needs docker + bucket).\n'
+printf '  * single-receipt smoke-run.sh -> verify end-to-end PASS (needs docker + bucket).\n'
 printf '  * payload 64 MiB truncation + full-raw secret scan on live output (needs a real run).\n'
 printf '  * live runner boundary controls (opt-in: harness/runner-security-live-test.sh).\n'
 

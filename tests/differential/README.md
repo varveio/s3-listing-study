@@ -1,10 +1,21 @@
 # The differential replay oracle
 
 This harness re-issues **every committed verdict in the repo** through the
-verifier and requires the bytes back unchanged. It is the safety mechanism for
-the bash → Python port: an implementation that produces a different `verify.md`,
-a different receipt stamp, or a different union report for any committed run is
-wrong, and this gate says so mechanically.
+verifier and requires the bytes back unchanged. An implementation that produces a
+different `verify.md`, a different receipt stamp, or a different union report for
+any committed run is wrong, and this gate says so mechanically.
+
+**What it proves changed at cutover.** While `harness/verify-listing.sh` and the
+`normalize.sh` adapters were still in the tree, this gate could run either
+implementation over the same corpus, and green meant *the port is equivalent to
+the original*. Those files are gone. There is one implementation left, so green
+now means **the current implementation still reproduces the committed artifacts
+byte for byte** — a regression test against the receipts this repo published, not
+an equivalence proof against the code that produced them. That is a weaker
+statement about the port and a stronger one about the repo: it is the property
+that has to hold on every future change. Do not read a green run as re-proving
+equivalence; the evidence for that is the commit history of the port, and this
+gate green at the commit that deleted the shell.
 
 The corpus is **67 single-receipt verdicts + 2 unions**, pinned as
 `EXPECTED_SINGLES` / `EXPECTED_UNIONS` in `__main__.py`. That is every committed
@@ -23,14 +34,14 @@ that never produced a verdict — there is nothing to replay them against.
 python3 -m tests.differential          # from the repo root; ~4 minutes
 ```
 
-No network, no docker, no security gate: both `security_preflight` calls in
-`harness/verify-listing.sh` sit inside the discrepancy/union re-list branches,
-and every committed verdict is a PASS, so the replay never reaches them.
+No network, no docker, no security gate: both preflight calls sit inside the
+discrepancy/union re-list branches, and every committed verdict is a PASS, so the
+replay never reaches them.
 
-The replay itself is stdlib-only, but the reference adapters it re-runs are not:
-`tools/aws-cli/adapter/normalize.sh` mode `s3api-v2-yamlstream` shells out to
-bare `python3` and imports `yaml`. `pyyaml` is a declared project dependency for
-that reason, so `uv run python -m tests.differential` and a bare `python3` judge
+The replay itself is stdlib-only, but the adapters it re-runs are not: every
+`tools/*/adapter/normalize.py` reads its payload with `duckdb`, and mode
+`s3api-v2-yamlstream` additionally imports `yaml`. Both are declared project
+dependencies, so `uv run python -m tests.differential` and a bare `python3` judge
 the same corpus, and the preflight refuses to judge at all (42) rather than
 charging a missing interpreter dependency to the implementation under test.
 
@@ -85,9 +96,9 @@ prior unit's record — and a state file that cannot be written turns a would-be
 opinion, and the unit that depends on it halts rather than degrading to green.
 It is raised when the data directory is absent, when the reference manifest does
 not hash to `c78a8273…92adb`, when the committed registry fixture does not hash to
-`254c8cfe…bbced`, when bare `python3` cannot import a module the reference
-adapters use (`tools/aws-cli/adapter/normalize.sh` mode `s3api-v2-yamlstream`
-imports `yaml`), or when **any raw payload the corpus names** is missing or does
+`254c8cfe…bbced`, when bare `python3` cannot import a module the adapters use
+(`duckdb`, and `yaml` for `tools/aws-cli/adapter/normalize.py` mode
+`s3api-v2-yamlstream`), or when **any raw payload the corpus names** is missing or does
 not hash to the digest its own `run.meta` cites. That last check is what keeps a
 partial restore of the data directory from surfacing as exit 1 — "your port is
 wrong" — when the truth is that the oracle is incomplete.
@@ -124,10 +135,9 @@ that does not change. It was recovered from the pre-squash repo at
 ### The fixture is markdown, and stays markdown (decision for U3)
 
 `254c8cfe…` is the sha256 of a **markdown** registry. `data/registry.toml` is a
-different file with a different sha, so the digest guard at
-`harness/verify-listing.sh:658-663` — which compares `$LOOKUP --digest` against
-the `registry_sha256` line in each `run.meta` — can never be satisfied from the
-TOML. The format change does not preserve this fixture; nothing could, short of
+different file with a different sha, so the digest guard — which compares the
+registry's digest against the `registry_sha256` line in each `run.meta` — can
+never be satisfied from the TOML. The format change does not preserve this fixture; nothing could, short of
 a preimage. That is not a defect to be worked around, it is what binding a
 receipt to exact bytes means.
 
@@ -142,9 +152,8 @@ The decision, so a later reader does not relitigate it:
   receipts. Those receipts were made against a markdown registry; replaying them
   exactly requires reading one. The legacy reader is not a second supported
   registry format and nothing new may be written in it.
-- `replay.py:101` currently injects the fixture through the `SMOKE_REGISTRY`
-  environment variable, because that is the only hook the shell verifier offers.
-  When U3 lands, that injection **must become an explicit `--registry` argument**.
+- `replay.py` passes the fixture as an explicit `--registry` argument, not
+  through the `SMOKE_REGISTRY` environment variable the shell verifier read.
   Making the oracle point somewhere else is a deliberate change to the oracle
   with its own justification, recorded here — not a silent edit that happens to
   turn a gate green.
@@ -157,13 +166,12 @@ For a **single receipt**:
    root is ever written — `$S3_STUDY_DATA` and `tools/*/receipts` are read-only
    inputs, and an oracle the gate can write to is not an oracle.
 2. Restore the verdict placeholder in the staged `receipt.md`. The re-verify guard
-   (`harness/verify-listing.sh:671-680`) refuses an already-stamped receipt; the
-   placeholder is exactly the state the receipt was in when the committed verdict
-   was issued.
+   refuses an already-stamped receipt; the placeholder is exactly the state the
+   receipt was in when the committed verdict was issued.
 3. Read the scope back from the committed `verify.md` Scope row, and the verified
    stream from `run.meta` (`stdout_path`/`stderr_path`, preferring the stream whose
    recorded sha256 is not the empty digest) — never from what happens to be on disk.
-4. Run `harness/verify-listing.sh` with cwd set to a link farm.
+4. Run `python3 -m s3_listing_study.verify` with cwd set to a link farm.
 5. Require exit 0, a byte-identical `verify.md`, and a byte-identical restamped
    `receipt.md`.
 

@@ -29,7 +29,7 @@ MANIFEST_SHA256 = "c78a82737dd1982a999912afa89f870c013cb22e01e50b8c4835ddb725992
 
 # The registry the committed runs saw. docs/smoke-bucket.md has moved on since,
 # and the verifier refuses to judge a run against a registry it never saw, so the
-# replay pins SMOKE_REGISTRY to this fixture. Recovered from the pre-squash repo
+# replay pins --registry to this fixture. Recovered from the pre-squash repo
 # at 32951ff6:docs/smoke-bucket.md.
 REGISTRY_SHA256 = "254c8cfedd06b1b8671c5bbabc753bfe45462124821eacf44bd27b43c67bbced"
 REGISTRY_FIXTURE = "tests/fixtures/registry-254c8cfe.md"
@@ -40,7 +40,7 @@ DEFAULT_DATA_DIR = "~/s3-list-study-data"
 # normalize.sh:64-82` (mode `s3api-v2-yamlstream`) shells out to bare `python3`
 # and imports these; whichever `python3` is first on PATH is the one that runs,
 # so the probe has to be a subprocess, not an `import` here.
-ADAPTER_MODULES = ("yaml",)
+ADAPTER_MODULES = ("duckdb", "yaml")
 
 
 class OracleUnavailable(Exception):

@@ -162,7 +162,7 @@ invoking `s5cmd --no-sign-request run /work/cmds.txt` directly — it is not a
 `smoke-run.sh` receipt because `run` needs a file mounted into the container,
 which the wrapper does not provide for this tool.
 
-`../adapter/run.sh`/`../adapter/normalize.sh` and everything under
+`../adapter/run.sh`/`../adapter/normalize.py` and everything under
 `../research/` and `../receipts/` are immutable inputs to this page — they were
 not modified for this consolidation beyond the migration's link and path
 repairs.

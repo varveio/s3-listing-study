@@ -83,10 +83,10 @@ def normalize_generated(report: bytes) -> bytes:
 def unstamp(receipt_md: Path) -> None:
     """Restore the verdict placeholder so the re-verify guard lets the replay run.
 
-    The guard at harness/verify-listing.sh:671-680 refuses to restamp an already
-    stamped receipt. Putting the placeholder back is exactly the state the receipt
-    was in when the committed verdict was issued, which is what makes the restamped
-    output comparable byte for byte.
+    The re-verify guard refuses to restamp an already stamped receipt. Putting
+    the placeholder back is exactly the state the receipt was in when the
+    committed verdict was issued, which is what makes the restamped output
+    comparable byte for byte.
     """
     text = receipt_md.read_text()
     stamps = _STAMP.findall(text)
@@ -97,36 +97,22 @@ def unstamp(receipt_md: Path) -> None:
     receipt_md.write_text(_STAMP.sub(_PLACEHOLDER, text, count=1))
 
 
-IMPLEMENTATION = os.environ.get("S3STUDY_VERIFIER", "shell")
-"""Which verifier the oracle judges: ``shell`` (the reference) or ``python``.
-
-A parameter rather than a one-way switch, so the two implementations can be run
-against the same corpus and compared. Repointing the oracle is a deliberate
-change with its own justification (`README.md` § "The fixture is markdown"), not
-a silent edit that happens to turn a gate green: nothing else about the replay
-moves — same staging, same argv, same byte comparison.
-"""
-
-
-def verifier_argv(repo: Path, registry: Path) -> list[str]:
+def verifier_argv(registry: Path) -> list[str]:
     """The command that issues the verdict, and how the registry reaches it.
 
-    The shell verifier offers only the `SMOKE_REGISTRY` environment hook. The
-    ported one takes `--registry PATH` and digests its raw bytes, so pointing it
-    at the committed markdown fixture reproduces `254c8cfe…` naturally — the
-    injection becomes an explicit argument rather than inherited environment.
+    The shell verifier this replay was built to compare against is gone, so there
+    is one implementation left to judge. It takes `--registry PATH` and digests
+    the file's raw bytes, so pointing it at the committed markdown fixture
+    reproduces `254c8cfe…` naturally — an explicit argument rather than the
+    inherited `SMOKE_REGISTRY` environment the shell offered.
     """
-    if IMPLEMENTATION == "python":
-        return [
-            sys.executable,
-            "-m",
-            "s3_listing_study.verify",
-            "--registry",
-            str(registry),
-        ]
-    if IMPLEMENTATION != "shell":
-        raise RuntimeError(f"S3STUDY_VERIFIER must be 'shell' or 'python', not {IMPLEMENTATION!r}")
-    return [str(repo / "harness" / "verify-listing.sh")]
+    return [
+        sys.executable,
+        "-m",
+        "s3_listing_study.verify",
+        "--registry",
+        str(registry),
+    ]
 
 
 def _run(cmd: list[str], cwd: Path, registry: Path) -> tuple[int, str]:
@@ -163,9 +149,9 @@ def replay_single(case: SingleCase, oracle: Oracle, farm: Path, work: Path) -> R
     (staged / "verify.md").unlink()
     unstamp(staged / "receipt.md")
 
-    normalize = oracle.repo / "tools" / case.tool / "adapter" / "normalize.sh"
+    normalize = oracle.repo / "tools" / case.tool / "adapter" / "normalize.py"
     cmd = [
-        *verifier_argv(oracle.repo, oracle.registry),
+        *verifier_argv(oracle.registry),
         "--receipt",
         str(staged),
         "--input",
@@ -206,11 +192,11 @@ def replay_union(case: UnionCase, oracle: Oracle, farm: Path, work: Path) -> Res
     out.mkdir(parents=True)
 
     cmd = [
-        *verifier_argv(oracle.repo, oracle.registry),
+        *verifier_argv(oracle.registry),
         "--scope",
         "union",
         "--normalize",
-        str(oracle.repo / "tools" / case.tool / "adapter" / "normalize.sh"),
+        str(oracle.repo / "tools" / case.tool / "adapter" / "normalize.py"),
         "--out",
         str(out),
     ]

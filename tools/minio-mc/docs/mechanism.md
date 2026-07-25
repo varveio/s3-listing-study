@@ -282,7 +282,7 @@ smoked (see `running.md`).
   layer to one line per object — [RUN] over [SRC] here.) Folders carry
   `type:"folder"`, empty `etag`, and a nanosecond synthetic `lastModified`.
 
-[`../adapter/normalize.sh`](../adapter/normalize.sh) (this tool's adapter) emits
+[`../adapter/normalize.py`](../adapter/normalize.py) (this tool's adapter) emits
 `key<TAB>size<TAB>etag<TAB>mtime<TAB>storage_class`, `-` where a mode does not
 expose a field, and re-prepends the run's scope prefix. `*-json` modes expose all
 five fields; text modes expose `-` for size (humanized/lossy) and etag (absent).

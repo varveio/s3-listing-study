@@ -811,7 +811,7 @@
       "qualification": "This is a limitation of the study adapter, not an established defect in the tool's native Parquet output. No smoke key contained either byte.",
       "legacy_origins": ["PROSE-5"],
       "evidence": [
-        {"kind":"documentation","path":"../adapter/normalize.sh"},
+        {"kind":"documentation","path":"../adapter/normalize.py"},
         {"kind":"documentation","path":"../docs/running.md"}
       ]
     },

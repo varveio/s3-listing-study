@@ -116,7 +116,7 @@ still valid. Full detail:
 
 **What was done instead — [OBS] manifest-diff, not a verifier PASS.** Listing
 correctness rests on a `docker run > file` **direct capture**, normalized by
-`../adapter/normalize.sh`, diffed against the registry manifest with the verifier's own
+`../adapter/normalize.py`, diffed against the registry manifest with the verifier's own
 canonicalization (`LC_ALL=C`, `tolower(etag)`, mtime tz-canonical). All four
 scopes matched exactly (counts above). This is a manifest-diff, **not** a
 certified verifier verdict: the match is recorded as the `supported`
@@ -134,7 +134,7 @@ independently logged fact. Full record:
 `../receipts/smoke/_capability/direct-capture.provenance.md`.
 
 **normalize.sh caveat.** Claim `adapter-tab-newline-key-loss`.
-`../adapter/normalize.sh` reads the Parquet on stdin
+`../adapter/normalize.py` reads the Parquet on stdin
 (spooled to a temp file — Parquet needs random access) and emits
 `key<TAB>size<TAB>etag<TAB>mtime<TAB>storage_class` via DuckDB `-list` with a
 tab separator and **no quoting**, so a valid `Key` containing a literal TAB or

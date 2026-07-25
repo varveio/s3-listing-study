@@ -188,13 +188,10 @@ directory (`$S3_STUDY_DATA`, holding `manifests/` and `receipts/`); see
 [`tests/differential/README.md`](tests/differential/README.md). `uv run pytest`
 alone needs none of it — its fixtures are synthetic and committed.
 
-Adapters are mid-port. `docs/operating/tool-structure.md` and
-`harness/README.md` still describe a tool's adapter as `adapter/normalize.sh`,
-which is accurate today: `normalize.sh` is still what the receipts were verified
-with, and `normalize.py` is held to producing its bytes exactly. At cutover —
-when a tool's receipts are re-verified through `normalize.py` — those two
-documents, and the `ADAPTER_MODULES` interpreter probe in
-`tests/differential/oracle.py`, are what must change with it.
+A tool's adapter is `adapter/normalize.py`. The `normalize.sh` adapters the
+committed receipts were originally verified with have been removed; the ported
+adapters reproduce every committed `verify.md` byte for byte, which is what the
+differential replay checks on every change.
 
 ## Results
 

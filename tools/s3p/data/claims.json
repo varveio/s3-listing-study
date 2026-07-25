@@ -457,7 +457,7 @@
       "qualification": "The fixtures under adapter/fixtures cover ls-raw, ls, ls-long, summarize, and empty input; no live tool output could be captured.",
       "legacy_origins": ["PROSE-3"],
       "evidence": [
-        {"kind":"documentation","path":"../adapter/normalize.sh"},
+        {"kind":"documentation","path":"../adapter/normalize.py"},
         {"kind":"documentation","path":"../adapter/fixtures/README.md"}
       ]
     }

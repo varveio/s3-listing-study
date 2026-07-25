@@ -6,8 +6,8 @@ have no coverage at all. They are also the ones that become public claims about
 someone else's software, so they are the last place in this repo where a port
 should be trusted on inspection.
 
-Each case runs the **shipped** `harness/verify-listing.sh`, copied byte for byte
-into a staged tree (asserted below). The only substitutions are the runner
+Each case runs the shipped verifier — this checkout's `s3_listing_study.verify`,
+asserted below — inside a staged tree. The only substitutions are the runner
 security preflight and `docker`, which replays a fixture-recorded reference
 listing. See `tests/tier3/stage.py`.
 """
@@ -76,17 +76,15 @@ def alpha_receipt(stage: Stage, rows: list[str]) -> Path:
     return stage.receipt("alpha", tier3.ALPHA_META, rows, prefix=tier3.ALPHA_PREFIX)
 
 
-def test_the_staged_harness_is_byte_identical_to_the_shipped_one(stage: Stage) -> None:
-    """A rig that quietly edited the verifier would prove nothing about it.
+def test_the_verifier_under_test_is_this_checkouts(stage: Stage) -> None:
+    """A rig that quietly ran something else would prove nothing about the verifier.
 
-    Under `S3STUDY_VERIFIER=python` the staged shell file is never executed, so
-    its digest proves nothing about what ran; the implementation under test is
-    then pinned the only way it can be — the package the entry point imports has
-    to be this checkout's, not a stale install that happens to be on the path.
+    There is no staged shell file to digest any more, so the implementation under
+    test is pinned the only way it can be: the package the entry point imports
+    has to be this checkout's, not a stale install that happens to be on the path.
     """
-    assert stage.staged_sha256 == tier3.sha256_file(tier3.VERIFIER)
-    if tier3.IMPLEMENTATION == "python":
-        assert Path(verify.__file__).resolve().is_relative_to(tier3.REPO / "src")
+    assert stage.verifier, "the rig must name the command it drives"
+    assert Path(verify.__file__).resolve().is_relative_to(tier3.REPO / "src")
 
 
 def test_a_clean_receipt_passes_without_re_listing(stage: Stage) -> None:
@@ -122,7 +120,7 @@ def test_dropped_key_with_the_reference_agreeing_is_fail(stage: Stage) -> None:
 
 
 def test_mtime_only_overwrite_is_drift_and_not_fail(stage: Stage) -> None:
-    """The case `harness/verify-listing.sh:878-885` calls out by name.
+    """The case the verifier's mtime comparison exists to catch.
 
     An object was overwritten with identical bytes: same key, same size, same
     ETag, later mtime. The tool reports what the bucket now holds and disagrees

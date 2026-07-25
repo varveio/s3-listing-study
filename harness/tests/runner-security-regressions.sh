@@ -330,7 +330,7 @@ live_cleanup_rc=$?
 set -e
 if [ "$live_cleanup_rc" -eq 2 ] && grep -q 'discard this runner' "$work/live-cleanup.out"; then ok "live-test cleanup rc=137 fails closed"; else bad "live-test cleanup rc=137 did not fail closed (rc=$live_cleanup_rc; $(tail -2 "$work/live-cleanup.out" | tr '\n' ' '))"; fi
 
-if grep -Fn -- '--network host' "$HARNESS/smoke-run.sh" "$HARNESS/verify-listing.sh" >/dev/null; then bad "normal scripts still use host networking"; else ok "normal scripts contain no host networking"; fi
+if grep -Fn -- '--network host' "$HARNESS/smoke-run.sh" >/dev/null; then bad "normal scripts still use host networking"; else ok "normal scripts contain no host networking"; fi
 
 # Rename-only staging is exercised in an isolated committed fixture repository;
 # the suite's top-level trap reclaims this private mktemp tree.
@@ -891,13 +891,9 @@ run_fake_smoke "$work/smoke-entrypoint-control" --entrypoint "$(printf 'entry\nf
   && ok "caller entrypoint LF rejected" \
   || bad "caller entrypoint LF was not rejected rc=$smoke_rc"
 
-if grep -A7 'local -a ref_cmd' "$HARNESS/verify-listing.sh" | grep -q 'security_append_evidence_log_args ref_cmd' \
-   && grep -A7 'local -a ref_cmd' "$HARNESS/verify-listing.sh" | grep -q 'security_append_network_args ref_cmd' \
-   && grep -A7 '^  REF_CMD=()' "$HARNESS/verify-listing.sh" | grep -q 'security_append_evidence_log_args REF_CMD' \
-   && grep -A7 '^  REF_CMD=()' "$HARNESS/verify-listing.sh" | grep -q 'security_append_network_args REF_CMD'; then
-  ok "both reference re-list constructors use explicit evidence-log/no-pull args"
-else
-  bad "reference re-list constructor bypasses evidence-log/no-pull args"
-fi
+# The reference re-list argv is no longer asserted by grepping a shell file: the
+# verifier is Python, and `tests/test_verify.py` pins the produced argv element by
+# element, the sentinel `run_prefix`, and that the preflight seam cannot widen —
+# over the code that runs, not over its text.
 
 [ "$fail" -eq 0 ] || exit 1

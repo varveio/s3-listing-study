@@ -14,13 +14,11 @@ from __future__ import annotations
 
 import base64
 import os
-import re
 from pathlib import Path
 
 import pytest
 
 from s3_listing_study.receipt.scan import (
-    SCAN_SECRET_RE,
     Outcome,
     TreeScanError,
     scan_file,
@@ -29,7 +27,6 @@ from s3_listing_study.receipt.scan import (
 
 HARNESS = Path(__file__).resolve().parents[1] / "harness"
 FIXTURES = HARNESS / "tests" / "scan-fixtures"
-SCAN_LIB = HARNESS / "scan-lib.sh"
 CLEAN = sorted(p for p in (FIXTURES / "clean").iterdir() if p.is_file())
 OBFUSCATED = sorted((FIXTURES / "dirty").glob("*.b64"))
 
@@ -44,27 +41,6 @@ def dirty(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
         target.write_bytes(base64.b64decode(source.read_bytes()))
         decoded[target.name] = target
     return decoded
-
-
-def test_pattern_is_the_one_in_scan_lib_sh() -> None:
-    """The two live scanners' regex, bound rather than trusted to stay in step.
-
-    ``harness/scan-tree.sh`` is still the CI tree scanner and still sources
-    ``harness/scan-lib.sh``, so the pattern now exists in two places. This repo's
-    own history is that a regex drifting between two shell callers is exactly why
-    ``scan-lib.sh`` was created; a comment would not have caught that either.
-
-    One documented translation, and only one: the shell writes the POSIX class
-    ``[[:space:]]``, which in the C locale (``scan-lib.sh`` and ``scan-tree.sh``
-    both ``export LC_ALL=C``) is exactly ``[ \\t\\n\\r\\f\\v]``. Everything else
-    must match character for character. Case-insensitivity is the shell's
-    ``grep -aEi``.
-    """
-    shell = re.search(r"^SCAN_SECRET_RE='(.*)'$", SCAN_LIB.read_text(), re.MULTILINE)
-    assert shell is not None, "scan-lib.sh no longer defines SCAN_SECRET_RE on one line"
-    translated = shell.group(1).replace("[[:space:]]", r"[ \t\n\r\f\v]")
-    assert translated == SCAN_SECRET_RE.pattern.decode()
-    assert SCAN_SECRET_RE.flags & re.IGNORECASE
 
 
 def test_fixture_corpus_is_present() -> None:

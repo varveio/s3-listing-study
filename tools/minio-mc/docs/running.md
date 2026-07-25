@@ -93,7 +93,7 @@ mode exposes. Notes:
   `versions-mode-ran-on-unversioned-bucket`; multi-version fidelity deferred, claim
   `multi-version-fidelity-untested`).
 - **`mc find`** prints keys as **alias-prefixed absolute paths** (`s3/<bucket>/<key>`)
-  and emits **no ETag even under `--json`**; `../adapter/normalize.sh` strips the
+  and emits **no ETag even under `--json`**; `../adapter/normalize.py` strips the
   `<alias>/<bucket>/` prefix and marks etag `-`. It traverses the same serial
   `List()` path as `ls --recursive` [SRC mc `cmd/find.go:275-284`]. The PASS is
   scoped to `STANDARD` objects (find skips `GLACIER`; the bucket is all `STANDARD`) —
@@ -107,7 +107,7 @@ mode exposes. Notes:
 The first `recursive` (text) verify returned **FAIL missing=2** — an adapter bug,
 not a tool defect: two keys had a size string exactly 7 chars wide (`1006KiB`),
 which `%7s` prints with no separating space after `]`, and the text regex required
-whitespace there. Fixed (`\s+`→`\s*`) in `../adapter/normalize.sh`; the mode was re-run (fresh
+whitespace there. Fixed (`\s+`→`\s*`) in `../adapter/normalize.py`; the mode was re-run (fresh
 receipt) and PASSES. The `recursive-json` PASS on the same key set separately
 shows that the tool listed all 148,917 keys throughout.
 
@@ -168,7 +168,7 @@ harness/smoke-run.sh \
 `<mode>` is one of `recursive`, `recursive-json`, `shallow`, `shallow-json`,
 `versions-json`, `find`, `find-json` — see `tools/minio-mc/adapter/run.sh`'s `case`
 statement for the exact argv each maps to. Add `--prefix <p>` for a scoped listing
-(e.g. `normals-hourly/`). `../adapter/run.sh`, `../adapter/normalize.sh`, and everything under
+(e.g. `normals-hourly/`). `../adapter/run.sh`, `../adapter/normalize.py`, and everything under
 [`../research/`](../research/) and [`../receipts/`](../receipts/) are **immutable**
 inputs to this page — they were not modified for this consolidation; a rerun adds
 a new receipt rather than editing an existing one.
