@@ -2,8 +2,7 @@
 
 Replaces the shell/Python scripts under ``harness/`` and ``scripts/`` with a
 single packaged implementation of the contract, registry, manifest, and
-verifier. See ``notes/2026-07-25-cleanup-plan.md`` for the port plan and unit
-sequencing.
+verifier.
 """
 
 __version__ = "0.1.0"

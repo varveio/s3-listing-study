@@ -1,0 +1,49 @@
+# Smoke-bucket registry — the machine-read bucket facts.
+#
+# Canonical source for every value an executable resolves about a bucket.
+# `docs/smoke-bucket.md` keeps the prose that explains these facts to a human;
+# where the two state the same value they must agree, and `tests/test_registry.py`
+# fails the build if they drift.
+#
+# Nothing executable in this repo embeds a bucket name (owner's rule): callers
+# pass the bucket as a parameter and resolve its facts through
+# `s3_listing_study.registry`, so a receipt cites what the registry says rather
+# than what somebody retyped.
+#
+# Data artifacts (manifests, payloads) never enter the repo — see
+# docs/smoke-bucket.md. This file is metadata: the `manifest_sha256` below is the
+# binding, not the artifact.
+#
+# Every bucket is one `[buckets."<name>"]` table with exactly the six fields
+# below. The table form is deliberate: TOML forbids defining the same table or
+# key twice, so a duplicated bucket or a duplicated field is a parse error rather
+# than a first-match-wins guess. A resolver that guessed would put a plausible
+# wrong digest in a receipt, which is worse than no receipt at all.
+
+[harness_client]
+# Must stay digest-pinned: a tag would let the reference client change under a
+# campaign without the receipts noticing.
+image = "amazon/aws-cli@sha256:eb85b2c72442c9eab0bdbe608095b9b909bc2a7136924124d63fe0c03b2ec334"
+
+# AWS Open Data — NOAA U.S. Climate Normals; sponsor-paid requests.
+# Access is anonymous (`--no-sign-request`); last verified during the recorded
+# 2026-07-16 smoke.
+[buckets."noaa-normals-pds"]
+region = "us-east-1"
+manifest = "<data>/manifests/noaa-normals-pds.2026-07-17.tsv.gz"
+manifest_sha256 = "c78a82737dd1982a999912afa89f870c013cb22e01e50b8c4835ddb725992adb"
+snapshot_date = "2026-07-17"
+keys = 148917
+# The measured-shape summary the receipt must carry. Prose by design — it is for
+# a human reading the receipt, not for parsing.
+shape = """
+- **Top level**: 4 prefixes + 1 root-level key —
+  `normals-monthly/` 48,796 · `normals-daily/` 48,787 ·
+  `normals-annualseasonal/` 48,784 · `normals-hourly/` 2,549 · `index.html` 1.
+- **Depth histogram** (`/`-count): depth 0 → 1 key, depth 2 → 29,986,
+  depth 3 → 118,930. No deep nesting; the tree is broad and shallow.
+- **Largest second-level prefixes**: `normals-monthly/1991-2020/` 15,625 ·
+  `normals-daily/1991-2020/` 15,624 · `normals-annualseasonal/1991-2020/`
+  15,623 · the `2006-2020/` trio ≈ 13,480 each · the `1981-2010/` trio ≈
+  9,840 each.
+- ≥149 LIST pages un-delimited at the 1,000-key page cap."""

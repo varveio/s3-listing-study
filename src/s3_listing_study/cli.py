@@ -1,9 +1,8 @@
 """Command-line entry point: ``s3-listing-study``.
 
 Will grow subcommands ``verify | smoke | build-manifest | scan-tree`` as the
-corresponding units land (see ``notes/2026-07-25-cleanup-plan.md`` §5). For
-now this only exposes ``--version`` so the package installs to a working
-console script.
+corresponding units land. For now this only exposes ``--version`` so the
+package installs to a working console script.
 """
 
 import argparse
