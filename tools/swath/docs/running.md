@@ -1,212 +1,319 @@
 # Swath — running
 
-How the image was built, every mode that was smoked with its receipt, the
-parquet capability probes and the wrapper boundary that limits them, the
-concurrency cap, and the supported-architecture matrix. Canonical tested
-identity (pinned SHA, version, study states) lives in
-[`../data/tool.json`](../data/tool.json); this page supplies the operational
-detail. Evidence labels and the claim `some-id` reference notation are as
-defined in [`mechanism.md`](mechanism.md); pinned commit `f1009db`.
+What this study selected as its v0.2.0 subject, what it ran, what it could not
+run, what could not be checked, and how to reproduce the work that exists.
 
-## Image — built by the agent, not published
+Canonical tested identity — repository, version, pinned revision, and study
+states — lives in [`../data/tool.json`](../data/tool.json). The claim `some-id`
+reference notation and the evidence vocabulary are defined once in
+[`mechanism.md`](mechanism.md); this page does not repeat them. Mechanism
+explanation lives there too.
 
-**No image is published upstream.** Swath ships a self-contained multi-stage
-`Dockerfile` (`docker build .` needs no prior host Gradle run) `[SRC
-Dockerfile:1-49]`. The image used for every receipt on this page was built by
-the research agent from **upstream's own `Dockerfile` at the pinned SHA**:
+## Tested subject: upstream's published image
 
-```
-docker build -t swath:groundwork .        # in <sources>/swath @ f1009db
-# manifest digest: sha256:1dc6d1e60d4f9aabffcde8b789e49688938cbabcf93b3e35a1c53fc73ea8f9d1
-# (Docker 29 containerd image store: image ID == manifest digest)
-```
+The subject is upstream's own published image, an OCI index at
+`ghcr.io/varveio/swath@sha256:ef1aca9ab473f133acceb5730ff88d52abaaa89e773801cdb62deff51f9909b0`,
+pulled anonymously with no `docker login` — claim
+`published-image-is-anonymously-pullable`. Nothing was built locally for this
+subject; the v0.1.0 pass built its own image from upstream's Dockerfile, and this
+one did not need to.
 
-The digest-pinned ref the smoke wrapper requires was produced by pushing to a
-**throwaway local registry**: `localhost:5000/swath@sha256:1dc6d1e6…`
-(digest-pinned). Entrypoint is `["java","-jar","/opt/swath/swath.jar"]` (exec
-form, java as PID 1) `[SRC Dockerfile:80]`, so `../adapter/run.sh` argv starts at the
-top-level option / `list` subcommand. Reported `--version`: `swath
-0.1.0-SNAPSHOT`; host/build arch arm64, native.
+**Tag trap.** The registry tag is `0.2.0`, with no `v` prefix. `v0.2.0` returns
+`manifest unknown`, which will catch anyone who copies the git tag — the git tag
+*is* `v`-prefixed, and release version discipline is mechanical: a release fails
+unless the git tag equals `v` plus the Gradle version — claim
+`no-releases-or-tags`.
 
-**Image↔source binding is an agent-asserted build fact** (claim
-`image-source-binding-agent-asserted`). Stated exactly so per
-`../receipts/smoke/_build/build.md`: the source→image link is recorded in that build
-receipt, **not** cryptographically embedded in each run receipt. The image
-carries no OCI `revision`/source-SHA label, so a `run.meta` read in isolation
-shows only "this digest, `--version 0.1.0-SNAPSHOT`" — **not** "built from
-`f1009db`". A future build should stamp the source SHA into an image label so the
-binding is receipt-checkable. To rebuild: check out the pinned SHA
-`f1009db599861a7e905a539778d915f1bb5426eb`, `docker build -t swath:groundwork .`,
-then push the resulting digest to a local registry
-(`localhost:5000`, the `swath-registry` throwaway) for the wrapper's digest-pin.
+The image binds itself to source: both per-arch config blobs carry
+`org.opencontainers.image.revision` equal to the pinned commit `cef8ec2`, so the
+source-to-image link is embedded in the artifact rather than recorded only in a
+build receipt — claim `image-source-binding-agent-asserted`. The jar inside it is
+the release build job's own uber-jar, promoted by a build-context override and
+checksum-verified before use. The running image self-reports `swath 0.2.0
+(cef8ec24a74f)` — claim `reported-version-is-snapshot`. The label read, the
+manifest fetch and the `--version` probe were all direct container observations
+with no receipt.
 
-## Concurrency cap
+At this revision the repository is public, carries an Apache-2.0 licence and a
+`NOTICE` naming Varve Systems Ltd, and publishes tagged releases — claims
+`repo-is-private-prerelease`, `no-license-dangling-reference`,
+`no-releases-or-tags`. Each of those three contradicts the inherited
+characterization of the v0.1.0 subject; the disposition is recorded in the
+ledger.
 
-Every run was pinned to `--max-parallel-listings 8`. Swath's own default is
-**64** `[SRC ListCommand.java:114-115]`; 8 is this subject's smoke cap, applied
-so the smoke pass exercises the parallel path without opening a wide concurrency
-sweep (that sweep is the primary benchmark-phase knob — see
-[`../README.md`](../README.md) § Limitations and open questions). The cap is why
-`peak_in_flight` tops out at 8 where scope allows; it also means the parallelism
-ratio at Swath's real default is **unmeasured** here (claim
-`parallelism-ratio-at-higher-concurrency`).
+**Build route, if you need one.** Not used here. Swath is Java on a JDK 25
+toolchain with no toolchain auto-provisioning configured, so a bare host needs a
+local JDK 25 — claim `language-is-java`. `docker build .` from the repo root is
+self-contained; only CI substitutes the promoted jar.
 
-## Every smoked mode
+## No receipts: the runner-security blocker
 
-All runs **anonymous** (`--no-sign-request`, `auth=anonymous` enforced by the
-credential-starved wrapper) against `noaa-normals-pds` (us-east-1) at its
-2026-07-17 snapshot (148,917 keys, manifest sha256 `c78a…2adb`),
-`--max-parallel-listings 8`, `--checkpoint none` for the text modes. Pre-flight
-PASS: the pinned harness client's re-list is byte-identical to the manifest
-(`sha256 8b5b584e…` both sides — no drift; `../receipts/smoke/_preflight`).
-`CREDS=none` (no credentialed pass); `EDGE_BUCKET=none` (unicode/weird-key/
-multipart-ETag fidelity deferred — see `mechanism.md`).
+**This is the owning statement for every "no receipt, no verdict" clause
+elsewhere in this capsule.**
 
-| Mode | Scope | Keys | Exit | Wall | api_calls (per 1k) | peak_in_flight | splits / steals | Verdict | Receipt |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| recursive-tsv | full | 148,917 | 0 | 7.17s | 339 (2.28) | 8 | 7 / 98 | **PASS** | `recursive-tsv/full` |
-| recursive-tsv | normals-hourly/ | 2,549 | 0 | 3.99s | 112 (43.9) | 8 | **0** / 6 | **PASS** | `recursive-tsv/hourly` |
-| recursive-tsv | normals-monthly/1991-2020/ | 15,625 | 0 | 3.83s | 123 (7.87) | 8 | 7 / 59 | **PASS** | `recursive-tsv/monthly1991` |
-| recursive-tsv | normals-annualseasonal/1981-2010/access/ | 9,839 | 0 | 3.44s | 82 (8.33) | 8 | 4 / 37 | **PASS** | `recursive-tsv/asaccess1981` |
-| recursive-jsonl | full | 148,917 | 0 | 7.54s | 319 (2.14) | 8 | 8 / 102 | **PASS** | `recursive-jsonl/full` |
-| recursive-jsonl | normals-monthly/1991-2020/ | 15,625 | 0 | 4.34s | 124 (7.94) | 8 | 7 / 62 | **PASS** | `recursive-jsonl/monthly1991` |
-| recursive-aligned | full | 148,917 | 0 | 7.58s | 334 (2.24) | 8 | 9 / 100 | **PASS** | `recursive-aligned/full` |
-| recursive-aligned | normals-monthly/1991-2020/ | 15,625 | 0 | 3.87s | 119 (7.62) | 8 | 7 / 56 | **PASS** | `recursive-aligned/monthly1991` |
-| seed-none | full | 148,917 | 0 | 9.16s | **516** (3.47) | **6** | 22 / 284 | **PASS** | `seed-none/full` |
-| seed-none | normals-monthly/1991-2020/ | 15,625 | 0 | 3.65s | 116 (7.42) | **4** | 7 / 80 | **PASS** | `seed-none/monthly1991` |
+The study's mandatory runner-security profile is not provisioned on the machine
+this pass ran on, and that machine categorically cannot satisfy it: it is a
+shared devcontainer carrying unrelated workloads and private checkouts, not a
+provisioned runner. `harness/smoke-run.sh` performs that preflight and owns the
+receipt format, so **the wrapper was never used and no receipt exists for any
+run of this subject.** No claim about it is `confirmed`, and none can be until
+the work is re-run under the wrapper on a provisioned runner.
 
-Every verifier verdict: `dups=0 missing=0 extra=0`, fields match where the mode
-exposes them (`verify.md` in each receipt; claim
-`smoke-output-complete-no-duplicates`). Three facts to read off the table,
-none generalized past smoke:
+Everything under "What ran" below is therefore a direct container observation:
+`docker run` with `--cap-drop ALL`, `--security-opt no-new-privileges:true`, and
+credential starvation (metadata service disabled, credential environment emptied,
+AWS config and credential files pointed at a nonexistent path). That reproduces
+the wrapper's credential starvation and capability drop, but not its network
+confinement, timeout enforcement, payload hygiene pipeline, or receipt schema.
+The captured stderr, a stdout sample and payload hashes are preserved under
+[`../receipts/observations-v0.2.0/`](../receipts/observations-v0.2.0/) and are
+labelled as observations, not receipts.
 
-- **Behaviour is scope-dependent (not "small = less parallel").** `peak_in_flight`
-  reached the `8` cap on the full, 15k, 9.8k, and even the 2,549-key `hourly`
-  recursive runs — `hourly` did it through steals alone (`splits=0`). Only the
-  un-seeded `seed-none` runs peaked lower (6 full / 4 monthly). So splitting is
-  scope-dependent and the un-seeded path reaches lower peak concurrency; scope
-  size alone does not predict parallelism (claim
-  `peak-concurrency-is-scope-dependent`). (These are Swath's own self-reported
-  counters, not an independent wire capture.)
-- **The un-seeded run recorded MORE, not fewer, API calls:** 516 (`--seed none`)
-  vs 339 (`--seed shallow`) on the full bucket — the run *with* the up-front seed
-  made fewer calls. Both PASS; one run per arm settles the observed counts, not a
-  causal effect of the seed choice (claim `seed-cost-direction-at-smoke`). These
-  api_calls are Swath's own self-reported counters, not an independent wire capture.
-- **Probe overhead was far higher on the small prefix:** 43.9 api_calls/1k on the
-  2,549-key `hourly` prefix vs 2.28/1k full-bucket. These two runs differ in both
-  size and keyspace shape with no repeats, so they settle the two ratios, not a
-  general overhead-vs-scale law (claim `probe-overhead-higher-on-small-prefix`, an
-  open benchmark question). These api_calls-per-1k ratios derive from Swath's own
-  self-reported counters, not an independent wire capture.
+## What the verifier could not check
 
-All runs recorded `throttle_events=0`, `aimd_votes=0`, `errors=0` (clean public
-bucket; AIMD never engaged; claim `aimd-idle-at-smoke`) — all Swath's own
-self-reported counters, with `aimd_votes` in each run's `list_run_diagnostics`
-stderr line, not an independent wire capture. Peak RSS held ~320–560 MB across
-every scope, JVM baseline-dominated — not a scale claim.
+**No verifier verdict exists for any run of this subject**, for two reasons that
+compound.
 
-## Parquet capability probes and the wrapper boundary
+First, the reference manifest artifact is absent from this box, so
+`harness/verify-listing.sh` could not be run at all. Completeness rests only on
+count-and-uniqueness against the registry's recorded figures in
+[`../../../docs/smoke-bucket.md`](../../../docs/smoke-bucket.md). That is
+strictly weaker than a manifest diff: it can detect a missing or duplicated key
+in aggregate, but it cannot detect a substituted key, a corrupted key, or
+compensating errors — claim `smoke-output-complete-no-duplicates`. Cross-mode
+agreement does not substitute for it either: four listing modes normalizing to
+the same key set (claim `cross-mode-key-set-agreement`) constrains the engine
+and the adapter against each other, never against ground truth.
 
-| Probe | Scope | Keys | Exit | Wall | api_calls | Result | Receipt |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| parquet | normals-monthly/1991-2020/ | 15,625 | 0 | 4.02s | 120 | run OK, `output_files=3`, output uncapturable | `_capability/parquet-probe` |
-| sorted-parquet | normals-monthly/1991-2020/ | 15,625 | 0 | 4.82s | 135 | run OK, `output_files=1` after k-way merge, output uncapturable | `_capability/sort-probe` |
+Second, the registered smoke bucket has drifted since its 2026-07-17 snapshot.
+Every object under `normals-hourly/` now reports `last_modified` 2026-07-22 — a
+re-upload that moved mtimes while leaving the key set intact (exact count match
+at both scopes, zero duplicates at full-bucket scope). This is a fact about the
+third-party bucket, not a finding about Swath, and re-baselining is the
+orchestrator's decision. The practical consequence is direct: an mtime-asserting
+verification against the 2026-07-17 manifest would now fail on that scope, and
+would fail correctly.
 
-**Structural harness boundary — fidelity is NOT settled.** These modes write a
-dataset **directory** (`-o`), but the smoke wrapper captures only container
-stdout/stderr (`docker logs`) and mounts no output volume, so the dataset is
-**destroyed with the container**. The probes show the paths *execute* to exit 0
-with a **self-reported** `objects=15625` in each probe's `list_run_summary`
-stderr line (claim `parquet-modes-execute`), not an independent wire capture —
-that does **not** establish the dataset actually contains all 15,625 keys (no
-verifier ran on the output). Parquet byte-exactness
-stays `unverified` (claim `parquet-output-byte-exact`); verifying it needs a
-volume-mounting harness path, deferred to the benchmark phase.
+Elsewhere in this capsule this caveat appears as a short clause with a link back
+here, never re-derived.
 
-**Footguns for the parquet modes** (per the project's docs): Parquet/sorted
-output requires `-o <directory>` — it never goes to stdout; `--sort` is
-Parquet-only and refuses `--checkpoint none` `[SRC ListCommand.java:355-359]`;
-`--sort` needs ~`2× objects × bytes/object` staging disk and a raised `ulimit -n`
-`[DOC usage.md:200-232]`.
+## What ran
 
-## Auth and quickstart
+Two instrumented listing runs on 2026-08-02, both anonymous
+(`--no-sign-request` from a credential-starved container), both
+`--concurrency 8`, `--format jsonl -v`, `--region us-east-1`, against
+`noaa-normals-pds`, on the index's arm64 child manifest with no emulation. Four
+further single-mode runs through the rewritten adapter are recorded under
+[Adapter and harness contract](#adapter-and-harness-contract); they captured
+output, not counters, so no figure below comes from them.
 
-Anonymous is a first-class flag: `--no-sign-request` selects
-`AnonymousCredentialsProvider` `[SRC ListCommand.java:87-88,2034]`; otherwise the
-SDK default chain, or `--profile`. `--region` overrides the SDK chain; a
-wrong-region bucket surfaces a typed `RegionRedirectException` naming the correct
-region `[SRC S3PageFetcher.java:333-347]`. As smoked:
+| Scope | Keys emitted | Exit | Wall | API calls (per 1k) | Pages fetched | Peak in flight | Splits / steals | Peak RSS |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `normals-hourly/` | 2,549 | 0 | 4.1 s listing, 8.4 s session | 75 (29.42) | 49 | 8 at 246 ms | 0 / 3 | 415.1 MB |
+| full bucket | 148,917 | 0 | 10.4 s listing, 16.9 s session; 18 s measured outside the tool | 240 (1.61) | 165 | 8 at 1,922 ms | 19 / 25 | 508.8 MB |
 
-```
-swath list s3://<bucket>[/<prefix>] --region <r> --no-sign-request \
-  --format tsv --checkpoint none --max-parallel-listings 8
-```
+Every figure in that table except the externally measured 18 seconds and the row
+counts is Swath's own self-reported counter from its `list_run_summary` and
+`list_run_diagnostics` stderr lines — the tool's account of its own behaviour,
+not an independent wire capture. **These are two single unreplicated runs. They
+are not benchmark results and they are not comparable to anything.**
 
-## Reproduction via `harness/smoke-run.sh`
+What they settle, each with its own limits:
 
-Every receipt was produced by the shared wrapper, never a bare `docker run`.
-`../adapter/run.sh` only *prints* the argv the wrapper appends to the pinned image's
-entrypoint; the wrapper owns `docker run`, mounts, credential injection/starving,
-the timeout, and measurement. To reproduce a row:
+- **Anonymous listing works from a credential-starved container.**
+  `--no-sign-request` sits at the top of a three-branch credential chain; both
+  runs listed anonymously and exited 0 — claim `anonymous-listing-supported`.
+- **The full run emitted 148,917 JSONL rows with zero duplicate keys**, matching
+  the registry's recorded count for the bucket — claim
+  `smoke-output-complete-no-duplicates`, with the verification limits above. The
+  zero-duplicate result is consistent with the disjointness design of
+  [`mechanism.md`](mechanism.md#the-range-model-and-why-output-is-exactly-once-by-construction)
+  but does not verify it.
+- **The LISTs ran in parallel.** The full run reported eight concurrent listings
+  in flight with nineteen splits and twenty-five steals — claim
+  `full-run-reported-parallel-listings`. Both scopes reached the configured
+  ceiling of eight, the small prefix from forty-eight seed ranges with zero
+  splits, which contradicts the inherited scope-dependent-peak finding — claim
+  `peak-concurrency-is-scope-dependent`.
+- **The AIMD controller never engaged.** Both runs recorded zero throttle events,
+  zero transient events, zero AIMD votes and zero errors against this clean
+  public bucket — claim `aimd-idle-at-smoke`. That settles that AIMD did not fire
+  in these two runs, not whether it is dead weight.
+- **Probe overhead was far higher on the small prefix** — 29.42 API calls per
+  thousand objects on the 2,549-key prefix against 1.61 on the full bucket —
+  claim `probe-overhead-higher-on-small-prefix`. The two runs vary both size and
+  keyspace shape with no repeats, so they settle two ratios, not a law.
+- **Non-worker-page calls were a minority of both runs**: 26 of the hourly run's
+  75 calls and 75 of the full run's 240, computed from each run's recorded
+  page-fetch count rather than a theoretical keys-divided-by-page-size floor —
+  claim `non-worker-page-call-share`. The captured counters do not decompose that
+  residue into seed, structure and pivot classes, and settling it needs `-vv`
+  capture.
+- **Timestamps came out second-precision with an explicit `Z`**, spanning
+  2025-11-24 to 2026-07-22 with no fractional part — claim
+  `timestamp-precision-is-variable`.
+- **Both runs executed natively on arm64** and, because a stdout run still opens
+  an in-process SQLite database, they loaded the SQLite JDBC driver and its
+  native library there — claim `runs-executed-natively-on-arm64`. That closes the
+  native-extraction half of the arm64 gap; the durable on-disk checkpoint and the
+  Zstd and Parquet native paths remain unexercised on arm64.
+
+Two offline probes under `--network none` also ran: `--version`, and `list
+--help`, whose usage block shows the absence of `--max-keys`, `--delimiter`,
+`--recursive`, `--no-owner-split` and `--all-versions`. Those absences are
+established from source; the help probe observed them live without a receipt —
+claims `page-size-fixed-no-max-keys`, `no-shallow-listing-mode`,
+`no-owner-split-flag-absent`, `versions-listing-is-dead-code`.
+
+**Region is required, even anonymously.** A run with no resolvable region exits 2
+before the first request, because region resolution and credential resolution are
+independent code paths — claim `region-required-even-anonymously`. This is the
+single most likely reason a first containerized run fails, and it is why
+`--region us-east-1` is explicit in every invocation below. Upstream's own
+anonymous quickstarts omit it.
+
+## Adapter and harness contract
+
+`../adapter/run.sh` implements the shared harness's argv contract: it prints a
+NUL-delimited argv and never runs Docker or the tool. Because the image
+entrypoint is `["java","-jar","/opt/swath/swath.jar"]`, that argv starts at the
+top-level option or the `list` subcommand, not at a binary name.
+`../adapter/normalize.sh` converts native output into the frozen smoke harness's
+five-field normalized stream.
+
+**Both adapter scripts have been rewritten for v0.2.0 and validated by
+execution.** As previously committed they targeted the v0.1.0 subject and could
+not run against this one at all: their argv used `--max-parallel-listings`,
+`--format aligned`, `--seed none` and `--force-sort`, none of which exist at
+`cef8ec2`, so every mode would have failed argument parsing. The current scripts
+emit `--concurrency`, `--format table`, `--tune seed.mode=none` and — for the
+sort disk guard — `--tune sort.ignore-disk-check=on`, there being no
+`--force-sort` option at all (claims `mode-inventory-v020`,
+`concurrency-flag-is-aimd-ceiling`, `live-error-messages-name-absent-flags`).
+The normalizer's mode names moved with them: `recursive-tsv`,
+`recursive-jsonl`, `recursive-table`, `seed-none`, `parquet-probe`,
+`sort-probe`, where `recursive-aligned` became `recursive-table` to match
+v0.2.0's own format name.
+
+Validation was execution, not reading. All four stdout modes were driven through
+`run.sh` and `normalize.sh` against `s3://noaa-normals-pds/normals-hourly/` on
+2026-08-02, each exiting 0 and each normalizing to 2,549 rows of exactly five
+fields — claim `adapter-v020-modes-execute`. All four normalized to a
+byte-identical key set — claim `cross-mode-key-set-agreement`. Both are recorded
+in the adapter-modes
+[observation](../receipts/observations-v0.2.0/adapter-modes/observation.md).
+That agreement spans two text encoders, a fixed-width parser and one arm whose
+request pattern differs — `seed.mode=none` issues no `delimiter=/` probes at all
+— so it is evidence that the engine and the adapter are consistent with each
+other. **It is not a completeness check**: nothing here was compared against a
+reference manifest, so all four arms could agree and still be wrong in the same
+way, and the caveat above stands unchanged. These were direct container
+observations under the same credential starvation as the two runs above: still
+no receipt, still no verifier verdict, and the `parquet-probe` and `sort-probe`
+modes were not run.
+
+**What the harness can capture.** Only the three text formats are capturable:
+Parquet as a file sink, Parquet as a directory dataset, sorted Parquet, and
+resume are structurally uncapturable because the harness bind-mounts nothing and
+Parquet refuses stdout outright — claim `file-sinks-not-harness-capturable`. That
+is a harness limitation, not a tool limitation, and those modes should be
+recorded as not verified for that reason rather than as untested. Closing the gap
+needs a bind mount plus a post-run archive step, or an out-of-harness run
+normalized separately. Note the cost of leaving it open: Parquet is Swath's only
+byte-exact output path (claim `parquet-key-column-is-byte-exact`), so excluding
+it means the study never exercises that path.
+
+The same limitation applies to `--report`, which writes to a container-local
+path. The clean scrape target under this harness is the `list_run_summary` line
+on stderr at `-v`, which is where every counter above came from — claim
+`api-calls-counter-is-trustworthy`.
+
+## Mode-by-mode coverage
+
+Swath v0.2.0 offers ten modes — three text formats, Parquet as a single-file sink
+and as a directory dataset, sorted Parquet, the `resume` subcommand, and three
+seed modes — claim `mode-inventory-v020`.
+
+| Mode | Status in this pass | Why |
+| --- | --- | --- |
+| `--format jsonl` | Observed twice directly and once through the adapter, exit 0; no receipt, no verifier verdict | Runner-security blocker |
+| `--tune seed.mode=shallow` (default) | Observed; both direct runs and three of the four adapter modes used it | Default; no receipt |
+| `--format tsv`, `--format table` | Each exercised once through the rewritten adapter, exit 0; no receipt, no verifier verdict | 2,549 normalized rows each on `normals-hourly/` — [adapter-modes observation](../receipts/observations-v0.2.0/adapter-modes/observation.md), claim `adapter-v020-modes-execute` |
+| `--tune seed.mode=none` | Exercised once through the rewritten adapter, exit 0; no receipt, no verifier verdict | A genuine request-pattern change — no `delimiter=/` probes at all — and it agreed key-for-key with the three seeded arms on that one prefix ([observation](../receipts/observations-v0.2.0/adapter-modes/observation.md)). No counters were captured, so the seed-cost arms are still uncompared — claim `seed-cost-direction-at-smoke` |
+| `--tune seed.mode=hints` | Unexercised | Declared but unreachable: it throws at seed time, after the checkpoint database is opened and the S3 client is built — claim `seed-hints-unimplemented`. Worth one capability probe of the exit-2 failure |
+| `--format parquet` (file and directory) | Not capturable | Directory or file sink; harness mounts nothing — claim `file-sinks-not-harness-capturable` |
+| `--sort` | Not capturable | Parquet-only by construction |
+| `swath resume <dir>` | Not capturable | Needs a durable checkpoint, hence a directory dataset, hence a mount — claim `only-parquet-directory-is-resumable` |
+| `--fetch-owner` | Unexercised | Request-shape variant rather than a mode; one representative run recommended |
+
+Edge-key fidelity was not exercised at all: the study registry configures no edge
+bucket and the corpus listed carries no control-character keys — claim
+`control-char-key-fidelity-untested`.
+
+## Reproducing the two runs
+
+Both runs were direct `docker run` invocations. This is what was executed, not a
+reconstruction:
 
 ```sh
-harness/smoke-run.sh \
-  --tool swath --mode recursive-tsv \
-  --image localhost:5000/swath@sha256:1dc6d1e60d4f9aabffcde8b789e49688938cbabcf93b3e35a1c53fc73ea8f9d1 \
-  --run-script tools/swath/adapter/run.sh \
-  --bucket noaa-normals-pds --region us-east-1 \
-  --auth anonymous \
-  --out tools/swath/receipts/smoke/recursive-tsv/full
+docker run --rm --pull=never --cap-drop ALL --security-opt no-new-privileges:true \
+  -e AWS_EC2_METADATA_DISABLED=true -e TZ=UTC \
+  ghcr.io/varveio/swath@sha256:ef1aca9ab473f133acceb5730ff88d52abaaa89e773801cdb62deff51f9909b0 \
+  list s3://noaa-normals-pds/normals-hourly/ \
+    --region us-east-1 --no-sign-request --format jsonl -v --concurrency 8
 ```
 
-Swap `--mode` for any row in `../adapter/run.sh`'s case statement and add `--prefix <p>`
-for a scoped listing. Rebuilding the image first requires the pinned checkout at
-`f1009db` and the `docker build` above. `../adapter/run.sh`/`../adapter/normalize.sh` and
-everything under `../research/` and `../receipts/` are **immutable** inputs — they
-were not modified for this consolidation; a rerun adds a new receipt rather than
-editing one.
+The full-bucket run is the same invocation with `s3://noaa-normals-pds/`. The
+image must be pulled by digest first; the tag, if you use one, is `0.2.0`.
 
-## Architecture matrix
+**A receipted re-run is a different procedure, and it is now blocked on two
+things**: a runner provisioned to the study's security profile, so
+`harness/smoke-run.sh` can own execution, timeouts and measurement; and the
+reference manifest present, so `harness/verify-listing.sh` can produce a verdict.
+The third blocker, a v0.2.0 adapter, is closed — `tsv`, `table`, `jsonl` and
+`seed.mode=none` all run through it already, so the re-run is a matter of
+executing those four under the wrapper and adding a `seed.mode=hints` capability
+probe.
 
-| Channel | amd64 | arm64 | Note |
-| --- | --- | --- | --- |
-| Upstream published image | — | — | none published |
-| Prebuilt binaries | — | — | none (no releases/tags) |
-| Source/Docker build | **[INFERRED]** | **built & smoked (native)** | uber-jar is arch-neutral bytecode; native deps (sqlite-jdbc, zstd-jni) bundle libs for every arch; runtime base `eclipse-temurin:25-jre-noble` is multi-arch `[SRC Dockerfile:9-16,73]` |
-
-Smoke ran **natively on arm64** (host `aarch64`, 8 cores, 31 GB, gcp:us-east1-b),
-**no emulation** (`arch=arm64 emulated=no` in every receipt). **amd64 was neither
-built nor run here:** amd64 support is `[INFERRED]` from the Dockerfile
-(arch-neutral bytecode, all-arch native deps, multi-arch base) `[SRC
-Dockerfile:9-16,73]`, **not demonstrated** (claim `amd64-support-inferred`). The
-benchmark should confirm an actual amd64 build+run before settling on it as the
-common-denominator arch, and must not silently compare Swath's arm64 smoke
-numbers against amd64 runs of other tools (see
-[`../README.md`](../README.md) § Limitations and open questions). Smoke produces
-no comparative numbers, so the arch choice here is immaterial to anything on this
-page.
+The v0.1.0 subject's receipts under [`../receipts/smoke/`](../receipts/smoke/)
+are preserved as immutable evidence about that earlier subject, built from
+upstream's Dockerfile at revision `f1009db`. They are not evidence about v0.2.0
+and no claim in [`../data/claims.json`](../data/claims.json) cites them.
 
 ## Deferred coverage
 
-The following facets were not exercised and stay `unverified`; each bullet gives
-its own reason:
+Each of these stays `unverified`, with its own reason:
 
-- **Crash-resume and exactly-once under kill** — smoke used `--checkpoint none`;
-  no SIGKILL, mid-checkpoint, or resume run (claims `crash-resume-works`,
+- **Crash-resume and exactly-once under kill** — no crash, SIGKILL or resume run
+  was performed, and neither observation run could have exercised it: a stdout
+  run gets an in-process memory-backed checkpoint (claims `crash-resume-works`,
   `exactly-once-under-crash`).
-- **Parquet / sorted-parquet fidelity** — needs a volume-mounting harness path to
-  capture and verify the dataset (claim `parquet-output-byte-exact`).
-- **Bounded memory at scale**, including `--sort` staging-disk and sort-memory
-  behavior (claim `bounded-memory-at-scale`).
-- **Edge-key fidelity** — `EDGE_BUCKET=none`; byte-exactness is proven only for
-  control-character-free keys (claims `text-sink-key-fidelity-ascii-only`,
+- **Parquet and sorted-Parquet execution and fidelity** — no such run was made at
+  v0.2.0, and none is capturable under a harness that mounts nothing; the earlier
+  exit-0 capability probes were against the v0.1.0 build and are not
+  re-established for this subject (claims `parquet-modes-execute`,
+  `parquet-output-byte-exact`).
+- **Bounded memory at scale** — the observed peak RSS figures are
+  JVM-baseline-dominated at this scale and probe no cliff (claim
+  `bounded-memory-at-scale`).
+- **Edge-key fidelity** — no edge corpus is configured (claim
   `control-char-key-fidelity-untested`).
-- **amd64 build and run** — only arm64 has build+run evidence (claim
-  `amd64-support-inferred`).
-- **Comparative and high-concurrency arms** — the `--max-parallel-listings` sweep,
-  AIMD necessity, and every cross-tool comparison (claims
+- **The seed-mode comparison** — both instrumented runs used the default shallow
+  seed, and the one `seed.mode=none` run captured output only, with no
+  `list_run_summary` counters, so no cost comparison of the two arms exists at
+  v0.2.0; the inherited direction was measured on the v0.1.0 build under a flag
+  spelling that no longer exists (claim `seed-cost-direction-at-smoke`).
+- **amd64 execution** — amd64 is supported across every channel, including a real
+  child manifest in the published index and dual-platform CI builds, but every run
+  here was native arm64 (claims `amd64-support-inferred`,
+  `arm64-never-runtime-smoked-upstream`).
+- **Concurrency above 8, AIMD necessity, and every comparative arm** — claims
   `parallelism-ratio-at-higher-concurrency`, `aimd-necessity`,
   `no-tool-combines-all-features`, `throughput-within-10pct-of-s3-fast-list`,
-  `may-lose-to-s3-fast-list-hinted`, `java-handicap-at-high-rates`,
-  `seed-cost-comparison`).
+  `s3-fast-list-published-throughput`, `may-lose-to-s3-fast-list-hinted`,
+  `java-handicap-at-high-rates`, `seed-cost-comparison`.
+- **Endpoint conformance and intra-page ordering** — the encoding hazards and the
+  missing ordering check are source-established and need a replay server or a
+  seeded edge corpus, not another listing run (claims
+  `plus-to-space-conditional-hazard`, `encoding-contract-not-validated`,
+  `no-intra-page-ordering-check`, `non-snapshot-pagination-misses-late-inserts`).

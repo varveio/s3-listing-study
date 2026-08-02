@@ -4,7 +4,7 @@
   "title": "Runnable tool capsule claims",
   "type": "object",
   "additionalProperties": false,
-  "required": ["$schema", "schema_version", "tool", "legacy_ledger", "claims"],
+  "required": ["$schema", "schema_version", "tool", "claims"],
   "properties": {
     "$schema": { "type": "string", "const": "../../../schemas/claims.schema.json" },
     "schema_version": { "type": "integer", "const": 1 },
@@ -30,7 +30,7 @@
     "claim": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "statement", "scope", "status", "disposition", "qualification", "legacy_origins", "evidence"],
+      "required": ["id", "statement", "scope", "status", "disposition", "qualification", "evidence"],
       "properties": {
         "id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
         "statement": { "type": "string", "minLength": 1 },
