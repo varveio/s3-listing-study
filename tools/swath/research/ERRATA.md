@@ -71,3 +71,49 @@ evidence than a clean ledger run.
 [`../../../docs/operating/tool-structure.md`](../../../docs/operating/tool-structure.md):
 derivation records are append-only, and `data/claims.json` is the canonical
 current record.
+
+## E2 — two propositions assert more than the source they cite
+
+Found by an independent adversarial review of `data/claims.json`. Both defects
+originate in these derivation records and were carried into the ledger; the
+ledger is corrected, these pages are not.
+
+**"Far-ahead is never worse than byte-midpoint" is wrong** —
+`report.md` § 2.4 and `reader-A-engine.md` (step-back) both conclude that the
+midpoint step-back is *what makes far-ahead never worse than byte-midpoint*. The
+cited state machine steps back to the midpoint **only when the initial probe
+finds the upper half empty** (`ThiefPolicy.afterInitialKeyProbe`); when the upper
+half is non-empty the far-ahead pivot is committed, so a distribution with nearly
+all its mass below the far-ahead pivot and a single key above it produces a
+split materially worse than the midpoint with no step-back. The step-back bounds
+the empty-upper case, not the sparse-upper case. The ledger claim, renamed
+`pivot-placement-is-multi-phase`, now says so.
+
+**Exactly-once for file sinks is design intent, not an established property** —
+`report.md` § 5 states `durable_cursor` gives "file sinks, exactly-once" from the
+schema anchors alone. The schema and `ResumeCommand` establish what the cursor
+means; they do not establish that part creation, part finalization, metadata
+persistence, cursor update and checkpoint deletion are atomically coordinated
+across a crash, and no fault-injection or read-back run was made. The ledger
+carries the design in `checkpoint-resume-design-exists` and the guarantee as
+`unverified` in `exactly-once-under-crash`, which previously contradicted each
+other.
+
+## E3 — the bucket-drift finding quantifies one prefix, and the drift is bucket-wide
+
+`report.md` § 8.4 records the smoke bucket's drift as "every object in
+`normals-hourly/` now reports `last_modified` 2026-07-22", and states the
+consequence as an `mtime` comparison that "would now fail on at least the
+`normals-hourly/` scope". Nothing there is false — the hedge is doing real work —
+but the figure a reader takes away is 2,549 objects, and the full comparison
+against the 2026-07-17 snapshot is **129,227 of 148,917 objects, 87 percent**,
+newest `2026-07-22T13:20:38Z`, with the key set unchanged. The prefix the report
+names is the fully-re-uploaded corner of a bucket-wide mtime refresh, not the
+extent of it.
+
+The study-level record in
+[`../../../docs/smoke-bucket.md`](../../../docs/smoke-bucket.md) carries the
+full figures, and [`../docs/running.md`](../docs/running.md) now states them
+where it owns the verifier caveat. The consequence changes with the number: an
+mtime-asserting verification against the current manifest fails across most of
+the bucket rather than on one prefix.

@@ -23,11 +23,11 @@ REQUIRED_FILES = {
     "data/tool.json", "data/claims.json", "docs/mechanism.md",
     "docs/running.md", "adapter/run.sh", "adapter/normalize.sh",
 }
-# The migration stratum is optional: a capsule has one exactly when
-# data/claims.json declares legacy_ledger, since that ledger is what names the
-# legacy origins the frozen page and conservation map account for. A capsule
-# with a ledger must ship both files; a born-canonical capsule must ship
-# neither, so the two never drift apart.
+# The migration stratum is optional: a capsule has one exactly when it appears
+# in MIGRATED_TOOLS below, and its data/claims.json must then declare the
+# legacy_ledger that names the legacy origins the frozen page and conservation
+# map account for. A capsule with a stratum must ship both files; a
+# born-canonical capsule must ship neither, so the two never drift apart.
 MIGRATION_FILES = {"research/tool-page.md", "research/claims-migration.md"}
 REQUIRED_H2 = {
     "At a glance", "How it works", "Modes and study coverage", "What we learned",
@@ -35,6 +35,26 @@ REQUIRED_H2 = {
     "Provenance", "Evidence boundary",
 }
 FIXTURE_TOOLS = {"s3p", "s4cmd"}
+# Which capsules came through the legacy consolidated layout. Whether a capsule
+# was migrated is a fact about its history, so it is declared here rather than
+# inferred from whether data/claims.json currently declares a legacy_ledger.
+# Inferring it made the stratum self-cancelling: a migrated capsule that deleted
+# its ledger, every legacy_origins field and both research files reclassified
+# itself as born-canonical and skipped the very preservation checks that exist to
+# object. The roster and the ledger are two independent records of one fact, and
+# the validator requires them to agree in both directions.
+#
+# What this does not close, deliberately: a change that edits both records
+# together still reads as consistent. That is the subject-retirement path in
+# docs/operating/tool-structure.md -- legitimate, and what happened to swath,
+# whose v0.1.0-era stratum was retired with its subject. No validator can tell an
+# argued retirement from an unargued deletion; what it can do is force the
+# deletion to appear on this line, where an owner-reviewed tools/ PR has to see
+# it. Removing a slug here is a decision, not a side effect.
+MIGRATED_TOOLS = {
+    "aws-cli", "minio-mc", "ps3", "rclone", "s3-fast-list",
+    "s3kor", "s3p", "s4cmd", "s5cmd", "s7cmd",
+}
 
 HISTORICAL_BANNER = re.compile(
     r"^> \*\*Historical landing page \(\d{4}-\d{2}-\d{2}, capsule migration\)\.\*\* This is the full\n"
@@ -103,6 +123,20 @@ def check_claim_schema_contract(schema_path: Path, errors: list[str]) -> None:
     def migrated(status: str, evidence: list[dict[str, str]]) -> dict[str, object]:
         return document(status, evidence, legacy_ledger=ledger, legacy_origins=["M1"])
 
+    def with_second_claim(
+        fixture: dict[str, object], legacy_origins: list[str] | None,
+    ) -> dict[str, object]:
+        # The half-present stratum needs two claims to express: one document,
+        # one claim conserving an origin and one not.
+        first = fixture["claims"][0]  # type: ignore[index]
+        second = dict(first)  # type: ignore[arg-type]
+        second["id"] = "schema-fixture-two"
+        if legacy_origins is None:
+            second.pop("legacy_origins", None)
+        else:
+            second["legacy_origins"] = legacy_origins
+        return {**fixture, "claims": [first, second]}
+
     run_evidence = [{"kind": "run", "receipt": "../receipts/fixture"}]
     valid = {
         "confirmed-run": migrated("confirmed", run_evidence),
@@ -114,6 +148,9 @@ def check_claim_schema_contract(schema_path: Path, errors: list[str]) -> None:
         "unverifiable-none": migrated("unverifiable", [{"kind": "none", "reason": "No surviving evidence."}]),
         "born-canonical-run": document("confirmed", run_evidence),
         "born-canonical-none": document("unverified", [{"kind": "none", "reason": "Not run."}]),
+        # The stratum rule is per-document, so it must not misfire on the
+        # ordinary migrated shape of several claims each conserving an origin.
+        "migrated-two-claims": with_second_claim(migrated("confirmed", run_evidence), ["M1"]),
     }
     invalid = {
         "confirmed-with-none": migrated("confirmed", [
@@ -152,6 +189,17 @@ def check_claim_schema_contract(schema_path: Path, errors: list[str]) -> None:
         ),
         "claim-empty-legacy-origins": document(
             "confirmed", run_evidence, legacy_ledger=ledger, legacy_origins=[],
+        ),
+        # Both directions of the all-or-nothing stratum rule, including the
+        # half-present shape a ledger plus a partially stripped claim set makes.
+        "ledger-without-claim-origins": document(
+            "confirmed", run_evidence, legacy_ledger=ledger, legacy_origins=None,
+        ),
+        "claim-origins-without-ledger": document(
+            "confirmed", run_evidence, legacy_ledger=None, legacy_origins=["M1"],
+        ),
+        "ledger-with-one-claim-missing-origins": with_second_claim(
+            migrated("confirmed", run_evidence), None,
         ),
     }
     for name, fixture in valid.items():
@@ -345,12 +393,29 @@ def main() -> int:
 
     tool_data = load_json(capsule / "data" / "tool.json", errors)
     claims_data = load_json(capsule / "data" / "claims.json", errors)
-    has_migration = isinstance(claims_data, dict) and "legacy_ledger" in claims_data
+    has_migration = args.tool in MIGRATED_TOOLS
+    declares_ledger = isinstance(claims_data, dict) and "legacy_ledger" in claims_data
+    if isinstance(claims_data, dict) and declares_ledger != has_migration:
+        if has_migration:
+            errors.append(
+                f"{args.tool} is listed as a migrated capsule (MIGRATED_TOOLS in "
+                "this script) but data/claims.json declares no legacy_ledger: a "
+                "migration stratum is removed only with its whole subject under "
+                "the subject-retirement rule, which removes the slug from that "
+                "roster in the same reviewed change"
+            )
+        else:
+            errors.append(
+                f"{args.tool} is not listed as a migrated capsule (MIGRATED_TOOLS "
+                "in this script) but data/claims.json declares a legacy_ledger: a "
+                "capsule that acquires a migration stratum records it in that roster"
+            )
     migration_regression = bool(args.migration_base) and has_migration
     if args.migration_base and not has_migration:
         errors.append(
             f"--migration-base {args.migration_base} given for a capsule with no "
-            "migration stratum: data/claims.json declares no legacy_ledger, so "
+            f"migration stratum: {args.tool} is not in MIGRATED_TOOLS, so either it "
+            "is born canonical or its stratum was retired with its subject, and "
             "there is no legacy base to regress against"
         )
 

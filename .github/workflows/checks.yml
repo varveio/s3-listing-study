@@ -90,26 +90,29 @@ jobs:
             python3 scripts/validate-tool-capsule.py --tool "$tool"
           done
 
-      - name: Source-anchor gate (self-test here; the real sweep runs locally)
+      - name: Source-anchor gate self-test (this job verifies no project anchor)
         # Every `source` evidence entry pins a repository, a commit, and often a
-        # line range in a checkout that does not live in this repo, and CI has
-        # no subject checkouts. With no --source-root the sweep therefore
-        # reports every anchor as skipped and passes: it proves the ledgers
-        # parse and prints the skip count, and verifies no anchor at all. A
-        # green tick for work not done is the failure mode this gate exists to
-        # prevent, so the step first runs the checker's self-test, which builds
-        # a throwaway repository and proves the gate still catches an
-        # out-of-range line range, a path missing at the cited commit, and a
-        # source root sitting on the wrong revision.
+        # line range in a checkout that does not live in this repo, and a hosted
+        # runner has none of those checkouts. So CI cannot verify a single
+        # project anchor, and this step no longer implies otherwise. A
+        # checkout-free sweep used to run here as well: with no --source-root it
+        # reported every anchor as skipped and exited 0, a green tick for work
+        # not done, which is the exact failure this gate exists to prevent. It
+        # is gone, and it verified nothing the capsule-validation step above
+        # does not already cover — that step parses and schema-checks every
+        # ledger. What remains is the checker's self-test, which builds a
+        # throwaway repository and proves the gate still catches an out-of-range
+        # line range, a path missing at the cited commit, a source root sitting
+        # on the wrong revision, a supplied checkout that would otherwise be
+        # silently ignored, and a prose label whose complete path names nothing
+        # at the commit.
         #
-        # The sweep that checks this repo's own anchors is run by whoever has
-        # the pinned checkouts, e.g.
-        #   python3 scripts/check-source-anchors.py --tool swath \
+        # The sweep over this repo's own anchors is run by whoever holds the
+        # pinned checkouts, with --require-checked so it cannot pass having
+        # checked nothing:
+        #   python3 scripts/check-source-anchors.py --tool swath --require-checked \
         #     --source-root /path/to/swath-at-cef8ec2
-        run: |
-          set -euo pipefail
-          python3 scripts/check-source-anchors.py --self-test
-          python3 scripts/check-source-anchors.py
+        run: python3 scripts/check-source-anchors.py --self-test
 
       - name: Markdown link check (current-state surfaces)
         run: python3 scripts/check-links.py

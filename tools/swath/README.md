@@ -18,9 +18,9 @@ The tested-subject facts are stated here; the canonical record is
 | --- | --- |
 | Tested subject | Upstream's own published image for `v0.2.0` — no fork, no patch, nothing built locally — pulled anonymously by digest, its `org.opencontainers.image.revision` label equal to the tested commit `cef8ec2`, self-reporting `swath 0.2.0 (cef8ec24a74f)`. The registry tag is `0.2.0`; `v0.2.0` is a 404. Run anonymously (`--no-sign-request`) at `--concurrency 8`, native arm64. Canonical identity: [`data/tool.json`](data/tool.json). |
 | Exercised coverage | All three stdout formats (`jsonl`, `tsv`, `table`) and both reachable seed modes (`shallow`, `seed.mode=none`): `jsonl` on the full bucket and one prefix, the other three modes once each on that prefix through the rewritten v0.2.0 adapter, all exit 0 and all normalizing to the same key set — claims `adapter-v020-modes-execute`, `cross-mode-key-set-agreement`. No Parquet, sorted-Parquet or resume run; no credentialed, edge-key, crash, or high-concurrency run. |
-| Correctness and verifier state | **No verifier verdict exists for any run**: the reference manifest was absent, so the shared verifier could not run. Completeness rests only on count-and-uniqueness against the registry's recorded figures — weaker than a manifest diff. Claim `smoke-output-complete-no-duplicates`. |
-| Receipts | **None.** The mandatory runner-security profile was not provisioned, so `harness/smoke-run.sh` was never used. Every runtime fact here rests on direct container observations — two instrumented runs plus four adapter-mode runs — and no claim on this subject is `confirmed`. |
-| Smoke observation | The full-bucket run exited 0 having emitted 148,917 JSON Lines rows with zero duplicate keys, and reported eight concurrent listings in flight — claims `smoke-output-complete-no-duplicates`, `full-run-reported-parallel-listings`. A single unreplicated groundwork run, counted by the tool itself: not a benchmark result and not comparable to anything. |
+| Correctness and verifier state | **No verifier verdict exists for any run**, and **no completeness check was performed**: count-and-uniqueness against the registry's recorded figures is the only cross-check, and it cannot detect a substituted key or compensating errors — claim `smoke-output-count-and-uniqueness`, with the reasons in [`docs/running.md`](docs/running.md#what-the-verifier-could-not-check). |
+| Receipts | **None**, and no claim on this subject is `confirmed`. Every runtime fact here is a direct container observation — two instrumented runs plus four adapter-mode runs. Why, in one place: [`docs/running.md`](docs/running.md#no-receipts-the-runner-security-blocker). |
+| Smoke observation | The full-bucket run exited 0 having emitted 148,917 JSON Lines rows with zero duplicate keys, and reported eight concurrent listings in flight — claims `smoke-output-count-and-uniqueness`, `full-run-reported-parallel-listings`. A single unreplicated groundwork run, counted by the tool itself: not a benchmark result and not comparable to anything. |
 | Results | No benchmark or comparative result exists. |
 
 ## How it works
@@ -71,15 +71,14 @@ resolve in [`data/claims.json`](data/claims.json).
   [`Engine defaults and the one supported rollback`](docs/mechanism.md#engine-defaults-and-the-one-supported-rollback)
   · `v020-engine-default-flips`, `engine-toggles-are-diagnostic`
 
-- **Nothing is receipt-backed and no verifier ran.** The runner-security profile
-  was not provisioned, so the harness wrapper was never used; the manifest was
-  absent, so no run has a verdict; and the registered bucket has drifted since
-  its snapshot. Completeness rests on count-and-uniqueness alone. The strongest
-  cross-check available was four listing modes normalizing to a byte-identical
-  key set on one prefix — engine-and-adapter consistency, not agreement with
-  ground truth, and four arms can agree while being wrong the same way.
+- **Nothing is receipt-backed and no verifier ran.** The strongest cross-check
+  available was four listing modes normalizing to a byte-identical key set on one
+  prefix — engine-and-adapter consistency, not agreement with ground truth, and
+  four arms can agree while being wrong the same way. The blockers, the absent
+  completeness check and the bucket's drift are stated once, in the linked
+  section.
   [`What the verifier could not check`](docs/running.md#what-the-verifier-could-not-check)
-  · `smoke-output-complete-no-duplicates`, `aimd-idle-at-smoke`,
+  · `smoke-output-count-and-uniqueness`, `aimd-idle-at-smoke`,
   `cross-mode-key-set-agreement`
 
 - **Several knobs a cross-tool comparison would reach for do not exist.** Page
@@ -109,8 +108,9 @@ resolve in [`data/claims.json`](data/claims.json).
   `exactly-once-under-crash`.
 - Every run was native arm64. amd64 is supported across every publishing channel,
   including a real child manifest in the published index, but was not exercised
-  here, and upstream never runtime-smokes arm64 because its runners are amd64 —
-  claims `amd64-support-inferred`, `arm64-never-runtime-smoked-upstream`.
+  here, and the v0.2.0 workflows do not runtime-smoke arm64 because its runners
+  are amd64 —
+  claims `amd64-built-and-smoked-upstream`, `arm64-not-runtime-smoked-at-v020`.
 
 ### Harness and verifier blockers
 
@@ -136,12 +136,14 @@ resolve in [`data/claims.json`](data/claims.json).
   `plus-to-space-conditional-hazard`.
 - Pages are assumed to arrive in ascending byte order and never checked — claim
   `no-intra-page-ordering-check`.
-- The project is new — created 2026-07-25, one contributor, two releases in six
-  days — and upstream's nightly deep-verification workflow had failed on every
-  visible run at the research date, while pull-request and `main` CI were green
-  ([`research/report.md`](research/report.md) § 9.4). The code
-  is careful and the prose has not caught up, which is claim
-  `docs-and-javadoc-drift`.
+- The project is new: ten days old at the 2026-08-02 research date, created
+  2026-07-25, with a single contributor — claim
+  `upstream-is-young-and-solo-maintained` — and two releases in six days, claim
+  `upstream-publishes-tagged-releases`. Upstream's nightly deep-verification
+  workflow had failed on every visible run at that date while pull-request and
+  `main` CI were green — claim `nightly-deep-verification-failing`. All three are
+  read from the GitHub APIs on one day and move with time. The code is careful
+  and the prose has not caught up, which is claim `docs-and-javadoc-drift`.
 
 ### Benchmark questions
 
@@ -149,9 +151,10 @@ resolve in [`data/claims.json`](data/claims.json).
   `seed.mode=none` versus `shallow` arm (the cleanest experiment Swath offers),
   the documented pre-0.2.0 rollback A/B, probe overhead versus scale, AIMD
   necessity under real throttling, memory at scale, Parquet fidelity and cost,
-  crash-resume under SIGKILL, and every cross-tool comparison. All currently
-  `unverified`; the full list with reasons is in
-  [`docs/running.md`](docs/running.md#deferred-coverage).
+  and crash-resume under SIGKILL. All currently `unverified`; the full list with
+  reasons is in [`docs/running.md`](docs/running.md#deferred-coverage).
+  Comparisons against other listers are not Swath's to hold: they live in
+  [`docs/open-questions.md`](../../docs/open-questions.md).
 
 ## Navigate this directory
 
@@ -181,20 +184,20 @@ frozen pre-restructure page, no conservation map, and no claim in
 [`data/claims.json`](data/claims.json) carries a legacy origin. Every claim
 states the v0.2.0 subject on its own evidence.
 
-The two runtime observations are the study's own. Neither is **a run record** in
-the harness sense: source reading is not a run record either, and nothing here
-was produced by the shared wrapper — see [`docs/running.md`](docs/running.md#no-receipts-the-runner-security-blocker).
+The two runtime observations are the study's own, and neither is **a run record**
+in the harness sense; source reading is not a run record either — see
+[`docs/running.md`](docs/running.md#no-receipts-the-runner-security-blocker).
 
 ## Evidence boundary
 
 Source and documentation can establish a mechanism or a risk; they cannot
 establish that a run behaved as designed. A committed receipt is what
-`confirmed` requires, and this subject has none. The runtime facts here are
-direct container observations — Swath's own self-reported counters and the rows
-it emitted — from single unreplicated runs, two of them instrumented, with no
-verifier verdict. They are
-groundwork observations, not benchmark results, and no number here is
-comparative.
+`confirmed` requires, and this subject has
+[none](docs/running.md#no-receipts-the-runner-security-blocker). The runtime
+facts here are direct container observations — Swath's own self-reported
+counters and the rows it emitted — from single unreplicated runs, two of them
+instrumented. They are groundwork observations, not benchmark results, and no
+number here is comparative.
 
 ## Varve and Swath
 
@@ -210,6 +213,6 @@ receipts and no verifier verdict. Swath's earlier internal benchmark history is
 structural control on the first-party source basis is that the v0.2.0 derivation
 was source-first and deliberately blind, every claim is anchored, and an
 independent cross-model review re-verified the anchors — claim
-`first-party-private-source-basis`. We welcome help from people who know the
+`first-party-source-basis`. We welcome help from people who know the
 other tools better; the run records are published so readers can inspect and
 improve the setup.

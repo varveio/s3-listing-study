@@ -25,7 +25,7 @@
 # silently invent keys, so tsv/table REFUSE such a row instead. Only the JSONL
 # and Parquet paths are faithful for control-char keys — JSON escaping is
 # invertible because it escapes the backslash. See claims
-# `text-sink-key-fidelity-ascii-only`, `jsonl-escaping-is-invertible`,
+# `text-sink-key-encoding-is-lossy`, `jsonl-escaping-is-invertible`,
 # `control-char-key-fidelity-untested`. Not exercised on the registered bucket,
 # whose keys are ASCII.
 #
@@ -43,6 +43,15 @@ PREFIX="${2:-}"; : "$PREFIX"   # accepted, deliberately unused (see header)
 
 die() { printf 'normalize.sh(swath/%s): %s\n' "$MODE" "$*" >&2; exit 3; }
 
+# A downstream reader that closes early (`head`, an aborted verifier) delivers
+# SIGPIPE, which is not a data-fidelity failure and must not be reported as one.
+# 141 = 128+13. Every branch routes its exit status through this.
+pipe_or_die() {
+  if [ "$1" -ne 0 ] && [ "$1" -ne 141 ]; then
+    die "rejected (exit $1; the message above says why)"
+  fi
+}
+
 # Refuse a \xHH control escape rather than decode it (not invertible, see header).
 guard_esc='if (k ~ /\\x[0-9a-f][0-9a-f]/) {
     printf "normalize.sh: key carries a swath \\xHH control escape, which is not invertible (the backslash is not escaped). Re-run this scope with --format jsonl. Offending key: %s\n", k > "/dev/stderr"; exit 3 }'
@@ -56,12 +65,21 @@ case "$MODE" in
   # swath emits: key size last_modified etag storage_class row_type
   # contract is: key size etag           mtime            storage_class
   recursive-tsv|seed-none)
+    # Field-count is validated BEFORE the row_type filter, deliberately. A key
+    # containing a TAB shifts every native column right, so $6 lands on
+    # storage_class ("STANDARD") rather than row_type; filtering first would
+    # read that as a non-object and skip the row silently, turning an
+    # unrepresentable key into missing output with exit 0. Counting first turns
+    # the same row into a loud refusal.
+    set +e
     awk -F'\t' -v OFS='\t' '
       NR==1 && $1=="key" && $2=="size" && $3=="last_modified" { next }   # header
       NF==0 { next }
+      {
+        if (NF != 6) { printf "normalize.sh: expected 6 tsv columns, got %d on line %d — a key containing a TAB shifts the columns and is unrepresentable in the 5-field contract\n", NF, NR > "/dev/stderr"; exit 3 }
+      }
       $6 != "" && $6 != "OBJECT" { next }                                # objects only
       {
-        if (NF != 6) { printf "normalize.sh: expected 6 tsv columns, got %d on line %d\n", NF, NR > "/dev/stderr"; exit 3 }
         k=$1; sz=$2; mt=$3; et=$4; sc=$5
         '"$guard_esc"'
         '"$guard_sep"'
@@ -70,7 +88,10 @@ case "$MODE" in
         if (et=="") et="-"; if (sc=="") sc="-"
         gsub(/^"|"$/, "", et)          # defensive; swath already stores ETags unquoted
         print k, sz, et, mt, sc
-      }' ;;
+      }'
+    awk_rc=$?
+    set -e
+    pipe_or_die "$awk_rc" ;;
 
   # ---- JSONL: no header, nullable fields OMITTED (never null) ---------------
   # Key on field NAMES, never position. The TAB/newline guard runs inside jq on
@@ -108,6 +129,7 @@ case "$MODE" in
   # separator spaces are asserted and the row refused if they are missing — a
   # silent mis-slice would fabricate keys.
   recursive-table)
+    set +e
     awk '
       length($0) < 43 { printf "normalize.sh: table line %d shorter than the 42-byte fixed prefix\n", NR > "/dev/stderr"; exit 3 }
       {
@@ -118,10 +140,17 @@ case "$MODE" in
         '"$guard_esc"'
         '"$guard_sep"'
         sub(/\.[0-9]+Z$/, "Z", mt)
-        if (sz=="" || sz=="PRE" || sz=="-") sz="-"   # PRE=common prefix, -=delete marker
+        # PRE marks a common prefix and "-" a delete marker. Neither is an
+        # object, and the contract is one row per object, so they are skipped
+        # rather than emitted with a "-" size — emitting them would fabricate
+        # object records that the manifest cannot match.
+        if (sz=="PRE" || sz=="-" || sz=="") next
         if (mt=="") mt="-"
         printf "%s\t%s\t-\t%s\t-\n", k, sz, mt        # table exposes no etag/storage_class
-      }' ;;
+      }'
+    awk_rc=$?
+    set -e
+    pipe_or_die "$awk_rc" ;;
 
   *)
     die "unknown mode (expected recursive-tsv|recursive-jsonl|recursive-table|seed-none; the parquet modes are directory sinks and are not stdout-capturable)" ;;

@@ -333,7 +333,7 @@ them by this table:
 | --- | --- | --- |
 | `receipts/` | Immutable evidence | Permanent while the capsule describes the subject they record; removed only with a subject retirement (below) |
 | `research/report.md`, `reconciliation.md`, `codex-review.md` | Append-only derivation records | Retirable only through a deliberate promote-or-waive pass at repo finalization |
-| Migration stratum — `research/tool-page.md`, `research/claims-migration.md`, `legacy_origins` in `claims.json`, the validator's conservation checks, and the playbook | Frozen once proven | Sealed at wave end; not deleted |
+| Migration stratum — `research/tool-page.md`, `research/claims-migration.md`, `legacy_origins` in `claims.json`, the validator's conservation checks, and the playbook | Frozen once proven | Sealed at wave end; removed only with the whole subject under subject retirement (below), never on its own |
 | `README.md`, `docs/`, `data/` | Living | Kept current |
 
 Receipts are the product every `confirmed` claim cites, so they are never
@@ -345,10 +345,25 @@ retire that subject wholesale — its receipts, its derivation records, and its
 migration stratum together. The rule is all-or-nothing and its rationale is that
 run records for a subject the capsule no longer describes are worse than absent:
 a reader finds them under `receipts/` and reasonably reads them as evidence
-about the current subject. A retirement must leave no claim citing the removed
-evidence, and the records remain in git history. Retiring *some* of a subject's
-receipts while keeping others is not permitted — that is the tidying this rule
-exists to forbid. `swath` is the worked example: its v0.1.0-era receipts,
+about the current subject. Four conditions bind it, and all four are checkable after the fact:
+
+1. **The criterion is result-independent.** Retirement is permitted because the
+   subject was superseded and never released — never because of what its
+   evidence showed. A retirement argued from an inconvenient result is
+   prohibited, and the argument must be recorded before the deletion.
+2. **A tombstone survives.** The capsule records what was retired, when, why,
+   and the commit at which the records remain reachable. Deletion may remove the
+   files; it may not remove the fact that they existed.
+3. **No dangling references.** No claim, page or index may cite the removed
+   evidence afterwards, and the reference audit is part of the retirement.
+4. **All-or-nothing.** Retiring *some* of a subject's receipts while keeping
+   others is not permitted — that is exactly the tidying the never-delete rule
+   exists to forbid.
+
+Condition 1 is the one that matters and the one a reader cannot verify from the
+diff alone, which is why it is written down: the rule is deliberately easier to
+audit than to abuse, but it is not self-enforcing, and an owner who wanted to
+bury a result could satisfy conditions 2 through 4 while lying about 1. `swath` is the worked example: its v0.1.0-era receipts,
 research and stratum were retired together when the capsule moved to v0.2.0.
 
 The derivation records otherwise retire only once their conclusions are

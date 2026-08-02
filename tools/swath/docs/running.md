@@ -21,26 +21,28 @@ subject.
 `manifest unknown`, which will catch anyone who copies the git tag — the git tag
 *is* `v`-prefixed, and release version discipline is mechanical: a release fails
 unless the git tag equals `v` plus the Gradle version — claim
-`no-releases-or-tags`.
+`upstream-publishes-tagged-releases`.
 
 The image binds itself to source: both per-arch config blobs carry
 `org.opencontainers.image.revision` equal to the pinned commit `cef8ec2`, so the
 source-to-image link is embedded in the artifact rather than recorded only in a
-build receipt — claim `image-source-binding-agent-asserted`. The jar inside it is
+build receipt — claim `image-label-binds-to-source-commit`. The jar inside it is
 the release build job's own uber-jar, promoted by a build-context override and
 checksum-verified before use. The running image self-reports `swath 0.2.0
-(cef8ec24a74f)` — claim `reported-version-is-snapshot`. The label read, the
+(cef8ec24a74f)` — claim `image-self-reports-v020`. The label read, the
 manifest fetch and the `--version` probe were all direct container observations
 with no receipt.
 
 At this revision the repository is public, carries an Apache-2.0 licence and a
 `NOTICE` naming Varve Systems Ltd, and publishes tagged releases — claims
-`repo-is-private-prerelease`, `no-license-dangling-reference`,
-`no-releases-or-tags`.
+`repo-is-public-at-v020`, `license-is-apache-2-0-with-notice`,
+`upstream-publishes-tagged-releases`.
 
 **Build route, if you need one.** Not used here. Swath is Java on a JDK 25
-toolchain with no toolchain auto-provisioning configured, so a bare host needs a
-local JDK 25 — claim `language-is-java`. `docker build .` from the repo root is
+toolchain, and neither settings file registers a toolchain resolver — the
+mechanism Gradle needs before it can auto-provision — so on the build files
+inspected a bare host needs a local JDK 25 already installed — claim
+`language-is-java`. `docker build .` from the repo root is
 self-contained; only CI substitutes the promoted jar.
 
 ## No receipts: the runner-security blocker
@@ -72,24 +74,32 @@ labelled as observations, not receipts.
 compound.
 
 First, the reference manifest artifact is absent from this box, so
-`harness/verify-listing.sh` could not be run at all. Completeness rests only on
-count-and-uniqueness against the registry's recorded figures in
-[`../../../docs/smoke-bucket.md`](../../../docs/smoke-bucket.md). That is
-strictly weaker than a manifest diff: it can detect a missing or duplicated key
-in aggregate, but it cannot detect a substituted key, a corrupted key, or
-compensating errors — claim `smoke-output-complete-no-duplicates`. Cross-mode
+`harness/verify-listing.sh` could not be run at all. **No completeness check was
+performed**; the only cross-check is count-and-uniqueness against the registry's
+recorded figures in
+[`../../../docs/smoke-bucket.md`](../../../docs/smoke-bucket.md). That does not
+establish completeness at all: a substituted key, a corrupted key, or a missing
+key compensated by an extra one leaves both the count and the uniqueness intact
+— claim `smoke-output-count-and-uniqueness`. Cross-mode
 agreement does not substitute for it either: four listing modes normalizing to
 the same key set (claim `cross-mode-key-set-agreement`) constrains the engine
 and the adapter against each other, never against ground truth.
 
-Second, the registered smoke bucket has drifted since its 2026-07-17 snapshot.
-Every object under `normals-hourly/` now reports `last_modified` 2026-07-22 — a
-re-upload that moved mtimes while leaving the key set intact (exact count match
-at both scopes, zero duplicates at full-bucket scope). This is a fact about the
-third-party bucket, not a finding about Swath, and re-baselining is the
-orchestrator's decision. The practical consequence is direct: an mtime-asserting
-verification against the 2026-07-17 manifest would now fail on that scope, and
-would fail correctly.
+Second, the registered smoke bucket has drifted since its 2026-07-17 snapshot,
+and the drift is bucket-wide rather than localised. Comparing the full-bucket
+listing against that snapshot, **129,227 of 148,917 objects — 87 percent — now
+report a `last_modified` later than the snapshot date**, the newest
+`2026-07-22T13:20:38Z`; under `normals-hourly/` it is every object. The key set
+itself is unchanged: 148,917 keys, exact count match at both scopes, zero
+duplicates at full-bucket scope. So the key column looks stable while the mtime
+column is stale for most of the bucket. This is a fact about the third-party
+bucket, not a finding about Swath; the figures are those of the study's own
+drift note in
+[`../../../docs/smoke-bucket.md`](../../../docs/smoke-bucket.md), and
+re-baselining is the orchestrator's decision. The practical
+consequence is direct and large: an mtime-asserting verification against the
+2026-07-17 manifest would now report mismatches on most of the bucket, and would
+report them correctly.
 
 Elsewhere in this capsule this caveat appears as a short clause with a link back
 here, never re-derived.
@@ -122,15 +132,20 @@ What they settle, each with its own limits:
   runs listed anonymously and exited 0 — claim `anonymous-listing-supported`.
 - **The full run emitted 148,917 JSONL rows with zero duplicate keys**, matching
   the registry's recorded count for the bucket — claim
-  `smoke-output-complete-no-duplicates`, with the verification limits above. The
+  `smoke-output-count-and-uniqueness`, with the verification limits above. The
   zero-duplicate result is consistent with the disjointness design of
-  [`mechanism.md`](mechanism.md#the-range-model-and-why-output-is-exactly-once-by-construction)
+  [`mechanism.md`](mechanism.md#the-range-model-and-why-no-deduplication-pass-exists)
   but does not verify it.
 - **The LISTs ran in parallel.** The full run reported eight concurrent listings
   in flight with nineteen splits and twenty-five steals — claim
-  `full-run-reported-parallel-listings`. Both scopes reached the configured
-  ceiling of eight, the small prefix from forty-eight seed ranges with zero
-  splits — claim `peak-concurrency-is-scope-dependent`.
+  `full-run-reported-parallel-listings`. Both runs reached the same figure: peak
+  in flight was eight, the configured ceiling, at both scopes — claim
+  `peak-in-flight-reached-ceiling-at-both-scopes`. What differed was how they got
+  there, not how far they got: the prefix reached eight after 246 ms from
+  forty-eight seed ranges with zero splits, the full bucket after 1,922 ms from
+  five seed ranges with nineteen splits. Two unreplicated runs at one
+  `--concurrency` setting settle two split histories, not a relationship between
+  scope and peak concurrency.
 - **The AIMD controller never engaged.** Both runs recorded zero throttle events,
   zero transient events, zero AIMD votes and zero errors against this clean
   public bucket — claim `aimd-idle-at-smoke`. That settles that AIMD did not fire
@@ -145,8 +160,10 @@ What they settle, each with its own limits:
   claim `non-worker-page-call-share`. The captured counters do not decompose that
   residue into seed, structure and pivot classes, and settling it needs `-vv`
   capture.
-- **Timestamps came out second-precision with an explicit `Z`**, spanning
-  2025-11-24 to 2026-07-22 with no fractional part — claim
+- **Timestamps came out second-precision with an explicit `Z`.** The retained
+  evidence is a three-row sample from each run — six rows spanning 2025-11-24 to
+  2026-07-22, none with a fractional part. The complete outputs were not kept, so
+  nothing here covers either full output — claim
   `timestamp-precision-is-variable`.
 - **Both runs executed natively on arm64** and, because a stdout run still opens
   an in-process SQLite database, they loaded the SQLite JDBC driver and its
@@ -221,9 +238,11 @@ on stderr at `-v`, which is where every counter above came from — claim
 
 ## Mode-by-mode coverage
 
-Swath v0.2.0 offers ten modes — three text formats, Parquet as a single-file sink
-and as a directory dataset, sorted Parquet, the `resume` subcommand, and three
-seed modes — claim `mode-inventory-v020`.
+Swath v0.2.0 offers nine executable modes — three text formats, Parquet as a
+single-file sink and as a directory dataset, sorted Parquet, the `resume`
+subcommand, and two reachable seed modes — plus `seed.mode=hints`, which is
+declared and rejected at seed time and so is not an executable mode at all —
+claim `mode-inventory-v020`.
 
 | Mode | Status in this pass | Why |
 | --- | --- | --- |
@@ -291,15 +310,20 @@ Each of these stays `unverified`, with its own reason:
   v0.2.0 (claim `seed-cost-direction-at-smoke`).
 - **amd64 execution** — amd64 is supported across every channel, including a real
   child manifest in the published index and dual-platform CI builds, but every run
-  here was native arm64 (claims `amd64-support-inferred`,
-  `arm64-never-runtime-smoked-upstream`).
-- **Concurrency above 8, AIMD necessity, and every comparative arm** — claims
-  `parallelism-ratio-at-higher-concurrency`, `aimd-necessity`,
-  `no-tool-combines-all-features`, `throughput-within-10pct-of-s3-fast-list`,
-  `s3-fast-list-published-throughput`, `may-lose-to-s3-fast-list-hinted`,
-  `java-handicap-at-high-rates`, `seed-cost-comparison`.
+  here was native arm64 (claims `amd64-built-and-smoked-upstream`,
+  `arm64-not-runtime-smoked-at-v020`).
+- **Concurrency above 8, AIMD necessity, and JVM cost at high list rates** — no
+  run here went above `--concurrency 8`, nothing throttled, and neither run was a
+  high-rate one (claims `parallelism-ratio-at-higher-concurrency`,
+  `aimd-necessity`, `java-handicap-at-high-rates`).
 - **Endpoint conformance and intra-page ordering** — the encoding hazards and the
   missing ordering check are source-established and need a replay server or a
   seeded edge corpus, not another listing run (claims
   `plus-to-space-conditional-hazard`, `encoding-contract-not-validated`,
   `no-intra-page-ordering-check`, `non-snapshot-pagination-misses-late-inserts`).
+
+Comparative arms are deliberately not listed here. A question that spans several
+tools — how Swath's throughput or its seeding cost compares with another
+lister's, or which tools combine which features — has one owning location,
+[`../../../docs/open-questions.md`](../../../docs/open-questions.md), and is not
+restated on a tool's page.

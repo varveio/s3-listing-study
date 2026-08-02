@@ -26,6 +26,14 @@
     },
     "claims": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/claim" } }
   },
+  "allOf": [
+    {
+      "$comment": "The migration stratum is all-or-nothing across the document. A capsule that declares legacy_ledger must carry legacy_origins on every claim: conservation is an accounting of the whole legacy page, so a claim that opts out silently removes origins from the count with nothing to object. A born-canonical capsule must carry it on none, since there is no ledger for an origin to name.",
+      "if": { "required": ["legacy_ledger"] },
+      "then": { "properties": { "claims": { "items": { "required": ["legacy_origins"] } } } },
+      "else": { "properties": { "claims": { "items": { "not": { "required": ["legacy_origins"] } } } } }
+    }
+  ],
   "$defs": {
     "claim": {
       "type": "object",

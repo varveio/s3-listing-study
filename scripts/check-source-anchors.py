@@ -17,6 +17,15 @@ supplied with `--source-root` (repeatable, `PATH` or `REPOSITORY=PATH`). A root
 is used for a repository only when its HEAD is the commit the evidence cites: a
 check against the wrong revision is worse than no check. Anchors with no root
 for their repository are reported as skipped with a count, never as passing.
+
+Three rules keep a skip from reading as a pass. A supplied root that no anchor
+ever resolved to is an error, not a silent no-op — the bare-`PATH` form is
+associated only by sitting on the cited commit, so one revision out of date it
+matches nothing and would otherwise be ignored behind a zero exit. A Markdown
+label that spells a complete path naming nothing at the commit fails, since only
+an elided or ambiguous label is prose being imprecise. And `--require-checked`
+fails a run that verified no anchor at all, so an invocation whose green tick is
+meant to mean "anchors were checked" cannot mean anything less.
 """
 
 from __future__ import annotations
@@ -64,6 +73,7 @@ class SourceRoot:
         self.path = path
         self.head = ""
         self.identities: set[str] = set()
+        self.used = False  # set by run(): did any anchor resolve to this root?
         if label:
             self.identities.add(normalize_repository(label))
 
@@ -228,23 +238,38 @@ def tree_files(root: SourceRoot, commit: str, cache: dict) -> set[str]:
     return cache[key]
 
 
-def resolve_best_effort_path(anchor: Anchor, root: SourceRoot, cache: dict) -> str | None:
+def resolve_best_effort_path(
+    anchor: Anchor, root: SourceRoot, cache: dict,
+) -> tuple[str | None, str | None]:
     """Resolve an abbreviated prose path (.../Foo.java, …Foo.java, Foo.java).
 
-    Returns the one file at the commit it can only mean, or None when the
-    abbreviation is ambiguous or matches nothing — prose anchors are free-form,
-    so an unresolved one is reported as skipped, not as a missing file.
+    Returns (path, None) for the one file at the commit the label can only
+    mean; (None, None) when the label is genuinely abbreviated or ambiguous,
+    which prose is allowed to be, so it is reported as skipped; and
+    (None, reason) when the label spelled a complete path — no elision marker,
+    more than one segment — that names nothing at the commit and is a suffix of
+    nothing there either. That is a typo (`src/Missing.java`), not an
+    approximation, and counting it as skipped let a demonstrably bad anchor
+    read as one nobody could check.
     """
     files = tree_files(root, anchor.commit, cache)
     # Strip only an explicit elision marker: a bare leading "." is part of a
     # real path (.github/workflows/ci.yml).
-    suffix = re.sub(r"^(?:\.\.\.|…)+/?", "", anchor.path)
+    elided = re.match(r"^(?:\.\.\.|…)+/?", anchor.path)
+    suffix = anchor.path[elided.end():] if elided else anchor.path
     if suffix in files:
-        return suffix
+        return suffix, None
     candidates = [path for path in files if path.endswith("/" + suffix)]
     if not candidates and "/" not in suffix:
         candidates = [path for path in files if path.rpartition("/")[2].endswith(suffix)]
-    return candidates[0] if len(candidates) == 1 else None
+    if len(candidates) == 1:
+        return candidates[0], None
+    if not candidates and not elided and "/" in suffix:
+        return None, f"path does not exist at {anchor.commit[:7]}"
+    # No candidates for a bare filename stays skippable: prose names classes and
+    # generated files that legitimately are not paths in the tree. Several
+    # candidates stays skippable in every form: the label really is ambiguous.
+    return None, None
 
 
 def file_lines(root: SourceRoot, commit: str, path: str, cache: dict) -> int | str:
@@ -311,6 +336,7 @@ class Outcome(NamedTuple):
     refused: int  # anchors those refusals cover
     skipped: dict[tuple[str, str], int]  # (repository, commit) -> anchor count
     unresolved: dict[str, int]  # commit -> Markdown labels whose path did not resolve
+    unused: list[str]  # one line per supplied root no anchor ever resolved to
 
 
 def run(anchors: list[Anchor], roots: list[SourceRoot]) -> Outcome:
@@ -321,21 +347,28 @@ def run(anchors: list[Anchor], roots: list[SourceRoot]) -> Outcome:
     refused: dict[tuple[str, str, str, str], int] = {}
     skipped: dict[tuple[str, str], int] = {}
     unresolved: dict[str, int] = {}
+    for root in roots:
+        root.used = False
     for anchor in anchors:
         root = resolve_root(anchor, roots)
         if root is None:
             key = (anchor.repository or "(no repository cited)", anchor.commit)
             skipped[key] = skipped.get(key, 0) + 1
             continue
+        root.used = True
         if not root.is_at(anchor.commit):
             key = (str(root.path), root.head, anchor.repository or "cited", anchor.commit)
             refused[key] = refused.get(key, 0) + 1
             continue
         path = anchor.path
         if anchor.best_effort:
-            path = resolve_best_effort_path(anchor, root, trees)
-            if path is None:
+            path, unresolvable = resolve_best_effort_path(anchor, root, trees)
+            if path is None and not unresolvable:
                 unresolved[anchor.commit] = unresolved.get(anchor.commit, 0) + 1
+                continue
+            if path is None:
+                checked += 1  # the label was resolved far enough to be wrong
+                failures.append(anchor.failure(unresolvable))
                 continue
         checked += 1
         reason = check_anchor(anchor, root, path, blobs)
@@ -346,24 +379,58 @@ def run(anchors: list[Anchor], roots: list[SourceRoot]) -> Outcome:
         f"{commit[:7]} — refusing to check {count} anchor(s) against the wrong revision"
         for (path, head, repository, commit), count in sorted(refused.items())
     ]
-    return Outcome(checked, failures, refusals, sum(refused.values()), skipped, unresolved)
+    # A root the caller supplied and this never used is not a neutral fact: the
+    # caller believes they handed over a checkout and got a verdict about it. The
+    # bare-PATH form makes that easy to hit -- a checkout with no remote naming
+    # the cited repository is associated only by sitting on the cited commit, so
+    # one revision out of date it matches nothing at all and every anchor it was
+    # meant to answer for is merely skipped. Say so, and fail.
+    unused = [
+        f"source root {root.path} was never used: "
+        + (
+            f"it names no repository (no remote, and no REPOSITORY= label)"
+            if not root.identities
+            else f"it names {', '.join(sorted(root.identities))}"
+        )
+        + f" and its HEAD {root.head[:7]} is not a commit any anchor in scope "
+        "cites — a supplied checkout must be checked against or refused, never "
+        "silently ignored"
+        for root in roots if not root.used
+    ]
+    return Outcome(
+        checked, failures, refusals, sum(refused.values()), skipped, unresolved, unused,
+    )
 
 
 def self_test() -> int:
     """Prove the gate still catches the defect class, without a subject checkout.
 
     Builds a throwaway repository whose first commit holds a 38-line file and
-    whose second commit does not, then exercises the five behaviours the gate
-    exists for. Offline, git-only, no fixture files in the tree.
+    whose second commit does not, then exercises the behaviours the gate exists
+    for. Offline, git-only, no fixture files in the tree.
     """
     identity = "https://example.invalid/subject"
     author = ("-c", "user.email=gate@example.invalid", "-c", "user.name=gate")
     failed: list[str] = []
+    cases = 0
+
+    def case(held: bool, complaint: str) -> None:
+        """Record one behaviour, so the reported case count cannot drift."""
+        nonlocal cases
+        cases += 1
+        if not held:
+            failed.append(complaint)
+
     with tempfile.TemporaryDirectory() as workspace:
         subject = Path(workspace) / "subject"
         (subject / "src").mkdir(parents=True)
         source = subject / "src" / "Small.java"
         source.write_text("\n".join(f"line {n}" for n in range(1, 39)) + "\n", encoding="utf-8")
+        # Two files sharing a basename, so an abbreviated prose label can be
+        # genuinely ambiguous rather than merely absent.
+        for folder in ("a", "b"):
+            (subject / folder).mkdir()
+            (subject / folder / "Dup.java").write_text("only line\n", encoding="utf-8")
         git(subject, "init", "-q", "-b", "main")
         git(subject, "add", "-A")
         git(subject, *author, "commit", "-q", "-m", "seed")
@@ -377,8 +444,12 @@ def self_test() -> int:
         def anchor(path: str, lines: str | None) -> list[Anchor]:
             return [Anchor("fixture", "fixture-claim", identity, pinned, path, lines)]
 
-        def source_root(path: Path) -> SourceRoot:
-            root = SourceRoot(path, identity)
+        def prose(path: str, lines: str | None) -> list[Anchor]:
+            # A Markdown [SRC] label: best-effort, and carrying no repository.
+            return [Anchor("fixture", "notes.md:1", None, pinned, path, lines, True)]
+
+        def source_root(path: Path, label: str | None = identity) -> SourceRoot:
+            root = SourceRoot(path, label)
             problem = root.probe()
             if problem:
                 failed.append(problem)
@@ -388,20 +459,75 @@ def self_test() -> int:
         moved_root = source_root(subject)  # HEAD is the later commit
 
         outcome = run(anchor("src/Small.java", "10-38"), [pinned_root])
-        if outcome.checked != 1 or outcome.failures or outcome.refusals:
-            failed.append(f"in-range anchor did not pass cleanly: {outcome}")
+        case(
+            outcome.checked == 1 and not outcome.failures and not outcome.refusals,
+            f"in-range anchor did not pass cleanly: {outcome}",
+        )
         outcome = run(anchor("src/Small.java", "85-107"), [pinned_root])
-        if not any("past end of file" in failure for failure in outcome.failures):
-            failed.append(f"out-of-range anchor not caught: {outcome.failures}")
+        case(
+            any("past end of file" in failure for failure in outcome.failures),
+            f"out-of-range anchor not caught: {outcome.failures}",
+        )
         outcome = run(anchor("src/Gone.java", "1"), [pinned_root])
-        if not any("does not exist" in failure for failure in outcome.failures):
-            failed.append(f"missing path not caught: {outcome.failures}")
+        case(
+            any("does not exist" in failure for failure in outcome.failures),
+            f"missing path not caught: {outcome.failures}",
+        )
         outcome = run(anchor("src/Small.java", "85-107"), [moved_root])
-        if outcome.checked or outcome.failures or outcome.refused != 1:
-            failed.append(f"wrong-revision root was not refused: {outcome}")
+        case(
+            not outcome.checked and not outcome.failures and outcome.refused == 1,
+            f"wrong-revision root was not refused: {outcome}",
+        )
         outcome = run(anchor("src/Small.java", "1"), [])
-        if outcome.checked or sum(outcome.skipped.values()) != 1:
-            failed.append(f"anchor with no source root was not skipped: {outcome}")
+        case(
+            not outcome.checked and sum(outcome.skipped.values()) == 1,
+            f"anchor with no source root was not skipped: {outcome}",
+        )
+
+        # The documented bare-PATH form: a checkout with no remote naming the
+        # cited repository is associated only by sitting on the cited commit.
+        # One revision out of date it matches nothing, and used to be ignored in
+        # silence behind a zero exit.
+        outcome = run(anchor("src/Small.java", "1"), [source_root(subject, None)])
+        case(
+            not outcome.checked and len(outcome.unused) == 1
+            and sum(outcome.skipped.values()) == 1,
+            f"unusable bare-PATH source root was not refused: {outcome}",
+        )
+        outcome = run(anchor("src/Small.java", "10-38"), [source_root(pinned_checkout, None)])
+        case(
+            outcome.checked == 1 and not outcome.failures and not outcome.unused,
+            f"bare-PATH root at the cited commit did not check: {outcome}",
+        )
+
+        # Prose labels are best-effort, but only where prose is actually
+        # imprecise: an elided or ambiguous path is skippable, a complete one
+        # that names nothing at the commit is a defect like any other.
+        outcome = run(prose("src/Missing.java", "1"), [pinned_root])
+        case(
+            any("does not exist" in failure for failure in outcome.failures),
+            f"complete-but-absent Markdown path was not failed: {outcome}",
+        )
+        outcome = run(prose(".../Missing.java", "1"), [pinned_root])
+        case(
+            not outcome.failures and sum(outcome.unresolved.values()) == 1,
+            f"elided Markdown path was not skipped: {outcome}",
+        )
+        outcome = run(prose("Dup.java", "1"), [pinned_root])
+        case(
+            not outcome.failures and sum(outcome.unresolved.values()) == 1,
+            f"ambiguous Markdown path was not skipped: {outcome}",
+        )
+        outcome = run(prose(".../Small.java", "10-38"), [pinned_root])
+        case(
+            outcome.checked == 1 and not outcome.failures,
+            f"resolvable elided Markdown path was not checked: {outcome}",
+        )
+        outcome = run(prose(".../Small.java", "85-107"), [pinned_root])
+        case(
+            any("past end of file" in failure for failure in outcome.failures),
+            f"out-of-range Markdown anchor not caught: {outcome.failures}",
+        )
         git(subject, "worktree", "remove", "--force", str(pinned_checkout))
 
     for case in failed:
@@ -409,7 +535,7 @@ def self_test() -> int:
     if failed:
         print(f"check-source-anchors: self-test failed ({len(failed)} case(s))", file=sys.stderr)
         return 1
-    print("check-source-anchors: self-test passed (5 case(s))")
+    print(f"check-source-anchors: self-test passed ({cases} case(s))")
     return 0
 
 
@@ -429,6 +555,14 @@ def main() -> int:
         help=(
             "also check inline [SRC path:lines @ shortsha] labels (best-effort); "
             "with no PATH, every Markdown page in the selected capsules"
+        ),
+    )
+    parser.add_argument(
+        "--require-checked", action="store_true",
+        help=(
+            "fail when the run verified no anchor at all; pass it wherever a "
+            "green result is meant to mean anchors were checked, so a sweep "
+            "with no usable checkout cannot read as a clean one"
         ),
     )
     parser.add_argument(
@@ -474,7 +608,13 @@ def main() -> int:
 
     outcome = run(anchors, roots)
     errors.extend(outcome.refusals)
+    errors.extend(outcome.unused)
     errors.extend(outcome.failures)
+    if args.require_checked and not outcome.checked:
+        errors.append(
+            f"--require-checked: this run verified 0 of {len(anchors)} anchor(s) in "
+            "scope — a sweep that checked nothing must not report success"
+        )
     for error in errors:
         print(f"ERROR: {error}", file=sys.stderr)
     for (repository, commit), count in sorted(outcome.skipped.items()):

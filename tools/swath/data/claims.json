@@ -4,7 +4,7 @@
   "tool": "swath",
   "claims": [
     {
-      "id": "repo-is-private-prerelease",
+      "id": "repo-is-public-at-v020",
       "statement": "Swath's canonical repository is github.com/varveio/swath and it is public at v0.2.0.",
       "scope": "structure",
       "status": "supported",
@@ -40,7 +40,7 @@
       ]
     },
     {
-      "id": "no-license-dangling-reference",
+      "id": "license-is-apache-2-0-with-notice",
       "statement": "At cef8ec2 the repository carries an Apache-2.0 LICENSE file and a NOTICE naming Varve Systems Ltd, with THIRD_PARTY_NOTICES.md as the authoritative attribution record.",
       "scope": "structure",
       "status": "supported",
@@ -70,7 +70,7 @@
       ]
     },
     {
-      "id": "reported-version-is-snapshot",
+      "id": "image-self-reports-v020",
       "statement": "The tested image self-reports the version string swath 0.2.0 (cef8ec24a74f).",
       "scope": "structure",
       "status": "supported",
@@ -84,7 +84,7 @@
       ]
     },
     {
-      "id": "no-releases-or-tags",
+      "id": "upstream-publishes-tagged-releases",
       "statement": "Upstream publishes tagged releases: v0.1.0 on 2026-07-27 and v0.2.0 on 2026-08-02, with v-prefixed git tags.",
       "scope": "structure",
       "status": "supported",
@@ -106,7 +106,7 @@
       ]
     },
     {
-      "id": "image-source-binding-agent-asserted",
+      "id": "image-label-binds-to-source-commit",
       "statement": "The published image binds itself to source: both per-arch config blobs carry org.opencontainers.image.revision equal to the pinned commit cef8ec24a74ffae14ee6a9462e4b7f6c334fbc32.",
       "scope": "structure",
       "status": "supported",
@@ -150,7 +150,7 @@
       ]
     },
     {
-      "id": "first-party-private-source-basis",
+      "id": "first-party-source-basis",
       "statement": "The groundwork read Swath's own source at the pinned v0.2.0 tag, a first-party source basis, and the tool is built by the same organisation that runs the study.",
       "scope": "structure",
       "status": "supported",
@@ -206,6 +206,32 @@
       ]
     },
     {
+      "id": "termination-cannot-see-false-quiescence",
+      "statement": "A split child is counted into the outstanding-work total while the thief still holds the victim's lock, so the engine's termination check cannot observe a false quiescence between hand-off and count.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Source-established at cef8ec2: poll reports quiescent only when the ready deque is empty and outstanding is zero, and the enqueue that increments outstanding is documented and called under the victim lock. No run instruments the worklist and no fault-injection run exercised the race, so this is a design property read from source.",
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/varveio/swath",
+          "commit": "cef8ec24a74ffae14ee6a9462e4b7f6c334fbc32",
+          "path": "swath-core/src/main/java/io/varve/swath/engine/Worklist.java",
+          "lines": "88-121"
+        },
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/varveio/swath",
+          "commit": "cef8ec24a74ffae14ee6a9462e4b7f6c334fbc32",
+          "path": "swath-core/src/main/java/io/varve/swath/engine/WorkStealingScan.java",
+          "lines": "900-916"
+        }
+      ]
+    },
+    {
       "id": "listing-is-adaptive-density-aware",
       "statement": "Swath's listing is adaptive and density-aware.",
       "scope": "mechanism",
@@ -240,7 +266,7 @@
       ]
     },
     {
-      "id": "sampling-replaces-blind-midpoints",
+      "id": "pivot-placement-is-multi-phase",
       "statement": "Pivot placement is a multi-phase state machine whose first placement is a density-derived far-ahead fraction, with the plain byte midpoint used as a step-back target and bisection as a late phase.",
       "scope": "mechanism",
       "status": "supported",
@@ -652,7 +678,7 @@
       ]
     },
     {
-      "id": "peak-concurrency-is-scope-dependent",
+      "id": "peak-in-flight-reached-ceiling-at-both-scopes",
       "statement": "Peak in-flight concurrency reached the configured ceiling of eight at both observed scopes.",
       "scope": "runtime",
       "status": "supported",
@@ -828,7 +854,7 @@
       ]
     },
     {
-      "id": "smoke-output-complete-no-duplicates",
+      "id": "smoke-output-count-and-uniqueness",
       "statement": "The full-bucket v0.2.0 listing run emitted 148,917 JSONL rows with zero duplicate keys, matching the smoke registry's recorded key count for the bucket.",
       "scope": "correctness",
       "status": "supported",
@@ -864,7 +890,7 @@
       ]
     },
     {
-      "id": "text-sink-key-fidelity-ascii-only",
+      "id": "text-sink-key-encoding-is-lossy",
       "statement": "Swath's text output formats are lossy for keys outside plain UTF-8 printable bytes: TSV and table escape control bytes as backslash-xHH without escaping the backslash itself, and all three text formats render the key through a UTF-8 string decode that turns invalid bytes into U+FFFD irreversibly.",
       "scope": "correctness",
       "status": "supported",
@@ -1300,7 +1326,7 @@
       ]
     },
     {
-      "id": "inspect-diff-are-stubs",
+      "id": "no-inspect-or-diff-subcommand",
       "statement": "Swath v0.2.0 has no inspect or diff subcommand; the command surface is list, resume and help, plus two hidden commands, dump-run and completion.",
       "scope": "operability",
       "status": "supported",
@@ -1833,7 +1859,7 @@
       ]
     },
     {
-      "id": "amd64-support-inferred",
+      "id": "amd64-built-and-smoked-upstream",
       "statement": "Swath builds and runs on amd64.",
       "scope": "compatibility",
       "status": "supported",
@@ -1881,7 +1907,7 @@
       ]
     },
     {
-      "id": "arm64-never-runtime-smoked-upstream",
+      "id": "arm64-not-runtime-smoked-at-v020",
       "statement": "Upstream validates arm64 to build but never runtime-smokes it, because its runners are amd64.",
       "scope": "compatibility",
       "status": "supported",
@@ -1941,6 +1967,54 @@
           "commit": "cef8ec24a74ffae14ee6a9462e4b7f6c334fbc32",
           "path": "docs/internals/s3-implementation-compatibility.md",
           "lines": "18-21"
+        }
+      ]
+    },
+    {
+      "id": "upstream-is-young-and-solo-maintained",
+      "statement": "At the 2026-08-02 research date the Swath repository was ten days old, created 2026-07-25, and had a single contributor with 48 commits.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Read from the GitHub repository and contributors APIs on 2026-08-02 and recorded in the groundwork research. A project-age and staffing fact that moves with time, not a judgement about the code; the sole contributor is also the sole reviewer of the protected public-release environment, which makes releases a single point of failure.",
+      "evidence": [
+        {
+          "kind": "documentation",
+          "url": "https://api.github.com/repos/varveio/swath"
+        },
+        {
+          "kind": "documentation",
+          "url": "https://api.github.com/repos/varveio/swath/contributors"
+        },
+        {
+          "kind": "documentation",
+          "path": "../research/reader-E-build.md"
+        },
+        {
+          "kind": "documentation",
+          "path": "../research/report.md"
+        }
+      ]
+    },
+    {
+      "id": "nightly-deep-verification-failing",
+      "statement": "Upstream's scheduled Nightly deep verification workflow had failed on every visible run at the 2026-08-02 research date, while pull-request and main continuous integration were green.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Four visible runs — 2026-07-30, 07-31, 08-01 and 08-02 — all failed on the same stale head bf0bac8, read from the GitHub Actions runs API on 2026-08-02. The cause was not investigated and what that suite covers was not established, so this bounds the project's visible verification health and nothing more.",
+      "evidence": [
+        {
+          "kind": "documentation",
+          "url": "https://api.github.com/repos/varveio/swath/actions/runs"
+        },
+        {
+          "kind": "documentation",
+          "path": "../research/reader-E-build.md"
+        },
+        {
+          "kind": "documentation",
+          "path": "../research/report.md"
         }
       ]
     },
@@ -2028,7 +2102,7 @@
     },
     {
       "id": "java-handicap-at-high-rates",
-      "statement": "Java startup and garbage collection handicap Swath at high list rates.",
+      "statement": "JVM startup and garbage collection cost Swath measurable throughput at high list rates.",
       "scope": "performance",
       "status": "unverified",
       "disposition": "retained",

@@ -33,10 +33,13 @@ establish that the mechanism behaved as designed at runtime.
 `swath list` drives one engine. The keyspace is divided into half-open byte
 ranges; each range is scanned by a virtual-thread worker, and a worker with
 nothing claimable becomes a *thief* that subdivides a busy peer's range by
-synthesizing a pivot key at runtime — claim `work-stealing-range-engine`. At
-most one steal attempt is in flight across the whole fleet, and lock order is
-strictly victim then gate, so termination cannot observe a false quiescence
-between hand-off and count.
+synthesizing a pivot key at runtime — claim `work-stealing-range-engine`, whose
+qualification carries the two fleet-wide invariants: at most one steal attempt
+is in flight at a time, and lock order is strictly victim then gate. Termination
+depends on a third: a split child is counted while the thief still holds the
+victim's lock, so quiescence cannot be observed falsely between hand-off and
+count — claim `termination-cannot-see-false-quiescence`. All three are read from
+source; no run instruments the worklist.
 
 The code separates an executor layer (locks, clocks, RPC) from a pure policy
 layer that decides by request-and-response over probe outcomes, across three
@@ -56,45 +59,54 @@ gate chain includes a confetti-feedback gate that suppresses carving when
 completed children come back as runts, letting every sixteenth carve through as
 a probe (report § 2.3).
 
-## The range model and why output is exactly-once by construction
+## The range model and why no deduplication pass exists
 
 A worker owning `(A, B]` lists with `start_after = A` and emits every returned
-key `k` with `A < k <= B`. The boundary key belongs to the left interval. Ranges
-are disjoint and cover the keyspace with no gap and no overlap — claim
+key `k` with `A < k <= B`. The boundary key belongs to the left interval. The
+engine is *designed* to keep ranges disjoint and covering the keyspace with no
+gap and no overlap — claim
 `internal-tiling-is-disjoint` — through five distinct mechanisms: exact seed
 tiling ending in a final open range, a single strict `k > hi` comparison, a
 per-key bound re-read backed by an under-lock re-trim whose downstream emission
 uses the trimmed batch, a three-clause durable compare-and-swap, and two split
 loser paths of which only the late one restores the bound.
 
-Because ranges are disjoint and seed pages never emit objects, output is
-exactly-once by construction with no separate deduplication pass — claim
-`no-dedup-pass-by-construction`. Every split is committed by that three-clause
-compare-and-swap, whose `UPDATE` and child `INSERT` run in one
-checkpoint-writer transaction, so a crash mid-split leaves both rows or neither
-— claim `split-commit-is-atomic-cas`. The `cursor < pivot` clause is also the
-durable backstop that turns a badly placed pivot into a balance problem rather
-than a coverage problem.
+Because those ranges are *designed* disjoint and seed pages emit no objects at
+all, no separate deduplication pass exists anywhere in the tree: the design is
+meant to make one unnecessary rather than the code removing duplicates after the
+fact — claim `no-dedup-pass-by-construction`. Every split is committed by that
+three-clause compare-and-swap, whose `UPDATE` and child `INSERT` are issued
+inside one checkpoint-writer transaction — claim `split-commit-is-atomic-cas`.
+The `cursor < pivot` clause is also the durable backstop that turns a badly
+placed pivot into a balance problem rather than a coverage problem.
 
-These are design properties established from source. No run instruments the
-internal range set, and exactly-once across a crash and resume remains
-`unverified` — claim `exactly-once-under-crash`.
+These are design properties read from source, not runtime guarantees
+established here. What source settles is the absence of a deduplication pass and
+the disjointness design that is meant to make one unnecessary; it does not
+settle that any run emitted every key exactly once, on a clean run or any other.
+No run instruments the internal range set; no fault-injection run terminated the
+process mid-split, so both-rows-or-neither is the intended consequence of the
+single transaction rather than an observed one; and exactly-once across a crash
+and resume remains `unverified` — claim `exactly-once-under-crash`.
 
 ## Keyspace division: seeding and pivot placement
 
 The default shallow seed runs a serial `delimiter=/` descent before any worker
 starts, with a probe budget derived from the worker count (`targetSeeds =
 min(1000, 4 × workers)`, `maxProbes = min(256, targetSeeds)`). Because the
-frontier is polled one node at a time, raising `--concurrency` *lengthens* the
-seed phase — claim `seed-descent-is-serial`.
+frontier is polled one node at a time, raising `--concurrency` raises the seed
+probe budget — claim `seed-descent-is-serial`. Upstream states that this
+lengthens the seed phase; the frontier can exhaust before the budget is spent,
+and no run here measured seed duration against concurrency.
 
 Pivot placement is a multi-phase state machine, not a plain bisection. Its first
 placement is a density-derived far-ahead fraction,
 `clamp(0.5 + 0.25 × min(1, trailing density / average density), 0.5, 0.75)`, on
 a bounded range; the plain byte midpoint is a step-back target re-probed only
-when the upper half comes back empty, which is what makes far-ahead never worse
-than the midpoint; bisection is a late phase — claim
-`sampling-replaces-blind-midpoints`. Later phases add structure discovery (one
+when the upper half comes back empty, which bounds that case but leaves a
+non-empty yet very sparse upper half committed at the far-ahead pivot;
+bisection is a late phase — claim
+`pivot-placement-is-multi-phase`. Later phases add structure discovery (one
 `delimiter=/` list at 32 keys), density reflection, and a flat-leaf fallback.
 Every synthesized pivot is built over Unicode code points, so it is valid UTF-8
 by construction.
@@ -142,8 +154,11 @@ Page size is a hard-coded 1000 with no `--max-keys` flag, so it is not sweepable
 without patching source — claim `page-size-fixed-no-max-keys`.
 
 SDK-internal retry is disabled at `maxAttempts = 1`, so one increment of Swath's
-API counter corresponds to one HTTP request and the concurrency gauge sees every
-real 503 immediately — claim `sdk-internal-retry-disabled`. That is also what
+API counter corresponds to one SDK list-call attempt — not to a call site that
+retries internally, and not to a wire request either, since the increment fires
+before the request is built and so counts an attempt that dies in DNS or connect
+setup — and the concurrency gauge sees every real 503 immediately — claim
+`sdk-internal-retry-disabled`. That is also what
 makes the reported `cost.api_calls` a request count rather than a call-site
 count: it has exactly one increment site, fires immediately before the SDK call,
 and counts attempts issued across every request class — claim
@@ -256,10 +271,10 @@ Output is streaming rather than accumulate-then-dump: the output stage receives
 one page batch at a time and writes each entry straight through the formatter,
 holding no per-run collection; the only per-run state is a four-counter tally,
 and the split tree lives in SQLite rather than on the heap — claim
-`output-is-streaming`. The only writer of file descriptor 1 in the main source
-tree is the output sink; logging, progress, the stats block and the
-resolved-output echo all go to stderr, so a normalizer needs no stream-separation
-logic — claim `stdout-is-clean`.
+`output-is-streaming`. On the output and list-command paths inspected, the only
+writer of file descriptor 1 is the output sink; logging, progress, the stats
+block and the resolved-output echo all go to stderr, so a normalizer needs no
+stream-separation logic on the observed modes — claim `stdout-is-clean`.
 
 There is no shallow listing mode: `swath list` always fully enumerates objects,
 and `delimiter=/` is used only internally for seed and thief probes. There is no
@@ -267,9 +282,11 @@ and `delimiter=/` is used only internally for seed and thief probes. There is no
 
 Per format:
 
-- **JSONL** is the only invertible text format, because its JSON escaping also
-  escapes the backslash. It emits no header and omits nullable fields rather than
-  emitting nulls, so an adapter must key on field names and never on position —
+- **JSONL** is the only text format whose escaping is invertible, because its
+  JSON escaping also escapes the backslash — and only for keys that are valid
+  UTF-8, since invalid bytes become U+FFFD before the formatter sees them. It
+  emits no header and omits nullable fields rather than emitting nulls, so an
+  adapter must key on field names and never on position —
   claim `jsonl-escaping-is-invertible`.
 - **TSV** always writes a header line and emits six fields with `last_modified`
   before `etag`, so a normalizer must drop the header and swap columns three and
@@ -282,14 +299,16 @@ Per format:
   decode, which makes it the only byte-exact key representation Swath produces —
   claim `parquet-key-column-is-byte-exact`.
 
-All three text formats are lossy for keys outside plain UTF-8 printable bytes.
-TSV and table escape control bytes as `\xHH` without escaping the backslash
-itself, so a key literally containing the four characters `\x09` is
-indistinguishable on the wire from a key containing a real tab; and all three
-render the key through a UTF-8 string decode that turns invalid bytes into
-U+FFFD irreversibly. An adapter must detect and refuse, never decode; escaping is
+None of the three text formats round-trips every key, and printable ASCII is not
+a safe domain. TSV and table escape control bytes as `\xHH` without escaping the
+backslash itself, so a key literally containing the four characters `\x09` — all
+printable ASCII — is indistinguishable on the wire from a key containing a real
+tab; and all three render the key through a UTF-8 string decode that turns
+invalid bytes into U+FFFD irreversibly. Only a key with no control byte, no
+literal `\xHH` sequence, and valid UTF-8 survives unambiguously.
+An adapter must detect and refuse, never decode; escaping is
 not bypassable, because `--raw-output` has no option binding — claim
-`text-sink-key-fidelity-ascii-only`. Whether the native output preserves
+`text-sink-key-encoding-is-lossy`. Whether the native output preserves
 control-character keys faithfully is `unverified` — claim
 `control-char-key-fidelity-untested`.
 
@@ -311,10 +330,14 @@ filtered run cannot be checked against a full-scope manifest — claim
 The resume design uses a SQLite checkpoint whose `listing_node` table *is* the
 worklist, written by a single checkpoint-writer thread; the schema is pinned at
 `user_version 1` with exact-match-or-refuse and no migration path. The `cursor`
-column is the last emitted key, giving at-most-once for text sinks, while the
-durable cursor is the highest key inside a finalized part, giving exactly-once
-for file sinks. The checkpoint is deleted on clean completion — claim
-`checkpoint-resume-design-exists`.
+column is the last emitted key; for a file sink the durable cursor is instead
+the highest key inside a finalized part. Those two definitions are the design's
+intended basis for at-most-once text output and exactly-once file output, and
+they are design intent only: nothing here establishes that part creation,
+finalization, metadata persistence, cursor update and checkpoint deletion are
+atomically coordinated under a crash, and the guarantee itself stays
+`unverified` — claims `checkpoint-resume-design-exists`,
+`exactly-once-under-crash`. The checkpoint is deleted on clean completion.
 
 Only a Parquet directory dataset is resumable. A stdout run or `--checkpoint
 none` opens an in-process memory-backed SQLite store that writes nothing to disk,
@@ -345,7 +368,7 @@ Several things a caller or a benchmark would reach for are not there:
   then throws an invalid-config error at seed time, after the checkpoint database
   is opened and the S3 client is built — claim `seed-hints-unimplemented`.
 - No `inspect` or `diff` subcommand. The surface is `list`, `resume` and `help`,
-  plus the hidden `dump-run` and `completion` — claim `inspect-diff-are-stubs`.
+  plus the hidden `dump-run` and `completion` — claim `no-inspect-or-diff-subcommand`.
 - No `--no-owner-split` flag; the owner-split kill switch is spelled
   `--engine-toggle owner_split=off`, and a dedicated test asserts the flag
   spelling is rejected — claim `no-owner-split-flag-absent`.

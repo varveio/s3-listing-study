@@ -18,7 +18,10 @@ but the complete public evidence package is not yet available.**
 > observation rather than receipt: its runs were made outside
 > `harness/smoke-run.sh`, because the runner-security profile was not
 > provisioned. Historical
-receipts remain immutable. Missing artifacts must be recovered and published,
+receipts remain immutable while their subject stands: they are never edited,
+and are removed only when the whole subject is retired under
+[`tool-structure.md`](tool-structure.md) § Lifecycle — as Swath's were, above.
+Missing artifacts must be recovered and published,
 or explicitly waived with the dependent claim kept qualified; they are never
 recreated and presented as the bytes from an old run.
 

@@ -85,9 +85,16 @@ means while authoring:
 - **Scale-dependent behaviour is not settleable at smoke scale.** Throughput,
   memory cliffs, OOM behaviour, high-concurrency behaviour and crash-resume stay
   `unverified` with a recorded reason, however suggestive a single run looked.
-- **A verifier verdict is separate from a clean exit.** If the manifest was
-  absent or the bucket drifted, there is no verdict, and completeness rests on
-  whatever weaker check you actually ran. Say which.
+- **A verifier verdict is separate from a clean exit, and drift is not the
+  absence of a verdict.** If the manifest is absent the verifier cannot run at
+  all, so there is no verdict and completeness rests on whatever weaker check
+  you actually ran — say which. Drift is the opposite case: `DRIFT` *is* a
+  verdict, and it means the bucket moved, so stop and re-baseline rather than
+  recording anything about the tool.
+- **Count-and-uniqueness is not completeness.** Matching a recorded key count
+  with no duplicates leaves a substituted key, and a missing key compensated by
+  an extra one, both undetectable. If that is all you have, say that is all you
+  have — and do not name the claim after completeness.
 
 ## The verification loop
 
@@ -111,8 +118,25 @@ shellcheck -S warning tools/<slug>/adapter/*.sh
 
 Then the checks no script performs:
 
-- **No claim is `confirmed`** unless a receipt genuinely exists:
-  `grep -c '"confirmed"' tools/<slug>/data/claims.json`.
+- **No claim is `confirmed`** unless a receipt genuinely exists. Counting the
+  word is not the check — parse the ledger, and for every `confirmed` claim
+  assert it carries `kind: "run"` evidence whose `receipt` path exists on disk:
+
+  ```sh
+  python3 - <<'EOF'
+  import json, os
+  d = json.load(open('tools/<slug>/data/claims.json'))
+  for c in d['claims']:
+      if c['status'] != 'confirmed':
+          continue
+      runs = [e for e in c['evidence'] if e['kind'] == 'run']
+      assert runs, f"{c['id']}: confirmed with no run evidence"
+      for r in runs:
+          p = os.path.normpath(os.path.join('tools/<slug>/data', r['receipt']))
+          assert os.path.exists(p), f"{c['id']}: receipt missing at {p}"
+  print('confirmed claims all cite an existing receipt')
+  EOF
+  ```
 - **No dangling claim IDs.** Every backticked ID in README and docs resolves in
   the ledger. A dangling ID is a defect, and it is invisible to the validator.
 - **Every evidence `artifact`/`receipt` path exists** on disk.
@@ -124,6 +148,47 @@ Then the checks no script performs:
   key set. It is cheap, and it catches adapter and engine faults together —
   though it is *not* a completeness check: every arm can agree and be wrong the
   same way.
+
+## Split the independent review by concern
+
+A capsule change is too big for one review. Three single-shot reviews of a
+~6,000-line capsule diff were attempted here and **all three produced nothing** —
+they stalled past the budget with no output, because a single reviewer has to
+hold the claim ledger, the prose, the machinery, the adapter and the process
+docs at once. Splitting the same diff into five scoped reviews, run in parallel,
+returned all five inside one window and surfaced 37 findings including two
+criticals.
+
+Split by **concern, not by file count**. Each slice gets its own diff, its own
+focus list, and a scope fence telling it that sibling reviews cover the rest:
+
+| Slice | Reviews | Asks |
+| --- | --- | --- |
+| Evidence | `data/` | Does any claim's status or wording outrun its evidence? |
+| Prose | `README.md`, `docs/` | Is every statement backed by a claim, and does it obey the content contracts? |
+| Machinery | `schemas/`, `scripts/`, CI | Did a check that used to fire stop firing? Can a gate report success having verified nothing? |
+| Adapter | `adapter/` | Would this argv fail against the real binary? Can the normalizer emit or drop a row it should refuse? |
+| Rules | operating docs | Does new guidance contradict existing law, or license something it should bound? |
+
+Three things make the split work:
+
+- **Give every slice the same context block** — what evidence exists, what does
+  not, and what is deliberately out of scope. Without it each reviewer
+  re-discovers "there are no receipts" and spends its budget there.
+- **Demand a structured verdict and validate it yourself.** Ask for
+  `{verdict, blockers[], withinBudget, coverage}` in the prompt and validate the
+  returned JSON against the schema locally — generate loosely, validate
+  strictly. A reviewer that ran out of budget must return `PARTIAL`, never
+  `READY`.
+- **Fix in the same slices.** The findings arrive already partitioned, so
+  parallel fixers inherit the partition. One sequencing rule: a slice that
+  renames claim IDs must land before the slice that cites them, or the two
+  collide.
+
+The failure this avoids is subtler than a timeout. A single reviewer that *does*
+finish a huge diff samples it — and sampling by importance systematically misses
+defects that cluster in unglamorous places. Both criticals here came from slices
+a whole-diff reviewer would have skimmed.
 
 ## Traps that cost real time
 

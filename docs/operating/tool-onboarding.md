@@ -50,11 +50,13 @@ migrated capsule, so a born-canonical capsule could not land. That is closed;
 step 4 needs no exception:
 
 - `schemas/claims.schema.json` — root `legacy_ledger` and per-claim
-  `legacy_origins` are optional. Present, they validate exactly as before.
+  `legacy_origins` are optional, but not independently so: a conditional binds
+  them, so a document with a ledger carries `legacy_origins` on *every* claim
+  and one without a ledger carries it on none. Present, they validate exactly
+  as before.
 - `scripts/validate-tool-capsule.py` — `research/tool-page.md` and
   `research/claims-migration.md` moved out of `REQUIRED_FILES` into
-  `MIGRATION_FILES`, required only when `data/claims.json` declares
-  `legacy_ledger`. The README checks follow the same condition: navigation
+  `MIGRATION_FILES`, required only for a capsule with a migration stratum. The README checks follow the same condition: navigation
   names the two files, and Provenance names `Mixed provenance`,
   `research/reconciliation.md` and `research/tool-page.md`, only for a capsule
   that has an inherited layer to describe. `not a run record` stays required
@@ -63,12 +65,20 @@ step 4 needs no exception:
   for the born-canonical shape.
 
 The rule is now **all or nothing**, which is stricter than what came before: a
-capsule has a migration stratum exactly when its ledger says so. A ledger
-without the two files, the two files without a ledger, and claims carrying
-`legacy_origins` with no ledger are each an error. So the gap cannot be
-worked around by fabricating an empty ledger or a placeholder frozen page —
-that would turn the stratum from evidence into ritual — and a migrated capsule
-cannot shed its evidence by dropping the ledger. The migrated capsules still
+capsule has a migration stratum exactly when the validator's `MIGRATED_TOOLS`
+roster says so, and its ledger, its two research files and its claims' origins
+must all agree with that. A ledger without the two files, the two files without
+a ledger, claims carrying `legacy_origins` with no ledger, a ledger with any
+claim missing them, and a ledger disagreeing with the roster in either
+direction are each an error. So the gap cannot be worked around by fabricating
+an empty ledger or a placeholder frozen page — that would turn the stratum from
+evidence into ritual — and a migrated capsule cannot shed its evidence by
+dropping the ledger, because identity is declared in the roster rather than
+inferred from content the same commit could delete. Retiring a stratum stays
+possible under the subject-retirement rule in
+[`tool-structure.md`](tool-structure.md); it now has to remove the slug from
+the roster too, which is the point — the deletion appears in the diff an owner
+reviews instead of taking effect by inference. The migrated capsules still
 validate unchanged.
 
 ## Re-deriving an existing subject at a new upstream version
