@@ -15,8 +15,7 @@ The subject is upstream's own published image, an OCI index at
 `ghcr.io/varveio/swath@sha256:ef1aca9ab473f133acceb5730ff88d52abaaa89e773801cdb62deff51f9909b0`,
 pulled anonymously with no `docker login` — claim
 `published-image-is-anonymously-pullable`. Nothing was built locally for this
-subject; the v0.1.0 pass built its own image from upstream's Dockerfile, and this
-one did not need to.
+subject.
 
 **Tag trap.** The registry tag is `0.2.0`, with no `v` prefix. `v0.2.0` returns
 `manifest unknown`, which will catch anyone who copies the git tag — the git tag
@@ -37,9 +36,7 @@ with no receipt.
 At this revision the repository is public, carries an Apache-2.0 licence and a
 `NOTICE` naming Varve Systems Ltd, and publishes tagged releases — claims
 `repo-is-private-prerelease`, `no-license-dangling-reference`,
-`no-releases-or-tags`. Each of those three contradicts the inherited
-characterization of the v0.1.0 subject; the disposition is recorded in the
-ledger.
+`no-releases-or-tags`.
 
 **Build route, if you need one.** Not used here. Swath is Java on a JDK 25
 toolchain with no toolchain auto-provisioning configured, so a bare host needs a
@@ -133,8 +130,7 @@ What they settle, each with its own limits:
   in flight with nineteen splits and twenty-five steals — claim
   `full-run-reported-parallel-listings`. Both scopes reached the configured
   ceiling of eight, the small prefix from forty-eight seed ranges with zero
-  splits, which contradicts the inherited scope-dependent-peak finding — claim
-  `peak-concurrency-is-scope-dependent`.
+  splits — claim `peak-concurrency-is-scope-dependent`.
 - **The AIMD controller never engaged.** Both runs recorded zero throttle events,
   zero transient events, zero AIMD votes and zero errors against this clean
   public bucket — claim `aimd-idle-at-smoke`. That settles that AIMD did not fire
@@ -181,19 +177,14 @@ top-level option or the `list` subcommand, not at a binary name.
 `../adapter/normalize.sh` converts native output into the frozen smoke harness's
 five-field normalized stream.
 
-**Both adapter scripts have been rewritten for v0.2.0 and validated by
-execution.** As previously committed they targeted the v0.1.0 subject and could
-not run against this one at all: their argv used `--max-parallel-listings`,
-`--format aligned`, `--seed none` and `--force-sort`, none of which exist at
-`cef8ec2`, so every mode would have failed argument parsing. The current scripts
+**Both adapter scripts are written for v0.2.0 and validated by execution.** They
 emit `--concurrency`, `--format table`, `--tune seed.mode=none` and — for the
 sort disk guard — `--tune sort.ignore-disk-check=on`, there being no
-`--force-sort` option at all (claims `mode-inventory-v020`,
-`concurrency-flag-is-aimd-ceiling`, `live-error-messages-name-absent-flags`).
-The normalizer's mode names moved with them: `recursive-tsv`,
-`recursive-jsonl`, `recursive-table`, `seed-none`, `parquet-probe`,
-`sort-probe`, where `recursive-aligned` became `recursive-table` to match
-v0.2.0's own format name.
+`--force-sort` option at all even though the guard's own error message names one
+(claims `mode-inventory-v020`, `concurrency-flag-is-aimd-ceiling`,
+`live-error-messages-name-absent-flags`). The normalizer's modes are
+`recursive-tsv`, `recursive-jsonl`, `recursive-table`, `seed-none`,
+`parquet-probe` and `sort-probe`, named to match v0.2.0's own format names.
 
 Validation was execution, not reading. All four stdout modes were driven through
 `run.sh` and `normalize.sh` against `s3://noaa-normals-pds/normals-hourly/` on
@@ -275,10 +266,8 @@ The third blocker, a v0.2.0 adapter, is closed — `tsv`, `table`, `jsonl` and
 executing those four under the wrapper and adding a `seed.mode=hints` capability
 probe.
 
-The v0.1.0 subject's receipts under [`../receipts/smoke/`](../receipts/smoke/)
-are preserved as immutable evidence about that earlier subject, built from
-upstream's Dockerfile at revision `f1009db`. They are not evidence about v0.2.0
-and no claim in [`../data/claims.json`](../data/claims.json) cites them.
+Everything under [`../receipts/`](../receipts/) is about v0.2.0, and all of it is
+observation rather than receipt.
 
 ## Deferred coverage
 
@@ -289,10 +278,8 @@ Each of these stays `unverified`, with its own reason:
   run gets an in-process memory-backed checkpoint (claims `crash-resume-works`,
   `exactly-once-under-crash`).
 - **Parquet and sorted-Parquet execution and fidelity** — no such run was made at
-  v0.2.0, and none is capturable under a harness that mounts nothing; the earlier
-  exit-0 capability probes were against the v0.1.0 build and are not
-  re-established for this subject (claims `parquet-modes-execute`,
-  `parquet-output-byte-exact`).
+  v0.2.0, and none is capturable under a harness that mounts nothing (claims
+  `parquet-modes-execute`, `parquet-output-byte-exact`).
 - **Bounded memory at scale** — the observed peak RSS figures are
   JVM-baseline-dominated at this scale and probe no cliff (claim
   `bounded-memory-at-scale`).
@@ -301,8 +288,7 @@ Each of these stays `unverified`, with its own reason:
 - **The seed-mode comparison** — both instrumented runs used the default shallow
   seed, and the one `seed.mode=none` run captured output only, with no
   `list_run_summary` counters, so no cost comparison of the two arms exists at
-  v0.2.0; the inherited direction was measured on the v0.1.0 build under a flag
-  spelling that no longer exists (claim `seed-cost-direction-at-smoke`).
+  v0.2.0 (claim `seed-cost-direction-at-smoke`).
 - **amd64 execution** — amd64 is supported across every channel, including a real
   child manifest in the published index and dual-platform CI builds, but every run
   here was native arm64 (claims `amd64-support-inferred`,

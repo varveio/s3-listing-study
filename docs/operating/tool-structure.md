@@ -6,9 +6,13 @@ it serves, and where the boundaries lie between current explanation, canonical
 data, historical research, executable integration, and evidence. Throughout,
 a runnable tool directory in this shape is called a *capsule*.
 
-All eleven runnable tools implement this contract (migration wave completed
-2026-07-20). A tool's current README must describe the files that actually
-exist in its directory.
+All eleven runnable tools implement this contract: ten were converted in the
+migration wave completed 2026-07-20, and one — `swath` — was written directly in
+this shape and carries no migration stratum. The migration stratum described
+below therefore exists **where present**, not on every capsule: a born-canonical
+capsule has no frozen pre-restructure page, no conservation audit, and no
+`legacy_origins` on any claim. A tool's current README must describe the files
+that actually exist in its directory.
 
 This contract does not apply to contextual entries such as `pure-storage` and
 `s3-inventory`. A useful contextual entry may remain a directory containing
@@ -327,15 +331,29 @@ them by this table:
 
 | Layer | Mutability | End of life |
 | --- | --- | --- |
-| `receipts/` | Immutable evidence | Permanent; never deleted |
+| `receipts/` | Immutable evidence | Permanent while the capsule describes the subject they record; removed only with a subject retirement (below) |
 | `research/report.md`, `reconciliation.md`, `codex-review.md` | Append-only derivation records | Retirable only through a deliberate promote-or-waive pass at repo finalization |
 | Migration stratum — `research/tool-page.md`, `research/claims-migration.md`, `legacy_origins` in `claims.json`, the validator's conservation checks, and the playbook | Frozen once proven | Sealed at wave end; not deleted |
 | `README.md`, `docs/`, `data/` | Living | Kept current |
 
-Receipts are the product every `confirmed` claim cites, so they never leave.
-The derivation records retire only once their conclusions are conserved in the
-ledger and provenance no longer points at them — a promote-or-waive pass, not a
-bare deletion. The migration stratum exists solely to prove the restructure lost
+Receipts are the product every `confirmed` claim cites, so they are never
+deleted to tidy a directory, never rewritten, and never dropped because a claim
+that cited them changed. There is exactly one exception, added 2026-08-02 after
+the first occurrence: **subject retirement.** When a capsule is retargeted to a
+new upstream version and the previous subject was never released, the owner may
+retire that subject wholesale — its receipts, its derivation records, and its
+migration stratum together. The rule is all-or-nothing and its rationale is that
+run records for a subject the capsule no longer describes are worse than absent:
+a reader finds them under `receipts/` and reasonably reads them as evidence
+about the current subject. A retirement must leave no claim citing the removed
+evidence, and the records remain in git history. Retiring *some* of a subject's
+receipts while keeping others is not permitted — that is the tidying this rule
+exists to forbid. `swath` is the worked example: its v0.1.0-era receipts,
+research and stratum were retired together when the capsule moved to v0.2.0.
+
+The derivation records otherwise retire only once their conclusions are
+conserved in the ledger and provenance no longer points at them — a
+promote-or-waive pass, not a bare deletion. The migration stratum exists solely to prove the restructure lost
 nothing; deleting the frozen tool page would turn every `legacy_origins` value
 into an unresolvable label, so it is sealed rather than removed.
 

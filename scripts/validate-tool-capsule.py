@@ -511,9 +511,18 @@ def main() -> int:
         )
         if provenance_match:
             provenance = provenance_match.group("body")
-            required_provenance = ["Mixed provenance", "not a run record", "research/reconciliation.md"]
+            # "not a run record" is required of every capsule: the page must
+            # distinguish what was read from what was executed, whatever its
+            # lineage. The other two are migration-era by nature -- "Mixed
+            # provenance" exists to flag a firsthand layer sitting on an
+            # inherited one, and reconciliation.md is the inherited notes'
+            # audit -- so requiring them of a born-canonical capsule would
+            # force it to describe a seed it does not have.
+            required_provenance = ["not a run record"]
             if has_migration:
-                required_provenance.append("research/tool-page.md")
+                required_provenance += [
+                    "Mixed provenance", "research/reconciliation.md", "research/tool-page.md",
+                ]
             for required in required_provenance:
                 if required not in provenance:
                     errors.append(f"README Provenance section does not name {required}")

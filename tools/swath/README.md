@@ -68,7 +68,7 @@ resolve in [`data/claims.json`](data/claims.json).
   on by default now; the previous tail-floor reading multiplied any estimate to
   exactly zero once its reach term went non-positive. The documented pre-0.2.0
   rollback pair is the one supported non-default engine configuration.
-  [`What changed between v0.1.0 and v0.2.0`](docs/mechanism.md#what-changed-between-v010-and-v020)
+  [`Engine defaults and the one supported rollback`](docs/mechanism.md#engine-defaults-and-the-one-supported-rollback)
   · `v020-engine-default-flips`, `engine-toggles-are-diagnostic`
 
 - **Nothing is receipt-backed and no verifier ran.** The runner-security profile
@@ -139,7 +139,7 @@ resolve in [`data/claims.json`](data/claims.json).
 - The project is new — created 2026-07-25, one contributor, two releases in six
   days — and upstream's nightly deep-verification workflow had failed on every
   visible run at the research date, while pull-request and `main` CI were green
-  ([`research/v2-blind/report.md`](research/v2-blind/report.md) § 9.4). The code
+  ([`research/report.md`](research/report.md) § 9.4). The code
   is careful and the prose has not caught up, which is claim
   `docs-and-javadoc-drift`.
 
@@ -161,26 +161,29 @@ resolve in [`data/claims.json`](data/claims.json).
 | See what image was selected, what ran, what was blocked, and how to reproduce it | [`docs/running.md`](docs/running.md) |
 | Inspect canonical identity, study states, and the full claim ledger | [`data/tool.json`](data/tool.json) and [`data/claims.json`](data/claims.json) |
 | Integrate the subject with the shared harness | [`adapter/`](adapter/) |
-| Read the independent blind re-derivation at v0.2.0, its errata, and its cross-model review | [`research/v2-blind/`](research/v2-blind/) |
-| Audit how every old ledger row and prose claim became atomic claims | [`research/claims-migration.md`](research/claims-migration.md) and the preserved reconciliation in [`research/`](research/) |
-| Read the historical pre-restructure landing page | [`research/tool-page.md`](research/tool-page.md) — frozen historical research, not the current entry point |
-| Inspect the observations and the earlier subject's immutable run records | [`receipts/`](receipts/) |
+| Read the independent blind re-derivation at v0.2.0, its errata, and its cross-model review | [`research/`](research/) |
+| Audit an individual claim's evidence in depth | [`data/claims.json`](data/claims.json), then the owning `research/reader-*.md` |
+| Inspect the committed observations | [`receipts/`](receipts/) |
 
 ## Provenance
 
-**Mixed provenance.** The current understanding of v0.2.0 comes from a firsthand
-source-first derivation against the pinned commit `cef8ec2`, deliberately blind
-to this page's inherited wording, re-checked by an independent cross-model review
-and recorded in [`research/v2-blind/`](research/v2-blind/); its two runtime
-observations are the study's own, and neither is a run record in the harness
-sense. The inherited layer beneath it was seeded from Swath's own design
-documentation, and that seed was **not a run record**; several of its
-propositions are now contradicted or corrected, with each disposition recorded in
-[`data/claims.json`](data/claims.json). See
-[`research/tool-page.md`](research/tool-page.md) and
-[`research/reconciliation.md`](research/reconciliation.md) for the earlier
-subject, and [`research/v2-blind/ERRATA.md`](research/v2-blind/ERRATA.md) for
-known defects in the current derivation record.
+**Firsthand, single-subject.** Everything current about v0.2.0 comes from a
+source-first derivation against the pinned commit `cef8ec2` — five readers over
+a frozen worktree, deliberately blind to any existing capsule prose —
+consolidated, then re-checked by an independent cross-model review whose
+findings were all re-verified against source before being accepted. It is
+recorded in
+[`research/`](research/), with known defects in that record listed in
+[`research/ERRATA.md`](research/ERRATA.md).
+
+This page has **a single layer.** The capsule carries no migration stratum — no
+frozen pre-restructure page, no conservation map, and no claim in
+[`data/claims.json`](data/claims.json) carries a legacy origin. Every claim
+states the v0.2.0 subject on its own evidence.
+
+The two runtime observations are the study's own. Neither is **a run record** in
+the harness sense: source reading is not a run record either, and nothing here
+was produced by the shared wrapper — see [`docs/running.md`](docs/running.md#no-receipts-the-runner-security-blocker).
 
 ## Evidence boundary
 
@@ -205,8 +208,8 @@ which is why this page states plainly that Swath's v0.2.0 pass produced no
 receipts and no verifier verdict. Swath's earlier internal benchmark history is
 **not** used here; any number must be produced again on this harness. The
 structural control on the first-party source basis is that the v0.2.0 derivation
-was blind to the inherited page, every claim is anchored, and an independent
-cross-model review re-verified the anchors — claim
+was source-first and deliberately blind, every claim is anchored, and an
+independent cross-model review re-verified the anchors — claim
 `first-party-private-source-basis`. We welcome help from people who know the
 other tools better; the run records are published so readers can inspect and
 improve the setup.

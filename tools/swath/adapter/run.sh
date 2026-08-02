@@ -11,14 +11,10 @@
 #
 # Usage: run.sh <mode> <bucket> <region> [prefix]
 #
-# SUBJECT: swath v0.2.0 (commit cef8ec2). The v0.1.0 spellings this file used
-# before — --max-parallel-listings, --seed, --force-sort, --format aligned — do
-# NOT exist at v0.2.0 and fail argument parsing at exit 2. Current spellings:
-#   --max-parallel-listings N  ->  --concurrency N
-#   --seed none                ->  --tune seed.mode=none
-#   --force-sort               ->  --tune sort.ignore-disk-check=on
-#   --format aligned           ->  --format table
-# Verified against `list --help` on the pinned image; see claim `mode-inventory-v020`.
+# SUBJECT: swath v0.2.0 (commit cef8ec2). The spellings emitted below are the
+# v0.2.0 ones — --concurrency N, --tune seed.mode=none,
+# --tune sort.ignore-disk-check=on, --format table — verified against
+# `list --help` on the pinned image; see claim `mode-inventory-v020`.
 #
 # Concurrency: every mode caps --concurrency at 8. swath's default is 64, which
 # would blow the campaign's aggregate politeness budget on a sponsored bucket.

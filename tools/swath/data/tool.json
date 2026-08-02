@@ -4,7 +4,9 @@
   "slug": "swath",
   "display_name": "Swath",
   "entry_type": "runnable_lister",
-  "upstream": { "repository": "https://github.com/varveio/swath" },
+  "upstream": {
+    "repository": "https://github.com/varveio/swath"
+  },
   "language": "Java",
   "license": "Apache-2.0",
   "tested": {
@@ -12,11 +14,17 @@
     "repository": "https://github.com/varveio/swath",
     "version": {
       "value": "0.2.0",
-      "provenance": { "kind": "documentation", "reference": "../research/v2-blind/report.md" }
+      "provenance": {
+        "kind": "documentation",
+        "reference": "../research/report.md"
+      }
     },
     "revision": {
       "value": "cef8ec24a74ffae14ee6a9462e4b7f6c334fbc32",
-      "provenance": { "kind": "documentation", "reference": "../research/v2-blind/report.md" }
+      "provenance": {
+        "kind": "documentation",
+        "reference": "../research/report.md"
+      }
     }
   },
   "study": {
@@ -26,5 +34,7 @@
     "auth_status": "anonymous",
     "benchmark_eligibility": "conditional"
   },
-  "evidence_roots": ["../receipts/smoke", "../receipts/observations-v0.2.0"]
+  "evidence_roots": [
+    "../receipts/observations-v0.2.0"
+  ]
 }

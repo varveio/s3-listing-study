@@ -1,9 +1,10 @@
 # Onboarding a new tool
 
-How a new subject joins the study, from scope decision to a reviewed capsule.
-This page owns only the sequence and the seams; each step's substance lives in
-the document that owns it, linked in place. Nothing here duplicates protocol
-text.
+How a new subject joins the study, from scope decision to a reviewed capsule,
+and how an existing subject is re-derived when its upstream releases a new
+version. This page owns only the sequence and the seams; each step's substance
+lives in the document that owns it, linked in place. Nothing here duplicates
+protocol text.
 
 A new tool is **born canonical**: it is built directly in the function-grouped
 capsule shape. It never passes through the legacy consolidated layout, and it
@@ -32,31 +33,80 @@ map, no legacy origins.
    The migration playbook does **not** apply — it converts legacy directories,
    which a new tool never has.
 4. **Validate and review.** Run
-   `python3 scripts/validate-tool-capsule.py --tool <tool> --base <ref>`,
-   subject to the machinery gap below. Independent review (a different-model
-   reviewer plus the standard one) and the owner-reviewed `tools/` PR apply
-   exactly as for every `tools/` change ([`../AGENTS.md`](../AGENTS.md)
-   § Working conventions).
+   `python3 scripts/validate-tool-capsule.py --tool <tool>`. Pass no
+   `--migration-base`: there is no legacy base to regress against, and the
+   validator now rejects the flag on a capsule with no migration stratum.
+   Independent review (a different-model reviewer plus the standard one) and
+   the owner-reviewed `tools/` PR apply exactly as for every `tools/` change
+   ([`../AGENTS.md`](../AGENTS.md) § Working conventions).
 
-## Known machinery gap — resolve at first use
+## The migration stratum is optional (machinery, 2026-08-02)
 
-The schemas and validator were built during the migration wave and currently
-assume a migrated capsule. Before the first born-canonical tool lands, one
-owner-approved machinery change is needed:
+The schemas and validator were built during the migration wave and assumed a
+migrated capsule, so a born-canonical capsule could not land. That is closed;
+step 4 needs no exception:
 
-- `schemas/claims.schema.json` requires `legacy_ledger` (source, migration
-  map, expected origins) at the root; a born-canonical ledger has none.
-- `scripts/validate-tool-capsule.py` requires `research/tool-page.md` and
-  `research/claims-migration.md` and runs conservation and frozen-page checks
-  against the base ref; a born-canonical tool has neither file and no legacy
-  base.
+- `schemas/claims.schema.json` — root `legacy_ledger` and per-claim
+  `legacy_origins` are optional. Present, they validate exactly as before.
+- `scripts/validate-tool-capsule.py` — `research/tool-page.md` and
+  `research/claims-migration.md` moved out of `REQUIRED_FILES` into
+  `MIGRATION_FILES`, required only when `data/claims.json` declares
+  `legacy_ledger`. The README checks follow the same condition: navigation
+  names the two files, and Provenance names `Mixed provenance`,
+  `research/reconciliation.md` and `research/tool-page.md`, only for a capsule
+  that has an inherited layer to describe. `not a run record` stays required
+  of every capsule — distinguishing what was read from what was executed is
+  not a migration-era concern. `check_claim_schema_contract` carries fixtures
+  for the born-canonical shape.
 
-The intended change is small and additive: make the migration stratum
-optional — present and fully checked when a legacy page exists, absent for
-born-canonical capsules — without weakening any check that guards the eleven
-migrated tools. Do not work around the gap by fabricating an empty legacy
-ledger or a placeholder frozen page; that would turn the migration stratum
-from evidence into ritual.
+The rule is now **all or nothing**, which is stricter than what came before: a
+capsule has a migration stratum exactly when its ledger says so. A ledger
+without the two files, the two files without a ledger, and claims carrying
+`legacy_origins` with no ledger are each an error. So the gap cannot be
+worked around by fabricating an empty ledger or a placeholder frozen page —
+that would turn the stratum from evidence into ritual — and a migrated capsule
+cannot shed its evidence by dropping the ledger. The migrated capsules still
+validate unchanged.
+
+## Re-deriving an existing subject at a new upstream version
+
+A capsule describes one version, and upstreams release. When the subject moves
+— first done for `swath`, whose v0.1.0-era capsule was retargeted to v0.2.0 —
+the trigger is a **subject change, not doc staleness**. Editing the existing
+pages in place silently inherits whatever the old pages got wrong, which is the
+exact failure this study exists to correct, so the derivation is redone rather
+than patched. Only the seams that differ from the sequence above:
+
+1. **Freeze the subject before dispatching anyone.** Check the new tag out in
+   a detached worktree and point every reader at that path. Upstream `main`
+   moved twice mid-run on the swath re-derivation and shifted one reader's
+   line numbers underneath it.
+2. **Re-derive blind.** The researcher must not read the existing capsule
+   pages first, for the same reason original groundwork is blind — the method
+   in [`tool-research-brief.md`](tool-research-brief.md) still governs, and its
+   file layout is still historical. The new derivation is its own record under
+   `research/`, never an edit of the old one: a version-named subdirectory
+   while both eras coexist, flat only once the superseded era has been
+   deliberately retired. Either way `research/README.md` must say which
+   subject each file describes — a research directory holding two versions of
+   one tool is unreadable without that router (see
+   [`../../tools/swath/research/README.md`](../../tools/swath/research/README.md)).
+3. **Check the adapter against the new version's real CLI.** Swath's committed
+   `run.sh` still emitted `--max-parallel-listings`, `--seed` and
+   `--force-sort`, none of which exist at v0.2.0 — every mode it drove would
+   have failed at exit 2, silently rotted by a version bump. Diffing the
+   adapter's flags against the new `--help` is cheap and should be routine.
+4. **Preserve any claim ID that conserves a legacy origin.** The conservation
+   map is frozen; renumbering those claims stops it resolving. Behaviour that
+   reversed is recorded as `contradicted` under its existing ID, not deleted.
+5. **A version bump is not by itself a born-canonical event.** Re-deriving
+   does not retire the migration stratum. Retiring it is a separate decision
+   about the legacy layer itself, argued on its own grounds and recorded on
+   the capsule's Provenance section — swath's was retired because the subject
+   beneath it was never released and its records were seeded from design
+   documentation rather than from runs, not because the version moved.
+
+Validation and review are unchanged from step 4 above.
 
 ## What this page deliberately does not contain
 

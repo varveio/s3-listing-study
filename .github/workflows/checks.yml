@@ -90,5 +90,26 @@ jobs:
             python3 scripts/validate-tool-capsule.py --tool "$tool"
           done
 
+      - name: Source-anchor gate (self-test here; the real sweep runs locally)
+        # Every `source` evidence entry pins a repository, a commit, and often a
+        # line range in a checkout that does not live in this repo, and CI has
+        # no subject checkouts. With no --source-root the sweep therefore
+        # reports every anchor as skipped and passes: it proves the ledgers
+        # parse and prints the skip count, and verifies no anchor at all. A
+        # green tick for work not done is the failure mode this gate exists to
+        # prevent, so the step first runs the checker's self-test, which builds
+        # a throwaway repository and proves the gate still catches an
+        # out-of-range line range, a path missing at the cited commit, and a
+        # source root sitting on the wrong revision.
+        #
+        # The sweep that checks this repo's own anchors is run by whoever has
+        # the pinned checkouts, e.g.
+        #   python3 scripts/check-source-anchors.py --tool swath \
+        #     --source-root /path/to/swath-at-cef8ec2
+        run: |
+          set -euo pipefail
+          python3 scripts/check-source-anchors.py --self-test
+          python3 scripts/check-source-anchors.py
+
       - name: Markdown link check (current-state surfaces)
         run: python3 scripts/check-links.py

@@ -391,3 +391,12 @@ and are recorded so they cannot silently graduate:
    cap. The bounding control is the **300 s timeout**, which caps how long a runaway
    can emit; the cap itself is about capture size, not disk safety. If a tool is
    expected to emit enormous output, watch disk during the run.
+9. **The reference manifest is absent on a fresh box, so `verify-listing.sh`
+   cannot run there at all.** The manifest lives outside the working tree by
+   the no-data-in-repo rule, and without it the verifier issues no verdict no
+   matter how the runner is provisioned. Fetching the artifact and checking it
+   against the registry sha256 is therefore a **prerequisite distinct from the
+   runner-security gate** — a clone plus a provisioned runner still verifies
+   nothing. Row 2 of the prerequisites table describes the campaign's
+   artifact, not any particular machine's copy of it; see
+   [`../docs/operating/artifact-availability.md`](../docs/operating/artifact-availability.md).

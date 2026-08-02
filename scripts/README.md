@@ -37,5 +37,32 @@ No arguments:
 python3 scripts/check-links.py
 ```
 
+`check-source-anchors.py` checks that every cited source anchor names lines
+that exist. A `source` evidence entry in `data/claims.json` pins a repository,
+a commit, a path, and often a line range; the proposition can be right while the
+line numbers are wrong, and nothing else catches that. The checkouts are not in
+this repo, so one is supplied per repository with `--source-root` (repeatable,
+`PATH` or `REPOSITORY=PATH`), and a root is used only when its HEAD is the
+commit the evidence cites — checking against the wrong revision is worse than
+not checking. Files are read with `git show <commit>:<path>`, never from the
+working tree. Anchors with no root for their repository are reported as skipped
+with a count, never as passing:
+
+```sh
+python3 scripts/check-source-anchors.py --tool swath \
+  --source-root /path/to/swath-at-cef8ec2
+```
+
+`--tool` scopes to one capsule; with no `--tool`, every capsule under `tools/`.
+`--markdown [PATH ...]` additionally reads the inline `[SRC path:lines @ sha]`
+labels in reports and reader notes. That mode is opt-in and best-effort: prose
+anchors abbreviate paths (`.../Foo.java`), so it resolves each against the file
+list at the cited commit and reports the ones it cannot resolve unambiguously
+as skipped rather than failing them. `--self-test` builds a throwaway git
+repository and checks that the gate still catches an out-of-range range, a path
+missing at the cited commit, and a source root on the wrong revision; CI runs
+that, plus a checkout-free sweep that reports its skip count, since a hosted
+runner has no subject checkouts to resolve anchors against.
+
 The parameterized migration procedure, evidence fences, fixture exceptions,
 and review gates are in the tool capsule migration playbook.

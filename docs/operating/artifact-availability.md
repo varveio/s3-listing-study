@@ -5,17 +5,28 @@ Identity and availability are different: a digest can identify exact bytes even
 when those bytes are not published, and a Dockerfile can describe a build
 without reproducing the historical image byte-for-byte.
 
-**Status (2026-07-20): receipts are committed and internally hash-consistent,
-but the complete public evidence package is not yet available.** Historical
+**Status (2026-08-02): receipts are committed and internally hash-consistent,
+but the complete public evidence package is not yet available.**
+
+> **Swath's subject was retired on 2026-08-02.** Its capsule was retargeted from
+> a v0.1.0-era subject to v0.2.0, and the earlier subject — never released — was
+> retired wholesale under the subject-retirement rule in
+> [`tool-structure.md`](tool-structure.md) § Lifecycle: its receipts, derivation
+> records and migration stratum were removed together, and no claim cites them.
+> Every count on this page is stated after that removal, and the figures below
+> therefore differ from the 2026-07-20 wave totals. Swath's current evidence is
+> observation rather than receipt: its runs were made outside
+> `harness/smoke-run.sh`, because the runner-security profile was not
+> provisioned. Historical
 receipts remain immutable. Missing artifacts must be recovered and published,
 or explicitly waived with the dependent claim kept qualified; they are never
 recreated and presented as the bytes from an old run.
 
 ## Receipt inventory
 
-The tree contains 86 `receipt.md` files. Eighty-five are standard
+The tree contains 74 `receipt.md` files. Seventy-three are standard
 `harness/smoke-run.sh` records with sibling `run.meta`; one is the separate pS3
-build-attempt receipt. Of the 85 wrapper records, 67 have an ordinary
+build-attempt receipt. Of the 73 wrapper records, 57 have an ordinary
 `verify.md`, and two fan-out groups have `union-verify.md` records. The remaining
 wrapper records are blockers, capability/debug probes, union shards, or
 procedures for which ordinary single-run completeness verification does not
@@ -80,7 +91,7 @@ describes the recorded provenance, not a new registry pull or rebuild test.
 | minio-mc | Public upstream digest reference | Not needed | Registry bytes identified by digest |
 | s7cmd | Local-only image | No recipe in this repository | No |
 | s3-fast-list | Local-only image | Yes | No; dependency/toolchain closure differs from upstream |
-| Swath | Throwaway local-registry image | No recipe in this repository | No; source-to-image binding is recorded, not embedded |
+| Swath | **Public upstream digest reference** (`ghcr.io/varveio/swath`, pulled anonymously) | Not needed | Registry bytes identified by digest; the image's `org.opencontainers.image.revision` label equals the tested commit, so the source-to-image binding is embedded rather than merely recorded |
 | s3p | Local-only study image | Yes | No; dependency closure is not locked |
 | s3kor | Local-only study image | Yes | No exact-byte rebuild demonstrated |
 | s4cmd | Throwaway local-registry image | Yes | No exact-byte rebuild demonstrated |

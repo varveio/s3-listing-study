@@ -20,9 +20,9 @@ as defined in [`../../../docs/methodology.md`](../../../docs/methodology.md)
 of it produced a receipt; the reason is owned by
 [`running.md`](running.md#no-receipts-the-runner-security-blocker). Narrative
 that is not represented by a canonical claim is attributed inline to the
-derivation in [`../research/v2-blind/report.md`](../research/v2-blind/report.md),
+derivation in [`../research/report.md`](../research/report.md),
 whose known anchor defects are listed in
-[`../research/v2-blind/ERRATA.md`](../research/v2-blind/ERRATA.md).
+[`../research/ERRATA.md`](../research/ERRATA.md).
 
 Everything below is established from the pinned source and the project's own
 documentation unless it names a run. Source can establish a mechanism; it cannot
@@ -99,22 +99,23 @@ than the midpoint; bisection is a late phase — claim
 Every synthesized pivot is built over Unicode code points, so it is valid UTF-8
 by construction.
 
-## What changed between v0.1.0 and v0.2.0
+## Engine defaults and the one supported rollback
 
-The engine delta is two default flips: rate-anchored sensing moved off to on,
+Two engine defaults flipped at v0.2.0: rate-anchored sensing moved off to on,
 and the tail floor moved from `CURRENT` to `REACH_FLOORED` — claim
 `v020-engine-default-flips`. Both are settled in the toggle record and its parse
 fallbacks, not only in prose.
 
-The old tail-floor reading was structurally blind rather than merely noisy: its
-product is exactly zero for *any* estimate once the reach term is non-positive,
-so an honest large estimate was multiplied away before the comparison. The new
-reading floors reach at one sixteenth, so geometry shrinks a child's share
-instead of erasing it. Rate-anchored sensing replaces an estimator that
-degenerated to raw range width with one whose magnitude is the range's own
-proven mass and whose geometry is measured in a window anchored at the cursor's
-divergence. Each consult site additionally evaluates the old verdict and records
-the divergence, so the tool ships instrumentation for its own default flip.
+The pre-0.2.0 tail-floor reading was structurally blind rather than merely
+noisy: its product is exactly zero for *any* estimate once the reach term is
+non-positive, so an honest large estimate was multiplied away before the
+comparison. The shipped reading floors reach at one sixteenth, so geometry
+shrinks a child's share instead of erasing it. Rate-anchored sensing replaces an
+estimator that degenerated to raw range width with one whose magnitude is the
+range's own proven mass and whose geometry is measured in a window anchored at
+the cursor's divergence. Each consult site additionally evaluates the older
+verdict and records the divergence, so the tool ships instrumentation for its
+own default flip.
 
 The documented pre-0.2.0 rollback is the pair `rate_anchored_sensing=off` with
 `tail_floor=current`, and it is the only non-default engine configuration the
