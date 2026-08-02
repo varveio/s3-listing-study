@@ -56,6 +56,7 @@ Read *one* index, not five guesses. Order: this table → `docs/README.md`.
 | Provisioning a runner or executing a subject/reference container | `docs/operating/runner-security.md` — the mandatory execution boundary and activation gate |
 | About to state anything about a specific tool | `tools/<tool>/README.md` — the tool page, for current observations + provenance |
 | Changing a tool directory's structure or deciding which file owns content | `docs/operating/tool-structure.md` — the authoritative capsule and Markdown-role contract |
+| Actually writing a capsule — a new tool, or an existing one at a new upstream version | `docs/operating/capsule-authoring.md` — build order, agent topology, and the verification loop; `docs/operating/tool-onboarding.md` for where it sits in the sequence |
 | Looking for which tools are in scope, or a tool's tier | `tools/README.md` |
 | Working on the documented S3 API contract (ordering, delimiter, pagination, encoding) | `docs/s3-reference.md` |
 | Working on an open cross-tool question (language bottleneck, resume, throttling) | `docs/open-questions.md` |

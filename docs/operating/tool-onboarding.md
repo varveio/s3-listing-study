@@ -25,7 +25,10 @@ map, no legacy origins.
    [`runner-security.md`](runner-security.md) unchanged.
 3. **Build the capsule directly.** The target shape, every directory's
    purpose, the Markdown content contracts, the canonical-data rules, and the
-   lifecycle table are all owned by [`tool-structure.md`](tool-structure.md).
+   lifecycle table are all owned by [`tool-structure.md`](tool-structure.md);
+   the *procedure* for producing one — build order, agent topology, and the
+   verification loop — is owned by
+   [`capsule-authoring.md`](capsule-authoring.md).
    For a born-canonical tool: `research/` starts with `report.md` (and the
    independent-review record when one exists) only; `data/claims.json` records
    the study's own findings with the same status vocabulary and evidence
