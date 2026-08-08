@@ -131,7 +131,7 @@ own default flip.
 
 The documented pre-0.2.0 rollback is the pair `rate_anchored_sensing=off` with
 `tail_floor=current`, and it is the only non-default engine configuration the
-project supports — claim `engine-toggles-are-diagnostic`. The other thirteen
+project supports — claim `engine-toggles-are-diagnostic`. The other twelve
 `--engine-toggle` values are declared experimental diagnostic surface, even
 though several of them change the request pattern outright.
 

@@ -44,7 +44,7 @@ From the verifier itself, not from prose:
 
 **Header line, always** — `OutputStage` calls `formatter.writeHeader()` unconditionally before the drain loop `[SRC swath-core/.../output/OutputStage.java:69 @ cef8ec2]`, and TSV's header is a literal constant:
 
-```
+```text
 key	size	last_modified	etag	storage_class	row_type
 ```
 `[SRC swath-core/.../output/TsvFormatter.java:23 @ cef8ec2]` — pinned by test `[SRC swath-core/src/test/.../output/FormatterTest.java:78 @ cef8ec2]`.
@@ -86,7 +86,7 @@ Timestamp: same `Fields.isoMicros` `[SRC …JsonlFormatter.java:85]` — same va
 
 **No header** `[SRC swath-core/.../output/AlignedFormatter.java:135-138 @ cef8ec2]`. **Carries only size, time and key — no etag, no storage_class.** Layout is fixed-width, key last:
 
-```
+```text
 pad(size, 14, right-justified) + "  " + pad(time, 24, left-justified) + "  " + escape(key) + "\n"
 ```
 `[SRC …AlignedFormatter.java:123-124, 141-166 @ cef8ec2]`.
@@ -271,6 +271,9 @@ case "$MODE" in
   # ---- jsonl : RECOMMENDED. JSON escaping is invertible; no header; summary is
   #      kept off the data stream by construction. Fields are OMITTED when null,
   #      so key on names, never position.
+  # **Correction (review):** this frozen implementation checks TAB/newline only
+  # after join("\t"), so the guard cannot fire. The committed
+  # ../adapter/normalize.sh refuses raw .key inside jq before joining fields.
   jsonl)
     command -v jq >/dev/null || die "jq is required for mode jsonl"
     jq -r '
@@ -334,7 +337,7 @@ esac
 
 ### 7.2 Recommended invocations
 
-```
+```sh
 swath list s3://<bucket>/ --format jsonl --no-sign-request          # primary
 swath list s3://<bucket>/ --format tsv   --no-sign-request          # header-drop path
 swath list s3://<bucket>/ --format table --no-sign-request          # 3-field, fixed-width

@@ -103,7 +103,7 @@ retryPolicy = watchdog.isArmed() ? RetryPolicy.RIDE_OUT : RetryPolicy.BOUNDED;
 ### 2.3 Attempt-timeout escalation: level → wall-clock
 
 The engine publishes only an integer **level** on `PageRequest.attemptTimeoutEscalationLevel`; the store maps it `[SRC …/PageRequest.java:19-34 @ cef8ec2]`, `[DOC docs/internals/probe-budgets.md §3]`:
-```
+```text
 budget = base(callClass) × 2^level,  level clamped to [0, MAX_ESCALATION_SHIFT=30]
 ```
 `[SRC …/S3PageFetcher.java:500-535 @ cef8ec2]`

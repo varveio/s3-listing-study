@@ -16,10 +16,7 @@
 # --tune sort.ignore-disk-check=on, --format table — verified against
 # `list --help` on the pinned image; see claim `mode-inventory-v020`.
 #
-# Concurrency: every mode caps --concurrency at 8. swath's default is 64, which
-# would blow the campaign's aggregate politeness budget on a sponsored bucket.
-# --concurrency is an AIMD *ceiling*, not a setpoint (claim
-# `concurrency-flag-is-aimd-ceiling`), so the effective level may sit below it.
+# Every adapter mode passes the study setting `--concurrency 8`.
 #
 # Region is mandatory even anonymously: --no-sign-request does not affect region
 # resolution, and a credential-starved container with no AWS_REGION exits 2

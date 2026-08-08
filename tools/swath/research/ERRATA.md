@@ -38,6 +38,8 @@ a conclusion was reached rather than *what* is currently claimed.
 Two smaller anchor drifts of the same kind, corrected in the ledger only:
 `docs/usage.md:620` (the filters sentence is at 622) and
 `swath.java-conventions.gradle.kts:23` (`JavaLanguageVersion.of(25)` is line 24).
+`reader-D-output.md` also cites the `RowTally.java` field range as `:141-144`;
+the fields are at `:26-29` in the pinned source.
 
 ### What this says about the derivation
 

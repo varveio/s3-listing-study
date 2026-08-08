@@ -537,7 +537,7 @@
     },
     {
       "id": "sdk-internal-retry-disabled",
-      "statement": "SDK-internal retry is disabled at maxAttempts 1, so one increment of Swath's API counter corresponds to one HTTP request and the AIMD gauge sees every real 503 immediately.",
+      "statement": "SDK-internal retry is disabled at maxAttempts 1, so one increment of Swath's API counter corresponds to one SDK list-call attempt and the AIMD gauge sees every real 503 immediately.",
       "scope": "mechanism",
       "status": "supported",
       "disposition": "retained",
@@ -1264,42 +1264,6 @@
       ]
     },
     {
-      "id": "adapter-v020-modes-execute",
-      "statement": "The v0.2.0-rewritten adapter's four stdout modes — recursive-tsv, recursive-jsonl, recursive-table and seed-none — each execute against the pinned image at exit 0 and normalize to 2,549 rows of exactly five fields.",
-      "scope": "operability",
-      "status": "supported",
-      "disposition": "retained",
-      "qualification": "Each mode was run exactly once, on 2026-08-02, against the single prefix s3://noaa-normals-pds/normals-hourly/ of one bucket, anonymously at --concurrency 8 on native arm64, as a direct container observation: harness/smoke-run.sh was not used, so there is no receipt and no verifier verdict. It establishes that the rewritten argv parses and that the normalizer handles each mode's native output on that one prefix; it says nothing about the parquet-probe and sort-probe modes, which were not run here, and nothing about any other corpus or scope.",
-      "evidence": [
-        {
-          "kind": "observation",
-          "artifact": "../receipts/observations-v0.2.0/adapter-modes/observation.md"
-        },
-        {
-          "kind": "documentation",
-          "path": "../adapter/run.sh"
-        },
-        {
-          "kind": "documentation",
-          "path": "../adapter/normalize.sh"
-        }
-      ]
-    },
-    {
-      "id": "cross-mode-key-set-agreement",
-      "statement": "Those same four modes normalize to a byte-identical key set, sorted-key-set sha256 e71289eb3c4e0dc0f4d4f163e2b22414d0a93d5876fe5e11535490e5fd50dc54 over 2,549 keys.",
-      "scope": "output",
-      "status": "supported",
-      "disposition": "retained",
-      "qualification": "Four single unreplicated runs on one prefix of one bucket on 2026-08-02, with no receipt and no verifier verdict. The agreement spans two text encoders, a fixed-width parser, and one arm whose request pattern differs — seed.mode=none issues no delimiter-slash probes at all — so it is evidence about the engine and the adapter being consistent with each other. It is not a completeness check: with the reference manifest absent, nothing here is compared against ground truth, and all four arms could agree and still be wrong in the same way. No per-mode counters were captured, so it supports no cost comparison between the seed arms and does not generalize beyond this prefix.",
-      "evidence": [
-        {
-          "kind": "observation",
-          "artifact": "../receipts/observations-v0.2.0/adapter-modes/observation.md"
-        }
-      ]
-    },
-    {
       "id": "seed-hints-unimplemented",
       "statement": "Swath has no hinted seed mode: the hints seed mode is accepted by CLI validation and then throws an invalid-config error at seed time.",
       "scope": "operability",
@@ -1972,7 +1936,7 @@
     },
     {
       "id": "upstream-is-young-and-solo-maintained",
-      "statement": "At the 2026-08-02 research date the Swath repository was ten days old, created 2026-07-25, and had a single contributor with 48 commits.",
+      "statement": "At the 2026-08-02 research date the Swath repository was eight days old, created 2026-07-25, and had a single contributor with 48 commits.",
       "scope": "structure",
       "status": "supported",
       "disposition": "retained",
@@ -2045,62 +2009,6 @@
       ]
     },
     {
-      "id": "no-tool-combines-all-features",
-      "statement": "No other listing tool combines zero-config operation, streaming bounded memory, crash resume, and Parquet output.",
-      "scope": "performance",
-      "status": "unverified",
-      "disposition": "retained",
-      "qualification": "A comparative claim spanning all tools; groundwork scope is Swath only and it is routed to cross-cutting review.",
-      "evidence": [
-        {
-          "kind": "none",
-          "reason": "Comparative across every tool; not settled by Swath-only groundwork."
-        }
-      ]
-    },
-    {
-      "id": "throughput-within-10pct-of-s3-fast-list",
-      "statement": "Swath's throughput comes within about ten percent of s3-fast-list at equal concurrency.",
-      "scope": "performance",
-      "status": "unverified",
-      "disposition": "retained",
-      "qualification": "An upstream self-published design target, not a comparative result. The v0.2.0 pass deliberately transcribed no figure from upstream's own performance documents, so the target is carried as an unverified hypothesis only; throughput is scale-dependent and no comparative run has been made on this harness.",
-      "evidence": [
-        {
-          "kind": "none",
-          "reason": "No comparative throughput run has been performed, and throughput is not measurable from two unreplicated observation runs."
-        }
-      ]
-    },
-    {
-      "id": "s3-fast-list-published-throughput",
-      "statement": "s3-fast-list published 3.1 million objects per second at concurrency 1000.",
-      "scope": "performance",
-      "status": "unverified",
-      "disposition": "retained",
-      "qualification": "A published figure about another tool, used only as context, routed to the s3-fast-list page and not settled here.",
-      "evidence": [
-        {
-          "kind": "none",
-          "reason": "A number about another tool, not reproduced on this harness and not Swath's to verify."
-        }
-      ]
-    },
-    {
-      "id": "may-lose-to-s3-fast-list-hinted",
-      "statement": "Swath may underperform s3-fast-list on hinted throughput.",
-      "scope": "performance",
-      "status": "unverified",
-      "disposition": "retained",
-      "qualification": "A comparative and scale hypothesis for the benchmark phase. Swath has no hinted mode of its own at v0.2.0, so the comparison is against the other tool's hinted arm only.",
-      "evidence": [
-        {
-          "kind": "none",
-          "reason": "No comparative hinted-throughput run has been performed."
-        }
-      ]
-    },
-    {
       "id": "java-handicap-at-high-rates",
       "statement": "JVM startup and garbage collection cost Swath measurable throughput at high list rates.",
       "scope": "performance",
@@ -2111,20 +2019,6 @@
         {
           "kind": "none",
           "reason": "No high-list-rate run has been performed; behaviour at high rates is scale-dependent."
-        }
-      ]
-    },
-    {
-      "id": "seed-cost-comparison",
-      "statement": "Swath's zero-config seeding carries a throughput cost worth comparing against s3-fast-list cold and hinted.",
-      "scope": "performance",
-      "status": "unverified",
-      "disposition": "retained",
-      "qualification": "The hypothesis concerns the other tool's two arms; comparative, benchmark phase.",
-      "evidence": [
-        {
-          "kind": "none",
-          "reason": "No comparative cold-versus-hinted run has been performed."
         }
       ]
     },

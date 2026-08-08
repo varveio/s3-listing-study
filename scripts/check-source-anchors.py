@@ -155,7 +155,8 @@ def collect_json_anchors(capsule: Path, errors: list[str]) -> list[Anchor]:
                 continue  # schema-level defect; the capsule validator owns it
             anchors.append(Anchor(
                 tool, str(claim.get("id")), evidence.get("repository"),
-                str(commit), str(path), evidence.get("lines"),
+                str(commit), str(path),
+                str(evidence["lines"]) if evidence.get("lines") is not None else None,
             ))
     return anchors
 
@@ -233,8 +234,8 @@ def collect_markdown_anchors(pages: list[Path]) -> tuple[list[Anchor], int, int]
 def tree_files(root: SourceRoot, commit: str, cache: dict) -> set[str]:
     key = (str(root.path), commit)
     if key not in cache:
-        listing = git(root.path, "ls-tree", "-r", "--name-only", commit)
-        cache[key] = set(listing.stdout.splitlines()) if listing.returncode == 0 else set()
+        listing = git(root.path, "ls-tree", "-r", "-z", "--name-only", commit)
+        cache[key] = set(listing.stdout.split("\0")) - {""} if listing.returncode == 0 else set()
     return cache[key]
 
 
@@ -312,6 +313,9 @@ def check_anchor(anchor: Anchor, root: SourceRoot, path: str, cache: dict) -> st
 
 def resolve_root(anchor: Anchor, roots: list[SourceRoot]) -> SourceRoot | None:
     """Pick the checkout that speaks for this anchor's repository, if any."""
+    for root in roots:
+        if root.is_at(anchor.commit):
+            return root
     if anchor.repository:
         identity = normalize_repository(anchor.repository)
         matched = [root for root in roots if identity in root.identities]
@@ -356,6 +360,14 @@ def run(anchors: list[Anchor], roots: list[SourceRoot]) -> Outcome:
             skipped[key] = skipped.get(key, 0) + 1
             continue
         root.used = True
+        if root.is_at(anchor.commit) and anchor.repository:
+            # A commit-exact bare root can supersede a stale named checkout.
+            # The named root still participated in routing, so it is not an
+            # unused-input error; its bytes are simply not trusted.
+            identity = normalize_repository(anchor.repository)
+            for candidate in roots:
+                if identity in candidate.identities:
+                    candidate.used = True
         if not root.is_at(anchor.commit):
             key = (str(root.path), root.head, anchor.repository or "cited", anchor.commit)
             refused[key] = refused.get(key, 0) + 1
@@ -388,7 +400,7 @@ def run(anchors: list[Anchor], roots: list[SourceRoot]) -> Outcome:
     unused = [
         f"source root {root.path} was never used: "
         + (
-            f"it names no repository (no remote, and no REPOSITORY= label)"
+            "it names no repository (no remote, and no REPOSITORY= label)"
             if not root.identities
             else f"it names {', '.join(sorted(root.identities))}"
         )
@@ -498,6 +510,15 @@ def self_test() -> int:
         case(
             outcome.checked == 1 and not outcome.failures and not outcome.unused,
             f"bare-PATH root at the cited commit did not check: {outcome}",
+        )
+        outcome = run(
+            anchor("src/Small.java", "10-38"),
+            [moved_root, source_root(pinned_checkout, None)],
+        )
+        case(
+            outcome.checked == 1 and not outcome.failures
+            and not outcome.refusals and not outcome.unused,
+            f"commit-exact bare root did not beat a stale named root: {outcome}",
         )
 
         # Prose labels are best-effort, but only where prose is actually

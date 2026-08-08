@@ -17,9 +17,9 @@ The tested-subject facts are stated here; the canonical record is
 | Question | Current answer |
 | --- | --- |
 | Tested subject | Upstream's own published image for `v0.2.0` — no fork, no patch, nothing built locally — pulled anonymously by digest, its `org.opencontainers.image.revision` label equal to the tested commit `cef8ec2`, self-reporting `swath 0.2.0 (cef8ec24a74f)`. The registry tag is `0.2.0`; `v0.2.0` is a 404. Run anonymously (`--no-sign-request`) at `--concurrency 8`, native arm64. Canonical identity: [`data/tool.json`](data/tool.json). |
-| Exercised coverage | All three stdout formats (`jsonl`, `tsv`, `table`) and both reachable seed modes (`shallow`, `seed.mode=none`): `jsonl` on the full bucket and one prefix, the other three modes once each on that prefix through the rewritten v0.2.0 adapter, all exit 0 and all normalizing to the same key set — claims `adapter-v020-modes-execute`, `cross-mode-key-set-agreement`. No Parquet, sorted-Parquet or resume run; no credentialed, edge-key, crash, or high-concurrency run. |
+| Exercised coverage | Two direct `jsonl` observations, one on the full bucket and one prefix. A separate four-mode adapter summary lacks the exact commands and raw normalized outputs needed to support a canonical runtime claim. No Parquet, sorted-Parquet or resume run; no credentialed, edge-key, crash, or high-concurrency run. |
 | Correctness and verifier state | **No verifier verdict exists for any run**, and **no completeness check was performed**: count-and-uniqueness against the registry's recorded figures is the only cross-check, and it cannot detect a substituted key or compensating errors — claim `smoke-output-count-and-uniqueness`, with the reasons in [`docs/running.md`](docs/running.md#what-the-verifier-could-not-check). |
-| Receipts | **None**, and no claim on this subject is `confirmed`. Every runtime fact here is a direct container observation — two instrumented runs plus four adapter-mode runs. Why, in one place: [`docs/running.md`](docs/running.md#no-receipts-the-runner-security-blocker). |
+| Receipts | **None**, and no claim on this subject is `confirmed`. Runtime facts retained as evidence come from two direct container observations. Why, in one place: [`docs/running.md`](docs/running.md#no-receipts-the-runner-security-blocker). |
 | Smoke observation | The full-bucket run exited 0 having emitted 148,917 JSON Lines rows with zero duplicate keys, and reported eight concurrent listings in flight — claims `smoke-output-count-and-uniqueness`, `full-run-reported-parallel-listings`. A single unreplicated groundwork run, counted by the tool itself: not a benchmark result and not comparable to anything. |
 | Results | No benchmark or comparative result exists. |
 
@@ -40,8 +40,8 @@ Upstream's mode surface and what this study exercised are separate.
 
 | Mode | Upstream purpose | What this study exercised |
 | --- | --- | --- |
-| `list --format jsonl \| tsv \| table` | Fully enumerate a bucket to a text stream. | All three, once each on one prefix through the adapter, plus `jsonl` on the full bucket. Unreceipted observations. |
-| `list --tune seed.mode=shallow \| none` | Change whether an up-front `delimiter=/` descent runs at all — a request-pattern change, not an output change. | Both, as unreceipted observations: `shallow` as the default, `none` once on one prefix. Their key sets matched; no counters were captured, so the cost arms remain uncompared. |
+| `list --format jsonl \| tsv \| table` | Fully enumerate a bucket to a text stream. | `jsonl` in two direct observations. A four-mode adapter summary is preserved but is not independently auditable and supports no canonical runtime claim. |
+| `list --tune seed.mode=shallow \| none` | Change whether an up-front `delimiter=/` descent runs at all — a request-pattern change, not an output change. | `shallow` in the two direct observations. `none` appears only in the unauditable adapter summary, so the cost arms remain uncompared. |
 | `list --tune seed.mode=hints` | Declared hinted seeding. | Not run; it throws at seed time, so there is no hinted mode. |
 | `list --format parquet` / `--sort` | Write a multi-part, optionally globally key-sorted Parquet dataset to a directory. | Not run and not capturable: the harness bind-mounts nothing. Parquet is also Swath's only byte-exact output path. |
 | `swath resume <dir>` | Resume a crashed listing from a SQLite checkpoint. | Not run; it needs a durable checkpoint, which needs a directory dataset, which needs a mount. |
@@ -71,22 +71,20 @@ resolve in [`data/claims.json`](data/claims.json).
   [`Engine defaults and the one supported rollback`](docs/mechanism.md#engine-defaults-and-the-one-supported-rollback)
   · `v020-engine-default-flips`, `engine-toggles-are-diagnostic`
 
-- **Nothing is receipt-backed and no verifier ran.** The strongest cross-check
-  available was four listing modes normalizing to a byte-identical key set on one
-  prefix — engine-and-adapter consistency, not agreement with ground truth, and
-  four arms can agree while being wrong the same way. The blockers, the absent
-  completeness check and the bucket's drift are stated once, in the linked
-  section.
+- **Nothing is receipt-backed and no verifier ran.** The retained observations
+  support only the facts their committed commands and payload samples expose.
+  The blockers, the absent completeness check and the bucket's drift are stated
+  once, in the linked section.
   [`What the verifier could not check`](docs/running.md#what-the-verifier-could-not-check)
-  · `smoke-output-count-and-uniqueness`, `aimd-idle-at-smoke`,
-  `cross-mode-key-set-agreement`
+  · `smoke-output-count-and-uniqueness`, `aimd-idle-at-smoke`
 
 - **Several knobs a cross-tool comparison would reach for do not exist.** Page
   size is a hard-coded 1000 with no `--max-keys`, so it is not sweepable without
   patching source; there is no `--delimiter` or `--recursive`; the owner-split
   kill switch has no flag spelling; and versioned listing is dead code.
   [`Absences, dead code, and documentation drift`](docs/mechanism.md#absences-dead-code-and-documentation-drift)
-  · `page-size-fixed-no-max-keys`, `no-shallow-listing-mode`, `versions-listing-is-dead-code`
+  · `page-size-fixed-no-max-keys`, `no-shallow-listing-mode`,
+  `no-owner-split-flag-absent`, `versions-listing-is-dead-code`
 
 - **The tool's prose docs and javadoc are not a reliable statement of what
   ships.** Fifteen drift items were consolidated, three of which state engine
@@ -101,8 +99,8 @@ resolve in [`data/claims.json`](data/claims.json).
 
 ### Coverage gaps
 
-- Three output formats and two seed modes were exercised, on one bucket, in
-  single unreplicated runs — the three adapter-driven modes on one prefix only.
+- Only `jsonl` with the default shallow seed is supported by auditable direct
+  observations, on one bucket in two unreplicated runs.
   No credentialed, edge-key, crash, resume, or high-concurrency run — claims
   `control-char-key-fidelity-untested`, `crash-resume-works`,
   `exactly-once-under-crash`.
@@ -136,7 +134,7 @@ resolve in [`data/claims.json`](data/claims.json).
   `plus-to-space-conditional-hazard`.
 - Pages are assumed to arrive in ascending byte order and never checked — claim
   `no-intra-page-ordering-check`.
-- The project is new: ten days old at the 2026-08-02 research date, created
+- The project is new: eight days old at the 2026-08-02 research date, created
   2026-07-25, with a single contributor — claim
   `upstream-is-young-and-solo-maintained` — and two releases in six days, claim
   `upstream-publishes-tagged-releases`. Upstream's nightly deep-verification

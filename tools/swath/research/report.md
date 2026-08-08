@@ -1,5 +1,9 @@
 # `swath` v0.2.0 — source-first groundwork report
 
+**Current record:** [`ERRATA.md`](ERRATA.md) and
+[`data/claims.json`](../data/claims.json); this report remains frozen derivation
+history.
+
 **Status of this document.** Source-first derivation from the pinned checkout, the project's own docs, the published image, and a small number of direct container observations. **It contains no receipts.** The study's mandatory runner-security profile is not provisioned on this box, so `harness/smoke-run.sh` was never used and no run below is a receipt — see § 8, which states the blocker precisely. Every runtime claim is labelled `[OBS <how>]`, never `[RUN]`.
 
 **Evidence labels** (per `BRIEF.md`): `[SRC <file:line> @ cef8ec2]` read in the pinned checkout · `[DOC <path>]` the project's own docs at that revision · `[3P <source>]` third-party · `[OBS <how>]` directly observed in a run the wrapper could not record · `[INFERRED]` reasoning, with its basis stated. One extension is preserved from reader B: **`[3P-DEP <coords> <symbol>]`** — read in a pinned third-party dependency (the AWS SDK jar from the Gradle cache). It is not swath's source, so it is not `[SRC]`; it is not a published account, so `[3P <url>]` would misdescribe it. Reader anchors are preserved verbatim throughout rather than tidied away.
@@ -611,7 +615,7 @@ A partial decomposition, offered with its limits: at `W=8` the seed budget is `t
 
 ## 9. Notable findings
 
-### 9.1 The 0.1.0 → 0.2.0 engine delta is two default flips, and both are cures for the same class of blindness
+### 9.1 The 0.1.0 → 0.2.0 engine delta
 
 | commit | change |
 |---|---|
@@ -621,15 +625,9 @@ A partial decomposition, offered with its limits: at `W=8` the seed budget is `t
 | `00d8528` | Independent seed-time cure: `appendOpenTileSentinel` `[GIT 00d8528]`, `[SRC .../HybridSeedPlanner.java:643-689 @ cef8ec2]` |
 | `bf0bac8` | No behavioural change — javadoc and startup log text only `[GIT bf0bac8]` |
 
-Both defaults are confirmed in code, not just docs: `EngineToggles.DEFAULT = new EngineToggles(true,…,true, TailFloorMode.REACH_FLOORED)` and `parse()`'s matching fallbacks `[SRC EngineToggles.java:187-189, 310-311 @ cef8ec2]`, selected at `remainingWorkEstimator(maxKeys)` `[SRC EngineToggles.java:456-460 @ cef8ec2]`.
-
-`rate_anchored_sensing` replaces `(keysEmitted/consumed) × remaining` — which reads both spans over `[lo,hi]`'s divergence window and degenerates to raw width when `consumed` underflows `[SRC .../StealMath.java:106-112 @ cef8ec2]` — with a reading whose **magnitude is the range's own proven mass** (floored at one page so an un-started range is not scored zero and dropped from selection) and whose **geometry is measured in a window anchored at the cursor's divergence from `lo`** `[SRC .../RateAnchoredEstimator.java:92-103 @ cef8ec2]`, `[SRC .../StealMath.java:135-145 @ cef8ec2]` — precisely the term the old reading loses to a deep shared prefix. One estimator per run, shared by victim selection, the owner-split gate chain, and the `slow_ranges[]` diagnostic; `RangeScanner`'s readahead engage gate is deliberately outside the seam, with an explicit call-site rationale `[SRC .../RangeScanner.java:343-347, 363 @ cef8ec2]`.
-
-`tail_floor`'s `CURRENT` blindness is **structural, not statistical**: when `min(1, densityRatio) − f <= 0` the product is exactly `0` for **any** `est`, so an honest large estimate is multiplied away before the comparison `[SRC .../StealMath.java:410-420 @ cef8ec2]`. `REACH_FLOORED` floors the reach term at 1/16 so geometry *shrinks* the child's share instead of *erasing* it; where real reach exceeds 1/16 the two arms are byte-identical. Both cures are monotonically more permissive than `CURRENT`, and each of the three consult sites additionally evaluates `CURRENT`'s verdict and records the divergence under its own reason prefix `[SRC .../OwnerSplitGovernor.java:268-326 @ cef8ec2]` — i.e. the tool ships instrumentation for its own default flip. That is unusually disciplined.
-
-**The open frontier is the engine's structural weak spot, and 0.2.0 attacks it from three sides**: the owner-split governor refuses it outright `[SRC .../OwnerSplitGovernor.java:86-93 @ cef8ec2]`, readahead refuses it `[SRC .../RangeScanner.java:333 @ cef8ec2]`, and only a thief's `extrapolate` can carve it — which is exactly why `00d8528`'s seed sentinel (giving the mass-bearing tile a finite `hi`) and `6788d05`'s attribution counter both exist.
-
-For the benchmark this means the **documented rollback pair** (`--engine-toggle rate_anchored_sensing=off --engine-toggle tail_floor=current`) is the one supported non-default engine configuration and the clean way to measure the 0.2.0 delta `[SRC EngineToggles.java:22-27 @ cef8ec2]`.
+The public source establishes the two default flips and the supported rollback
+spellings. Benchmark-arm selection belongs to the common methodology; this
+public report does not carry maintainer rationale for tuned defaults.
 
 ### 9.2 The docs-vs-source drift set — a source-reliability finding, stated plainly
 

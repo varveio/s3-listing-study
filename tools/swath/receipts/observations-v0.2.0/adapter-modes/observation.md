@@ -5,6 +5,11 @@ harness/smoke-run.sh was not used and harness/verify-listing.sh could not
 run (the reference manifest is absent from this box). Recorded as a direct
 container observation.
 
+HISTORICAL SUMMARY ONLY. The exact expanded per-mode commands and raw normalized
+outputs were not retained, so the rows and hashes below are not independently
+auditable and support no canonical runtime or cross-mode-agreement claim. Re-run
+these modes under the wrapper before treating them as exercised coverage.
+
 Date (UTC)   : 2026-08-02T21:10:41Z
 Image        : ghcr.io/varveio/swath@sha256:ef1aca9ab473f133acceb5730ff88d52abaaa89e773801cdb62deff51f9909b0 (arm64 child, native)
 Tool version : swath 0.2.0 (cef8ec24a74f)
@@ -19,15 +24,3 @@ Normalizer   : tools/swath/adapter/normalize.sh <mode>
 | `recursive-jsonl` | 0 | 2549 | 5  | `34f0c8d04b114f4582b64535e27d91afb64e7c775cef92ea029fecbc000f69cc` |
 | `recursive-table` | 0 | 2549 | 5  | `47c5dc5a1305fd89df05585ee66113329bfd01b7537d9967d021002a7458f27e` |
 | `seed-none` | 0 | 2549 | 5  | `4cbcffb85bf9a153346a7a77855a3434a02dfaeeb876b86c209c1c2158e7b3dd` |
-
-## Cross-mode agreement
-
-All four modes normalize to a byte-identical key set (2,549 keys, sha256 of
-the sorted key list below). Four independent output paths -- two different
-text encoders, a fixed-width parser, and a distinct request pattern
-(seed.mode=none issues no delimiter=/ probes) -- agreeing exactly is
-evidence about the engine and the adapter together. It is not a completeness
-check: without the reference manifest, all four could agree and still be
-wrong in the same way.
-
-    sorted-key-set sha256 = e71289eb3c4e0dc0f4d4f163e2b22414d0a93d5876fe5e11535490e5fd50dc54

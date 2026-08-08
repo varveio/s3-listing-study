@@ -73,15 +73,21 @@ means while authoring:
 
 - **No receipt means nothing is `confirmed`.** The schema enforces it —
   `confirmed` requires `kind: "run"` evidence, and a run evidence entry must
-  point at a committed receipt. If the runner-security profile was not
+  point at a receipt-shaped string. The validator checks local existence; Git
+  tracking is enforced separately below. If the runner-security profile was not
   provisioned, `harness/smoke-run.sh` was not used and no receipt exists, full
   stop.
-- **A real run that the wrapper could not record is still evidence.** Label it
-  `[OBS <how>]` in prose and `kind: "observation"` in the ledger, put the
-  artifacts under `receipts/`, state exactly what blocked recording, and qualify
-  the claim to the single run that produced it. `receipts/` is scoped to "run
-  records **and** observations", so observations belong there — but the capsule
-  must never let one read as the other.
+- **Never initiate subject execution outside the mandatory runner boundary.**
+  Failure to provision the runner-security profile is a stop condition, not an
+  alternate observation path. If pre-existing output from an external or
+  earlier out-of-boundary execution must be preserved, label it `[OBS <how>]`
+  in prose and `kind: "observation"` in the ledger, state exactly how it was
+  produced, and keep it explicitly non-receipt. Such an observation may retain
+  provenance and support only a proposition bounded to what its committed
+  commands and artifacts make auditable. It cannot make a claim `confirmed` or
+  substitute for wrapper execution and verification. `receipts/` is scoped to
+  run records **and** preserved observations; the capsule must never let one
+  read as the other.
 - **Scale-dependent behaviour is not settleable at smoke scale.** Throughput,
   memory cliffs, OOM behaviour, high-concurrency behaviour and crash-resume stay
   `unverified` with a recorded reason, however suggestive a single run looked.
@@ -108,9 +114,14 @@ python3 scripts/check-links.py
 harness/scan-tree.sh .
 
 # every source anchor resolves at the commit the evidence cites
-python3 scripts/check-source-anchors.py --tool <slug> --source-root <checkout>
+python3 scripts/check-source-anchors.py --tool <slug> --require-checked \
+        --source-root <repository-1>=<checkout-1> \
+        --source-root <repository-2>=<checkout-2>
 python3 scripts/check-source-anchors.py --tool <slug> --markdown tools/<slug>/research/ \
-        --source-root <checkout>
+        --require-checked --source-root <repository-1>=<checkout-1> \
+        --source-root <repository-2>=<checkout-2>
+
+Any skipped anchors mean the verification is incomplete.
 
 # adapter is executable and matches the harness contract
 shellcheck -S warning tools/<slug>/adapter/*.sh
@@ -124,7 +135,7 @@ Then the checks no script performs:
 
   ```sh
   python3 - <<'EOF'
-  import json, os
+  import json, os, subprocess
   d = json.load(open('tools/<slug>/data/claims.json'))
   for c in d['claims']:
       if c['status'] != 'confirmed':
@@ -134,6 +145,8 @@ Then the checks no script performs:
       for r in runs:
           p = os.path.normpath(os.path.join('tools/<slug>/data', r['receipt']))
           assert os.path.exists(p), f"{c['id']}: receipt missing at {p}"
+          subprocess.run(["git", "ls-files", "--error-unmatch", "--", p], check=True,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
   print('confirmed claims all cite an existing receipt')
   EOF
   ```
@@ -151,13 +164,7 @@ Then the checks no script performs:
 
 ## Split the independent review by concern
 
-A capsule change is too big for one review. Three single-shot reviews of a
-~6,000-line capsule diff were attempted here and **all three produced nothing** —
-they stalled past the budget with no output, because a single reviewer has to
-hold the claim ledger, the prose, the machinery, the adapter and the process
-docs at once. Splitting the same diff into five scoped reviews, run in parallel,
-returned all five inside one window and surfaced 37 findings including two
-criticals.
+Split independent review by concern. A capsule change is too big for one review.
 
 Split by **concern, not by file count**. Each slice gets its own diff, its own
 focus list, and a scope fence telling it that sibling reviews cover the rest:

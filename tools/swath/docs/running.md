@@ -81,9 +81,10 @@ recorded figures in
 establish completeness at all: a substituted key, a corrupted key, or a missing
 key compensated by an extra one leaves both the count and the uniqueness intact
 — claim `smoke-output-count-and-uniqueness`. Cross-mode
-agreement does not substitute for it either: four listing modes normalizing to
-the same key set (claim `cross-mode-key-set-agreement`) constrains the engine
-and the adapter against each other, never against ground truth.
+agreement does not substitute for it. The preserved four-mode adapter summary
+cannot substitute for completeness and,
+because its exact commands and raw normalized outputs were not retained, it
+does not support a canonical runtime claim.
 
 Second, the registered smoke bucket has drifted since its 2026-07-17 snapshot,
 and the drift is bucket-wide rather than localised. Comparing the full-bucket
@@ -203,22 +204,12 @@ sort disk guard — `--tune sort.ignore-disk-check=on`, there being no
 `recursive-tsv`, `recursive-jsonl`, `recursive-table`, `seed-none`,
 `parquet-probe` and `sort-probe`, named to match v0.2.0's own format names.
 
-Validation was execution, not reading. All four stdout modes were driven through
-`run.sh` and `normalize.sh` against `s3://noaa-normals-pds/normals-hourly/` on
-2026-08-02, each exiting 0 and each normalizing to 2,549 rows of exactly five
-fields — claim `adapter-v020-modes-execute`. All four normalized to a
-byte-identical key set — claim `cross-mode-key-set-agreement`. Both are recorded
-in the adapter-modes
-[observation](../receipts/observations-v0.2.0/adapter-modes/observation.md).
-That agreement spans two text encoders, a fixed-width parser and one arm whose
-request pattern differs — `seed.mode=none` issues no `delimiter=/` probes at all
-— so it is evidence that the engine and the adapter are consistent with each
-other. **It is not a completeness check**: nothing here was compared against a
-reference manifest, so all four arms could agree and still be wrong in the same
-way, and the caveat above stands unchanged. These were direct container
-observations under the same credential starvation as the two runs above: still
-no receipt, still no verifier verdict, and the `parquet-probe` and `sort-probe`
-modes were not run.
+A four-mode adapter summary from 2026-08-02 is preserved as an
+[observation note](../receipts/observations-v0.2.0/adapter-modes/observation.md),
+but its exact expanded commands and raw normalized outputs were not retained.
+The summary is therefore not independently auditable and supports no canonical
+runtime or cross-mode-agreement claim. The adapter must be exercised again under
+the wrapper before those modes receive runtime coverage.
 
 **What the harness can capture.** Only the three text formats are capturable:
 Parquet as a file sink, Parquet as a directory dataset, sorted Parquet, and
@@ -246,10 +237,10 @@ claim `mode-inventory-v020`.
 
 | Mode | Status in this pass | Why |
 | --- | --- | --- |
-| `--format jsonl` | Observed twice directly and once through the adapter, exit 0; no receipt, no verifier verdict | Runner-security blocker |
-| `--tune seed.mode=shallow` (default) | Observed; both direct runs and three of the four adapter modes used it | Default; no receipt |
-| `--format tsv`, `--format table` | Each exercised once through the rewritten adapter, exit 0; no receipt, no verifier verdict | 2,549 normalized rows each on `normals-hourly/` — [adapter-modes observation](../receipts/observations-v0.2.0/adapter-modes/observation.md), claim `adapter-v020-modes-execute` |
-| `--tune seed.mode=none` | Exercised once through the rewritten adapter, exit 0; no receipt, no verifier verdict | A genuine request-pattern change — no `delimiter=/` probes at all — and it agreed key-for-key with the three seeded arms on that one prefix ([observation](../receipts/observations-v0.2.0/adapter-modes/observation.md)). No counters were captured, so the seed-cost arms are still uncompared — claim `seed-cost-direction-at-smoke` |
+| `--format jsonl` | Observed twice directly, exit 0; no receipt, no verifier verdict | Runner-security blocker |
+| `--tune seed.mode=shallow` (default) | Observed in both direct runs | Default; no receipt |
+| `--format tsv`, `--format table` | Unverified | Present only in an unauditable historical adapter summary; re-run required |
+| `--tune seed.mode=none` | Unverified | Present only in an unauditable historical adapter summary; the seed-cost arms remain uncompared — claim `seed-cost-direction-at-smoke` |
 | `--tune seed.mode=hints` | Unexercised | Declared but unreachable: it throws at seed time, after the checkpoint database is opened and the S3 client is built — claim `seed-hints-unimplemented`. Worth one capability probe of the exit-2 failure |
 | `--format parquet` (file and directory) | Not capturable | Directory or file sink; harness mounts nothing — claim `file-sinks-not-harness-capturable` |
 | `--sort` | Not capturable | Parquet-only by construction |
@@ -268,6 +259,12 @@ reconstruction:
 ```sh
 docker run --rm --pull=never --cap-drop ALL --security-opt no-new-privileges:true \
   -e AWS_EC2_METADATA_DISABLED=true -e TZ=UTC \
+  -e AWS_ACCESS_KEY_ID= -e AWS_SECRET_ACCESS_KEY= -e AWS_SESSION_TOKEN= \
+  -e AWS_SECURITY_TOKEN= -e AWS_CONTAINER_CREDENTIALS_RELATIVE_URI= \
+  -e AWS_CONTAINER_CREDENTIALS_FULL_URI= -e AWS_CONTAINER_AUTHORIZATION_TOKEN= \
+  -e AWS_ROLE_ARN= -e AWS_SHARED_CREDENTIALS_FILE=/nonexistent-by-harness \
+  -e AWS_CONFIG_FILE=/nonexistent-by-harness -e AWS_WEB_IDENTITY_TOKEN_FILE=/nonexistent-by-harness \
+  -e AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE=/nonexistent-by-harness \
   ghcr.io/varveio/swath@sha256:ef1aca9ab473f133acceb5730ff88d52abaaa89e773801cdb62deff51f9909b0 \
   list s3://noaa-normals-pds/normals-hourly/ \
     --region us-east-1 --no-sign-request --format jsonl -v --concurrency 8

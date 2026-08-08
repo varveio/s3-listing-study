@@ -62,15 +62,6 @@ At the pinned revision the shipped docs are **stale and now wrong**: `docs/insta
 - Maven Central + Gradle Plugin Portal for the dependency graph. The shipped runtime closure alone is **107 artifacts** [SRC THIRD_PARTY_NOTICES.md @ cef8ec2]; the build additionally resolves the Shadow, jk1-license-report, spotless, JMH plugins and the whole test stack.
 - **No JDK toolchain download.** `JavaLanguageVersion.of(25)` [SRC build-logic/src/main/kotlin/swath.java-conventions.gradle.kts:23 @ cef8ec2] with **no foojay/toolchain resolver configured anywhere** — the temurin-25 base JDK satisfies it in-container. On a bare host this means a **local JDK 25 is mandatory**; Gradle will not auto-provision one.
 
-**Cost, cold, 8-core aarch64 / 31 GB** — grounded anchors first, then the estimate:
-- CI anchor: the v0.2.0 release `build` step (compile + fast tests + shadowJar + distZip/distTar) took **3m17s** on a 4-core `ubuntu-latest` with a *warm* `setup-gradle` cache [3P run 30746967874].
-- CI anchor: `docker-check`'s full multi-arch buildx build took **2m55s** with a warm `type=gha` cache [3P PR run 30746142981].
-- [INFERRED] Cold single-arch native `docker build .` on your box: **8–15 min wall**, dominated by Gradle distribution + Maven download and the shadowJar merge of a ~77 MB fat jar. Multi-arch adds only a second JRE base pull and a COPY (the Gradle stage runs once) — **+1–2 min**, not double.
-- [INFERRED] Download volume: **~600–900 MB** (128 MiB Gradle + ~230 MB base images + ~300–500 MB Maven + apt).
-- [INFERRED] Disk: **~4–6 GB** peak — BuildKit `/root/.gradle` cache mount ~2–3 GB, build-stage layers ~1.5 GB, final runtime image ~350–400 MB uncompressed (167.8 MB compressed: 28.4 + 10.9 + 60.1 JRE layers + **68.4 MB** jar layer [3P per-layer manifest sizes]).
-
-Note the `--mount=type=cache,target=/root/.gradle` on both Gradle steps [SRC Dockerfile:55,60 @ cef8ec2] — a second build is far cheaper, but the cache lives in BuildKit, not in a layer.
-
 ---
 
 ## Q3 — Architecture matrix (deliverable)
