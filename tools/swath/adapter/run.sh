@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tools/swath/adapter/run.sh — prints the swath argv (NUL-delimited) for one smoke mode.
+# tools/swath/adapter/run.sh — prints the swath argv (NUL-delimited) for one mode.
 #
 # CONTRACT (harness/README.md):
 #   - Prints ONLY the argv, NUL-delimited (printf '%s\0' per arg). Never executes.
@@ -11,9 +11,16 @@
 #
 # Usage: run.sh <mode> <bucket> <region> [prefix]
 #
-# Concurrency: every mode caps --max-parallel-listings at 8 (subject card
-# CONCURRENCY_CAP=8). swath's default is 64; leaving it default would blow the
-# campaign concurrency budget.
+# SUBJECT: swath v0.2.0 (commit cef8ec2). The spellings emitted below are the
+# v0.2.0 ones — --concurrency N, --tune seed.mode=none,
+# --tune sort.ignore-disk-check=on, --format table — verified against
+# `list --help` on the pinned image; see claim `mode-inventory-v020`.
+#
+# Every adapter mode passes the study setting `--concurrency 8`.
+#
+# Region is mandatory even anonymously: --no-sign-request does not affect region
+# resolution, and a credential-starved container with no AWS_REGION exits 2
+# before issuing a request (claim `region-required-even-anonymously`).
 set -euo pipefail
 
 MODE="${1:?mode required}"
@@ -21,29 +28,28 @@ BUCKET="${2:?bucket required}"
 REGION="${3:?region required}"
 PREFIX="${4:-}"
 
-# Build the s3:// URI. swath takes the prefix scope in the URI path, not a flag.
+# swath takes the prefix scope in the URI path, not a flag. There is no
+# --prefix, and no --delimiter/--recursive: `list` is unconditionally recursive
+# (claim `no-shallow-listing-mode`).
 if [ -n "$PREFIX" ]; then
   URI="s3://${BUCKET}/${PREFIX}"
 else
   URI="s3://${BUCKET}"
 fi
 
-# Common args shared by every listing mode:
-#   -v                          INFO logs → the list_run_summary line (api calls,
-#                               strategy, peak_rss) lands on stderr for [RUN] evidence.
-#                               (-v is a TOP-LEVEL option and must precede `list`.)
-#   list <uri>                  the only listing subcommand.
-#   --region                    explicit region (parameter; overrides SDK chain).
-#   --no-sign-request           anonymous / unsigned (public bucket).
-#   --checkpoint none           ephemeral in-memory store: same WorkStealingScan
-#                               engine, no on-disk .swath-checkpoint/ file, not
-#                               resumable — the clean choice for a one-shot smoke.
-#   --max-parallel-listings 8   cap concurrency at the subject-card CONCURRENCY_CAP.
+# Shared by every mode:
+#   -v                  INFO logs, so the list_run_summary line (api_calls,
+#                       strategy) reaches stderr. -v is a TOP-LEVEL option and
+#                       must precede `list`.
+#   --checkpoint none   ephemeral in-memory SQLite: same work-stealing engine,
+#                       nothing durable on disk, not resumable — the clean
+#                       choice for a one-shot run. Note this still loads
+#                       sqlite-jdbc (claim `only-parquet-directory-is-resumable`).
 common_tail=( list "$URI"
   --region "$REGION"
   --no-sign-request
   --checkpoint none
-  --max-parallel-listings 8 )
+  --concurrency 8 )
 
 emit() { for a in "$@"; do printf '%s\0' "$a"; done; }
 
@@ -52,29 +58,32 @@ case "$MODE" in
     emit -v "${common_tail[@]}" --format tsv ;;
   recursive-jsonl)
     emit -v "${common_tail[@]}" --format jsonl ;;
-  recursive-aligned)
-    emit -v "${common_tail[@]}" --format aligned ;;
+  recursive-table)
+    # v0.2.0 name for what v0.1.0 called `aligned`. Exposes no etag and no
+    # storage_class, so the normalizer emits `-` for both.
+    emit -v "${common_tail[@]}" --format table ;;
   seed-none)
-    # Request-pattern variant: no up-front delimiter=/ seed probe; a single root
-    # range that the work-stealing engine subdivides by demand-driven stealing.
-    emit -v "${common_tail[@]}" --format tsv --seed none ;;
+    # Request-pattern variant: no up-front delimiter=/ seed probe, a single root
+    # range subdivided purely by demand-driven stealing. The only *supported*
+    # control over whether swath issues delimiter=/ requests at all.
+    emit -v "${common_tail[@]}" --format tsv --tune seed.mode=none ;;
   parquet-probe)
-    # CAPABILITY PROBE ONLY (receipts/smoke/_capability). The parquet sink writes
-    # a dataset directory (-o), never stdout; the stdout-only smoke wrapper mounts
-    # no volume, so this output is NOT capturable/verifiable here — the probe only
-    # proves the file-sink path executes. Output goes to a container-internal dir
-    # discarded with the container. NOTE: cannot reuse `--checkpoint none` common
-    # tail (parquet still fine with none, but keep the probe self-describing).
-    emit -v list "s3://${BUCKET}${PREFIX:+/$PREFIX}" --region "$REGION" \
-      --no-sign-request --checkpoint none --max-parallel-listings 8 \
+    # CAPABILITY PROBE ONLY. The parquet sink writes a dataset directory (-o) and
+    # refuses stdout; the wrapper mounts no volume, so the output is NOT
+    # capturable or verifiable here (claim `file-sinks-not-harness-capturable`).
+    # The probe only shows the file-sink path executes; the dataset dies with the
+    # container.
+    emit -v list "$URI" --region "$REGION" \
+      --no-sign-request --checkpoint none --concurrency 8 \
       --format parquet -o /tmp/swout ;;
   sort-probe)
-    # CAPABILITY PROBE ONLY. Globally-sorted parquet (a distinct output contract).
-    # --sort requires a checkpoint (refused with --checkpoint none), so this uses
-    # --checkpoint auto (container-internal). Output uncapturable as above.
-    emit -v list "s3://${BUCKET}${PREFIX:+/$PREFIX}" --region "$REGION" \
-      --no-sign-request --checkpoint auto --max-parallel-listings 8 \
-      --format parquet --sort --force-sort -o /tmp/swout ;;
+    # CAPABILITY PROBE ONLY. Globally-sorted parquet is a distinct output
+    # contract. --sort requires a checkpoint (refused under --checkpoint none)
+    # and a directory dataset, so this uses --checkpoint auto, container-internal.
+    # Output uncapturable as above.
+    emit -v list "$URI" --region "$REGION" \
+      --no-sign-request --checkpoint auto --concurrency 8 \
+      --format parquet --sort --tune sort.ignore-disk-check=on -o /tmp/swout ;;
   *)
     printf 'run.sh: unknown mode: %s\n' "$MODE" >&2
     exit 2 ;;

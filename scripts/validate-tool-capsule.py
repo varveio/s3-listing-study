@@ -21,15 +21,40 @@ REQUIRED_DIRS = {"data", "docs", "adapter", "research", "receipts"}
 ALLOWED_ROOT = REQUIRED_DIRS | {"README.md", "build"}
 REQUIRED_FILES = {
     "data/tool.json", "data/claims.json", "docs/mechanism.md",
-    "docs/running.md", "research/claims-migration.md", "adapter/run.sh",
-    "adapter/normalize.sh", "research/tool-page.md",
+    "docs/running.md", "adapter/run.sh", "adapter/normalize.sh",
 }
+# The migration stratum is optional: a capsule has one exactly when it appears
+# in MIGRATED_TOOLS below, and its data/claims.json must then declare the
+# legacy_ledger that names the legacy origins the frozen page and conservation
+# map account for. A capsule with a stratum must ship both files; a
+# born-canonical capsule must ship neither, so the two never drift apart.
+MIGRATION_FILES = {"research/tool-page.md", "research/claims-migration.md"}
 REQUIRED_H2 = {
     "At a glance", "How it works", "Modes and study coverage", "What we learned",
     "Limitations and open questions", "Navigate this directory",
     "Provenance", "Evidence boundary",
 }
 FIXTURE_TOOLS = {"s3p", "s4cmd"}
+# Which capsules came through the legacy consolidated layout. Whether a capsule
+# was migrated is a fact about its history, so it is declared here rather than
+# inferred from whether data/claims.json currently declares a legacy_ledger.
+# Inferring it made the stratum self-cancelling: a migrated capsule that deleted
+# its ledger, every legacy_origins field and both research files reclassified
+# itself as born-canonical and skipped the very preservation checks that exist to
+# object. The roster and the ledger are two independent records of one fact, and
+# the validator requires them to agree in both directions.
+#
+# What this does not close, deliberately: a change that edits both records
+# together still reads as consistent. That is the subject-retirement path in
+# docs/operating/tool-structure.md -- legitimate, and what happened to swath,
+# whose v0.1.0-era stratum was retired with its subject. No validator can tell an
+# argued retirement from an unargued deletion; what it can do is force the
+# deletion to appear on this line, where an owner-reviewed tools/ PR has to see
+# it. Removing a slug here is a decision, not a side effect.
+MIGRATED_TOOLS = {
+    "aws-cli", "minio-mc", "ps3", "rclone", "s3-fast-list",
+    "s3kor", "s3p", "s4cmd", "s5cmd", "s7cmd",
+}
 
 HISTORICAL_BANNER = re.compile(
     r"^> \*\*Historical landing page \(\d{4}-\d{2}-\d{2}, capsule migration\)\.\*\* This is the full\n"
@@ -61,54 +86,121 @@ def check_claim_schema_contract(schema_path: Path, errors: list[str]) -> None:
     schema = json.loads(schema_path.read_text(encoding="utf-8"))
     validator = jsonschema.Draft202012Validator(schema, format_checker=jsonschema.FormatChecker())
 
-    def document(status: str, evidence: list[dict[str, str]]) -> dict[str, object]:
-        return {
+    ledger = {
+        "source": "../research/tool-page.md",
+        "migration_map": "../research/claims-migration.md",
+        "expected_origins": ["M1"],
+    }
+
+    def document(
+        status: str, evidence: list[dict[str, str]],
+        legacy_ledger: dict[str, object] | None = None,
+        legacy_origins: list[str] | None = None,
+    ) -> dict[str, object]:
+        # A None stratum argument omits the key entirely, which is how a
+        # born-canonical capsule differs from a migrated one.
+        claim: dict[str, object] = {
+            "id": "schema-fixture",
+            "statement": "A schema contract fixture.",
+            "scope": "runtime",
+            "status": status,
+            "disposition": "retained",
+            "qualification": "Used only to test schema semantics.",
+        }
+        if legacy_origins is not None:
+            claim["legacy_origins"] = legacy_origins
+        claim["evidence"] = evidence
+        fixture: dict[str, object] = {
             "$schema": "../../../schemas/claims.schema.json",
             "schema_version": 1,
             "tool": "schema-fixture",
-            "legacy_ledger": {
-                "source": "../research/tool-page.md",
-                "migration_map": "../research/claims-migration.md",
-                "expected_origins": ["M1"],
-            },
-            "claims": [{
-                "id": "schema-fixture",
-                "statement": "A schema contract fixture.",
-                "scope": "runtime",
-                "status": status,
-                "disposition": "retained",
-                "qualification": "Used only to test schema semantics.",
-                "legacy_origins": ["M1"],
-                "evidence": evidence,
-            }],
         }
+        if legacy_ledger is not None:
+            fixture["legacy_ledger"] = legacy_ledger
+        fixture["claims"] = [claim]
+        return fixture
 
+    def migrated(status: str, evidence: list[dict[str, str]]) -> dict[str, object]:
+        return document(status, evidence, legacy_ledger=ledger, legacy_origins=["M1"])
+
+    def with_second_claim(
+        fixture: dict[str, object], legacy_origins: list[str] | None,
+    ) -> dict[str, object]:
+        # The half-present stratum needs two claims to express: one document,
+        # one claim conserving an origin and one not.
+        first = fixture["claims"][0]  # type: ignore[index]
+        second = dict(first)  # type: ignore[arg-type]
+        second["id"] = "schema-fixture-two"
+        if legacy_origins is None:
+            second.pop("legacy_origins", None)
+        else:
+            second["legacy_origins"] = legacy_origins
+        return {**fixture, "claims": [first, second]}
+
+    run_evidence = [{"kind": "run", "receipt": "../receipts/fixture"}]
     valid = {
-        "confirmed-run": document("confirmed", [{"kind": "run", "receipt": "../receipts/fixture"}]),
-        "supported-source": document("supported", [{
+        "confirmed-run": migrated("confirmed", run_evidence),
+        "supported-source": migrated("supported", [{
             "kind": "source", "subject": "upstream", "repository": "https://example.com/repo",
             "commit": "abcdef0", "path": "src/main.rs",
         }]),
-        "unverified-none": document("unverified", [{"kind": "none", "reason": "Not run."}]),
-        "unverifiable-none": document("unverifiable", [{"kind": "none", "reason": "No surviving evidence."}]),
+        "unverified-none": migrated("unverified", [{"kind": "none", "reason": "Not run."}]),
+        "unverifiable-none": migrated("unverifiable", [{"kind": "none", "reason": "No surviving evidence."}]),
+        "born-canonical-run": document("confirmed", run_evidence),
+        "born-canonical-none": document("unverified", [{"kind": "none", "reason": "Not run."}]),
+        # The stratum rule is per-document, so it must not misfire on the
+        # ordinary migrated shape of several claims each conserving an origin.
+        "migrated-two-claims": with_second_claim(migrated("confirmed", run_evidence), ["M1"]),
     }
     invalid = {
-        "confirmed-with-none": document("confirmed", [
+        "confirmed-with-none": migrated("confirmed", [
             {"kind": "run", "receipt": "../receipts/fixture"},
             {"kind": "none", "reason": "Contradictory evidence state."},
         ]),
-        "supported-with-none": document("supported", [{"kind": "none", "reason": "Not evidence."}]),
-        "unverified-with-source": document("unverified", [{
+        "supported-with-none": migrated("supported", [{"kind": "none", "reason": "Not evidence."}]),
+        "unverified-with-source": migrated("unverified", [{
             "kind": "source", "subject": "upstream", "repository": "https://example.com/repo",
             "commit": "abcdef0", "path": "src/main.rs",
         }]),
-        "source-with-receipt": document("supported", [{
+        "source-with-receipt": migrated("supported", [{
             "kind": "source", "subject": "upstream", "repository": "https://example.com/repo",
             "commit": "abcdef0", "path": "src/main.rs", "receipt": "../receipts/fixture",
         }]),
-        "run-with-source-fields": document("confirmed", [{
+        "run-with-source-fields": migrated("confirmed", [{
             "kind": "run", "receipt": "../receipts/fixture", "repository": "https://example.com/repo",
         }]),
+        "born-canonical-confirmed-without-run": document("confirmed", [{
+            "kind": "documentation", "url": "https://example.com/docs",
+        }]),
+        "ledger-missing-migration-map": document(
+            "confirmed", run_evidence,
+            legacy_ledger={"source": "../research/tool-page.md", "expected_origins": ["M1"]},
+            legacy_origins=["M1"],
+        ),
+        "ledger-foreign-source": document(
+            "confirmed", run_evidence,
+            legacy_ledger={**ledger, "source": "../research/report.md"},
+            legacy_origins=["M1"],
+        ),
+        "ledger-empty-origins": document(
+            "confirmed", run_evidence,
+            legacy_ledger={**ledger, "expected_origins": []},
+            legacy_origins=["M1"],
+        ),
+        "claim-empty-legacy-origins": document(
+            "confirmed", run_evidence, legacy_ledger=ledger, legacy_origins=[],
+        ),
+        # Both directions of the all-or-nothing stratum rule, including the
+        # half-present shape a ledger plus a partially stripped claim set makes.
+        "ledger-without-claim-origins": document(
+            "confirmed", run_evidence, legacy_ledger=ledger, legacy_origins=None,
+        ),
+        "claim-origins-without-ledger": document(
+            "confirmed", run_evidence, legacy_ledger=None, legacy_origins=["M1"],
+        ),
+        "ledger-with-one-claim-missing-origins": with_second_claim(
+            migrated("confirmed", run_evidence), None,
+        ),
     }
     for name, fixture in valid.items():
         if list(validator.iter_errors(fixture)):
@@ -299,14 +391,48 @@ def main() -> int:
         print(f"validate-tool-capsule: missing {capsule}", file=sys.stderr)
         return 1
 
+    tool_data = load_json(capsule / "data" / "tool.json", errors)
+    claims_data = load_json(capsule / "data" / "claims.json", errors)
+    has_migration = args.tool in MIGRATED_TOOLS
+    declares_ledger = isinstance(claims_data, dict) and "legacy_ledger" in claims_data
+    if isinstance(claims_data, dict) and declares_ledger != has_migration:
+        if has_migration:
+            errors.append(
+                f"{args.tool} is listed as a migrated capsule (MIGRATED_TOOLS in "
+                "this script) but data/claims.json declares no legacy_ledger: a "
+                "migration stratum is removed only with its whole subject under "
+                "the subject-retirement rule, which removes the slug from that "
+                "roster in the same reviewed change"
+            )
+        else:
+            errors.append(
+                f"{args.tool} is not listed as a migrated capsule (MIGRATED_TOOLS "
+                "in this script) but data/claims.json declares a legacy_ledger: a "
+                "capsule that acquires a migration stratum records it in that roster"
+            )
+    migration_regression = bool(args.migration_base) and has_migration
+    if args.migration_base and not has_migration:
+        errors.append(
+            f"--migration-base {args.migration_base} given for a capsule with no "
+            f"migration stratum: {args.tool} is not in MIGRATED_TOOLS, so either it "
+            "is born canonical or its stratum was retired with its subject, and "
+            "there is no legacy base to regress against"
+        )
+
     actual_root = {entry.name for entry in capsule.iterdir()}
     for name in sorted(REQUIRED_DIRS - actual_root):
         errors.append(f"missing required root directory: {name}/")
     for name in sorted(actual_root - ALLOWED_ROOT):
         errors.append(f"unexpected item at capsule root: {name}")
-    for relative in sorted(REQUIRED_FILES):
+    for relative in sorted(REQUIRED_FILES | (MIGRATION_FILES if has_migration else set())):
         if not (capsule / relative).is_file():
             errors.append(f"missing required file: {relative}")
+    if not has_migration:
+        for relative in sorted(MIGRATION_FILES):
+            if (capsule / relative).is_file():
+                errors.append(
+                    f"migration stratum file without a legacy ledger: {relative}"
+                )
     for name in sorted({"mechanism.md", "running.md", "run.sh", "normalize.sh", "Dockerfile"} & actual_root):
         errors.append(f"legacy mixed-responsibility root file remains: {name}")
     if (capsule / "docs" / "claims-migration.md").is_file():
@@ -315,7 +441,7 @@ def main() -> int:
     build_exists = (capsule / "build").exists()
     if build_exists and not (capsule / "build" / "Dockerfile").is_file():
         errors.append("build/ exists without Dockerfile")
-    if args.migration_base:
+    if migration_regression:
         base_has_dockerfile = git(
             repo, "cat-file", "-e",
             f"{args.migration_base}:tools/{args.tool}/Dockerfile",
@@ -325,8 +451,6 @@ def main() -> int:
         if not base_has_dockerfile and build_exists:
             errors.append("build/ exists even though the migration-base tool has no Dockerfile")
 
-    tool_data = load_json(capsule / "data" / "tool.json", errors)
-    claims_data = load_json(capsule / "data" / "claims.json", errors)
     check_claim_schema_contract(repo / "schemas" / "claims.schema.json", errors)
     if tool_data is not None:
         validate_schema(tool_data, repo / "schemas" / "tool.schema.json", "tool.json", errors)
@@ -353,7 +477,16 @@ def main() -> int:
         ids = [claim.get("id") for claim in claims if isinstance(claim, dict)]
         if len(ids) != len(set(ids)):
             errors.append("claim IDs are not unique")
-        if args.migration_base:
+        if not has_migration:
+            stray = [
+                claim.get("id") for claim in claims
+                if isinstance(claim, dict) and "legacy_origins" in claim
+            ]
+            if stray:
+                errors.append(
+                    f"claims declare legacy_origins without a legacy ledger: {stray}"
+                )
+        if migration_regression:
             ledger = claims_data.get("legacy_ledger", {})
             expected = ledger.get("expected_origins", []) if isinstance(ledger, dict) else []
             seen = {
@@ -443,10 +576,25 @@ def main() -> int:
         )
         if provenance_match:
             provenance = provenance_match.group("body")
-            for required in ("Mixed provenance", "not a run record", "research/tool-page.md", "research/reconciliation.md"):
+            # "not a run record" is required of every capsule: the page must
+            # distinguish what was read from what was executed, whatever its
+            # lineage. The other two are migration-era by nature -- "Mixed
+            # provenance" exists to flag a firsthand layer sitting on an
+            # inherited one, and reconciliation.md is the inherited notes'
+            # audit -- so requiring them of a born-canonical capsule would
+            # force it to describe a seed it does not have.
+            required_provenance = ["not a run record"]
+            if has_migration:
+                required_provenance += [
+                    "Mixed provenance", "research/reconciliation.md", "research/tool-page.md",
+                ]
+            for required in required_provenance:
                 if required not in provenance:
                     errors.append(f"README Provenance section does not name {required}")
-        for required in ("data/claims.json", "research/claims-migration.md", "research/tool-page.md", "receipts/"):
+        required_navigation = ["data/claims.json", "receipts/"]
+        if has_migration:
+            required_navigation += sorted(MIGRATION_FILES)
+        for required in required_navigation:
             if required not in readme:
                 errors.append(f"README navigation does not name {required}")
         for directory in sorted(REQUIRED_DIRS | ({"build"} if build_exists else set())):
@@ -463,7 +611,7 @@ def main() -> int:
         if path.is_file() and path.suffix != ".json":
             errors.append(f"data/ contains non-JSON source: {path.name}")
 
-    if args.migration_base:
+    if migration_regression:
         check_receipts(repo, capsule, args.tool, args.migration_base, errors)
         check_research_preservation(
             repo, capsule, args.tool, args.migration_base, errors,

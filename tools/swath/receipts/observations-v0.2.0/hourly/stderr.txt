@@ -1,0 +1,17 @@
+tune effective: engine.readahead=off, seed.mode=shallow, parquet.writers=3, summary.interval=PT30S, sort.ignore-disk-check=off
+12:22:22.031 INFO  i.v.s.c.ListCommand - list_command_start bucket=noaa-normals-pds prefix=normals-hourly/ args_hash=5ea01a6b3e8565c4a5baf263dd2648cd0a7cad9182678f585d43a68a29b75698 checkpoint_path=none strategy=WORK_STEALING max_parallel_listings=8 engine_toggles_default=true
+12:22:22.297 INFO  i.v.s.s.FirstRequestMarkerFetcher - list_first_request_issued elapsed_ms=271
+12:22:23.199 INFO  i.v.s.s.FirstRequestMarkerFetcher - list_first_page_returned elapsed_ms=1173
+12:22:24.298 INFO  i.v.s.o.RunProgressReporter - progress run_id=1 phase=seeding strategy=WORK_STEALING elapsed_ms=2004 phase_elapsed_ms=2003 api_calls=6 retries=0 cost_usd=2.9999999999999997E-5 completed=5/32 probes percent=16 probes=5 probe_budget=32 last_probe_age_ms=20
+12:22:26.610 INFO  i.v.s.e.SeedStep - seed_shallow run_id=1 probes=16 cut_points=47 synthesized_cuts=32 seed_ranges=48
+12:22:26.612 INFO  i.v.s.c.ListCommand - list_seed run_id=1 seed=SHALLOW seed_count=48
+12:22:26.623 INFO  i.v.s.r.ListRunner - list_run_start strategy=WORK_STEALING checkpointed=true run_id=1 output_format=JSONL worker_count=8
+12:22:26.625 INFO  i.v.s.e.WorkStealingScan - work_stealing_scan_start run_id=1 worker_count=8 seed_count=48 max_keys=1000
+12:22:29.167 INFO  i.v.s.e.WorkStealingScan - quiescence_reached run_id=1 outstanding=0
+12:22:30.690 INFO  i.v.s.e.WorkStealingScan - work_stealing_scan_exit run_id=1 outstanding=0
+12:22:30.702 INFO  i.v.s.r.ListRunner - list_run_summary run_id=1 objects=2549 duration_ms=4070 session_duration_ms=8400 strategy=WORK_STEALING api_calls=75 cost_usd=3.75E-4 output_files=1 compressed_size_bytes=658634 keys=2549 pages=18 peak_in_flight=8 steals=3 splits=0 errors=0 keys_per_sec=626.2488120552632 api_calls_per_1k_objects=29.423303256178894 peak_rss_bytes=415137792 peak_heap_bytes=174677824 cpu_seconds=1.76 cpu_efficiency=0.4324040444163449
+12:22:30.702 INFO  i.v.s.r.ListRunner - list_run_diagnostics run_id=1 duration_ms=4070 strategy=WORK_STEALING strategy_why=checkpointed_resumable_nodes steal_reasons={OWNER_SPLIT.remaining_est_floor=1, IDLE_SLOT.in_flight=36, SEED.radix_bands=32, CHILD_MASS.tiny=13, TOGGLE.tail_floor_reach_floored_on=1, ALPHABET.window_gap=1, SEED.frontier_reordered=1, SENSING_STEAL.geometry_lift=1, STEAL.attempted=3, TOGGLE.mass_aware_seed_on=1, AIMD.slow_start_double=1, SEED_SCHED.distinct_seed_worker=8, TOGGLE.rate_anchored_sensing_on=1, SENSING_OWNER.geometry_lift=1, RETRY.retry_pivot_adjacent=1, SEED.open_tile_sentinel_declined_no_spare_slot=1, CHILD_MASS.empty=31, SEED.frontier_continued_past_explosion=1, SENSING_STEAL.page_floor=1, SEED.dense_root_radix_banded=1, CHILD_MASS.small=4, PIVOT.reflect_empty=1, NO_VICTIM.pool_empty=2, SEED.top_complete=1, IDLE_SLOT.paced=3, SEED.frontier_level_ordered=1, ALPHABET.alphabet_fallback=1, NO_VICTIM.no_splittable_victim=2} probe_fetches=9 empty_upper_bisections=7 splits_committed=0 unsplittable_victims=0 split_guard_aborts=0 peak_in_flight=8 time_to_first_steal_ms=-1 time_to_peak_in_flight_ms=246 pages=49 fetched_keys=37524 mean_keys_per_page=765.795918367347 short_truncated_pages=0 throttle_events=0 transient_events=0 aimd_votes=0 aimd_target_reductions=0
+  2,549 objects in 4.1s listing · 626 keys/s · 8.4s total
+  75 API calls · 29.42 per 1k objects · in flight avg 4.62 · peak 8
+  <$0.001 (est. @ $0.005/1k LIST)
+  1 file · 658.6 KB written · peak RSS 415.1 MB

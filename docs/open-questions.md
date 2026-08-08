@@ -97,6 +97,21 @@ If the hypothesis holds, it predicts a language-tier stratification in the
 results that's roughly independent of algorithm — and it puts the single JVM
 entrant (ours) in an interesting spot. See [`../tools/pure-storage/`](../tools/pure-storage/).
 
+Related comparative hypotheses moved here from the Swath-only ledger remain
+`unverified` and retain no evidence beyond the reasons stated:
+
+- No other listing tool combines zero-config operation, streaming bounded
+  memory, crash resume, and Parquet output. This spans every tool and cannot be
+  settled by Swath-only groundwork.
+- Swath comes within about ten percent of s3-fast-list at equal concurrency.
+  This was an upstream design target, not a result from this harness; no
+  comparative throughput run has been performed.
+- Swath may underperform s3-fast-list on hinted throughput. No comparative
+  hinted-throughput run has been performed.
+- Swath's zero-config seeding has a throughput cost worth comparing with
+  s3-fast-list's cold and hinted arms. No comparative cold-versus-hinted run has
+  been performed.
+
 ---
 
 ## 3. Which tools support crash-resume?
