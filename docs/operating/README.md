@@ -11,7 +11,12 @@ the study and its findings should start at [`../README.md`](../README.md).
 - [`tool-structure.md`](tool-structure.md) — the authoritative contract for a
   runnable tool directory: what every layer and Markdown file owns.
 - [`tool-onboarding.md`](tool-onboarding.md) — the sequence for adding a new
-  subject and building its capsule.
+  subject and building its capsule, and for re-deriving one when its upstream
+  releases a new version.
+- [`capsule-authoring.md`](capsule-authoring.md) — how to actually produce a
+  capsule from a derivation: what order to build it in, how to split the work
+  across agents, how the evidence rules bind while writing, and the
+  verification loop that runs before a capsule is called done.
 - [`artifact-availability.md`](artifact-availability.md) — what receipt payloads,
   manifests, and images are retrievable from a clone today, what is only
   hash-bound, and the remaining release gate.

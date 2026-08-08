@@ -19,6 +19,7 @@ import io
 import subprocess
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -57,6 +58,9 @@ UNEXERCISED = {
     "ps3": {"list-versions"},
     "s3p": {"ls-long"},
     "s4cmd": {"du", "shallow", "show-directory"},
+    # v0.1.0 receipts were retired with that subject; v0.2.0 currently has
+    # observations only, so no mode has a replayable committed payload yet.
+    "swath": {"recursive-tsv", "recursive-jsonl", "recursive-table", "seed-none"},
 }
 
 # A mode whose input is a BINARY stream, where a lone newline is not an empty
@@ -328,7 +332,7 @@ FIXTURES: dict[tuple[str, str], tuple[bytes, str, list[bytes]]] = {
     ),
     # AlignedFormatter: size right-justified in columns [1,14], the instant from
     # column 17, the key from column 43.
-    ("swath", "recursive-aligned"): (
+    ("swath", "recursive-table"): (
         b"       3184153  2026-03-16T14:41:50Z      normals-hourly/access/A.csv\n",
         "normals-hourly/",
         [b"normals-hourly/access/A.csv"],
@@ -487,6 +491,45 @@ def test_output_conforms_to_contract_v2(tool: str, mode: str) -> None:
             assert record.mtime.endswith("Z")
         if record.size is not None:
             assert record.size.isdigit()
+
+
+def test_swath_table_drops_non_object_rows() -> None:
+    payload = (
+        f"{'PRE':>14}  {'':24}  normals-hourly/prefix/\n"
+        f"{'-':>14}  {'':24}  normals-hourly/deleted\n"
+        f"{3184153:>14}  {'2026-03-16T14:41:50Z':24}  normals-hourly/object\n"
+    ).encode()
+    done = run("swath", "recursive-table", "normals-hourly/", payload)
+    assert done.returncode == 0, done.stderr
+    assert [record.key for record in read_records(io.BytesIO(done.stdout))] == [
+        b"normals-hourly/object"
+    ]
+
+
+@pytest.mark.parametrize("mode", ["recursive-tsv", "recursive-table"])
+def test_swath_text_modes_refuse_ambiguous_control_escapes(mode: str) -> None:
+    if mode == "recursive-tsv":
+        payload = b"literal\\x09key\t1\t2026-03-16T14:41:50Z\tetag\tSTANDARD\tOBJECT\n"
+    else:
+        payload = f"{1:>14}  {'2026-03-16T14:41:50Z':24}  literal\\x09key\n".encode()
+    done = run("swath", mode, "", payload)
+    assert done.returncode != 0
+    assert b"ambiguous swath" in done.stderr
+
+
+@pytest.mark.parametrize("mode", sorted(load_adapter(REPO, "swath").MODES))
+def test_swath_treats_a_closed_downstream_as_success(
+    monkeypatch: pytest.MonkeyPatch, mode: str
+) -> None:
+    adapter = load_adapter(REPO, "swath")
+
+    def broken_pipe(*_args: object) -> int:
+        raise BrokenPipeError
+
+    monkeypatch.setattr(adapter, "normalize", broken_pipe)
+    monkeypatch.setattr(adapter.sys, "stdin", SimpleNamespace(buffer=io.BytesIO()))
+    monkeypatch.setattr(adapter.sys, "stdout", SimpleNamespace(buffer=io.BytesIO()))
+    assert adapter.main(["normalize.py", mode]) == 0
 
 
 # Every (mode, empty payload) pair, minus the one combination that is not an

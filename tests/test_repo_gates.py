@@ -11,9 +11,11 @@ into a false pass.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
-from s3_listing_study import capsule, cli, links
+from s3_listing_study import capsule, cli, links, source_anchors
 
 
 def test_capsule_and_links_agree_on_heading_slugs() -> None:
@@ -42,3 +44,25 @@ def test_validate_capsule_reports_a_tool_that_has_no_directory(
 ) -> None:
     assert cli.main(["validate-capsule", "--tool", "not-a-tool"]) == 1
     assert "validate-capsule: missing" in capsys.readouterr().err
+
+
+def test_source_anchor_subcommand_runs_its_regression_self_test(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert cli.main(["check-source-anchors", "--self-test"]) == 0
+    assert "self-test passed" in capsys.readouterr().out
+
+
+def test_source_anchor_lines_are_coerced_from_canonical_json(tmp_path: Path) -> None:
+    capsule = tmp_path / "fixture"
+    (capsule / "data").mkdir(parents=True)
+    (capsule / "data" / "claims.json").write_text(
+        '{"tool":"fixture","claims":[{"id":"one","evidence":['
+        '{"kind":"source","repository":"https://example.invalid/repo",'
+        '"commit":"abcdef0","path":"source.py","lines":7}]}]}',
+        encoding="utf-8",
+    )
+    errors: list[str] = []
+    anchors = source_anchors.collect_json_anchors(capsule, errors)
+    assert errors == []
+    assert anchors[0].lines == "7"

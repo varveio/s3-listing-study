@@ -50,7 +50,9 @@ EXPECTED_PAYLOADS = {
     "s4cmd": 1,
     "s5cmd": 14,
     "s7cmd": 13,
-    "swath": 12,
+    # The v0.1.0 receipt corpus was retired with that subject. The v0.2.0 files
+    # are explicitly observations, not harness payloads suitable for replay.
+    "swath": 0,
 }
 
 

@@ -4,27 +4,37 @@
   "slug": "swath",
   "display_name": "Swath",
   "entry_type": "runnable_lister",
-  "upstream": { "repository": "https://github.com/varveio/swath" },
+  "upstream": {
+    "repository": "https://github.com/varveio/swath"
+  },
   "language": "Java",
-  "license": "None present at f1009db",
+  "license": "Apache-2.0",
   "tested": {
     "variant": "upstream",
     "repository": "https://github.com/varveio/swath",
     "version": {
-      "value": "0.1.0-SNAPSHOT",
-      "provenance": { "kind": "run", "reference": "../receipts/smoke/recursive-tsv/full/run.meta" }
+      "value": "0.2.0",
+      "provenance": {
+        "kind": "documentation",
+        "reference": "../research/report.md"
+      }
     },
     "revision": {
-      "value": "f1009db599861a7e905a539778d915f1bb5426eb",
-      "provenance": { "kind": "observation", "reference": "../receipts/smoke/_build/build.md" }
+      "value": "cef8ec24a74ffae14ee6a9462e4b7f6c334fbc32",
+      "provenance": {
+        "kind": "documentation",
+        "reference": "../research/report.md"
+      }
     }
   },
   "study": {
     "groundwork_status": "complete",
-    "smoke_execution_status": "ran",
-    "verification_status": "passed",
+    "smoke_execution_status": "blocked",
+    "verification_status": "blocked",
     "auth_status": "anonymous",
-    "benchmark_eligibility": "planned"
+    "benchmark_eligibility": "conditional"
   },
-  "evidence_roots": ["../receipts/smoke"]
+  "evidence_roots": [
+    "../receipts/observations-v0.2.0"
+  ]
 }

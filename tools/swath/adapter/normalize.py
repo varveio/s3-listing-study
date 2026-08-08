@@ -11,7 +11,7 @@ directly, and the aligned sink is fixed-width columns ``substr`` addresses in on
 expression. Framing and validation stay in ``contract`` via ``emit_result``.
 
 Field exposure — ``recursive-tsv`` / ``seed-none`` / ``recursive-jsonl`` carry all
-five fields. ``recursive-aligned`` (AlignedFormatter) prints size, last_modified
+five fields. ``recursive-table`` (TableFormatter) prints size, last_modified
 and key only, so etag and storage_class are `-`.
 
 mtime is swath's own ``DateTimeFormatter.ISO_INSTANT`` (``Fields.isoMicros``).
@@ -40,9 +40,11 @@ would need the aligned sink's column arithmetic revisited.
 
 from __future__ import annotations
 
+import re
 import sys
 from typing import IO
 
+from s3_listing_study.contract import ContractViolation
 from s3_listing_study.duckdb_adapter import connect, emit_result, staged
 
 UNKNOWN_MODE_EXIT = 2
@@ -51,7 +53,9 @@ UNKNOWN_MODE_EXIT = 2
 # committed payload exercises — untested by construction, and invisible otherwise.
 TSV_MODES = frozenset({"recursive-tsv", "seed-none"})
 
-MODES = TSV_MODES | {"recursive-jsonl", "recursive-aligned"}
+MODES = TSV_MODES | {"recursive-jsonl", "recursive-table"}
+
+CONTROL_ESCAPE = re.compile(rb"\\x[0-9a-fA-F]{2}")
 
 # The TSV sink's column order, which is NOT the contract's: last_modified sits
 # third and etag fourth. Declared, never sniffed — a payload whose etag column is
@@ -74,28 +78,71 @@ QUERIES = {
     # run over a prefix holding no objects produces one — and the answer is a clean
     # 0-row exit.
     "tsv": f"""
-        SELECT "key", "size", nullif("etag", ''), "last_modified", nullif("storage_class", '')
+        SELECT "key", "size", nullif("etag", ''),
+               regexp_replace("last_modified", '\\.[0-9]+Z$', 'Z'),
+               nullif("storage_class", '')
         FROM read_csv($path, delim = '\t', quote = '', escape = '', header = false,
                       auto_detect = false, columns = {SWATH_TSV_COLUMNS})
         WHERE coalesce("row_type", '') IN ('', 'OBJECT')
     """,
     "recursive-jsonl": f"""
-        SELECT "key", CAST("size" AS VARCHAR), "etag", "last_modified", "storage_class"
+        SELECT "key", CAST("size" AS VARCHAR), "etag",
+               regexp_replace("last_modified", '\\.[0-9]+Z$', 'Z'), "storage_class"
         FROM read_json($path, format = 'newline_delimited', columns = {SWATH_JSONL_COLUMNS})
         WHERE coalesce("row_type", 'OBJECT') = 'OBJECT'
     """,
     # AlignedFormatter: size right-justified in columns [1,14], two spaces, the
     # instant in [17,40], two spaces, the key from column 43 to end of line. The
     # formatter emits neither etag nor storage class.
-    "recursive-aligned": f"""
+    "recursive-table": f"""
         SELECT "key", "size", NULL, "mtime", NULL
         FROM (SELECT trim(substr(line, 1, 14)) AS "size",
                      trim(substr(line, 17, 24)) AS "mtime",
                      substr(line, 43) AS "key"
               FROM {LINES})
-        WHERE "key" <> ''
+        WHERE "key" <> '' AND "size" NOT IN ('', '-', 'PRE')
     """,
 }
+
+
+def validate_text_framing(data: bytes, mode: str) -> None:
+    """Refuse ambiguous text rows before DuckDB can filter or join fields."""
+    if mode in TSV_MODES:
+        for number, line in enumerate(data.splitlines(), 1):
+            if not line:
+                continue
+            fields = line.split(b"\t")
+            if fields[:3] == [b"key", b"size", b"last_modified"]:
+                continue
+            if len(fields) != 6:
+                raise ContractViolation(
+                    f"native TSV line {number} has {len(fields)} fields, expected 6; "
+                    "a TAB in a key is unrepresentable",
+                    field="key",
+                )
+            if fields[5] not in (b"", b"OBJECT"):
+                continue
+            if CONTROL_ESCAPE.search(fields[0]):
+                raise ContractViolation(
+                    "text-sink key carries an ambiguous swath \\xHH control escape; "
+                    "use recursive-jsonl",
+                    field="key",
+                )
+    elif mode == "recursive-table":
+        for number, line in enumerate(data.splitlines(), 1):
+            if not line:
+                continue
+            if len(line) < 43:
+                raise ContractViolation(f"table line {number} is shorter than 43 bytes")
+            if line[14:16] != b"  " or line[40:42] != b"  ":
+                raise ContractViolation(f"table line {number} has overflowing fixed-width columns")
+            key = line[42:]
+            if CONTROL_ESCAPE.search(key):
+                raise ContractViolation(
+                    "text-sink key carries an ambiguous swath \\xHH control escape; "
+                    "use recursive-jsonl",
+                    field="key",
+                )
 
 
 def normalize(out: IO[bytes], data: bytes, mode: str) -> int:
@@ -106,6 +153,7 @@ def normalize(out: IO[bytes], data: bytes, mode: str) -> int:
     else:
         print(f"normalize.py: unknown mode: {mode}", file=sys.stderr)
         return UNKNOWN_MODE_EXIT
+    validate_text_framing(data, mode)
     with staged(data) as path:
         emit_result(out, connect().execute(sql, {"path": path}))
     return 0
@@ -115,7 +163,12 @@ def main(argv: list[str]) -> int:
     if len(argv) < 2:
         print("normalize.py: mode required", file=sys.stderr)
         return UNKNOWN_MODE_EXIT
-    return normalize(sys.stdout.buffer, sys.stdin.buffer.read(), argv[1])
+    try:
+        return normalize(sys.stdout.buffer, sys.stdin.buffer.read(), argv[1])
+    except BrokenPipeError:
+        # A verifier or diagnostic consumer may close early. That is not a
+        # malformed listing and must behave consistently in every mode.
+        return 0
 
 
 if __name__ == "__main__":

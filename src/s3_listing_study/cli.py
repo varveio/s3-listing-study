@@ -2,7 +2,7 @@
 
 Will grow subcommands ``smoke | build-manifest | scan-tree`` as the
 corresponding units land; ``verify``, ``receipt``, ``validate-capsule``, and
-``check-links`` are here.
+``check-links``, and ``check-source-anchors`` are here.
 """
 
 import argparse
@@ -33,6 +33,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return receipt_main(args[1:])
     if args and args[0] == "check-links":
         return links_main(args[1:])
+    if args and args[0] == "check-source-anchors":
+        from s3_listing_study.source_anchors import main as source_anchors_main
+
+        return source_anchors_main(args[1:])
     # `validate-capsule` is imported here rather than at module scope: it is the
     # one subcommand that needs `jsonschema`, and a missing install must not take
     # the other subcommands down with it.
@@ -50,7 +54,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["verify", "receipt", "validate-capsule", "check-links"],
+        choices=[
+            "verify",
+            "receipt",
+            "validate-capsule",
+            "check-links",
+            "check-source-anchors",
+        ],
         help="subcommand to run",
     )
     parser.parse_args(args)

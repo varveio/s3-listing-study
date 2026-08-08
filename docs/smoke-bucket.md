@@ -72,6 +72,28 @@ the repo goes public.
 > orphaned by design (receipts bind to the registry digest, so no v1 receipt
 > can verify against the v2 registry).
 
+> **Observed drift, 2026-08-02.** A live anonymous re-list of this bucket,
+> compared against the 2026-07-17 snapshot recorded above: the **key set is
+> unchanged** — 148,917 keys returned, zero duplicates, all unique — but
+> **129,227 of 148,917 objects (87%) now report a `last_modified` later than
+> the snapshot date**, the newest `2026-07-22T13:20:38Z`. So the
+> key/size/etag columns appear stable while the `mtime` column is stale for
+> most of the bucket: the identical-byte-overwrite case the verifier's `DRIFT`
+> verdict exists for ([`../harness/README.md`](../harness/README.md)
+> § Verdicts). **Consequence:** a contract-v2 5-field verification against the
+> current manifest would report mass `mtime` mismatches that belong to the
+> bucket, not to any tool. The snapshot figures above are deliberately **not**
+> edited — this note is an observation about them. **Re-baselining has not
+> been done and is the orchestrator's/owner's call** (§ Changing the smoke
+> bucket in [`../harness/README.md`](../harness/README.md)).
+>
+> Recorded at the same time: **the manifest artifact is not present on a fresh
+> machine.** It lives outside the repo by the no-data-in-repo rule above, so a
+> clone alone can verify nothing until the artifact is fetched — a distinct
+> prerequisite from the runner-security gate, and one that cost this run real
+> time before it was understood. See
+> [`operating/artifact-availability.md`](operating/artifact-availability.md).
+
 ### Measured shape
 
 - **Top level**: 4 prefixes + 1 root-level key —
