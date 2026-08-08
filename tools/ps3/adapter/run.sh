@@ -2,7 +2,7 @@
 # tools/ps3/adapter/run.sh <mode> <bucket> <region> [prefix]
 #
 # Prints the tool argv to run INSIDE the container, NUL-delimited, and nothing
-# else. The wrapper (harness/smoke-run.sh) owns docker run, mounts, auth, and
+# else. The wrapper (harness/run-attempt.sh) owns docker run, mounts, auth, and
 # timeout. The image ENTRYPOINT is the pS3 binary itself, so argv here starts at
 # the SUBCOMMAND, not the binary name.
 #

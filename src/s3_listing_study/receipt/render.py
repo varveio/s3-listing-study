@@ -114,7 +114,6 @@ def render(facts: RunFacts, stdout: Payload, stderr: Payload) -> bytes:
     stderr_note = esc("payload_stderr", stderr.note)
     invocation = md_safe_block("invocation", facts.invocation)
     shape = md_safe_block("shape", facts.shape)
-    development = facts.security_profile == "local-development-unisolated"
 
     timeout_note = f" — **killed at the {timeout}s timeout**" if facts.timed_out == "1" else ""
     obs_cell = "none" if obs_env == "none" else f"`{obs_env}` — recorded verbatim"
@@ -136,14 +135,9 @@ def render(facts: RunFacts, stdout: Payload, stderr: Payload) -> bytes:
 
     out = f"# Smoke receipt — `{tool}` / mode `{mode}`\n\n"
     out += (
-        "Produced by `harness/smoke-run.sh`. Not a benchmark: this run makes no\n"
+        "Produced by `harness/run-attempt.sh`. Not a benchmark: this run makes no\n"
         "comparative claim and its duration is a fact about this run only.\n\n"
     )
-    if development:
-        out += (
-            "**Local development capture:** the manifest and host-firewall gate were not\n"
-            "checked. This receipt is not evidentiary or correctness-verified.\n\n"
-        )
 
     out += "## Result\n\n| | |\n| --- | --- |\n"
     out += f"| Date (UTC) | {utc_start} |\n"
@@ -173,18 +167,8 @@ def render(facts: RunFacts, stdout: Payload, stderr: Payload) -> bytes:
     out += "\n## Security boundary\n\n| | |\n| --- | --- |\n"
     out += f"| Profile | `{security_profile}` |\n"
     out += f"| Provider adapter | `{security_provider}` |\n"
-    if development:
-        out += (
-            f"| Docker network | `{security_network}` (ordinary Docker bridge,"
-            f" MTU {security_mtu}) |\n"
-        )
-        out += "| Firewall policy | not checked — local development only |\n"
-    else:
-        out += (
-            f"| Docker network | `{security_network}` (user-defined bridge,"
-            f" MTU {security_mtu}) |\n"
-        )
-        out += f"| Firewall policy | sha256 `{security_policy_sha}` |\n"
+    out += f"| Docker network | `{security_network}` (user-defined bridge, MTU {security_mtu}) |\n"
+    out += f"| Firewall policy | sha256 `{security_policy_sha}` |\n"
     out += (
         "| Container hardening | `--pull=never`; `--cap-drop ALL`; "
         "`--security-opt no-new-privileges:true` |\n"
@@ -197,11 +181,6 @@ def render(facts: RunFacts, stdout: Payload, stderr: Payload) -> bytes:
         f"| Docker logging | driver `{log_driver}`; canonical config sha256"
         f" `{log_config_sha}`; option keys (base64) `{log_option_keys}` |\n"
     )
-    if development:
-        out += (
-            "| Development log limit | 1 GiB, one local file. Output at or above this"
-            " limit is not completeness-eligible. |\n"
-        )
 
     out += "\n## Box\n\n| | |\n| --- | --- |\n"
     out += f"| Arch | `{arch}` |\n"
@@ -226,20 +205,10 @@ def render(facts: RunFacts, stdout: Payload, stderr: Payload) -> bytes:
     out += prefix_row
     out += f"| Registry | `{registry_path}` (sha256 `{registry_sha}`) |\n"
     out += f"| Manifest | `{manifest}` |\n"
-    if development:
-        out += (
-            f"| Manifest sha256 | `{manifest_sha}` — registry expectation only;"
-            " file not checked |\n"
-        )
-    else:
-        out += (
-            f"| Manifest sha256 | `{manifest_sha}` — verified against the file"
-            " before this run |\n"
-        )
+    out += f"| Manifest sha256 | `{manifest_sha}` — verified against the file before this run |\n"
     out += f"| Snapshot date | {snapshot_date} |\n"
     out += f"| Manifest keys | {manifest_keys} |\n"
-    shape_qualifier = ", not verified" if development else ""
-    out += f"\n### Measured shape (from the registry{shape_qualifier})\n\n<pre>{shape}</pre>\n"
+    out += f"\n### Measured shape (from the registry)\n\n<pre>{shape}</pre>\n"
 
     out += "\n## Memory\n\n| | | |\n| --- | --- | --- |\n"
     out += (

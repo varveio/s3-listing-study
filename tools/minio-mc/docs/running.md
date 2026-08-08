@@ -55,7 +55,7 @@ auto-resolve it via an anonymous `GET ?location` before the first LIST [OBS
 
 All 10 smoke runs below (across seven distinct mode names — `recursive-json`
 appears at four scopes) ran **anonymous**, native arm64, via
-`harness/smoke-run.sh`, against
+`harness/run-attempt.sh`, against
 `noaa-normals-pds` (us-east-1) at its 2026-07-17 snapshot (148,917 keys, manifest
 sha256 `c78a827…2adb`). All verdicts via `harness/verify-listing.sh`. `CREDS=none`
 (no credentialed pass) and `EDGE_BUCKET=none` (unicode/weird-key/multipart-ETag
@@ -147,7 +147,7 @@ probe, not a wrapper receipt); the 1000/1000/549 page split is [INFERRED] from t
 mc offers for `ls` (no built-in API-call counter or progress metric exists) and is
 what the study's replay-server phase can key off.
 
-## Reproduction via `harness/smoke-run.sh`
+## Reproduction via `harness/run-attempt.sh`
 
 Every receipt above was produced by the shared wrapper, never a bare `docker run`.
 `../adapter/run.sh` only *prints* the argv (NUL-delimited) that the wrapper appends to the
@@ -156,7 +156,7 @@ anonymous-alias injection, mounts, credential starving, the timeout, and
 measurement. To reproduce any row:
 
 ```sh
-harness/smoke-run.sh \
+harness/run-attempt.sh \
   --tool minio-mc --mode recursive-json \
   --image minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727 \
   --run-script tools/minio-mc/adapter/run.sh \

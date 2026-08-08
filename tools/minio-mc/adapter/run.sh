@@ -2,7 +2,7 @@
 # run.sh <mode> <bucket> <region> [prefix]
 #
 # Prints the argv to execute inside the minio/mc container, NUL-delimited.
-# It prints ONLY argv; the harness wrapper (smoke-run.sh) owns `docker run`,
+# It prints ONLY argv; the harness wrapper (run-attempt.sh) owns `docker run`,
 # the anonymous MC_HOST alias injection (via --env), timeout, and measurement.
 #
 # The image ENTRYPOINT is ["mc"] (verified: docker inspect), so argv starts at

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# harness/smoke-run.sh — the shared smoke run wrapper.
+# harness/run-attempt.sh — the shared tool-attempt wrapper.
 #
 # Owns `docker run` entirely: image, mounts, network, credential injection or
 # starving, timeout, cleanup, measurement, receipt. A per-tool run.sh only
@@ -13,18 +13,18 @@
 #      harness's own error as a tool result misreports someone else's work.
 #
 # Usage:
-#   smoke-run.sh --tool NAME --mode MODE --image REF@sha256:... \
+#   run-attempt.sh --tool NAME --mode MODE --image REF@sha256:... \
 #                --run-script PATH --bucket B [--region R] [--prefix P] \
 #                --auth anonymous|credentialed [--creds-profile NAME] \
 #                --out DIR [--timeout 300] [--poll-ms 50] [--entrypoint E] \
-#                [--self-contained] [--development]
+#                [--development]
 #
 set -euo pipefail
 export LC_ALL=C
 WRAPPER_START="$(date +%s)"   # the 300s guardrail covers the WHOLE invocation
 
-die()  { printf '\nsmoke-run: %s\n' "$*" >&2; exit 2; }   # 2 = harness error
-say()  { printf 'smoke-run: %s\n' "$*" >&2; }
+die()  { printf '\nrun-attempt: %s\n' "$*" >&2; exit 2; }   # 2 = harness error
+say()  { printf 'run-attempt: %s\n' "$*" >&2; }
 
 REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 DATA_DIR="${S3_STUDY_DATA:-$HOME/.s3-listing-study/data}"
@@ -85,7 +85,7 @@ python3 -I -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) els
 TOOL=""; MODE=""; IMAGE=""; RUN_SCRIPT=""; BUCKET=""; REGION=""; PREFIX=""
 AUTH=""; CREDS_PROFILE=""; OUT=""; TIMEOUT=300; POLL_MS=50; ENTRYPOINT=""
 TOOL_VERSION=""; PASS_ENV=()
-SELF_CONTAINED=no; DEVELOPMENT=no
+DEVELOPMENT=no
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -97,7 +97,6 @@ while [ $# -gt 0 ]; do
     --timeout) TIMEOUT="$2"; shift 2 ;; --poll-ms) POLL_MS="$2"; shift 2 ;;
     --entrypoint) ENTRYPOINT="$2"; shift 2 ;;
     --tool-version) TOOL_VERSION="$2"; shift 2 ;;
-    --self-contained) SELF_CONTAINED=yes; shift ;;
     --development) DEVELOPMENT=yes; shift ;;
     --env) PASS_ENV+=("$2"); shift 2 ;;
     *) die "unknown argument: $1" ;;
@@ -341,7 +340,7 @@ fi
 # reports mapfile's success, so a script that prints half its argv and dies
 # still gets executed. Capture, check the producer, verify NUL framing, decode.
 TMP="$(mktemp -d)"
-CONTAINER_NAME="s3study-smoke-${TMP##*/}"
+CONTAINER_NAME="s3study-attempt-${TMP##*/}"
 CONTAINER_NAME="${CONTAINER_NAME//./-}"
 container_create_attempted=no
 cleanup() {
@@ -423,7 +422,7 @@ DOCKER_CMD+=(create --name "$CONTAINER_NAME")
 if [ "$DEVELOPMENT" = yes ]; then
   # OrbStack rejects Docker's unlimited max-size=-1 when the container starts.
   # A large explicit local cap is acceptable only for this non-evidentiary
-  # development path and is recorded in run.meta below.
+  # development path and is recorded in result.json below.
   DOCKER_CMD+=(--log-driver=json-file --log-opt max-size=1g --log-opt max-file=1)
 else
   security_append_evidence_log_args DOCKER_CMD
@@ -481,10 +480,8 @@ serialize() { local out=""; for a in "$@"; do out+="$(printf '%q' "$a") "; done;
 INVOCATION="$(serialize "${DOCKER_CMD[@]}")"$'\n'"$(serialize "${DOCKER_START_CMD[@]}")"
 
 # ---------------------------------------------------------------------- run
-# Refuse to overwrite evidence. Re-running a mode into a populated directory
-# silently replaces stdout/stderr/run.meta/receipt.md while leaving the previous
-# verify.md in place — an internally mixed receipt tree that looks complete and
-# whose verdict belongs to bytes that no longer exist.
+# Refuse to overwrite evidence. Re-running into a populated directory could mix
+# files from different attempts while leaving a plausible-looking result.
 if [ -e "$OUT" ] && [ -n "$(ls -A "$OUT" 2>/dev/null)" ]; then
   die "receipt directory is not empty: $OUT
         Refusing to overwrite evidence. Remove it deliberately, or use a fresh directory."
@@ -645,7 +642,7 @@ if [ -z "$TOOL_VERSION" ]; then
   fi
 fi
 
-# ------------------- redact (full) → scan (full) → truncate → hash → receipt
+# -------------------- redact (full) → scan (full) → truncate → finalize
 # The container has exited; the measured clock stopped at FinishedAt. Everything
 # from here on is offline, and is done by the packaged half of this wrapper
 # (src/s3_listing_study/receipt/), which owns the data-shaped work:
@@ -662,17 +659,19 @@ fi
 #   * truncation at 64 MiB keeping the head, recorded loudly;
 #   * hashing LAST, because the hash freezes the bytes and redaction after it
 #     would redact nothing;
-#   * run.meta and receipt.md, every field refused if it carries a control byte,
-#     scanned in $TMP and placed only after passing.
+#   * production: run.meta and receipt.md, every field refused if it carries a
+#     control byte, scanned in $TMP and placed only after passing;
+#   * development: result.json plus deterministic gzip streams, with no human
+#     rendering or correctness claim.
 #
 # Every value below is what THIS wrapper measured or decided, passed explicitly:
 # a receipt records what ran, never a plausible reconstruction of it.
 finish_rc=0
-FINISH_PLACEMENT_ARGS=()
-[ "$SELF_CONTAINED" = yes ] && FINISH_PLACEMENT_ARGS+=(--self-contained)
+FINISH_MODE_ARGS=()
+[ "$DEVELOPMENT" = yes ] && FINISH_MODE_ARGS+=(--machine-only)
 receipt_py finish \
   --tmp="$TMP" --out="$OUT" --data-dir="$DATA_DIR" \
-  "${FINISH_PLACEMENT_ARGS[@]}" \
+  "${FINISH_MODE_ARGS[@]}" \
   --tool="$TOOL" --mode="$MODE" --auth="$AUTH" \
   --bucket="$BUCKET" --region="$REGION" --prefix="$PREFIX" \
   --image="$IMAGE" --image-arch="$IMG_ARCH" --host-arch="$HOST_DOCKER_ARCH" \
@@ -702,15 +701,18 @@ receipt_py finish \
 # only bury the reason under a second, vaguer one.
 [ "$finish_rc" -eq 0 ] || exit "$finish_rc"
 
-# TODO discipline: a mandatory receipt field left as TODO is a defective receipt.
-# The agent greps receipts for TODO, but the wrapper must ALSO announce it — a
-# field can never be silently absent-but-looking-filled. Auto-filled fields
-# (tool version) drop their TODO on success; whatever remains is surfaced loudly.
-todo_lines="$(grep -nF 'TODO' "$OUT/receipt.md" || true)"
-if [ -n "$todo_lines" ]; then
-  say "WARNING: $OUT/receipt.md carries UNFILLED TODO field(s) — a mandatory field left as TODO is a defective receipt. Fill these before the checkpoint:"
-  while IFS= read -r l; do say "  TODO → $l"; done <<<"$todo_lines"
+if [ "$DEVELOPMENT" = yes ]; then
+  say "[$TOOL/$MODE] exit=$rc wall=${wall}s → $OUT/result.json"
+else
+  # TODO discipline: a mandatory receipt field left as TODO is a defective receipt.
+  # The agent greps receipts for TODO, but the wrapper must ALSO announce it — a
+  # field can never be silently absent-but-looking-filled. Auto-filled fields
+  # (tool version) drop their TODO on success; whatever remains is surfaced loudly.
+  todo_lines="$(grep -nF 'TODO' "$OUT/receipt.md" || true)"
+  if [ -n "$todo_lines" ]; then
+    say "WARNING: $OUT/receipt.md carries UNFILLED TODO field(s) — a mandatory field left as TODO is a defective receipt. Fill these before the checkpoint:"
+    while IFS= read -r l; do say "  TODO → $l"; done <<<"$todo_lines"
+  fi
+  say "[$TOOL/$MODE] exit=$rc wall=${wall}s peak_rss=${peak_rss_mb}MB cgroup_peak=${cg_peak_mb}MB → $OUT/receipt.md"
 fi
-
-say "[$TOOL/$MODE] exit=$rc wall=${wall}s peak_rss=${peak_rss_mb}MB cgroup_peak=${cg_peak_mb}MB → $OUT/receipt.md"
 exit 0

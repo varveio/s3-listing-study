@@ -2,7 +2,7 @@
 # harness/tests/run.sh — a test-fixture run.sh for the harness regression suite.
 #
 # NOT a subject tool. It drives the pinned aws-cli image as a stand-in "tool" so
-# the smoke-run.sh -> verify path can be exercised end to end against
+# the run-attempt.sh -> verify path can be exercised end to end against
 # the real manifest. Prints NUL-delimited argv only; the wrapper owns docker run.
 #
 #   run.sh <mode> <bucket> <region> [prefix]

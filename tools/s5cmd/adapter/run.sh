@@ -3,7 +3,7 @@
 #
 # Prints the s5cmd argv to run inside the container, NUL-delimited (one
 # `printf '%s\0'` per argument), and nothing else. The wrapper (harness/
-# smoke-run.sh) owns `docker run`, mounts, auth injection, and the timeout, and
+# run-attempt.sh) owns `docker run`, mounts, auth injection, and the timeout, and
 # APPENDS this argv to the image ENTRYPOINT, which for peakcom/s5cmd is
 # ["/s5cmd"] (verified: docker inspect -f '{{json .Config.Entrypoint}}'). So the
 # argv here starts at the s5cmd GLOBAL FLAGS / SUBCOMMAND, never at the binary.

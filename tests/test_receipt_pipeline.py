@@ -10,6 +10,7 @@ nothing. Each of those is asserted here by its consequence, not by inspection.
 
 from __future__ import annotations
 
+import gzip
 import hashlib
 import json
 from collections.abc import Iterator
@@ -242,37 +243,133 @@ def test_an_oversized_payload_is_placed_outside_the_receipt_directory(
     assert not (out / "stdout.txt").exists()
 
 
-def test_self_contained_large_payloads_are_attempt_local_and_disjoint(
+def _machine_argv(
+    tmp: Path,
+    out: Path,
+    data_dir: Path,
+    **overrides: str,
+) -> list[str]:
+    argv = [*_facts_argv(tmp, out, data_dir), "--machine-only"]
+    for name, value in overrides.items():
+        option = f"--{name.replace('_', '-')}="
+        argv = [arg for arg in argv if not arg.startswith(option)]
+        argv.append(f"{option}{value}")
+    return argv
+
+
+def test_machine_finish_is_exact_typed_and_round_trips_streams(tmp_path: Path) -> None:
+    tmp = tmp_path / "tmp"
+    out = tmp_path / "attempt"
+    tmp.mkdir()
+    out.mkdir()
+    raw = b"owner=" + KEY_ID.encode() + b"\n"
+    safe = b"owner=<REDACTED-AWS-KEY-ID>\n"
+    (tmp / "stdout.raw").write_bytes(raw)
+    (tmp / "stderr.raw").write_bytes(b"")
+
+    assert cli.main(_machine_argv(tmp, out, tmp_path / "data")) == 0
+    assert {path.name for path in out.iterdir()} == {
+        "result.json",
+        "stderr.raw.gz",
+        "stdout.raw.gz",
+    }
+    assert gzip.decompress((out / "stdout.raw.gz").read_bytes()) == safe
+    assert gzip.decompress((out / "stderr.raw.gz").read_bytes()) == b""
+
+    result = json.loads((out / "result.json").read_bytes())
+    assert result["schema_version"] == 1
+    assert result["exit_code"] == 0
+    assert result["timed_out"] is False
+    assert result["status"] == "completed"
+    assert isinstance(result["wall_seconds"], float)
+    assert result["tool"] == "fixture-tool"
+    assert result["invocation"]
+    assert result["security"]["profile"] == "fixture-profile-1"
+    assert result["security"]["development_log_policy"]["maximum_bytes"] == 1 << 30
+    stdout = result["streams"]["stdout"]
+    assert stdout["raw_bytes"] == len(safe)
+    assert stdout["raw_sha256"] == hashlib.sha256(safe).hexdigest()
+    assert stdout["stored_bytes"] == (out / "stdout.raw.gz").stat().st_size
+    assert stdout["stored_sha256"] == hashlib.sha256(
+        (out / "stdout.raw.gz").read_bytes()
+    ).hexdigest()
+    assert stdout["redaction_changed_bytes"] == len(KEY_ID)
+    assert stdout["truncated"] is False
+    assert result["streams"]["stderr"]["raw_bytes"] == 0
+
+
+@pytest.mark.parametrize(
+    ("exit_code", "timed_out", "status"),
+    [("7", "0", "failed"), ("137", "1", "timed_out")],
+)
+def test_machine_finish_status(
+    tmp_path: Path, exit_code: str, timed_out: str, status: str
+) -> None:
+    tmp = tmp_path / "tmp"
+    out = tmp_path / "attempt"
+    tmp.mkdir()
+    out.mkdir()
+    (tmp / "stdout.raw").write_bytes(b"")
+    (tmp / "stderr.raw").write_bytes(b"failure\n")
+    argv = _machine_argv(
+        tmp,
+        out,
+        tmp_path / "data",
+        exit_code=exit_code,
+        timed_out=timed_out,
+    )
+    assert cli.main(argv) == 0
+    result = json.loads((out / "result.json").read_bytes())
+    assert result["exit_code"] == int(exit_code)
+    assert result["timed_out"] is (timed_out == "1")
+    assert result["status"] == status
+
+
+def test_machine_finish_gzip_is_deterministic_and_compresses_large_output(
     tmp_path: Path,
 ) -> None:
-    payloads = (b"a\n" * (INLINE_MAX // 2 + 1), b"b\n" * (INLINE_MAX // 2 + 1))
-    outputs: list[Path] = []
-    for number, payload in enumerate(payloads):
+    payload = b"same object key\n" * 100_000
+    stored: list[bytes] = []
+    stream_facts: list[dict[str, object]] = []
+    for number in range(2):
         tmp = tmp_path / f"tmp-{number}"
         out = tmp_path / f"attempt-{number}"
-        data_dir = tmp_path / "data"
         tmp.mkdir()
         out.mkdir()
         (tmp / "stdout.raw").write_bytes(payload)
         (tmp / "stderr.raw").write_bytes(b"")
-        argv = [*_facts_argv(tmp, out, data_dir), "--self-contained"]
-        assert cli.main(argv) == 0
-        meta = dict(
-            line.split("=", 1)
-            for line in (out / "run.meta").read_text().splitlines()
-            if "=" in line
+        assert cli.main(_machine_argv(tmp, out, tmp_path / "data")) == 0
+        compressed = (out / "stdout.raw.gz").read_bytes()
+        stored.append(compressed)
+        stream_facts.append(
+            json.loads((out / "result.json").read_bytes())["streams"]["stdout"]
         )
-        assert meta["stdout_path"] == "stdout.txt"
-        assert (out / "stdout.txt").read_bytes() == payload
-        assert not (data_dir / "receipts").exists()
-        outputs.append(out / "stdout.txt")
-
-    assert outputs[0] != outputs[1]
-    assert outputs[0].read_bytes() != outputs[1].read_bytes()
+        assert len(compressed) < len(payload)
+    assert stored[0] == stored[1]
+    assert stream_facts[0]["stored_sha256"] == stream_facts[1]["stored_sha256"]
 
 
-def test_self_contained_finish_refuses_to_clobber_final_artifacts(
-    tmp_path: Path,
+def test_machine_finish_never_inherits_the_human_receipt_truncation_cap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    payload = b"complete machine output\n" * 100
+    tmp = tmp_path / "tmp"
+    out = tmp_path / "attempt"
+    tmp.mkdir()
+    out.mkdir()
+    (tmp / "stdout.raw").write_bytes(payload)
+    (tmp / "stderr.raw").write_bytes(b"")
+    monkeypatch.setattr(cli, "PAYLOAD_CAP", 8)
+
+    assert cli.main(_machine_argv(tmp, out, tmp_path / "data")) == 0
+    assert gzip.decompress((out / "stdout.raw.gz").read_bytes()) == payload
+    stream = json.loads((out / "result.json").read_bytes())["streams"]["stdout"]
+    assert stream["truncated"] is False
+    assert stream["dropped_bytes"] == 0
+
+
+def test_machine_finish_retains_partial_artifacts_and_refuses_reuse(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     tmp = tmp_path / "tmp"
     out = tmp_path / "attempt"
@@ -280,13 +377,24 @@ def test_self_contained_finish_refuses_to_clobber_final_artifacts(
     out.mkdir()
     (tmp / "stdout.raw").write_bytes(b"first\n")
     (tmp / "stderr.raw").write_bytes(b"")
-    argv = [*_facts_argv(tmp, out, tmp_path / "data"), "--self-contained"]
-    assert cli.main(argv) == 0
-    original = (out / "stdout.txt").read_bytes()
+    argv = _machine_argv(tmp, out, tmp_path / "data")
+    real_gzip = cli.gzip_exclusive  # type: ignore[attr-defined]
 
-    (tmp / "stdout.raw").write_bytes(b"second\n")
+    def fail_stderr(source: Path, destination: Path):  # type: ignore[no-untyped-def]
+        if destination.name == "stderr.raw.gz":
+            destination.write_bytes(b"partial")
+            raise OSError("synthetic write failure")
+        return real_gzip(source, destination)
+
+    monkeypatch.setattr(cli, "gzip_exclusive", fail_stderr)
     assert cli.main(argv) == 2
-    assert (out / "stdout.txt").read_bytes() == original
+    original = (out / "stdout.raw.gz").read_bytes()
+    assert (out / "stderr.raw.gz").read_bytes() == b"partial"
+    assert not (out / "result.json").exists()
+
+    monkeypatch.setattr(cli, "gzip_exclusive", real_gzip)
+    assert cli.main(argv) == 2
+    assert (out / "stdout.raw.gz").read_bytes() == original
 
 
 def test_an_external_payload_never_clobbers_different_bytes(

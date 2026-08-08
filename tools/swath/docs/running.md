@@ -53,7 +53,7 @@ elsewhere in this capsule.**
 The study's mandatory runner-security profile is not provisioned on the machine
 this pass ran on, and that machine categorically cannot satisfy it: it is a
 shared devcontainer carrying unrelated workloads and private checkouts, not a
-provisioned runner. `harness/smoke-run.sh` performs that preflight and owns the
+provisioned runner. `harness/run-attempt.sh` performs that preflight and owns the
 receipt format, so **the wrapper was never used and no receipt exists for any
 run of this subject.** No claim about it is `confirmed`, and none can be until
 the work is re-run under the wrapper on a provisioned runner.
@@ -275,7 +275,7 @@ image must be pulled by digest first; the tag, if you use one, is `0.2.0`.
 
 **A receipted re-run is a different procedure, and it is now blocked on two
 things**: a runner provisioned to the study's security profile, so
-`harness/smoke-run.sh` can own execution, timeouts and measurement; and the
+`harness/run-attempt.sh` can own execution, timeouts and measurement; and the
 reference manifest present, so `harness/verify-listing.sh` can produce a verdict.
 The third blocker, a v0.2.0 adapter, is closed — `tsv`, `table`, `jsonl` and
 `seed.mode=none` all run through it already, so the re-run is a matter of

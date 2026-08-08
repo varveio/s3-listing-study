@@ -244,7 +244,7 @@ must provide util-linux `flock` and GNU `mv` with `--no-copy` and
 
 ## Identity claim
 
-Credential starvation in `smoke-run.sh` remains defense in depth: anonymous
+Credential starvation in `run-attempt.sh` remains defense in depth: anonymous
 runs receive empty AWS credential values, nonexistent credential/config paths,
 and no mounted profiles. `AWS_EC2_METADATA_DISABLED=true` is cooperative SDK
 configuration, not proof that the runner is identity-free.

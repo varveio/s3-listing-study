@@ -2,7 +2,7 @@
 # tools/s3kor/adapter/run.sh <mode> <bucket> <region> [prefix]
 #
 # Prints the argv to run INSIDE the s3kor container, NUL-delimited, and nothing
-# else. The wrapper (harness/smoke-run.sh) owns docker run, mounts, auth, and
+# else. The wrapper (harness/run-attempt.sh) owns docker run, mounts, auth, and
 # the timeout, and APPENDS this argv to the image ENTRYPOINT.
 #
 # Image ENTRYPOINT is ["/usr/local/bin/s3kor"] (verified with

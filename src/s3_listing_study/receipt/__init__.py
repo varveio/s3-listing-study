@@ -2,5 +2,5 @@
 
 The offline half of a smoke run: the redact/scan classifier and the receipt
 markdown generator. Docker lifecycle, argv, timeout, and the cleanup trap stay
-in ``harness/smoke-run.sh``.
+in ``harness/run-attempt.sh``.
 """

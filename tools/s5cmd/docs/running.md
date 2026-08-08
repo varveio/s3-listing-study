@@ -74,7 +74,7 @@ prefix twice (e.g. `` `normals-annualseasonal/`normals-annualseasonal/ ``) —
 the wrapper's `${PREFIX:+...}${PREFIX:-...}` template is not an if/else (`:-`
 substitutes its value whenever the variable is *set*, not just when empty).
 This was found independently by both the aws-cli and s5cmd groundwork agents
-and fixed in `harness/smoke-run.sh` (commit `014f74a`); it is recorded as claim
+and fixed in `harness/run-attempt.sh` (commit `014f74a`); it is recorded as claim
 `receipt-double-prefix-cosmetic-defect`. The already-committed receipts under
 `../receipts/smoke/` are left with the malformed cell **as a direct record of
 what the wrapper actually rendered** — receipts record wrapper output, not a
@@ -131,7 +131,7 @@ Unsigned access is the global `--no-sign-request` flag, which wires
 `storage/s3.go:1320,1344` @ 991c9fb]. This worked unsigned against the
 us-east-1 smoke bucket [RUN `../receipts/smoke/*`].
 
-## Reproduction via `harness/smoke-run.sh`
+## Reproduction via `harness/run-attempt.sh`
 
 Every receipt above was produced by the shared wrapper, never a bare `docker
 run`. `../adapter/run.sh` only *prints* the argv (NUL-delimited) that the wrapper
@@ -139,7 +139,7 @@ appends to the pinned image's entrypoint; the wrapper owns `docker run`, mounts,
 credential injection/starving, the timeout, and measurement.
 
 ```sh
-harness/smoke-run.sh \
+harness/run-attempt.sh \
   --tool s5cmd --mode recursive \
   --image peakcom/s5cmd@sha256:2ff939e2ee3c76adcadd78dbfc3e2569b18a3743ed9dcfccb1ec589af7fb9903 \
   --run-script tools/s5cmd/adapter/run.sh \
@@ -159,7 +159,7 @@ produce `union-verify.md`. The in-process `s5cmd run <file>` capability probe
 in `../receipts/smoke/_capability/run-fanout/` is reproduced by mounting a
 commands file (one `ls` line per shard) read-only into the container and
 invoking `s5cmd --no-sign-request run /work/cmds.txt` directly — it is not a
-`smoke-run.sh` receipt because `run` needs a file mounted into the container,
+`run-attempt.sh` receipt because `run` needs a file mounted into the container,
 which the wrapper does not provide for this tool.
 
 `../adapter/run.sh`/`../adapter/normalize.py` and everything under

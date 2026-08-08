@@ -157,7 +157,7 @@ Only the citation provenance was corrected; the behavioral claim stays `unverifi
 The related at-scale memory claim (`fast-list-memory-at-scale`) carries the same
 version-delta caveat by reference.
 
-## Reproduction via `harness/smoke-run.sh`
+## Reproduction via `harness/run-attempt.sh`
 
 Every receipt above was produced by the shared wrapper, never a bare `docker run`.
 `../adapter/run.sh` only *prints* the argv (NUL-delimited) that the wrapper appends
@@ -165,7 +165,7 @@ to the pinned image's entrypoint; the wrapper owns `docker run`, mounts, credent
 starving, the timeout, and measurement.
 
 ```sh
-harness/smoke-run.sh \
+harness/run-attempt.sh \
   --tool rclone --mode recursive-walk \
   --image rclone/rclone@sha256:c61954aaa32328a5486715dd063a81c7879f5195ad3505cd362deddd509dc4a1 \
   --run-script tools/rclone/adapter/run.sh \

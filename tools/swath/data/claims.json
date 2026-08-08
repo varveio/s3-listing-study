@@ -1539,7 +1539,7 @@
         },
         {
           "kind": "documentation",
-          "path": "../../../harness/smoke-run.sh"
+          "path": "../../../harness/run-attempt.sh"
         }
       ]
     },

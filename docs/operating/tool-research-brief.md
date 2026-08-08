@@ -159,7 +159,7 @@ research budget to produce a truthful, useless `STATUS: blocked`.
    multipart ETag is deterministic for fixed parts — so the post-seed
    listing genuinely validates the seeding instead of comparing a snapshot
    to itself.
-3. **`harness/smoke-run.sh`** — the shared run wrapper. It **owns `docker
+3. **`harness/run-attempt.sh`** — the shared run wrapper. It **owns `docker
    run` entirely** — image, mounts, the fixed contained network and security
    profile from [`runner-security.md`](runner-security.md), credential
    injection or starving, timeout, cleanup; the per-tool `run.sh` only emits
@@ -607,7 +607,7 @@ story is "generate N invocations":
      `docker inspect -f '{{json .Config.Entrypoint}}' <image>` before writing
      a mode: if the entrypoint is already the tool binary, your argv starts
      at the subcommand, not the binary name.
-2. Run each mode via `harness/smoke-run.sh` (containerized, fixed contained
+2. Run each mode via `harness/run-attempt.sh` (containerized, fixed contained
    bridge, mandatory runner-security preflight, timeout-enforced), which
    consumes `run.sh`'s argv.
 3. The wrapper's receipt is staged under `tools/TOOL/receipts/smoke/<mode>/`

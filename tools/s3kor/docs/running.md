@@ -154,7 +154,7 @@ Routing this decision to the owner is carried in [`../README.md`](../README.md)
 § "Limitations and open questions" (benchmark eligibility is `conditional` in
 [`../data/tool.json`](../data/tool.json)).
 
-## Reproduction via `harness/smoke-run.sh`
+## Reproduction via `harness/run-attempt.sh`
 
 Both receipts were produced by the shared wrapper, never a bare `docker run`.
 `run.sh` only *prints* the argv (NUL-delimited) that the wrapper appends to the
@@ -163,7 +163,7 @@ pinned image's entrypoint (`["/usr/local/bin/s3kor"]`); the wrapper owns
 measurement. To reproduce either row:
 
 ```sh
-harness/smoke-run.sh \
+harness/run-attempt.sh \
   --tool s3kor --mode list \
   --image 's3kor@sha256:b021869dfa78b7af85506a5d566ec6c7e7ed49d940b20d9e110a04fa5006f37c' \
   --run-script tools/s3kor/adapter/run.sh \

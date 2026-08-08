@@ -1,6 +1,6 @@
 # Smoke receipt — `fix&amp;tool` / mode `mode&lt;v2&gt;`
 
-Produced by `harness/smoke-run.sh`. Not a benchmark: this run makes no
+Produced by `harness/run-attempt.sh`. Not a benchmark: this run makes no
 comparative claim and its duration is a fact about this run only.
 
 ## Result

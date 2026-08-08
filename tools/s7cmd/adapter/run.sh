@@ -4,7 +4,7 @@
 #   run.sh <mode> <bucket> <region> [prefix]
 #
 # Prints ONLY the argv to execute inside the container, one element per
-# `printf '%s\0'` record. It never runs anything — harness/smoke-run.sh owns
+# `printf '%s\0'` record. It never runs anything — harness/run-attempt.sh owns
 # `docker run`, mounts, auth injection, and the timeout.
 #
 # IMPORTANT: the argv is APPENDED to the image ENTRYPOINT, which for the

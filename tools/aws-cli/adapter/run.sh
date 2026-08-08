@@ -3,7 +3,7 @@
 #
 # Prints the aws-cli argv to run INSIDE the container, NUL-delimited (one
 # `printf '%s\0'` per argument) — nothing else. The shared wrapper
-# (harness/smoke-run.sh) owns `docker run`, mounts, auth injection, network,
+# (harness/run-attempt.sh) owns `docker run`, mounts, auth injection, network,
 # and the timeout; this script never executes anything.
 #
 # The image ENTRYPOINT is `/usr/local/bin/aws` (verified via

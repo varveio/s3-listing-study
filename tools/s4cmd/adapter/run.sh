@@ -2,7 +2,7 @@
 # tools/s4cmd/adapter/run.sh <mode> <bucket> <region> [prefix]
 #
 # Prints the s4cmd argv for a listing mode, NUL-delimited, and nothing else.
-# The harness wrapper (smoke-run.sh) owns `docker run`, mounts, auth, timeout,
+# The harness wrapper (run-attempt.sh) owns `docker run`, mounts, auth, timeout,
 # and appends this argv to the image ENTRYPOINT, which is ["s4cmd"] — so the
 # argv here starts at the SUBCOMMAND, not the binary name.
 #

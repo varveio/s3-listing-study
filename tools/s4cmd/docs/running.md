@@ -160,13 +160,13 @@ compatibility — are the `unverified` claims in
 [`../research/tool-page.md`](../research/tool-page.md) § "Open hypotheses for the
 benchmark".
 
-## Reproduction via `harness/smoke-run.sh`
+## Reproduction via `harness/run-attempt.sh`
 
 Every capability receipt was produced by the shared wrapper, never a bare `docker
 run`. To reproduce the canonical capability probe:
 
 ```sh
-harness/smoke-run.sh \
+harness/run-attempt.sh \
   --tool s4cmd --mode recursive \
   --image 'localhost:5000/s4cmd-study@sha256:d458ef5096180e517840712e29b0b8705ec97cebf48f717cad2fea3805105813' \
   --run-script tools/s4cmd/adapter/run.sh \

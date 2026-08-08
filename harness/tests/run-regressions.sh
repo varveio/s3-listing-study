@@ -2,7 +2,7 @@
 # harness/tests/run-regressions.sh — durable regression suite for the harness.
 #
 # Covers everything runnable WITHOUT the real bucket or docker, by driving the
-# actual verifier (`s3_listing_study.verify --scope union`) and smoke-run.sh's
+# actual verifier (`s3_listing_study.verify --scope union`) and run-attempt.sh's
 # --env guard over synthetic registry/manifest/receipt fixtures built at runtime:
 #
 #   * union scenarios (PASS, structural-ERROR, dup-FAIL, overlap-ERROR,
@@ -12,7 +12,7 @@
 #     offset -> ERROR) via the union path (they die in compare_fields, no docker);
 #   * current run-meta-directory payload paths and legacy absolute payload paths
 #     through the union verifier;
-#   * per-tool env allowlist accept/reject matrix — smoke-run.sh dies at the
+#   * per-tool env allowlist accept/reject matrix — run-attempt.sh dies at the
 #     guard before any Docker call; asserts exit code and message;
 #
 # Every case prints PASS/FAIL; the script exits nonzero if any case fails. Cases
@@ -23,7 +23,7 @@ export LC_ALL=C
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 HARNESS="$(cd -- "$HERE/.." && pwd)"
 REPO_ROOT="$(cd -- "$HARNESS/.." && pwd)"
-SMOKE="$HARNESS/smoke-run.sh"
+SMOKE="$HARNESS/run-attempt.sh"
 NORMALIZE="$HERE/adapters/normalize.sh"
 
 # The verifier is the Python package, and its field comparison runs on DuckDB, a declared project dependency, so the
@@ -276,7 +276,7 @@ run_union "$d/out" --receipt "$d" --remainder "$d"
 assert_rc "compare_fields malformed MANIFEST mtime -> ERROR" 3 "$RC"
 grep -qi 'manifest mtime is not contract-v2' "$d/out.err" 2>/dev/null && ok "malformed manifest mtime attributed to manifest" || bad "malformed manifest mtime message missing"
 
-# --- per-tool env matrix (smoke-run.sh dies before any docker) ----------------
+# --- per-tool env matrix (run-attempt.sh dies before any docker) --------------
 RS="$WORK/run.sh"
 { printf '#!/usr/bin/env bash\nprintf '"'"'x\\0'"'"'\n'; } >"$RS"
 chmod +x "$RS"
@@ -364,7 +364,7 @@ fi
 printf '\n--- not covered here (needs the real bucket or docker) ---\n'
 printf '  * union missing/extra/field-mismatch FAIL vs DRIFT — the reference re-list runs a real\n'
 printf '    docker s3api list against the bucket; run one scoped real union to exercise it.\n'
-printf '  * single-receipt smoke-run.sh -> verify end-to-end PASS (needs docker + bucket).\n'
+printf '  * single-receipt run-attempt.sh -> verify end-to-end PASS (needs docker + bucket).\n'
 printf '  * payload 64 MiB truncation + full-raw secret scan on live output (needs a real run).\n'
 printf '  * live runner boundary controls (operator setup: docs/operating/runner-security.md).\n'
 

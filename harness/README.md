@@ -14,7 +14,7 @@ Shared measurement and verification infrastructure for the smoke campaign
 | --- | --- | --- |
 | 1 | `docs/smoke-bucket.md` — bucket registry | **live** — `noaa-normals-pds`, snapshot 2026-07-17 (contract-v2 re-baseline) |
 | 2 | Reference manifest, pinned harness client | **live** — 148,917 keys, **contract v2** (`key/size/etag/mtime/storage_class`), sha256 in the registry, in `<data>/manifests/` |
-| 3 | `smoke-run.sh` — run wrapper | **requires a set-up runner** — the contained-network security profile must pass its per-run gate |
+| 3 | `run-attempt.sh` — run wrapper | **requires a set-up runner** — the contained-network security profile must pass its per-run gate |
 | 4 | `s3_listing_study.verify` — output verifier | **requires a set-up runner for reference re-lists** — same contained-network profile and gate |
 | 5 | `base.Dockerfile` — shared base layer | **not built** — deliberately. The brief marks it optional and it is only needed by a tool that ships no upstream image. The first such tool builds it; speculative infrastructure for nobody is worse than none. |
 
@@ -28,7 +28,7 @@ Further networked execution requires the
 hardening, host firewall, identity claims, and build/pull boundary are
 specified there; that document is the authoritative contract.
 
-`smoke-run.sh` and each reference re-list fail closed through
+`run-attempt.sh` and each reference re-list fail closed through
 `runner-security-check.sh`. The check enforces one property per run — that the
 run is anonymous by construction — by verifying live that no ambient credential
 variables are set, that no cloud metadata service answers on the host, that the
@@ -49,7 +49,7 @@ whose last step is this same gate.
                           │
    passed --run-script PATH ┤ argv only, NUL-delimited, never executes
                           ▼
-                    smoke-run.sh  ── owns docker run, auth, timeout, measurement
+                    run-attempt.sh  ── owns docker run, auth, timeout, measurement
                           │            → receipts/smoke/<mode>/receipt.md
                           ▼
    passed --normalize PATH ───► s3_listing_study.verify ── manifest (sha256-bound)
@@ -68,7 +68,7 @@ historical receipts cite the pre-migration root paths as run facts.
   certify a manifest that verified nothing. Strict — any ambiguity is a hard,
   loud failure. `--path` / `--digest` bind a receipt to the registry it came
   from.
-- **`smoke-run.sh`** — owns `docker run` entirely. **Receipts produced outside
+- **`run-attempt.sh`** — owns `docker run` entirely. **Receipts produced outside
   this wrapper do not count** (methodology § Run records (receipts)). Writes `run.meta`
   alongside `receipt.md`. Current records declare
   `payload_path_base=run-meta-directory`: inline `stdout_path`/`stderr_path`
@@ -195,7 +195,7 @@ the current registry digest, the same bucket, tool, and auth mode.
 
 ### `run.meta` — the binding between a run and its verdict
 
-The verifier does **not** trust its own arguments. `smoke-run.sh` records what
+The verifier does **not** trust its own arguments. `run-attempt.sh` records what
 actually ran — tool, mode, auth, bucket, prefix, image, exit code, payload paths
 and their sha256 — and the verifier validates against it. Without this, tool,
 mode, bucket, scope and inputs are five independent claims: one mode's output
@@ -255,7 +255,7 @@ defect.
 ### Bucket names are parameters, always
 
 The owner's rule — *no executable artifact embeds a bucket name* — is
-**enforced, not requested**: `smoke-run.sh` greps the tool's `run.sh` for the
+**enforced, not requested**: `run-attempt.sh` greps the tool's `run.sh` for the
 bucket name and refuses to run if it finds it.
 
 ## Orchestrator-side staging — `stage-workspace.sh`
@@ -313,7 +313,7 @@ procedure:
    `…Z`), gzipped into `<data>/manifests/`, sha256 recorded in
    the registry.
 3. **Re-smoke the finished tools as a scripted sweep**: for each tool, loop
-   its `run.sh` modes through `smoke-run.sh` against the new registry entry.
+   its `run.sh` modes through `run-attempt.sh` against the new registry entry.
    No agent, no research — the expensive agentic work (adapters, mode
    discovery) is already done and reusable by construction.
 4. **One decision to take when it first happens**: the receipt layout for a

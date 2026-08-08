@@ -3,12 +3,12 @@
 #
 # Prints the tool argv to execute inside the container, NUL-delimited
 # (printf '%s\0' per argument). Nothing else. The harness wrapper
-# (harness/smoke-run.sh) owns `docker run`, mounts, auth, and the timeout, and
+# (harness/run-attempt.sh) owns `docker run`, mounts, auth, and the timeout, and
 # APPENDS this argv to the image ENTRYPOINT, which is ["s3p"] (see the image's
 # Dockerfile). So argv here starts at the SUBCOMMAND, not the `s3p` binary.
 #
 # Bucket, region, and prefix are ALWAYS parameters — no bucket name is embedded
-# (owner's rule; smoke-run.sh greps this file for the bucket name and refuses if
+# (owner's rule; run-attempt.sh greps this file for the bucket name and refuses if
 # it finds one).
 #
 # CONCURRENCY: every mode pins --list-concurrency 8 to honour this subject's

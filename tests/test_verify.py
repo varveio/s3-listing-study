@@ -286,7 +286,7 @@ def _stage_regressions(root: Path) -> Path:
     """A copy of the shipped harness tree, run against this checkout's sources."""
     harness = root / "harness"
     shutil.copytree(REPO / "harness", harness)
-    # The suite stages a hermetic fake-Docker copy of smoke-run.sh, and resolves
+    # The suite stages a hermetic fake-Docker copy of run-attempt.sh, and resolves
     # the verifier itself, from its own ../src. Copied here too, so this staged
     # tree resolves both exactly as the repo does and never through whatever
     # `s3_listing_study` the ambient interpreter happens to have.

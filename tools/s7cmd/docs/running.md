@@ -98,12 +98,12 @@ versioned-bucket-fidelity gap.
 
 Every receipt above was produced by the shared harness, never by a bespoke
 script — `run.sh` only prints the argv (see its header for the exact
-contract); `harness/smoke-run.sh` owns `docker run`, mounts, credential
+contract); `harness/run-attempt.sh` owns `docker run`, mounts, credential
 injection/starving, timeout, measurement, and receipt-writing. To reproduce
 any row:
 
 ```sh
-harness/smoke-run.sh \
+harness/run-attempt.sh \
   --tool s7cmd --mode <mode> \
   --image 's7cmd@sha256:07091182512e74cde4bb897a97b1fc9a586757560c5008ae8c701d7fdb6974da' \
   --run-script tools/s7cmd/adapter/run.sh \

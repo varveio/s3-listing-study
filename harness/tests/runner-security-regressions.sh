@@ -265,7 +265,7 @@ unset CHECK_LIVE_FILE
 run_check FAKE_FOREIGN_NETWORK=yes FAKE_ALL_NETWORKS_JSON="$foreign_network_json"
 reject_check "Docker network added after installation rejected"
 
-if grep -Fn -- '--network host' "$HARNESS/smoke-run.sh" >/dev/null; then bad "normal scripts still use host networking"; else ok "normal scripts contain no host networking"; fi
+if grep -Fn -- '--network host' "$HARNESS/run-attempt.sh" >/dev/null; then bad "normal scripts still use host networking"; else ok "normal scripts contain no host networking"; fi
 
 # Rename-only staging is exercised in an isolated committed fixture repository;
 # the suite's top-level trap reclaims this private mktemp tree.
@@ -515,7 +515,7 @@ fi
 # Drive smoke-run through a fully fake Docker lifecycle.  This exercises the
 # actual create/start/wait/logs/inspect/cleanup argv without Docker or a network.
 smoke_repo="$work/smoke-repo"; mkdir -p "$smoke_repo/harness" "$smoke_repo/docs"
-cp "$HARNESS/smoke-run.sh" "$HARNESS/runner-security-lib.sh" "$smoke_repo/harness/"
+cp "$HARNESS/run-attempt.sh" "$HARNESS/runner-security-lib.sh" "$smoke_repo/harness/"
 # The wrapper cites the versioned deny policy by digest, so the staged copy
 # carries the policy file the preflight enforces.
 mkdir -p "$smoke_repo/harness/security"
@@ -536,7 +536,7 @@ chmod +x "$smoke_repo/harness/runner-security-check.sh"
 smoke_manifest="$work/smoke.manifest"; : >"$smoke_manifest"
 smoke_manifest_sha="$(sha256sum "$smoke_manifest" | cut -d' ' -f1)"
 # A synthetic registry, in the real format, read by the real resolver — the
-# staged copy of smoke-run.sh is pointed at it through the same file-level seam
+# staged copy of run-attempt.sh is pointed at it through the same file-level seam
 # used below for SECURITY_STATE and PROC_ROOT. No environment override and no
 # argument reaches it; the two cases below pin that.
 smoke_registry="$work/registry.toml"
@@ -551,9 +551,9 @@ smoke_registry="$work/registry.toml"
   printf 'keys = 0\n'
   printf 'shape = "synthetic"\n'
 } >"$smoke_registry"
-sed -i "s|^REGISTRY=.*|REGISTRY=\"$smoke_registry\"|" "$smoke_repo/harness/smoke-run.sh"
+sed -i "s|^REGISTRY=.*|REGISTRY=\"$smoke_registry\"|" "$smoke_repo/harness/run-attempt.sh"
 fake_proc="$work/fake-proc"; mkdir -p "$fake_proc/4242"
-sed -i "s|PROC_ROOT=/proc|PROC_ROOT=$fake_proc|" "$smoke_repo/harness/smoke-run.sh"
+sed -i "s|PROC_ROOT=/proc|PROC_ROOT=$fake_proc|" "$smoke_repo/harness/run-attempt.sh"
 smoke_run_script="$work/smoke-run-adapter.sh"
 printf '%s\n' '#!/usr/bin/env bash' "printf 'list\\0'" >"$smoke_run_script"; chmod +x "$smoke_run_script"
 smoke_bin="$work/smoke-bin"; mkdir -p "$smoke_bin"
@@ -588,7 +588,7 @@ case "$1 $2" in
       *StartedAt*) [ "${FAKE_TIME_INSPECT_RC:-0}" -eq 0 ] || exit "$FAKE_TIME_INSPECT_RC"; printf '2026-07-20T00:00:00.000000000Z\n' ;;
       *FinishedAt*) [ "${FAKE_TIME_INSPECT_RC:-0}" -eq 0 ] || exit "$FAKE_TIME_INSPECT_RC"; printf '2026-07-20T00:00:01.000000000Z\n' ;;
     esac ;;
-  'start s3study-smoke-'*) exit "${FAKE_START_RC:-0}" ;;
+  'start s3study-attempt-'*) exit "${FAKE_START_RC:-0}" ;;
   'wait 000000000000'*) [ "${FAKE_WAIT_RC:-0}" -eq 0 ] || exit "$FAKE_WAIT_RC"; printf '0\n' ;;
   'logs 000000000000'*) exit "${FAKE_LOGS_RC:-0}" ;;
   'rm -f') exit "${FAKE_CLEANUP_RC:-0}" ;;
@@ -622,7 +622,7 @@ run_fake_smoke() {
   ( cd -- "${FAKE_SMOKE_CWD:-$PWD}" \
     && env -u AWS_PROFILE -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
       PATH="$smoke_bin:$PATH" S3_STUDY_DATA="$work/data" FAKE_DOCKER_LOG="$work/smoke-docker.log" \
-      "$smoke_repo/harness/smoke-run.sh" --tool minio-mc --mode recursive --image "$smoke_image" \
+      "$smoke_repo/harness/run-attempt.sh" --tool minio-mc --mode recursive --image "$smoke_image" \
         --run-script "$smoke_run_script" --bucket testbucket --auth anonymous --out "$out" \
         "${version_args[@]}" --env MC_HOST_s3=https://s3.amazonaws.com "$@" \
   ) >"$out.stdout" 2>"$out.stderr" || smoke_rc=$?
@@ -633,7 +633,7 @@ if [ "$smoke_rc" -eq 0 ] \
    && grep -q '^docker_log_config_sha256=' "$work/smoke-ok/run.meta" \
    && grep -q '^docker_log_option_keys_base64=bWF4LXNpemU=$' "$work/smoke-ok/run.meta" \
    && grep -q '^functional_env=MC_HOST_s3=https://s3.amazonaws.com$' "$work/smoke-ok/run.meta" \
-   && grep -Eq '^create --name s3study-smoke-[^ ]+ --log-driver=json-file --log-opt max-size=-1 --pull=never ' "$work/smoke-docker.log"; then
+   && grep -Eq '^create --name s3study-attempt-[^ ]+ --log-driver=json-file --log-opt max-size=-1 --pull=never ' "$work/smoke-docker.log"; then
   ok "fake smoke enforces exact unlimited local-log create contract"
 else
   bad "fake smoke unlimited local-log contract rc=$smoke_rc: $(tail -3 "$work/smoke-ok.stderr" | tr '\n' ' ')"
@@ -643,14 +643,19 @@ fi
 # checking. It remains digest-pinned and container-restricted, but is labeled
 # non-evidentiary and uses Docker's ordinary bridge.
 mv "$smoke_manifest" "$smoke_manifest.saved"
-FAKE_LOG_CONFIG_DEVELOPMENT=yes run_fake_smoke "$work/smoke-development" --development --self-contained
+FAKE_LOG_CONFIG_DEVELOPMENT=yes run_fake_smoke "$work/smoke-development" --development
 if [ "$smoke_rc" -eq 0 ] \
    && grep -q 'development: manifest and host-firewall checks are skipped' "$work/smoke-development.stderr" \
-   && grep -q '^security_profile=local-development-unisolated$' "$work/smoke-development/run.meta" \
+   && [ "$(find "$work/smoke-development" -maxdepth 1 -type f | wc -l)" -eq 3 ] \
+   && [ "$(jq -r '.security.profile' "$work/smoke-development/result.json")" = local-development-unisolated ] \
+   && [ "$(jq -r '.status' "$work/smoke-development/result.json")" = completed ] \
    && grep -q -- '--network bridge' "$work/smoke-docker.log" \
-   && [ -f "$work/smoke-development/stdout.txt" ] \
-   && [ -f "$work/smoke-development/run.meta" ]; then
-  ok "development smoke runs without manifest/firewall gate and labels attempt-local output"
+   && [ -f "$work/smoke-development/result.json" ] \
+   && [ -f "$work/smoke-development/stdout.raw.gz" ] \
+   && [ -f "$work/smoke-development/stderr.raw.gz" ] \
+   && ! find "$work/smoke-development" -maxdepth 1 -type f \( -name '*.md' -o -name '*.meta' -o -name '*.txt' \) | grep -q . \
+   && grep -q -- "$work/smoke-development/result.json" "$work/smoke-development.stderr"; then
+  ok "development attempt writes only machine-oriented result and compressed streams"
 else
   bad "development smoke failed rc=$smoke_rc: $(tail -3 "$work/smoke-development.stderr" | tr '\n' ' ')"
 fi
@@ -782,7 +787,7 @@ fi
 
 : >"$work/smoke-docker.log"
 FAKE_CREATE_RC=124 run_fake_smoke "$work/smoke-create-timeout"
-if [ "$smoke_rc" -eq 2 ] && grep -q '^rm -f s3study-smoke-' "$work/smoke-docker.log"; then
+if [ "$smoke_rc" -eq 2 ] && grep -q '^rm -f s3study-attempt-' "$work/smoke-docker.log"; then
   ok "timed-out create cleans deterministic stable container name"
 else
   bad "timed-out create did not clean stable target rc=$smoke_rc"
@@ -794,7 +799,7 @@ smoke_timeout_case() { # <label> <env-name> <124|137>
   printf -v "$var" '%s' "$value"; export "${var?}"
   run_fake_smoke "$out"
   unset "$var"
-  if [ "$smoke_rc" -eq 2 ] && grep -q '^rm -f s3study-smoke-' "$work/smoke-docker.log"; then
+  if [ "$smoke_rc" -eq 2 ] && grep -q '^rm -f s3study-attempt-' "$work/smoke-docker.log"; then
     ok "$label rc=$value triggers stable-name cleanup"
   else
     bad "$label rc=$value cleanup missing (smoke rc=$smoke_rc)"
@@ -817,7 +822,7 @@ fi
 
 : >"$work/smoke-docker.log"
 FAKE_START_RC=125 run_fake_smoke "$work/smoke-start-125"
-if [ "$smoke_rc" -eq 2 ] && grep -q '^rm -f s3study-smoke-' "$work/smoke-docker.log"; then
+if [ "$smoke_rc" -eq 2 ] && grep -q '^rm -f s3study-attempt-' "$work/smoke-docker.log"; then
   ok "general docker rc=125 reconciles stable subject name"
 else
   bad "docker rc=125 did not reconcile subject name rc=$smoke_rc"

@@ -62,27 +62,6 @@ def test_run_meta_matches_the_shell_emitter(name: str) -> None:
     assert render_meta(facts, stdout, stderr) == (FIXTURES / f"{name}.run.meta").read_bytes()
 
 
-def test_development_receipt_does_not_claim_production_evidence() -> None:
-    facts, stdout, stderr = _case("plain")
-    development = RunFacts(
-        **{
-            **facts.__dict__,
-            "security_profile": "local-development-unisolated",
-            "security_provider": "local-development",
-            "docker_network": "bridge",
-            "firewall_policy_sha256": "not-checked-development",
-        }
-    )
-    receipt = render(development, stdout, stderr).decode()
-    assert "not evidentiary or correctness-verified" in receipt
-    assert "ordinary Docker bridge" in receipt
-    assert "Firewall policy | not checked" in receipt
-    assert "Development log limit | 1 GiB" in receipt
-    assert "registry expectation only; file not checked" in receipt
-    assert "verified against the file before this run" not in receipt
-    assert "user-defined bridge" not in receipt
-
-
 def test_verdict_placeholder_is_the_one_the_verifier_splices() -> None:
     """The receipt writes the slot; the verifier writes over it. One string."""
     assert VERDICT_PLACEHOLDER == PLACEHOLDER

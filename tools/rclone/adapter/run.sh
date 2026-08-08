@@ -4,7 +4,7 @@
 #   run.sh <mode> <bucket> <region> [prefix]
 #
 # Prints ONLY the argv (each argument followed by a NUL). It never executes
-# anything: harness/smoke-run.sh owns `docker run`, mounts, auth starvation, and
+# anything: harness/run-attempt.sh owns `docker run`, mounts, auth starvation, and
 # the timeout, and APPENDS this argv to the image ENTRYPOINT — which for
 # rclone/rclone is `["rclone"]`, so the argv starts at the SUBCOMMAND, not `rclone`.
 #

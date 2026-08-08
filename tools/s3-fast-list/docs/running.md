@@ -159,7 +159,7 @@ Detail: `../receipts/smoke/_capability/HARNESS-INCOMPATIBILITY.txt`.
 
 Every **smoke-run** receipt (the four `list/` rows above) was produced by the
 shared harness — `../adapter/run.sh` only prints the argv (NUL-delimited; see its header for
-the contract), and `harness/smoke-run.sh` owns `docker run`, credential starving,
+the contract), and `harness/run-attempt.sh` owns `docker run`, credential starving,
 timeout, measurement, and receipt-writing. The `_build/` receipts (the `docker
 build` above) and the `_capability/` direct captures were produced **out of band**
 — outside the smoke harness — and are labelled as such. Rebuilding the image

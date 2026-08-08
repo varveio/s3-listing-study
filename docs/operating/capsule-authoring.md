@@ -75,7 +75,7 @@ means while authoring:
   `confirmed` requires `kind: "run"` evidence, and a run evidence entry must
   point at a receipt-shaped string. The validator checks local existence; Git
   tracking is enforced separately below. If the runner-security profile was not
-  provisioned, `harness/smoke-run.sh` was not used and no receipt exists, full
+  provisioned, `harness/run-attempt.sh` was not used and no receipt exists, full
   stop.
 - **Never initiate subject execution outside the mandatory runner boundary.**
   Failure to provision the runner-security profile is a stop condition, not an
