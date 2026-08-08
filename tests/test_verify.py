@@ -31,7 +31,7 @@ REGISTRY_FIXTURE = REPO / "tests" / "fixtures" / "registry-254c8cfe.md"
 def test_the_registry_fixture_digests_to_the_sha_every_receipt_cites() -> None:
     """Identity is the raw bytes, so the markdown fixture reproduces `254c8cfe…`.
 
-    All 85 committed `run.meta` cite that digest and the verifier refuses to
+    All 73 committed `run.meta` cite that digest and the verifier refuses to
     judge a run against a registry it never saw. Digesting a parse instead of
     the file would make every committed verdict unreplayable.
     """

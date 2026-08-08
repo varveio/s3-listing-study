@@ -52,7 +52,7 @@ DEFAULT_STATE = "notes/agent-state/cleanup.json"
 # of committed verdicts in the repo genuinely changed, and it must be made in the
 # same commit that adds or removes the verdict, with the reason in the message.
 # Never adjust one to make a red gate go green.
-EXPECTED_SINGLES = 67
+EXPECTED_SINGLES = 57
 EXPECTED_UNIONS = 2
 
 

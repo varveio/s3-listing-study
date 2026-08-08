@@ -1,7 +1,7 @@
 """Discover the replayable corpus and recover each case's original invocation.
 
-The corpus is 67 single-receipt verdicts (every committed `verify.md`) plus 2
-unions (every committed `union-verify.md`). The 85 committed `run.meta` also
+The corpus is 57 single-receipt verdicts (every committed `verify.md`) plus 2
+unions (every committed `union-verify.md`). The 73 committed `run.meta` also
 cover capability probes and BLOCKED s3-fast-list runs; those carry no verdict, so
 there is nothing to replay against and they are not part of the corpus.
 

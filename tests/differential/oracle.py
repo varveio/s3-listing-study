@@ -23,7 +23,7 @@ EXIT_GREEN = 0
 EXIT_MISMATCH = 1
 EXIT_ORACLE_UNAVAILABLE = 42
 
-# The reference manifest the 85 committed run.meta bind themselves to.
+# The reference manifest the 73 committed run.meta bind themselves to.
 MANIFEST_NAME = "noaa-normals-pds.2026-07-17.tsv.gz"
 MANIFEST_SHA256 = "c78a82737dd1982a999912afa89f870c013cb22e01e50b8c4835ddb725992adb"
 

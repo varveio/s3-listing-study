@@ -17,15 +17,15 @@ that has to hold on every future change. Do not read a green run as re-proving
 equivalence; the evidence for that is the commit history of the port, and this
 gate green at the commit that deleted the shell.
 
-The corpus is **67 single-receipt verdicts + 2 unions**, pinned as
+The corpus is **57 single-receipt verdicts + 2 unions**, pinned as
 `EXPECTED_SINGLES` / `EXPECTED_UNIONS` in `__main__.py`. That is every committed
 `verify.md` and every committed `union-verify.md`. An unfiltered run that
 discovers any other number fails: otherwise a dropped or moved verdict artifact
 shrinks the denominator along with the numerator and the gate reports a clean
 sweep of whatever survived. Changing either constant asserts that the set of
 committed verdicts genuinely changed, and belongs in the same commit as the
-artifact it accounts for. The repo holds 85 `run.meta`
-files, but the remaining 18 are capability probes and BLOCKED `s3-fast-list` runs
+artifact it accounts for. The repo holds 73 `run.meta`
+files, but the remaining 16 are capability probes and BLOCKED `s3-fast-list` runs
 that never produced a verdict — there is nothing to replay them against.
 
 ## Running it
@@ -108,8 +108,8 @@ wrong" — when the truth is that the oracle is incomplete.
 | Input | Where | Bound by |
 | --- | --- | --- |
 | Reference manifest | `$S3_STUDY_DATA/manifests/noaa-normals-pds.2026-07-17.tsv.gz` | sha256 `c78a8273…92adb` |
-| Raw payloads (57 of 67) | `$S3_STUDY_DATA/receipts/` | each run.meta's own sha256, checked by the preflight |
-| Raw payloads (10 of 67) | `tools/*/receipts/` | committed |
+| Raw payloads (47 of 57) | `$S3_STUDY_DATA/receipts/` | each run.meta's own sha256, checked by the preflight |
+| Raw payloads (10 of 57) | `tools/*/receipts/` | committed |
 | Registry fixture | `tests/fixtures/registry-254c8cfe.md` | sha256 `254c8cfe…bbced` |
 
 `$S3_STUDY_DATA` defaults to `~/s3-list-study-data`. It is never hardcoded — the
@@ -124,7 +124,7 @@ source cannot fake a match.
 
 ## Why a registry fixture
 
-The 85 committed `run.meta` cite registry sha `254c8cfe…`; today's
+The 73 committed `run.meta` cite registry sha `254c8cfe…`; today's
 `docs/smoke-bucket.md` hashes to something else. The verifier refuses to judge a
 run against a registry the run never saw, so the replay exports
 `SMOKE_REGISTRY=tests/fixtures/registry-254c8cfe.md`. Pinning it also insulates

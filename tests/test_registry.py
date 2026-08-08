@@ -7,7 +7,7 @@ first field where they differ. It uses its own markdown reader on purpose: a
 guard that shared the reader under test would agree with it by construction.
 
 That the registry resolves to the bytes the receipts name is proved elsewhere,
-by the differential replay, which re-issues all 67 committed verdicts against
+by the differential replay, which re-issues all 57 committed verdicts against
 those bytes.
 """
 

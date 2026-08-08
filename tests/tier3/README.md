@@ -1,7 +1,7 @@
 # Tier 3 — the FAIL, DRIFT and ERROR verdicts
 
 Tier 1 (`tests/differential/`) replays every committed verdict in the repo. All
-67 of them are PASS, so the branch that matters most has no coverage at all: on
+57 of them are PASS, so the branch that matters most has no coverage at all: on
 any discrepancy the verifier re-lists the reference bucket **before attributing
 anything to the tool** (`s3_listing_study.verify.single`, union equivalent in `.union`) and
 splits the outcome three ways.

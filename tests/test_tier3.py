@@ -1,6 +1,6 @@
 """Tier 3 — the verdicts no committed receipt exercises.
 
-All 67 replayed verdicts are PASS, so FAIL, DRIFT and ERROR — the three outcomes
+All 57 replayed verdicts are PASS, so FAIL, DRIFT and ERROR — the three outcomes
 of the reference re-list that decides whether a discrepancy is *the tool's* —
 have no coverage at all. They are also the ones that become published findings
 about another project's tool, so they are the last place in this repo where a

@@ -7,7 +7,7 @@
   no payload reaches. Answered by :mod:`tests.adapters.equivalence`.
 
 The bytes these adapters produce over the committed payloads are judged by the
-differential replay, which re-issues all 67 committed verdicts through them and
+differential replay, which re-issues all 57 committed verdicts through them and
 requires ``verify.md`` back unchanged. The shell adapters that used to provide a
 second opinion are gone; the committed artifacts are the oracle now.
 """

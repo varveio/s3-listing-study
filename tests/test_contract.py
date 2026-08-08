@@ -2,7 +2,7 @@
 
 The mtime tests are differential against awk: they take the ``canon_mt``
 function and ``MTIME_RE_AWK`` frozen below and run them under the real ``awk``.
-The 67 committed verdicts were issued under those exact semantics, so "agrees
+The 57 surviving committed verdicts were issued under those exact semantics, so "agrees
 with what I think awk does" is not enough.
 """
 
@@ -34,7 +34,7 @@ CANON_MT_AWK = (
 """The shell verifier's ``canon_mt``, character for character.
 
 The file it was lifted from is gone, so this constant is now the only copy: it
-records the semantics **the 67 committed verdicts were issued under**, and the
+records the semantics **the 57 surviving committed verdicts were issued under**, and the
 tests below run it through the real awk. It is a frozen historical fact, not a
 mirror of live code — changing it asserts that those verdicts were formed some
 other way, which they were not.

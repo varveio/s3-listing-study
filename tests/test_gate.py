@@ -54,7 +54,12 @@ def _emit(path: Path, unit: str, status: str) -> None:
         head="deadbeef",
         started="2026-07-25T00:00:00Z",
         finished="2026-07-25T00:04:00Z",
-        counts={"singles_ok": 67, "singles_bad": 0, "unions_ok": 2, "unions_bad": 0},
+        counts={
+            "singles_ok": gate.EXPECTED_SINGLES,
+            "singles_bad": 0,
+            "unions_ok": gate.EXPECTED_UNIONS,
+            "unions_bad": 0,
+        },
         selection={"restricted": False},
     )
 
@@ -165,7 +170,7 @@ def test_full_run_is_green(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> N
 
 
 def test_a_shrunken_corpus_is_not_green(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    # 60 of 67 verdict artifacts gone: the denominator must not shrink with the
+    # 50 of 57 verdict artifacts gone: the denominator must not shrink with the
     # numerator. This is the false green the harness exists to prevent.
     _stub_gate(monkeypatch, tmp_path, singles=7)
     code, record = _run(tmp_path)

@@ -4,7 +4,7 @@ Two properties, decided in ``tests/differential/README.md`` § "The fixture is
 markdown, and stays markdown":
 
 * **Identity is the raw bytes.** ``--registry PATH`` is digested as
-  ``sha256(file bytes)``, format-agnostically. All 85 committed ``run.meta``
+  ``sha256(file bytes)``, format-agnostically. All 73 committed ``run.meta``
   cite ``254c8cfe…`` — the sha of a *markdown* registry — and the verifier
   refuses to verify a run against a registry it never saw. Digesting bytes
   rather than a parse is what lets the committed fixture reproduce that digest
