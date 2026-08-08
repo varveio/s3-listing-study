@@ -1,7 +1,7 @@
-# normalize.sh adapter fixtures
+# normalize.py adapter fixtures
 
 Synthetic `s4cmd ls` output modeled on `pretty_print` (s4cmd.py:1592-1622), used
-to exercise `normalize.sh`. **Synthetic, not captured from a real s4cmd run** —
+to exercise `normalize.py`. **Synthetic, not captured from a real s4cmd run** —
 no listing mode could be executed (no anonymous access, CREDS=none), so these are
 a construction check of the parser, not a `[RUN]` against tool output.
 

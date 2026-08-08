@@ -235,7 +235,7 @@ claim `interrupt-resume-behavior-untested`).
   does not affect listing.
 - **Keys are printed relative to the listed target**, not as absolute keys — a
   scoped `mc ls s3/b/prefix/` prints keys without the `prefix/` [SRC mc
-  `cmd/ls.go:114-128` @ 7394ce0] [RUN]. `normalize.sh` re-prepends the scope
+  `cmd/ls.go:114-128` @ 7394ce0] [RUN]. `normalize.py` re-prepends the scope
   prefix.
 - **Trailing slash only saves a probe (not a stat-vs-list switch):** `mc ls s3/b`
   stats the target, recognises it is a directory, appends `/`, and lists it
@@ -282,7 +282,7 @@ smoked (see `running.md`).
   layer to one line per object — [RUN] over [SRC] here.) Folders carry
   `type:"folder"`, empty `etag`, and a nanosecond synthetic `lastModified`.
 
-[`../adapter/normalize.sh`](../adapter/normalize.sh) (this tool's adapter) emits
+[`../adapter/normalize.py`](../adapter/normalize.py) (this tool's adapter) emits
 `key<TAB>size<TAB>etag<TAB>mtime<TAB>storage_class`, `-` where a mode does not
 expose a field, and re-prepends the run's scope prefix. `*-json` modes expose all
 five fields; text modes expose `-` for size (humanized/lossy) and etag (absent).

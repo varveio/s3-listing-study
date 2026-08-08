@@ -189,9 +189,12 @@ construction [INFERRED].
 Each caveat below is owned here or in the claim's qualification; `running.md`
 carries the operator-facing view and does not re-derive them.
 
-**KEY-BYTE FIDELITY.** The `normalize.sh` adapter's text branches split on
-whitespace and rejoin fields with a single space, so a key containing runs of
-spaces, tabs, or an embedded newline is **not** reproduced byte-for-byte; the
+**KEY-BYTE FIDELITY.** The text branches split on whitespace, so a key
+containing runs of spaces, a tab, or an embedded newline is not recoverable from
+them. The claim `adapter-whitespace-key-fidelity-loss` was observed against the
+previous shell adapter, which rejoined the split fields with a single space and
+emitted the altered key; `normalize.py` splits the same way but refuses a key the
+framing cannot carry instead of altering it. The
 JSON branch's `jq @tsv` escapes tab/newline/backslash too (claim
 `adapter-whitespace-key-fidelity-loss`). This is exact for the NOAA smoke
 keyspace (keys are `[A-Za-z0-9._/-]`, no whitespace) and every committed PASS
@@ -203,7 +206,7 @@ keys.
 
 **`allversions` validates the request/output contract only, on a
 non-versioned bucket** (claim `allversions-validates-request-contract-only`).
-The `normalize.sh` adapter discards the trailing versionID token entirely. On
+The `normalize.py` adapter discards the trailing versionID token entirely. On
 the smoke bucket (non-versioned, one version per key) that is sound. On a
 **versioned** bucket, multiple versions of one key would collapse into duplicate
 key records, and the verifier would (correctly) flag them as duplicates. The

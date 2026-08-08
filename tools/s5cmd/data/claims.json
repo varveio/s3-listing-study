@@ -614,18 +614,18 @@
     },
     {
       "id": "adapter-whitespace-key-fidelity-loss",
-      "statement": "The study's normalize.sh text branches split on whitespace and rejoin fields with a single space, so a key containing runs of spaces, tabs, or an embedded newline is not reproduced byte-for-byte.",
+      "statement": "The study adapter's text branches split on whitespace, so a key containing runs of spaces, tabs, or an embedded newline is not recoverable from them. The observation was made against the previous shell adapter (normalize.sh, since removed), which rejoined the split fields with a single space and emitted the altered key.",
       "scope": "correctness",
       "status": "supported",
       "disposition": "retained",
-      "qualification": "This is a limitation of the study adapter, exact for the whitespace-free NOAA smoke keyspace; general weird-key fidelity is deferred with the edge-case fixture (EDGE_BUCKET=none).",
+      "qualification": "This is a limitation of the study adapter, exact for the whitespace-free NOAA smoke keyspace; general weird-key fidelity is deferred with the edge-case fixture (EDGE_BUCKET=none). The current normalize.py splits the same way but refuses a key the framing cannot carry rather than emitting an altered one, so the byte-for-byte loss half is not known to hold of it; no committed receipt re-tests the claim against that adapter, so the claim is left as recorded rather than demoted.",
       "legacy_origins": [
         "PROSE-3"
       ],
       "evidence": [
         {
           "kind": "documentation",
-          "path": "../adapter/normalize.sh"
+          "path": "../adapter/normalize.py"
         },
         {
           "kind": "documentation",
@@ -646,7 +646,7 @@
       "evidence": [
         {
           "kind": "documentation",
-          "path": "../adapter/normalize.sh"
+          "path": "../adapter/normalize.py"
         },
         {
           "kind": "run",

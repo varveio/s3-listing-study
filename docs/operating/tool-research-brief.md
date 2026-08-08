@@ -184,8 +184,8 @@ research budget to produce a truthful, useless `STATUS: blocked`.
    attached identity through its control plane. The wrapper currently rejects
    credentialed mode; no credential profile is mounted. Receipts produced
    outside the wrapper don't count.
-4. **`harness/verify-listing.sh`** — the shared output verifier. Input: raw
-   tool output (via the tool's `normalize.sh` adapter, below), the manifest
+4. **`python3 -m s3_listing_study.verify`** — the shared output verifier. Input: raw
+   tool output (via the tool's `normalize.py` adapter, below), the manifest
    (cited by sha256), and a scope (full bucket, or a prefix, or delimiter
    semantics — it derives the expected set from the manifest). Duplicate
    semantics: normalized outputs are concatenated as a **multiset**,
@@ -261,7 +261,7 @@ Once the owner has read and accepted a tool's groundwork branch, its
 `README.md` is rebuilt — it stays the tool's landing page, but the stale
 tool page text does not survive into the benchmark period. **Run this at deep
 tier** (owner's call): the inputs are all prepared, so it's cheap, but the
-  output is the public summary of what we learned about someone else's tool — a
+  output is the public summary of what we learned about another project's tool — a
 mis-carried status or a quietly narrowed hypothesis here is exactly the kind
 of error the study exists to avoid. **This step does no new research and
 re-verifies no claims** — the groundwork already did both and was itself
@@ -529,12 +529,12 @@ bucket(s), manifests, snapshot dates, and designated scoped-check prefixes;
 verifier. If any of these is missing, or pre-flight fails, jump to Finalize
 early — do not improvise infrastructure; the measurement and verification
 path is deliberately shared across all agents. Resolve every registry field
-through `harness/registry-lookup.sh` — never hand-copy a digest: a 64-hex
+through the packaged registry reader — never hand-copy a digest: a 64-hex
 string retyped across twelve tools is a typo waiting to certify a manifest
 that verified nothing.
 
 **Measurement boundary (invariant):** the wrapper's wall-clock is the
-container's lifetime (`StartedAt→FinishedAt`). Your `normalize.sh`, the
+container's lifetime (`StartedAt→FinishedAt`). Your `normalize.py`, the
 verifier, and any post-processing run **after the clock stops** and must
 never sit inside a timed window — at smoke or any later phase. Adapter cost
 is our cost, not the tool's.
@@ -584,7 +584,7 @@ story is "generate N invocations":
 
 1. **Write the tool's adapter and runner as you go** — these are deliverables,
    not conveniences:
-   - `tools/TOOL/normalize.sh <mode> [prefix]`: reads the tool's raw output
+   - `tools/TOOL/adapter/normalize.py <mode> [prefix]`: reads the tool's raw output
      for that mode on stdin, emits
      `key<TAB>size<TAB>etag<TAB>mtime<TAB>storage_class` per line on stdout
      (raw key bytes, no re-encoding; `-` for any field that mode doesn't
@@ -637,7 +637,7 @@ story is "generate N invocations":
    probes go under `receipts/smoke/_build/`, `_adapter/`, `_capability/` —
    underscore dirs carry no verifier verdict and are exempt from the
    every-mode expectation.
-4. **Check the output with `harness/verify-listing.sh`**: recursive modes
+4. **Check the output with `python3 -m s3_listing_study.verify`**: recursive modes
    against the full manifest; prefix-scoped and delimiter modes against the
    verifier's derived expected set for that scope; fan-out modes concatenated
    as a multiset with duplicates counted **before** dedup — each shard
@@ -679,7 +679,8 @@ story is "generate N invocations":
    `-e AWS_SECRET_ACCESS_KEY=` with an **empty** value — that is the
    wrapper's credential starvation made visible, not a leak; do not flag it
    and do not "fix" it; (b) before every commit, run
-   `harness/scan-tree.sh <dir>` over the tree you are about to commit — same
+   `python3 -m s3_listing_study.receipt scan-tree <dir>` over the tree you are
+   about to commit — same
    value-shaped scan, exported for exactly this use. If anything flags:
    **quarantine and flag, never delete evidence** — move the artifact aside,
    record the hit and the quarantine location in the receipt, and raise it
@@ -811,7 +812,7 @@ orchestrator to route.
 
 Run the Codex CLI as a separate reviewer over **everything you produced**
 — report, reconciliation, receipts, the tool page diff, `run.sh`,
-`normalize.sh`, Dockerfile, and any harness files you authored:
+`normalize.py`, Dockerfile, and any harness files you authored:
 
 ```sh
 cd "$WORKTREE"
@@ -826,7 +827,7 @@ codex exec -m gpt-5.6-sol -c model_reasoning_effort=xhigh \
    research/reconciliation.md, every receipt under receipts/smoke/ INCLUDING
    external payloads under <data>/receipts/TOOL/ (verify each
    against the sha256 its receipt cites, and check them for secrets),
-   run.sh, normalize.sh, the Dockerfile if present, and the uncommitted
+   run.sh, normalize.py, the Dockerfile if present, and the uncommitted
    tool page edits (git diff tools/TOOL/README.md). Re-verify every [SRC]
    anchor against the checkout at <sources>/TOOL (confirm the
    pinned SHA first) by targeted lookup — open each cited file:line and
@@ -877,7 +878,7 @@ tools/TOOL/
     codex-review.md            # Stage E findings + resolutions
   Dockerfile                   # only if upstream ships no image
   run.sh                       # <mode> <bucket> <region> [prefix] — NUL-delimited argv, parameterized
-  normalize.sh                 # <mode> [prefix]; raw output → key/size/etag/mtime/storage_class lines
+  normalize.py                 # <mode> [prefix]; raw output → key/size/etag/mtime/storage_class lines
   receipts/smoke/<mode>/...    # Stage C receipts
 ```
 
@@ -916,7 +917,7 @@ its label.
    best-practice configuration for large listings *per the project's own
    guidance*, with citations; hinted/two-pass workflows if any; auth setup
    including the unsigned/anonymous mechanism (or its absence); footguns.
-5. **Output and observability** — formats, the `normalize.sh` contract for
+5. **Output and observability** — formats, the `normalize.py` contract for
    each mode, metrics/counters/logs the tool exposes.
 6. **Failure surface** — what docs/source/issues say about memory growth,
    interruption, error handling, endpoint quirks. Labeled; hypotheses stay

@@ -14,8 +14,8 @@ Shared measurement and verification infrastructure for the smoke campaign
 | --- | --- | --- |
 | 1 | `docs/smoke-bucket.md` — bucket registry | **live** — `noaa-normals-pds`, snapshot 2026-07-17 (contract-v2 re-baseline) |
 | 2 | Reference manifest, pinned harness client | **live** — 148,917 keys, **contract v2** (`key/size/etag/mtime/storage_class`), sha256 in the registry, in `<data>/manifests/` |
-| 3 | `smoke-run.sh` — run wrapper | **requires provisioned runner** — contained-network security profile must pass its activation gate |
-| 4 | `verify-listing.sh` — output verifier | **requires provisioned runner for reference re-lists** — same contained-network profile and gate |
+| 3 | `smoke-run.sh` — run wrapper | **requires a set-up runner** — the contained-network security profile must pass its per-run gate |
+| 4 | `s3_listing_study.verify` — output verifier | **requires a set-up runner for reference re-lists** — same contained-network profile and gate |
 | 5 | `base.Dockerfile` — shared base layer | **not built** — deliberately. The brief marks it optional and it is only needed by a tool that ships no upstream image. The first such tool builds it; speculative infrastructure for nobody is worse than none. |
 
 Campaign parameters currently in force: `CREDS=none` (every run anonymous),
@@ -23,37 +23,45 @@ Campaign parameters currently in force: `CREDS=none` (every run anonymous),
 
 ## Mandatory runner boundary
 
-Further networked execution requires the provisioned
+Further networked execution requires the
 [`s3-listing-study-v1`](../docs/operating/runner-security.md) profile. The container
 hardening, host firewall, identity claims, and build/pull boundary are
 specified there; that document is the authoritative contract.
 
 `smoke-run.sh` and each reference re-list fail closed through
-`runner-security-check.sh`. The check binds a root-owned readiness record to the
-current host, boot, Docker daemon, complete Docker-network inventory, bridge
-configuration, firewall backend, policy artifacts, and canonical live rules. It
-also rejects recognized cloud metadata in the `local` profile and probes
-link-local denial plus public S3 from the subject bridge.
+`runner-security-check.sh`. The check enforces one property per run — that the
+run is anonymous by construction — by verifying live that no ambient credential
+variables are set, that no cloud metadata service answers on the host, that the
+subject bridge is the fixed profile on an `iptables` backend, that the live
+firewall carries exactly the deny policy rendered from
+`harness/security/policy.v1.env` plus the current Docker network subnets, and
+that a digest-pinned probe on that bridge finds link-local denied and public S3
+reachable. There is no readiness record: the expected policy comes from this
+repository, so nothing has to be re-hashed or boot-bound. Runner setup is a
+documented operator procedure in
+[`docs/operating/runner-security.md`](../docs/operating/runner-security.md),
+whose last step is this same gate.
 
 ## Contract
 
 ```
-                 registry-lookup.sh ── docs/smoke-bucket.md (single source)
+        s3_listing_study.registry ── data/registry.toml (single source)
                           │
    passed --run-script PATH ┤ argv only, NUL-delimited, never executes
                           ▼
                     smoke-run.sh  ── owns docker run, auth, timeout, measurement
                           │            → receipts/smoke/<mode>/receipt.md
                           ▼
-   passed --normalize PATH ───► verify-listing.sh ── manifest (sha256-bound)
+   passed --normalize PATH ───► s3_listing_study.verify ── manifest (sha256-bound)
 ```
 
 Adapter locations are caller-supplied, not inferred by the harness. Every
 capsule passes `tools/<tool>/adapter/run.sh` and
-`tools/<tool>/adapter/normalize.sh` (migration wave completed 2026-07-20);
+`tools/<tool>/adapter/normalize.py` (migration wave completed 2026-07-20);
 historical receipts cite the pre-migration root paths as run facts.
 
-- **`registry-lookup.sh <bucket> <field>`** — resolves `region`, `manifest`,
+- **`python3 -m s3_listing_study.receipt registry --registry PATH --bucket BUCKET --field FIELD`** —
+  resolves `region`, `manifest`,
   `manifest_sha256`, `snapshot_date`, `keys`, `shape` from the registry. Exists
   so a receipt cites what the registry *says* rather than what somebody retyped:
   a 64-hex digest transcribed by hand across twelve tools is a typo waiting to
@@ -115,7 +123,7 @@ historical receipts cite the pre-migration root paths as run facts.
   - **Version + TODO warnings.** Auto-fills the tool version (caller `--tool-version` wins, else
     best-effort `--version` on the image), and any receipt field left as `TODO`
     produces a loud warning on the wrapper's final summary.
-- **`verify-listing.sh`** — the only thing that issues a verdict on output.
+- **`python3 -m s3_listing_study.verify`** — the only thing that issues a verdict on output.
   Requires `--receipt` and refuses to run without the wrapper's `run.meta`.
   Parses the **contract-v2 5-field manifest and adapter output**
   (`key/size/etag/mtime/storage_class`) and fails loudly if handed a 3-field
@@ -126,7 +134,7 @@ historical receipts cite the pre-migration root paths as run facts.
   equal) in a single awk pass — no per-row `date` fork. **Refuses a verdict on a
   truncated verified payload** (a cut-off listing cannot establish completeness;
   stderr truncation alone does not block verifying a complete stdout). Passes the
-  run's prefix (from `run.meta`) to `normalize.sh` as `$2`. Gains
+  run's prefix (from `run.meta`) to `normalize.py` as `$2`. Gains
   **`--scope union`** (below).
 
 ### `--scope union` — fan-out completeness across shards
@@ -164,17 +172,17 @@ keys (e.g. `index.html`) that live under no prefix.
   coverage defect in the fan-out **plan**, reported as **`ERROR` (exit 3)**,
   distinct from and never mistaken for the tool dropping keys (`FAIL`).
 
-The union mirrors the single-receipt path everywhere it judges: it **binds mode
+The union mirrors the single-receipt path everywhere it verifies: it **binds mode
 across the prefix shards** (they must share one `mode`; a caller `--mode` must
 equal it; the remainder is exempt as above), **refuses** any shard with
 `redaction_changed_bytes=yes` or a **truncated** verified stream, and
-copies-then-hashes-then-judges. **Stream selection**: by default it picks each
+copies-then-hashes-then-checks. **Stream selection**: by default it picks each
 shard's verified stream by heuristic — stdout unless stdout is empty and stderr is
 non-empty — which is a guess; a tool that prints a banner on stdout and its
 listing on stderr needs **`--stream stdout|stderr`**, which pins the stream for
 **all** shards (a fan-out set shares tool+mode, so it shares the stream). It
 **re-lists the reference before issuing any `FAIL`** — missing/extra keys, field
-mismatches, or a shard failing its own scope — so bucket drift is never charged to
+mismatches, or a shard failing its own scope — so bucket drift is never attributed to
 the tool; only pure duplication (dups > 0, everything else clean) may `FAIL`
 without a re-list, since a bucket cannot drift into duplicates. Every plan-defect
 death after `--out` is parsed still writes a durable `union-verify.md` with
@@ -205,7 +213,7 @@ represent a delimiter that is itself `:`.
 | | |
 | --- | --- |
 | `PASS` | Complete, no duplicates, fields match where the mode exposes them |
-| `FAIL` | A real discrepancy in **the tool output or this mode's `normalize.sh`** (the verdict does not distinguish them, and says so). **Completeness and field `FAIL`s are always preceded by a fresh reference re-list that confirms the bucket did *not* move**. The **one exception** is duplication-only: cross-shard/multiset duplicates can be identified without a re-list, because bucket drift cannot create duplicate emitted records. Both the single-receipt and `--scope union` paths follow this rule. |
+| `FAIL` | A real discrepancy in **the tool output or this mode's `normalize.py`** (the verdict does not distinguish them, and says so). **Completeness and field `FAIL`s are always preceded by a fresh reference re-list that confirms the bucket did *not* move**. The **one exception** is duplication-only: cross-shard/multiset duplicates can be identified without a re-list, because bucket drift cannot create duplicate emitted records. Both the single-receipt and `--scope union` paths follow this rule. |
 | `DRIFT` | The bucket moved since the snapshot. **Stop — not a tool finding.** Only the orchestrator re-baselines. The mismatch re-list captures the full **5-field** record (`key/size/etag/mtime/storage_class`) with the manifest's exact canonicalization (`TZ=UTC`, ETag unquoted, mtime `+00:00`→`Z`) and compares full records — because an object replaced under the same key leaves the key set identical, and an *identical-byte* overwrite changes only `mtime`, which a key/size/etag-only check would miss and wrongly `FAIL`. |
 | `ERROR` | The verifier could not run. **Not a pass.** |
 
@@ -237,7 +245,7 @@ Use `--entrypoint` on the wrapper if a tool needs it overridden.
 ### Measurement boundary — adapters are never on the clock
 
 The wrapper's wall-clock is the container's lifetime (`StartedAt→FinishedAt`,
-from `docker inspect`). `normalize.sh`, `verify-listing.sh`, and all
+from `docker inspect`). `normalize.py`, the verifier, and all
 post-processing run **after the clock stops**. This is an invariant, not an
 implementation detail: adapter cost is the study's cost, not the tool's, and
 it must never sit inside a timed window at smoke scale or in the benchmark
@@ -292,13 +300,13 @@ guard will refuse the fresh run.
 
 Owner requirement (2026-07-17): a bucket change must be **script-driven, not
 agentic**. The design already supports that — the per-tool `run.sh` +
-`normalize.sh` adapters are parameterized by bucket/region/prefix, and
+`normalize.py` adapters are parameterized by bucket/region/prefix, and
 nothing tool-specific encodes the bucket (the scan gate enforces it). The
 procedure:
 
 1. **Update the registry** (`docs/smoke-bucket.md`): bucket, region, shape,
    key count, snapshot date. The registry is the single source every receipt
-   binds to via `registry-lookup.sh` — nothing else needs editing.
+   binds to via the packaged registry reader — nothing else needs editing.
 2. **Re-baseline the reference manifest** with the pinned harness client:
    full 5-field listing (`key/size/etag/mtime/storage_class`), the
    canonicalization the verifier expects (`TZ=UTC`, ETag unquoted, mtime

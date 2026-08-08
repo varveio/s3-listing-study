@@ -194,7 +194,7 @@ pin `-c <= 8` (claim `num-threads-default-is-cpu-count-times-four`); the smoke
 region flag** — region is entirely boto3's to resolve (S3 default us-east-1 plus
 bucket-region redirect) [SRC `s4cmd.py` — no region option @ 80059bf].
 
-## Output contract per mode (`normalize.sh`)
+## Output contract per mode (`normalize.py`)
 
 `ls` output is `pretty_print` (`s4cmd.py:1592`): space-aligned columns
 `<mtime> <size> <name>`, where `<name>` is the full `s3://bucket/key` URL,

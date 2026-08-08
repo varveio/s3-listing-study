@@ -109,15 +109,15 @@ sufficient — it checks structure, not truthfulness.
 
 ```sh
 # structure, links, secrets
-python3 scripts/validate-tool-capsule.py --tool <slug>
-python3 scripts/check-links.py
+uv run s3-listing-study validate-capsule --tool <slug>
+uv run s3-listing-study check-links
 harness/scan-tree.sh .
 
 # every source anchor resolves at the commit the evidence cites
-python3 scripts/check-source-anchors.py --tool <slug> --require-checked \
+uv run s3-listing-study check-source-anchors --tool <slug> --require-checked \
         --source-root <repository-1>=<checkout-1> \
         --source-root <repository-2>=<checkout-2>
-python3 scripts/check-source-anchors.py --tool <slug> --markdown tools/<slug>/research/ \
+uv run s3-listing-study check-source-anchors --tool <slug> --markdown tools/<slug>/research/ \
         --require-checked --source-root <repository-1>=<checkout-1> \
         --source-root <repository-2>=<checkout-2>
 
@@ -154,7 +154,7 @@ Then the checks no script performs:
   the ledger. A dangling ID is a defect, and it is invisible to the validator.
 - **Every evidence `artifact`/`receipt` path exists** on disk.
 - **The adapter round-trips real output.** Execute each mode's argv against the
-  real subject, pipe it through `normalize.sh`, and assert the field count. A
+  real subject, pipe it through `normalize.py`, and assert the field count. A
   normalizer that has only seen synthetic fixtures has not been tested.
 - **Cross-mode agreement, where the tool offers more than one output path.**
   If several modes should enumerate the same thing, check they produce the same
@@ -173,7 +173,7 @@ focus list, and a scope fence telling it that sibling reviews cover the rest:
 | --- | --- | --- |
 | Evidence | `data/` | Does any claim's status or wording outrun its evidence? |
 | Prose | `README.md`, `docs/` | Is every statement backed by a claim, and does it obey the content contracts? |
-| Machinery | `schemas/`, `scripts/`, CI | Did a check that used to fire stop firing? Can a gate report success having verified nothing? |
+| Machinery | `schemas/`, `src/s3_listing_study/`, CI | Did a check that used to fire stop firing? Can a gate report success having verified nothing? |
 | Adapter | `adapter/` | Would this argv fail against the real binary? Can the normalizer emit or drop a row it should refuse? |
 | Rules | operating docs | Does new guidance contradict existing law, or license something it should bound? |
 

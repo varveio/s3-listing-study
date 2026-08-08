@@ -923,7 +923,7 @@
         },
         {
           "kind": "documentation",
-          "path": "../adapter/normalize.sh"
+          "path": "../adapter/normalize.py"
         }
       ]
     },
@@ -971,7 +971,7 @@
         },
         {
           "kind": "documentation",
-          "path": "../adapter/normalize.sh"
+          "path": "../adapter/normalize.py"
         }
       ]
     },
@@ -1019,7 +1019,7 @@
         },
         {
           "kind": "documentation",
-          "path": "../adapter/normalize.sh"
+          "path": "../adapter/normalize.py"
         }
       ]
     },

@@ -6,6 +6,12 @@ as parameters resolved from this file — a bucket name hardcoded anywhere
 executable is a defect. The smoke protocol this registry serves is
 [`tool-research-brief.md`](operating/tool-research-brief.md).
 
+**The machine-read source is [`data/registry.toml`](../data/registry.toml).**
+Code resolves bucket facts from there, not from the tables below; the tables
+state the same values for a human reader, and `tests/test_registry.py` fails if
+the two ever disagree. Change both, or change the TOML and let the guard tell
+you what is stale.
+
 Snapshots are taken with the pinned harness client, **anonymously**, and the
 manifest is the reference listing every smoke run is verified against. A
 drifted bucket (pre-flight or mid-campaign reference re-list disagreeing with
@@ -14,7 +20,9 @@ every receipt cites the manifest sha256 it was checked against.
 
 ## Harness client
 
-Image: `amazon/aws-cli@sha256:eb85b2c72442c9eab0bdbe608095b9b909bc2a7136924124d63fe0c03b2ec334`
+| | |
+| --- | --- |
+| Image | `amazon/aws-cli@sha256:eb85b2c72442c9eab0bdbe608095b9b909bc2a7136924124d63fe0c03b2ec334` |
 
 Invocation shape, run only after the mandatory
 [`runner-security`](operating/runner-security.md) preflight:
@@ -36,7 +44,7 @@ UTC); the pipeline rewrites the trailing `+00:00` to `Z`, giving the
 contract-v2 canonical `YYYY-MM-DDTHH:MM:SSZ`. Snapshot, pre-flight, and
 mismatch re-list all use this exact pipeline — same image, same query, same
 canonicalization. The mismatch re-list captures the full five-field record
-(see `harness/verify-listing.sh`).
+(see `s3_listing_study.verify`).
 
 ## Primary: `noaa-normals-pds`
 
@@ -44,7 +52,7 @@ canonicalization. The mismatch re-list captures the full five-field record
 | --- | --- |
 | Bucket | `noaa-normals-pds` (AWS Open Data — NOAA U.S. Climate Normals; sponsor-paid requests) |
 | Region | `us-east-1` |
-| Access | Anonymous (`--no-sign-request`); last verified during the recorded 2026-07-16 smoke. Future checks require the runner-security activation gate and preflight. |
+| Access | Anonymous (`--no-sign-request`); last verified during the recorded 2026-07-17 smoke. Future checks require the runner-security activation gate and preflight. |
 | Manifest | `<data>/manifests/noaa-normals-pds.2026-07-17.tsv.gz` — `key<TAB>size<TAB>etag<TAB>mtime<TAB>storage_class` (contract v2), ETag unquoted, mtime `YYYY-MM-DDTHH:MM:SSZ` UTC. |
 | Manifest sha256 | `c78a82737dd1982a999912afa89f870c013cb22e01e50b8c4835ddb725992adb` |
 | Snapshot date | 2026-07-17 (UTC) |

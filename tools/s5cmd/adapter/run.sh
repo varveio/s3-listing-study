@@ -39,7 +39,7 @@ case "$mode" in
     emit --no-sign-request ls -e -s "s3://${bucket}/${prefix}" ;;
   rootkeys)
     # Remainder shard for the fan-out --scope union: a root delimiter listing
-    # (identical request to `delimiter`) whose adapter (normalize.sh rootkeys)
+    # (identical request to `delimiter`) whose adapter (normalize.py rootkeys)
     # keeps only the unprefixed OBJECT keys and drops the DIR common-prefixes,
     # so the union's unprefixed-remainder contract is satisfied exactly. run.meta
     # prefix MUST be empty (the remainder is the unprefixed complement).

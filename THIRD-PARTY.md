@@ -68,8 +68,8 @@ for any of them:
   A copyleft obligation to offer Corresponding Source attaches on *conveying*
   object code — the operative fact here is that nothing is conveyed.
 - The tools are run as separate programs. The study's own `run.sh` /
-  `normalize.sh` never link against them — `run.sh` emits argv and does not
-  execute, and `normalize.sh` parses captured stdout after the fact. Apache-2.0
+  `normalize.py` never link against them — `run.sh` emits argv and does not
+  execute, and `normalize.py` parses captured stdout after the fact. Apache-2.0
   scripts alongside a GPL/AGPL binary in a container is mere aggregation, not a
   derivative work.
 - AGPL §13's network clause is not engaged: `mc` is run as an unmodified

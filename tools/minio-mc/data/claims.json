@@ -867,18 +867,18 @@
     },
     {
       "id": "text-key-parse-best-effort",
-      "statement": "The text-mode key parse in the study adapter is best-effort, so *-json modes are authoritative for keys.",
+      "statement": "The text-mode key parse in the study adapter is best-effort, so *-json modes are authoritative for keys. The observation was made against the previous shell adapter (normalize.sh, since removed).",
       "scope": "correctness",
       "status": "supported",
       "disposition": "retained",
-      "qualification": "A key beginning with a storage-class token and a space is indistinguishable from the SC column; whitespace-free NOAA keys parse exactly and general weird-key fidelity is deferred (EDGE_BUCKET=none).",
+      "qualification": "A key beginning with a storage-class token and a space is indistinguishable from the SC column; whitespace-free NOAA keys parse exactly and general weird-key fidelity is deferred (EDGE_BUCKET=none). The ambiguity is a property of the text output, not of the adapter language, but no committed receipt re-tests the claim against the current normalize.py, so the claim is left as recorded.",
       "legacy_origins": [
         "PROSE-5"
       ],
       "evidence": [
         {
           "kind": "documentation",
-          "path": "../adapter/normalize.sh"
+          "path": "../adapter/normalize.py"
         },
         {
           "kind": "documentation",

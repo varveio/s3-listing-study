@@ -50,7 +50,7 @@ tools/<tool>/
     running.md               how this study built, ran, and checked it
   adapter/                   shared-harness integration
     run.sh                   prints tool argv; never launches the tool
-    normalize.sh             converts native output to the smoke contract
+    normalize.py             converts native output to the smoke contract
     fixtures/                synthetic adapter QA, only where applicable
   build/                     optional local image construction
     Dockerfile               study build recipe
@@ -284,7 +284,7 @@ always linking back to the source record.
 NUL-delimited argv and never runs Docker or the tool; the harness owns
 execution, credentials, timeouts, and measurement.
 
-`adapter/normalize.sh` converts the tool's native output into the frozen smoke
+`adapter/normalize.py` converts the tool's native output into the frozen smoke
 harness's normalized stream. That stream is an executable compatibility
 boundary, not a stored canonical result. The future benchmark design may use
 JSON Lines, but this structure migration does not rewrite the frozen smoke
@@ -384,13 +384,30 @@ conversion procedure, exceptions, commands, stop conditions, and review return
 format. Validate the living capsule contract with:
 
 ```sh
-python3 scripts/validate-tool-capsule.py --tool <tool>
+uv run s3-listing-study validate-capsule --tool <tool>
 ```
 
+The gate is `s3_listing_study.capsule`, part of the packaged CLI: it validates
+`data/tool.json` and `data/claims.json` against the Draft 2020-12 schemas in
+`schemas/`, checks evidence references, verifies the root layout and the README
+contract, and resolves local Markdown links and fragments. Run it from the
+project environment (`uv sync`) — it needs `jsonschema`.
+
 The completed migration's conservation, research-preservation, and receipt
-checks are a frozen regression, separate from the living contract. CI runs it
-against the pinned pre-migration ref with `--migration-base`; `--base` remains
-an alias only so the sealed playbook's recorded commands continue to work.
+checks are a frozen regression, separate from the living contract. It checks
+legacy-claim conservation, preserved research, receipt immutability, and the two
+synthetic-fixture reclassifications against a commit where
+`tools/<tool>/README.md` is still the historical pre-capsule page — since PR #22
+merged, the last pre-migration commit on `main`, not `main` itself:
+
+```sh
+uv run s3-listing-study validate-capsule --tool <tool> \
+  --migration-base f5beafd4d8e83a605af38aa7e22a75d94cbaa50b
+```
+
+CI runs the living contract for every runnable tool as a separately named check;
+`--base` remains an alias for `--migration-base` only so the sealed playbook's
+recorded commands continue to work.
 
 The playbook explains **how to convert** an existing directory. This document
 defines **what the resulting directory means**.

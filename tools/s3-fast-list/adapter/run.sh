@@ -16,7 +16,7 @@
 # stdout/stderr (docker logs) and mounts nothing, so the only way to get the
 # listing out is --output-parquet-file /dev/stdout, which streams the parquet
 # bytes to stdout (env_logger writes its info/heartbeat lines to stderr, so
-# stdout stays pure parquet). normalize.sh parses that parquet. The keyspace
+# stdout stays pure parquet). normalize.py parses that parquet. The keyspace
 # CSV (.ks) is redirected to /dev/null (we don't consume it; default would write
 # it to the container CWD "/").
 #

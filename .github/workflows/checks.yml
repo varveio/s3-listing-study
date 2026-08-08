@@ -18,6 +18,8 @@ jobs:
     steps:
       - name: Check out
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
 
       - name: Install pinned shellcheck (user path — no privileged host mutation)
         run: |
@@ -30,26 +32,6 @@ jobs:
           install -m 0755 /tmp/shellcheck-v0.10.0/shellcheck "$HOME/.local/bin/shellcheck"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           "$HOME/.local/bin/shellcheck" --version
-
-      - name: Install pinned jsonschema closure
-        # A venv sidesteps PEP 668 on the runner's externally-managed system
-        # Python without privileged mutation. The full dependency closure is
-        # version-pinned and installed with --no-deps so the resolver can
-        # never float a transitive package (typing-extensions is required by
-        # referencing on Python < 3.13; the runner is 3.12). PyPI never
-        # re-serves a changed artifact under the same name/version/filename,
-        # so version pins bound the executable code.
-        run: |
-          set -euo pipefail
-          python3 -m venv "$HOME/.venv"
-          "$HOME/.venv/bin/pip" install --no-deps \
-            jsonschema==4.26.0 \
-            attrs==26.1.0 \
-            jsonschema-specifications==2025.9.1 \
-            referencing==0.37.0 \
-            rpds-py==0.30.0 \
-            typing-extensions==4.15.0
-          echo "$HOME/.venv/bin" >> "$GITHUB_PATH"
 
       - name: bash -n over every tracked shell script
         run: |
@@ -68,26 +50,40 @@ jobs:
           chmod +x /tmp/no-docker/docker
           echo "/tmp/no-docker" >> "$GITHUB_PATH"
 
+      - name: Full-tree secret scan
+        # Before `uv sync`: the scan reads every file under the tree, and a
+        # populated `.venv/` puts third-party binaries in front of it.
+        run: PYTHONPATH=src python3 -P -m s3_listing_study.receipt scan-tree .
+
+      - name: Install uv
+        # The harness suite drives the packaged verifier, whose field comparison
+        # runs on DuckDB. It gets the locked project environment rather than
+        # whatever the runner's python3 happens to import.
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+
+      - name: Sync (locked)
+        run: uv sync --locked
+
       - name: Harness regression suite (includes the harness shellcheck gate)
         run: harness/tests/run-regressions.sh
 
-      - name: Secret-scanner fixtures
-        run: harness/tests/scan-fixtures-run.sh
-
-      - name: Full-tree secret scan
-        run: harness/scan-tree.sh .
-
       - name: Tool adapter shellcheck
-        run: shellcheck -S warning tools/*/adapter/*.sh tools/*/adapter/fixtures/*.sh
+        run: shellcheck -S warning tools/*/adapter/run.sh tools/*/adapter/fixtures/*.sh
 
       - name: s3p adapter fixture QA
         run: tools/s3p/adapter/fixtures/check.sh
 
       - name: Current capsule validation (all runnable tools)
+        # The validator and the link checker are packaged subcommands, so they
+        # run from the locked environment: jsonschema is a declared dependency
+        # of this project, pinned by uv.lock, not a closure the workflow
+        # provisions on the side.
         run: |
           set -euo pipefail
           for tool in aws-cli minio-mc ps3 rclone s3-fast-list s3kor s3p s4cmd s5cmd s7cmd swath; do
-            python3 scripts/validate-tool-capsule.py --tool "$tool"
+            uv run s3-listing-study validate-capsule --tool "$tool"
           done
 
       - name: Source-anchor gate self-test (this job verifies no project anchor)
@@ -110,9 +106,41 @@ jobs:
         # The sweep over this repo's own anchors is run by whoever holds the
         # pinned checkouts, with --require-checked so it cannot pass having
         # checked nothing:
-        #   python3 scripts/check-source-anchors.py --tool swath --require-checked \
+        #   uv run s3-listing-study check-source-anchors --tool swath --require-checked \
         #     --source-root /path/to/swath-at-cef8ec2
-        run: python3 scripts/check-source-anchors.py --self-test
+        run: uv run s3-listing-study check-source-anchors --self-test
 
       - name: Markdown link check (current-state surfaces)
-        run: python3 scripts/check-links.py
+        run: uv run s3-listing-study check-links
+
+  python-package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+
+      - name: Sync (locked)
+        run: uv sync --locked
+
+      - name: ruff check
+        run: uv run ruff check
+
+      - name: ruff format --check
+        run: uv run ruff format --check src tests
+
+      - name: mypy
+        run: uv run mypy
+
+      - name: pytest
+        # Deselect the oracle-backed gates: the reference data they read is
+        # deliberately not in the repo, so CI cannot judge them. Deselecting
+        # here states that where it is configured, rather than letting a test
+        # self-skip and read as a pass. Run them locally with `-m oracle`.
+        run: uv run pytest -m "not oracle"

@@ -8,7 +8,7 @@ are recorded here rather than edited into them.
 
 Every `[SRC path:lines @ cef8ec2]` label in this directory was machine-checked
 against the pinned checkout with
-[`scripts/check-source-anchors.py`](../../../scripts/check-source-anchors.py).
+the packaged `s3-listing-study check-source-anchors` command.
 Of 1,229 anchors resolved from 1,078 labels, **22 cite a line past the end of
 the file they name**:
 
@@ -57,12 +57,12 @@ what corrected them:
   importance systematically misses defects concentrated in unglamorous areas.
 
 The practical lesson is that anchor-range checking is **mechanical and should
-not be delegated to judgement**. `scripts/check-source-anchors.py` performs it;
+not be delegated to judgement**. `s3-listing-study check-source-anchors` performs it;
 run it against any new derivation before its claims are promoted:
 
 ```sh
-python3 scripts/check-source-anchors.py --tool <slug> --source-root <checkout>
-python3 scripts/check-source-anchors.py --tool <slug> --markdown tools/<slug>/research/ --source-root <checkout>
+uv run s3-listing-study check-source-anchors --tool <slug> --source-root <checkout>
+uv run s3-listing-study check-source-anchors --tool <slug> --markdown tools/<slug>/research/ --source-root <checkout>
 ```
 
 The Markdown mode is best-effort — 129 of this directory's anchors were skipped

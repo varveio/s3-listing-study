@@ -1,5 +1,10 @@
 # Session exhaust — absolute paths, SHAs, swath-private context. See AGENTS.md.
-notes/handoffs/
+# The whole tree, not just its known subdirectories: AGENTS.md § Knowledge system
+# states Notes are not part of this repository, so a plan or handoff committed by
+# accident would leave every citation of it dangling for anyone who clones. The
+# differential gate also writes its machine-local run records under
+# notes/agent-state/ by default.
+notes/
 
 # Agent-runner state. Same reasoning as notes/handoffs/ above: a .git/info/exclude
 # entry doesn't survive a fresh clone, so the first session from a new machine
@@ -22,3 +27,17 @@ harness/manifests/
 out/
 tools/bin/
 .DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+# Anchored: unanchored `build/` would match at any depth and silently ignore new
+# files under the tracked tools/*/build/ vendored artifacts — a provenance hazard
+# in a repo whose rules turn on what is committed (see NOTICE).
+/build/
+/dist/

@@ -36,7 +36,7 @@ map, no legacy origins.
    The migration playbook does **not** apply — it converts legacy directories,
    which a new tool never has.
 4. **Validate and review.** Run
-   `python3 scripts/validate-tool-capsule.py --tool <tool>`. Pass no
+   `uv run s3-listing-study validate-capsule --tool <tool>`. Pass no
    `--migration-base`: there is no legacy base to regress against, and the
    validator now rejects the flag on a capsule with no migration stratum.
    Independent review (a different-model reviewer plus the standard one) and
@@ -54,7 +54,7 @@ step 4 needs no exception:
   them, so a document with a ledger carries `legacy_origins` on *every* claim
   and one without a ledger carries it on none. Present, they validate exactly
   as before.
-- `scripts/validate-tool-capsule.py` — `research/tool-page.md` and
+- `src/s3_listing_study/capsule.py` — `research/tool-page.md` and
   `research/claims-migration.md` moved out of `REQUIRED_FILES` into
   `MIGRATION_FILES`, required only for a capsule with a migration stratum. The README checks follow the same condition: navigation
   names the two files, and Provenance names `Mixed provenance`,

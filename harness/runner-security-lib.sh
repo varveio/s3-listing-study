@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Shared, side-effect-free constants and Docker argv construction for the
-# runner-security boundary. Network/firewall provisioning lives in the operator
-# script; ordinary harness paths only consume and verify that state.
+# runner-security boundary. Bridge and firewall setup is an operator procedure
+# (docs/operating/runner-security.md); ordinary harness paths only verify, per
+# run, that the resulting policy is in force.
 
 # These constants are consumed by scripts that source this library; a direct
 # linter pass over the library cannot see those references.
@@ -130,8 +131,6 @@ security_validate_evidence_log_config() {
 security_preflight() {
   env -u S3_STUDY_SECURITY_STATE_FILE \
       -u S3_STUDY_SECURITY_INSTALLED_HELPER \
-      -u S3_STUDY_SECURITY_RULES_V4 \
-      -u S3_STUDY_SECURITY_RULES_V6 \
       -u S3_STUDY_SECURITY_ALLOW_UNPRIVILEGED_STATE \
       "$SECURITY_CHECK" --quiet --bucket "$1" --region "$2"
 }

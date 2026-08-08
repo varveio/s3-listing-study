@@ -103,7 +103,7 @@ resolve in [`data/claims.json`](data/claims.json).
   and the standard verifier was never engaged.
 - s4cmd `rstrip()`s each output line, so a key with a trailing space or a newline
   cannot be represented faithfully — a tool-side output limit, canonical claim
-  `key-byte-fidelity-tool-side-loss`. The `normalize.sh` adapter was exercised
+  `key-byte-fidelity-tool-side-loss`. The `normalize.py` adapter was exercised
   only on synthetic fixtures, not real tool output.
 
 ### Benchmark questions

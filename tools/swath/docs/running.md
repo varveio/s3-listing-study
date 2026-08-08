@@ -192,7 +192,7 @@ anonymous quickstarts omit it.
 NUL-delimited argv and never runs Docker or the tool. Because the image
 entrypoint is `["java","-jar","/opt/swath/swath.jar"]`, that argv starts at the
 top-level option or the `list` subcommand, not at a binary name.
-`../adapter/normalize.sh` converts native output into the frozen smoke harness's
+`../adapter/normalize.py` converts native output into the frozen smoke harness's
 five-field normalized stream.
 
 **Both adapter scripts are written for v0.2.0 and validated by execution.** They

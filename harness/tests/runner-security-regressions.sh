@@ -6,6 +6,7 @@ export LC_ALL=C
 
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 HARNESS="$(cd -- "$HERE/.." && pwd)"
+REPO_ROOT="$(cd -- "$HARNESS/.." && pwd)"
 # shellcheck source=harness/runner-security-lib.sh
 . "$HARNESS/runner-security-lib.sh"
 work="$(mktemp -d)"; trap 'rm -rf -- "$work"' EXIT
@@ -32,35 +33,81 @@ if security_validate_bucket dotted.bucket; then bad "dotted bucket accepted"; el
 if security_validate_bucket Uppercase; then bad "uppercase bucket accepted"; else ok "uppercase bucket rejected"; fi
 
 digest="$(printf '%064d' 0)"
-plan="$($HARNESS/runner-security-live-test.sh --probe-image "probe@sha256:$digest" --bucket bucket --region us-east-1 --print-plan)"
-[ "$(printf '%s\n' "$plan" | wc -l)" -eq 7 ] && ok "live validator dry plan" || bad "live validator dry plan"
 
-set +e
-S3_STUDY_SECURITY_STATE_FILE="$work/missing" "$HARNESS/runner-security-check.sh" --bucket bucket --region us-east-1 >"$work/missing.out" 2>&1
-rc=$?
-set -e
-[ "$rc" -eq 2 ] && ok "missing readiness fails closed" || bad "missing readiness rc=$rc"
+# A fake Docker control plane. Everything the gate learns about the box comes
+# through it, so the whole suite stays hermetic.
+fake="$work/bin"; mkdir -p "$fake"
+network_json='[{"Name":"s3-listing-study-subjects","Id":"network-test","Driver":"bridge","Internal":false,"EnableIPv6":false,"IPAM":{"Config":[{"Subnet":"172.30.0.0/24","Gateway":"172.30.0.1"}]},"Options":{"com.docker.network.bridge.name":"s3study0","com.docker.network.bridge.enable_icc":"false","com.docker.network.driver.mtu":"1500"}}]'
+foreign_network_json="${network_json%]}, {\"Name\":\"other\",\"Id\":\"other-test\",\"Driver\":\"bridge\",\"Internal\":false,\"EnableIPv6\":false,\"IPAM\":{\"Config\":[{\"Subnet\":\"203.0.113.0/24\"}]},\"Options\":{}}]"
+cat >"$fake/docker" <<'SH'
+#!/usr/bin/env bash
+[ -z "${FAKE_DOCKER_LOG:-}" ] || printf '%s\n' "$*" >>"$FAKE_DOCKER_LOG"
+case "$1 $2" in
+  'info --format') printf '%s\n' "${FAKE_BACKEND:-iptables}" ;;
+  'network ls') printf 'network-test\n'; [ "${FAKE_FOREIGN_NETWORK:-no}" = yes ] && printf 'other-test\n'; true ;;
+  'network inspect')
+    if [[ " $* " == *" s3-listing-study-subjects "* ]]; then
+      printf '%s\n' "${FAKE_NETWORK_JSON_OVERRIDE:-$FAKE_NETWORK_JSON}"
+    else
+      printf '%s\n' "${FAKE_ALL_NETWORKS_JSON:-$FAKE_NETWORK_JSON}"
+    fi ;;
+  'image inspect') exit 0 ;;
+  'run --rm') exit "${FAKE_RUN_RC:-0}" ;;
+  'rm -f') exit "${FAKE_CLEANUP_RC:-0}" ;;
+  'container ls') [ "${FAKE_ABSENCE_RC:-0}" -eq 0 ] || exit "$FAKE_ABSENCE_RC" ;;
+  *) exit 90 ;;
+esac
+SH
+cat >"$fake/curl" <<'SH'
+#!/usr/bin/env bash
+[ "${FAKE_METADATA:-no}" = yes ] && exit 0
+exit 1
+SH
+chmod +x "$fake/docker" "$fake/curl"
+cat >"$fake/stat" <<'SH'
+#!/usr/bin/env bash
+case "$1 $2" in
+  '-c %u') printf '0\n' ;;
+  '-c %a')
+    case "${3##*/}" in
+      helper) printf '%s\n' "${FAKE_HELPER_MODE:-755}" ;;
+      *) printf '644\n' ;;
+    esac ;;
+  *) exit 90 ;;
+esac
+SH
+cat >"$fake/sudo" <<'SH'
+#!/usr/bin/env bash
+[ "$1" = -n ] || exit 90
+exec "$2"
+SH
+chmod +x "$fake/stat" "$fake/sudo"
+render_policy() { # <v4-out> <v6-out> [env...]
+  env PATH="$fake:$PATH" FAKE_NETWORK_JSON="$network_json" "${@:3}" \
+    "$HARNESS/security/render-policy.sh" "$1" "$2"
+}
 
-# Canonical rendered bodies and live filter-table capture.
+# The expected chain bodies are rendered from the versioned policy, not typed
+# out here: this is the same code path the gate runs on every invocation.
 rules4="$work/rules4"; rules6="$work/rules6"; live_valid="$work/live.valid"
-cat >"$rules4" <<'EOF'
-*filter
--F S3STUDY_FWD
--F S3STUDY_IN
--A S3STUDY_FWD -d 169.254.0.0/16 -j REJECT --reject-with icmp-port-unreachable
--A S3STUDY_FWD -j RETURN
--A S3STUDY_IN -j REJECT --reject-with icmp-port-unreachable
-COMMIT
-EOF
-cat >"$rules6" <<'EOF'
-*filter
--F S3STUDY_FWD
--F S3STUDY_IN
--A S3STUDY_FWD -d fe80::/10 -j REJECT --reject-with icmp6-adm-prohibited
--A S3STUDY_FWD -j RETURN
--A S3STUDY_IN -j REJECT --reject-with icmp6-adm-prohibited
-COMMIT
-EOF
+render_policy "$rules4" "$rules6"
+missing_deny=""
+while IFS= read -r cidr; do
+  grep -qFx -- "-A S3STUDY_FWD -d $cidr -j REJECT --reject-with icmp-port-unreachable" "$rules4" \
+    || missing_deny="$missing_deny $cidr"
+done < <(sed -n 's/^ipv4_deny=//p' "$HARNESS/security/policy.v1.env" | tr ',' '\n')
+if [ -z "$missing_deny" ] && grep -qFx -- '-A S3STUDY_FWD -d 192.168.0.0/16 -j REJECT --reject-with icmp-port-unreachable' "$rules4" \
+   && grep -qFx -- '-A S3STUDY_FWD -d fc00::/7 -j REJECT --reject-with icmp6-adm-prohibited' "$rules6"; then
+  ok "rendered policy rejects every private range the policy file names"
+else
+  bad "rendered policy is missing a private-network deny:$missing_deny"
+fi
+render_policy "$work/rules4.foreign" "$work/rules6.foreign" \
+  FAKE_FOREIGN_NETWORK=yes FAKE_ALL_NETWORKS_JSON="$foreign_network_json"
+grep -qFx -- '-A S3STUDY_FWD -d 203.0.113.0/24 -j REJECT --reject-with icmp-port-unreachable' "$work/rules4.foreign" \
+  && ok "rendered policy denies a Docker network outside the private ranges" \
+  || bad "rendered policy ignored a foreign Docker network subnet"
+
 {
   printf '[ipv4]\n*filter\n:INPUT ACCEPT [0:0]\n:FORWARD ACCEPT [0:0]\n:S3STUDY_FWD - [0:0]\n:S3STUDY_IN - [0:0]\n'
   printf '%s\n' '-A INPUT -i s3study0 -j S3STUDY_IN' '-A FORWARD -i s3study0 -j S3STUDY_FWD'
@@ -117,15 +164,15 @@ awk '
 
 [ "$(head -1 "$HARNESS/security/firewall-state.sh")" = '#!/bin/bash' ] \
   && grep -qFx 'export PATH=/usr/sbin:/usr/bin:/sbin:/bin' "$HARNESS/security/firewall-state.sh" \
-  && grep -qF 'NOPASSWD: %s ""' "$HARNESS/runner-security-provision.sh" \
+  && grep -qF 'NOPASSWD: /usr/local/libexec/s3-study-firewall-state ""' "$HARNESS/security/firewall-state.sh" \
   && ok "privileged helper has an absolute shell, trusted PATH, and no-argument sudo grant" \
-  || bad "privileged helper or sudo grant is not confined"
+  || bad "privileged helper or documented sudo grant is not confined"
 
 expect_bad_firewall() {
   local label="$1" fixture="$2"
   if "$HARNESS/security/validate-firewall-state.sh" "$fixture" "$rules4" "$rules6" >/dev/null 2>&1; then bad "$label accepted"; else ok "$label rejected"; fi
 }
-for kind in earlier_return targeted_accept broad_accept duplicate_hook late_hook altered_body; do
+for kind in earlier_return targeted_accept broad_accept duplicate_hook late_hook altered_body dropped_private_deny; do
   fixture="$work/live.$kind"; cp "$live_valid" "$fixture"
   case "$kind" in
     earlier_return) sed -i '0,/-A INPUT /s//-A INPUT -j RETURN\n-A INPUT /' "$fixture" ;;
@@ -134,65 +181,10 @@ for kind in earlier_return targeted_accept broad_accept duplicate_hook late_hook
     duplicate_hook) sed -i '0,/-A INPUT -i s3study0 -j S3STUDY_IN/a -A INPUT -i s3study0 -j S3STUDY_IN' "$fixture" ;;
     late_hook) sed -i '0,/-A INPUT /s//-A INPUT -p tcp -j ACCEPT\n-A INPUT /' "$fixture" ;;
     altered_body) sed -i '0,/-A S3STUDY_FWD -j RETURN/s//-A S3STUDY_FWD -j ACCEPT/' "$fixture" ;;
+    dropped_private_deny) sed -i '/-A S3STUDY_FWD -d 192.168.0.0\/16 /d' "$fixture" ;;
   esac
   expect_bad_firewall "$kind" "$fixture"
 done
-
-fake="$work/bin"; mkdir -p "$fake"
-network_json='[{"Name":"s3-listing-study-subjects","Id":"network-test","Driver":"bridge","Internal":false,"EnableIPv6":false,"IPAM":{"Config":[{"Subnet":"172.30.0.0/24","Gateway":"172.30.0.1"}]},"Options":{"com.docker.network.bridge.name":"s3study0","com.docker.network.bridge.enable_icc":"false","com.docker.network.driver.mtu":"1500"}}]'
-cat >"$fake/docker" <<'SH'
-#!/usr/bin/env bash
-[ -z "${FAKE_DOCKER_LOG:-}" ] || printf '%s\n' "$*" >>"$FAKE_DOCKER_LOG"
-case "$1 $2" in
-  'info --format') case "$3" in *FirewallBackend*) printf '%s\n' "${FAKE_BACKEND:-iptables}" ;; *) printf '%s\n' "${FAKE_DOCKER_ID:-docker-test}" ;; esac ;;
-  'network ls')
-    if [[ " $* " == *' --filter '* ]]; then
-      if [ -n "${FAKE_NETWORK_LS_STATE:-}" ]; then
-        n=0; [ ! -f "$FAKE_NETWORK_LS_STATE" ] || n="$(cat "$FAKE_NETWORK_LS_STATE")"
-        n=$((n + 1)); printf '%s\n' "$n" >"$FAKE_NETWORK_LS_STATE"
-        [ "$n" -lt "${FAKE_NETWORK_LS_FAIL_ON:-999}" ] || exit 125
-      fi
-      [ "${FAKE_ABSENCE_RC:-0}" -eq 0 ] || exit "$FAKE_ABSENCE_RC"
-      [ "${FAKE_TEMP_NETWORK_PRESENT:-no}" = yes ] && printf 's3study-validation-test\n'
-      true
-    else
-      printf 'network-test\n'
-    fi ;;
-  'network inspect') if [[ " $* " == *' -f '* ]]; then printf '172.31.0.1\n'; else printf '%s\n' "${FAKE_NETWORK_JSON_OVERRIDE:-$FAKE_NETWORK_JSON}"; fi ;;
-  'network create') exit "${FAKE_CREATE_RC:-0}" ;;
-  'network rm') exit "${FAKE_CLEANUP_RC:-0}" ;;
-  'container ls') [ "${FAKE_ABSENCE_RC:-0}" -eq 0 ] || exit "$FAKE_ABSENCE_RC" ;;
-  'rm -f') exit "${FAKE_CLEANUP_RC:-0}" ;;
-  'image inspect') exit 0 ;;
-  'run --rm')
-    [ "${FAKE_RUN_RC:-0}" -eq 0 ] || exit "$FAKE_RUN_RC"
-    if [ "${FAKE_LIVE_FLOW:-no}" = yes ]; then
-      [[ "$*" == *wget* ]] && exit 0
-      [[ "$*" == *s3-listing-study-subjects* ]] && exit 1
-    fi
-    exit 0 ;;
-  'run -d') [ "${FAKE_PEER_COLLISION:-no}" = yes ] && exit 1; exit 0 ;;
-  *) exit 90 ;;
-esac
-SH
-cat >"$fake/curl" <<'SH'
-#!/usr/bin/env bash
-[ "${FAKE_METADATA:-no}" = yes ] && exit 0
-exit 1
-SH
-cat >"$fake/timeout" <<'SH'
-#!/usr/bin/env bash
-[ "${FAKE_PUBLIC_FAIL:-no}" = yes ] && exit 1
-[ "$1" = -k ] && shift 2
-shift
-exec "$@"
-SH
-cat >"$fake/python3" <<'SH'
-#!/usr/bin/env bash
-[ -z "${FAKE_LISTENER_LOG:-}" ] || printf 'listener-opened\n' >>"$FAKE_LISTENER_LOG"
-exit 99
-SH
-chmod +x "$fake/docker" "$fake/curl" "$fake/timeout" "$fake/python3"
 
 helper="$work/helper"
 cat >"$helper" <<'SH'
@@ -200,136 +192,80 @@ cat >"$helper" <<'SH'
 cat "$FAKE_LIVE_FILE"
 SH
 chmod +x "$helper"
-host_sha="$(sha256sum /etc/machine-id | cut -d' ' -f1)"
-boot_sha="$(printf '%s' "$(cat /proc/sys/kernel/random/boot_id)" | sha256sum | cut -d' ' -f1)"
-policy_sha="$(sha256sum "$HARNESS/security/policy.v1.env" | cut -d' ' -f1)"
-helper_sha="$(sha256sum "$helper" | cut -d' ' -f1)"
-net_sha="$(printf '%s' "$network_json" | jq -cS '[.[] | {Id,Name,Driver,Internal,EnableIPv6,IPAM:.IPAM.Config}] | sort_by(.Id)' | sha256sum | cut -d' ' -f1)"
-state="$work/ready.env"
-write_state() {
-  local live_file="${1:-$live_valid}" live live_sha
-  live="$(cat "$live_file")"; live_sha="$(printf '%s\n' "$live" | sha256sum | cut -d' ' -f1)"
-  {
-    printf 'version=1\nprofile_id=s3-listing-study-v1\nprovider=local\n'
-    printf 'host_id_sha256=%s\nboot_id_sha256=%s\ndocker_id=docker-test\ndocker_networks_sha256=%s\n' "$host_sha" "$boot_sha" "$net_sha"
-    printf 'network_name=s3-listing-study-subjects\nnetwork_id=network-test\nbridge_name=s3study0\n'
-    printf 'ipv4_subnet=172.30.0.0/24\nipv4_gateway=172.30.0.1\nmtu=1500\nipv6=false\nfirewall_backend=iptables\n'
-    printf 'policy_source_sha256=%s\nrules_v4_sha256=%s\nrules_v6_sha256=%s\n' "$policy_sha" "$(sha256sum "$rules4" | cut -d' ' -f1)" "$(sha256sum "$rules6" | cut -d' ' -f1)"
-    printf 'live_policy_sha256=%s\nhelper_sha256=%s\n' "$live_sha" "$helper_sha"
-    printf 'probe_image=probe@sha256:%s\nprovisioned_at=2026-07-19T00:00:00Z\n' "$digest"
-  } >"$state"
-}
+config="$work/runner.env"
+write_config() { printf 'probe_image=probe@sha256:%s\n' "$digest" >"$config"; }
 run_check() {
   set +e
   env -u AWS_PROFILE -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
     PATH="$fake:$PATH" FAKE_NETWORK_JSON="$network_json" FAKE_LIVE_FILE="${CHECK_LIVE_FILE:-$live_valid}" \
     FAKE_DOCKER_LOG="${CHECK_DOCKER_LOG:-}" \
-    S3_STUDY_SECURITY_STATE_FILE="$state" S3_STUDY_SECURITY_INSTALLED_HELPER="$helper" \
-    S3_STUDY_SECURITY_RULES_V4="$rules4" S3_STUDY_SECURITY_RULES_V6="$rules6" \
+    S3_STUDY_SECURITY_STATE_FILE="$config" S3_STUDY_SECURITY_INSTALLED_HELPER="$helper" \
     S3_STUDY_SECURITY_ALLOW_UNPRIVILEGED_STATE=yes "$@" \
+    "$HARNESS/runner-security-check.sh" --quiet --bucket bucket --region us-east-1 >"$work/check.out" 2>&1
+  check_rc=$?; set -e
+}
+run_privileged_check() {
+  set +e
+  env -u AWS_PROFILE -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
+    PATH="$fake:$PATH" FAKE_NETWORK_JSON="$network_json" FAKE_LIVE_FILE="$live_valid" \
+    FAKE_HELPER_MODE="${FAKE_HELPER_MODE:-755}" \
+    S3_STUDY_SECURITY_STATE_FILE="$config" S3_STUDY_SECURITY_INSTALLED_HELPER="$helper" \
     "$HARNESS/runner-security-check.sh" --quiet --bucket bucket --region us-east-1 >"$work/check.out" 2>&1
   check_rc=$?; set -e
 }
 reject_check() { if [ "$check_rc" -eq 2 ]; then ok "$1"; else bad "$1 rc=$check_rc"; fi; }
 
-write_state; run_check
+write_config; run_check
 [ "$check_rc" -eq 0 ] && ok "fully faked readiness validates" || bad "valid readiness: $(head -1 "$work/check.out")"
+write_config; FAKE_HELPER_MODE=775 run_privileged_check
+if [ "$check_rc" -eq 2 ] && grep -q 'helper is group/world writable' "$work/check.out"; then
+  ok "passwordless-sudo firewall helper permission drift fails closed"
+else
+  bad "writable passwordless-sudo firewall helper accepted rc=$check_rc"
+fi
 check_probe_log="$work/check-probe.log"; : >"$check_probe_log"
-cp "$state" "$work/base.state"
 CHECK_DOCKER_LOG="$check_probe_log" run_check
 if grep -q '^run --rm .*--pull=never' "$check_probe_log"; then ok "readiness probe is no-pull"; else bad "readiness probe omitted --pull=never"; fi
-cp "$work/base.state" "$state"; : >"$check_probe_log"
+: >"$check_probe_log"
 CHECK_DOCKER_LOG="$check_probe_log" run_check FAKE_RUN_RC=125
 if [ "$check_rc" -eq 2 ] && grep -q '^rm -f s3study-preflight-' "$check_probe_log"; then ok "readiness probe rc=125 triggers stable-name reconciliation"; else bad "readiness probe rc=125 reconciliation missing"; fi
+: >"$check_probe_log"
+CHECK_DOCKER_LOG="$check_probe_log" run_check FAKE_RUN_RC=137 FAKE_CLEANUP_RC=137 FAKE_ABSENCE_RC=125
+if [ "$check_rc" -eq 2 ] && grep -q 'discard this runner' "$work/check.out"; then ok "probe cleanup rc=137 fails closed with discard-runner warning"; else bad "probe cleanup rc=137 did not fail closed"; fi
 unset CHECK_DOCKER_LOG
 
-cp "$work/base.state" "$state"; printf 'provider=local\n' >>"$state"; run_check; reject_check "duplicate readiness field rejected"
-cp "$work/base.state" "$state"; printf 'unknown=x\n' >>"$state"; run_check; reject_check "malformed readiness rejected"
-for mutation in host boot network; do
-  cp "$work/base.state" "$state"
-  case "$mutation" in host) sed -i 's/^host_id_sha256=.*/host_id_sha256=bad/' "$state" ;; boot) sed -i 's/^boot_id_sha256=.*/boot_id_sha256=bad/' "$state" ;; network) sed -i 's/^docker_networks_sha256=.*/docker_networks_sha256=bad/' "$state" ;; esac
-  run_check; reject_check "$mutation binding drift rejected"
-done
-cp "$work/base.state" "$state"; run_check FAKE_DOCKER_ID=other; reject_check "Docker daemon drift rejected"
-cp "$work/base.state" "$state"; run_check FAKE_BACKEND=nftables; reject_check "firewall backend drift rejected"
+S3_STUDY_SECURITY_STATE_FILE="$work/missing" "$HARNESS/runner-security-check.sh" \
+  --bucket bucket --region us-east-1 >"$work/missing.out" 2>&1 && missing_rc=0 || missing_rc=$?
+[ "$missing_rc" -eq 2 ] && ok "missing runner config fails closed" || bad "missing runner config rc=$missing_rc"
+printf 'probe_image=probe:latest\n' >"$config"; run_check; reject_check "mutable-tag probe image rejected"
+write_config; printf 'unknown=x\n' >>"$config"; run_check; reject_check "unknown runner-config field rejected"
+write_config; printf 'probe_image=probe@sha256:%s\n' "$digest" >>"$config"; run_check; reject_check "duplicate probe_image rejected"
+
+write_config
+run_check AWS_SECURITY_TOKEN=x; reject_check "ambient credential rejected"
+run_check FAKE_METADATA=yes; reject_check "metadata-positive local runner rejected"
+run_check FAKE_RUN_RC=1; reject_check "subject-boundary probe failure rejected"
+run_check FAKE_BACKEND=nftables; reject_check "non-iptables Docker firewall backend rejected"
 bad_bridge="${network_json/s3study0/wrong0}"
-cp "$work/base.state" "$state"; run_check FAKE_NETWORK_JSON_OVERRIDE="$bad_bridge"; reject_check "bridge drift rejected"
-cp "$work/base.state" "$state"; printf '#drift\n' >>"$helper"; run_check; reject_check "helper drift rejected"; sed -i '$d' "$helper"
-cp "$work/base.state" "$state"; run_check AWS_SECURITY_TOKEN=x; reject_check "ambient credential rejected"
-cp "$work/base.state" "$state"; run_check FAKE_METADATA=yes; reject_check "metadata-positive local runner rejected"
-cp "$work/base.state" "$state"; run_check FAKE_PUBLIC_FAIL=yes; reject_check "public S3 probe failure rejected"
-cp "$work/base.state" "$state"; sed -i 's/^policy_source_sha256=.*/policy_source_sha256=bad/' "$state"; run_check; reject_check "policy artifact drift rejected"
-cp "$work/base.state" "$state"; sed -i 's/^rules_v4_sha256=.*/rules_v4_sha256=bad/' "$state"; run_check; reject_check "rendered policy drift rejected"
-cp "$work/base.state" "$state"; sed -i 's/^live_policy_sha256=.*/live_policy_sha256=bad/' "$state"; run_check; reject_check "full firewall-state drift rejected"
+run_check FAKE_NETWORK_JSON_OVERRIDE="$bad_bridge"; reject_check "bridge drift rejected"
+icc_on="${network_json/\"com.docker.network.bridge.enable_icc\":\"false\"/\"com.docker.network.bridge.enable_icc\":\"true\"}"
+run_check FAKE_NETWORK_JSON_OVERRIDE="$icc_on"; reject_check "inter-container communication drift rejected"
 
-# Even when a malicious ruleset is the one hashed in readiness, canonical
-# validation rejects it.
-write_state "$work/live.earlier_return"; CHECK_LIVE_FILE="$work/live.earlier_return" run_check; reject_check "hashed bypass ruleset rejected"; unset CHECK_LIVE_FILE
+# The private-network deny is asserted against the live firewall on every run:
+# a rule removed from the running kernel fails the gate even though nothing on
+# disk changed.
+CHECK_LIVE_FILE="$work/live.dropped_private_deny" run_check
+reject_check "live firewall missing an RFC1918 deny rejected"
+CHECK_LIVE_FILE="$work/live.earlier_return" run_check
+reject_check "live firewall with an earlier RETURN rejected"
+unset CHECK_LIVE_FILE
 
-# Failed reprovision invalidates the exact prior readiness before validation.
-provision_state="$work/provision-state"; mkdir -p "$provision_state"; printf 'old\n' >"$provision_state/runner-ready.env"
-set +e
-S3_STUDY_SECURITY_TEST_MODE=yes S3_STUDY_SECURITY_STATE_DIR="$provision_state" \
-  "$HARNESS/runner-security-provision.sh" --runner-user INVALID --probe-image "probe@sha256:$digest" --bucket bucket --region us-east-1 >/dev/null 2>&1
-provision_rc=$?
-set -e
-[ "$provision_rc" -eq 2 ] && [ ! -e "$provision_state/runner-ready.env" ] && ok "failed reprovision invalidates readiness" || bad "failed reprovision retained readiness"
+# A Docker network created after the rules were installed is not covered by
+# them, and the run stops until they are reinstalled.
+run_check FAKE_FOREIGN_NETWORK=yes FAKE_ALL_NETWORKS_JSON="$foreign_network_json"
+reject_check "Docker network added after installation rejected"
 
-# Once absence is confirmed, any create failure leaves ownership uncertain and
-# reconciles the stable network name.
-collision_log="$work/collision.log"
-set +e
-PATH="$fake:$PATH" FAKE_DOCKER_LOG="$collision_log" FAKE_CREATE_RC=1 S3_STUDY_SECURITY_TEST_SUFFIX=collision \
-  "$HARNESS/runner-security-live-test.sh" --probe-image "probe@sha256:$digest" --bucket bucket --region us-east-1 >/dev/null 2>&1
-collision_rc=$?
-set -e
-if [ "$collision_rc" -ne 0 ] && grep -q '^network rm s3study-validation-collision' "$collision_log"; then ok "network-create rc=1 reconciles stable name"; else bad "network-create rc=1 reconciliation missing"; fi
-
-occupied_log="$work/occupied.log"
-set +e
-PATH="$fake:$PATH" FAKE_DOCKER_LOG="$occupied_log" FAKE_TEMP_NETWORK_PRESENT=yes S3_STUDY_SECURITY_TEST_SUFFIX=occupied \
-  "$HARNESS/runner-security-live-test.sh" --probe-image "probe@sha256:$digest" --bucket bucket --region us-east-1 >/dev/null 2>&1
-occupied_rc=$?
-set -e
-if [ "$occupied_rc" -ne 0 ] && ! grep -q '^network create ' "$occupied_log" && ! grep -q '^network rm ' "$occupied_log"; then ok "pre-existing network name is never claimed or removed"; else bad "occupied network handling was destructive"; fi
-
-peer_log="$work/peer-collision.log"
-listener_log="$work/listener.log"
-set +e
-PATH="$fake:$PATH" FAKE_DOCKER_LOG="$peer_log" FAKE_LISTENER_LOG="$listener_log" FAKE_CREATE_RC=0 FAKE_LIVE_FLOW=yes FAKE_PEER_COLLISION=yes \
-  S3_STUDY_SECURITY_TEST_MODE=yes S3_STUDY_SECURITY_TEST_NO_LISTENER=yes S3_STUDY_SECURITY_TEST_SUFFIX=peer-collision \
-  "$HARNESS/runner-security-live-test.sh" --probe-image "probe@sha256:$digest" --bucket bucket --region us-east-1 >/dev/null 2>&1
-peer_rc=$?
-set -e
-if [ "$peer_rc" -ne 0 ] && grep -q '^network rm s3study-validation-peer-collision' "$peer_log" \
-   && grep -q '^rm -f s3study-control-peer-peer-collision' "$peer_log" \
-   && [ ! -e "$listener_log" ]; then
-  ok "peer run failure reconciles both uncertain peer and created network"
-else
-  bad "peer run failure reconciliation was incomplete or opened a listener"
-fi
-if ! grep '^run ' "$peer_log" | grep -v -- '--pull=never' >/dev/null; then ok "all exercised live-test containers are no-pull"; else bad "live-test container omitted --pull=never"; fi
-
-probe_timeout_log="$work/probe-timeout.log"
-set +e
-PATH="$fake:$PATH" FAKE_DOCKER_LOG="$probe_timeout_log" FAKE_CREATE_RC=0 FAKE_RUN_RC=137 \
-  S3_STUDY_SECURITY_TEST_MODE=yes S3_STUDY_SECURITY_TEST_NO_LISTENER=yes S3_STUDY_SECURITY_TEST_SUFFIX=probe-timeout \
-  "$HARNESS/runner-security-live-test.sh" --probe-image "probe@sha256:$digest" --bucket bucket --region us-east-1 >/dev/null 2>&1
-probe_timeout_rc=$?
-set -e
-if [ "$probe_timeout_rc" -ne 0 ] && grep -q '^rm -f s3study-probe-probe-timeout-' "$probe_timeout_log"; then ok "live probe rc=137 triggers stable-name cleanup"; else bad "live probe rc=137 cleanup missing"; fi
-
-live_cleanup_log="$work/live-cleanup.log"
-set +e
-PATH="$fake:$PATH" FAKE_DOCKER_LOG="$live_cleanup_log" FAKE_CREATE_RC=0 FAKE_LIVE_FLOW=yes FAKE_PEER_COLLISION=yes FAKE_CLEANUP_RC=137 \
-  FAKE_NETWORK_LS_STATE="$work/network-ls-state" FAKE_NETWORK_LS_FAIL_ON=2 \
-  S3_STUDY_SECURITY_TEST_MODE=yes S3_STUDY_SECURITY_TEST_NO_LISTENER=yes S3_STUDY_SECURITY_TEST_SUFFIX=cleanup-timeout \
-  "$HARNESS/runner-security-live-test.sh" --probe-image "probe@sha256:$digest" --bucket bucket --region us-east-1 >"$work/live-cleanup.out" 2>&1
-live_cleanup_rc=$?
-set -e
-if [ "$live_cleanup_rc" -eq 2 ] && grep -q 'discard this runner' "$work/live-cleanup.out"; then ok "live-test cleanup rc=137 fails closed"; else bad "live-test cleanup rc=137 did not fail closed (rc=$live_cleanup_rc; $(tail -2 "$work/live-cleanup.out" | tr '\n' ' '))"; fi
-
-if grep -Fn -- '--network host' "$HARNESS/smoke-run.sh" "$HARNESS/verify-listing.sh" >/dev/null; then bad "normal scripts still use host networking"; else ok "normal scripts contain no host networking"; fi
+if grep -Fn -- '--network host' "$HARNESS/smoke-run.sh" >/dev/null; then bad "normal scripts still use host networking"; else ok "normal scripts contain no host networking"; fi
 
 # Rename-only staging is exercised in an isolated committed fixture repository;
 # the suite's top-level trap reclaims this private mktemp tree.
@@ -579,7 +515,19 @@ fi
 # Drive smoke-run through a fully fake Docker lifecycle.  This exercises the
 # actual create/start/wait/logs/inspect/cleanup argv without Docker or a network.
 smoke_repo="$work/smoke-repo"; mkdir -p "$smoke_repo/harness" "$smoke_repo/docs"
-cp "$HARNESS/smoke-run.sh" "$HARNESS/runner-security-lib.sh" "$HARNESS/scan-lib.sh" "$smoke_repo/harness/"
+cp "$HARNESS/smoke-run.sh" "$HARNESS/runner-security-lib.sh" "$smoke_repo/harness/"
+# The wrapper cites the versioned deny policy by digest, so the staged copy
+# carries the policy file the preflight enforces.
+mkdir -p "$smoke_repo/harness/security"
+cp "$HARNESS/security/policy.v1.env" "$smoke_repo/harness/security/"
+# The staged copy computes REPO_ROOT from its own location and imports the
+# wrapper's offline half from $REPO_ROOT/src, so src/ is staged too: everything
+# this fake-Docker harness needs lives inside $smoke_repo. Leaving it out would
+# make the suite pass only where an editable install happens to be present and
+# fail on a clean checkout — and it would resolve the redactor and the credential
+# scanner through the ambient interpreter, which is the very shadowing seam the
+# wrapper pins with `-P`.
+cp -R "$REPO_ROOT/src" "$smoke_repo/src"
 cat >"$smoke_repo/harness/runner-security-check.sh" <<'SH'
 #!/usr/bin/env bash
 exit 0
@@ -587,29 +535,23 @@ SH
 chmod +x "$smoke_repo/harness/runner-security-check.sh"
 smoke_manifest="$work/smoke.manifest"; : >"$smoke_manifest"
 smoke_manifest_sha="$(sha256sum "$smoke_manifest" | cut -d' ' -f1)"
-cat >"$smoke_repo/harness/registry-lookup.sh" <<SH
-#!/usr/bin/env bash
-case "\$1" in
-  --path) printf '%s\n' '$work/registry.md' ;;
-  --digest) printf '%064d\n' 1 ;;
-  --list-buckets) printf 'testbucket\n' ;;
-  *) case "\$2" in
-       region) printf 'us-east-1\n' ;;
-       manifest) printf '%s\n' '$smoke_manifest' ;;
-       manifest_sha256) printf '%s\n' '$smoke_manifest_sha' ;;
-       snapshot_date) printf '2026-07-20\n' ;;
-       keys) printf '0\n' ;;
-       shape) printf 'synthetic\n' ;;
-     esac ;;
-esac
-SH
-chmod +x "$smoke_repo/harness/registry-lookup.sh"
-smoke_ready="$work/smoke-ready.env"
+# A synthetic registry, in the real format, read by the real resolver — the
+# staged copy of smoke-run.sh is pointed at it through the same file-level seam
+# used below for SECURITY_STATE and PROC_ROOT. No environment override and no
+# argument reaches it; the two cases below pin that.
+smoke_registry="$work/registry.toml"
 {
-  printf 'profile_id=s3-listing-study-v1\nprovider=local\nmtu=1500\n'
-  printf 'live_policy_sha256=%064d\n' 2
-} >"$smoke_ready"
-sed -i "s|SECURITY_STATE=/etc/s3-listing-study/runner-ready.env|SECURITY_STATE=$smoke_ready|" "$smoke_repo/harness/smoke-run.sh"
+  printf '[harness_client]\n'
+  printf 'image = "example/harness@sha256:%064d"\n\n' 3
+  printf '[buckets.testbucket]\n'
+  printf 'region = "us-east-1"\n'
+  printf 'manifest = "%s"\n' "$smoke_manifest"
+  printf 'manifest_sha256 = "%s"\n' "$smoke_manifest_sha"
+  printf 'snapshot_date = "2026-07-20"\n'
+  printf 'keys = 0\n'
+  printf 'shape = "synthetic"\n'
+} >"$smoke_registry"
+sed -i "s|^REGISTRY=.*|REGISTRY=\"$smoke_registry\"|" "$smoke_repo/harness/smoke-run.sh"
 fake_proc="$work/fake-proc"; mkdir -p "$fake_proc/4242"
 sed -i "s|PROC_ROOT=/proc|PROC_ROOT=$fake_proc|" "$smoke_repo/harness/smoke-run.sh"
 smoke_run_script="$work/smoke-run-adapter.sh"
@@ -620,6 +562,7 @@ cat >"$smoke_bin/docker" <<'SH'
 [ -z "${FAKE_DOCKER_LOG:-}" ] || printf '%s\n' "$*" >>"$FAKE_DOCKER_LOG"
 case "$1 $2" in
   'image inspect') printf 'amd64\n' ;;
+  'network inspect') printf '1500\n' ;;
   'create --name')
     [ "${FAKE_CREATE_RC:-0}" -eq 0 ] || exit "$FAKE_CREATE_RC"
     printf '%064d\n' 3 ;;
@@ -670,11 +613,17 @@ run_fake_smoke() {
   local -a version_args=(--tool-version fake)
   [ "${FAKE_USE_AUTO_VERSION:-no}" = yes ] && version_args=()
   smoke_rc=0
-  env -u AWS_PROFILE -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
-    PATH="$smoke_bin:$PATH" S3_STUDY_DATA="$work/data" FAKE_DOCKER_LOG="$work/smoke-docker.log" \
-    "$smoke_repo/harness/smoke-run.sh" --tool minio-mc --mode recursive --image "$smoke_image" \
-      --run-script "$smoke_run_script" --bucket testbucket --auth anonymous --out "$out" \
-      "${version_args[@]}" --env MC_HOST_s3=https://s3.amazonaws.com "$@" >"$out.stdout" 2>"$out.stderr" || smoke_rc=$?
+  # The working directory is a parameter because it is part of the wrapper's
+  # attack surface: `python3 -m` puts the invocation directory on sys.path ahead
+  # of the wrapper's own src/, so one case below runs from a directory carrying a
+  # planted `s3_listing_study/`. Every path handed to the wrapper is absolute.
+  ( cd -- "${FAKE_SMOKE_CWD:-$PWD}" \
+    && env -u AWS_PROFILE -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
+      PATH="$smoke_bin:$PATH" S3_STUDY_DATA="$work/data" FAKE_DOCKER_LOG="$work/smoke-docker.log" \
+      "$smoke_repo/harness/smoke-run.sh" --tool minio-mc --mode recursive --image "$smoke_image" \
+        --run-script "$smoke_run_script" --bucket testbucket --auth anonymous --out "$out" \
+        "${version_args[@]}" --env MC_HOST_s3=https://s3.amazonaws.com "$@" \
+  ) >"$out.stdout" 2>"$out.stderr" || smoke_rc=$?
 }
 : >"$work/smoke-docker.log"; run_fake_smoke "$work/smoke-ok"
 if [ "$smoke_rc" -eq 0 ] \
@@ -686,6 +635,67 @@ if [ "$smoke_rc" -eq 0 ] \
   ok "fake smoke enforces exact unlimited local-log create contract"
 else
   bad "fake smoke unlimited local-log contract rc=$smoke_rc: $(tail -3 "$work/smoke-ok.stderr" | tr '\n' ' ')"
+fi
+
+# --- the import path is not redirectable -------------------------------------
+# The wrapper's offline half owns the redactor and the credential scanner, so
+# replacing the MODULE is strictly worse than redirecting the registry: it
+# forges the whole receipt, scan included, and still exits 0. Two seams, both
+# pinned here — the invocation directory, which `python3 -m` would place at
+# sys.path[0], and an ambient PYTHONPATH, which precedes the standard library
+# and can shadow `tomllib` itself.
+plant="$work/plant"
+mkdir -p "$plant/s3_listing_study/receipt" "$plant/stdlib-shadow"
+: >"$plant/s3_listing_study/__init__.py"
+: >"$plant/s3_listing_study/receipt/__init__.py"
+cat >"$plant/s3_listing_study/receipt/__main__.py" <<'PY'
+import os
+open(os.environ["PLANT_MARKER"], "a").write("planted module ran\n")
+raise SystemExit(0)
+PY
+printf 'raise SystemExit("planted tomllib won")\n' >"$plant/stdlib-shadow/tomllib.py"
+/bin/rm -f -- "$work/plant.marker"
+FAKE_SMOKE_CWD="$plant" PLANT_MARKER="$work/plant.marker" PYTHONPATH="$plant/stdlib-shadow" \
+  run_fake_smoke "$work/smoke-plant"
+if [ "$smoke_rc" -eq 0 ] && [ ! -e "$work/plant.marker" ] \
+   && grep -qF "registry_path=$smoke_registry" "$work/smoke-plant/run.meta"; then
+  ok "planted s3_listing_study/ in cwd and ambient PYTHONPATH cannot replace the offline half"
+else
+  bad "wrapper import path is shadowable rc=$smoke_rc: $(tail -3 "$work/smoke-plant.stderr" | tr '\n' ' ')"
+fi
+
+# --- the registry is not redirectable ----------------------------------------
+# A valid decoy, not a broken file: if any of these seams worked the run would
+# succeed and cite the decoy's snapshot date, which is the failure that looks
+# like evidence.
+decoy_registry="$work/decoy-registry.toml"
+{
+  printf '[harness_client]\n'
+  printf 'image = "example/harness@sha256:%064d"\n\n' 3
+  printf '[buckets.testbucket]\n'
+  printf 'region = "us-east-1"\n'
+  printf 'manifest = "%s"\n' "$smoke_manifest"
+  printf 'manifest_sha256 = "%s"\n' "$smoke_manifest_sha"
+  printf 'snapshot_date = "1999-12-31"\n'
+  printf 'keys = 0\n'
+  printf 'shape = "decoy"\n'
+} >"$decoy_registry"
+SMOKE_REGISTRY="$decoy_registry" S3_STUDY_REGISTRY="$decoy_registry" REGISTRY="$decoy_registry" \
+  run_fake_smoke "$work/smoke-registry-env"
+if [ "$smoke_rc" -eq 0 ] \
+   && grep -qF "registry_path=$smoke_registry" "$work/smoke-registry-env/run.meta" \
+   && grep -q '^snapshot_date=2026-07-20$' "$work/smoke-registry-env/run.meta" \
+   && ! grep -q '1999-12-31' "$work/smoke-registry-env/run.meta"; then
+  ok "registry constant is not redirectable through the environment"
+else
+  bad "environment redirected the registry rc=$smoke_rc: $(tail -3 "$work/smoke-registry-env.stderr" | tr '\n' ' ')"
+fi
+
+run_fake_smoke "$work/smoke-registry-arg" --registry "$decoy_registry"
+if [ "$smoke_rc" -eq 2 ] && grep -q 'unknown argument: --registry' "$work/smoke-registry-arg.stderr"; then
+  ok "registry constant is not redirectable through argv"
+else
+  bad "argv redirected the registry rc=$smoke_rc: $(tail -3 "$work/smoke-registry-arg.stderr" | tr '\n' ' ')"
 fi
 
 run_fake_smoke "$work/smoke-caller-control" --mode "$(printf 'recursive\nforged=yes')"
@@ -815,13 +825,9 @@ run_fake_smoke "$work/smoke-entrypoint-control" --entrypoint "$(printf 'entry\nf
   && ok "caller entrypoint LF rejected" \
   || bad "caller entrypoint LF was not rejected rc=$smoke_rc"
 
-if grep -A7 'local -a ref_cmd' "$HARNESS/verify-listing.sh" | grep -q 'security_append_evidence_log_args ref_cmd' \
-   && grep -A7 'local -a ref_cmd' "$HARNESS/verify-listing.sh" | grep -q 'security_append_network_args ref_cmd' \
-   && grep -A7 '^  REF_CMD=()' "$HARNESS/verify-listing.sh" | grep -q 'security_append_evidence_log_args REF_CMD' \
-   && grep -A7 '^  REF_CMD=()' "$HARNESS/verify-listing.sh" | grep -q 'security_append_network_args REF_CMD'; then
-  ok "both reference re-list constructors use explicit evidence-log/no-pull args"
-else
-  bad "reference re-list constructor bypasses evidence-log/no-pull args"
-fi
+# The reference re-list argv is no longer asserted by grepping a shell file: the
+# verifier is Python, and `tests/test_verify.py` pins the produced argv element by
+# element, the sentinel `run_prefix`, and that the preflight seam cannot widen —
+# over the code that runs, not over its text.
 
 [ "$fail" -eq 0 ] || exit 1

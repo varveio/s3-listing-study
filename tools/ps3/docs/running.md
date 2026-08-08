@@ -93,7 +93,7 @@ authenticate anonymously, so it produces no listing to diff. Manifest digest
   receipt** (env differs from the wrapper's full starvation); `[OBS]` is never a
   receipt. Recorded as a direct observation, with both environments documented; only
   the exit-1 half above is receipt-backed.
-- **`_adapter/`** — `list-sample.txt` fixture; `normalize.sh` validated
+- **`_adapter/`** — `list-sample.txt` fixture; the adapter was validated
   synthetically because no live pS3 output was obtainable (blocked).
 
 **Edge-case fidelity checks: DEFERRED** (`EDGE_BUCKET=none`). The alphabet
@@ -182,6 +182,6 @@ listing, and silently listing the whole bucket under a "scoped" label would
 verify against the wrong expected set. The `_build/`, `help/`, and
 `silent-empty/` captures are not `smoke-run.sh` receipts — they are help/version,
 a source-compile attempt, and a bare-env observation respectively, captured
-directly. `run.sh`/`normalize.sh` and everything under `research/` and
+directly. `run.sh`/`normalize.py` and everything under `research/` and
 `receipts/` are immutable inputs to this page — not modified for this
 consolidation.

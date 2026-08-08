@@ -63,7 +63,6 @@ result, we will fill in the complete run record so the update remains checkable:
 | `docs/operating/tool-onboarding.md` | The sequence for adding a new subject; pointer-based, owns the seams only. |
 | `tools/README.md` | Every tool in scope and its current status. |
 | `tools/<tool>/README.md` | That tool's current entry point; it routes to explanation, canonical claims, research, and evidence. |
-| `scripts/README.md` | Repository validation utilities, usage, and dependencies. |
 | `harness/` | The shared run harness: how a run is staged, executed, scanned for secrets, and checked. Read this if you're checking our setup. |
 | `harness/README.md` | What each harness script does and the run contract. |
 
@@ -79,6 +78,14 @@ network:
 ```sh
 harness/tests/run-regressions.sh     # adapter + verifier regressions, plus the shellcheck lint gate
 harness/tests/scan-fixtures-run.sh   # proves the secret scanner catches planted secrets
+```
+
+The two repository-structure gates are subcommands of the packaged CLI, so they
+need the project environment (`uv sync`):
+
+```sh
+uv run s3-listing-study validate-capsule --tool <tool>   # one capsule against the structure contract
+uv run s3-listing-study check-links                      # relative Markdown links on current-state pages
 ```
 
 Note `harness/tests/run.sh` is **not** the test runner — it's a fixture
