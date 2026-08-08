@@ -242,6 +242,53 @@ def test_an_oversized_payload_is_placed_outside_the_receipt_directory(
     assert not (out / "stdout.txt").exists()
 
 
+def test_self_contained_large_payloads_are_attempt_local_and_disjoint(
+    tmp_path: Path,
+) -> None:
+    payloads = (b"a\n" * (INLINE_MAX // 2 + 1), b"b\n" * (INLINE_MAX // 2 + 1))
+    outputs: list[Path] = []
+    for number, payload in enumerate(payloads):
+        tmp = tmp_path / f"tmp-{number}"
+        out = tmp_path / f"attempt-{number}"
+        data_dir = tmp_path / "data"
+        tmp.mkdir()
+        out.mkdir()
+        (tmp / "stdout.raw").write_bytes(payload)
+        (tmp / "stderr.raw").write_bytes(b"")
+        argv = [*_facts_argv(tmp, out, data_dir), "--self-contained"]
+        assert cli.main(argv) == 0
+        meta = dict(
+            line.split("=", 1)
+            for line in (out / "run.meta").read_text().splitlines()
+            if "=" in line
+        )
+        assert meta["stdout_path"] == "stdout.txt"
+        assert (out / "stdout.txt").read_bytes() == payload
+        assert not (data_dir / "receipts").exists()
+        outputs.append(out / "stdout.txt")
+
+    assert outputs[0] != outputs[1]
+    assert outputs[0].read_bytes() != outputs[1].read_bytes()
+
+
+def test_self_contained_finish_refuses_to_clobber_final_artifacts(
+    tmp_path: Path,
+) -> None:
+    tmp = tmp_path / "tmp"
+    out = tmp_path / "attempt"
+    tmp.mkdir()
+    out.mkdir()
+    (tmp / "stdout.raw").write_bytes(b"first\n")
+    (tmp / "stderr.raw").write_bytes(b"")
+    argv = [*_facts_argv(tmp, out, tmp_path / "data"), "--self-contained"]
+    assert cli.main(argv) == 0
+    original = (out / "stdout.txt").read_bytes()
+
+    (tmp / "stdout.raw").write_bytes(b"second\n")
+    assert cli.main(argv) == 2
+    assert (out / "stdout.txt").read_bytes() == original
+
+
 def test_an_external_payload_never_clobbers_different_bytes(
     run: tuple[Path, Path, Path, list[str]],
 ) -> None:

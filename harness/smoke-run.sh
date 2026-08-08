@@ -16,7 +16,8 @@
 #   smoke-run.sh --tool NAME --mode MODE --image REF@sha256:... \
 #                --run-script PATH --bucket B [--region R] [--prefix P] \
 #                --auth anonymous|credentialed [--creds-profile NAME] \
-#                --out DIR [--timeout 300] [--poll-ms 50] [--entrypoint E]
+#                --out DIR [--timeout 300] [--poll-ms 50] [--entrypoint E] \
+#                [--self-contained] [--development]
 #
 set -euo pipefail
 export LC_ALL=C
@@ -84,6 +85,7 @@ python3 -I -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) els
 TOOL=""; MODE=""; IMAGE=""; RUN_SCRIPT=""; BUCKET=""; REGION=""; PREFIX=""
 AUTH=""; CREDS_PROFILE=""; OUT=""; TIMEOUT=300; POLL_MS=50; ENTRYPOINT=""
 TOOL_VERSION=""; PASS_ENV=()
+SELF_CONTAINED=no; DEVELOPMENT=no
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -95,6 +97,8 @@ while [ $# -gt 0 ]; do
     --timeout) TIMEOUT="$2"; shift 2 ;; --poll-ms) POLL_MS="$2"; shift 2 ;;
     --entrypoint) ENTRYPOINT="$2"; shift 2 ;;
     --tool-version) TOOL_VERSION="$2"; shift 2 ;;
+    --self-contained) SELF_CONTAINED=yes; shift ;;
+    --development) DEVELOPMENT=yes; shift ;;
     --env) PASS_ENV+=("$2"); shift 2 ;;
     *) die "unknown argument: $1" ;;
   esac
@@ -242,28 +246,46 @@ if [ -n "$REGION" ] && [ "$REGION" != "$REG_REGION" ]; then
 fi
 REGION="$REG_REGION"
 
-[ -r "$MANIFEST" ] || die "manifest not readable: $MANIFEST"
-actual_sha="$(sha256sum "$MANIFEST" | cut -d' ' -f1)"
-[ "$actual_sha" = "$MANIFEST_SHA" ] \
-  || die "manifest digest mismatch — registry $MANIFEST_SHA, file $actual_sha.
-        Registry and data directory disagree; the orchestrator re-baselines. Not a tool finding."
+if [ "$DEVELOPMENT" = no ]; then
+  [ -r "$MANIFEST" ] || die "manifest not readable: $MANIFEST"
+  actual_sha="$(sha256sum "$MANIFEST" | cut -d' ' -f1)"
+  [ "$actual_sha" = "$MANIFEST_SHA" ] \
+    || die "manifest digest mismatch — registry $MANIFEST_SHA, file $actual_sha.
+          Registry and data directory disagree; the orchestrator re-baselines. Not a tool finding."
+else
+  say "development: manifest and host-firewall checks are skipped; this run is not evidentiary or correctness-verified"
+fi
 
-# Fail closed before inspecting/pulling or executing the subject image. This
-# validates the ambient credential environment, metadata denial, bridge and
-# live firewall state, and the public S3 path; it never provisions or repairs
-# the runner.
-security_preflight "$BUCKET" "$REGION" \
-  || die "runner security preflight failed; no subject container was started"
-# The receipt cites the boundary the preflight just proved: the profile
-# constants this build enforces, the MTU of the bridge the subject attaches to,
-# and the digest of the versioned deny policy found in force — not a hash of one
-# box's firewall dump, which no reader could re-derive.
-SECURITY_PROFILE="$SECURITY_PROFILE_ID"
-SECURITY_PROVIDER_VALUE="$SECURITY_PROVIDER"
-SECURITY_MTU="$(security_docker_control network inspect "$SECURITY_NETWORK" \
-  -f '{{index .Options "com.docker.network.driver.mtu"}}')" \
-  || die "cannot read the study bridge MTU $(security_docker_status $?)"
-SECURITY_POLICY_SHA="$(sha256sum "$SECURITY_POLICY_FILE" | cut -d' ' -f1)"
+if [ "$DEVELOPMENT" = no ]; then
+  # Fail closed before inspecting/pulling or executing the subject image. This
+  # validates the ambient credential environment, metadata denial, bridge and
+  # live firewall state, and the public S3 path; it never provisions or repairs
+  # the runner.
+  security_preflight "$BUCKET" "$REGION" \
+    || die "runner security preflight failed; no subject container was started"
+  # The receipt cites the boundary the preflight just proved: the profile
+  # constants this build enforces, the MTU of the bridge the subject attaches to,
+  # and the digest of the versioned deny policy found in force — not a hash of one
+  # box's firewall dump, which no reader could re-derive.
+  SECURITY_PROFILE="$SECURITY_PROFILE_ID"
+  SECURITY_PROVIDER_VALUE="$SECURITY_PROVIDER"
+  SECURITY_MTU="$(security_docker_control network inspect "$SECURITY_NETWORK" \
+    -f '{{index .Options "com.docker.network.driver.mtu"}}')" \
+    || die "cannot read the study bridge MTU $(security_docker_status $?)"
+  SECURITY_POLICY_SHA="$(sha256sum "$SECURITY_POLICY_FILE" | cut -d' ' -f1)"
+else
+  # This path exists only to prove the local mechanics on a developer box whose
+  # Docker daemon is outside the devcontainer. It retains the container-level
+  # restrictions below but makes no host-firewall or isolation claim.
+  SECURITY_NETWORK=bridge
+  SECURITY_PROFILE="local-development-unisolated"
+  SECURITY_PROVIDER_VALUE="local-development"
+  SECURITY_MTU="$(security_docker_control network inspect "$SECURITY_NETWORK" \
+    -f '{{index .Options "com.docker.network.driver.mtu"}}')" \
+    || die "cannot read the Docker bridge MTU $(security_docker_status $?)"
+  [ -n "$SECURITY_MTU" ] || SECURITY_MTU=unreported
+  SECURITY_POLICY_SHA=not-checked-development
+fi
 
 # ------------------------------------------------------- owner's bucket rule
 # Scans against EVERY registered bucket, not just this run's. A run.sh that
@@ -398,7 +420,14 @@ fi
 DOCKER_CMD=()
 security_append_docker_control_prefix DOCKER_CMD
 DOCKER_CMD+=(create --name "$CONTAINER_NAME")
-security_append_evidence_log_args DOCKER_CMD
+if [ "$DEVELOPMENT" = yes ]; then
+  # OrbStack rejects Docker's unlimited max-size=-1 when the container starts.
+  # A large explicit local cap is acceptable only for this non-evidentiary
+  # development path and is recorded in run.meta below.
+  DOCKER_CMD+=(--log-driver=json-file --log-opt max-size=1g --log-opt max-file=1)
+else
+  security_append_evidence_log_args DOCKER_CMD
+fi
 security_append_network_args DOCKER_CMD
 DOCKER_CMD+=( -e AWS_EC2_METADATA_DISABLED=true )
 # TZ pinned so timestamps are unambiguous. `aws s3 ls` prints LOCAL time with no
@@ -487,8 +516,14 @@ DOCKER_LOG_CONFIG="$(security_docker_control inspect -f '{{json .HostConfig.LogC
 DOCKER_LOG_CONFIG_CANON="$(printf '%s' "$DOCKER_LOG_CONFIG" | jq -cS \
   'if type == "object" then . else error("log config is not an object") end' 2>/dev/null)" \
   || die "Docker returned malformed effective log configuration; refusing to start the subject"
-security_validate_evidence_log_config "$DOCKER_LOG_DRIVER" "$DOCKER_LOG_CONFIG_CANON" \
-  || die "effective Docker log configuration is not exactly json-file with max-size=-1; refusing incomplete or remotely logged evidence"
+if [ "$DEVELOPMENT" = yes ]; then
+  [ "$DOCKER_LOG_DRIVER" = json-file ] \
+    && [ "$DOCKER_LOG_CONFIG_CANON" = '{"max-file":"1","max-size":"1g"}' ] \
+    || die "development Docker log configuration differs from the recorded 1 GiB local cap; refusing the run"
+else
+  security_validate_evidence_log_config "$DOCKER_LOG_DRIVER" "$DOCKER_LOG_CONFIG_CANON" \
+    || die "effective Docker log configuration is not exactly json-file with max-size=-1; refusing incomplete or remotely logged evidence"
+fi
 DOCKER_LOG_CONFIG_SHA="$(printf '%s' "$DOCKER_LOG_CONFIG_CANON" | sha256sum | cut -d' ' -f1)"
 DOCKER_LOG_OPTION_KEYS_B64="$(printf '%s' "$DOCKER_LOG_CONFIG_CANON" | jq -r 'keys[] | @base64' | paste -sd, -)" \
   || die "could not derive safe Docker log-option key identities"
@@ -633,8 +668,11 @@ fi
 # Every value below is what THIS wrapper measured or decided, passed explicitly:
 # a receipt records what ran, never a plausible reconstruction of it.
 finish_rc=0
+FINISH_PLACEMENT_ARGS=()
+[ "$SELF_CONTAINED" = yes ] && FINISH_PLACEMENT_ARGS+=(--self-contained)
 receipt_py finish \
   --tmp="$TMP" --out="$OUT" --data-dir="$DATA_DIR" \
+  "${FINISH_PLACEMENT_ARGS[@]}" \
   --tool="$TOOL" --mode="$MODE" --auth="$AUTH" \
   --bucket="$BUCKET" --region="$REGION" --prefix="$PREFIX" \
   --image="$IMAGE" --image-arch="$IMG_ARCH" --host-arch="$HOST_DOCKER_ARCH" \

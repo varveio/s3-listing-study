@@ -106,10 +106,38 @@ def _scan_or_quarantine(path: Path, label: str, out: Path, *, binary: bool = Fal
         )
 
 
+def _copy_exclusive(source: Path, destination: Path) -> None:
+    """Copy a final attempt artifact without an overwrite race."""
+    created = False
+    try:
+        with source.open("rb") as reader, destination.open("xb") as writer:
+            created = True
+            shutil.copyfileobj(reader, writer)
+    except FileExistsError:
+        raise ReceiptError(
+            f"attempt artifact {destination} already exists — refusing to overwrite evidence"
+        ) from None
+    except Exception:
+        if created:
+            destination.unlink(missing_ok=True)
+        raise
+    source.unlink()
+
+
 def _finish(args: argparse.Namespace) -> int:
     tmp = Path(args.tmp)
     out = Path(args.out)
     data_dir = Path(args.data_dir)
+
+    if args.self_contained:
+        targets = (*(f"{stream}.txt" for stream in STREAMS), "run.meta", "receipt.md")
+        occupied = [name for name in targets if (out / name).exists()]
+        if occupied:
+            raise ReceiptError(
+                "self-contained attempt already has final artifacts: "
+                + ", ".join(occupied)
+                + " — refusing to overwrite evidence"
+            )
 
     # --- redact (full) → scan (full) → truncate → hash ------------------------
     # Redaction runs over the WHOLE raw stream first (a legitimate object key
@@ -157,6 +185,7 @@ def _finish(args: argparse.Namespace) -> int:
             auth=args.auth,
             truncated=bool(dropped[stream]),
             dropped_bytes=dropped[stream],
+            self_contained=args.self_contained,
         )
         for stream in STREAMS
     }
@@ -229,8 +258,12 @@ def _finish(args: argparse.Namespace) -> int:
     # redact-before-hash.
     _scan_or_die(tmp / "receipt.md", str(tmp / "receipt.md"))
     _scan_or_die(tmp / "run.meta", str(tmp / "run.meta"))
-    shutil.move(str(tmp / "receipt.md"), str(out / "receipt.md"))
-    shutil.move(str(tmp / "run.meta"), str(out / "run.meta"))
+    if args.self_contained:
+        _copy_exclusive(tmp / "receipt.md", out / "receipt.md")
+        _copy_exclusive(tmp / "run.meta", out / "run.meta")
+    else:
+        shutil.move(str(tmp / "receipt.md"), str(out / "receipt.md"))
+        shutil.move(str(tmp / "run.meta"), str(out / "run.meta"))
     return 0
 
 
@@ -335,6 +368,11 @@ def build_parser() -> argparse.ArgumentParser:
     finish.add_argument("--tmp", required=True)
     finish.add_argument("--out", required=True)
     finish.add_argument("--data-dir", required=True)
+    finish.add_argument(
+        "--self-contained",
+        action="store_true",
+        help="keep payloads beside run.meta regardless of size and refuse overwrite",
+    )
     for name in _FACT_ARGS:
         finish.add_argument(f"--{name}", required=True)
 

@@ -161,6 +161,7 @@ def place(
     auth: str,
     truncated: bool,
     dropped_bytes: int,
+    self_contained: bool = False,
 ) -> Payload:
     """Hash the redacted, scanned, truncated stream and put it where it belongs.
 
@@ -170,8 +171,26 @@ def place(
     """
     size = source.stat().st_size
     sha = sha256_file(source)
-    if size <= INLINE_MAX:
-        shutil.copyfile(source, out / f"{stream}.txt")
+    if size <= INLINE_MAX or self_contained:
+        destination = out / f"{stream}.txt"
+        if self_contained and destination.exists():
+            raise ReceiptError(
+                f"attempt payload {destination} already exists — refusing to overwrite evidence"
+            )
+        if self_contained:
+            created = False
+            try:
+                with source.open("rb") as reader, destination.open("xb") as writer:
+                    created = True
+                    shutil.copyfileobj(reader, writer)
+            except Exception:
+                if created:
+                    destination.unlink(missing_ok=True)
+                raise
+        else:
+            shutil.copyfile(source, destination)
+        if self_contained and sha256_file(destination) != sha:
+            raise ReceiptError("payload hash changed during placement — refusing to cite it")
         # Inline payloads travel with run.meta. Record only the sibling
         # filename and declare its base in run.meta; embedding the caller's
         # relative --out spelling made old paths depend on an undeclared
@@ -183,7 +202,11 @@ def place(
             sha256=sha,
             truncated="yes" if truncated else "no",
             dropped_bytes=dropped_bytes,
-            note=f"inline — `{stream}.txt` ({size} bytes, sha256 `{sha}`)",
+            note=(
+                f"attempt-local — `{stream}.txt` ({size} bytes, sha256 `{sha}`)"
+                if self_contained
+                else f"inline — `{stream}.txt` ({size} bytes, sha256 `{sha}`)"
+            ),
         )
 
     ext_dir = data_dir / "receipts" / tool

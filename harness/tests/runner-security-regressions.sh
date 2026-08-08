@@ -573,6 +573,8 @@ case "$1 $2" in
         [ "${FAKE_LOG_INSPECT_RC:-0}" -eq 0 ] || exit "$FAKE_LOG_INSPECT_RC"
         if [ "${FAKE_LOG_CONFIG_CONTROL:-no}" = yes ]; then
           printf '{}\nforged=yes\n'
+        elif [ "${FAKE_LOG_CONFIG_DEVELOPMENT:-no}" = yes ]; then
+          printf '{"max-file":"1","max-size":"1g"}\n'
         elif [ "${FAKE_LOG_CONFIG_LIMITED:-no}" = yes ]; then
           printf '{"max-size":"10m"}\n'
         elif [ "${FAKE_LOG_CONFIG_MAX_FILE:-no}" = yes ]; then
@@ -636,6 +638,29 @@ if [ "$smoke_rc" -eq 0 ] \
 else
   bad "fake smoke unlimited local-log contract rc=$smoke_rc: $(tail -3 "$work/smoke-ok.stderr" | tr '\n' ' ')"
 fi
+
+# A development capture may deliberately defer correctness and host-firewall
+# checking. It remains digest-pinned and container-restricted, but is labeled
+# non-evidentiary and uses Docker's ordinary bridge.
+mv "$smoke_manifest" "$smoke_manifest.saved"
+FAKE_LOG_CONFIG_DEVELOPMENT=yes run_fake_smoke "$work/smoke-development" --development --self-contained
+if [ "$smoke_rc" -eq 0 ] \
+   && grep -q 'development: manifest and host-firewall checks are skipped' "$work/smoke-development.stderr" \
+   && grep -q '^security_profile=local-development-unisolated$' "$work/smoke-development/run.meta" \
+   && grep -q -- '--network bridge' "$work/smoke-docker.log" \
+   && [ -f "$work/smoke-development/stdout.txt" ] \
+   && [ -f "$work/smoke-development/run.meta" ]; then
+  ok "development smoke runs without manifest/firewall gate and labels attempt-local output"
+else
+  bad "development smoke failed rc=$smoke_rc: $(tail -3 "$work/smoke-development.stderr" | tr '\n' ' ')"
+fi
+run_fake_smoke "$work/smoke-manifest-required"
+if [ "$smoke_rc" -eq 2 ] && grep -q 'manifest not readable' "$work/smoke-manifest-required.stderr"; then
+  ok "normal smoke still fails closed when the manifest is absent"
+else
+  bad "normal smoke accepted a missing manifest rc=$smoke_rc: $(tail -3 "$work/smoke-manifest-required.stderr" | tr '\n' ' ')"
+fi
+mv "$smoke_manifest.saved" "$smoke_manifest"
 
 # --- the import path is not redirectable -------------------------------------
 # The wrapper's offline half owns the redactor and the credential scanner, so
