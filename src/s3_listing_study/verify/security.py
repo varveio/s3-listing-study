@@ -4,7 +4,7 @@ The verifier reaches its FAIL / DRIFT / ERROR branches only through ``docker``,
 behind the preflight, so without an injectable seam those verdicts are
 unreachable offline and cannot be tested at all. The seam is therefore part of
 the contract rather than a testing convenience (``tests/tier3/README.md``
-§ "The stub is the oracle").
+§ "The fake runtime contract is implementation-agnostic").
 
 What is injectable is the **preflight** — runner readiness is a property of the
 box, not of the implementation under test, and it has its own suite in
@@ -147,11 +147,9 @@ class PreflightSkipped(SecurityBoundary):
     ``docker`` on ``PATH`` and builds the production argv, so a fixture
     ``docker`` sees exactly what the real one would.
 
-    No argv selects this class. The shell's seam was file-level (tier 3 replaces
-    ``runner-security-lib.sh`` in a *staged copy*) and therefore unreachable from
-    a production invocation; a ``--skip-preflight`` flag would have made a
+    No argv selects this class: a ``--skip-preflight`` flag would make a
     mandatory gate optional for anyone running the shipped entry point against a
-    real bucket. Tier 3 constructs it in-process instead —
+    real bucket. Tier 3 constructs this boundary in process —
     ``tests/tier3/verifier_entry.py``, which is not installed.
     """
 
