@@ -67,10 +67,19 @@ LINES = "(SELECT unnest(str_split(content, chr(10))) AS line FROM read_text($pat
 TSV_FIELDS = f"""
     (SELECT str_split(line, chr(9)) AS f FROM {LINES} WHERE line <> '')"""
 
-# Default sink: whitespace-aligned DATE SIZE KEY, or `PRE <key>` for a common
-# prefix (the empty date column collapses under a whitespace split).
-ALIGNED_FIELDS = rf"""
-    (SELECT str_split_regex(trim(line), '[ \t]+') AS f FROM {LINES} WHERE trim(line) <> '')"""
+# Default sink: fixed-width DATE (25 chars), two-space separator, SIZE/PRE
+# (14 chars), two-space separator, then the unpadded key. Slice at the source
+# formatter's fixed boundary instead of parsing whitespace: the key may itself
+# begin with spaces, and splitting or a greedy separator would silently eat
+# them. A literal tab in the key reaches contract v2's emit boundary and is
+# refused there rather than rewritten into a different key.
+ALIGNED_ROWS = f"""
+    (SELECT line,
+            trim(substr(line, 1, 25)) AS date,
+            trim(substr(line, 28, 14)) AS size_or_marker,
+            substr(line, 44) AS key
+       FROM {LINES}
+      WHERE length(line) >= 43)"""
 
 S7CMD_JSON_COLUMNS = """{'Key': 'VARCHAR', 'Size': 'BIGINT', 'ETag': 'VARCHAR',
                          'LastModified': 'VARCHAR', 'StorageClass': 'VARCHAR',
@@ -88,13 +97,13 @@ QUERIES = {
         FROM {TSV_FIELDS}
     """,
     "recursive-aligned": f"""
-        SELECT CASE WHEN f[1] = 'PRE' THEN f[2] ELSE f[3] END,
-               CASE WHEN f[1] <> 'PRE' THEN f[2] END,
+        SELECT key,
+               CASE WHEN size_or_marker <> 'PRE' THEN size_or_marker END,
                NULL,
-               CASE WHEN f[1] <> 'PRE' THEN f[1] END,
+               CASE WHEN size_or_marker <> 'PRE' THEN date END,
                NULL
-        FROM {ALIGNED_FIELDS}
-        WHERE f[1] = 'PRE' OR len(f) >= 3
+        FROM {ALIGNED_ROWS}
+        WHERE key <> '' AND (size_or_marker = 'PRE' OR (date <> '' AND size_or_marker <> ''))
     """,
     # NDJSON: one object per line, `{{"Key",…}}` or `{{"Prefix":…}}` for a common
     # prefix. Columns are declared, not sniffed, so a payload of nothing but

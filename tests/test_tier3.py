@@ -236,6 +236,17 @@ def test_union_with_a_designated_remainder_is_complete_and_passes(stage: Stage) 
     assert "| Structural status | complete |" in outcome.report
 
 
+def test_union_refuses_shards_from_different_regions(stage: Stage) -> None:
+    shards = union_shards(stage, tier3.alpha_rows(), tier3.beta_rows())
+    remainder = union_remainder(stage)
+    beta_meta = shards[1] / "run.meta"
+    beta_meta.write_text(beta_meta.read_text().replace("region=us-east-1", "region=us-west-2"))
+    outcome = stage.verify_union([*shards, remainder], remainder=remainder, reference=None)
+    assert outcome.returncode == 3
+    assert outcome.verdict == "ERROR"
+    assert "is region 'us-west-2', not 'us-east-1'" in outcome.report
+
+
 def test_union_dropped_key_with_the_reference_agreeing_is_fail(stage: Stage) -> None:
     """A shard that fails its own scope, with the bucket unmoved: FAIL, exit 1."""
     beta = tier3.beta_rows()

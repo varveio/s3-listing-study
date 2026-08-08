@@ -18,14 +18,17 @@ from pathlib import Path
 import pytest
 
 from s3_listing_study.receipt import cli
+from s3_listing_study.receipt.errors import ReceiptError
 from s3_listing_study.receipt.redact import (
     INLINE_MAX,
     PAYLOAD_CAP,
+    preserve_binary_file,
     redact_file,
     redact_line,
     scope_tag,
     truncate_head,
 )
+from s3_listing_study.receipt.scan import LINE_SIZE_LIMIT
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "receipt"
 
@@ -66,6 +69,37 @@ def test_redaction_reports_whether_it_changed_anything(tmp_path: Path) -> None:
     dirty = tmp_path / "dirty.raw"
     dirty.write_bytes(KEY_ID.encode() + b"\n")
     assert redact_file(dirty, tmp_path / "dirty.txt") is True
+
+
+def test_redaction_refuses_a_line_over_the_shared_safety_limit(tmp_path: Path) -> None:
+    source = tmp_path / "huge.raw"
+    source.write_bytes(b"x" * (LINE_SIZE_LIMIT + 1))
+    with pytest.raises(ReceiptError, match="line exceeds"):
+        redact_file(source, tmp_path / "huge.txt")
+
+
+def test_redaction_accepts_a_line_at_the_shared_safety_limit(tmp_path: Path) -> None:
+    source = tmp_path / "boundary.raw"
+    source.write_bytes(b"x" * LINE_SIZE_LIMIT)
+    target = tmp_path / "boundary.txt"
+    assert redact_file(source, target) is False
+    assert target.stat().st_size == LINE_SIZE_LIMIT
+
+
+def test_binary_payload_preserves_a_long_newline_free_stream(tmp_path: Path) -> None:
+    source = tmp_path / "listing.parquet.raw"
+    payload = b"PAR1" + b"x" * (LINE_SIZE_LIMIT + 1) + b"PAR1"
+    source.write_bytes(payload)
+    target = tmp_path / "listing.parquet"
+    assert preserve_binary_file(source, target) is False
+    assert target.read_bytes() == payload
+
+
+def test_binary_payload_blocks_bytes_that_would_need_redaction(tmp_path: Path) -> None:
+    source = tmp_path / "listing.parquet.raw"
+    source.write_bytes(b"PAR1" + KEY_ID.encode() + b"PAR1")
+    with pytest.raises(ReceiptError, match="cannot safely redact opaque binary"):
+        preserve_binary_file(source, tmp_path / "listing.parquet")
 
 
 def test_truncate_keeps_the_head(tmp_path: Path) -> None:
@@ -115,6 +149,22 @@ def test_finish_places_a_clean_run(run: tuple[Path, Path, Path, list[str]]) -> N
     assert meta["stdout_sha256"] == hashlib.sha256((out / "stdout.txt").read_bytes()).hexdigest()
     assert "# Smoke receipt" in (out / "receipt.md").read_text()
     assert not (out / "quarantine").exists()
+
+
+def test_finish_uses_the_binary_path_for_s3_fast_list_parquet(
+    run: tuple[Path, Path, Path, list[str]],
+) -> None:
+    tmp, _out, data_dir, argv = run
+    argv = ["--tool=s3-fast-list" if arg.startswith("--tool=") else arg for arg in argv]
+    argv = ["--mode=list" if arg.startswith("--mode=") else arg for arg in argv]
+    payload = b"PAR1" + b"x" * (LINE_SIZE_LIMIT + 1) + b"PAR1"
+    (tmp / "stdout.raw").write_bytes(payload)
+    (tmp / "stderr.raw").write_bytes(b"")
+
+    assert cli.main(argv) == 0
+    placed = list((data_dir / "receipts" / "s3-fast-list").glob("*.stdout.txt"))
+    assert len(placed) == 1
+    assert placed[0].read_bytes() == payload
 
 
 def test_finish_hashes_the_redacted_bytes_not_the_raw_ones(

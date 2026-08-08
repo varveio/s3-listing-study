@@ -60,7 +60,7 @@ capsule passes `tools/<tool>/adapter/run.sh` and
 `tools/<tool>/adapter/normalize.py` (migration wave completed 2026-07-20);
 historical receipts cite the pre-migration root paths as run facts.
 
-- **`python3 -m s3_listing_study.receipt registry <bucket> --field FIELD`** —
+- **`python3 -m s3_listing_study.receipt registry --registry PATH --bucket BUCKET --field FIELD`** —
   resolves `region`, `manifest`,
   `manifest_sha256`, `snapshot_date`, `keys`, `shape` from the registry. Exists
   so a receipt cites what the registry *says* rather than what somebody retyped:

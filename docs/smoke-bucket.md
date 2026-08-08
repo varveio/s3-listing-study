@@ -52,7 +52,7 @@ canonicalization. The mismatch re-list captures the full five-field record
 | --- | --- |
 | Bucket | `noaa-normals-pds` (AWS Open Data — NOAA U.S. Climate Normals; sponsor-paid requests) |
 | Region | `us-east-1` |
-| Access | Anonymous (`--no-sign-request`); last verified during the recorded 2026-07-16 smoke. Future checks require the runner-security activation gate and preflight. |
+| Access | Anonymous (`--no-sign-request`); last verified during the recorded 2026-07-17 smoke. Future checks require the runner-security activation gate and preflight. |
 | Manifest | `<data>/manifests/noaa-normals-pds.2026-07-17.tsv.gz` — `key<TAB>size<TAB>etag<TAB>mtime<TAB>storage_class` (contract v2), ETag unquoted, mtime `YYYY-MM-DDTHH:MM:SSZ` UTC. |
 | Manifest sha256 | `c78a82737dd1982a999912afa89f870c013cb22e01e50b8c4835ddb725992adb` |
 | Snapshot date | 2026-07-17 (UTC) |

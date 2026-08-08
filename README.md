@@ -173,8 +173,8 @@ installed**, because the listing adapters and the test harnesses import
 ```sh
 uv sync                     # or: python3 -m venv .venv && .venv/bin/pip install -e .
 uv run pytest               # offline: no bucket, no network, no data directory
-python3 -m tests.differential          # replays every committed verdict (exit 0/1/42)
-python3 -m tests.adapters aws-cli rclone   # shell vs Python adapters, byte-for-byte
+uv run python -m tests.differential          # replays every committed verdict (exit 0/1/42)
+uv run python -m tests.adapters aws-cli rclone   # shell vs Python adapters, byte-for-byte
 ```
 
 Without that install, a Python adapter invoked as `--normalize` fails with

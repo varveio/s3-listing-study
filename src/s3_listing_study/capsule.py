@@ -105,6 +105,13 @@ def validate_schema(instance: object, schema_path: Path, label: str, errors: lis
         errors.append(f"{label}:{location}: {error.message}")
 
 
+def provenance_reference(item: object) -> str | None:
+    """Return a provenance reference only from the schema's expected object shape."""
+    provenance = item.get("provenance") if isinstance(item, dict) else None
+    reference = provenance.get("reference") if isinstance(provenance, dict) else None
+    return reference if isinstance(reference, str) else None
+
+
 def check_claim_schema_contract(schema_path: Path, errors: list[str]) -> None:
     schema = json.loads(schema_path.read_text(encoding="utf-8"))
     validator = jsonschema.Draft202012Validator(schema, format_checker=jsonschema.FormatChecker())
@@ -524,9 +531,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         tested = tool_data.get("tested", {})
         for field in ("version", "revision", "upstream_base"):
             item = tested.get(field) if isinstance(tested, dict) else None
-            reference = (
-                item.get("provenance", {}).get("reference") if isinstance(item, dict) else None
-            )
+            reference = provenance_reference(item)
             if (
                 reference
                 and not reference.startswith("https://")

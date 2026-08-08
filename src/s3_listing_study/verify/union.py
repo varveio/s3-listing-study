@@ -207,6 +207,7 @@ def _read_shards(options: Options, work: Path) -> dict[str, str]:
                     "cites a different registry digest than the first shard",
                 ),
                 ("manifest_sha256", "cites a different manifest than the first shard"),
+                ("region", "is region '{got}', not '{want}'"),
             ):
                 if meta.get(key, "") != shared[key]:
                     raise UnionError(
@@ -305,6 +306,15 @@ def _check_overlap(prefixes: list[str]) -> None:
 
 def run(options: Options) -> int:
     """Issue the union verdict. Returns the process exit code."""
+    out = Path(options.out)
+
+    def write_error(message: str) -> None:
+        try:
+            out.mkdir(parents=True, exist_ok=True)
+            (out / "union-verify.md").write_bytes(report.union_error(generated_utc(), message))
+        except OSError:
+            pass
+
     try:
         with tempfile.TemporaryDirectory() as tmp:
             return _run(options, Path(tmp))
@@ -314,13 +324,11 @@ def run(options: Options) -> int:
         # `common.relist` raise the plain VerifierError, and converting those in
         # a sibling handler left no union-verify.md at all.
         failure = exc if isinstance(exc, UnionError) else UnionError(str(exc))
-        out = Path(options.out)
-        try:
-            out.mkdir(parents=True, exist_ok=True)
-            (out / "union-verify.md").write_bytes(report.union_error(generated_utc(), str(failure)))
-        except OSError:
-            pass
+        write_error(str(failure))
         raise failure from None
+    except Exception as exc:
+        write_error(f"unexpected {type(exc).__name__}: {exc}")
+        raise
 
 
 def _run(options: Options, work: Path) -> int:

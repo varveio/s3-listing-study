@@ -107,13 +107,16 @@ def render(facts: RunFacts, stdout: Payload, stderr: Payload) -> bytes:
     cg_samples = esc("cg_samples", facts.cgroup_samples)
     poll_ms = esc("POLL_MS", facts.poll_ms)
     redaction_changed = esc("REDACTION_CHANGED", facts.redaction_changed_bytes)
+    timeout = esc("TIMEOUT", facts.timeout)
+    docker_control_timeout = esc("DOCKER_CONTROL_TIMEOUT_S", facts.docker_control_timeout_s)
+    docker_cleanup_timeout = esc("DOCKER_CLEANUP_TIMEOUT_S", facts.docker_cleanup_timeout_s)
     stdout_note = esc("payload_stdout", stdout.note)
     stderr_note = esc("payload_stderr", stderr.note)
     invocation = md_safe_block("invocation", facts.invocation)
     shape = md_safe_block("shape", facts.shape)
 
     timeout_note = (
-        f" — **killed at the {facts.timeout}s timeout**" if facts.timed_out == "1" else ""
+        f" — **killed at the {timeout}s timeout**" if facts.timed_out == "1" else ""
     )
     obs_cell = "none" if obs_env == "none" else f"`{obs_env}` — recorded verbatim"
     functional_cell = (
@@ -173,8 +176,8 @@ def render(facts: RunFacts, stdout: Payload, stderr: Payload) -> bytes:
         "`--security-opt no-new-privileges:true` |\n"
     )
     out += (
-        f"| Docker control bounds | {facts.docker_control_timeout_s}s ordinary calls;"
-        f" {facts.docker_cleanup_timeout_s}s cleanup calls |\n"
+        f"| Docker control bounds | {docker_control_timeout}s ordinary calls;"
+        f" {docker_cleanup_timeout}s cleanup calls |\n"
     )
     out += (
         f"| Docker logging | driver `{log_driver}`; canonical config sha256"

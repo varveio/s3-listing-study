@@ -64,6 +64,24 @@ cat >"$fake/curl" <<'SH'
 exit 1
 SH
 chmod +x "$fake/docker" "$fake/curl"
+cat >"$fake/stat" <<'SH'
+#!/usr/bin/env bash
+case "$1 $2" in
+  '-c %u') printf '0\n' ;;
+  '-c %a')
+    case "${3##*/}" in
+      helper) printf '%s\n' "${FAKE_HELPER_MODE:-755}" ;;
+      *) printf '644\n' ;;
+    esac ;;
+  *) exit 90 ;;
+esac
+SH
+cat >"$fake/sudo" <<'SH'
+#!/usr/bin/env bash
+[ "$1" = -n ] || exit 90
+exec "$2"
+SH
+chmod +x "$fake/stat" "$fake/sudo"
 render_policy() { # <v4-out> <v6-out> [env...]
   env PATH="$fake:$PATH" FAKE_NETWORK_JSON="$network_json" "${@:3}" \
     "$HARNESS/security/render-policy.sh" "$1" "$2"
@@ -186,10 +204,25 @@ run_check() {
     "$HARNESS/runner-security-check.sh" --quiet --bucket bucket --region us-east-1 >"$work/check.out" 2>&1
   check_rc=$?; set -e
 }
+run_privileged_check() {
+  set +e
+  env -u AWS_PROFILE -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
+    PATH="$fake:$PATH" FAKE_NETWORK_JSON="$network_json" FAKE_LIVE_FILE="$live_valid" \
+    FAKE_HELPER_MODE="${FAKE_HELPER_MODE:-755}" \
+    S3_STUDY_SECURITY_STATE_FILE="$config" S3_STUDY_SECURITY_INSTALLED_HELPER="$helper" \
+    "$HARNESS/runner-security-check.sh" --quiet --bucket bucket --region us-east-1 >"$work/check.out" 2>&1
+  check_rc=$?; set -e
+}
 reject_check() { if [ "$check_rc" -eq 2 ]; then ok "$1"; else bad "$1 rc=$check_rc"; fi; }
 
 write_config; run_check
 [ "$check_rc" -eq 0 ] && ok "fully faked readiness validates" || bad "valid readiness: $(head -1 "$work/check.out")"
+write_config; FAKE_HELPER_MODE=775 run_privileged_check
+if [ "$check_rc" -eq 2 ] && grep -q 'helper is group/world writable' "$work/check.out"; then
+  ok "passwordless-sudo firewall helper permission drift fails closed"
+else
+  bad "writable passwordless-sudo firewall helper accepted rc=$check_rc"
+fi
 check_probe_log="$work/check-probe.log"; : >"$check_probe_log"
 CHECK_DOCKER_LOG="$check_probe_log" run_check
 if grep -q '^run --rm .*--pull=never' "$check_probe_log"; then ok "readiness probe is no-pull"; else bad "readiness probe omitted --pull=never"; fi

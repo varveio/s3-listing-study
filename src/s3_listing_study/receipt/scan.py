@@ -20,10 +20,36 @@ works — before ever setting CREDS, where signatures and account IDs appear.
 
 from __future__ import annotations
 
+import mmap
 import os
 import re
+from collections.abc import Iterator
 from enum import IntEnum
 from pathlib import Path
+from typing import BinaryIO
+
+LINE_SIZE_LIMIT = 1024 * 1024
+"""Maximum bytes in one line, including its terminator when present.
+
+Both redaction and scanning use this bound before applying a regular expression,
+so a newline-free or huge-line payload cannot force an unbounded allocation.
+"""
+
+
+class LineTooLongError(Exception):
+    """A line exceeded :data:`LINE_SIZE_LIMIT`; processing must fail closed."""
+
+
+def bounded_lines(handle: BinaryIO) -> Iterator[bytes]:
+    """Yield binary lines without ever reading more than the shared line limit."""
+    while True:
+        line = handle.readline(LINE_SIZE_LIMIT + 1)
+        if not line:
+            return
+        if len(line) > LINE_SIZE_LIMIT:
+            raise LineTooLongError(f"line exceeds the {LINE_SIZE_LIMIT}-byte receipt safety limit")
+        yield line
+
 
 # ``[[:space:]]`` in the C locale, spelled out rather than left to ``\s``: the
 # byte set is pinned here, so it cannot widen under a locale or an interpreter.
@@ -75,10 +101,29 @@ def scan_file(path: Path) -> Outcome:
     """
     try:
         with open(path, "rb") as handle:
-            for line in handle:
+            for line in bounded_lines(handle):
                 if SCAN_SECRET_RE.search(line):
                     return Outcome.FLAGGED
-    except OSError:
+    except (OSError, LineTooLongError):
+        return Outcome.ERROR
+    return Outcome.CLEAN
+
+
+def scan_binary_file(path: Path) -> Outcome:
+    """Classify an opaque binary payload without imposing a text-line limit.
+
+    Binary listing formats such as Parquet legitimately contain arbitrarily
+    long newline-free regions. Memory-map the file so the same credential-shape
+    expression sees every byte without first allocating the whole payload.
+    """
+    try:
+        with open(path, "rb") as handle:
+            if os.fstat(handle.fileno()).st_size == 0:
+                return Outcome.CLEAN
+            with mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ) as payload:
+                if SCAN_SECRET_RE.search(payload):
+                    return Outcome.FLAGGED
+    except (OSError, ValueError):
         return Outcome.ERROR
     return Outcome.CLEAN
 

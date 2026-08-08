@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from s3_listing_study.verify import cli, common, compare, report, security
+from s3_listing_study.verify import cli, common, compare, report, security, union
 from s3_listing_study.verify.errors import ERROR_EXIT, VerifierError
 from s3_listing_study.verify.registry_source import RegistrySource
 
@@ -181,6 +181,42 @@ def test_relist_builds_its_docker_argv_only_through_the_boundary(monkeypatch) ->
     assert captured[0][3:5] == ["s3api", "list-objects-v2"]
 
 
+def test_normalize_timeout_is_a_verifier_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    payload = tmp_path / "payload"
+    payload.write_bytes(b"")
+
+    def expire(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        assert kwargs["timeout"] == common.NORMALIZE_TIMEOUT_S
+        raise subprocess.TimeoutExpired(argv, common.NORMALIZE_TIMEOUT_S)
+
+    monkeypatch.setattr(subprocess, "run", expire)
+    with pytest.raises(VerifierError, match="normalize adapter timed out"):
+        common.normalize("adapter", "mode", "", payload)
+
+
+def test_unexpected_union_error_still_writes_the_durable_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def crash(options: union.Options, work: Path) -> int:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(union, "_run", crash)
+    options = union.Options(
+        receipts=[],
+        normalize="adapter",
+        out=str(tmp_path),
+        registry=RegistrySource.load(REGISTRY_FIXTURE),
+        security=security.SecurityBoundary(),
+    )
+    with pytest.raises(RuntimeError, match="boom"):
+        union.run(options)
+    durable = (tmp_path / "union-verify.md").read_text()
+    assert "**Verdict: ERROR**" in durable
+    assert "unexpected RuntimeError: boom" in durable
+
+
 def test_the_preflight_seam_cannot_widen() -> None:
     """`preflight` is the ONLY thing tier 3 is allowed to replace.
 
@@ -188,7 +224,14 @@ def test_the_preflight_seam_cannot_widen() -> None:
     the status strings are what a verdict is read from, so a seam that grew a
     second override would make tier 3 stop testing what ships.
     """
-    overrides = set(security.PreflightSkipped.__dict__) - {"__doc__", "__module__", "__qualname__"}
+    class_metadata = {
+        "__doc__",
+        "__module__",
+        "__qualname__",
+        "__firstlineno__",
+        "__static_attributes__",
+    }
+    overrides = set(security.PreflightSkipped.__dict__) - class_metadata
     assert overrides == {"preflight"}
 
 

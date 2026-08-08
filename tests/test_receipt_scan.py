@@ -18,8 +18,10 @@ from pathlib import Path
 import pytest
 
 from s3_listing_study.receipt.scan import (
+    LINE_SIZE_LIMIT,
     Outcome,
     TreeScanError,
+    scan_binary_file,
     scan_file,
     scan_tree,
 )
@@ -80,6 +82,22 @@ def test_unreadable_file_is_scanner_error_not_clean(tmp_path: Path) -> None:
 
 def test_missing_file_is_scanner_error(tmp_path: Path) -> None:
     assert scan_file(tmp_path / "absent.txt") is Outcome.ERROR
+
+
+def test_scan_line_size_boundary_fails_closed(tmp_path: Path) -> None:
+    boundary = tmp_path / "boundary.txt"
+    boundary.write_bytes(b"x" * LINE_SIZE_LIMIT)
+    assert scan_file(boundary) is Outcome.CLEAN
+    boundary.write_bytes(b"x" * (LINE_SIZE_LIMIT + 1))
+    assert scan_file(boundary) is Outcome.ERROR
+
+
+def test_binary_scan_accepts_long_newline_free_content_and_still_flags(tmp_path: Path) -> None:
+    payload = tmp_path / "listing.parquet"
+    payload.write_bytes(b"PAR1" + b"x" * (LINE_SIZE_LIMIT + 1) + b"PAR1")
+    assert scan_binary_file(payload) is Outcome.CLEAN
+    payload.write_bytes(payload.read_bytes() + b"AKIA" + b"Q" * 16)
+    assert scan_binary_file(payload) is Outcome.FLAGGED
 
 
 def test_tree_clean(tmp_path: Path) -> None:

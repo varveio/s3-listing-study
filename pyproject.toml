@@ -12,8 +12,8 @@ dependencies = [
     # Draft 2020-12 schemas in schemas/; the capsule gate is a real dependency
     # of this package, not something the CI runner provisions on the side.
     "jsonschema>=4.23",
-    # tools/aws-cli/adapter/normalize.sh (s3api-v2-yamlstream) shells out to
-    # `python3 -c 'import yaml'`. Declared here so `uv run` replays the corpus
+    # tools/aws-cli/adapter/normalize.py imports yaml for s3api-v2-yamlstream.
+    # Declared here so `uv run` replays the corpus
     # the same way a bare `python3` does; the oracle preflight also refuses to
     # judge without it rather than reporting a missing import as a port bug.
     "pyyaml>=6.0",

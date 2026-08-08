@@ -13,4 +13,4 @@ repos:
         # Type-check exactly what CI does. Passing changed filenames would
         # override pyproject's `files` and make the hook and CI disagree.
         pass_filenames: false
-        additional_dependencies: [duckdb, pytest]
+        additional_dependencies: [duckdb, pytest, jsonschema, types-jsonschema]

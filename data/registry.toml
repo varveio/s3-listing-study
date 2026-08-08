@@ -27,7 +27,7 @@ image = "amazon/aws-cli@sha256:eb85b2c72442c9eab0bdbe608095b9b909bc2a7136924124d
 
 # AWS Open Data — NOAA U.S. Climate Normals; sponsor-paid requests.
 # Access is anonymous (`--no-sign-request`); last verified during the recorded
-# 2026-07-16 smoke.
+# 2026-07-17 smoke.
 [buckets."noaa-normals-pds"]
 region = "us-east-1"
 manifest = "<data>/manifests/noaa-normals-pds.2026-07-17.tsv.gz"

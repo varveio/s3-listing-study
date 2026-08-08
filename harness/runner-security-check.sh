@@ -112,6 +112,10 @@ printf '%s' "$network_json" | jq -e \
 [ -f "$INSTALLED_HELPER" ] && [ ! -L "$INSTALLED_HELPER" ] || die "installed firewall-state helper is missing: $INSTALLED_HELPER"
 if [ "$UNPRIVILEGED" != yes ]; then
   [ "$(stat -c %u "$INSTALLED_HELPER")" = 0 ] || die "installed firewall-state helper is not root-owned"
+  helper_mode="$(stat -c %a "$INSTALLED_HELPER")"
+  case "$helper_mode" in
+    *[2367][0-7]|*[0-7][2367]) die "installed firewall-state helper is group/world writable (mode $helper_mode)" ;;
+  esac
 fi
 work="$(mktemp -d)"; trap 'rm -rf -- "$work"' EXIT
 "$HERE/security/render-policy.sh" "$work/rules4" "$work/rules6" \

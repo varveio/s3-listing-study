@@ -16,12 +16,14 @@ are also legitimate object sizes.
 from __future__ import annotations
 
 import hashlib
+import mmap
 import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
 from .errors import ReceiptError
+from .scan import LineTooLongError, bounded_lines
 
 PAYLOAD_CAP = 64 * 1024 * 1024
 """Bytes kept per stream. A run emitting gigabytes of retry noise is evidence of
@@ -61,17 +63,46 @@ def redact_line(line: bytes) -> bytes:
 def redact_file(src: Path, dst: Path) -> bool:
     """Redact ``src`` into ``dst``; return whether any byte changed.
 
-    Line by line, as ``sed`` reads it: no expression here may span a line break,
-    and a stream too large to hold in memory is exactly the case the 64 MiB cap
-    exists for.
+    Line by line: no expression here may span a line break. Each line is bounded
+    before regex processing; the separate 64 MiB payload cap still governs how
+    many successfully processed bytes are retained afterward.
     """
     changed = False
     with open(src, "rb") as reader, open(dst, "wb") as writer:
-        for line in reader:
-            out = redact_line(line)
-            changed = changed or out != line
-            writer.write(out)
+        try:
+            for line in bounded_lines(reader):
+                out = redact_line(line)
+                changed = changed or out != line
+                writer.write(out)
+        except LineTooLongError as exc:
+            raise ReceiptError(f"cannot redact {src}: {exc}") from None
     return changed
+
+
+def preserve_binary_file(src: Path, dst: Path) -> bool:
+    """Copy an opaque binary stream unchanged, or refuse bytes needing redaction.
+
+    Applying text substitutions to Parquet would silently corrupt the evidence.
+    Search the memory-mapped source with every redaction expression first; a
+    match therefore blocks publication for inspection instead of either leaking
+    it or rewriting the binary payload. The map bounds Python-side memory even
+    when the file contains no newlines.
+    """
+    try:
+        with open(src, "rb") as reader:
+            size = src.stat().st_size
+            if size:
+                with mmap.mmap(reader.fileno(), 0, access=mmap.ACCESS_READ) as payload:
+                    if any(pattern.search(payload) for pattern, _ in _REDACTIONS):
+                        raise ReceiptError(
+                            f"cannot safely redact opaque binary payload {src}: "
+                            "credential-shaped bytes require operator inspection"
+                        )
+            with open(dst, "wb") as writer:
+                shutil.copyfileobj(reader, writer, length=1 << 20)
+    except OSError as exc:
+        raise ReceiptError(f"cannot preserve opaque binary payload {src}: {exc}") from None
+    return False
 
 
 def truncate_head(path: Path, cap: int = PAYLOAD_CAP) -> int:

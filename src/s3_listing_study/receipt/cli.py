@@ -34,11 +34,17 @@ from s3_listing_study.registry import FIELDS, Registry, RegistryError
 from .errors import ReceiptError
 from .meta import RunFacts
 from .meta import render as render_meta
-from .redact import PAYLOAD_CAP, Payload, place, redact_file, truncate_head
+from .redact import PAYLOAD_CAP, Payload, place, preserve_binary_file, redact_file, truncate_head
 from .render import ReceiptBlockError, render
-from .scan import Outcome, TreeScanError, scan_file, scan_tree
+from .scan import Outcome, TreeScanError, scan_binary_file, scan_file, scan_tree
 
 STREAMS = ("stdout", "stderr")
+
+# The subject/mode/stream triples whose raw capture is an opaque binary format.
+# Keep this explicit: treating an arbitrary text stream as binary would bypass
+# the fail-closed line bound, while treating this Parquet stream as text rejects
+# legitimate newline-free output.
+BINARY_PAYLOAD_STREAMS = frozenset({("s3-fast-list", "list", "stdout")})
 
 
 def say(message: str) -> None:
@@ -76,14 +82,14 @@ def _scan_or_die(path: Path, label: str) -> None:
         )
 
 
-def _scan_or_quarantine(path: Path, label: str, out: Path) -> None:
+def _scan_or_quarantine(path: Path, label: str, out: Path, *, binary: bool = False) -> None:
     """Payload variant: on a flag, QUARANTINE the bytes before dying.
 
     ``$OUT/quarantine`` is outside the wrapper's ``$TMP``, so the cleanup trap
     never touches it and the evidence survives for inspection rather than being
     removed by the very failure that found it.
     """
-    outcome = scan_file(path)
+    outcome = scan_binary_file(path) if binary else scan_file(path)
     if outcome is Outcome.FLAGGED:
         quarantine = out / "quarantine"
         quarantine.mkdir(parents=True, exist_ok=True)
@@ -115,14 +121,16 @@ def _finish(args: argparse.Namespace) -> int:
     # no-op in the normal case and any change is surfaced loudly.
     redaction_changed = False
     for stream in STREAMS:
-        if redact_file(tmp / f"{stream}.raw", tmp / f"{stream}.txt"):
+        binary = (args.tool, args.mode, stream) in BINARY_PAYLOAD_STREAMS
+        redactor = preserve_binary_file if binary else redact_file
+        if redactor(tmp / f"{stream}.raw", tmp / f"{stream}.txt"):
             redaction_changed = True
             say(
                 f"WARNING: redaction altered {stream} bytes. Either a real secret was present,"
                 " or the\n        scrubber corrupted legitimate data. The verifier's verdict on"
                 " this payload is\n        NOT trustworthy until the orchestrator reviews it."
             )
-        _scan_or_quarantine(tmp / f"{stream}.txt", stream, out)
+        _scan_or_quarantine(tmp / f"{stream}.txt", stream, out, binary=binary)
 
     # Truncation is recorded loudly: the verifier refuses a completeness verdict
     # on a truncated stream. The full redacted stream was already scanned, so the

@@ -133,3 +133,22 @@ def test_unavailable_memory_is_not_rendered_as_zero() -> None:
     receipt = render(facts, stdout, stderr).decode()
     assert "| `peak_rss` | unavailable MB |" in receipt
     assert "0.0 MB | `VmHWM`" not in receipt
+
+
+@pytest.mark.parametrize(
+    "field", ["timeout", "docker_control_timeout_s", "docker_cleanup_timeout_s"]
+)
+def test_timeout_fields_use_the_single_markdown_escaper(field: str) -> None:
+    facts, stdout, stderr = _case("hostile")
+    forged = RunFacts(**{**facts.__dict__, field: "1|2"})
+    assert b"1&#124;2" in render(forged, stdout, stderr)
+
+
+@pytest.mark.parametrize(
+    "field", ["timeout", "docker_control_timeout_s", "docker_cleanup_timeout_s"]
+)
+def test_timeout_fields_reject_controls(field: str) -> None:
+    facts, stdout, stderr = _case("hostile")
+    forged = RunFacts(**{**facts.__dict__, field: "1\n2"})
+    with pytest.raises(ReceiptError):
+        render(forged, stdout, stderr)

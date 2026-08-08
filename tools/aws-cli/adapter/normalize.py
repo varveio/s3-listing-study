@@ -39,6 +39,7 @@ route the study currently has. ``tests/test_adapters.py`` pins both halves.
 from __future__ import annotations
 
 import datetime
+import re
 import sys
 from typing import IO, Any
 
@@ -163,7 +164,9 @@ def emit_yamlstream(out: IO[bytes], data: bytes) -> None:
             return UNEXPOSED
         if isinstance(value, datetime.datetime):
             return value.astimezone(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-        return str(value).replace("+00:00", "Z").replace("+0000", "Z")
+        stamp = str(value)
+        stamp = re.sub(r"(?<=\d{2}:\d{2}:\d{2})\.\d+(?=(?:Z|\+00:?00)$)", "", stamp)
+        return stamp.replace("+00:00", "Z").replace("+0000", "Z")
 
     def pages(doc: object) -> list[dict[str, Any]]:
         if isinstance(doc, list):

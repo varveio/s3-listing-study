@@ -251,6 +251,7 @@ class Stage:
         ).rstrip(os.pathsep)
         env[ENV_RC] = str(rc)
         env[ENV_STDERR] = message
+        env.pop(ENV_REFERENCE, None)
         if reference is not None:
             env[ENV_REFERENCE] = str(reference)
         proc = subprocess.run(

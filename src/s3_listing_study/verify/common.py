@@ -26,6 +26,9 @@ from .security import SecurityBoundary, docker_status
 Stream = tuple[str, str, str, str]
 """One recorded payload stream: name, resolved path, sha256, truncated (yes|no)."""
 
+NORMALIZE_TIMEOUT_S = 300
+"""Maximum wall time for one host-side adapter normalization."""
+
 
 def say(message: str) -> None:
     sys.stderr.write(f"verify-listing: {message}\n")
@@ -102,9 +105,19 @@ def normalize(adapter: str, mode: str, prefix: str, payload: Path) -> bytes:
     full-bucket run.
     """
     with payload.open("rb") as handle:
-        proc = subprocess.run(
-            [adapter, mode, prefix], stdin=handle, stdout=subprocess.PIPE, check=False
-        )
+        try:
+            proc = subprocess.run(
+                [adapter, mode, prefix],
+                stdin=handle,
+                stdout=subprocess.PIPE,
+                check=False,
+                timeout=NORMALIZE_TIMEOUT_S,
+            )
+        except subprocess.TimeoutExpired:
+            raise VerifierError(
+                f"normalize adapter timed out after {NORMALIZE_TIMEOUT_S}s on {payload} "
+                f"(mode {mode})"
+            ) from None
     if proc.returncode != 0:
         raise VerifierError(f"normalize adapter failed on {payload} (mode {mode})")
     return proc.stdout

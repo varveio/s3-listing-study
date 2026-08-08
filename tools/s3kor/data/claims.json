@@ -333,11 +333,11 @@
     },
     {
       "id": "list-versions-manifest-comparable-only-unversioned",
-      "statement": "list-versions is manifest-comparable only on an unversioned bucket: ListObjectVersions returns every version and delete marker and normalize.sh drops the version id to a bare key, so on a versioned bucket it legitimately emits duplicate and delete-marker-only keys.",
+      "statement": "list-versions is manifest-comparable only on an unversioned bucket: ListObjectVersions returns every version and delete marker and normalize.py drops the version id to a bare key, so on a versioned bucket it legitimately emits duplicate and delete-marker-only keys.",
       "scope": "correctness",
       "status": "supported",
       "disposition": "retained",
-      "qualification": "The smoke bucket's versioning state is unrecorded and normalize.sh does not enforce it, so this precondition is unestablished; the mode was credential-blocked regardless.",
+      "qualification": "The smoke bucket's versioning state is unrecorded and normalize.py does not enforce the unversioned-bucket precondition, so it remains unestablished; the mode was credential-blocked regardless.",
       "legacy_origins": ["PROSE-2"],
       "evidence": [
         {"kind": "source", "subject": "tested-variant", "repository": "https://github.com/sethkor/s3kor", "commit": "844fe3d", "path": "list.go", "lines": "109-151"},

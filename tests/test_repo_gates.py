@@ -11,6 +11,7 @@ into a false pass.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -44,6 +45,16 @@ def test_validate_capsule_reports_a_tool_that_has_no_directory(
 ) -> None:
     assert cli.main(["validate-capsule", "--tool", "not-a-tool"]) == 1
     assert "validate-capsule: missing" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("provenance", [None, "source", []])
+def test_malformed_provenance_is_a_validation_error_not_a_crash(provenance: object) -> None:
+    document = json.loads((Path("tools/aws-cli/data/tool.json")).read_text())
+    document["tested"]["version"]["provenance"] = provenance
+    errors: list[str] = []
+    capsule.validate_schema(document, Path("schemas/tool.schema.json"), "tool.json", errors)
+    assert errors
+    assert capsule.provenance_reference(document["tested"]["version"]) is None
 
 
 def test_source_anchor_subcommand_runs_its_regression_self_test(

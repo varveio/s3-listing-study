@@ -591,6 +591,40 @@ def test_a_short_text_row_is_refused_rather_than_padded() -> None:
     assert b"Expected Number of Columns: 5" in done.stderr
 
 
+def test_aws_yaml_string_timestamp_drops_fractional_seconds() -> None:
+    payload = (
+        b"Contents:\n"
+        b"- Key: a.txt\n"
+        b"  Size: 1\n"
+        b"  ETag: deadbeef\n"
+        b"  LastModified: '2026-03-16T14:41:50.123456+00:00'\n"
+        b"  StorageClass: STANDARD\n"
+    )
+    done = run("aws-cli", "s3api-v2-yamlstream", "", payload)
+    assert done.returncode == 0, done.stderr
+    assert done.stdout == b"a.txt\t1\tdeadbeef\t2026-03-16T14:41:50Z\tSTANDARD\n"
+
+
+def test_s7cmd_aligned_reconstructs_object_and_prefix_keys_with_spaces() -> None:
+    payload = (
+        f"{'2026-03-16T14:41:50Z':<25}  {12:>14}    dir/object  key.txt\n"
+        f"{'':25}  {'PRE':>14}    dir/common  prefix/\n"
+    ).encode()
+    done = run("s7cmd", "recursive-aligned", "", payload)
+    assert done.returncode == 0, done.stderr
+    assert [line.split(b"\t", 1)[0] for line in done.stdout.splitlines()] == [
+        b"  dir/object  key.txt",
+        b"  dir/common  prefix/",
+    ]
+
+
+def test_s7cmd_aligned_refuses_a_tab_in_a_key_instead_of_rewriting_it() -> None:
+    payload = f"{'2026-03-16T14:41:50Z':<25}  {12:>14}  \tdir/object.txt\n".encode()
+    done = run("s7cmd", "recursive-aligned", "", payload)
+    assert done.returncode != 0
+    assert b"cannot carry" in done.stderr
+
+
 class OneBatch:
     """A ResultSet stand-in: one batch of rows, then exhaustion."""
 
@@ -693,9 +727,11 @@ def test_s3kor_list_refuses_a_panic_whose_frames_are_tab_indented() -> None:
 def test_the_modes_no_committed_payload_reaches_are_the_known_ones(tool: str) -> None:
     """Pins today's coverage, per tool — see ``UNEXERCISED``.
 
-    Seven adapters have a payload for every mode they declare. Four modes across
-    three tools have none, and for those the differential replay says nothing
-    however green it is: their port rests on the fixture alone. If this fails,
+    Seven adapters have a payload for every mode they declare. Nine modes across
+    four other tools have none: five legacy modes plus Swath's four v0.2.0 modes,
+    whose capsule is observation-only and has no replayable committed payload
+    yet. For these modes the differential replay says nothing however green it
+    is: their port rests on the fixture alone. If this fails,
     either coverage arrived or the corpus stopped reaching a mode it used to.
     """
     assert unexercised_modes(REPO, tool) == UNEXERCISED.get(tool, set())
