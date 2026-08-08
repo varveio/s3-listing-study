@@ -135,8 +135,8 @@ Three tiers:
 | Tier | Path | Trust |
 | --- | --- | --- |
 | **Docs** | `docs/` | Authoritative — act on it without re-checking |
-| **Notes** | Internal working notes (not part of this repository) | Current but informal — may evolve |
-| **Archive** | Internal archive (not part of this repository) | Superseded; background only |
+| **Notes** | Working notes, in a private repository — not this one | Current but informal — may evolve |
+| **Archive** | Superseded material, in that same private repository | Superseded; background only |
 
 Write a **note** while thinking; promote to a **doc** only once the decision is
 settled, describes current reality rather than the deliberation, and should be
@@ -151,10 +151,13 @@ costly/external gate; write the handoff, then stop. Durable design thinking,
 reviews, audits, execution journals, and decision records stay in ordinary
 indexed notes. Handoffs are not indexed individually.
 
-**Handoff notes are git-ignored** — session exhaust can carry absolute paths and
-local context that should not land in a public repo. We use `.gitignore` rather
-than a per-clone `.git/info/exclude`, because an exclude doesn't survive a fresh
-clone: the first session from a new machine would otherwise commit the exhaust.
+**Handoff notes live in the private notes repository, never in this one** —
+session exhaust can carry absolute paths and local context that should not land
+in a public repo. Writing one into this tree puts it in the wrong repository even
+when nothing commits it. This repository's `.gitignore` excludes `notes/` as a
+backstop for exactly that mistake, and uses `.gitignore` rather than a per-clone
+`.git/info/exclude` because an exclude doesn't survive a fresh clone: the first
+session from a new machine would otherwise commit the exhaust.
 
 ## Tier posture
 
