@@ -1,9 +1,4 @@
-"""Command-line entry point: ``s3-listing-study``.
-
-Will grow subcommands ``smoke | build-manifest | scan-tree`` as the
-corresponding units land; ``verify``, ``receipt``, ``validate-capsule``, and
-``check-links``, and ``check-source-anchors`` are here.
-"""
+"""Command-line entry point for verification, receipts, and repository checks."""
 
 import argparse
 import sys

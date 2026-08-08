@@ -9,12 +9,12 @@ re-list did not run (ERROR, no attribution possible). That branch shells out to 
 against real S3 behind the runner-security gate, so offline it dies rc=3 and all
 three verdicts are untested.
 
-Tier 3 makes them reachable without weakening a single check:
+Tier 3 makes them reachable without weakening the production path:
 
 * the verifier under test is the shipped one — this checkout's
   `s3_listing_study.verify`, asserted by `test_the_verifier_under_test_is_this_checkouts`;
-* only `runner-security-lib.sh` is replaced in the staged tree, by a stub that
-  keeps the production argv construction and neuters just the runner preflight;
+* `tests/tier3/verifier_entry.py` injects `PreflightSkipped()` in process, so
+  runner readiness is bypassed without adding a production CLI flag;
 * `docker` is a fixture replayer on PATH (`fake-docker.sh`), driven by
   environment variables and argv alone.
 
@@ -163,23 +163,19 @@ class Outcome:
 
 
 class Stage:
-    """A staged harness tree, a staged manifest, and staged receipts under `root`."""
+    """A staged fake runtime, manifest, and receipts under ``root``."""
 
     def __init__(self, root: Path, manifest: Sequence[str] | None = None) -> None:
         self.root = root
-        self.harness = root / "harness"
         self.bin = root / "bin"
         self.verifier: list[str] = []
-        self._stage_harness()
+        self._stage_runtime()
         self.manifest = self._stage_manifest(manifest if manifest is not None else manifest_rows())
         self.manifest_sha256 = sha256_file(self.manifest)
 
     # ---------------------------------------------------------------- staging
-    def _stage_harness(self) -> None:
-        self.harness.mkdir(parents=True)
-        # The one substitution. harness/ itself is never written to: the shipped
-        # tree is the reference side of the port's differential.
-        shutil.copy2(TIER3 / "runner-security-lib.stub.sh", self.harness / "runner-security-lib.sh")
+    def _stage_runtime(self) -> None:
+        """Install only the fake ``docker`` executable used by reference re-lists."""
         self.bin.mkdir(parents=True)
         shutil.copy2(TIER3 / "fake-docker.sh", self.bin / "docker")
         (self.bin / "docker").chmod(0o755)

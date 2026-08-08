@@ -29,30 +29,25 @@ the repo exercises these paths.
 - the verifier under test is this checkout's `s3_listing_study.verify`, and
   `test_the_verifier_under_test_is_this_checkouts` asserts that — a stale install
   on the path would otherwise be judged instead. `harness/` is never written to.
-- `runner-security-lib.stub.sh` replaces only the sourced security library. It
-  keeps the production argv construction verbatim (the `timeout -k 2s 30s`
-  wrapper, `--pull=never`, the network profile, the evidence log driver) and the
-  production status strings, because those land in the ERROR report the tests
-  assert on. The single substantive change is `security_preflight` returning 0:
-  runner readiness is a property of the box, not of the implementation under
-  test, and it has its own suite in `harness/tests/`.
+- `verifier_entry.py` passes `PreflightSkipped()` through the verifier's
+  in-process security seam. Runner readiness is a property of the box, not of
+  the implementation under test, and it has its own suite in `harness/tests/`.
+  The seam is not installed and no production CLI argument can select it.
 - `fake-docker.sh` is installed as `docker` on `PATH` and replays a
   fixture-recorded reference listing. It honours `--prefix`, so a verifier that
   forgot to scope its re-list gets a whole-bucket reference, exactly as it would
   in production.
 
-## The stub is the oracle, so it is implementation-agnostic
+## The fake runtime contract is implementation-agnostic
 
 The fake docker's entire contract is argv plus three environment variables —
 `S3STUDY_FAKE_DOCKER_REFERENCE`, `_RC`, `_STDERR` — and the staged receipts,
 manifest and registry are ordinary on-disk artifacts. Nothing in it knows the
-verifier is bash. A ported verifier is dropped in by pointing `_stage_harness`
-at it; the cases, fixtures and assertions do not move. **The one shell-specific
-piece is the security-lib stub**, which exists only because the shell verifier
-`source`s that file: the port must offer an equivalent seam (an injectable
-security boundary, or a preflight it can be told to skip) or these four verdicts
-become unreachable again under the new implementation. That is a requirement on
-U3, recorded here rather than discovered later.
+verifier is Python. `PreflightSkipped` changes only the readiness check; Docker
+execution still goes through the production `SecurityBoundary`, so the fake sees
+the exact timeout, network, hardening, and evidence-log argv. The cases, fixtures,
+and assertions therefore exercise the shipped verifier while keeping the
+mandatory preflight unreachable from a production invocation.
 
 ## Fixtures
 

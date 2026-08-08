@@ -111,7 +111,7 @@ sufficient — it checks structure, not truthfulness.
 # structure, links, secrets
 uv run s3-listing-study validate-capsule --tool <slug>
 uv run s3-listing-study check-links
-harness/scan-tree.sh .
+uv run s3-listing-study receipt scan-tree .
 
 # every source anchor resolves at the commit the evidence cites
 uv run s3-listing-study check-source-anchors --tool <slug> --require-checked \

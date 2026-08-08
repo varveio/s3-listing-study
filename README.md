@@ -165,28 +165,32 @@ reports observations; it does not decide correctness by itself.
 
 ## Running the checks in this repo
 
-The harness and the verifier are POSIX shell and need only the usual command-line
-tools (`bash`, `awk`, `jq`, `sha256sum`). **The Python side needs the project
-installed**, because the listing adapters and the test harnesses import
-`s3_listing_study`:
+The data-shaped core is Python: registry and receipt handling, listing adapters,
+and the DuckDB-backed verifier, including its reference re-list Docker execution
+through `SecurityBoundary`. Bash owns the smoke subject's container lifecycle,
+measurement, and the live runner-security gate. **Install the project before
+using either layer**, because the shell wrapper invokes the package and the
+adapters import `s3_listing_study`:
 
 ```sh
 uv sync                     # or: python3 -m venv .venv && .venv/bin/pip install -e .
 uv run pytest               # offline: no bucket, no network, no data directory
 uv run python -m tests.differential          # replays every committed verdict (exit 0/1/42)
-uv run python -m tests.adapters aws-cli rclone   # shell vs Python adapters, byte-for-byte
+uv run pytest tests/test_adapters.py          # focused adapter contract and corpus coverage
 ```
 
 Without that install, a Python adapter invoked as `--normalize` fails with
 `ModuleNotFoundError` and the verifier reports it as a finding about the *tool*,
-which it is not. `tests/differential` and `tests/adapters` speak the same exit
-contract: `0` green, `1` a real mismatch, `42` ORACLE_UNAVAILABLE — the inputs
-could not be read, so nothing was verified. `42` is never a pass.
+which it is not. The differential replay uses exit `0` for green, `1` for a real
+mismatch, and `42` for ORACLE_UNAVAILABLE — the external inputs could not be
+read, so nothing was verified. `42` is never a pass. The focused adapter suite
+is ordinary offline pytest over committed synthetic fixtures and corpus
+coverage.
 
-The two gates above that replay committed receipts need the external data
-directory (`$S3_STUDY_DATA`, holding `manifests/` and `receipts/`); see
-[`tests/differential/README.md`](tests/differential/README.md). `uv run pytest`
-alone needs none of it — its fixtures are synthetic and committed.
+The differential replay needs the external data directory (`$S3_STUDY_DATA`,
+holding `manifests/` and `receipts/`); see
+[`tests/differential/README.md`](tests/differential/README.md). The pytest suites
+need none of it — their fixtures are synthetic and committed.
 
 A tool's adapter is `adapter/normalize.py`. The `normalize.sh` adapters the
 committed receipts were originally verified with have been removed; the ported
