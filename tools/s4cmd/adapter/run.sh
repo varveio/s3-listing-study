@@ -2,8 +2,8 @@
 # tools/s4cmd/adapter/run.sh <mode> <bucket> <region> [prefix]
 #
 # Prints the s4cmd argv for a listing mode, NUL-delimited, and nothing else.
-# The harness wrapper (run-attempt.sh) owns `docker run`, mounts, auth, timeout,
-# and appends this argv to the image ENTRYPOINT, which is ["s4cmd"] — so the
+# A derived image's shared Python attempt runner owns subject execution,
+# capture, auth starvation, and timeout. Its fixed prefix is ["s4cmd"], so the
 # argv here starts at the SUBCOMMAND, not the binary name.
 #
 # Bucket / region / prefix are always parameters (owner's rule: no executable

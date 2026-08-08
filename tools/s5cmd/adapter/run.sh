@@ -2,9 +2,9 @@
 # tools/s5cmd/adapter/run.sh <mode> <bucket> <region> [prefix]
 #
 # Prints the s5cmd argv to run inside the container, NUL-delimited (one
-# `printf '%s\0'` per argument), and nothing else. The wrapper (harness/
-# run-attempt.sh) owns `docker run`, mounts, auth injection, and the timeout, and
-# APPENDS this argv to the image ENTRYPOINT, which for peakcom/s5cmd is
+# `printf '%s\0'` per argument), and nothing else. A derived image's shared
+# Python attempt runner owns execution, capture, auth starvation, and timeout.
+# Its fixed command prefix for peakcom/s5cmd is
 # ["/s5cmd"] (verified: docker inspect -f '{{json .Config.Entrypoint}}'). So the
 # argv here starts at the s5cmd GLOBAL FLAGS / SUBCOMMAND, never at the binary.
 #

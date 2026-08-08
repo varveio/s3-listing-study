@@ -160,13 +160,19 @@ of:
 
 ## Reproduction
 
+The following command is historical and is not runnable in the current
+checkout: `harness/smoke-run.sh` has been retired. New attempts use the single
+derived-image contract in
+[`../../../harness/README.md`](../../../harness/README.md), and a pS3 image has
+not been implemented yet.
+
 The `list-anon` receipt was produced by the shared wrapper, never a bare `docker
 run`: `run.sh` only *prints* the argv (NUL-delimited) that the wrapper appends
-to the image entrypoint; `harness/run-attempt.sh` owns `docker run`, mounts,
+to the image entrypoint; `harness/smoke-run.sh` owns `docker run`, mounts,
 credential starving, timeout, and measurement.
 
 ```sh
-harness/run-attempt.sh \
+harness/smoke-run.sh \
   --tool ps3 --mode list \
   --image ps3-study@sha256:c0d7b655163832bf769af0dd5da037c17f6b7b1b519724b8291297b5ae539663 \
   --run-script tools/ps3/adapter/run.sh \
@@ -180,7 +186,7 @@ harness/run-attempt.sh \
 argument** (exit 3): pS3 has no `--prefix`/delimiter flag, so it cannot scope a
 listing, and silently listing the whole bucket under a "scoped" label would
 verify against the wrong expected set. The `_build/`, `help/`, and
-`silent-empty/` captures are not `run-attempt.sh` receipts — they are help/version,
+`silent-empty/` captures are not `smoke-run.sh` receipts — they are help/version,
 a source-compile attempt, and a bare-env observation respectively, captured
 directly. `run.sh`/`normalize.py` and everything under `research/` and
 `receipts/` are immutable inputs to this page — not modified for this

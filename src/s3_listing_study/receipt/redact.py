@@ -15,7 +15,6 @@ are also legitimate object sizes.
 
 from __future__ import annotations
 
-import gzip
 import hashlib
 import mmap
 import re
@@ -54,54 +53,30 @@ _REDACTIONS: tuple[tuple[re.Pattern[bytes], bytes], ...] = (
 )
 
 
-def _redact_line_with_count(line: bytes) -> tuple[bytes, int]:
-    """Return the redacted line and the number of source bytes matched.
-
-    Counting matched source bytes gives the machine result a stable, useful
-    redaction measure even when a replacement changes length. The public
-    ``redact_line`` and ``redact_file`` APIs retain their historical return
-    types for the production receipt path.
-    """
-    changed_bytes = 0
-    for pattern, replacement in _REDACTIONS:
-        def replace(match: re.Match[bytes], replacement: bytes = replacement) -> bytes:
-            nonlocal changed_bytes
-            rendered = match.expand(replacement)
-            if rendered != match.group(0):
-                changed_bytes += len(match.group(0))
-            return rendered
-
-        line = pattern.sub(replace, line)
-    return line, changed_bytes
-
-
 def redact_line(line: bytes) -> bytes:
     """Apply every substitution to one line, in order — as ``sed -e … -e …`` does."""
-    return _redact_line_with_count(line)[0]
+    for pattern, replacement in _REDACTIONS:
+        line = pattern.sub(replacement, line)
+    return line
 
 
-def redact_file_count(src: Path, dst: Path) -> int:
-    """Redact ``src`` into ``dst``; return matched source bytes changed.
+def redact_file(src: Path, dst: Path) -> bool:
+    """Redact ``src`` into ``dst``; return whether any byte changed.
 
     Line by line: no expression here may span a line break. Each line is bounded
     before regex processing; the separate 64 MiB payload cap still governs how
     many successfully processed bytes are retained afterward.
     """
-    changed_bytes = 0
+    changed = False
     with open(src, "rb") as reader, open(dst, "wb") as writer:
         try:
             for line in bounded_lines(reader):
-                out, line_changed = _redact_line_with_count(line)
-                changed_bytes += line_changed
+                out = redact_line(line)
+                changed = changed or out != line
                 writer.write(out)
         except LineTooLongError as exc:
             raise ReceiptError(f"cannot redact {src}: {exc}") from None
-    return changed_bytes
-
-
-def redact_file(src: Path, dst: Path) -> bool:
-    """Redact ``src`` into ``dst``; return whether any byte changed."""
-    return redact_file_count(src, dst) > 0
+    return changed
 
 
 def preserve_binary_file(src: Path, dst: Path) -> bool:
@@ -161,43 +136,6 @@ class Payload:
     note: str
 
 
-@dataclass(frozen=True)
-class CompressedPayload:
-    """Identity of an uncompressed safe stream and its stored gzip bytes."""
-
-    raw_bytes: int
-    raw_sha256: str
-    stored_bytes: int
-    stored_sha256: str
-
-
-def gzip_exclusive(source: Path, destination: Path) -> CompressedPayload:
-    """Store ``source`` as deterministic gzip without ever replacing evidence.
-
-    A failed write deliberately leaves its partial destination in place. That
-    makes the failure inspectable and ensures a retry refuses to mix attempts.
-    """
-    raw_bytes = source.stat().st_size
-    raw_sha256 = sha256_file(source)
-    try:
-        with (
-            destination.open("xb") as stored,
-            gzip.GzipFile(filename="", mode="wb", fileobj=stored, mtime=0) as archive,
-            source.open("rb") as reader,
-        ):
-            shutil.copyfileobj(reader, archive, length=1 << 20)
-    except FileExistsError:
-        raise ReceiptError(
-            f"attempt artifact {destination} already exists — refusing to overwrite evidence"
-        ) from None
-    return CompressedPayload(
-        raw_bytes=raw_bytes,
-        raw_sha256=raw_sha256,
-        stored_bytes=destination.stat().st_size,
-        stored_sha256=sha256_file(destination),
-    )
-
-
 def scope_tag(prefix: str) -> str:
     """``full``, or the prefix with everything outside ``[A-Za-z0-9._-]`` as ``_``.
 
@@ -233,8 +171,7 @@ def place(
     size = source.stat().st_size
     sha = sha256_file(source)
     if size <= INLINE_MAX:
-        destination = out / f"{stream}.txt"
-        shutil.copyfile(source, destination)
+        shutil.copyfile(source, out / f"{stream}.txt")
         # Inline payloads travel with run.meta. Record only the sibling
         # filename and declare its base in run.meta; embedding the caller's
         # relative --out spelling made old paths depend on an undeclared

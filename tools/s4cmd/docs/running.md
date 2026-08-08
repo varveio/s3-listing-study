@@ -128,9 +128,9 @@ before the first request).
 ## Run scripts and the concurrency-cap guard
 
 [`../adapter/run.sh`](../adapter/run.sh) prints only the s4cmd argv
-(NUL-delimited) for a mode; the wrapper owns `docker run`, mounts, credential
-injection/starving, timeout, and measurement. The argv starts at the
-**subcommand** because the image entrypoint is `["s4cmd"]`.
+(NUL-delimited) for a mode; a derived image's shared Python runner owns subject
+execution, capture, credential starvation, timeout, and measurement. The argv
+starts at the **subcommand** because the fixed tool prefix is `["s4cmd"]`.
 
 Because s4cmd's default thread count is `cpu_count*4` (`s4cmd.py:120-121`) — 32 on
 the runner, 4× the `CONCURRENCY_CAP=8` — every mode pins `-c` (claim
@@ -160,13 +160,18 @@ compatibility — are the `unverified` claims in
 [`../research/tool-page.md`](../research/tool-page.md) § "Open hypotheses for the
 benchmark".
 
-## Reproduction via `harness/run-attempt.sh`
+## Historical reproduction command (runner retired)
+
+The command below records how the committed receipts were produced, but it is
+not runnable in the current checkout. New attempts use the single derived-image
+contract described in [`../../../harness/README.md`](../../../harness/README.md);
+only the AWS CLI derived image is implemented so far.
 
 Every capability receipt was produced by the shared wrapper, never a bare `docker
-run`. To reproduce the canonical capability probe:
+run`. Historical command for the canonical capability probe:
 
 ```sh
-harness/run-attempt.sh \
+harness/smoke-run.sh \
   --tool s4cmd --mode recursive \
   --image 'localhost:5000/s4cmd-study@sha256:d458ef5096180e517840712e29b0b8705ec97cebf48f717cad2fea3805105813' \
   --run-script tools/s4cmd/adapter/run.sh \

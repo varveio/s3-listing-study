@@ -2,15 +2,15 @@
 # tools/s3kor/adapter/run.sh <mode> <bucket> <region> [prefix]
 #
 # Prints the argv to run INSIDE the s3kor container, NUL-delimited, and nothing
-# else. The wrapper (harness/run-attempt.sh) owns docker run, mounts, auth, and
-# the timeout, and APPENDS this argv to the image ENTRYPOINT.
+# else. A derived image's shared Python attempt runner owns subject execution,
+# capture, auth starvation, and timeout, and prepends the fixed tool command.
 #
 # Image ENTRYPOINT is ["/usr/local/bin/s3kor"] (verified with
 #   docker inspect -f '{{json .Config.Entrypoint}}' <image>)
 # so the argv here starts at the SUBCOMMAND, not the binary name.
 #
 # Bucket, region, and prefix are ALWAYS parameters — a hardcoded bucket name
-# anywhere here is a defect the wrapper's scan gate rejects.
+# anywhere here is a defect (owner's rule).
 #
 # s3kor listing surface (v0.0.37): a single `ls` subcommand with one listing
 # flag, --all-versions. There is no delimiter/shallow flag and no output-format

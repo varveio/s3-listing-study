@@ -2,17 +2,16 @@
 # tools/aws-cli/adapter/run.sh <mode> <bucket> <region> [prefix]
 #
 # Prints the aws-cli argv to run INSIDE the container, NUL-delimited (one
-# `printf '%s\0'` per argument) — nothing else. The shared wrapper
-# (harness/run-attempt.sh) owns `docker run`, mounts, auth injection, network,
-# and the timeout; this script never executes anything.
+# `printf '%s\0'` per argument) — nothing else. The scheduler passes this argv
+# to the derived image's Python attempt runner, which owns subject execution,
+# capture, timing, timeout, and finalization; this script never executes anything.
 #
 # The image ENTRYPOINT is `/usr/local/bin/aws` (verified via
 # `docker inspect -f '{{json .Config.Entrypoint}}'`), so the argv starts at the
 # SUBCOMMAND (`s3api` / `s3`), NOT the `aws` binary name.
 #
 # bucket / region / prefix are ALWAYS parameters — no bucket name is ever
-# embedded here (owner's rule; the wrapper greps this file for the bucket name
-# and refuses to run if it finds it).
+# embedded here (owner's rule).
 #
 # Anonymous access is `--no-sign-request` (global arg; sets botocore
 # signature_version=UNSIGNED, applies to both `s3` and `s3api`).

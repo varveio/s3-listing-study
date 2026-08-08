@@ -1,6 +1,6 @@
 """``python -m s3_listing_study.receipt`` — the wrapper's offline half.
 
-``harness/run-attempt.sh`` keeps everything that runs against the host in order —
+``harness/smoke-run.sh`` keeps everything that runs against the host in order —
 Docker lifecycle, argv, platform selection, the timeout, the cleanup trap, the
 memory sampling loop — and calls in here for the data-shaped work. Every
 subcommand runs either **before** the container is created or **after** it has
@@ -8,7 +8,7 @@ exited; none is on the measured clock, which is Docker's own
 ``FinishedAt`` minus ``StartedAt`` and the container's cgroup, never a wrapper-side
 timer.
 
-Operator-facing warnings keep the ``run-attempt:`` prefix. The split is an
+Operator-facing warnings keep the ``smoke-run:`` prefix. The split is an
 implementation detail of one wrapper; a reader watching a run should not have to
 learn that the truncation warning now comes from a different process.
 
@@ -16,7 +16,7 @@ Exit codes on the wrapper's path (``registry``, ``finish``): ``0`` clean, ``2``
 harness error, and never ``1`` — nothing in here is a tool result, so nothing in
 here may be reported as one. That is enforced rather than asserted: an
 unexpected exception would otherwise leave the interpreter's own ``1``, which
-``run-attempt.sh`` reserves for the subject tool, so :func:`main` maps anything
+``smoke-run.sh`` reserves for the subject tool, so :func:`main` maps anything
 unhandled to ``2``. The standalone ``scan-tree`` subcommand is not part of a run
 and keeps grep's three outcomes, ``1`` among them.
 """
@@ -24,7 +24,6 @@ and keeps grep's three outcomes, ``1`` among them.
 from __future__ import annotations
 
 import argparse
-import json
 import shutil
 import sys
 from collections.abc import Sequence
@@ -35,16 +34,7 @@ from s3_listing_study.registry import FIELDS, Registry, RegistryError
 from .errors import ReceiptError
 from .meta import RunFacts
 from .meta import render as render_meta
-from .redact import (
-    PAYLOAD_CAP,
-    CompressedPayload,
-    Payload,
-    gzip_exclusive,
-    place,
-    preserve_binary_file,
-    redact_file_count,
-    truncate_head,
-)
+from .redact import PAYLOAD_CAP, Payload, place, preserve_binary_file, redact_file, truncate_head
 from .render import ReceiptBlockError, render
 from .scan import Outcome, TreeScanError, scan_binary_file, scan_file, scan_tree
 
@@ -58,7 +48,7 @@ BINARY_PAYLOAD_STREAMS = frozenset({("s3-fast-list", "list", "stdout")})
 
 
 def say(message: str) -> None:
-    print(f"run-attempt: {message}", file=sys.stderr)
+    print(f"smoke-run: {message}", file=sys.stderr)
 
 
 def _registry(args: argparse.Namespace) -> int:
@@ -116,83 +106,10 @@ def _scan_or_quarantine(path: Path, label: str, out: Path, *, binary: bool = Fal
         )
 
 
-def _machine_result(
-    args: argparse.Namespace,
-    streams: dict[str, CompressedPayload],
-    dropped: dict[str, int],
-    redaction_changed_bytes: dict[str, int],
-) -> bytes:
-    """Render the minimal typed record for a local development attempt."""
-    timed_out = args.timed_out == "1"
-    exit_code = int(args.exit_code)
-    status = "timed_out" if timed_out else "completed" if exit_code == 0 else "failed"
-    result = {
-        "auth": args.auth,
-        "bucket": args.bucket,
-        "entrypoint": args.entrypoint,
-        "exit_code": exit_code,
-        "host_arch": args.host_arch,
-        "image": args.image,
-        "image_arch": args.image_arch,
-        "invocation": args.invocation,
-        "measured_process": args.measured_process,
-        "mode": args.mode,
-        "prefix": args.prefix,
-        "region": args.region,
-        "schema_version": 1,
-        "security": {
-            "cap_drop": args.container_cap_drop,
-            "development_log_policy": {
-                "config_sha256": args.docker_log_config_sha256,
-                "driver": args.docker_log_driver,
-                "maximum_bytes": 1 << 30,
-                "maximum_files": 1,
-                "option_keys_base64": args.docker_log_option_keys_base64,
-            },
-            "network": args.docker_network,
-            "network_mtu": args.network_mtu,
-            "no_new_privileges": args.container_no_new_privileges == "true",
-            "profile": args.security_profile,
-            "pull_policy": args.docker_pull_policy,
-        },
-        "started_at": args.utc_start,
-        "status": status,
-        "streams": {
-            stream: {
-                "compression": "gzip",
-                "dropped_bytes": dropped[stream],
-                "path": f"{stream}.raw.gz",
-                "raw_bytes": payload.raw_bytes,
-                "raw_sha256": payload.raw_sha256,
-                "redaction_changed_bytes": redaction_changed_bytes[stream],
-                "stored_bytes": payload.stored_bytes,
-                "stored_sha256": payload.stored_sha256,
-                "truncated": bool(dropped[stream]),
-            }
-            for stream, payload in streams.items()
-        },
-        "timed_out": timed_out,
-        "tool": args.tool,
-        "tool_version": args.tool_version or None,
-        "tool_version_source": args.tool_version_source,
-        "wall_seconds": float(args.wall_clock_s),
-    }
-    return (json.dumps(result, sort_keys=True, separators=(",", ":")) + "\n").encode()
-
-
 def _finish(args: argparse.Namespace) -> int:
     tmp = Path(args.tmp)
     out = Path(args.out)
     data_dir = Path(args.data_dir)
-
-    if args.machine_only:
-        occupied = sorted(path.name for path in out.iterdir())
-        if occupied:
-            raise ReceiptError(
-                "attempt directory already has artifacts: "
-                + ", ".join(occupied)
-                + " — refusing to overwrite evidence"
-            )
 
     # --- redact (full) → scan (full) → truncate → hash ------------------------
     # Redaction runs over the WHOLE raw stream first (a legitimate object key
@@ -202,57 +119,30 @@ def _finish(args: argparse.Namespace) -> int:
     # even when it sits beyond the 64 MiB cap, instead of being silently dropped
     # with the truncated tail. Anonymous runs sign nothing, so redaction is a
     # no-op in the normal case and any change is surfaced loudly.
-    redaction_changed_bytes: dict[str, int] = {}
+    redaction_changed = False
     for stream in STREAMS:
         binary = (args.tool, args.mode, stream) in BINARY_PAYLOAD_STREAMS
-        if binary:
-            preserve_binary_file(tmp / f"{stream}.raw", tmp / f"{stream}.txt")
-            changed_bytes = 0
-        else:
-            changed_bytes = redact_file_count(
-                tmp / f"{stream}.raw", tmp / f"{stream}.txt"
-            )
-        redaction_changed_bytes[stream] = changed_bytes
-        if changed_bytes:
+        redactor = preserve_binary_file if binary else redact_file
+        if redactor(tmp / f"{stream}.raw", tmp / f"{stream}.txt"):
+            redaction_changed = True
             say(
                 f"WARNING: redaction altered {stream} bytes. Either a real secret was present,"
-                " or the\n        scrubber corrupted legitimate data. Review this attempt before"
-                " using it."
+                " or the\n        scrubber corrupted legitimate data. The verifier's verdict on"
+                " this payload is\n        NOT trustworthy until the orchestrator reviews it."
             )
         _scan_or_quarantine(tmp / f"{stream}.txt", stream, out, binary=binary)
 
-    # Machine attempts retain the complete stream and use gzip for size. The
-    # historical human receipt path keeps its published 64 MiB cap; its verifier
-    # refuses completeness verdicts on anything truncated.
-    dropped = dict.fromkeys(STREAMS, 0)
-    if not args.machine_only:
-        for stream in STREAMS:
-            dropped[stream] = truncate_head(tmp / f"{stream}.txt", PAYLOAD_CAP)
-            if dropped[stream]:
-                say(
-                    f"[{args.tool}/{args.mode}] {stream} exceeded {PAYLOAD_CAP}-byte cap —"
-                    f" TRUNCATED, dropped {dropped[stream]} bytes (head kept)."
-                )
-
-    if args.machine_only:
-        compressed = {
-            stream: gzip_exclusive(tmp / f"{stream}.txt", out / f"{stream}.raw.gz")
-            for stream in STREAMS
-        }
-        # The record is created only after both streams are complete. A failed
-        # stream or JSON write remains visible and makes the directory
-        # non-reusable; no retry can silently mix attempt artifacts.
-        try:
-            with (out / "result.json").open("xb") as result_file:
-                result_file.write(
-                    _machine_result(args, compressed, dropped, redaction_changed_bytes)
-                )
-        except FileExistsError:
-            raise ReceiptError(
-                f"attempt artifact {out / 'result.json'} already exists — "
-                "refusing to overwrite evidence"
-            ) from None
-        return 0
+    # Truncation is recorded loudly: the verifier refuses a completeness verdict
+    # on a truncated stream. The full redacted stream was already scanned, so the
+    # dropped tail cannot hide a secret.
+    dropped = {}
+    for stream in STREAMS:
+        dropped[stream] = truncate_head(tmp / f"{stream}.txt", PAYLOAD_CAP)
+        if dropped[stream]:
+            say(
+                f"[{args.tool}/{args.mode}] {stream} exceeded {PAYLOAD_CAP}-byte cap —"
+                f" TRUNCATED, dropped {dropped[stream]} bytes (head kept)."
+            )
 
     payloads: dict[str, Payload] = {
         stream: place(
@@ -311,9 +201,7 @@ def _finish(args: argparse.Namespace) -> int:
         functional_env=args.functional_env,
         tool_version=args.tool_version,
         tool_version_source=args.tool_version_source,
-        redaction_changed_bytes=(
-            "yes" if any(redaction_changed_bytes.values()) else "no"
-        ),
+        redaction_changed_bytes="yes" if redaction_changed else "no",
         peak_rss_kb=args.peak_rss_kb,
         cgroup_peak_bytes=args.cgroup_peak_bytes,
         rss_samples=args.rss_samples,
@@ -447,11 +335,6 @@ def build_parser() -> argparse.ArgumentParser:
     finish.add_argument("--tmp", required=True)
     finish.add_argument("--out", required=True)
     finish.add_argument("--data-dir", required=True)
-    finish.add_argument(
-        "--machine-only",
-        action="store_true",
-        help="write only result.json and deterministic gzip streams for a local attempt",
-    )
     for name in _FACT_ARGS:
         finish.add_argument(f"--{name}", required=True)
 

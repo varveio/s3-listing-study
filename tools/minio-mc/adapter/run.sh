@@ -2,15 +2,15 @@
 # run.sh <mode> <bucket> <region> [prefix]
 #
 # Prints the argv to execute inside the minio/mc container, NUL-delimited.
-# It prints ONLY argv; the harness wrapper (run-attempt.sh) owns `docker run`,
-# the anonymous MC_HOST alias injection (via --env), timeout, and measurement.
+# It prints ONLY argv; a derived image's shared Python attempt runner owns
+# subject execution, byte capture, timeout, and measurement.
 #
 # The image ENTRYPOINT is ["mc"] (verified: docker inspect), so argv starts at
 # the global flags / subcommand, NOT at "mc".
 #
 # Anonymous access: mc has no --no-sign-request flag. It resolves credentials
-# from an alias. The wrapper is invoked with
-#   --env MC_HOST_s3=https://s3.amazonaws.com
+# from an alias. A future scheduler must declare
+#   MC_HOST_s3=https://s3.amazonaws.com
 # which defines an ad-hoc alias "s3" carrying NO embedded credentials; minio-go
 # then resolves SignatureAnonymous and issues unsigned requests. The alias NAME
 # ("s3") is not a bucket name; the bucket is always the $2 parameter.

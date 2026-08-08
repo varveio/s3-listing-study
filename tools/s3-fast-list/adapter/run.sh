@@ -3,10 +3,9 @@
 #
 # CONTRACT (harness/README.md § Contract):
 #   - This script NEVER runs the tool. It prints argv only, NUL-delimited
-#     (printf '%s\0' per argument), and the wrapper appends it to the image
-#     ENTRYPOINT and owns `docker run`, mounts, auth injection, and timeout.
+#     (printf '%s\0' per argument), for a derived image's shared attempt runner.
 #   - Bucket, region, and prefix are ALWAYS parameters. A hardcoded bucket name
-#     anywhere here is a defect the wrapper actively greps for and refuses.
+#     anywhere here is a defect (owner's rule).
 #
 # IMAGE ENTRYPOINT: the groundwork image (distroless/cc-debian12 runtime) sets
 # no ENTRYPOINT, so argv must start with the binary path /usr/bin/s3-fast-list.

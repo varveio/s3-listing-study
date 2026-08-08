@@ -71,12 +71,14 @@ Two failure modes, both observed:
 The vocabulary is defined in [`../methodology.md`](../methodology.md). What it
 means while authoring:
 
-- **No receipt means nothing is `confirmed`.** The schema enforces it —
-  `confirmed` requires `kind: "run"` evidence, and a run evidence entry must
-  point at a receipt-shaped string. The validator checks local existence; Git
-  tracking is enforced separately below. If the runner-security profile was not
-  provisioned, `harness/run-attempt.sh` was not used and no receipt exists, full
-  stop.
+- **Historical `confirmed` claims stay receipt-bound.** Current capsule ledgers
+  use `confirmed` for observations backed by committed historical
+  `receipt.md`/`run.meta` records, and those records remain the evidence a
+  reader can audit. The validator checks local existence; Git tracking is
+  enforced separately below. A new minimal `result.json` attempt is diagnostic
+  development output until the benchmark methodology/security amendment and a
+  correctness path land. Do not promote a claim to `confirmed` from such an
+  attempt, and do not invent a replacement evidentiary path in a capsule.
 - **Never initiate subject execution outside the mandatory runner boundary.**
   Failure to provision the runner-security profile is a stop condition, not an
   alternate observation path. If pre-existing output from an external or
@@ -85,9 +87,9 @@ means while authoring:
   produced, and keep it explicitly non-receipt. Such an observation may retain
   provenance and support only a proposition bounded to what its committed
   commands and artifacts make auditable. It cannot make a claim `confirmed` or
-  substitute for wrapper execution and verification. `receipts/` is scoped to
-  run records **and** preserved observations; the capsule must never let one
-  read as the other.
+  substitute for receipt-bound historical verification or the future benchmark
+  evidentiary path. `receipts/` is scoped to run records **and** preserved
+  observations; the capsule must never let one read as the other.
 - **Scale-dependent behaviour is not settleable at smoke scale.** Throughput,
   memory cliffs, OOM behaviour, high-concurrency behaviour and crash-resume stay
   `unverified` with a recorded reason, however suggestive a single run looked.
@@ -129,9 +131,10 @@ shellcheck -S warning tools/<slug>/adapter/*.sh
 
 Then the checks no script performs:
 
-- **No claim is `confirmed`** unless a receipt genuinely exists. Counting the
-  word is not the check — parse the ledger, and for every `confirmed` claim
-  assert it carries `kind: "run"` evidence whose `receipt` path exists on disk:
+- **No current claim is `confirmed`** unless its historical receipt genuinely
+  exists. Counting the word is not the check — parse the ledger, and for every
+  `confirmed` claim assert it carries `kind: "run"` evidence whose `receipt`
+  path exists on disk:
 
   ```sh
   python3 - <<'EOF'

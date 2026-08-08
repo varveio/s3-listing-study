@@ -135,7 +135,7 @@ def render(facts: RunFacts, stdout: Payload, stderr: Payload) -> bytes:
 
     out = f"# Smoke receipt — `{tool}` / mode `{mode}`\n\n"
     out += (
-        "Produced by `harness/run-attempt.sh`. Not a benchmark: this run makes no\n"
+        "Produced by `harness/smoke-run.sh`. Not a benchmark: this run makes no\n"
         "comparative claim and its duration is a fact about this run only.\n\n"
     )
 

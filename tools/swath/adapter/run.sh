@@ -3,11 +3,11 @@
 #
 # CONTRACT (harness/README.md):
 #   - Prints ONLY the argv, NUL-delimited (printf '%s\0' per arg). Never executes.
-#   - The wrapper APPENDS this argv to the image ENTRYPOINT, which for the swath
+#   - A derived image prepends the fixed command prefix, which for the swath
 #     image is ["java","-jar","/opt/swath/swath.jar"] — so argv starts at the
 #     TOP-LEVEL options / subcommand, NOT the binary name.
 #   - Bucket, region, prefix are ALWAYS parameters. A hardcoded bucket name here
-#     is a defect (owner's rule; the wrapper greps for it and refuses to run).
+#     is a defect (owner's rule).
 #
 # Usage: run.sh <mode> <bucket> <region> [prefix]
 #
@@ -69,7 +69,7 @@ case "$MODE" in
     emit -v "${common_tail[@]}" --format tsv --tune seed.mode=none ;;
   parquet-probe)
     # CAPABILITY PROBE ONLY. The parquet sink writes a dataset directory (-o) and
-    # refuses stdout; the wrapper mounts no volume, so the output is NOT
+    # refuses stdout; the attempt contract mounts no native-output volume, so the output is NOT
     # capturable or verifiable here (claim `file-sinks-not-harness-capturable`).
     # The probe only shows the file-sink path executes; the dataset dies with the
     # container.

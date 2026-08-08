@@ -2,14 +2,13 @@
 # tools/s3p/adapter/run.sh <mode> <bucket> <region> [prefix]
 #
 # Prints the tool argv to execute inside the container, NUL-delimited
-# (printf '%s\0' per argument). Nothing else. The harness wrapper
-# (harness/run-attempt.sh) owns `docker run`, mounts, auth, and the timeout, and
-# APPENDS this argv to the image ENTRYPOINT, which is ["s3p"] (see the image's
+# (printf '%s\0' per argument). Nothing else. The shared Python
+# attempt engine owns subject execution, capture, auth starvation, and timeout,
+# and prepends the fixed command prefix ["s3p"] (see the image's
 # Dockerfile). So argv here starts at the SUBCOMMAND, not the `s3p` binary.
 #
 # Bucket, region, and prefix are ALWAYS parameters — no bucket name is embedded
-# (owner's rule; run-attempt.sh greps this file for the bucket name and refuses if
-# it finds one).
+# (owner's rule).
 #
 # CONCURRENCY: every mode pins --list-concurrency 8 to honour this subject's
 # CONCURRENCY_CAP=8. s3p's default list-concurrency is 100, which would blow the
@@ -19,7 +18,7 @@
 # 8 is a smoke-scale ceiling, not a recommended production value.
 #
 # AUTH NOTE: s3p has no --no-sign-request / anonymous / unsigned option (neither
-# in v3.6.0 source nor in the smoked 3.7.2 build). Under the wrapper's
+# in v3.6.0 source nor in the smoked 3.7.2 build). Under the attempt engine's
 # credential-starved anonymous mode every mode below fails at AWS SDK credential
 # resolution before issuing a LIST. This is a recorded capability finding, not a
 # run.sh defect. See research/report.md § Smoke results.

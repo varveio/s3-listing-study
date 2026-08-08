@@ -4,8 +4,8 @@
 #   run.sh <mode> <bucket> <region> [prefix]
 #
 # Prints ONLY the argv to execute inside the container, one element per
-# `printf '%s\0'` record. It never runs anything — harness/run-attempt.sh owns
-# `docker run`, mounts, auth injection, and the timeout.
+# `printf '%s\0'` record. It never runs anything — a derived image's shared
+# Python attempt runner owns subject execution, capture, auth starvation, and timeout.
 #
 # IMPORTANT: the argv is APPENDED to the image ENTRYPOINT, which for the
 # s7cmd image is `/usr/local/bin/s7cmd` (verified with
@@ -13,7 +13,7 @@
 # `ls` SUBCOMMAND, not the binary name.
 #
 # Bucket, region, and prefix are ALWAYS parameters (owner's rule): a hardcoded
-# bucket name anywhere here is a defect the wrapper greps for and refuses.
+# bucket name anywhere here is a defect (owner's rule).
 #
 # Anonymous access uses s7cmd's own `--target-no-sign-request` (s3ls-rs
 # `S3Credentials::NoSign` -> `config_loader.no_credentials()`); `--target-region`

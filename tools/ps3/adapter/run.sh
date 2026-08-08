@@ -2,8 +2,8 @@
 # tools/ps3/adapter/run.sh <mode> <bucket> <region> [prefix]
 #
 # Prints the tool argv to run INSIDE the container, NUL-delimited, and nothing
-# else. The wrapper (harness/run-attempt.sh) owns docker run, mounts, auth, and
-# timeout. The image ENTRYPOINT is the pS3 binary itself, so argv here starts at
+# else. A derived image's shared Python attempt runner owns subject execution,
+# capture, auth starvation, and timeout. The fixed command prefix is the pS3 binary, so argv starts at
 # the SUBCOMMAND, not the binary name.
 #
 # Bucket, region, and prefix are always parameters — never hardcoded.

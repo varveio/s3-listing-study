@@ -4,19 +4,18 @@
 #   run.sh <mode> <bucket> <region> [prefix]
 #
 # Prints ONLY the argv (each argument followed by a NUL). It never executes
-# anything: harness/run-attempt.sh owns `docker run`, mounts, auth starvation, and
-# the timeout, and APPENDS this argv to the image ENTRYPOINT — which for
+# anything: a derived image's shared Python attempt runner owns subject
+# execution, capture, auth starvation, and timeout. The fixed prefix for
 # rclone/rclone is `["rclone"]`, so the argv starts at the SUBCOMMAND, not `rclone`.
 #
 # Bucket, region and prefix are ALWAYS parameters (owner's rule): nothing here
-# hardcodes a bucket name. The smoke wrapper greps this file for every registered
-# bucket name and refuses to run if it finds one.
+# hardcodes a bucket name.
 #
 # Anonymous access: rclone's S3 backend goes unsigned when no access_key_id /
 # secret_access_key are set and env_auth is false (its default) — it installs
 # aws.AnonymousCredentials [SRC backend/s3/s3.go:1508-1511 @ 5bc93a2a7]. We use the
 # on-the-fly connection-string remote `:s3,provider=AWS,region=R:BUCKET[/PREFIX]`
-# so no config file is needed; the wrapper additionally starves every AWS_* env
+# so no config file is needed; the attempt runner additionally starves AWS credential env
 # credential, so auth=anonymous is enforced, not merely configured.
 #
 # The "run it properly for listing" flags, on every lsjson mode:

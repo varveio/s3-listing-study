@@ -159,31 +159,19 @@ research budget to produce a truthful, useless `STATUS: blocked`.
    multipart ETag is deterministic for fixed parts — so the post-seed
    listing genuinely validates the seeding instead of comparing a snapshot
    to itself.
-3. **`harness/run-attempt.sh`** — the shared run wrapper. It **owns `docker
-   run` entirely** — image, mounts, the fixed contained network and security
-   profile from [`runner-security.md`](runner-security.md), credential
-   injection or starving, timeout, cleanup; the per-tool `run.sh` only emits
-   the argv to execute inside the container. It captures UTC date,
-   wall-clock, exit code, image digest, box spec (arch/cores/RAM/region),
-   auth mode, and **two memory numbers, both labeled**:
-   - `peak_rss` — kernel-tracked `VmHWM` of the tool's main process, read
-     from `/proc/<container-pid>/status`. This satisfies the methodology's
-     peak-RSS receipt field. For multi-process fan-out modes it covers the
-     main process only, and the receipt says so.
-   - `cgroup_peak_mem` — cgroup v2 `memory.peak` for the whole container
-     tree, page cache and kernel/socket memory included — useful, but never
-     to be presented as RSS.
-   The wrapper is also the **credential boundary**: anonymous-mode runs are
-   credential-starved — no credential env vars, no mounted profiles or
-   config, `AWS_EC2_METADATA_DISABLED=true`. Those are cooperative settings,
-   not the security boundary. The mandatory runner-security preflight
-   separately verifies the host-bound readiness record, contained bridge,
-   firewall state, metadata denial, and public S3 path before each networked
-   invocation. The current `local` profile refuses recognized cloud metadata;
-   a future cloud runner needs a provider adapter that proves there is no
-   attached identity through its control plane. The wrapper currently rejects
-   credentialed mode; no credential profile is mounted. Receipts produced
-   outside the wrapper don't count.
+3. **`python3 -m s3_listing_study.attempt`** — the single in-image subject
+   lifecycle. It directly executes the adapter-produced argv after the image's
+   fixed command prefix, captures binary streams, measures with a monotonic
+   clock, enforces timeout cleanup, deterministically compresses both streams,
+   and writes `result.json` last. The first derived image contract is
+   [`harness/images/aws-cli/`](../../harness/images/aws-cli/); a tool without a
+   derived image is not runnable through the new path yet. The host-side
+   scheduler must enforce the fixed network and security profile from
+   [`runner-security.md`](runner-security.md) before starting a networked image.
+   The runner removes AWS credential/profile variables and disables metadata
+   discovery as defense in depth, but those cooperative settings are not the
+   host security boundary. Historical `receipt.md`/`run.meta` records retain
+   their old shell-runner provenance and are not rewritten.
 4. **`python3 -m s3_listing_study.verify`** — the shared output verifier. Input: raw
    tool output (via the tool's `normalize.py` adapter, below), the manifest
    (cited by sha256), and a scope (full bucket, or a prefix, or delimiter
@@ -599,19 +587,21 @@ story is "generate N invocations":
    - `tools/TOOL/run.sh <mode> <bucket> <region> [prefix]`: **prints the tool
      argv, NUL-delimited** (`printf '%s\0'` per argument — plain
      whitespace-separated text can't represent an argument containing a
-     space) — nothing else; the wrapper owns `docker run`, mounts, auth
-     injection, and timeout. Bucket, region, and prefix are **always
+     space) — nothing else; the derived image's Python attempt runner owns
+     subject lifecycle, capture, auth starvation, and timeout. Bucket, region, and prefix are **always
      parameters** — a hardcoded bucket name anywhere in `run.sh` is a defect
      (owner's rule). One entry per smoked mode, growing as you go. **The
-     wrapper appends your argv to the image's `ENTRYPOINT`** — check
-     `docker inspect -f '{{json .Config.Entrypoint}}' <image>` before writing
-     a mode: if the entrypoint is already the tool binary, your argv starts
-     at the subcommand, not the binary name.
-2. Run each mode via `harness/run-attempt.sh` (containerized, fixed contained
-   bridge, mandatory runner-security preflight, timeout-enforced), which
-   consumes `run.sh`'s argv.
-3. The wrapper's receipt is staged under `tools/TOOL/receipts/smoke/<mode>/`
-   and must contain, per methodology § Run records (receipts): UTC date, exact invocation,
+     derived image prepends a fixed tool command prefix** — inspect the subject
+     entrypoint before defining that prefix. If the subject entrypoint is already
+     the tool binary, adapter argv starts at the subcommand, not the binary name.
+2. Run each mode only after its derived-image recipe exists. The scheduler runs
+   the mandatory security preflight, invokes the adapter, then starts that image
+   with the exact adapter argv. AWS CLI is the first implemented image; do not
+   revive the deleted shell runner or improvise another lifecycle for other tools.
+3. A minimal attempt writes `result.json`, `stdout.raw.gz`, and `stderr.raw.gz`.
+   These are machine artifacts, not automatically a methodology receipt. Before
+   promoting a run-dependent claim, the committed evidence must still contain,
+   per methodology § Run records (receipts): UTC date, exact invocation,
    auth mode, image digest + tool version, box spec (arch/cores/RAM/region),
    bucket identity + manifest snapshot date **and sha256** + the registry's
    measured-shape summary, wall-clock, exit code, `peak_rss` (main-process
@@ -620,19 +610,11 @@ story is "generate N invocations":
    output follows the no-data-in-repo rule: small text (≲100 KB) inline in
    the receipt dir; anything larger goes to
    `<data>/receipts/TOOL/` with its path **and sha256**
-   recorded in the receipt — redacted and secret-scanned *before* hashing
+   recorded in the evidence — redacted and secret-scanned *before* hashing
    (step 6), published alongside the manifests as release assets at
-   publication. The wrapper **caps each payload stream at 64 MiB** — beyond
-   that it truncates (after secret-scanning the full stream, so a credential
-   past the cap still flags rather than being silently dropped), records
-   `truncated=yes` with the dropped byte count in `run.meta`, and the
-   receipt says so loudly; a run that emits gigabytes of repeated retry
-   noise is evidence of the retrying, not worth publishing byte-for-byte. A tool page promotion that depends on an external payload is
+   publication. A tool page promotion that depends on an external payload is
    allowed only once that payload sits, hashed, at its recorded location —
-   a receipt whose evidence can't be produced is not a receipt. The wrapper
-   auto-fills the receipt fields it can (tool version among them); **grep
-   your receipts for `TODO` before the checkpoint** — an unfilled mandatory
-   field is a defective receipt, and nothing else will warn you. Non-mode
+   a receipt whose evidence can't be produced is not a receipt. Non-mode
    evidence is evidence too: build failures, adapter fixtures, capability
    probes go under `receipts/smoke/_build/`, `_adapter/`, `_capability/` —
    underscore dirs carry no verifier verdict and are exempt from the
@@ -661,17 +643,17 @@ story is "generate N invocations":
    (`--debug`, `-vv`, dump-headers), built-in API-call counters, request
    logs. Where per-request logging is driven by environment rather than
    flags (`RUST_LOG=debug` is the only route for many Rust tools), pass it
-   via the wrapper's `--env NAME=VALUE` passthrough — observability
-   variables only; the wrapper refuses credential-shaped names. Whether LISTs are actually serial or parallel is often visible this
+   only through a declared non-secret image/scheduler environment contract;
+   credential-shaped names remain forbidden. Whether LISTs are actually serial or parallel is often visible this
    way even at smoke scale. If the tool exposes nothing, note it and defer
    request-shape capture to the study's replay-server phase (the
    methodology's "Phase 2") — do not build interception infrastructure
    here.
-6. **Redact before staging — and before hashing.** Debug output can embed
+6. **Redact before staging.** Debug output can embed
    `Authorization` headers, presigned query params, tokens, and account IDs.
-   The **wrapper owns payload hygiene**: every payload is redacted, then
-   scanned, then hashed, in that order, automatically — the hash freezes the
-   bytes, so redaction always precedes it. `gitleaks` is deliberately **not**
+   The minimal attempt engine preserves and hashes canonical raw bytes; it does
+   not yet implement the evidentiary secret-scan/quarantine stage. Do not stage
+   or promote its output until that post-run control exists. `gitleaks` is deliberately **not**
    used (its entropy rules fire on S3 pagination cursors — every paginating
    tool trips it); the wrapper's scan matches credential **values by shape**
    (`AKIA…` key ids, hex signatures, long base64 assignments), not variable

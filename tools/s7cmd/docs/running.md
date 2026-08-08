@@ -96,14 +96,20 @@ versioned-bucket-fidelity gap.
 
 ## Reproduction
 
+The following command is historical and is not runnable in the current
+checkout: `harness/smoke-run.sh` has been retired. New attempts use the single
+derived-image contract in
+[`../../../harness/README.md`](../../../harness/README.md), and an s7cmd image has
+not been implemented yet.
+
 Every receipt above was produced by the shared harness, never by a bespoke
 script — `run.sh` only prints the argv (see its header for the exact
-contract); `harness/run-attempt.sh` owns `docker run`, mounts, credential
-injection/starving, timeout, measurement, and receipt-writing. To reproduce
+contract); `harness/smoke-run.sh` owns `docker run`, mounts, credential
+injection/starving, timeout, measurement, and receipt-writing. Historical command for
 any row:
 
 ```sh
-harness/run-attempt.sh \
+harness/smoke-run.sh \
   --tool s7cmd --mode <mode> \
   --image 's7cmd@sha256:07091182512e74cde4bb897a97b1fc9a586757560c5008ae8c701d7fdb6974da' \
   --run-script tools/s7cmd/adapter/run.sh \

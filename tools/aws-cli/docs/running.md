@@ -51,13 +51,18 @@ Each mode's exact argv-building logic lives in `adapter/run.sh` (do not edit; it
 immutable per this consolidation's scope) — it prints the argv the wrapper
 executes, never runs anything itself.
 
-## Reproducing a receipt via `harness/run-attempt.sh`
+## Historical reproduction command (runner retired)
+
+The command below records how the committed receipts were produced, but it is
+not runnable in the current checkout because `harness/smoke-run.sh` has been
+retired. New AWS CLI attempts use the derived-image contract in
+[`../../../harness/images/aws-cli/README.md`](../../../harness/images/aws-cli/README.md).
 
 Every receipt above was produced by the shared wrapper, never by running
-aws-cli directly on the host (methodology § Run records (receipts)). To reproduce one:
+aws-cli directly on the host (methodology § Run records (receipts)). Historical command:
 
 ```sh
-harness/run-attempt.sh \
+harness/smoke-run.sh \
   --tool aws-cli --mode s3api-v2-text \
   --image amazon/aws-cli@sha256:406ca32d31e640a56e8d52921b40528cc64bfa59ec9cb4ee1456db6746cb7292 \
   --run-script tools/aws-cli/adapter/run.sh \
@@ -66,7 +71,7 @@ harness/run-attempt.sh \
   --out <output-dir> --timeout 300 --tool-version 2.36.1
 ```
 
-`run-attempt.sh` owns `docker run` entirely — image, mounts, network,
+`smoke-run.sh` owns `docker run` entirely — image, mounts, network,
 credential injection or starving, timeout, cleanup, RSS/cgroup sampling, and
 the receipt (`receipt.md` + `run.meta`). It refuses a non-digest-pinned
 image and enforces the 300s/mode guardrail regardless of what `--timeout` is
@@ -101,7 +106,7 @@ actually run, 2026-07-17:
    receipts: `receipts/smoke/fanout/{shard-monthly,shard-daily,shard-annualseasonal,remainder}/`
    (the `normals-hourly/` shard reuses `s3api-v2-text-hourly/`).
 
-To reproduce: run each shard through `run-attempt.sh` exactly as in
+Historical procedure: each shard ran through `smoke-run.sh` exactly as in
 "Reproducing a receipt" above with the shard's `--prefix` (or the delimiter
 flags for the remainder), then invoke
 `s3-listing-study verify --scope union` pointed at the shard receipt

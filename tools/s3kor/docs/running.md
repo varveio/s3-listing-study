@@ -154,16 +154,21 @@ Routing this decision to the owner is carried in [`../README.md`](../README.md)
 § "Limitations and open questions" (benchmark eligibility is `conditional` in
 [`../data/tool.json`](../data/tool.json)).
 
-## Reproduction via `harness/run-attempt.sh`
+## Historical reproduction command (runner retired)
+
+The command below records how the committed receipts were produced, but it is
+not runnable in the current checkout. New attempts use the single derived-image
+contract described in [`../../../harness/README.md`](../../../harness/README.md);
+only the AWS CLI derived image is implemented so far.
 
 Both receipts were produced by the shared wrapper, never a bare `docker run`.
 `run.sh` only *prints* the argv (NUL-delimited) that the wrapper appends to the
 pinned image's entrypoint (`["/usr/local/bin/s3kor"]`); the wrapper owns
 `docker run`, mounts, credential injection/starving, the timeout, and
-measurement. To reproduce either row:
+measurement. Historical command for either row:
 
 ```sh
-harness/run-attempt.sh \
+harness/smoke-run.sh \
   --tool s3kor --mode list \
   --image 's3kor@sha256:b021869dfa78b7af85506a5d566ec6c7e7ed49d940b20d9e110a04fa5006f37c' \
   --run-script tools/s3kor/adapter/run.sh \

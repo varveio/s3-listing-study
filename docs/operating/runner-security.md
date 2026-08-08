@@ -40,43 +40,33 @@ separate disposable, identity-free builder; the acceptable fallback is the same
 disposable host used sequentially for build/pull first and gated execution
 second. During a campaign, no build and no mutable-tag pull occurs.
 
-Harness Docker control-plane calls are finite: ordinary inspect/create/start/
-wait/log/probe operations have a 30-second bound and cleanup operations have a
-10-second bound. Smoke lifecycle errors and version/reference/probe failure
-messages that include a wrapper status label both status 124 (TERM deadline) and
-137 (follow-up KILL) as timeouts. Readiness checks that report a failed
-invariant without retaining a raw wrapper status describe the bounded operation
-instead.
-Cleanup reconciliation is required after every
-nonzero Docker client result that could have created or started stable-name
-state—including status 125—not only after timeout statuses. Smoke subjects use
-a wrapper-owned stable name across separate create and start calls, so a timed-
-out call still leaves a deterministic bounded cleanup target. Probes and
-reference re-lists also use stable names when a timed-out `docker run` could
-otherwise outlive its client; the offline version probe is likewise networkless,
-no-pull, bounded, and stably named. These bounds stop the harness hanging
-indefinitely; they cannot prove cleanup succeeded while the Docker daemon
-remains unavailable, so discard rather than reuse a disposable runner after an
-unresolved cleanup failure.
+Host-side Docker control-plane calls remain finite: ordinary image inspection,
+container creation/start/probe operations have a 30-second bound and cleanup
+operations have a 10-second bound. New attempts run the shared Python attempt
+runner inside a derived subject image; Docker or Batch schedules that image and
+provides an output location, but does not time the tool, collect listing bytes,
+normalize output, or interpret the result. Those lifecycle and artifact
+semantics belong to the in-image runner. The host preflight, fixed bridge,
+firewall policy, digest-pinned/no-pull image discipline, and bounded cleanup
+remain outside the image and must pass before any networked subject starts.
 
-Every evidentiary listing container is created with
-`--log-driver=json-file --log-opt max-size=-1`: a local driver with rotation and
-size truncation disabled. Before starting a smoke subject, the harness inspects
-the effective container configuration and requires exactly `json-file` plus the
-single `max-size=-1` option. A rotating, size-limited, remote, additional, or
-unknown option fails closed. Only after that check does the smoke record capture
-the driver, a SHA-256 of the canonical configuration, and safely encoded option-
-key names. Raw option values are never persisted because rejected remote logging
-options can contain endpoints or credentials.
+New attempt output is captured by the in-image runner as byte streams on
+worker-local storage and then committed as attempt artifacts. Docker or Batch
+text logs are diagnostics only; they are not the listing-data channel and are
+not part of a completeness claim. A result whose raw bytes exist only in
+`docker logs`, a remote log driver, or a scheduler log stream is not a completed
+new attempt.
 
-Smoke output is later collected with `docker logs`, so the exact inspected
-contract is part of its completeness claim. Reference re-lists consume Docker's
-attached stdout directly rather than calling `docker logs`, but use the same
-explicit non-rotating local configuration to avoid daemon-default differences.
-Security probes do not produce listing evidence and may use the daemon's logging
-default; their output is never promoted into a run receipt. The unlimited log
-contract prevents Docker rotation, not host disk exhaustion; disposable-runner
-capacity remains an operator responsibility.
+Historical smoke receipts are not rewritten. They were produced by the retired
+shell wrapper, which created evidence containers with
+`--log-driver=json-file --log-opt max-size=-1`, inspected that effective logging
+configuration before start, captured stdout/stderr with `docker logs`, and
+recorded the validated driver/config hash in `run.meta`. Those fields remain
+facts about the committed historical `receipt.md`/`run.meta` records and the
+read-only verifier paths that audit them; they are not the channel for new
+attempt evidence. Reference re-lists for those historical verifier paths retain
+their recorded behavior. Security probes still do not produce listing evidence,
+and their output must not be promoted into a run record.
 
 The bridge alone is not the security boundary. The host firewall rejects
 bridge-originated access to the host, loopback, link-local/metadata, RFC 1918,
@@ -244,10 +234,11 @@ must provide util-linux `flock` and GNU `mv` with `--no-copy` and
 
 ## Identity claim
 
-Credential starvation in `run-attempt.sh` remains defense in depth: anonymous
-runs receive empty AWS credential values, nonexistent credential/config paths,
-and no mounted profiles. `AWS_EC2_METADATA_DISABLED=true` is cooperative SDK
-configuration, not proof that the runner is identity-free.
+Credential starvation in the in-image Python attempt runner remains defense in
+depth: anonymous child processes have AWS credential and profile variables
+removed and metadata discovery disabled, and receive no mounted profiles.
+`AWS_EC2_METADATA_DISABLED=true` is cooperative SDK configuration, not proof
+that the runner is identity-free.
 
 For the `local` adapter, the identity claim rests on using a dedicated non-cloud
 host plus rejection of recognized cloud metadata. A future GCP/AWS adapter must
