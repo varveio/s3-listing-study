@@ -1,0 +1,10 @@
+{
+  "tool": "aws-cli",
+  "subject_image": "amazon/aws-cli@sha256:406ca32d31e640a56e8d52921b40528cc64bfa59ec9cb4ee1456db6746cb7292",
+  "subject_python": "/usr/bin/python3",
+  "subject_workdir": "/aws",
+  "executable": ["/usr/local/bin/aws"],
+  "command": "adapter/command.py",
+  "normalizer": "adapter/normalize.py",
+  "adapter_bundle_sha256": "c6d0037bb65830ccb6ca3cd8d21bf9d974a8ed8e64e74d23799a49ec6b791f87"
+}

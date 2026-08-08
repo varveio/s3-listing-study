@@ -203,8 +203,8 @@ def run(options: Options) -> int:
     meta_path = receipt / "run.meta"
     if not meta_path.is_file():
         raise VerifierError(
-            f"no run.meta in {options.receipt} — this receipt was not produced by "
-            "harness/smoke-run.sh, and receipts produced outside the wrapper do not count"
+            f"no run.meta in {options.receipt} — this is not a standard wrapper-era "
+            "receipt, and receipts produced outside that evidence contract do not count"
         )
     meta = read_meta(meta_path)
     m_tool, m_mode, m_bucket = meta.get("tool", ""), meta.get("mode", ""), meta.get("bucket", "")

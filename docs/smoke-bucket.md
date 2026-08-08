@@ -1,9 +1,9 @@
 # Smoke-bucket registry
 
 The binding source for every executable artifact in the smoke campaign:
-harness scripts, per-tool `run.sh`, subject cards, and receipts take buckets
+harness code, per-tool `command.py`, subject cards, and receipts take buckets
 as parameters resolved from this file — a bucket name hardcoded anywhere
-executable is a defect. The smoke protocol this registry serves is
+executable is a defect. The historical smoke protocol this registry serves is
 [`tool-research-brief.md`](operating/tool-research-brief.md).
 
 **The machine-read source is [`data/registry.toml`](../data/registry.toml).**

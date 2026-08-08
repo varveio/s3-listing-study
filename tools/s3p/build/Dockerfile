@@ -27,6 +27,5 @@ FROM node@sha256:2cf067cfed83d5ea958367df9f966191a942351a2df77d6f0193e162b5febfc
 RUN npm install -g --ignore-scripts s3p@3.7.2 \
  && npm cache clean --force
 
-# ENTRYPOINT is the tool binary, so run.sh argv starts at the SUBCOMMAND
-# (see harness README "run.sh argv is appended to the image ENTRYPOINT").
+# ENTRYPOINT is the tool binary; the command adapter includes it as argv[0].
 ENTRYPOINT ["s3p"]

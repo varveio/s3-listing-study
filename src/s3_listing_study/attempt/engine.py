@@ -7,14 +7,16 @@ import ctypes
 import gzip
 import hashlib
 import json
+import math
 import os
 import platform
+import re
 import signal
 import subprocess
 import tempfile
 import time
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
@@ -25,13 +27,16 @@ from s3_listing_study.secret_scan import scan_binary_file
 
 SCHEMA_VERSION: Final = 1
 STREAM_NAMES: Final = ("stdout", "stderr")
-BASE_SUBJECT_ENV: Final[Mapping[str, str]] = MappingProxyType({
-    "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-    "HOME": "/nonexistent",
-    "LANG": "C.UTF-8",
-    "LC_ALL": "C.UTF-8",
-    "AWS_EC2_METADATA_DISABLED": "true",
-})
+IMAGE_DIGEST_RE: Final = re.compile(r"sha256:[0-9a-f]{64}")
+BASE_SUBJECT_ENV: Final[Mapping[str, str]] = MappingProxyType(
+    {
+        "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        "HOME": "/nonexistent",
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+        "AWS_EC2_METADATA_DISABLED": "true",
+    }
+)
 # Future tool-specific functional settings must be declared here (or through a
 # policy layer that replaces this seam), reviewed as non-secret, and recorded.
 # No ambient value is copied merely because it happens to exist in the runner.
@@ -49,19 +54,22 @@ class AttemptOptions:
     output: Path
     argv: tuple[str, ...]
     timeout_s: float
+    adapter_bundle_sha256: str
+    subject_image: str
+    derived_image: str
     term_grace_s: float = 5.0
     attempt_id: str = ""
     tool: str = "unknown"
     tool_version: str | None = None
-    subject_image: str | None = None
-    derived_image: str | None = None
     harness_revision: str | None = None
+    operation: str = "list"
     auth: str = "anonymous"
     mode: str | None = None
     bucket: str | None = None
     region: str | None = None
     prefix: str | None = None
     scope: str | None = None
+    concurrency: int | None = None
 
 
 @dataclass(frozen=True)
@@ -94,10 +102,16 @@ def _validate(options: AttemptOptions) -> AttemptOptions:
         raise AttemptError("the subject argv is empty")
     if any("\x00" in argument for argument in options.argv):
         raise AttemptError("the subject argv contains a NUL byte")
-    if options.timeout_s <= 0:
-        raise AttemptError("timeout must be greater than zero")
-    if options.term_grace_s < 0:
-        raise AttemptError("TERM grace must not be negative")
+    if not math.isfinite(options.timeout_s) or options.timeout_s <= 0:
+        raise AttemptError("timeout must be a finite number greater than zero")
+    if not math.isfinite(options.term_grace_s) or options.term_grace_s < 0:
+        raise AttemptError("TERM grace must be a finite nonnegative number")
+    if re.fullmatch(r"[0-9a-f]{64}", options.adapter_bundle_sha256) is None:
+        raise AttemptError("adapter bundle identity must be 64 lowercase hexadecimal digits")
+    if IMAGE_DIGEST_RE.fullmatch(options.subject_image) is None:
+        raise AttemptError("subject image identity must be sha256:<64 lowercase hex digits>")
+    if IMAGE_DIGEST_RE.fullmatch(options.derived_image) is None:
+        raise AttemptError("derived image identity must be sha256:<64 lowercase hex digits>")
     if options.auth != "anonymous":
         raise AttemptError("only anonymous S3 attempts are implemented")
     attempt_id = options.attempt_id or str(uuid.uuid4())
@@ -107,6 +121,7 @@ def _validate(options: AttemptOptions) -> AttemptOptions:
         output=options.output,
         argv=options.argv,
         timeout_s=options.timeout_s,
+        adapter_bundle_sha256=options.adapter_bundle_sha256,
         term_grace_s=options.term_grace_s,
         attempt_id=attempt_id,
         tool=options.tool,
@@ -114,27 +129,58 @@ def _validate(options: AttemptOptions) -> AttemptOptions:
         subject_image=options.subject_image,
         derived_image=options.derived_image,
         harness_revision=options.harness_revision,
+        operation=options.operation,
         auth=options.auth,
         mode=options.mode,
         bucket=options.bucket,
         region=options.region,
         prefix=options.prefix,
         scope=options.scope,
+        concurrency=options.concurrency,
     )
 
 
-def _prepare_output(output: Path) -> None:
+@contextlib.contextmanager
+def _open_output_directory(output: Path) -> Iterator[int]:
+    """Open/create ``output`` without following links and anchor it by descriptor."""
+    if not output.parts:
+        raise AttemptError("output path is empty")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    start = Path("/") if output.is_absolute() else Path(".")
+    descriptor = os.open(start, flags)
     try:
-        output.mkdir()
-    except FileExistsError:
-        pass
-    except FileNotFoundError:
-        raise AttemptError(f"output parent does not exist: {output.parent}") from None
-    if not output.is_dir():
-        raise AttemptError(f"output path is not a directory: {output}")
-    occupied = sorted(entry.name for entry in output.iterdir())
-    if occupied:
-        raise AttemptError(f"output directory is populated; refusing to overwrite: {output}")
+        parts = output.parts[1:] if output.is_absolute() else output.parts
+        if not parts:
+            raise AttemptError("output path must name a child directory")
+        for index, component in enumerate(parts):
+            is_leaf = index == len(parts) - 1
+            try:
+                next_descriptor = os.open(component, flags, dir_fd=descriptor)
+            except FileNotFoundError:
+                if not is_leaf:
+                    raise AttemptError(f"output parent does not exist: {output.parent}") from None
+                try:
+                    os.mkdir(component, mode=0o700, dir_fd=descriptor)
+                    next_descriptor = os.open(component, flags, dir_fd=descriptor)
+                except FileExistsError:
+                    try:
+                        next_descriptor = os.open(component, flags, dir_fd=descriptor)
+                    except OSError as exc:
+                        raise AttemptError(
+                            f"output path contains a symlink or non-directory component: {output}"
+                        ) from exc
+            except OSError as exc:
+                raise AttemptError(
+                    f"output path contains a symlink or non-directory component: {output}"
+                ) from exc
+            os.close(descriptor)
+            descriptor = next_descriptor
+        occupied = sorted(os.listdir(descriptor))
+        if occupied:
+            raise AttemptError(f"output directory is populated; refusing to overwrite: {output}")
+        yield descriptor
+    finally:
+        os.close(descriptor)
 
 
 def _enable_child_subreaper() -> None:
@@ -189,9 +235,7 @@ def _reap_adopted_child(pid: int) -> bool:
     try:
         reaped_pid, _status = os.waitpid(pid, os.WNOHANG)
     except ChildProcessError as exc:
-        raise AttemptError(
-            f"lost supervision of adopted child process {pid}"
-        ) from exc
+        raise AttemptError(f"lost supervision of adopted child process {pid}") from exc
     return reaped_pid == pid
 
 
@@ -206,9 +250,7 @@ def _inspect_adopted_children(
     for proc_pid in _direct_children() - baseline_children:
         facts = _process_facts(proc_pid)
         if facts is None:
-            raise AttemptError(
-                f"lost process facts for supervised process {proc_pid}"
-            )
+            raise AttemptError(f"lost process facts for supervised process {proc_pid}")
         state, child_pid, child_process_group = facts
         # A procfs mount can expose PIDs from an ancestor namespace while
         # Popen/waitpid use the runner's namespace. Match on NSpid instead of
@@ -346,9 +388,7 @@ def _execute(
             if not supervised_empty:
                 timed_out = True
                 term_sent = _signal_group(process_group, signal.SIGTERM)
-                grace_deadline_ns = time.monotonic_ns() + int(
-                    term_grace_s * 1_000_000_000
-                )
+                grace_deadline_ns = time.monotonic_ns() + int(term_grace_s * 1_000_000_000)
                 supervised_empty = _wait_for_supervised_processes(
                     process,
                     process_group,
@@ -402,47 +442,71 @@ def _sha256(path: Path) -> tuple[int, str]:
     return size, digest.hexdigest()
 
 
-def _fsync_directory(directory: Path) -> None:
-    descriptor = os.open(directory, os.O_RDONLY)
+def _publish_exclusive(
+    output_fd: int,
+    output_label: Path,
+    name: str,
+    writer: Callable[[BinaryIO], None],
+) -> tuple[int, str]:
+    temporary = f".{name}.{uuid.uuid4().hex}.tmp"
     try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
-
-
-def _publish_exclusive(destination: Path, writer: Callable[[BinaryIO], None]) -> None:
-    temporary = destination.parent / f".{destination.name}.{uuid.uuid4().hex}.tmp"
-    try:
-        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        descriptor = os.open(
+            temporary,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+            0o600,
+            dir_fd=output_fd,
+        )
         with os.fdopen(descriptor, "wb") as output:
             writer(output)
             output.flush()
             os.fsync(output.fileno())
+        stored_size, stored_digest = _sha256_at(output_fd, temporary)
         try:
-            os.link(temporary, destination)
+            os.link(
+                temporary,
+                name,
+                src_dir_fd=output_fd,
+                dst_dir_fd=output_fd,
+                follow_symlinks=False,
+            )
         except FileExistsError:
             raise AttemptError(
-                f"artifact already exists; refusing to overwrite: {destination}"
+                f"artifact already exists; refusing to overwrite: {output_label / name}"
             ) from None
-        _fsync_directory(destination.parent)
+        os.fsync(output_fd)
+        return stored_size, stored_digest
     finally:
-        temporary.unlink(missing_ok=True)
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(temporary, dir_fd=output_fd)
 
 
-def _gzip(source: Path, destination: Path) -> dict[str, object]:
+def _sha256_at(directory_fd: int, name: str) -> tuple[int, str]:
+    descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory_fd)
+    with os.fdopen(descriptor, "rb") as source:
+        digest = hashlib.sha256()
+        size = 0
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            size += len(chunk)
+            digest.update(chunk)
+    return size, digest.hexdigest()
+
+
+def _gzip(source: Path, output_fd: int, output_label: Path, name: str) -> dict[str, object]:
     raw_size, raw_digest = _sha256(source)
 
     def write_gzip(output: BinaryIO) -> None:
-        with gzip.GzipFile(
-            filename="", mode="wb", compresslevel=9, fileobj=output, mtime=0
-        ) as archive, source.open("rb") as raw:
+        with (
+            gzip.GzipFile(
+                filename="", mode="wb", compresslevel=9, fileobj=output, mtime=0
+            ) as archive,
+            source.open("rb") as raw,
+        ):
             for chunk in iter(lambda: raw.read(1024 * 1024), b""):
                 archive.write(chunk)
 
-    _publish_exclusive(destination, write_gzip)
-    stored_size, stored_digest = _sha256(destination)
+    stored_size, stored_digest = _publish_exclusive(output_fd, output_label, name, write_gzip)
     return {
-        "path": destination.name,
+        "path": name,
         "compression": "gzip",
         "raw_bytes": raw_size,
         "raw_sha256": raw_digest,
@@ -453,9 +517,7 @@ def _gzip(source: Path, destination: Path) -> dict[str, object]:
 
 def _scan_raw_streams(scratch: Path) -> dict[str, str]:
     """Scan complete raw streams before any artifact is published."""
-    outcomes = {
-        stream: scan_binary_file(scratch / f"{stream}.raw") for stream in STREAM_NAMES
-    }
+    outcomes = {stream: scan_binary_file(scratch / f"{stream}.raw") for stream in STREAM_NAMES}
     failed = [stream for stream, outcome in outcomes.items() if outcome is not ScanOutcome.CLEAN]
     if failed:
         details = ", ".join(f"{stream}={outcomes[stream].name.lower()}" for stream in failed)
@@ -514,69 +576,82 @@ def run_attempt(
     after the monotonic end timestamp and therefore cannot affect ``elapsed_ns``.
     """
     options = _validate(options)
-    _prepare_output(options.output)
     child_env = anonymous_environment(os.environ if source_env is None else source_env)
-    scratch_parent = options.output.parent
-    with tempfile.TemporaryDirectory(prefix=".s3-attempt-", dir=scratch_parent) as scratch_name:
-        scratch = Path(scratch_name)
-        execution = _execute(
-            options.argv,
-            scratch / "stdout.raw",
-            scratch / "stderr.raw",
-            timeout_s=options.timeout_s,
-            term_grace_s=options.term_grace_s,
-            env=child_env,
-        )
-        if post_measure_hook is not None:
-            post_measure_hook()
-        scan_outcomes = _scan_raw_streams(scratch)
-        streams = {
-            stream: _gzip(
-                scratch / f"{stream}.raw", options.output / f"{stream}.raw.gz"
+    with _open_output_directory(options.output) as output_fd:
+        with tempfile.TemporaryDirectory(prefix=".s3-attempt-") as scratch_name:
+            scratch = Path(scratch_name)
+            execution = _execute(
+                options.argv,
+                scratch / "stdout.raw",
+                scratch / "stderr.raw",
+                timeout_s=options.timeout_s,
+                term_grace_s=options.term_grace_s,
+                env=child_env,
             )
-            for stream in STREAM_NAMES
+            if post_measure_hook is not None:
+                post_measure_hook()
+            scan_outcomes = _scan_raw_streams(scratch)
+            streams = {
+                stream: _gzip(
+                    scratch / f"{stream}.raw",
+                    output_fd,
+                    options.output,
+                    f"{stream}.raw.gz",
+                )
+                for stream in STREAM_NAMES
+            }
+
+        result: dict[str, object] = {
+            "schema_version": SCHEMA_VERSION,
+            "attempt_id": options.attempt_id,
+            "tool": {"name": options.tool, "version": options.tool_version},
+            "images": {
+                "subject": options.subject_image,
+                "derived": options.derived_image,
+            },
+            "harness_revision": options.harness_revision,
+            "adapter_bundle_sha256": options.adapter_bundle_sha256,
+            "platform": {
+                "architecture": platform.machine(),
+                "operating_system": platform.system(),
+            },
+            "invocation": {
+                "argv": list(options.argv),
+                "authentication": options.auth,
+                "environment": child_env,
+            },
+            "logical_request": {
+                "schema_version": 1,
+                "operation": options.operation,
+                "mode": options.mode,
+                "bucket": options.bucket,
+                "region": options.region,
+                "prefix": options.prefix,
+                "authentication": options.auth,
+                "concurrency": options.concurrency,
+            },
+            "target": {
+                "mode": options.mode,
+                "bucket": options.bucket,
+                "region": options.region,
+                "prefix": options.prefix,
+                "scope": options.scope,
+            },
+            "timing": {
+                "clock": "time.monotonic_ns",
+                "elapsed_ns": execution.elapsed_ns,
+                "timeout_ns": int(options.timeout_s * 1_000_000_000),
+                "term_grace_ns": int(options.term_grace_s * 1_000_000_000),
+            },
+            "outcome": _outcome(execution),
+            "secret_scan": {"status": "clean", "streams": scan_outcomes},
+            "streams": streams,
         }
+        encoded = (json.dumps(result, sort_keys=True, separators=(",", ":")) + "\n").encode()
 
-    result: dict[str, object] = {
-        "schema_version": SCHEMA_VERSION,
-        "attempt_id": options.attempt_id,
-        "tool": {"name": options.tool, "version": options.tool_version},
-        "images": {
-            "subject": options.subject_image,
-            "derived": options.derived_image,
-        },
-        "harness_revision": options.harness_revision,
-        "platform": {
-            "architecture": platform.machine(),
-            "operating_system": platform.system(),
-        },
-        "invocation": {
-            "argv": list(options.argv),
-            "authentication": options.auth,
-            "environment": child_env,
-        },
-        "target": {
-            "mode": options.mode,
-            "bucket": options.bucket,
-            "region": options.region,
-            "prefix": options.prefix,
-            "scope": options.scope,
-        },
-        "timing": {
-            "clock": "time.monotonic_ns",
-            "elapsed_ns": execution.elapsed_ns,
-            "timeout_ns": int(options.timeout_s * 1_000_000_000),
-            "term_grace_ns": int(options.term_grace_s * 1_000_000_000),
-        },
-        "outcome": _outcome(execution),
-        "secret_scan": {"status": "clean", "streams": scan_outcomes},
-        "streams": streams,
-    }
-    encoded = (json.dumps(result, sort_keys=True, separators=(",", ":")) + "\n").encode()
+        def write_result(output: BinaryIO) -> None:
+            output.write(encoded)
 
-    def write_result(output: BinaryIO) -> None:
-        output.write(encoded)
-
-    _publish_exclusive(options.output / "result.json", write_result)
+        _publish_exclusive(output_fd, options.output, "result.json", write_result)
     runner_exit = 0 if execution.group_empty and not execution.escaped_descendants else 2
     return result, runner_exit

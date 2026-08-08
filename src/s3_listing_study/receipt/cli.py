@@ -1,22 +1,21 @@
-"""``python -m s3_listing_study.receipt`` — the wrapper's offline half.
+"""``python -m s3_listing_study.receipt`` — historical receipt auditing.
 
-``harness/smoke-run.sh`` keeps everything that runs against the host in order —
-Docker lifecycle, argv, platform selection, the timeout, the cleanup trap, the
-memory sampling loop — and calls in here for the data-shaped work. Every
+The retired shell receipt wrapper kept Docker lifecycle, argv, platform
+selection, timeout, cleanup, and memory sampling in order and called in here
+for data-shaped work. Every retained wrapper-era
 subcommand runs either **before** the container is created or **after** it has
 exited; none is on the measured clock, which is Docker's own
 ``FinishedAt`` minus ``StartedAt`` and the container's cgroup, never a wrapper-side
 timer.
 
-Operator-facing warnings keep the ``smoke-run:`` prefix. The split is an
-implementation detail of one wrapper; a reader watching a run should not have to
-learn that the truncation warning now comes from a different process.
+Operator-facing warnings use a receipt-specific prefix. The retired wrapper's
+name is preserved only in frozen evidence, not in current command output.
 
-Exit codes on the wrapper's path (``registry``, ``finish``): ``0`` clean, ``2``
+Historical exit codes on the wrapper's path (``registry``, ``finish``): ``0`` clean, ``2``
 harness error, and never ``1`` — nothing in here is a tool result, so nothing in
 here may be reported as one. That is enforced rather than asserted: an
 unexpected exception would otherwise leave the interpreter's own ``1``, which
-``smoke-run.sh`` reserves for the subject tool, so :func:`main` maps anything
+the wrapper reserved for the subject tool, so :func:`main` maps anything
 unhandled to ``2``. The standalone ``scan-tree`` subcommand is not part of a run
 and keeps grep's three outcomes, ``1`` among them.
 """
@@ -48,7 +47,7 @@ BINARY_PAYLOAD_STREAMS = frozenset({("s3-fast-list", "list", "stdout")})
 
 
 def say(message: str) -> None:
-    print(f"smoke-run: {message}", file=sys.stderr)
+    print(f"receipt: {message}", file=sys.stderr)
 
 
 def _registry(args: argparse.Namespace) -> int:

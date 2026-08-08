@@ -135,9 +135,10 @@ research budget to produce a truthful, useless `STATUS: blocked`.
 1. **`docs/smoke-bucket.md` — the bucket registry.** For each smoke bucket:
    name, region, manifest path **and sha256 digest**, snapshot date, a
    measured-shape summary (key count, top-level prefix fan-out, depth
-   histogram), and 2–3 designated prefixes for scoped checks. Harness
-   scripts, `run.sh`, and receipts all take bucket/manifest as parameters;
-   no executable artifact embeds a bucket name.
+   histogram), and 2–3 designated prefixes for scoped checks. The scheduler
+   passes bucket scope to the attempt; the manifest remains outside the measured
+   lifecycle and is supplied only to downstream verification and evidence
+   rendering. No executable artifact embeds a bucket name.
 2. **The reference manifest**, snapshotted with the **pinned harness client**
    — a digest-recorded `amazon/aws-cli` container, never the host CLI (the
    AWS CLI is itself a study subject; methodology §3a's no-host-runs rule has
@@ -150,7 +151,7 @@ research budget to produce a truthful, useless `STATUS: blocked`.
    with no manifest re-baseline and no orphaned receipts — whereas a
    re-baseline after receipts exist orphans every one of them (the verifier
    binds each receipt to the registry digest it ran against). **Data artifacts never enter the repo**
-   (owner's rule): the registry's sha256 is the binding, agents verify the
+   (owner's rule): the registry's sha256 is the evidence binding, agents verify the
    local file against it, and the artifacts are published as immutable
    release assets when the repo goes public — so third-party verification
    survives without git carrying data blobs. For the *seeded* edge-case
@@ -159,12 +160,14 @@ research budget to produce a truthful, useless `STATUS: blocked`.
    multipart ETag is deterministic for fixed parts — so the post-seed
    listing genuinely validates the seeding instead of comparing a snapshot
    to itself.
-3. **`python3 -m s3_listing_study.attempt`** — the single in-image subject
-   lifecycle. It directly executes the adapter-produced argv after the image's
-   fixed command prefix, captures binary streams, measures with a monotonic
+3. **`/usr/bin/python3 -I /opt/s3-listing-study/attempt.pyz`** — the fixed
+   entrypoint for the single in-image subject lifecycle. The final derived image
+   contains the zipapp, not an installed `s3_listing_study` package. It accepts a typed logical request, resolves complete argv through
+   the image-bundled command driver, captures binary streams, measures with a monotonic
    clock, enforces timeout cleanup, deterministically compresses both streams,
-   and writes `result.json` last. The first derived image contract is
-   [`harness/images/aws-cli/`](../../harness/images/aws-cli/); a tool without a
+   and writes `result.json` last. A manifest is not an attempt input: it enters
+   only a separately requested downstream verification/evidence step. The first derived image contract is
+   [`harness/derived-image/`](../../harness/derived-image/); a tool without a
    derived image is not runnable through the new path yet. The host-side
    scheduler must enforce the fixed network and security profile from
    [`runner-security.md`](runner-security.md) before starting a networked image.
@@ -570,7 +573,7 @@ For each mode — plain/recursive list; parallel or hinted list; each output
 format; delimiter/shallow mode; the fan-out workaround if the tool's parallel
 story is "generate N invocations":
 
-1. **Write the tool's adapter and runner as you go** — these are deliverables,
+1. **Write the tool's adapters as you go** — these are deliverables,
    not conveniences:
    - `tools/TOOL/adapter/normalize.py <mode> [prefix]`: reads the tool's raw output
      for that mode on stdin, emits
@@ -584,20 +587,26 @@ story is "generate N invocations":
      path-relative names needs it to reconstruct full keys — without it such
      modes are normalizable only at the bucket root. The verifier calls this
      adapter; the benchmark phase inherits it.
-   - `tools/TOOL/run.sh <mode> <bucket> <region> [prefix]`: **prints the tool
-     argv, NUL-delimited** (`printf '%s\0'` per argument — plain
-     whitespace-separated text can't represent an argument containing a
-     space) — nothing else; the derived image's Python attempt runner owns
-     subject lifecycle, capture, auth starvation, and timeout. Bucket, region, and prefix are **always
-     parameters** — a hardcoded bucket name anywhere in `run.sh` is a defect
-     (owner's rule). One entry per smoked mode, growing as you go. **The
-     derived image prepends a fixed tool command prefix** — inspect the subject
-     entrypoint before defining that prefix. If the subject entrypoint is already
-     the tool binary, adapter argv starts at the subcommand, not the binary name.
-2. Run each mode only after its derived-image recipe exists. The scheduler runs
-   the mandatory security preflight, invokes the adapter, then starts that image
-   with the exact adapter argv. AWS CLI is the first implemented image; do not
+   - `tools/TOOL/adapter/command.py`: exports typed
+     `build_command(CommandRequest) -> tuple[str, ...]`, returning complete
+     subject argv including its executable. The generic image bundles the
+     selected adapter, and its in-image driver resolves the scheduler's typed
+     logical request; no shell, raw argv escape hatch, NUL stream, or whitespace
+     serialization sits at the boundary. The Python attempt runner owns subject lifecycle,
+     capture, auth starvation, and timeout. Bucket, region, and prefix are
+     **always parameters** — a hardcoded bucket name in the adapter is a defect
+     (owner's rule). Inspect the subject entrypoint before defining its fixed
+     executable. If the subject entrypoint is already the tool binary, that
+     binary becomes element zero because the shared derived image replaces the
+     subject entrypoint. Optional concurrency is a typed field; an adapter must
+     explicitly declare its supported range or reject it.
+2. Run each mode only after its shared-derived-image registration exists. The
+   scheduler runs the mandatory security preflight, then starts that image with
+   logical request fields only. AWS CLI is the first registered image; do not
    revive the deleted shell runner or improvise another lifecycle for other tools.
+   Build the registered image only through
+   `s3-listing-study build-derived-image --tool TOOL --tag TAG`; subject image,
+   workdir, and component paths are capsule-owned rather than free build arguments.
 3. A minimal attempt writes `result.json`, `stdout.raw.gz`, and `stderr.raw.gz`.
    These are machine artifacts, not automatically a methodology receipt. Before
    promoting a run-dependent claim, the committed evidence must still contain,
@@ -793,7 +802,7 @@ orchestrator to route.
 ### Stage E — cross-model critical review
 
 Run the Codex CLI as a separate reviewer over **everything you produced**
-— report, reconciliation, receipts, the tool page diff, `run.sh`,
+— report, reconciliation, receipts, the tool page diff, `command.py`,
 `normalize.py`, Dockerfile, and any harness files you authored:
 
 ```sh
@@ -809,7 +818,7 @@ codex exec -m gpt-5.6-sol -c model_reasoning_effort=xhigh \
    research/reconciliation.md, every receipt under receipts/smoke/ INCLUDING
    external payloads under <data>/receipts/TOOL/ (verify each
    against the sha256 its receipt cites, and check them for secrets),
-   run.sh, normalize.py, the Dockerfile if present, and the uncommitted
+   command.py, normalize.py, the Dockerfile if present, and the uncommitted
    tool page edits (git diff tools/TOOL/README.md). Re-verify every [SRC]
    anchor against the checkout at <sources>/TOOL (confirm the
    pinned SHA first) by targeted lookup — open each cited file:line and
@@ -858,9 +867,11 @@ tools/TOOL/
     report.md                  # the source-first report (below)
     reconciliation.md          # Stage D
     codex-review.md            # Stage E findings + resolutions
-  Dockerfile                   # only if upstream ships no image
-  run.sh                       # <mode> <bucket> <region> [prefix] — NUL-delimited argv, parameterized
-  normalize.py                 # <mode> [prefix]; raw output → key/size/etag/mtime/storage_class lines
+  adapter/
+    command.py                 # typed friendly parameters → exact argv
+    normalize.py               # argparse CLI; raw output → five-field contract
+  build/Dockerfile             # only for a study-owned subject build
+  build/image.json             # optional inputs to the shared derived-image recipe
   receipts/smoke/<mode>/...    # Stage C receipts
 ```
 

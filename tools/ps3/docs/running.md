@@ -31,8 +31,8 @@ that works — fetched by content hash from the pinned commit:
   binary exposes three subcommands whose source is absent (§ Source-build
   failure). It is pinned by content hash precisely because the repo cannot
   regenerate it.
-- `ENTRYPOINT ["/usr/local/bin/pS3"]`, so `run.sh` argv starts at the
-  subcommand.
+- `ENTRYPOINT ["/usr/local/bin/pS3"]`; `command.py` preserves that fixed-prefix
+  convention.
 
 Built image:
 `ps3-study@sha256:c0d7b655163832bf769af0dd5da037c17f6b7b1b519724b8291297b5ae539663`,
@@ -160,34 +160,23 @@ of:
 
 ## Reproduction
 
-The following command is historical and is not runnable in the current
-checkout: `harness/smoke-run.sh` has been retired. New attempts use the single
+The committed receipt is immutable wrapper-era evidence. New attempts use the single
 derived-image contract in
 [`../../../harness/README.md`](../../../harness/README.md), and a pS3 image has
 not been implemented yet.
 
 The `list-anon` receipt was produced by the shared wrapper, never a bare `docker
-run`: `run.sh` only *prints* the argv (NUL-delimited) that the wrapper appends
-to the image entrypoint; `harness/smoke-run.sh` owns `docker run`, mounts,
-credential starving, timeout, and measurement.
+run`, and retains its exact original invocation. The current `command.py` is a
+typed command compiler with no shell or NUL transport. The attempt engine owns
+execution, capture, timeout, and measurement.
 
-```sh
-harness/smoke-run.sh \
-  --tool ps3 --mode list \
-  --image ps3-study@sha256:c0d7b655163832bf769af0dd5da037c17f6b7b1b519724b8291297b5ae539663 \
-  --run-script tools/ps3/adapter/run.sh \
-  --bucket noaa-normals-pds --region us-east-1 \
-  --auth anonymous \
-  --out tools/ps3/receipts/smoke/_capability/list-anon
-```
-
-`run.sh` maps `list` → `list-objects-v2`, `list-versions` →
+`command.py` maps `list` → `list-objects-v2`, `list-versions` →
 `list-object-versions`, `head` → `head-objects`. It **refuses a prefix
 argument** (exit 3): pS3 has no `--prefix`/delimiter flag, so it cannot scope a
 listing, and silently listing the whole bucket under a "scoped" label would
 verify against the wrong expected set. The `_build/`, `help/`, and
-`silent-empty/` captures are not `smoke-run.sh` receipts — they are help/version,
+`silent-empty/` captures are not standard wrapper-era receipts — they are help/version,
 a source-compile attempt, and a bare-env observation respectively, captured
-directly. `run.sh`/`normalize.py` and everything under `research/` and
-`receipts/` are immutable inputs to this page — not modified for this
-consolidation.
+directly. `command.py` and `normalize.py` are living integration code and changed
+for the typed Python cutover. Everything under `research/` and `receipts/`
+remains immutable evidence.

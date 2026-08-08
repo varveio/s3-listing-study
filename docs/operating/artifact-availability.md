@@ -15,8 +15,8 @@ but the complete public evidence package is not yet available.**
 > records and migration stratum were removed together, and no claim cites them.
 > Every count on this page is stated after that removal, and the figures below
 > therefore differ from the 2026-07-20 wave totals. Swath's current evidence is
-> observation rather than receipt: its runs were made outside
-> `harness/smoke-run.sh`, because the runner-security profile was not
+> observation rather than receipt: its runs were made outside the retired
+> wrapper-era evidence path, because the runner-security profile was not
 > provisioned. Historical
 receipts remain immutable while their subject stands: they are never edited,
 and are removed only when the whole subject is retired under
@@ -28,7 +28,7 @@ recreated and presented as the bytes from an old run.
 ## Receipt inventory
 
 The tree contains 74 `receipt.md` files. Seventy-three are standard
-`harness/smoke-run.sh` records with sibling `run.meta`; one is the separate pS3
+wrapper-era records with sibling `run.meta`; one is the separate pS3
 build-attempt receipt. Of the 73 wrapper records, 57 have an ordinary
 `verify.md`, and two fan-out groups have `union-verify.md` records. The remaining
 wrapper records are blockers, capability/debug probes, union shards, or

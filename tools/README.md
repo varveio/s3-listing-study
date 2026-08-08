@@ -116,9 +116,10 @@ Every runnable tool uses the same layout:
 - `data/` — machine-readable identity (`tool.json`) and the claims ledger
   (`claims.json`)
 - `docs/` — how it works (`mechanism.md`) and how to run it (`running.md`)
-- `adapter/` — harness integration, with `fixtures/` where a tool has
-  synthetic adapter QA
-- `build/` — the study's local image recipe, only where a tool needs one
+- `adapter/` — typed Python command compilation and normalization, with
+  `fixtures/` where a tool has synthetic adapter QA
+- `build/` — local subject recipes or declarative shared-derived-image inputs,
+  only where a tool needs them
 - `research/` — the frozen research trail the page was derived from
 - `receipts/` — immutable run records
 

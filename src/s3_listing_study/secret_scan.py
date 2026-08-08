@@ -31,9 +31,7 @@ def bounded_lines(handle: BinaryIO) -> Iterator[bytes]:
         if not line:
             return
         if len(line) > LINE_SIZE_LIMIT:
-            raise LineTooLongError(
-                f"line exceeds the {LINE_SIZE_LIMIT}-byte receipt safety limit"
-            )
+            raise LineTooLongError(f"line exceeds the {LINE_SIZE_LIMIT}-byte receipt safety limit")
         yield line
 
 
@@ -131,8 +129,7 @@ def scan_tree(root: Path) -> tuple[list[Path], int]:
                     continue
             except OSError as exc:
                 raise TreeScanError(
-                    f"cannot stat {path} ({exc.strerror}) "
-                    "— a traversal failure is not a clean pass"
+                    f"cannot stat {path} ({exc.strerror}) — a traversal failure is not a clean pass"
                 ) from None
             scanned += 1
             outcome = scan_file(path)

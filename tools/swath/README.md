@@ -43,7 +43,7 @@ Upstream's mode surface and what this study exercised are separate.
 | `list --format jsonl \| tsv \| table` | Fully enumerate a bucket to a text stream. | `jsonl` in two direct observations. A four-mode adapter summary is preserved but is not independently auditable and supports no canonical runtime claim. |
 | `list --tune seed.mode=shallow \| none` | Change whether an up-front `delimiter=/` descent runs at all — a request-pattern change, not an output change. | `shallow` in the two direct observations. `none` appears only in the unauditable adapter summary, so the cost arms remain uncompared. |
 | `list --tune seed.mode=hints` | Declared hinted seeding. | Not run; it throws at seed time, so there is no hinted mode. |
-| `list --format parquet` / `--sort` | Write a multi-part, optionally globally key-sorted Parquet dataset to a directory. | Not run and not capturable: the harness bind-mounts nothing. Parquet is also Swath's only byte-exact output path. |
+| `list --format parquet` / `--sort` | Write a multi-part, optionally globally key-sorted Parquet dataset to a directory. | Not run; the current driver writes `/tmp/swout`, which the minimal attempt contract does not publish. Parquet is also Swath's only byte-exact output path. |
 | `swath resume <dir>` | Resume a crashed listing from a SQLite checkpoint. | Not run; it needs a durable checkpoint, which needs a directory dataset, which needs a mount. |
 
 Swath has no shallow `ls`-style output mode and no `inspect` or `diff`
@@ -115,9 +115,10 @@ resolve in [`data/claims.json`](data/claims.json).
 - No receipts and no verifier verdict for any run; see
   [`docs/running.md`](docs/running.md#no-receipts-the-runner-security-blocker),
   which owns that caveat.
-- Only the three stdout text formats are capturable. Parquet, sorted Parquet and
-  resume are structurally uncapturable under a harness that bind-mounts nothing —
-  a harness limitation, not a tool one. Because Parquet is Swath's only byte-exact
+- The current driver sends Parquet probes to `/tmp/swout`, while the minimal
+  attempt contract publishes only the two raw streams and `result.json`; those
+  native outputs are therefore not currently preserved. This is a driver and
+  publication limitation, not a tool one. Because Parquet is Swath's only byte-exact
   output path, leaving the gap open means never exercising it — claims
   `file-sinks-not-harness-capturable`, `parquet-key-column-is-byte-exact`.
 - The committed adapter has been rewritten for v0.2.0 and its four stdout modes

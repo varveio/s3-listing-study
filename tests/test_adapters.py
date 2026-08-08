@@ -457,6 +457,13 @@ def test_adapter_is_an_executable_the_verifier_can_invoke(tool: str) -> None:
 
 
 @pytest.mark.parametrize("tool", PORTED)
+def test_normalizer_has_standard_help(tool: str) -> None:
+    done = subprocess.run([str(adapter_path(tool)), "--help"], capture_output=True, check=False)
+    assert done.returncode == 0
+    assert b"usage:" in done.stdout
+
+
+@pytest.mark.parametrize("tool", PORTED)
 def test_every_declared_mode_has_a_fixture(tool: str) -> None:
     declared = set(load_adapter(REPO, tool).MODES)
     covered = {adapter_mode for adapter_tool, adapter_mode in FIXTURES if adapter_tool == tool}
@@ -529,7 +536,7 @@ def test_swath_treats_a_closed_downstream_as_success(
     monkeypatch.setattr(adapter, "normalize", broken_pipe)
     monkeypatch.setattr(adapter.sys, "stdin", SimpleNamespace(buffer=io.BytesIO()))
     monkeypatch.setattr(adapter.sys, "stdout", SimpleNamespace(buffer=io.BytesIO()))
-    assert adapter.main(["normalize.py", mode]) == 0
+    assert adapter.main([mode]) == 0
 
 
 # Every (mode, empty payload) pair, minus the one combination that is not an

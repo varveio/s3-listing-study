@@ -67,8 +67,8 @@ for any of them:
   none). No image, and no binary, is pushed to a registry or otherwise conveyed.
   A copyleft obligation to offer Corresponding Source attaches on *conveying*
   object code — the operative fact here is that nothing is conveyed.
-- The tools are run as separate programs. The study's own `run.sh` /
-  `normalize.py` never link against them — `run.sh` emits argv and does not
+- The tools are run as separate programs. The study's own `command.py` /
+  `normalize.py` never link against them — `command.py` emits argv and does not
   execute, and `normalize.py` parses captured stdout after the fact. Apache-2.0
   scripts alongside a GPL/AGPL binary in a container is mere aggregation, not a
   derivative work.

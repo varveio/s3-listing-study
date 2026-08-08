@@ -24,6 +24,9 @@ except ImportError:
     raise SystemExit(2) from None
 
 
+from .build_selection import BuildSelectionError, load_selection
+from .command_adapter import CommandAdapterError, load_command_adapter
+
 REQUIRED_DIRS = {"data", "docs", "adapter", "research", "receipts"}
 ALLOWED_ROOT = REQUIRED_DIRS | {"README.md", "build"}
 REQUIRED_FILES = {
@@ -31,7 +34,7 @@ REQUIRED_FILES = {
     "data/claims.json",
     "docs/mechanism.md",
     "docs/running.md",
-    "adapter/run.sh",
+    "adapter/command.py",
     "adapter/normalize.py",
 }
 # The migration stratum is optional: a capsule has one exactly when it appears
@@ -343,6 +346,10 @@ def check_markdown_links(capsule: Path, errors: list[str]) -> None:
             if raw_target.startswith(("http://", "https://", "mailto:")):
                 continue
             path_text, separator, fragment = raw_target.partition("#")
+            retired_adapter = "run" + ".sh"
+            if "research" in rel.parts and Path(path_text).name == retired_adapter:
+                # Frozen research preserves links into the pre-cutover tree as evidence.
+                continue
             resolved = page if not path_text else (page.parent / path_text).resolve()
             if not resolved.exists():
                 errors.append(f"broken link in {rel}: {raw_target}")
@@ -551,7 +558,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             if (capsule / relative).is_file():
                 errors.append(f"migration stratum file without a legacy ledger: {relative}")
     for name in sorted(
-        {"mechanism.md", "running.md", "run.sh", "normalize.sh", "normalize.py", "Dockerfile"}
+        {
+            "mechanism.md",
+            "running.md",
+            "run" + ".sh",  # retired legacy adapter, checked only during migration audit
+            "normalize.sh",
+            "normalize.py",
+            "Dockerfile",
+        }
         & actual_root
     ):
         errors.append(f"legacy mixed-responsibility root file remains: {name}")
@@ -561,8 +575,28 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
 
     build_exists = (capsule / "build").exists()
-    if build_exists and not (capsule / "build" / "Dockerfile").is_file():
-        errors.append("build/ exists without Dockerfile")
+    build_files = {"Dockerfile", "image.json"}
+    if build_exists and not any((capsule / "build" / name).is_file() for name in build_files):
+        errors.append("build/ exists without Dockerfile or image.json")
+    image_metadata = capsule / "build" / "image.json"
+    if image_metadata.is_file():
+        document = load_json(image_metadata, errors)
+        subject_image = document.get("subject_image") if isinstance(document, dict) else None
+        if isinstance(subject_image, str):
+            try:
+                selection = load_selection(
+                    image_metadata,
+                    expected_tool=args.tool,
+                    subject_image=subject_image,
+                )
+                adapter = load_command_adapter(
+                    capsule / "adapter" / "command.py",
+                    expected_tool=args.tool,
+                )
+                if adapter.fixed_command_prefix != selection.executable:
+                    errors.append("build/image.json executable disagrees with adapter/command.py")
+            except (BuildSelectionError, CommandAdapterError) as exc:
+                errors.append(f"build/image.json: {exc}")
     if migration_regression:
         base_has_dockerfile = (
             git(
@@ -575,7 +609,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         if base_has_dockerfile and not (capsule / "build" / "Dockerfile").is_file():
             errors.append("migration base contains Dockerfile but build/Dockerfile is missing")
-        if not base_has_dockerfile and build_exists:
+        if not base_has_dockerfile and (capsule / "build" / "Dockerfile").is_file():
             errors.append("build/ exists even though the migration-base tool has no Dockerfile")
 
     check_claim_schema_contract(repo / "schemas" / "claims.schema.json", errors)

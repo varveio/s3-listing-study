@@ -125,8 +125,8 @@ uv run s3-listing-study check-source-anchors --tool <slug> --markdown tools/<slu
 
 Any skipped anchors mean the verification is incomplete.
 
-# adapter is executable and matches the harness contract
-shellcheck -S warning tools/<slug>/adapter/*.sh
+# Python command and normalization adapters match their shared contracts
+uv run pytest -q tests/test_command_adapters.py tests/test_adapters.py
 ```
 
 Then the checks no script performs:
@@ -206,9 +206,12 @@ a whole-diff reviewer would have skimmed.
   runner fails at argument parsing, not at listing. Diff the adapter's flags
   against the new `--help` (see [`tool-onboarding.md`](tool-onboarding.md)
   § Re-deriving).
-- **`run.sh` argv is appended to the image `ENTRYPOINT`.** Where the entrypoint
-  is already the binary, correct argv starts at the subcommand. Check with
-  `docker inspect -f '{{json .Config.Entrypoint}}'` before writing a mode.
+- **The command adapter returns complete subject argv.** Where the subject image
+  entrypoint is already the binary, record that executable first and follow it
+  with the subcommand. Check with
+  `docker inspect -f '{{json .Config.Entrypoint}}'` before writing a mode. The
+  shared derived image replaces the subject entrypoint, so no prefix may remain
+  implicit in image packaging.
 - **Freeze the subject in a detached worktree** before dispatching readers.
   A moving upstream shifts line numbers underneath work in progress.
 - **Anchor line numbers are not self-checking.** They were wrong 22 times in one

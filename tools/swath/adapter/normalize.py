@@ -46,6 +46,7 @@ from typing import IO
 
 from s3_listing_study.contract import ContractViolation
 from s3_listing_study.duckdb_adapter import connect, emit_result, staged
+from s3_listing_study.normalizer_cli import normalizer_main
 
 UNKNOWN_MODE_EXIT = 2
 
@@ -145,7 +146,7 @@ def validate_text_framing(data: bytes, mode: str) -> None:
                 )
 
 
-def normalize(out: IO[bytes], data: bytes, mode: str) -> int:
+def normalize(out: IO[bytes], data: bytes, mode: str, prefix: str = "") -> int:
     if mode in TSV_MODES:
         sql = QUERIES["tsv"]
     elif mode in QUERIES:
@@ -159,17 +160,16 @@ def normalize(out: IO[bytes], data: bytes, mode: str) -> int:
     return 0
 
 
-def main(argv: list[str]) -> int:
-    if len(argv) < 2:
-        print("normalize.py: mode required", file=sys.stderr)
-        return UNKNOWN_MODE_EXIT
-    try:
-        return normalize(sys.stdout.buffer, sys.stdin.buffer.read(), argv[1])
-    except BrokenPipeError:
-        # A verifier or diagnostic consumer may close early. That is not a
-        # malformed listing and must behave consistently in every mode.
-        return 0
+def main(argv: list[str] | None = None) -> int:
+    return normalizer_main(
+        normalize,
+        modes=MODES,
+        prog="swath normalize",
+        argv=argv,
+        broken_pipe_is_success=True,
+        error_exit=UNKNOWN_MODE_EXIT,
+    )
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv))
+    sys.exit(main())

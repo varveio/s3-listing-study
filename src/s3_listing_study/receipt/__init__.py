@@ -1,6 +1,6 @@
 """Receipt handling: metadata, rendering, redaction, and scanning.
 
-The offline half of a smoke run: the redact/scan classifier and the receipt
-markdown generator. Docker lifecycle, argv, timeout, and the cleanup trap stay
-in ``harness/smoke-run.sh``.
+The retained offline half of historical smoke runs: the redact/scan classifier
+and receipt Markdown generator. Docker lifecycle, argv, timeout, and cleanup
+belonged to the now-retired shell receipt wrapper.
 """

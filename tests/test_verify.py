@@ -237,8 +237,19 @@ def test_the_preflight_seam_cannot_widen() -> None:
 
 def test_no_argv_can_disable_the_preflight() -> None:
     """The gate is `docs/operating/runner-security.md`'s activation gate, not an option."""
-    assert "--skip-preflight" not in cli._TAKES_VALUE
+    assert "--skip-preflight" not in cli.build_parser()._option_string_actions
     assert cli.main(["--skip-preflight"]) == ERROR_EXIT
+
+
+def test_verifier_help_is_normal_argparse_help(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as stopped:
+        cli.main(["--help"])
+    assert stopped.value.code == 0
+    assert "usage: s3-listing-study verify" in capsys.readouterr().out
+
+
+def test_duplicate_singleton_option_is_an_error() -> None:
+    assert cli.main(["--scope", "full", "--scope", "prefix"]) == ERROR_EXIT
 
 
 # ----------------------------------------------------------------- the refusals

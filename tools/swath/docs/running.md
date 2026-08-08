@@ -53,7 +53,7 @@ elsewhere in this capsule.**
 The study's mandatory runner-security profile is not provisioned on the machine
 this pass ran on, and that machine categorically cannot satisfy it: it is a
 shared devcontainer carrying unrelated workloads and private checkouts, not a
-provisioned runner. The retired `harness/smoke-run.sh` was therefore never used
+provisioned runner. The retired wrapper-era evidence path was therefore never used
 and no receipt exists for any run of this subject. No claim about it is
 `confirmed`, and none can be until the work is re-run on a provisioned runner
 through the single derived-image attempt contract in
@@ -190,14 +190,16 @@ anonymous quickstarts omit it.
 
 ## Adapter and harness contract
 
-`../adapter/run.sh` implements the shared harness's argv contract: it prints a
-NUL-delimited argv and never runs Docker or the tool. Because the image
-entrypoint is `["java","-jar","/opt/swath/swath.jar"]`, that argv starts at the
+`../adapter/command.py` implements the shared typed command contract without
+shell or NUL transport and never runs Docker or the tool. The subject image
+entrypoint is `["java","-jar","/opt/swath/swath.jar"]`, and the adapter preserves that
 top-level option or the `list` subcommand, not at a binary name.
-`../adapter/normalize.py` converts native output into the frozen smoke harness's
+`../adapter/normalize.py` converts native output into the historical verifier's
 five-field normalized stream.
 
-**Both adapter scripts are written for v0.2.0 and validated by execution.** They
+**Both adapter modules target v0.2.0.** Their typed contracts and argv are
+covered by repository tests; the historical observations below do not by
+themselves prove the newly cut-over modules execute in-image. They
 emit `--concurrency`, `--format table`, `--tune seed.mode=none` and — for the
 sort disk guard — `--tune sort.ignore-disk-check=on`, there being no
 `--force-sort` option at all even though the guard's own error message names one
@@ -210,17 +212,16 @@ A four-mode adapter summary from 2026-08-02 is preserved as an
 [observation note](../receipts/observations-v0.2.0/adapter-modes/observation.md),
 but its exact expanded commands and raw normalized outputs were not retained.
 The summary is therefore not independently auditable and supports no canonical
-runtime or cross-mode-agreement claim. The adapter must be exercised again under
-the wrapper before those modes receive runtime coverage.
+runtime or cross-mode-agreement claim. The adapter must be exercised again in a
+registered derived-image attempt before those modes receive runtime coverage.
 
-**What the harness can capture.** Only the three text formats are capturable:
-Parquet as a file sink, Parquet as a directory dataset, sorted Parquet, and
-resume are structurally uncapturable because the harness bind-mounts nothing and
-Parquet refuses stdout outright — claim `file-sinks-not-harness-capturable`. That
-is a harness limitation, not a tool limitation, and those modes should be
-recorded as not verified for that reason rather than as untested. Closing the gap
-needs a bind mount plus a post-run archive step, or an out-of-harness run
-normalized separately. Note the cost of leaving it open: Parquet is Swath's only
+**What the current attempt path can publish.** The text modes flow through the
+captured raw streams. `command.py` directs both Parquet probes to `/tmp/swout`,
+while the current minimal attempt contract publishes only `result.json` and the
+two raw streams; it has no native-output collection stage. Parquet also refuses
+stdout outright — claim `file-sinks-not-harness-capturable`. This is a current
+driver/publication limitation, not a tool limitation or a claim that file sinks
+are permanently uncapturable. Note the cost of leaving it open: Parquet is Swath's only
 byte-exact output path (claim `parquet-key-column-is-byte-exact`), so excluding
 it means the study never exercises that path.
 
@@ -244,9 +245,9 @@ claim `mode-inventory-v020`.
 | `--format tsv`, `--format table` | Unverified | Present only in an unauditable historical adapter summary; re-run required |
 | `--tune seed.mode=none` | Unverified | Present only in an unauditable historical adapter summary; the seed-cost arms remain uncompared — claim `seed-cost-direction-at-smoke` |
 | `--tune seed.mode=hints` | Unexercised | Declared but unreachable: it throws at seed time, after the checkpoint database is opened and the S3 client is built — claim `seed-hints-unimplemented`. Worth one capability probe of the exit-2 failure |
-| `--format parquet` (file and directory) | Not capturable | Directory or file sink; harness mounts nothing — claim `file-sinks-not-harness-capturable` |
-| `--sort` | Not capturable | Parquet-only by construction |
-| `swath resume <dir>` | Not capturable | Needs a durable checkpoint, hence a directory dataset, hence a mount — claim `only-parquet-directory-is-resumable` |
+| `--format parquet` probes | Not published by current attempt path | Driver writes `/tmp/swout`; minimal artifacts omit native outputs — claim `file-sinks-not-harness-capturable` |
+| `--sort` | Not published by current attempt path | Parquet-only by construction; driver writes `/tmp/swout` |
+| `swath resume <dir>` | Unexercised | Needs a durable checkpoint and is not a declared current driver mode — claim `only-parquet-directory-is-resumable` |
 | `--fetch-owner` | Unexercised | Request-shape variant rather than a mode; one representative run recommended |
 
 Edge-key fidelity was not exercised at all: the study registry configures no edge
@@ -278,10 +279,10 @@ image must be pulled by digest first; the tag, if you use one, is `0.2.0`.
 **A receipted re-run is a different procedure, and it is now blocked on two
 things**: a runner provisioned to the study's security profile plus a Swath
 derived image using the shared Python attempt engine; and the
-reference manifest present, so `harness/verify-listing.sh` can produce a verdict.
+reference manifest present, so the shared verifier can produce a verdict.
 The third blocker, a v0.2.0 adapter, is closed — `tsv`, `table`, `jsonl` and
 `seed.mode=none` all run through it already, so the re-run is a matter of
-executing those four under the wrapper and adding a `seed.mode=hints` capability
+executing those four through the derived-image attempt path and adding a `seed.mode=hints` capability
 probe.
 
 Everything under [`../receipts/`](../receipts/) is about v0.2.0, and all of it is

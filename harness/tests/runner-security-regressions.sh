@@ -265,7 +265,7 @@ unset CHECK_LIVE_FILE
 run_check FAKE_FOREIGN_NETWORK=yes FAKE_ALL_NETWORKS_JSON="$foreign_network_json"
 reject_check "Docker network added after installation rejected"
 
-if grep -RFn --include='*.sh' -- '--network host' "$HARNESS" >/dev/null; then bad "normal scripts still use host networking"; else ok "normal scripts contain no host networking"; fi
+if grep -RFn --exclude-dir=tests --include='*.sh' -- '--network host' "$HARNESS" >/dev/null; then bad "normal scripts still use host networking"; else ok "normal scripts contain no host networking"; fi
 
 # Rename-only staging is exercised in an isolated committed fixture repository;
 # the suite's top-level trap reclaims this private mktemp tree.

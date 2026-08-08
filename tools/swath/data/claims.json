@@ -1515,11 +1515,11 @@
     },
     {
       "id": "file-sinks-not-harness-capturable",
-      "statement": "Only the three text formats are capturable by this study's harness; the Parquet file and directory sinks, sorted Parquet, and resume are structurally uncapturable because the harness bind-mounts nothing.",
+      "statement": "The current Swath driver modes that use native Parquet sinks are not published by the current minimal attempt artifact contract.",
       "scope": "compatibility",
       "status": "supported",
       "disposition": "retained",
-      "qualification": "This is a harness limitation, not a tool limitation, and those modes should be recorded as not verified for that reason rather than as untested. Parquet refuses stdout outright and the text formatter factory throws for it. Closing the gap needs a bind mount plus a post-run archive step, or an out-of-harness run normalized separately.",
+      "qualification": "This is a limitation of the current driver and minimal artifact publication path, not a tool limitation or a claim that file sinks are permanently uncapturable. Swath refuses Parquet on stdout; command.py directs the Parquet probes to /tmp/swout, while the current attempt engine publishes only result.json and the two captured raw streams and does not collect native output.",
       "evidence": [
         {
           "kind": "source",
@@ -1539,7 +1539,11 @@
         },
         {
           "kind": "documentation",
-          "path": "../../../harness/smoke-run.sh"
+          "path": "../adapter/command.py"
+        },
+        {
+          "kind": "documentation",
+          "path": "../../../harness/README.md"
         }
       ]
     },
@@ -1549,11 +1553,11 @@
       "scope": "runtime",
       "status": "unverified",
       "disposition": "retained",
-      "qualification": "No Parquet or sorted-Parquet run was made at v0.2.0, and no such run is capturable under a harness that mounts nothing, so both output paths are unexercised here.",
+      "qualification": "No Parquet or sorted-Parquet run was made at v0.2.0. The current driver directs these modes to /tmp/swout and the minimal attempt contract does not publish native output, so both paths remain unexercised here.",
       "evidence": [
         {
           "kind": "none",
-          "reason": "No Parquet or sorted-Parquet run was executed at v0.2.0; the sinks are path-based and the harness bind-mounts nothing."
+          "reason": "No Parquet or sorted-Parquet run was executed at v0.2.0; the current driver uses a container-local native sink that the minimal attempt contract does not publish."
         }
       ]
     },

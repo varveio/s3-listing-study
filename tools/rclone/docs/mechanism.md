@@ -253,8 +253,8 @@ phase.
 
 Image: upstream `rclone/rclone@sha256:c619…dc4a1` (tag `1.74.4`), a multi-arch
 manifest-list digest resolving to `linux/arm64` on this runner [DOC
-hub.docker.com/r/rclone/rclone]. Entrypoint is `["rclone"]`, so `../adapter/run.sh`
-argv starts at the subcommand. **amd64 and arm64 are both natively supported** on
+hub.docker.com/r/rclone/rclone]. The typed command adapter includes `rclone` as
+argv[0]. **amd64 and arm64 are both natively supported** on
 every channel (upstream image, prebuilt binaries, source build — pure-Go
 `CGO_ENABLED=0` static) [RUN `docker buildx imagetools inspect`; DOC
 rclone.org/downloads; SRC Dockerfile @ 5bc93a2a7]. Smoke ran native arm64, no

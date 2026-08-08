@@ -27,5 +27,5 @@ ADD --checksum=sha256:3bc7bbbb0d45d6f96b0130f98859ea7cfe693b13a84384612404235113
     /usr/local/bin/pS3
 RUN chmod +x /usr/local/bin/pS3
 
-# Entrypoint IS the tool binary: run.sh argv starts at the subcommand.
+# Entrypoint is the tool binary; the command adapter includes it as argv[0].
 ENTRYPOINT ["/usr/local/bin/pS3"]

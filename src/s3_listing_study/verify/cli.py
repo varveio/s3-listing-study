@@ -25,64 +25,84 @@ runner preflight and only an in-process caller — ``tests/tier3`` — can suppl
 
 from __future__ import annotations
 
+import argparse
 import os
 import sys
 import traceback
 from collections.abc import Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Never
 
+from ..argparse_utils import UniqueStoreAction
 from ..registry import default_path
 from . import single, union
 from .errors import ERROR_EXIT, VerifierError
 from .registry_source import RegistrySource
 from .security import SecurityBoundary
 
-_TAKES_VALUE = {
-    "--tool",
-    "--mode",
-    "--normalize",
-    "--bucket",
-    "--scope",
-    "--scope-prefix",
-    "--scope-delimiter",
-    "--input",
-    "--receipt",
-    "--receipts-dir",
-    "--remainder",
-    "--out",
-    "--stream",
-    "--registry",
-}
+
+class _VerifierParser(argparse.ArgumentParser):
+    """Turn argparse usage failures into the verifier's ERROR domain."""
+
+    def error(self, message: str) -> Never:
+        raise VerifierError(message)
 
 
+_SINGLETON_OPTIONS = (
+    "tool",
+    "mode",
+    "normalize",
+    "bucket",
+    "scope",
+    "scope_prefix",
+    "scope_delimiter",
+    "receipts_dir",
+    "remainder",
+    "out",
+    "stream",
+    "registry",
+)
+
+
+@dataclass(slots=True)
 class _Args:
-    def __init__(self) -> None:
-        self.values: dict[str, str] = {}
-        self.inputs: list[str] = []
-        self.receipts: list[str] = []
+    tool: str = ""
+    mode: str = ""
+    normalize: str = ""
+    bucket: str = ""
+    scope: str = ""
+    scope_prefix: str = ""
+    scope_delimiter: str = ""
+    inputs: list[str] = field(default_factory=list)
+    receipts: list[str] = field(default_factory=list)
+    receipts_dir: str = ""
+    remainder: str = ""
+    out: str = ""
+    stream: str = ""
+    registry: str = ""
 
-    def get(self, name: str) -> str:
-        return self.values.get(name, "")
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = _VerifierParser(
+        prog="s3-listing-study verify",
+        description="Audit normalized listing output against a recorded manifest.",
+        allow_abbrev=False,
+    )
+    for destination in _SINGLETON_OPTIONS:
+        parser.add_argument(f"--{destination.replace('_', '-')}", action=UniqueStoreAction)
+    parser.add_argument("--input", action="append", dest="inputs", default=[])
+    parser.add_argument("--receipt", action="append", dest="receipts", default=[])
+    return parser
 
 
 def _parse(argv: Sequence[str]) -> _Args:
-    args = _Args()
-    rest = list(argv)
-    while rest:
-        flag = rest.pop(0)
-        if flag not in _TAKES_VALUE:
-            raise VerifierError(f"unknown argument: {flag}")
-        if not rest:
-            raise VerifierError(f"{flag} needs a value")
-        value = rest.pop(0)
-        if flag == "--input":
-            args.inputs.append(value)
-        elif flag == "--receipt":
-            args.receipts.append(value)
-            args.values["--receipt"] = value
-        else:
-            args.values[flag] = value
-    return args
+    values = build_parser().parse_args(argv)
+    return _Args(
+        **{destination: getattr(values, destination) or "" for destination in _SINGLETON_OPTIONS},
+        inputs=values.inputs,
+        receipts=values.receipts,
+    )
 
 
 def _expand_receipts_dir(args: _Args) -> None:
@@ -94,7 +114,7 @@ def _expand_receipts_dir(args: _Args) -> None:
     a different shard set on the two implementations is a different union
     verdict.
     """
-    directory = args.get("--receipts-dir")
+    directory = args.receipts_dir
     if not directory:
         return
     root = Path(directory)
@@ -103,29 +123,28 @@ def _expand_receipts_dir(args: _Args) -> None:
     for child in sorted(root.iterdir(), key=lambda p: str(p)):
         if child.is_dir() and not child.is_symlink() and (child / "run.meta").exists():
             args.receipts.append(str(child))
-            args.values["--receipt"] = str(child)
 
 
 def run(argv: Sequence[str], security: SecurityBoundary | None = None) -> int:
     """Parse, dispatch, and return the process exit code."""
     args = _parse(argv)
-    scope = args.get("--scope")
+    scope = args.scope
     if not scope:
         raise VerifierError("--scope is required (full|prefix|delimiter|union)")
-    adapter = args.get("--normalize")
+    adapter = args.normalize
     if not adapter or not os.access(adapter, os.X_OK):
         raise VerifierError("--normalize must be an executable adapter")
-    if args.get("--stream") not in ("", "stdout", "stderr"):
+    if args.stream not in ("", "stdout", "stderr"):
         raise VerifierError(
             "--stream must be stdout or stderr (it pins the verified stream for --scope union)"
         )
     _expand_receipts_dir(args)
-    if not args.get("--receipt"):
+    if not args.receipts:
         raise VerifierError(
             "--receipt is required: the verifier binds to the run that produced the output"
         )
 
-    registry_arg = args.get("--registry")
+    registry_arg = args.registry
     registry = RegistrySource.load(Path(registry_arg) if registry_arg else default_path())
     if security is None:
         security = SecurityBoundary()
@@ -133,12 +152,12 @@ def run(argv: Sequence[str], security: SecurityBoundary | None = None) -> int:
     if scope == "union":
         if not args.receipts:
             raise VerifierError("--scope union needs at least one --receipt or a --receipts-dir")
-        if args.get("--scope-prefix") or args.get("--scope-delimiter"):
+        if args.scope_prefix or args.scope_delimiter:
             raise VerifierError(
                 "--scope union takes no --scope-prefix / --scope-delimiter; coverage is derived "
                 "from the shards"
             )
-        if not args.get("--out"):
+        if not args.out:
             raise VerifierError(
                 "--scope union requires --out <dir> — the union verdict must land in a durable "
                 "artifact (union-verify.md), not only on stdout"
@@ -147,12 +166,12 @@ def run(argv: Sequence[str], security: SecurityBoundary | None = None) -> int:
             union.Options(
                 receipts=args.receipts,
                 normalize=adapter,
-                out=args.get("--out"),
+                out=args.out,
                 registry=registry,
                 security=security,
-                remainder=args.get("--remainder"),
-                stream=args.get("--stream"),
-                mode=args.get("--mode"),
+                remainder=args.remainder,
+                stream=args.stream,
+                mode=args.mode,
             )
         )
 
@@ -160,18 +179,18 @@ def run(argv: Sequence[str], security: SecurityBoundary | None = None) -> int:
         raise VerifierError("at least one --input is required")
     return single.run(
         single.Options(
-            receipt=args.get("--receipt"),
+            receipt=args.receipts[-1],
             receipts=args.receipts,
             inputs=args.inputs,
             normalize=adapter,
             registry=registry,
             security=security,
             scope_kind=scope,
-            scope_prefix=args.get("--scope-prefix"),
-            scope_delimiter=args.get("--scope-delimiter"),
-            tool=args.get("--tool"),
-            mode=args.get("--mode"),
-            bucket=args.get("--bucket"),
+            scope_prefix=args.scope_prefix,
+            scope_delimiter=args.scope_delimiter,
+            tool=args.tool,
+            mode=args.mode,
+            bucket=args.bucket,
         )
     )
 

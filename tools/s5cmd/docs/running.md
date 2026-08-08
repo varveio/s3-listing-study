@@ -17,8 +17,8 @@ peakcom/s5cmd@sha256:2ff939e2ee3c76adcadd78dbfc3e2569b18a3743ed9dcfccb1ec589af7f
 This is upstream's own published image (README § Docker → `docker pull
 peakcom/s5cmd`) [DOC README.md:116-124], matching the normal packaged setup,
 so no self-built Dockerfile is staged. Entrypoint is
-`["/s5cmd"]`, so every `run.sh` argv below starts at the s5cmd global
-flags/subcommand, never at the binary [RUN `../receipts/smoke/recursive`].
+`["/s5cmd"]`; `command.py` preserves that fixed-prefix convention
+[RUN `../receipts/smoke/recursive`].
 
 **Tool version:** `v2.3.0-991c9fb` — self-reported by `s5cmd version` in the
 pinned image; the version string embeds the pinned commit `991c9fb`, linking
@@ -74,7 +74,7 @@ prefix twice (e.g. `` `normals-annualseasonal/`normals-annualseasonal/ ``) —
 the wrapper's `${PREFIX:+...}${PREFIX:-...}` template is not an if/else (`:-`
 substitutes its value whenever the variable is *set*, not just when empty).
 This was found independently by both the aws-cli and s5cmd groundwork agents
-and fixed in `harness/smoke-run.sh` (commit `014f74a`); it is recorded as claim
+and fixed in the retired receipt wrapper (commit `014f74a`); it is recorded as claim
 `receipt-double-prefix-cosmetic-defect`. The already-committed receipts under
 `../receipts/smoke/` are left with the malformed cell **as a direct record of
 what the wrapper actually rendered** — receipts record wrapper output, not a
@@ -136,24 +136,15 @@ us-east-1 smoke bucket [RUN `../receipts/smoke/*`].
 The command below records how the committed receipts were produced, but it is
 not runnable in the current checkout. New attempts use the single derived-image
 contract described in [`../../../harness/README.md`](../../../harness/README.md);
-only the AWS CLI derived image is implemented so far.
+the shared derived-image recipe exists, but this subject has not passed its compatibility gate.
 
-Every receipt above was produced by the shared wrapper, never a bare `docker
-run`. `../adapter/run.sh` only *prints* the argv (NUL-delimited) that the wrapper
-appends to the pinned image's entrypoint; the wrapper owns `docker run`, mounts,
-credential injection/starving, the timeout, and measurement.
+Every receipt above was produced by the retired shared wrapper, never a bare
+`docker run`. The current `../adapter/command.py` is a typed compiler with no
+shell or NUL transport; execution, capture, timeout, and measurement belong to
+the attempt engine. Each immutable receipt retains its exact original
+invocation.
 
-```sh
-harness/smoke-run.sh \
-  --tool s5cmd --mode recursive \
-  --image peakcom/s5cmd@sha256:2ff939e2ee3c76adcadd78dbfc3e2569b18a3743ed9dcfccb1ec589af7fb9903 \
-  --run-script tools/s5cmd/adapter/run.sh \
-  --bucket noaa-normals-pds --region us-east-1 \
-  --auth anonymous \
-  --out tools/s5cmd/receipts/smoke/recursive
-```
-
-Swap `--mode` for any row in `run.sh`'s case statement (`recursive`,
+Swap `--mode` for any mode declared by `command.py` (`recursive`,
 `delimiter`, `rootkeys`, `json`, `listv1`, `allversions`, `fullpath`) and add
 `--prefix <p>` for a scoped listing (e.g. `normals-hourly/`). The fan-out mode
 is not a single wrapper invocation — it is the wrapper run once per shard
@@ -164,10 +155,9 @@ produce `union-verify.md`. The in-process `s5cmd run <file>` capability probe
 in `../receipts/smoke/_capability/run-fanout/` is reproduced by mounting a
 commands file (one `ls` line per shard) read-only into the container and
 invoking `s5cmd --no-sign-request run /work/cmds.txt` directly — it is not a
-`smoke-run.sh` receipt because `run` needs a file mounted into the container,
+standard wrapper-era receipt because `run` needs a file mounted into the container,
 which the wrapper does not provide for this tool.
 
-`../adapter/run.sh`/`../adapter/normalize.py` and everything under
-`../research/` and `../receipts/` are immutable inputs to this page — they were
-not modified for this consolidation beyond the migration's link and path
-repairs.
+`../adapter/command.py` and `../adapter/normalize.py` are living integration code
+and changed for the typed Python cutover. Everything under `../research/` and
+`../receipts/` remains immutable evidence.

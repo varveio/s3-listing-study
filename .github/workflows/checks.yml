@@ -69,8 +69,8 @@ jobs:
       - name: Harness regression suite (includes the harness shellcheck gate)
         run: harness/tests/run-regressions.sh
 
-      - name: Tool adapter shellcheck
-        run: shellcheck -S warning tools/*/adapter/run.sh tools/*/adapter/fixtures/*.sh
+      - name: Tool adapter fixture shellcheck
+        run: shellcheck -S warning tools/*/adapter/fixtures/*.sh
 
       - name: s3p adapter fixture QA
         run: tools/s3p/adapter/fixtures/check.sh

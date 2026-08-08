@@ -51,9 +51,14 @@ def _case(name: str) -> tuple[RunFacts, Payload, Payload]:
 
 
 @pytest.mark.parametrize("name", CASES)
-def test_receipt_matches_the_shell_renderer(name: str) -> None:
+def test_receipt_preserves_frozen_bytes_except_retired_producer_wording(name: str) -> None:
     facts, stdout, stderr = _case(name)
-    assert render(facts, stdout, stderr) == (FIXTURES / f"{name}.receipt.md").read_bytes()
+    expected_lines = (FIXTURES / f"{name}.receipt.md").read_bytes().splitlines(keepends=True)
+    expected_lines[2:4] = [
+        b"Rendered for the retired groundwork receipt format. Not a benchmark: this run makes no\n",
+        b"comparative claim and its duration is a fact about this run only.\n",
+    ]
+    assert render(facts, stdout, stderr) == b"".join(expected_lines)
 
 
 @pytest.mark.parametrize("name", CASES)

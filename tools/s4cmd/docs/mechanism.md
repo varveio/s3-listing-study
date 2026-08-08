@@ -190,7 +190,7 @@ The `-c/--num-threads` flag is confirmed present in the built image's `--help`
 (claim `num-threads-flag-present`), and its default `cpu_count*4` is **32** on
 the 8-core runner — 4× this campaign's `CONCURRENCY_CAP=8`, so any real run must
 pin `-c <= 8` (claim `num-threads-default-is-cpu-count-times-four`); the smoke
-`run.sh` pins `-c 4` and rejects any override outside `1..8`. There is **no
+`command.py` pins `-c 4` and rejects any override outside `1..8`. There is **no
 region flag** — region is entirely boto3's to resolve (S3 default us-east-1 plus
 bucket-region redirect) [SRC `s4cmd.py` — no region option @ 80059bf].
 

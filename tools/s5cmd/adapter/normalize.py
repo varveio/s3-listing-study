@@ -45,6 +45,7 @@ import sys
 from typing import IO
 
 from s3_listing_study.duckdb_adapter import connect, emit_result, staged
+from s3_listing_study.normalizer_cli import normalizer_main
 
 UNKNOWN_MODE_EXIT = 2
 
@@ -142,13 +143,11 @@ def normalize(out: IO[bytes], data: bytes, mode: str, prefix: str) -> int:
     return 0
 
 
-def main(argv: list[str]) -> int:
-    if len(argv) < 2:
-        print("normalize.py: mode required", file=sys.stderr)
-        return UNKNOWN_MODE_EXIT
-    prefix = argv[2] if len(argv) > 2 else ""
-    return normalize(sys.stdout.buffer, sys.stdin.buffer.read(), argv[1], prefix)
+def main(argv: list[str] | None = None) -> int:
+    return normalizer_main(
+        normalize, modes=MODES, prog="s5cmd normalize", argv=argv, error_exit=UNKNOWN_MODE_EXIT
+    )
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv))
+    sys.exit(main())

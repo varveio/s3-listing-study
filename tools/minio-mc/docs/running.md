@@ -20,7 +20,7 @@ minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
 This is upstream's own published multi-arch image (index digest above; arm64
 sub-manifest `sha256:37d109dd…`), so it closely matches the setup users receive
 and no self-built Dockerfile was staged [RUN `docker manifest inspect`]. Entrypoint is `["mc"]` [RUN `docker
-inspect`], so every `../adapter/run.sh` argv below starts at the global flag / subcommand,
+inspect`], so `../adapter/command.py` preserves the recorded entrypoint convention,
 **never at `mc`**.
 
 **Architecture:** amd64, arm64, and ppc64le are all natively present in the index
@@ -54,8 +54,8 @@ auto-resolve it via an anonymous `GET ?location` before the first LIST [OBS
 ## Every smoked mode
 
 All 10 smoke runs below (across seven distinct mode names — `recursive-json`
-appears at four scopes) ran **anonymous**, native arm64, via
-`harness/smoke-run.sh`, against
+appears at four scopes) ran **anonymous**, native arm64, via the retired shared
+receipt wrapper, against
 `noaa-normals-pds` (us-east-1) at its 2026-07-17 snapshot (148,917 keys, manifest
 sha256 `c78a827…2adb`). All verdicts via `harness/verify-listing.sh`. `CREDS=none`
 (no credentialed pass) and `EDGE_BUCKET=none` (unicode/weird-key/multipart-ETag
@@ -152,31 +152,21 @@ what the study's replay-server phase can key off.
 The command below records how the committed receipts were produced, but it is
 not runnable in the current checkout. New attempts use the single derived-image
 contract described in [`../../../harness/README.md`](../../../harness/README.md);
-only the AWS CLI derived image is implemented so far.
+the shared derived-image recipe exists, but this subject has not passed its compatibility gate.
 
 Every receipt above was produced by the shared wrapper, never a bare `docker run`.
-`../adapter/run.sh` only *prints* the argv (NUL-delimited) that the wrapper appends to the
-pinned image's entrypoint; the wrapper owns `docker run`, the `--env MC_HOST_s3`
-anonymous-alias injection, mounts, credential starving, the timeout, and
-measurement. Historical command for any row:
-
-```sh
-harness/smoke-run.sh \
-  --tool minio-mc --mode recursive-json \
-  --image minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727 \
-  --run-script tools/minio-mc/adapter/run.sh \
-  --bucket noaa-normals-pds --region us-east-1 \
-  --auth anonymous \
-  --out tools/minio-mc/receipts/smoke/recursive-json
-```
+The current `../adapter/command.py` is a typed command compiler with no shell or
+NUL transport. Subject execution, capture, timeout, and measurement remain the
+attempt engine's responsibility. The immutable receipts retain their original
+image digest, logical fields, and exact invocation for audit.
 
 `<mode>` is one of `recursive`, `recursive-json`, `shallow`, `shallow-json`,
-`versions-json`, `find`, `find-json` — see `tools/minio-mc/adapter/run.sh`'s `case`
-statement for the exact argv each maps to. Add `--prefix <p>` for a scoped listing
-(e.g. `normals-hourly/`). `../adapter/run.sh`, `../adapter/normalize.py`, and everything under
-[`../research/`](../research/) and [`../receipts/`](../receipts/) are **immutable**
-inputs to this page — they were not modified for this consolidation; a rerun adds
-a new receipt rather than editing an existing one.
+`versions-json`, `find`, `find-json` — see `tools/minio-mc/adapter/command.py`
+for the exact argv each maps to. Add `--prefix <p>` for a scoped listing
+(e.g. `normals-hourly/`). `../adapter/command.py` and `../adapter/normalize.py`
+are living integration code and changed for the typed Python cutover. Everything
+under [`../research/`](../research/) and [`../receipts/`](../receipts/) remains
+immutable evidence; a rerun adds a new receipt rather than editing an existing one.
 
 ## Architecture matrix
 

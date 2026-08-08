@@ -5,8 +5,9 @@ The active subject lifecycle is the stdlib-first Python package at
 execution, byte capture, timing, timeout cleanup, and finalization for new
 attempts.
 
-The first slice is deliberately local and small. It accepts a direct argv,
-starts it without a shell, captures stdout and stderr as bytes, and commits one
+The first slice is deliberately local and small. It accepts a typed logical
+listing request, resolves it through the selected in-image tool driver, starts
+the resulting argv without a shell, captures stdout and stderr as bytes, and commits one
 attempt directory containing exactly:
 
 ```text
@@ -29,27 +30,36 @@ other scheduler text streams are diagnostics only for new attempts; they are
 not the listing-data channel and cannot stand in for `stdout.raw.gz` /
 `stderr.raw.gz`.
 
-Run the package directly when it is already installed in a derived image:
+The derived image fixes this zipapp entrypoint; schedulers append only the
+logical request arguments and never replace it:
 
 ```sh
-python -m s3_listing_study.attempt \
+/usr/bin/python3 -I /opt/s3-listing-study/attempt.pyz \
   --output /output/attempt-id \
+  --derived-image sha256:DERIVED_IMAGE_DIGEST \
   --tool aws-cli \
+  --operation list \
   --mode s3api-v2-text \
   --bucket BUCKET \
   --region REGION \
   --prefix '' \
-  --scope full \
-  --command-prefix /usr/local/bin/aws \
-  -- s3api list-objects-v2 --bucket BUCKET --region REGION --no-sign-request \
-  --query 'Contents[].[Key,Size,ETag,LastModified,StorageClass]' --output text
+  --scope full
 ```
 
-The scheduler obtains the arguments after `--` from the tool's NUL-delimited
-`tools/<tool>/adapter/run.sh`. Adapters compile friendly parameters into argv;
-they never execute or time the subject. The AWS CLI derived-image packaging
-contract and its current self-contained-payload blocker are documented in
-`images/aws-cli/README.md`.
+The scheduler passes only typed logical fields, including optional concurrency.
+An explicit concurrency is accepted only by an adapter that declares support;
+the current s4cmd adapter contract accepts `1..8` and defaults to `4`. AWS CLI
+is the only current derived-image registration. The selected tool's bundled
+`command.py` resolves complete subject argv inside the image through the typed
+driver API; there is no raw argv escape hatch. Adapters never execute or time
+the subject. Tool-specific image
+packaging uses one shared recipe; its current compatible-interpreter constraint
+is documented in
+[`derived-image/README.md`](derived-image/README.md). Tool-specific subject
+digest and workdir inputs remain capsule-owned and are selected through
+`s3-listing-study build-derived-image --tool SLUG --tag TAG`, never free build
+arguments. Each result records the validated canonical
+`adapter_bundle_sha256` as its sole adapter identity.
 
 ## Security boundary
 
@@ -77,9 +87,8 @@ any benchmark result should be published.
 
 Committed smoke receipts predate the attempt engine and remain immutable audit
 evidence. Their `receipt.md`, `run.meta`, raw payload conventions, parsers, and
-verifier tests are retained. References in tool pages to
-`harness/smoke-run.sh` describe the historical command that produced those
-records; the shell runner itself is retired and is not an active execution
+verifier tests are retained. Current tool pages describe those records as
+wrapper-era receipts without presenting the deleted wrapper as an execution
 path.
 
 `s3_listing_study.verify` continues to audit those receipt-bound streams against

@@ -118,8 +118,8 @@ synthetic fixtures for both modes, including keys containing spaces, confirming
 the 5-field `key/-/-/-/-` contract (only the key column is populated; for
 `list-versions` the leading version-id token is stripped; the leading-token
 strip is manifest-comparable only on an unversioned bucket, claim
-`list-versions-manifest-comparable-only-unversioned`). `run.sh` argv was
-verified NUL-delimited and parameterized on bucket/region/prefix (no hardcoded
+`list-versions-manifest-comparable-only-unversioned`). The current `command.py`
+compiler is typed and parameterized on bucket/region/prefix (no hardcoded
 bucket) [OBS host self-tests, `../receipts/smoke/_adapter/self-test.txt`;
 adapters never run on the measurement clock].
 
@@ -159,28 +159,17 @@ Routing this decision to the owner is carried in [`../README.md`](../README.md)
 The command below records how the committed receipts were produced, but it is
 not runnable in the current checkout. New attempts use the single derived-image
 contract described in [`../../../harness/README.md`](../../../harness/README.md);
-only the AWS CLI derived image is implemented so far.
+the shared derived-image recipe exists, but this subject has not passed its compatibility gate.
 
-Both receipts were produced by the shared wrapper, never a bare `docker run`.
-`run.sh` only *prints* the argv (NUL-delimited) that the wrapper appends to the
-pinned image's entrypoint (`["/usr/local/bin/s3kor"]`); the wrapper owns
-`docker run`, mounts, credential injection/starving, the timeout, and
-measurement. Historical command for either row:
-
-```sh
-harness/smoke-run.sh \
-  --tool s3kor --mode list \
-  --image 's3kor@sha256:b021869dfa78b7af85506a5d566ec6c7e7ed49d940b20d9e110a04fa5006f37c' \
-  --run-script tools/s3kor/adapter/run.sh \
-  --bucket noaa-normals-pds --region us-east-1 \
-  --auth anonymous \
-  --out tools/s3kor/receipts/smoke/_capability/list
-```
+Both receipts were produced by the retired shared wrapper, never a bare
+`docker run`. The current `command.py` is a typed compiler with no shell or NUL
+transport; execution, capture, timeout, and measurement belong to the attempt
+engine. Each immutable receipt retains its exact original invocation.
 
 Swap `--mode list-versions` (and `--out …/list-versions`) for the other
 receipt. Rebuilding the image first requires the pinned checkout at
 `844fe3d7931fcca415c8b8a4e22f048886e6b82b` and the `docker build` above.
-`adapter/run.sh`/`adapter/normalize.py` and everything under `../research/` and
+`adapter/command.py`/`adapter/normalize.py` and everything under `../research/` and
 `../receipts/` are immutable inputs to this page; a rerun adds a new receipt
 rather than editing an existing one.
 

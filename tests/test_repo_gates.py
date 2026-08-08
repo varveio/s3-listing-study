@@ -11,12 +11,27 @@ into a false pass.
 
 from __future__ import annotations
 
+import ast
 import json
 from pathlib import Path
 
 import pytest
 
 from s3_listing_study import capsule, cli, links, source_anchors
+
+REPO = Path(__file__).resolve().parents[1]
+
+
+def test_root_and_forwarded_command_help_are_normal(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as root_help:
+        cli.main(["--help"])
+    assert root_help.value.code == 0
+    assert "validate-capsule" in capsys.readouterr().out
+
+    with pytest.raises(SystemExit) as verify_help:
+        cli.main(["verify", "--help"])
+    assert verify_help.value.code == 0
+    assert "s3-listing-study verify" in capsys.readouterr().out
 
 
 def test_capsule_and_links_agree_on_heading_slugs() -> None:
@@ -77,3 +92,65 @@ def test_source_anchor_lines_are_coerced_from_canonical_json(tmp_path: Path) -> 
     anchors = source_anchors.collect_json_anchors(capsule, errors)
     assert errors == []
     assert anchors[0].lines == "7"
+
+
+def test_deleted_runner_paths_remain_only_in_frozen_evidence() -> None:
+    """Living code and docs must not advertise retired executable paths."""
+    deleted_names = tuple(
+        bytes(points).decode("ascii")
+        for points in (
+            (115, 109, 111, 107, 101, 45, 114, 117, 110, 46, 115, 104),
+            (114, 117, 110, 45, 97, 116, 116, 101, 109, 112, 116, 46, 115, 104),
+            (97, 100, 97, 112, 116, 101, 114, 47, 114, 117, 110, 46, 115, 104),
+        )
+    )
+
+    def static_string(node: ast.AST) -> str | None:
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return node.value
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+            left = static_string(node.left)
+            right = static_string(node.right)
+            if left is not None and right is not None:
+                return left + right
+        return None
+
+    offenders: list[str] = []
+    for path in REPO.rglob("*"):
+        relative = path.relative_to(REPO)
+        parts = relative.parts
+        ignored_dirs = {
+            ".git",
+            ".mypy_cache",
+            ".pytest_cache",
+            ".ruff_cache",
+            ".venv",
+            "__pycache__",
+        }
+        if not path.is_file() or ignored_dirs.intersection(parts):
+            continue
+        allowed = (
+            len(parts) >= 3 and parts[0] == "tools" and parts[2] in {"receipts", "research"}
+        ) or parts[:2] == ("tests", "fixtures")
+        if allowed:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        emitted_strings: list[str] = []
+        if path.suffix == ".py":
+            try:
+                tree = ast.parse(text, filename=str(relative))
+            except SyntaxError:
+                tree = None
+            if tree is not None:
+                emitted_strings = [
+                    value for node in ast.walk(tree) if (value := static_string(node)) is not None
+                ]
+        if any(
+            name in text or any(name in value for value in emitted_strings)
+            for name in deleted_names
+        ):
+            offenders.append(str(relative))
+    assert offenders == []

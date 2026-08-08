@@ -48,12 +48,13 @@ tools/<tool>/
   docs/                      current human explanation
     mechanism.md             how the tool works
     running.md               how this study built, ran, and checked it
-  adapter/                   shared-harness integration
-    run.sh                   prints tool argv; never launches the tool
-    normalize.py             converts native output to the smoke contract
+  adapter/                   shared Python integration
+    command.py               typed friendly parameters to exact subject argv
+    normalize.py             converts native output to the five-field contract
     fixtures/                synthetic adapter QA, only where applicable
-  build/                     optional local image construction
-    Dockerfile               study build recipe
+  build/                     optional tool-owned build inputs
+    Dockerfile               local subject build recipe, where needed
+    image.json               derived-image inputs, where needed
   research/                  preserved derivation and review history
     tool-page.md             frozen full pre-restructure landing page
     claims-migration.md      audit map from the old ledger to claims.json
@@ -280,24 +281,39 @@ always linking back to the source record.
 
 ## Executable integration and builds
 
-`adapter/run.sh` implements the shared harness's argv contract. It prints a
-NUL-delimited argv and never runs Docker or the tool; the harness owns
-execution, credentials, timeouts, and measurement.
+`adapter/command.py` implements the shared typed command contract. It exports
+`build_command(CommandRequest) -> tuple[str, ...]`, returning the complete
+subject argv including the executable. The shared image build bundles exactly
+one selected adapter; the in-image driver loads it and compiles argv from the
+scheduler's typed logical request. The adapter
+never runs Docker or the tool; the attempt engine owns execution, credentials,
+timeouts, and measurement. Its argparse boundary prints JSON only for operator
+inspection and normal `--help`, not as a scheduler transport.
+Optional concurrency is a typed logical field, never an environment lookup.
+Adapters reject it unless they explicitly declare a supported range.
 
-`adapter/normalize.py` converts the tool's native output into the frozen smoke
-harness's normalized stream. That stream is an executable compatibility
-boundary, not a stored canonical result. The future benchmark design may use
-JSON Lines, but this structure migration does not rewrite the frozen smoke
-harness.
+`adapter/normalize.py` converts the tool's native output into the historical
+verifier's normalized stream. Each module keeps its library `normalize`
+function clean and uses the shared argparse boundary in
+`s3_listing_study.normalizer_cli`. That stream is an executable compatibility
+boundary, not a stored canonical result.
 
 `adapter/fixtures/` is allowed only for synthetic adapter QA that already
 exists. Observed captures remain receipts. The current classified exceptions
 are documented in the migration playbook.
 
-`build/Dockerfile` exists only when the study carries a local build recipe. Its
-header explains deviations from upstream and points to the relevant research.
-Tools using an upstream image or another installation path do not receive an
-empty `build/` directory.
+`build/Dockerfile` exists only when the study carries a local subject build
+recipe; its header explains deviations from upstream and points to relevant
+research. `build/image.json` may instead record declarative inputs for the
+single shared `harness/derived-image/Dockerfile`. Tool capsules never copy or
+fork that shared attempt-runner recipe. Tools using an upstream image without
+derivation or another installation path do not receive an empty `build/`
+directory.
+Construction is slug-only through `s3-listing-study build-derived-image`; the
+command validates capsule containment and binds the registered `subject`,
+`adapter`, and `selection` named contexts. `adapter_bundle_sha256` binds a
+documented canonical byte manifest of `command.py` and `normalize.py` and is the
+sole adapter identity in a new `result.json`.
 
 ## Receipts and raw formats
 

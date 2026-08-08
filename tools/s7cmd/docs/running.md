@@ -96,32 +96,20 @@ versioned-bucket-fidelity gap.
 
 ## Reproduction
 
-The following command is historical and is not runnable in the current
-checkout: `harness/smoke-run.sh` has been retired. New attempts use the single
+The committed receipts are immutable wrapper-era evidence. New attempts use the single
 derived-image contract in
 [`../../../harness/README.md`](../../../harness/README.md), and an s7cmd image has
 not been implemented yet.
 
 Every receipt above was produced by the shared harness, never by a bespoke
-script — `run.sh` only prints the argv (see its header for the exact
-contract); `harness/smoke-run.sh` owns `docker run`, mounts, credential
-injection/starving, timeout, measurement, and receipt-writing. Historical command for
-any row:
-
-```sh
-harness/smoke-run.sh \
-  --tool s7cmd --mode <mode> \
-  --image 's7cmd@sha256:07091182512e74cde4bb897a97b1fc9a586757560c5008ae8c701d7fdb6974da' \
-  --run-script tools/s7cmd/adapter/run.sh \
-  --bucket noaa-normals-pds --region us-east-1 [--prefix <scope>] \
-  --auth anonymous \
-  --out <out-dir>
-```
+script. The current `command.py` is a typed command compiler with no shell or
+NUL transport; the attempt engine owns execution, capture, timeout, and
+measurement. Each immutable receipt retains its exact original invocation.
 
 `<mode>` is one of `recursive-tsv`, `recursive-tsv-nosort`,
 `recursive-aligned`, `recursive-json`, `recursive-one`, `all-versions`,
 `max-depth`, `shallow-tsv`, `bucket-list` — see
-`tools/s7cmd/adapter/run.sh`'s `case` statement for the exact flags each maps
+`tools/s7cmd/adapter/command.py` for the exact flags each maps
 to. Rebuilding the image first
 requires the pinned `s7cmd` checkout at `d589df7ce691edbede05fc9a691ab1787cdb6b9e`
 and `docker build -t s7cmd:groundwork-v1.5.0 .` in it (see Build above);
