@@ -29,6 +29,16 @@ class CommandRequest:
     operation: str = "list"
     auth: str = "anonymous"
     concurrency: int | None = None
+    sink_dir: str = ""
+    """Container-local directory a mode with a native file sink may write into.
+
+    Absent for every mode that writes its listing to stdout, which is most of
+    them. A mode whose tool refuses to stream — Swath's sorted Parquet requires
+    a directory dataset — builds its destination path under this directory, and
+    the attempt engine collects, scans, and publishes whatever lands there. An
+    adapter never chooses its own path: a container-local path the engine does
+    not know about is output the attempt record cannot account for.
+    """
 
 
 class CommandBuilder(Protocol):

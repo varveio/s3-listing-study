@@ -12,6 +12,7 @@ import os
 import platform
 import re
 import signal
+import stat
 import subprocess
 import tempfile
 import time
@@ -22,11 +23,23 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import BinaryIO, Final
 
+from s3_listing_study.python_runtime import interpreter_identity
 from s3_listing_study.secret_scan import Outcome as ScanOutcome
 from s3_listing_study.secret_scan import scan_binary_file
 
 SCHEMA_VERSION: Final = 1
 STREAM_NAMES: Final = ("stdout", "stderr")
+NATIVE_DIRECTORY: Final = "native"
+"""Where a mode's native file-sink output is published inside the attempt.
+
+Most modes write their listing to stdout and produce nothing here. A mode whose
+tool refuses to stream — Swath's Parquet dataset — writes into the sink
+directory the engine hands it, and every file that lands there is scanned,
+hashed, and published under this name. Output the engine cannot account for is
+output that cannot appear in a receipt.
+"""
+NATIVE_MAX_FILES: Final = 4096
+NATIVE_MAX_BYTES: Final = 8 * 1024**3
 IMAGE_DIGEST_RE: Final = re.compile(r"sha256:[0-9a-f]{64}")
 BASE_SUBJECT_ENV: Final[Mapping[str, str]] = MappingProxyType(
     {
@@ -70,6 +83,7 @@ class AttemptOptions:
     prefix: str | None = None
     scope: str | None = None
     concurrency: int | None = None
+    sink_dir: str | None = None
 
 
 @dataclass(frozen=True)
@@ -137,6 +151,7 @@ def _validate(options: AttemptOptions) -> AttemptOptions:
         prefix=options.prefix,
         scope=options.scope,
         concurrency=options.concurrency,
+        sink_dir=options.sink_dir,
     )
 
 
@@ -528,6 +543,161 @@ def _scan_raw_streams(scratch: Path) -> dict[str, str]:
     return {stream: outcome.name.lower() for stream, outcome in outcomes.items()}
 
 
+def _mkdir_at(parent_fd: int, name: str) -> int:
+    """Create (or reuse) one child directory and return its descriptor.
+
+    Reusing an existing directory is the one place this module does not refuse a
+    path it did not create: a dataset's parts share their parent directory, so
+    the second part would otherwise fail on the tree the first part built. Every
+    artifact inside it is still published with ``O_EXCL``.
+    """
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    with contextlib.suppress(FileExistsError):
+        os.mkdir(name, mode=0o700, dir_fd=parent_fd)
+    try:
+        return os.open(name, flags, dir_fd=parent_fd)
+    except OSError as exc:
+        raise AttemptError(f"native output path is not a directory: {name}") from exc
+
+
+@contextlib.contextmanager
+def _open_sink_directory(sink: Path) -> Iterator[int]:
+    """Anchor the sink by descriptor for the whole plan-then-publish sequence."""
+    try:
+        descriptor = os.open(sink, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except OSError as exc:
+        raise AttemptError(f"native sink is not a directory: {sink}") from exc
+    try:
+        yield descriptor
+    finally:
+        os.close(descriptor)
+
+
+def _sink_walk_failed(error: OSError) -> None:
+    raise AttemptError(f"native sink is not fully readable: {error}")
+
+
+def _plan_native(sink_fd: int) -> tuple[Path, ...]:
+    """Account for every file in the sink, in a stable order, publishing nothing.
+
+    The walk, the caps, and the secret scan all run here — BEFORE any artifact
+    is published, for the same reason :func:`_scan_raw_streams` runs where it
+    does: a partial publish of output that turns out to carry a credential is
+    still a leak. The caps are enforced as the walk proceeds, so a subject that
+    filled the sink with millions of files stops the walk instead of being
+    enumerated into memory first.
+
+    A symlink, socket, or device node is refused rather than skipped, symlinked
+    directories included: the sink is meant to hold a listing, and anything else
+    in it means the attempt is not the thing the record would claim it is.
+    """
+    planned: list[Path] = []
+    total = 0
+    for root, directories, names, directory_fd in os.fwalk(
+        ".", dir_fd=sink_fd, onerror=_sink_walk_failed, follow_symlinks=False
+    ):
+        directories.sort()
+        relative_root = Path(root)
+        for name in directories:
+            if not stat.S_ISDIR(os.lstat(name, dir_fd=directory_fd).st_mode):
+                raise AttemptError(
+                    f"native sink holds a symlinked directory: {relative_root / name}"
+                )
+        for name in sorted(names):
+            relative = relative_root / name
+            if not stat.S_ISREG(os.lstat(name, dir_fd=directory_fd).st_mode):
+                raise AttemptError(f"native sink holds a non-regular file: {relative}")
+            if len(planned) == NATIVE_MAX_FILES:
+                raise AttemptError(f"native sink holds more than {NATIVE_MAX_FILES} files")
+            descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory_fd)
+            try:
+                total += os.fstat(descriptor).st_size
+                if total > NATIVE_MAX_BYTES:
+                    raise AttemptError(f"native sink holds more than {NATIVE_MAX_BYTES} bytes")
+                # The scanner takes a path; /proc/self/fd names the descriptor
+                # already opened at this directory, so the file scanned is the
+                # file the walk saw and not whatever the name resolves to now.
+                outcome = scan_binary_file(Path(f"/proc/self/fd/{descriptor}"))
+            finally:
+                os.close(descriptor)
+            if outcome is not ScanOutcome.CLEAN:
+                raise AttemptError(
+                    f"secret scan did not clear native subject output "
+                    f"({relative}={outcome.name.lower()}); refusing to publish attempt artifacts"
+                )
+            planned.append(relative)
+    return tuple(planned)
+
+
+def _open_native_file(sink_fd: int, relative: Path) -> int:
+    """Reopen one planned sink file, anchoring every component by descriptor."""
+    directory_fd = os.dup(sink_fd)
+    try:
+        for component in relative.parts[:-1]:
+            next_fd = os.open(
+                component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory_fd
+            )
+            os.close(directory_fd)
+            directory_fd = next_fd
+        return os.open(relative.name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory_fd)
+    except OSError as exc:
+        raise AttemptError(f"planned native file is no longer readable: {relative}") from exc
+    finally:
+        os.close(directory_fd)
+
+
+def _publish_native(
+    sink_fd: int,
+    planned: Sequence[Path],
+    output_fd: int,
+    output_label: Path,
+) -> list[dict[str, object]]:
+    """Publish the planned sink files under ``native/``, preserving their layout.
+
+    Layout is preserved because a Parquet dataset is a directory of parts plus a
+    sidecar, and flattening it would produce something DuckDB cannot read back.
+    Only files :func:`_plan_native` already cleared are published.
+    """
+    if not planned:
+        return []
+    records: list[dict[str, object]] = []
+    native_fd = _mkdir_at(output_fd, NATIVE_DIRECTORY)
+    try:
+        for relative in planned:
+            opened: list[int] = []
+            target_fd = native_fd
+            try:
+                for component in relative.parts[:-1]:
+                    target_fd = _mkdir_at(target_fd, component)
+                    opened.append(target_fd)
+
+                def write_native(output: BinaryIO, source: Path = relative) -> None:
+                    with os.fdopen(_open_native_file(sink_fd, source), "rb") as raw:
+                        for chunk in iter(lambda: raw.read(1024 * 1024), b""):
+                            output.write(chunk)
+
+                size, digest = _publish_exclusive(
+                    target_fd,
+                    output_label / NATIVE_DIRECTORY,
+                    relative.name,
+                    write_native,
+                )
+            finally:
+                for descriptor in reversed(opened):
+                    os.close(descriptor)
+            records.append(
+                {
+                    "path": f"{NATIVE_DIRECTORY}/{relative.as_posix()}",
+                    "bytes": size,
+                    "sha256": digest,
+                }
+            )
+        os.fsync(native_fd)
+    finally:
+        os.close(native_fd)
+    return records
+
+
 def _outcome(execution: _Execution) -> dict[str, object]:
     exit_code = execution.returncode if execution.returncode >= 0 else None
     subject_signal = -execution.returncode if execution.returncode < 0 else None
@@ -591,15 +761,34 @@ def run_attempt(
             if post_measure_hook is not None:
                 post_measure_hook()
             scan_outcomes = _scan_raw_streams(scratch)
-            streams = {
-                stream: _gzip(
-                    scratch / f"{stream}.raw",
-                    output_fd,
-                    options.output,
-                    f"{stream}.raw.gz",
+            native_refusal = (
+                "a descendant escaped the subject process group, so the sink cannot be "
+                "attributed to the supervised run"
+                if execution.escaped_descendants
+                else None
+            )
+            with contextlib.ExitStack() as stack:
+                sink_fd: int | None = None
+                planned: tuple[Path, ...] = ()
+                if options.sink_dir and native_refusal is None:
+                    sink_fd = stack.enter_context(_open_sink_directory(Path(options.sink_dir)))
+                    planned = _plan_native(sink_fd)
+                # Everything below publishes. Nothing above it has, so a sink the
+                # plan refuses leaves the attempt with no artifacts at all.
+                streams = {
+                    stream: _gzip(
+                        scratch / f"{stream}.raw",
+                        output_fd,
+                        options.output,
+                        f"{stream}.raw.gz",
+                    )
+                    for stream in STREAM_NAMES
+                }
+                native_output = (
+                    _publish_native(sink_fd, planned, output_fd, options.output)
+                    if sink_fd is not None
+                    else []
                 )
-                for stream in STREAM_NAMES
-            }
 
         result: dict[str, object] = {
             "schema_version": SCHEMA_VERSION,
@@ -615,6 +804,7 @@ def run_attempt(
                 "architecture": platform.machine(),
                 "operating_system": platform.system(),
             },
+            "interpreter": interpreter_identity(),
             "invocation": {
                 "argv": list(options.argv),
                 "authentication": options.auth,
@@ -646,6 +836,8 @@ def run_attempt(
             "outcome": _outcome(execution),
             "secret_scan": {"status": "clean", "streams": scan_outcomes},
             "streams": streams,
+            "native_output": native_output,
+            "native_refusal": native_refusal,
         }
         encoded = (json.dumps(result, sort_keys=True, separators=(",", ":")) + "\n").encode()
 

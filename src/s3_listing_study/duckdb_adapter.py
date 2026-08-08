@@ -11,14 +11,14 @@ and writes through its ``to_line``, so a SQL adapter is held to exactly the bar 
 row-at-a-time :func:`~s3_listing_study.contract.emit` adapter is. It is the
 set-at-a-time twin of ``emit``, not a second contract.
 
-Text, not bytes
----------------
+Text, and bytes where the sink has them
+---------------------------------------
 A DuckDB ``VARCHAR`` is UTF-8 text, so a key whose bytes are not valid UTF-8
-cannot travel this path — unlike ``contract.emit``, which carries raw bytes end
-to end. That limit is accepted deliberately: every key in every bucket the study
-lists today is ASCII, and the edge-key bucket that could hold otherwise does not
-exist yet (``EDGE_BUCKET=none``). Building BLOB plumbing for a bucket we do not
-have would be speculative.
+cannot travel a text sink's path. The key column is therefore also accepted as a
+``BLOB`` and carried byte-for-byte, which is what a binary sink — Swath's
+Parquet dataset — actually holds. The four remaining columns stay ``VARCHAR`` or
+``NULL``: a size, an etag, a timestamp and a storage class are ASCII by
+construction in every mode the study reads.
 
 What this path does NOT reintroduce is the escaping bug it replaces. A key
 containing TAB, NEWLINE or CR arrives here as those bytes and is refused at the
@@ -97,12 +97,35 @@ def _text(value: Any, field: str) -> str | None:
     )
 
 
+def _key(value: Any) -> bytes:
+    """The key column as raw bytes, from either a ``VARCHAR`` or a ``BLOB``.
+
+    A ``BLOB`` column travels byte-for-byte, so a format that stores the key as
+    raw bytes — Swath's Parquet sink does — keeps its fidelity through this path
+    instead of being narrowed to what UTF-8 can spell. ``VARCHAR`` stays
+    supported because most adapters read a text sink, where the key has already
+    been through the tool's own decode.
+    """
+    if value is None:
+        return b""
+    if isinstance(value, bytes):
+        return value
+    if isinstance(value, str):
+        return value.encode("utf-8")
+    raise ContractViolation(
+        f"key column must be VARCHAR, BLOB or NULL; the query produced "
+        f"{type(value).__name__} {value!r} — the adapter's SELECT is missing a CAST",
+        field=FIELD_NAMES[0],
+    )
+
+
 def _line(row: Any) -> bytes:
-    key, size, etag, mtime, storage_class = (
-        _text(value, name) for value, name in zip(row, FIELD_NAMES, strict=True)
+    key_value, *rest = row
+    size, etag, mtime, storage_class = (
+        _text(value, name) for value, name in zip(rest, FIELD_NAMES[1:], strict=True)
     )
     return Record(
-        key=b"" if key is None else key.encode("utf-8"),
+        key=_key(key_value),
         size=size,
         etag=etag,
         mtime=mtime,
@@ -114,10 +137,10 @@ def emit_result(out: IO[bytes], result: ResultSet) -> None:
     """Write a 5-column DuckDB result set as contract-v2 records.
 
     Columns are positional, in ``FIELD_NAMES`` order: key, size, etag, mtime,
-    storage_class. All five are ``VARCHAR`` or ``NULL`` — the SQL does its own
-    casting, because the shape of a size or a timestamp is a fact about the tool
-    and belongs in that tool's query. ``NULL`` and ``'-'`` both mean the mode does
-    not expose the field.
+    storage_class. The key is ``VARCHAR``, ``BLOB`` or ``NULL``; the other four
+    are ``VARCHAR`` or ``NULL`` — the SQL does its own casting, because the shape
+    of a size or a timestamp is a fact about the tool and belongs in that tool's
+    query. ``NULL`` and ``'-'`` both mean the mode does not expose the field.
     """
     while True:
         rows = result.fetchmany(FETCH_BATCH)

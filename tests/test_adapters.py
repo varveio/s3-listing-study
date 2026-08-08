@@ -54,13 +54,25 @@ PORTED = (
 # was blocked at auth. A mode LEAVING this map means coverage arrived; a mode
 # joining it means the equivalence run quietly stopped judging that mode, and the
 # port of it now rests on its FIXTURES entry alone.
+# Modes whose output is a DIRECTORY dataset, not a stream. They take no stdin,
+# so the stdin-payload fixture harness cannot express them; they are exercised
+# through a published native/ directory instead.
+DATASET_MODES = {("swath", "recursive-parquet"), ("swath", "recursive-parquet-sorted")}
+
 UNEXERCISED = {
     "ps3": {"list-versions"},
     "s3p": {"ls-long"},
     "s4cmd": {"du", "shallow", "show-directory"},
     # v0.1.0 receipts were retired with that subject; v0.2.0 currently has
     # observations only, so no mode has a replayable committed payload yet.
-    "swath": {"recursive-tsv", "recursive-jsonl", "recursive-table", "seed-none"},
+    "swath": {
+        "recursive-tsv",
+        "recursive-jsonl",
+        "recursive-table",
+        "seed-none",
+        "recursive-parquet",
+        "recursive-parquet-sorted",
+    },
 }
 
 # A mode whose input is a BINARY stream, where a lone newline is not an empty
@@ -466,6 +478,7 @@ def test_normalizer_has_standard_help(tool: str) -> None:
 @pytest.mark.parametrize("tool", PORTED)
 def test_every_declared_mode_has_a_fixture(tool: str) -> None:
     declared = set(load_adapter(REPO, tool).MODES)
+    declared -= {mode for fixture_tool, mode in DATASET_MODES if fixture_tool == tool}
     covered = {adapter_mode for adapter_tool, adapter_mode in FIXTURES if adapter_tool == tool}
     assert declared == covered
 
@@ -524,7 +537,10 @@ def test_swath_text_modes_refuse_ambiguous_control_escapes(mode: str) -> None:
     assert b"ambiguous swath" in done.stderr
 
 
-@pytest.mark.parametrize("mode", sorted(load_adapter(REPO, "swath").MODES))
+@pytest.mark.parametrize(
+    "mode",
+    sorted(load_adapter(REPO, "swath").MODES - {mode for tool, mode in DATASET_MODES}),
+)
 def test_swath_treats_a_closed_downstream_as_success(
     monkeypatch: pytest.MonkeyPatch, mode: str
 ) -> None:
@@ -580,6 +596,26 @@ def test_a_newline_only_parquet_stream_is_refused() -> None:
     assert done.returncode == 1
     assert done.stdout == b""
     assert b"not readable parquet" in done.stderr
+
+
+def test_a_swath_dataset_without_its_success_marker_is_refused(tmp_path: Path) -> None:
+    """A killed swath run leaves valid-but-short parts and no ``_SUCCESS``.
+
+    Normalizing those parts would produce a clean short listing, which the
+    verifier would read as the tool having missed keys rather than as a run that
+    never finished.
+    """
+    dataset = tmp_path / "listing"
+    (dataset / "data").mkdir(parents=True)
+    (dataset / "data" / "part-w0-00000.parquet").write_bytes(b"PAR1")
+    done = subprocess.run(
+        [str(adapter_path("swath")), "recursive-parquet", "--dataset", str(dataset)],
+        capture_output=True,
+        check=False,
+    )
+    assert done.returncode == 1
+    assert done.stdout == b""
+    assert b"_SUCCESS" in done.stderr
 
 
 def test_a_short_text_row_is_refused_rather_than_padded() -> None:

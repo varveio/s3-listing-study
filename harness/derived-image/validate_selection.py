@@ -8,10 +8,19 @@ from pathlib import Path
 sys.path.insert(0, "/build/payload")
 
 from s3_listing_study.build_selection import BuildSelectionError, load_staged_selection
+from s3_listing_study.python_runtime import running_libc
 
 try:
     selection = load_staged_selection(Path("/build/image.json"), Path("/build/tool"))
-    if selection.subject_python != "/usr/bin/python3":
-        raise BuildSelectionError("selected subject does not provide the shared Python runtime")
+    # This script runs on the interpreter the build bound, so its own libc is
+    # the one the attempt engine will run under. A registration that declares
+    # the other one produces an interpreter that loads on the build host and
+    # dies inside the subject, which is exactly what this build must not ship.
+    libc = running_libc()
+    if libc != selection.python_libc:
+        raise BuildSelectionError(
+            f"the bound interpreter is {libc or 'of an unidentifiable libc'}, "
+            f"but this capsule registers python_libc {selection.python_libc}"
+        )
 except BuildSelectionError as exc:
     raise SystemExit(f"derived-image selection refused: {exc}") from None

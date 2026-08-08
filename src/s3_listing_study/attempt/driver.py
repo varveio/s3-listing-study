@@ -39,6 +39,10 @@ def validate_request(request: CommandRequest) -> None:
         raise CommandAdapterError("region is required")
     if request.auth != "anonymous":
         raise CommandAdapterError("only anonymous authentication is implemented")
+    if request.sink_dir and not request.sink_dir.startswith("/"):
+        raise CommandAdapterError("sink directory must be an absolute path")
+    if "\x00" in request.sink_dir:
+        raise CommandAdapterError("sink directory contains a NUL byte")
     if "\x00" in request.prefix:
         raise CommandAdapterError("prefix contains a NUL byte")
     if len(request.prefix.encode("utf-8")) > 1024:

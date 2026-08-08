@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import platform
 import re
 import subprocess
 import sys
@@ -24,6 +25,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from s3_listing_study.command_adapter import CommandAdapterError, load_command_adapter
+from s3_listing_study.python_runtime import LIBC_VALUES, PythonRuntimeError, ensure_runtime
 
 SLUG_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 SUBJECT_IMAGE_RE = re.compile(
@@ -36,7 +38,7 @@ ADAPTER_MANIFEST_HEADER = b"s3-listing-study-adapter-bundle-v1\0"
 REQUIRED_FIELDS = {
     "tool",
     "subject_image",
-    "subject_python",
+    "python_libc",
     "subject_workdir",
     "executable",
     "command",
@@ -53,7 +55,7 @@ class BuildSelectionError(ValueError):
 class BuildSelection:
     tool: str
     subject_image: str
-    subject_python: str
+    python_libc: str
     subject_workdir: str
     executable: tuple[str, ...]
     command: str
@@ -112,6 +114,19 @@ def _canonical_absolute_path(value: object, field: str) -> str:
     return value
 
 
+def _argv_token(value: object, field: str) -> str:
+    """One literal argv element of a multi-token program prefix.
+
+    A token is not path-checked here because containment for these elements is
+    the capsule gate's cross-check in ``capsule.py:596``: the registered
+    executable must equal the adapter's ``fixed_command_prefix``, so a token
+    cannot name anything the reviewed adapter does not already name.
+    """
+    if not isinstance(value, str) or not value or "\x00" in value:
+        raise BuildSelectionError(f"{field} must be a non-empty NUL-free argv token")
+    return value
+
+
 def adapter_bundle_sha256(adapter_dir: Path) -> str:
     """Hash the canonical command/normalizer bundle without importing either file."""
     root = adapter_dir.resolve(strict=True)
@@ -148,15 +163,27 @@ def load_staged_selection(
     subject_image = raw["subject_image"]
     if not isinstance(subject_image, str) or SUBJECT_IMAGE_RE.fullmatch(subject_image) is None:
         raise BuildSelectionError("subject_image must be pinned by a lowercase sha256 digest")
-    subject_python = _canonical_absolute_path(raw["subject_python"], "subject_python")
+    python_libc = raw["python_libc"]
+    if python_libc not in LIBC_VALUES:
+        raise BuildSelectionError(
+            f"python_libc must be one of {LIBC_VALUES}; got: {python_libc!r}. "
+            "It selects the pinned interpreter build for this subject's base image, "
+            "and an Alpine subject needs the musl one."
+        )
     subject_workdir = _canonical_absolute_path(raw["subject_workdir"], "subject_workdir")
 
     executable_raw = raw["executable"]
     if not isinstance(executable_raw, list) or not executable_raw:
         raise BuildSelectionError("registered executable must be a non-empty path array")
-    executable = tuple(
-        _canonical_absolute_path(value, f"executable[{index}]")
-        for index, value in enumerate(executable_raw)
+    # Only the program itself is a path. A JVM tool's prefix continues with
+    # literal argv tokens — Swath's is java, -jar, then the jar — and requiring
+    # every element to be an absolute path would exclude every such subject.
+    executable = (
+        _canonical_absolute_path(executable_raw[0], "executable[0]"),
+        *(
+            _argv_token(value, f"executable[{index}]")
+            for index, value in enumerate(executable_raw[1:], start=1)
+        ),
     )
 
     if raw["command"] != "adapter/command.py" or raw["normalizer"] != "adapter/normalize.py":
@@ -183,7 +210,7 @@ def load_staged_selection(
     return BuildSelection(
         tool=tool,
         subject_image=subject_image,
-        subject_python=subject_python,
+        python_libc=python_libc,
         subject_workdir=subject_workdir,
         executable=executable,
         command=raw["command"],
@@ -247,7 +274,18 @@ def build_derived_image_main(argv: Sequence[str] | None = None) -> int:
             root,
             "shared derived-image Dockerfile",
         )
+        # The subject supplies the tool, never the interpreter the attempt engine
+        # runs on: ten of eleven subject images have no Python at all.
+        #
+        # platform.machine() is the BUILD HOST's architecture, which is correct
+        # only because this build is native — no --platform is passed and the
+        # subject image is pulled for the host's own architecture. Building for
+        # a foreign architecture would need the target named explicitly here.
+        interpreter = ensure_runtime(platform.machine(), selection.python_libc)
     except BuildSelectionError as exc:
+        print(f"build-derived-image: {exc}", file=sys.stderr)
+        return 2
+    except PythonRuntimeError as exc:
         print(f"build-derived-image: {exc}", file=sys.stderr)
         return 2
 
@@ -262,6 +300,8 @@ def build_derived_image_main(argv: Sequence[str] | None = None) -> int:
         f"adapter={selection.adapter_dir}",
         "--build-context",
         f"selection={selection.metadata_path.parent}",
+        "--build-context",
+        f"python={interpreter}",
         "--tag",
         args.tag,
         str(root),

@@ -13,6 +13,7 @@ from types import ModuleType
 
 import pytest
 
+from s3_listing_study import build_selection
 from s3_listing_study.build_selection import (
     BuildSelectionError,
     adapter_bundle_sha256,
@@ -42,6 +43,7 @@ TOOLS = (
 )
 BUCKET = "bucket-x"
 REGION = "region-y"
+SINK = "/sink"
 REGIONS = (REGION, "eu-west-3")
 PREFIXES = ("", "p x/雪/")
 Q_CONTENTS = "Contents[].[Key,Size,ETag,LastModified,StorageClass]"
@@ -258,42 +260,37 @@ def _s7cmd(mode: str, prefix: str) -> tuple[str, ...]:
 
 def _swath(mode: str, prefix: str) -> tuple[str, ...]:
     uri = f"s3://{BUCKET}" + (f"/{prefix}" if prefix else "")
-    common = (
+    head = (
         "-v",
+        "--color",
+        "never",
         "list",
         uri,
         "--region",
         REGION,
         "--no-sign-request",
-        "--checkpoint",
-        "none",
         "--concurrency",
         "8",
     )
+    common = (*head, "--checkpoint", "none")
+    dataset = f"{SINK}/listing"
     return {
         "recursive-tsv": (*common, "--format", "tsv"),
         "recursive-jsonl": (*common, "--format", "jsonl"),
         "recursive-table": (*common, "--format", "table"),
         "seed-none": (*common, "--format", "tsv", "--tune", "seed.mode=none"),
-        "parquet-probe": (*common, "--format", "parquet", "-o", "/tmp/swout"),
-        "sort-probe": (
-            "-v",
-            "list",
-            uri,
-            "--region",
-            REGION,
-            "--no-sign-request",
+        "recursive-parquet": (*common, "--format", "parquet", "-o", dataset),
+        "recursive-parquet-sorted": (
+            *head,
             "--checkpoint",
             "auto",
-            "--concurrency",
-            "8",
             "--format",
             "parquet",
+            "-o",
+            dataset,
             "--sort",
             "--tune",
             "sort.ignore-disk-check=on",
-            "-o",
-            "/tmp/swout",
         ),
     }[mode]
 
@@ -322,7 +319,7 @@ FIXED_PREFIXES = {
     "s4cmd": ("s4cmd",),
     "s5cmd": ("/s5cmd",),
     "s7cmd": ("/usr/local/bin/s7cmd",),
-    "swath": ("java", "-jar", "/opt/swath/swath.jar"),
+    "swath": ("/opt/java/openjdk/bin/java", "-jar", "/opt/swath/swath.jar"),
 }
 EXPECTED_MODES = {
     "aws-cli": {
@@ -377,8 +374,8 @@ EXPECTED_MODES = {
         "recursive-jsonl",
         "recursive-table",
         "seed-none",
-        "parquet-probe",
-        "sort-probe",
+        "recursive-parquet",
+        "recursive-parquet-sorted",
     },
 }
 
@@ -392,7 +389,7 @@ def test_every_mode_matches_the_frozen_shell_argv_contract(tool: str) -> None:
     for mode in module.MODES:
         for prefix in PREFIXES:
             for region in REGIONS:
-                request = CommandRequest(mode, BUCKET, region, prefix)
+                request = CommandRequest(mode, BUCKET, region, prefix, sink_dir=SINK)
                 try:
                     expected = EXPECTED[tool](mode, prefix)
                 except CommandAdapterError:
@@ -513,7 +510,7 @@ def _registered_fixture(tmp_path: Path) -> tuple[Path, Path, dict[str, object]]:
         "subject_image": (
             "amazon/aws-cli@sha256:406ca32d31e640a56e8d52921b40528cc64bfa59ec9cb4ee1456db6746cb7292"
         ),
-        "subject_python": "/usr/bin/python3",
+        "python_libc": "gnu",
         "subject_workdir": "/aws",
         "executable": ["/usr/local/bin/aws"],
         "command": "adapter/command.py",
@@ -558,10 +555,11 @@ def test_selection_rejects_duplicate_json_keys(tmp_path: Path) -> None:
         ("subject_image", "amazon/aws-cli:latest", "pinned"),
         ("subject_image", "amazon/aws-cli@sha256:ABC", "pinned"),
         ("subject_image", "../aws-cli@sha256:" + "0" * 64, "pinned"),
-        ("subject_python", "usr/bin/python3", "canonical absolute"),
-        ("subject_python", "/usr/../bin/python3", "traversal"),
+        ("python_libc", "glibc", "python_libc must be one of"),
+        ("python_libc", "", "python_libc must be one of"),
         ("subject_workdir", "/aws/", "canonical absolute"),
         ("executable", ["aws"], "canonical absolute"),
+        ("executable", ["/usr/bin/java", ""], "argv token"),
         ("command", "../adapter/command.py", "fixed registered"),
         ("normalizer", "adapter/../normalize.py", "fixed registered"),
         ("adapter_bundle_sha256", "0" * 63, "64 lowercase"),
@@ -630,7 +628,7 @@ def test_selection_rejects_missing_or_changed_adapter_bytes(tmp_path: Path) -> N
 
 
 def test_slug_only_builder_registers_exact_named_contexts(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     calls: list[tuple[str, ...]] = []
 
@@ -642,13 +640,25 @@ def test_slug_only_builder_registers_exact_named_contexts(
         calls.append(command)
         return Completed()
 
+    # The real provisioner downloads a quarter-gigabyte interpreter archive; the
+    # offline suite must never reach the network, so the tree is faked here and
+    # the bound context asserted against it.
+    interpreter = tmp_path / "python"
+    interpreter.mkdir()
+
+    def fake_ensure_runtime(architecture: str, libc: str, **kwargs: object) -> Path:
+        assert libc == "gnu"
+        return interpreter
+
     monkeypatch.chdir(REPO)
     monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(build_selection, "ensure_runtime", fake_ensure_runtime)
     assert build_derived_image_main(["--tool", "aws-cli", "--tag", "study:test"]) == 0
     assert len(calls) == 1
     command = calls[0]
     assert "--build-arg" not in command
-    assert command.count("--build-context") == 3
+    assert command.count("--build-context") == 4
+    assert f"python={interpreter}" in command
     assert any(item.startswith("subject=docker-image://amazon/aws-cli@sha256:") for item in command)
     assert f"adapter={REPO / 'tools/aws-cli/adapter'}" in command
     assert f"selection={REPO / 'tools/aws-cli/build'}" in command

@@ -1,0 +1,14 @@
+{
+  "tool": "swath",
+  "subject_image": "ghcr.io/varveio/swath@sha256:e03f7be9c025b91794152f9b07550565beadd0acb543bb66f2ec3923b5497978",
+  "python_libc": "gnu",
+  "subject_workdir": "/opt/swath",
+  "executable": [
+    "/opt/java/openjdk/bin/java",
+    "-jar",
+    "/opt/swath/swath.jar"
+  ],
+  "command": "adapter/command.py",
+  "normalizer": "adapter/normalize.py",
+  "adapter_bundle_sha256": "e202a8de6ab5b5165030ab9d0ce99bca64faddb31095004db3a26f5471450adc"
+}

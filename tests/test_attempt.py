@@ -552,6 +552,53 @@ def test_anonymous_child_environment_is_a_strict_recorded_allowlist(tmp_path: Pa
     assert result_env == expected
 
 
+def test_native_sink_is_published_with_its_layout(tmp_path: Path) -> None:
+    sink = tmp_path / "sink"
+    (sink / "data").mkdir(parents=True)
+    (sink / "data" / "part-0.bin").write_bytes(b"rows")
+    (sink / "_SUCCESS").write_bytes(b"")
+    result, runner_exit = _run(tmp_path, "pass", sink_dir=str(sink))
+
+    assert runner_exit == 0
+    assert result["native_refusal"] is None
+    native = cast(list[dict[str, object]], result["native_output"])
+    assert [entry["path"] for entry in native] == ["native/_SUCCESS", "native/data/part-0.bin"]
+    assert (tmp_path / "attempt" / "native" / "data" / "part-0.bin").read_bytes() == b"rows"
+
+
+def test_flagged_native_sink_fails_closed_without_artifacts(tmp_path: Path) -> None:
+    """The sink is planned before the streams, so a refusal publishes nothing."""
+    sink = tmp_path / "sink"
+    sink.mkdir()
+    (sink / "part.bin").write_bytes(b"A" + b"KIA" + b"Q" * 16)
+    with pytest.raises(AttemptError, match="secret scan did not clear native"):
+        _run(tmp_path, "pass", sink_dir=str(sink))
+    assert list((tmp_path / "attempt").iterdir()) == []
+
+
+def test_symlinked_sink_directory_is_refused(tmp_path: Path) -> None:
+    sink = tmp_path / "sink"
+    (sink / "data").mkdir(parents=True)
+    (sink / "link").symlink_to(sink / "data")
+    with pytest.raises(AttemptError, match="symlinked directory"):
+        _run(tmp_path, "pass", sink_dir=str(sink))
+    assert list((tmp_path / "attempt").iterdir()) == []
+
+
+def test_native_sink_caps_stop_the_walk(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    sink = tmp_path / "sink"
+    sink.mkdir()
+    for index in range(4):
+        (sink / f"part-{index}.bin").write_bytes(b"rows")
+    monkeypatch.setattr(attempt_engine, "NATIVE_MAX_FILES", 2)
+    with pytest.raises(AttemptError, match="more than 2 files"):
+        _run(tmp_path, "pass", sink_dir=str(sink))
+    monkeypatch.setattr(attempt_engine, "NATIVE_MAX_FILES", 4096)
+    monkeypatch.setattr(attempt_engine, "NATIVE_MAX_BYTES", 7)
+    with pytest.raises(AttemptError, match="more than 7 bytes"):
+        _run(tmp_path, "pass", sink_dir=str(sink))
+
+
 def test_flagged_raw_stream_fails_closed_without_artifacts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -807,7 +854,8 @@ def test_generic_dockerfile_bakes_no_tool_specific_command_prefix() -> None:
     assert "COPY --from=attempt-builder /build/image.json" in dockerfile
     assert "ARG " not in dockerfile
     assert "WORKDIR ${SUBJECT_WORKDIR}" not in dockerfile
-    assert 'ENTRYPOINT ["/usr/bin/python3", "-I"' in dockerfile
+    assert 'ENTRYPOINT ["/opt/s3-listing-study/python/bin/python3", "-I"' in dockerfile
+    assert "COPY --from=python . /opt/s3-listing-study/python/" in dockerfile
     assert "aws-cli" not in dockerfile
     assert "command-prefix" not in dockerfile
     assert "sh -c" not in dockerfile
@@ -820,7 +868,7 @@ def test_generic_dockerfile_bakes_no_tool_specific_command_prefix() -> None:
         "subject_image": (
             "amazon/aws-cli@sha256:406ca32d31e640a56e8d52921b40528cc64bfa59ec9cb4ee1456db6746cb7292"
         ),
-        "subject_python": "/usr/bin/python3",
+        "python_libc": "gnu",
         "subject_workdir": "/aws",
         "executable": ["/usr/local/bin/aws"],
         "command": "adapter/command.py",

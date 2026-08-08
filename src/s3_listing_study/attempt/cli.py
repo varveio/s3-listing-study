@@ -7,6 +7,7 @@ import math
 import os
 import re
 import sys
+import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -77,40 +78,46 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         timeout, term_grace = _parse_numbers(args.timeout, args.term_grace)
         concurrency = _parse_concurrency(args.concurrency)
-        request = CommandRequest(
-            mode=args.mode,
-            bucket=args.bucket,
-            region=args.region,
-            prefix=args.prefix,
-            tool=args.tool,
-            operation=args.operation,
-            auth=args.auth,
-            concurrency=concurrency,
-        )
-        invocation = resolve_invocation(request)
-        _result, runner_exit = run_attempt(
-            AttemptOptions(
-                output=Path(args.output),
-                argv=invocation.argv,
-                timeout_s=timeout,
-                adapter_bundle_sha256=invocation.adapter_bundle_sha256,
-                term_grace_s=term_grace,
-                attempt_id=args.attempt_id,
-                tool=args.tool,
-                tool_version=args.tool_version,
-                subject_image=invocation.subject_image_digest,
-                derived_image=args.derived_image,
-                harness_revision=args.harness_revision,
-                operation=args.operation,
-                auth=args.auth,
+        # The engine, not the adapter, owns where native output may land: a
+        # container-local path an adapter picked for itself is output no attempt
+        # record can account for. Removed with the container either way.
+        with tempfile.TemporaryDirectory(prefix="s3-study-sink-") as sink_dir:
+            request = CommandRequest(
                 mode=args.mode,
                 bucket=args.bucket,
                 region=args.region,
                 prefix=args.prefix,
-                scope=args.scope,
+                tool=args.tool,
+                operation=args.operation,
+                auth=args.auth,
                 concurrency=concurrency,
+                sink_dir=sink_dir,
             )
-        )
+            invocation = resolve_invocation(request)
+            _result, runner_exit = run_attempt(
+                AttemptOptions(
+                    output=Path(args.output),
+                    argv=invocation.argv,
+                    timeout_s=timeout,
+                    adapter_bundle_sha256=invocation.adapter_bundle_sha256,
+                    term_grace_s=term_grace,
+                    attempt_id=args.attempt_id,
+                    tool=args.tool,
+                    tool_version=args.tool_version,
+                    subject_image=invocation.subject_image_digest,
+                    derived_image=args.derived_image,
+                    harness_revision=args.harness_revision,
+                    operation=args.operation,
+                    auth=args.auth,
+                    mode=args.mode,
+                    bucket=args.bucket,
+                    region=args.region,
+                    prefix=args.prefix,
+                    scope=args.scope,
+                    concurrency=concurrency,
+                    sink_dir=sink_dir,
+                )
+            )
     except (AttemptError, BuildSelectionError, CommandAdapterError, OSError) as exc:
         print(f"attempt-runner: {exc}", file=sys.stderr)
         return 2

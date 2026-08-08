@@ -163,6 +163,7 @@ resolve in [`data/claims.json`](data/claims.json).
 | See what image was selected, what ran, what was blocked, and how to reproduce it | [`docs/running.md`](docs/running.md) |
 | Inspect canonical identity, study states, and the full claim ledger | [`data/tool.json`](data/tool.json) and [`data/claims.json`](data/claims.json) |
 | Integrate the subject with the shared harness | [`adapter/`](adapter/) |
+| See which subject image the derived attempt image is built from | [`build/`](build/) |
 | Read the independent blind re-derivation at v0.2.0, its errata, and its cross-model review | [`research/`](research/) |
 | Audit an individual claim's evidence in depth | [`data/claims.json`](data/claims.json), then the owning `research/reader-*.md` |
 | Inspect the committed observations | [`receipts/`](receipts/) |
