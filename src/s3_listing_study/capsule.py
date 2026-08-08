@@ -68,8 +68,16 @@ FIXTURE_TOOLS = {"s3p", "s4cmd"}
 # deletion to appear on this line, where an owner-reviewed tools/ PR has to see
 # it. Removing a slug here is a decision, not a side effect.
 MIGRATED_TOOLS = {
-    "aws-cli", "minio-mc", "ps3", "rclone", "s3-fast-list",
-    "s3kor", "s3p", "s4cmd", "s5cmd", "s7cmd",
+    "aws-cli",
+    "minio-mc",
+    "ps3",
+    "rclone",
+    "s3-fast-list",
+    "s3kor",
+    "s3p",
+    "s4cmd",
+    "s5cmd",
+    "s7cmd",
 }
 
 HISTORICAL_BANNER = re.compile(
@@ -123,7 +131,8 @@ def check_claim_schema_contract(schema_path: Path, errors: list[str]) -> None:
     }
 
     def document(
-        status: str, evidence: list[dict[str, str]],
+        status: str,
+        evidence: list[dict[str, str]],
         legacy_ledger: dict[str, object] | None = None,
         legacy_origins: list[str] | None = None,
     ) -> dict[str, object]:
@@ -154,7 +163,8 @@ def check_claim_schema_contract(schema_path: Path, errors: list[str]) -> None:
         return document(status, evidence, legacy_ledger=ledger, legacy_origins=["M1"])
 
     def with_second_claim(
-        fixture: dict[str, object], legacy_origins: list[str] | None,
+        fixture: dict[str, object],
+        legacy_origins: list[str] | None,
     ) -> dict[str, object]:
         # The half-present stratum needs two claims to express: one document,
         # one claim conserving an origin and one not.
@@ -173,10 +183,18 @@ def check_claim_schema_contract(schema_path: Path, errors: list[str]) -> None:
     run_evidence = [{"kind": "run", "receipt": "../receipts/fixture"}]
     valid = {
         "confirmed-run": migrated("confirmed", run_evidence),
-        "supported-source": migrated("supported", [{
-            "kind": "source", "subject": "upstream", "repository": "https://example.com/repo",
-            "commit": "abcdef0", "path": "src/main.rs",
-        }]),
+        "supported-source": migrated(
+            "supported",
+            [
+                {
+                    "kind": "source",
+                    "subject": "upstream",
+                    "repository": "https://example.com/repo",
+                    "commit": "abcdef0",
+                    "path": "src/main.rs",
+                }
+            ],
+        ),
         "unverified-none": migrated("unverified", [{"kind": "none", "reason": "Not run."}]),
         "unverifiable-none": migrated(
             "unverifiable", [{"kind": "none", "reason": "No surviving evidence."}]
@@ -188,53 +206,99 @@ def check_claim_schema_contract(schema_path: Path, errors: list[str]) -> None:
         "migrated-two-claims": with_second_claim(migrated("confirmed", run_evidence), ["M1"]),
     }
     invalid = {
-        "confirmed-with-none": migrated("confirmed", [
-            {"kind": "run", "receipt": "../receipts/fixture"},
-            {"kind": "none", "reason": "Contradictory evidence state."},
-        ]),
+        "confirmed-with-none": migrated(
+            "confirmed",
+            [
+                {"kind": "run", "receipt": "../receipts/fixture"},
+                {"kind": "none", "reason": "Contradictory evidence state."},
+            ],
+        ),
         "supported-with-none": migrated("supported", [{"kind": "none", "reason": "Not evidence."}]),
-        "unverified-with-source": migrated("unverified", [{
-            "kind": "source", "subject": "upstream", "repository": "https://example.com/repo",
-            "commit": "abcdef0", "path": "src/main.rs",
-        }]),
-        "source-with-receipt": migrated("supported", [{
-            "kind": "source", "subject": "upstream", "repository": "https://example.com/repo",
-            "commit": "abcdef0", "path": "src/main.rs", "receipt": "../receipts/fixture",
-        }]),
-        "run-with-source-fields": migrated("confirmed", [{
-            "kind": "run", "receipt": "../receipts/fixture", "repository": "https://example.com/repo",
-        }]),
-        "born-canonical-confirmed-without-run": document("confirmed", [{
-            "kind": "documentation", "url": "https://example.com/docs",
-        }]),
+        "unverified-with-source": migrated(
+            "unverified",
+            [
+                {
+                    "kind": "source",
+                    "subject": "upstream",
+                    "repository": "https://example.com/repo",
+                    "commit": "abcdef0",
+                    "path": "src/main.rs",
+                }
+            ],
+        ),
+        "source-with-receipt": migrated(
+            "supported",
+            [
+                {
+                    "kind": "source",
+                    "subject": "upstream",
+                    "repository": "https://example.com/repo",
+                    "commit": "abcdef0",
+                    "path": "src/main.rs",
+                    "receipt": "../receipts/fixture",
+                }
+            ],
+        ),
+        "run-with-source-fields": migrated(
+            "confirmed",
+            [
+                {
+                    "kind": "run",
+                    "receipt": "../receipts/fixture",
+                    "repository": "https://example.com/repo",
+                }
+            ],
+        ),
+        "born-canonical-confirmed-without-run": document(
+            "confirmed",
+            [
+                {
+                    "kind": "documentation",
+                    "url": "https://example.com/docs",
+                }
+            ],
+        ),
         "ledger-missing-migration-map": document(
-            "confirmed", run_evidence,
+            "confirmed",
+            run_evidence,
             legacy_ledger={"source": "../research/tool-page.md", "expected_origins": ["M1"]},
             legacy_origins=["M1"],
         ),
         "ledger-foreign-source": document(
-            "confirmed", run_evidence,
+            "confirmed",
+            run_evidence,
             legacy_ledger={**ledger, "source": "../research/report.md"},
             legacy_origins=["M1"],
         ),
         "ledger-empty-origins": document(
-            "confirmed", run_evidence,
+            "confirmed",
+            run_evidence,
             legacy_ledger={**ledger, "expected_origins": []},
             legacy_origins=["M1"],
         ),
         "claim-empty-legacy-origins": document(
-            "confirmed", run_evidence, legacy_ledger=ledger, legacy_origins=[],
+            "confirmed",
+            run_evidence,
+            legacy_ledger=ledger,
+            legacy_origins=[],
         ),
         # Both directions of the all-or-nothing stratum rule, including the
         # half-present shape a ledger plus a partially stripped claim set makes.
         "ledger-without-claim-origins": document(
-            "confirmed", run_evidence, legacy_ledger=ledger, legacy_origins=None,
+            "confirmed",
+            run_evidence,
+            legacy_ledger=ledger,
+            legacy_origins=None,
         ),
         "claim-origins-without-ledger": document(
-            "confirmed", run_evidence, legacy_ledger=None, legacy_origins=["M1"],
+            "confirmed",
+            run_evidence,
+            legacy_ledger=None,
+            legacy_origins=["M1"],
         ),
         "ledger-with-one-claim-missing-origins": with_second_claim(
-            migrated("confirmed", run_evidence), None,
+            migrated("confirmed", run_evidence),
+            None,
         ),
     }
     for name, fixture in valid.items():
@@ -485,9 +549,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not has_migration:
         for relative in sorted(MIGRATION_FILES):
             if (capsule / relative).is_file():
-                errors.append(
-                    f"migration stratum file without a legacy ledger: {relative}"
-                )
+                errors.append(f"migration stratum file without a legacy ledger: {relative}")
     for name in sorted(
         {"mechanism.md", "running.md", "run.sh", "normalize.sh", "normalize.py", "Dockerfile"}
         & actual_root
@@ -548,13 +610,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             errors.append("claim IDs are not unique")
         if not has_migration:
             stray = [
-                claim.get("id") for claim in claims
+                claim.get("id")
+                for claim in claims
                 if isinstance(claim, dict) and "legacy_origins" in claim
             ]
             if stray:
-                errors.append(
-                    f"claims declare legacy_origins without a legacy ledger: {stray}"
-                )
+                errors.append(f"claims declare legacy_origins without a legacy ledger: {stray}")
         if migration_regression:
             ledger = claims_data.get("legacy_ledger", {})
             expected = ledger.get("expected_origins", []) if isinstance(ledger, dict) else []
@@ -676,7 +737,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             required_provenance = ["not a run record"]
             if has_migration:
                 required_provenance += [
-                    "Mixed provenance", "research/reconciliation.md", "research/tool-page.md",
+                    "Mixed provenance",
+                    "research/reconciliation.md",
+                    "research/tool-page.md",
                 ]
             for required in required_provenance:
                 if required not in provenance:

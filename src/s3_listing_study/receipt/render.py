@@ -115,9 +115,7 @@ def render(facts: RunFacts, stdout: Payload, stderr: Payload) -> bytes:
     invocation = md_safe_block("invocation", facts.invocation)
     shape = md_safe_block("shape", facts.shape)
 
-    timeout_note = (
-        f" — **killed at the {timeout}s timeout**" if facts.timed_out == "1" else ""
-    )
+    timeout_note = f" — **killed at the {timeout}s timeout**" if facts.timed_out == "1" else ""
     obs_cell = "none" if obs_env == "none" else f"`{obs_env}` — recorded verbatim"
     functional_cell = (
         "none"

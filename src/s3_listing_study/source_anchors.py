@@ -62,7 +62,10 @@ def git(
     root: Path, *args: str, text: bool = True
 ) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]:
     return subprocess.run(
-        ["git", "-C", str(root), *args], text=text, capture_output=True, check=False,
+        ["git", "-C", str(root), *args],
+        text=text,
+        capture_output=True,
+        check=False,
     )
 
 
@@ -103,17 +106,21 @@ class SourceRoot:
 
     def is_at(self, commit: str) -> bool:
         """True when this checkout's HEAD is the cited commit (short or full)."""
-        return bool(self.head) and (
-            self.head.startswith(commit) or commit.startswith(self.head)
-        )
+        return bool(self.head) and (self.head.startswith(commit) or commit.startswith(self.head))
 
 
 class Anchor:
     """One cited path[:lines] at one commit, with where it was cited from."""
 
     def __init__(
-        self, tool: str, origin: str, repository: str | None,
-        commit: str, path: str, lines: str | None, best_effort: bool = False,
+        self,
+        tool: str,
+        origin: str,
+        repository: str | None,
+        commit: str,
+        path: str,
+        lines: str | None,
+        best_effort: bool = False,
     ) -> None:
         self.tool = tool
         self.origin = origin  # claim id, or "file:line" for a Markdown label
@@ -162,11 +169,16 @@ def collect_json_anchors(capsule: Path, errors: list[str]) -> list[Anchor]:
             commit = evidence.get("commit")
             if not path or not commit:
                 continue  # schema-level defect; the capsule validator owns it
-            anchors.append(Anchor(
-                tool, str(claim.get("id")), evidence.get("repository"),
-                str(commit), str(path),
-                str(evidence["lines"]) if evidence.get("lines") is not None else None,
-            ))
+            anchors.append(
+                Anchor(
+                    tool,
+                    str(claim.get("id")),
+                    evidence.get("repository"),
+                    str(commit),
+                    str(path),
+                    str(evidence["lines"]) if evidence.get("lines") is not None else None,
+                )
+            )
     return anchors
 
 
@@ -177,10 +189,7 @@ def markdown_pages(targets: list[Path], capsules: list[Path]) -> list[Path]:
         if target.is_file() and target.suffix.lower() == ".md":
             pages.add(target)
         elif target.is_dir():
-            pages.update(
-                page for page in target.rglob("*.md")
-                if "receipts" not in page.parts
-            )
+            pages.update(page for page in target.rglob("*.md") if "receipts" not in page.parts)
     return sorted(pages)
 
 
@@ -207,8 +216,10 @@ def collect_markdown_anchors(pages: list[Path]) -> tuple[list[Anchor], int, int]
         # A page that pins exactly one commit lets its abbreviated continuation
         # labels (which carry no `@ sha`) be read against that commit.
         page_commits = {
-            found.group("commit") for label in SRC_LABEL.finditer(text)
-            for found in [LABEL_COMMIT.search(label.group("body"))] if found
+            found.group("commit")
+            for label in SRC_LABEL.finditer(text)
+            for found in [LABEL_COMMIT.search(label.group("body"))]
+            if found
         }
         page_commit = page_commits.pop() if len(page_commits) == 1 else None
         for match in SRC_LABEL.finditer(text):
@@ -217,7 +228,7 @@ def collect_markdown_anchors(pages: list[Path]) -> tuple[list[Anchor], int, int]
             commit_match = LABEL_COMMIT.search(match.group("body"))
             if commit_match:
                 commit = commit_match.group("commit")
-                body = match.group("body")[:commit_match.start()]
+                body = match.group("body")[: commit_match.start()]
             elif page_commit:
                 commit = page_commit
                 body = match.group("body")
@@ -237,10 +248,17 @@ def collect_markdown_anchors(pages: list[Path]) -> tuple[list[Anchor], int, int]
                 if not part or (lines and not LINES_SPEC.match(lines)):
                     unparsed += 1
                     continue
-                anchors.append(Anchor(
-                    tool, f"{relative}:{line_number}", None,
-                    commit, part.group("path"), lines, best_effort=True,
-                ))
+                anchors.append(
+                    Anchor(
+                        tool,
+                        f"{relative}:{line_number}",
+                        None,
+                        commit,
+                        part.group("path"),
+                        lines,
+                        best_effort=True,
+                    )
+                )
     return anchors, labels, unparsed
 
 
@@ -257,7 +275,9 @@ def tree_files(root: SourceRoot, commit: str, cache: TreeCache) -> set[str]:
 
 
 def resolve_best_effort_path(
-    anchor: Anchor, root: SourceRoot, cache: TreeCache,
+    anchor: Anchor,
+    root: SourceRoot,
+    cache: TreeCache,
 ) -> tuple[str | None, str | None]:
     """Resolve an abbreviated prose path (.../Foo.java, …Foo.java, Foo.java).
 
@@ -274,7 +294,7 @@ def resolve_best_effort_path(
     # Strip only an explicit elision marker: a bare leading "." is part of a
     # real path (.github/workflows/ci.yml).
     elided = re.match(r"^(?:\.\.\.|…)+/?", anchor.path)
-    suffix = anchor.path[elided.end():] if elided else anchor.path
+    suffix = anchor.path[elided.end() :] if elided else anchor.path
     if suffix in files:
         return suffix, None
     candidates = [path for path in files if path.endswith("/" + suffix)]
@@ -431,10 +451,17 @@ def run(anchors: list[Anchor], roots: list[SourceRoot]) -> Outcome:
         + f" and its HEAD {root.head[:7]} is not a commit any anchor in scope "
         "cites — a supplied checkout must be checked against or refused, never "
         "silently ignored"
-        for root in roots if not root.used
+        for root in roots
+        if not root.used
     ]
     return Outcome(
-        checked, failures, refusals, sum(refused.values()), skipped, unresolved, unused,
+        checked,
+        failures,
+        refusals,
+        sum(refused.values()),
+        skipped,
+        unresolved,
+        unused,
     )
 
 
@@ -526,8 +553,7 @@ def self_test() -> int:
         # silence behind a zero exit.
         outcome = run(anchor("src/Small.java", "1"), [source_root(subject, None)])
         case(
-            not outcome.checked and len(outcome.unused) == 1
-            and sum(outcome.skipped.values()) == 1,
+            not outcome.checked and len(outcome.unused) == 1 and sum(outcome.skipped.values()) == 1,
             f"unusable bare-PATH source root was not refused: {outcome}",
         )
         outcome = run(anchor("src/Small.java", "10-38"), [source_root(pinned_checkout, None)])
@@ -540,8 +566,10 @@ def self_test() -> int:
             [moved_root, source_root(pinned_checkout, None)],
         )
         case(
-            outcome.checked == 1 and not outcome.failures
-            and not outcome.refusals and not outcome.unused,
+            outcome.checked == 1
+            and not outcome.failures
+            and not outcome.refusals
+            and not outcome.unused,
             f"commit-exact bare root did not beat a stale named root: {outcome}",
         )
 
@@ -600,14 +628,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
-        "--markdown", nargs="*", default=None, metavar="PATH",
+        "--markdown",
+        nargs="*",
+        default=None,
+        metavar="PATH",
         help=(
             "also check inline [SRC path:lines @ shortsha] labels (best-effort); "
             "with no PATH, every Markdown page in the selected capsules"
         ),
     )
     parser.add_argument(
-        "--require-checked", action="store_true",
+        "--require-checked",
+        action="store_true",
         help=(
             "fail when the run verified no anchor at all; pass it wherever a "
             "green result is meant to mean anchors were checked, so a sweep "
@@ -615,7 +647,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
-        "--self-test", action="store_true",
+        "--self-test",
+        action="store_true",
         help="check the gate itself against a synthetic repository and exit",
     )
     args = parser.parse_args(None if argv is None else list(argv))
@@ -626,22 +659,24 @@ def main(argv: Sequence[str] | None = None) -> int:
         capsules = [REPO / "tools" / args.tool]
         if not (capsules[0] / "data" / "claims.json").is_file():
             print(
-                f"check-source-anchors: no capsule ledger at "
-                f"tools/{args.tool}/data/claims.json",
+                f"check-source-anchors: no capsule ledger at tools/{args.tool}/data/claims.json",
                 file=sys.stderr,
             )
             return 1
     else:
         capsules = sorted(
-            entry for entry in (REPO / "tools").iterdir()
+            entry
+            for entry in (REPO / "tools").iterdir()
             if (entry / "data" / "claims.json").is_file()
         )
 
     roots: list[SourceRoot] = []
     for spec in args.source_roots:
         label, separator, path_text = spec.partition("=")
-        root = SourceRoot(Path(path_text if separator else label).expanduser().resolve(),
-                          label if separator else None)
+        root = SourceRoot(
+            Path(path_text if separator else label).expanduser().resolve(),
+            label if separator else None,
+        )
         problem = root.probe()
         if problem:
             print(f"check-source-anchors: {problem}", file=sys.stderr)
