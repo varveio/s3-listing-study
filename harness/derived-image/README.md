@@ -56,28 +56,33 @@ What matters is the base of the subject's *runtime* stage, not its build stage.
 
 ## The payload is the worker half of the package
 
-The package is split by where its code runs, and the Dockerfile copies the two
-halves that run here:
+The package is split by which role runs the code, using this system's own
+vocabulary — a Cloud Batch task is the worker, the side that submits and
+collects is the manager. The Dockerfile copies the two layers a worker executes:
 
 | Layer | Runs | Ships in a subject image |
 | --- | --- | --- |
-| `s3_listing_study/attempt/` | inside the subject image | yes |
-| `s3_listing_study/common/` | both sides | yes |
-| `s3_listing_study/host/` | on a host only | no |
+| `s3_listing_study/worker/` | as the Batch attempt task, inside the subject image | yes |
+| `s3_listing_study/common/` | reached by both roles | yes |
+| `s3_listing_study/manager/` | on the orchestrating side | no |
+| `s3_listing_study/repo/` | wherever this repository is being edited | no |
 
-The zipapp's entry point is `attempt.cli`, and `common/` is exactly what that
-entry point and host-side code both reach — verification, receipts, capsule
-validation, collection and upload stay out. Two things follow, and both matter
-for a campaign. A subject image carries only code an attempt can execute, rather
-than a GCS client and a DuckDB adapter it can never call. And a subject image's
-digest stops moving when host-side code is edited, so orchestrator work does not
-invalidate the digests a campaign pins.
+The zipapp's entry point is `worker.cli`, and `common/` is exactly the
+intersection: what that entry point and the manager both reach. Verification,
+receipts, collection and upload stay in `manager/`; capsule validation, link
+checking and source-anchor checking are not orchestration at all and stay in
+`repo/`.
+
+Two things follow, and both matter for a campaign. A subject image carries only
+code an attempt can execute, rather than a GCS client and a DuckDB adapter it can
+never call. And a subject image's digest stops moving when manager-side code is
+edited, so orchestrator work does not invalidate the digests a campaign pins.
 
 `tests/test_payload_boundary.py` holds the boundary: it fails if anything in the
-shipped layers imports `host/`, if a module in `common/` is not genuinely reached
-from both sides, or if this Dockerfile stops matching that split. A missing
-import is a fast local failure naming the module, rather than an ImportError
-inside a container at attempt time.
+shipped layers imports an unshipped one, if a module in `common/` is not
+genuinely reached from both roles, or if this Dockerfile stops matching the
+split. A missing import is a fast local failure naming the module, rather than an
+ImportError inside a container at attempt time.
 
 `validate_selection.py` imports the entry point during the build, so a payload
 that does not import fails the build instead of surfacing inside a benchmark

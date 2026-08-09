@@ -12,7 +12,7 @@ three verdicts are untested.
 Tier 3 makes them reachable without weakening the production path:
 
 * the verifier under test is the shipped one — this checkout's
-  `s3_listing_study.host.verify`, asserted by `test_the_verifier_under_test_is_this_checkouts`;
+  `s3_listing_study.manager.verify`, asserted by `test_the_verifier_under_test_is_this_checkouts`;
 * `tests/tier3/verifier_entry.py` injects `PreflightSkipped()` in process, so
   runner readiness is bypassed without adding a production CLI flag;
 * `docker` is a fixture replayer on PATH (`fake-docker.sh`), driven by

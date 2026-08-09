@@ -44,7 +44,7 @@ UTC); the pipeline rewrites the trailing `+00:00` to `Z`, giving the
 contract-v2 canonical `YYYY-MM-DDTHH:MM:SSZ`. Snapshot, pre-flight, and
 mismatch re-list all use this exact pipeline — same image, same query, same
 canonicalization. The mismatch re-list captures the full five-field record
-(see `s3_listing_study.host.verify`).
+(see `s3_listing_study.manager.verify`).
 
 ## Primary: `noaa-normals-pds`
 

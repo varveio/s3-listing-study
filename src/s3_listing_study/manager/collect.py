@@ -59,8 +59,8 @@ def _write_parquet(tsv: bytes, parquet_path: Path) -> None:
     adapter path can for a native binary sink. Known limitation, not silently
     mishandled: this raises CollectError instead of writing a wrong file.
     """
-    from s3_listing_study.host.contract import FIELD_NAMES
-    from s3_listing_study.host.duckdb_adapter import connect, staged
+    from s3_listing_study.manager.contract import FIELD_NAMES
+    from s3_listing_study.manager.duckdb_adapter import connect, staged
 
     try:
         tsv.decode("utf-8")

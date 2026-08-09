@@ -295,7 +295,7 @@ Adapters reject it unless they explicitly declare a supported range.
 `adapter/normalize.py` converts the tool's native output into the historical
 verifier's normalized stream. Each module keeps its library `normalize`
 function clean and uses the shared argparse boundary in
-`s3_listing_study.host.normalizer_cli`. That stream is an executable compatibility
+`s3_listing_study.manager.normalizer_cli`. That stream is an executable compatibility
 boundary, not a stored canonical result.
 
 `adapter/fixtures/` is allowed only for synthetic adapter QA that already
@@ -423,7 +423,7 @@ format. Validate the living capsule contract with:
 uv run s3-listing-study validate-capsule --tool <tool>
 ```
 
-The gate is `s3_listing_study.host.capsule`, part of the packaged CLI: it validates
+The gate is `s3_listing_study.repo.capsule`, part of the packaged CLI: it validates
 `data/tool.json` and `data/claims.json` against the Draft 2020-12 schemas in
 `schemas/`, checks evidence references, verifies the root layout and the README
 contract, and resolves local Markdown links and fragments. Run it from the

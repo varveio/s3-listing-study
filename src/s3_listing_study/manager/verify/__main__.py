@@ -1,4 +1,4 @@
-"""``python -m s3_listing_study.host.verify`` — the verifier as a process."""
+"""``python -m s3_listing_study.manager.verify`` — the verifier as a process."""
 
 from __future__ import annotations
 

@@ -107,7 +107,7 @@ re-uploading objects under `normals-hourly/` and `normals-monthly/` — their
 `normals-hourly/` therefore returned `DRIFT` (2549/2549 keys present, size and
 storage_class unchanged, **mtime-only** divergence from the 2026-03-16-mtime
 manifest), independently confirmed by the harness aws-cli re-list [SRC
-`s3_listing_study.host.verify` drift path]. Per methodology this is the third-party
+`s3_listing_study.manager.verify` drift path]. Per methodology this is the third-party
 bucket moving under us — **not a tool finding** (claim `noaa-bucket-drift-event`).
 The walk was re-run and verified on the still-un-drifted
 `normals-annualseasonal/1981-2010/` scope (0/9,841 keys re-uploaded), where it PASSes

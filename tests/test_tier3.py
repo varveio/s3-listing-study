@@ -6,7 +6,7 @@ have no coverage at all. They are also the ones that become published findings
 about another project's tool, so they are the last place in this repo where a
 port should be trusted on inspection.
 
-Each case runs the shipped verifier — this checkout's `s3_listing_study.host.verify`,
+Each case runs the shipped verifier — this checkout's `s3_listing_study.manager.verify`,
 asserted below — inside a staged tree. The only substitutions are the runner
 security preflight and `docker`, which replays a fixture-recorded reference
 listing. See `tests/tier3/stage.py`.
@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from s3_listing_study.host import verify
+from s3_listing_study.manager import verify
 from tests.tier3 import make_fixtures
 from tests.tier3 import stage as tier3
 from tests.tier3.stage import Stage

@@ -1,4 +1,4 @@
-"""Tests for s3_listing_study.host.collect: row counts and Parquet conversion."""
+"""Tests for s3_listing_study.manager.collect: row counts and Parquet conversion."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pathlib import Path
 
 import duckdb
 
-from s3_listing_study.host.collect import CollectError, _collect
+from s3_listing_study.manager.collect import CollectError, _collect
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -73,7 +73,7 @@ def test_unknown_tool_raises_collect_error(tmp_path: Path) -> None:
 def test_non_utf8_normalized_output_refuses_parquet_conversion_rather_than_corrupt(
     tmp_path: Path,
 ) -> None:
-    from s3_listing_study.host.collect import _write_parquet
+    from s3_listing_study.manager.collect import _write_parquet
 
     try:
         _write_parquet(b"\xff\xfe not valid utf-8\n", tmp_path / "out.parquet")

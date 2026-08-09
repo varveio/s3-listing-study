@@ -67,7 +67,7 @@ def bind_streams(run_meta: Path, meta: dict[str, str]) -> list[Stream]:
     One copy, because the single-receipt path and the union path resolve the
     same three facts about the same file and would bind different bytes for the
     same receipt if they ever drifted on how a recorded path is resolved.
-    :func:`~s3_listing_study.host.verify.meta.resolve_payload_path` raises
+    :func:`~s3_listing_study.manager.verify.meta.resolve_payload_path` raises
     :class:`VerifierError` on a ``payload_path_base`` this build does not
     implement; each caller phrases its own refusal around that.
     """

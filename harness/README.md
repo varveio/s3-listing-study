@@ -1,7 +1,7 @@
 # Harness
 
 The active subject lifecycle is the stdlib-first Python package at
-`src/s3_listing_study/attempt/`. It is the only implementation of process
+`src/s3_listing_study/worker/`. It is the only implementation of process
 execution, byte capture, timing, timeout cleanup, and finalization for new
 attempts.
 
@@ -161,7 +161,7 @@ different architectures and against different scopes; nothing merges or
 supersedes across the two, and a reader must take the scope and date from the
 record in hand rather than from the directory it shares.
 
-`s3_listing_study.host.verify` continues to audit those receipt-bound streams against
+`s3_listing_study.manager.verify` continues to audit those receipt-bound streams against
 their recorded registry and manifest. The offline union regression suite is
 `harness/tests/run-regressions.sh`; the host security regression suite is
 `harness/tests/runner-security-regressions.sh`.

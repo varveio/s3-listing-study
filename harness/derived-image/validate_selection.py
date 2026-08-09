@@ -11,7 +11,7 @@ sys.path.insert(0, "/build/payload")
 # not import — a missing dependency, a syntax error — then fails the build
 # against the exact name, instead of surfacing inside a benchmark attempt on an
 # image that has already shipped.
-import s3_listing_study.attempt.cli  # noqa: F401
+import s3_listing_study.worker.cli  # noqa: F401
 from s3_listing_study.common.build_selection import BuildSelectionError, load_staged_selection
 from s3_listing_study.common.python_runtime import running_libc
 

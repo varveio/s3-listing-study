@@ -20,7 +20,7 @@ environment variable can point the verifier at a registry nobody reviewed.
 The security boundary is deliberately NOT on that surface. It is a keyword
 argument to :func:`run`, so the shipped entry point always runs the mandatory
 runner preflight and only an in-process caller — ``tests/tier3`` — can supply
-:class:`~s3_listing_study.host.verify.security.PreflightSkipped`.
+:class:`~s3_listing_study.manager.verify.security.PreflightSkipped`.
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""``python -m s3_listing_study.host.receipt`` — historical receipt auditing.
+"""``python -m s3_listing_study.manager.receipt`` — historical receipt auditing.
 
 The retired shell receipt wrapper kept Docker lifecycle, argv, platform
 selection, timeout, cleanup, and memory sampling in order and called in here
@@ -28,7 +28,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from s3_listing_study.host.registry import FIELDS, Registry, RegistryError
+from s3_listing_study.manager.registry import FIELDS, Registry, RegistryError
 
 from .errors import ReceiptError
 from .meta import RunFacts
@@ -312,7 +312,7 @@ _FACT_ARGS = (
 """Every run fact the wrapper observed, passed as argv.
 
 argv, not a file: a value carrying a newline is refused by
-:func:`~s3_listing_study.host.receipt.meta.reject_control` rather than silently
+:func:`~s3_listing_study.manager.receipt.meta.reject_control` rather than silently
 becoming two lines of something, and a reader can see in the wrapper exactly
 which measured value reaches which receipt field.
 """

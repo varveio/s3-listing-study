@@ -6,9 +6,9 @@ those an adapter is a SELECT that produces the five contract columns, not a
 parser. This module is the two pieces such an adapter must not re-derive:
 somewhere for DuckDB to read stdin from, and the emit boundary.
 
-:func:`emit_result` validates through :class:`~s3_listing_study.host.contract.Record`
+:func:`emit_result` validates through :class:`~s3_listing_study.manager.contract.Record`
 and writes through its ``to_line``, so a SQL adapter is held to exactly the bar a
-row-at-a-time :func:`~s3_listing_study.host.contract.emit` adapter is. It is the
+row-at-a-time :func:`~s3_listing_study.manager.contract.emit` adapter is. It is the
 set-at-a-time twin of ``emit``, not a second contract.
 
 Text, and bytes where the sink has them

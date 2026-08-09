@@ -13,13 +13,13 @@ FROM subject AS attempt-builder
 USER root
 WORKDIR /build
 COPY --from=python . /opt/s3-listing-study/python/
-# Only the two packages an attempt can reach. s3_listing_study/host/ is
+# Only the two packages an attempt can reach. s3_listing_study/manager/ is
 # deliberately absent: it never executes here, and leaving it out is what keeps a
 # subject image's digest still while host-side code changes — a campaign pins
 # these digests, so orchestrator work must not move them.
 COPY src/s3_listing_study/__init__.py /build/payload/s3_listing_study/__init__.py
 COPY src/s3_listing_study/common/ /build/payload/s3_listing_study/common/
-COPY src/s3_listing_study/attempt/ /build/payload/s3_listing_study/attempt/
+COPY src/s3_listing_study/worker/ /build/payload/s3_listing_study/worker/
 COPY harness/derived-image/zipapp_main.py /build/payload/__main__.py
 COPY harness/derived-image/validate_selection.py /build/validate_selection.py
 COPY --from=selection image.json /build/image.json

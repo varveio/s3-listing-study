@@ -525,7 +525,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if has_migration:
             errors.append(
                 f"{args.tool} is listed as a migrated capsule (MIGRATED_TOOLS in "
-                "s3_listing_study.host.capsule) but data/claims.json declares no legacy_ledger: a "
+                "s3_listing_study.repo.capsule) but data/claims.json declares no legacy_ledger: a "
                 "migration stratum is removed only with its whole subject under "
                 "the subject-retirement rule, which removes the slug from that "
                 "roster in the same reviewed change"
@@ -533,7 +533,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             errors.append(
                 f"{args.tool} is not listed as a migrated capsule (MIGRATED_TOOLS "
-                "in s3_listing_study.host.capsule) but data/claims.json declares a "
+                "in s3_listing_study.repo.capsule) but data/claims.json declares a "
                 "legacy_ledger: a "
                 "capsule that acquires a migration stratum records it in that roster"
             )

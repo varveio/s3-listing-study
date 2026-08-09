@@ -3,7 +3,7 @@
 Scope: root-level Markdown, docs/, harness/README.md, tools/README.md, and the
 README-only contextual tool directories (those with no data/ capsule, e.g.
 pure-storage and s3-inventory) — the pages a reader navigates today.
-Capsule-internal pages are already covered by :mod:`s3_listing_study.host.capsule`,
+Capsule-internal pages are already covered by :mod:`s3_listing_study.repo.capsule`,
 and internal working notes (not published) are dated history whose links
 describe the tree as it was, so neither is checked here.
 

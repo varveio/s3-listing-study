@@ -178,7 +178,7 @@ research budget to produce a truthful, useless `STATUS: blocked`.
    discovery as defense in depth, but those cooperative settings are not the
    host security boundary. Historical `receipt.md`/`run.meta` records retain
    their old shell-runner provenance and are not rewritten.
-4. **`python3 -m s3_listing_study.host.verify`** — the shared output verifier. Input: raw
+4. **`python3 -m s3_listing_study.manager.verify`** — the shared output verifier. Input: raw
    tool output (via the tool's `normalize.py` adapter, below), the manifest
    (cited by sha256), and a scope (full bucket, or a prefix, or delimiter
    semantics — it derives the expected set from the manifest). Duplicate
@@ -631,7 +631,7 @@ story is "generate N invocations":
    probes go under `receipts/smoke/_build/`, `_adapter/`, `_capability/` —
    underscore dirs carry no verifier verdict and are exempt from the
    every-mode expectation.
-4. **Check the output with `python3 -m s3_listing_study.host.verify`**: recursive modes
+4. **Check the output with `python3 -m s3_listing_study.manager.verify`**: recursive modes
    against the full manifest; prefix-scoped and delimiter modes against the
    verifier's derived expected set for that scope; fan-out modes concatenated
    as a multiset with duplicates counted **before** dedup — each shard
@@ -673,7 +673,7 @@ story is "generate N invocations":
    `-e AWS_SECRET_ACCESS_KEY=` with an **empty** value — that is the
    wrapper's credential starvation made visible, not a leak; do not flag it
    and do not "fix" it; (b) before every commit, run
-   `python3 -m s3_listing_study.host.receipt scan-tree <dir>` over the tree you are
+   `python3 -m s3_listing_study.manager.receipt scan-tree <dir>` over the tree you are
    about to commit — same
    value-shaped scan, exported for exactly this use. If anything flags:
    **quarantine and flag, never delete evidence** — move the artifact aside,

@@ -1,4 +1,4 @@
-"""``python -m s3_listing_study.host.receipt`` — the wrapper's offline half."""
+"""``python -m s3_listing_study.manager.receipt`` — the wrapper's offline half."""
 
 from __future__ import annotations
 

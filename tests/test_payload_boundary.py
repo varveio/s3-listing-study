@@ -1,16 +1,17 @@
-"""The package layout is the worker/host boundary, and imports respect it.
+"""The package layout is the worker/manager boundary, and imports respect it.
 
-``s3_listing_study.attempt`` runs inside a subject image; ``common`` is what both
-sides share and therefore also ships there; ``host`` never does. The Dockerfile
+``s3_listing_study.worker`` is what a Cloud Batch attempt task executes;
+``common`` is what both roles share and therefore ships alongside it;
+``manager`` is the orchestrating side and never enters an image. The Dockerfile
 copies the first two subtrees and not the third, so the boundary holds only as
 long as nothing on the shipped side imports the unshipped one.
 
 Both failure directions are expensive in their own way. A worker module reaching
-into ``host`` produces an ImportError inside a container at attempt time, on a
-runner — the latest and most costly place to find out. A ``host`` module drifting
-into ``common`` widens what ships next to eleven third-party binaries and moves
-every derived image's digest whenever it is edited, invalidating the pins a
-campaign runs against.
+into ``manager`` produces an ImportError inside a container at attempt time, on a
+runner — the latest and most costly place to find out. A ``manager`` module
+drifting into ``common`` widens what ships next to eleven third-party binaries
+and moves every derived image's digest whenever it is edited, invalidating the
+pins a campaign runs against.
 """
 
 from __future__ import annotations
@@ -21,7 +22,12 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 PACKAGE = REPO / "src" / "s3_listing_study"
 DOCKERFILE = REPO / "harness" / "derived-image" / "Dockerfile"
-SHIPPED = ("attempt", "common")
+
+WORKER = "worker"
+REPO_LAYER = "repo"
+MANAGER = "manager"
+COMMON = "common"
+SHIPPED = (WORKER, COMMON)
 
 
 def _modules() -> dict[str, Path]:
@@ -65,20 +71,6 @@ def _layer(module: str) -> str:
     return parts[1] if len(parts) > 1 else "root"
 
 
-def test_shipped_layers_never_import_host() -> None:
-    offenders: list[str] = []
-    for module, path in sorted(_modules().items()):
-        if _layer(module) not in SHIPPED:
-            continue
-        for imported in sorted(_imported_names(module, path)):
-            if _layer(imported) == "host":
-                offenders.append(f"{module} -> {imported}")
-    assert not offenders, (
-        "modules that ship in a subject image import host-only code, which will "
-        f"ImportError at attempt time: {offenders}"
-    )
-
-
 def _reachable_from(layer: str) -> set[str]:
     """Transitive closure of imports starting at every module in one layer."""
     modules = _modules()
@@ -94,27 +86,41 @@ def _reachable_from(layer: str) -> set[str]:
     return seen
 
 
+def test_shipped_layers_never_import_manager() -> None:
+    offenders: list[str] = []
+    for module, path in sorted(_modules().items()):
+        if _layer(module) not in SHIPPED:
+            continue
+        for imported in sorted(_imported_names(module, path)):
+            if _layer(imported) in (MANAGER, REPO_LAYER):
+                offenders.append(f"{module} -> {imported}")
+    assert not offenders, (
+        "modules that ship in a subject image import unshipped code, which will "
+        f"ImportError at attempt time: {offenders}"
+    )
+
+
 def test_common_is_actually_shared() -> None:
     """common/ is the intersection, not a drawer.
 
-    Reachability, not direct import: a module both sides reach only through
-    another common module is still genuinely shared. Anything one side cannot
-    reach at all belongs in that other side's layer — worker-only code in
-    common/ ships and pins for no reason, host-only code there is the drift this
-    whole boundary exists to prevent.
+    Reachability, not direct import: a module both roles reach only through
+    another common module is still genuinely shared. Anything one role cannot
+    reach at all belongs in that other role's layer — worker-only code in
+    common/ ships and pins for no reason, manager-only code there is the drift
+    this whole boundary exists to prevent.
     """
     modules = _modules()
-    from_worker = _reachable_from("attempt")
-    from_host = _reachable_from("host")
+    from_worker = _reachable_from(WORKER)
+    from_manager = _reachable_from(MANAGER)
 
     misplaced: list[str] = []
     for module in sorted(modules):
-        if _layer(module) != "common" or module == "s3_listing_study.common":
+        if _layer(module) != COMMON or module == f"s3_listing_study.{COMMON}":
             continue
         if module not in from_worker:
-            misplaced.append(f"{module} (no attempt/ module reaches it — belongs in host/)")
-        elif module not in from_host:
-            misplaced.append(f"{module} (no host/ module reaches it — belongs in attempt/)")
+            misplaced.append(f"{module} (no worker/ module reaches it — belongs in manager/)")
+        elif module not in from_manager:
+            misplaced.append(f"{module} (no manager/ module reaches it — belongs in worker/)")
     assert not misplaced, f"modules in common/ that are not actually shared: {misplaced}"
 
 
@@ -124,9 +130,10 @@ def test_dockerfile_ships_exactly_the_shipped_layers() -> None:
         assert f"COPY src/s3_listing_study/{layer}/" in text, (
             f"the derived image must copy s3_listing_study/{layer}/"
         )
-    assert "COPY src/s3_listing_study/host/" not in text, (
-        "host-only code must not be copied into a subject image"
-    )
+    for layer in (MANAGER, REPO_LAYER):
+        assert f"COPY src/s3_listing_study/{layer}/" not in text, (
+            f"{layer}-only code must not be copied into a subject image"
+        )
     assert "COPY src/s3_listing_study/ " not in text, (
-        "copying the whole package puts host-only modules back in the image"
+        "copying the whole package puts manager-only modules back in the image"
     )

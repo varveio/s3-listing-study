@@ -10,7 +10,7 @@ markdown, and stays markdown":
   rather than a parse is what lets the committed fixture reproduce that digest
   naturally; nothing short of a preimage could make the TOML do it.
 * **Field parsing dispatches on file type.** ``.toml`` goes through
-  :mod:`s3_listing_study.host.registry`. Anything else is read by the narrow legacy
+  :mod:`s3_listing_study.manager.registry`. Anything else is read by the narrow legacy
   markdown reader below, retained *solely* so historical receipts can be
   replayed against the registry they were made against. It is not a second
   supported format and nothing new may be written in it.

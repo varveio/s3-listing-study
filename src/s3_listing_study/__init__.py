@@ -2,7 +2,7 @@
 
 One packaged implementation of the attempt engine, contract, registry,
 manifest, and verifier. ``harness/`` retains host security and orchestration
-helpers; subject lifecycle and timing live in ``s3_listing_study.attempt``.
+helpers; subject lifecycle and timing live in ``s3_listing_study.worker``.
 """
 
 __version__ = "0.1.0"

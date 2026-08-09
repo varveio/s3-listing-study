@@ -2,7 +2,7 @@
 # harness/tests/run-regressions.sh — durable regression suite for the harness.
 #
 # Covers everything runnable WITHOUT the real bucket or docker, by driving the
-# actual verifier (`s3_listing_study.host.verify --scope union`) over synthetic
+# actual verifier (`s3_listing_study.manager.verify --scope union`) over synthetic
 # registry/manifest/receipt fixtures built at runtime:
 #
 #   * union scenarios (PASS, structural-ERROR, dup-FAIL, overlap-ERROR,
@@ -37,7 +37,7 @@ if [ -z "$PYTHON" ]; then
     PYTHON="python3"
   fi
 fi
-if ! PYTHONPATH="$REPO_ROOT/src" "$PYTHON" -P -c 'import s3_listing_study.host.verify, duckdb' 2>/dev/null; then
+if ! PYTHONPATH="$REPO_ROOT/src" "$PYTHON" -P -c 'import s3_listing_study.manager.verify, duckdb' 2>/dev/null; then
   printf 'REGRESSION SUITE CANNOT RUN: %s cannot import the verifier and duckdb.\n' "$PYTHON" >&2
   printf '  Run `uv sync` in the repo root, or point S3STUDY_PYTHON at an interpreter that has them.\n' >&2
   exit 2
@@ -104,7 +104,7 @@ run_union() {  # <out> <args...> -> sets RC
   RC=0
   # --registry is the only redirection of the registry, and it is an argument,
   # never an environment variable.
-  PYTHONPATH="$REPO_ROOT/src" "$PYTHON" -P -m s3_listing_study.host.verify \
+  PYTHONPATH="$REPO_ROOT/src" "$PYTHON" -P -m s3_listing_study.manager.verify \
     --scope union --registry "$REG" --normalize "$NORMALIZE" --out "$out" "$@" \
     >/dev/null 2>"$out.err" || RC=$?
 }

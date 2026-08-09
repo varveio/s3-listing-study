@@ -50,8 +50,8 @@ from __future__ import annotations
 import sys
 from typing import IO
 
-from s3_listing_study.host.duckdb_adapter import connect, emit_result, staged
-from s3_listing_study.host.normalizer_cli import normalizer_main
+from s3_listing_study.manager.duckdb_adapter import connect, emit_result, staged
+from s3_listing_study.manager.normalizer_cli import normalizer_main
 
 UNKNOWN_MODE_EXIT = 2
 

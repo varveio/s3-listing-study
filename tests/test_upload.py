@@ -1,4 +1,7 @@
-"""Tests for s3_listing_study.host.upload: file selection, ordering, and precondition handling."""
+"""Tests for s3_listing_study.manager.upload.
+
+File selection, ordering, and precondition handling.
+"""
 
 from __future__ import annotations
 
@@ -6,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from s3_listing_study.host.upload import UploadError, parse_destination, upload_attempt
+from s3_listing_study.manager.upload import UploadError, parse_destination, upload_attempt
 
 
 class _FakeBlob:
