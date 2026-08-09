@@ -10,16 +10,28 @@ registration, so a plan is self-contained.
 with its image set frozen, which is why a plan carries no campaign ID and no
 image digest. Receipts group under the campaign that produced them.
 
-**A tool with an empty body runs once**, at the mode ``bench/tools.yaml``
+**A tool that names no mode runs once**, at the mode ``bench/tools.yaml``
 records for it, on the plan's own allocation. That is what most tools want and
-it says nothing a plan needs to restate, so the name alone declares it.
+it says nothing a plan needs to restate, so the name alone declares it — and a
+tool that only re-allocates keeps the default mode rather than having to write
+a matrix out to say so.
 
 **Cases are generated, not hand-written.** A tool wanting more declares a
-``matrix`` whose
-cross-product is the set of cases, so "2 GB vs 4 GB, sorted vs unsorted" is two
-lines rather than four hand-copied blocks that can disagree. Case IDs are
-derived from the axis values for the same reason: a hand-typed ID is a
-hand-typed opportunity to file one case's attempt under another case's name.
+``matrix`` whose cross-product is the set of cases, so "2 GB vs 4 GB, sorted vs
+unsorted" is two lines rather than four hand-copied blocks that can disagree.
+Case IDs are derived from the axis values for the same reason: a hand-typed ID
+is a hand-typed opportunity to file one case's attempt under another case's
+name.
+
+**The box and the process are different questions.** ``vcpus``/``memory_gb``
+buy a machine; ``container_memory_gb`` is a cgroup ceiling on top of it, via
+``docker run --memory``, and is the only figure here a running program can feel
+— Batch's own per-task ``memoryMib`` decides scheduling and constrains nothing.
+Sweeping the ceiling therefore holds the machine, its cores and its neighbours
+still, and reaches sizes no machine type sells. A managed runtime is told its
+share through ``heap_percent``, because a JVM and V8 both default to a fraction
+of what they can see, and leaving that alone would make the runtime's heuristic
+the independent variable instead of the memory a case asked for.
 
 A tool may state several blocks and take their union, because one cross-product
 forces every mode to take every value of every axis — wrong as soon as one mode
@@ -65,9 +77,21 @@ TOP_LEVEL = ("spec_version", "bucket", "region", "defaults", "tools", "exclude")
 # What a box is, in the terms a plan states it: shape, not product name. The
 # machine type is resolved from the pair through bench/instances.yaml, so a plan
 # never names a provider's catalogue and a new generation is one edit there.
-# Both are required once resolved — a case that did not say how much memory it
-# wanted cannot be compared against one that did.
-RESOURCE_FIELDS = ("vcpus", "memory_gb")
+BOX_FIELDS = ("vcpus", "memory_gb")
+
+# What the process gets, which is not the same question. `container_memory_gb`
+# becomes a real cgroup ceiling via `docker run --memory`, so it is the only one
+# of these a running program can actually feel; Batch's own per-task memoryMib
+# is a scheduling input and constrains nothing. Absent means unconstrained —
+# the container sees the whole box.
+PROCESS_FIELDS = ("container_memory_gb", "heap_percent")
+
+# Required once resolved: a case that did not say how much memory it wanted
+# cannot be compared against one that did. The container ceiling is the
+# exception, because "no ceiling" is a real and different answer.
+REQUIRED_RESOURCE_FIELDS = (*BOX_FIELDS, "heap_percent")
+
+RESOURCE_FIELDS = (*BOX_FIELDS, *PROCESS_FIELDS)
 
 # Scheduling, not allocation. Settable at plan and tool level, never an axis —
 # varying reps does not make a different case, and a timeout swept as an axis is
@@ -92,7 +116,7 @@ class PlanError(Exception):
 
 @dataclass(frozen=True)
 class Resources:
-    """The box a case asks for. What it actually got is recorded by the worker."""
+    """The box a case asks for, and what the process on it may use."""
 
     vcpus: int
     memory_gb: int
@@ -100,6 +124,14 @@ class Resources:
     # what Batch is actually told, so a receipt can cite the box rather than the
     # request that implied it.
     machine_type: str
+    # None means no ceiling: the container sees the whole box.
+    container_memory_gb: int | None
+    heap_percent: int
+
+    @property
+    def visible_memory_gb(self) -> int:
+        """What a program running here can actually use."""
+        return self.container_memory_gb or self.memory_gb
 
     @property
     def memory_mib(self) -> int:
@@ -108,6 +140,21 @@ class Resources:
     @property
     def cpu_milli(self) -> int:
         return self.vcpus * 1000
+
+    @property
+    def docker_options(self) -> tuple[str, ...]:
+        """`docker run` flags, for Batch's container `options` and the local path.
+
+        ``--memory-swap`` is pinned to ``--memory`` deliberately: left alone,
+        Docker permits swap up to twice the limit, so a run that "fits in 2 GB"
+        might have fitted in 2 GB of RAM plus 2 GB of disk.
+        """
+        if self.container_memory_gb is None:
+            return ()
+        return (
+            f"--memory={self.container_memory_gb}g",
+            f"--memory-swap={self.container_memory_gb}g",
+        )
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -129,6 +176,9 @@ class Case:
     # The axis values that generated this case, in ID order. Kept so a reader
     # can group by an axis without re-parsing the ID it was rendered into.
     axes: tuple[tuple[str, str | int], ...]
+    # What the runtime must be told about its own memory, if it is the kind that
+    # needs telling. Empty for a tool with no managed heap.
+    env: tuple[tuple[str, str], ...]
     fingerprint: str
 
 
@@ -158,9 +208,10 @@ class Plan:
         *,
         default_modes: Mapping[str, str] | None = None,
         instances: Mapping[tuple[int, int], str] | None = None,
+        heap_policies: Mapping[str, HeapPolicy] | None = None,
     ) -> Plan:
-        """Read a plan; both tables default to their file beside ``bench/``."""
-        return _load(path, default_modes, instances)
+        """Read a plan; every table defaults to its file beside ``bench/``."""
+        return _load(path, default_modes, instances, heap_policies)
 
     def tools(self) -> list[str]:
         """Every tool with at least one case, in plan order."""
@@ -189,6 +240,53 @@ def buckets_dir() -> Path:
 
 def default_path(bucket: str) -> Path:
     return buckets_dir() / f"{bucket}.yaml"
+
+
+@dataclass(frozen=True)
+class HeapPolicy:
+    """How one runtime is told how much of its memory it may use as heap.
+
+    Only a managed runtime needs this. A Go or Rust tool takes what it takes;
+    a JVM and V8 both default to a *fraction* of what they can see, so leaving
+    it alone would make the runtime's own heuristic the independent variable
+    rather than the memory we set.
+    """
+
+    env: str
+    # ``{percent}`` and ``{mib}`` are the two shapes a runtime accepts: the JVM
+    # reads its cgroup ceiling itself and wants a proportion, V8 does not and
+    # wants an absolute size.
+    value: str
+
+    def render(self, *, percent: int, visible_memory_gb: int) -> tuple[str, str]:
+        return self.env, self.value.format(
+            percent=percent, mib=visible_memory_gb * 1024 * percent // 100
+        )
+
+
+def load_heap_policies(path: Path) -> dict[str, HeapPolicy]:
+    """Read the ``heap`` table of ``bench/tools.yaml``."""
+    _, doc = _read_yaml_mapping(path, "tool defaults")
+    table = doc.get("heap")
+    if table is None:
+        return {}
+    if not isinstance(table, dict):
+        raise PlanError(f"'heap' in {path} is not a mapping")
+    policies: dict[str, HeapPolicy] = {}
+    for tool, entry in table.items():
+        where = f"heap.{tool}"
+        if not isinstance(entry, dict):
+            raise PlanError(f"'{where}' in {path} is not a mapping")
+        _reject_unknown(entry, ("env", "value"), f"'{where}'", path)
+        value = _string(entry, "value", where, path)
+        unknown = set(re.findall(r"\{(\w+)\}", value)) - {"percent", "mib"}
+        if unknown:
+            raise PlanError(
+                f"'{where}' value in {path} uses unknown placeholder(s) "
+                f"{', '.join(sorted(unknown))} (percent|mib)"
+            )
+        policies[tool] = HeapPolicy(env=_string(entry, "env", where, path), value=value)
+    return policies
 
 
 def load_instances(path: Path) -> dict[tuple[int, int], str]:
@@ -221,7 +319,7 @@ def load_instances(path: Path) -> dict[tuple[int, int], str]:
 def load_default_modes(path: Path) -> dict[str, str]:
     """Read ``bench/tools.yaml`` — the mode an empty tool runs."""
     _, doc = _read_yaml_mapping(path, "tool defaults")
-    _reject_unknown(doc, ("spec_version", "default_modes"), "tool defaults", path)
+    _reject_unknown(doc, ("spec_version", "default_modes", "heap"), "tool defaults", path)
     _require_spec_version(doc, "tool defaults", path)
     table = _table(doc, "default_modes", "default_modes", path)
     if not table:
@@ -256,6 +354,7 @@ def _load(
     path: Path,
     default_modes: Mapping[str, str] | None,
     instances: Mapping[tuple[int, int], str] | None,
+    heap_policies: Mapping[str, HeapPolicy] | None,
 ) -> Plan:
     raw, doc = _read_yaml_mapping(path, "plan")
 
@@ -278,6 +377,7 @@ def _load(
     # plan read from anywhere still means the same thing.
     modes = default_modes if default_modes is not None else _sibling_default_modes(doc, path)
     catalogue = instances if instances is not None else load_instances(_sibling(path, "instances"))
+    heaps = load_heap_policies(_sibling(path, "tools")) if heap_policies is None else heap_policies
 
     plan = Plan(
         path=path,
@@ -289,7 +389,13 @@ def _load(
             base_resources,
             base_schedule,
             modes,
-            _Context(bucket=bucket, region=region, instances=catalogue, path=path),
+            _Context(
+                bucket=bucket,
+                region=region,
+                instances=catalogue,
+                heaps=heaps,
+                path=path,
+            ),
         ),
         exclusions=_exclusions(doc, path),
     )
@@ -355,7 +461,7 @@ def _resources(
         raise PlanError(f"'{where}' 'resources' in {path} is not a mapping")
     _reject_unknown(raw, RESOURCE_FIELDS, f"'{where}' resources", path)
     if complete:
-        missing = sorted(set(RESOURCE_FIELDS) - set(raw))
+        missing = sorted(set(REQUIRED_RESOURCE_FIELDS) - set(raw))
         if missing:
             raise PlanError(
                 f"'{where}' resources in {path} is missing {', '.join(missing)} "
@@ -381,9 +487,13 @@ def _schedule(
     return resolved
 
 
-def _says_nothing(body: object) -> bool:
-    """``aws-cli:`` with no body — the tool adds nothing to the plan's defaults."""
-    return body is None or (isinstance(body, dict) and not body)
+def _wants_default_mode(body: object) -> bool:
+    """A tool that never named a mode — ``aws-cli:``, or one that only re-allocates.
+
+    Stating ``resources`` is not stating a mode, so a tool asking for a bigger
+    box at its usual mode should not have to write the matrix out to say so.
+    """
+    return body is None or (isinstance(body, dict) and "matrix" not in body)
 
 
 def _sibling(path: Path, name: str) -> Path:
@@ -394,26 +504,29 @@ def _sibling(path: Path, name: str) -> Path:
 def _sibling_default_modes(doc: Mapping[str, Any], path: Path) -> Mapping[str, str]:
     """``bench/tools.yaml`` beside the plan's directory — read only if needed."""
     tools = doc.get("tools")
-    if not isinstance(tools, dict) or not any(_says_nothing(body) for body in tools.values()):
+    if not isinstance(tools, dict) or not any(_wants_default_mode(body) for body in tools.values()):
         return {}
     return load_default_modes(_sibling(path, "tools"))
 
 
-def _default_body(tool: str, default_modes: Mapping[str, str], path: Path) -> dict[str, Any]:
-    """What an empty tool means: one case, at the mode recorded for that tool.
+def _default_body(
+    tool: str, body: object, default_modes: Mapping[str, str], path: Path
+) -> dict[str, Any]:
+    """Give a tool that named no mode the one recorded for it, keeping the rest.
 
     A tool that runs once, at its usual mode, on the plan's own allocation says
     nothing a plan needs to spell out — so writing the name and stopping is the
-    whole declaration.
+    whole declaration. Anything it *did* say (a ceiling, a timeout) survives.
     """
     mode = default_modes.get(tool)
     if mode is None:
         known = "|".join(sorted(default_modes)) or "none"
         raise PlanError(
-            f"'tools.{tool}' in {path} is empty, but {tool} has no default mode "
+            f"'tools.{tool}' in {path} names no mode, and {tool} has no default "
             f"in bench/tools.yaml ({known}) — give it a matrix or record its mode"
         )
-    return {"matrix": {"mode": [mode]}}
+    stated = body if isinstance(body, dict) else {}
+    return {**stated, "matrix": {"mode": [mode]}}
 
 
 @dataclass(frozen=True)
@@ -423,6 +536,7 @@ class _Context:
     bucket: str
     region: str
     instances: Mapping[tuple[int, int], str]
+    heaps: Mapping[str, HeapPolicy]
     path: Path
 
 
@@ -441,7 +555,9 @@ def _cases(
     for tool, body in declared.items():
         if not TOOL_RE.fullmatch(tool):
             raise PlanError(f"plan {path} has a malformed tool name: {tool!r}")
-        tools[tool] = _default_body(tool, default_modes, path) if _says_nothing(body) else body
+        tools[tool] = (
+            _default_body(tool, body, default_modes, path) if _wants_default_mode(body) else body
+        )
     cases: list[Case] = []
     for tool in tools:
         cases.extend(_tool_cases(tool, tools, base_resources, base_schedule, context))
@@ -576,7 +692,34 @@ def _case(
             f"bench/instances.yaml does not offer ({offered}) — add the shape or ask "
             "for one that exists"
         )
-    resolved = Resources(vcpus=shape[0], memory_gb=shape[1], machine_type=machine_type)
+
+    ceiling = resources.get("container_memory_gb")
+    container_memory_gb = None if ceiling is None else int(ceiling)
+    # A ceiling above the box is not a bigger container, it is a plan that will
+    # be silently ignored by the one thing that enforces it.
+    if container_memory_gb is not None and container_memory_gb > shape[1]:
+        raise PlanError(
+            f"'tools.{tool}' in {path} caps the container at {container_memory_gb} GB "
+            f"on a {shape[1]} GB box — a ceiling above the box constrains nothing"
+        )
+
+    heap_percent = int(resources["heap_percent"])
+    if not 1 <= heap_percent <= 100:
+        raise PlanError(f"'tools.{tool}' in {path} asks for a heap of {heap_percent}% (1-100)")
+
+    resolved = Resources(
+        vcpus=shape[0],
+        memory_gb=shape[1],
+        machine_type=machine_type,
+        container_memory_gb=container_memory_gb,
+        heap_percent=heap_percent,
+    )
+    policy = context.heaps.get(tool)
+    env = (
+        ()
+        if policy is None
+        else (policy.render(percent=heap_percent, visible_memory_gb=resolved.visible_memory_gb),)
+    )
 
     case_id = derive_case_id(chosen)
     if not CASE_ID_RE.fullmatch(case_id):
@@ -592,6 +735,7 @@ def _case(
         reps=schedule["reps"],
         timeout_s=schedule["timeout_s"],
         axes=chosen,
+        env=env,
         fingerprint=fingerprint(
             bucket=context.bucket,
             region=context.region,
@@ -599,6 +743,7 @@ def _case(
             mode=mode,
             resources=resolved,
             timeout_s=schedule["timeout_s"],
+            env=env,
         ),
     )
 
@@ -624,6 +769,7 @@ def fingerprint(
     mode: str,
     resources: Resources,
     timeout_s: int,
+    env: Sequence[tuple[str, str]] = (),
 ) -> str:
     """A digest over the resolved case — what makes two attempts comparable."""
     payload = {
@@ -634,6 +780,7 @@ def fingerprint(
         "mode": mode,
         "resources": resources.as_dict(),
         "timeout_s": timeout_s,
+        "env": [list(pair) for pair in env],
     }
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()

@@ -22,6 +22,7 @@ defaults:
   resources:
     vcpus: 2
     memory_gb: 8
+    heap_percent: 75
 tools:
 {tools}
 """
@@ -51,9 +52,14 @@ INSTANCES = {
 }
 
 
+# swath is the tool with a managed heap in these fixtures, as in the real table.
+HEAPS = {"swath": bench.HeapPolicy(env="JAVA_TOOL_OPTIONS", value="-XX:MaxRAMPercentage={percent}")}
+
+
 def load(path: Path, **kwargs: object) -> bench.Plan:
-    """``Plan.load`` with the fixture catalogue already supplied."""
+    """``Plan.load`` with the fixture tables already supplied."""
     kwargs.setdefault("instances", INSTANCES)
+    kwargs.setdefault("heap_policies", HEAPS)
     return bench.Plan.load(path, **kwargs)  # type: ignore[arg-type]
 
 
@@ -66,19 +72,21 @@ def test_the_committed_plan_loads() -> None:
     assert loaded.bucket == "noaa-ghcn-pds"
     assert loaded.region == "us-east-1"
     assert len(loaded.tools()) == 11
-    # Ten sampled tools, plus swath's two blocks: 2 streaming modes at one size
+    # Ten bare tools, plus swath's two blocks: 2 streaming modes at one ceiling
     # and the sorted mode at two.
     assert len(loaded.cases) == 14
     assert len(loaded.cases_for("swath")) == 4
-    # The sorted block sweeps memory at a fixed vCPU count, so only the box's
-    # memory moves: 4 GB and 8 GB at 2 vCPU are two shapes of one generation.
+
+    # The sweep is the container ceiling; the box does not move, so nothing but
+    # the memory the process can feel differs across the sorted pair.
     sorted_cases = [c for c in loaded.cases_for("swath") if "sorted" in c.mode]
-    assert {c.resources.vcpus for c in sorted_cases} == {2}
-    assert sorted(c.resources.memory_gb for c in sorted_cases) == [4, 8]
-    assert {c.resources.machine_type for c in sorted_cases} == {
-        "n4-highcpu-2",
-        "n4-standard-2",
-    }
+    assert {c.resources.machine_type for c in sorted_cases} == {"n4-highcpu-2"}
+    assert sorted(c.resources.container_memory_gb or 0 for c in sorted_cases) == [2, 4]
+
+    # 75% of what the container can see, not of the box it sits on.
+    constrained = next(c for c in sorted_cases if c.resources.container_memory_gb == 2)
+    assert constrained.resources.docker_options == ("--memory=2g", "--memory-swap=2g")
+    assert constrained.env == (("JAVA_TOOL_OPTIONS", "-XX:MaxRAMPercentage=75"),)
 
 
 def test_the_committed_plan_matches_the_registered_tools() -> None:
@@ -150,7 +158,7 @@ def test_a_shape_the_catalogue_lacks_is_refused(tmp_path: Path) -> None:
     """Caught while resolving, not when Batch rejects the job."""
     path = write(tmp_path, ONE_CASE)
     with pytest.raises(bench.PlanError, match="does not offer"):
-        bench.Plan.load(path, instances={(64, 512): "n4-highmem-64"})
+        load(path, instances={(64, 512): "n4-highmem-64"})
 
 
 # ── expansion and cascade ────────────────────────────────────────────────────
@@ -176,7 +184,7 @@ def test_an_explicitly_empty_mapping_reads_the_same_as_a_bare_key(tmp_path: Path
 
 def test_an_empty_tool_with_no_default_mode_is_refused(tmp_path: Path) -> None:
     path = write(tmp_path, "s5cmd:\n")
-    with pytest.raises(bench.PlanError, match="no default mode"):
+    with pytest.raises(bench.PlanError, match="has no default"):
         load(path, default_modes={"s3p": "ls"})
 
 
@@ -307,6 +315,91 @@ def test_blocks_generating_the_same_case_twice_are_refused(tmp_path: Path) -> No
     )
     with pytest.raises(bench.PlanError, match="twice"):
         load(path)
+
+
+# ── the container ceiling and the heap ───────────────────────────────────────
+
+
+def test_no_ceiling_means_no_docker_flags(tmp_path: Path) -> None:
+    """Absent is a real answer: the container sees the whole box."""
+    case = load(write(tmp_path, ONE_CASE)).cases[0]
+    assert case.resources.container_memory_gb is None
+    assert case.resources.docker_options == ()
+    assert case.resources.visible_memory_gb == 8  # the box
+
+
+def test_a_ceiling_is_enforced_as_a_cgroup_limit(tmp_path: Path) -> None:
+    """Batch's memoryMib constrains nothing; `docker run --memory` does.
+
+    Swap is pinned to the same value on purpose — left alone Docker allows twice
+    the limit, so "it fitted in 2 GB" could mean 2 GB of RAM plus 2 GB of disk.
+    """
+    path = write(tmp_path, "swath:\n  resources:\n    container_memory_gb: 2\n")
+    case = load(path, default_modes={"swath": "recursive-tsv"}).cases[0]
+    assert case.resources.docker_options == ("--memory=2g", "--memory-swap=2g")
+    assert case.resources.visible_memory_gb == 2
+
+
+def test_a_ceiling_above_the_box_is_refused(tmp_path: Path) -> None:
+    """It would constrain nothing, so it is a plan that does not mean what it says."""
+    path = write(tmp_path, "swath:\n  resources:\n    container_memory_gb: 64\n")
+    with pytest.raises(bench.PlanError, match="constrains nothing"):
+        load(path, default_modes={"swath": "recursive-tsv"})
+
+
+def test_the_heap_follows_the_ceiling_not_the_box(tmp_path: Path) -> None:
+    """A JVM reads its cgroup limit, so a percentage needs no arithmetic here."""
+    path = write(tmp_path, "swath:\n  resources:\n    container_memory_gb: 2\n")
+    case = load(path, default_modes={"swath": "recursive-tsv"}).cases[0]
+    assert case.env == (("JAVA_TOOL_OPTIONS", "-XX:MaxRAMPercentage=75"),)
+
+
+def test_a_runtime_wanting_a_size_gets_one_computed(tmp_path: Path) -> None:
+    """V8 cannot read its own ceiling, so `{mib}` is resolved against it."""
+    path = write(tmp_path, "s3p:\n  resources:\n    container_memory_gb: 4\n")
+    case = load(
+        path,
+        default_modes={"s3p": "ls"},
+        heap_policies={
+            "s3p": bench.HeapPolicy(env="NODE_OPTIONS", value="--max-old-space-size={mib}")
+        },
+    ).cases[0]
+    assert case.env == (("NODE_OPTIONS", "--max-old-space-size=3072"),)  # 75% of 4 GB
+
+
+def test_a_tool_without_a_managed_heap_is_told_nothing(tmp_path: Path) -> None:
+    """A Go tool has no ceiling to set, so setting one would be noise."""
+    assert (
+        load(write(tmp_path, "s5cmd:\n"), default_modes={"s5cmd": "recursive"}).cases[0].env == ()
+    )
+
+
+def test_an_impossible_heap_percentage_is_refused(tmp_path: Path) -> None:
+    path = write(tmp_path, ONE_CASE)
+    path.write_text(
+        path.read_text(encoding="utf-8").replace("heap_percent: 75", "heap_percent: 150"),
+        encoding="utf-8",
+    )
+    with pytest.raises(bench.PlanError, match="heap of 150"):
+        load(path)
+
+
+def test_an_unknown_heap_placeholder_is_refused(tmp_path: Path) -> None:
+    """A typo would otherwise reach the runtime as a literal brace."""
+    path = tmp_path / "tools.yaml"
+    path.write_text(
+        "spec_version: 1\ndefault_modes: {swath: recursive-tsv}\n"
+        "heap:\n  swath:\n    env: JAVA_TOOL_OPTIONS\n    value: '-Xmx{gigabytes}'\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(bench.PlanError, match="unknown placeholder"):
+        bench.load_heap_policies(path)
+
+
+def test_the_committed_heap_table_covers_the_managed_runtimes() -> None:
+    """swath is Java and s3p is JavaScript; the rest have no heap to size."""
+    policies = bench.load_heap_policies(bench.bench_dir() / "tools.yaml")
+    assert set(policies) == {"swath", "s3p"}
 
 
 # ── identity ─────────────────────────────────────────────────────────────────
@@ -510,7 +603,7 @@ def test_resolve_plan_expands_the_committed_plan(capsys: pytest.CaptureFixture[s
     assert bench_cli.resolve_plan_main(["--bucket", "noaa-ghcn-pds"]) == 0
     out = capsys.readouterr().out
     assert "14 cases, 14 attempts" in out
-    assert "recursive-parquet-sorted.memory_gb-4" in out
+    assert "recursive-parquet-sorted.container_memory_gb-2" in out
 
 
 def test_resolve_plan_emits_machine_readable_cases(

@@ -83,12 +83,35 @@ catalogue, and a new machine generation is one edit there rather than one per
 case. A shape the catalogue does not offer is refused while resolving, rather
 than when Batch rejects the job.
 
-This is also what makes a memory sweep mean anything. Cloud Batch's per-task
-`memoryMib` is a scheduling input — it decides machine-type compatibility and
-how many tasks share a VM — **not** a cgroup limit, so two tasks on one VM shape
-see the same memory however they were labelled. Moving memory has to move the
-machine, and holding `vcpus` fixed across the sweep is what keeps memory the
-only variable.
+## The box and the process are different questions
+
+`vcpus`/`memory_gb` buy a machine. `container_memory_gb` is a ceiling on top of
+it — a real cgroup limit, passed as `docker run --memory` (Batch takes extra
+docker flags through a container runnable's `options`). It is the only figure
+here a running program can actually feel: Cloud Batch's per-task `memoryMib` is
+a scheduling input that decides machine-type compatibility and how many tasks
+share a VM, and constrains nothing at runtime.
+
+So a memory sweep should move the ceiling, not the machine:
+
+```yaml
+swath:
+  matrix:
+    - mode: [recursive-parquet-sorted]
+      container_memory_gb: [2, 4]
+```
+
+The box stays identical across those two cases — same machine type, same cores,
+same neighbours — and the ceiling reaches sizes no machine type sells. Omitting
+`container_memory_gb` means no ceiling: the container sees the whole box. A
+ceiling larger than the box is refused, since it would constrain nothing.
+
+`heap_percent` is how much of that a managed runtime may use. Only swath's JVM
+and s3p's V8 are told — the Go, Rust and Python tools have no such ceiling —
+and [`tools.yaml`](tools.yaml) says how to tell each one. It matters because
+both runtimes default to a *fraction* of the memory they can see, so leaving
+them alone would make the runtime's own heuristic the independent variable
+rather than the memory the case asked for.
 
 Every tool with a `build/image.json` must appear under `tools` or `exclude`
 with a reason. A tool that is simply absent is a validation error — registering

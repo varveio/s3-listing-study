@@ -58,11 +58,18 @@ def _rows(loaded: bench.Plan) -> list[dict[str, object]]:
             "vcpus": case.resources.vcpus,
             "memory_gb": case.resources.memory_gb,
             "machine_type": case.resources.machine_type,
+            "container_memory_gb": case.resources.container_memory_gb or "-",
+            "heap_percent": case.resources.heap_percent,
+            "docker_options": list(case.resources.docker_options),
+            "env": dict(case.env),
             # Derived, and carried because they are what a Batch job is told.
             "memory_mib": case.resources.memory_mib,
             "cpu_milli": case.resources.cpu_milli,
             "reps": case.reps,
             "timeout_s": case.timeout_s,
+            "heap": dict(case.env).get("JAVA_TOOL_OPTIONS")
+            or dict(case.env).get("NODE_OPTIONS")
+            or "-",
             "fingerprint": case.fingerprint,
         }
         for case in loaded.cases
@@ -70,7 +77,7 @@ def _rows(loaded: bench.Plan) -> list[dict[str, object]]:
 
 
 def _render(loaded: bench.Plan, rows: Sequence[dict[str, object]]) -> str:
-    columns = ("tool", "case", "vcpus", "memory_gb", "machine_type", "reps", "timeout_s")
+    columns = ("tool", "case", "machine_type", "container_memory_gb", "heap", "reps", "timeout_s")
     widths = {c: max(len(c), *(len(str(r[c])) for r in rows)) for c in columns} if rows else {}
     lines = [
         f"{loaded.bucket} ({loaded.region}) — {len(rows)} cases, "
