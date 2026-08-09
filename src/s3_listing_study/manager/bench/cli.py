@@ -1,0 +1,112 @@
+"""``s3-listing-study resolve-plan`` — expand a bucket plan and show every case.
+
+A plan's cases are generated, so the only way to review what a campaign would
+actually submit is to resolve it and look. This command is that dry run: it
+never contacts a bucket, submits anything, or writes a file.
+
+The resolved allocation is printed per case rather than the layer each value
+came from, because the question a reader has is "what box does this run on",
+and a value's provenance is answered by reading the plan next to it.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from collections.abc import Sequence
+from pathlib import Path
+
+from s3_listing_study.common.argparse_utils import UniqueStoreAction
+from s3_listing_study.manager.bench import plan as bench
+
+
+def repo_root() -> Path:
+    return bench.buckets_dir().parents[1]
+
+
+def registered_tools(root: Path | None = None) -> set[str]:
+    """Every tool carrying a derived-image registration."""
+    base = repo_root() if root is None else root
+    return {path.parents[1].name for path in base.glob("tools/*/build/image.json")}
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="s3-listing-study resolve-plan", allow_abbrev=False, add_help=True
+    )
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--bucket", action=UniqueStoreAction, help="plan under bench/buckets")
+    source.add_argument("--path", action=UniqueStoreAction, help="path to a plan file")
+    parser.add_argument(
+        "--json", action="store_true", help="emit the resolved cases as JSON instead of a table"
+    )
+    parser.add_argument(
+        "--skip-roster",
+        action="store_true",
+        help="do not require every registered tool to be run or excluded",
+    )
+    return parser
+
+
+def _rows(loaded: bench.Plan) -> list[dict[str, object]]:
+    return [
+        {
+            "tool": case.tool,
+            "case": case.case_id,
+            "mode": case.mode,
+            "machine_type": case.resources.machine_type,
+            "memory_mib": case.resources.memory_mib,
+            "cpu_milli": case.resources.cpu_milli,
+            "reps": case.reps,
+            "timeout_s": case.timeout_s,
+            "fingerprint": case.fingerprint,
+        }
+        for case in loaded.cases
+    ]
+
+
+def _render(loaded: bench.Plan, rows: Sequence[dict[str, object]]) -> str:
+    columns = ("tool", "case", "machine_type", "memory_mib", "cpu_milli", "reps", "timeout_s")
+    widths = {c: max(len(c), *(len(str(r[c])) for r in rows)) for c in columns} if rows else {}
+    lines = [
+        f"{loaded.bucket} ({loaded.region}) — {len(rows)} cases, "
+        f"{sum(int(str(r['reps'])) for r in rows)} attempts at {loaded.path}",
+        "",
+        "  ".join(c.ljust(widths[c]) for c in columns),
+        "  ".join("-" * widths[c] for c in columns),
+    ]
+    lines.extend("  ".join(str(row[c]).ljust(widths[c]) for c in columns) for row in rows)
+    for exclusion in loaded.exclusions:
+        lines.append(f"excluded: {exclusion.tool} — {exclusion.reason}")
+    return "\n".join(lines)
+
+
+def resolve_plan_main(argv: Sequence[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    path = bench.default_path(args.bucket) if args.bucket else Path(args.path)
+    try:
+        loaded = bench.Plan.load(path)
+        if not args.skip_roster:
+            bench.check_roster(loaded, registered_tools())
+    except bench.PlanError as exc:
+        print(f"resolve-plan: {exc}", file=sys.stderr)
+        return 1
+
+    rows = _rows(loaded)
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "bucket": loaded.bucket,
+                    "region": loaded.region,
+                    "plan_sha256": loaded.digest,
+                    "cases": rows,
+                    "exclusions": [{"tool": e.tool, "reason": e.reason} for e in loaded.exclusions],
+                },
+                indent=2,
+            )
+        )
+    else:
+        print(_render(loaded, rows))
+    return 0

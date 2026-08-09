@@ -1,0 +1,88 @@
+# Benchmark plan — noaa-ghcn-pds (AWS Open Data, NOAA GHCN daily).
+#
+# What to run against this bucket and on what box. A campaign executes this plan
+# together with any others it covers, with its image set frozen; the campaign ID
+# is what receipts group under, so it appears nowhere in here.
+#
+# This is not a registry entry. `data/registry.toml` binds a bucket to a
+# reference manifest for the verification lineage; nothing in the attempt path
+# reads it, and this bucket has no manifest. A plan stands alone.
+
+spec_version: 1
+
+bucket: noaa-ghcn-pds
+region: us-east-1
+
+defaults:
+  reps: 3
+
+  # ~1M objects at the 1,000-key LIST page cap is ~1,000 sequential pages. The
+  # worker's own default is 300s, which the one large-N measurement we have
+  # (148,917 keys in 146s) says would kill most tools around the 15% mark.
+  timeout_s: 3600
+
+  # PLACEHOLDER — pending the real per-bucket allocation. Every field is
+  # required so that no case can resolve to a box nobody chose.
+  resources:
+    machine_type: e2-standard-4
+    memory_mib: 8192
+    cpu_milli: 4000
+
+# Every registered tool must appear under `tools` or `exclude`; a tool that is
+# simply absent is a validation error rather than a silent skip. All eleven run
+# against this bucket, so there is nothing to exclude yet.
+
+tools:
+  aws-cli:
+    matrix:
+      mode: [s3api-v2-text]
+
+  s5cmd:
+    matrix:
+      mode: [recursive]
+
+  rclone:
+    matrix:
+      mode: [recursive-hierarchical]
+
+  minio-mc:
+    matrix:
+      mode: [recursive]
+
+  s7cmd:
+    matrix:
+      mode: [recursive-tsv]
+
+  s3-fast-list:
+    matrix:
+      mode: [list]
+
+  # No --prefix flag at all, so it always lists the whole bucket. That is this
+  # plan's workload anyway, which is why it is comparable here and was not on
+  # the scoped smoke prefix.
+  ps3:
+    matrix:
+      mode: [list]
+
+  s3kor:
+    matrix:
+      mode: [list]
+
+  s4cmd:
+    matrix:
+      mode: [recursive]
+
+  s3p:
+    matrix:
+      mode: [ls]
+
+  # The one tool being swept rather than sampled: output format, sorting, and
+  # memory, as a cross-product. Six cases from six lines.
+  #
+  # Memory varies as a per-task limit on one machine type rather than by
+  # swapping e2-small for e2-medium, because those differ in vCPU as well and
+  # the result could not be attributed to memory.
+  swath:
+    matrix:
+      mode: [recursive-tsv, recursive-parquet, recursive-parquet-sorted]
+      memory_mib: [2048, 4096]

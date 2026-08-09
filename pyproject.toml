@@ -39,6 +39,9 @@ dev = [
     # ignore_missing_imports override: the validator's schema calls are worth
     # type-checking.
     "types-jsonschema>=4.23",
+    # Same reasoning for the bucket-plan reader: a plan is hand-written config,
+    # so the shape it comes back as is worth type-checking.
+    "types-PyYAML>=6.0",
 ]
 
 [build-system]
