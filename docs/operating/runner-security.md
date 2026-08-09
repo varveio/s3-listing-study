@@ -246,6 +246,91 @@ prove attachment state through the provider control plane and provide its own
 metadata targets. Metadata blocking and identity proof are deliberately separate:
 a blocked metadata endpoint does not prove that no identity is attached.
 
+## The authenticated stratum's AWS credential
+
+Most of the study lists public buckets anonymously. Some questions cannot be
+asked that way — versioned listings on a bucket that does not expose them
+publicly, requester-pays, a corpus that is simply not public — so those cases run
+in an authenticated stratum with an AWS credential.
+
+That credential is a **blast-radius decision before it is a convenience**. It
+lives in a secret that a benchmark task reads, and the tools reading it are
+eleven third-party programs the study does not control. So it is scoped to do the
+one thing the study needs — list other people's buckets — and explicitly denied
+the ability to touch anything of the operator's own.
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DenyOwnOrganization",
+      "Effect": "Deny",
+      "Action": "s3:*",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": { "aws:ResourceOrgID": "${aws:PrincipalOrgID}" }
+      }
+    },
+    {
+      "Sid": "DenyOwnAccount",
+      "Effect": "Deny",
+      "Action": "s3:*",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": { "aws:ResourceAccount": "${aws:PrincipalAccount}" }
+      }
+    },
+    {
+      "Sid": "AllowListingAnyOtherBucket",
+      "Effect": "Allow",
+      "Action": [
+        "s3:ListBucket",
+        "s3:ListBucketVersions",
+        "s3:GetBucketLocation"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+Four things about this policy are deliberate.
+
+**No account or organization ID appears in it.** Both denies compare a resource
+key against the caller's own via a policy variable —
+`aws:ResourceAccount` against `${aws:PrincipalAccount}`, and `aws:ResourceOrgID`
+against `${aws:PrincipalOrgID}`. The policy is therefore publishable as written
+and correct in any account that applies it, with no edit and nothing to leak.
+
+**Both denies, not one.** `aws:PrincipalOrgID` is absent for a principal outside
+an organization, and an unresolved variable is not a safe thing to rest a deny
+on. The account-level deny uses a key that is always present, so it holds
+regardless. The organization-level deny then widens the same guard to sibling
+accounts.
+
+**A bucket outside any organization is unaffected by the org deny.**
+`aws:ResourceOrgID` is absent for such a bucket, so `StringEquals` is false and
+the deny does not fire — which is the intended outcome, since those are exactly
+the buckets the study measures.
+
+**No `s3:GetObject`.** The study lists; it does not read object bodies. Granting
+object reads would widen a credential that eleven third-party binaries handle,
+for no measurement this repository performs. Add it only alongside a case that
+needs it, and say so in that case's record.
+
+`s3:ListBucketVersions` is not optional despite looking like it. Five tools carry
+a versioned-listing mode — `aws-cli s3api-versions-text`, `s5cmd allversions`,
+`minio-mc versions-json`, `s3kor list-versions`, `ps3 list-versions` — and every
+one of them calls `ListObjectVersions`, which that permission governs. A policy
+granting only `s3:ListBucket` fails all five in a way that reads as a tool defect
+rather than a permissions gap.
+
+Delivery is an identity, not a flag: only the authenticated stratum's service
+account can read the secret, so an anonymous case cannot obtain the credential
+even if its job spec asks for it. See the `create_aws_credentials_secret` variable
+in [`infra/terraform/modules/gcp/s3-listing-study`](../../infra/terraform/modules/gcp/s3-listing-study/README.md).
+
 ## Residual risk and future work
 
 Accepted for this phase:
