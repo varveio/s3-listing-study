@@ -29,18 +29,12 @@ defaults:
   # (148,917 keys in 146s) says would kill most tools around the 15% mark.
   timeout_s: 3600
 
-  # N4 is Intel Emerald Rapids (5th-gen Xeon) — a fixed modern core, unlike E2's
-  # shared and variable one, which is not a platform to time anything on. The
-  # modern families start at 2 GB per vCPU in their highcpu shapes, so 2 vCPU
-  # comes with 4 GB and there is no 2 GB/2 vCPU box to ask for; the task takes
-  # the 2 GB and the rest is headroom.
-  #
-  # Note for the Batch config: N4 and C4 do not support pd-balanced, the Compute
-  # Engine default, and need hyperdisk-balanced or pd-ssd boot disks.
+  # The shape, not a machine type: bench/instances.yaml says which box that is.
+  # The smallest modern shape — the families start at 2 GB per vCPU in their
+  # highcpu form, so there is no 2 GB/2 vCPU box to ask for.
   resources:
-    machine_type: n4-highcpu-2   # 2 vCPU / 4 GB
-    memory_mib: 2048
-    cpu_milli: 2000
+    vcpus: 2
+    memory_gb: 4
 
 # Every registered tool must appear here or under `exclude`; a tool that is
 # simply absent is a validation error rather than a silent skip. All eleven run
@@ -66,16 +60,13 @@ tools:
   # and a single cross-product would have run every mode at every size to find
   # that out.
   #
-  # Memory varies as a per-task limit rather than by swapping machine types,
-  # since two machine types differ in vCPU as well and the result could not be
-  # attributed to memory. The block still needs a bigger box to hold the larger
-  # limit: a 4096 MiB task does not fit beside the OS on a 4 GB VM.
+  # vcpus stays at 2 across the sweep, so memory is the only thing that moves —
+  # within a generation the highcpu/standard shapes at one vCPU count differ in
+  # nothing else.
   swath:
     matrix:
       - mode: [recursive-tsv, recursive-parquet]
-        memory_mib: [2048]
+        memory_gb: [4]
 
       - mode: [recursive-parquet-sorted]
-        memory_mib: [2048, 4096]
-        resources:
-          machine_type: n4-highcpu-4   # 4 vCPU / 8 GB
+        memory_gb: [4, 8]

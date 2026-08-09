@@ -62,9 +62,12 @@ FINGERPRINT_VERSION = 1
 
 TOP_LEVEL = ("spec_version", "bucket", "region", "defaults", "tools", "exclude")
 
-# What a box is. Every field is required once resolved: a case that did not say
-# how much memory it wanted cannot be compared against one that did.
-RESOURCE_FIELDS = ("machine_type", "memory_mib", "cpu_milli")
+# What a box is, in the terms a plan states it: shape, not product name. The
+# machine type is resolved from the pair through bench/instances.yaml, so a plan
+# never names a provider's catalogue and a new generation is one edit there.
+# Both are required once resolved — a case that did not say how much memory it
+# wanted cannot be compared against one that did.
+RESOURCE_FIELDS = ("vcpus", "memory_gb")
 
 # Scheduling, not allocation. Settable at plan and tool level, never an axis —
 # varying reps does not make a different case, and a timeout swept as an axis is
@@ -91,12 +94,26 @@ class PlanError(Exception):
 class Resources:
     """The box a case asks for. What it actually got is recorded by the worker."""
 
+    vcpus: int
+    memory_gb: int
+    # Resolved from the pair above, never stated by a plan. Carried because it is
+    # what Batch is actually told, so a receipt can cite the box rather than the
+    # request that implied it.
     machine_type: str
-    memory_mib: int
-    cpu_milli: int
+
+    @property
+    def memory_mib(self) -> int:
+        return self.memory_gb * 1024
+
+    @property
+    def cpu_milli(self) -> int:
+        return self.vcpus * 1000
 
     def as_dict(self) -> dict[str, Any]:
-        return {field: getattr(self, field) for field in RESOURCE_FIELDS}
+        return {
+            **{field: getattr(self, field) for field in RESOURCE_FIELDS},
+            "machine_type": self.machine_type,
+        }
 
 
 @dataclass(frozen=True)
@@ -135,9 +152,15 @@ class Plan:
     exclusions: tuple[Exclusion, ...]
 
     @classmethod
-    def load(cls, path: Path, *, default_modes: Mapping[str, str] | None = None) -> Plan:
-        """Read a plan. ``default_modes`` defaults to ``bench/tools.yaml``."""
-        return _load(path, default_modes)
+    def load(
+        cls,
+        path: Path,
+        *,
+        default_modes: Mapping[str, str] | None = None,
+        instances: Mapping[tuple[int, int], str] | None = None,
+    ) -> Plan:
+        """Read a plan; both tables default to their file beside ``bench/``."""
+        return _load(path, default_modes, instances)
 
     def tools(self) -> list[str]:
         """Every tool with at least one case, in plan order."""
@@ -168,44 +191,76 @@ def default_path(bucket: str) -> Path:
     return buckets_dir() / f"{bucket}.yaml"
 
 
-def load_default_modes(path: Path) -> dict[str, str]:
-    """Read ``bench/tools.yaml`` — the mode a sampled tool runs."""
-    try:
-        raw = path.read_bytes()
-    except OSError as exc:
-        raise PlanError(f"tool defaults not readable: {path} ({exc.strerror})") from None
-    try:
-        doc = yaml.safe_load(raw.decode("utf-8"))
-    except (UnicodeDecodeError, yaml.YAMLError) as exc:
-        raise PlanError(f"tool defaults are not valid YAML: {path}: {exc}") from None
-    if not isinstance(doc, dict):
-        raise PlanError(f"tool defaults {path} is not a mapping")
-    _reject_unknown(doc, ("spec_version", "default_modes"), "tool defaults", path)
-    if doc.get("spec_version") != SPEC_VERSION:
-        raise PlanError(
-            f"tool defaults {path} has spec_version {doc.get('spec_version')!r}, "
-            f"this reader supports {SPEC_VERSION}"
+def load_instances(path: Path) -> dict[tuple[int, int], str]:
+    """Read ``bench/instances.yaml`` — which box a (vcpus, memory_gb) pair is."""
+    _, doc = _read_yaml_mapping(path, "instance catalogue")
+    _reject_unknown(doc, ("spec_version", "instances"), "instance catalogue", path)
+    _require_spec_version(doc, "instance catalogue", path)
+    entries = doc.get("instances")
+    if not isinstance(entries, list) or not entries:
+        raise PlanError(f"instance catalogue {path} lists no instances")
+    catalogue: dict[tuple[int, int], str] = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise PlanError(f"instance catalogue {path} has a non-mapping entry: {entry!r}")
+        _reject_unknown(entry, ("vcpus", "memory_gb", "machine_type"), "instance", path)
+        shape = (
+            _positive_int(entry.get("vcpus"), "vcpus", "instance", path),
+            _positive_int(entry.get("memory_gb"), "memory_gb", "instance", path),
         )
+        # A shape listed twice would resolve to whichever came last, so two
+        # campaigns could name the same box and get different machines.
+        if shape in catalogue:
+            raise PlanError(
+                f"instance catalogue {path} lists {shape[0]} vCPU / {shape[1]} GB twice"
+            )
+        catalogue[shape] = _string(entry, "machine_type", "instance", path)
+    return catalogue
+
+
+def load_default_modes(path: Path) -> dict[str, str]:
+    """Read ``bench/tools.yaml`` — the mode an empty tool runs."""
+    _, doc = _read_yaml_mapping(path, "tool defaults")
+    _reject_unknown(doc, ("spec_version", "default_modes"), "tool defaults", path)
+    _require_spec_version(doc, "tool defaults", path)
     table = _table(doc, "default_modes", "default_modes", path)
     if not table:
         raise PlanError(f"tool defaults {path} names no tools")
     return {tool: _string(table, tool, "default_modes", path) for tool in table}
 
 
-def _load(path: Path, default_modes: Mapping[str, str] | None) -> Plan:
+def _read_yaml_mapping(path: Path, what: str) -> tuple[bytes, dict[str, Any]]:
+    """The bytes and the mapping they parse to — bytes so a caller can cite them."""
     try:
         raw = path.read_bytes()
     except OSError as exc:
-        raise PlanError(f"plan not readable: {path} ({exc.strerror})") from None
+        raise PlanError(f"{what} not readable: {path} ({exc.strerror})") from None
     try:
         doc = yaml.safe_load(raw.decode("utf-8"))
     except (UnicodeDecodeError, yaml.YAMLError) as exc:
-        raise PlanError(f"plan is not valid YAML: {path}: {exc}") from None
+        raise PlanError(f"{what} is not valid YAML: {path}: {exc}") from None
     if not isinstance(doc, dict):
-        raise PlanError(f"plan {path} is not a mapping")
+        raise PlanError(f"{what} {path} is not a mapping")
+    return raw, doc
+
+
+def _require_spec_version(doc: Mapping[str, Any], what: str, path: Path) -> None:
+    if doc.get("spec_version") != SPEC_VERSION:
+        raise PlanError(
+            f"{what} {path} has spec_version {doc.get('spec_version')!r}, "
+            f"this reader supports {SPEC_VERSION}"
+        )
+
+
+def _load(
+    path: Path,
+    default_modes: Mapping[str, str] | None,
+    instances: Mapping[tuple[int, int], str] | None,
+) -> Plan:
+    raw, doc = _read_yaml_mapping(path, "plan")
 
     _reject_unknown(doc, TOP_LEVEL, "plan", path)
-    _require_version(doc, path)
+    _require_spec_version(doc, "plan", path)
 
     bucket = _string(doc, "bucket", "plan", path)
     # The filename is the bucket's name, so a plan that disagrees with its own
@@ -222,13 +277,20 @@ def _load(path: Path, default_modes: Mapping[str, str] | None) -> Plan:
     # Resolved next to the plan rather than passed down from the caller, so a
     # plan read from anywhere still means the same thing.
     modes = default_modes if default_modes is not None else _sibling_default_modes(doc, path)
+    catalogue = instances if instances is not None else load_instances(_sibling(path, "instances"))
 
     plan = Plan(
         path=path,
         digest=hashlib.sha256(raw).hexdigest(),
         bucket=bucket,
         region=region,
-        cases=_cases(doc, bucket, region, base_resources, base_schedule, modes, path),
+        cases=_cases(
+            doc,
+            base_resources,
+            base_schedule,
+            modes,
+            _Context(bucket=bucket, region=region, instances=catalogue, path=path),
+        ),
         exclusions=_exclusions(doc, path),
     )
     _reject_overlap(plan, path)
@@ -299,16 +361,11 @@ def _resources(
                 f"'{where}' resources in {path} is missing {', '.join(missing)} "
                 "(defaults must be complete so every case resolves)"
             )
-    resolved: dict[str, Any] = {}
-    for field in RESOURCE_FIELDS:
-        if field not in raw:
-            continue
-        resolved[field] = (
-            _string(raw, field, f"{where} resources", path)
-            if field == "machine_type"
-            else _positive_int(raw[field], field, f"{where} resources", path)
-        )
-    return resolved
+    return {
+        field: _positive_int(raw[field], field, f"{where} resources", path)
+        for field in RESOURCE_FIELDS
+        if field in raw
+    }
 
 
 def _schedule(
@@ -329,12 +386,17 @@ def _says_nothing(body: object) -> bool:
     return body is None or (isinstance(body, dict) and not body)
 
 
+def _sibling(path: Path, name: str) -> Path:
+    """A shared table one level above the plan's own directory."""
+    return path.resolve().parents[1] / f"{name}.yaml"
+
+
 def _sibling_default_modes(doc: Mapping[str, Any], path: Path) -> Mapping[str, str]:
     """``bench/tools.yaml`` beside the plan's directory — read only if needed."""
     tools = doc.get("tools")
     if not isinstance(tools, dict) or not any(_says_nothing(body) for body in tools.values()):
         return {}
-    return load_default_modes(path.resolve().parents[1] / "tools.yaml")
+    return load_default_modes(_sibling(path, "tools"))
 
 
 def _default_body(tool: str, default_modes: Mapping[str, str], path: Path) -> dict[str, Any]:
@@ -354,15 +416,24 @@ def _default_body(tool: str, default_modes: Mapping[str, str], path: Path) -> di
     return {"matrix": {"mode": [mode]}}
 
 
+@dataclass(frozen=True)
+class _Context:
+    """What every case needs to know but no case states: the target and the boxes."""
+
+    bucket: str
+    region: str
+    instances: Mapping[tuple[int, int], str]
+    path: Path
+
+
 def _cases(
     doc: Mapping[str, Any],
-    bucket: str,
-    region: str,
     base_resources: Mapping[str, Any],
     base_schedule: Mapping[str, int],
     default_modes: Mapping[str, str],
-    path: Path,
+    context: _Context,
 ) -> tuple[Case, ...]:
+    path = context.path
     declared = _table(doc, "tools", "tools", path)
     if not declared:
         raise PlanError(f"plan {path} runs no tools")
@@ -373,19 +444,18 @@ def _cases(
         tools[tool] = _default_body(tool, default_modes, path) if _says_nothing(body) else body
     cases: list[Case] = []
     for tool in tools:
-        cases.extend(_tool_cases(tool, tools, bucket, region, base_resources, base_schedule, path))
+        cases.extend(_tool_cases(tool, tools, base_resources, base_schedule, context))
     return tuple(cases)
 
 
 def _tool_cases(
     tool: str,
     tools: Mapping[str, Any],
-    bucket: str,
-    region: str,
     base_resources: Mapping[str, Any],
     base_schedule: Mapping[str, int],
-    path: Path,
+    context: _Context,
 ) -> list[Case]:
+    path = context.path
     where = f"tools.{tool}"
     table = _table(tools, tool, where, path)
     _reject_unknown(table, TOOL_FIELDS, f"'{where}'", path)
@@ -408,7 +478,7 @@ def _tool_cases(
                 **{k: v for k, v in chosen if k in RESOURCE_FIELDS},
             }
             mode = str(dict(chosen)["mode"])
-            cases.append(_case(tool, mode, chosen, case_resources, schedule, bucket, region, path))
+            cases.append(_case(tool, mode, chosen, case_resources, schedule, context))
     return cases
 
 
@@ -472,7 +542,7 @@ def _axes(entry: Mapping[str, Any], where: str, path: Path) -> dict[str, list[st
             raise PlanError(f"'{where}' '{axis}' in {path} is not a non-empty list")
         checked: list[str | int] = []
         for value in values:
-            if axis in ("mode", "machine_type"):
+            if axis == "mode":
                 if not isinstance(value, str) or not value.strip():
                     raise PlanError(
                         f"'{where}' '{axis}' in {path} has a non-string value: {value!r}"
@@ -494,15 +564,20 @@ def _case(
     chosen: tuple[tuple[str, str | int], ...],
     resources: Mapping[str, Any],
     schedule: Mapping[str, int],
-    bucket: str,
-    region: str,
-    path: Path,
+    context: _Context,
 ) -> Case:
-    resolved = Resources(
-        machine_type=str(resources["machine_type"]),
-        memory_mib=int(resources["memory_mib"]),
-        cpu_milli=int(resources["cpu_milli"]),
-    )
+    path = context.path
+    shape = (int(resources["vcpus"]), int(resources["memory_gb"]))
+    machine_type = context.instances.get(shape)
+    if machine_type is None:
+        offered = ", ".join(f"{v}x{m}" for v, m in sorted(context.instances)) or "none"
+        raise PlanError(
+            f"'tools.{tool}' in {path} asks for {shape[0]} vCPU / {shape[1]} GB, which "
+            f"bench/instances.yaml does not offer ({offered}) — add the shape or ask "
+            "for one that exists"
+        )
+    resolved = Resources(vcpus=shape[0], memory_gb=shape[1], machine_type=machine_type)
+
     case_id = derive_case_id(chosen)
     if not CASE_ID_RE.fullmatch(case_id):
         raise PlanError(
@@ -518,8 +593,8 @@ def _case(
         timeout_s=schedule["timeout_s"],
         axes=chosen,
         fingerprint=fingerprint(
-            bucket=bucket,
-            region=region,
+            bucket=context.bucket,
+            region=context.region,
             tool=tool,
             mode=mode,
             resources=resolved,

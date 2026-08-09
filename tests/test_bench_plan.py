@@ -20,9 +20,8 @@ defaults:
   reps: 3
   timeout_s: 3600
   resources:
-    machine_type: e2-standard-4
-    memory_mib: 8192
-    cpu_milli: 4000
+    vcpus: 2
+    memory_gb: 8
 tools:
 {tools}
 """
@@ -41,6 +40,22 @@ aws-cli:
     mode: [s3api-v2-text]
 """
 
+# Enough of a catalogue to resolve every shape these plans ask for. Passed in
+# rather than read from bench/, so a fixture plan does not need a tree beside it.
+INSTANCES = {
+    (2, 4): "n4-highcpu-2",
+    (2, 8): "n4-standard-2",
+    (2, 16): "n4-highmem-2",
+    (4, 8): "n4-highcpu-4",
+    (4, 16): "n4-standard-4",
+}
+
+
+def load(path: Path, **kwargs: object) -> bench.Plan:
+    """``Plan.load`` with the fixture catalogue already supplied."""
+    kwargs.setdefault("instances", INSTANCES)
+    return bench.Plan.load(path, **kwargs)  # type: ignore[arg-type]
+
 
 # ── the shipped plan ─────────────────────────────────────────────────────────
 
@@ -55,9 +70,15 @@ def test_the_committed_plan_loads() -> None:
     # and the sorted mode at two.
     assert len(loaded.cases) == 14
     assert len(loaded.cases_for("swath")) == 4
-    # The sorted block's own box, not the plan default.
+    # The sorted block sweeps memory at a fixed vCPU count, so only the box's
+    # memory moves: 4 GB and 8 GB at 2 vCPU are two shapes of one generation.
     sorted_cases = [c for c in loaded.cases_for("swath") if "sorted" in c.mode]
-    assert {c.resources.machine_type for c in sorted_cases} == {"n4-highcpu-4"}
+    assert {c.resources.vcpus for c in sorted_cases} == {2}
+    assert sorted(c.resources.memory_gb for c in sorted_cases) == [4, 8]
+    assert {c.resources.machine_type for c in sorted_cases} == {
+        "n4-highcpu-2",
+        "n4-standard-2",
+    }
 
 
 def test_the_committed_plan_matches_the_registered_tools() -> None:
@@ -92,31 +113,71 @@ def test_the_committed_plan_declares_every_registered_tool() -> None:
     assert loaded.declared() == bench_cli.registered_tools()
 
 
+def test_the_committed_catalogue_offers_no_shared_core_machines() -> None:
+    """E2 is a shared, variable core — not a platform to time anything on."""
+    catalogue = bench.load_instances(bench.bench_dir() / "instances.yaml")
+    assert catalogue
+    assert not [m for m in catalogue.values() if m.startswith("e2-")]
+
+
+def test_a_memory_sweep_holds_vcpus_constant() -> None:
+    """What makes memory the only variable: same vCPU count, three memory sizes.
+
+    If the catalogue ever offered a shape whose family changed vCPU alongside
+    memory, a memory axis would silently be measuring two things.
+    """
+    catalogue = bench.load_instances(bench.bench_dir() / "instances.yaml")
+    by_vcpu: dict[int, set[int]] = {}
+    for vcpus, memory_gb in catalogue:
+        by_vcpu.setdefault(vcpus, set()).add(memory_gb)
+    assert all(len(sizes) > 1 for sizes in by_vcpu.values())
+
+
+def test_a_shape_listed_twice_is_refused(tmp_path: Path) -> None:
+    """It would resolve to whichever came last, so two campaigns could differ."""
+    path = tmp_path / "instances.yaml"
+    path.write_text(
+        "spec_version: 1\ninstances:\n"
+        "  - {vcpus: 2, memory_gb: 4, machine_type: n4-highcpu-2}\n"
+        "  - {vcpus: 2, memory_gb: 4, machine_type: c4-highcpu-2}\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(bench.PlanError, match="twice"):
+        bench.load_instances(path)
+
+
+def test_a_shape_the_catalogue_lacks_is_refused(tmp_path: Path) -> None:
+    """Caught while resolving, not when Batch rejects the job."""
+    path = write(tmp_path, ONE_CASE)
+    with pytest.raises(bench.PlanError, match="does not offer"):
+        bench.Plan.load(path, instances={(64, 512): "n4-highmem-64"})
+
+
 # ── expansion and cascade ────────────────────────────────────────────────────
 
 
 def test_an_empty_tool_runs_once_at_its_default_mode(tmp_path: Path) -> None:
     """Writing the name and stopping is the whole declaration."""
     path = write(tmp_path, "s5cmd:\ns3p:\n")
-    loaded = bench.Plan.load(path, default_modes={"s5cmd": "recursive", "s3p": "ls"})
+    loaded = load(path, default_modes={"s5cmd": "recursive", "s3p": "ls"})
     assert [(c.tool, c.case_id, c.mode) for c in loaded.cases] == [
         ("s5cmd", "recursive", "recursive"),
         ("s3p", "ls", "ls"),
     ]
     # An empty tool takes the plan's allocation, not one of its own.
-    assert {c.resources.machine_type for c in loaded.cases} == {"e2-standard-4"}
+    assert {c.resources.machine_type for c in loaded.cases} == {"n4-standard-2"}
 
 
 def test_an_explicitly_empty_mapping_reads_the_same_as_a_bare_key(tmp_path: Path) -> None:
     path = write(tmp_path, "s5cmd: {}\n")
-    loaded = bench.Plan.load(path, default_modes={"s5cmd": "recursive"})
+    loaded = load(path, default_modes={"s5cmd": "recursive"})
     assert [c.case_id for c in loaded.cases] == ["recursive"]
 
 
 def test_an_empty_tool_with_no_default_mode_is_refused(tmp_path: Path) -> None:
     path = write(tmp_path, "s5cmd:\n")
     with pytest.raises(bench.PlanError, match="no default mode"):
-        bench.Plan.load(path, default_modes={"s3p": "ls"})
+        load(path, default_modes={"s3p": "ls"})
 
 
 def test_an_unindented_matrix_does_not_silently_become_a_default_case(tmp_path: Path) -> None:
@@ -127,7 +188,7 @@ def test_an_unindented_matrix_does_not_silently_become_a_default_case(tmp_path: 
     """
     path = write(tmp_path, "swath:\nmatrix:\n  - mode: [recursive-tsv]\n")
     with pytest.raises(bench.PlanError, match=r"'tools\.matrix' .* is not a mapping"):
-        bench.Plan.load(path, default_modes={"swath": "recursive-tsv"})
+        load(path, default_modes={"swath": "recursive-tsv"})
 
 
 def test_a_matrix_expands_to_its_cross_product(tmp_path: Path) -> None:
@@ -137,15 +198,15 @@ def test_a_matrix_expands_to_its_cross_product(tmp_path: Path) -> None:
         swath:
           matrix:
             mode: [recursive-tsv, recursive-parquet]
-            memory_mib: [2048, 4096]
+            memory_gb: [4, 8]
         """,
     )
-    ids = [case.case_id for case in bench.Plan.load(path).cases]
+    ids = [case.case_id for case in load(path).cases]
     assert ids == [
-        "recursive-tsv.memory_mib-2048",
-        "recursive-tsv.memory_mib-4096",
-        "recursive-parquet.memory_mib-2048",
-        "recursive-parquet.memory_mib-4096",
+        "recursive-tsv.memory_gb-4",
+        "recursive-tsv.memory_gb-8",
+        "recursive-parquet.memory_gb-4",
+        "recursive-parquet.memory_gb-8",
     ]
 
 
@@ -156,17 +217,19 @@ def test_an_axis_overrides_the_tool_which_overrides_the_defaults(tmp_path: Path)
         """
         swath:
           resources:
-            memory_mib: 16384
-            cpu_milli: 8000
+            memory_gb: 8
+            vcpus: 4
           matrix:
             mode: [recursive-tsv]
-            memory_mib: [2048]
+            memory_gb: [16]
         """,
     )
-    case = bench.Plan.load(path).cases[0]
-    assert case.resources.memory_mib == 2048  # axis
-    assert case.resources.cpu_milli == 8000  # tool level
-    assert case.resources.machine_type == "e2-standard-4"  # defaults
+    case = load(path).cases[0]
+    assert case.resources.memory_gb == 16  # axis beats the tool
+    assert case.resources.vcpus == 4  # tool beats the defaults
+    assert case.timeout_s == 3600  # defaults, unmentioned by either
+    # Resolved from the pair, never stated by any layer.
+    assert case.resources.machine_type == "n4-standard-4"
 
 
 def test_a_tool_may_override_the_schedule(tmp_path: Path) -> None:
@@ -179,7 +242,7 @@ def test_a_tool_may_override_the_schedule(tmp_path: Path) -> None:
             mode: [list]
         """,
     )
-    case = bench.Plan.load(path).cases[0]
+    case = load(path).cases[0]
     assert (case.timeout_s, case.reps) == (7200, 3)
 
 
@@ -191,24 +254,24 @@ def test_blocks_let_modes_take_different_sweeps(tmp_path: Path) -> None:
         swath:
           matrix:
             - mode: [recursive-tsv]
-              memory_mib: [2048]
+              memory_gb: [4]
             - mode: [recursive-parquet-sorted]
-              memory_mib: [2048, 4096]
+              memory_gb: [8, 16]
               resources:
-                machine_type: n4-highcpu-4
+                vcpus: 4
         """,
     )
-    cases = bench.Plan.load(path).cases
+    cases = load(path).cases
     assert [c.case_id for c in cases] == [
-        "recursive-tsv.memory_mib-2048",
-        "recursive-parquet-sorted.memory_mib-2048",
-        "recursive-parquet-sorted.memory_mib-4096",
+        "recursive-tsv.memory_gb-4",
+        "recursive-parquet-sorted.memory_gb-8",
+        "recursive-parquet-sorted.memory_gb-16",
     ]
-    # A block's resources override the tool and the defaults, and its axes still
-    # override the block.
-    assert cases[0].resources.machine_type == "e2-standard-4"
-    assert [c.resources.machine_type for c in cases[1:]] == ["n4-highcpu-4"] * 2
-    assert [c.resources.memory_mib for c in cases[1:]] == [2048, 4096]
+    # A block's resources override the defaults, and its axes still override the
+    # block: the sorted pair gets the block's 4 vCPU and its own memory.
+    assert cases[0].resources.machine_type == "n4-highcpu-2"
+    assert [c.resources.vcpus for c in cases[1:]] == [4, 4]
+    assert [c.resources.machine_type for c in cases[1:]] == ["n4-highcpu-4", "n4-standard-4"]
 
 
 def test_blocks_that_declare_different_axes_are_refused(tmp_path: Path) -> None:
@@ -220,11 +283,11 @@ def test_blocks_that_declare_different_axes_are_refused(tmp_path: Path) -> None:
           matrix:
             - mode: [recursive-tsv]
             - mode: [recursive-parquet]
-              memory_mib: [4096]
+              memory_gb: [8]
         """,
     )
     with pytest.raises(bench.PlanError, match="mixes axis sets"):
-        bench.Plan.load(path)
+        load(path)
 
 
 def test_blocks_generating_the_same_case_twice_are_refused(tmp_path: Path) -> None:
@@ -235,15 +298,15 @@ def test_blocks_generating_the_same_case_twice_are_refused(tmp_path: Path) -> No
         swath:
           matrix:
             - mode: [recursive-tsv]
-              memory_mib: [2048]
+              memory_gb: [4]
             - mode: [recursive-tsv]
-              memory_mib: [2048]
+              memory_gb: [4]
               resources:
-                machine_type: n4-highcpu-4
+                vcpus: 2
         """,
     )
     with pytest.raises(bench.PlanError, match="twice"):
-        bench.Plan.load(path)
+        load(path)
 
 
 # ── identity ─────────────────────────────────────────────────────────────────
@@ -257,10 +320,10 @@ def test_a_single_valued_axis_still_appears_in_the_id(tmp_path: Path) -> None:
         swath:
           matrix:
             mode: [recursive-tsv]
-            memory_mib: [2048]
+            memory_gb: [4]
         """,
     )
-    assert bench.Plan.load(path).cases[0].case_id == "recursive-tsv.memory_mib-2048"
+    assert load(path).cases[0].case_id == "recursive-tsv.memory_gb-4"
 
 
 def test_resource_changes_move_the_fingerprint(tmp_path: Path) -> None:
@@ -271,10 +334,10 @@ def test_resource_changes_move_the_fingerprint(tmp_path: Path) -> None:
         swath:
           matrix:
             mode: [recursive-tsv]
-            memory_mib: [2048, 4096]
+            memory_gb: [4, 8]
         """,
     )
-    first, second = bench.Plan.load(path).cases
+    first, second = load(path).cases
     assert first.fingerprint != second.fingerprint
 
 
@@ -293,7 +356,7 @@ def test_reps_are_not_part_of_identity(tmp_path: Path) -> None:
             ),
             encoding="utf-8",
         )
-        fingerprints.append(bench.Plan.load(path).cases[0].fingerprint)
+        fingerprints.append(load(path).cases[0].fingerprint)
     assert fingerprints[0] == fingerprints[1]
 
 
@@ -310,7 +373,7 @@ def test_timeout_is_part_of_identity(tmp_path: Path) -> None:
             ),
             encoding="utf-8",
         )
-        fingerprints.append(bench.Plan.load(path).cases[0].fingerprint)
+        fingerprints.append(load(path).cases[0].fingerprint)
     assert fingerprints[0] != fingerprints[1]
 
 
@@ -321,7 +384,7 @@ def test_an_unknown_key_is_refused(tmp_path: Path) -> None:
     """An unknown key is a misspelling of a real one, and would silently do nothing."""
     path = write(tmp_path, ONE_CASE, extra="concurrency: 8\n")
     with pytest.raises(bench.PlanError, match="unknown key"):
-        bench.Plan.load(path)
+        load(path)
 
 
 def test_an_unsupported_spec_version_is_refused(tmp_path: Path) -> None:
@@ -331,7 +394,7 @@ def test_an_unsupported_spec_version_is_refused(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     with pytest.raises(bench.PlanError, match="spec_version"):
-        bench.Plan.load(path)
+        load(path)
 
 
 def test_a_filename_that_disagrees_with_the_bucket_is_refused(tmp_path: Path) -> None:
@@ -339,7 +402,7 @@ def test_a_filename_that_disagrees_with_the_bucket_is_refused(tmp_path: Path) ->
     renamed = path.with_name("other.yaml")
     path.rename(renamed)
     with pytest.raises(bench.PlanError, match="is named"):
-        bench.Plan.load(renamed)
+        load(renamed)
 
 
 def test_a_matrix_without_a_mode_axis_is_refused(tmp_path: Path) -> None:
@@ -348,11 +411,11 @@ def test_a_matrix_without_a_mode_axis_is_refused(tmp_path: Path) -> None:
         """
         swath:
           matrix:
-            memory_mib: [2048]
+            memory_gb: [4]
         """,
     )
     with pytest.raises(bench.PlanError, match="no 'mode' axis"):
-        bench.Plan.load(path)
+        load(path)
 
 
 def test_a_repeated_axis_value_is_refused(tmp_path: Path) -> None:
@@ -363,20 +426,20 @@ def test_a_repeated_axis_value_is_refused(tmp_path: Path) -> None:
         swath:
           matrix:
             mode: [recursive-tsv]
-            memory_mib: [2048, 2048]
+            memory_gb: [4, 4]
         """,
     )
     with pytest.raises(bench.PlanError, match="repeats a value"):
-        bench.Plan.load(path)
+        load(path)
 
 
 def test_incomplete_defaults_are_refused(tmp_path: Path) -> None:
     path = write(tmp_path, ONE_CASE)
     path.write_text(
-        path.read_text(encoding="utf-8").replace("    cpu_milli: 4000\n", ""), encoding="utf-8"
+        path.read_text(encoding="utf-8").replace("    memory_gb: 8\n", ""), encoding="utf-8"
     )
-    with pytest.raises(bench.PlanError, match="missing cpu_milli"):
-        bench.Plan.load(path)
+    with pytest.raises(bench.PlanError, match="missing memory_gb"):
+        load(path)
 
 
 def test_a_yaml_bool_is_not_a_memory_size(tmp_path: Path) -> None:
@@ -387,11 +450,11 @@ def test_a_yaml_bool_is_not_a_memory_size(tmp_path: Path) -> None:
         swath:
           matrix:
             mode: [recursive-tsv]
-            memory_mib: [yes]
+            memory_gb: [yes]
         """,
     )
     with pytest.raises(bench.PlanError, match="positive integer"):
-        bench.Plan.load(path)
+        load(path)
 
 
 def test_running_and_excluding_the_same_tool_is_refused(tmp_path: Path) -> None:
@@ -401,13 +464,13 @@ def test_running_and_excluding_the_same_tool_is_refused(tmp_path: Path) -> None:
         extra="exclude:\n  - tool: aws-cli\n    reason: contradicts itself\n",
     )
     with pytest.raises(bench.PlanError, match="both runs and excludes"):
-        bench.Plan.load(path)
+        load(path)
 
 
 def test_an_exclusion_without_a_reason_is_refused(tmp_path: Path) -> None:
     path = write(tmp_path, ONE_CASE, extra="exclude:\n  - tool: s3p\n")
     with pytest.raises(bench.PlanError, match="reason"):
-        bench.Plan.load(path)
+        load(path)
 
 
 # ── cross-checks ─────────────────────────────────────────────────────────────
@@ -415,27 +478,27 @@ def test_an_exclusion_without_a_reason_is_refused(tmp_path: Path) -> None:
 
 def test_a_registered_tool_the_plan_ignores_is_refused(tmp_path: Path) -> None:
     """Registering a tool and forgetting a campaign is the mistake this catches."""
-    loaded = bench.Plan.load(write(tmp_path, ONE_CASE))
+    loaded = load(write(tmp_path, ONE_CASE))
     with pytest.raises(bench.PlanError, match="does not mention s5cmd"):
         bench.check_roster(loaded, {"aws-cli", "s5cmd"})
 
 
 def test_an_excluded_tool_satisfies_the_roster(tmp_path: Path) -> None:
-    loaded = bench.Plan.load(
+    loaded = load(
         write(tmp_path, ONE_CASE, extra="exclude:\n  - tool: s5cmd\n    reason: not yet built\n")
     )
     bench.check_roster(loaded, {"aws-cli", "s5cmd"})
 
 
 def test_an_unregistered_tool_is_refused(tmp_path: Path) -> None:
-    loaded = bench.Plan.load(write(tmp_path, ONE_CASE))
+    loaded = load(write(tmp_path, ONE_CASE))
     with pytest.raises(bench.PlanError, match="unregistered"):
         bench.check_roster(loaded, set())
 
 
 def test_a_mode_the_adapter_lacks_is_refused(tmp_path: Path) -> None:
     """Caught before submission rather than at Batch runtime."""
-    loaded = bench.Plan.load(write(tmp_path, ONE_CASE))
+    loaded = load(write(tmp_path, ONE_CASE))
     with pytest.raises(bench.PlanError, match="no mode 's3api-v2-text'"):
         bench.check_modes(loaded, {"aws-cli": {"s3-ls-recursive"}})
 
@@ -447,7 +510,7 @@ def test_resolve_plan_expands_the_committed_plan(capsys: pytest.CaptureFixture[s
     assert bench_cli.resolve_plan_main(["--bucket", "noaa-ghcn-pds"]) == 0
     out = capsys.readouterr().out
     assert "14 cases, 14 attempts" in out
-    assert "recursive-parquet-sorted.memory_mib-2048" in out
+    assert "recursive-parquet-sorted.memory_gb-4" in out
 
 
 def test_resolve_plan_emits_machine_readable_cases(

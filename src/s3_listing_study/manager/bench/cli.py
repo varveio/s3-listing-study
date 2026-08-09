@@ -55,7 +55,10 @@ def _rows(loaded: bench.Plan) -> list[dict[str, object]]:
             "tool": case.tool,
             "case": case.case_id,
             "mode": case.mode,
+            "vcpus": case.resources.vcpus,
+            "memory_gb": case.resources.memory_gb,
             "machine_type": case.resources.machine_type,
+            # Derived, and carried because they are what a Batch job is told.
             "memory_mib": case.resources.memory_mib,
             "cpu_milli": case.resources.cpu_milli,
             "reps": case.reps,
@@ -67,7 +70,7 @@ def _rows(loaded: bench.Plan) -> list[dict[str, object]]:
 
 
 def _render(loaded: bench.Plan, rows: Sequence[dict[str, object]]) -> str:
-    columns = ("tool", "case", "machine_type", "memory_mib", "cpu_milli", "reps", "timeout_s")
+    columns = ("tool", "case", "vcpus", "memory_gb", "machine_type", "reps", "timeout_s")
     widths = {c: max(len(c), *(len(str(r[c])) for r in rows)) for c in columns} if rows else {}
     lines = [
         f"{loaded.bucket} ({loaded.region}) — {len(rows)} cases, "

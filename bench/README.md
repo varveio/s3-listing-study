@@ -62,12 +62,10 @@ state several blocks and take their union, and a block may carry its own
 swath:
   matrix:
     - mode: [recursive-tsv, recursive-parquet]
-      memory_mib: [2048]
+      memory_gb: [4]
 
     - mode: [recursive-parquet-sorted]
-      memory_mib: [2048, 4096]
-      resources:
-        machine_type: n4-highcpu-4
+      memory_gb: [4, 8]
 ```
 
 Every block must declare the same axis *names*, so one tool's case IDs keep
@@ -76,6 +74,21 @@ their shape; the values are what differ.
 Values resolve in four shallow layers, nearest statement winning:
 `defaults` → the tool → the block → the matrix axis. `resources` is a flat
 table of scalars, so there is no nesting for a merge surprise to hide in.
+
+## A plan asks for a shape, not a machine type
+
+`resources` states `vcpus` and `memory_gb`; [`instances.yaml`](instances.yaml)
+says which machine type that pair is. A plan therefore never names a provider's
+catalogue, and a new machine generation is one edit there rather than one per
+case. A shape the catalogue does not offer is refused while resolving, rather
+than when Batch rejects the job.
+
+This is also what makes a memory sweep mean anything. Cloud Batch's per-task
+`memoryMib` is a scheduling input — it decides machine-type compatibility and
+how many tasks share a VM — **not** a cgroup limit, so two tasks on one VM shape
+see the same memory however they were labelled. Moving memory has to move the
+machine, and holding `vcpus` fixed across the sweep is what keeps memory the
+only variable.
 
 Every tool with a `build/image.json` must appear under `tools` or `exclude`
 with a reason. A tool that is simply absent is a validation error — registering

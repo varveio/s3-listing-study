@@ -1,0 +1,43 @@
+# The box each (vcpus, memory_gb) pair resolves to.
+#
+# A plan asks for two vCPUs and eight gigabytes; which machine type that is, is
+# a fact about the cloud and not about the benchmark. Keeping it here means a
+# plan states the shape it needs rather than a provider's product name, and a
+# new machine generation is one edit rather than one per case.
+#
+# Varying memory here is what actually varies memory. Cloud Batch's per-task
+# `memoryMib` is a scheduling input — it decides machine-type compatibility and
+# how many tasks share a VM — not a cgroup limit, so two tasks on one VM shape
+# see the same memory however they were labelled. A memory axis therefore has to
+# move the machine, which is why these are resolved rather than requested.
+#
+# vCPU is held constant across a memory sweep by construction: within a
+# generation, highcpu/standard/highmem at the same vCPU count differ only in
+# memory, so 2 vCPU at 4 vs 8 GB is one variable and not two.
+#
+# N4 is Intel Emerald Rapids (5th-gen Xeon). E2 is deliberately absent: it is a
+# shared, variable core and not a platform to time anything on.
+#
+# UNVERIFIED against the live API — this account lacks compute.machineTypes.list,
+# so the ratios come from Compute Engine's published documentation (N4 highcpu
+# 2 GB/vCPU, standard 4, highmem 8) rather than from an enumeration. Check with
+# `gcloud compute machine-types list --filter="name~'^n4-'"` before a campaign
+# depends on a shape below.
+#
+# Note for the Batch config: N4 does not support pd-balanced, the Compute Engine
+# default, and needs hyperdisk-balanced or pd-ssd boot disks.
+
+spec_version: 1
+
+instances:
+  - { vcpus: 2, memory_gb: 4, machine_type: n4-highcpu-2 }
+  - { vcpus: 2, memory_gb: 8, machine_type: n4-standard-2 }
+  - { vcpus: 2, memory_gb: 16, machine_type: n4-highmem-2 }
+
+  - { vcpus: 4, memory_gb: 8, machine_type: n4-highcpu-4 }
+  - { vcpus: 4, memory_gb: 16, machine_type: n4-standard-4 }
+  - { vcpus: 4, memory_gb: 32, machine_type: n4-highmem-4 }
+
+  - { vcpus: 8, memory_gb: 16, machine_type: n4-highcpu-8 }
+  - { vcpus: 8, memory_gb: 32, machine_type: n4-standard-8 }
+  - { vcpus: 8, memory_gb: 64, machine_type: n4-highmem-8 }
