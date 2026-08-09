@@ -19,10 +19,13 @@ been through the full groundwork pipeline (pinned builds, smoke runs,
 source-anchored reports, reconciliation, and critical cross-checks) and carries
 committed receipts. Smoke is not measurement — no benchmark or comparative
 performance result exists in this repo (receipts carry a wall-clock/RSS figure,
-but only as a fact about that one run). Two cohorts: `aws-cli`, `s5cmd`,
-`s7cmd`, `rclone`, `minio-mc`, `s3-fast-list`, and Swath ran anonymously at
-smoke (not all correctness-verified); `s3p`, `s3kor`, `s4cmd`, and `ps3` were
-blocked without credentials. Per-tool status: `tools/README.md`.
+but only as a fact about that one run). All eleven have now run at smoke on
+amd64 through the attempt engine — `aws-cli`, `s5cmd`, `s7cmd`, `rclone`,
+`minio-mc`, `s3-fast-list` and Swath anonymously, and `s3p`, `s3kor`, `s4cmd`
+and `ps3` with a credential, which previously blocked them. Running is not
+verifying: those engine attempts carry no verdict, because auditing one against
+a reference manifest is not implemented yet. Per-tool status:
+`tools/README.md`.
 
 ## Project principles
 

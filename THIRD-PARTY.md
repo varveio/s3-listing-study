@@ -3,10 +3,9 @@
 This repository evaluates third-party object-store listing tools. It vendors no
 third-party source code (with one narrow exception noted below). Each tool is
 fetched or built from upstream at a pinned revision, invoked as a separate
-program, and never redistributed from here. Some are exercised only at a
-capability probe (they have no unsigned request path, so their listing modes are
-blocked without credentials) rather than in a full listing run — see
-[`tools/README.md`](tools/README.md) for which.
+program, and never redistributed from here. Some have no unsigned request path
+and are therefore exercised under a scoped list-only credential rather than
+anonymously — see [`tools/README.md`](tools/README.md) for which.
 
 This file, unlike [`NOTICE`](NOTICE), is a maintained research record — it is
 expected to change as the study verifies more of what it currently only

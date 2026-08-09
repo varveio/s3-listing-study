@@ -54,9 +54,11 @@ Groundwork split the roster into two cohorts:
   `minio-mc`, `s3-fast-list` (a disclosed fork build pending an upstream
   `--no-sign-request` contribution), and Swath. A smoke run does not by itself
   establish correctness or performance beyond that exact run.
-- **Blocked without credentials:** `s3p`, `s3kor`, `s4cmd`, and `ps3` expose no
-  unsigned request path. Their committed capability receipts document that
-  limitation; they have not successfully listed the smoke bucket.
+- **Ran with a scoped credential:** `s3p`, `s3kor`, `s4cmd`, and `ps3` expose no
+  unsigned request path, so they cannot be smoked anonymously at all. Their
+  committed capability receipts document that limitation, and they have since
+  listed the smoke bucket under a list-only credential. The same caveat applies:
+  a smoke run establishes nothing beyond that exact run.
 
 See [`tools/README.md`](tools/README.md) for the per-tool status,
 [`docs/methodology.md`](docs/methodology.md) for the measurement plan we wrote

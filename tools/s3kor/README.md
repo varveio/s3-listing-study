@@ -9,8 +9,8 @@ This study's groundwork is complete; no benchmark comparison has been run.
 | Question | Current answer |
 | --- | --- |
 | Tested subject | Upstream s3kor at pinned commit `844fe3d` (release tag `v0.0.37`), built from source because upstream ships no image or Dockerfile. The go-install binary self-reports `dev-local-version none unknown`; canonical identity is in [`data/tool.json`](data/tool.json). |
-| Exercised coverage | Both listing modes (`list`, `list-versions`) were attempted but **blocked**: s3kor has no unsigned listing path and the campaign is `CREDS=none`. No listing output was produced. |
-| Correctness | No verifier verdict was possible — the tool produced no listing to verify (`n/a — capability probe`). |
+| Exercised coverage | `list` has run under a scoped list-only credential and produced a listing. Anonymously both modes are **blocked**: s3kor has no unsigned listing path. `list-versions` has not been run under credentials. |
+| Correctness | No verdict. The credentialed `list` attempt produced a listing, but auditing an attempt against a reference manifest is not implemented, so nothing has checked it. |
 | Smoke observation | Both listing modes were blocked under `CREDS=none` with a startup panic at AWS session construction, exit 2, and zero S3 requests. This is a single-run capability finding, not a listing or benchmark result. |
 | Results | No benchmark or comparative result exists, and none can until s3kor is given credentials. |
 

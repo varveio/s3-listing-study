@@ -25,7 +25,10 @@ COPY harness/derived-image/validate_selection.py /build/validate_selection.py
 COPY --from=selection image.json /build/image.json
 COPY --from=adapter command.py /build/tool/command.py
 COPY --from=adapter normalize.py /build/tool/normalize.py
-RUN ["/opt/s3-listing-study/python/bin/python3", "-I", "/build/validate_selection.py"]
+# -B: importing the entry point to check it must not leave __pycache__ behind in
+# the payload, which would seal compiled bytecode into the archive and into the
+# digest a campaign pins.
+RUN ["/opt/s3-listing-study/python/bin/python3", "-I", "-B", "/build/validate_selection.py"]
 RUN ["/opt/s3-listing-study/python/bin/python3", "-I", "-m", "zipapp", "/build/payload", "-o", "/attempt.pyz"]
 
 FROM subject

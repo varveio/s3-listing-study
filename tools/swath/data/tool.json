@@ -29,7 +29,7 @@
   },
   "study": {
     "groundwork_status": "complete",
-    "smoke_execution_status": "blocked",
+    "smoke_execution_status": "ran",
     "verification_status": "blocked",
     "auth_status": "anonymous",
     "benchmark_eligibility": "conditional"

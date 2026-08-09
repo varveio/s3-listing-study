@@ -24,13 +24,19 @@ scale-dependent or comparative stays unverified until the benchmark phase.
 
 ## The roster
 
-Groundwork split the roster into two cohorts:
+Groundwork split the roster by how a tool can be reached at all:
 
-- **Ran anonymously at smoke** — aws-cli, s5cmd, s7cmd, rclone, minio-mc,
+- **Smoked anonymously** — aws-cli, s5cmd, s7cmd, rclone, minio-mc,
   s3-fast-list, and Swath.
-- **Blocked without credentials** — s3p, s3kor, s4cmd, and ps3 expose no
-  unsigned request path (ps3 also has no working native build). Whether they
-  participate with scoped list-only credentials is an open decision.
+- **Requires a credential** — s3p, s3kor, s4cmd, and ps3 expose no unsigned
+  request path. They are now smoked under a scoped list-only credential; ps3
+  additionally runs natively for the first time, having previously only ever
+  been built under emulation.
+
+Every subject has now run at smoke through the attempt engine. None of those
+engine attempts carries a verifier verdict: auditing one against a reference
+manifest is not implemented, so "ran" and "verified" remain separate facts here,
+as everywhere else in this repository.
 
 The tables below describe each tool's listing approach in one line. The
 tool's own page and claims ledger say how each statement stands — evidenced by
