@@ -19,9 +19,9 @@ from pathlib import Path
 
 import pytest
 
-from s3_listing_study.verify import cli, common, compare, report, security, union
-from s3_listing_study.verify.errors import ERROR_EXIT, VerifierError
-from s3_listing_study.verify.registry_source import RegistrySource
+from s3_listing_study.host.verify import cli, common, compare, report, security, union
+from s3_listing_study.host.verify.errors import ERROR_EXIT, VerifierError
+from s3_listing_study.host.verify.registry_source import RegistrySource
 
 REPO = Path(__file__).resolve().parents[1]
 REGRESSIONS = REPO / "harness" / "tests" / "run-regressions.sh"

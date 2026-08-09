@@ -161,7 +161,7 @@ different architectures and against different scopes; nothing merges or
 supersedes across the two, and a reader must take the scope and date from the
 record in hand rather than from the directory it shares.
 
-`s3_listing_study.verify` continues to audit those receipt-bound streams against
+`s3_listing_study.host.verify` continues to audit those receipt-bound streams against
 their recorded registry and manifest. The offline union regression suite is
 `harness/tests/run-regressions.sh`; the host security regression suite is
 `harness/tests/runner-security-regressions.sh`.

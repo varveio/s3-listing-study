@@ -44,8 +44,8 @@ from __future__ import annotations
 import sys
 from typing import IO
 
-from s3_listing_study.duckdb_adapter import connect, emit_result, staged
-from s3_listing_study.normalizer_cli import normalizer_main
+from s3_listing_study.host.duckdb_adapter import connect, emit_result, staged
+from s3_listing_study.host.normalizer_cli import normalizer_main
 
 UNKNOWN_MODE_EXIT = 3
 UNREADABLE_EXIT = 1

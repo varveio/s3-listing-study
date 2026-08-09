@@ -24,8 +24,8 @@ except ImportError:
     raise SystemExit(2) from None
 
 
-from .build_selection import BuildSelectionError, load_selection
-from .command_adapter import CommandAdapterError, load_command_adapter
+from ..common.build_selection import BuildSelectionError, load_selection
+from ..common.command_adapter import CommandAdapterError, load_command_adapter
 
 REQUIRED_DIRS = {"data", "docs", "adapter", "research", "receipts"}
 ALLOWED_ROOT = REQUIRED_DIRS | {"README.md", "build"}
@@ -96,7 +96,7 @@ HISTORICAL_BANNER = re.compile(
 
 def repo_root() -> Path:
     """The repo root, two levels above this package — this gate reads the working tree."""
-    return Path(__file__).resolve().parents[2]
+    return Path(__file__).resolve().parents[3]
 
 
 def load_json(path: Path, errors: list[str]) -> object | None:
@@ -525,7 +525,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if has_migration:
             errors.append(
                 f"{args.tool} is listed as a migrated capsule (MIGRATED_TOOLS in "
-                "s3_listing_study.capsule) but data/claims.json declares no legacy_ledger: a "
+                "s3_listing_study.host.capsule) but data/claims.json declares no legacy_ledger: a "
                 "migration stratum is removed only with its whole subject under "
                 "the subject-retirement rule, which removes the slug from that "
                 "roster in the same reviewed change"
@@ -533,7 +533,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             errors.append(
                 f"{args.tool} is not listed as a migrated capsule (MIGRATED_TOOLS "
-                "in s3_listing_study.capsule) but data/claims.json declares a legacy_ledger: a "
+                "in s3_listing_study.host.capsule) but data/claims.json declares a "
+                "legacy_ledger: a "
                 "capsule that acquires a migration stratum records it in that roster"
             )
     migration_regression = bool(args.migration_base) and has_migration

@@ -12,8 +12,8 @@ sys.path.insert(0, "/build/payload")
 # against the exact name, instead of surfacing inside a benchmark attempt on an
 # image that has already shipped.
 import s3_listing_study.attempt.cli  # noqa: F401
-from s3_listing_study.build_selection import BuildSelectionError, load_staged_selection
-from s3_listing_study.python_runtime import running_libc
+from s3_listing_study.common.build_selection import BuildSelectionError, load_staged_selection
+from s3_listing_study.common.python_runtime import running_libc
 
 try:
     selection = load_staged_selection(Path("/build/image.json"), Path("/build/tool"))

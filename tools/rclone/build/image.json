@@ -4,8 +4,10 @@
   "subject_version": "1.74.4",
   "python_libc": "musl",
   "subject_workdir": "/data",
-  "executable": ["/usr/local/bin/rclone"],
+  "executable": [
+    "/usr/local/bin/rclone"
+  ],
   "command": "adapter/command.py",
   "normalizer": "adapter/normalize.py",
-  "adapter_bundle_sha256": "960fe5ac27c39a3bab6b7df43877b13a49af486a40a6b05cafa965676268b92f"
+  "adapter_bundle_sha256": "c4b052ac850ddbd773cc20515be37e5b2956ee6a0c42e945aadd03647a883794"
 }

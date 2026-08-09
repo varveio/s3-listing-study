@@ -1,4 +1,4 @@
-"""``python -m s3_listing_study.receipt`` — the wrapper's offline half."""
+"""``python -m s3_listing_study.host.verify`` — the verifier as a process."""
 
 from __future__ import annotations
 

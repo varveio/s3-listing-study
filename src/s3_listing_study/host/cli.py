@@ -8,49 +8,49 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from s3_listing_study import __version__
-from s3_listing_study.links import main as links_main
+from s3_listing_study.host.links import main as links_main
 
 Handler = Callable[[Sequence[str] | None], int]
 
 
 def _verify_main(argv: Sequence[str] | None) -> int:
-    from s3_listing_study.verify import main
+    from s3_listing_study.host.verify import main
 
     return main(argv)
 
 
 def _receipt_main(argv: Sequence[str] | None) -> int:
-    from s3_listing_study.receipt.cli import main
+    from s3_listing_study.host.receipt.cli import main
 
     return main(argv)
 
 
 def _capsule_main(argv: Sequence[str] | None) -> int:
-    from s3_listing_study.capsule import main
+    from s3_listing_study.host.capsule import main
 
     return main(argv)
 
 
 def _source_anchors_main(argv: Sequence[str] | None) -> int:
-    from s3_listing_study.source_anchors import main
+    from s3_listing_study.host.source_anchors import main
 
     return main(argv)
 
 
 def _build_derived_image_main(argv: Sequence[str] | None) -> int:
-    from s3_listing_study.build_selection import build_derived_image_main
+    from s3_listing_study.common.build_selection import build_derived_image_main
 
     return build_derived_image_main(argv)
 
 
 def _collect_attempt_main(argv: Sequence[str] | None) -> int:
-    from s3_listing_study.collect import collect_attempt_main
+    from s3_listing_study.host.collect import collect_attempt_main
 
     return collect_attempt_main(list(argv) if argv is not None else None)
 
 
 def _upload_attempt_main(argv: Sequence[str] | None) -> int:
-    from s3_listing_study.upload import upload_attempt_main
+    from s3_listing_study.host.upload import upload_attempt_main
 
     return upload_attempt_main(list(argv) if argv is not None else None)
 

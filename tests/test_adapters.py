@@ -23,8 +23,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from s3_listing_study.contract import FIELD_COUNT, MTIME_RE, ContractViolation, read_records
-from s3_listing_study.duckdb_adapter import emit_result
+from s3_listing_study.host.contract import FIELD_COUNT, MTIME_RE, ContractViolation, read_records
+from s3_listing_study.host.duckdb_adapter import emit_result
 from tests.adapters.equivalence import (
     corpus_shortfall,
     load_adapter,

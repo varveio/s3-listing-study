@@ -11,9 +11,9 @@ import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 
-from s3_listing_study.argparse_utils import UniqueStoreAction
-from s3_listing_study.build_selection import BuildSelectionError
-from s3_listing_study.command_adapter import CommandAdapterError, CommandRequest
+from s3_listing_study.common.argparse_utils import UniqueStoreAction
+from s3_listing_study.common.build_selection import BuildSelectionError
+from s3_listing_study.common.command_adapter import CommandAdapterError, CommandRequest
 
 from .driver import resolve_invocation
 from .engine import (

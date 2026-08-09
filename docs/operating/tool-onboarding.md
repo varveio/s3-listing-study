@@ -54,7 +54,7 @@ step 4 needs no exception:
   them, so a document with a ledger carries `legacy_origins` on *every* claim
   and one without a ledger carries it on none. Present, they validate exactly
   as before.
-- `src/s3_listing_study/capsule.py` — `research/tool-page.md` and
+- `src/s3_listing_study/host/capsule.py` — `research/tool-page.md` and
   `research/claims-migration.md` moved out of `REQUIRED_FILES` into
   `MIGRATION_FILES`, required only for a capsule with a migration stratum. The README checks follow the same condition: navigation
   names the two files, and Provenance names `Mixed provenance`,

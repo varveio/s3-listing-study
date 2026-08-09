@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Compile s5cmd listing parameters into exact in-image argv."""
 
-from s3_listing_study.command_adapter import (
+from s3_listing_study.common.command_adapter import (
     CommandAdapterError,
     CommandRequest,
     command_adapter_main,

@@ -8,7 +8,7 @@ license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 dependencies = [
     "duckdb>=1.1",
-    # s3_listing_study.capsule validates tool.json/claims.json against the
+    # s3_listing_study.host.capsule validates tool.json/claims.json against the
     # Draft 2020-12 schemas in schemas/; the capsule gate is a real dependency
     # of this package, not something the CI runner provisions on the side.
     "jsonschema>=4.23",
@@ -17,7 +17,7 @@ dependencies = [
     # the same way a bare `python3` does; the oracle preflight also refuses to
     # judge without it rather than reporting a missing import as a port bug.
     "pyyaml>=6.0",
-    # s3_listing_study.upload only. Not a dependency of the attempt engine or
+    # s3_listing_study.host.upload only. Not a dependency of the attempt engine or
     # anything in the timed/security-critical path — the uploader is a
     # deliberately separate process (see harness/README.md and the campaign
     # orchestration notes: no gcsfuse, nothing GCS-shaped inside the engine).
@@ -28,7 +28,7 @@ dependencies = [
 ]
 
 [project.scripts]
-s3-listing-study = "s3_listing_study.cli:main"
+s3-listing-study = "s3_listing_study.host.cli:main"
 
 [dependency-groups]
 dev = [

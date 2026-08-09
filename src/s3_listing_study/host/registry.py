@@ -95,7 +95,7 @@ class Registry:
 
 def default_path() -> Path:
     """``data/registry.toml`` at the repo root."""
-    return Path(__file__).resolve().parents[2] / "data" / "registry.toml"
+    return Path(__file__).resolve().parents[3] / "data" / "registry.toml"
 
 
 def _load(path: Path) -> Registry:

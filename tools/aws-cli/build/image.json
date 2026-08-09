@@ -4,8 +4,10 @@
   "subject_version": "2.36.1",
   "python_libc": "gnu",
   "subject_workdir": "/aws",
-  "executable": ["/usr/local/bin/aws"],
+  "executable": [
+    "/usr/local/bin/aws"
+  ],
   "command": "adapter/command.py",
   "normalizer": "adapter/normalize.py",
-  "adapter_bundle_sha256": "f088915debde2a21350041f81a6e97a31ec28a1ac17976e2790bfcb894b0bb05"
+  "adapter_bundle_sha256": "0090ee1ed68d6688004b4ca58647c5467f597fb727e3ed8ded34540efae9a3f5"
 }

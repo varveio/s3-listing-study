@@ -1,11 +1,11 @@
 """Compatibility imports for the historical receipt secret scanner.
 
 The implementation is shared with the attempt engine in
-``s3_listing_study.secret_scan``. Existing receipt and audit callers retain
+``s3_listing_study.common.secret_scan``. Existing receipt and audit callers retain
 this module path.
 """
 
-from s3_listing_study.secret_scan import (
+from s3_listing_study.common.secret_scan import (
     LINE_SIZE_LIMIT,
     SCAN_SECRET_RE,
     LineTooLongError,

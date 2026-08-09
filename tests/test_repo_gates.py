@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from s3_listing_study import capsule, cli, links, source_anchors
+from s3_listing_study.host import capsule, cli, links, source_anchors
 
 REPO = Path(__file__).resolve().parents[1]
 

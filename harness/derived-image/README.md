@@ -35,7 +35,7 @@ rclone's are Go binaries on minimal bases. The recipe therefore does not use the
 subject's interpreter and does not install one: it binds a single pinned
 [python-build-standalone](https://github.com/astral-sh/python-build-standalone)
 CPython, digest-verified on the host by
-[`../../src/s3_listing_study/python_runtime.py`](../../src/s3_listing_study/python_runtime.py)
+[`../../src/s3_listing_study/common/python_runtime.py`](../../src/s3_listing_study/common/python_runtime.py)
 and copied to `/opt/s3-listing-study/python/`. No package manager runs inside a
 subject image and the subject's own package set is untouched.
 
@@ -54,19 +54,30 @@ What matters is the base of the subject's *runtime* stage, not its build stage.
 `s3kor` compiles under golang/glibc and ships `FROM alpine`, so it is `musl`;
 `s7cmd` builds on Alpine but runs on `debian:trixie-slim`, so it is `gnu`.
 
-## The payload is the whole package
+## The payload is the worker half of the package
 
-The Dockerfile copies `src/s3_listing_study/` in one line. Only `attempt/` and
-what it imports ever runs — the zipapp's entry point is `attempt.cli` — but the
-rest rides along rather than being tracked in a hand-maintained file list that
-drifts every time an import changes.
+The package is split by where its code runs, and the Dockerfile copies the two
+halves that run here:
 
-The cost is that an edit anywhere in the package changes the derived image's
-digest, even when no in-image code changed. That is acceptable because a
-campaign rebuilds every registered image from one harness commit before it runs
-(owner's call, 2026-08-09), so attempts within a campaign share an image
-revision by construction, and results from different platform strata are never
-mixed anyway.
+| Layer | Runs | Ships in a subject image |
+| --- | --- | --- |
+| `s3_listing_study/attempt/` | inside the subject image | yes |
+| `s3_listing_study/common/` | both sides | yes |
+| `s3_listing_study/host/` | on a host only | no |
+
+The zipapp's entry point is `attempt.cli`, and `common/` is exactly what that
+entry point and host-side code both reach — verification, receipts, capsule
+validation, collection and upload stay out. Two things follow, and both matter
+for a campaign. A subject image carries only code an attempt can execute, rather
+than a GCS client and a DuckDB adapter it can never call. And a subject image's
+digest stops moving when host-side code is edited, so orchestrator work does not
+invalidate the digests a campaign pins.
+
+`tests/test_payload_boundary.py` holds the boundary: it fails if anything in the
+shipped layers imports `host/`, if a module in `common/` is not genuinely reached
+from both sides, or if this Dockerfile stops matching that split. A missing
+import is a fast local failure naming the module, rather than an ImportError
+inside a container at attempt time.
 
 `validate_selection.py` imports the entry point during the build, so a payload
 that does not import fails the build instead of surfacing inside a benchmark

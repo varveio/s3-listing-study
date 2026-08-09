@@ -19,12 +19,12 @@ from s3_listing_study.attempt import AttemptError, AttemptOptions, cli, run_atte
 from s3_listing_study.attempt import engine as attempt_engine
 from s3_listing_study.attempt.driver import ResolvedInvocation, validate_request
 from s3_listing_study.attempt.driver import resolve_invocation as resolve_real_invocation
-from s3_listing_study.command_adapter import (
+from s3_listing_study.common.command_adapter import (
     CommandAdapterError,
     CommandRequest,
     load_command_adapter,
 )
-from s3_listing_study.secret_scan import Outcome as ScanOutcome
+from s3_listing_study.common.secret_scan import Outcome as ScanOutcome
 
 LOGICAL_ARGS = [
     "--tool",
@@ -845,7 +845,10 @@ def test_generic_dockerfile_bakes_no_tool_specific_command_prefix() -> None:
     dockerfile = (root / "harness/derived-image/Dockerfile").read_text()
 
     assert dockerfile.count("FROM subject") == 2
-    assert "COPY src/s3_listing_study/ /build/payload/s3_listing_study/" in dockerfile
+    # Which package layers make up the payload is owned by
+    # tests/test_payload_boundary.py; this only pins that the recipe stays
+    # generic, so assert the copy exists without restating the boundary.
+    assert "COPY src/s3_listing_study/attempt/" in dockerfile
     assert "COPY harness/derived-image/zipapp_main.py /build/payload/" in dockerfile
     assert "COPY --from=adapter command.py /build/tool/command.py" in dockerfile
     assert "COPY --from=adapter normalize.py /build/tool/normalize.py" in dockerfile
@@ -873,5 +876,5 @@ def test_generic_dockerfile_bakes_no_tool_specific_command_prefix() -> None:
         "executable": ["/usr/local/bin/aws"],
         "command": "adapter/command.py",
         "normalizer": "adapter/normalize.py",
-        "adapter_bundle_sha256": "f088915debde2a21350041f81a6e97a31ec28a1ac17976e2790bfcb894b0bb05",
+        "adapter_bundle_sha256": "0090ee1ed68d6688004b4ca58647c5467f597fb727e3ed8ded34540efae9a3f5",
     }

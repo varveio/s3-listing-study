@@ -13,7 +13,7 @@ that did nothing wrong.
 Keys travel as **hex**
 ----------------------
 A key is bytes copied from the listing response and is never decoded
-(:mod:`s3_listing_study.contract`), but a DuckDB ``VARCHAR`` is UTF-8 text and
+(:mod:`s3_listing_study.host.contract`), but a DuckDB ``VARCHAR`` is UTF-8 text and
 ``BLOB`` carries neither ``substring`` nor a fast bulk load. Every field is
 therefore staged as ``'x' + bytes.hex()``: fixed-width lowercase hex orders
 exactly as the underlying bytes do (``'0'`` < ``'9'`` < ``'a'`` < ``'f'`` in
@@ -72,7 +72,7 @@ def bad_mtimes(rows: Iterable[Row]) -> list[bytes]:
     """Rows whose mtime is not contract-v2 shape, rendered as ``key<TAB>mtime``.
 
     Asserted over every row of both sides *before* any dedup or join.
-    :func:`~s3_listing_study.contract.canon_mtime` keeps digits only, so it also
+    :func:`~s3_listing_study.host.contract.canon_mtime` keeps digits only, so it also
     equates garbage sharing those digits, and a malformed mtime on a key the
     inner join drops (an extra, a missing, a later manifest row) would otherwise
     slip past a first-row check and reach a FAIL or a PASS.

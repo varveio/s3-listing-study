@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from s3_listing_study.build_selection import load_staged_selection
-from s3_listing_study.command_adapter import (
+from s3_listing_study.common.build_selection import load_staged_selection
+from s3_listing_study.common.command_adapter import (
     CommandAdapterError,
     CommandRequest,
     load_command_adapter,

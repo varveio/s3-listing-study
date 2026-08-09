@@ -14,8 +14,9 @@ from types import ModuleType
 
 import pytest
 
-from s3_listing_study import __version__, build_selection
-from s3_listing_study.build_selection import (
+from s3_listing_study import __version__
+from s3_listing_study.common import build_selection
+from s3_listing_study.common.build_selection import (
     BuildSelectionError,
     adapter_bundle_sha256,
     build_derived_image_main,
@@ -23,7 +24,7 @@ from s3_listing_study.build_selection import (
     load_registered_selection,
     load_selection,
 )
-from s3_listing_study.command_adapter import (
+from s3_listing_study.common.command_adapter import (
     CommandAdapterError,
     CommandRequest,
     load_command_adapter,

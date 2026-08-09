@@ -171,7 +171,7 @@ For a **single receipt**:
 3. Read the scope back from the committed `verify.md` Scope row, and the verified
    stream from `run.meta` (`stdout_path`/`stderr_path`, preferring the stream whose
    recorded sha256 is not the empty digest) — never from what happens to be on disk.
-4. Run `python3 -m s3_listing_study.verify` with cwd set to a link farm.
+4. Run `python3 -m s3_listing_study.host.verify` with cwd set to a link farm.
 5. Require exit 0, a byte-identical `verify.md`, and a byte-identical restamped
    `receipt.md`.
 

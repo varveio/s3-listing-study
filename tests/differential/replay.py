@@ -107,7 +107,7 @@ def verifier_argv(registry: Path) -> list[str]:
     return [
         sys.executable,
         "-m",
-        "s3_listing_study.verify",
+        "s3_listing_study.host.verify",
         "--registry",
         str(registry),
     ]

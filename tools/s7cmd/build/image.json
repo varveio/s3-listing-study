@@ -4,8 +4,10 @@
   "subject_version": "1.5.0",
   "python_libc": "gnu",
   "subject_workdir": "/home/s7cmd",
-  "executable": ["/usr/local/bin/s7cmd"],
+  "executable": [
+    "/usr/local/bin/s7cmd"
+  ],
   "command": "adapter/command.py",
   "normalizer": "adapter/normalize.py",
-  "adapter_bundle_sha256": "2ef942003f54cd7fa2948a94e02f4efc3621763083c99a72bf63c7442830f948"
+  "adapter_bundle_sha256": "899a6ca9450b0735dec72a37b3ac0fd31ca7a20b7b270c0e9968d05360fa95a3"
 }

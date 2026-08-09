@@ -39,7 +39,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Literal, NamedTuple, overload
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).resolve().parents[3]
 
 # [SRC path/to/file.java:12-18,30 @ abc1234]. One label may carry several
 # semicolon-separated paths under a single trailing commit, and lines are

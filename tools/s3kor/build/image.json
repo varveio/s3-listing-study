@@ -4,8 +4,10 @@
   "subject_version": "v0.0.37",
   "python_libc": "musl",
   "subject_workdir": "/",
-  "executable": ["/usr/local/bin/s3kor"],
+  "executable": [
+    "/usr/local/bin/s3kor"
+  ],
   "command": "adapter/command.py",
   "normalizer": "adapter/normalize.py",
-  "adapter_bundle_sha256": "f2757943591fa68f6a26f7679bddf7b6d4e162329d5e9100597ce588c8e6cf52"
+  "adapter_bundle_sha256": "317824cacedaf942ecc14ab0676b8a5eeebe272a3a9d8a48d018f3d5347637fb"
 }

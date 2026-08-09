@@ -22,12 +22,12 @@ from pathlib import Path
 
 import pytest
 
-from s3_listing_study.receipt.errors import ReceiptError
-from s3_listing_study.receipt.meta import RunFacts
-from s3_listing_study.receipt.meta import fields as meta_fields
-from s3_listing_study.receipt.meta import render as render_meta
-from s3_listing_study.receipt.redact import Payload
-from s3_listing_study.receipt.render import (
+from s3_listing_study.host.receipt.errors import ReceiptError
+from s3_listing_study.host.receipt.meta import RunFacts
+from s3_listing_study.host.receipt.meta import fields as meta_fields
+from s3_listing_study.host.receipt.meta import render as render_meta
+from s3_listing_study.host.receipt.redact import Payload
+from s3_listing_study.host.receipt.render import (
     VERDICT_PLACEHOLDER,
     ReceiptBlockError,
     html_escape,
@@ -35,7 +35,7 @@ from s3_listing_study.receipt.render import (
     md_safe_inline,
     render,
 )
-from s3_listing_study.verify.report import PLACEHOLDER
+from s3_listing_study.host.verify.report import PLACEHOLDER
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "receipt"
 CASES = ("plain", "hostile")

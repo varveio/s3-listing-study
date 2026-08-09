@@ -26,9 +26,9 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import BinaryIO, Final
 
-from s3_listing_study.python_runtime import interpreter_identity
-from s3_listing_study.secret_scan import Outcome as ScanOutcome
-from s3_listing_study.secret_scan import scan_binary_file
+from s3_listing_study.common.python_runtime import interpreter_identity
+from s3_listing_study.common.secret_scan import Outcome as ScanOutcome
+from s3_listing_study.common.secret_scan import scan_binary_file
 
 SCHEMA_VERSION: Final = 1
 STREAM_NAMES: Final = ("stdout", "stderr")

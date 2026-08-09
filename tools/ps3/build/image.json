@@ -4,8 +4,10 @@
   "subject_version": "0.1.16",
   "python_libc": "gnu",
   "subject_workdir": "/",
-  "executable": ["/usr/local/bin/pS3"],
+  "executable": [
+    "/usr/local/bin/pS3"
+  ],
   "command": "adapter/command.py",
   "normalizer": "adapter/normalize.py",
-  "adapter_bundle_sha256": "a349d3a0bea8ed38b3b0bff57a5e5d49e084331947c08ad02f29907a3a98c452"
+  "adapter_bundle_sha256": "ee703a76d6b435ae7ca0d4a851f39783d7f9832ee94a9c2a934dd01065cb0c12"
 }

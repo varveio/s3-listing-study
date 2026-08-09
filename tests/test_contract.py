@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from s3_listing_study.contract import (
+from s3_listing_study.host.contract import (
     MTIME_RE,
     ContractViolation,
     Record,

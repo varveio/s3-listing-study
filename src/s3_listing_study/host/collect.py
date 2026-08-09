@@ -29,7 +29,7 @@ class CollectError(RuntimeError):
 
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+    return Path(__file__).resolve().parents[3]
 
 
 def _normalize(tool: str, mode: str, prefix: str, stdin_data: bytes, dataset: Path | None) -> bytes:
@@ -59,8 +59,8 @@ def _write_parquet(tsv: bytes, parquet_path: Path) -> None:
     adapter path can for a native binary sink. Known limitation, not silently
     mishandled: this raises CollectError instead of writing a wrong file.
     """
-    from s3_listing_study.contract import FIELD_NAMES
-    from s3_listing_study.duckdb_adapter import connect, staged
+    from s3_listing_study.host.contract import FIELD_NAMES
+    from s3_listing_study.host.duckdb_adapter import connect, staged
 
     try:
         tsv.decode("utf-8")
