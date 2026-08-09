@@ -65,6 +65,12 @@ variable "create_runner" {
   default     = true
 }
 
+variable "runner_reads_aws_credentials" {
+  description = "Grant the runner read access to the AWS credential secret, so a credentialed case can be run directly instead of only submitted as a job. A runner holding this secret must not also be the host that executes subject containers."
+  type        = bool
+  default     = false
+}
+
 variable "runner_zone" {
   description = "Zone for the runner VM. Must be inside var.region, and must offer the chosen machine type."
   type        = string

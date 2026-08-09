@@ -331,6 +331,26 @@ account can read the secret, so an anonymous case cannot obtain the credential
 even if its job spec asks for it. See the `create_aws_credentials_secret` variable
 in [`infra/terraform/modules/gcp/s3-listing-study`](../../infra/terraform/modules/gcp/s3-listing-study/README.md).
 
+That is a statement about who can *obtain* the credential. It is not a statement
+about how the credential reaches a subject once a job legitimately holds it.
+That step is a flag and an ambient variable — `--auth authenticated` plus
+`S3_STUDY_AWS_CREDENTIAL` — and the engine fails closed on the dangerous half of
+the pairing: a run declaring itself anonymous while credential material sits in
+its environment is refused rather than recorded, so no anonymous receipt can come
+from a credentialed process. See
+[`harness/README.md`](../../harness/README.md) § Authenticated attempts.
+
+A runner may also hold the credential directly, so that a credentialed case can
+be run rather than only submitted; `runner_reads_aws_credentials` gates it and is
+off unless a deployment asks for it. Custody and execution are separable, and it
+is execution that the profile above constrains: a host holding the credential
+must not also be the host that executes subject containers. Where the two
+coexist on a development box, subjects run on a container network that cannot
+reach the metadata endpoint, the host-level check does not pass because the host
+is a real cloud VM, and the resulting attempts are local development captures
+that do not carry the `s3-listing-study-v1` profile. The provider adapter this
+section calls for remains the prerequisite for anything that claims it.
+
 ## Residual risk and future work
 
 Accepted for this phase:

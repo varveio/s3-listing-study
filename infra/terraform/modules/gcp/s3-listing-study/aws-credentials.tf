@@ -136,9 +136,24 @@ resource "google_service_account_iam_member" "runner_actas_authenticated" {
   depends_on = [google_service_account.runner]
 }
 
-# The runner deliberately gets NO secretAccessor. Reading the credential onto the
-# runner would mean running a subject container on a machine with an attached
-# service account and a live metadata server — the configuration
-# docs/operating/runner-security.md forbids for subject execution, and which its
-# `local` adapter refuses outright. Exercise an authenticated case by submitting
-# one job, not by running it on the orchestrator.
+# The runner may read the credential, so that a credentialed case can be
+# exercised by running it directly rather than only by submitting a job. The
+# constraint that survives is about execution, not about custody: a host holding
+# this credential must not also be the host that executes subject containers,
+# because that is a machine with an attached service account and a live metadata
+# server next to eleven third-party binaries. Where the two must coexist,
+# subjects run on a container network that cannot reach the metadata endpoint,
+# and their receipts do not carry the s3-listing-study-v1 profile.
+#
+# Off by default: a deployment that only ever submits jobs has no reason to widen
+# the runner, and the authenticated worker above remains the identity that reads
+# this secret in the normal path.
+resource "google_secret_manager_secret_iam_member" "runner_access" {
+  count     = var.create_aws_credentials_secret && var.create_runner && var.runner_reads_aws_credentials ? 1 : 0
+  project   = var.project
+  secret_id = google_secret_manager_secret.aws_credentials[0].secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = local.runner_sa_member
+
+  depends_on = [google_service_account.runner]
+}

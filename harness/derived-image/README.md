@@ -43,11 +43,16 @@ One interpreter for every subject is also one fewer uncontrolled difference in
 the comparison this repository exists to make.
 
 `python_libc` in `image.json` selects which build is bound: an Alpine-based
-subject (`s7cmd`) needs `musl`, everything else `gnu`. It is declared per capsule
+subject needs `musl`, a glibc-based one `gnu`. Of the eleven registrations,
+`rclone`, `s3kor` and `s5cmd` are the musl ones. It is declared per capsule
 rather than sniffed, because guessing wrong yields an interpreter that loads on
 the build host and dies inside the subject. `validate_selection.py` runs on the
 bound interpreter during the build and refuses a registration that declares the
 other one.
+
+What matters is the base of the subject's *runtime* stage, not its build stage.
+`s3kor` compiles under golang/glibc and ships `FROM alpine`, so it is `musl`;
+`s7cmd` builds on Alpine but runs on `debian:trixie-slim`, so it is `gnu`.
 
 ## The payload is the whole package
 

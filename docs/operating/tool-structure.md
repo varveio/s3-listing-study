@@ -339,6 +339,14 @@ format actually produced: Markdown receipts, JSON metadata, logs, Parquet,
 stdout, stderr, hashes, or other native artifacts. Converting or deduplicating
 those files would change the evidence rather than improve its organization.
 
+One mode directory may therefore hold records of two different shapes at once:
+wrapper-era `receipt.md` / `run.meta` / `verify.md` / `stderr.txt` files, and
+`attempt-N/` directories written by the attempt engine. They are separate runs
+and neither supersedes the other; a rerun takes the next free `attempt-N` and
+removes nothing. See [`harness/README.md`](../../harness/README.md) § Historical
+receipts and verification for what distinguishes them and why the older files
+still name a wrapper that no longer exists.
+
 ## Duplication boundary
 
 Some repetition is necessary and intentional:
