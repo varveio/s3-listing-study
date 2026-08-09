@@ -25,8 +25,9 @@ name.
 
 **The box and the process are different questions.** ``vcpus``/``memory_gb``
 buy a machine; ``container_memory_gb`` is a cgroup ceiling on top of it, via
-``docker run --memory``, and is the only figure here a running program can feel
-— Batch's own per-task ``memoryMib`` decides scheduling and constrains nothing.
+``docker run --memory``, and is the only figure here a running program is known
+to feel — Batch documents its per-task ``memoryMib`` as a scheduling input and
+says nothing about enforcing it.
 Sweeping the ceiling therefore holds the machine, its cores and its neighbours
 still, and reaches sizes no machine type sells. A managed runtime is additionally
 told what share of that it may use as heap, because a JVM and V8 both default to
@@ -81,10 +82,11 @@ TOP_LEVEL = ("spec_version", "bucket", "region", "defaults", "tools", "exclude")
 BOX_FIELDS = ("vcpus", "memory_gb")
 
 # What the process gets, which is not the same question. A real cgroup ceiling
-# via `docker run --memory`, so it is the only figure here a running program can
-# actually feel; Batch's own per-task memoryMib is a scheduling input and
-# constrains nothing. Absent means unconstrained — the container sees the whole
-# box. Unlike a heap share, this means something to every tool.
+# via `docker run --memory`, so it is the only figure here a running program is
+# known to feel; Batch documents its per-task memoryMib as a scheduling input
+# and says nothing about enforcing it. Absent means unconstrained — the
+# container sees the whole box. Unlike a heap share, this means something to
+# every tool.
 PROCESS_FIELDS = ("container_memory_gb",)
 
 # Required once resolved: a case that did not say how much memory it wanted
@@ -284,7 +286,7 @@ class HeapConfig:
 
 def load_heap_config(path: Path) -> HeapConfig:
     """Read the ``heap`` table of ``bench/tools.yaml``."""
-    _, doc = _read_yaml_mapping(path, "tool defaults")
+    doc = _tool_defaults_document(path)
     heap = doc.get("heap")
     if heap is None:
         return HeapConfig(percent=100, policies={})
@@ -345,11 +347,25 @@ def load_instances(path: Path) -> dict[tuple[int, int], str]:
     return catalogue
 
 
-def load_default_modes(path: Path) -> dict[str, str]:
-    """Read ``bench/tools.yaml`` — the mode an empty tool runs."""
+def _tool_defaults_document(path: Path) -> dict[str, Any]:
+    """Validate ``bench/tools.yaml`` as a whole, whichever table a caller wants.
+
+    Both readers of this file go through here so neither can be the one that
+    skips the version check. ``load_heap_config`` runs on every plan while
+    ``load_default_modes`` runs only when some tool wants its default mode, so
+    validating in the callers left the common path unguarded: a tools.yaml
+    written for a future reader was accepted, and its heap table applied, as
+    long as the plan being resolved happened to name every mode itself.
+    """
     _, doc = _read_yaml_mapping(path, "tool defaults")
     _reject_unknown(doc, ("spec_version", "default_modes", "heap"), "tool defaults", path)
     _require_spec_version(doc, "tool defaults", path)
+    return doc
+
+
+def load_default_modes(path: Path) -> dict[str, str]:
+    """Read ``bench/tools.yaml`` — the mode an empty tool runs."""
+    doc = _tool_defaults_document(path)
     table = _table(doc, "default_modes", "default_modes", path)
     if not table:
         raise PlanError(f"tool defaults {path} names no tools")
@@ -430,14 +446,6 @@ def _load(
     )
     _reject_overlap(plan, path)
     return plan
-
-
-def _require_version(doc: dict[str, Any], path: Path) -> None:
-    version = doc.get("spec_version")
-    if version != SPEC_VERSION:
-        raise PlanError(
-            f"plan {path} has spec_version {version!r}, this reader supports {SPEC_VERSION}"
-        )
 
 
 def _reject_unknown(

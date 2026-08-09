@@ -67,6 +67,13 @@ tools:
   #
   # The question is whether sorting still completes when it cannot buffer: at
   # 2 GB the JVM gets a 1.5 GB heap and has to spill.
+  #
+  # Expect the 2 GB cell to be the one that fails, and treat a kill as a result
+  # rather than a surprise. It leaves ~512 MB for metaspace, code cache, thread
+  # stacks, GC native memory and direct buffers, all charged to the same cgroup
+  # — and MaxDirectMemorySize defaults to roughly the heap size. A sorting run
+  # is the most buffer-hungry shape swath has, so SIGKILL is a plausible
+  # outcome, and a different finding from "it spilled and finished".
   swath:
     matrix:
       - mode: [recursive-tsv, recursive-parquet]

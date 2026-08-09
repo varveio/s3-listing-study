@@ -44,8 +44,15 @@ heap:
   # collected.
   percent: 75
 
-  # `{percent}` and `{mib}` are substituted per case: the JVM reads its own
-  # cgroup ceiling and wants a proportion, V8 cannot and wants a size.
+  # `{percent}` and `{mib}` are substituted per case: the JVM takes a proportion
+  # of the ceiling it reads for itself, V8 takes a size in MiB. Node has read
+  # its cgroup limit since v12 (and cgroup v2 since 20.3), so this is pinned
+  # because the default is version-dependent, not because V8 cannot see it.
+  #
+  # JAVA_TOOL_OPTIONS makes the JVM print "Picked up JAVA_TOOL_OPTIONS: ..." to
+  # stderr on every run, unconditionally — the request for a switch to suppress
+  # it was closed Won't Fix. Every swath receipt will carry that line. If
+  # swath's launcher honours JAVA_OPTS or JDK_JAVA_OPTIONS, prefer one of those.
   tools:
     swath:
       env: JAVA_TOOL_OPTIONS

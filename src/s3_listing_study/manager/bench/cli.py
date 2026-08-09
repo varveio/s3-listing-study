@@ -66,9 +66,9 @@ def _rows(loaded: bench.Plan) -> list[dict[str, object]]:
             "cpu_milli": case.resources.cpu_milli,
             "reps": case.reps,
             "timeout_s": case.timeout_s,
-            "heap": dict(case.env).get("JAVA_TOOL_OPTIONS")
-            or dict(case.env).get("NODE_OPTIONS")
-            or "-",
+            # Whatever the heap table named, rather than a list of env vars kept
+            # in step with it by hand: a case carries at most one.
+            "heap": "; ".join(value for _, value in case.env) or "-",
             "fingerprint": case.fingerprint,
         }
         for case in loaded.cases

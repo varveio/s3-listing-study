@@ -88,9 +88,10 @@ than when Batch rejects the job.
 `vcpus`/`memory_gb` buy a machine. `container_memory_gb` is a ceiling on top of
 it — a real cgroup limit, passed as `docker run --memory` (Batch takes extra
 docker flags through a container runnable's `options`). It is the only figure
-here a running program can actually feel: Cloud Batch's per-task `memoryMib` is
-a scheduling input that decides machine-type compatibility and how many tasks
-share a VM, and constrains nothing at runtime.
+here a running program is known to feel: Cloud Batch documents its per-task
+`memoryMib` as a scheduling input — machine-type compatibility, and how many
+tasks share a VM — and says nothing about enforcing it at runtime. Treat that
+as undocumented rather than settled until one throwaway job confirms it.
 
 So a memory sweep should move the ceiling, not the machine:
 

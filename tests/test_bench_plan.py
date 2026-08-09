@@ -126,7 +126,7 @@ def test_the_committed_plan_declares_every_registered_tool() -> None:
 
 
 def test_the_committed_catalogue_offers_no_shared_core_machines() -> None:
-    """E2 is a shared, variable core — not a platform to time anything on."""
+    """E2 picks Intel or AMD for you, so you cannot know which chip you timed on."""
     catalogue = bench.load_instances(bench.bench_dir() / "instances.yaml")
     assert catalogue
     assert not [m for m in catalogue.values() if m.startswith("e2-")]
@@ -351,11 +351,34 @@ def test_a_ceiling_above_the_box_is_refused(tmp_path: Path) -> None:
         load(path, default_modes={"swath": "recursive-tsv"})
 
 
-def test_the_heap_follows_the_ceiling_not_the_box(tmp_path: Path) -> None:
-    """A JVM reads its cgroup limit, so a percentage needs no arithmetic here."""
+def test_a_percentage_template_needs_no_ceiling_arithmetic(tmp_path: Path) -> None:
+    """The JVM reads its own cgroup limit, so the share passes through as written.
+
+    This deliberately does not claim to prove the heap follows the ceiling: a
+    percent-only template renders the same string either way. That claim is
+    tested against a `{mib}` template below, where the arithmetic is visible.
+    """
     path = write(tmp_path, "swath:\n  resources:\n    container_memory_gb: 2\n")
     case = load(path, default_modes={"swath": "recursive-tsv"}).cases[0]
     assert case.env == (("JAVA_TOOL_OPTIONS", "-XX:MaxRAMPercentage=75"),)
+
+
+def test_a_size_template_resolves_against_the_ceiling_not_the_box(tmp_path: Path) -> None:
+    """The claim a percent-only template cannot make: 75% of 4 GB, not of the 8 GB box."""
+    v8 = bench.HeapConfig(
+        percent=75,
+        policies={"s3p": bench.HeapPolicy(env="NODE_OPTIONS", value="--max-old-space-size={mib}")},
+    )
+    capped = load(
+        write(tmp_path, "s3p:\n  resources:\n    container_memory_gb: 4\n"),
+        default_modes={"s3p": "ls"},
+        heap=v8,
+    ).cases[0]
+    uncapped = load(
+        write(tmp_path, "s3p:\n", bucket="c"), default_modes={"s3p": "ls"}, heap=v8
+    ).cases[0]
+    assert capped.env == (("NODE_OPTIONS", "--max-old-space-size=3072"),)  # 75% of 4 GB
+    assert uncapped.env == (("NODE_OPTIONS", "--max-old-space-size=6144"),)  # 75% of the box
 
 
 def test_a_runtime_wanting_a_size_gets_one_computed(tmp_path: Path) -> None:
@@ -429,7 +452,60 @@ def test_the_committed_heap_table_covers_the_managed_runtimes() -> None:
     assert heap.percent == 75
 
 
+def test_a_tools_file_from_a_future_reader_is_refused(tmp_path: Path) -> None:
+    """The heap table is read on every plan; the mode table only sometimes.
+
+    Validating in each caller left the common path unguarded, so a tools.yaml
+    written for a later reader was accepted whenever the plan happened to name
+    every mode itself.
+    """
+    path = tmp_path / "tools.yaml"
+    body = "default_modes: {swath: recursive-tsv}\nheap:\n  percent: 75\n  tools: {}\n"
+    path.write_text(f"spec_version: 99\n{body}", encoding="utf-8")
+    with pytest.raises(bench.PlanError, match="spec_version"):
+        bench.load_heap_config(path)
+
+    path.write_text(f"spec_version: 1\nstray_key: true\n{body}", encoding="utf-8")
+    with pytest.raises(bench.PlanError, match="unknown key"):
+        bench.load_heap_config(path)
+
+
 # ── identity ─────────────────────────────────────────────────────────────────
+
+
+def test_every_field_of_a_case_moves_its_fingerprint(tmp_path: Path) -> None:
+    """Identity must cover the whole resolved case, not just the parts with tests.
+
+    The bucket in particular is load-bearing — other tests use separate
+    directories on the strength of it — but nothing asserted it.
+    """
+    base = "swath:\n  matrix:\n    mode: [recursive-tsv]\n"
+
+    def fingerprint_of(body: str, *, bucket: str = "b", region: str = "us-east-1") -> str:
+        directory = tmp_path / f"{bucket}-{region}-{abs(hash(body))}"
+        directory.mkdir()
+        path = directory / f"{bucket}.yaml"
+        text = MINIMAL.format(bucket=bucket, tools=textwrap.indent(body, "  "))
+        path.write_text(text.replace("region: us-east-1", f"region: {region}"), encoding="utf-8")
+        return load(path, default_modes={"swath": "recursive-tsv"}).cases[0].fingerprint
+
+    reference = fingerprint_of(base)
+    assert fingerprint_of(base, bucket="other") != reference
+    assert fingerprint_of(base, region="eu-west-1") != reference
+    # mode, via a different mode of the same tool.
+    assert fingerprint_of("swath:\n  matrix:\n    mode: [recursive-jsonl]\n") != reference
+    # env, via the ceiling that the heap share is rendered against.
+    assert fingerprint_of(f"{base}  resources:\n    container_memory_gb: 2\n") != reference
+
+
+def test_two_tools_running_the_same_mode_differ(tmp_path: Path) -> None:
+    """The tool is part of identity, not merely part of the receipt path."""
+    path = write(
+        tmp_path, "s5cmd:\n  matrix:\n    mode: [list]\ns3kor:\n  matrix:\n    mode: [list]\n"
+    )
+    first, second = load(path).cases
+    assert first.case_id == second.case_id  # same derived path segment
+    assert first.fingerprint != second.fingerprint
 
 
 def test_a_single_valued_axis_still_appears_in_the_id(tmp_path: Path) -> None:

@@ -5,27 +5,28 @@
 # plan states the shape it needs rather than a provider's product name, and a
 # new machine generation is one edit rather than one per case.
 #
-# Varying memory here is what actually varies memory. Cloud Batch's per-task
-# `memoryMib` is a scheduling input — it decides machine-type compatibility and
-# how many tasks share a VM — not a cgroup limit, so two tasks on one VM shape
-# see the same memory however they were labelled. A memory axis therefore has to
-# move the machine, which is why these are resolved rather than requested.
-#
 # vCPU is held constant across a memory sweep by construction: within a
 # generation, highcpu/standard/highmem at the same vCPU count differ only in
-# memory, so 2 vCPU at 4 vs 8 GB is one variable and not two.
+# memory, so 2 vCPU at 4 vs 8 GB is one variable and not two. Sweeping the
+# container ceiling is usually the better instrument (see bench/README.md), but
+# where a case does move the box, this is what keeps it to one variable.
 #
-# N4 is Intel Emerald Rapids (5th-gen Xeon). E2 is deliberately absent: it is a
-# shared, variable core and not a platform to time anything on.
+# N4 is Intel Emerald Rapids (5th-gen Xeon). E2 is deliberately absent, and the
+# documented reason is sharper than "shared core" — only e2-micro/small/medium
+# time-share a physical core. E2 offers both Intel and AMD processors and "the
+# processor is selected for you at the time of VM creation", with no minimum CPU
+# platform settable. You cannot know which chip you timed on. N4 names one.
 #
-# UNVERIFIED against the live API — this account lacks compute.machineTypes.list,
-# so the ratios come from Compute Engine's published documentation (N4 highcpu
-# 2 GB/vCPU, standard 4, highmem 8) rather than from an enumeration. Check with
-# `gcloud compute machine-types list --filter="name~'^n4-'"` before a campaign
-# depends on a shape below.
+# Machine types and ratios are verified against Compute Engine's published
+# tables (N4 highcpu 2 GB/vCPU, standard 4, highmem 8) rather than the live API,
+# which this account cannot list (no compute.machineTypes.list).
 #
-# Note for the Batch config: N4 does not support pd-balanced, the Compute Engine
-# default, and needs hyperdisk-balanced or pd-ssd boot disks.
+# BOOT DISK — a Batch job on these fails at instance creation without it. N4
+# supports no Persistent Disk type at all, only Hyperdisk ("N4 doesn't support
+# Persistent Disk or Local SSD"), while Batch defaults a boot disk to
+# pd-balanced. Set it to `hyperdisk-balanced` explicitly. Not pd-ssd — N4 does
+# not take that either, and Batch's own disk-type field does not list a
+# Hyperdisk value, so this needs checking against the API it actually accepts.
 
 spec_version: 1
 
