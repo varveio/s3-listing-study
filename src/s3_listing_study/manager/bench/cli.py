@@ -59,7 +59,6 @@ def _rows(loaded: bench.Plan) -> list[dict[str, object]]:
             "memory_gb": case.resources.memory_gb,
             "machine_type": case.resources.machine_type,
             "container_memory_gb": case.resources.container_memory_gb or "-",
-            "heap_percent": case.resources.heap_percent,
             "docker_options": list(case.resources.docker_options),
             "env": dict(case.env),
             # Derived, and carried because they are what a Batch job is told.

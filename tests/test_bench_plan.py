@@ -22,7 +22,6 @@ defaults:
   resources:
     vcpus: 2
     memory_gb: 8
-    heap_percent: 75
 tools:
 {tools}
 """
@@ -53,13 +52,18 @@ INSTANCES = {
 
 
 # swath is the tool with a managed heap in these fixtures, as in the real table.
-HEAPS = {"swath": bench.HeapPolicy(env="JAVA_TOOL_OPTIONS", value="-XX:MaxRAMPercentage={percent}")}
+HEAP = bench.HeapConfig(
+    percent=75,
+    policies={
+        "swath": bench.HeapPolicy(env="JAVA_TOOL_OPTIONS", value="-XX:MaxRAMPercentage={percent}")
+    },
+)
 
 
 def load(path: Path, **kwargs: object) -> bench.Plan:
     """``Plan.load`` with the fixture tables already supplied."""
     kwargs.setdefault("instances", INSTANCES)
-    kwargs.setdefault("heap_policies", HEAPS)
+    kwargs.setdefault("heap", HEAP)
     return bench.Plan.load(path, **kwargs)  # type: ignore[arg-type]
 
 
@@ -360,9 +364,12 @@ def test_a_runtime_wanting_a_size_gets_one_computed(tmp_path: Path) -> None:
     case = load(
         path,
         default_modes={"s3p": "ls"},
-        heap_policies={
-            "s3p": bench.HeapPolicy(env="NODE_OPTIONS", value="--max-old-space-size={mib}")
-        },
+        heap=bench.HeapConfig(
+            percent=75,
+            policies={
+                "s3p": bench.HeapPolicy(env="NODE_OPTIONS", value="--max-old-space-size={mib}")
+            },
+        ),
     ).cases[0]
     assert case.env == (("NODE_OPTIONS", "--max-old-space-size=3072"),)  # 75% of 4 GB
 
@@ -375,12 +382,28 @@ def test_a_tool_without_a_managed_heap_is_told_nothing(tmp_path: Path) -> None:
 
 
 def test_an_impossible_heap_percentage_is_refused(tmp_path: Path) -> None:
-    path = write(tmp_path, ONE_CASE)
+    """A share over 100 is a heap larger than the memory it must fit in."""
+    path = tmp_path / "tools.yaml"
     path.write_text(
-        path.read_text(encoding="utf-8").replace("heap_percent: 75", "heap_percent: 150"),
+        "spec_version: 1\ndefault_modes: {swath: recursive-tsv}\n"
+        "heap:\n  percent: 150\n  tools:\n    swath:\n"
+        "      env: JAVA_TOOL_OPTIONS\n      value: '-XX:MaxRAMPercentage={percent}'\n",
         encoding="utf-8",
     )
-    with pytest.raises(bench.PlanError, match="heap of 150"):
+    with pytest.raises(bench.PlanError, match="over 100"):
+        bench.load_heap_config(path)
+
+
+def test_a_plan_may_not_set_a_heap_share(tmp_path: Path) -> None:
+    """It configures two tools out of eleven, so it is not a plan's business."""
+    path = write(tmp_path, ONE_CASE)
+    path.write_text(
+        path.read_text(encoding="utf-8").replace(
+            "    memory_gb: 8", "    memory_gb: 8\n    heap_percent: 50"
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(bench.PlanError, match="unknown key"):
         load(path)
 
 
@@ -389,17 +412,21 @@ def test_an_unknown_heap_placeholder_is_refused(tmp_path: Path) -> None:
     path = tmp_path / "tools.yaml"
     path.write_text(
         "spec_version: 1\ndefault_modes: {swath: recursive-tsv}\n"
-        "heap:\n  swath:\n    env: JAVA_TOOL_OPTIONS\n    value: '-Xmx{gigabytes}'\n",
+        "heap:\n  percent: 75\n  tools:\n    swath:\n"
+        "      env: JAVA_TOOL_OPTIONS\n      value: '-Xmx{gigabytes}'\n",
         encoding="utf-8",
     )
     with pytest.raises(bench.PlanError, match="unknown placeholder"):
-        bench.load_heap_policies(path)
+        bench.load_heap_config(path)
 
 
 def test_the_committed_heap_table_covers_the_managed_runtimes() -> None:
     """swath is Java and s3p is JavaScript; the rest have no heap to size."""
-    policies = bench.load_heap_policies(bench.bench_dir() / "tools.yaml")
-    assert set(policies) == {"swath", "s3p"}
+    heap = bench.load_heap_config(bench.bench_dir() / "tools.yaml")
+    assert set(heap.policies) == {"swath", "s3p"}
+    # The share lives with the policies, not in any plan: nine tools have no
+    # heap to size, so a per-bucket setting would be restated and ignored.
+    assert heap.percent == 75
 
 
 # ── identity ─────────────────────────────────────────────────────────────────

@@ -28,10 +28,11 @@ buy a machine; ``container_memory_gb`` is a cgroup ceiling on top of it, via
 ``docker run --memory``, and is the only figure here a running program can feel
 — Batch's own per-task ``memoryMib`` decides scheduling and constrains nothing.
 Sweeping the ceiling therefore holds the machine, its cores and its neighbours
-still, and reaches sizes no machine type sells. A managed runtime is told its
-share through ``heap_percent``, because a JVM and V8 both default to a fraction
-of what they can see, and leaving that alone would make the runtime's heuristic
-the independent variable instead of the memory a case asked for.
+still, and reaches sizes no machine type sells. A managed runtime is additionally
+told what share of that it may use as heap, because a JVM and V8 both default to
+a fraction of what they can see; that share lives with the heap policies in
+``bench/tools.yaml`` rather than in a plan, since it configures two tools out of
+eleven and every plan would otherwise restate a figure most cases ignore.
 
 A tool may state several blocks and take their union, because one cross-product
 forces every mode to take every value of every axis — wrong as soon as one mode
@@ -79,17 +80,17 @@ TOP_LEVEL = ("spec_version", "bucket", "region", "defaults", "tools", "exclude")
 # never names a provider's catalogue and a new generation is one edit there.
 BOX_FIELDS = ("vcpus", "memory_gb")
 
-# What the process gets, which is not the same question. `container_memory_gb`
-# becomes a real cgroup ceiling via `docker run --memory`, so it is the only one
-# of these a running program can actually feel; Batch's own per-task memoryMib
-# is a scheduling input and constrains nothing. Absent means unconstrained —
-# the container sees the whole box.
-PROCESS_FIELDS = ("container_memory_gb", "heap_percent")
+# What the process gets, which is not the same question. A real cgroup ceiling
+# via `docker run --memory`, so it is the only figure here a running program can
+# actually feel; Batch's own per-task memoryMib is a scheduling input and
+# constrains nothing. Absent means unconstrained — the container sees the whole
+# box. Unlike a heap share, this means something to every tool.
+PROCESS_FIELDS = ("container_memory_gb",)
 
 # Required once resolved: a case that did not say how much memory it wanted
 # cannot be compared against one that did. The container ceiling is the
 # exception, because "no ceiling" is a real and different answer.
-REQUIRED_RESOURCE_FIELDS = (*BOX_FIELDS, "heap_percent")
+REQUIRED_RESOURCE_FIELDS = BOX_FIELDS
 
 RESOURCE_FIELDS = (*BOX_FIELDS, *PROCESS_FIELDS)
 
@@ -126,7 +127,6 @@ class Resources:
     machine_type: str
     # None means no ceiling: the container sees the whole box.
     container_memory_gb: int | None
-    heap_percent: int
 
     @property
     def visible_memory_gb(self) -> int:
@@ -208,10 +208,10 @@ class Plan:
         *,
         default_modes: Mapping[str, str] | None = None,
         instances: Mapping[tuple[int, int], str] | None = None,
-        heap_policies: Mapping[str, HeapPolicy] | None = None,
+        heap: HeapConfig | None = None,
     ) -> Plan:
         """Read a plan; every table defaults to its file beside ``bench/``."""
-        return _load(path, default_modes, instances, heap_policies)
+        return _load(path, default_modes, instances, heap)
 
     def tools(self) -> list[str]:
         """Every tool with at least one case, in plan order."""
@@ -264,17 +264,46 @@ class HeapPolicy:
         )
 
 
-def load_heap_policies(path: Path) -> dict[str, HeapPolicy]:
+@dataclass(frozen=True)
+class HeapConfig:
+    """The share a managed runtime may use, and how each one is told.
+
+    Not part of a plan: nine of the eleven tools have no heap to size, so a
+    per-bucket setting would be a knob most cases ignore and every plan restates.
+    """
+
+    percent: int
+    policies: Mapping[str, HeapPolicy]
+
+    def env_for(self, tool: str, *, visible_memory_gb: int) -> tuple[tuple[str, str], ...]:
+        policy = self.policies.get(tool)
+        if policy is None:
+            return ()
+        return (policy.render(percent=self.percent, visible_memory_gb=visible_memory_gb),)
+
+
+def load_heap_config(path: Path) -> HeapConfig:
     """Read the ``heap`` table of ``bench/tools.yaml``."""
     _, doc = _read_yaml_mapping(path, "tool defaults")
-    table = doc.get("heap")
-    if table is None:
-        return {}
-    if not isinstance(table, dict):
+    heap = doc.get("heap")
+    if heap is None:
+        return HeapConfig(percent=100, policies={})
+    if not isinstance(heap, dict):
         raise PlanError(f"'heap' in {path} is not a mapping")
+    _reject_unknown(heap, ("percent", "tools"), "'heap'", path)
+
+    percent = _positive_int(heap.get("percent"), "percent", "heap", path)
+    if percent > 100:
+        raise PlanError(f"'heap' percent in {path} is {percent}, which is over 100")
+
+    table = heap.get("tools")
+    if table is None:
+        return HeapConfig(percent=percent, policies={})
+    if not isinstance(table, dict):
+        raise PlanError(f"'heap.tools' in {path} is not a mapping")
     policies: dict[str, HeapPolicy] = {}
     for tool, entry in table.items():
-        where = f"heap.{tool}"
+        where = f"heap.tools.{tool}"
         if not isinstance(entry, dict):
             raise PlanError(f"'{where}' in {path} is not a mapping")
         _reject_unknown(entry, ("env", "value"), f"'{where}'", path)
@@ -286,7 +315,7 @@ def load_heap_policies(path: Path) -> dict[str, HeapPolicy]:
                 f"{', '.join(sorted(unknown))} (percent|mib)"
             )
         policies[tool] = HeapPolicy(env=_string(entry, "env", where, path), value=value)
-    return policies
+    return HeapConfig(percent=percent, policies=policies)
 
 
 def load_instances(path: Path) -> dict[tuple[int, int], str]:
@@ -354,7 +383,7 @@ def _load(
     path: Path,
     default_modes: Mapping[str, str] | None,
     instances: Mapping[tuple[int, int], str] | None,
-    heap_policies: Mapping[str, HeapPolicy] | None,
+    heap: HeapConfig | None,
 ) -> Plan:
     raw, doc = _read_yaml_mapping(path, "plan")
 
@@ -377,7 +406,7 @@ def _load(
     # plan read from anywhere still means the same thing.
     modes = default_modes if default_modes is not None else _sibling_default_modes(doc, path)
     catalogue = instances if instances is not None else load_instances(_sibling(path, "instances"))
-    heaps = load_heap_policies(_sibling(path, "tools")) if heap_policies is None else heap_policies
+    heap_config = heap if heap is not None else load_heap_config(_sibling(path, "tools"))
 
     plan = Plan(
         path=path,
@@ -393,7 +422,7 @@ def _load(
                 bucket=bucket,
                 region=region,
                 instances=catalogue,
-                heaps=heaps,
+                heap=heap_config,
                 path=path,
             ),
         ),
@@ -536,7 +565,7 @@ class _Context:
     bucket: str
     region: str
     instances: Mapping[tuple[int, int], str]
-    heaps: Mapping[str, HeapPolicy]
+    heap: HeapConfig
     path: Path
 
 
@@ -703,23 +732,13 @@ def _case(
             f"on a {shape[1]} GB box — a ceiling above the box constrains nothing"
         )
 
-    heap_percent = int(resources["heap_percent"])
-    if not 1 <= heap_percent <= 100:
-        raise PlanError(f"'tools.{tool}' in {path} asks for a heap of {heap_percent}% (1-100)")
-
     resolved = Resources(
         vcpus=shape[0],
         memory_gb=shape[1],
         machine_type=machine_type,
         container_memory_gb=container_memory_gb,
-        heap_percent=heap_percent,
     )
-    policy = context.heaps.get(tool)
-    env = (
-        ()
-        if policy is None
-        else (policy.render(percent=heap_percent, visible_memory_gb=resolved.visible_memory_gb),)
-    )
+    env = context.heap.env_for(tool, visible_memory_gb=resolved.visible_memory_gb)
 
     case_id = derive_case_id(chosen)
     if not CASE_ID_RE.fullmatch(case_id):

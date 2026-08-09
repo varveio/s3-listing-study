@@ -28,20 +28,29 @@ default_modes:
 
 # Tools whose runtime must be told how much of its memory it may use as heap.
 #
-# Only a managed runtime appears here. Go and Rust tools (s5cmd, rclone,
-# minio-mc, ps3, s3kor, s3-fast-list, s7cmd) and the Python ones (aws-cli,
-# s4cmd) take what they take, and have no ceiling to set. A JVM and V8 both
-# default to a *fraction* of the memory they can see, so leaving them alone
-# would make the runtime's own heuristic the independent variable rather than
-# the memory a case asked for.
+# Only a managed runtime appears here, which is why this is not a plan's
+# business: nine of the eleven tools have no heap to size, so a per-bucket
+# `heap_percent` would have been a knob that most cases ignored and every plan
+# restated. Go, Rust and Python tools take what they take.
 #
-# `{percent}` and `{mib}` are substituted from the case: the JVM reads its own
-# cgroup ceiling and wants a proportion, V8 does not and wants a size.
+# A JVM and V8 both default to a *fraction* of the memory they can see, so
+# leaving them alone would make the runtime's own heuristic the independent
+# variable rather than the memory a case asked for.
 heap:
-  swath:
-    env: JAVA_TOOL_OPTIONS
-    value: "-XX:MaxRAMPercentage={percent}"
+  # Of the memory a case lets the process see — its container ceiling, or the
+  # whole box where there is none. The remainder is not waste: a JVM needs
+  # non-heap memory for metaspace, code cache, threads and direct buffers, and
+  # a container that hands all of it to the heap gets killed rather than
+  # collected.
+  percent: 75
 
-  s3p:
-    env: NODE_OPTIONS
-    value: "--max-old-space-size={mib}"
+  # `{percent}` and `{mib}` are substituted per case: the JVM reads its own
+  # cgroup ceiling and wants a proportion, V8 cannot and wants a size.
+  tools:
+    swath:
+      env: JAVA_TOOL_OPTIONS
+      value: "-XX:MaxRAMPercentage={percent}"
+
+    s3p:
+      env: NODE_OPTIONS
+      value: "--max-old-space-size={mib}"

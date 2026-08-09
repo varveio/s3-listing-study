@@ -106,12 +106,14 @@ same neighbours — and the ceiling reaches sizes no machine type sells. Omittin
 `container_memory_gb` means no ceiling: the container sees the whole box. A
 ceiling larger than the box is refused, since it would constrain nothing.
 
-`heap_percent` is how much of that a managed runtime may use. Only swath's JVM
-and s3p's V8 are told — the Go, Rust and Python tools have no such ceiling —
-and [`tools.yaml`](tools.yaml) says how to tell each one. It matters because
-both runtimes default to a *fraction* of the memory they can see, so leaving
-them alone would make the runtime's own heuristic the independent variable
-rather than the memory the case asked for.
+How much of that a managed runtime may use as heap is set once, in
+[`tools.yaml`](tools.yaml) beside the policies it configures — **not** in a
+plan. Only swath's JVM and s3p's V8 are told; the Go, Rust and Python tools have
+no such ceiling, so a per-bucket setting would be a knob nine cases in eleven
+ignore and every plan restates. It matters at all because both runtimes default
+to a *fraction* of the memory they can see, so leaving them alone would make the
+runtime own heuristic the independent variable rather than the memory the case
+asked for.
 
 Every tool with a `build/image.json` must appear under `tools` or `exclude`
 with a reason. A tool that is simply absent is a validation error — registering

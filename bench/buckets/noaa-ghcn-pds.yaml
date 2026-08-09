@@ -32,15 +32,9 @@ defaults:
   # The shape, not a machine type: bench/instances.yaml says which box that is.
   # The smallest modern shape — the families start at 2 GB per vCPU in their
   # highcpu form, so there is no 2 GB/2 vCPU box to ask for.
-  #
-  # heap_percent reaches only the tools with a managed runtime to tell (swath's
-  # JVM, s3p's V8); the rest have no such ceiling and ignore it. 75% leaves room
-  # for the runtime's own non-heap memory without handing most of the box to
-  # headroom the way a JVM's 25% default would.
   resources:
     vcpus: 2
     memory_gb: 4
-    heap_percent: 75
 
 # Every registered tool must appear here or under `exclude`; a tool that is
 # simply absent is a validation error rather than a silent skip. All eleven run
