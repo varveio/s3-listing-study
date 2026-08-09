@@ -1,30 +1,52 @@
 #!/usr/bin/env bash
 # Build every registered tool's derived image and run one representative
-# smoke attempt against the registered smoke bucket, replacing that tool's
-# committed receipt.
+# smoke attempt against the registered smoke bucket, ADDING a new attempt
+# directory next to whatever that mode already holds.
+#
+# This script never deletes anything under receipts/. A mode directory may
+# already hold legacy single-run receipt files and earlier attempt-N
+# directories; both are evidence a claim may cite, and
+# docs/operating/tool-structure.md forbids removing them to tidy a rerun.
+# Each run allocates the next unused attempt-N, so a rerun accumulates rather
+# than overwrites — the same rule upload-attempt enforces at the destination
+# with if_generation_match=0.
 #
 # Usage:
 #   harness/smoke-campaign.sh [--tool SLUG]... [--credential-file PATH] \
-#                              [--jobs N] [--keep-going]
+#                              [--jobs N] [--keep-going] [--convert-parquet]
+#
+# Every successful smoke run is immediately passed through collect-attempt
+# (row count always; Parquet conversion only with --convert-parquet, since
+# it's the expensive part). GCS upload is a separate, later step
+# (`s3-listing-study upload-attempt`) — this script never uploads anything.
 #
 # With no --tool, runs every tool listed in TOOL_SMOKE_PLAN below that has a
 # build/image.json registration. --tool may repeat to run a subset — pass it
 # once to run exactly one tool. --jobs N (default 1) runs up to N tools'
 # build+smoke concurrently; each tool writes to its own receipts directory, so
-# concurrent tools never touch the same files.
+# concurrent tools never touch the same files. Note that --jobs N>1 does make
+# each attempt's `resources.peak_disk_delta_bytes` unusable: that figure comes
+# from polling whole-filesystem usage, so concurrent attempts sharing a disk
+# are counted into each other. Smoke does not measure, so this is acceptable
+# here; a campaign that cares about the figure runs one attempt per host.
 #
 # --credential-file PATH points at a file whose first two lines are the AWS
 # access key ID and secret access key (no KEY= prefix, no quoting) — the same
 # shape the study's Secret Manager payload's two credential lines take.
 # Required only for tools whose plan entry says "authenticated"; omit it and
 # those tools are skipped with a clear message instead of failing the run.
+# The credential value is exported into this script's own environment and
+# forwarded by name only (`docker run -e NAME`, never `-e NAME=value`), so it
+# never appears in any process's argv, in `ps` output, or in sudo's log.
 #
 # Prerequisites this script does NOT set up (see docs/operating/
-# runner-security.md and this session's notes handoff for why): the
-# `s3-listing-study-subjects` Docker bridge network, and a DOCKER-USER
-# iptables rule denying that bridge's subnet 169.254.169.254 so subject
-# containers cannot reach cloud metadata. Create the network and rule once
-# per host before running this script.
+# runner-security.md § Operator procedure): the `s3-listing-study-subjects`
+# Docker bridge network, and a DOCKER-USER iptables rule denying that bridge's
+# subnet 169.254.169.254 so subject containers cannot reach cloud metadata.
+# Create the network and rule once per host before running this script. It
+# also needs `sudo docker` (and, for the authenticated cases, a sudoers policy
+# that permits --preserve-env for one named variable) plus membership of the
+# `docker` group for the build step's `sg docker`.
 set -euo pipefail
 
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -36,26 +58,36 @@ REGION="us-east-1"
 PREFIX="normals-hourly/"
 NETWORK="s3-listing-study-subjects"
 
-# slug:mode:auth — one representative smoke case per registered tool. Add a
-# line here (and a build/image.json registration) to bring a new tool under
-# this script; nothing else in this file is tool-specific.
+# Stamped into every result.json so a receipt names the harness that produced
+# it. `-dirty` is recorded honestly rather than suppressed: a smoke run from an
+# uncommitted tree is a real thing to do, and a receipt claiming a clean commit
+# it was not built from would be worse than one that says so.
+HARNESS_REVISION="$(git rev-parse --short=12 HEAD)"
+git diff --quiet HEAD -- . || HARNESS_REVISION="$HARNESS_REVISION-dirty"
+
+# slug:mode:auth:prefix — one representative smoke case per registered tool.
+# prefix is empty to mean "use the global $PREFIX default"; only a tool whose
+# mode cannot take one (pS3 has no --prefix flag at all) sets it explicitly
+# empty here. Add a line here (and a build/image.json registration) to bring
+# a new tool under this script; nothing else in this file is tool-specific.
 TOOL_SMOKE_PLAN=(
-  "aws-cli:s3api-v2-text:anonymous"
-  "swath:recursive-tsv:anonymous"
-  "s5cmd:recursive:anonymous"
-  "rclone:recursive-hierarchical:anonymous"
-  "minio-mc:recursive:anonymous"
-  "s7cmd:recursive:anonymous"
-  "s3-fast-list:recursive:anonymous"
-  "ps3:list:authenticated"
-  "s3kor:list:authenticated"
-  "s4cmd:recursive:authenticated"
-  "s3p:ls:authenticated"
+  "aws-cli:s3api-v2-text:anonymous:"
+  "swath:recursive-tsv:anonymous:"
+  "s5cmd:recursive:anonymous:"
+  "rclone:recursive-hierarchical:anonymous:"
+  "minio-mc:recursive:anonymous:"
+  "s7cmd:recursive-tsv:anonymous:"
+  "s3-fast-list:list:anonymous:"
+  "ps3:list:authenticated:EMPTY"
+  "s3kor:list:authenticated:"
+  "s4cmd:recursive:authenticated:"
+  "s3p:ls:authenticated:"
 )
 
 CREDENTIAL_FILE=""
 KEEP_GOING=no
 JOBS=1
+CONVERT_PARQUET=no
 declare -a ONLY_TOOLS=()
 
 while [ "$#" -gt 0 ]; do
@@ -64,6 +96,7 @@ while [ "$#" -gt 0 ]; do
     --credential-file) CREDENTIAL_FILE="$2"; shift 2 ;;
     --jobs) JOBS="$2"; shift 2 ;;
     --keep-going) KEEP_GOING=yes; shift ;;
+    --convert-parquet) CONVERT_PARQUET=yes; shift ;;
     *) echo "smoke-campaign: unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -93,7 +126,9 @@ trap 'rm -rf -- "$LOG_DIR"' EXIT
 # Runs entirely inside its own log-redirected subshell so parallel instances
 # never interleave output; exit status alone is the caller's signal.
 run_one_tool() {
-  local tool="$1" mode="$2" auth="$3"
+  local tool="$1" mode="$2" auth="$3" prefix_field="${4:-}"
+  local prefix="$PREFIX"
+  [ -z "$prefix_field" ] || { [ "$prefix_field" = EMPTY ] && prefix="" || prefix="$prefix_field"; }
 
   if [ ! -f "tools/$tool/build/image.json" ]; then
     echo "SKIP (not registered — no tools/$tool/build/image.json)"
@@ -105,7 +140,7 @@ run_one_tool() {
   fi
 
   echo "-- build --"
-  sg docker -c "uv run s3-listing-study build-derived-image --tool $tool"
+  sg docker -c "uv run s3-listing-study build-derived-image --tool '$tool'"
 
   local tag digest
   tag="$(sudo docker images --filter "reference=s3-listing-study/$tool" \
@@ -115,52 +150,84 @@ run_one_tool() {
   [ -n "$digest" ] || { echo "could not resolve built image digest for $tool"; return 1; }
 
   echo "-- smoke ($mode, $auth) --"
-  local outdir="tools/$tool/receipts/smoke/$mode"
-  rm -rf "$outdir"
-  mkdir -p "$outdir"
-  chmod 777 "$outdir"  # subject images run as their own, varying, container uid
-  local abs_outdir="$REPO_ROOT/$outdir"
+  local mode_dir="tools/$tool/receipts/smoke/$mode"
+  mkdir -p "$mode_dir"
 
-  local -a env_args=()
-  local cred=""
+  # Allocate the next unused attempt-N; never remove what is already here. The
+  # engine writes each artifact with an exclusive create, so a collision would
+  # fail the run rather than overwrite a recorded attempt — this loop keeps us
+  # from ever reaching that, without a destructive rm.
+  local n=1
+  while [ -e "$mode_dir/attempt-$n" ]; do n=$((n + 1)); done
+  local attempt_dir="$mode_dir/attempt-$n"
+  local abs_attempt_dir="$REPO_ROOT/$attempt_dir"
+  mkdir -p "$abs_attempt_dir"
+  # Only the new attempt directory is opened up, and only for the length of the
+  # run: subject images run as their own, varying, container uid. The mode
+  # directory holding prior evidence keeps its normal permissions.
+  chmod 777 "$abs_attempt_dir"
+
+  local -a env_args=() sudo_args=()
   if [ "$auth" = authenticated ]; then
-    cred="AWS_ACCESS_KEY_ID=$(sed -n '1p' "$CREDENTIAL_FILE")
+    # Exported, never interpolated into a command line. `-e NAME` tells docker
+    # to forward the value from its own environment; sudo resets that
+    # environment, so the one variable is named on --preserve-env. If a sudoers
+    # policy refuses that, docker forwards nothing, the engine refuses to run an
+    # authenticated attempt without a credential, and the run fails closed
+    # instead of quietly falling back to an unsigned request.
+    export S3_STUDY_AWS_CREDENTIAL="AWS_ACCESS_KEY_ID=$(sed -n '1p' "$CREDENTIAL_FILE")
 AWS_SECRET_ACCESS_KEY=$(sed -n '2p' "$CREDENTIAL_FILE")"
-    env_args=(-e "S3_STUDY_AWS_CREDENTIAL=$cred")
+    env_args=(-e S3_STUDY_AWS_CREDENTIAL)
+    sudo_args=(--preserve-env=S3_STUDY_AWS_CREDENTIAL)
   fi
 
+  local subject_version
+  subject_version="$(python3 -c "
+import json, sys
+print(json.load(open(sys.argv[1]))['subject_version'])" "tools/$tool/build/image.json")"
+
   local run_status=0
-  sudo docker run --rm \
+  sudo "${sudo_args[@]}" docker run --rm \
     --network "$NETWORK" \
     --cap-drop ALL --security-opt no-new-privileges:true \
-    -v "$abs_outdir:/output" \
+    -v "$abs_attempt_dir:/output" \
     -e S3_STUDY_ATTEMPT_OUT=/output \
     "${env_args[@]}" \
     "s3-listing-study/$tool@$digest" \
-    --output /output/attempt-1 \
+    --output /output \
     --derived-image "$digest" \
     --tool "$tool" \
+    --tool-version "$subject_version" \
+    --harness-revision "$HARNESS_REVISION" \
     --operation list \
     --auth "$auth" \
     --mode "$mode" \
     --bucket "$BUCKET" \
     --region "$REGION" \
-    --prefix "$PREFIX" \
+    --prefix "$prefix" \
     --scope full || run_status=$?
-  unset cred
+  unset S3_STUDY_AWS_CREDENTIAL
 
-  sudo chown -R "$(id -u):$(id -g)" "$outdir"
+  sudo chown -R "$(id -u):$(id -g)" "$abs_attempt_dir"
+  chmod 755 "$abs_attempt_dir"
 
-  if [ "$run_status" -ne 0 ] || [ ! -f "$outdir/attempt-1/result.json" ]; then
-    echo "smoke FAILED (exit $run_status)"
+  if [ "$run_status" -ne 0 ] || [ ! -f "$attempt_dir/result.json" ]; then
+    echo "smoke FAILED (exit $run_status) — see $attempt_dir"
     return 1
   fi
+  echo "wrote $attempt_dir"
 
   python3 -c "
-import json
-d = json.load(open('$outdir/attempt-1/result.json'))
+import json, sys
+d = json.load(open(sys.argv[1]))
 print(f\"outcome={d['outcome']['status']} secret_scan={d['secret_scan']['status']}\")
-"
+print(f\"resources={d.get('resources')}\")
+" "$attempt_dir/result.json"
+
+  echo "-- collect --"
+  local -a collect_args=(--attempt-dir "$abs_attempt_dir" --tool "$tool")
+  [ "$CONVERT_PARQUET" = yes ] && collect_args+=(--convert-parquet)
+  uv run s3-listing-study collect-attempt "${collect_args[@]}" || echo "collect-attempt failed (non-fatal)"
 }
 
 declare -a queued=()
@@ -175,19 +242,18 @@ failures=()
 running=0
 
 launch() {
-  local entry="$1" tool mode auth
-  IFS=: read -r tool mode auth <<<"$entry"
+  local entry="$1" tool mode auth prefix_field
+  IFS=: read -r tool mode auth prefix_field <<<"$entry"
   echo "== $tool: starting =="
   {
-    run_one_tool "$tool" "$mode" "$auth"
+    run_one_tool "$tool" "$mode" "$auth" "$prefix_field"
   } >"$LOG_DIR/$tool.log" 2>&1 &
   pids["$tool"]=$!
 }
 
 reap_one() {
   local finished_pid="" wait_status=0
-  wait -n -p finished_pid
-  wait_status=$?
+  wait -n -p finished_pid || wait_status=$?
   local finished=""
   local tool
   for tool in "${!pids[@]}"; do
@@ -211,9 +277,9 @@ reap_one() {
 
 if [ "$JOBS" -eq 1 ]; then
   for entry in "${queued[@]}"; do
-    IFS=: read -r tool mode auth <<<"$entry"
+    IFS=: read -r tool mode auth prefix_field <<<"$entry"
     echo "== $tool =="
-    if run_one_tool "$tool" "$mode" "$auth"; then
+    if run_one_tool "$tool" "$mode" "$auth" "$prefix_field"; then
       :
     else
       failures+=("$tool")
