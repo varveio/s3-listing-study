@@ -11,10 +11,13 @@ import math
 import os
 import platform
 import re
+import resource
+import shutil
 import signal
 import stat
 import subprocess
 import tempfile
+import threading
 import time
 import uuid
 from collections.abc import Callable, Iterator, Mapping, Sequence
@@ -134,6 +137,10 @@ class _Execution:
     kill_sent: bool
     group_empty: bool
     escaped_descendants: tuple[int, ...]
+    peak_rss_kb: int
+    user_cpu_s: float
+    system_cpu_s: float
+    peak_disk_delta_bytes: int
 
 
 def _merge_functional_env(child: dict[str, str], functional_env: Mapping[str, str]) -> None:
@@ -507,6 +514,65 @@ def _emergency_cleanup(
         time.sleep(0.01)
 
 
+DISK_SAMPLE_PATH: Final = "/"
+DISK_SAMPLE_INTERVAL_S: Final = 1.0
+
+
+class _DiskPeakSampler:
+    """Background thread tracking peak filesystem usage during one attempt.
+
+    Independent of, and generic across, whatever any given tool self-reports
+    about itself — the harness's own measurement, the same way for every
+    subject. Started before the clock and stopped after it, so neither the
+    thread's creation nor its teardown lands inside ``elapsed_ns``. Reports a
+    delta above a pre-execution baseline so the base image's own footprint is
+    never attributed to the run.
+
+    The figure is whole-filesystem, not per-process: two attempts sharing a
+    disk are counted into each other, so it is only meaningful when one attempt
+    runs at a time on a host. That is true of the production one-attempt-per-
+    machine shape and false under ``smoke-campaign.sh --jobs N`` for N>1.
+
+    ``getrusage`` has no filesystem-space equivalent to the memory/CPU figures
+    it gives for free (its ``ru_inblock``/``ru_oublock`` counters are I/O
+    operation counts, not space, and are unreliable on Linux for this use
+    case) — polling is the plain way to get a real number.
+    """
+
+    def __init__(
+        self, path: str = DISK_SAMPLE_PATH, interval_s: float = DISK_SAMPLE_INTERVAL_S
+    ) -> None:
+        self._path = path
+        self._interval_s = interval_s
+        self._baseline = shutil.disk_usage(path).used
+        self._peak = self._baseline
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def _sample(self) -> None:
+        try:
+            used = shutil.disk_usage(self._path).used
+        except OSError:
+            return
+        if used > self._peak:
+            self._peak = used
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            self._sample()
+            self._stop.wait(self._interval_s)
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def stop(self) -> int:
+        """Stop sampling and return the peak delta above baseline, in bytes."""
+        self._stop.set()
+        self._thread.join(timeout=self._interval_s * 2)
+        self._sample()  # the interval between the last poll and exit would else be missed
+        return max(0, self._peak - self._baseline)
+
+
 def _execute(
     argv: Sequence[str],
     stdout_raw: Path,
@@ -525,7 +591,12 @@ def _execute(
     escaped: set[int] = set()
     supervised_empty = False
     start_ns = 0
+    disk_sampler = _DiskPeakSampler()
     with stdout_raw.open("xb") as stdout_file, stderr_raw.open("xb") as stderr_file:
+        # Started before the clock, stopped after it: thread creation is real
+        # work and does not belong inside elapsed_ns. Sampling a slightly wider
+        # window than the run can only raise the reported peak, never hide one.
+        disk_sampler.start()
         start_ns = time.monotonic_ns()
         try:
             process = subprocess.Popen(
@@ -582,9 +653,17 @@ def _execute(
         except subprocess.TimeoutExpired:
             _signal_group(process_group, signal.SIGKILL)
             raise AttemptError("subject root process could not be reaped after SIGKILL") from None
+        # Read right after the reap that makes it valid: RUSAGE_CHILDREN is the
+        # cumulative account of every child this process has reaped, which is
+        # exactly the one subject spawned above as long as one process runs
+        # exactly one attempt — true in the derived image (a fresh interpreter
+        # per invocation), not guaranteed if a caller reuses a process across
+        # attempts (e.g. multiple run_attempt() calls in one test process).
+        rusage = resource.getrusage(resource.RUSAGE_CHILDREN)
         escaped_descendants = tuple(sorted(escaped))
         group_empty = supervised_empty
     end_ns = time.monotonic_ns()
+    peak_disk_delta_bytes = disk_sampler.stop()
     return _Execution(
         elapsed_ns=end_ns - start_ns,
         returncode=returncode,
@@ -593,6 +672,10 @@ def _execute(
         kill_sent=kill_sent,
         group_empty=group_empty,
         escaped_descendants=escaped_descendants,
+        peak_rss_kb=rusage.ru_maxrss,
+        user_cpu_s=rusage.ru_utime,
+        system_cpu_s=rusage.ru_stime,
+        peak_disk_delta_bytes=peak_disk_delta_bytes,
     )
 
 
@@ -988,6 +1071,13 @@ def run_attempt(
                 "elapsed_ns": execution.elapsed_ns,
                 "timeout_ns": int(options.timeout_s * 1_000_000_000),
                 "term_grace_ns": int(options.term_grace_s * 1_000_000_000),
+            },
+            "resources": {
+                "source": "getrusage(RUSAGE_CHILDREN) + polled disk_usage(/)",
+                "peak_rss_kb": execution.peak_rss_kb,
+                "user_cpu_s": execution.user_cpu_s,
+                "system_cpu_s": execution.system_cpu_s,
+                "peak_disk_delta_bytes": execution.peak_disk_delta_bytes,
             },
             "outcome": _outcome(execution),
             "secret_scan": {"status": "clean", "streams": scan_outcomes},
