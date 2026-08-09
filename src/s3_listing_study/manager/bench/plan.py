@@ -10,7 +10,12 @@ registration, so a plan is self-contained.
 with its image set frozen, which is why a plan carries no campaign ID and no
 image digest. Receipts group under the campaign that produced them.
 
-**Cases are generated, not hand-written.** Each tool declares a ``matrix`` whose
+**A tool with an empty body runs once**, at the mode ``bench/tools.yaml``
+records for it, on the plan's own allocation. That is what most tools want and
+it says nothing a plan needs to restate, so the name alone declares it.
+
+**Cases are generated, not hand-written.** A tool wanting more declares a
+``matrix`` whose
 cross-product is the set of cases, so "2 GB vs 4 GB, sorted vs unsorted" is two
 lines rather than four hand-copied blocks that can disagree. Case IDs are
 derived from the axis values for the same reason: a hand-typed ID is a
@@ -55,7 +60,7 @@ SPEC_VERSION = 1
 # a migration and must be visible as one.
 FINGERPRINT_VERSION = 1
 
-TOP_LEVEL = ("spec_version", "bucket", "region", "defaults", "sampled", "tools", "exclude")
+TOP_LEVEL = ("spec_version", "bucket", "region", "defaults", "tools", "exclude")
 
 # What a box is. Every field is required once resolved: a case that did not say
 # how much memory it wanted cannot be compared against one that did.
@@ -319,42 +324,34 @@ def _schedule(
     return resolved
 
 
+def _says_nothing(body: object) -> bool:
+    """``aws-cli:`` with no body — the tool adds nothing to the plan's defaults."""
+    return body is None or (isinstance(body, dict) and not body)
+
+
 def _sibling_default_modes(doc: Mapping[str, Any], path: Path) -> Mapping[str, str]:
     """``bench/tools.yaml`` beside the plan's directory — read only if needed."""
-    if not doc.get("sampled"):
+    tools = doc.get("tools")
+    if not isinstance(tools, dict) or not any(_says_nothing(body) for body in tools.values()):
         return {}
     return load_default_modes(path.resolve().parents[1] / "tools.yaml")
 
 
-def _sampled(
-    doc: Mapping[str, Any], default_modes: Mapping[str, str], path: Path
-) -> dict[str, Any]:
-    """Expand the shorthand roster into the same shape an explicit tool takes.
+def _default_body(tool: str, default_modes: Mapping[str, str], path: Path) -> dict[str, Any]:
+    """What an empty tool means: one case, at the mode recorded for that tool.
 
-    A tool that runs once, at its registered mode, on the plan's own allocation
-    is the common case and says nothing a plan needs to restate. Listing the
-    name is the whole declaration.
+    A tool that runs once, at its usual mode, on the plan's own allocation says
+    nothing a plan needs to spell out — so writing the name and stopping is the
+    whole declaration.
     """
-    raw = doc.get("sampled")
-    if raw is None:
-        return {}
-    if not isinstance(raw, list):
-        raise PlanError(f"'sampled' in {path} is not a list")
-    expanded: dict[str, Any] = {}
-    for tool in raw:
-        if not isinstance(tool, str) or not TOOL_RE.fullmatch(tool):
-            raise PlanError(f"'sampled' in {path} has a malformed tool name: {tool!r}")
-        if tool in expanded:
-            raise PlanError(f"'sampled' in {path} names {tool} twice")
-        mode = default_modes.get(tool)
-        if mode is None:
-            known = "|".join(sorted(default_modes)) or "none"
-            raise PlanError(
-                f"'sampled' in {path} names {tool}, which has no default mode "
-                f"in bench/tools.yaml ({known})"
-            )
-        expanded[tool] = {"matrix": {"mode": [mode]}}
-    return expanded
+    mode = default_modes.get(tool)
+    if mode is None:
+        known = "|".join(sorted(default_modes)) or "none"
+        raise PlanError(
+            f"'tools.{tool}' in {path} is empty, but {tool} has no default mode "
+            f"in bench/tools.yaml ({known}) — give it a matrix or record its mode"
+        )
+    return {"matrix": {"mode": [mode]}}
 
 
 def _cases(
@@ -366,21 +363,16 @@ def _cases(
     default_modes: Mapping[str, str],
     path: Path,
 ) -> tuple[Case, ...]:
-    sampled = _sampled(doc, default_modes, path)
-    explicit = _table(doc, "tools", "tools", path) if "tools" in doc else {}
-    both = sorted(set(sampled) & set(explicit))
-    if both:
-        raise PlanError(
-            f"plan {path} both samples and expands {', '.join(both)} — "
-            "a tool is declared in one place or the other"
-        )
-    tools = {**sampled, **explicit}
-    if not tools:
+    declared = _table(doc, "tools", "tools", path)
+    if not declared:
         raise PlanError(f"plan {path} runs no tools")
-    cases: list[Case] = []
-    for tool in tools:
+    tools: dict[str, Any] = {}
+    for tool, body in declared.items():
         if not TOOL_RE.fullmatch(tool):
             raise PlanError(f"plan {path} has a malformed tool name: {tool!r}")
+        tools[tool] = _default_body(tool, default_modes, path) if _says_nothing(body) else body
+    cases: list[Case] = []
+    for tool in tools:
         cases.extend(_tool_cases(tool, tools, bucket, region, base_resources, base_schedule, path))
     return tuple(cases)
 

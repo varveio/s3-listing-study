@@ -87,8 +87,7 @@ def test_every_default_mode_is_one_its_adapter_implements() -> None:
         assert mode in implemented, f"{tool}: {mode!r} not in {sorted(implemented)}"
 
 
-def test_the_committed_plan_declares_every_tool_once() -> None:
-    """Sampled and expanded rosters must not overlap or leave a tool out."""
+def test_the_committed_plan_declares_every_registered_tool() -> None:
     loaded = bench.Plan.load(bench.default_path("noaa-ghcn-pds"))
     assert loaded.declared() == bench_cli.registered_tools()
 
@@ -96,36 +95,39 @@ def test_the_committed_plan_declares_every_tool_once() -> None:
 # ── expansion and cascade ────────────────────────────────────────────────────
 
 
-def test_a_sampled_tool_runs_once_at_its_default_mode(tmp_path: Path) -> None:
-    """Naming the tool is the whole declaration."""
-    path = write(tmp_path, ONE_CASE, extra="sampled: [s5cmd, s3p]\n")
+def test_an_empty_tool_runs_once_at_its_default_mode(tmp_path: Path) -> None:
+    """Writing the name and stopping is the whole declaration."""
+    path = write(tmp_path, "s5cmd:\ns3p:\n")
     loaded = bench.Plan.load(path, default_modes={"s5cmd": "recursive", "s3p": "ls"})
-    sampled = [c for c in loaded.cases if c.tool in ("s5cmd", "s3p")]
-    assert [(c.tool, c.case_id, c.mode) for c in sampled] == [
+    assert [(c.tool, c.case_id, c.mode) for c in loaded.cases] == [
         ("s5cmd", "recursive", "recursive"),
         ("s3p", "ls", "ls"),
     ]
-    # Sampled tools take the plan's allocation, not one of their own.
-    assert {c.resources.machine_type for c in sampled} == {"e2-standard-4"}
+    # An empty tool takes the plan's allocation, not one of its own.
+    assert {c.resources.machine_type for c in loaded.cases} == {"e2-standard-4"}
 
 
-def test_sampling_a_tool_with_no_default_mode_is_refused(tmp_path: Path) -> None:
-    path = write(tmp_path, ONE_CASE, extra="sampled: [s5cmd]\n")
+def test_an_explicitly_empty_mapping_reads_the_same_as_a_bare_key(tmp_path: Path) -> None:
+    path = write(tmp_path, "s5cmd: {}\n")
+    loaded = bench.Plan.load(path, default_modes={"s5cmd": "recursive"})
+    assert [c.case_id for c in loaded.cases] == ["recursive"]
+
+
+def test_an_empty_tool_with_no_default_mode_is_refused(tmp_path: Path) -> None:
+    path = write(tmp_path, "s5cmd:\n")
     with pytest.raises(bench.PlanError, match="no default mode"):
         bench.Plan.load(path, default_modes={"s3p": "ls"})
 
 
-def test_a_tool_may_not_be_both_sampled_and_expanded(tmp_path: Path) -> None:
-    """Two declarations of one tool is a question about which one wins."""
-    path = write(tmp_path, ONE_CASE, extra="sampled: [aws-cli]\n")
-    with pytest.raises(bench.PlanError, match="both samples and expands"):
-        bench.Plan.load(path, default_modes={"aws-cli": "s3api-v2-text"})
+def test_an_unindented_matrix_does_not_silently_become_a_default_case(tmp_path: Path) -> None:
+    """The cost of the empty-tool shorthand, and why it is affordable.
 
-
-def test_a_repeated_sampled_tool_is_refused(tmp_path: Path) -> None:
-    path = write(tmp_path, ONE_CASE, extra="sampled: [s5cmd, s5cmd]\n")
-    with pytest.raises(bench.PlanError, match="twice"):
-        bench.Plan.load(path, default_modes={"s5cmd": "recursive"})
+    Losing a level of indentation turns ``matrix`` into a sibling tool rather
+    than swath's body. That refuses, instead of quietly running swath once.
+    """
+    path = write(tmp_path, "swath:\nmatrix:\n  - mode: [recursive-tsv]\n")
+    with pytest.raises(bench.PlanError, match=r"'tools\.matrix' .* is not a mapping"):
+        bench.Plan.load(path, default_modes={"swath": "recursive-tsv"})
 
 
 def test_a_matrix_expands_to_its_cross_product(tmp_path: Path) -> None:

@@ -37,30 +37,30 @@ defaults:
     memory_mib: 2048
     cpu_milli: 2000
 
-# Every registered tool must appear under `sampled`, `tools` or `exclude`; a
-# tool that is simply absent is a validation error rather than a silent skip.
-# All eleven run against this bucket, so there is nothing to exclude yet.
-
-# One attempt each, at the mode bench/tools.yaml records for them, on the
-# allocation above. Naming the tool is the whole declaration.
+# Every registered tool must appear here or under `exclude`; a tool that is
+# simply absent is a validation error rather than a silent skip. All eleven run
+# against this bucket, so there is nothing to exclude yet.
 #
-# ps3 has no --prefix flag at all, so it always lists the whole bucket. That is
-# this plan's workload anyway, which is why it is comparable here and was not on
-# the scoped smoke prefix.
-sampled:
-  - aws-cli
-  - s5cmd
-  - rclone
-  - minio-mc
-  - s7cmd
-  - s3-fast-list
-  - ps3
-  - s3kor
-  - s4cmd
-  - s3p
+# An empty tool runs once, at the mode bench/tools.yaml records for it, on the
+# allocation above. Writing the name and stopping is the whole declaration.
 
 tools:
-  # The one tool being swept rather than sampled. Two blocks, because the modes
+  aws-cli:
+  s5cmd:
+  rclone:
+  minio-mc:
+  s7cmd:
+  s3-fast-list:
+  s3kor:
+  s4cmd:
+  s3p:
+
+  # No --prefix flag at all, so it always lists the whole bucket. That is this
+  # plan's workload anyway, which is why it is comparable here and was not on
+  # the scoped smoke prefix.
+  ps3:
+
+  # The one tool with anything to say. Two blocks, because the modes
   # do not all want the same sweep: only the sorted one has a reason to care
   # about memory, and a single cross-product would have run every mode at every
   # size to find that out.
