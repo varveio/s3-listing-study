@@ -7,6 +7,11 @@
 # This is not a registry entry. `data/registry.toml` binds a bucket to a
 # reference manifest for the verification lineage; nothing in the attempt path
 # reads it, and this bucket has no manifest. A plan stands alone.
+#
+# The workload is the whole bucket — every case lists all ~1M objects, and there
+# is no prefix anywhere in a plan to narrow it with. Scoping a listing changes
+# the row count a case should produce, which is a fact about a target rather
+# than a knob a case may turn; a prefix worth studying gets its own plan.
 
 spec_version: 1
 
@@ -54,16 +59,12 @@ tools:
   s3kor:
   s4cmd:
   s3p:
-
-  # No --prefix flag at all, so it always lists the whole bucket. That is this
-  # plan's workload anyway, which is why it is comparable here and was not on
-  # the scoped smoke prefix.
   ps3:
 
-  # The one tool with anything to say. Two blocks, because the modes
-  # do not all want the same sweep: only the sorted one has a reason to care
-  # about memory, and a single cross-product would have run every mode at every
-  # size to find that out.
+  # The one tool with anything to say. Two blocks, because the modes do not all
+  # want the same sweep: only the sorted one has a reason to care about memory,
+  # and a single cross-product would have run every mode at every size to find
+  # that out.
   #
   # Memory varies as a per-task limit rather than by swapping machine types,
   # since two machine types differ in vCPU as well and the result could not be
