@@ -310,10 +310,22 @@ fork that shared attempt-runner recipe. Tools using an upstream image without
 derivation or another installation path do not receive an empty `build/`
 directory.
 Construction is slug-only through `s3-listing-study build-derived-image`; the
-command validates capsule containment and binds the registered `subject`,
-`adapter`, and `selection` named contexts. `adapter_bundle_sha256` binds a
-documented canonical byte manifest of `command.py` and `normalize.py` and is the
-sole adapter identity in a new `result.json`.
+command validates capsule containment and binds four named contexts — the
+registered `subject` image, the capsule's `adapter` and `selection` directories,
+and the study's pinned `python` interpreter, which the engine runs on so that a
+subject image need not ship one. `adapter_bundle_sha256` binds a documented
+canonical byte manifest of `command.py` and `normalize.py` and is the sole
+adapter identity in a new `result.json`.
+
+`image.json` declares, besides the adapter paths and that digest: the
+digest-pinned `subject_image`; `subject_version`, the release that digest
+contains, which names the derived image and is distinct from `data/tool.json`'s
+`tested.version`; `python_libc`, selecting the pinned interpreter build for the
+subject's base (`musl` for Alpine, otherwise `gnu`); `subject_workdir`; and
+`executable`, which must equal the adapter's `fixed_command_prefix`. With no
+`--tag`, the derived image is named
+`s3-listing-study/<tool>:<subject_version>-h<harness version>-<digest prefix>`,
+so it cannot be mistaken for the upstream image it wraps.
 
 ## Receipts and raw formats
 

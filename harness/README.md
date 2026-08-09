@@ -34,7 +34,7 @@ The derived image fixes this zipapp entrypoint; schedulers append only the
 logical request arguments and never replace it:
 
 ```sh
-/usr/bin/python3 -I /opt/s3-listing-study/attempt.pyz \
+/opt/s3-listing-study/python/bin/python3 -I /opt/s3-listing-study/attempt.pyz \
   --output /output/attempt-id \
   --derived-image sha256:DERIVED_IMAGE_DIGEST \
   --tool aws-cli \
@@ -48,18 +48,20 @@ logical request arguments and never replace it:
 
 The scheduler passes only typed logical fields, including optional concurrency.
 An explicit concurrency is accepted only by an adapter that declares support;
-the current s4cmd adapter contract accepts `1..8` and defaults to `4`. AWS CLI
-is the only current derived-image registration. The selected tool's bundled
-`command.py` resolves complete subject argv inside the image through the typed
-driver API; there is no raw argv escape hatch. Adapters never execute or time
-the subject. Tool-specific image
-packaging uses one shared recipe; its current compatible-interpreter constraint
-is documented in
-[`derived-image/README.md`](derived-image/README.md). Tool-specific subject
-digest and workdir inputs remain capsule-owned and are selected through
-`s3-listing-study build-derived-image --tool SLUG --tag TAG`, never free build
-arguments. Each result records the validated canonical
-`adapter_bundle_sha256` as its sole adapter identity.
+the current s4cmd adapter contract accepts `1..8` and defaults to `4`. `aws-cli`
+and `swath` are the current derived-image registrations; a tool is registered by
+adding `tools/<tool>/build/image.json`. The selected tool's bundled `command.py`
+resolves complete subject argv inside the image through the typed driver API;
+there is no raw argv escape hatch. Adapters never execute or time the subject.
+
+Tool-specific image packaging uses one shared recipe, documented in
+[`derived-image/README.md`](derived-image/README.md). It runs the engine on a
+pinned interpreter bound at build time, so a subject image is not required to
+ship a Python of its own. Tool-specific subject digest, version, workdir, and
+libc inputs remain capsule-owned and are selected through
+`s3-listing-study build-derived-image --tool SLUG`, never free build arguments.
+Each result records the validated canonical `adapter_bundle_sha256` as its sole
+adapter identity, and the derived image's own digest as the image identity.
 
 ## Security boundary
 
