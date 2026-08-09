@@ -1,0 +1,11 @@
+{
+  "tool": "s3p",
+  "subject_image": "registry.local/s3p@sha256:a57122e3ecc56f81574afa2c455788a881d008e2ddbf208981e92a444d2ea127",
+  "subject_version": "3.7.2",
+  "python_libc": "gnu",
+  "subject_workdir": "/",
+  "executable": ["/usr/local/bin/s3p"],
+  "command": "adapter/command.py",
+  "normalizer": "adapter/normalize.py",
+  "adapter_bundle_sha256": "a98189b7e9f5cc696795f024a795626b2d3d8fb67d6c6d398dbb65602e8031e3"
+}

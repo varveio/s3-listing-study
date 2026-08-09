@@ -1,0 +1,11 @@
+{
+  "tool": "s4cmd",
+  "subject_image": "registry.local/s4cmd@sha256:7226447d752b971fcad0bb87ede1e82b80d22aecfec96c4e2f4aa9296e398fbc",
+  "subject_version": "2.1.0",
+  "python_libc": "gnu",
+  "subject_workdir": "/",
+  "executable": ["/usr/local/bin/s4cmd"],
+  "command": "adapter/command.py",
+  "normalizer": "adapter/normalize.py",
+  "adapter_bundle_sha256": "33570218ee5feb1597a902ab2e95c6aaf1e192bf3f90e7a7a3b0e697df77d635"
+}

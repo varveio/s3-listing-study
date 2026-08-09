@@ -312,13 +312,13 @@ EXPECTED: dict[str, Callable[[str, str], tuple[str, ...]]] = {
 }
 FIXED_PREFIXES = {
     "aws-cli": ("/usr/local/bin/aws",),
-    "minio-mc": ("mc",),
+    "minio-mc": ("/usr/bin/mc",),
     "ps3": ("/usr/local/bin/pS3",),
-    "rclone": ("rclone",),
+    "rclone": ("/usr/local/bin/rclone",),
     "s3-fast-list": ("/usr/bin/s3-fast-list",),
     "s3kor": ("/usr/local/bin/s3kor",),
-    "s3p": ("s3p",),
-    "s4cmd": ("s4cmd",),
+    "s3p": ("/usr/local/bin/s3p",),
+    "s4cmd": ("/usr/local/bin/s4cmd",),
     "s5cmd": ("/s5cmd",),
     "s7cmd": ("/usr/local/bin/s7cmd",),
     "swath": ("/opt/java/openjdk/bin/java", "-jar", "/opt/swath/swath.jar"),
@@ -441,7 +441,7 @@ def test_s4cmd_accepts_every_registered_concurrency_in_the_full_matrix() -> None
                     argv = adapter.compile(request)
                     index = argv.index("-c")
                     assert argv[index + 1] == str(concurrency)
-                    assert argv[0] == "s4cmd"
+                    assert argv[0] == "/usr/local/bin/s4cmd"
                     assert argv[-1] == f"s3://{BUCKET}/{prefix}"
 
 

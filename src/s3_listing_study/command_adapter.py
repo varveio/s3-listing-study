@@ -55,6 +55,16 @@ class LoadedCommandAdapter:
     fixed_command_prefix: tuple[str, ...]
     concurrency_range: tuple[int, int] | None
     tool: str
+    functional_env: dict[str, str]
+    """Non-secret, tool-specific environment the subject structurally needs.
+
+    Empty for most tools. Exists for a subject like mc, which has no
+    ``--no-sign-request`` flag and instead resolves an anonymous alias from an
+    endpoint URL it must be told — configuration, not a credential. Reviewed
+    as non-secret at capsule-authoring time, same as ``DECLARED_FUNCTIONAL_ENV``
+    in the attempt engine; the engine still refuses any key that collides with
+    a reserved or credential name.
+    """
 
     def compile(self, request: CommandRequest) -> tuple[str, ...]:
         """Return the complete subject argv the attempt engine will execute."""
@@ -113,12 +123,18 @@ def load_command_adapter(
     prefix = getattr(module, "FIXED_COMMAND_PREFIX", None)
     tool = getattr(module, "TOOL", None)
     concurrency_range = getattr(module, "CONCURRENCY_RANGE", None)
+    functional_env = getattr(module, "FUNCTIONAL_ENV", {})
     if not callable(build):
         raise CommandAdapterError(f"{path} does not export callable build_command")
     if not isinstance(prefix, tuple) or not all(isinstance(item, str) for item in prefix):
         raise CommandAdapterError(f"{path} does not export tuple[str, ...] FIXED_COMMAND_PREFIX")
     if not isinstance(tool, str) or not tool:
         raise CommandAdapterError(f"{path} does not export non-empty TOOL")
+    if not isinstance(functional_env, dict) or not all(
+        isinstance(key, str) and key and isinstance(value, str) and "\x00" not in key + value
+        for key, value in functional_env.items()
+    ):
+        raise CommandAdapterError(f"{path} exports invalid FUNCTIONAL_ENV; expected dict[str, str]")
     if expected_tool is not None and tool != expected_tool:
         raise CommandAdapterError(
             f"bundled driver is for {tool}, not requested tool {expected_tool}"
@@ -138,6 +154,7 @@ def load_command_adapter(
         prefix,
         cast(tuple[int, int] | None, concurrency_range),
         tool,
+        cast(dict[str, str], functional_env),
     )
 
 

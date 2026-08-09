@@ -1,0 +1,11 @@
+{
+  "tool": "rclone",
+  "subject_image": "rclone/rclone@sha256:c61954aaa32328a5486715dd063a81c7879f5195ad3505cd362deddd509dc4a1",
+  "subject_version": "1.74.4",
+  "python_libc": "musl",
+  "subject_workdir": "/data",
+  "executable": ["/usr/local/bin/rclone"],
+  "command": "adapter/command.py",
+  "normalizer": "adapter/normalize.py",
+  "adapter_bundle_sha256": "960fe5ac27c39a3bab6b7df43877b13a49af486a40a6b05cafa965676268b92f"
+}

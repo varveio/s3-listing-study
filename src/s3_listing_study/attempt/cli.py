@@ -16,7 +16,13 @@ from s3_listing_study.build_selection import BuildSelectionError
 from s3_listing_study.command_adapter import CommandAdapterError, CommandRequest
 
 from .driver import resolve_invocation
-from .engine import AttemptError, AttemptOptions, run_attempt
+from .engine import (
+    CREDENTIAL_ENV_VAR,
+    AttemptError,
+    AttemptOptions,
+    parse_credential_env,
+    run_attempt,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -38,7 +44,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--harness-revision", action=UniqueStoreAction)
     parser.add_argument("--operation", action=UniqueStoreAction, choices=("list",), required=True)
     parser.add_argument(
-        "--auth", action=UniqueStoreAction, choices=("anonymous",), default="anonymous"
+        "--auth",
+        action=UniqueStoreAction,
+        choices=("anonymous", "authenticated"),
+        default="anonymous",
     )
     parser.add_argument("--mode", action=UniqueStoreAction, required=True)
     parser.add_argument("--bucket", action=UniqueStoreAction, required=True)
@@ -78,6 +87,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         timeout, term_grace = _parse_numbers(args.timeout, args.term_grace)
         concurrency = _parse_concurrency(args.concurrency)
+        credential_blob = os.environ.get(CREDENTIAL_ENV_VAR)
+        if args.auth == "authenticated":
+            if not credential_blob:
+                raise CommandAdapterError(f"--auth authenticated requires {CREDENTIAL_ENV_VAR}")
+            credential_env = parse_credential_env(credential_blob)
+        elif credential_blob:
+            raise CommandAdapterError(f"{CREDENTIAL_ENV_VAR} is set but --auth is anonymous")
+        else:
+            credential_env = None
         # The engine, not the adapter, owns where native output may land: a
         # container-local path an adapter picked for itself is output no attempt
         # record can account for. Removed with the container either way.
@@ -116,6 +134,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     scope=args.scope,
                     concurrency=concurrency,
                     sink_dir=sink_dir,
+                    credential_env=credential_env,
+                    functional_env=invocation.functional_env,
                 )
             )
     except (AttemptError, BuildSelectionError, CommandAdapterError, OSError) as exc:

@@ -9,7 +9,7 @@ from s3_listing_study.command_adapter import (
 )
 
 TOOL = "s3p"
-FIXED_COMMAND_PREFIX = ("s3p",)
+FIXED_COMMAND_PREFIX = ("/usr/local/bin/s3p",)
 MODES = frozenset({"ls", "ls-long", "ls-raw", "summarize"})
 
 

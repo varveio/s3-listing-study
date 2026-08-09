@@ -9,7 +9,7 @@ from s3_listing_study.command_adapter import (
 )
 
 TOOL = "s4cmd"
-FIXED_COMMAND_PREFIX = ("s4cmd",)
+FIXED_COMMAND_PREFIX = ("/usr/local/bin/s4cmd",)
 MODES = frozenset({"recursive", "shallow", "show-directory", "du"})
 CONCURRENCY_RANGE = (1, 8)
 DEFAULT_CONCURRENCY = 4

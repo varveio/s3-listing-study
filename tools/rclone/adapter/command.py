@@ -9,7 +9,7 @@ from s3_listing_study.command_adapter import (
 )
 
 TOOL = "rclone"
-FIXED_COMMAND_PREFIX = ("rclone",)
+FIXED_COMMAND_PREFIX = ("/usr/local/bin/rclone",)
 MODES = frozenset(
     {
         "recursive-fastlist",
@@ -28,6 +28,12 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
     backend = f"s3,provider=AWS,region={request.region}"
     if request.mode == "listv1":
         backend += ",list_version=1"
+    if request.auth == "authenticated":
+        # rclone's s3 backend falls back to anonymous credentials when none
+        # are configured (backend/s3/s3.go:1508-1511); env_auth=true is what
+        # tells it to actually read AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY
+        # from the process environment the engine already populated.
+        backend += ",env_auth=true"
     remote = f":{backend}:{request.bucket}"
     if request.prefix:
         remote += f"/{request.prefix}"

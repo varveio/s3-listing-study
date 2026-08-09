@@ -55,6 +55,36 @@ BASE_SUBJECT_ENV: Final[Mapping[str, str]] = MappingProxyType(
 # No ambient value is copied merely because it happens to exist in the runner.
 DECLARED_FUNCTIONAL_ENV: Final[Mapping[str, str]] = MappingProxyType({})
 
+AWS_CREDENTIAL_ENV_KEYS: Final = ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN")
+"""The only keys an authenticated child's credential material may set.
+
+Matches the Secret Manager payload lines documented in
+``infra/terraform/modules/gcp/s3-listing-study/aws-credentials.tf``. A
+credential mapping naming anything else is refused rather than forwarded.
+"""
+
+AWS_CREDENTIAL_REQUIRED_ENV_KEYS: Final = ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY")
+
+CREDENTIAL_ENV_VAR: Final = "S3_STUDY_AWS_CREDENTIAL"
+"""Ambient variable carrying the raw ``KEY=VALUE`` credential payload.
+
+Deliberately not an ``AWS_*`` name, so an SDK never picks it up directly and it
+is never itself forwarded to a child; only the keys parsed out of it are, and
+only for an authenticated attempt.
+"""
+
+_RESERVED_ENV_KEYS: Final = (
+    frozenset(BASE_SUBJECT_ENV)
+    | frozenset(AWS_CREDENTIAL_ENV_KEYS)
+    | {CREDENTIAL_ENV_VAR, "AWS_REGION", "AWS_DEFAULT_REGION"}
+)
+"""Keys a capsule's ``FUNCTIONAL_ENV`` may never set.
+
+Reserved so a tool-specific declaration can't silently widen the ambient
+boundary or shadow the credential path — either would defeat the allowlist
+construction ``anonymous_environment``/``authenticated_environment`` exist for.
+"""
+
 
 class AttemptError(RuntimeError):
     """The runner could not create a trustworthy attempt record."""
@@ -84,6 +114,15 @@ class AttemptOptions:
     scope: str | None = None
     concurrency: int | None = None
     sink_dir: str | None = None
+    credential_env: Mapping[str, str] | None = None
+    """Validated AWS credential keys for an authenticated attempt.
+
+    ``None`` for ``auth="anonymous"`` — carrying any value there is refused,
+    not ignored, so an anonymous receipt can never silently follow from a run
+    that actually had credential material available to it.
+    """
+    functional_env: Mapping[str, str] = MappingProxyType({})
+    """The selected capsule's declared non-secret functional environment."""
 
 
 @dataclass(frozen=True)
@@ -97,18 +136,112 @@ class _Execution:
     escaped_descendants: tuple[int, ...]
 
 
-def anonymous_environment(source: Mapping[str, str]) -> dict[str, str]:
+def _merge_functional_env(child: dict[str, str], functional_env: Mapping[str, str]) -> None:
+    collisions = sorted(set(functional_env) & _RESERVED_ENV_KEYS)
+    if collisions:
+        raise AttemptError(f"functional_env collides with reserved key(s): {', '.join(collisions)}")
+    child.update(functional_env)
+
+
+def _region_env(region: str | None) -> dict[str, str]:
+    """``AWS_REGION``/``AWS_DEFAULT_REGION`` for every attempt that names one.
+
+    The region is already public in argv and the logical request; it is not a
+    credential. It is declared here, not left to each adapter's ``--region``
+    CLI flag, because at least one subject (pS3, its Go AWS SDK v1 session)
+    does not thread a CLI-flag-only region into its own API calls and
+    silently returns zero results without it — a structural SDK dependency,
+    not a tool-specific quirk worth hand-waving around per capsule.
+    """
+    return {} if region is None else {"AWS_REGION": region, "AWS_DEFAULT_REGION": region}
+
+
+def anonymous_environment(
+    source: Mapping[str, str],
+    functional_env: Mapping[str, str] = MappingProxyType({}),
+    region: str | None = None,
+) -> dict[str, str]:
     """Return the complete explicit environment passed to an anonymous child.
 
     ``source`` is accepted so callers can make the ambient boundary explicit;
     none of its values are inherited. This allowlist construction prevents new
     credential, endpoint, proxy, loader, SDK, or arbitrary variables from
-    bypassing an inevitably incomplete denylist.
+    bypassing an inevitably incomplete denylist. ``functional_env`` is the
+    capsule's own declared, non-secret, structurally-required configuration
+    (e.g. mc's anonymous alias endpoint) — reviewed at capsule-authoring time,
+    same trust level as ``DECLARED_FUNCTIONAL_ENV``.
     """
     del source
     child = dict(BASE_SUBJECT_ENV)
     child.update(DECLARED_FUNCTIONAL_ENV)
+    child.update(_region_env(region))
+    _merge_functional_env(child, functional_env)
     return child
+
+
+def authenticated_environment(
+    source: Mapping[str, str],
+    credential_env: Mapping[str, str],
+    functional_env: Mapping[str, str] = MappingProxyType({}),
+    region: str | None = None,
+) -> dict[str, str]:
+    """Return the complete explicit environment passed to an authenticated child.
+
+    Identical construction to ``anonymous_environment`` — nothing from
+    ``source`` is inherited — plus the caller's already-validated credential
+    keys. ``AWS_EC2_METADATA_DISABLED`` stays set: the explicit static
+    credential is the only one this child should ever use, never an instance
+    metadata fallback.
+    """
+    del source
+    child = dict(BASE_SUBJECT_ENV)
+    child.update(DECLARED_FUNCTIONAL_ENV)
+    child.update(_region_env(region))
+    _merge_functional_env(child, functional_env)
+    child.update(credential_env)
+    return child
+
+
+def parse_credential_env(blob: str) -> dict[str, str]:
+    """Parse ``KEY=VALUE`` lines into a validated AWS credential mapping.
+
+    Matches the Secret Manager payload format in
+    ``infra/terraform/modules/gcp/s3-listing-study/aws-credentials.tf``: one
+    ``KEY=VALUE`` per line, ``AWS_SESSION_TOKEN`` optional.
+    """
+    result: dict[str, str] = {}
+    for line_number, raw_line in enumerate(blob.splitlines(), start=1):
+        line = raw_line.strip()
+        if not line:
+            continue
+        if "=" not in line:
+            raise AttemptError(f"credential line {line_number} is not KEY=VALUE")
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip()
+        if key not in AWS_CREDENTIAL_ENV_KEYS:
+            raise AttemptError(f"credential line {line_number} names an unsupported key: {key}")
+        if key in result:
+            raise AttemptError(f"credential line {line_number} duplicates key: {key}")
+        if not value:
+            raise AttemptError(f"credential line {line_number} has an empty value")
+        result[key] = value
+    missing = [key for key in AWS_CREDENTIAL_REQUIRED_ENV_KEYS if key not in result]
+    if missing:
+        raise AttemptError(f"credential payload is missing required key(s): {', '.join(missing)}")
+    return result
+
+
+def _redacted_environment(env: Mapping[str, str]) -> dict[str, str]:
+    """The child environment as it may be persisted: credential values masked.
+
+    Key names stay visible so a receipt still shows which variables were set;
+    only values that could be secret material are replaced.
+    """
+    return {
+        key: ("<REDACTED>" if key in AWS_CREDENTIAL_ENV_KEYS else value)
+        for key, value in env.items()
+    }
 
 
 def _validate(options: AttemptOptions) -> AttemptOptions:
@@ -126,8 +259,22 @@ def _validate(options: AttemptOptions) -> AttemptOptions:
         raise AttemptError("subject image identity must be sha256:<64 lowercase hex digits>")
     if IMAGE_DIGEST_RE.fullmatch(options.derived_image) is None:
         raise AttemptError("derived image identity must be sha256:<64 lowercase hex digits>")
-    if options.auth != "anonymous":
-        raise AttemptError("only anonymous S3 attempts are implemented")
+    if options.auth not in ("anonymous", "authenticated"):
+        raise AttemptError("auth must be anonymous or authenticated")
+    if options.auth == "anonymous":
+        if options.credential_env:
+            raise AttemptError("an anonymous attempt must not carry credential material")
+    else:
+        if not options.credential_env:
+            raise AttemptError("an authenticated attempt requires credential_env")
+        unknown = sorted(set(options.credential_env) - set(AWS_CREDENTIAL_ENV_KEYS))
+        if unknown:
+            raise AttemptError(f"credential_env has unsupported key(s): {', '.join(unknown)}")
+        missing = [
+            key for key in AWS_CREDENTIAL_REQUIRED_ENV_KEYS if key not in options.credential_env
+        ]
+        if missing:
+            raise AttemptError(f"credential_env is missing required key(s): {', '.join(missing)}")
     attempt_id = options.attempt_id or str(uuid.uuid4())
     if not attempt_id or any(character.isspace() for character in attempt_id):
         raise AttemptError("attempt ID must be a non-empty token")
@@ -152,6 +299,8 @@ def _validate(options: AttemptOptions) -> AttemptOptions:
         scope=options.scope,
         concurrency=options.concurrency,
         sink_dir=options.sink_dir,
+        credential_env=options.credential_env,
+        functional_env=options.functional_env,
     )
 
 
@@ -746,7 +895,14 @@ def run_attempt(
     after the monotonic end timestamp and therefore cannot affect ``elapsed_ns``.
     """
     options = _validate(options)
-    child_env = anonymous_environment(os.environ if source_env is None else source_env)
+    env_source = os.environ if source_env is None else source_env
+    if options.auth == "anonymous":
+        child_env = anonymous_environment(env_source, options.functional_env, options.region)
+    else:
+        assert options.credential_env is not None  # enforced by _validate above
+        child_env = authenticated_environment(
+            env_source, options.credential_env, options.functional_env, options.region
+        )
     with _open_output_directory(options.output) as output_fd:
         with tempfile.TemporaryDirectory(prefix=".s3-attempt-") as scratch_name:
             scratch = Path(scratch_name)
@@ -808,7 +964,7 @@ def run_attempt(
             "invocation": {
                 "argv": list(options.argv),
                 "authentication": options.auth,
-                "environment": child_env,
+                "environment": _redacted_environment(child_env),
             },
             "logical_request": {
                 "schema_version": 1,

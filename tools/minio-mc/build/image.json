@@ -1,0 +1,11 @@
+{
+  "tool": "minio-mc",
+  "subject_image": "minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727",
+  "subject_version": "RELEASE.2025-08-13T08-35-41Z",
+  "python_libc": "gnu",
+  "subject_workdir": "/",
+  "executable": ["/usr/bin/mc"],
+  "command": "adapter/command.py",
+  "normalizer": "adapter/normalize.py",
+  "adapter_bundle_sha256": "554c280629c6cfe7b3144446bdfbf804a40d9cd8ca4425b9bca7222d89a09d8a"
+}

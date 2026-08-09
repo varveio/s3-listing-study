@@ -1,0 +1,11 @@
+{
+  "tool": "s5cmd",
+  "subject_image": "peakcom/s5cmd@sha256:2ff939e2ee3c76adcadd78dbfc3e2569b18a3743ed9dcfccb1ec589af7fb9903",
+  "subject_version": "v2.3.0",
+  "python_libc": "musl",
+  "subject_workdir": "/aws",
+  "executable": ["/s5cmd"],
+  "command": "adapter/command.py",
+  "normalizer": "adapter/normalize.py",
+  "adapter_bundle_sha256": "905583c7f2a9b8063ff0acf057dbc504aea758e5ea044c2bc79df5a30139f1f9"
+}

@@ -1,0 +1,11 @@
+{
+  "tool": "ps3",
+  "subject_image": "registry.local/ps3@sha256:9c17987701d3fdccaa41b8ce41fbdf386a9872d663e1877b248697dfec712097",
+  "subject_version": "0.1.16",
+  "python_libc": "gnu",
+  "subject_workdir": "/",
+  "executable": ["/usr/local/bin/pS3"],
+  "command": "adapter/command.py",
+  "normalizer": "adapter/normalize.py",
+  "adapter_bundle_sha256": "a349d3a0bea8ed38b3b0bff57a5e5d49e084331947c08ad02f29907a3a98c452"
+}

@@ -29,6 +29,13 @@ Q_CONTENTS = "Contents[].[Key,Size,ETag,LastModified,StorageClass]"
 Q_VERSIONS = "Versions[].[Key,Size,ETag,LastModified,StorageClass]"
 
 
+def _auth_flags(request: CommandRequest) -> tuple[str, ...]:
+    # Authenticated runs sign requests with the credential the engine put in
+    # the child's environment; anonymous runs pin no-sign-request so a subject
+    # can never fall back to an ambient credential it should not have.
+    return ("--no-sign-request",) if request.auth == "anonymous" else ()
+
+
 def _s3api(request: CommandRequest, operation: str) -> list[str]:
     argv = [
         "s3api",
@@ -37,7 +44,7 @@ def _s3api(request: CommandRequest, operation: str) -> list[str]:
         request.bucket,
         "--region",
         request.region,
-        "--no-sign-request",
+        *_auth_flags(request),
     ]
     if request.prefix:
         argv.extend(("--prefix", request.prefix))
@@ -54,7 +61,7 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
             request.bucket,
             "--region",
             request.region,
-            "--no-sign-request",
+            *_auth_flags(request),
             "--delimiter",
             "/",
             "--query",
@@ -67,7 +74,7 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
         argv = ["s3", "ls", target]
         if mode == "s3-ls-recursive":
             argv.append("--recursive")
-        argv.extend(("--region", request.region, "--no-sign-request"))
+        argv.extend(("--region", request.region, *_auth_flags(request)))
         return tuple(argv)
 
     operations = {
@@ -90,7 +97,7 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
             request.bucket,
             "--region",
             request.region,
-            "--no-sign-request",
+            *_auth_flags(request),
             "--delimiter",
             "/",
         ]

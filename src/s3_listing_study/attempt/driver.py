@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from s3_listing_study.build_selection import load_staged_selection
@@ -24,6 +24,7 @@ class ResolvedInvocation:
     argv: tuple[str, ...]
     adapter_bundle_sha256: str
     subject_image_digest: str
+    functional_env: dict[str, str] = field(default_factory=dict)
 
 
 def validate_request(request: CommandRequest) -> None:
@@ -37,8 +38,8 @@ def validate_request(request: CommandRequest) -> None:
         raise CommandAdapterError("bucket is required")
     if not request.region:
         raise CommandAdapterError("region is required")
-    if request.auth != "anonymous":
-        raise CommandAdapterError("only anonymous authentication is implemented")
+    if request.auth not in ("anonymous", "authenticated"):
+        raise CommandAdapterError("auth must be anonymous or authenticated")
     if request.sink_dir and not request.sink_dir.startswith("/"):
         raise CommandAdapterError("sink directory must be an absolute path")
     if "\x00" in request.sink_dir:
@@ -71,13 +72,15 @@ def resolve_invocation(
         adapter_dir,
         expected_tool=request.tool,
     )
-    command = load_command_adapter(
+    adapter = load_command_adapter(
         adapter_dir / "command.py",
         expected_tool=request.tool,
-    ).compile(request)
+    )
+    command = adapter.compile(request)
     _reference, subject_image_digest = selection.subject_image.rsplit("@", 1)
     return ResolvedInvocation(
         command,
         selection.adapter_bundle_sha256,
         subject_image_digest,
+        adapter.functional_env,
     )

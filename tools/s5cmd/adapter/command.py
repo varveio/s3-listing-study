@@ -15,17 +15,25 @@ MODES = frozenset(
 )
 
 
+def _auth_flags(request: CommandRequest) -> tuple[str, ...]:
+    # Authenticated runs sign requests with the credential the engine put in
+    # the child's environment; anonymous runs pin no-sign-request so a subject
+    # can never fall back to an ambient credential it should not have.
+    return ("--no-sign-request",) if request.auth == "anonymous" else ()
+
+
 def _build_tail(request: CommandRequest) -> tuple[str, ...]:
     target = f"s3://{request.bucket}/{request.prefix}"
     recursive = target + "*"
+    auth = _auth_flags(request)
     commands = {
-        "recursive": ("--no-sign-request", "ls", "-e", "-s", recursive),
-        "delimiter": ("--no-sign-request", "ls", "-e", "-s", target),
-        "rootkeys": ("--no-sign-request", "ls", "-e", "-s", target),
-        "json": ("--json", "--no-sign-request", "ls", recursive),
-        "listv1": ("--no-sign-request", "--use-list-objects-v1", "ls", "-e", "-s", recursive),
-        "allversions": ("--no-sign-request", "ls", "--all-versions", "-e", "-s", recursive),
-        "fullpath": ("--no-sign-request", "ls", "--show-fullpath", recursive),
+        "recursive": (*auth, "ls", "-e", "-s", recursive),
+        "delimiter": (*auth, "ls", "-e", "-s", target),
+        "rootkeys": (*auth, "ls", "-e", "-s", target),
+        "json": ("--json", *auth, "ls", recursive),
+        "listv1": (*auth, "--use-list-objects-v1", "ls", "-e", "-s", recursive),
+        "allversions": (*auth, "ls", "--all-versions", "-e", "-s", recursive),
+        "fullpath": (*auth, "ls", "--show-fullpath", recursive),
     }
     try:
         return commands[request.mode]
