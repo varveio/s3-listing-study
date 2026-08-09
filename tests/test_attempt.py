@@ -845,8 +845,7 @@ def test_generic_dockerfile_bakes_no_tool_specific_command_prefix() -> None:
     dockerfile = (root / "harness/derived-image/Dockerfile").read_text()
 
     assert dockerfile.count("FROM subject") == 2
-    assert "COPY src/s3_listing_study/attempt/ /build/payload/" in dockerfile
-    assert "COPY src/s3_listing_study/secret_scan.py /build/payload/" in dockerfile
+    assert "COPY src/s3_listing_study/ /build/payload/s3_listing_study/" in dockerfile
     assert "COPY harness/derived-image/zipapp_main.py /build/payload/" in dockerfile
     assert "COPY --from=adapter command.py /build/tool/command.py" in dockerfile
     assert "COPY --from=adapter normalize.py /build/tool/normalize.py" in dockerfile

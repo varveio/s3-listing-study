@@ -7,12 +7,10 @@ from pathlib import Path
 
 sys.path.insert(0, "/build/payload")
 
-# The Dockerfile copies an explicit allowlist of payload modules, not the whole
-# package: the verifier, the DuckDB adapter, and the capsule tooling have no
-# business inside a subject image. Importing the entry point closes that
-# allowlist here — a module left out of it raises ImportError against the exact
-# missing name and fails the build, instead of surfacing inside a benchmark
-# attempt on a shipped image.
+# Import the entry point before it is sealed into an image. A payload that does
+# not import — a missing dependency, a syntax error — then fails the build
+# against the exact name, instead of surfacing inside a benchmark attempt on an
+# image that has already shipped.
 import s3_listing_study.attempt.cli  # noqa: F401
 from s3_listing_study.build_selection import BuildSelectionError, load_staged_selection
 from s3_listing_study.python_runtime import running_libc

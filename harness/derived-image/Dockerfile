@@ -13,13 +13,7 @@ FROM subject AS attempt-builder
 USER root
 WORKDIR /build
 COPY --from=python . /opt/s3-listing-study/python/
-COPY src/s3_listing_study/__init__.py /build/payload/s3_listing_study/__init__.py
-COPY src/s3_listing_study/argparse_utils.py /build/payload/s3_listing_study/argparse_utils.py
-COPY src/s3_listing_study/build_selection.py /build/payload/s3_listing_study/build_selection.py
-COPY src/s3_listing_study/command_adapter.py /build/payload/s3_listing_study/command_adapter.py
-COPY src/s3_listing_study/python_runtime.py /build/payload/s3_listing_study/python_runtime.py
-COPY src/s3_listing_study/secret_scan.py /build/payload/s3_listing_study/secret_scan.py
-COPY src/s3_listing_study/attempt/ /build/payload/s3_listing_study/attempt/
+COPY src/s3_listing_study/ /build/payload/s3_listing_study/
 COPY harness/derived-image/zipapp_main.py /build/payload/__main__.py
 COPY harness/derived-image/validate_selection.py /build/validate_selection.py
 COPY --from=selection image.json /build/image.json

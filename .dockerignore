@@ -11,3 +11,5 @@
 *
 !src
 !harness
+**/__pycache__
+**/*.pyc

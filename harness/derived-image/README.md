@@ -49,15 +49,23 @@ the build host and dies inside the subject. `validate_selection.py` runs on the
 bound interpreter during the build and refuses a registration that declares the
 other one.
 
-## The payload is an allowlist
+## The payload is the whole package
 
-The Dockerfile copies named modules — `argparse_utils`, `build_selection`,
-`command_adapter`, `python_runtime`, `secret_scan`, and `attempt/` — not the
-whole package. The verifier, the DuckDB adapter, and the capsule tooling are
-deliberately absent: a subject image has no business carrying the code that
-judges its output. `validate_selection.py` imports the entry point during the
-build, so a module left out of that list fails the build rather than raising
-`ImportError` inside a benchmark attempt.
+The Dockerfile copies `src/s3_listing_study/` in one line. Only `attempt/` and
+what it imports ever runs — the zipapp's entry point is `attempt.cli` — but the
+rest rides along rather than being tracked in a hand-maintained file list that
+drifts every time an import changes.
+
+The cost is that an edit anywhere in the package changes the derived image's
+digest, even when no in-image code changed. That is acceptable because a
+campaign rebuilds every registered image from one harness commit before it runs
+(owner's call, 2026-08-09), so attempts within a campaign share an image
+revision by construction, and results from different platform strata are never
+mixed anyway.
+
+`validate_selection.py` imports the entry point during the build, so a payload
+that does not import fails the build instead of surfacing inside a benchmark
+attempt on a shipped image.
 
 ## Registration
 
