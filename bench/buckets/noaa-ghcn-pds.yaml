@@ -14,19 +14,28 @@ bucket: noaa-ghcn-pds
 region: us-east-1
 
 defaults:
-  reps: 3
+  # One attempt per case for now. Raising this is cheap on Batch, where reps are
+  # separate tasks rather than added wall-clock, so the number to raise it to is
+  # a question for a calibration run and not a guess.
+  reps: 1
 
   # ~1M objects at the 1,000-key LIST page cap is ~1,000 sequential pages. The
   # worker's own default is 300s, which the one large-N measurement we have
   # (148,917 keys in 146s) says would kill most tools around the 15% mark.
   timeout_s: 3600
 
-  # PLACEHOLDER — pending the real per-bucket allocation. Every field is
-  # required so that no case can resolve to a box nobody chose.
+  # N4 is Intel Emerald Rapids (5th-gen Xeon) — a fixed modern core, unlike E2's
+  # shared and variable one, which is not a platform to time anything on. The
+  # modern families start at 2 GB per vCPU in their highcpu shapes, so 2 vCPU
+  # comes with 4 GB and there is no 2 GB/2 vCPU box to ask for; the task takes
+  # the 2 GB and the rest is headroom.
+  #
+  # Note for the Batch config: N4 and C4 do not support pd-balanced, the Compute
+  # Engine default, and need hyperdisk-balanced or pd-ssd boot disks.
   resources:
-    machine_type: e2-standard-4
-    memory_mib: 8192
-    cpu_milli: 4000
+    machine_type: n4-highcpu-2   # 2 vCPU / 4 GB
+    memory_mib: 2048
+    cpu_milli: 2000
 
 # Every registered tool must appear under `tools` or `exclude`; a tool that is
 # simply absent is a validation error rather than a silent skip. All eleven run
@@ -76,13 +85,21 @@ tools:
     matrix:
       mode: [ls]
 
-  # The one tool being swept rather than sampled: output format, sorting, and
-  # memory, as a cross-product. Six cases from six lines.
+  # The one tool being swept rather than sampled. Two blocks, because the modes
+  # do not all want the same sweep: only the sorted one has a reason to care
+  # about memory, and a single cross-product would have run every mode at every
+  # size to find that out.
   #
-  # Memory varies as a per-task limit on one machine type rather than by
-  # swapping e2-small for e2-medium, because those differ in vCPU as well and
-  # the result could not be attributed to memory.
+  # Memory varies as a per-task limit rather than by swapping machine types,
+  # since two machine types differ in vCPU as well and the result could not be
+  # attributed to memory. The block still needs a bigger box to hold the larger
+  # limit: a 4096 MiB task does not fit beside the OS on a 4 GB VM.
   swath:
     matrix:
-      mode: [recursive-tsv, recursive-parquet, recursive-parquet-sorted]
-      memory_mib: [2048, 4096]
+      - mode: [recursive-tsv, recursive-parquet]
+        memory_mib: [2048]
+
+      - mode: [recursive-parquet-sorted]
+        memory_mib: [2048, 4096]
+        resources:
+          machine_type: n4-highcpu-4   # 4 vCPU / 8 GB

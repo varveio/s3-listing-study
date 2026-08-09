@@ -26,11 +26,31 @@ ID, no image digest, and no date.
 ## Cases are generated
 
 Each tool declares a `matrix`, and its cross-product is that tool's set of
-cases. Three modes and two memory sizes is six cases from six lines, rather
-than six hand-copied blocks that can drift apart.
+cases — two modes and two memory sizes is four cases from four lines, rather
+than four hand-copied blocks that can drift apart.
 
-Values resolve in three shallow layers, nearest statement winning:
-`defaults` → the tool's own block → the matrix axis. `resources` is a flat
+One cross-product forces every mode to take every value of every axis, which is
+wrong as soon as one mode needs an allocation its siblings do not. So a tool may
+state several blocks and take their union, and a block may carry its own
+`resources`:
+
+```yaml
+swath:
+  matrix:
+    - mode: [recursive-tsv, recursive-parquet]
+      memory_mib: [2048]
+
+    - mode: [recursive-parquet-sorted]
+      memory_mib: [2048, 4096]
+      resources:
+        machine_type: n4-highcpu-4
+```
+
+Every block must declare the same axis *names*, so one tool's case IDs keep
+their shape; the values are what differ.
+
+Values resolve in four shallow layers, nearest statement winning:
+`defaults` → the tool → the block → the matrix axis. `resources` is a flat
 table of scalars, so there is no nesting for a merge surprise to hide in.
 
 Every tool with a `build/image.json` must appear under `tools` or `exclude`

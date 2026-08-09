@@ -50,9 +50,13 @@ def test_the_committed_plan_loads() -> None:
     assert loaded.bucket == "noaa-ghcn-pds"
     assert loaded.region == "us-east-1"
     assert len(loaded.tools()) == 11
-    # Ten sampled tools plus swath's 3 modes x 2 memory sizes.
-    assert len(loaded.cases) == 16
-    assert len(loaded.cases_for("swath")) == 6
+    # Ten sampled tools, plus swath's two blocks: 2 streaming modes at one size
+    # and the sorted mode at two.
+    assert len(loaded.cases) == 14
+    assert len(loaded.cases_for("swath")) == 4
+    # The sorted block's own box, not the plan default.
+    sorted_cases = [c for c in loaded.cases_for("swath") if "sorted" in c.mode]
+    assert {c.resources.machine_type for c in sorted_cases} == {"n4-highcpu-4"}
 
 
 def test_the_committed_plan_matches_the_registered_tools() -> None:
@@ -116,6 +120,69 @@ def test_a_tool_may_override_the_schedule(tmp_path: Path) -> None:
     )
     case = bench.Plan.load(path).cases[0]
     assert (case.timeout_s, case.reps) == (7200, 3)
+
+
+def test_blocks_let_modes_take_different_sweeps(tmp_path: Path) -> None:
+    """The point of blocks: only the mode that cares about memory is swept."""
+    path = write(
+        tmp_path,
+        """
+        swath:
+          matrix:
+            - mode: [recursive-tsv]
+              memory_mib: [2048]
+            - mode: [recursive-parquet-sorted]
+              memory_mib: [2048, 4096]
+              resources:
+                machine_type: n4-highcpu-4
+        """,
+    )
+    cases = bench.Plan.load(path).cases
+    assert [c.case_id for c in cases] == [
+        "recursive-tsv.memory_mib-2048",
+        "recursive-parquet-sorted.memory_mib-2048",
+        "recursive-parquet-sorted.memory_mib-4096",
+    ]
+    # A block's resources override the tool and the defaults, and its axes still
+    # override the block.
+    assert cases[0].resources.machine_type == "e2-standard-4"
+    assert [c.resources.machine_type for c in cases[1:]] == ["n4-highcpu-4"] * 2
+    assert [c.resources.memory_mib for c in cases[1:]] == [2048, 4096]
+
+
+def test_blocks_that_declare_different_axes_are_refused(tmp_path: Path) -> None:
+    """Mixed axis sets would give one tool IDs of two different shapes."""
+    path = write(
+        tmp_path,
+        """
+        swath:
+          matrix:
+            - mode: [recursive-tsv]
+            - mode: [recursive-parquet]
+              memory_mib: [4096]
+        """,
+    )
+    with pytest.raises(bench.PlanError, match="mixes axis sets"):
+        bench.Plan.load(path)
+
+
+def test_blocks_generating_the_same_case_twice_are_refused(tmp_path: Path) -> None:
+    """Two blocks can overlap; the second would append into the first's evidence."""
+    path = write(
+        tmp_path,
+        """
+        swath:
+          matrix:
+            - mode: [recursive-tsv]
+              memory_mib: [2048]
+            - mode: [recursive-tsv]
+              memory_mib: [2048]
+              resources:
+                machine_type: n4-highcpu-4
+        """,
+    )
+    with pytest.raises(bench.PlanError, match="twice"):
+        bench.Plan.load(path)
 
 
 # ── identity ─────────────────────────────────────────────────────────────────
@@ -318,7 +385,7 @@ def test_a_mode_the_adapter_lacks_is_refused(tmp_path: Path) -> None:
 def test_resolve_plan_expands_the_committed_plan(capsys: pytest.CaptureFixture[str]) -> None:
     assert bench_cli.resolve_plan_main(["--bucket", "noaa-ghcn-pds"]) == 0
     out = capsys.readouterr().out
-    assert "16 cases, 48 attempts" in out
+    assert "14 cases, 14 attempts" in out
     assert "recursive-parquet-sorted.memory_mib-2048" in out
 
 
@@ -327,7 +394,7 @@ def test_resolve_plan_emits_machine_readable_cases(
 ) -> None:
     assert bench_cli.resolve_plan_main(["--bucket", "noaa-ghcn-pds", "--json"]) == 0
     payload = json.loads(capsys.readouterr().out)
-    assert len(payload["cases"]) == 16
+    assert len(payload["cases"]) == 14
     # The plan digest travels with the resolution so a submission can cite the
     # exact bytes it expanded.
     assert len(payload["plan_sha256"]) == 64

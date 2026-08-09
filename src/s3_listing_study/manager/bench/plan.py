@@ -11,11 +11,16 @@ with its image set frozen, which is why a plan carries no campaign ID and no
 image digest. Receipts group under the campaign that produced them.
 
 **Cases are generated, not hand-written.** Each tool declares a ``matrix`` whose
-cross-product is the set of cases, so the four swath cases behind "2 GB vs 4 GB,
-sorted vs unsorted" are two lines rather than four hand-copied blocks that can
-disagree. Case IDs are derived from the axis values for the same reason: a
-hand-typed ID is a hand-typed opportunity to file one case's attempt under
-another case's name.
+cross-product is the set of cases, so "2 GB vs 4 GB, sorted vs unsorted" is two
+lines rather than four hand-copied blocks that can disagree. Case IDs are
+derived from the axis values for the same reason: a hand-typed ID is a
+hand-typed opportunity to file one case's attempt under another case's name.
+
+A tool may state several blocks and take their union, because one cross-product
+forces every mode to take every value of every axis — wrong as soon as one mode
+needs an allocation its siblings do not. A block carries its own ``resources``
+override for exactly that, and every block must declare the same axis names so
+one tool's IDs keep their shape.
 
 **The derived ID is a path, not an identity.** Adding an axis later changes
 every ID a tool generates, so an ID cannot be what says "these attempts are the
@@ -318,40 +323,95 @@ def _tool_cases(
     resources = {**base_resources, **_resources(table, where, path, complete=False)}
     schedule = {**base_schedule, **_schedule(table, where, path, complete=False)}
 
-    axes = _matrix(table, where, path)
-    ordered = [axis for axis in AXIS_FIELDS if axis in axes]
     cases: list[Case] = []
-    for combination in itertools.product(*(axes[axis] for axis in ordered)):
-        chosen = tuple(zip(ordered, combination, strict=True))
-        case_resources = {**resources, **{k: v for k, v in chosen if k in RESOURCE_FIELDS}}
-        mode = str(dict(chosen)["mode"])
-        cases.append(_case(tool, mode, chosen, case_resources, schedule, bucket, region, path))
+    for block in _matrix_blocks(table, where, path):
+        # Block resources sit between the tool and the axes: a block is how one
+        # group of modes says it needs a different box from its siblings.
+        block_resources = {**resources, **block.resources}
+        ordered = [axis for axis in AXIS_FIELDS if axis in block.axes]
+        for combination in itertools.product(*(block.axes[axis] for axis in ordered)):
+            chosen = tuple(zip(ordered, combination, strict=True))
+            case_resources = {
+                **block_resources,
+                **{k: v for k, v in chosen if k in RESOURCE_FIELDS},
+            }
+            mode = str(dict(chosen)["mode"])
+            cases.append(_case(tool, mode, chosen, case_resources, schedule, bucket, region, path))
     return cases
 
 
-def _matrix(table: Mapping[str, Any], where: str, path: Path) -> dict[str, list[str | int]]:
-    matrix = _table(table, "matrix", f"{where}.matrix", path)
-    _reject_unknown(matrix, AXIS_FIELDS, f"'{where}.matrix'", path)
-    if "mode" not in matrix:
-        raise PlanError(f"'{where}.matrix' in {path} has no 'mode' axis")
+@dataclass(frozen=True)
+class _Block:
+    """One cross-product, plus the allocation it overrides for its own cases."""
+
+    axes: dict[str, list[str | int]]
+    resources: dict[str, Any]
+
+
+def _matrix_blocks(table: Mapping[str, Any], where: str, path: Path) -> list[_Block]:
+    """One block, or several when modes do not all want the same sweep.
+
+    A single cross-product forces every mode to take every value of every axis.
+    That is wrong as soon as one mode needs a different allocation from its
+    siblings — sorting spills to disk where a streaming write does not — so a
+    tool may state several blocks and take their union.
+
+    Every block must declare the same axis *names*, so that one tool's case IDs
+    stay the same shape and remain comparable. The values are what differ.
+    """
+    raw = table.get("matrix")
+    if raw is None:
+        raise PlanError(f"'{where}' in {path} has no 'matrix'")
+    entries = raw if isinstance(raw, list) else [raw]
+    if not entries:
+        raise PlanError(f"'{where}.matrix' in {path} is an empty list")
+
+    blocks: list[_Block] = []
+    for index, entry in enumerate(entries):
+        label = f"{where}.matrix" if not isinstance(raw, list) else f"{where}.matrix[{index}]"
+        if not isinstance(entry, dict):
+            raise PlanError(f"'{label}' in {path} is not a mapping")
+        _reject_unknown(entry, (*AXIS_FIELDS, "resources"), f"'{label}'", path)
+        blocks.append(
+            _Block(
+                axes=_axes(entry, label, path),
+                resources=_resources(entry, label, path, complete=False),
+            )
+        )
+
+    names = {frozenset(block.axes) for block in blocks}
+    if len(names) > 1:
+        shapes = " vs ".join(sorted("+".join(sorted(n)) for n in names))
+        raise PlanError(
+            f"'{where}.matrix' in {path} mixes axis sets ({shapes}) — every block must "
+            "declare the same axes so the tool's case ids stay comparable"
+        )
+    return blocks
+
+
+def _axes(entry: Mapping[str, Any], where: str, path: Path) -> dict[str, list[str | int]]:
+    if "mode" not in entry:
+        raise PlanError(f"'{where}' in {path} has no 'mode' axis")
     axes: dict[str, list[str | int]] = {}
-    for axis, values in matrix.items():
+    for axis, values in entry.items():
+        if axis == "resources":
+            continue
         if not isinstance(values, list) or not values:
-            raise PlanError(f"'{where}.matrix' '{axis}' in {path} is not a non-empty list")
+            raise PlanError(f"'{where}' '{axis}' in {path} is not a non-empty list")
         checked: list[str | int] = []
         for value in values:
-            if axis == "mode" or axis == "machine_type":
+            if axis in ("mode", "machine_type"):
                 if not isinstance(value, str) or not value.strip():
                     raise PlanError(
-                        f"'{where}.matrix' '{axis}' in {path} has a non-string value: {value!r}"
+                        f"'{where}' '{axis}' in {path} has a non-string value: {value!r}"
                     )
                 checked.append(value)
             else:
-                checked.append(_positive_int(value, axis, f"{where}.matrix", path))
+                checked.append(_positive_int(value, axis, where, path))
         # A repeated value would silently generate two identical cases whose IDs
         # collide, so the second would append into the first's directory.
         if len(set(checked)) != len(checked):
-            raise PlanError(f"'{where}.matrix' '{axis}' in {path} repeats a value")
+            raise PlanError(f"'{where}' '{axis}' in {path} repeats a value")
         axes[axis] = checked
     return axes
 
