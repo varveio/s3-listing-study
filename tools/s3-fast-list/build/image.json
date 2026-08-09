@@ -1,0 +1,11 @@
+{
+  "tool": "s3-fast-list",
+  "subject_image": "registry.local/s3-fast-list@sha256:877f4bb39c49aeb7e8a46474ab5b1af1652dbaf530d4745fd9088274b2a0ee69",
+  "subject_version": "1.1.0",
+  "python_libc": "gnu",
+  "subject_workdir": "/",
+  "executable": ["/usr/bin/s3-fast-list"],
+  "command": "adapter/command.py",
+  "normalizer": "adapter/normalize.py",
+  "adapter_bundle_sha256": "32302baebc44d7add96e40fac8c2175be43157c4010831f372edd15825dc6113"
+}
