@@ -1,0 +1,13 @@
+# Build context for the shared derived-image recipe.
+#
+# harness/derived-image/Dockerfile takes the repository root as its context but
+# copies only the attempt payload under src/ and its own helpers under harness/.
+# Without this file every derived-image build ships the whole 187 MB tree —
+# receipts, research, capsule data, and .git — to the daemon for nothing.
+#
+# The per-tool subject recipes under tools/*/build/ are unaffected: they either
+# copy nothing from a context (s3p, s4cmd, s3kor, ps3) or are documented to
+# build inside an upstream checkout rather than this repository (s3-fast-list).
+*
+!src
+!harness

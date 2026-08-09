@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from s3_listing_study import __version__
 from s3_listing_study.command_adapter import CommandAdapterError, load_command_adapter
 from s3_listing_study.python_runtime import LIBC_VALUES, PythonRuntimeError, ensure_runtime
 
@@ -33,11 +34,22 @@ SUBJECT_IMAGE_RE = re.compile(
     r"[a-z0-9]+(?:[._-][a-z0-9]+)*@sha256:[0-9a-f]{64}"
 )
 SHA256_RE = re.compile(r"[0-9a-f]{64}")
+SUBJECT_VERSION_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+"""A subject version that is also a legal Docker tag component.
+
+The derived-image name embeds it verbatim, so a value Docker would refuse has
+to fail at registration rather than at ``docker build``.
+"""
+
 ADAPTER_FILES = ("command.py", "normalize.py")
 ADAPTER_MANIFEST_HEADER = b"s3-listing-study-adapter-bundle-v1\0"
+DERIVED_IMAGE_NAMESPACE = "s3-listing-study"
+"""Repository component of a derived image name, so it cannot read as upstream's."""
+
 REQUIRED_FIELDS = {
     "tool",
     "subject_image",
+    "subject_version",
     "python_libc",
     "subject_workdir",
     "executable",
@@ -55,6 +67,7 @@ class BuildSelectionError(ValueError):
 class BuildSelection:
     tool: str
     subject_image: str
+    subject_version: str
     python_libc: str
     subject_workdir: str
     executable: tuple[str, ...]
@@ -163,6 +176,19 @@ def load_staged_selection(
     subject_image = raw["subject_image"]
     if not isinstance(subject_image, str) or SUBJECT_IMAGE_RE.fullmatch(subject_image) is None:
         raise BuildSelectionError("subject_image must be pinned by a lowercase sha256 digest")
+
+    # The digest is the subject's identity; this is the human-readable name for
+    # the same thing, and it exists so a derived image can say which release it
+    # wraps. It is declared here rather than read from `data/tool.json`, whose
+    # `tested.version` records the version the study's receipts and claims are
+    # anchored to — a different fact that legitimately lags the pinned digest
+    # during a version bump.
+    subject_version = raw["subject_version"]
+    if not isinstance(subject_version, str) or not SUBJECT_VERSION_RE.fullmatch(subject_version):
+        raise BuildSelectionError(
+            "subject_version must name the pinned image's release as a Docker tag component"
+        )
+
     python_libc = raw["python_libc"]
     if python_libc not in LIBC_VALUES:
         raise BuildSelectionError(
@@ -210,6 +236,7 @@ def load_staged_selection(
     return BuildSelection(
         tool=tool,
         subject_image=subject_image,
+        subject_version=subject_version,
         python_libc=python_libc,
         subject_workdir=subject_workdir,
         executable=executable,
@@ -258,13 +285,37 @@ def load_selection(path: Path, *, expected_tool: str, subject_image: str) -> Bui
     return selection
 
 
+def derived_image_tag(selection: BuildSelection) -> str:
+    """The default name for the derived image built from one registration.
+
+    A derived image is neither the subject nor the harness alone, so a name
+    carrying one version misreads as the other: ``swath:0.2.2`` sat next to
+    upstream's own ``ghcr.io/varveio/swath:0.2.2`` in a local image list and was
+    taken for it. The name therefore states both versions and the subject digest
+    it wraps — ``s3-listing-study/swath:0.2.2-h0.1.0-e03f7be9c025``.
+
+    The tag is a label for humans, not an identity. Identity stays the derived
+    image's own digest, which the attempt engine requires as ``--derived-image``
+    and records in ``result.json``; two builds differing only in adapter bytes
+    share this name and are told apart there.
+    """
+    digest = selection.subject_image.partition("@sha256:")[2][:12]
+    return (
+        f"{DERIVED_IMAGE_NAMESPACE}/{selection.tool}"
+        f":{selection.subject_version}-h{__version__}-{digest}"
+    )
+
+
 def build_derived_image_main(argv: Sequence[str] | None = None) -> int:
     """Build one registered derived image from only its slug and output tag."""
     parser = argparse.ArgumentParser(prog="s3-listing-study build-derived-image")
     parser.add_argument("--tool", required=True)
-    parser.add_argument("--tag", required=True)
+    parser.add_argument(
+        "--tag",
+        help="output image name; defaults to the name derived from the registration",
+    )
     args = parser.parse_args(argv)
-    if not args.tag or "\x00" in args.tag:
+    if args.tag is not None and (not args.tag or "\x00" in args.tag):
         parser.error("--tag must be a non-empty Docker image tag")
     try:
         root = Path.cwd().resolve(strict=True)
@@ -289,6 +340,7 @@ def build_derived_image_main(argv: Sequence[str] | None = None) -> int:
         print(f"build-derived-image: {exc}", file=sys.stderr)
         return 2
 
+    tag = derived_image_tag(selection) if args.tag is None else args.tag
     command = (
         "docker",
         "build",
@@ -303,9 +355,10 @@ def build_derived_image_main(argv: Sequence[str] | None = None) -> int:
         "--build-context",
         f"python={interpreter}",
         "--tag",
-        args.tag,
+        tag,
         str(root),
     )
+    print(f"build-derived-image: building {tag}", file=sys.stderr)
     try:
         return subprocess.run(command, check=False).returncode
     except OSError as exc:

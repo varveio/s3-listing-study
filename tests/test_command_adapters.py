@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -13,11 +14,12 @@ from types import ModuleType
 
 import pytest
 
-from s3_listing_study import build_selection
+from s3_listing_study import __version__, build_selection
 from s3_listing_study.build_selection import (
     BuildSelectionError,
     adapter_bundle_sha256,
     build_derived_image_main,
+    derived_image_tag,
     load_registered_selection,
     load_selection,
 )
@@ -510,6 +512,7 @@ def _registered_fixture(tmp_path: Path) -> tuple[Path, Path, dict[str, object]]:
         "subject_image": (
             "amazon/aws-cli@sha256:406ca32d31e640a56e8d52921b40528cc64bfa59ec9cb4ee1456db6746cb7292"
         ),
+        "subject_version": "2.36.1",
         "python_libc": "gnu",
         "subject_workdir": "/aws",
         "executable": ["/usr/local/bin/aws"],
@@ -555,6 +558,11 @@ def test_selection_rejects_duplicate_json_keys(tmp_path: Path) -> None:
         ("subject_image", "amazon/aws-cli:latest", "pinned"),
         ("subject_image", "amazon/aws-cli@sha256:ABC", "pinned"),
         ("subject_image", "../aws-cli@sha256:" + "0" * 64, "pinned"),
+        ("subject_version", "", "subject_version"),
+        ("subject_version", "-2.36.1", "subject_version"),
+        ("subject_version", "2.36.1 ", "subject_version"),
+        ("subject_version", "2.36.1/beta", "subject_version"),
+        ("subject_version", 2, "subject_version"),
         ("python_libc", "glibc", "python_libc must be one of"),
         ("python_libc", "", "python_libc must be one of"),
         ("subject_workdir", "/aws/", "canonical absolute"),
@@ -663,3 +671,25 @@ def test_slug_only_builder_registers_exact_named_contexts(
     assert f"adapter={REPO / 'tools/aws-cli/adapter'}" in command
     assert f"selection={REPO / 'tools/aws-cli/build'}" in command
     assert command[-3:] == ("--tag", "study:test", str(REPO))
+
+    # Omitting --tag must not fall back to a bare, upstream-looking name.
+    calls.clear()
+    assert build_derived_image_main(["--tool", "aws-cli"]) == 0
+    assert calls[0][-3:] == (
+        "--tag",
+        f"s3-listing-study/aws-cli:2.36.1-h{__version__}-406ca32d31e6",
+        str(REPO),
+    )
+
+
+def test_derived_image_tag_states_both_versions_and_the_subject_digest() -> None:
+    """The name a reader sees must not be mistakable for the upstream image."""
+    selection = load_registered_selection(REPO, "swath")
+    tag = derived_image_tag(selection)
+    assert tag == f"s3-listing-study/swath:0.2.2-h{__version__}-e03f7be9c025"
+    # A Docker reference: one repository component, one legal tag component.
+    repository, _, reference = tag.partition(":")
+    assert re.fullmatch(
+        r"[a-z0-9]+(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)+", repository
+    )
+    assert re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9._-]{0,127}", reference)

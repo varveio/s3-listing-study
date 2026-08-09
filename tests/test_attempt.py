@@ -868,6 +868,7 @@ def test_generic_dockerfile_bakes_no_tool_specific_command_prefix() -> None:
         "subject_image": (
             "amazon/aws-cli@sha256:406ca32d31e640a56e8d52921b40528cc64bfa59ec9cb4ee1456db6746cb7292"
         ),
+        "subject_version": "2.36.1",
         "python_libc": "gnu",
         "subject_workdir": "/aws",
         "executable": ["/usr/local/bin/aws"],
