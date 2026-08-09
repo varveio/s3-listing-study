@@ -1,0 +1,27 @@
+# The mode each tool runs when a plan names it without saying more.
+#
+# Shared by every bucket plan, because a tool's representative mode is a fact
+# about the tool and not about any one bucket. Restating it per plan would mean
+# eleven lines of the same thing in each, drifting apart one edit at a time.
+#
+# Not in tools/<tool>/build/image.json: that file is an exact-field-set contract
+# for building the derived image, and which mode a benchmark samples is not a
+# property of the build.
+#
+# tests/test_bench_plan.py checks every mode here against the adapter that would
+# have to implement it, so a rename in an adapter cannot leave this stale.
+
+spec_version: 1
+
+default_modes:
+  aws-cli: s3api-v2-text
+  minio-mc: recursive
+  ps3: list
+  rclone: recursive-hierarchical
+  s3-fast-list: list
+  s3kor: list
+  s3p: ls
+  s4cmd: recursive
+  s5cmd: recursive
+  s7cmd: recursive-tsv
+  swath: recursive-tsv

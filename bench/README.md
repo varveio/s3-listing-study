@@ -23,9 +23,25 @@ A campaign runs one or more plans with its image set frozen, and receipts group
 under the campaign that produced them. That is why a plan carries no campaign
 ID, no image digest, and no date.
 
+## Most tools just run
+
+A tool that runs once, at its usual mode, on the plan's own allocation says
+nothing a plan needs to spell out. Listing the name is the whole declaration:
+
+```yaml
+sampled: [aws-cli, s5cmd, rclone, minio-mc, s7cmd, s3-fast-list, ps3, s3kor, s4cmd, s3p]
+```
+
+The mode each one runs lives in [`tools.yaml`](tools.yaml), because a tool's
+representative mode is a fact about the tool rather than about any one bucket.
+Restating it per plan would mean the same eleven lines in every file, drifting
+apart one edit at a time. A test checks each default against the adapter that
+implements it, so an adapter rename cannot leave it stale.
+
 ## Cases are generated
 
-Each tool declares a `matrix`, and its cross-product is that tool's set of
+Tools needing more than one case go under `tools` and declare a `matrix`, whose
+cross-product is that tool's set of
 cases — two modes and two memory sizes is four cases from four lines, rather
 than four hand-copied blocks that can drift apart.
 
@@ -53,9 +69,10 @@ Values resolve in four shallow layers, nearest statement winning:
 `defaults` → the tool → the block → the matrix axis. `resources` is a flat
 table of scalars, so there is no nesting for a merge surprise to hide in.
 
-Every tool with a `build/image.json` must appear under `tools` or `exclude`
-with a reason. A tool that is simply absent is a validation error — registering
-a subject and forgetting a bucket should not look like a decision to skip it.
+Every tool with a `build/image.json` must appear under `sampled`, `tools` or
+`exclude` with a reason, and in exactly one of them. A tool that is simply
+absent is a validation error — registering a subject and forgetting a bucket
+should not look like a decision to skip it.
 
 ## Case IDs are paths, not identities
 

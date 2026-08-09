@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import textwrap
 from pathlib import Path
@@ -66,7 +67,65 @@ def test_the_committed_plan_matches_the_registered_tools() -> None:
     bench.check_roster(bench.Plan.load(bench.default_path("noaa-ghcn-pds")), registered)
 
 
+def test_every_default_mode_is_one_its_adapter_implements() -> None:
+    """The drift guard for bench/tools.yaml, read from the adapters themselves.
+
+    A mode renamed in an adapter would otherwise leave a default that only fails
+    once a campaign is already submitting work.
+    """
+    root = Path(__file__).resolve().parents[1]
+    defaults = bench.load_default_modes(bench.bench_dir() / "tools.yaml")
+    for tool, mode in defaults.items():
+        source = (root / "tools" / tool / "adapter" / "command.py").read_text(encoding="utf-8")
+        node = next(
+            n
+            for n in ast.walk(ast.parse(source))
+            if isinstance(n, ast.Assign) and any(getattr(t, "id", "") == "MODES" for t in n.targets)
+        )
+        value = node.value
+        implemented = ast.literal_eval(value.args[0] if isinstance(value, ast.Call) else value)
+        assert mode in implemented, f"{tool}: {mode!r} not in {sorted(implemented)}"
+
+
+def test_the_committed_plan_declares_every_tool_once() -> None:
+    """Sampled and expanded rosters must not overlap or leave a tool out."""
+    loaded = bench.Plan.load(bench.default_path("noaa-ghcn-pds"))
+    assert loaded.declared() == bench_cli.registered_tools()
+
+
 # ── expansion and cascade ────────────────────────────────────────────────────
+
+
+def test_a_sampled_tool_runs_once_at_its_default_mode(tmp_path: Path) -> None:
+    """Naming the tool is the whole declaration."""
+    path = write(tmp_path, ONE_CASE, extra="sampled: [s5cmd, s3p]\n")
+    loaded = bench.Plan.load(path, default_modes={"s5cmd": "recursive", "s3p": "ls"})
+    sampled = [c for c in loaded.cases if c.tool in ("s5cmd", "s3p")]
+    assert [(c.tool, c.case_id, c.mode) for c in sampled] == [
+        ("s5cmd", "recursive", "recursive"),
+        ("s3p", "ls", "ls"),
+    ]
+    # Sampled tools take the plan's allocation, not one of their own.
+    assert {c.resources.machine_type for c in sampled} == {"e2-standard-4"}
+
+
+def test_sampling_a_tool_with_no_default_mode_is_refused(tmp_path: Path) -> None:
+    path = write(tmp_path, ONE_CASE, extra="sampled: [s5cmd]\n")
+    with pytest.raises(bench.PlanError, match="no default mode"):
+        bench.Plan.load(path, default_modes={"s3p": "ls"})
+
+
+def test_a_tool_may_not_be_both_sampled_and_expanded(tmp_path: Path) -> None:
+    """Two declarations of one tool is a question about which one wins."""
+    path = write(tmp_path, ONE_CASE, extra="sampled: [aws-cli]\n")
+    with pytest.raises(bench.PlanError, match="both samples and expands"):
+        bench.Plan.load(path, default_modes={"aws-cli": "s3api-v2-text"})
+
+
+def test_a_repeated_sampled_tool_is_refused(tmp_path: Path) -> None:
+    path = write(tmp_path, ONE_CASE, extra="sampled: [s5cmd, s5cmd]\n")
+    with pytest.raises(bench.PlanError, match="twice"):
+        bench.Plan.load(path, default_modes={"s5cmd": "recursive"})
 
 
 def test_a_matrix_expands_to_its_cross_product(tmp_path: Path) -> None:

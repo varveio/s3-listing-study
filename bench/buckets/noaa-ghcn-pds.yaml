@@ -37,54 +37,29 @@ defaults:
     memory_mib: 2048
     cpu_milli: 2000
 
-# Every registered tool must appear under `tools` or `exclude`; a tool that is
-# simply absent is a validation error rather than a silent skip. All eleven run
-# against this bucket, so there is nothing to exclude yet.
+# Every registered tool must appear under `sampled`, `tools` or `exclude`; a
+# tool that is simply absent is a validation error rather than a silent skip.
+# All eleven run against this bucket, so there is nothing to exclude yet.
+
+# One attempt each, at the mode bench/tools.yaml records for them, on the
+# allocation above. Naming the tool is the whole declaration.
+#
+# ps3 has no --prefix flag at all, so it always lists the whole bucket. That is
+# this plan's workload anyway, which is why it is comparable here and was not on
+# the scoped smoke prefix.
+sampled:
+  - aws-cli
+  - s5cmd
+  - rclone
+  - minio-mc
+  - s7cmd
+  - s3-fast-list
+  - ps3
+  - s3kor
+  - s4cmd
+  - s3p
 
 tools:
-  aws-cli:
-    matrix:
-      mode: [s3api-v2-text]
-
-  s5cmd:
-    matrix:
-      mode: [recursive]
-
-  rclone:
-    matrix:
-      mode: [recursive-hierarchical]
-
-  minio-mc:
-    matrix:
-      mode: [recursive]
-
-  s7cmd:
-    matrix:
-      mode: [recursive-tsv]
-
-  s3-fast-list:
-    matrix:
-      mode: [list]
-
-  # No --prefix flag at all, so it always lists the whole bucket. That is this
-  # plan's workload anyway, which is why it is comparable here and was not on
-  # the scoped smoke prefix.
-  ps3:
-    matrix:
-      mode: [list]
-
-  s3kor:
-    matrix:
-      mode: [list]
-
-  s4cmd:
-    matrix:
-      mode: [recursive]
-
-  s3p:
-    matrix:
-      mode: [ls]
-
   # The one tool being swept rather than sampled. Two blocks, because the modes
   # do not all want the same sweep: only the sorted one has a reason to care
   # about memory, and a single cross-product would have run every mode at every

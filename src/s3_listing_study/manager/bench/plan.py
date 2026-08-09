@@ -55,7 +55,7 @@ SPEC_VERSION = 1
 # a migration and must be visible as one.
 FINGERPRINT_VERSION = 1
 
-TOP_LEVEL = ("spec_version", "bucket", "region", "defaults", "tools", "exclude")
+TOP_LEVEL = ("spec_version", "bucket", "region", "defaults", "sampled", "tools", "exclude")
 
 # What a box is. Every field is required once resolved: a case that did not say
 # how much memory it wanted cannot be compared against one that did.
@@ -130,8 +130,9 @@ class Plan:
     exclusions: tuple[Exclusion, ...]
 
     @classmethod
-    def load(cls, path: Path) -> Plan:
-        return _load(path)
+    def load(cls, path: Path, *, default_modes: Mapping[str, str] | None = None) -> Plan:
+        """Read a plan. ``default_modes`` defaults to ``bench/tools.yaml``."""
+        return _load(path, default_modes)
 
     def tools(self) -> list[str]:
         """Every tool with at least one case, in plan order."""
@@ -148,16 +149,45 @@ class Plan:
         return tuple(case for case in self.cases if case.tool == tool)
 
 
+def bench_dir() -> Path:
+    """``bench`` at the repo root."""
+    return Path(__file__).resolve().parents[4] / "bench"
+
+
 def buckets_dir() -> Path:
     """``bench/buckets`` at the repo root."""
-    return Path(__file__).resolve().parents[4] / "bench" / "buckets"
+    return bench_dir() / "buckets"
 
 
 def default_path(bucket: str) -> Path:
     return buckets_dir() / f"{bucket}.yaml"
 
 
-def _load(path: Path) -> Plan:
+def load_default_modes(path: Path) -> dict[str, str]:
+    """Read ``bench/tools.yaml`` — the mode a sampled tool runs."""
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        raise PlanError(f"tool defaults not readable: {path} ({exc.strerror})") from None
+    try:
+        doc = yaml.safe_load(raw.decode("utf-8"))
+    except (UnicodeDecodeError, yaml.YAMLError) as exc:
+        raise PlanError(f"tool defaults are not valid YAML: {path}: {exc}") from None
+    if not isinstance(doc, dict):
+        raise PlanError(f"tool defaults {path} is not a mapping")
+    _reject_unknown(doc, ("spec_version", "default_modes"), "tool defaults", path)
+    if doc.get("spec_version") != SPEC_VERSION:
+        raise PlanError(
+            f"tool defaults {path} has spec_version {doc.get('spec_version')!r}, "
+            f"this reader supports {SPEC_VERSION}"
+        )
+    table = _table(doc, "default_modes", "default_modes", path)
+    if not table:
+        raise PlanError(f"tool defaults {path} names no tools")
+    return {tool: _string(table, tool, "default_modes", path) for tool in table}
+
+
+def _load(path: Path, default_modes: Mapping[str, str] | None) -> Plan:
     try:
         raw = path.read_bytes()
     except OSError as exc:
@@ -183,14 +213,17 @@ def _load(path: Path) -> Plan:
     base_resources = _resources(defaults, "defaults", path, complete=True)
     base_schedule = _schedule(defaults, "defaults", path, complete=True)
 
+    region = _string(doc, "region", "plan", path)
+    # Resolved next to the plan rather than passed down from the caller, so a
+    # plan read from anywhere still means the same thing.
+    modes = default_modes if default_modes is not None else _sibling_default_modes(doc, path)
+
     plan = Plan(
         path=path,
         digest=hashlib.sha256(raw).hexdigest(),
         bucket=bucket,
-        region=_string(doc, "region", "plan", path),
-        cases=_cases(
-            doc, bucket, _string(doc, "region", "plan", path), base_resources, base_schedule, path
-        ),
+        region=region,
+        cases=_cases(doc, bucket, region, base_resources, base_schedule, modes, path),
         exclusions=_exclusions(doc, path),
     )
     _reject_overlap(plan, path)
@@ -286,15 +319,62 @@ def _schedule(
     return resolved
 
 
+def _sibling_default_modes(doc: Mapping[str, Any], path: Path) -> Mapping[str, str]:
+    """``bench/tools.yaml`` beside the plan's directory — read only if needed."""
+    if not doc.get("sampled"):
+        return {}
+    return load_default_modes(path.resolve().parents[1] / "tools.yaml")
+
+
+def _sampled(
+    doc: Mapping[str, Any], default_modes: Mapping[str, str], path: Path
+) -> dict[str, Any]:
+    """Expand the shorthand roster into the same shape an explicit tool takes.
+
+    A tool that runs once, at its registered mode, on the plan's own allocation
+    is the common case and says nothing a plan needs to restate. Listing the
+    name is the whole declaration.
+    """
+    raw = doc.get("sampled")
+    if raw is None:
+        return {}
+    if not isinstance(raw, list):
+        raise PlanError(f"'sampled' in {path} is not a list")
+    expanded: dict[str, Any] = {}
+    for tool in raw:
+        if not isinstance(tool, str) or not TOOL_RE.fullmatch(tool):
+            raise PlanError(f"'sampled' in {path} has a malformed tool name: {tool!r}")
+        if tool in expanded:
+            raise PlanError(f"'sampled' in {path} names {tool} twice")
+        mode = default_modes.get(tool)
+        if mode is None:
+            known = "|".join(sorted(default_modes)) or "none"
+            raise PlanError(
+                f"'sampled' in {path} names {tool}, which has no default mode "
+                f"in bench/tools.yaml ({known})"
+            )
+        expanded[tool] = {"matrix": {"mode": [mode]}}
+    return expanded
+
+
 def _cases(
     doc: Mapping[str, Any],
     bucket: str,
     region: str,
     base_resources: Mapping[str, Any],
     base_schedule: Mapping[str, int],
+    default_modes: Mapping[str, str],
     path: Path,
 ) -> tuple[Case, ...]:
-    tools = _table(doc, "tools", "tools", path)
+    sampled = _sampled(doc, default_modes, path)
+    explicit = _table(doc, "tools", "tools", path) if "tools" in doc else {}
+    both = sorted(set(sampled) & set(explicit))
+    if both:
+        raise PlanError(
+            f"plan {path} both samples and expands {', '.join(both)} — "
+            "a tool is declared in one place or the other"
+        )
+    tools = {**sampled, **explicit}
     if not tools:
         raise PlanError(f"plan {path} runs no tools")
     cases: list[Case] = []
