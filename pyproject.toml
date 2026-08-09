@@ -17,6 +17,14 @@ dependencies = [
     # the same way a bare `python3` does; the oracle preflight also refuses to
     # judge without it rather than reporting a missing import as a port bug.
     "pyyaml>=6.0",
+    # s3_listing_study.upload only. Not a dependency of the attempt engine or
+    # anything in the timed/security-critical path — the uploader is a
+    # deliberately separate process (see harness/README.md and the campaign
+    # orchestration notes: no gcsfuse, nothing GCS-shaped inside the engine).
+    # Used for its if_generation_match=0 create-only semantics, which is what
+    # makes "an attempt is never overwritten" enforceable on upload, not just
+    # documented.
+    "google-cloud-storage>=2.18",
 ]
 
 [project.scripts]

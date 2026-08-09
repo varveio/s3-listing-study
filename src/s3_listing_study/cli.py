@@ -43,6 +43,18 @@ def _build_derived_image_main(argv: Sequence[str] | None) -> int:
     return build_derived_image_main(argv)
 
 
+def _collect_attempt_main(argv: Sequence[str] | None) -> int:
+    from s3_listing_study.collect import collect_attempt_main
+
+    return collect_attempt_main(list(argv) if argv is not None else None)
+
+
+def _upload_attempt_main(argv: Sequence[str] | None) -> int:
+    from s3_listing_study.upload import upload_attempt_main
+
+    return upload_attempt_main(list(argv) if argv is not None else None)
+
+
 @dataclass(frozen=True, slots=True)
 class Command:
     name: str
@@ -58,6 +70,16 @@ COMMANDS = (
         "build-derived-image",
         "build one slug-selected shared derived image",
         _build_derived_image_main,
+    ),
+    Command(
+        "collect-attempt",
+        "row-count (and optionally Parquet-convert) a finalized attempt's output",
+        _collect_attempt_main,
+    ),
+    Command(
+        "upload-attempt",
+        "upload a finalized attempt directory to a GCS destination prefix",
+        _upload_attempt_main,
     ),
     Command("check-links", "check repository-local Markdown links", links_main),
     Command("check-source-anchors", "validate source anchors", _source_anchors_main),
