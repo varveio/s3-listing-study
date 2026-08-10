@@ -76,8 +76,12 @@ import yaml
 SPEC_VERSION = 2
 
 # Versioned separately from the spec: the fingerprint function is part of the
-# on-disk contract the append guard enforces, so changing how it is computed is
-# a migration and must be visible as one.
+# on-disk contract the append guard will enforce, so changing how it is computed
+# is a migration and must be visible as one.
+#
+# Nothing reads a fingerprint yet — `resolve-plan` emits one and the attempt
+# store that would refuse a mismatched append is not written. Until it is, this
+# number is a promise rather than a check.
 FINGERPRINT_VERSION = 1
 
 TOP_LEVEL = ("spec_version", "bucket", "region", "defaults", "tools", "exclude")
@@ -581,8 +585,18 @@ def _needs_default_modes(body: object) -> bool:
 
 
 def _sibling(path: Path, name: str) -> Path:
-    """A shared table one level above the plan's own directory."""
-    return path.resolve().parents[1] / f"{name}.yaml"
+    """A shared table one level above the plan's own directory.
+
+    A draft reviewed from outside the tree falls back to the repository's own
+    ``bench/``, since ``resolve-plan --path`` is for reading a plan before it is
+    moved into place and would otherwise fail on a table its author never wrote.
+    Neither present keeps the message pointing at where the plan expected one.
+    """
+    beside = path.resolve().parents[1] / f"{name}.yaml"
+    if beside.exists():
+        return beside
+    fallback = bench_dir() / f"{name}.yaml"
+    return fallback if fallback.exists() else beside
 
 
 def _sibling_default_modes(doc: Mapping[str, Any], path: Path) -> Mapping[str, str]:

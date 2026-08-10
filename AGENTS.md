@@ -64,6 +64,7 @@ Read *one* index, not five guesses. Order: this table → `docs/README.md`.
 | Working on the documented S3 API contract (ordering, delimiter, pagination, encoding) | `docs/s3-reference.md` |
 | Working on an open cross-tool question (language bottleneck, resume, throttling) | `docs/open-questions.md` |
 | Promoting a claim out of `VERIFIED: no` | `docs/methodology.md` § Run records — then commit the receipt into `tools/<tool>/` |
+| Changing what a benchmark runs against a bucket | `bench/README.md` — the plan schema: layers, case rows, and case identity |
 | Looking for settled reference | `docs/README.md` |
 
 Each tool owns a directory under `tools/`; runnable-tool directory roles are

@@ -164,6 +164,18 @@ def test_a_shape_the_catalogue_lacks_is_refused(tmp_path: Path) -> None:
         load(path, instances={(64, 512): "n4-highmem-64"})
 
 
+def test_a_draft_outside_the_tree_resolves_against_the_repo_tables(tmp_path: Path) -> None:
+    """Reviewing a plan before moving it into place is the point of `--path`.
+
+    The tables are looked for beside the plan's directory first; a draft written
+    anywhere else would otherwise fail on a `tools.yaml` its author never wrote.
+    """
+    path = write(tmp_path, "s5cmd:\n", bucket="noaa-ghcn-pds")
+    case = bench.Plan.load(path).cases[0]
+    assert case.mode == "recursive"  # from the repository's bench/tools.yaml
+    assert case.resources.machine_type == "n4-standard-2"  # from its instances.yaml
+
+
 # ── expansion and cascade ────────────────────────────────────────────────────
 
 
