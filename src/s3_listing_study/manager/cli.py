@@ -43,6 +43,12 @@ def _build_derived_image_main(argv: Sequence[str] | None) -> int:
     return build_derived_image_main(argv)
 
 
+def _build_tool_image_main(argv: Sequence[str] | None) -> int:
+    from s3_listing_study.common.build_selection import build_tool_image_main
+
+    return build_tool_image_main(argv)
+
+
 def _resolve_plan_main(argv: Sequence[str] | None) -> int:
     from s3_listing_study.manager.bench.cli import resolve_plan_main
 
@@ -96,8 +102,13 @@ COMMANDS = (
         _build_shared_image_main,
     ),
     Command(
+        "build-tool-image",
+        "build one tool image on an immutable shared runtime",
+        _build_tool_image_main,
+    ),
+    Command(
         "build-derived-image",
-        "build one slug-selected shared derived image",
+        "build one worker layer on an immutable tool image",
         _build_derived_image_main,
     ),
     Command(

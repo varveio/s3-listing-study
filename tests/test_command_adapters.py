@@ -657,39 +657,32 @@ def test_slug_only_builder_registers_exact_named_contexts(
 
     monkeypatch.chdir(REPO)
     monkeypatch.setattr(subprocess, "run", fake_run)
-    base = "registry.example/base@sha256:" + "a" * 64
+    base = "registry.example/tool@sha256:" + "a" * 64
     assert (
-        build_derived_image_main(
-            ["--tool", "aws-cli", "--tag", "study:test", "--shared-base-image", base]
-        )
+        build_derived_image_main(["--tool", "aws-cli", "--tag", "study:test", "--tool-image", base])
         == 0
     )
     assert len(calls) == 1
     command = calls[0]
-    assert "--build-arg" not in command
-    assert command[:3] == ("docker", "buildx", "bake")
-    assert f"tool.contexts.base=docker-image://{base}" in command
-    assert f"derived.contexts.base=docker-image://{base}" in command
-    assert f"derived.contexts.adapter={REPO / 'tools/aws-cli/adapter'}" in command
-    assert f"derived.contexts.selection={REPO / 'tools/aws-cli/build'}" in command
-    assert "derived.tags=study:test" in command
+    assert command[:2] == ("docker", "build")
+    assert f"TOOL_IMAGE={base}" in command
+    assert f"adapter={REPO / 'tools/aws-cli/adapter'}" in command
+    assert f"selection={REPO / 'tools/aws-cli/build'}" in command
+    assert "study:test" in command
 
     # Omitting --tag must not fall back to a bare, upstream-looking name.
     calls.clear()
-    assert build_derived_image_main(["--tool", "aws-cli", "--shared-base-image", base]) == 0
-    assert f"derived.tags=s3-listing-study/aws-cli:2.36.1-h{__version__}-ad0f0b69890c" in calls[0]
+    assert build_derived_image_main(["--tool", "aws-cli", "--tool-image", base]) == 0
+    assert f"s3-listing-study/aws-cli:2.36.1-h{__version__}-dfdff159b0d7" in calls[0]
 
 
 def test_shared_base_builder_embeds_its_canonical_source_hash(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    python = tmp_path / "python"
     duckdb = tmp_path / "duckdb"
     ijson = tmp_path / "ijson"
-    python.mkdir()
     duckdb.mkdir()
     ijson.mkdir()
-    monkeypatch.setattr(build_selection, "ensure_runtime", lambda *_args: python)
     monkeypatch.setattr(build_selection, "ensure_duckdb", lambda *_args: duckdb)
     monkeypatch.setattr(build_selection, "ensure_ijson", lambda *_args: ijson)
 
@@ -738,17 +731,19 @@ def test_shared_base_recipe_pins_apt_snapshot_and_marker_contract() -> None:
         "ca-certificates=20230311+deb12u1",
         "libssl3=3.0.20-1~deb12u2",
         "openssl=3.0.20-1~deb12u2",
-        "libstdc++6)\" = '12.2.0-14+deb12u1'",
-        "tzdata)\" = '2026b-0+deb12u1'",
+        "python3=3.11.2-1+b1",
+        "python3-minimal=3.11.2-1+b1",
     ):
         assert package in dockerfile
     assert "ARG SHARED_BASE_SOURCE_SHA256" in dockerfile
     assert "> /opt/s3-listing-study/shared-base-source.sha256" in dockerfile
-    assert "COPY --from=ijson . /opt/s3-listing-study/python/lib/python3.12/site-packages/" in (
-        dockerfile
-    )
+    # ijson survives the move to the Debian runtime: same version and compiled
+    # backend, staged into 3.11's dist-packages rather than a bundled 3.12.
+    assert "COPY --from=ijson . /usr/local/lib/python3.11/dist-packages/" in dockerfile
     assert "ijson.__version__ == '3.5.1'" in dockerfile
     assert "ijson.backend == 'yajl2_c'" in dockerfile
+    assert "cmp /tmp/debian-packages.lock /tmp/installed-packages.lock" in dockerfile
+    assert "USER 10001:10001" in dockerfile
 
 
 def test_final_selection_validates_exact_shared_base_marker(tmp_path: Path) -> None:
@@ -775,7 +770,7 @@ def test_derived_image_tag_states_both_versions_and_the_tool_build_digest() -> N
     """The name a reader sees must not be mistakable for the upstream image."""
     selection = load_registered_selection(REPO, "swath")
     tag = derived_image_tag(selection)
-    assert tag == f"s3-listing-study/swath:0.2.4-h{__version__}-e8657c00fd00"
+    assert tag == f"s3-listing-study/swath:0.2.4-h{__version__}-65ed39ed638e"
     # A Docker reference: one repository component, one legal tag component.
     repository, _, reference = tag.partition(":")
     assert re.fullmatch(

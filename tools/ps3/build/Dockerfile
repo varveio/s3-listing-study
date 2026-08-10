@@ -11,7 +11,8 @@
 # amd64 only: the prebuilt binary is ELF x86-64. On an arm64 runner this image
 # runs under qemu emulation (smoke only) — see the receipts' arch/emulated.
 
-FROM base AS install
+ARG SHARED_BASE_IMAGE
+FROM ${SHARED_BASE_IMAGE}
 USER root
 
 # The tool's shipped prebuilt binary, pinned by commit path AND content hash.
@@ -20,7 +21,9 @@ ADD --checksum=sha256:3bc7bbbb0d45d6f96b0130f98859ea7cfe693b13a84384612404235113
     https://raw.githubusercontent.com/jboothomas/ps3/9428492291ef3aa824dba0b495583279c3d33760/pS3.0-1-16 \
     /usr/local/bin/pS3
 RUN chmod +x /usr/local/bin/pS3
-
-# Entrypoint is the tool binary; the command adapter includes it as argv[0].
-FROM scratch
-COPY --from=install /usr/local/bin/pS3 /tool-root/usr/local/bin/pS3
+ARG TOOL_BUILD_SHA256
+ARG SELECTION_SHA256
+LABEL io.varve.s3-listing-study.tool-build-sha256="${TOOL_BUILD_SHA256}" \
+      io.varve.s3-listing-study.selection-sha256="${SELECTION_SHA256}"
+USER 10001:10001
+WORKDIR /

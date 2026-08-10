@@ -1,8 +1,8 @@
 {
   "tool": "s3p",
   "tool_version": "3.7.2",
-  "shared_base_source_sha256": "c953a4b672ffb9cabad1d5e9cd86081790489e6494362883d93c337590c16d1f",
-  "tool_build_sha256": "2d65eafb0b8e277ea6dd1a7c314d389631223963c6dbe9924952b64afc10b2d1",
+  "shared_base_source_sha256": "e0e734015db69dab55671f779b182fdc92498db4ebaaa2823cfa4fc2355d2d97",
+  "tool_build_sha256": "1b16da26f6c132581d23041ac73473b059f2d35333b9450a7ea148fc97e86090",
   "tool_artifact": {"kind":"npm-package","locator":"https://registry.npmjs.org/s3p/-/s3p-3.7.2.tgz","sha256":"56e51536d2d34fa2988e53e04b2eb0a81aee695abe8fe4525ec0cc879ef24a51"},
   "subject_workdir": "/",
   "executable": [

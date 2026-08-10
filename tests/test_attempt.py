@@ -641,6 +641,10 @@ def test_tool_nonzero_is_a_recorded_outcome_and_cli_success(
     assert _result(output)["adapter_bundle_sha256"] == ADAPTER_BUNDLE_SHA256
     assert _result(output)["images"] == {
         "derived": DERIVED_IMAGE_DIGEST,
+        "tool": {
+            "digest": "sha256:" + "0" * 64,
+            "uri": "local/tool@sha256:" + "0" * 64,
+        },
         "shared_base": {
             "digest": SHARED_BASE_IMAGE_DIGEST,
             "uri": SHARED_BASE_IMAGE_URI,
@@ -676,7 +680,7 @@ child = subprocess.Popen([
 print(child.pid, flush=True)
 time.sleep(60)
 """
-    result, runner_exit = _run(tmp_path, source, timeout_s=0.1, term_grace_s=0.05)
+    result, runner_exit = _run(tmp_path, source, timeout_s=0.5, term_grace_s=0.05)
 
     assert runner_exit == 0
     outcome = _outcome(result)
@@ -779,7 +783,7 @@ def test_completed_attempt_has_exactly_three_artifacts_and_result_is_last(
         "stdout.raw.gz",
         "stderr.raw.gz",
     }
-    assert _result(output)["schema_version"] == 2
+    assert _result(output)["schema_version"] == 3
 
 
 def test_post_measure_delay_is_excluded_from_elapsed_time(tmp_path: Path) -> None:
@@ -904,7 +908,7 @@ def test_anonymous_child_environment_is_a_strict_recorded_allowlist(tmp_path: Pa
 
     expected = {
         "AWS_EC2_METADATA_DISABLED": "true",
-        "HOME": "/nonexistent",
+        "HOME": "/home/s3study",
         "LANG": "C.UTF-8",
         "LC_ALL": "C.UTF-8",
         "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
@@ -1177,7 +1181,7 @@ def test_publication_stays_anchored_when_output_parent_path_is_swapped(tmp_path:
     )
 
     assert runner_exit == 0
-    assert result["schema_version"] == 2
+    assert result["schema_version"] == 3
     assert list((parent / "attempt").iterdir()) == []
     anchored = original_parent / "attempt"
     assert {path.name for path in anchored.iterdir()} == {
@@ -1213,18 +1217,19 @@ def test_generic_dockerfile_bakes_no_tool_specific_command_prefix() -> None:
     root = Path(__file__).resolve().parents[1]
     dockerfile = (root / "harness/derived-image/Dockerfile").read_text()
 
-    assert dockerfile.count("FROM base") == 1
+    assert dockerfile.count("FROM ${TOOL_IMAGE}") == 2
     # Which package layers make up the payload is owned by
     # tests/test_payload_boundary.py; this only pins that the recipe stays
     # generic, so assert the copy exists without restating the boundary.
     assert "COPY --from=adapter command.py /opt/s3-listing-study/tool/command.py" in dockerfile
     assert "COPY --from=adapter normalize.py /opt/s3-listing-study/tool/normalize.py" in dockerfile
     assert "COPY --from=selection image.json /opt/s3-listing-study/selection.json" in dockerfile
-    assert "ARG " not in dockerfile
+    assert "ARG TOOL_IMAGE" in dockerfile
     assert "WORKDIR ${SUBJECT_WORKDIR}" not in dockerfile
     assert "aws-cli" not in dockerfile
     assert "command-prefix" not in dockerfile
     assert "sh -c" not in dockerfile
     assert "S3_STUDY_ATTEMPT_OUT" not in dockerfile
+    assert "USER 10001:10001" in dockerfile
     assert not (root / "harness/images/aws-cli").exists()
     assert (root / "tools/aws-cli/build/Dockerfile").exists()

@@ -187,7 +187,7 @@ def test_wheel_traversal_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPa
 def test_only_native_campaign_architectures_have_locked_wheels() -> None:
     assert set(duckdb_runtime.WHEELS) == {"x86_64", "aarch64"}
     assert duckdb_runtime.VERSION == "1.5.5"
-    assert duckdb_runtime.PYTHON_TAG == "cp312-cp312"
+    assert duckdb_runtime.PYTHON_TAG == "cp311-cp311"
 
 
 def test_locked_wheel_urls_and_hashes_are_recorded_in_uv_lock() -> None:

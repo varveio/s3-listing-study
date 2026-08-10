@@ -27,15 +27,20 @@
 # nothing from the base but a kernel. Verified by running it — `rclone v1.74.4`,
 # reporting `os/version: debian 12.15`.
 
-FROM base AS fetch
+ARG SHARED_BASE_IMAGE
+FROM ${SHARED_BASE_IMAGE}
+USER root
 # --checksum makes the digest a precondition of the fetch: a substituted or
 # corrupted archive fails the build rather than being unpacked.
 ADD --checksum=sha256:fe435e0c36228e7c2f116a8701f01127bb1f694005fc11d1f27186c8bca4115d \
     https://downloads.rclone.org/v1.74.4/rclone-v1.74.4-linux-amd64.zip /tmp/rclone.zip
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends unzip \
-    && unzip -j /tmp/rclone.zip 'rclone-v1.74.4-linux-amd64/rclone' -d /out \
-    && rm -rf /var/lib/apt/lists/*
-
-FROM scratch
-COPY --from=fetch /out/rclone /tool-root/usr/local/bin/rclone
+RUN /usr/bin/python3 -m zipfile -e /tmp/rclone.zip /tmp/rclone \
+    && install -m 0755 /tmp/rclone/rclone-v1.74.4-linux-amd64/rclone \
+        /usr/local/bin/rclone \
+    && install -d -o 10001 -g 10001 /data
+ARG TOOL_BUILD_SHA256
+ARG SELECTION_SHA256
+LABEL io.varve.s3-listing-study.tool-build-sha256="${TOOL_BUILD_SHA256}" \
+      io.varve.s3-listing-study.selection-sha256="${SELECTION_SHA256}"
+USER 10001:10001
+WORKDIR /data

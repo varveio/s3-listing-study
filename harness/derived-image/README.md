@@ -1,85 +1,44 @@
-# Final per-tool attempt image
+# Tool and execution images
 
-[`Dockerfile`](Dockerfile) is the common final assembly recipe. It combines the
-exact published shared base, one capsule-owned `/tool-root` payload, and current
-worker/common code with one adapter and selection record. The output is one
-image and digest per tool, scheduled directly by Batch.
+The runnable image chain is explicit OCI parentage:
 
-Tool payloads prefer checksum-pinned official distributions; `s3-fast-list` is
-the sole native source-build exception. The common base fixes shared filesystem
-inputs but does not erase bundled or static runtime differences. Full capsule
-and registration rules live in
-[`../../docs/operating/tool-structure.md`](../../docs/operating/tool-structure.md)
-§ Executable integration and builds.
-
-Worker or adapter edits do not invalidate the separate tool target. Reusing it
-requires retained or restored BuildKit cache; registry-backed cache for fresh
-builders is not implemented yet.
-
-## Build and publication flow
-
-First build the shared base once, tag it in the target registry namespace, push
-it, and resolve the registry's immutable digest. There is no publication helper
-for this step yet:
-
-```sh
-BASE_TAG=us-east1-docker.pkg.dev/PROJECT/REPOSITORY/shared-base:2026-08-10
-uv run s3-listing-study build-shared-image --tag "$BASE_TAG"
-docker push "$BASE_TAG"
-docker image inspect --format '{{json .RepoDigests}}' "$BASE_TAG"
+```text
+shared Debian/Python runtime -> tool image -> execution image
 ```
 
-Select the one returned reference for that repository and keep the complete
-`REGISTRY/...@sha256:<64 lowercase hex>` value:
+Each `tools/<tool>/build/Dockerfile` consumes an immutable shared-runtime
+reference and produces a real runnable tool image. It no longer exports a
+scratch `/tool-root` overlay. The generic [`Dockerfile`](Dockerfile) then
+consumes the immutable tool image and adds only the current worker zipapp,
+selected adapter, selection metadata, and root-owned provenance.
+
+Build and resolve each layer separately:
 
 ```sh
-BASE_IMAGE=us-east1-docker.pkg.dev/PROJECT/REPOSITORY/shared-base@sha256:BASE_DIGEST
-```
+uv run s3-listing-study build-shared-image --tag study/runtime:candidate
+# export/push and resolve SHARED_RUNTIME_IMAGE=...@sha256:...
 
-Build one final image locally from that exact base:
+uv run s3-listing-study build-tool-image \
+  --tool swath \
+  --shared-base-image "$SHARED_RUNTIME_IMAGE" \
+  --tag study/tool-swath:candidate
+# export/push and resolve TOOL_IMAGE=...@sha256:...
 
-```sh
 uv run s3-listing-study build-derived-image \
   --tool swath \
-  --shared-base-image "$BASE_IMAGE"
+  --tool-image "$TOOL_IMAGE" \
+  --tag study/execution-swath:candidate
 ```
 
-Or build, push, inspect, and atomically add it to a campaign image set:
+A worker-only change therefore rebuilds only the final layer when the tool
+parent is supplied by digest; it does not depend on retained BuildKit cache.
+The execution image runs as `10001:10001`, uses `/usr/bin/python3`, and records
+its exact tool parent and canonical selection hash in
+`/opt/s3-listing-study/image-provenance.json`. New results use schema 3;
+historical schema-2 results and image sets remain readable.
 
-```sh
-uv run s3-listing-study publish-derived-image \
-  --tool swath \
-  --repository us-east1-docker.pkg.dev/PROJECT/REPOSITORY \
-  --image-set build/images.json \
-  --shared-base-image "$BASE_IMAGE"
-```
-
-The production commands reject a mutable base tag. Reuse the same
-`BASE_IMAGE` for every tool in an image set; image-set validation rejects mixed
-base digests or source identities.
-
-With no explicit `--tag`, the readable local name is:
+Schedulers append typed logical-request arguments to the fixed entry point:
 
 ```text
-s3-listing-study/swath:0.2.4-h0.1.0-e8657c00fd00
-                └tool  └release └harness └tool-build prefix
+/usr/bin/python3 -I /opt/s3-listing-study/attempt.pyz
 ```
-
-That tag is not an identity. Publication records the final image's own immutable
-URI and digest, the shared-base URI/digest/source identity, tool build and
-artifact identities, adapter bundle, and harness revision. The worker result
-records the same execution-relevant provenance.
-
-## Running
-
-The final image fixes this entry point; schedulers append typed logical request
-arguments and never replace it:
-
-```text
-/opt/s3-listing-study/python/bin/python3 -I /opt/s3-listing-study/attempt.pyz
-```
-
-The child process receives a minimal allowlisted environment rather than the
-worker's Python or TLS settings. Runtime, security, output, and authentication
-details are documented in [`../README.md`](../README.md) and
-[`../../docs/operating/runner-security.md`](../../docs/operating/runner-security.md).

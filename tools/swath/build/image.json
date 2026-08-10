@@ -1,8 +1,8 @@
 {
   "tool": "swath",
   "tool_version": "0.2.4",
-  "shared_base_source_sha256": "c953a4b672ffb9cabad1d5e9cd86081790489e6494362883d93c337590c16d1f",
-  "tool_build_sha256": "e8657c00fd00cf2d058fa7999612c357fde00c62bd3916363927fcbc0eb80c57",
+  "shared_base_source_sha256": "e0e734015db69dab55671f779b182fdc92498db4ebaaa2823cfa4fc2355d2d97",
+  "tool_build_sha256": "65ed39ed638ebc268c30a1c0d0d50083c4eaec775c874f6e1890f6ef507e89eb",
   "tool_artifact": {"kind":"release-archive","locator":"https://github.com/varveio/swath/releases/download/v0.2.4/swath-0.2.4.jar","sha256":"01a55d46a7173094f5e66959c24347f85e87f28edeeb4652a535795ac97f2b52"},
   "subject_workdir": "/opt/swath",
   "executable": [

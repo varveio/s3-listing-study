@@ -52,6 +52,12 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="immutable registry URI of the once-built shared base",
     )
+    parser.add_argument(
+        "--tool-image",
+        action=UniqueStoreAction,
+        required=True,
+        help="immutable URI of the separately built tool parent",
+    )
     return parser
 
 
@@ -192,6 +198,8 @@ def publish_derived_image_main(argv: Sequence[str] | None = None) -> int:
         target_tag = _target_tag(args.repository, selection)
         image_set_path = Path(args.image_set)
         existing = _read_image_set(image_set_path) if image_set_path.exists() else {}
+        if getattr(existing, "schema_version", IMAGE_SET_SCHEMA_VERSION) == 2:
+            raise SubmissionError("cannot extend a historical schema-version-2 image set")
         shared_repository, separator, shared_base_digest = args.shared_base_image.rpartition("@")
         if (
             not separator
@@ -207,7 +215,10 @@ def publish_derived_image_main(argv: Sequence[str] | None = None) -> int:
         )
         validate_registered_images(existing, root=root, skip={selection.tool})
         harness_revision = _revision(root, selection.tool)
-        build = derived_image_build_command(root, selection, target_tag, args.shared_base_image)
+        tool_repository, separator, tool_image_digest = args.tool_image.rpartition("@")
+        if not separator or not tool_repository or DIGEST_RE.fullmatch(tool_image_digest) is None:
+            raise SubmissionError("tool image must be an immutable URI with sha256 digest")
+        build = derived_image_build_command(root, selection, target_tag, args.tool_image)
         built = _run(build)
         if built.returncode != 0:
             raise _failure("derived-image build", built)
@@ -229,6 +240,9 @@ def publish_derived_image_main(argv: Sequence[str] | None = None) -> int:
             "shared_base_uri": args.shared_base_image,
             "shared_base_source_sha256": selection.shared_base_source_sha256,
             "tool_build_sha256": selection.tool_build_sha256,
+            "tool_image_digest": tool_image_digest,
+            "tool_image_uri": args.tool_image,
+            "selection_sha256": selection.selection_sha256,
             "tool_artifact": {
                 "kind": selection.tool_artifact_kind,
                 "locator": selection.tool_artifact_locator,

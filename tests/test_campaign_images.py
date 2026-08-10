@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from s3_listing_study.common.build_selection import BuildSelection
+from s3_listing_study.common.build_selection import BuildSelection, load_registered_selection
 from s3_listing_study.manager.campaign import images as image_publish
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -42,7 +42,7 @@ def install_fakes(
     ) -> tuple[str, ...]:
         assert root == ROOT
         assert selection.tool == "aws-cli"
-        assert shared_base.endswith("@" + "sha256:" + "a" * 64)
+        assert shared_base.endswith("@" + "sha256:" + "c" * 64)
         tags.append(tag)
         return "docker", "build", "--tag", tag, str(root)
 
@@ -79,6 +79,8 @@ def publish_args(path: Path) -> list[str]:
         str(path),
         "--shared-base-image",
         "registry.example/shared-base@sha256:" + "a" * 64,
+        "--tool-image",
+        "registry.example/tool/aws-cli@sha256:" + "c" * 64,
     ]
 
 
@@ -93,13 +95,16 @@ def test_publisher_captures_pushed_digest_and_exact_registered_fields(
     document = json.loads(path.read_text(encoding="utf-8"))
     image = document["images"]["aws-cli"]
     registration = json.loads((ROOT / "tools/aws-cli/build/image.json").read_text(encoding="utf-8"))
-    assert document["schema_version"] == 2
+    assert document["schema_version"] == 3
     assert image == {
         "derived_image": DIGEST,
         "image_uri": f"{tags[0].rsplit(':', 1)[0]}@{DIGEST}",
         "shared_base_digest": "sha256:" + "a" * 64,
         "shared_base_uri": "registry.example/shared-base@sha256:" + "a" * 64,
         "tool_build_sha256": registration["tool_build_sha256"],
+        "tool_image_digest": "sha256:" + "c" * 64,
+        "tool_image_uri": "registry.example/tool/aws-cli@sha256:" + "c" * 64,
+        "selection_sha256": load_registered_selection(ROOT, "aws-cli").selection_sha256,
         "tool_artifact": registration["tool_artifact"],
         "tool_version": registration["tool_version"],
         "adapter_bundle_sha256": registration["adapter_bundle_sha256"],
@@ -167,6 +172,9 @@ def registered_image(tool: str, digest_character: str) -> dict[str, Any]:
         "shared_base_digest": "sha256:" + "a" * 64,
         "shared_base_uri": "registry.example/shared-base@sha256:" + "a" * 64,
         "tool_build_sha256": registration["tool_build_sha256"],
+        "tool_image_digest": "sha256:" + "c" * 64,
+        "tool_image_uri": f"{REPOSITORY}/tool/{tool}@sha256:" + "c" * 64,
+        "selection_sha256": load_registered_selection(ROOT, tool).selection_sha256,
         "tool_artifact": registration["tool_artifact"],
         "tool_version": registration["tool_version"],
         "adapter_bundle_sha256": registration["adapter_bundle_sha256"],
@@ -175,7 +183,7 @@ def registered_image(tool: str, digest_character: str) -> dict[str, Any]:
     }
 
 
-def test_publisher_merges_other_valid_tools_and_refuses_bad_existing_claims(
+def test_publisher_refuses_to_extend_historical_schema_two(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     path = tmp_path / "images.json"
@@ -183,16 +191,9 @@ def test_publisher_merges_other_valid_tools_and_refuses_bad_existing_claims(
     path.write_text(
         json.dumps({"schema_version": 2, "images": {"rclone": rclone}}), encoding="utf-8"
     )
-    install_fakes(monkeypatch, successful)
-    assert image_publish.publish_derived_image_main(publish_args(path)) == 0
-    assert json.loads(path.read_text())["images"]["rclone"] == rclone
-
-    document = json.loads(path.read_text())
-    document["images"]["rclone"]["tool_version"] = "fabricated"
-    path.write_text(json.dumps(document), encoding="utf-8")
     calls, _tags = install_fakes(monkeypatch, successful)
     assert image_publish.publish_derived_image_main(publish_args(path)) == 1
-    assert not calls  # Refused before Git, Docker build, or push.
+    assert not calls
 
 
 @pytest.mark.parametrize(
@@ -215,7 +216,7 @@ def test_publisher_refuses_an_existing_set_from_another_shared_base_before_build
     else:
         existing[mismatch] = "b" * 64
     path.write_text(
-        json.dumps({"schema_version": 2, "images": {"aws-cli": existing}}),
+        json.dumps({"schema_version": 3, "images": {"aws-cli": existing}}),
         encoding="utf-8",
     )
 

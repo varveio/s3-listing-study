@@ -27,13 +27,13 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import BinaryIO, Final
 
-from s3_listing_study.common.python_runtime import interpreter_identity
+from s3_listing_study.common.runtime_identity import interpreter_identity
 from s3_listing_study.common.secret_scan import Outcome as ScanOutcome
 from s3_listing_study.common.secret_scan import scan_binary_file
 
 from .summary import summarize
 
-SCHEMA_VERSION: Final = 2
+SCHEMA_VERSION: Final = 3
 STREAM_NAMES: Final = ("stdout", "stderr")
 NATIVE_DIRECTORY: Final = "native"
 """Where a mode's native file-sink output is published inside the attempt.
@@ -53,7 +53,7 @@ JOB_ID_RE: Final = re.compile(r"[a-z](?:[a-z0-9-]*[a-z0-9])?")
 BASE_SUBJECT_ENV: Final[Mapping[str, str]] = MappingProxyType(
     {
         "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-        "HOME": "/nonexistent",
+        "HOME": "/home/s3study",
         "LANG": "C.UTF-8",
         "LC_ALL": "C.UTF-8",
         "AWS_EC2_METADATA_DISABLED": "true",
@@ -134,6 +134,9 @@ class AttemptOptions:
     shared_base_digest: str
     shared_base_uri: str
     derived_image: str
+    tool_image_digest: str = "sha256:" + "0" * 64
+    tool_image_uri: str = "local/tool@sha256:" + "0" * 64
+    selection_sha256: str = "0" * 64
     subject_workdir: str = "/"
     shared_base_source_sha256: str = "0" * 64
     tool_build_sha256: str = "0" * 64
@@ -166,7 +169,7 @@ class AttemptOptions:
     not ignored, so an anonymous receipt can never silently follow from a run
     that actually had credential material available to it.
     """
-    functional_env: Mapping[str, str] = MappingProxyType({})
+    functional_env: Mapping[str, str] = field(default_factory=lambda: MappingProxyType({}))
     """The selected capsule's declared non-secret functional environment."""
 
 
@@ -1335,6 +1338,10 @@ def run_attempt(
             "tool": {"name": options.tool, "version": options.tool_version},
             "images": {
                 "derived": options.derived_image,
+                "tool": {
+                    "digest": options.tool_image_digest,
+                    "uri": options.tool_image_uri,
+                },
                 "shared_base": {
                     "digest": options.shared_base_digest,
                     "uri": options.shared_base_uri,
@@ -1347,6 +1354,7 @@ def run_attempt(
                 "tool": {
                     "build_sha256": options.tool_build_sha256,
                     "artifact": dict(options.tool_artifact),
+                    "selection_sha256": options.selection_sha256,
                 },
             },
             "harness_revision": options.harness_revision,

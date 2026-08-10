@@ -32,7 +32,7 @@ from s3_listing_study.manager.campaign import (
 )
 from s3_listing_study.manager.campaign.batch import BatchConfig, render_job
 
-IMAGE_SET_FIELDS = {
+IMAGE_SET_FIELDS_V2 = {
     "derived_image",
     "image_uri",
     "shared_base_digest",
@@ -44,7 +44,20 @@ IMAGE_SET_FIELDS = {
     "adapter_bundle_sha256",
     "harness_revision",
 }
-IMAGE_SET_SCHEMA_VERSION = 2
+IMAGE_SET_FIELDS = IMAGE_SET_FIELDS_V2 | {
+    "tool_image_digest",
+    "tool_image_uri",
+    "selection_sha256",
+}
+IMAGE_SET_SCHEMA_VERSION = 3
+
+
+class ImageSet(dict[str, dict[str, Any]]):
+    """Validated registrations retaining their on-disk schema generation."""
+
+    def __init__(self, *args: Any, schema_version: int, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.schema_version = schema_version
 
 
 class SubmissionError(RuntimeError):
@@ -103,7 +116,7 @@ def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
-def _read_image_set(path: Path) -> dict[str, dict[str, Any]]:
+def _read_image_set(path: Path) -> ImageSet:
     try:
         raw = path.read_text(encoding="utf-8")
         document = json.loads(raw, object_pairs_hook=_reject_duplicate_keys)
@@ -114,10 +127,10 @@ def _read_image_set(path: Path) -> dict[str, dict[str, Any]]:
     unknown_top = sorted(set(document) - {"schema_version", "images"})
     if unknown_top:
         raise SubmissionError(f"image set has unknown key(s): {', '.join(unknown_top)}")
-    if document.get("schema_version") != IMAGE_SET_SCHEMA_VERSION or isinstance(
-        document.get("schema_version"), bool
-    ):
-        raise SubmissionError(f"image set schema_version must be {IMAGE_SET_SCHEMA_VERSION}")
+    schema_version = document.get("schema_version")
+    if schema_version not in (2, IMAGE_SET_SCHEMA_VERSION) or isinstance(schema_version, bool):
+        raise SubmissionError("image set schema_version must be 2 or 3")
+    fields = IMAGE_SET_FIELDS if schema_version == 3 else IMAGE_SET_FIELDS_V2
     images = document.get("images")
     if not isinstance(images, dict) or not images:
         raise SubmissionError("image set images must be a non-empty object")
@@ -126,8 +139,8 @@ def _read_image_set(path: Path) -> dict[str, dict[str, Any]]:
     for tool, value in images.items():
         if not isinstance(tool, str) or not tool or not isinstance(value, dict):
             raise SubmissionError("each image must be a tool-named object")
-        missing = sorted(IMAGE_SET_FIELDS - set(value))
-        unknown = sorted(set(value) - IMAGE_SET_FIELDS)
+        missing = sorted(fields - set(value))
+        unknown = sorted(set(value) - fields)
         if missing or unknown:
             detail = []
             if missing:
@@ -151,6 +164,19 @@ def _read_image_set(path: Path) -> dict[str, dict[str, Any]]:
             identity = value[field]
             if not isinstance(identity, str) or re.fullmatch(r"[0-9a-f]{64}", identity) is None:
                 raise SubmissionError(f"{tool}: {field} is not 64 lowercase hex digits")
+        if schema_version == 3:
+            tool_digest = value["tool_image_digest"]
+            tool_uri = value["tool_image_uri"]
+            if not isinstance(tool_digest, str) or DIGEST_RE.fullmatch(tool_digest) is None:
+                raise SubmissionError(f"{tool}: tool_image_digest is not a sha256 digest")
+            if not isinstance(tool_uri, str) or not tool_uri.endswith(f"@{tool_digest}"):
+                raise SubmissionError(f"{tool}: tool_image_uri digest does not match")
+            selection_sha256 = value["selection_sha256"]
+            if (
+                not isinstance(selection_sha256, str)
+                or re.fullmatch(r"[0-9a-f]{64}", selection_sha256) is None
+            ):
+                raise SubmissionError(f"{tool}: selection_sha256 is not 64 lowercase hex digits")
         artifact = value["tool_artifact"]
         if not isinstance(artifact, dict) or set(artifact) != {"kind", "locator", "sha256"}:
             raise SubmissionError(f"{tool}: tool_artifact has invalid fields")
@@ -189,7 +215,7 @@ def _read_image_set(path: Path) -> dict[str, dict[str, Any]]:
         raise SubmissionError(
             "image set must use one shared base digest and source identity for every tool"
         )
-    return validated
+    return ImageSet(validated, schema_version=schema_version)
 
 
 def validate_registered_images(
@@ -200,6 +226,8 @@ def validate_registered_images(
 ) -> None:
     """Refuse component claims that disagree with the public capsule registration."""
     base = repo_root() if root is None else root
+    if getattr(images, "schema_version", IMAGE_SET_SCHEMA_VERSION) == 2:
+        return
     skipped = set() if skip is None else skip
     for tool, image in images.items():
         if tool in skipped:
@@ -215,6 +243,7 @@ def validate_registered_images(
                 "sha256": selection.tool_artifact_sha256,
             },
             "adapter_bundle_sha256": selection.adapter_bundle_sha256,
+            "selection_sha256": selection.selection_sha256,
         }
         mismatched = sorted(field for field, value in expected.items() if image.get(field) != value)
         if mismatched:

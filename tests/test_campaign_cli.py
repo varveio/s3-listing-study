@@ -12,8 +12,10 @@ from typing import Any
 
 import pytest
 
-from s3_listing_study.manager.campaign import Attempt, ledger
+from s3_listing_study.manager.bench import plan as bench
+from s3_listing_study.manager.campaign import Attempt, CampaignError, ledger
 from s3_listing_study.manager.campaign import cli as campaign_cli
+from s3_listing_study.manager.campaign.batch import render_job as render_batch_job
 from tests.test_campaign_batch import DIGEST, attempt
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -159,19 +161,17 @@ def test_repeatable_canonical_buckets_form_one_deterministic_campaign(
     image_set = write_image_set(tmp_path / "images.json", {"aws-cli"})
     roster_checks: list[str] = []
 
-    monkeypatch.setattr(campaign_cli.bench, "buckets_dir", lambda: buckets)
-    monkeypatch.setattr(
-        campaign_cli.bench, "default_path", lambda bucket: buckets / f"{bucket}.yaml"
-    )
+    monkeypatch.setattr(bench, "buckets_dir", lambda: buckets)
+    monkeypatch.setattr(bench, "default_path", lambda bucket: buckets / f"{bucket}.yaml")
     monkeypatch.setattr(campaign_cli, "registered_tools", lambda: {"aws-cli"})
     monkeypatch.setattr(campaign_cli, "validate_registered_images", lambda _images: None)
-    original_check_roster = campaign_cli.bench.check_roster
+    original_check_roster = bench.check_roster
 
     def check_roster(plan: Any, registered: Any) -> None:
         roster_checks.append(plan.bucket)
         original_check_roster(plan, registered)
 
-    monkeypatch.setattr(campaign_cli.bench, "check_roster", check_roster)
+    monkeypatch.setattr(bench, "check_roster", check_roster)
     monkeypatch.setattr(
         campaign_cli,
         "_run",
@@ -250,13 +250,13 @@ def test_duplicate_plan_bucket_is_rejected_before_rendering(
     assert "more than one plan for bucket 'same'" in capsys.readouterr().err
 
 
-def test_image_set_refuses_the_previous_schema(tmp_path: Path) -> None:
+def test_image_set_refuses_an_unknown_schema(tmp_path: Path) -> None:
     _plan, image_set = write_inputs(tmp_path)
     document = json.loads(image_set.read_text(encoding="utf-8"))
     document["schema_version"] = 1
     image_set.write_text(json.dumps(document), encoding="utf-8")
 
-    with pytest.raises(campaign_cli.SubmissionError, match="schema_version must be 2"):
+    with pytest.raises(campaign_cli.SubmissionError, match="schema_version must be 2 or 3"):
         campaign_cli._read_image_set(image_set)
 
 
@@ -283,7 +283,7 @@ def test_dry_run_is_deterministic_and_touches_no_subprocess_or_ledger(
     assert not (tmp_path / "ledger.sqlite3").exists()
 
 
-def test_submit_refuses_image_components_that_disagree_with_registration(
+def test_historical_schema_two_does_not_rehash_against_current_registration(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     plan, image_set = write_inputs(tmp_path)
@@ -296,9 +296,10 @@ def test_submit_refuses_image_components_that_disagree_with_registration(
         lambda *_args, **_kwargs: pytest.fail("mismatched image contacted a subprocess"),
     )
     assert (
-        campaign_cli.submit_campaign_main([*arguments(tmp_path, plan, image_set), "--dry-run"]) == 1
+        campaign_cli.submit_campaign_main([*arguments(tmp_path, plan, image_set), "--dry-run"]) == 0
     )
-    assert "disagrees with registered tool_version" in capsys.readouterr().err
+    rendered = json.loads(capsys.readouterr().out)
+    assert rendered["campaign.json"]["images"]["aws-cli"]["tool_version"] == "fabricated"
     assert not (tmp_path / "ledger.sqlite3").exists()
 
 
@@ -620,7 +621,9 @@ def test_actual_cli_freezes_every_plan_before_one_manifest_and_all_jobs(
     ]
     assert [call[1] for call in calls[:2]] == [first.read_bytes(), second.read_bytes()]
     assert calls[2][0][4].endswith("/campaign.json")
-    manifest_document = json.loads(calls[2][1])
+    manifest_payload = calls[2][1]
+    assert manifest_payload is not None
+    manifest_document = json.loads(manifest_payload)
     assert [plan["bucket"] for plan in manifest_document["plans"]] == ["first", "second"]
     assert [call[0][1:4] for call in calls[3:]] == [
         ("batch", "jobs", "submit"),
@@ -635,7 +638,7 @@ def test_later_plan_hash_mismatch_prevents_every_cloud_and_ledger_mutation(
     second = write_plan(tmp_path / "second.yaml", bucket="second")
     image_set = write_image_set(tmp_path / "images.json", {"aws-cli"})
     cloud_calls: list[tuple[str, ...]] = []
-    original_render_job = campaign_cli.render_job
+    original_render_job = render_batch_job
     render_count = 0
 
     def render_job(selected: Any, config: Any) -> Any:
@@ -650,7 +653,7 @@ def test_later_plan_hash_mismatch_prevents_every_cloud_and_ledger_mutation(
         cloud_calls.append(tuple(argv))
         return completed()
 
-    monkeypatch.setattr(campaign_cli, "render_job", render_job)
+    monkeypatch.setattr("s3_listing_study.manager.campaign.cli.render_job", render_job)
     monkeypatch.setattr(campaign_cli, "_run", fake_run)
     argv = [
         "--path",
@@ -673,17 +676,17 @@ def test_later_job_render_failure_prevents_every_cloud_and_ledger_mutation(
     first = write_plan(tmp_path / "first.yaml", bucket="first")
     second = write_plan(tmp_path / "second.yaml", bucket="second")
     image_set = write_image_set(tmp_path / "images.json", {"aws-cli"})
-    original_render_job = campaign_cli.render_job
+    original_render_job = render_batch_job
     render_count = 0
 
     def render_job(selected: Any, config: Any) -> Any:
         nonlocal render_count
         render_count += 1
         if render_count == 2:
-            raise campaign_cli.CampaignError("later render failed")
+            raise CampaignError("later render failed")
         return original_render_job(selected, config)
 
-    monkeypatch.setattr(campaign_cli, "render_job", render_job)
+    monkeypatch.setattr("s3_listing_study.manager.campaign.cli.render_job", render_job)
     monkeypatch.setattr(
         campaign_cli,
         "_run",

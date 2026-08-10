@@ -1,4 +1,5 @@
 # Groundwork build recipe for s3-fast-list.
+ARG SHARED_BASE_IMAGE
 #
 # This is upstream's own Dockerfile (aws-samples/s3-fast-list @ 6c72f59, the
 # feat/no-sign-request branch = upstream b11e385 + the 2-commit anonymous-access
@@ -26,25 +27,25 @@ FROM rust@sha256:cf9dd0ec73e75f827fe59123fff9dc65af1a1c8363c3c31ee8d7f8ad0b6a5fb
 
 WORKDIR /usr/src/app
 
-# Some dependencies might need build tools for native components
-# (Arrow, Parquet, compression libraries)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    pkg-config \
-    && rm -rf /var/lib/apt/lists/*
-
 ADD --checksum=sha256:43bebce8cc64c85c25ff4d7b5fe497b46849825b4ff37fb0c7c230dcdf4bb6a0 \
     https://github.com/sagiba/s3-fast-list/archive/6c72f596e2ffe7311dec8cb7de29b114c0251207.tar.gz \
     /tmp/source.tar.gz
 RUN tar xzf /tmp/source.tar.gz --strip-components=1
+COPY --from=tool_build Cargo.lock /usr/src/app/Cargo.lock
 
 # Cache Cargo deps and build with optimal caching
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
-    cargo build --release
+    cargo build --release --locked
 
 
-# Export only the tool payload. The final image applies this overlay to the
-# shared runtime after the independently cached compile has completed.
-FROM scratch
-COPY --from=builder /usr/src/app/target/release/s3-fast-list /tool-root/usr/bin/s3-fast-list
-COPY --from=builder /usr/src/app/target/release/ks-tool /tool-root/usr/bin/ks-tool
+FROM ${SHARED_BASE_IMAGE}
+USER root
+COPY --from=builder /usr/src/app/target/release/s3-fast-list /usr/bin/s3-fast-list
+COPY --from=builder /usr/src/app/target/release/ks-tool /usr/bin/ks-tool
+ARG TOOL_BUILD_SHA256
+ARG SELECTION_SHA256
+LABEL io.varve.s3-listing-study.tool-build-sha256="${TOOL_BUILD_SHA256}" \
+      io.varve.s3-listing-study.selection-sha256="${SELECTION_SHA256}"
+USER 10001:10001
+WORKDIR /

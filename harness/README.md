@@ -48,7 +48,7 @@ logical request arguments and never replace it. There is no public
 `--attempt-id`: each worker-container execution mints its own UUID:
 
 ```sh
-/opt/s3-listing-study/python/bin/python3 -I /opt/s3-listing-study/attempt.pyz \
+/usr/bin/python3 -I /opt/s3-listing-study/attempt.pyz \
   --output /output \
   --shared-base-digest sha256:SHARED_BASE_DIGEST \
   --shared-base-uri REGISTRY/shared-base@sha256:SHARED_BASE_DIGEST \

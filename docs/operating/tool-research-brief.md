@@ -160,7 +160,7 @@ research budget to produce a truthful, useless `STATUS: blocked`.
    multipart ETag is deterministic for fixed parts — so the post-seed
    listing genuinely validates the seeding instead of comparing a snapshot
    to itself.
-3. **`/opt/s3-listing-study/python/bin/python3 -I /opt/s3-listing-study/attempt.pyz`**
+3. **`/usr/bin/python3 -I /opt/s3-listing-study/attempt.pyz`**
    — the fixed
    entrypoint for the single in-image subject lifecycle. The interpreter is the
    study's pinned one, bound into the image at build time rather than taken from
