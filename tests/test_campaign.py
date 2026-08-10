@@ -434,6 +434,31 @@ def test_a_state_for_an_unknown_job_is_refused(tmp_path: Path) -> None:
         ledger_module.record_state(connection, job_id="c-nope", state="running", now=NOW)
 
 
+def test_a_conditional_state_change_loses_cleanly_without_an_event(tmp_path: Path) -> None:
+    attempt = one_attempt()
+    with ledger_module.open_ledger(tmp_path / "ledger.sqlite3") as connection:
+        ledger_module.record_intent(
+            connection, attempt=attempt.as_dict(), campaign=attempt.campaign, now=NOW
+        )
+        ledger_module.record_state(connection, job_id=attempt.job_id, state="succeeded", now=NOW)
+
+        changed = ledger_module.record_state_if_current(
+            connection,
+            job_id=attempt.job_id,
+            expected_state="submitted",
+            state="running",
+            now=NOW,
+        )
+
+        assert changed is False
+        [row] = ledger_module.attempts(connection, campaign=attempt.campaign)
+        assert row["state"] == "succeeded"
+        recorded = connection.execute(
+            "SELECT event FROM events WHERE job_id = ? ORDER BY id", (attempt.job_id,)
+        ).fetchall()
+        assert [event["event"] for event in recorded] == ["submitting", "succeeded"]
+
+
 def test_an_unknown_state_is_refused(tmp_path: Path) -> None:
     attempt = one_attempt()
     with ledger_module.open_ledger(tmp_path / "ledger.sqlite3") as connection:

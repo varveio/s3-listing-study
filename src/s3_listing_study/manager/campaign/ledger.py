@@ -188,6 +188,38 @@ def record_state(
         _event(connection, job_id, now, state, detail)
 
 
+def record_state_if_current(
+    connection: sqlite3.Connection,
+    *,
+    job_id: str,
+    expected_state: str,
+    state: str,
+    now: str,
+    detail: Mapping[str, Any] | None = None,
+) -> bool:
+    """Move and record a state only if it still matches the caller's snapshot.
+
+    A false return is an ordinary lost compare-and-swap: another reconciler
+    advanced the row first. The caller must re-read rather than overwrite it.
+    """
+    if expected_state not in STATES:
+        raise LedgerError(f"unknown expected state {expected_state!r} ({'|'.join(STATES)})")
+    if state not in STATES:
+        raise LedgerError(f"unknown state {state!r} ({'|'.join(STATES)})")
+    with _transaction(connection):
+        updated = connection.execute(
+            "UPDATE attempts SET state = ?, updated_at = ? WHERE job_id = ? AND state = ?",
+            (state, now, job_id, expected_state),
+        )
+        if updated.rowcount == 1:
+            _event(connection, job_id, now, state, detail)
+            return True
+        exists = connection.execute("SELECT 1 FROM attempts WHERE job_id = ?", (job_id,)).fetchone()
+        if exists is None:
+            raise LedgerError(f"{job_id}: no such attempt in the ledger")
+        return False
+
+
 def _event(
     connection: sqlite3.Connection,
     job_id: str,
