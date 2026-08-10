@@ -13,7 +13,7 @@
 # the row count a case should produce, which is a fact about a target rather
 # than a knob a case may turn; a prefix worth studying gets its own plan.
 
-spec_version: 1
+spec_version: 2
 
 bucket: noaa-ghcn-pds
 region: us-east-1
@@ -32,9 +32,8 @@ defaults:
   # The shape, not a machine type: bench/instances.yaml says which box that is.
   # The smallest modern shape — the families start at 2 GB per vCPU in their
   # highcpu form, so there is no 2 GB/2 vCPU box to ask for.
-  resources:
-    vcpus: 2
-    memory_gb: 4
+  vcpus: 2
+  memory_gb: 4
 
 # Every registered tool must appear here or under `exclude`; a tool that is
 # simply absent is a validation error rather than a silent skip. All eleven run
@@ -55,10 +54,9 @@ tools:
   s3p:
   ps3:
 
-  # The one tool with anything to say. Two blocks, because the modes do not all
-  # want the same sweep: only the sorted one has a reason to care about memory,
-  # and a single cross-product would have run every mode at every size to find
-  # that out.
+  # The one tool with anything to say. Four rows, because four cases: only the
+  # sorted mode has a reason to care about memory, and the others say so by
+  # simply not being written twice.
   #
   # The sweep is the container ceiling, not the box: the box stays a 4 GB
   # n4-highcpu-2 throughout, and `docker run --memory` is what the process
@@ -74,10 +72,13 @@ tools:
   # — and MaxDirectMemorySize defaults to roughly the heap size. A sorting run
   # is the most buffer-hungry shape swath has, so SIGKILL is a plausible
   # outcome, and a different finding from "it spilled and finished".
+  #
+  # Every row states the ceiling, including the three that share one value: one
+  # left out would resolve to no ceiling at all, and the ID would then say
+  # nothing about the memory the run was given.
   swath:
-    matrix:
-      - mode: [recursive-tsv, recursive-parquet]
-        container_memory_gb: [4]
-
-      - mode: [recursive-parquet-sorted]
-        container_memory_gb: [2, 4]
+    cases:
+      - {mode: recursive-tsv, container_memory_gb: 4}
+      - {mode: recursive-parquet, container_memory_gb: 4}
+      - {mode: recursive-parquet-sorted, container_memory_gb: 2}
+      - {mode: recursive-parquet-sorted, container_memory_gb: 4}

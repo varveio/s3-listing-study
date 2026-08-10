@@ -1,4 +1,4 @@
-"""The bucket plan reader: cascade, matrix expansion, case identity, refusals."""
+"""The bucket plan reader: cascade, case rows, case identity, refusals."""
 
 from __future__ import annotations
 
@@ -13,15 +13,14 @@ from s3_listing_study.manager.bench import cli as bench_cli
 from s3_listing_study.manager.bench import plan as bench
 
 MINIMAL = """
-spec_version: 1
+spec_version: 2
 bucket: {bucket}
 region: us-east-1
 defaults:
   reps: 3
   timeout_s: 3600
-  resources:
-    vcpus: 2
-    memory_gb: 8
+  vcpus: 2
+  memory_gb: 8
 tools:
 {tools}
 """
@@ -36,8 +35,8 @@ def write(tmp_path: Path, tools: str, *, bucket: str = "b", extra: str = "") -> 
 
 ONE_CASE = """
 aws-cli:
-  matrix:
-    mode: [s3api-v2-text]
+  cases:
+    - {mode: s3api-v2-text}
 """
 
 # Enough of a catalogue to resolve every shape these plans ask for. Passed in
@@ -76,7 +75,7 @@ def test_the_committed_plan_loads() -> None:
     assert loaded.bucket == "noaa-ghcn-pds"
     assert loaded.region == "us-east-1"
     assert len(loaded.tools()) == 11
-    # Ten bare tools, plus swath's two blocks: 2 streaming modes at one ceiling
+    # Ten bare tools, plus swath's four rows: 2 streaming modes at one ceiling
     # and the sorted mode at two.
     assert len(loaded.cases) == 14
     assert len(loaded.cases_for("swath")) == 4
@@ -149,7 +148,7 @@ def test_a_shape_listed_twice_is_refused(tmp_path: Path) -> None:
     """It would resolve to whichever came last, so two campaigns could differ."""
     path = tmp_path / "instances.yaml"
     path.write_text(
-        "spec_version: 1\ninstances:\n"
+        "spec_version: 2\ninstances:\n"
         "  - {vcpus: 2, memory_gb: 4, machine_type: n4-highcpu-2}\n"
         "  - {vcpus: 2, memory_gb: 4, machine_type: c4-highcpu-2}\n",
         encoding="utf-8",
@@ -192,53 +191,52 @@ def test_an_empty_tool_with_no_default_mode_is_refused(tmp_path: Path) -> None:
         load(path, default_modes={"s3p": "ls"})
 
 
-def test_an_unindented_matrix_does_not_silently_become_a_default_case(tmp_path: Path) -> None:
+def test_unindented_cases_do_not_silently_become_a_default_case(tmp_path: Path) -> None:
     """The cost of the empty-tool shorthand, and why it is affordable.
 
-    Losing a level of indentation turns ``matrix`` into a sibling tool rather
+    Losing a level of indentation turns ``cases`` into a sibling tool rather
     than swath's body. That refuses, instead of quietly running swath once.
     """
-    path = write(tmp_path, "swath:\nmatrix:\n  - mode: [recursive-tsv]\n")
-    with pytest.raises(bench.PlanError, match=r"'tools\.matrix' .* is not a mapping"):
+    path = write(tmp_path, "swath:\ncases:\n  - {mode: recursive-tsv}\n")
+    with pytest.raises(bench.PlanError, match=r"'tools\.cases' .* is not a mapping"):
         load(path, default_modes={"swath": "recursive-tsv"})
 
 
-def test_a_matrix_expands_to_its_cross_product(tmp_path: Path) -> None:
+def test_each_row_is_one_case(tmp_path: Path) -> None:
+    """The number of cases is the number of lines; nothing is multiplied."""
     path = write(
         tmp_path,
         """
         swath:
-          matrix:
-            mode: [recursive-tsv, recursive-parquet]
-            memory_gb: [4, 8]
+          cases:
+            - {mode: recursive-tsv, memory_gb: 4}
+            - {mode: recursive-tsv, memory_gb: 8}
+            - {mode: recursive-parquet, memory_gb: 8}
         """,
     )
     ids = [case.case_id for case in load(path).cases]
     assert ids == [
         "recursive-tsv.memory_gb-4",
         "recursive-tsv.memory_gb-8",
-        "recursive-parquet.memory_gb-4",
         "recursive-parquet.memory_gb-8",
     ]
 
 
-def test_an_axis_overrides_the_tool_which_overrides_the_defaults(tmp_path: Path) -> None:
+def test_a_row_overrides_the_tool_which_overrides_the_defaults(tmp_path: Path) -> None:
     """Three layers, shallow and per-key: the nearest statement of a key wins."""
     path = write(
         tmp_path,
         """
         swath:
-          resources:
-            memory_gb: 8
-            vcpus: 4
-          matrix:
-            mode: [recursive-tsv]
-            memory_gb: [16]
+          memory_gb: 8
+          vcpus: 4
+          cases:
+            - {mode: recursive-tsv, memory_gb: 16}
         """,
     )
     case = load(path).cases[0]
-    assert case.resources.memory_gb == 16  # axis beats the tool
-    assert case.resources.vcpus == 4  # tool beats the defaults
+    assert case.resources.memory_gb == 16  # the row beats the tool
+    assert case.resources.vcpus == 4  # the tool beats the defaults
     assert case.timeout_s == 3600  # defaults, unmentioned by either
     # Resolved from the pair, never stated by any layer.
     assert case.resources.machine_type == "n4-standard-4"
@@ -250,75 +248,97 @@ def test_a_tool_may_override_the_schedule(tmp_path: Path) -> None:
         """
         ps3:
           timeout_s: 7200
-          matrix:
-            mode: [list]
+          cases:
+            - {mode: list}
         """,
     )
     case = load(path).cases[0]
     assert (case.timeout_s, case.reps) == (7200, 3)
 
 
-def test_blocks_let_modes_take_different_sweeps(tmp_path: Path) -> None:
-    """The point of blocks: only the mode that cares about memory is swept."""
+def test_rows_are_ragged_so_one_mode_can_be_swept_alone(tmp_path: Path) -> None:
+    """The point of rows: only the mode that cares about memory is written twice."""
     path = write(
         tmp_path,
         """
         swath:
-          matrix:
-            - mode: [recursive-tsv]
-              memory_gb: [4]
-            - mode: [recursive-parquet-sorted]
-              memory_gb: [8, 16]
-              resources:
-                vcpus: 4
+          cases:
+            - {mode: recursive-tsv, memory_gb: 4}
+            - {mode: recursive-parquet-sorted, memory_gb: 8, vcpus: 4}
+            - {mode: recursive-parquet-sorted, memory_gb: 16, vcpus: 4}
         """,
     )
     cases = load(path).cases
     assert [c.case_id for c in cases] == [
-        "recursive-tsv.memory_gb-4",
-        "recursive-parquet-sorted.memory_gb-8",
-        "recursive-parquet-sorted.memory_gb-16",
+        "recursive-tsv.vcpus-2.memory_gb-4",
+        "recursive-parquet-sorted.vcpus-4.memory_gb-8",
+        "recursive-parquet-sorted.vcpus-4.memory_gb-16",
     ]
-    # A block's resources override the defaults, and its axes still override the
-    # block: the sorted pair gets the block's 4 vCPU and its own memory.
+    # The first row never mentions vcpus, so it inherits the plan's 2 — and says
+    # so in its ID anyway, because a sibling put vcpus in the union.
     assert cases[0].resources.machine_type == "n4-highcpu-2"
     assert [c.resources.vcpus for c in cases[1:]] == [4, 4]
     assert [c.resources.machine_type for c in cases[1:]] == ["n4-highcpu-4", "n4-standard-4"]
 
 
-def test_blocks_that_declare_different_axes_are_refused(tmp_path: Path) -> None:
-    """Mixed axis sets would give one tool IDs of two different shapes."""
+def test_the_id_renders_the_union_of_the_keys_the_rows_state(tmp_path: Path) -> None:
+    """Ragged rows, one ID shape — otherwise a tool's IDs could not be compared.
+
+    A row stating no ceiling still renders one, because a sibling did: its
+    resolved answer is *no ceiling*, which is a real answer and not an absent key.
+    """
     path = write(
         tmp_path,
         """
         swath:
-          matrix:
-            - mode: [recursive-tsv]
-            - mode: [recursive-parquet]
-              memory_gb: [8]
+          cases:
+            - {mode: recursive-tsv}
+            - {mode: recursive-parquet-sorted, container_memory_gb: 2}
         """,
     )
-    with pytest.raises(bench.PlanError, match="mixes axis sets"):
-        load(path)
+    cases = load(path).cases
+    assert [c.case_id for c in cases] == [
+        "recursive-tsv.container_memory_gb-none",
+        "recursive-parquet-sorted.container_memory_gb-2",
+    ]
+    assert cases[0].resources.container_memory_gb is None
 
 
-def test_blocks_generating_the_same_case_twice_are_refused(tmp_path: Path) -> None:
-    """Two blocks can overlap; the second would append into the first's evidence."""
+def test_two_rows_that_resolve_to_one_case_are_refused(tmp_path: Path) -> None:
+    """The second would append into the first's evidence.
+
+    Not written identically: the second states a value it would have inherited
+    anyway, which is how this is actually mistyped.
+    """
     path = write(
         tmp_path,
         """
         swath:
-          matrix:
-            - mode: [recursive-tsv]
-              memory_gb: [4]
-            - mode: [recursive-tsv]
-              memory_gb: [4]
-              resources:
-                vcpus: 2
+          cases:
+            - {mode: recursive-tsv, memory_gb: 8}
+            - {mode: recursive-tsv, memory_gb: 8, vcpus: 2}
         """,
     )
     with pytest.raises(bench.PlanError, match="twice"):
         load(path)
+
+
+def test_a_row_may_omit_the_mode_and_inherit_the_tool_default(tmp_path: Path) -> None:
+    """What keeps a sweep over allocation alone at one line per case."""
+    path = write(
+        tmp_path,
+        """
+        s5cmd:
+          cases:
+            - {vcpus: 2}
+            - {vcpus: 4}
+        """,
+    )
+    cases = load(path, default_modes={"s5cmd": "recursive"}).cases
+    assert [(c.mode, c.case_id) for c in cases] == [
+        ("recursive", "recursive.vcpus-2"),
+        ("recursive", "recursive.vcpus-4"),
+    ]
 
 
 # ── the container ceiling and the heap ───────────────────────────────────────
@@ -338,7 +358,7 @@ def test_a_ceiling_is_enforced_as_a_cgroup_limit(tmp_path: Path) -> None:
     Swap is pinned to the same value on purpose — left alone Docker allows twice
     the limit, so "it fitted in 2 GB" could mean 2 GB of RAM plus 2 GB of disk.
     """
-    path = write(tmp_path, "swath:\n  resources:\n    container_memory_gb: 2\n")
+    path = write(tmp_path, "swath:\n  container_memory_gb: 2\n")
     case = load(path, default_modes={"swath": "recursive-tsv"}).cases[0]
     assert case.resources.docker_options == ("--memory=2g", "--memory-swap=2g")
     assert case.resources.visible_memory_gb == 2
@@ -346,7 +366,7 @@ def test_a_ceiling_is_enforced_as_a_cgroup_limit(tmp_path: Path) -> None:
 
 def test_a_ceiling_above_the_box_is_refused(tmp_path: Path) -> None:
     """It would constrain nothing, so it is a plan that does not mean what it says."""
-    path = write(tmp_path, "swath:\n  resources:\n    container_memory_gb: 64\n")
+    path = write(tmp_path, "swath:\n  container_memory_gb: 64\n")
     with pytest.raises(bench.PlanError, match="constrains nothing"):
         load(path, default_modes={"swath": "recursive-tsv"})
 
@@ -358,7 +378,7 @@ def test_a_percentage_template_needs_no_ceiling_arithmetic(tmp_path: Path) -> No
     percent-only template renders the same string either way. That claim is
     tested against a `{mib}` template below, where the arithmetic is visible.
     """
-    path = write(tmp_path, "swath:\n  resources:\n    container_memory_gb: 2\n")
+    path = write(tmp_path, "swath:\n  container_memory_gb: 2\n")
     case = load(path, default_modes={"swath": "recursive-tsv"}).cases[0]
     assert case.env == (("JAVA_TOOL_OPTIONS", "-XX:MaxRAMPercentage=75"),)
 
@@ -370,7 +390,7 @@ def test_a_size_template_resolves_against_the_ceiling_not_the_box(tmp_path: Path
         policies={"s3p": bench.HeapPolicy(env="NODE_OPTIONS", value="--max-old-space-size={mib}")},
     )
     capped = load(
-        write(tmp_path, "s3p:\n  resources:\n    container_memory_gb: 4\n"),
+        write(tmp_path, "s3p:\n  container_memory_gb: 4\n"),
         default_modes={"s3p": "ls"},
         heap=v8,
     ).cases[0]
@@ -383,7 +403,7 @@ def test_a_size_template_resolves_against_the_ceiling_not_the_box(tmp_path: Path
 
 def test_a_runtime_wanting_a_size_gets_one_computed(tmp_path: Path) -> None:
     """V8 cannot read its own ceiling, so `{mib}` is resolved against it."""
-    path = write(tmp_path, "s3p:\n  resources:\n    container_memory_gb: 4\n")
+    path = write(tmp_path, "s3p:\n  container_memory_gb: 4\n")
     case = load(
         path,
         default_modes={"s3p": "ls"},
@@ -408,7 +428,7 @@ def test_an_impossible_heap_percentage_is_refused(tmp_path: Path) -> None:
     """A share over 100 is a heap larger than the memory it must fit in."""
     path = tmp_path / "tools.yaml"
     path.write_text(
-        "spec_version: 1\ndefault_modes: {swath: recursive-tsv}\n"
+        "spec_version: 2\ndefault_modes: {swath: recursive-tsv}\n"
         "heap:\n  percent: 150\n  tools:\n    swath:\n"
         "      env: JAVA_TOOL_OPTIONS\n      value: '-XX:MaxRAMPercentage={percent}'\n",
         encoding="utf-8",
@@ -422,7 +442,7 @@ def test_a_plan_may_not_set_a_heap_share(tmp_path: Path) -> None:
     path = write(tmp_path, ONE_CASE)
     path.write_text(
         path.read_text(encoding="utf-8").replace(
-            "    memory_gb: 8", "    memory_gb: 8\n    heap_percent: 50"
+            "  memory_gb: 8", "  memory_gb: 8\n  heap_percent: 50"
         ),
         encoding="utf-8",
     )
@@ -434,7 +454,7 @@ def test_an_unknown_heap_placeholder_is_refused(tmp_path: Path) -> None:
     """A typo would otherwise reach the runtime as a literal brace."""
     path = tmp_path / "tools.yaml"
     path.write_text(
-        "spec_version: 1\ndefault_modes: {swath: recursive-tsv}\n"
+        "spec_version: 2\ndefault_modes: {swath: recursive-tsv}\n"
         "heap:\n  percent: 75\n  tools:\n    swath:\n"
         "      env: JAVA_TOOL_OPTIONS\n      value: '-Xmx{gigabytes}'\n",
         encoding="utf-8",
@@ -465,7 +485,7 @@ def test_a_tools_file_from_a_future_reader_is_refused(tmp_path: Path) -> None:
     with pytest.raises(bench.PlanError, match="spec_version"):
         bench.load_heap_config(path)
 
-    path.write_text(f"spec_version: 1\nstray_key: true\n{body}", encoding="utf-8")
+    path.write_text(f"spec_version: 2\nstray_key: true\n{body}", encoding="utf-8")
     with pytest.raises(bench.PlanError, match="unknown key"):
         bench.load_heap_config(path)
 
@@ -479,7 +499,7 @@ def test_every_field_of_a_case_moves_its_fingerprint(tmp_path: Path) -> None:
     The bucket in particular is load-bearing — other tests use separate
     directories on the strength of it — but nothing asserted it.
     """
-    base = "swath:\n  matrix:\n    mode: [recursive-tsv]\n"
+    base = "swath:\n  cases:\n    - {mode: recursive-tsv}\n"
 
     def fingerprint_of(body: str, *, bucket: str = "b", region: str = "us-east-1") -> str:
         directory = tmp_path / f"{bucket}-{region}-{abs(hash(body))}"
@@ -493,30 +513,29 @@ def test_every_field_of_a_case_moves_its_fingerprint(tmp_path: Path) -> None:
     assert fingerprint_of(base, bucket="other") != reference
     assert fingerprint_of(base, region="eu-west-1") != reference
     # mode, via a different mode of the same tool.
-    assert fingerprint_of("swath:\n  matrix:\n    mode: [recursive-jsonl]\n") != reference
+    assert fingerprint_of("swath:\n  cases:\n    - {mode: recursive-jsonl}\n") != reference
     # env, via the ceiling that the heap share is rendered against.
-    assert fingerprint_of(f"{base}  resources:\n    container_memory_gb: 2\n") != reference
+    assert fingerprint_of(f"{base}  container_memory_gb: 2\n") != reference
 
 
 def test_two_tools_running_the_same_mode_differ(tmp_path: Path) -> None:
     """The tool is part of identity, not merely part of the receipt path."""
     path = write(
-        tmp_path, "s5cmd:\n  matrix:\n    mode: [list]\ns3kor:\n  matrix:\n    mode: [list]\n"
+        tmp_path, "s5cmd:\n  cases:\n    - {mode: list}\ns3kor:\n  cases:\n    - {mode: list}\n"
     )
     first, second = load(path).cases
     assert first.case_id == second.case_id  # same derived path segment
     assert first.fingerprint != second.fingerprint
 
 
-def test_a_single_valued_axis_still_appears_in_the_id(tmp_path: Path) -> None:
+def test_a_key_only_one_row_states_still_appears_in_the_id(tmp_path: Path) -> None:
     """Otherwise the ID would mean "whatever the default was", unrecoverably."""
     path = write(
         tmp_path,
         """
         swath:
-          matrix:
-            mode: [recursive-tsv]
-            memory_gb: [4]
+          cases:
+            - {mode: recursive-tsv, memory_gb: 4}
         """,
     )
     assert load(path).cases[0].case_id == "recursive-tsv.memory_gb-4"
@@ -528,13 +547,49 @@ def test_resource_changes_move_the_fingerprint(tmp_path: Path) -> None:
         tmp_path,
         """
         swath:
-          matrix:
-            mode: [recursive-tsv]
-            memory_gb: [4, 8]
+          cases:
+            - {mode: recursive-tsv, memory_gb: 4}
+            - {mode: recursive-tsv, memory_gb: 8}
         """,
     )
     first, second = load(path).cases
     assert first.fingerprint != second.fingerprint
+
+
+def test_every_key_a_row_may_state_moves_both_the_id_and_the_fingerprint(
+    tmp_path: Path,
+) -> None:
+    """The law that makes the row vocabulary checkable rather than remembered.
+
+    A key visible to one but not the other is the ``timeout_s`` hazard: same ID,
+    different fingerprints, so two non-comparable runs land in one directory.
+    Adding a key to ``ROW_FIELDS`` without rendering it into the ID fails here
+    rather than in a campaign.
+    """
+    # Two legal values per key, both resolving to a shape the catalogue offers.
+    pairs: dict[str, tuple[object, object]] = {
+        "mode": ("recursive-tsv", "recursive-jsonl"),
+        "vcpus": (2, 4),
+        "memory_gb": (8, 16),
+        "container_memory_gb": (4, 8),
+    }
+    assert set(pairs) == set(bench.ROW_FIELDS), "a row key with no coverage here"
+
+    def case(field: str, value: object, index: int) -> bench.Case:
+        directory = tmp_path / f"{field}-{index}"
+        directory.mkdir()
+        path = directory / "b.yaml"
+        row = {"mode": "recursive-tsv"} | {field: value}
+        body = "swath:\n  cases:\n    - {" + ", ".join(f"{k}: {v}" for k, v in row.items()) + "}\n"
+        path.write_text(
+            MINIMAL.format(bucket="b", tools=textwrap.indent(body, "  ")), encoding="utf-8"
+        )
+        return load(path).cases[0]
+
+    for field, (before, after) in pairs.items():
+        first, second = case(field, before, 0), case(field, after, 1)
+        assert first.case_id != second.case_id, f"{field} does not reach the id"
+        assert first.fingerprint != second.fingerprint, f"{field} does not reach the fingerprint"
 
 
 def test_reps_are_not_part_of_identity(tmp_path: Path) -> None:
@@ -586,7 +641,7 @@ def test_an_unknown_key_is_refused(tmp_path: Path) -> None:
 def test_an_unsupported_spec_version_is_refused(tmp_path: Path) -> None:
     path = write(tmp_path, ONE_CASE)
     path.write_text(
-        path.read_text(encoding="utf-8").replace("spec_version: 1", "spec_version: 2"),
+        path.read_text(encoding="utf-8").replace("spec_version: 2", "spec_version: 3"),
         encoding="utf-8",
     )
     with pytest.raises(bench.PlanError, match="spec_version"):
@@ -601,38 +656,74 @@ def test_a_filename_that_disagrees_with_the_bucket_is_refused(tmp_path: Path) ->
         load(renamed)
 
 
-def test_a_matrix_without_a_mode_axis_is_refused(tmp_path: Path) -> None:
-    path = write(
-        tmp_path,
-        """
-        swath:
-          matrix:
-            memory_gb: [4]
-        """,
-    )
-    with pytest.raises(bench.PlanError, match="no 'mode' axis"):
+def test_a_row_without_a_mode_and_no_tool_default_is_refused(tmp_path: Path) -> None:
+    """Omitting the mode means "the usual one", which has to exist somewhere."""
+    path = write(tmp_path, "swath:\n  cases:\n    - {memory_gb: 4}\n")
+    with pytest.raises(bench.PlanError, match="states no mode"):
+        load(path, default_modes={"s3p": "ls"})
+
+
+def test_a_row_stating_the_schedule_is_refused(tmp_path: Path) -> None:
+    """``timeout_s`` is in the fingerprint but not the ID, so two rows differing
+    only there would render one ID and two fingerprints."""
+    path = write(tmp_path, "swath:\n  cases:\n    - {mode: recursive-tsv, timeout_s: 60}\n")
+    with pytest.raises(bench.PlanError, match="scheduling, not what a case is"):
         load(path)
 
 
-def test_a_repeated_axis_value_is_refused(tmp_path: Path) -> None:
-    """Two identical cases would collide on one directory and look like reps."""
-    path = write(
-        tmp_path,
-        """
-        swath:
-          matrix:
-            mode: [recursive-tsv]
-            memory_gb: [4, 4]
-        """,
+def test_a_layer_stating_a_mode_is_refused(tmp_path: Path) -> None:
+    """Eleven tools have eleven mode vocabularies, so nothing above a row has one."""
+    tool_level = write(tmp_path, "swath:\n  mode: recursive-tsv\n  cases:\n    - {memory_gb: 4}\n")
+    with pytest.raises(bench.PlanError, match="belongs to a case row"):
+        load(tool_level, default_modes={"swath": "recursive-tsv"})
+
+    plan_level = write(tmp_path, ONE_CASE, bucket="c")
+    plan_level.write_text(
+        plan_level.read_text(encoding="utf-8").replace("  reps: 3", "  reps: 3\n  mode: list"),
+        encoding="utf-8",
     )
-    with pytest.raises(bench.PlanError, match="repeats a value"):
+    with pytest.raises(bench.PlanError, match="belongs to a case row"):
+        load(plan_level)
+
+
+def test_defaults_given_as_a_list_is_refused(tmp_path: Path) -> None:
+    """The plan-level sweep this schema does not have.
+
+    A one-entry list and a fallback row mean the same thing; a two-entry list
+    could mean either a cascade or a cross-product over every tool at once.
+    """
+    path = tmp_path / "b.yaml"
+    path.write_text(
+        "spec_version: 2\n"
+        "bucket: b\n"
+        "region: us-east-1\n"
+        "defaults:\n"
+        "  - {reps: 3, timeout_s: 3600, vcpus: 2, memory_gb: 8}\n"
+        "  - {reps: 3, timeout_s: 3600, vcpus: 4, memory_gb: 8}\n"
+        "tools:\n"
+        "  aws-cli:\n"
+        "    cases:\n"
+        "      - {mode: s3api-v2-text}\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(bench.PlanError, match="not a sweep"):
         load(path)
+
+
+def test_a_tool_body_is_the_defaults_vocabulary_plus_its_rows() -> None:
+    """``defaults`` and a tool body are the same shape; the tool body also carries
+    the rows. Asserted so the sentence cannot rot away from the tuples."""
+    assert ("cases", *bench.LAYER_FIELDS) == bench.TOOL_FIELDS
+    assert not set(bench.ROW_FIELDS) & set(bench.SCHEDULE_FIELDS)
+    assert "mode" not in bench.LAYER_FIELDS
+    # The overlap is the allocation, stated the same way at either level.
+    assert set(bench.ROW_FIELDS) & set(bench.LAYER_FIELDS) == set(bench.RESOURCE_FIELDS)
 
 
 def test_incomplete_defaults_are_refused(tmp_path: Path) -> None:
     path = write(tmp_path, ONE_CASE)
     path.write_text(
-        path.read_text(encoding="utf-8").replace("    memory_gb: 8\n", ""), encoding="utf-8"
+        path.read_text(encoding="utf-8").replace("  memory_gb: 8\n", ""), encoding="utf-8"
     )
     with pytest.raises(bench.PlanError, match="missing memory_gb"):
         load(path)
@@ -644,9 +735,8 @@ def test_a_yaml_bool_is_not_a_memory_size(tmp_path: Path) -> None:
         tmp_path,
         """
         swath:
-          matrix:
-            mode: [recursive-tsv]
-            memory_gb: [yes]
+          cases:
+            - {mode: recursive-tsv, memory_gb: yes}
         """,
     )
     with pytest.raises(bench.PlanError, match="positive integer"):

@@ -15,7 +15,7 @@ writes nothing, so it is the way to review a campaign before submitting one.
 `data/registry.toml` binds a bucket to a reference manifest for the
 verification lineage. Nothing in the attempt path reads it, and a benchmark
 bucket has no manifest, so a plan is self-contained: bucket, region, roster,
-allocation, and matrix all live in the one file.
+allocation, and cases all live in the one file.
 
 ## A plan is intent; a campaign is an execution
 
@@ -42,42 +42,66 @@ Restating it per plan would mean the same eleven lines in every file, drifting
 apart one edit at a time. A test checks each default against the adapter that
 implements it, so an adapter rename cannot leave it stale.
 
-Losing a level of indentation on a `matrix:` makes it a sibling of the tool
+Losing a level of indentation on a `cases:` makes it a sibling of the tool
 rather than its body. That is refused — as an unregistered tool with no default
 mode — rather than quietly running the tool once.
 
-## Cases are generated
+## A layer and a row
 
-Tools needing more than one case declare a `matrix`, whose cross-product is
-that tool's set of
-cases — two modes and two memory sizes is four cases from four lines, rather
-than four hand-copied blocks that can drift apart.
+A plan has two shapes, and every key in it belongs to one of them.
 
-One cross-product forces every mode to take every value of every axis, which is
-wrong as soon as one mode needs an allocation its siblings do not. So a tool may
-state several blocks and take their union, and a block may carry its own
-`resources`:
+A **row** — one entry in a tool's `cases` — states what one case *is*: `mode`
+and the allocation (`vcpus`, `memory_gb`, `container_memory_gb`).
+
+A **layer** — `defaults`, or a tool's own body — states what every case under it
+*inherits*: the allocation again, plus the schedule (`reps`, `timeout_s`). Never
+`mode`: eleven tools have eleven mode vocabularies, so nothing above a row has a
+mode to state. A tool body is therefore `defaults` plus `cases`.
+
+A row carries only what the ID and the fingerprint can *both* see, which is what
+keeps `timeout_s` out of one: it is in the fingerprint but not the ID, so two
+rows differing only there would render one ID and two fingerprints — two
+non-comparable runs filed into one case directory.
+
+## Cases are enumerated
+
+Tools needing more than one case list rows, and each row is one case — the
+number of cases is the number of lines, with nothing multiplied out:
 
 ```yaml
 swath:
-  matrix:
-    - mode: [recursive-tsv, recursive-parquet]
-      memory_gb: [4]
-
-    - mode: [recursive-parquet-sorted]
-      memory_gb: [4, 8]
+  cases:
+    - {mode: recursive-tsv, container_memory_gb: 4}
+    - {mode: recursive-parquet, container_memory_gb: 4}
+    - {mode: recursive-parquet-sorted, container_memory_gb: 2}
+    - {mode: recursive-parquet-sorted, container_memory_gb: 4}
 ```
 
-Every block must declare the same axis *names*, so one tool's case IDs keep
-their shape; the values are what differ.
+Rows are ragged: a row states what differs and inherits the rest, which is how
+the one mode that cares about memory gets swept without its siblings restating
+an allocation they were happy with. A row may even omit `mode`, taking the tool's
+usual one, so a sweep over allocation alone is one line per case:
 
-Values resolve in four shallow layers, nearest statement winning:
-`defaults` → the tool → the block → the matrix axis. `resources` is a flat
-table of scalars, so there is no nesting for a merge surprise to hide in.
+```yaml
+s5cmd:
+  cases:
+    - {vcpus: 2}
+    - {vcpus: 8}
+```
+
+Values resolve in three shallow layers, nearest statement winning:
+`defaults` → the tool → the row. Every level is a flat table of scalars, so
+there is no nesting for a merge surprise to hide in.
+
+A cross-product was the earlier answer, and it multiplied where it should have
+enumerated: a tool whose sorted mode needed an allocation its siblings did not
+had to be split into blocks and unioned back together. There is likewise no
+plan-level sweep — one `defaults` row and a list of them mean the same thing at
+one entry and diverge silently at the second, so a list there is refused.
 
 ## A plan asks for a shape, not a machine type
 
-`resources` states `vcpus` and `memory_gb`; [`instances.yaml`](instances.yaml)
+A layer or a row states `vcpus` and `memory_gb`; [`instances.yaml`](instances.yaml)
 says which machine type that pair is. A plan therefore never names a provider's
 catalogue, and a new machine generation is one edit there rather than one per
 case. A shape the catalogue does not offer is refused while resolving, rather
@@ -97,9 +121,9 @@ So a memory sweep should move the ceiling, not the machine:
 
 ```yaml
 swath:
-  matrix:
-    - mode: [recursive-parquet-sorted]
-      container_memory_gb: [2, 4]
+  cases:
+    - {mode: recursive-parquet-sorted, container_memory_gb: 2}
+    - {mode: recursive-parquet-sorted, container_memory_gb: 4}
 ```
 
 The box stays identical across those two cases — same machine type, same cores,
@@ -122,12 +146,16 @@ a subject and forgetting a bucket should not look like a decision to skip it.
 
 ## Case IDs are paths, not identities
 
-An ID is derived from the axis values (`recursive-parquet.memory_mib-2048`), so
-adding an axis later changes every ID a tool generates. Identity is therefore
-carried by `fingerprint`, a digest over the resolved case. It survives an ID
-scheme change, and it refuses the reverse mistake: editing a matrix value while
-the derived ID lands the same would otherwise append non-comparable runs into
-one case directory.
+An ID is derived (`recursive-parquet-sorted.container_memory_gb-2`) from the
+*union* of the keys a tool's rows state, so a ragged row set still gives that
+tool IDs of one shape: a row that omitted a key renders the value it inherited,
+and `container_memory_gb-none` is the ceiling nobody set.
+
+Because the union is what renders, adding a key to one row changes every ID that
+tool generates. Identity is therefore carried by `fingerprint`, a digest over
+the resolved case. It survives an ID scheme change, and it refuses the reverse
+mistake: editing a row's value while the derived ID lands the same would
+otherwise append non-comparable runs into one case directory.
 
 `reps` is excluded from the fingerprint — how many times we ran something is
 not part of what we ran. `timeout_s` is included, because it can truncate a run

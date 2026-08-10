@@ -14,14 +14,23 @@ image digest. Receipts group under the campaign that produced them.
 records for it, on the plan's own allocation. That is what most tools want and
 it says nothing a plan needs to restate, so the name alone declares it — and a
 tool that only re-allocates keeps the default mode rather than having to write
-a matrix out to say so.
+its cases out to say so.
 
-**Cases are generated, not hand-written.** A tool wanting more declares a
-``matrix`` whose cross-product is the set of cases, so "2 GB vs 4 GB, sorted vs
-unsorted" is two lines rather than four hand-copied blocks that can disagree.
-Case IDs are derived from the axis values for the same reason: a hand-typed ID
-is a hand-typed opportunity to file one case's attempt under another case's
-name.
+**A plan has two shapes: a layer and a row.** A *row* — one entry in a tool's
+``cases`` — states what one case **is**: ``mode`` and the allocation. A *layer*
+— ``defaults``, or a tool's own body — states what every case under it inherits:
+the allocation, plus the schedule, and never ``mode``. Both draw on one flat
+vocabulary, so a tool body is ``defaults`` plus ``cases``.
+
+A row may carry only keys the ID and the fingerprint can *both* see, which is
+what keeps ``timeout_s`` out of one: it is in the fingerprint but not the ID, so
+two rows differing only there would render one ID and two fingerprints — two
+non-comparable runs filed into one case directory.
+
+**Cases are enumerated, not multiplied.** Each row is one case, and rows may be
+ragged: a row states what differs and inherits the rest. IDs are still derived,
+from the *union* of the keys a tool's rows state, so a row that omitted one
+renders the value it inherited and one tool's IDs keep one shape.
 
 **The box and the process are different questions.** ``vcpus``/``memory_gb``
 buy a machine; ``container_memory_gb`` is a cgroup ceiling on top of it, via
@@ -35,17 +44,11 @@ a fraction of what they can see; that share lives with the heap policies in
 ``bench/tools.yaml`` rather than in a plan, since it configures two tools out of
 eleven and every plan would otherwise restate a figure most cases ignore.
 
-A tool may state several blocks and take their union, because one cross-product
-forces every mode to take every value of every axis — wrong as soon as one mode
-needs an allocation its siblings do not. A block carries its own ``resources``
-override for exactly that, and every block must declare the same axis names so
-one tool's IDs keep their shape.
-
-**The derived ID is a path, not an identity.** Adding an axis later changes
-every ID a tool generates, so an ID cannot be what says "these attempts are the
+**The derived ID is a path, not an identity.** Adding a key to one row changes
+every ID that tool generates, so an ID cannot be what says "these attempts are the
 same case". :attr:`Case.fingerprint` is — a digest over the resolved case, which
 survives ID scheme changes and, more importantly, refuses the reverse mistake:
-editing a matrix value while the derived ID happens to land the same would
+editing a row's value while the derived ID happens to land the same would
 otherwise append non-comparable runs into one case directory. ``reps`` is
 excluded from it because how many times we ran something is not part of what we
 ran; ``timeout_s`` is included because it can truncate a run and therefore
@@ -55,7 +58,6 @@ change the result.
 from __future__ import annotations
 
 import hashlib
-import itertools
 import json
 import re
 from collections.abc import Collection, Iterable, Mapping, Sequence
@@ -65,9 +67,13 @@ from typing import Any
 
 import yaml
 
-# Bumped only when a plan written for an older reader would be misread by this
-# one. Unknown versions are refused rather than best-effort parsed.
-SPEC_VERSION = 1
+# Bumped only when a file written for an older reader would be misread by this
+# one. Unknown versions are refused rather than best-effort parsed. One number
+# for the whole `bench/` set, since the reader loads all three files together.
+#
+# 2: `matrix` became `cases`, a list of rows; the allocation stopped nesting
+# under `resources`. A v1 plan is refused rather than reinterpreted.
+SPEC_VERSION = 2
 
 # Versioned separately from the spec: the fingerprint function is part of the
 # on-disk contract the append guard enforces, so changing how it is computed is
@@ -96,16 +102,22 @@ REQUIRED_RESOURCE_FIELDS = BOX_FIELDS
 
 RESOURCE_FIELDS = (*BOX_FIELDS, *PROCESS_FIELDS)
 
-# Scheduling, not allocation. Settable at plan and tool level, never an axis —
-# varying reps does not make a different case, and a timeout swept as an axis is
-# a symptom of not knowing how long the run takes.
+# Scheduling, not allocation. Settable on a layer, never in a row — varying reps
+# does not make a different case, and a timeout is in the fingerprint but not the
+# ID, so two rows differing only there would file non-comparable runs into one
+# directory.
 SCHEDULE_FIELDS = ("reps", "timeout_s")
 
-# ``mode`` first so it leads every derived ID; the rest are sorted, so the ID is
-# a function of the axis *set* and not of the order someone typed them in.
-AXIS_FIELDS = ("mode", *RESOURCE_FIELDS)
+# What a row may state: what one case *is*. `mode` first so it leads every
+# derived ID; the rest follow in this order, so an ID is a function of the key
+# set and not of the order someone typed them in.
+ROW_FIELDS = ("mode", *RESOURCE_FIELDS)
 
-TOOL_FIELDS = ("matrix", "resources", *SCHEDULE_FIELDS)
+# What a layer may state: what every case under it inherits. No `mode` — eleven
+# tools have eleven mode vocabularies, so nothing above a row has one to state.
+LAYER_FIELDS = (*RESOURCE_FIELDS, *SCHEDULE_FIELDS)
+
+TOOL_FIELDS = ("cases", *LAYER_FIELDS)
 
 # Anchored with ``\Z`` and applied with ``fullmatch``: ``$`` also matches before
 # a trailing newline, and a case ID is used as a directory name.
@@ -167,7 +179,7 @@ class Resources:
 
 @dataclass(frozen=True)
 class Case:
-    """One resolved cell of a tool's matrix — the unit a campaign submits."""
+    """One resolved row of a tool's ``cases`` — the unit a campaign submits."""
 
     tool: str
     case_id: str
@@ -175,9 +187,11 @@ class Case:
     resources: Resources
     reps: int
     timeout_s: int
-    # The axis values that generated this case, in ID order. Kept so a reader
-    # can group by an axis without re-parsing the ID it was rendered into.
-    axes: tuple[tuple[str, str | int], ...]
+    # The values this case was rendered into an ID from, in ID order: the union
+    # of the keys the tool's rows state, so a row that omitted one carries the
+    # value it inherited. Kept so a reader can group by a key without re-parsing
+    # the ID. ``None`` is the container ceiling nobody set.
+    axes: tuple[tuple[str, str | int | None], ...]
     # What the runtime must be told about its own memory, if it is the kind that
     # needs telling. Empty for a tool with no managed heap.
     env: tuple[tuple[str, str], ...]
@@ -412,8 +426,16 @@ def _load(
     if path.suffix in (".yaml", ".yml") and path.stem != bucket:
         raise PlanError(f"plan {path} declares bucket {bucket!r} but is named {path.stem!r}")
 
+    # The plan-level sweep this schema does not have: one default row and a list
+    # of them coincide at one entry and diverge silently at the second.
+    if isinstance(doc.get("defaults"), list):
+        raise PlanError(
+            f"'defaults' in {path} is a list — defaults is one row of inherited "
+            "values, not a sweep; give each tool the cases it should run"
+        )
     defaults = _table(doc, "defaults", "defaults", path)
-    _reject_unknown(defaults, ("resources", *SCHEDULE_FIELDS), "[defaults]", path)
+    _reject_mode(defaults, "[defaults]", path)
+    _reject_unknown(defaults, LAYER_FIELDS, "[defaults]", path)
     base_resources = _resources(defaults, "defaults", path, complete=True)
     base_schedule = _schedule(defaults, "defaults", path, complete=True)
 
@@ -488,27 +510,37 @@ def _positive_int(value: object, key: str, where: str, path: Path) -> int:
 def _resources(
     table: Mapping[str, Any], where: str, path: Path, *, complete: bool
 ) -> dict[str, Any]:
-    """The resource keys ``table`` states. ``complete`` demands all of them."""
-    raw = table.get("resources")
-    if raw is None:
-        if complete:
-            raise PlanError(f"'{where}' in {path} has no 'resources'")
-        return {}
-    if not isinstance(raw, dict):
-        raise PlanError(f"'{where}' 'resources' in {path} is not a mapping")
-    _reject_unknown(raw, RESOURCE_FIELDS, f"'{where}' resources", path)
+    """The resource keys ``table`` states, flat. ``complete`` demands all of them.
+
+    Not nested under ``resources``, so a layer and a row draw on one vocabulary
+    and the cascade stays a per-key merge over scalars.
+    """
     if complete:
-        missing = sorted(set(REQUIRED_RESOURCE_FIELDS) - set(raw))
+        missing = sorted(set(REQUIRED_RESOURCE_FIELDS) - set(table))
         if missing:
             raise PlanError(
-                f"'{where}' resources in {path} is missing {', '.join(missing)} "
+                f"'{where}' in {path} is missing {', '.join(missing)} "
                 "(defaults must be complete so every case resolves)"
             )
     return {
-        field: _positive_int(raw[field], field, f"{where} resources", path)
+        field: _positive_int(table[field], field, where, path)
         for field in RESOURCE_FIELDS
-        if field in raw
+        if field in table
     }
+
+
+def _reject_mode(table: Mapping[str, Any], where: str, path: Path) -> None:
+    """``mode`` belongs to a row, and only to a row.
+
+    Said apart from the unknown-key list, which would read as "no such thing"
+    when the answer is "one level down".
+    """
+    if "mode" in table:
+        raise PlanError(
+            f"{where} in {path} states a mode — a mode belongs to a case row, not "
+            "to what rows inherit; state it per row, or record the tool's usual "
+            "mode in bench/tools.yaml"
+        )
 
 
 def _schedule(
@@ -524,13 +556,28 @@ def _schedule(
     return resolved
 
 
-def _wants_default_mode(body: object) -> bool:
-    """A tool that never named a mode — ``aws-cli:``, or one that only re-allocates.
+def _wants_a_default_row(body: object) -> bool:
+    """A tool that stated no cases — ``aws-cli:``, or one that only re-allocates.
 
-    Stating ``resources`` is not stating a mode, so a tool asking for a bigger
-    box at its usual mode should not have to write the matrix out to say so.
+    It gets one empty row, which inherits everything including the mode. A body
+    that is neither absent nor a mapping falls through to the tool reader, which
+    says what is wrong with it, rather than being replaced with a default case.
     """
-    return body is None or (isinstance(body, dict) and "matrix" not in body)
+    return body is None or (isinstance(body, dict) and "cases" not in body)
+
+
+def _needs_default_modes(body: object) -> bool:
+    """Whether resolving this tool will have to consult ``bench/tools.yaml``.
+
+    True for a tool that stated no cases, and for one whose rows do not all name
+    a mode — a row may omit it and take the tool's usual one.
+    """
+    if _wants_a_default_row(body):
+        return True
+    rows = body["cases"] if isinstance(body, dict) else None
+    if not isinstance(rows, list):
+        return False
+    return any(not isinstance(row, dict) or "mode" not in row for row in rows)
 
 
 def _sibling(path: Path, name: str) -> Path:
@@ -541,29 +588,9 @@ def _sibling(path: Path, name: str) -> Path:
 def _sibling_default_modes(doc: Mapping[str, Any], path: Path) -> Mapping[str, str]:
     """``bench/tools.yaml`` beside the plan's directory — read only if needed."""
     tools = doc.get("tools")
-    if not isinstance(tools, dict) or not any(_wants_default_mode(body) for body in tools.values()):
+    if not isinstance(tools, dict) or not any(_needs_default_modes(b) for b in tools.values()):
         return {}
     return load_default_modes(_sibling(path, "tools"))
-
-
-def _default_body(
-    tool: str, body: object, default_modes: Mapping[str, str], path: Path
-) -> dict[str, Any]:
-    """Give a tool that named no mode the one recorded for it, keeping the rest.
-
-    A tool that runs once, at its usual mode, on the plan's own allocation says
-    nothing a plan needs to spell out — so writing the name and stopping is the
-    whole declaration. Anything it *did* say (a ceiling, a timeout) survives.
-    """
-    mode = default_modes.get(tool)
-    if mode is None:
-        known = "|".join(sorted(default_modes)) or "none"
-        raise PlanError(
-            f"'tools.{tool}' in {path} names no mode, and {tool} has no default "
-            f"in bench/tools.yaml ({known}) — give it a matrix or record its mode"
-        )
-    stated = body if isinstance(body, dict) else {}
-    return {**stated, "matrix": {"mode": [mode]}}
 
 
 @dataclass(frozen=True)
@@ -592,25 +619,30 @@ def _cases(
     for tool, body in declared.items():
         if not TOOL_RE.fullmatch(tool):
             raise PlanError(f"plan {path} has a malformed tool name: {tool!r}")
-        tools[tool] = (
-            _default_body(tool, body, default_modes, path) if _wants_default_mode(body) else body
-        )
+        # One empty row: everything inherited, including the mode. Anything the
+        # tool *did* say (a ceiling, a timeout) survives beside it.
+        stated = body if isinstance(body, dict) else {}
+        tools[tool] = {**stated, "cases": [{}]} if _wants_a_default_row(body) else body
     cases: list[Case] = []
     for tool in tools:
-        cases.extend(_tool_cases(tool, tools, base_resources, base_schedule, context))
+        cases.extend(
+            _tool_cases(tool, tools[tool], base_resources, base_schedule, default_modes, context)
+        )
     return tuple(cases)
 
 
 def _tool_cases(
     tool: str,
-    tools: Mapping[str, Any],
+    body: Any,
     base_resources: Mapping[str, Any],
     base_schedule: Mapping[str, int],
+    default_modes: Mapping[str, str],
     context: _Context,
 ) -> list[Case]:
     path = context.path
     where = f"tools.{tool}"
-    table = _table(tools, tool, where, path)
+    table = _table({tool: body}, tool, where, path)
+    _reject_mode(table, f"'{where}'", path)
     _reject_unknown(table, TOOL_FIELDS, f"'{where}'", path)
 
     # Cascade is shallow and per-key, over a flat table of scalars: there is no
@@ -618,103 +650,83 @@ def _tool_cases(
     resources = {**base_resources, **_resources(table, where, path, complete=False)}
     schedule = {**base_schedule, **_schedule(table, where, path, complete=False)}
 
+    rows = _case_rows(table, where, path)
+    # The union of the keys the rows state, not each row's own: otherwise a row
+    # omitting a ceiling its sibling stated would give one tool IDs of two
+    # shapes. `mode` is always in it, or a bare tool would render an empty ID.
+    rendered = tuple(f for f in ROW_FIELDS if f == "mode" or any(f in row for row in rows))
+
     cases: list[Case] = []
-    for block in _matrix_blocks(table, where, path):
-        # Block resources sit between the tool and the axes: a block is how one
-        # group of modes says it needs a different box from its siblings.
-        block_resources = {**resources, **block.resources}
-        ordered = [axis for axis in AXIS_FIELDS if axis in block.axes]
-        for combination in itertools.product(*(block.axes[axis] for axis in ordered)):
-            chosen = tuple(zip(ordered, combination, strict=True))
-            case_resources = {
-                **block_resources,
-                **{k: v for k, v in chosen if k in RESOURCE_FIELDS},
-            }
-            mode = str(dict(chosen)["mode"])
-            cases.append(_case(tool, mode, chosen, case_resources, schedule, context))
+    for row in rows:
+        case_resources = {**resources, **{k: v for k, v in row.items() if k in RESOURCE_FIELDS}}
+        mode = _row_mode(row, tool, where, default_modes, path)
+        chosen = tuple(
+            (field, mode if field == "mode" else case_resources.get(field)) for field in rendered
+        )
+        cases.append(_case(tool, mode, chosen, case_resources, schedule, context))
     return cases
 
 
-@dataclass(frozen=True)
-class _Block:
-    """One cross-product, plus the allocation it overrides for its own cases."""
+def _row_mode(
+    row: Mapping[str, Any], tool: str, where: str, default_modes: Mapping[str, str], path: Path
+) -> str:
+    """The mode a row states, or the one ``bench/tools.yaml`` records for the tool.
 
-    axes: dict[str, list[str | int]]
-    resources: dict[str, Any]
-
-
-def _matrix_blocks(table: Mapping[str, Any], where: str, path: Path) -> list[_Block]:
-    """One block, or several when modes do not all want the same sweep.
-
-    A single cross-product forces every mode to take every value of every axis.
-    That is wrong as soon as one mode needs a different allocation from its
-    siblings — sorting spills to disk where a streaming write does not — so a
-    tool may state several blocks and take their union.
-
-    Every block must declare the same axis *names*, so that one tool's case IDs
-    stay the same shape and remain comparable. The values are what differ.
+    A row may omit it: that is how ``aws-cli:`` declares itself, and how a sweep
+    over allocation alone stays one line per case.
     """
-    raw = table.get("matrix")
-    if raw is None:
-        raise PlanError(f"'{where}' in {path} has no 'matrix'")
-    entries = raw if isinstance(raw, list) else [raw]
-    if not entries:
-        raise PlanError(f"'{where}.matrix' in {path} is an empty list")
+    stated = row.get("mode")
+    if isinstance(stated, str):
+        return stated
+    mode = default_modes.get(tool)
+    if mode is None:
+        known = "|".join(sorted(default_modes)) or "none"
+        raise PlanError(
+            f"'{where}' in {path} states no mode, and {tool} has no default in "
+            f"bench/tools.yaml ({known}) — name the mode in the row, or record "
+            "the tool's usual one there"
+        )
+    return mode
 
-    blocks: list[_Block] = []
-    for index, entry in enumerate(entries):
-        label = f"{where}.matrix" if not isinstance(raw, list) else f"{where}.matrix[{index}]"
+
+def _case_rows(table: Mapping[str, Any], where: str, path: Path) -> list[dict[str, Any]]:
+    """One tool's rows: each is one case, inheriting every key it does not state."""
+    raw = table.get("cases")
+    if raw is None:
+        raise PlanError(f"'{where}' in {path} has no 'cases'")
+    if not isinstance(raw, list) or not raw:
+        raise PlanError(f"'{where}.cases' in {path} is not a non-empty list")
+
+    rows: list[dict[str, Any]] = []
+    for index, entry in enumerate(raw):
+        label = f"{where}.cases[{index}]"
         if not isinstance(entry, dict):
             raise PlanError(f"'{label}' in {path} is not a mapping")
-        _reject_unknown(entry, (*AXIS_FIELDS, "resources"), f"'{label}'", path)
-        blocks.append(
-            _Block(
-                axes=_axes(entry, label, path),
-                resources=_resources(entry, label, path, complete=False),
+        # Named before the unknown-key list, which would read as "no such thing"
+        # when the answer is "one level up".
+        scheduling = sorted(set(entry) & set(SCHEDULE_FIELDS))
+        if scheduling:
+            raise PlanError(
+                f"'{label}' in {path} states {', '.join(scheduling)} — that is "
+                "scheduling, not what a case is; set it on the tool or in defaults"
             )
-        )
-
-    names = {frozenset(block.axes) for block in blocks}
-    if len(names) > 1:
-        shapes = " vs ".join(sorted("+".join(sorted(n)) for n in names))
-        raise PlanError(
-            f"'{where}.matrix' in {path} mixes axis sets ({shapes}) — every block must "
-            "declare the same axes so the tool's case ids stay comparable"
-        )
-    return blocks
-
-
-def _axes(entry: Mapping[str, Any], where: str, path: Path) -> dict[str, list[str | int]]:
-    if "mode" not in entry:
-        raise PlanError(f"'{where}' in {path} has no 'mode' axis")
-    axes: dict[str, list[str | int]] = {}
-    for axis, values in entry.items():
-        if axis == "resources":
-            continue
-        if not isinstance(values, list) or not values:
-            raise PlanError(f"'{where}' '{axis}' in {path} is not a non-empty list")
-        checked: list[str | int] = []
-        for value in values:
-            if axis == "mode":
+        _reject_unknown(entry, ROW_FIELDS, f"'{label}'", path)
+        row: dict[str, Any] = {}
+        for key, value in entry.items():
+            if key == "mode":
                 if not isinstance(value, str) or not value.strip():
-                    raise PlanError(
-                        f"'{where}' '{axis}' in {path} has a non-string value: {value!r}"
-                    )
-                checked.append(value)
+                    raise PlanError(f"'{label}' 'mode' in {path} is not a non-empty string")
+                row[key] = value
             else:
-                checked.append(_positive_int(value, axis, where, path))
-        # A repeated value would silently generate two identical cases whose IDs
-        # collide, so the second would append into the first's directory.
-        if len(set(checked)) != len(checked):
-            raise PlanError(f"'{where}' '{axis}' in {path} repeats a value")
-        axes[axis] = checked
-    return axes
+                row[key] = _positive_int(value, key, label, path)
+        rows.append(row)
+    return rows
 
 
 def _case(
     tool: str,
     mode: str,
-    chosen: tuple[tuple[str, str | int], ...],
+    chosen: tuple[tuple[str, str | int | None], ...],
     resources: Mapping[str, Any],
     schedule: Mapping[str, int],
     context: _Context,
@@ -775,16 +787,17 @@ def _case(
     )
 
 
-def derive_case_id(chosen: Iterable[tuple[str, str | int]]) -> str:
-    """``recursive-parquet.memory_mib-2048`` — the mode, then each varied axis.
+def derive_case_id(chosen: Iterable[tuple[str, str | int | None]]) -> str:
+    """``recursive-parquet.container_memory_gb-2`` — the mode, then each key.
 
-    Every axis the matrix declares appears, including one that happens to hold a
-    single value: dropping it would make the ID mean "whatever the default was
-    at the time", which nothing later can recover.
+    Every key any of the tool's rows states appears, even one only a single row
+    varies: dropping it would make the ID mean "whatever the default was at the
+    time". ``none`` is the ceiling nobody set — a real answer, not an absent key.
     """
     segments: list[str] = []
-    for axis, value in chosen:
-        segments.append(str(value) if axis == "mode" else f"{axis}-{value}")
+    for field, value in chosen:
+        rendered = "none" if value is None else str(value)
+        segments.append(rendered if field == "mode" else f"{field}-{rendered}")
     return ".".join(segments)
 
 

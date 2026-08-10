@@ -28,7 +28,7 @@
 # not take that either, and Batch's own disk-type field does not list a
 # Hyperdisk value, so this needs checking against the API it actually accepts.
 
-spec_version: 1
+spec_version: 2
 
 instances:
   - { vcpus: 2, memory_gb: 4, machine_type: n4-highcpu-2 }
