@@ -1,7 +1,13 @@
 name: image builds
 
+# A pull request or push only builds temporary CI artifacts. Before this workflow
+# reaches the default branch, publish a same-repository PR by applying the
+# `publish-images` label. Once it is on the default branch, run:
+# gh workflow run images-pr.yml --ref BRANCH -f publish_to_ghcr=true
+
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
     paths:
       - .dockerignore
       - .github/workflows/images-pr.yml
@@ -10,8 +16,6 @@ on:
       - pyproject.toml
       - src/s3_listing_study/__init__.py
       - src/s3_listing_study/common/**
-      - src/s3_listing_study/manager/campaign/**
-      - src/s3_listing_study/manager/cli.py
       - src/s3_listing_study/worker/**
       - tools/*/adapter/**
       - tools/*/build/**
@@ -26,32 +30,44 @@ on:
       - pyproject.toml
       - src/s3_listing_study/__init__.py
       - src/s3_listing_study/common/**
-      - src/s3_listing_study/manager/campaign/**
-      - src/s3_listing_study/manager/cli.py
       - src/s3_listing_study/worker/**
       - tools/*/adapter/**
       - tools/*/build/**
       - uv.lock
   workflow_dispatch:
+    inputs:
+      publish_to_ghcr:
+        description: Publish this selected branch's validated images to GHCR
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
 
 concurrency:
-  group: images-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: >-
+    images-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}-
+    ${{ github.event.action || 'none' }}-${{ github.event.label.name || 'none' }}-
+    ${{ inputs.publish_to_ghcr || false }}
+  cancel-in-progress: >-
+    ${{ !((github.event_name == 'workflow_dispatch' && inputs.publish_to_ghcr) ||
+    (github.event_name == 'pull_request' && github.event.action == 'labeled' &&
+    github.event.label.name == 'publish-images')) }}
 
 env:
+  GHCR_REPOSITORY: ghcr.io/varveio/s3-listing-study
   SHARED_ARCHIVE_TAG: s3-listing-study/shared-ci:content
   LOCAL_REGISTRY: localhost:5000
 
 jobs:
   shared-runtime:
+    if: github.event.action != 'labeled' || github.event.label.name == 'publish-images'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - name: Check out proposed merge
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -61,7 +77,7 @@ jobs:
 
       - name: Restore shared-runtime archive
         id: shared-cache
-        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: shared-runtime.tar.gz
           key: image-shared-${{ runner.os }}-${{ steps.shared-key.outputs.value }}
@@ -96,7 +112,7 @@ jobs:
             /usr/bin/python3 -I -c 'import duckdb, json, platform; print(json.dumps({"duckdb": duckdb.__version__, "python": platform.python_version()}, sort_keys=True))'
 
       - name: Upload shared runtime
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: shared-runtime
           path: shared-runtime.tar.gz
@@ -126,7 +142,7 @@ jobs:
           - swath
     steps:
       - name: Check out proposed merge
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -139,7 +155,7 @@ jobs:
         run: uv sync --locked
 
       - name: Download shared runtime
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: shared-runtime
 
@@ -180,7 +196,7 @@ jobs:
 
       - name: Restore tool-parent archive
         id: tool-cache
-        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: tool-cache/${{ matrix.tool }}.tar.gz
           key: image-tool-${{ runner.os }}-${{ steps.shared.outputs.digest }}-${{ hashFiles(format('tools/{0}/build/**', matrix.tool)) }}
@@ -263,7 +279,7 @@ jobs:
           PY
 
       - name: Upload tool and execution images
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: images-${{ matrix.tool }}
           path: image-artifacts/*.tar.gz
@@ -272,7 +288,7 @@ jobs:
           retention-days: 7
 
       - name: Upload image registration
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: registration-${{ matrix.tool }}
           path: image-artifacts/${{ matrix.tool }}.json
@@ -284,7 +300,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download image registrations
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: registration-*
           path: registrations
@@ -321,9 +337,411 @@ jobs:
           PY
 
       - name: Upload aggregate CI build manifest
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: image-build-manifest
           path: image-build-manifest.json
           if-no-files-found: error
           retention-days: 7
+
+  publication-plan:
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.publish_to_ghcr) ||
+      (github.event_name == 'pull_request' && github.event.action == 'labeled' &&
+      github.event.label.name == 'publish-images' &&
+      github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    outputs:
+      branch-tag-suffix: ${{ steps.branch.outputs.tag-suffix }}
+    steps:
+      - name: Validate and encode selected branch
+        id: branch
+        env:
+          REF_NAME: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
+          REF_TYPE: ${{ github.event_name == 'pull_request' && 'branch' || github.ref_type }}
+        run: |
+          set -euo pipefail
+          if [ "$REF_TYPE" != branch ]; then
+            echo "GHCR publication requires a branch ref, got: $REF_TYPE" >&2
+            exit 1
+          fi
+          branch_slug=$(printf '%s' "$REF_NAME" \
+            | tr '[:upper:]' '[:lower:]' \
+            | sed -E 's/[^a-z0-9._-]+/-/g; s/^[.-]+//; s/[.-]+$//; s/-+/-/g')
+          branch_slug=${branch_slug:0:50}
+          if [ -z "$branch_slug" ]; then
+            echo "selected branch does not produce a safe Docker tag" >&2
+            exit 1
+          fi
+          branch_hash=$(printf '%s' "$REF_NAME" | sha256sum | cut -c1-12)
+          tag_suffix="$branch_slug-$branch_hash"
+          if ! [[ "$tag_suffix" =~ ^[a-z0-9_][a-z0-9._-]{0,127}$ ]]; then
+            echo "invalid sanitized branch tag suffix: $tag_suffix" >&2
+            exit 1
+          fi
+          echo "tag-suffix=$tag_suffix" >> "$GITHUB_OUTPUT"
+
+  publish-shared:
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.publish_to_ghcr) ||
+      (github.event_name == 'pull_request' && github.event.action == 'labeled' &&
+      github.event.label.name == 'publish-images' &&
+      github.event.pull_request.head.repo.full_name == github.repository)
+    needs: [shared-runtime, publication-plan]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.publish.outputs.digest }}
+      reference: ${{ steps.publish.outputs.reference }}
+      immutable-tag: ${{ steps.publish.outputs.immutable-tag }}
+    steps:
+      - name: Download shared runtime
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: shared-runtime
+
+      - name: Log in to GitHub Container Registry
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$GITHUB_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+
+      - name: Publish shared runtime
+        id: publish
+        run: |
+          set -euo pipefail
+          gunzip -c shared-runtime.tar.gz | docker image load
+          transit_tag="$GHCR_REPOSITORY:shared-run-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          docker image tag "$SHARED_ARCHIVE_TAG" "$transit_tag"
+          docker image push "$transit_tag"
+          reference=$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$transit_tag" \
+            | awk -v prefix="$GHCR_REPOSITORY@" 'index($0, prefix) == 1 { print; exit }')
+          case "$reference" in
+            "$GHCR_REPOSITORY@sha256:"????????????????????????????????????????????????????????????????) ;;
+            *) echo "cannot resolve published shared-runtime digest: $reference" >&2; exit 1 ;;
+          esac
+          digest=${reference##*@}
+          immutable_tag="$GHCR_REPOSITORY:shared-sha256-${digest#sha256:}"
+          docker image tag "$transit_tag" "$immutable_tag"
+          docker image push "$immutable_tag"
+          docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$immutable_tag" \
+            | grep --fixed-strings --line-regexp "$reference"
+          {
+            echo "digest=$digest"
+            echo "reference=$reference"
+            echo "immutable-tag=$immutable_tag"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Write shared publication registration
+        env:
+          SHARED_DIGEST: ${{ steps.publish.outputs.digest }}
+          SHARED_REFERENCE: ${{ steps.publish.outputs.reference }}
+          SHARED_TAG: ${{ steps.publish.outputs.immutable-tag }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+
+          record = {
+              "digest": os.environ["SHARED_DIGEST"],
+              "immutable_tag": os.environ["SHARED_TAG"],
+              "kind": "shared-runtime",
+              "uri": os.environ["SHARED_REFERENCE"],
+          }
+          pathlib.Path("publication-shared.json").write_text(
+              json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+          )
+          PY
+
+      - name: Upload shared publication registration
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: publication-shared
+          path: publication-shared.json
+          if-no-files-found: error
+          retention-days: 30
+
+  publish-tool-execution:
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.publish_to_ghcr) ||
+      (github.event_name == 'pull_request' && github.event.action == 'labeled' &&
+      github.event.label.name == 'publish-images' &&
+      github.event.pull_request.head.repo.full_name == github.repository)
+    needs: [tool-execution, publication-plan, publish-shared]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        tool:
+          - aws-cli
+          - minio-mc
+          - ps3
+          - rclone
+          - s3-fast-list
+          - s3kor
+          - s3p
+          - s4cmd
+          - s5cmd
+          - s7cmd
+          - swath
+    steps:
+      - name: Check out selected branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+
+      - name: Sync locked environment
+        run: uv sync --locked
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Download built tool image
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: images-${{ matrix.tool }}
+          path: image-artifacts
+
+      - name: Download CI image registration
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: registration-${{ matrix.tool }}
+          path: ci-registration
+
+      - name: Log in to GitHub Container Registry
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$GITHUB_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+
+      - name: Publish tool parent and thin execution image
+        id: publish
+        env:
+          BRANCH_TAG_SUFFIX: ${{ needs.publication-plan.outputs.branch-tag-suffix }}
+          SHARED_DIGEST: ${{ needs.publish-shared.outputs.digest }}
+          SHARED_REFERENCE: ${{ needs.publish-shared.outputs.reference }}
+          TOOL: ${{ matrix.tool }}
+        run: |
+          set -euo pipefail
+          gunzip -c "image-artifacts/$TOOL-tool.tar.gz" | docker image load
+          local_tool_tag="$LOCAL_REGISTRY/tool/$TOOL:ci"
+          tool_transit_tag="$GHCR_REPOSITORY:tool-$TOOL-run-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          docker image tag "$local_tool_tag" "$tool_transit_tag"
+          docker image push "$tool_transit_tag"
+          tool_reference=$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$tool_transit_tag" \
+            | awk -v prefix="$GHCR_REPOSITORY@" 'index($0, prefix) == 1 { print; exit }')
+          case "$tool_reference" in
+            "$GHCR_REPOSITORY@sha256:"????????????????????????????????????????????????????????????????) ;;
+            *) echo "cannot resolve published $TOOL parent digest: $tool_reference" >&2; exit 1 ;;
+          esac
+          tool_digest=${tool_reference##*@}
+          tool_immutable_tag="$GHCR_REPOSITORY:tool-$TOOL-sha256-${tool_digest#sha256:}"
+          docker image tag "$tool_transit_tag" "$tool_immutable_tag"
+          docker image push "$tool_immutable_tag"
+          python3 - "ci-registration/$TOOL.json" "$SHARED_DIGEST" "$tool_digest" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          record = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          if record["shared_runtime_digest"] != sys.argv[2]:
+              raise SystemExit("published shared-runtime digest differs from the CI build")
+          if record["tool_image_digest"] != sys.argv[3]:
+              raise SystemExit("published tool-image digest differs from the CI build")
+          PY
+
+          execution_transit_tag="$GHCR_REPOSITORY:execution-$TOOL-run-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          uv run s3-listing-study build-derived-image \
+            --tool "$TOOL" --tool-image "$tool_reference" --tag "$execution_transit_tag"
+          docker image push "$execution_transit_tag"
+          execution_reference=$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$execution_transit_tag" \
+            | awk -v prefix="$GHCR_REPOSITORY@" 'index($0, prefix) == 1 { print; exit }')
+          case "$execution_reference" in
+            "$GHCR_REPOSITORY@sha256:"????????????????????????????????????????????????????????????????) ;;
+            *) echo "cannot resolve published $TOOL execution digest: $execution_reference" >&2; exit 1 ;;
+          esac
+          execution_digest=${execution_reference##*@}
+          execution_immutable_tag="$GHCR_REPOSITORY:execution-$TOOL-sha256-${execution_digest#sha256:}"
+          execution_branch_tag="$GHCR_REPOSITORY:execution-$TOOL-branch-$BRANCH_TAG_SUFFIX"
+          docker image tag "$execution_transit_tag" "$execution_immutable_tag"
+          docker image push "$execution_immutable_tag"
+
+          docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$tool_immutable_tag" \
+            | grep --fixed-strings --line-regexp "$tool_reference"
+          docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$execution_immutable_tag" \
+            | grep --fixed-strings --line-regexp "$execution_reference"
+          printf '%s\n' \
+            "TOOL_REFERENCE=$tool_reference" \
+            "TOOL_DIGEST=$tool_digest" \
+            "TOOL_IMMUTABLE_TAG=$tool_immutable_tag" \
+            "EXECUTION_REFERENCE=$execution_reference" \
+            "EXECUTION_DIGEST=$execution_digest" \
+            "EXECUTION_IMMUTABLE_TAG=$execution_immutable_tag" \
+            "EXECUTION_BRANCH_TAG=$execution_branch_tag" >> "$GITHUB_ENV"
+
+      - name: Verify baked GHCR provenance
+        run: |
+          set -euo pipefail
+          docker run --rm --pull=never --entrypoint /usr/bin/python3 "$EXECUTION_IMMUTABLE_TAG" \
+            -I -c 'import json,sys; p=json.load(open("/opt/s3-listing-study/image-provenance.json")); assert p["tool_image"]["uri"] == sys.argv[1]' \
+            "$TOOL_REFERENCE"
+
+      - name: Write tool publication registration
+        env:
+          BRANCH_TAG_SUFFIX: ${{ needs.publication-plan.outputs.branch-tag-suffix }}
+          SHARED_DIGEST: ${{ needs.publish-shared.outputs.digest }}
+          SHARED_REFERENCE: ${{ needs.publish-shared.outputs.reference }}
+          TOOL: ${{ matrix.tool }}
+        run: |
+          mkdir -p publications
+          python3 - "$TOOL" <<'PY'
+          import json
+          import os
+          import pathlib
+          import sys
+
+          tool = sys.argv[1]
+          record = {
+              "branch_tag_suffix": os.environ["BRANCH_TAG_SUFFIX"],
+              "execution_image": {
+                  "branch_tag": os.environ["EXECUTION_BRANCH_TAG"],
+                  "digest": os.environ["EXECUTION_DIGEST"],
+                  "immutable_tag": os.environ["EXECUTION_IMMUTABLE_TAG"],
+                  "uri": os.environ["EXECUTION_REFERENCE"],
+              },
+              "shared_runtime": {
+                  "digest": os.environ["SHARED_DIGEST"],
+                  "uri": os.environ["SHARED_REFERENCE"],
+              },
+              "tool": tool,
+              "tool_image": {
+                  "digest": os.environ["TOOL_DIGEST"],
+                  "immutable_tag": os.environ["TOOL_IMMUTABLE_TAG"],
+                  "uri": os.environ["TOOL_REFERENCE"],
+              },
+          }
+          pathlib.Path(f"publications/{tool}.json").write_text(
+              json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+          )
+          PY
+
+      - name: Upload tool publication registration
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: publication-${{ matrix.tool }}
+          path: publications/${{ matrix.tool }}.json
+          if-no-files-found: error
+          retention-days: 30
+
+  publication-summary:
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.publish_to_ghcr) ||
+      (github.event_name == 'pull_request' && github.event.action == 'labeled' &&
+      github.event.label.name == 'publish-images' &&
+      github.event.pull_request.head.repo.full_name == github.repository)
+    needs: [publication-plan, publish-shared, publish-tool-execution]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Download publication registrations
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: publication-*
+          path: publications
+
+      - name: Assemble and validate GHCR publication manifest
+        env:
+          BRANCH_TAG_SUFFIX: ${{ needs.publication-plan.outputs.branch-tag-suffix }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+
+          expected = {
+              "aws-cli", "minio-mc", "ps3", "rclone", "s3-fast-list", "s3kor",
+              "s3p", "s4cmd", "s5cmd", "s7cmd", "swath",
+          }
+          paths = list(pathlib.Path("publications").glob("**/*.json"))
+          records = [json.loads(path.read_text()) for path in paths if path.name != "publication-shared.json"]
+          shared_paths = [path for path in paths if path.name == "publication-shared.json"]
+          by_tool = {record["tool"]: record for record in records}
+          if len(records) != len(by_tool) or set(by_tool) != expected:
+              raise SystemExit("GHCR publication registrations are missing, duplicated, or unexpected")
+          if len(shared_paths) != 1:
+              raise SystemExit("shared publication registration is missing or duplicated")
+          shared = json.loads(shared_paths[0].read_text())
+          if any(record["shared_runtime"]["uri"] != shared["uri"] for record in records):
+              raise SystemExit("tool publications do not share the published runtime")
+          if any(record["branch_tag_suffix"] != os.environ["BRANCH_TAG_SUFFIX"] for record in records):
+              raise SystemExit("tool publications do not share the selected branch tag")
+          document = {
+              "branch_tag_suffix": os.environ["BRANCH_TAG_SUFFIX"],
+              "images": by_tool,
+              "kind": "github-container-image-publication",
+              "repository": os.environ["GHCR_REPOSITORY"],
+              "schema_version": 1,
+              "shared_runtime": shared,
+              "source_ref": os.environ["GITHUB_REF"],
+              "source_revision": os.environ["GITHUB_SHA"],
+          }
+          pathlib.Path("ghcr-publication-manifest.json").write_text(
+              json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+          )
+          PY
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Log in to GitHub Container Registry
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$GITHUB_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+
+      - name: Promote the validated branch image set
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' > branch-tags.tsv
+          import json
+          import pathlib
+
+          for path in sorted(pathlib.Path("publications").glob("**/*.json")):
+              if path.name == "publication-shared.json":
+                  continue
+              image = json.loads(path.read_text())["execution_image"]
+              print(image["uri"], image["branch_tag"], sep="\t")
+          PY
+          test "$(wc -l < branch-tags.tsv)" -eq 11
+          while IFS=$'\t' read -r reference branch_tag; do
+            docker buildx imagetools create \
+              --prefer-index=false \
+              --metadata-file promotion-metadata.json \
+              --tag "$branch_tag" \
+              "$reference"
+            promoted_digest=$(python3 -c \
+              'import json,sys; print(json.load(open(sys.argv[1]))["containerimage.descriptor"]["digest"])' \
+              promotion-metadata.json)
+            test "$promoted_digest" = "${reference##*@}"
+          done < branch-tags.tsv
+
+      - name: Upload aggregate GHCR publication manifest
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ghcr-publication-manifest
+          path: ghcr-publication-manifest.json
+          if-no-files-found: error
+          retention-days: 30
