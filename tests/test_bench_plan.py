@@ -43,6 +43,7 @@ aws-cli:
 # Enough of a catalogue to resolve every shape these plans ask for. Passed in
 # rather than read from bench/, so a fixture plan does not need a tree beside it.
 INSTANCES = {
+    (2, 2): "n4-custom-2-2048",
     (2, 4): "n4-highcpu-2",
     (2, 8): "n4-standard-2",
     (2, 16): "n4-highmem-2",
@@ -352,6 +353,334 @@ def test_a_row_may_omit_the_mode_and_inherit_the_tool_default(tmp_path: Path) ->
         ("recursive", "recursive.vcpus-2"),
         ("recursive", "recursive.vcpus-4"),
     ]
+
+
+def test_the_campaign_product_preserves_retained_cases_and_adds_only_8gb_ceiling(
+    tmp_path: Path,
+) -> None:
+    """The revised sweep drops low ceilings from the larger VM deliberately."""
+    old_plan = write(
+        tmp_path,
+        """
+        swath:
+          memory_gb: 4
+          container_memory_gb: 2
+          cases:
+            - {mode: recursive-tsv}
+            - {mode: recursive-parquet}
+            - {mode: recursive-parquet, container_memory_gb: 4}
+            - {mode: recursive-parquet-sorted}
+            - {mode: recursive-parquet-sorted, container_memory_gb: 4}
+            - {mode: recursive-parquet, vcpus: 4, memory_gb: 8}
+            - {mode: recursive-parquet, vcpus: 4, memory_gb: 8, container_memory_gb: 4}
+            - {mode: recursive-parquet-sorted, vcpus: 4, memory_gb: 8}
+            - {mode: recursive-parquet-sorted, vcpus: 4, memory_gb: 8, container_memory_gb: 4}
+        """,
+    )
+    old_cases = {case.case_id: case for case in load(old_plan).cases}
+
+    revised_plan = write(
+        tmp_path,
+        """
+        swath:
+          memory_gb: 4
+          container_memory_gb: 2
+          cases:
+            - {mode: recursive-tsv}
+            - product:
+                mode: [recursive-parquet, recursive-parquet-sorted]
+                zip:
+                  - {vcpus: 2, memory_gb: 4, container_memory_gb: 2}
+                  - {vcpus: 2, memory_gb: 4, container_memory_gb: 4}
+                  - {vcpus: 4, memory_gb: 8, container_memory_gb: 8}
+        """,
+    )
+    revised = load(revised_plan).cases
+    revised_cases = {case.case_id: case for case in revised}
+
+    assert bench.SPEC_VERSION == 2
+    assert bench.FINGERPRINT_VERSION == 1
+    assert [case.case_id for case in revised] == [
+        "recursive-tsv.vcpus-2.memory_gb-4.container_memory_gb-2",
+        "recursive-parquet.vcpus-2.memory_gb-4.container_memory_gb-2",
+        "recursive-parquet-sorted.vcpus-2.memory_gb-4.container_memory_gb-2",
+        "recursive-parquet.vcpus-2.memory_gb-4.container_memory_gb-4",
+        "recursive-parquet-sorted.vcpus-2.memory_gb-4.container_memory_gb-4",
+        "recursive-parquet.vcpus-4.memory_gb-8.container_memory_gb-8",
+        "recursive-parquet-sorted.vcpus-4.memory_gb-8.container_memory_gb-8",
+    ]
+    retained = [
+        "recursive-tsv.vcpus-2.memory_gb-4.container_memory_gb-2",
+        "recursive-parquet.vcpus-2.memory_gb-4.container_memory_gb-2",
+        "recursive-parquet-sorted.vcpus-2.memory_gb-4.container_memory_gb-2",
+        "recursive-parquet.vcpus-2.memory_gb-4.container_memory_gb-4",
+        "recursive-parquet-sorted.vcpus-2.memory_gb-4.container_memory_gb-4",
+    ]
+    assert {case_id: revised_cases[case_id].fingerprint for case_id in retained} == {
+        case_id: old_cases[case_id].fingerprint for case_id in retained
+    }
+    assert not set(revised_cases) & {
+        "recursive-parquet.vcpus-4.memory_gb-8.container_memory_gb-2",
+        "recursive-parquet.vcpus-4.memory_gb-8.container_memory_gb-4",
+        "recursive-parquet-sorted.vcpus-4.memory_gb-8.container_memory_gb-2",
+        "recursive-parquet-sorted.vcpus-4.memory_gb-8.container_memory_gb-4",
+    }
+    assert {
+        (
+            case.mode,
+            case.resources.vcpus,
+            case.resources.memory_gb,
+            case.resources.container_memory_gb,
+        )
+        for case in revised
+        if case.resources.vcpus == 4
+    } == {
+        ("recursive-parquet", 4, 8, 8),
+        ("recursive-parquet-sorted", 4, 8, 8),
+    }
+
+
+def test_two_independent_product_axes_multiply(tmp_path: Path) -> None:
+    path = write(
+        tmp_path,
+        """
+        swath:
+          cases:
+            - product:
+                mode: [recursive-tsv, recursive-jsonl]
+                container_memory_gb: [2, 4]
+        """,
+    )
+    assert [(case.mode, case.resources.container_memory_gb) for case in load(path).cases] == [
+        ("recursive-tsv", 2),
+        ("recursive-tsv", 4),
+        ("recursive-jsonl", 2),
+        ("recursive-jsonl", 4),
+    ]
+
+
+def test_zip_keeps_only_the_resource_shapes_that_were_authored(tmp_path: Path) -> None:
+    path = write(
+        tmp_path,
+        """
+        swath:
+          cases:
+            - product:
+                mode: [recursive-tsv]
+                zip:
+                  - {vcpus: 2, memory_gb: 2}
+                  - {vcpus: 2, memory_gb: 4}
+                  - {vcpus: 4, memory_gb: 8}
+        """,
+    )
+    shapes = [(case.resources.vcpus, case.resources.memory_gb) for case in load(path).cases]
+    assert shapes == [(2, 2), (2, 4), (4, 8)]
+    assert (4, 4) not in shapes
+
+
+def test_zip_may_be_the_products_only_factor(tmp_path: Path) -> None:
+    path = write(
+        tmp_path,
+        """
+        swath:
+          cases:
+            - product:
+                zip:
+                  - {mode: recursive-tsv, memory_gb: 4}
+                  - {mode: recursive-jsonl, memory_gb: 8}
+        """,
+    )
+    assert [(case.mode, case.resources.memory_gb) for case in load(path).cases] == [
+        ("recursive-tsv", 4),
+        ("recursive-jsonl", 8),
+    ]
+
+
+def test_product_order_does_not_depend_on_yaml_mapping_order(tmp_path: Path) -> None:
+    first = write(
+        tmp_path,
+        """
+        swath:
+          cases:
+            - product:
+                mode: [recursive-tsv, recursive-jsonl]
+                zip:
+                  - {vcpus: 2, memory_gb: 4}
+                  - {vcpus: 4, memory_gb: 8}
+                container_memory_gb: [2, 4]
+        """,
+    )
+    expected = [(case.case_id, case.fingerprint) for case in load(first).cases]
+    second = write(
+        tmp_path,
+        """
+        swath:
+          cases:
+            - product:
+                container_memory_gb: [2, 4]
+                zip:
+                  - {memory_gb: 4, vcpus: 2}
+                  - {memory_gb: 8, vcpus: 4}
+                mode: [recursive-tsv, recursive-jsonl]
+        """,
+    )
+    assert [(case.case_id, case.fingerprint) for case in load(second).cases] == expected
+
+
+def test_a_product_may_inherit_the_default_mode(tmp_path: Path) -> None:
+    path = write(
+        tmp_path,
+        """
+        s5cmd:
+          cases:
+            - product:
+                memory_gb: [4, 8]
+        """,
+    )
+    cases = load(path, default_modes={"s5cmd": "recursive"}).cases
+    assert [(case.mode, case.resources.memory_gb) for case in cases] == [
+        ("recursive", 4),
+        ("recursive", 8),
+    ]
+
+
+def test_a_product_omitting_mode_loads_the_repository_default(tmp_path: Path) -> None:
+    path = write(
+        tmp_path,
+        """
+        s5cmd:
+          cases:
+            - product:
+                memory_gb: [4, 8]
+        """,
+    )
+    assert [case.mode for case in bench.Plan.load(path).cases] == ["recursive", "recursive"]
+
+
+def test_expanded_rows_override_the_tool_which_overrides_defaults(tmp_path: Path) -> None:
+    path = write(
+        tmp_path,
+        """
+        swath:
+          vcpus: 4
+          memory_gb: 8
+          cases:
+            - product:
+                memory_gb: [8, 16]
+        """,
+    )
+    cases = load(path, default_modes={"swath": "recursive-tsv"}).cases
+    assert [(case.resources.vcpus, case.resources.memory_gb) for case in cases] == [
+        (4, 8),
+        (4, 16),
+    ]
+    assert {case.timeout_s for case in cases} == {3600}
+
+
+@pytest.mark.parametrize(
+    ("case_entry", "message"),
+    [
+        ("- {product: {}}", "product.*empty"),
+        ("- {product: {mode: []}}", "product.mode.*empty"),
+        ("- {product: {mode: recursive-tsv}}", "product.mode.*not a list"),
+        ("- {product: {zip: []}}", "product.zip.*empty"),
+        ("- {product: {zip: nope}}", "product.zip.*not a list"),
+        ("- {product: {zip: [nope]}}", "product.zip.*not a mapping"),
+        ("- {product: nope}", "product.*not a mapping"),
+        ("- {product: {unknown: [1]}}", "unknown key"),
+        ("- {product: {timeout_s: [60]}}", "scheduling, not what a case is"),
+        (
+            "- product: {mode: [recursive-tsv]}\n  timeout_s: 60",
+            "scheduling, not what a case is",
+        ),
+        (
+            "- product:\n    mode: [recursive-tsv]\n    zip:\n"
+            "      - {vcpus: 2, memory_gb: 4, timeout_s: 60}",
+            "scheduling, not what a case is",
+        ),
+        (
+            "- product:\n    vcpus: [2]\n    zip:\n      - {vcpus: 2, memory_gb: 4}",
+            "both as an independent axis and inside zip",
+        ),
+        (
+            "- product:\n    zip:\n      - {vcpus: 2, memory_gb: 4}\n"
+            "      - {vcpus: 4, container_memory_gb: 2}",
+            "fields that differ",
+        ),
+        ("- product:\n    zip:\n      - {vcpus: 2}", "at least two row fields"),
+        (
+            "- product:\n    zip:\n      - {vcpus: 2, memory_gb: 4}\n"
+            "      - {memory_gb: 4, vcpus: 2}",
+            "same choice twice",
+        ),
+        (
+            "- product:\n    zip:\n      - {vcpus: 2, mystery: 4}",
+            "unknown key",
+        ),
+        ("- {product: {mode: [[recursive-tsv]]}}", "mode.*not a non-empty string"),
+        ("- {product: {auth: [signed]}}", r"is not anonymous\|authenticated"),
+        ("- {product: {memory_gb: [false]}}", "not a positive integer"),
+        ("- {product: {mode: [recursive-tsv]}, mystery: 1}", "extra key"),
+    ],
+)
+def test_invalid_product_structures_are_refused(
+    tmp_path: Path, case_entry: str, message: str
+) -> None:
+    path = write(
+        tmp_path,
+        "swath:\n  cases:\n" + textwrap.indent(case_entry, "    ") + "\n",
+    )
+    with pytest.raises(bench.PlanError, match=message):
+        load(path, default_modes={"swath": "recursive-tsv"})
+
+
+def test_a_duplicate_resolved_case_across_literal_and_product_is_refused(tmp_path: Path) -> None:
+    path = write(
+        tmp_path,
+        """
+        swath:
+          cases:
+            - {mode: recursive-tsv, memory_gb: 8}
+            - product:
+                mode: [recursive-tsv]
+                memory_gb: [8]
+        """,
+    )
+    with pytest.raises(bench.PlanError, match="twice"):
+        load(path)
+
+
+def test_duplicate_values_on_an_independent_axis_are_refused_as_one_case(
+    tmp_path: Path,
+) -> None:
+    path = write(
+        tmp_path,
+        """
+        swath:
+          cases:
+            - product:
+                mode: [recursive-tsv, recursive-tsv]
+        """,
+    )
+    with pytest.raises(bench.PlanError, match="twice"):
+        load(path)
+
+
+def test_literal_rows_remain_scalar_and_compatible(tmp_path: Path) -> None:
+    literal = load(write(tmp_path, ONE_CASE)).cases[0]
+    assert literal.mode == "s3api-v2-text"
+    assert bench.SPEC_VERSION == 2
+
+    listed = write(tmp_path, "aws-cli:\n  cases:\n    - {mode: [s3api-v2-text]}\n")
+    with pytest.raises(bench.PlanError, match="not a non-empty string"):
+        load(listed)
+
+
+@pytest.mark.parametrize("bucket", ["noaa-rtma-pds", "sorel-20m"])
+def test_large_bucket_campaign_plans_resolve_seventeen_cases(bucket: str) -> None:
+    loaded = bench.Plan.load(bench.default_path(bucket))
+    assert len(loaded.cases) == 17
+    assert len(loaded.cases_for("swath")) == 7
 
 
 # ── the container ceiling and the heap ───────────────────────────────────────

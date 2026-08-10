@@ -32,11 +32,9 @@ tools:
   swath:
     cases:
       - {mode: recursive-tsv}
-      - {mode: recursive-parquet}
-      - {mode: recursive-parquet, container_memory_gb: 4}
-      - {mode: recursive-parquet-sorted}
-      - {mode: recursive-parquet-sorted, container_memory_gb: 4}
-      - {mode: recursive-parquet, vcpus: 4, memory_gb: 8}
-      - {mode: recursive-parquet, vcpus: 4, memory_gb: 8, container_memory_gb: 4}
-      - {mode: recursive-parquet-sorted, vcpus: 4, memory_gb: 8}
-      - {mode: recursive-parquet-sorted, vcpus: 4, memory_gb: 8, container_memory_gb: 4}
+      - product:
+          mode: [recursive-parquet, recursive-parquet-sorted]
+          zip:
+            - {vcpus: 2, memory_gb: 4, container_memory_gb: 2}
+            - {vcpus: 2, memory_gb: 4, container_memory_gb: 4}
+            - {vcpus: 4, memory_gb: 8, container_memory_gb: 8}

@@ -77,10 +77,11 @@ keeps `timeout_s` out of one: it is in the fingerprint but not the ID, so two
 rows differing only there would render one ID and two fingerprints — two
 non-comparable runs filed into one case directory.
 
-## Cases are enumerated
+## Cases are an ordered union
 
-Tools needing more than one case list rows, and each row is one case — the
-number of cases is the number of lines, with nothing multiplied out:
+Each entry in `cases` is either one literal row or an explicit `product`
+generator. Entries form an ordered union and each generator expands in place.
+Literal rows stay the direct way to describe ragged cases:
 
 ```yaml
 swath:
@@ -107,11 +108,45 @@ Values resolve in three shallow layers, nearest statement winning:
 `defaults` → the tool → the row. Every level is a flat table of scalars, so
 there is no nesting for a merge surprise to hide in.
 
-A cross-product was the earlier answer, and it multiplied where it should have
-enumerated: a tool whose sorted mode needed an allocation its siblings did not
-had to be split into blocks and unioned back together. There is likewise no
-plan-level sweep — one `defaults` row and a list of them mean the same thing at
-one entry and diverge silently at the second, so a list there is refused.
+Use `product` when independent axes should multiply. Its row-field values are
+non-empty lists; a list on a literal row remains invalid, so multiplication is
+never inferred from YAML type:
+
+```yaml
+swath:
+  cases:
+    - {mode: recursive-tsv}
+    - product:
+        mode: [recursive-parquet, recursive-parquet-sorted]
+        zip:
+          - {vcpus: 2, memory_gb: 4, container_memory_gb: 2}
+          - {vcpus: 2, memory_gb: 4, container_memory_gb: 4}
+          - {vcpus: 4, memory_gb: 8, container_memory_gb: 8}
+```
+
+`zip` is one optional correlated factor inside a product. It is a non-empty
+list of atomic mappings with the same two or more row fields. The example
+therefore asks for 2 and 4 GiB ceilings on the `2×4` machine, but only the 8 GiB
+ceiling on the `4×8` machine; it never manufactures a `4×8` case with a low
+ceiling. Zipped fields cannot also be independent axes. Unknown fields,
+inconsistent zip mappings, duplicate zip choices, empty axes, and duplicate
+resolved cases are refused.
+
+Expansion order is deterministic and does not depend on YAML mapping order.
+Zip choices are the outermost factor. Independent axes follow in canonical row
+field order (`mode`, `auth`, `vcpus`, `memory_gb`,
+`container_memory_gb`), with the rightmost advancing fastest. In the example,
+each zipped allocation contains both modes. Expansion happens before the
+ordinary three-layer inheritance, so an omitted generator field inherits
+exactly as it does in a literal row. A value in an atomic zip row is still a row
+value: the `container_memory_gb: 8` choice above overrides a lower global
+default for just those expanded cases.
+
+This is authoring sugar within spec v2: resolved case IDs, fingerprints, and
+campaign attempts contain ordinary rows, never the generator structure. There
+is still no plan-level sweep — one `defaults` row and a list of them mean the
+same thing at one entry and diverge silently at the second, so a list there is
+refused.
 
 ## A plan asks for a shape, not a machine type
 

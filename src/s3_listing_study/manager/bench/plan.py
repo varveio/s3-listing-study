@@ -28,10 +28,12 @@ what keeps ``timeout_s`` out of one: it is in the fingerprint but not the ID, so
 two rows differing only there would render one ID and two fingerprints — two
 non-comparable runs filed into one case directory.
 
-**Cases are enumerated, not multiplied.** Each row is one case, and rows may be
-ragged: a row states what differs and inherits the rest. IDs are still derived,
-from the *union* of the keys a tool's rows state, so a row that omitted one
-renders the value it inherited and one tool's IDs keep one shape.
+**Cases are an ordered union.** Each entry is either one literal row or an
+explicit product generator with an optional atomic zip factor. Generators
+expand to ordinary rows before inheritance. Rows may be ragged: a row states
+what differs and inherits the rest. IDs are still derived from the *union* of
+the keys a tool's expanded rows state, so a row that omitted one renders the
+value it inherited and one tool's IDs keep one shape.
 
 **The box and the process are different questions.** ``vcpus``/``memory_gb``
 buy a machine; ``container_memory_gb`` is a cgroup ceiling on top of it, via
@@ -59,6 +61,7 @@ change the result.
 from __future__ import annotations
 
 import hashlib
+import itertools
 import json
 import re
 from collections.abc import Collection, Iterable, Mapping, Sequence
@@ -73,7 +76,10 @@ import yaml
 # for the whole `bench/` set, since the reader loads all three files together.
 #
 # 2: `matrix` became `cases`, a list of rows; the allocation stopped nesting
-# under `resources`. A v1 plan is refused rather than reinterpreted.
+# under `resources`. Product/zip later extended `cases` into an ordered union,
+# without a bump because an older v2 reader fails closed on the unknown
+# `product` key rather than misreading the generator as a row. A v1 plan is
+# refused rather than reinterpreted.
 SPEC_VERSION = 2
 
 # Versioned separately from the spec: the fingerprint function is part of the
@@ -609,7 +615,24 @@ def _needs_default_modes(body: object) -> bool:
     rows = body["cases"] if isinstance(body, dict) else None
     if not isinstance(rows, list):
         return False
-    return any(not isinstance(row, dict) or "mode" not in row for row in rows)
+    for row in rows:
+        if not isinstance(row, dict):
+            return True
+        if "product" not in row:
+            if "mode" not in row:
+                return True
+            continue
+        product = row.get("product")
+        if not isinstance(product, dict):
+            return True
+        if "mode" in product:
+            continue
+        zipped = product.get("zip")
+        if not isinstance(zipped, list) or not zipped:
+            return True
+        if not all(isinstance(choice, dict) and "mode" in choice for choice in zipped):
+            return True
+    return False
 
 
 def _sibling(path: Path, name: str) -> Path:
@@ -733,7 +756,7 @@ def _row_mode(
 
 
 def _case_rows(table: Mapping[str, Any], where: str, path: Path) -> list[dict[str, Any]]:
-    """One tool's rows: each is one case, inheriting every key it does not state."""
+    """Expand one tool's ordered union into rows that inherit unstated keys."""
     raw = table.get("cases")
     if raw is None:
         raise PlanError(f"'{where}' in {path} has no 'cases'")
@@ -745,27 +768,150 @@ def _case_rows(table: Mapping[str, Any], where: str, path: Path) -> list[dict[st
         label = f"{where}.cases[{index}]"
         if not isinstance(entry, dict):
             raise PlanError(f"'{label}' in {path} is not a mapping")
-        # Named before the unknown-key list, which would read as "no such thing"
-        # when the answer is "one level up".
-        scheduling = sorted(set(entry) & set(SCHEDULE_FIELDS))
+        if "product" in entry:
+            rows.extend(_product_rows(entry, label, path))
+            continue
+        rows.append(_literal_row(entry, label, path))
+    return rows
+
+
+def _literal_row(entry: Mapping[str, Any], label: str, path: Path) -> dict[str, Any]:
+    """Validate one literal row; generators feed their expanded rows here too."""
+    # Named before the unknown-key list, which would read as "no such thing"
+    # when the answer is "one level up".
+    scheduling = sorted(set(entry) & set(SCHEDULE_FIELDS))
+    if scheduling:
+        raise PlanError(
+            f"'{label}' in {path} states {', '.join(scheduling)} — that is "
+            "scheduling, not what a case is; set it on the tool or in defaults"
+        )
+    _reject_unknown(entry, ROW_FIELDS, f"'{label}'", path)
+    return {key: _row_field_value(key, value, label, path) for key, value in entry.items()}
+
+
+def _row_field_value(key: str, value: Any, label: str, path: Path) -> str | int:
+    """Validate one scalar row-field value wherever its author stated it."""
+    if key == "mode":
+        if not isinstance(value, str) or not value.strip():
+            raise PlanError(f"'{label}' 'mode' in {path} is not a non-empty string")
+        return value
+    if key == "auth":
+        return _auth({key: value}, label, path, complete=False)[key]
+    return _positive_int(value, key, label, path)
+
+
+def _product_rows(entry: Mapping[str, Any], label: str, path: Path) -> list[dict[str, Any]]:
+    """Expand an explicit product whose optional zip choices stay indivisible."""
+    scheduling = sorted(set(entry) & set(SCHEDULE_FIELDS))
+    if scheduling:
+        raise PlanError(
+            f"'{label}' in {path} states {', '.join(scheduling)} — that is "
+            "scheduling, not what a case is; set it on the tool or in defaults"
+        )
+    if set(entry) != {"product"}:
+        extras = sorted(set(entry) - {"product"})
+        raise PlanError(
+            f"'{label}' in {path} is a product generator with extra key(s) "
+            f"{', '.join(repr(key) for key in extras)}; a generator entry contains only 'product'"
+        )
+
+    raw_product = entry["product"]
+    if not isinstance(raw_product, dict):
+        raise PlanError(f"'{label}.product' in {path} is not a mapping")
+    scheduling = sorted(set(raw_product) & set(SCHEDULE_FIELDS))
+    if scheduling:
+        raise PlanError(
+            f"'{label}.product' in {path} states {', '.join(scheduling)} — that is "
+            "scheduling, not what a case is; set it on the tool or in defaults"
+        )
+    _reject_unknown(raw_product, (*ROW_FIELDS, "zip"), f"'{label}.product'", path)
+    if not raw_product:
+        raise PlanError(f"'{label}.product' in {path} is empty")
+
+    independent: dict[str, list[str | int]] = {}
+    for field in ROW_FIELDS:
+        if field not in raw_product:
+            continue
+        values = raw_product[field]
+        if not isinstance(values, list):
+            raise PlanError(f"'{label}.product.{field}' in {path} is not a list")
+        if not values:
+            raise PlanError(f"'{label}.product.{field}' in {path} is empty")
+        independent[field] = [
+            _row_field_value(field, value, f"{label}.product.{field}[{index}]", path)
+            for index, value in enumerate(values)
+        ]
+
+    zipped = _zip_choices(raw_product.get("zip"), label, path) if "zip" in raw_product else []
+    zipped_fields = set(zipped[0]) if zipped else set()
+    overlap = [field for field in ROW_FIELDS if field in independent and field in zipped_fields]
+    if overlap:
+        raise PlanError(
+            f"'{label}.product' in {path} states {', '.join(overlap)} both as an "
+            "independent axis and inside zip"
+        )
+    if not independent and not zipped:
+        raise PlanError(f"'{label}.product' in {path} has no axes or zip choices")
+
+    # Correlated choices are the outermost factor. Independent axes follow in
+    # canonical row-field order, with the rightmost advancing fastest. The
+    # result therefore never depends on YAML mapping order.
+    factors: list[list[dict[str, str | int]]] = []
+    if zipped:
+        factors.append(zipped)
+    factors.extend([{field: value} for value in values] for field, values in independent.items())
+
+    rows: list[dict[str, Any]] = []
+    for choices in itertools.product(*factors):
+        row: dict[str, Any] = {}
+        for choice in choices:
+            row.update(choice)
+        rows.append(_literal_row(row, f"{label}.product expansion", path))
+    return rows
+
+
+def _zip_choices(value: Any, label: str, path: Path) -> list[dict[str, str | int]]:
+    """Validate atomic correlated rows used as one product factor."""
+    where = f"{label}.product.zip"
+    if not isinstance(value, list):
+        raise PlanError(f"'{where}' in {path} is not a list")
+    if not value:
+        raise PlanError(f"'{where}' in {path} is empty")
+
+    choices: list[dict[str, str | int]] = []
+    expected_fields: set[str] | None = None
+    seen: set[tuple[tuple[str, str | int], ...]] = set()
+    for index, raw_choice in enumerate(value):
+        choice_label = f"{where}[{index}]"
+        if not isinstance(raw_choice, dict):
+            raise PlanError(f"'{choice_label}' in {path} is not a mapping")
+        scheduling = sorted(set(raw_choice) & set(SCHEDULE_FIELDS))
         if scheduling:
             raise PlanError(
-                f"'{label}' in {path} states {', '.join(scheduling)} — that is "
+                f"'{choice_label}' in {path} states {', '.join(scheduling)} — that is "
                 "scheduling, not what a case is; set it on the tool or in defaults"
             )
-        _reject_unknown(entry, ROW_FIELDS, f"'{label}'", path)
-        row: dict[str, Any] = {}
-        for key, value in entry.items():
-            if key == "mode":
-                if not isinstance(value, str) or not value.strip():
-                    raise PlanError(f"'{label}' 'mode' in {path} is not a non-empty string")
-                row[key] = value
-            elif key == "auth":
-                row.update(_auth(entry, label, path, complete=False))
-            else:
-                row[key] = _positive_int(value, key, label, path)
-        rows.append(row)
-    return rows
+        _reject_unknown(raw_choice, ROW_FIELDS, f"'{choice_label}'", path)
+        fields = set(raw_choice)
+        if len(fields) < 2:
+            raise PlanError(f"'{choice_label}' in {path} must state at least two row fields")
+        if expected_fields is None:
+            expected_fields = fields
+        elif fields != expected_fields:
+            raise PlanError(
+                f"'{choice_label}' in {path} has fields that differ from the first zip choice"
+            )
+        choice = {
+            field: _row_field_value(field, raw_choice[field], choice_label, path)
+            for field in ROW_FIELDS
+            if field in raw_choice
+        }
+        identity = tuple(choice.items())
+        if identity in seen:
+            raise PlanError(f"'{where}' in {path} contains the same choice twice")
+        seen.add(identity)
+        choices.append(choice)
+    return choices
 
 
 def _case(
