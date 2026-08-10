@@ -14,7 +14,7 @@ from pathlib import Path
 from s3_listing_study.common.argparse_utils import UniqueStoreAction
 from s3_listing_study.common.build_selection import BuildSelectionError
 from s3_listing_study.common.command_adapter import CommandAdapterError, CommandRequest
-from s3_listing_study.common.image_provenance import (
+from s3_listing_study.worker.image_provenance import (
     ImageProvenanceError,
     load_image_provenance,
 )

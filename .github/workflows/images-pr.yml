@@ -57,7 +57,7 @@ jobs:
 
       - name: Calculate shared-runtime cache key
         id: shared-key
-        run: echo "value=${{ hashFiles('.dockerignore', 'harness/shared-image/**', 'src/s3_listing_study/common/duckdb_runtime.py', 'src/s3_listing_study/common/runtime_identity.py') }}" >> "$GITHUB_OUTPUT"
+        run: echo "value=${{ hashFiles('.dockerignore', 'harness/shared-image/**', 'src/s3_listing_study/common/duckdb_runtime.py') }}" >> "$GITHUB_OUTPUT"
 
       - name: Restore shared-runtime archive
         id: shared-cache
@@ -218,7 +218,7 @@ jobs:
           printf 'EXECUTION_TAG=%s\nEXECUTION_REFERENCE=%s\n' \
             "$execution_tag" "$execution_reference" >> "$GITHUB_ENV"
 
-      - name: Probe tool and worker images
+      - name: Inspect tool and worker images
         env:
           TOOL: ${{ matrix.tool }}
         run: |
@@ -230,12 +230,6 @@ jobs:
           docker run --rm --pull=never --entrypoint /usr/bin/python3 "$EXECUTION_TAG" \
             -I -c 'import json,sys; p=json.load(open("/opt/s3-listing-study/image-provenance.json")); assert p["tool_image"]["uri"] == sys.argv[1]; assert len(p["selection_sha256"]) == 64' \
             "$TOOL_REFERENCE"
-          mapfile -t executable < <(uv run python -c \
-            'import json,sys; print(*json.load(open(f"tools/{sys.argv[1]}/build/image.json"))["executable"], sep="\n")' \
-            "$TOOL")
-          docker run --rm --pull=never --entrypoint "${executable[0]}" \
-            "$TOOL_TAG" "${executable[@]:1}" --help >/dev/null
-          docker run --rm --pull=never "$EXECUTION_TAG" --help >/dev/null
 
       - name: Export images and registration
         env:

@@ -770,7 +770,7 @@ def test_derived_image_tag_states_both_versions_and_the_tool_build_digest() -> N
     """The name a reader sees must not be mistakable for the upstream image."""
     selection = load_registered_selection(REPO, "swath")
     tag = derived_image_tag(selection)
-    assert tag == f"s3-listing-study/swath:0.2.4-h{__version__}-65ed39ed638e"
+    assert tag == f"s3-listing-study/swath:0.2.4-h{__version__}-49d63b4d4465"
     # A Docker reference: one repository component, one legal tag component.
     repository, _, reference = tag.partition(":")
     assert re.fullmatch(

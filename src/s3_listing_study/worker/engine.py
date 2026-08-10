@@ -27,9 +27,9 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import BinaryIO, Final
 
-from s3_listing_study.common.runtime_identity import interpreter_identity
 from s3_listing_study.common.secret_scan import Outcome as ScanOutcome
 from s3_listing_study.common.secret_scan import scan_binary_file
+from s3_listing_study.worker.runtime_identity import interpreter_identity
 
 from .summary import summarize
 

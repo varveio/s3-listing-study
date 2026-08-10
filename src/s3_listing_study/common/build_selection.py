@@ -347,7 +347,6 @@ def shared_base_source_sha256(root: Path) -> str:
             root / ".dockerignore",
             root / "harness/shared-image/Dockerfile",
             root / "harness/shared-image/debian-packages.lock",
-            root / "src/s3_listing_study/common/runtime_identity.py",
             root / "src/s3_listing_study/common/duckdb_runtime.py",
             root / "src/s3_listing_study/common/ijson_runtime.py",
         ),

@@ -44,13 +44,13 @@ _SPACE = rb"[ \t\n\r\f\v]"
 SCAN_SECRET_RE = re.compile(
     rb"AKIA[A-Z0-9]{16}"
     rb"|ASIA[A-Z0-9]{16}"
-    rb"|X-Amz-Signature=[A-Fa-f0-9]{16,}"
+    rb"|(?i:"
+    rb"X-Amz-Signature=[A-Fa-f0-9]{16,}"
     rb"|X-Amz-Credential=[A-Za-z0-9%/+-]{10,}"
     rb"|X-Amz-Security-Token=[A-Za-z0-9%/+=]{20,}"
     rb"|(AWS_SESSION_TOKEN|AWS_SECRET_ACCESS_KEY)=[A-Za-z0-9/+=]{16,}"
     rb"|aws_secret_access_key" + _SPACE + rb"*=" + _SPACE + rb"*[A-Za-z0-9/+=]{20,}"
-    rb"|Authorization:" + _SPACE + rb"*(AWS4-HMAC-SHA256|Bearer|Basic)" + _SPACE,
-    re.IGNORECASE,
+    rb"|Authorization:" + _SPACE + rb"*(AWS4-HMAC-SHA256|Bearer|Basic)" + _SPACE + rb")",
 )
 
 

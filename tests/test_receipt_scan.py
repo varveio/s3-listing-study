@@ -67,6 +67,12 @@ def test_stored_obfuscated_fixture_is_clean_on_disk(path: Path) -> None:
     assert scan_file(path) is Outcome.CLEAN
 
 
+def test_lowercase_package_integrity_text_is_not_an_access_key(tmp_path: Path) -> None:
+    lock = tmp_path / "package-lock.json"
+    lock.write_text('{"integrity":"sha512-AKiAdPQlkOhFhqNfDtDC"}\n', encoding="utf-8")
+    assert scan_file(lock) is Outcome.CLEAN
+
+
 def test_unreadable_file_is_scanner_error_not_clean(tmp_path: Path) -> None:
     """rc=2 is its own outcome. A scanner that cannot read a file has not passed it."""
     if os.geteuid() == 0:

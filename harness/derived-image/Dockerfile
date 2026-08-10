@@ -7,8 +7,10 @@ COPY src/s3_listing_study/__init__.py /payload/s3_listing_study/__init__.py
 COPY src/s3_listing_study/common/ /payload/s3_listing_study/common/
 COPY src/s3_listing_study/worker/ /payload/s3_listing_study/worker/
 COPY harness/derived-image/zipapp_main.py /payload/__main__.py
-RUN mkdir /out \
-    && /usr/bin/python3 -I -m zipapp /payload -o /out/attempt.pyz
+RUN rm -rf /opt/s3-listing-study-worker-build \
+    && mkdir /opt/s3-listing-study-worker-build \
+    && /usr/bin/python3 -I -m zipapp /payload \
+      -o /opt/s3-listing-study-worker-build/attempt.pyz
 
 ARG TOOL_IMAGE
 FROM ${TOOL_IMAGE}
@@ -16,7 +18,7 @@ USER root
 ARG TOOL_IMAGE_DIGEST
 ARG TOOL_IMAGE_URI
 ARG SELECTION_SHA256
-COPY --from=assembler /out/attempt.pyz /opt/s3-listing-study/attempt.pyz
+COPY --from=assembler /opt/s3-listing-study-worker-build/attempt.pyz /opt/s3-listing-study/attempt.pyz
 COPY harness/derived-image/validate_selection.py /opt/s3-listing-study/validate_selection.py
 COPY --from=selection image.json /opt/s3-listing-study/selection.json
 COPY --from=adapter command.py /opt/s3-listing-study/tool/command.py
