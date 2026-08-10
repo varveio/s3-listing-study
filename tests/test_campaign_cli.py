@@ -68,6 +68,54 @@ def write_inputs(tmp_path: Path, *, auth: str = "anonymous") -> tuple[Path, Path
     return plan, image_set
 
 
+def write_plan(path: Path, *, bucket: str, tool: str = "aws-cli") -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        textwrap.dedent(
+            f"""\
+            spec_version: 2
+            bucket: {bucket}
+            region: us-east-1
+            defaults:
+              reps: 1
+              timeout_s: 3600
+              auth: anonymous
+              vcpus: 2
+              memory_gb: 4
+            tools:
+              {tool}:
+            """
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def write_image_set(path: Path, tools: set[str]) -> Path:
+    images: dict[str, dict[str, Any]] = {}
+    for tool in tools:
+        registration = json.loads(
+            (ROOT / f"tools/{tool}/build/image.json").read_text(encoding="utf-8")
+        )
+        images[tool] = {
+            "derived_image": DIGEST,
+            "image_uri": f"us-east1-docker.pkg.dev/study/images/{tool}@{DIGEST}",
+            "shared_base_digest": "sha256:" + "b" * 64,
+            "shared_base_uri": "registry.example/base@sha256:" + "b" * 64,
+            "tool_build_sha256": registration["tool_build_sha256"],
+            "tool_artifact": registration["tool_artifact"],
+            "tool_version": registration["tool_version"],
+            "adapter_bundle_sha256": registration["adapter_bundle_sha256"],
+            "shared_base_source_sha256": registration["shared_base_source_sha256"],
+            "harness_revision": "a" * 40,
+        }
+    path.write_text(
+        json.dumps({"schema_version": 2, "images": images}),
+        encoding="utf-8",
+    )
+    return path
+
+
 def arguments(tmp_path: Path, plan: Path, image_set: Path) -> list[str]:
     return [
         "--path",
@@ -100,6 +148,106 @@ def test_spot_is_the_default_provisioning_model(tmp_path: Path) -> None:
         arguments(tmp_path, tmp_path / "plan.yaml", tmp_path / "images.json")
     )
     assert parsed.provisioning == "SPOT"
+
+
+def test_repeatable_canonical_buckets_form_one_deterministic_campaign(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    buckets = tmp_path / "buckets"
+    write_plan(buckets / "first.yaml", bucket="first")
+    write_plan(buckets / "second.yaml", bucket="second")
+    image_set = write_image_set(tmp_path / "images.json", {"aws-cli"})
+    roster_checks: list[str] = []
+
+    monkeypatch.setattr(campaign_cli.bench, "buckets_dir", lambda: buckets)
+    monkeypatch.setattr(
+        campaign_cli.bench, "default_path", lambda bucket: buckets / f"{bucket}.yaml"
+    )
+    monkeypatch.setattr(campaign_cli, "registered_tools", lambda: {"aws-cli"})
+    monkeypatch.setattr(campaign_cli, "validate_registered_images", lambda _images: None)
+    original_check_roster = campaign_cli.bench.check_roster
+
+    def check_roster(plan: Any, registered: Any) -> None:
+        roster_checks.append(plan.bucket)
+        original_check_roster(plan, registered)
+
+    monkeypatch.setattr(campaign_cli.bench, "check_roster", check_roster)
+    monkeypatch.setattr(
+        campaign_cli,
+        "_run",
+        lambda *_args, **_kwargs: pytest.fail("dry-run called a subprocess"),
+    )
+    argv = [
+        "--bucket",
+        "first",
+        "--bucket",
+        "second",
+        *arguments(tmp_path, buckets / "unused.yaml", image_set)[2:],
+        "--dry-run",
+    ]
+
+    assert campaign_cli.submit_campaign_main(argv) == 0
+    rendered = json.loads(capsys.readouterr().out)
+    assert roster_checks == ["first", "second"]
+    assert [plan["bucket"] for plan in rendered["campaign.json"]["plans"]] == [
+        "first",
+        "second",
+    ]
+    assert [attempt["bucket"] for attempt in rendered["campaign.json"]["attempts"]] == [
+        "first",
+        "second",
+    ]
+    assert len(rendered["jobs"]) == 2
+    assert len({job["job_id"] for job in rendered["jobs"]}) == 2
+
+
+def test_image_set_must_cover_the_union_of_all_plan_tools(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    first = write_plan(tmp_path / "first.yaml", bucket="first")
+    second = write_plan(tmp_path / "second.yaml", bucket="second", tool="s5cmd")
+    image_set = write_image_set(tmp_path / "images.json", {"aws-cli"})
+    monkeypatch.setattr(
+        campaign_cli,
+        "_run",
+        lambda *_args, **_kwargs: pytest.fail("invalid campaign called a subprocess"),
+    )
+    argv = [
+        "--path",
+        str(first),
+        "--path",
+        str(second),
+        *arguments(tmp_path, first, image_set)[2:],
+        "--dry-run",
+    ]
+
+    assert campaign_cli.submit_campaign_main(argv) == 1
+    assert "image set does not exactly cover the plans (missing s5cmd)" in capsys.readouterr().err
+    assert not (tmp_path / "ledger.sqlite3").exists()
+
+
+def test_duplicate_plan_bucket_is_rejected_before_rendering(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    first = write_plan(tmp_path / "one" / "same.yaml", bucket="same")
+    duplicate = write_plan(tmp_path / "two" / "same.yaml", bucket="same")
+    image_set = write_image_set(tmp_path / "images.json", {"aws-cli"})
+    monkeypatch.setattr(
+        campaign_cli,
+        "render_job",
+        lambda *_args, **_kwargs: pytest.fail("duplicate campaign rendered a job"),
+    )
+    argv = [
+        "--path",
+        str(first),
+        "--path",
+        str(duplicate),
+        *arguments(tmp_path, first, image_set)[2:],
+        "--dry-run",
+    ]
+
+    assert campaign_cli.submit_campaign_main(argv) == 1
+    assert "more than one plan for bucket 'same'" in capsys.readouterr().err
 
 
 def test_image_set_refuses_the_previous_schema(tmp_path: Path) -> None:
@@ -442,3 +590,114 @@ def test_actual_cli_freezes_plan_then_manifest_before_submitting(
         "submit",
         json.loads(capsys.readouterr().out)["submissions"][0]["job_id"],
     )
+
+
+def test_actual_cli_freezes_every_plan_before_one_manifest_and_all_jobs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first = write_plan(tmp_path / "first.yaml", bucket="first")
+    second = write_plan(tmp_path / "second.yaml", bucket="second")
+    image_set = write_image_set(tmp_path / "images.json", {"aws-cli"})
+    calls: list[tuple[tuple[str, ...], bytes | None]] = []
+
+    def fake_run(argv: Any, *, payload: bytes | None = None) -> subprocess.CompletedProcess[bytes]:
+        calls.append((tuple(argv), payload))
+        return completed()
+
+    monkeypatch.setattr(campaign_cli, "_run", fake_run)
+    argv = [
+        "--path",
+        str(first),
+        "--path",
+        str(second),
+        *arguments(tmp_path, first, image_set)[2:],
+    ]
+
+    assert campaign_cli.submit_campaign_main(argv) == 0
+    assert [call[0][4] for call in calls[:2]] == [
+        "gs://study-results/campaigns/2026-08-10-first/inputs/plans/first.yaml",
+        "gs://study-results/campaigns/2026-08-10-first/inputs/plans/second.yaml",
+    ]
+    assert [call[1] for call in calls[:2]] == [first.read_bytes(), second.read_bytes()]
+    assert calls[2][0][4].endswith("/campaign.json")
+    manifest_document = json.loads(calls[2][1])
+    assert [plan["bucket"] for plan in manifest_document["plans"]] == ["first", "second"]
+    assert [call[0][1:4] for call in calls[3:]] == [
+        ("batch", "jobs", "submit"),
+        ("batch", "jobs", "submit"),
+    ]
+
+
+def test_later_plan_hash_mismatch_prevents_every_cloud_and_ledger_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    first = write_plan(tmp_path / "first.yaml", bucket="first")
+    second = write_plan(tmp_path / "second.yaml", bucket="second")
+    image_set = write_image_set(tmp_path / "images.json", {"aws-cli"})
+    cloud_calls: list[tuple[str, ...]] = []
+    original_render_job = campaign_cli.render_job
+    render_count = 0
+
+    def render_job(selected: Any, config: Any) -> Any:
+        nonlocal render_count
+        render_count += 1
+        if render_count == 1:
+            second.write_text(second.read_text(encoding="utf-8") + "# changed\n", encoding="utf-8")
+        return original_render_job(selected, config)
+
+    def fake_run(argv: Any, *, payload: bytes | None = None) -> subprocess.CompletedProcess[bytes]:
+        del payload
+        cloud_calls.append(tuple(argv))
+        return completed()
+
+    monkeypatch.setattr(campaign_cli, "render_job", render_job)
+    monkeypatch.setattr(campaign_cli, "_run", fake_run)
+    argv = [
+        "--path",
+        str(first),
+        "--path",
+        str(second),
+        *arguments(tmp_path, first, image_set)[2:],
+    ]
+
+    assert campaign_cli.submit_campaign_main(argv) == 1
+    assert render_count == 2
+    assert f"plan changed after it was resolved: {second}" in capsys.readouterr().err
+    assert cloud_calls == []
+    assert not (tmp_path / "ledger.sqlite3").exists()
+
+
+def test_later_job_render_failure_prevents_every_cloud_and_ledger_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    first = write_plan(tmp_path / "first.yaml", bucket="first")
+    second = write_plan(tmp_path / "second.yaml", bucket="second")
+    image_set = write_image_set(tmp_path / "images.json", {"aws-cli"})
+    original_render_job = campaign_cli.render_job
+    render_count = 0
+
+    def render_job(selected: Any, config: Any) -> Any:
+        nonlocal render_count
+        render_count += 1
+        if render_count == 2:
+            raise campaign_cli.CampaignError("later render failed")
+        return original_render_job(selected, config)
+
+    monkeypatch.setattr(campaign_cli, "render_job", render_job)
+    monkeypatch.setattr(
+        campaign_cli,
+        "_run",
+        lambda *_args, **_kwargs: pytest.fail("render failure reached a cloud command"),
+    )
+    argv = [
+        "--path",
+        str(first),
+        "--path",
+        str(second),
+        *arguments(tmp_path, first, image_set)[2:],
+    ]
+
+    assert campaign_cli.submit_campaign_main(argv) == 1
+    assert render_count == 2
+    assert "later render failed" in capsys.readouterr().err
+    assert not (tmp_path / "ledger.sqlite3").exists()

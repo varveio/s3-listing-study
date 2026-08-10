@@ -54,8 +54,16 @@ class SubmissionError(RuntimeError):
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="s3-listing-study submit-campaign", allow_abbrev=False)
     source = parser.add_mutually_exclusive_group(required=True)
-    source.add_argument("--bucket", action=UniqueStoreAction, help="plan under bench/buckets")
-    source.add_argument("--path", action=UniqueStoreAction, help="path to one plan file")
+    source.add_argument(
+        "--bucket",
+        action="append",
+        help="plan under bench/buckets (repeat for more plans)",
+    )
+    source.add_argument(
+        "--path",
+        action="append",
+        help="path to a plan file (repeat for more plans)",
+    )
     parser.add_argument(
         "--campaign", "--campaign-id", dest="campaign", action=UniqueStoreAction, required=True
     )
@@ -370,21 +378,34 @@ def _submit_jobs(
     return statuses, failed
 
 
-def _load_plan(args: argparse.Namespace) -> bench.Plan:
-    path = bench.default_path(args.bucket) if args.bucket else Path(args.path)
-    loaded = bench.Plan.load(path)
-    if path.resolve().parent == bench.buckets_dir().resolve():
-        bench.check_roster(loaded, registered_tools())
-    return loaded
+def _load_plans(args: argparse.Namespace) -> tuple[bench.Plan, ...]:
+    paths = (
+        [bench.default_path(bucket) for bucket in args.bucket]
+        if args.bucket
+        else [Path(path) for path in args.path]
+    )
+    loaded_plans: list[bench.Plan] = []
+    seen_buckets: set[str] = set()
+    for path in paths:
+        loaded = bench.Plan.load(path)
+        if path.resolve().parent == bench.buckets_dir().resolve():
+            bench.check_roster(loaded, registered_tools())
+        if loaded.bucket in seen_buckets:
+            raise SubmissionError(
+                f"campaign contains more than one plan for bucket {loaded.bucket!r}"
+            )
+        seen_buckets.add(loaded.bucket)
+        loaded_plans.append(loaded)
+    return tuple(loaded_plans)
 
 
 def submit_campaign_main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        loaded = _load_plan(args)
+        loaded_plans = _load_plans(args)
         images = _read_image_set(Path(args.image_set))
         validate_registered_images(images)
-        plan_tools = set(loaded.tools())
+        plan_tools = {tool for loaded in loaded_plans for tool in loaded.tools()}
         if set(images) != plan_tools:
             missing = sorted(plan_tools - set(images))
             extra = sorted(set(images) - plan_tools)
@@ -394,9 +415,13 @@ def submit_campaign_main(argv: Sequence[str] | None = None) -> int:
             if extra:
                 detail.append(f"extra {', '.join(extra)}")
             mismatch = "; ".join(detail)
-            raise SubmissionError(f"image set does not exactly cover the plan ({mismatch})")
+            raise SubmissionError(f"image set does not exactly cover the plans ({mismatch})")
 
-        generated = attempts_for(loaded, campaign=args.campaign, images=images)
+        generated = tuple(
+            attempt
+            for loaded in loaded_plans
+            for attempt in attempts_for(loaded, campaign=args.campaign, images=images)
+        )
         config = BatchConfig(
             results_bucket=args.results_bucket,
             anonymous_worker_service_account=args.anonymous_worker_sa,
@@ -411,7 +436,7 @@ def submit_campaign_main(argv: Sequence[str] | None = None) -> int:
         jobs = [render_job(attempt, config) for attempt in generated]
         campaign_document = manifest(
             campaign=args.campaign,
-            plans=[loaded],
+            plans=loaded_plans,
             images=images,
             attempts=generated,
             results_bucket=args.results_bucket,
@@ -429,13 +454,16 @@ def submit_campaign_main(argv: Sequence[str] | None = None) -> int:
             print(json.dumps(dry_run, sort_keys=True, indent=2, ensure_ascii=False))
             return 0
 
-        plan_bytes = loaded.path.read_bytes()
-        if hashlib.sha256(plan_bytes).hexdigest() != loaded.digest:
-            raise SubmissionError(f"plan changed after it was resolved: {loaded.path}")
+        plan_contents: list[bytes] = []
+        for loaded in loaded_plans:
+            plan_bytes = loaded.path.read_bytes()
+            if hashlib.sha256(plan_bytes).hexdigest() != loaded.digest:
+                raise SubmissionError(f"plan changed after it was resolved: {loaded.path}")
+            plan_contents.append(plan_bytes)
         base = f"gs://{args.results_bucket}/{campaign_prefix(args.campaign)}"
-        [plan_record] = campaign_document["plans"]
-        plan_uri = f"gs://{args.results_bucket}/{plan_record['path']}"
-        _freeze(plan_uri, plan_bytes)
+        for plan_record, plan_bytes in zip(campaign_document["plans"], plan_contents, strict=True):
+            plan_uri = f"gs://{args.results_bucket}/{plan_record['path']}"
+            _freeze(plan_uri, plan_bytes)
         _freeze(f"{base}/campaign.json", _canonical_json(campaign_document))
         statuses, failed = _submit_jobs(
             generated,
