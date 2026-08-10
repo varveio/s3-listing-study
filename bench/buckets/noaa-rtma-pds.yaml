@@ -1,0 +1,42 @@
+# Large-bucket diagnostic timing campaign. No correctness verifier is available.
+spec_version: 2
+
+bucket: noaa-rtma-pds
+region: us-east-1
+
+defaults:
+  reps: 1
+  timeout_s: 28800
+  auth: anonymous
+  vcpus: 2
+  memory_gb: 4
+  container_memory_gb: 2
+
+tools:
+  aws-cli:
+  s5cmd:
+  rclone:
+  minio-mc:
+  s7cmd:
+  s3-fast-list:
+
+  s3kor:
+    auth: authenticated
+  s4cmd:
+    auth: authenticated
+  s3p:
+    auth: authenticated
+  ps3:
+    auth: authenticated
+
+  swath:
+    cases:
+      - {mode: recursive-tsv}
+      - {mode: recursive-parquet}
+      - {mode: recursive-parquet, container_memory_gb: 4}
+      - {mode: recursive-parquet-sorted}
+      - {mode: recursive-parquet-sorted, container_memory_gb: 4}
+      - {mode: recursive-parquet, vcpus: 4, memory_gb: 8}
+      - {mode: recursive-parquet, vcpus: 4, memory_gb: 8, container_memory_gb: 4}
+      - {mode: recursive-parquet-sorted, vcpus: 4, memory_gb: 8}
+      - {mode: recursive-parquet-sorted, vcpus: 4, memory_gb: 8, container_memory_gb: 4}
