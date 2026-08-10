@@ -17,10 +17,11 @@ tool that only re-allocates keeps the default mode rather than having to write
 its cases out to say so.
 
 **A plan has two shapes: a layer and a row.** A *row* — one entry in a tool's
-``cases`` — states what one case **is**: ``mode`` and the allocation. A *layer*
-— ``defaults``, or a tool's own body — states what every case under it inherits:
-the allocation, plus the schedule, and never ``mode``. Both draw on one flat
-vocabulary, so a tool body is ``defaults`` plus ``cases``.
+``cases`` — states what one case **is**: ``mode``, the stratum, the allocation.
+A *layer* — ``defaults``, or a tool's own body — states what every case under it
+inherits: the stratum and allocation again, plus the schedule, and never
+``mode``. Both draw on one flat vocabulary, so a tool body is ``defaults`` plus
+``cases``.
 
 A row may carry only keys the ID and the fingerprint can *both* see, which is
 what keeps ``timeout_s`` out of one: it is in the fingerprint but not the ID, so
@@ -112,14 +113,23 @@ RESOURCE_FIELDS = (*BOX_FIELDS, *PROCESS_FIELDS)
 # directory.
 SCHEDULE_FIELDS = ("reps", "timeout_s")
 
+# Whether the request is signed, not whether the bucket is private: every target
+# is public and four of the eleven tools have no unsigned path, so a mixed roster
+# would compare listing against listing-plus-signing-1,000-requests. A stratum is
+# an identity too — an authenticated case runs as the service account that may
+# read the credential (infra/.../aws-credentials.tf).
+AUTH_CHOICES = ("anonymous", "authenticated")
+
 # What a row may state: what one case *is*. `mode` first so it leads every
 # derived ID; the rest follow in this order, so an ID is a function of the key
 # set and not of the order someone typed them in.
-ROW_FIELDS = ("mode", *RESOURCE_FIELDS)
+ROW_FIELDS = ("mode", "auth", *RESOURCE_FIELDS)
 
 # What a layer may state: what every case under it inherits. No `mode` — eleven
 # tools have eleven mode vocabularies, so nothing above a row has one to state.
-LAYER_FIELDS = (*RESOURCE_FIELDS, *SCHEDULE_FIELDS)
+# `auth` is here as well as in a row: a campaign usually runs one stratum, and
+# saying so once beats repeating it on every line.
+LAYER_FIELDS = ("auth", *RESOURCE_FIELDS, *SCHEDULE_FIELDS)
 
 TOOL_FIELDS = ("cases", *LAYER_FIELDS)
 
@@ -188,6 +198,7 @@ class Case:
     tool: str
     case_id: str
     mode: str
+    auth: str
     resources: Resources
     reps: int
     timeout_s: int
@@ -442,6 +453,7 @@ def _load(
     _reject_unknown(defaults, LAYER_FIELDS, "[defaults]", path)
     base_resources = _resources(defaults, "defaults", path, complete=True)
     base_schedule = _schedule(defaults, "defaults", path, complete=True)
+    base_auth = _auth(defaults, "defaults", path, complete=True)
 
     region = _string(doc, "region", "plan", path)
     # Resolved next to the plan rather than passed down from the caller, so a
@@ -457,7 +469,7 @@ def _load(
         region=region,
         cases=_cases(
             doc,
-            base_resources,
+            {**base_resources, **base_auth},
             base_schedule,
             modes,
             _Context(
@@ -545,6 +557,22 @@ def _reject_mode(table: Mapping[str, Any], where: str, path: Path) -> None:
             "to what rows inherit; state it per row, or record the tool's usual "
             "mode in bench/tools.yaml"
         )
+
+
+def _auth(table: Mapping[str, Any], where: str, path: Path, *, complete: bool) -> dict[str, str]:
+    """The stratum ``table`` states. Required of ``defaults``, so a plan written
+    before the field existed is refused rather than taking one nobody chose."""
+    value = table.get("auth")
+    if value is None:
+        if complete:
+            raise PlanError(
+                f"'{where}' in {path} has no 'auth' ({'|'.join(AUTH_CHOICES)}) — a case that "
+                "did not say whether it signed cannot be compared with one that did"
+            )
+        return {}
+    if value not in AUTH_CHOICES:
+        raise PlanError(f"'{where}' 'auth' in {path} is not {'|'.join(AUTH_CHOICES)}: {value!r}")
+    return {"auth": value}
 
 
 def _schedule(
@@ -661,7 +689,11 @@ def _tool_cases(
 
     # Cascade is shallow and per-key, over a flat table of scalars: there is no
     # nesting for a deep-merge surprise to hide in.
-    resources = {**base_resources, **_resources(table, where, path, complete=False)}
+    settings = {
+        **base_resources,
+        **_resources(table, where, path, complete=False),
+        **_auth(table, where, path, complete=False),
+    }
     schedule = {**base_schedule, **_schedule(table, where, path, complete=False)}
 
     rows = _case_rows(table, where, path)
@@ -672,12 +704,9 @@ def _tool_cases(
 
     cases: list[Case] = []
     for row in rows:
-        case_resources = {**resources, **{k: v for k, v in row.items() if k in RESOURCE_FIELDS}}
-        mode = _row_mode(row, tool, where, default_modes, path)
-        chosen = tuple(
-            (field, mode if field == "mode" else case_resources.get(field)) for field in rendered
-        )
-        cases.append(_case(tool, mode, chosen, case_resources, schedule, context))
+        resolved = {**settings, **row, "mode": _row_mode(row, tool, where, default_modes, path)}
+        chosen = tuple((field, resolved.get(field)) for field in rendered)
+        cases.append(_case(tool, resolved, chosen, schedule, context))
     return cases
 
 
@@ -731,6 +760,8 @@ def _case_rows(table: Mapping[str, Any], where: str, path: Path) -> list[dict[st
                 if not isinstance(value, str) or not value.strip():
                     raise PlanError(f"'{label}' 'mode' in {path} is not a non-empty string")
                 row[key] = value
+            elif key == "auth":
+                row.update(_auth(entry, label, path, complete=False))
             else:
                 row[key] = _positive_int(value, key, label, path)
         rows.append(row)
@@ -739,13 +770,15 @@ def _case_rows(table: Mapping[str, Any], where: str, path: Path) -> list[dict[st
 
 def _case(
     tool: str,
-    mode: str,
+    resolved: Mapping[str, Any],
     chosen: tuple[tuple[str, str | int | None], ...],
-    resources: Mapping[str, Any],
     schedule: Mapping[str, int],
     context: _Context,
 ) -> Case:
     path = context.path
+    mode = str(resolved["mode"])
+    auth = str(resolved["auth"])
+    resources = resolved
     shape = (int(resources["vcpus"]), int(resources["memory_gb"]))
     machine_type = context.instances.get(shape)
     if machine_type is None:
@@ -766,13 +799,13 @@ def _case(
             f"on a {shape[1]} GB box — a ceiling above the box constrains nothing"
         )
 
-    resolved = Resources(
+    resolved_resources = Resources(
         vcpus=shape[0],
         memory_gb=shape[1],
         machine_type=machine_type,
         container_memory_gb=container_memory_gb,
     )
-    env = context.heap.env_for(tool, visible_memory_gb=resolved.visible_memory_gb)
+    env = context.heap.env_for(tool, visible_memory_gb=resolved_resources.visible_memory_gb)
 
     case_id = derive_case_id(chosen)
     if not CASE_ID_RE.fullmatch(case_id):
@@ -784,7 +817,8 @@ def _case(
         tool=tool,
         case_id=case_id,
         mode=mode,
-        resources=resolved,
+        auth=auth,
+        resources=resolved_resources,
         reps=schedule["reps"],
         timeout_s=schedule["timeout_s"],
         axes=chosen,
@@ -794,7 +828,8 @@ def _case(
             region=context.region,
             tool=tool,
             mode=mode,
-            resources=resolved,
+            auth=auth,
+            resources=resolved_resources,
             timeout_s=schedule["timeout_s"],
             env=env,
         ),
@@ -821,6 +856,7 @@ def fingerprint(
     region: str,
     tool: str,
     mode: str,
+    auth: str,
     resources: Resources,
     timeout_s: int,
     env: Sequence[tuple[str, str]] = (),
@@ -832,6 +868,7 @@ def fingerprint(
         "region": region,
         "tool": tool,
         "mode": mode,
+        "auth": auth,
         "resources": resources.as_dict(),
         "timeout_s": timeout_s,
         "env": [list(pair) for pair in env],

@@ -29,6 +29,11 @@ defaults:
   # (148,917 keys in 146s) says would kill most tools around the 15% mark.
   timeout_s: 3600
 
+  # Signed, for every tool. Four of the eleven have no unsigned request path, and
+  # a roster split between signed and unsigned would compare listing against
+  # listing-plus-signing-1,000-requests. The bucket is public either way.
+  auth: authenticated
+
   # The shape, not a machine type: bench/instances.yaml says which box that is.
   # The smallest modern shape — the families start at 2 GB per vCPU in their
   # highcpu form, so there is no 2 GB/2 vCPU box to ask for.

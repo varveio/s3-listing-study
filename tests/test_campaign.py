@@ -24,17 +24,32 @@ from s3_listing_study.manager.campaign import (
 )
 from s3_listing_study.manager.campaign import ledger as ledger_module
 
-IMAGE = "sha256:" + "a" * 64
-OTHER_IMAGE = "sha256:" + "b" * 64
 NOW = "2026-08-10T12:00:00Z"
+
+
+def registration(*, subject: str = "a", derived: str = "d") -> dict[str, object]:
+    """One tool's image: the digest that ran, plus what it was built from."""
+    return {
+        "derived_image": "sha256:" + derived * 64,
+        "subject_image": "sha256:" + subject * 64,
+        "adapter_bundle_sha256": subject * 64,
+        "python_libc": "gnu",
+        "harness_revision": "0.1.0",
+    }
+
+
+IMAGE = registration()
+OTHER_IMAGE = registration(subject="b", derived="e")
 
 
 def committed_plan() -> bench.Plan:
     return bench.Plan.load(bench.default_path("noaa-ghcn-pds"))
 
 
-def image_set(plan: bench.Plan, image: str = IMAGE) -> dict[str, str]:
-    return dict.fromkeys(plan.tools(), image)
+def image_set(
+    plan: bench.Plan, image: dict[str, object] | None = None
+) -> dict[str, dict[str, object]]:
+    return dict.fromkeys(plan.tools(), image or IMAGE)
 
 
 # ── identity ─────────────────────────────────────────────────────────────────
@@ -47,9 +62,21 @@ def test_the_image_is_part_of_an_attempts_identity() -> None:
     the case this exists for — it must not resolve to the attempt that failed.
     """
     case = committed_plan().cases[0]
-    first = attempt_fingerprint(case_fingerprint=case.fingerprint, derived_image=IMAGE)
-    second = attempt_fingerprint(case_fingerprint=case.fingerprint, derived_image=OTHER_IMAGE)
+    first = attempt_fingerprint(case_fingerprint=case.fingerprint, components=IMAGE)
+    second = attempt_fingerprint(case_fingerprint=case.fingerprint, components=OTHER_IMAGE)
     assert first != second
+
+
+def test_rebuilding_only_the_orchestrator_side_leaves_identity_alone() -> None:
+    """The derived image also carries the collector and uploader, which run after
+    the timer closes; an edit to those must not invalidate every case."""
+    case = committed_plan().cases[0]
+    before = attempt_fingerprint(case_fingerprint=case.fingerprint, components=IMAGE)
+    rebuilt = attempt_fingerprint(
+        case_fingerprint=case.fingerprint,
+        components={**IMAGE, "derived_image": "sha256:" + "9" * 64},
+    )
+    assert before == rebuilt
 
 
 def test_a_case_fingerprint_stays_free_of_the_image() -> None:
@@ -63,9 +90,16 @@ def test_a_case_fingerprint_stays_free_of_the_image() -> None:
     assert [c.fingerprint for c in plan.cases] == [c.fingerprint for c in again.cases]
 
 
+def test_an_image_missing_a_component_is_refused() -> None:
+    with pytest.raises(CampaignError, match="missing adapter_bundle_sha256"):
+        attempt_fingerprint(case_fingerprint="abc", components={"harness_revision": "0.1.0"})
+
+
 def test_an_image_that_is_not_a_digest_is_refused() -> None:
+    plan = committed_plan()
+    images = image_set(plan, {**IMAGE, "derived_image": "latest"})
     with pytest.raises(CampaignError, match="not a sha256 digest"):
-        attempt_fingerprint(case_fingerprint="abc", derived_image="latest")
+        attempts_for(plan, campaign="2026-08-10-first", images=images)
 
 
 # ── job ids ──────────────────────────────────────────────────────────────────
@@ -201,14 +235,17 @@ def test_the_manifest_indexes_every_job_and_names_the_image_components() -> None
         campaign="2026-08-10-first",
         plans=[plan],
         images=images,
-        selections={"swath": {"subject_image": "sha256:dead", "subject_version": "0.2.2"}},
         attempts=generated,
         results_bucket="study-results",
+        provisioning="SPOT",
+        zone="us-east4-a",
     )
     assert len(document["attempts"]) == 14
     assert {a["job_id"] for a in document["attempts"]} == {a.job_id for a in generated}
     assert document["plans"][0]["sha256"] == plan.digest
-    assert document["images"]["swath"]["subject_version"] == "0.2.2"
+    assert document["images"]["swath"]["subject_image"] == IMAGE["subject_image"]
+    # Neither is in any fingerprint, and a reader will ask about both.
+    assert (document["provisioning"], document["zone"]) == ("SPOT", "us-east4-a")
 
 
 # ── the ledger ───────────────────────────────────────────────────────────────

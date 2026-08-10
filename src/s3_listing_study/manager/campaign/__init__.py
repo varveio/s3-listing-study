@@ -4,15 +4,19 @@ A plan is intent and a campaign is an execution, so everything an execution
 knows and a plan does not lives here — which image each tool ran, what the jobs
 were called, and where their artifacts land.
 
-**Identity is two-layer, because the two are known at different times.**
-:attr:`~s3_listing_study.manager.bench.plan.Case.fingerprint` is a digest over
-the resolved case and nothing else, so ``resolve-plan`` can compute it while
-contacting nothing. An *attempt* fingerprint folds in the derived image digest
-that actually ran, which only exists once images are built and pushed. Two
-functions rather than one because a case does not stop being the same case when
-its image is rebuilt — it stops being the same *attempt*, which is exactly the
-distinction that lets a fixed tool be re-run inside a campaign the other ten
-tools already completed.
+**Identity is two-layer, because the two are known at different times.** A case
+fingerprint covers the resolved case and nothing else, so ``resolve-plan`` can
+compute it while contacting nothing. An *attempt* fingerprint folds in the image
+that ran it, which exists only once images are built. That is what lets a fixed
+tool be re-run inside a campaign the other ten already completed: the same case,
+a different attempt.
+
+It folds in the image's **components** — subject digest, adapter bundle,
+interpreter, harness — rather than the derived digest, because the derived image
+also carries the collector and uploader, which run after the timer has closed
+and cannot reach the measurement. Fingerprinting the whole digest would let an
+edit to orchestrator code invalidate every case's identity. The derived digest
+is recorded in ``result.json`` and the manifest regardless.
 
 **An address is not an identity.** A path names a case in the plan's own
 vocabulary, readable by someone who has the plan open; the image is deliberately
@@ -61,6 +65,12 @@ DIGEST_RE = re.compile(r"\Asha256:[0-9a-f]{64}\Z")
 
 ATTEMPT_FINGERPRINT_VERSION = 1
 
+# Everything about the image that a measurement can depend on. `provisioning`
+# is deliberately absent: a spot VM is the same machine type at a different
+# price, so it changes the odds of being preempted and nothing a completed run
+# measured.
+IMAGE_COMPONENTS = ("subject_image", "adapter_bundle_sha256", "python_libc", "harness_revision")
+
 
 class CampaignError(Exception):
     """A campaign cannot be assembled from what it was given."""
@@ -80,18 +90,19 @@ def validate_campaign_id(campaign: str) -> str:
     return campaign
 
 
-def attempt_fingerprint(*, case_fingerprint: str, derived_image: str) -> str:
-    """What makes two runs the same attempt: the case, and the image that ran it.
+def attempt_fingerprint(*, case_fingerprint: str, components: Mapping[str, Any]) -> str:
+    """What makes two runs the same attempt: the case, and what ran it.
 
     Separate from the case fingerprint rather than replacing it, so a plan stays
     readable without a registry: `resolve-plan` still contacts nothing.
     """
-    if not DIGEST_RE.fullmatch(derived_image):
-        raise CampaignError(f"derived image is not a sha256 digest: {derived_image!r}")
+    missing = sorted(set(IMAGE_COMPONENTS) - set(components))
+    if missing:
+        raise CampaignError(f"image components are missing {', '.join(missing)}")
     payload = {
         "attempt_fingerprint_version": ATTEMPT_FINGERPRINT_VERSION,
         "case_fingerprint": case_fingerprint,
-        "derived_image": derived_image,
+        "image": {name: components[name] for name in IMAGE_COMPONENTS},
     }
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
@@ -153,7 +164,9 @@ class Attempt:
     bucket: str
     region: str
     case: Case
-    derived_image: str
+    # The whole registration: the derived digest that ran, and the components
+    # the fingerprint is taken over.
+    image: Mapping[str, Any]
     fingerprint: str
     job_id: str
     submission: int
@@ -168,8 +181,9 @@ class Attempt:
             "tool": self.case.tool,
             "case_id": self.case.case_id,
             "mode": self.case.mode,
+            "auth": self.case.auth,
             "case_fingerprint": self.case.fingerprint,
-            "derived_image": self.derived_image,
+            "derived_image": self.image["derived_image"],
             "fingerprint": self.fingerprint,
             "resources": self.case.resources.as_dict(),
             # What the runtime was told about its own memory, if it is the kind
@@ -186,7 +200,7 @@ def attempts_for(
     plan: Plan,
     *,
     campaign: str,
-    images: Mapping[str, str],
+    images: Mapping[str, Mapping[str, Any]],
     submission: int = 1,
 ) -> tuple[Attempt, ...]:
     """Every attempt one plan contributes, one per case per rep.
@@ -205,7 +219,9 @@ def attempts_for(
     attempts: list[Attempt] = []
     for case in plan.cases:
         image = images[case.tool]
-        digest = attempt_fingerprint(case_fingerprint=case.fingerprint, derived_image=image)
+        if not DIGEST_RE.fullmatch(str(image.get("derived_image", ""))):
+            raise CampaignError(f"{case.tool}: derived_image is not a sha256 digest")
+        digest = attempt_fingerprint(case_fingerprint=case.fingerprint, components=image)
         for _ in range(case.reps):
             attempts.append(
                 Attempt(
@@ -213,7 +229,7 @@ def attempts_for(
                     bucket=plan.bucket,
                     region=plan.region,
                     case=case,
-                    derived_image=image,
+                    image=image,
                     fingerprint=digest,
                     job_id=job_id(
                         campaign=campaign,
@@ -238,22 +254,25 @@ def manifest(
     *,
     campaign: str,
     plans: Sequence[Plan],
-    images: Mapping[str, str],
-    selections: Mapping[str, Mapping[str, Any]],
+    images: Mapping[str, Mapping[str, Any]],
     attempts: Sequence[Attempt],
     results_bucket: str,
+    provisioning: str = "STANDARD",
+    zone: str | None = None,
 ) -> dict[str, Any]:
     """``campaign.json`` — the index a job id is meaningless without.
 
-    Carries the image *components* beside each digest, not just the digest: a
-    harness rebuild moves every derived digest without any tool changing, and
-    only the components say which of the two happened.
+    ``zone`` and ``provisioning`` are recorded because they are not in any
+    fingerprint and a reader will ask: every number includes the network path
+    from the VM to the store, and spot changes the odds of being preempted.
     """
     return {
         "schema_version": 1,
         "campaign": validate_campaign_id(campaign),
         "results_bucket": results_bucket,
         "attempt_fingerprint_version": ATTEMPT_FINGERPRINT_VERSION,
+        "provisioning": provisioning,
+        "zone": zone,
         "plans": [
             {
                 "bucket": plan.bucket,
@@ -263,14 +282,6 @@ def manifest(
             }
             for plan in plans
         ],
-        "images": {
-            tool: {
-                "derived_image": digest,
-                "subject_image": selections.get(tool, {}).get("subject_image"),
-                "subject_version": selections.get(tool, {}).get("subject_version"),
-                "adapter_bundle_sha256": selections.get(tool, {}).get("adapter_bundle_sha256"),
-            }
-            for tool, digest in sorted(images.items())
-        },
+        "images": {tool: dict(image) for tool, image in sorted(images.items())},
         "attempts": [attempt.as_dict() for attempt in attempts],
     }

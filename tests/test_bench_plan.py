@@ -19,6 +19,7 @@ region: us-east-1
 defaults:
   reps: 3
   timeout_s: 3600
+  auth: anonymous
   vcpus: 2
   memory_gb: 8
 tools:
@@ -581,6 +582,7 @@ def test_every_key_a_row_may_state_moves_both_the_id_and_the_fingerprint(
     # Two legal values per key, both resolving to a shape the catalogue offers.
     pairs: dict[str, tuple[object, object]] = {
         "mode": ("recursive-tsv", "recursive-jsonl"),
+        "auth": ("anonymous", "authenticated"),
         "vcpus": (2, 4),
         "memory_gb": (8, 16),
         "container_memory_gb": (4, 8),
@@ -675,6 +677,41 @@ def test_a_row_without_a_mode_and_no_tool_default_is_refused(tmp_path: Path) -> 
         load(path, default_modes={"s3p": "ls"})
 
 
+def test_a_plan_that_does_not_say_whether_it_signed_is_refused(tmp_path: Path) -> None:
+    """Four of the eleven tools have no unsigned path, so this is never implicit."""
+    path = write(tmp_path, ONE_CASE)
+    path.write_text(
+        path.read_text(encoding="utf-8").replace("  auth: anonymous\n", ""), encoding="utf-8"
+    )
+    with pytest.raises(bench.PlanError, match="has no 'auth'"):
+        load(path)
+
+
+def test_a_stratum_that_is_not_one_of_the_two_is_refused(tmp_path: Path) -> None:
+    path = write(tmp_path, "swath:\n  auth: signed\n  cases:\n    - {mode: recursive-tsv}\n")
+    with pytest.raises(bench.PlanError, match=r"is not anonymous\|authenticated"):
+        load(path)
+
+
+def test_a_row_may_sweep_the_stratum_and_it_renders(tmp_path: Path) -> None:
+    """Running one tool both ways measures signing; the ID has to say which is which."""
+    path = write(
+        tmp_path,
+        """
+        aws-cli:
+          cases:
+            - {mode: s3api-v2-text, auth: anonymous}
+            - {mode: s3api-v2-text, auth: authenticated}
+        """,
+    )
+    first, second = load(path).cases
+    assert [c.case_id for c in (first, second)] == [
+        "s3api-v2-text.auth-anonymous",
+        "s3api-v2-text.auth-authenticated",
+    ]
+    assert first.fingerprint != second.fingerprint
+
+
 def test_a_row_stating_the_schedule_is_refused(tmp_path: Path) -> None:
     """``timeout_s`` is in the fingerprint but not the ID, so two rows differing
     only there would render one ID and two fingerprints."""
@@ -728,8 +765,9 @@ def test_a_tool_body_is_the_defaults_vocabulary_plus_its_rows() -> None:
     assert ("cases", *bench.LAYER_FIELDS) == bench.TOOL_FIELDS
     assert not set(bench.ROW_FIELDS) & set(bench.SCHEDULE_FIELDS)
     assert "mode" not in bench.LAYER_FIELDS
-    # The overlap is the allocation, stated the same way at either level.
-    assert set(bench.ROW_FIELDS) & set(bench.LAYER_FIELDS) == set(bench.RESOURCE_FIELDS)
+    # The overlap is what a case is *and* can sensibly be defaulted: the
+    # allocation, and which stratum it ran in.
+    assert set(bench.ROW_FIELDS) & set(bench.LAYER_FIELDS) == {*bench.RESOURCE_FIELDS, "auth"}
 
 
 def test_incomplete_defaults_are_refused(tmp_path: Path) -> None:
