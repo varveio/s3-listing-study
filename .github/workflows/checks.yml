@@ -67,7 +67,7 @@ jobs:
       - name: Full-tree secret scan
         # Before `uv sync`: the scan reads every file under the tree, and a
         # populated `.venv/` puts third-party binaries in front of it.
-        run: PYTHONPATH=src python3 -P -m s3_listing_study.receipt scan-tree .
+        run: PYTHONPATH=src python3 -P -m s3_listing_study.manager.receipt scan-tree .
 
       - name: Install uv
         # The harness suite drives the packaged verifier, whose field comparison
