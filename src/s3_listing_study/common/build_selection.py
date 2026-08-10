@@ -308,46 +308,18 @@ def derived_image_tag(selection: BuildSelection) -> str:
     )
 
 
-def build_derived_image_main(argv: Sequence[str] | None = None) -> int:
-    """Build one registered derived image from only its slug and output tag."""
-    parser = argparse.ArgumentParser(prog="s3-listing-study build-derived-image")
-    parser.add_argument("--tool", required=True)
-    parser.add_argument(
-        "--tag",
-        help="output image name; defaults to the name derived from the registration",
+def derived_image_build_command(root: Path, selection: BuildSelection, tag: str) -> tuple[str, ...]:
+    """Resolve the shared builder inputs and return its exact Docker argv."""
+    dockerfile = _contained(
+        root / "harness" / "derived-image" / "Dockerfile",
+        root,
+        "shared derived-image Dockerfile",
     )
-    args = parser.parse_args(argv)
-    if args.tag is not None and (not args.tag or "\x00" in args.tag):
-        parser.error("--tag must be a non-empty Docker image tag")
-    try:
-        root = Path.cwd().resolve(strict=True)
-        selection = load_registered_selection(root, args.tool)
-        dockerfile = _contained(
-            root / "harness" / "derived-image" / "Dockerfile",
-            root,
-            "shared derived-image Dockerfile",
-        )
-        # The subject supplies the tool, never the interpreter the attempt engine
-        # runs on: ten of eleven subject images have no Python at all.
-        #
-        # platform.machine() is the BUILD HOST's architecture, which is correct
-        # only because this build is native — no --platform is passed and the
-        # subject image is pulled for the host's own architecture. Building for
-        # a foreign architecture would need the target named explicitly here.
-        interpreter = ensure_runtime(platform.machine(), selection.python_libc)
-        duckdb_runtime = ensure_duckdb(platform.machine())
-    except BuildSelectionError as exc:
-        print(f"build-derived-image: {exc}", file=sys.stderr)
-        return 2
-    except PythonRuntimeError as exc:
-        print(f"build-derived-image: {exc}", file=sys.stderr)
-        return 2
-    except DuckDBRuntimeError as exc:
-        print(f"build-derived-image: {exc}", file=sys.stderr)
-        return 2
-
-    tag = derived_image_tag(selection) if args.tag is None else args.tag
-    command = (
+    # Native-only build: the host architecture selects the subject and pinned
+    # interpreter payloads. A foreign build needs a separate explicit contract.
+    interpreter = ensure_runtime(platform.machine(), selection.python_libc)
+    duckdb_runtime = ensure_duckdb(platform.machine())
+    return (
         "docker",
         "build",
         "--file",
@@ -366,6 +338,34 @@ def build_derived_image_main(argv: Sequence[str] | None = None) -> int:
         tag,
         str(root),
     )
+
+
+def build_derived_image_main(argv: Sequence[str] | None = None) -> int:
+    """Build one registered derived image from only its slug and output tag."""
+    parser = argparse.ArgumentParser(prog="s3-listing-study build-derived-image")
+    parser.add_argument("--tool", required=True)
+    parser.add_argument(
+        "--tag",
+        help="output image name; defaults to the name derived from the registration",
+    )
+    args = parser.parse_args(argv)
+    if args.tag is not None and (not args.tag or "\x00" in args.tag):
+        parser.error("--tag must be a non-empty Docker image tag")
+    try:
+        root = Path.cwd().resolve(strict=True)
+        selection = load_registered_selection(root, args.tool)
+        tag = derived_image_tag(selection) if args.tag is None else args.tag
+        command = derived_image_build_command(root, selection, tag)
+    except BuildSelectionError as exc:
+        print(f"build-derived-image: {exc}", file=sys.stderr)
+        return 2
+    except PythonRuntimeError as exc:
+        print(f"build-derived-image: {exc}", file=sys.stderr)
+        return 2
+    except DuckDBRuntimeError as exc:
+        print(f"build-derived-image: {exc}", file=sys.stderr)
+        return 2
+
     print(f"build-derived-image: building {tag}", file=sys.stderr)
     try:
         return subprocess.run(command, check=False).returncode
