@@ -205,7 +205,7 @@ def test_a_prefix_names_the_manager_run_and_not_the_execution() -> None:
         case_id="recursive-parquet-sorted.container_memory_gb-2",
     )
     assert prefix == (
-        "campaigns/2026-08-10-first/noaa-ghcn-pds/swath/"
+        "campaigns/2026-08-10-first/results/noaa-ghcn-pds/swath/"
         "recursive-parquet-sorted.container_memory_gb-2/run-1"
     )
 

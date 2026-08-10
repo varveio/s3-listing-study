@@ -166,7 +166,10 @@ def attempt_prefix(
     target. The worker appends its own execution UUID under this manager-owned
     run prefix.
     """
-    return f"{campaign_prefix(campaign)}/{bucket}/{tool}/{case_id}/run-{run_ordinal}"
+    return (
+        f"{campaign_prefix(campaign)}/results/"
+        f"{bucket}/{tool}/{case_id}/run-{run_ordinal}"
+    )
 
 
 @dataclass(frozen=True)
@@ -276,7 +279,7 @@ def manifest(
     images: Mapping[str, Mapping[str, Any]],
     attempts: Sequence[Attempt],
     results_bucket: str,
-    provisioning: str = "STANDARD",
+    provisioning: str = "SPOT",
     zone: str | None = None,
 ) -> dict[str, Any]:
     """``campaign.json`` — the index a job id is meaningless without.
@@ -296,7 +299,7 @@ def manifest(
             {
                 "bucket": plan.bucket,
                 "region": plan.region,
-                "path": f"{campaign_prefix(campaign)}/plans/{plan.bucket}.yaml",
+                "path": f"{campaign_prefix(campaign)}/inputs/plans/{plan.bucket}.yaml",
                 "sha256": plan.digest,
             }
             for plan in plans

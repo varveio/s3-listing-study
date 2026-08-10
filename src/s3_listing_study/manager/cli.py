@@ -49,6 +49,18 @@ def _resolve_plan_main(argv: Sequence[str] | None) -> int:
     return resolve_plan_main(argv)
 
 
+def _submit_campaign_main(argv: Sequence[str] | None) -> int:
+    from s3_listing_study.manager.campaign.cli import submit_campaign_main
+
+    return submit_campaign_main(argv)
+
+
+def _publish_derived_image_main(argv: Sequence[str] | None) -> int:
+    from s3_listing_study.manager.campaign.images import publish_derived_image_main
+
+    return publish_derived_image_main(argv)
+
+
 def _upload_attempt_main(argv: Sequence[str] | None) -> int:
     from s3_listing_study.manager.upload import upload_attempt_main
 
@@ -75,6 +87,16 @@ COMMANDS = (
         "resolve-plan",
         "expand a bucket's benchmark plan and show every case it generates",
         _resolve_plan_main,
+    ),
+    Command(
+        "submit-campaign",
+        "freeze and submit one resolved campaign to GCP Batch",
+        _submit_campaign_main,
+    ),
+    Command(
+        "publish-derived-image",
+        "build, push, and record one registered derived image",
+        _publish_derived_image_main,
     ),
     Command(
         "upload-attempt",

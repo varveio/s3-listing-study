@@ -124,7 +124,7 @@ after `elapsed_ns` has closed, then records that small summary directly in
 publishes one authoritative attempt tree:
 
 ```text
-campaigns/<campaign>/<bucket>/<tool>/<case>/run-<n>/<attempt-id>/
+campaigns/<campaign>/results/<bucket>/<tool>/<case>/run-<n>/<attempt-id>/
 ```
 
 Raw artifacts upload first and `result.json` uploads last, so the result record

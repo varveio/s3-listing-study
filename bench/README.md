@@ -187,7 +187,7 @@ therefore per execution, never the scheduled run identity. Every execution owns
 one authoritative tree:
 
 ```text
-campaigns/<campaign>/<bucket>/<tool>/<case>/run-<n>/<attempt-id>/
+campaigns/<campaign>/results/<bucket>/<tool>/<case>/run-<n>/<attempt-id>/
   result.json
   stdout.raw.gz
   stderr.raw.gz
