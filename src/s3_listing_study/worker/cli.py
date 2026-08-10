@@ -20,6 +20,8 @@ from .engine import (
     CREDENTIAL_ENV_VAR,
     AttemptError,
     AttemptOptions,
+    CampaignProvenance,
+    DeclaredResources,
     parse_credential_env,
     run_attempt,
 )
@@ -29,6 +31,14 @@ from .upload import UploadError, upload_attempt
 # own verdict is sealed in result.json before any of this runs, so a failure to
 # count or upload must not be reported as a failed attempt.
 POST_ATTEMPT_EXIT = 3
+NORMALIZER_PATH = Path("/opt/s3-listing-study/tool/normalize.py")
+
+
+def _normalizer_path(tool: str) -> Path:
+    """Use the staged adapter in-image, or its checkout path for local tests."""
+    if NORMALIZER_PATH.is_file():
+        return NORMALIZER_PATH
+    return Path.cwd() / "tools" / tool / "adapter" / "normalize.py"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -43,7 +53,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--timeout", action=UniqueStoreAction, default="300.0")
     parser.add_argument("--term-grace", action=UniqueStoreAction, default="5.0")
-    parser.add_argument("--attempt-id", action=UniqueStoreAction, default="")
     parser.add_argument("--tool", action=UniqueStoreAction, required=True)
     parser.add_argument("--tool-version", action=UniqueStoreAction)
     parser.add_argument("--derived-image", action=UniqueStoreAction, required=True)
@@ -61,13 +70,31 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--prefix", action=UniqueStoreAction, default="")
     parser.add_argument("--scope", action=UniqueStoreAction)
     parser.add_argument("--concurrency", action=UniqueStoreAction)
+    parser.add_argument("--campaign-id", action=UniqueStoreAction)
+    parser.add_argument("--job-id", action=UniqueStoreAction)
+    parser.add_argument("--case-id", action=UniqueStoreAction)
+    parser.add_argument("--case-fingerprint", action=UniqueStoreAction)
+    parser.add_argument("--attempt-fingerprint", action=UniqueStoreAction)
+    parser.add_argument("--run-ordinal", action=UniqueStoreAction)
+    parser.add_argument("--submission-number", action=UniqueStoreAction)
+    parser.add_argument("--machine-type", action=UniqueStoreAction)
+    parser.add_argument("--vcpus", action=UniqueStoreAction)
+    parser.add_argument("--memory-gb", action=UniqueStoreAction)
+    parser.add_argument(
+        "--container-memory-gb",
+        action=UniqueStoreAction,
+        help="positive GB value, or 'none' for an unconstrained campaign case",
+    )
     # Optional on purpose. Omitting it is what makes a local run — the repo's
     # own smoke campaign — need no bucket, no credentials, and no network
     # beyond the one the subject itself uses.
     parser.add_argument(
         "--destination",
         action=UniqueStoreAction,
-        help="gs://bucket/prefix to upload this attempt under; omit to keep the attempt local",
+        help=(
+            "manager-assigned gs://.../case/run-N prefix; the worker appends its UUID leaf; "
+            "omit to keep the attempt local"
+        ),
     )
     return parser
 
@@ -93,6 +120,53 @@ def _parse_concurrency(raw: str | None) -> int | None:
     return int(raw)
 
 
+def _positive_int(option: str, raw: str) -> int:
+    if re.fullmatch(r"[0-9]+", raw) is None or int(raw) < 1:
+        raise CommandAdapterError(f"{option} must be a positive ASCII integer")
+    return int(raw)
+
+
+def _parse_campaign(args: argparse.Namespace) -> CampaignProvenance | None:
+    names = (
+        "campaign_id",
+        "job_id",
+        "case_id",
+        "case_fingerprint",
+        "attempt_fingerprint",
+        "run_ordinal",
+        "submission_number",
+        "machine_type",
+        "vcpus",
+        "memory_gb",
+        "container_memory_gb",
+    )
+    present = [name for name in names if getattr(args, name) is not None]
+    if not present:
+        return None
+    if len(present) != len(names):
+        missing = ", ".join(f"--{name.replace('_', '-')}" for name in names if name not in present)
+        raise CommandAdapterError(f"campaign provenance is all-or-none; missing {missing}")
+    container_raw = str(args.container_memory_gb)
+    container_memory = (
+        None if container_raw == "none" else _positive_int("--container-memory-gb", container_raw)
+    )
+    return CampaignProvenance(
+        campaign_id=str(args.campaign_id),
+        job_id=str(args.job_id),
+        case_id=str(args.case_id),
+        case_fingerprint=str(args.case_fingerprint),
+        attempt_fingerprint=str(args.attempt_fingerprint),
+        run_ordinal=_positive_int("--run-ordinal", str(args.run_ordinal)),
+        submission_number=_positive_int("--submission-number", str(args.submission_number)),
+        resources=DeclaredResources(
+            machine_type=str(args.machine_type),
+            vcpus=_positive_int("--vcpus", str(args.vcpus)),
+            memory_gb=_positive_int("--memory-gb", str(args.memory_gb)),
+            container_memory_gb=container_memory,
+        ),
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.output is None:
@@ -101,6 +175,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         timeout, term_grace = _parse_numbers(args.timeout, args.term_grace)
         concurrency = _parse_concurrency(args.concurrency)
+        campaign = _parse_campaign(args)
         credential_blob = os.environ.get(CREDENTIAL_ENV_VAR)
         if args.auth == "authenticated":
             if not credential_blob:
@@ -133,7 +208,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                     timeout_s=timeout,
                     adapter_bundle_sha256=invocation.adapter_bundle_sha256,
                     term_grace_s=term_grace,
-                    attempt_id=args.attempt_id,
                     tool=args.tool,
                     tool_version=args.tool_version,
                     subject_image=invocation.subject_image_digest,
@@ -148,6 +222,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                     scope=args.scope,
                     concurrency=concurrency,
                     sink_dir=sink_dir,
+                    normalizer_path=_normalizer_path(args.tool),
+                    campaign=campaign,
+                    results_destination=args.destination,
                     credential_env=credential_env,
                     functional_env=invocation.functional_env,
                 )
@@ -174,15 +251,16 @@ def _publish(
     than as a listing outcome: the attempt itself either ran or it did not, and
     that verdict is already sealed in ``result.json``.
 
-    Only the raw attempt directory goes up. The row count is computed
-    host-side by ``manager.collect``, which needs each tool's DuckDB-backed
-    normalizer — see that module for why it cannot run here.
+    The worker has already counted locally and sealed the summary in
+    ``result.json``. Campaign uploads receive the manager's deterministic
+    ``run-N`` prefix and add the worker UUID leaf. Managers discover immediate child
+    prefixes with GCS delimiter listing, then fetch only each ``result.json``.
     """
-    # The run leaf is named here because only this process knows the attempt id
+    # The execution leaf is named here because only this process knows the attempt id
     # it minted — a submitter-chosen leaf would be written twice by a task
     # re-execution, after the run was already paid for.
-    leaf = str(result["attempt_id"])
     try:
+        leaf = str(result["attempt_id"])
         uploaded = upload_attempt(attempt_dir, f"{destination.rstrip('/')}/{leaf}")
     except (UploadError, OSError) as exc:
         print(f"attempt-runner: upload failed: {exc}", file=sys.stderr)

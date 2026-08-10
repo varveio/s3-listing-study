@@ -25,17 +25,10 @@ def upload_attempt_main(argv: list[str] | None = None) -> int:
         required=True,
         help="orchestrator-supplied gs://bucket/prefix/ this attempt's files land directly under",
     )
-    parser.add_argument(
-        "--metadata-only",
-        action="store_true",
-        help="upload only result.json and collected.json; skip raw listing output",
-    )
     args = parser.parse_args(argv)
 
     try:
-        uploaded = upload_attempt(
-            args.attempt_dir, args.destination, metadata_only=args.metadata_only
-        )
+        uploaded = upload_attempt(args.attempt_dir, args.destination)
     except UploadError as exc:
         print(f"upload-attempt: {exc}", file=sys.stderr)
         return 2

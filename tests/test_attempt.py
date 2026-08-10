@@ -9,6 +9,7 @@ import os
 import signal
 import sys
 import time
+import uuid
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast
@@ -21,7 +22,14 @@ from s3_listing_study.common.command_adapter import (
     load_command_adapter,
 )
 from s3_listing_study.common.secret_scan import Outcome as ScanOutcome
-from s3_listing_study.worker import AttemptError, AttemptOptions, cli, run_attempt
+from s3_listing_study.worker import (
+    AttemptError,
+    AttemptOptions,
+    CampaignProvenance,
+    DeclaredResources,
+    cli,
+    run_attempt,
+)
 from s3_listing_study.worker import engine as attempt_engine
 from s3_listing_study.worker.driver import ResolvedInvocation, validate_request
 from s3_listing_study.worker.driver import resolve_invocation as resolve_real_invocation
@@ -113,6 +121,7 @@ def test_attempt_cli_passes_typed_concurrency_and_records_it(
         return ResolvedInvocation(_python("pass"), ADAPTER_BUNDLE_SHA256, SUBJECT_IMAGE_DIGEST)
 
     monkeypatch.setattr(cli, "resolve_invocation", resolve)
+    monkeypatch.setattr(cli, "_normalizer_path", lambda _tool: None)
     output = tmp_path / "attempt"
     logical_args = list(LOGICAL_ARGS)
     logical_args[logical_args.index("--tool") + 1] = "s4cmd"
@@ -168,6 +177,7 @@ def _python(source: str) -> tuple[str, ...]:
 
 
 def _run(tmp_path: Path, source: str, **changes: object) -> tuple[dict[str, object], int]:
+    source_env = cast(Mapping[str, str] | None, changes.pop("source_env", None))
     values: dict[str, object] = {
         "output": tmp_path / "attempt",
         "argv": _python(source),
@@ -180,7 +190,7 @@ def _run(tmp_path: Path, source: str, **changes: object) -> tuple[dict[str, obje
         "tool": "synthetic",
     }
     values.update(changes)
-    return run_attempt(AttemptOptions(**values))  # type: ignore[arg-type]
+    return run_attempt(AttemptOptions(**values), source_env=source_env)  # type: ignore[arg-type]
 
 
 def _result(output: Path) -> dict[str, object]:
@@ -217,6 +227,171 @@ def test_success_records_direct_argv_and_binary_streams(tmp_path: Path) -> None:
         "status": "clean",
         "streams": {"stdout": "clean", "stderr": "clean"},
     }
+
+
+def test_worker_mints_a_distinct_uuid_for_each_container_execution(tmp_path: Path) -> None:
+    results = []
+    for ordinal in (1, 2):
+        result, runner_exit = _run(
+            tmp_path,
+            "pass",
+            output=tmp_path / f"attempt-{ordinal}",
+            attempt_id="",
+        )
+        assert runner_exit == 0
+        uuid.UUID(cast(str, result["attempt_id"]))
+        results.append(result["attempt_id"])
+    assert len(set(results)) == 2
+
+
+def test_completed_attempt_is_counted_from_existing_raw_path(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    payload = (
+        b'a.txt\t1\t"aa"\t2026-03-16T14:41:50+00:00\tSTANDARD\n'
+        b'b.txt\t2\t"bb"\t2026-03-16T14:41:51+00:00\tSTANDARD\n'
+    )
+    source = f"import os; os.write(1, {payload!r})"
+    result, runner_exit = _run(
+        tmp_path,
+        source,
+        mode="s3api-v2-text",
+        normalizer_path=root / "tools/aws-cli/adapter/normalize.py",
+    )
+    assert runner_exit == 0
+    assert result["summary"]["status"] == "counted"  # type: ignore[index]
+    assert result["summary"]["row_count"] == 2  # type: ignore[index]
+    assert result["summary"]["duckdb_version"] == "1.5.5"  # type: ignore[index]
+
+
+def test_summary_failure_keeps_raw_evidence_and_has_distinct_exit(tmp_path: Path) -> None:
+    normalizer = tmp_path / "normalize.py"
+    secret = "customer/key/that/must/not/enter/result.json"
+    normalizer.write_text(
+        f"def normalize(out, data, mode, prefix=''):\n    raise RuntimeError({secret!r})\n"
+    )
+    result, runner_exit = _run(
+        tmp_path,
+        "print('retained raw evidence')",
+        mode="synthetic",
+        normalizer_path=normalizer,
+    )
+    assert runner_exit == cli.POST_ATTEMPT_EXIT
+    assert _outcome(result)["status"] == "completed"
+    assert result["summary"]["status"] == "error"  # type: ignore[index]
+    assert result["summary"]["row_count"] is None  # type: ignore[index]
+    assert result["summary"]["error"] == {  # type: ignore[index]
+        "code": "normalizer_failed",
+        "type": "RuntimeError",
+    }
+    assert secret not in (tmp_path / "attempt/result.json").read_text()
+    assert (tmp_path / "attempt/result.json").is_file()
+    assert gzip.decompress((tmp_path / "attempt/stdout.raw.gz").read_bytes())
+
+
+def test_failed_tool_skips_summary_without_opening_normalizer(tmp_path: Path) -> None:
+    result, runner_exit = _run(
+        tmp_path,
+        "print('partial'); raise SystemExit(4)",
+        mode="any",
+        normalizer_path=tmp_path / "does-not-exist.py",
+    )
+    assert runner_exit == 0
+    assert result["summary"]["status"] == "skipped"  # type: ignore[index]
+    assert result["summary"]["reason"] == "tool_outcome_failed"  # type: ignore[index]
+    assert result["summary"]["row_count"] is None  # type: ignore[index]
+
+
+def test_campaign_provenance_and_batch_retry_are_recorded_but_not_forwarded(
+    tmp_path: Path,
+) -> None:
+    campaign = CampaignProvenance(
+        campaign_id="2026-08-10-first",
+        job_id="c-one-r1-s1",
+        case_id="case.one",
+        case_fingerprint="a" * 64,
+        attempt_fingerprint="b" * 64,
+        run_ordinal=1,
+        submission_number=1,
+        resources=DeclaredResources("n4-highcpu-2", 2, 4, None),
+    )
+    result, runner_exit = _run(
+        tmp_path,
+        "pass",
+        campaign=campaign,
+        results_destination="gs://results/campaigns/2026-08-10-first/bucket/tool/case/run-1",
+        source_env={"BATCH_TASK_RETRY_ATTEMPT": "0"},
+    )
+    assert runner_exit == 0
+    assert result["campaign"] == {
+        "campaign_id": campaign.campaign_id,
+        "job_id": campaign.job_id,
+        "case_id": campaign.case_id,
+        "case_fingerprint": campaign.case_fingerprint,
+        "attempt_fingerprint": campaign.attempt_fingerprint,
+        "run_ordinal": 1,
+        "submission_number": 1,
+        "declared_resources": {
+            "machine_type": "n4-highcpu-2",
+            "vcpus": 2,
+            "memory_gb": 4,
+            "container_memory_gb": None,
+        },
+    }
+    assert result["scheduler"] == {"batch_task_retry_attempt": 0}
+    assert "BATCH_TASK_RETRY_ATTEMPT" not in result["invocation"]["environment"]  # type: ignore[index]
+    assert str(result["artifact_uri"]).endswith("/test-attempt")
+    assert str(result["result_uri"]).endswith("/test-attempt/result.json")
+
+
+def test_cli_campaign_provenance_is_all_or_none_before_execution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        cli,
+        "resolve_invocation",
+        lambda _request: (_ for _ in ()).throw(AssertionError("must not resolve")),
+    )
+    output = tmp_path / "attempt"
+    assert (
+        cli.main(
+            [
+                "--output",
+                str(output),
+                *LOGICAL_ARGS,
+                "--campaign-id",
+                "2026-08-10-first",
+            ]
+        )
+        == 2
+    )
+    assert not output.exists()
+
+
+def test_cgroup_v2_before_after_and_oom_deltas_are_captured(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cgroup = tmp_path / "cgroup"
+    cgroup.mkdir()
+    (cgroup / "memory.current").write_text("100\n")
+    (cgroup / "memory.peak").write_text("200\n")
+    (cgroup / "memory.max").write_text("4096\n")
+    (cgroup / "memory.events").write_text("oom 1\noom_kill 0\n")
+    monkeypatch.setattr(attempt_engine, "_cgroup_v2_directory", lambda: cgroup)
+    source = (
+        "from pathlib import Path; "
+        f"p=Path({str(cgroup)!r}); "
+        "(p/'memory.current').write_text('150\\n'); "
+        "(p/'memory.peak').write_text('300\\n'); "
+        "(p/'memory.events').write_text('oom 3\\noom_kill 1\\n')"
+    )
+    result, _runner_exit = _run(tmp_path, source)
+    memory = result["resources"]["cgroup_v2_memory"]  # type: ignore[index]
+    assert memory["before"]["memory_current_bytes"] == 100
+    assert memory["after"]["memory_peak_bytes"] == 300
+    assert (memory["oom_delta"], memory["oom_kill_delta"]) == (2, 1)
+    assert result["platform"]["cgroup_v2_memory_limit_bytes"] == 4096  # type: ignore[index]
+    assert result["timing"]["started_at_utc"].endswith("Z")  # type: ignore[index]
+    assert result["timing"]["ended_at_utc"].endswith("Z")  # type: ignore[index]
 
 
 def test_tool_nonzero_is_a_recorded_outcome_and_cli_success(
@@ -420,7 +595,7 @@ def test_completed_attempt_has_exactly_three_artifacts_and_result_is_last(
         "stdout.raw.gz",
         "stderr.raw.gz",
     }
-    assert _result(output)["schema_version"] == 1
+    assert _result(output)["schema_version"] == 2
 
 
 def test_post_measure_delay_is_excluded_from_elapsed_time(tmp_path: Path) -> None:
@@ -808,7 +983,7 @@ def test_publication_stays_anchored_when_output_parent_path_is_swapped(tmp_path:
     )
 
     assert runner_exit == 0
-    assert result["schema_version"] == 1
+    assert result["schema_version"] == 2
     assert list((parent / "attempt").iterdir()) == []
     anchored = original_parent / "attempt"
     assert {path.name for path in anchored.iterdir()} == {

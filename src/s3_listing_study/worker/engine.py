@@ -22,6 +22,7 @@ import time
 import uuid
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from types import MappingProxyType
 from typing import BinaryIO, Final
@@ -30,7 +31,9 @@ from s3_listing_study.common.python_runtime import interpreter_identity
 from s3_listing_study.common.secret_scan import Outcome as ScanOutcome
 from s3_listing_study.common.secret_scan import scan_binary_file
 
-SCHEMA_VERSION: Final = 1
+from .summary import summarize
+
+SCHEMA_VERSION: Final = 2
 STREAM_NAMES: Final = ("stdout", "stderr")
 NATIVE_DIRECTORY: Final = "native"
 """Where a mode's native file-sink output is published inside the attempt.
@@ -44,6 +47,9 @@ output that cannot appear in a receipt.
 NATIVE_MAX_FILES: Final = 4096
 NATIVE_MAX_BYTES: Final = 8 * 1024**3
 IMAGE_DIGEST_RE: Final = re.compile(r"sha256:[0-9a-f]{64}")
+FINGERPRINT_RE: Final = re.compile(r"[0-9a-f]{64}")
+CAMPAIGN_ID_RE: Final = re.compile(r"\d{4}-\d{2}-\d{2}-[a-z][a-z0-9]*")
+JOB_ID_RE: Final = re.compile(r"[a-z](?:[a-z0-9-]*[a-z0-9])?")
 BASE_SUBJECT_ENV: Final[Mapping[str, str]] = MappingProxyType(
     {
         "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
@@ -93,6 +99,30 @@ class AttemptError(RuntimeError):
     """The runner could not create a trustworthy attempt record."""
 
 
+@dataclass(frozen=True, slots=True)
+class DeclaredResources:
+    """The allocation the campaign declared for this attempt."""
+
+    machine_type: str
+    vcpus: int
+    memory_gb: int
+    container_memory_gb: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class CampaignProvenance:
+    """Correlation fields supplied together by a campaign submission."""
+
+    campaign_id: str
+    job_id: str
+    case_id: str
+    case_fingerprint: str
+    attempt_fingerprint: str
+    run_ordinal: int
+    submission_number: int
+    resources: DeclaredResources
+
+
 @dataclass(frozen=True)
 class AttemptOptions:
     """Validated inputs for one direct-argv attempt."""
@@ -117,6 +147,9 @@ class AttemptOptions:
     scope: str | None = None
     concurrency: int | None = None
     sink_dir: str | None = None
+    normalizer_path: Path | None = None
+    campaign: CampaignProvenance | None = None
+    results_destination: str | None = None
     credential_env: Mapping[str, str] | None = None
     """Validated AWS credential keys for an authenticated attempt.
 
@@ -129,18 +162,108 @@ class AttemptOptions:
 
 
 @dataclass(frozen=True)
+class _CgroupSnapshot:
+    location: str | None
+    memory_current_bytes: int | None
+    memory_peak_bytes: int | None
+    memory_events: Mapping[str, int] | None
+    error: str | None = None
+
+
+@dataclass(frozen=True)
 class _Execution:
     elapsed_ns: int
+    started_at_utc: str
+    ended_at_utc: str
     returncode: int
     timed_out: bool
     term_sent: bool
     kill_sent: bool
     group_empty: bool
     escaped_descendants: tuple[int, ...]
-    peak_rss_kb: int
+    rusage_children_max_child_peak_rss_kb: int
     user_cpu_s: float
     system_cpu_s: float
     peak_disk_delta_bytes: int
+    cgroup_before: _CgroupSnapshot
+    cgroup_after: _CgroupSnapshot
+
+
+def _utc_now() -> str:
+    return datetime.now(UTC).isoformat(timespec="microseconds").replace("+00:00", "Z")
+
+
+def _cgroup_v2_directory(
+    proc_cgroup: Path = Path("/proc/self/cgroup"),
+    mountinfo: Path = Path("/proc/self/mountinfo"),
+) -> Path | None:
+    """Resolve this worker's cgroup v2 directory from procfs mount facts."""
+    try:
+        cgroup_line = next(
+            line for line in proc_cgroup.read_text().splitlines() if line.startswith("0::")
+        )
+        cgroup_path = Path(cgroup_line.partition("::")[2])
+        for line in mountinfo.read_text().splitlines():
+            before, separator, after = line.partition(" - ")
+            if not separator or after.split()[0] != "cgroup2":
+                continue
+            fields = before.split()
+            mount_root = Path(fields[3])
+            mount_point = Path(fields[4])
+            try:
+                relative = cgroup_path.relative_to(mount_root)
+            except ValueError:
+                continue
+            return mount_point / relative
+    except (OSError, StopIteration, IndexError):
+        return None
+    return None
+
+
+def _read_int(path: Path) -> int:
+    return int(path.read_text().strip())
+
+
+def _read_memory_events(path: Path) -> dict[str, int]:
+    events: dict[str, int] = {}
+    for line in path.read_text().splitlines():
+        name, value = line.split()
+        events[name] = int(value)
+    return events
+
+
+def _cgroup_snapshot(directory: Path | None) -> _CgroupSnapshot:
+    if directory is None:
+        return _CgroupSnapshot(None, None, None, None, "cgroup v2 location unavailable")
+    try:
+        return _CgroupSnapshot(
+            str(directory),
+            _read_int(directory / "memory.current"),
+            _read_int(directory / "memory.peak"),
+            _read_memory_events(directory / "memory.events"),
+        )
+    except (OSError, ValueError) as exc:
+        return _CgroupSnapshot(str(directory), None, None, None, str(exc))
+
+
+def _memory_total_bytes(path: Path = Path("/proc/meminfo")) -> int | None:
+    try:
+        for line in path.read_text().splitlines():
+            if line.startswith("MemTotal:"):
+                return int(line.split()[1]) * 1024
+    except (OSError, ValueError, IndexError):
+        return None
+    return None
+
+
+def _cgroup_limit(directory: Path | None) -> int | str | None:
+    if directory is None:
+        return None
+    try:
+        value = (directory / "memory.max").read_text().strip()
+        return "max" if value == "max" else int(value)
+    except (OSError, ValueError):
+        return None
 
 
 def _merge_functional_env(child: dict[str, str], functional_env: Mapping[str, str]) -> None:
@@ -251,6 +374,34 @@ def _redacted_environment(env: Mapping[str, str]) -> dict[str, str]:
     }
 
 
+def _validate_campaign(campaign: CampaignProvenance) -> None:
+    if CAMPAIGN_ID_RE.fullmatch(campaign.campaign_id) is None:
+        raise AttemptError("campaign ID must be a dated lowercase campaign token")
+    if len(campaign.job_id) > 63 or JOB_ID_RE.fullmatch(campaign.job_id) is None:
+        raise AttemptError("job ID is not a valid GCP Batch job token")
+    if not campaign.case_id or any(character.isspace() for character in campaign.case_id):
+        raise AttemptError("case ID must be a non-empty whitespace-free token")
+    if FINGERPRINT_RE.fullmatch(campaign.case_fingerprint) is None:
+        raise AttemptError("case fingerprint must be 64 lowercase hexadecimal digits")
+    if FINGERPRINT_RE.fullmatch(campaign.attempt_fingerprint) is None:
+        raise AttemptError("attempt fingerprint must be 64 lowercase hexadecimal digits")
+    if campaign.run_ordinal < 1:
+        raise AttemptError("run ordinal must be a 1-based positive integer")
+    if campaign.submission_number < 1:
+        raise AttemptError("submission number must be a positive integer")
+    resources = campaign.resources
+    if not resources.machine_type or any(
+        character.isspace() for character in resources.machine_type
+    ):
+        raise AttemptError("machine type must be a non-empty whitespace-free token")
+    if resources.vcpus < 1 or resources.memory_gb < 1:
+        raise AttemptError("declared vCPUs and memory must be positive integers")
+    if resources.container_memory_gb is not None and (
+        resources.container_memory_gb < 1 or resources.container_memory_gb > resources.memory_gb
+    ):
+        raise AttemptError("container memory must be positive and no larger than machine memory")
+
+
 def _validate(options: AttemptOptions) -> AttemptOptions:
     if not options.argv:
         raise AttemptError("the subject argv is empty")
@@ -282,6 +433,15 @@ def _validate(options: AttemptOptions) -> AttemptOptions:
         ]
         if missing:
             raise AttemptError(f"credential_env is missing required key(s): {', '.join(missing)}")
+    if options.campaign is not None:
+        _validate_campaign(options.campaign)
+    if options.results_destination is not None and options.campaign is None:
+        # Non-campaign uploads remain supported by the CLI, but the engine can
+        # only put an artifact URI in result.json when the deterministic
+        # campaign/job layout exists.
+        results_destination = None
+    else:
+        results_destination = options.results_destination
     attempt_id = options.attempt_id or str(uuid.uuid4())
     if not attempt_id or any(character.isspace() for character in attempt_id):
         raise AttemptError("attempt ID must be a non-empty token")
@@ -306,6 +466,9 @@ def _validate(options: AttemptOptions) -> AttemptOptions:
         scope=options.scope,
         concurrency=options.concurrency,
         sink_dir=options.sink_dir,
+        normalizer_path=options.normalizer_path,
+        campaign=options.campaign,
+        results_destination=results_destination,
         credential_env=options.credential_env,
         functional_env=options.functional_env,
     )
@@ -591,12 +754,18 @@ def _execute(
     escaped: set[int] = set()
     supervised_empty = False
     start_ns = 0
+    started_at_utc = ""
+    ended_at_utc = ""
+    end_ns = 0
     disk_sampler = _DiskPeakSampler()
+    cgroup_directory = _cgroup_v2_directory()
+    cgroup_before = _cgroup_snapshot(cgroup_directory)
     with stdout_raw.open("xb") as stdout_file, stderr_raw.open("xb") as stderr_file:
         # Started before the clock, stopped after it: thread creation is real
         # work and does not belong inside elapsed_ns. Sampling a slightly wider
         # window than the run can only raise the reported peak, never hide one.
         disk_sampler.start()
+        started_at_utc = _utc_now()
         start_ns = time.monotonic_ns()
         try:
             process = subprocess.Popen(
@@ -653,6 +822,11 @@ def _execute(
         except subprocess.TimeoutExpired:
             _signal_group(process_group, signal.SIGKILL)
             raise AttemptError("subject root process could not be reaped after SIGKILL") from None
+        # The timed interval ends at reap.  Every measurement snapshot and all
+        # normalization/compression/upload work follows this point.
+        end_ns = time.monotonic_ns()
+        ended_at_utc = _utc_now()
+        cgroup_after = _cgroup_snapshot(cgroup_directory)
         # Read right after the reap that makes it valid: RUSAGE_CHILDREN is the
         # cumulative account of every child this process has reaped, which is
         # exactly the one subject spawned above as long as one process runs
@@ -662,20 +836,23 @@ def _execute(
         rusage = resource.getrusage(resource.RUSAGE_CHILDREN)
         escaped_descendants = tuple(sorted(escaped))
         group_empty = supervised_empty
-    end_ns = time.monotonic_ns()
     peak_disk_delta_bytes = disk_sampler.stop()
     return _Execution(
         elapsed_ns=end_ns - start_ns,
+        started_at_utc=started_at_utc,
+        ended_at_utc=ended_at_utc,
         returncode=returncode,
         timed_out=timed_out,
         term_sent=term_sent,
         kill_sent=kill_sent,
         group_empty=group_empty,
         escaped_descendants=escaped_descendants,
-        peak_rss_kb=rusage.ru_maxrss,
+        rusage_children_max_child_peak_rss_kb=rusage.ru_maxrss,
         user_cpu_s=rusage.ru_utime,
         system_cpu_s=rusage.ru_stime,
         peak_disk_delta_bytes=peak_disk_delta_bytes,
+        cgroup_before=cgroup_before,
+        cgroup_after=cgroup_after,
     )
 
 
@@ -966,6 +1143,75 @@ def _outcome(execution: _Execution) -> dict[str, object]:
     }
 
 
+def _batch_retry_attempt(source_env: Mapping[str, str]) -> int | None:
+    raw = source_env.get("BATCH_TASK_RETRY_ATTEMPT")
+    if raw is None:
+        return None
+    if re.fullmatch(r"[0-9]+", raw) is None:
+        raise AttemptError("BATCH_TASK_RETRY_ATTEMPT must be a nonnegative ASCII integer")
+    return int(raw)
+
+
+def _campaign_record(campaign: CampaignProvenance | None) -> dict[str, object] | None:
+    if campaign is None:
+        return None
+    resources = campaign.resources
+    return {
+        "campaign_id": campaign.campaign_id,
+        "job_id": campaign.job_id,
+        "case_id": campaign.case_id,
+        "case_fingerprint": campaign.case_fingerprint,
+        "attempt_fingerprint": campaign.attempt_fingerprint,
+        "run_ordinal": campaign.run_ordinal,
+        "submission_number": campaign.submission_number,
+        "declared_resources": {
+            "machine_type": resources.machine_type,
+            "vcpus": resources.vcpus,
+            "memory_gb": resources.memory_gb,
+            "container_memory_gb": resources.container_memory_gb,
+        },
+    }
+
+
+def _cgroup_record(execution: _Execution) -> dict[str, object]:
+    before = execution.cgroup_before
+    after = execution.cgroup_after
+    have_events = before.memory_events is not None and after.memory_events is not None
+    before_events = before.memory_events or {}
+    after_events = after.memory_events or {}
+    return {
+        "location": after.location or before.location,
+        "before": {
+            "memory_current_bytes": before.memory_current_bytes,
+            "memory_peak_bytes": before.memory_peak_bytes,
+            "memory_events": before.memory_events,
+            "error": before.error,
+        },
+        "after": {
+            "memory_current_bytes": after.memory_current_bytes,
+            "memory_peak_bytes": after.memory_peak_bytes,
+            "memory_events": after.memory_events,
+            "error": after.error,
+        },
+        "oom_delta": (
+            after_events.get("oom", 0) - before_events.get("oom", 0) if have_events else None
+        ),
+        "oom_kill_delta": (
+            after_events.get("oom_kill", 0) - before_events.get("oom_kill", 0)
+            if have_events
+            else None
+        ),
+    }
+
+
+def _result_locations(options: AttemptOptions) -> tuple[str | None, str | None]:
+    if options.results_destination is None or options.campaign is None:
+        return None, None
+    root = options.results_destination.rstrip("/")
+    artifact = f"{root}/{options.attempt_id}"
+    return artifact, f"{artifact}/result.json"
+
+
 def run_attempt(
     options: AttemptOptions,
     *,
@@ -979,6 +1225,7 @@ def run_attempt(
     """
     options = _validate(options)
     env_source = os.environ if source_env is None else source_env
+    batch_retry_attempt = _batch_retry_attempt(env_source)
     if options.auth == "anonymous":
         child_env = anonymous_environment(env_source, options.functional_env, options.region)
     else:
@@ -999,6 +1246,7 @@ def run_attempt(
             )
             if post_measure_hook is not None:
                 post_measure_hook()
+            outcome = _outcome(execution)
             scan_outcomes = _scan_raw_streams(scratch)
             native_refusal = (
                 "a descendant escaped the subject process group, so the sink cannot be "
@@ -1028,7 +1276,20 @@ def run_attempt(
                     if sink_fd is not None
                     else []
                 )
+                summary = summarize(
+                    outcome_status=str(outcome["status"]),
+                    adapter_bundle_sha256=options.adapter_bundle_sha256,
+                    normalizer_path=options.normalizer_path,
+                    mode=options.mode,
+                    prefix=options.prefix,
+                    stdout_path=scratch / "stdout.raw",
+                    dataset_path=(
+                        Path(options.sink_dir) if native_output and options.sink_dir else None
+                    ),
+                )
 
+        artifact_uri, result_uri = _result_locations(options)
+        cgroup_directory = _cgroup_v2_directory()
         result: dict[str, object] = {
             "schema_version": SCHEMA_VERSION,
             "attempt_id": options.attempt_id,
@@ -1039,9 +1300,17 @@ def run_attempt(
             },
             "harness_revision": options.harness_revision,
             "adapter_bundle_sha256": options.adapter_bundle_sha256,
+            "campaign": _campaign_record(options.campaign),
+            "scheduler": {"batch_task_retry_attempt": batch_retry_attempt},
+            "artifact_uri": artifact_uri,
+            "result_uri": result_uri,
             "platform": {
                 "architecture": platform.machine(),
                 "operating_system": platform.system(),
+                "logical_cpus": os.cpu_count(),
+                "mem_total_bytes": _memory_total_bytes(),
+                "cgroup_v2_location": str(cgroup_directory) if cgroup_directory else None,
+                "cgroup_v2_memory_limit_bytes": _cgroup_limit(cgroup_directory),
             },
             "interpreter": interpreter_identity(),
             "invocation": {
@@ -1069,17 +1338,24 @@ def run_attempt(
             "timing": {
                 "clock": "time.monotonic_ns",
                 "elapsed_ns": execution.elapsed_ns,
+                "started_at_utc": execution.started_at_utc,
+                "ended_at_utc": execution.ended_at_utc,
                 "timeout_ns": int(options.timeout_s * 1_000_000_000),
                 "term_grace_ns": int(options.term_grace_s * 1_000_000_000),
             },
             "resources": {
-                "source": "getrusage(RUSAGE_CHILDREN) + polled disk_usage(/)",
-                "peak_rss_kb": execution.peak_rss_kb,
-                "user_cpu_s": execution.user_cpu_s,
-                "system_cpu_s": execution.system_cpu_s,
-                "peak_disk_delta_bytes": execution.peak_disk_delta_bytes,
+                "rusage_children_max_child_peak_rss_kb": (
+                    execution.rusage_children_max_child_peak_rss_kb
+                ),
+                "rusage_children_user_cpu_s": execution.user_cpu_s,
+                "rusage_children_system_cpu_s": execution.system_cpu_s,
+                "whole_filesystem_peak_used_delta_bytes": execution.peak_disk_delta_bytes,
+                "whole_filesystem_sample_path": DISK_SAMPLE_PATH,
+                "whole_filesystem_poll_interval_s": DISK_SAMPLE_INTERVAL_S,
+                "cgroup_v2_memory": _cgroup_record(execution),
             },
-            "outcome": _outcome(execution),
+            "outcome": outcome,
+            "summary": summary,
             "secret_scan": {"status": "clean", "streams": scan_outcomes},
             "streams": streams,
             "native_output": native_output,
@@ -1091,5 +1367,12 @@ def run_attempt(
             output.write(encoded)
 
         _publish_exclusive(output_fd, options.output, "result.json", write_result)
-    runner_exit = 0 if execution.group_empty and not execution.escaped_descendants else 2
+    if not execution.group_empty or execution.escaped_descendants:
+        runner_exit = 2
+    elif summary["status"] == "error":
+        # The tool outcome and raw evidence are valid and already sealed; 3 is
+        # the distinct post-attempt failure policy used for summary/upload.
+        runner_exit = 3
+    else:
+        runner_exit = 0
     return result, runner_exit

@@ -7,12 +7,12 @@ results existed, on purpose — see
 
 **Status: plan written before comparisons; measurement not yet executed.** No
 benchmark has been run and no comparative performance result exists in this repo (smoke receipts
-carry per-run wall-clock and RSS, but never as a comparison). As of 2026-07-17
-every subject has completed *groundwork* — pinned builds or source checkouts,
-anonymous smoke where the tool could list, source-anchored mechanism reports,
-reconciliation, and critical cross-checks. Four subjects were blocked without
-credentials, and not every completed smoke run is correctness-verified; see
-`../tools/README.md` for the cohort split and per-tool status, and
+carry per-run wall-clock and RSS, but never as a comparison). All eleven
+subjects have now run at smoke on amd64 through the attempt engine: seven
+anonymously and `s3p`, `s3kor`, `s4cmd`, and `ps3` with a scoped credential.
+Those attempts establish that the execution path works, not correctness: none
+has a verifier verdict because auditing an attempt against a reference manifest
+is not implemented yet. See `../tools/README.md` for per-tool status and
 `smoke-bucket.md` for the historical reference snapshot.
 
 **Protocol note.** The comparative measurement plan predates comparative
@@ -21,6 +21,27 @@ s3-fast-list pilots, before the wider groundwork wave; the current brief is
 therefore the final procedure, not the original pre-pilot text. No comparative
 benchmark had begun, so those operational fixes were not fitted to benchmark
 results. Future material measurement-rule changes are dated in this document.
+
+**Material methodology change — 2026-08-10.** The production campaign shape is
+now one scheduled run per case (`reps: 1`), each on a fresh GCP Batch VM of the
+same declared machine type and resources as its comparison peers. There are no
+cold/warm arms. VM and container startup, worker normalization and row
+counting, compression, upload, and manager post-processing are outside `elapsed_ns`;
+`elapsed_ns` covers the subject child from launch through reap, including its
+own output work. Benchmark buckets must be large enough that fixed process-launch
+overhead is insignificant. This replaces the earlier one-box, cold/warm, and
+repeat-to-estimate-variance rules below; the output-mode and concurrency-sweep
+decisions are unchanged.
+
+Required routine campaign reporting is summary-only. The campaign model owns a
+`run-<n>` ordinal for each scheduled run (`run-1` under the current policy),
+while every worker-container execution mints its own attempt UUID below that
+prefix. The manager reconciler still to be implemented must discover only
+immediate UUID children with a delimiter listing and read their exact
+`result.json` summaries. Raw listings remain in the same GCS attempt trees and
+are fetched only for correctness verification or investigation. Multiple UUID
+children under one run are duplicate executions; the reconciler must surface
+all and select none as canonical.
 
 ## Evidence language
 
@@ -161,18 +182,21 @@ must be stated as a limitation or controlled by running in-region.
 
 ### 3. Keeping comparisons useful
 
-- **One box, all tools.** Every published comparison is our-box-vs-our-box.
+- **Same declared resources, all tools.** Every published comparison uses fresh
+  Batch VMs of the same declared machine type, vCPU count, and memory shape.
   Third-party published numbers (s3-fast-list's 3.1M/s, S3P's 35K/s, PS3's 94K/s)
   are **context, never comparison** — different hardware, different buckets,
   different years, mostly self-reported.
 - **Same bucket, same window.** Bucket contents drift; tools run against the same
   bucket at wildly different times aren't comparable.
-- **Cold and warm.** DNS, connection pools, and S3's own partition warming all
-  matter. Report both or state which.
+- **One fresh VM and one scheduled run per case.** `reps` is 1 and there are no
+  cold/warm arms. VM/container boot is outside the timer; network setup performed
+  by the subject remains part of the subject's own elapsed time.
 - **Concurrency swept, not fixed.** A single concurrency number is a choice that
   can change the result. Sweep each tool across its range and report its best.
-- **Repeat count and variance stated.** A single run is an anecdote. Median of n
-  with spread, n stated. Discarding a run requires a recorded reason.
+- **Large buckets amortize fixed launch cost.** `elapsed_ns` necessarily includes
+  launching the subject process. The benchmark uses buckets large enough that
+  this fixed cost is insignificant beside the listing.
 - **Pinned versions.** Every tool's exact version and build recorded in the
   receipt.
 
@@ -209,19 +233,13 @@ back to our own Dockerfile only where upstream ships none, and say which was use
 
 Two details to handle up front:
 
-- **Use the contained study bridge.** Bridge NAT adds local packet rewriting and
-  connection-tracking work, not another network round trip. Host networking
-  removes isolation from the runner and its metadata/internal network surfaces.
-  - All networked subject and trusted reference containers use the fixed,
-    firewall-backed bridge and security profile in
-    [`runner-security.md`](operating/runner-security.md).
-  - Before benchmark settings freeze, pinned trusted controls—not third-party
-    subjects—run an alternating host/bridge A/B for CPU, MTU, conntrack, socket
-    pressure, and request timings under a pre-registered
-    equivalence/no-regression rule.
-  - Every measured run begins after the same one-object public-S3 readiness
-    probe on this bridge, so its DNS, route, TLS, and conntrack warming is part
-    of the common harness path.
+- **Use the execution profile for the scheduler.** Production comparisons use
+  the cooperative GCP Batch profile in
+  [`runner-security.md`](operating/runner-security.md): one task on one fresh VM,
+  a least-privilege task identity, and metadata access so the worker can obtain
+  the token that uploads to GCS. The firewall-backed bridge and metadata-denial
+  gate are retained for local Docker runs on the more-privileged manager/runner
+  host; they are not a Batch prerequisite or provider adapter.
 - **The JVM sees cgroup limits and reacts.** Under `--memory`, a modern JVM sizes
   its heap from the container limit. Swath is the only JVM entrant, so
   memory-capped runs are not a neutral environment for it — its behaviour under a
@@ -332,7 +350,8 @@ Known frictions to resolve before Phase 2 (recorded now, not solved):
 ## Run records (receipts)
 
 Every run-dependent observation promoted to `confirmed` needs a committed receipt containing:
-exact invocation, tool version/build, box spec (arch, cores, RAM, region), bucket
+exact invocation, tool version/build, declared machine type and resources (arch,
+cores, RAM, region), bucket
 identity and measured shape, raw output or a pointer to it, exit code, wall-clock,
 peak RSS, API call count where obtainable, and the date.
 
@@ -374,6 +393,6 @@ These limits are part of how readers should understand the results:
 - **Small bucket samples don't generalize.** Five buckets are five anecdotes
   unless mapped to a shape taxonomy.
 - **Tools keep changing.** Every number is version-stamped and will age.
-- **Our box is one box.** `s3-fast-list`'s 1000-way concurrency claim may
-  need more machine than we have; if so, that's a stated limitation of the study,
-  not evidence against the tool.
+- **Our declared machine shape is one shape.** `s3-fast-list`'s 1000-way
+  concurrency claim may need more resources than the campaign declares; if so,
+  that is a stated limitation of the study, not evidence against the tool.

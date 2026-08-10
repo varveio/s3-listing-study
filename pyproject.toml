@@ -19,9 +19,9 @@ dependencies = [
     "pyyaml>=6.0",
     # No GCS SDK on purpose. s3_listing_study.worker.upload ships inside every
     # derived image, and google-cloud-storage's google-crc32c dependency
-    # publishes no musllinux wheel at any version — three subjects (rclone,
-    # s3kor, s5cmd) run on musl, so the SDK would have to be compiled from
-    # source inside Alpine images that carry no toolchain. The uploader needs
+    # publishes no musllinux wheel at any version. All current subjects run on
+    # glibc, but keeping the worker uploader standard-library-only avoids adding
+    # a large SDK and compiled dependency to every pinned image. It needs
     # one POST and one ifGenerationMatch=0 header, so it uses urllib and the
     # study depends on nothing for it.
 ]

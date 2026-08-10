@@ -13,18 +13,18 @@ a different attempt.
 
 It folds in the image's **components** — subject digest, adapter bundle,
 interpreter, harness — rather than the derived digest, because the derived image
-also carries the collector and uploader, which run after the timer has closed
-and cannot reach the measurement. Fingerprinting the whole digest would let an
+also carries post-timing summarization and upload code, which cannot reach the
+measurement. Fingerprinting the whole digest would let an
 edit to orchestrator code invalidate every case's identity. The derived digest
 is recorded in ``result.json`` and the manifest regardless.
 
 **An address is not an identity.** A path names a case in the plan's own
 vocabulary, readable by someone who has the plan open; the image is deliberately
-absent from it and recorded in ``result.json`` instead. The run directory is
-named by the worker at execution, not by the submitter, because Batch may
-re-execute a task (``BATCH_TASK_RETRY_ATTEMPT``) and a path the submitter chose
-would then be written twice — refused by the create-only upload, after the run
-had already cost what it cost.
+absent from it and recorded in ``result.json`` instead. The manager names an
+intentional ``run-N`` directory; the UUID leaf below it is named by the worker
+at execution. Batch may re-execute a task (``BATCH_TASK_RETRY_ATTEMPT``), so a
+submitter-chosen execution leaf would be written twice — refused by the
+create-only upload only after the duplicate run had already cost what it cost.
 
 **Nothing is deleted and nothing is overwritten.** A submission that produced
 no artifacts re-submits under a new job ID and targets the same, still-empty
@@ -54,7 +54,7 @@ JOB_ID_RE = re.compile(r"\A[a-z]([a-z0-9-]*[a-z0-9])?\Z")
 JOB_ID_PREFIX = "c-"
 CAMPAIGN_MAX = 18
 TOOL_MAX = 12
-SLUG_MAX = 14
+SLUG_MAX = 12
 HASH_CHARS = 8
 
 # `<date>-<word>`: dated because a campaign is an event, and the date is the
@@ -118,8 +118,16 @@ def _slug(case_id: str) -> str:
     return reduced[:SLUG_MAX].rstrip("-")
 
 
-def job_id(*, campaign: str, tool: str, case_id: str, fingerprint: str, submission: int) -> str:
-    """``c-2026-08-10-first-swath-recursive-parq-1f4a9c02-s1``.
+def job_id(
+    *,
+    campaign: str,
+    tool: str,
+    case_id: str,
+    fingerprint: str,
+    run_ordinal: int = 1,
+    submission: int,
+) -> str:
+    """``c-2026-08-10-first-swath-recursive-pa-1f4a9c02-r1-s1``.
 
     ``submission`` counts re-submissions of one attempt, never runs of it: a job
     id is not deleted and not reused, so a job that failed to start leaves its
@@ -129,11 +137,13 @@ def job_id(*, campaign: str, tool: str, case_id: str, fingerprint: str, submissi
     validate_campaign_id(campaign)
     if submission < 1 or submission > 99:
         raise CampaignError(f"submission must be between 1 and 99: {submission}")
+    if run_ordinal < 1 or run_ordinal > 99:
+        raise CampaignError(f"run ordinal must be between 1 and 99: {run_ordinal}")
     if len(tool) > TOOL_MAX:
         raise CampaignError(f"tool name {tool!r} is over {TOOL_MAX} characters")
     rendered = (
         f"{JOB_ID_PREFIX}{campaign}-{tool}-{_slug(case_id)}"
-        f"-{fingerprint[:HASH_CHARS]}-s{submission}"
+        f"-{fingerprint[:HASH_CHARS]}-r{run_ordinal}-s{submission}"
     )
     # Belt and braces: every component is bounded above, so this cannot fire
     # without one of those bounds being wrong.
@@ -146,19 +156,22 @@ def campaign_prefix(campaign: str) -> str:
     return f"campaigns/{validate_campaign_id(campaign)}"
 
 
-def attempt_prefix(*, campaign: str, bucket: str, tool: str, case_id: str) -> str:
+def attempt_prefix(
+    *, campaign: str, bucket: str, tool: str, case_id: str, run_ordinal: int = 1
+) -> str:
     """Where one case's runs land, without naming any one of them.
 
     The bucket is in the path because a campaign covering two plans would
     otherwise collide on ``s5cmd/recursive`` — same tool, same case, different
-    target. The worker appends its own run directory under this.
+    target. The worker appends its own execution UUID under this manager-owned
+    run prefix.
     """
-    return f"{campaign_prefix(campaign)}/attempts/{bucket}/{tool}/{case_id}"
+    return f"{campaign_prefix(campaign)}/{bucket}/{tool}/{case_id}/run-{run_ordinal}"
 
 
 @dataclass(frozen=True)
 class Attempt:
-    """One case, one image: the unit a job is submitted for."""
+    """One manager-assigned run of one case/image: one Batch job."""
 
     campaign: str
     bucket: str
@@ -170,12 +183,14 @@ class Attempt:
     fingerprint: str
     job_id: str
     submission: int
+    run_ordinal: int
     prefix: str
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "job_id": self.job_id,
             "submission": self.submission,
+            "run_ordinal": self.run_ordinal,
             "bucket": self.bucket,
             "region": self.region,
             "tool": self.case.tool,
@@ -185,6 +200,7 @@ class Attempt:
             "case_fingerprint": self.case.fingerprint,
             "derived_image": self.image["derived_image"],
             "fingerprint": self.fingerprint,
+            "attempt_fingerprint": self.fingerprint,
             "resources": self.case.resources.as_dict(),
             # What the runtime was told about its own memory, if it is the kind
             # that needs telling. Part of the invocation, so it is recorded as
@@ -203,11 +219,11 @@ def attempts_for(
     images: Mapping[str, Mapping[str, Any]],
     submission: int = 1,
 ) -> tuple[Attempt, ...]:
-    """Every attempt one plan contributes, one per case per rep.
+    """Every manager-assigned run, one per case for each requested ``rep``.
 
-    A rep is a separate job on its own instance rather than a repeated run in
-    one, so nothing about a first rep can carry into a second — a warm page
-    cache, a filled disk, a JIT that has already compiled the hot path.
+    The plan retains ``reps`` as the count, while each concrete job/result uses
+    an explicit 1-based ``run_ordinal``. That ordinal distinguishes intentional
+    reruns; UUID children under one ordinal instead expose duplicate executions.
     """
     validate_campaign_id(campaign)
     missing = sorted({case.tool for case in plan.cases} - set(images))
@@ -222,7 +238,7 @@ def attempts_for(
         if not DIGEST_RE.fullmatch(str(image.get("derived_image", ""))):
             raise CampaignError(f"{case.tool}: derived_image is not a sha256 digest")
         digest = attempt_fingerprint(case_fingerprint=case.fingerprint, components=image)
-        for _ in range(case.reps):
+        for run_ordinal in range(1, case.reps + 1):
             attempts.append(
                 Attempt(
                     campaign=campaign,
@@ -236,14 +252,17 @@ def attempts_for(
                         tool=case.tool,
                         case_id=case.case_id,
                         fingerprint=digest,
+                        run_ordinal=run_ordinal,
                         submission=submission,
                     ),
                     submission=submission,
+                    run_ordinal=run_ordinal,
                     prefix=attempt_prefix(
                         campaign=campaign,
                         bucket=plan.bucket,
                         tool=case.tool,
                         case_id=case.case_id,
+                        run_ordinal=run_ordinal,
                     ),
                 )
             )
@@ -267,7 +286,7 @@ def manifest(
     from the VM to the store, and spot changes the odds of being preempted.
     """
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "campaign": validate_campaign_id(campaign),
         "results_bucket": results_bucket,
         "attempt_fingerprint_version": ATTEMPT_FINGERPRINT_VERSION,

@@ -13,11 +13,10 @@
 #
 # Usage:
 #   harness/smoke-campaign.sh [--tool SLUG]... [--credential-file PATH] \
-#                              [--jobs N] [--keep-going] [--convert-parquet]
+#                              [--jobs N] [--keep-going]
 #
-# Every successful smoke run is immediately passed through collect-attempt
-# (row count always; Parquet conversion only with --convert-parquet, since
-# it's the expensive part). GCS upload is a separate, later step
+# Every attempt normalizes and counts locally after its subject measurement;
+# the small summary is sealed into result.json. GCS upload is a separate step
 # (`s3-listing-study upload-attempt`) — this script never uploads anything.
 #
 # With no --tool, runs every tool listed in TOOL_SMOKE_PLAN below that has a
@@ -25,7 +24,7 @@
 # once to run exactly one tool. --jobs N (default 1) runs up to N tools'
 # build+smoke concurrently; each tool writes to its own receipts directory, so
 # concurrent tools never touch the same files. Note that --jobs N>1 does make
-# each attempt's `resources.peak_disk_delta_bytes` unusable: that figure comes
+# each attempt's `resources.whole_filesystem_peak_used_delta_bytes` unusable: that figure comes
 # from polling whole-filesystem usage, so concurrent attempts sharing a disk
 # are counted into each other. Smoke does not measure, so this is acceptable
 # here; a campaign that cares about the figure runs one attempt per host.
@@ -87,7 +86,6 @@ TOOL_SMOKE_PLAN=(
 CREDENTIAL_FILE=""
 KEEP_GOING=no
 JOBS=1
-CONVERT_PARQUET=no
 declare -a ONLY_TOOLS=()
 
 while [ "$#" -gt 0 ]; do
@@ -96,7 +94,6 @@ while [ "$#" -gt 0 ]; do
     --credential-file) CREDENTIAL_FILE="$2"; shift 2 ;;
     --jobs) JOBS="$2"; shift 2 ;;
     --keep-going) KEEP_GOING=yes; shift ;;
-    --convert-parquet) CONVERT_PARQUET=yes; shift ;;
     *) echo "smoke-campaign: unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -175,8 +172,12 @@ run_one_tool() {
     # policy refuses that, docker forwards nothing, the engine refuses to run an
     # authenticated attempt without a credential, and the run fails closed
     # instead of quietly falling back to an unsigned request.
-    export S3_STUDY_AWS_CREDENTIAL="AWS_ACCESS_KEY_ID=$(sed -n '1p' "$CREDENTIAL_FILE")
-AWS_SECRET_ACCESS_KEY=$(sed -n '2p' "$CREDENTIAL_FILE")"
+    local aws_access_key aws_secret_key
+    aws_access_key="$(sed -n '1p' "$CREDENTIAL_FILE")"
+    aws_secret_key="$(sed -n '2p' "$CREDENTIAL_FILE")"
+    S3_STUDY_AWS_CREDENTIAL="AWS_ACCESS_KEY_ID=$aws_access_key
+AWS_SECRET_ACCESS_KEY=$aws_secret_key"
+    export S3_STUDY_AWS_CREDENTIAL
     env_args=(-e S3_STUDY_AWS_CREDENTIAL)
     sudo_args=(--preserve-env=S3_STUDY_AWS_CREDENTIAL)
   fi
@@ -220,14 +221,10 @@ print(json.load(open(sys.argv[1]))['subject_version'])" "tools/$tool/build/image
   python3 -c "
 import json, sys
 d = json.load(open(sys.argv[1]))
-print(f\"outcome={d['outcome']['status']} secret_scan={d['secret_scan']['status']}\")
+print(f\"outcome={d['outcome']['status']} secret_scan={d['secret_scan']['status']} \"
+      f\"summary={d['summary']['status']} row_count={d['summary']['row_count']}\")
 print(f\"resources={d.get('resources')}\")
 " "$attempt_dir/result.json"
-
-  echo "-- collect --"
-  local -a collect_args=(--attempt-dir "$abs_attempt_dir" --tool "$tool")
-  [ "$CONVERT_PARQUET" = yes ] && collect_args+=(--convert-parquet)
-  uv run s3-listing-study collect-attempt "${collect_args[@]}" || echo "collect-attempt failed (non-fatal)"
 }
 
 declare -a queued=()

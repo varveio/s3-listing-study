@@ -13,6 +13,7 @@ FROM subject AS attempt-builder
 USER root
 WORKDIR /build
 COPY --from=python . /opt/s3-listing-study/python/
+COPY --from=duckdb . /opt/s3-listing-study/python/lib/python3.13/site-packages/
 # Only the two packages an attempt can reach. s3_listing_study/manager/ is
 # deliberately absent: it never executes here, and leaving it out is what keeps a
 # subject image's digest still while host-side code changes — a campaign pins
@@ -29,11 +30,13 @@ COPY --from=adapter normalize.py /build/tool/normalize.py
 # the payload, which would seal compiled bytecode into the archive and into the
 # digest a campaign pins.
 RUN ["/opt/s3-listing-study/python/bin/python3", "-I", "-B", "/build/validate_selection.py"]
+RUN ["/opt/s3-listing-study/python/bin/python3", "-I", "-B", "-c", "import duckdb; assert duckdb.__version__ == '1.5.5', duckdb.__version__"]
 RUN ["/opt/s3-listing-study/python/bin/python3", "-I", "-m", "zipapp", "/build/payload", "-o", "/attempt.pyz"]
 
 FROM subject
 
 COPY --from=python . /opt/s3-listing-study/python/
+COPY --from=duckdb . /opt/s3-listing-study/python/lib/python3.13/site-packages/
 COPY --from=attempt-builder /attempt.pyz /opt/s3-listing-study/attempt.pyz
 COPY --from=attempt-builder /build/tool/ /opt/s3-listing-study/tool/
 COPY --from=attempt-builder /build/image.json /opt/s3-listing-study/selection.json

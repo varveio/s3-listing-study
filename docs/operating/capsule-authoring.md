@@ -79,8 +79,9 @@ means while authoring:
   development output until the benchmark methodology/security amendment and a
   correctness path land. Do not promote a claim to `confirmed` from such an
   attempt, and do not invent a replacement evidentiary path in a capsule.
-- **Never initiate subject execution outside the mandatory runner boundary.**
-  Failure to provision the runner-security profile is a stop condition, not an
+- **Never initiate subject execution outside a documented execution profile.**
+  Use the cooperative GCP Batch profile or the strict local Docker profile in
+  [`runner-security.md`](runner-security.md). Failure to provision the selected profile is a stop condition, not an
   alternate observation path. If pre-existing output from an external or
   earlier out-of-boundary execution must be preserved, label it `[OBS <how>]`
   in prose and `kind: "observation"` in the ledger, state exactly how it was

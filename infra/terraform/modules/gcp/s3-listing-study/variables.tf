@@ -9,7 +9,7 @@ variable "project" {
 }
 
 variable "region" {
-  description = "Region for the results bucket, Artifact Registry repository, and any created subnet (e.g. us-east1). Keep the runner, the bucket, and the Batch jobs in one region: cross-region reads of attempt artifacts are the campaign's main avoidable egress cost."
+  description = "Region for the results bucket, Artifact Registry repository, and any created subnet (e.g. us-east1). Keep the runner, bucket, and Batch jobs in one region; required routine reporting must read compact results only, while requested verification may fetch large artifacts."
   type        = string
 }
 
@@ -52,7 +52,7 @@ variable "subnet_cidr" {
 # ── Authenticated stratum ─────────────────────────────────────────────────────
 
 variable "create_aws_credentials_secret" {
-  description = "Create the authenticated listing stratum: a Secret Manager secret for AWS credentials, plus a SEPARATE worker service account that alone can read it. The anonymous worker cannot, which is what makes the stratum an identity rather than a promise — any task can reach the metadata server, so a flag could not enforce this. Terraform creates the secret container only; add the value out of band, because a version's payload is stored in plain text in state. Leave false for an anonymous-only estate."
+  description = "Create the authenticated listing stratum: a Secret Manager secret for AWS credentials, plus a SEPARATE worker service account that alone can read it. Batch metadata access is intentional, so the attached identity determines whether a task can obtain the secret and keeps recorded auth aligned with capability. Terraform creates the secret container only; add the value out of band, because a version's payload is stored in plain text in state. Leave false for an anonymous-only estate."
   type        = bool
   default     = false
 }
@@ -66,7 +66,7 @@ variable "create_runner" {
 }
 
 variable "runner_reads_aws_credentials" {
-  description = "Grant the runner read access to the AWS credential secret, so a credentialed case can be run directly instead of only submitted as a job. A runner holding this secret must not also be the host that executes subject containers."
+  description = "Grant the runner read access to the AWS credential secret, so a credentialed case can be run directly instead of only submitted as a job. Direct execution must use the strict local Docker profile and pass the credential only to an authenticated attempt."
   type        = bool
   default     = false
 }

@@ -6,12 +6,12 @@
 copies the first two subtrees and not the third, so the boundary holds only as
 long as nothing on the shipped side imports the unshipped one.
 
-Both failure directions are expensive in their own way. A worker module reaching
-into ``manager`` produces an ImportError inside a container at attempt time, on a
-runner — the latest and most costly place to find out. A ``manager`` module
-drifting into ``common`` widens what ships next to eleven third-party binaries
-and moves every derived image's digest whenever it is edited, invalidating the
-pins a campaign runs against.
+The expensive failure direction is a shipped worker/common module reaching into
+``manager``: it produces an ImportError inside a container at attempt time, on a
+runner — the latest and most costly place to find out. Manager imports of
+``common`` are intentional; that is the shared layer's purpose. The reachability
+test below keeps every common module genuinely shared so manager-only code does
+not drift into the image and change every derived-image digest.
 """
 
 from __future__ import annotations

@@ -654,6 +654,8 @@ def test_slug_only_builder_registers_exact_named_contexts(
     # the bound context asserted against it.
     interpreter = tmp_path / "python"
     interpreter.mkdir()
+    duckdb_payload = tmp_path / "duckdb"
+    duckdb_payload.mkdir()
 
     def fake_ensure_runtime(architecture: str, libc: str, **kwargs: object) -> Path:
         assert libc == "gnu"
@@ -662,12 +664,14 @@ def test_slug_only_builder_registers_exact_named_contexts(
     monkeypatch.chdir(REPO)
     monkeypatch.setattr(subprocess, "run", fake_run)
     monkeypatch.setattr(build_selection, "ensure_runtime", fake_ensure_runtime)
+    monkeypatch.setattr(build_selection, "ensure_duckdb", lambda _architecture: duckdb_payload)
     assert build_derived_image_main(["--tool", "aws-cli", "--tag", "study:test"]) == 0
     assert len(calls) == 1
     command = calls[0]
     assert "--build-arg" not in command
-    assert command.count("--build-context") == 4
+    assert command.count("--build-context") == 5
     assert f"python={interpreter}" in command
+    assert f"duckdb={duckdb_payload}" in command
     assert any(item.startswith("subject=docker-image://amazon/aws-cli@sha256:") for item in command)
     assert f"adapter={REPO / 'tools/aws-cli/adapter'}" in command
     assert f"selection={REPO / 'tools/aws-cli/build'}" in command

@@ -151,9 +151,11 @@ out = {
 # Every measurement the campaign exists to collect must be present and
 # positive on any attempt that ran at all, timed out or not.
 res = r["resources"]
-out["rss_positive"] = res["peak_rss_kb"] > 0
-out["cpu_positive"] = (res["user_cpu_s"] + res["system_cpu_s"]) > 0
-out["disk_present"] = res["peak_disk_delta_bytes"] is not None
+out["rss_positive"] = res["rusage_children_max_child_peak_rss_kb"] > 0
+out["cpu_positive"] = (
+    res["rusage_children_user_cpu_s"] + res["rusage_children_system_cpu_s"]
+) > 0
+out["disk_present"] = res["whole_filesystem_peak_used_delta_bytes"] is not None
 out["elapsed_positive"] = r["timing"]["elapsed_ns"] > 0
 # A timeout must not overshoot its deadline by more than the grace it was
 # given plus a second of reaping — that is the whole point of the deadline.
@@ -167,10 +169,8 @@ out["stdout_bytes_match"] = len(raw) == s["raw_bytes"]
 out["stdout_hash_match"] = hashlib.sha256(raw).hexdigest() == s["raw_sha256"]
 out["stdout_nonempty"] = s["raw_bytes"] > 0
 
-collected = d / "collected.json"
-if collected.exists():
-    c = json.loads(collected.read_text())
-    out["row_count"] = c["row_count"]
+out["summary_status"] = r["summary"]["status"]
+out["row_count"] = r["summary"]["row_count"]
 
 for k, v in out.items():
     print(f"{k}={v}")
@@ -184,20 +184,19 @@ echo "e2e-local: $TOOL @ ${DIGEST:0:19}… bucket=$BUCKET"
 echo
 echo "== happy: completes well inside its timeout =="
 run_case happy --prefix "$PREFIX" --timeout 120
-uv run s3-listing-study collect-attempt --attempt-dir "$WORK/happy" --tool "$TOOL" >/dev/null
 facts "$WORK/happy" > "$WORK/happy.facts"
 check "status"             "$(fact "$WORK/happy.facts" status)"             "completed"
 check "timed_out"          "$(fact "$WORK/happy.facts" timed_out)"          "False"
 check "exit_code"          "$(fact "$WORK/happy.facts" exit_code)"          "0"
 check "cleanup.state"      "$(fact "$WORK/happy.facts" state)"              "not_needed"
 check "escaped"            "$(fact "$WORK/happy.facts" escaped)"            "0"
+check "summary.status"     "$(fact "$WORK/happy.facts" summary_status)"     "counted"
 check "row_count"          "$(fact "$WORK/happy.facts" row_count)"          "2549"
 
 # Grace is generous enough that a well-behaved subject exits on SIGTERM alone.
 echo
 echo "== terminate: deadline hit, SIGTERM is enough =="
 run_case terminate --timeout 6 --term-grace 2
-uv run s3-listing-study collect-attempt --attempt-dir "$WORK/terminate" --tool "$TOOL" >/dev/null
 facts "$WORK/terminate" > "$WORK/terminate.facts"
 check "status"             "$(fact "$WORK/terminate.facts" status)"         "timed_out"
 check "timed_out"          "$(fact "$WORK/terminate.facts" timed_out)"      "True"
@@ -205,7 +204,7 @@ check "term_sent"          "$(fact "$WORK/terminate.facts" term_sent)"      "Tru
 check "group_empty"        "$(fact "$WORK/terminate.facts" group_empty)"    "True"
 check "escaped"            "$(fact "$WORK/terminate.facts" escaped)"        "0"
 check "partial stdout"     "$(fact "$WORK/terminate.facts" stdout_nonempty)" "True"
-# A partial listing is not a measurement: collect must decline to count it
+# A partial listing is not a measurement: the worker must decline to count it
 # rather than report a row count that undercounts the bucket.
 check "row_count declined" "$(fact "$WORK/terminate.facts" row_count)"      "None"
 
@@ -245,26 +244,16 @@ if [ -n "$DESTINATION" ]; then
   # The worker names its own run leaf, so the destination layout is only
   # knowable from the receipt the run produced.
   leaf="$(fact "$WORK/upload.facts" attempt_id)"
-  # Three, not four: collected.json is computed host-side, because every
-  # normalizer needs DuckDB and no image carries it.
+  # stdout, stderr, and the worker-owned result (which already holds row_count).
   landed="$(gcloud storage ls "$DESTINATION/$leaf/" 2>/dev/null | wc -l)"
   check "objects at destination" "$landed" "3"
 
-  # The count still has to be recoverable from what was uploaded — that is the
-  # whole premise of leaving it out of the image.
-  uv run s3-listing-study collect-attempt --attempt-dir "$WORK/upload" --tool "$TOOL" >/dev/null
-  facts "$WORK/upload" > "$WORK/upload.facts"
-  check "row_count from uploaded evidence" "$(fact "$WORK/upload.facts" row_count)" "2549"
+  check "worker row_count" "$(fact "$WORK/upload.facts" row_count)" "2549"
 
   # The create-only precondition is the whole of "an attempt is never
   # overwritten". Re-uploading the same directory to the same leaf must be
   # refused, not silently accepted as a second generation.
   #
-  # Note what this run legitimately *does* publish before it is refused:
-  # collected.json, which did not exist at the destination and so is a
-  # creation, not a replacement. That is how a host-side row count reaches a
-  # bucket the worker uploaded to — and it is why the object count below is
-  # one higher than the three the worker itself wrote.
   echo "  re-upload to the same leaf must be refused"
   if uv run s3-listing-study upload-attempt \
        --attempt-dir "$WORK/upload" --destination "$DESTINATION/$leaf" >/dev/null 2>&1; then
@@ -276,7 +265,7 @@ if [ -n "$DESTINATION" ]; then
   unset S3_STUDY_GCS_TOKEN
 
   final="$(gcloud storage ls "$DESTINATION/$leaf/" 2>/dev/null | wc -l)"
-  check "objects after host-side collect published" "$final" "4"
+  check "objects after refused re-upload" "$final" "3"
 
   echo
   echo "  destination layout:"

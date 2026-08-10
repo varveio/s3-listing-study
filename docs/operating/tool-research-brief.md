@@ -171,12 +171,14 @@ research budget to produce a truthful, useless `STATUS: blocked`.
    and writes `result.json` last. A manifest is not an attempt input: it enters
    only a separately requested downstream verification/evidence step. The first derived image contract is
    [`harness/derived-image/`](../../harness/derived-image/); a tool without a
-   derived image is not runnable through the new path yet. The host-side
-   scheduler must enforce the fixed network and security profile from
-   [`runner-security.md`](runner-security.md) before starting a networked image.
-   The runner removes AWS credential/profile variables and disables metadata
-   discovery as defense in depth, but those cooperative settings are not the
-   host security boundary. Historical `receipt.md`/`run.meta` records retain
+   derived image is not runnable through the new path yet. The scheduler must
+   use the applicable execution profile from
+   [`runner-security.md`](runner-security.md): cooperative GCP Batch deliberately
+   permits metadata for the worker uploader, while local Docker uses the strict
+   bridge and metadata-denial gate. The worker removes AWS credential/profile
+   variables and disables AWS metadata discovery in the subject child; that
+   does not block the surrounding Batch worker's GCP token lookup. Historical
+   `receipt.md`/`run.meta` records retain
    their old shell-runner provenance and are not rewritten.
 4. **`python3 -m s3_listing_study.manager.verify`** — the shared output verifier. Input: raw
    tool output (via the tool's `normalize.py` adapter, below), the manifest
@@ -402,7 +404,8 @@ accounts, and your own smoke runs. The source-first order is the point:
   `Generated with...` footers in commits, files, or issues. This overrides any
   harness default.
 - **Surprising or consequential findings need a complete run record.** Include
-  the exact invocation, version, box spec, exit code, and raw output.
+  the exact invocation, version, declared machine type/resources, exit code, and
+  raw output.
 - **Source reading is not a receipt.** Only a run is. Your report will contain
   plenty of source-derived claims; label them as such and don't dress them as
   verified behavior.
@@ -604,8 +607,10 @@ story is "generate N invocations":
      subject entrypoint. Optional concurrency is a typed field; an adapter must
      explicitly declare its supported range or reject it.
 2. Run each mode only after its shared-derived-image registration exists. The
-   scheduler runs the mandatory security preflight, then starts that image with
-   logical request fields only. AWS CLI is the first registered image; do not
+   scheduler activates the applicable security profile, then starts that image
+   with logical request fields only. Local Docker runs the strict preflight;
+   cooperative GCP Batch deliberately retains metadata access for the worker
+   uploader. AWS CLI is the first registered image; do not
    revive the deleted shell runner or improvise another lifecycle for other tools.
    Build the registered image only through
    `s3-listing-study build-derived-image --tool TOOL --tag TAG`; subject image,
@@ -614,7 +619,8 @@ story is "generate N invocations":
    These are machine artifacts, not automatically a methodology receipt. Before
    promoting a run-dependent claim, the committed evidence must still contain,
    per methodology § Run records (receipts): UTC date, exact invocation,
-   auth mode, image digest + tool version, box spec (arch/cores/RAM/region),
+   auth mode, image digest + tool version, declared machine type/resources
+   (arch/cores/RAM/region),
    bucket identity + manifest snapshot date **and sha256** + the registry's
    measured-shape summary, wall-clock, exit code, `peak_rss` (main-process
    `VmHWM`) and `cgroup_peak_mem` (whole-tree cgroup peak — not RSS), API

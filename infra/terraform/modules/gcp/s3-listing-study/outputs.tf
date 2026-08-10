@@ -1,10 +1,10 @@
 output "results_bucket" {
-  description = "Results bucket name. Attempt artifacts land under runs/**; frozen campaign manifests under manifests/**."
+  description = "Results bucket name. Campaign data lands under campaigns/<campaign>/: frozen plan/manifest objects and authoritative <bucket>/<tool>/<case>/run-<n>/<attempt-uuid>/** trees."
   value       = google_storage_bucket.results.name
 }
 
 output "results_bucket_url" {
-  description = "Results bucket gs:// URL — the orchestrator's artifact destination."
+  description = "Results bucket gs:// URL — workers publish one tree per execution; required routine reporting discovers UUID children with delimiter listings and reads only result.json."
   value       = "gs://${google_storage_bucket.results.name}"
 }
 

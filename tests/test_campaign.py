@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -177,14 +178,21 @@ def test_a_campaign_id_too_long_for_the_budget_is_refused() -> None:
 
 def test_the_bucket_is_in_the_path_so_two_plans_cannot_collide() -> None:
     """`s5cmd/recursive` against two buckets is one case id and two cases."""
-    common = {"campaign": "2026-08-10-first", "tool": "s5cmd", "case_id": "recursive"}
-    assert attempt_prefix(bucket="noaa-ghcn-pds", **common) != attempt_prefix(
-        bucket="commoncrawl", **common
+    assert attempt_prefix(
+        campaign="2026-08-10-first",
+        bucket="noaa-ghcn-pds",
+        tool="s5cmd",
+        case_id="recursive",
+    ) != attempt_prefix(
+        campaign="2026-08-10-first",
+        bucket="commoncrawl",
+        tool="s5cmd",
+        case_id="recursive",
     )
 
 
-def test_a_prefix_names_the_case_and_not_the_run() -> None:
-    """The worker names its own run directory beneath this.
+def test_a_prefix_names_the_manager_run_and_not_the_execution() -> None:
+    """The worker names its own UUID execution directory beneath this.
 
     Batch can execute one task more than once (`BATCH_TASK_RETRY_ATTEMPT`), so a
     leaf chosen here would be written twice and refused by the create-only
@@ -197,9 +205,25 @@ def test_a_prefix_names_the_case_and_not_the_run() -> None:
         case_id="recursive-parquet-sorted.container_memory_gb-2",
     )
     assert prefix == (
-        "campaigns/2026-08-10-first/attempts/noaa-ghcn-pds/swath/"
-        "recursive-parquet-sorted.container_memory_gb-2"
+        "campaigns/2026-08-10-first/noaa-ghcn-pds/swath/"
+        "recursive-parquet-sorted.container_memory_gb-2/run-1"
     )
+
+
+def test_repetitions_get_distinct_run_paths_and_batch_job_ids() -> None:
+    plan = committed_plan()
+    repeated_case = replace(plan.cases[0], reps=2)
+    repeated = replace(plan, cases=(repeated_case,))
+    generated = attempts_for(
+        repeated,
+        campaign="2026-08-10-first",
+        images={repeated_case.tool: IMAGE},
+    )
+    assert [attempt.run_ordinal for attempt in generated] == [1, 2]
+    assert len({attempt.job_id for attempt in generated}) == 2
+    assert generated[0].fingerprint == generated[1].fingerprint
+    assert generated[0].prefix.endswith("/run-1")
+    assert generated[1].prefix.endswith("/run-2")
 
 
 def test_the_path_keeps_the_plans_vocabulary_and_not_the_image() -> None:
@@ -335,6 +359,45 @@ def test_a_state_change_keeps_its_history(tmp_path: Path) -> None:
             "SELECT event FROM events WHERE job_id = ? ORDER BY id", (attempt.job_id,)
         ).fetchall()
         assert [e["event"] for e in events] == ["submitting", "submitted", "failed"]
+
+
+def test_an_intent_and_its_first_event_are_atomic(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    attempt = one_attempt()
+    with ledger_module.open_ledger(tmp_path / "ledger.sqlite3") as connection:
+        monkeypatch.setattr(
+            ledger_module,
+            "_event",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("event write failed")),
+        )
+        with pytest.raises(RuntimeError, match="event write failed"):
+            ledger_module.record_intent(
+                connection, attempt=attempt.as_dict(), campaign=attempt.campaign, now=NOW
+            )
+        assert ledger_module.attempts(connection, campaign=attempt.campaign) == []
+
+
+def test_a_state_and_its_event_are_atomic(tmp_path: Path) -> None:
+    attempt = one_attempt()
+    with ledger_module.open_ledger(tmp_path / "ledger.sqlite3") as connection:
+        ledger_module.record_intent(
+            connection, attempt=attempt.as_dict(), campaign=attempt.campaign, now=NOW
+        )
+        with pytest.raises(TypeError, match="JSON serializable"):
+            ledger_module.record_state(
+                connection,
+                job_id=attempt.job_id,
+                state="submitted",
+                now=NOW,
+                detail={"not_json": object()},
+            )
+        [row] = ledger_module.attempts(connection, campaign=attempt.campaign)
+        assert row["state"] == "submitting"
+        events = connection.execute(
+            "SELECT event FROM events WHERE job_id = ? ORDER BY id", (attempt.job_id,)
+        ).fetchall()
+        assert [event["event"] for event in events] == ["submitting"]
 
 
 def test_the_ledger_knows_the_next_submission_number(tmp_path: Path) -> None:

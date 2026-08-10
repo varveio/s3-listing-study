@@ -8,13 +8,10 @@ invocation safe. It is still never *part of* the engine: an upload failure must
 stay legible as an upload failure and not contaminate a listing outcome.
 
 **Standard library only, deliberately.** The obvious implementation is
-``google-cloud-storage``, and it was the recorded choice until it met the
-roster: ``google-crc32c`` — a hard dependency — publishes no musllinux wheel at
-any version, and three subjects (rclone, s3kor, s5cmd) run on musl. Vendoring
-the SDK would have meant compiling a C extension inside Alpine subject images
-that carry no toolchain. What the uploader actually needs from GCS is one POST
-and one precondition header, so it asks for exactly that: no wheels to vendor,
-no libc matrix, nothing added to eleven images that a campaign pins.
+``google-cloud-storage``, but the uploader only needs one POST and one
+precondition header. All eleven current subjects use glibc; avoiding the SDK is
+still useful because it keeps a large dependency and its compiled CRC extension
+out of every pinned image.
 
 **Do not mount the bucket instead.** The engine's atomic ``os.replace()`` of
 ``result.json`` is what makes a finalized attempt directory trustworthy;
@@ -23,8 +20,9 @@ gcsfuse would turn that into a non-atomic copy-and-delete, letting a partial
 that says "this attempt finished".
 
 The destination is a complete ``gs://bucket/prefix/`` the caller supplies
-outright: this module has no opinion on layout. The caller appends the run
-leaf, because only the worker knows the attempt id it minted.
+outright: this module has no opinion on layout. In a campaign, the manager
+supplies the deterministic ``run-<n>`` prefix and the worker caller appends the
+attempt UUID leaf, because only that execution knows the ID it minted.
 
 ``result.json`` uploads last: its presence at the destination is what lets an
 external reader treat "this attempt's upload is complete" as legible — the same
@@ -34,25 +32,25 @@ silently overwrite a previous upload. "An attempt is never overwritten" is
 enforced here, not merely documented.
 
 Credentials come from one of two places. ``S3_STUDY_GCS_TOKEN``, when set,
-carries an OAuth2 access token the caller injected by name — the same shape the
-runner already uses for the AWS credential, and the only option that works on
-the subject bridge, where the metadata endpoint is deliberately unreachable.
-When it is unset, the token is read from the instance metadata server, which is
-what a Batch task's worker service account provides.
+carries an OAuth2 access token the caller injected by name and supports the
+strict local Docker profile, where metadata is deliberately unreachable. In
+GCP Batch it is normally unset: metadata access is intentional, and the worker
+reads the bounded task service-account token from the instance metadata server.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Callable, Mapping
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
-BULK_FILES = ("stdout.raw.gz", "stderr.raw.gz", "normalized.parquet")
-METADATA_FILES = ("collected.json",)
+BULK_FILES = ("stdout.raw.gz", "stderr.raw.gz")
 RESULT_FILE = "result.json"
 TOKEN_ENV_VAR = "S3_STUDY_GCS_TOKEN"
 
@@ -72,14 +70,151 @@ class UploadError(RuntimeError):
     """A finalized attempt directory could not be uploaded."""
 
 
-def _iter_upload_files(attempt_dir: Path, *, metadata_only: bool) -> list[Path]:
-    files = [attempt_dir / name for name in METADATA_FILES if (attempt_dir / name).is_file()]
-    if not metadata_only:
-        files += [attempt_dir / name for name in BULK_FILES if (attempt_dir / name).is_file()]
-        native_dir = attempt_dir / "native"
-        if native_dir.is_dir():
-            files += sorted(p for p in native_dir.rglob("*") if p.is_file())
+def _file_digest(path: Path) -> tuple[int, str]:
+    digest = hashlib.sha256()
+    size = 0
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            size += len(chunk)
+            digest.update(chunk)
+    return size, digest.hexdigest()
+
+
+def _declared_path(root: Path, value: object, *, label: str) -> Path:
+    if not isinstance(value, str) or not value:
+        raise UploadError(f"result.json {label} path must be a nonempty string")
+    relative = PurePosixPath(value)
+    if (
+        relative.is_absolute()
+        or relative.as_posix() != value
+        or any(part in ("", ".", "..") for part in relative.parts)
+    ):
+        raise UploadError(f"result.json {label} path is not canonical and relative: {value!r}")
+    path = root.joinpath(*relative.parts)
+    try:
+        resolved = path.resolve(strict=True)
+    except OSError as exc:
+        raise UploadError(f"result.json declares missing {label} artifact: {value}") from exc
+    if resolved != path or not path.is_file():
+        raise UploadError(f"result.json {label} artifact is not a contained regular file: {value}")
+    return path
+
+
+def _validate_digest(
+    path: Path,
+    record: Mapping[str, object],
+    *,
+    label: str,
+    size_field: str,
+    digest_field: str,
+) -> None:
+    size = record.get(size_field)
+    digest = record.get(digest_field)
+    if type(size) is not int or size < 0:
+        raise UploadError(f"result.json {label} {size_field} must be a nonnegative integer")
+    if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+        raise UploadError(f"result.json {label} {digest_field} must be a SHA-256 digest")
+    actual_size, actual_digest = _file_digest(path)
+    if (actual_size, actual_digest) != (size, digest):
+        raise UploadError(f"result.json {label} artifact does not match its recorded evidence")
+
+
+def _native_files(root: Path) -> set[str]:
+    native = root / "native"
+    if not os.path.lexists(native):
+        return set()
+    if native.is_symlink() or not native.is_dir():
+        raise UploadError("attempt native artifact root is not a contained directory")
+    files: set[str] = set()
+    pending = [native]
+    while pending:
+        directory = pending.pop()
+        for child in directory.iterdir():
+            if child.is_symlink():
+                raise UploadError(
+                    f"attempt native artifact is a symlink: {child.relative_to(root)}"
+                )
+            if child.is_dir():
+                pending.append(child)
+            elif child.is_file():
+                files.add(child.relative_to(root).as_posix())
+            else:
+                raise UploadError(
+                    f"attempt native artifact is not a regular file: {child.relative_to(root)}"
+                )
     return files
+
+
+def _validated_upload_files(attempt_dir: Path) -> tuple[Path, list[Path]]:
+    """Authenticate the finalized schema-2 evidence set before uploading any byte."""
+    try:
+        root = attempt_dir.resolve(strict=True)
+    except OSError as exc:
+        raise UploadError(f"not a finalized attempt directory: {attempt_dir}") from exc
+    if not root.is_dir():
+        raise UploadError(f"not a finalized attempt directory: {attempt_dir}")
+    result_path = root / RESULT_FILE
+    if not result_path.is_file() or result_path.is_symlink():
+        raise UploadError(f"not a finalized attempt directory: {attempt_dir}")
+    try:
+        result = json.loads(result_path.read_bytes())
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise UploadError("result.json is not valid UTF-8 JSON") from exc
+    if not isinstance(result, dict) or result.get("schema_version") != 2:
+        raise UploadError("result.json must be a schema-version-2 object")
+
+    streams = result.get("streams")
+    if not isinstance(streams, dict) or set(streams) != {"stdout", "stderr"}:
+        raise UploadError("result.json streams must declare exactly stdout and stderr")
+    files: list[Path] = []
+    for stream, expected_path in zip(("stdout", "stderr"), BULK_FILES, strict=True):
+        record = streams[stream]
+        if not isinstance(record, dict) or record.get("path") != expected_path:
+            raise UploadError(
+                f"result.json {stream} path must be the worker-owned {expected_path!r}"
+            )
+        path = _declared_path(root, record["path"], label=stream)
+        _validate_digest(
+            path,
+            record,
+            label=stream,
+            size_field="stored_bytes",
+            digest_field="stored_sha256",
+        )
+        files.append(path)
+
+    native_output = result.get("native_output")
+    if not isinstance(native_output, list):
+        raise UploadError("result.json native_output must be a list")
+    declared_native: dict[str, Path] = {}
+    for index, record in enumerate(native_output):
+        label = f"native_output[{index}]"
+        if not isinstance(record, dict):
+            raise UploadError(f"result.json {label} must be an object")
+        value = record.get("path")
+        if not isinstance(value, str) or not value.startswith("native/"):
+            raise UploadError(f"result.json {label} path must be under native/")
+        if value in declared_native:
+            raise UploadError(f"result.json declares native artifact twice: {value}")
+        path = _declared_path(root, value, label=label)
+        _validate_digest(
+            path,
+            record,
+            label=label,
+            size_field="bytes",
+            digest_field="sha256",
+        )
+        declared_native[value] = path
+    actual_native = _native_files(root)
+    if actual_native != set(declared_native):
+        missing = sorted(set(declared_native) - actual_native)
+        undeclared = sorted(actual_native - set(declared_native))
+        raise UploadError(
+            f"native artifact set does not match result.json "
+            f"(missing={missing}, undeclared={undeclared})"
+        )
+    files.extend(declared_native[name] for name in sorted(declared_native))
+    return result_path, files
 
 
 def parse_destination(destination: str) -> tuple[str, str]:
@@ -150,20 +285,17 @@ def upload_attempt(
     attempt_dir: Path,
     destination: str,
     *,
-    metadata_only: bool = False,
     uploader: Uploader | None = None,
 ) -> list[str]:
-    """Upload one finalized attempt directory; return the object names uploaded, in order."""
-    result_path = attempt_dir / RESULT_FILE
-    if not result_path.is_file():
-        raise UploadError(f"not a finalized attempt directory: {attempt_dir}")
-
+    """Preflight all worker-owned evidence, then upload ``result.json`` last."""
+    result_path, files = _validated_upload_files(attempt_dir)
     bucket, prefix = parse_destination(destination)
     send = uploader if uploader is not None else _authenticated_uploader()
 
     uploaded: list[str] = []
-    for local_path in _iter_upload_files(attempt_dir, metadata_only=metadata_only):
-        relative = local_path.relative_to(attempt_dir).as_posix()
+    root = result_path.parent
+    for local_path in files:
+        relative = local_path.relative_to(root).as_posix()
         object_name = f"{prefix}/{relative}" if prefix else relative
         send(bucket, object_name, local_path)
         uploaded.append(object_name)

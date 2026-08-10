@@ -2,11 +2,11 @@
 #
 # Everything a benchmark campaign for this study needs in one GCP project:
 #
-#   results-bucket.tf   where attempt artifacts and campaign manifests land
+#   results-bucket.tf   campaigns/<campaign> metadata and attempt trees
 #   image-registry.tf   Artifact Registry for the derived attempt images
 #   worker.tf           the identity each Cloud Batch attempt task runs as
 #   orchestrator.tf     the privilege bundle for driving a campaign
-#   runner.tf           the VM that builds, pushes, submits, and collects
+#   runner.tf           the VM that builds, pushes, submits, and reads summaries
 #   network.tf          optional VPC, for estates without a default network
 #
 # It creates no Batch jobs. Batch is serverless: a campaign's jobs are rendered

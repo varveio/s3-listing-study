@@ -1,8 +1,9 @@
 # ── Campaign runner VM ────────────────────────────────────────────────────────
 #
-# One long-lived machine that does everything outside a Batch task: build the
-# derived images, push them to the registry, submit and poll a campaign's jobs,
-# and pull results back for analysis.
+# One long-lived machine provisioned for everything outside a Batch task: image
+# builds and pushes, campaign submission/polling, and the required compact-result
+# reconciler. Bulk artifacts stay in GCS unless a correctness check or
+# investigation requests them.
 #
 # It earns its place for three reasons beyond convenience:
 #
@@ -10,13 +11,14 @@
 #     construction — it binds the pinned interpreter for the build host's own
 #     architecture and passes no --platform. An amd64 runner builds the images
 #     Batch will actually run, with no emulation anywhere in the path.
-#   * Duration. A campaign outlives a laptop session. The reconcile loop is
-#     restartable by design, but it still has to be running somewhere.
-#   * Egress. Results are read back for analysis; doing that in the same region
-#     as the bucket is the difference between free and billed.
+#   * Duration. A campaign outlives a laptop session. The required reconciler
+#     must be restartable, but it still needs a long-lived home.
+#   * Egress. Required routine reconciliation reads only compact summaries,
+#     while a correctness check may fetch large raw artifacts. Keeping the
+#     runner in the bucket's region avoids billing for those requested reads.
 #
 # It is NOT a measurement host. Nothing timed ever runs here — subjects run in
-# Batch tasks, one attempt per VM. This machine's size and noise cannot reach any
+# Batch tasks, one task per fresh VM. This machine's size and noise cannot reach any
 # published number, which is why it is sized for Docker builds rather than for
 # benchmark isolation.
 #
@@ -57,7 +59,7 @@ resource "google_service_account" "runner" {
   project      = var.project
   account_id   = "${local.name}-runner"
   display_name = "s3-listing-study campaign runner"
-  description  = "Identity the campaign runner VM builds, pushes, submits, and collects as"
+  description  = "Identity for runner-side builds, pushes, campaign submission, and required compact-result reconciliation"
 }
 
 resource "google_project_iam_member" "runner" {

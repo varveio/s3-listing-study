@@ -1,10 +1,10 @@
-"""Modules that run on the orchestrating side, never inside a subject image.
+"""Orchestration-side modules that never ship inside a subject image.
 
-The manager submits and monitors work, collects and uploads its results, and
-owns everything this repository does with an attempt once it exists —
-verification, receipts, capsule validation, normalization and the maintenance
-commands. Nothing here may be imported from ``s3_listing_study.worker`` or
-``s3_listing_study.common``: ``tests/test_payload_boundary.py`` enforces that
-direction, which is what keeps manager-side work from changing the images a
-campaign pins.
+The manager submits and monitors work and owns verification, receipts, capsule
+validation, and maintenance commands. It may import the deliberately shared
+``s3_listing_study.common`` layer. The shipped ``worker`` and ``common`` layers
+must never import this package. A host-side manager upload wrapper deliberately
+reuses the worker-owned create-only uploader, but that reverse dependency does
+not affect the image boundary; ``tests/test_payload_boundary.py`` enforces the
+image-critical direction.
 """

@@ -27,6 +27,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS attempts (
     job_id       TEXT PRIMARY KEY,
     campaign     TEXT NOT NULL,
+    run_ordinal  INTEGER NOT NULL,
     submission   INTEGER NOT NULL,
     state        TEXT NOT NULL,
     created_at   TEXT NOT NULL,
@@ -60,7 +61,7 @@ CREATE TABLE IF NOT EXISTS attempts (
     -- is still recoverable from the row that was written at the time.
     case_json    TEXT NOT NULL,
 
-    UNIQUE (campaign, fingerprint, submission)
+    UNIQUE (campaign, fingerprint, run_ordinal, submission)
 );
 
 CREATE TABLE IF NOT EXISTS events (
@@ -102,6 +103,19 @@ def open_ledger(path: Path) -> Iterator[sqlite3.Connection]:
         connection.close()
 
 
+@contextmanager
+def _transaction(connection: sqlite3.Connection) -> Iterator[None]:
+    """Commit one ledger mutation and its history event as a unit."""
+    connection.execute("BEGIN IMMEDIATE")
+    try:
+        yield
+        connection.execute("COMMIT")
+    except BaseException:
+        if connection.in_transaction:
+            connection.execute("ROLLBACK")
+        raise
+
+
 def record_intent(
     connection: sqlite3.Connection,
     *,
@@ -111,43 +125,47 @@ def record_intent(
 ) -> None:
     """Write the row that says we are about to submit this attempt."""
     resources = attempt["resources"]
-    try:
-        connection.execute(
-            "INSERT INTO attempts (job_id, campaign, submission, state, created_at, updated_at,"
-            " bucket, region, tool, case_id, mode, machine_type, vcpus, memory_gb,"
-            " container_memory_gb, timeout_s, env_json, derived_image, case_fingerprint,"
-            " fingerprint, prefix, case_json)"
-            " VALUES (?, ?, ?, 'submitting', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                attempt["job_id"],
-                campaign,
-                attempt["submission"],
-                now,
-                now,
-                attempt["bucket"],
-                attempt["region"],
-                attempt["tool"],
-                attempt["case_id"],
-                attempt["mode"],
-                resources["machine_type"],
-                resources["vcpus"],
-                resources["memory_gb"],
-                resources["container_memory_gb"],
-                attempt["timeout_s"],
-                json.dumps(attempt["env"], sort_keys=True),
-                attempt["derived_image"],
-                attempt["case_fingerprint"],
-                attempt["fingerprint"],
-                attempt["prefix"],
-                json.dumps(attempt, sort_keys=True),
-            ),
-        )
-    except sqlite3.IntegrityError as exc:
-        raise LedgerError(
-            f"{attempt['job_id']}: this attempt is already in the ledger for {campaign} "
-            f"({exc}) — raise the submission number to send it again"
-        ) from None
-    _event(connection, attempt["job_id"], now, "submitting", None)
+    with _transaction(connection):
+        try:
+            connection.execute(
+                "INSERT INTO attempts (job_id, campaign, run_ordinal, submission, state,"
+                " created_at, updated_at,"
+                " bucket, region, tool, case_id, mode, machine_type, vcpus, memory_gb,"
+                " container_memory_gb, timeout_s, env_json, derived_image, case_fingerprint,"
+                " fingerprint, prefix, case_json)"
+                " VALUES (?, ?, ?, ?, 'submitting', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
+                " ?, ?, ?, ?)",
+                (
+                    attempt["job_id"],
+                    campaign,
+                    attempt["run_ordinal"],
+                    attempt["submission"],
+                    now,
+                    now,
+                    attempt["bucket"],
+                    attempt["region"],
+                    attempt["tool"],
+                    attempt["case_id"],
+                    attempt["mode"],
+                    resources["machine_type"],
+                    resources["vcpus"],
+                    resources["memory_gb"],
+                    resources["container_memory_gb"],
+                    attempt["timeout_s"],
+                    json.dumps(attempt["env"], sort_keys=True),
+                    attempt["derived_image"],
+                    attempt["case_fingerprint"],
+                    attempt["fingerprint"],
+                    attempt["prefix"],
+                    json.dumps(attempt, sort_keys=True),
+                ),
+            )
+        except sqlite3.IntegrityError as exc:
+            raise LedgerError(
+                f"{attempt['job_id']}: this attempt is already in the ledger for {campaign} "
+                f"({exc}) — raise the submission number to send it again"
+            ) from None
+        _event(connection, attempt["job_id"], now, "submitting", None)
 
 
 def record_state(
@@ -161,12 +179,13 @@ def record_state(
     """Move an attempt's current state, keeping the transition in ``events``."""
     if state not in STATES:
         raise LedgerError(f"unknown state {state!r} ({'|'.join(STATES)})")
-    updated = connection.execute(
-        "UPDATE attempts SET state = ?, updated_at = ? WHERE job_id = ?", (state, now, job_id)
-    )
-    if updated.rowcount == 0:
-        raise LedgerError(f"{job_id}: no such attempt in the ledger")
-    _event(connection, job_id, now, state, detail)
+    with _transaction(connection):
+        updated = connection.execute(
+            "UPDATE attempts SET state = ?, updated_at = ? WHERE job_id = ?", (state, now, job_id)
+        )
+        if updated.rowcount == 0:
+            raise LedgerError(f"{job_id}: no such attempt in the ledger")
+        _event(connection, job_id, now, state, detail)
 
 
 def _event(
@@ -182,7 +201,13 @@ def _event(
     )
 
 
-def next_submission(connection: sqlite3.Connection, *, campaign: str, fingerprint: str) -> int:
+def next_submission(
+    connection: sqlite3.Connection,
+    *,
+    campaign: str,
+    fingerprint: str,
+    run_ordinal: int = 1,
+) -> int:
     """The submission number a re-send of this attempt would take.
 
     Counted here rather than from Batch because a job id is never deleted and
@@ -190,14 +215,16 @@ def next_submission(connection: sqlite3.Connection, *, campaign: str, fingerprin
     attempt has already spent.
     """
     row = connection.execute(
-        "SELECT MAX(submission) AS highest FROM attempts WHERE campaign = ? AND fingerprint = ?",
-        (campaign, fingerprint),
+        "SELECT MAX(submission) AS highest FROM attempts "
+        "WHERE campaign = ? AND fingerprint = ? AND run_ordinal = ?",
+        (campaign, fingerprint, run_ordinal),
     ).fetchone()
     return 1 if row is None or row["highest"] is None else int(row["highest"]) + 1
 
 
 def attempts(connection: sqlite3.Connection, *, campaign: str) -> list[dict[str, Any]]:
     rows = connection.execute(
-        "SELECT * FROM attempts WHERE campaign = ? ORDER BY tool, case_id, submission", (campaign,)
+        "SELECT * FROM attempts WHERE campaign = ? ORDER BY tool, case_id, run_ordinal, submission",
+        (campaign,),
     ).fetchall()
     return [dict(row) for row in rows]

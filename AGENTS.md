@@ -47,7 +47,7 @@ a reference manifest is not implemented yet. Per-tool status:
   produced by us, on our corpus, with our tuning. A result must be run again on
   this harness before it is cited here.
 - **Third-party published numbers are context, never comparison.** Every published
-  head-to-head is our-box-vs-our-box.
+  head-to-head uses fresh VMs with the same declared machine type and resources.
 
 ## Routing — task to the docs you read
 
@@ -56,7 +56,7 @@ Read *one* index, not five guesses. Order: this table → `docs/README.md`.
 | If you're... | Read |
 | --- | --- |
 | Designing or changing how a run works | `docs/methodology.md` — especially the five decisions |
-| Provisioning a runner or executing a subject/reference container | `docs/operating/runner-security.md` — the mandatory execution boundary and activation gate |
+| Provisioning a runner or executing a subject/reference container | `docs/operating/runner-security.md` — the Batch and local execution profiles and the local activation gate |
 | About to state anything about a specific tool | `tools/<tool>/README.md` — the tool page, for current observations + provenance |
 | Changing a tool directory's structure or deciding which file owns content | `docs/operating/tool-structure.md` — the authoritative capsule and Markdown-role contract |
 | Actually writing a capsule — a new tool, or an existing one at a new upstream version | `docs/operating/capsule-authoring.md` — build order, agent topology, and the verification loop; `docs/operating/tool-onboarding.md` for where it sits in the sequence |
@@ -94,7 +94,8 @@ which go in `docs/open-questions.md`.
 - Never report another tool's runtime behavior from memory, from a blog post, or
   from source reading alone. Run it.
 - Surprising or consequential observations about another tool need the exact
-  invocation, tool version, box spec, bucket identity, exit code, and raw output.
+  invocation, tool version, declared machine type/resources, bucket identity,
+  exit code, and raw output.
   The rclone exit-0-on-OOM note is the live example: it describes a serious
   outcome and currently traces to a single GitHub issue, so it remains an open
   question until we reproduce it.

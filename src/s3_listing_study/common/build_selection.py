@@ -26,6 +26,8 @@ from typing import Any
 
 from s3_listing_study import __version__
 from s3_listing_study.common.command_adapter import CommandAdapterError, load_command_adapter
+from s3_listing_study.common.duckdb_runtime import DuckDBRuntimeError
+from s3_listing_study.common.duckdb_runtime import ensure_runtime as ensure_duckdb
 from s3_listing_study.common.python_runtime import LIBC_VALUES, PythonRuntimeError, ensure_runtime
 
 SLUG_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
@@ -333,10 +335,14 @@ def build_derived_image_main(argv: Sequence[str] | None = None) -> int:
         # subject image is pulled for the host's own architecture. Building for
         # a foreign architecture would need the target named explicitly here.
         interpreter = ensure_runtime(platform.machine(), selection.python_libc)
+        duckdb_runtime = ensure_duckdb(platform.machine())
     except BuildSelectionError as exc:
         print(f"build-derived-image: {exc}", file=sys.stderr)
         return 2
     except PythonRuntimeError as exc:
+        print(f"build-derived-image: {exc}", file=sys.stderr)
+        return 2
+    except DuckDBRuntimeError as exc:
         print(f"build-derived-image: {exc}", file=sys.stderr)
         return 2
 
@@ -354,6 +360,8 @@ def build_derived_image_main(argv: Sequence[str] | None = None) -> int:
         f"selection={selection.metadata_path.parent}",
         "--build-context",
         f"python={interpreter}",
+        "--build-context",
+        f"duckdb={duckdb_runtime}",
         "--tag",
         tag,
         str(root),

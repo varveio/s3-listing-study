@@ -5,10 +5,9 @@ The active subject lifecycle is the stdlib-first Python package at
 execution, byte capture, timing, timeout cleanup, and finalization for new
 attempts.
 
-The first slice is deliberately local and small. It accepts a typed logical
-listing request, resolves it through the selected in-image tool driver, starts
-the resulting argv without a shell, captures stdout and stderr as bytes, and commits one
-attempt directory containing:
+The worker accepts a typed logical listing request, resolves it through the
+selected in-image tool driver, starts the resulting argv without a shell,
+captures stdout and stderr as bytes, and commits one attempt directory containing:
 
 ```text
 result.json
@@ -18,24 +17,25 @@ native/          only for a mode whose sink is a directory the tool writes itsel
 ```
 
 `result.json` is written atomically and last. Tool nonzero exits, signals, and
-clean timeouts are recorded outcomes; they are not runner failures. The timer
-uses `time.monotonic_ns()` around subject execution and capture only, before
-credential-shape scanning of the complete opaque raw streams, deterministic
-gzip, and result finalization. A flagged stream or scanner error is a harness
-failure: the runner exits 2 and publishes none of the artifacts. A clean
-scan is recorded in `result.json`.
+clean timeouts are recorded outcomes; they are not runner failures. Inside the
+worker container, the subject is a supervised subprocess tree, not another
+container. The timer uses `time.monotonic_ns()` from immediately before launch
+through reap of that tree. Credential-shape scanning of the complete opaque raw
+streams, deterministic gzip, worker-side normalization and row counting, result
+finalization, and GCS upload happen only after that clock stops. A flagged
+stream or scanner error is a harness failure: the runner exits 2 and publishes
+none of the artifacts. A clean scan is recorded in `result.json`.
 
-`result.json` also carries a `resources` object — `peak_rss_kb`, `user_cpu_s`
-and `system_cpu_s` from `getrusage(RUSAGE_CHILDREN)`, read immediately after the
-reap that makes it valid, plus `peak_disk_delta_bytes` from a background poll of
-filesystem usage against a pre-execution baseline. Both are the harness's own
-measurement rather than anything a subject reports about itself. The RSS and CPU
-figures are only the subject's because one process runs exactly one attempt, and
-the disk figure is only the subject's because one attempt runs at a time on a
-host; neither holds for a caller that reuses a process or runs attempts
-concurrently. `resources` is additive within `schema_version: 1` rather than a
-new version, so a reader must treat it as optional: attempts recorded before it
-existed are schema 1 and do not carry it.
+In `schema_version: 2`, the result records UTC subject start/end timestamps and
+observed worker facts (logical CPUs, host memory, and readable cgroup-v2
+location/limit). Its `resources` object records
+`rusage_children_max_child_peak_rss_kb`, `rusage_children_user_cpu_s`,
+`rusage_children_system_cpu_s`, `whole_filesystem_peak_used_delta_bytes` plus its
+sample path/interval, and `cgroup_v2_memory` snapshots before/after the subject
+with OOM/OOM-kill deltas. The RSS field is the largest single child's peak, not
+aggregate tree memory; cgroup memory is the whole container/task signal when
+available. The filesystem delta is attributable only when one attempt uses the
+host filesystem at a time.
 
 The runner opens and captures the subject's raw stdout/stderr byte streams
 inside the derived image. Docker json-file logs, `docker logs`, Batch logs, and
@@ -44,11 +44,12 @@ not the listing-data channel and cannot stand in for `stdout.raw.gz` /
 `stderr.raw.gz`.
 
 The derived image fixes this zipapp entrypoint; schedulers append only the
-logical request arguments and never replace it:
+logical request arguments and never replace it. There is no public
+`--attempt-id`: each worker-container execution mints its own UUID:
 
 ```sh
 /opt/s3-listing-study/python/bin/python3 -I /opt/s3-listing-study/attempt.pyz \
-  --output /output/attempt-id \
+  --output /output \
   --derived-image sha256:DERIVED_IMAGE_DIGEST \
   --tool aws-cli \
   --operation list \
@@ -78,19 +79,23 @@ adapter identity, and the derived image's own digest as the image identity.
 
 ## Security boundary
 
-Networked execution still requires the `s3-listing-study-v1` profile in
+Networked execution uses the scheduler-specific profile in
 [`docs/operating/runner-security.md`](../docs/operating/runner-security.md).
-The image scheduler must run `runner-security-check.sh` before starting a
-networked subject. The in-image attempt engine provides defense in depth for
-anonymous runs by replacing the ambient environment with a fixed, minimal
-runtime environment and setting `AWS_EC2_METADATA_DISABLED=true`. The exact
-child environment is recorded in `result.json`; credential/profile, endpoint,
-proxy, trust-anchor, loader, Python, cloud-SDK, and arbitrary ambient variables
-are not inherited. This does not replace the host identity, firewall, bridge,
-digest-pin, and no-pull gate.
+GCP Batch is cooperative: its metadata endpoint stays reachable because this
+worker's uploader needs the task service-account token. The identity can create
+but not read, replace, or delete results. Local Docker on the more-privileged
+manager/runner host retains the `s3-listing-study-v1` bridge, firewall, and
+metadata-denial gate; `runner-security-check.sh` applies there, not to Batch.
+The gate is required before a local invocation can claim the strict evidence
+profile. `smoke-campaign.sh` and `e2e-local.sh` are diagnostic paths that only
+inspect the bridge; their outputs are not strict-profile evidence.
 
-The remaining files under `harness/` provision and test that host-side security
-boundary or stage orchestrator workspaces. They do not run or time subjects.
+In both profiles the attempt engine replaces the subject child's ambient
+environment with a fixed, minimal runtime environment and sets
+`AWS_EC2_METADATA_DISABLED=true`. That setting prevents the S3 client subprocess
+from discovering an AWS instance credential; it does not and must not prevent
+the surrounding Batch worker from reading its GCP token for upload. The exact
+child environment is recorded in `result.json`.
 
 ### Authenticated attempts
 
@@ -111,34 +116,53 @@ records the two credential values as `<REDACTED>` — names visible, values
 never persisted. Callers must forward the variable by name (`docker run -e
 NAME`), never as `-e NAME=value`, which would put the secret in argv.
 
-## After the attempt
+## After subject timing
 
-Two commands run against an already-finalized attempt directory, as separate
-processes, after the container has exited. Neither can touch `elapsed_ns`, and
-neither is part of the subject lifecycle:
+The worker normalizes enough of the captured listing to compute the row count
+after `elapsed_ns` has closed, then records that small summary directly in
+`result.json`. It deterministically compresses the raw streams. Each execution
+publishes one authoritative attempt tree:
 
-- `s3-listing-study collect-attempt --attempt-dir DIR --tool SLUG` writes
-  `collected.json` next to `result.json`, holding the row count obtained by
-  running that tool's own `adapter/normalize.py` as an unmodified subprocess.
-  `--convert-parquet` additionally writes `normalized.parquet`; it is off by
-  default because it is the expensive part.
-- `s3-listing-study upload-attempt --attempt-dir DIR --destination gs://…/`
-  copies the directory to a caller-supplied destination prefix. Every object is
-  written create-only (`if_generation_match=0`) and `result.json` goes last, so
-  a retry cannot overwrite a recorded attempt and the presence of `result.json`
-  at the destination means the upload finished. A partially failed upload
-  therefore cannot be resumed into the same prefix by design; the orchestrator
-  gives the retry a new prefix.
+```text
+campaigns/<campaign>/<bucket>/<tool>/<case>/run-<n>/<attempt-id>/
+```
 
-`smoke-campaign.sh` builds and smoke-runs every registered tool through both
-steps. It allocates the next unused `attempt-N` per mode and never deletes
-anything under `receipts/`.
+Raw artifacts upload first and `result.json` uploads last, so the result record
+is also the commit marker for that execution. Every object is written create-only
+(`ifGenerationMatch=0`).
 
-The current ARM64 AWS CLI runner image and a local diagnostic attempt have
-succeeded as implementation checks. They are non-evidentiary and
-non-comparative: they prove this slice of the runner/image plumbing can produce
-the minimal machine artifacts, not that any tool claim should be promoted or
-any benchmark result should be published.
+The campaign model owns the `run-<n>` ordinal (`run-1` under the current
+`reps: 1` policy; higher ordinals are reserved for separately scheduled runs,
+not an implemented append-later command). Each worker-container execution mints
+the `attempt_id` UUID beneath that run prefix. The UUID is per execution, not the
+scheduled run or Batch job: one job may theoretically produce more than one
+UUID leaf if the task is duplicated despite the campaign setting automatic
+Batch retries to 0. Create-only upload preserves every leaf. The required
+reconciler must surface more than one result under the same run prefix as an
+anomaly; it must never select one as the canonical result or collapse them into
+one attempt.
+
+The required routine manager reporting path must visit only manifest-known run
+prefixes. It must list each with GCS `delimiter=/` to discover immediate UUID
+children without descending into their contents, then GET each child's exact
+`result.json` and read its small worker-produced summary and metrics. Raw
+listing artifacts remain in GCS as audit and verification evidence. The
+manager fetches raw bytes
+only for correctness verification or a specific investigation; it does not
+download every listing, run routine manager-side collection over them, or write
+a companion `collected.json` into an attempt.
+
+`smoke-campaign.sh` remains the local all-tools diagnostic path. Production
+campaign modeling under `s3_listing_study.manager.campaign` resolves cases,
+freezes image and attempt manifests, assigns Batch job IDs, and records mutable
+submission state plus its append-only transition history in the local ledger.
+The mutable row answers current state; events retain submission/retry history
+after Batch ages jobs out. The ledger is operational and is not run evidence.
+
+All eleven subjects have run at smoke on amd64 through this engine, four with a
+scoped credential. Those runs are non-comparative and carry no verifier verdict:
+they prove the runner/image path can produce the machine artifacts, not that a
+tool claim should be promoted or a benchmark result published.
 
 ## Historical receipts and verification
 
@@ -166,6 +190,7 @@ their recorded registry and manifest. The offline union regression suite is
 `harness/tests/run-regressions.sh`; the host security regression suite is
 `harness/tests/runner-security-regressions.sh`.
 
-Campaign scheduling, cloud execution, normalization, Parquet conversion,
-comparison, upload, and aggregation are outside this first attempt-engine
-slice. None may introduce a second subject lifecycle or timing implementation.
+Provider submission/reconciliation and comparative reporting remain separate
+manager integration work. They must consume worker summaries for routine
+operation and must not introduce a second subject lifecycle, timing
+implementation, or eager raw-artifact download path.

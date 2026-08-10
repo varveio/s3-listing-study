@@ -43,12 +43,6 @@ def _build_derived_image_main(argv: Sequence[str] | None) -> int:
     return build_derived_image_main(argv)
 
 
-def _collect_attempt_main(argv: Sequence[str] | None) -> int:
-    from s3_listing_study.manager.collect import collect_attempt_main
-
-    return collect_attempt_main(list(argv) if argv is not None else None)
-
-
 def _resolve_plan_main(argv: Sequence[str] | None) -> int:
     from s3_listing_study.manager.bench.cli import resolve_plan_main
 
@@ -81,11 +75,6 @@ COMMANDS = (
         "resolve-plan",
         "expand a bucket's benchmark plan and show every case it generates",
         _resolve_plan_main,
-    ),
-    Command(
-        "collect-attempt",
-        "row-count (and optionally Parquet-convert) a finalized attempt's output",
-        _collect_attempt_main,
     ),
     Command(
         "upload-attempt",

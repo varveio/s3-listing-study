@@ -19,8 +19,9 @@
 # Batch task can reach the VM metadata server, so any task running as an identity
 # that holds secretAccessor can mint a token and read the secret whatever it was
 # submitted to do — the secret's name is derivable, so non-enumerability is not a
-# control. An anonymous attempt that ran a subject with a bug, or a subject that
-# is simply curious about its environment, would be able to read a live AWS key.
+# control. Separate identities make the recorded authentication stratum match
+# what the task can obtain and prevent a mis-submitted anonymous case from
+# silently running authenticated.
 #
 # So the anonymous worker in worker.tf CANNOT read this secret, and this identity
 # exists only to run the authenticated cases. Submitting a case in the
@@ -137,13 +138,10 @@ resource "google_service_account_iam_member" "runner_actas_authenticated" {
 }
 
 # The runner may read the credential, so that a credentialed case can be
-# exercised by running it directly rather than only by submitting a job. The
-# constraint that survives is about execution, not about custody: a host holding
-# this credential must not also be the host that executes subject containers,
-# because that is a machine with an attached service account and a live metadata
-# server next to eleven third-party binaries. Where the two must coexist,
-# subjects run on a container network that cannot reach the metadata endpoint,
-# and their receipts do not carry the s3-listing-study-v1 profile.
+# exercised directly rather than only submitted. Direct subject execution uses
+# the strict local Docker profile, whose bridge cannot reach host/cloud metadata;
+# the selected AWS credential is passed explicitly only to an authenticated
+# attempt. Batch instead uses the separate authenticated identity above.
 #
 # Off by default: a deployment that only ever submits jobs has no reason to widen
 # the runner, and the authenticated worker above remains the identity that reads

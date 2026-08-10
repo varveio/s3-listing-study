@@ -3,20 +3,21 @@
 The GCP infrastructure for running this study's benchmark campaigns: a results
 bucket, an Artifact Registry repository for the derived attempt images, the
 least-privilege identity each Cloud Batch task runs as, the privilege bundle an
-orchestrator needs, and a runner VM that builds, pushes, submits, and collects.
+orchestrator needs, and a runner VM provisioned to build and push images and to
+host campaign submission and the required summary-only reconciler.
 
 It creates **no Batch jobs**. Batch is serverless; a campaign's jobs are rendered
-and submitted at runtime, one per attempt, each with a deterministic job ID so
+and submitted at runtime, one per scheduled run, each with a deterministic job ID so
 submission is idempotent and a lost handle can be recomputed rather than
 recovered.
 
 | File | What it owns |
 | --- | --- |
-| `results-bucket.tf` | where attempt artifacts and campaign manifests land |
+| `results-bucket.tf` | where campaign plans, compact results, and raw audit artifacts land |
 | `image-registry.tf` | Artifact Registry for the derived attempt images |
 | `worker.tf` | the identity each Batch attempt task runs as |
 | `orchestrator.tf` | the privilege bundle for driving a campaign |
-| `runner.tf` | the VM that builds, pushes, submits, and collects |
+| `runner.tf` | the VM for builds, submission, and the required summary reconciler |
 | `network.tf` | optional VPC, for estates without a default network |
 
 ## Why this is a module and not an environment
@@ -96,6 +97,16 @@ than silent.
 **The worker cannot read the bucket.** Reading results back is the orchestrator's
 job. A worker writes its own attempt and has no reason to see any other.
 
+**Batch metadata access is intentional.** The in-worker uploader obtains its
+OAuth token from the VM metadata server. The subjects are cooperative software,
+not treated as hostile; the attached identity is nevertheless limited to new
+result-object creation, Artifact Registry reads, and Batch/log reporting. Each
+attempt has a fresh VM with one task in an otherwise disposable benchmark
+project. The strict metadata-denial bridge remains a local-Docker profile for
+direct runs on the more-privileged runner and is not a Batch prerequisite. The
+runtime job renderer sets `maxRetryCount: 0`; duplicate execution is
+still detected through multiple worker UUIDs beneath one `run-<n>` prefix.
+
 **The anonymous worker holds no credentials for the object stores under test.**
 The benchmark lists public buckets anonymously. "Anonymous" describes the S3
 authentication stratum, not the absence of a cloud identity — the task still runs
@@ -105,8 +116,8 @@ as this service account, which is what bounds what a subject image could reach.
 creates a *second* worker service account, and only it can read the credentials
 secret. An anonymous case therefore cannot obtain the credential even if its job
 spec asks for one — Batch fails the task at environment preparation, before the
-container starts. This is not a defence against hostile tools; it is what makes
-"this attempt was anonymous" a fact rather than an intention, so a mis-submitted
+container starts. This makes "this attempt was anonymous" a fact rather than an
+intention, so a mis-submitted
 case fails loudly instead of quietly producing an authenticated measurement
 labelled anonymous. The submitter chooses by setting the job's
 `allocationPolicy.serviceAccount` to `worker_sa_email` or
@@ -119,9 +130,21 @@ organization ID hardcoded — is in
 § *The authenticated stratum's AWS credential*.
 
 **The runner is not a measurement host.** Nothing timed runs on it. Subjects run
-in Batch tasks, one attempt per VM, so the runner's size and noise cannot reach
+in Batch tasks, one task per fresh VM, so the runner's size and noise cannot reach
 any published number — which is why it is sized for Docker builds and why its
 `machine_type` is in `ignore_changes`.
+
+**Required routine collection is summary-only.** Each worker execution
+publishes one authoritative tree under
+`campaigns/<campaign>/<bucket>/<tool>/<case>/run-<n>/<attempt-uuid>/`, with raw
+artifacts first and `result.json` last. The campaign model owns the run ordinal;
+the current `reps: 1` policy yields `run-1`, while higher ordinals are reserved
+for separately scheduled runs rather than an implemented append-later command.
+For every manifest-known run prefix the required manager reconciler must use a
+delimiter listing to discover only immediate UUID children, then GET each exact
+`result.json`. It must read raw listings only for requested correctness
+verification or investigation. More than one UUID child under one run must be
+surfaced as duplicate execution and none may be silently selected.
 
 **Grants are additive (`google_*_iam_member`), never authoritative.** An
 authoritative binding on the bucket would clobber the worker's `objectCreator` on

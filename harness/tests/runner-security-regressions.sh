@@ -6,7 +6,6 @@ export LC_ALL=C
 
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 HARNESS="$(cd -- "$HERE/.." && pwd)"
-REPO_ROOT="$(cd -- "$HARNESS/.." && pwd)"
 # shellcheck source=harness/runner-security-lib.sh
 . "$HARNESS/runner-security-lib.sh"
 work="$(mktemp -d)"; trap 'rm -rf -- "$work"' EXIT

@@ -23,6 +23,11 @@ A campaign runs one or more plans with its image set frozen, and receipts group
 under the campaign that produced them. That is why a plan carries no campaign
 ID, no image digest, and no date.
 
+The current benchmark policy is `reps: 1`: one scheduled run per case, on one
+fresh Batch VM with one task. The plan schema retains `reps` as an explicit
+schedule field, but published campaigns do not raise it without a dated
+methodology change. There are no cold/warm arms.
+
 ## Most tools just run
 
 A tool that runs once, at its usual mode, on the plan's own allocation says
@@ -135,8 +140,9 @@ swath:
     - {mode: recursive-parquet-sorted, container_memory_gb: 4}
 ```
 
-The box stays identical across those two cases — same machine type, same cores,
-same neighbours — and the ceiling reaches sizes no machine type sells. Omitting
+The declared shape stays identical across those two cases — same machine type,
+cores, and memory, with each attempt alone on a fresh VM — and the ceiling
+reaches sizes no machine type sells. Omitting
 `container_memory_gb` means no ceiling: the container sees the whole box. A
 ceiling larger than the box is refused, since it would constrain nothing.
 
@@ -169,3 +175,40 @@ otherwise append non-comparable runs into one case directory.
 `reps` is excluded from the fingerprint — how many times we ran something is
 not part of what we ran. `timeout_s` is included, because it can truncate a run
 and change the result.
+
+## Scheduled jobs and execution UUIDs are separate identities
+
+The campaign model gives each scheduled run a stable job ID and a `run-<n>`
+ordinal. That ordinal is separate from the worker's attempt UUID: current
+`reps: 1` produces `run-1`; higher ordinals are reserved for separately
+scheduled runs, not an implemented append-later rerun command. Every actual
+worker-container execution independently mints an attempt UUID; `attempt_id` is
+therefore per execution, never the scheduled run identity. Every execution owns
+one authoritative tree:
+
+```text
+campaigns/<campaign>/<bucket>/<tool>/<case>/run-<n>/<attempt-id>/
+  result.json
+  stdout.raw.gz
+  stderr.raw.gz
+  native/...
+```
+
+Neither the manager ordinal nor the execution UUID is folded into the case or
+attempt fingerprint; those hashes remain content-derived descriptions of what
+ran, while the path components say which scheduled run and execution produced
+the evidence.
+
+Raw artifacts upload first and `result.json` uploads last. Every object is
+create-only, so two executions cannot overwrite each other even if Batch somehow
+runs the same submitted work twice. The UUID is the artifact overwrite boundary,
+not a workaround for duplicate Batch resource names; job-name idempotence and
+resubmission numbering remain manager concerns.
+
+The campaign sets automatic Batch retries to 0. Even so, its trust model does
+not assume a scheduled job and a worker execution are one-to-one. For each
+manifest-known run prefix, the required manager reconciler must use a GCS
+delimiter listing to discover only its immediate UUID children, without
+descending into or downloading raw artifacts, then GET the exact `result.json`
+from each child. More than one child under one run is a duplicate-execution
+anomaly; the reconciler must surface every result and select none as canonical.

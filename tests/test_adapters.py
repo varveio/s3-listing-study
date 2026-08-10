@@ -513,6 +513,45 @@ def test_output_conforms_to_contract_v2(tool: str, mode: str) -> None:
             assert record.size.isdigit()
 
 
+@pytest.mark.parametrize("tool", PORTED)
+def test_normalizer_can_read_an_existing_raw_path_without_stdin(tool: str, tmp_path: Path) -> None:
+    """The worker path uses the same adapters without staging listing bytes."""
+    mode = next(mode for fixture_tool, mode in FIXTURES if fixture_tool == tool)
+    payload, prefix, _keys = FIXTURES[(tool, mode)]
+    raw = tmp_path / "stdout.raw"
+    raw.write_bytes(payload)
+    by_stdin = run(tool, mode, prefix, payload)
+    by_path = subprocess.run(
+        [str(adapter_path(tool)), mode, prefix, "--input", str(raw)],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        check=False,
+    )
+    assert by_path.returncode == by_stdin.returncode, by_path.stderr
+    assert by_path.stdout == by_stdin.stdout
+
+
+@pytest.mark.parametrize(
+    ("tool", "mode"),
+    sorted(set(FIXTURES) - DATASET_MODES),
+)
+def test_empty_existing_raw_path_matches_empty_stdin(tool: str, mode: str, tmp_path: Path) -> None:
+    """File-backed input preserves bytes-mode empty-listing/error semantics."""
+    prefix = FIXTURES[(tool, mode)][1]
+    raw = tmp_path / "stdout.raw"
+    raw.write_bytes(b"")
+    by_stdin = run(tool, mode, prefix, b"")
+    by_path = subprocess.run(
+        [str(adapter_path(tool)), mode, prefix, "--input", str(raw)],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        check=False,
+    )
+    assert by_path.returncode == by_stdin.returncode, by_path.stderr
+    assert by_path.stdout == by_stdin.stdout
+    assert by_path.stderr == by_stdin.stderr
+
+
 def test_swath_table_drops_non_object_rows() -> None:
     payload = (
         f"{'PRE':>14}  {'':24}  normals-hourly/prefix/\n"

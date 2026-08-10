@@ -1,21 +1,65 @@
 # Runner security
 
 This is the authoritative security contract for running third-party subject
-images. Anyone setting up a runner or executing networked subjects must
-follow it. It applies to future runs; historical receipts describe the profile
-that was active when they were produced and are not rewritten.
+images. The tools are cooperative third-party software, not adversarial
+workloads. The controls below separate attempts, keep identities narrow, and
+limit the consequences of mistakes; they are not a hostile-code sandbox.
+Historical receipts describe the profile active when they were produced and
+are not rewritten.
 
-## Current profile
+## Current execution profiles
 
-`s3-listing-study-v1` runs on a dedicated, disposable Linux host with Docker and
-no attached workload identity, ambient cloud credentials, private checkouts, or
-unrelated workloads. The first implemented provider adapter is `local`: it is
-for a genuinely local or bare-metal runner and refuses a host on which known
-GCP, AWS, or Azure metadata is present. It is not a substitute for a cloud
-control-plane identity check. A cloud VM needs a provider adapter that proves
-that no service account or instance profile is attached.
+### GCP Batch: cooperative production profile
 
-Every networked subject and trusted reference container uses the fixed
+Production benchmark attempts run in an otherwise disposable benchmark project,
+one task on one fresh Batch VM. Comparable cases declare the same machine type,
+vCPU count, memory, and container ceiling. No manager checkout, unrelated
+workload, or second attempt shares that VM.
+
+The Batch VM metadata server is intentionally reachable from the container.
+The in-worker GCS uploader needs the task service-account token it supplies.
+That access is acceptable because the task identity is bounded to:
+
+- create new objects in the results bucket, with no bucket read or delete;
+- pull the pinned derived image from Artifact Registry; and
+- report Batch task state and write diagnostic logs.
+
+Authenticated cases use a separate task identity that additionally reads the
+one AWS credential secret. Anonymous cases use an identity without that grant.
+The tools can use their task identity to create additional objects in the
+results bucket; the study accepts that for cooperative tools, while IAM still
+prevents reading or deleting results. Artifact uploads are also create-only, so
+an execution cannot replace an existing attempt object.
+
+There is no metadata-denial provider adapter or local firewall gate in front of
+Batch. Requiring one would break the uploader and would not improve the bounded
+identity described above. The production boundary is the fresh one-task VM,
+least-privilege service account, digest-pinned image, and disposable project.
+
+The derived image is the one Batch container. Inside it, the worker launches the
+tool as a supervised subprocess tree; the tool is not nested in a second
+container. Automatic Batch retries are set to 0, but execution identity still
+does not assume a one-to-one scheduler outcome. The campaign model owns a stable
+`run-<n>` ordinal (`run-1` for the current `reps: 1` campaign); every
+worker-container execution mints a fresh attempt UUID and uploads create-only
+beneath that manifest-known run prefix. If one run produces multiple UUID
+children, the required reconciler must surface every result as duplicate
+execution and select none as canonical.
+
+The required manager reconciler must list each expected run prefix with GCS
+`delimiter=/` to discover only immediate UUID children, then read each exact
+`result.json`. It must not descend into or download raw listing output. Raw
+artifacts stay in the same attempt tree and are fetched only for correctness
+verification or a specific investigation.
+
+### Local Docker: stricter manager-host profile
+
+Local runs may share a more-privileged manager/runner host, so they retain the
+`s3-listing-study-v1` Docker bridge and metadata-denial profile. The local gate
+refuses a host on which recognized GCP, AWS, or Azure metadata is present; this
+is a local-host rule, not a prerequisite or provider adapter for Batch.
+
+Every local networked subject and trusted reference container uses the fixed
 `s3-listing-study-subjects` user-defined bridge. The bridge is IPv4-only, has
 inter-container communication disabled, and pins its MTU to the host's default
 uplink. Containers publish no ports and receive no host-directory or Docker
@@ -33,22 +77,24 @@ and also use `--pull=never`; execution never resolves a missing image.
 Forced non-root execution and read-only root filesystems are deferred until they
 can be compatibility-tested across all upstream images.
 
-This profile covers networked run, trusted-reference, and security-probe
+The local profile covers networked run, trusted-reference, and security-probe
 containers. It does not sandbox `docker build`, image pulls, or BuildKit. Every
-digest-pinned campaign image must already be present before setup. Prefer a
-separate disposable, identity-free builder; the acceptable fallback is the same
-disposable host used sequentially for build/pull first and gated execution
-second. During a campaign, no build and no mutable-tag pull occurs.
+digest-pinned local image must already be present before setup. During a local
+run, no build and no mutable-tag pull occurs. Batch instead pulls the frozen
+digest from the campaign's Artifact Registry.
 
-Host-side Docker control-plane calls remain finite: ordinary image inspection,
+Local host-side Docker control-plane calls remain finite: ordinary image inspection,
 container creation/start/probe operations have a 30-second bound and cleanup
 operations have a 10-second bound. New attempts run the shared Python attempt
 runner inside a derived subject image; Docker or Batch schedules that image and
-provides an output location, but does not time the tool, collect listing bytes,
-normalize output, or interpret the result. Those lifecycle and artifact
-semantics belong to the in-image runner. The host preflight, fixed bridge,
-firewall policy, digest-pinned/no-pull image discipline, and bounded cleanup
-remain outside the image and must pass before any networked subject starts.
+provides an output location, but does not time the tool or collect listing
+bytes. The worker times the subject, captures the raw streams, derives the small
+summary after timing, and uploads the attempt. The local host preflight, fixed
+bridge, firewall policy, digest-pinned/no-pull image discipline, and bounded
+cleanup remain outside the image and must pass before a local networked subject
+can claim the strict local evidence profile. Diagnostic smoke/e2e runs may omit
+the full gate, but their output is not profile-backed evidence. These controls
+do not run on Batch.
 
 New attempt output is captured by the in-image runner as byte streams on
 worker-local storage and then committed as attempt artifacts. Docker or Batch
@@ -68,20 +114,22 @@ attempt evidence. Reference re-lists for those historical verifier paths retain
 their recorded behavior. Security probes still do not produce listing evidence,
 and their output must not be promoted into a run record.
 
-The bridge alone is not the security boundary. The host firewall rejects
+For local Docker, the bridge alone is not the security boundary. The host firewall rejects
 bridge-originated access to the host, loopback, link-local/metadata, RFC 1918,
 carrier-grade NAT, internal IPv6 ranges, and every Docker network present when
 the rules are rendered. Ordinary public egress remains available. Denials use
 `REJECT` so a forbidden request fails promptly instead of consuming a benchmark
 timeout.
 
-## What the gate proves
+## What the local gate proves
 
-The gate enforces one property, on every networked invocation: **this run is
-anonymous by construction.** It is not a host-integrity attestation and does not
-verify a recorded snapshot of a provisioned box.
-[`runner-security-check.sh`](../harness/runner-security-check.sh) runs before
-every networked harness container and checks, live:
+When activated for a strict-profile local invocation, the gate enforces one
+property: **no ambient host cloud identity or credential is available to the
+subject.** An authenticated attempt may still receive its explicitly selected
+AWS listing credential. The gate is not a host-integrity attestation and does
+not verify a recorded snapshot of a provisioned box.
+[`runner-security-check.sh`](../../harness/runner-security-check.sh) runs before
+each local networked invocation that claims the strict profile and checks, live:
 
 - **no ambient credentials** — the AWS/GCP/Azure credential variables an SDK
   would silently pick up are absent from the environment this run inherits;
@@ -94,11 +142,11 @@ every networked harness container and checks, live:
   `iptables`. The firewall hooks are keyed on the bridge interface, so a bridge
   that is not this one would leave the policy covering nothing;
 - **the private-network deny is in force** —
-  [`render-policy.sh`](../harness/security/render-policy.sh) renders the
+  [`render-policy.sh`](../../harness/security/render-policy.sh) renders the
   expected owned-chain bodies from
-  [`policy.v1.env`](../harness/security/policy.v1.env) plus the Docker network
+  [`policy.v1.env`](../../harness/security/policy.v1.env) plus the Docker network
   subnets that exist right now, and
-  [`validate-firewall-state.sh`](../harness/security/validate-firewall-state.sh)
+  [`validate-firewall-state.sh`](../../harness/security/validate-firewall-state.sh)
   requires the live filter table to carry exactly those bodies, reached through
   a bridge-specific jump that is rule 1 of both `INPUT` and `FORWARD`, unique,
   in both IPv4 and IPv6. Live state is read through a root-owned, no-argument
@@ -129,8 +177,8 @@ a bridge without host policy is forbidden.
 ## Operator procedure: local runner
 
 Setup is a documented human procedure, not a script: it runs once per runner,
-needs root, and every property it establishes is re-verified per run by the gate
-above. Before starting:
+needs root, and every property it establishes is re-verified per strict-profile
+run by the gate above. Before starting:
 
 - Use a disposable host and quiesce subject execution while setting it up.
   Never run this on a shared workstation.
@@ -185,8 +233,9 @@ harness/runner-security-check.sh --bucket <registered-public-bucket> \
   --region <bucket-region>
 ```
 
-Step 5 is the acceptance test: it is the same gate every run passes through, so
-a successful setup and a successful run are the same evidence. Re-run steps 1–4
+Step 5 is the acceptance test: it is the same gate every profile-backed local
+run passes through, so a successful setup and a successful run are the same
+evidence. Re-run steps 1–4
 after a reboot, after adding or removing a Docker network, or after changing
 the policy source — the gate fails closed until you do.
 
@@ -232,7 +281,7 @@ action, or by disposing of the dedicated staging filesystem/runner. The host
 must provide util-linux `flock` and GNU `mv` with `--no-copy` and
 `--no-target-directory` support.
 
-## Identity claim
+## Identity claims
 
 Credential starvation in the in-image Python attempt runner remains defense in
 depth: anonymous child processes have AWS credential and profile variables
@@ -240,11 +289,11 @@ removed and metadata discovery disabled, and receive no mounted profiles.
 `AWS_EC2_METADATA_DISABLED=true` is cooperative SDK configuration, not proof
 that the runner is identity-free.
 
-For the `local` adapter, the identity claim rests on using a dedicated non-cloud
-host plus rejection of recognized cloud metadata. A future GCP/AWS adapter must
-prove attachment state through the provider control plane and provide its own
-metadata targets. Metadata blocking and identity proof are deliberately separate:
-a blocked metadata endpoint does not prove that no identity is attached.
+For local Docker, the identity claim rests on rejection of recognized cloud
+metadata and the firewall-backed bridge. For GCP Batch, the claim is different
+and explicit: an identity is attached, its metadata token is available to the
+worker, and IAM bounds that identity to the permissions listed in the Batch
+profile. Metadata denial is neither required nor desired there.
 
 ## The authenticated stratum's AWS credential
 
@@ -340,16 +389,12 @@ its environment is refused rather than recorded, so no anonymous receipt can com
 from a credentialed process. See
 [`harness/README.md`](../../harness/README.md) § Authenticated attempts.
 
-A runner may also hold the credential directly, so that a credentialed case can
-be run rather than only submitted; `runner_reads_aws_credentials` gates it and is
-off unless a deployment asks for it. Custody and execution are separable, and it
-is execution that the profile above constrains: a host holding the credential
-must not also be the host that executes subject containers. Where the two
-coexist on a development box, subjects run on a container network that cannot
-reach the metadata endpoint, the host-level check does not pass because the host
-is a real cloud VM, and the resulting attempts are local development captures
-that do not carry the `s3-listing-study-v1` profile. The provider adapter this
-section calls for remains the prerequisite for anything that claims it.
+A runner may also hold the credential directly so a credentialed case can run
+locally rather than only be submitted; `runner_reads_aws_credentials` gates
+that grant and is off unless a deployment asks for it. A direct run still uses
+the strict local Docker profile, and the selected credential reaches only an
+authenticated attempt through `S3_STUDY_AWS_CREDENTIAL`. Batch uses the separate
+authenticated task identity described above.
 
 ## Residual risk and future work
 
@@ -357,34 +402,35 @@ Accepted for this phase:
 
 - subjects may contact arbitrary public Internet destinations, including an
   attacker-controlled S3 bucket;
-- the shared host kernel and Docker daemon remain part of the trusted computing
-  base;
+- Batch subjects can reach metadata and use their bounded GCP task identity to
+  create objects in the results bucket;
+- for local Docker, the shared host kernel and Docker daemon remain part of the
+  trusted computing base;
 - resource exhaustion (logs, disk, PIDs, sockets/conntrack) is not solved here;
-- credentialed subject execution remains unimplemented.
+- authenticated execution is implemented and has run locally; Batch has the
+  separate authenticated identity and secret grant described above.
 
 Deferred options are S3/exact-bucket-only egress, a transparent S3-aware proxy,
 general Internet denial, mandatory non-root/read-only containers, per-tool VMs
-or microVMs/gVisor, cloud provider adapters, resource/log bounds, and CI. These
-are additions to this contract, not properties of `s3-listing-study-v1`.
+or microVMs/gVisor for local runs, resource/log bounds, and CI. These are
+possible additions, not prerequisites for the cooperative Batch profile.
 
 Future CI has two distinct lanes: ordinary pull-request checks run the static and
 fake-host suites without privileged mutation; a manual or scheduled integration
 runs the full setup procedure and gate on an ephemeral disposable runner
-matching this profile. A generic hosted CI VM is useful for experimentation but is not
-identity or firewall proof unless an adapter validates that environment.
+matching the strict local profile. A generic hosted CI VM is useful for
+experimentation but does not carry the local profile unless that same gate
+passes. Batch integration uses the cooperative Batch profile instead.
 
-## Benchmark gate
+## Local-profile measurement status
 
-A user-defined bridge adds NAT/connection-tracking CPU work; it does not add a
-network round trip. Before benchmark methodology freezes, compare host versus
-bridge using pinned trusted controls only, alternating arms and recording DNS,
-connect, TLS, first-byte, total time, host CPU, conntrack pressure, and socket
-occupancy. Pre-register equivalence/no-regression from the study's meaningful
-effect and variance policy. No third-party subject regains host networking for
-this test, and this document adopts no arbitrary fixed sub-millisecond threshold.
+The strict Docker bridge exists for local diagnostics on the manager/runner
+host. Production comparative measurements run on fresh Batch VMs instead, so a
+host-versus-bridge timing arm is not a benchmark activation gate and local runs
+are not substituted for the declared Batch machine shape.
 
 ## Source policy
 
 The portable CIDRs and reject modes are versioned in
-[`policy.v1.env`](../harness/security/policy.v1.env). The accepted design rationale
+[`policy.v1.env`](../../harness/security/policy.v1.env). The accepted design rationale
 is retained in internal working notes (not published).

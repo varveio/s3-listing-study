@@ -42,41 +42,39 @@ subject image and the subject's own package set is untouched.
 One interpreter for every subject is also one fewer uncontrolled difference in
 the comparison this repository exists to make.
 
-`python_libc` in `image.json` selects which build is bound: an Alpine-based
-subject needs `musl`, a glibc-based one `gnu`. Of the eleven registrations,
-`rclone`, `s3kor` and `s5cmd` are the musl ones. It is declared per capsule
-rather than sniffed, because guessing wrong yields an interpreter that loads on
-the build host and dies inside the subject. `validate_selection.py` runs on the
-bound interpreter during the build and refuses a registration that declares the
-other one.
-
-What matters is the base of the subject's *runtime* stage, not its build stage.
-`s3kor` compiles under golang/glibc and ships `FROM alpine`, so it is `musl`;
-`s7cmd` builds on Alpine but runs on `debian:trixie-slim`, so it is `gnu`.
+`python_libc` in `image.json` selects which build is bound. All eleven current
+registrations use `gnu`: the three former Alpine registrations (`rclone`,
+`s3kor`, and `s5cmd`) moved to the study's pinned glibc base on 2026-08-10.
+It is declared per capsule rather than sniffed, because guessing wrong yields
+an interpreter that loads on the build host and dies inside the subject.
+`validate_selection.py` runs on the bound interpreter during the build and
+refuses a registration that declares the other one.
 
 ## The payload is the worker half of the package
 
 The package is split by which role runs the code, using this system's own
-vocabulary — a Cloud Batch task is the worker, the side that submits and
-collects is the manager. The Dockerfile copies the two layers a worker executes:
+vocabulary — a Cloud Batch task is the worker, while the side that submits jobs
+and reconciles their compact summaries is the manager. The Dockerfile copies
+the two layers a worker executes:
 
 | Layer | Runs | Ships in a subject image |
 | --- | --- | --- |
-| `s3_listing_study/worker/` | as the Batch attempt task, inside the subject image | yes |
+| `s3_listing_study/worker/` | inside the Batch attempt image; execution, post-timing summary, and upload | yes |
 | `s3_listing_study/common/` | reached by both roles | yes |
 | `s3_listing_study/manager/` | on the orchestrating side | no |
 | `s3_listing_study/repo/` | wherever this repository is being edited | no |
 
 The zipapp's entry point is `worker.cli`, and `common/` is exactly the
 intersection: what that entry point and the manager both reach. Verification,
-receipts, collection and upload stay in `manager/`; capsule validation, link
-checking and source-anchor checking are not orchestration at all and stay in
-`repo/`.
+receipts, campaign reconciliation, and comparative reporting stay in
+`manager/`; capsule validation, link checking and source-anchor checking are
+not orchestration at all and stay in `repo/`.
 
 Two things follow, and both matter for a campaign. A subject image carries only
-code an attempt can execute, rather than a GCS client and a DuckDB adapter it can
-never call. And a subject image's digest stops moving when manager-side code is
-edited, so orchestrator work does not invalidate the digests a campaign pins.
+code an attempt needs, including the standard-library GCS uploader and the
+adapter used for its post-timing row count. A subject image's digest also stops
+moving when manager-side code is edited, so orchestrator work does not invalidate
+the digests a campaign pins.
 
 `tests/test_payload_boundary.py` holds the boundary: it fails if anything in the
 shipped layers imports an unshipped one, if a module in `common/` is not

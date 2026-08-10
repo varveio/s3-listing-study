@@ -1,8 +1,9 @@
 # ── Results bucket ────────────────────────────────────────────────────────────
 #
-# Landing zone for everything a campaign produces: attempt artifacts under
-# runs/**, and the frozen campaign manifests the orchestrator writes before
-# submitting anything under manifests/**.
+# Landing zone for everything a campaign produces under campaigns/<campaign>/:
+# frozen plan/manifest objects and authoritative
+# <bucket>/<tool>/<case>/run-<n>/<attempt-uuid>/** trees containing result
+# summaries and raw audit evidence.
 #
 # Versioning is on because the study's rule is that an attempt is never
 # overwritten and a retry is always a new attempt. Versioning does not enforce

@@ -1,14 +1,14 @@
 # ── Batch worker identity ─────────────────────────────────────────────────────
 #
-# The identity each Cloud Batch attempt task runs as, and the real security
-# boundary of the whole design: the submit path may run any image, but only ever
-# as this least-privilege identity.
+# The bounded identity each cooperative Cloud Batch attempt uses. Metadata
+# access is intentional: the in-worker uploader obtains this identity's token
+# there. Its narrow grants limit mistakes without treating the subject as
+# hostile software.
 #
 # The benchmark lists public buckets anonymously, so this identity holds no
 # credentials for any object store under test. "Anonymous" describes the S3
 # authentication stratum, not the absence of a cloud identity — the task still
-# runs as this service account, which is what bounds what a subject image could
-# reach if it tried.
+# runs as this service account, which is what authorizes its GCS upload.
 
 resource "google_service_account" "worker" {
   project      = var.project
@@ -39,8 +39,8 @@ resource "google_artifact_registry_repository_iam_member" "worker_pull" {
 #
 # Overwriting an existing GCS object requires delete as well as create, so
 # withholding delete makes "an attempt is never overwritten" an IAM property
-# rather than a convention the uploader is trusted to honour. A retry is a new
-# attempt at a new prefix, so it needs nothing more.
+# rather than a convention the uploader is trusted to honour. Every worker
+# execution mints a new attempt UUID, so a duplicate execution has a new leaf.
 #
 # There is no viewer role here on purpose: reading results back is the
 # orchestrator's job. A worker writes its own attempt and has no reason to see
