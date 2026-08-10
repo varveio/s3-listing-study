@@ -1,4 +1,4 @@
-"""Worker-owned post-measurement normalization and bounded row counting."""
+"""Worker-owned post-measurement, bounded native row counting."""
 
 from __future__ import annotations
 
@@ -38,44 +38,18 @@ def _install_compatibility_aliases() -> None:
         sys.modules.setdefault(name, module)
 
 
-class _LineCounter:
-    """A write-only binary sink that keeps only a row count."""
-
-    def __init__(self) -> None:
-        self.row_count = 0
-        self.bytes_written = 0
-        self.last_byte: int | None = None
-
-    def writable(self) -> bool:
-        return True
-
-    def write(self, data: bytes) -> int:
-        if not isinstance(data, bytes):
-            raise TypeError("normalizer output must be bytes")
-        self.row_count += data.count(b"\n")
-        self.bytes_written += len(data)
-        if data:
-            self.last_byte = data[-1]
-        return len(data)
-
-    def finish(self) -> int:
-        if self.bytes_written and self.last_byte != ord("\n"):
-            raise SummaryError("normalizer emitted an unterminated contract row")
-        return self.row_count
-
-
-def _load_normalizer(path: Path) -> ModuleType:
+def _load_adapter(path: Path) -> ModuleType:
     if not path.is_file():
-        raise SummaryError(f"normalizer path is not a file: {path}")
+        raise SummaryError(f"adapter path is not a file: {path}")
     _install_compatibility_aliases()
-    name = f"_s3_study_normalizer_{uuid.uuid4().hex}"
+    name = f"_s3_study_summary_adapter_{uuid.uuid4().hex}"
     spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
-        raise SummaryError(f"could not load normalizer: {path}")
+        raise SummaryError(f"could not load adapter: {path}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    if not callable(getattr(module, "normalize", None)):
-        raise SummaryError(f"normalizer exports no callable normalize(): {path}")
+    if not callable(getattr(module, "count_rows", None)):
+        raise SummaryError(f"adapter exports no callable count_rows(): {path}")
     return module
 
 
@@ -98,45 +72,41 @@ def _observed_duckdb_version() -> str | None:
 
 def _count(
     *,
-    normalizer_path: Path,
+    adapter_path: Path,
     mode: str,
     prefix: str,
     stdout_path: Path,
-    dataset_path: Path | None,
+    native_root: Path | None,
 ) -> tuple[int, str]:
-    module = _load_normalizer(normalizer_path)
-    normalize: Any = module.normalize
-    counter = _LineCounter()
-    if dataset_path is not None:
-        returncode = normalize(counter, b"", mode, prefix, str(dataset_path))
-    else:
-        with existing_input_path(str(stdout_path)), mapped_input(str(stdout_path)) as data:
-            returncode = normalize(counter, data, mode, prefix)
-    if returncode != 0:
-        raise SummaryError(f"normalizer returned {returncode}")
-    return counter.finish(), _duckdb_version()
+    module = _load_adapter(adapter_path)
+    count_rows: Any = module.count_rows
+    with existing_input_path(str(stdout_path)), mapped_input(str(stdout_path)) as data:
+        row_count = count_rows(data, mode, prefix, str(native_root) if native_root else "")
+    if isinstance(row_count, bool) or not isinstance(row_count, int) or row_count < 0:
+        raise SummaryError("count_rows() must return a nonnegative integer")
+    return row_count, _duckdb_version()
 
 
 def summarize(
     *,
     outcome_status: str,
     adapter_bundle_sha256: str,
-    normalizer_path: Path | None,
+    adapter_path: Path | None,
     mode: str | None,
     prefix: str | None,
     stdout_path: Path,
-    dataset_path: Path | None,
+    native_root: Path | None,
 ) -> dict[str, object]:
-    """Return the typed summary embedded in ``result.json``.
+    """Return the typed count-only summary embedded in ``result.json``.
 
     Tool failures and partial runs are deliberately not counted: their raw
-    output remains evidence, but its line count is not the target's row count.
-    A normalizer failure is separate from the tool outcome and is returned as
-    ``status=error`` so the engine can retain all artifacts and use its distinct
-    post-attempt exit policy.
+    output remains evidence, but its row count is not the target's completed
+    logical object count. A counting failure is separate from the tool outcome
+    and is returned as ``status=error`` so the engine can retain all artifacts
+    and use its distinct post-attempt exit policy.
     """
     base: dict[str, object] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "status": "skipped",
         "row_count": None,
         "reason": None,
@@ -148,8 +118,8 @@ def summarize(
     if outcome_status != "completed":
         base["reason"] = f"tool_outcome_{outcome_status}"
         return base
-    if normalizer_path is None:
-        base["reason"] = "normalizer_not_configured"
+    if adapter_path is None:
+        base["reason"] = "adapter_not_configured"
         return base
     if mode is None:
         base["status"] = "error"
@@ -157,11 +127,11 @@ def summarize(
         return base
     try:
         row_count, version = _count(
-            normalizer_path=normalizer_path,
+            adapter_path=adapter_path,
             mode=mode,
             prefix=prefix or "",
             stdout_path=stdout_path,
-            dataset_path=dataset_path,
+            native_root=native_root,
         )
     except Exception as exc:  # adapter errors must remain data, not erase evidence
         base["status"] = "error"
@@ -169,7 +139,7 @@ def summarize(
         # fragments. Keep the small routinely-read result free of raw keys;
         # the retained raw artifact and Batch diagnostics remain available for
         # a targeted investigation.
-        base["error"] = {"code": "normalizer_failed", "type": type(exc).__name__}
+        base["error"] = {"code": "row_count_failed", "type": type(exc).__name__}
         return base
     base.update(status="counted", row_count=row_count, duckdb_version=version)
     return base

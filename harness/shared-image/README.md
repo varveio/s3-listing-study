@@ -6,11 +6,13 @@ image. It contains only:
 - a digest-pinned Debian/glibc userspace;
 - the Debian CA trust store and minimal runtime libraries;
 - one checksum-verified python-build-standalone CPython 3.12 distribution; and
-- one checksum-verified DuckDB runtime for that interpreter.
+- one checksum-verified DuckDB runtime for that interpreter; and
+- one checksum-verified ijson 3.5.1 runtime with its compiled `yajl2_c` backend.
 
 It contains no tool, worker, adapter, manager, benchmark plan, or receipt. Its
-Debian packages resolve from one signed snapshot and are version-pinned; Python
-and DuckDB archives are checksum-verified before they enter the build.
+Debian packages resolve from one signed snapshot and are version-pinned; the
+Python archive and the DuckDB and ijson wheels are checksum-verified before they
+enter the build.
 
 This is a common base filesystem, not a claim that every tool uses the same
 runtime internals. Static binaries and bundled Node, Python, or JRE payloads may

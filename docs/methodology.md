@@ -25,13 +25,20 @@ results. Future material measurement-rule changes are dated in this document.
 **Material methodology change — 2026-08-10.** The production campaign shape is
 now one scheduled run per case (`reps: 1`), each on a fresh GCP Batch VM of the
 same declared machine type and resources as its comparison peers. There are no
-cold/warm arms. VM and container startup, worker normalization and row
-counting, compression, upload, and manager post-processing are outside `elapsed_ns`;
+cold/warm arms. VM and container startup, worker native-row counting,
+compression, upload, and manager post-processing are outside `elapsed_ns`;
 `elapsed_ns` covers the subject child from launch through reap, including its
 own output work. Benchmark buckets must be large enough that fixed process-launch
 overhead is insignificant. This replaces the earlier one-box, cold/warm, and
 repeat-to-estimate-variance rules below; the output-mode and concurrency-sweep
 decisions are unchanged.
+
+Routine attempts do not normalize or convert listing output. After the timed
+subject exits successfully, the selected adapter's `count_rows` path applies
+the same mode-specific row selection as its verifier normalizer but computes
+only a count. The worker retains and uploads the original stdout, stderr, and
+native directory output. Five-field normalization is manager-side work invoked
+only for explicit correctness verification.
 
 Required routine campaign reporting is summary-only. The campaign model owns a
 `run-<n>` ordinal for each scheduled run (`run-1` under the current policy),

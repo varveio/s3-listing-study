@@ -51,10 +51,17 @@ agree on the number, and the receipt already fixed which number it is.
 
 from __future__ import annotations
 
+import re
 import sys
 from typing import IO
 
-from s3_listing_study.manager.duckdb_adapter import connect, emit_result, staged
+from s3_listing_study.manager.duckdb_adapter import (
+    connect,
+    count_lf_lines,
+    count_query,
+    emit_result,
+    staged,
+)
 from s3_listing_study.manager.normalizer_cli import normalizer_main
 
 UNKNOWN_MODE_EXIT = 64
@@ -91,6 +98,32 @@ QUERIES = {
         FROM read_json($path, format = 'newline_delimited', columns = {S3P_JSON_COLUMNS})
     """,
 }
+
+
+def count_rows(data: bytes, mode: str, prefix: str = "", native_root: str = "") -> int:
+    import duckdb
+
+    if mode == "summarize":
+        return 0
+    if mode == "ls":
+        return count_lf_lines(data, bool)
+    if mode == "ls-long":
+        fields = re.compile(rb"[ \t]+")
+
+        def selected(line: bytes) -> bool:
+            stripped = line.strip(b" ")
+            return bool(stripped) and len(fields.split(stripped)) >= 4
+
+        return count_lf_lines(data, selected)
+    if mode not in QUERIES:
+        raise ValueError(f"unknown mode: {mode}")
+    with staged(data) as path:
+        try:
+            return count_query(connect(), QUERIES[mode], {"path": path})
+        except duckdb.Error as exc:
+            if mode != "ls-raw":
+                raise
+            raise ValueError(f"input is not the NDJSON ls --raw writes: {exc}") from exc
 
 
 def normalize(out: IO[bytes], data: bytes, mode: str, prefix: str = "") -> int:

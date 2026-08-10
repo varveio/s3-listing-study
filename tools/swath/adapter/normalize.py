@@ -46,7 +46,13 @@ from pathlib import Path
 from typing import IO
 
 from s3_listing_study.manager.contract import ContractViolation
-from s3_listing_study.manager.duckdb_adapter import connect, emit_result, staged
+from s3_listing_study.manager.duckdb_adapter import (
+    connect,
+    count_query,
+    emit_result,
+    iter_lf_lines,
+    staged,
+)
 from s3_listing_study.manager.normalizer_cli import normalizer_main
 
 UNKNOWN_MODE_EXIT = 2
@@ -168,24 +174,92 @@ PARQUET_QUERY = """
     WHERE coalesce("row_type", 'OBJECT') = 'OBJECT'
 """
 
+PARQUET_COUNT_QUERY = """
+    SELECT count(*)
+    FROM read_parquet($glob)
+    WHERE coalesce("row_type", 'OBJECT') = 'OBJECT'
+"""
+
+
+def _dataset_root(dataset: str) -> Path:
+    """Accept either Swath's dataset root or the native parent containing it."""
+    root = Path(dataset)
+    if (root / "_SUCCESS").is_file() or (root / "data").is_dir():
+        return root
+    listing = root / "listing"
+    if listing.exists():
+        return listing
+    return root
+
+
+def _dataset_parts(dataset: str) -> tuple[Path, list[Path]]:
+    root = _dataset_root(dataset)
+    if not (root / "_SUCCESS").is_file():
+        raise ValueError(
+            f"dataset has no _SUCCESS marker under {root}; the swath run did not finish writing it"
+        )
+    parts = sorted(root.glob("data/*.parquet"))
+    if not parts:
+        raise ValueError(f"no Parquet parts under {root / 'data'}")
+    return root, parts
+
+
+def count_rows(data: bytes, mode: str, prefix: str = "", native_root: str = "") -> int:
+    if mode in PARQUET_MODES:
+        import duckdb
+
+        try:
+            _root, parts = _dataset_parts(native_root)
+            row = (
+                connect()
+                .execute(PARQUET_COUNT_QUERY, {"glob": [str(part) for part in parts]})
+                .fetchone()
+            )
+        except (ValueError, duckdb.Error) as exc:
+            raise ValueError(f"dataset is not countable Parquet: {exc}") from exc
+        if row is None or not isinstance(row[0], int):  # pragma: no cover - DuckDB invariant
+            raise RuntimeError("DuckDB count query returned no integer row")
+        return row[0]
+    if mode == "recursive-table":
+        count = 0
+        for number, line in enumerate(iter_lf_lines(data), 1):
+            if not line:
+                continue
+            if len(line) < 43:
+                raise ContractViolation(f"table line {number} is shorter than 43 bytes")
+            if line[14:16] != b"  " or line[40:42] != b"  ":
+                raise ContractViolation(f"table line {number} has overflowing fixed-width columns")
+            key = line[42:]
+            if CONTROL_ESCAPE.search(key):
+                raise ContractViolation(
+                    "text-sink key carries an ambiguous swath \\xHH control escape; "
+                    "use recursive-jsonl",
+                    field="key",
+                )
+            size = line[:14].strip(b" ")
+            count += bool(key) and size not in (b"", b"-", b"PRE")
+        return count
+    if mode in TSV_MODES:
+        sql = QUERIES["tsv"]
+    elif mode in QUERIES:
+        sql = QUERIES[mode]
+    else:
+        raise ValueError(f"unknown mode: {mode}")
+    validate_text_framing(data, mode)
+    with staged(data) as path:
+        return count_query(connect(), sql, {"path": path})
+
 
 def _normalize_dataset(out: IO[bytes], mode: str, dataset: str) -> int:
     import duckdb
 
-    root = Path(dataset)
     # swath writes _SUCCESS last, after the manifest (v0.2.2). Without it the
     # dataset is a killed run's valid-but-short parts, which would normalize
     # cleanly into a short listing the verifier would blame on the tool.
-    if not (root / "_SUCCESS").is_file():
-        print(
-            f"normalize.py: dataset has no _SUCCESS marker under {root}; "
-            "the swath run did not finish writing it",
-            file=sys.stderr,
-        )
-        return UNREADABLE_EXIT
-    parts = sorted(root.glob("data/*.parquet"))
-    if not parts:
-        print(f"normalize.py: no Parquet parts under {root / 'data'}", file=sys.stderr)
+    try:
+        _root, parts = _dataset_parts(dataset)
+    except ValueError as exc:
+        print(f"normalize.py: {exc}", file=sys.stderr)
         return UNREADABLE_EXIT
     try:
         result = connect().execute(PARQUET_QUERY, {"glob": [str(part) for part in parts]})

@@ -1,7 +1,7 @@
 {
   "tool": "s5cmd",
   "tool_version": "v2.3.0",
-  "shared_base_source_sha256": "a2643461eead4bcdafa978c63730b90ff77376d8ac7df6e1da6d90d7170f658b",
+  "shared_base_source_sha256": "c953a4b672ffb9cabad1d5e9cd86081790489e6494362883d93c337590c16d1f",
   "tool_build_sha256": "15ce0d0dc7c7c40e1664f9896fb3fd9f0620cb599ced9ea85653fd72e95993f9",
   "tool_artifact": {"kind":"release-archive","locator":"https://github.com/peak/s5cmd/releases/download/v2.3.0/s5cmd_2.3.0_Linux-64bit.tar.gz","sha256":"de0fdbfa3aceae55e069ba81a0fc17b2026567637603734a387b2fca06c299b4"},
   "subject_workdir": "/aws",
@@ -10,5 +10,5 @@
   ],
   "command": "adapter/command.py",
   "normalizer": "adapter/normalize.py",
-  "adapter_bundle_sha256": "2333d9bec7417d1d4346590448552a1bbe224e1e429009dd4b512bebfded8b47"
+  "adapter_bundle_sha256": "d1fd7fc7b7cfbc5c484f915525b02fdbcc0ac36fddc11ef54a0363299b76a983"
 }

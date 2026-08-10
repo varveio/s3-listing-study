@@ -291,11 +291,15 @@ inspection and normal `--help`, not as a scheduler transport.
 Optional concurrency is a typed logical field, never an environment lookup.
 Adapters reject it unless they explicitly declare a supported range.
 
-`adapter/normalize.py` converts the tool's native output into the historical
-verifier's normalized stream. Each module keeps its library `normalize`
-function clean and uses the shared argparse boundary in
-`s3_listing_study.manager.normalizer_cli`. That stream is an executable compatibility
-boundary, not a stored canonical result.
+`adapter/normalize.py` owns both native row selection and explicit verifier
+conversion. Its `count_rows(data, mode, prefix="", native_root="") -> int`
+library function counts the selected native rows without constructing the
+historical five-field records; this is the only path routine worker attempts
+invoke. Its separate `normalize` library function converts the same selected
+rows into the verifier's normalized stream and uses the shared argparse boundary
+in `s3_listing_study.manager.normalizer_cli`. Normalization is explicit
+manager-side verification work, not part of a routine attempt, and its stream
+is an executable compatibility boundary rather than a stored canonical result.
 
 `adapter/fixtures/` is allowed only for synthetic adapter QA that already
 exists. Observed captures remain receipts. The current classified exceptions
@@ -310,7 +314,8 @@ digest-pinned builder or runtime stages are allowed; upstream tool images are
 not execution bases or artifact donors.
 
 The stable base in `harness/shared-image/` contains the pinned Debian/glibc
-userspace, CA trust, CPython, and DuckDB, but no tool or worker. The common final
+userspace, CA trust, CPython, DuckDB, and the pinned compiled ijson runtime, but
+no tool or worker. The common final
 recipe in `harness/derived-image/` starts from that same base, applies
 `/tool-root`, and adds current `worker/`, worker-reachable `common/`, one
 adapter, and `image.json` as `selection.json`. Tool capsules do not copy either

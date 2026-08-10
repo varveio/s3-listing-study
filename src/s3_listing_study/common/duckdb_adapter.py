@@ -29,8 +29,9 @@ C-escaped into a key the bucket does not hold.
 from __future__ import annotations
 
 import contextvars
+import io
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Callable, Collection, Iterator
 from contextlib import contextmanager
 from typing import IO, Any, Protocol
 
@@ -38,6 +39,9 @@ from .contract import FIELD_NAMES, RECORD_SEPARATOR, ContractViolation, Record
 
 FETCH_BATCH = 10_000
 """Rows per ``fetchmany``. Bounds memory on a full-bucket listing."""
+
+LINE_CHUNK_SIZE = 64 * 1024
+"""Bytes read at once by the binary-safe count-only line iterator."""
 
 
 class ResultSet(Protocol):
@@ -173,3 +177,113 @@ def emit_result(out: IO[bytes], result: ResultSet) -> None:
         if not rows:
             return
         out.write(RECORD_SEPARATOR.join(_line(row) for row in rows) + RECORD_SEPARATOR)
+
+
+def count_query(connection: Any, sql: str, params: dict[str, Any] | None = None) -> int:
+    """Count a reader/filter query without materialising its projected records.
+
+    Capsule queries define which native rows are listing rows. Wrapping that
+    exact relation in ``count(*)`` preserves those filters while letting DuckDB
+    prune the five-field projection used only by explicit normalization.
+    """
+    row = connection.execute(
+        f"SELECT count(*) FROM ({sql}) AS listing_rows", dict(params or {})
+    ).fetchone()
+    if row is None or not isinstance(row[0], int):  # pragma: no cover - DuckDB invariant
+        raise RuntimeError("DuckDB count query returned no integer row")
+    return row[0]
+
+
+def iter_lf_lines(data: bytes | Any, chunk_size: int = LINE_CHUNK_SIZE) -> Iterator[bytes]:
+    """Yield the exact ``str_split(content, chr(10))`` framing, chunk by chunk.
+
+    NUL and every other non-LF byte are payload. The final remainder is always
+    yielded, including the empty remainder after a trailing LF and the sole
+    empty line of a zero-byte input. Memory is bounded by one input chunk plus
+    the longest physical line.
+    """
+    if chunk_size <= 0:
+        raise ValueError("line chunk size must be positive")
+    offset = 0
+    buffered = bytearray()
+    while True:
+        if isinstance(data, bytes):
+            chunk = data[offset : offset + chunk_size]
+            offset += len(chunk)
+        else:
+            chunk = data.read(chunk_size)
+        if not chunk:
+            yield bytes(buffered)
+            return
+        start = 0
+        while True:
+            boundary = chunk.find(b"\n", start)
+            if boundary < 0:
+                buffered.extend(chunk[start:])
+                break
+            buffered.extend(chunk[start:boundary])
+            yield bytes(buffered)
+            buffered.clear()
+            start = boundary + 1
+
+
+def count_lf_lines(data: bytes | Any, predicate: Callable[[bytes], bool]) -> int:
+    """Count selected physical lines without decoding or constructing records."""
+    return sum(predicate(line) for line in iter_lf_lines(data))
+
+
+def count_top_level_json_arrays(data: bytes | Any, names: Collection[str]) -> dict[str, int]:
+    """Count selected arrays with ijson's explicit C-backed incremental parser."""
+    try:
+        from ijson.backends import yajl2_c
+        from ijson.common import JSONError
+    except ImportError as exc:  # pragma: no cover - packaging/runtime failure
+        raise RuntimeError("ijson's required yajl2_c backend is unavailable") from exc
+
+    wanted = set(names)
+    counts = dict.fromkeys(wanted, 0)
+    seen: set[str] = set()
+    source = io.BytesIO(data) if isinstance(data, bytes) else data
+    try:
+        events = yajl2_c.basic_parse(source)
+        first = next(events, None)
+        if first != ("start_map", None):
+            raise ValueError("malformed JSON: expected one top-level object")
+        stack: list[tuple[str, str | None]] = [("map", None)]
+        pending_key: str | None = None
+        value_events = {"start_map", "start_array", "string", "number", "boolean", "null"}
+        for event, value in events:
+            if event == "map_key":
+                if len(stack) == 1:
+                    pending_key = value
+                continue
+            selected_array = stack[-1][1] if stack and stack[-1][0] == "array" else None
+            if selected_array is not None and event in value_events:
+                if event != "start_map":
+                    raise ValueError(
+                        f"top-level JSON field {selected_array!r} contains a non-object item"
+                    )
+                counts[selected_array] += 1
+            selected_field = pending_key if len(stack) == 1 and pending_key in wanted else None
+            array_field: str | None = None
+            if selected_field is not None and event in value_events:
+                if selected_field in seen:
+                    raise ValueError(f"duplicate top-level JSON field {selected_field!r}")
+                seen.add(selected_field)
+                if event == "start_array":
+                    array_field = selected_field
+                elif event != "null":
+                    raise ValueError(
+                        f"top-level JSON field {selected_field!r} is not an array or null"
+                    )
+            if len(stack) == 1 and event in value_events:
+                pending_key = None
+            if event == "start_map":
+                stack.append(("map", None))
+            elif event == "start_array":
+                stack.append(("array", array_field))
+            elif event in {"end_map", "end_array"}:
+                stack.pop()
+    except JSONError as exc:
+        raise ValueError(f"malformed JSON: {exc}") from exc
+    return counts

@@ -48,10 +48,17 @@ is fair game here — never inside a timed window.
 
 from __future__ import annotations
 
+import re
 import sys
 from typing import IO
 
-from s3_listing_study.manager.duckdb_adapter import connect, emit_result, staged
+from s3_listing_study.manager.duckdb_adapter import (
+    connect,
+    count_lf_lines,
+    count_query,
+    emit_result,
+    staged,
+)
 from s3_listing_study.manager.normalizer_cli import normalizer_main
 
 UNKNOWN_MODE_EXIT = 3
@@ -139,6 +146,24 @@ QUERIES = {
         FROM scoped
     """,
 }
+
+
+def count_rows(data: bytes, mode: str, prefix: str = "", native_root: str = "") -> int:
+    if mode == "find":
+        blank = re.compile(rb"^[ \t\r\v\f]*$")
+        return count_lf_lines(data, lambda line: blank.match(line) is None)
+    if mode in TEXT_MODES:
+        row = re.compile(rb"^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC\]\s*\S+.*$")
+        return count_lf_lines(data, lambda line: row.match(line) is not None)
+    if mode in JSON_MODES:
+        sql = QUERIES["json"]
+    elif mode in QUERIES:
+        sql = QUERIES[mode]
+    else:
+        raise ValueError(f"unknown mode: {mode}")
+    with staged(data) as path:
+        params = {"path": path} | ({"pfx": prefix.removeprefix("/")} if "$pfx" in sql else {})
+        return count_query(connect(), sql, params)
 
 
 def normalize(out: IO[bytes], data: bytes, mode: str, prefix: str) -> int:

@@ -38,7 +38,13 @@ from __future__ import annotations
 import sys
 from typing import IO
 
-from s3_listing_study.manager.duckdb_adapter import connect, emit_result, staged
+from s3_listing_study.manager.duckdb_adapter import (
+    connect,
+    count_lf_lines,
+    count_query,
+    emit_result,
+    staged,
+)
 from s3_listing_study.manager.normalizer_cli import normalizer_main
 
 UNKNOWN_MODE_EXIT = 3
@@ -98,6 +104,19 @@ QUERIES = {
         WHERE contains(line, ';')
     """,
 }
+
+
+def count_rows(data: bytes, mode: str, prefix: str = "", native_root: str = "") -> int:
+    if mode == "lsf":
+        return count_lf_lines(data, lambda line: b";" in line)
+    if mode in RECURSIVE_MODES:
+        sql = QUERIES["recursive"]
+    elif mode in QUERIES:
+        sql = QUERIES[mode]
+    else:
+        raise ValueError(f"unknown mode: {mode}")
+    with staged(data) as path:
+        return count_query(connect(), sql, {"path": path, "pfx": prefix})
 
 
 def normalize(out: IO[bytes], data: bytes, mode: str, prefix: str) -> int:

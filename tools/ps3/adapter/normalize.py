@@ -60,7 +60,12 @@ from __future__ import annotations
 import sys
 from typing import IO
 
-from s3_listing_study.manager.duckdb_adapter import connect, emit_result, staged
+from s3_listing_study.manager.duckdb_adapter import (
+    connect,
+    count_lf_lines,
+    emit_result,
+    staged,
+)
 from s3_listing_study.manager.normalizer_cli import normalizer_main
 
 UNKNOWN_MODE_EXIT = 2
@@ -85,6 +90,12 @@ QUERY = rf"""
           FROM (SELECT str_split(line, chr(9)) AS f
                 FROM {LINES} WHERE starts_with(line, 'Object: ')))
 """
+
+
+def count_rows(data: bytes, mode: str, prefix: str = "", native_root: str = "") -> int:
+    if mode not in MODES:
+        raise ValueError(f"unknown mode: {mode}")
+    return count_lf_lines(data, lambda line: line.startswith(b"Object: "))
 
 
 def normalize(out: IO[bytes], data: bytes, mode: str, prefix: str = "") -> int:

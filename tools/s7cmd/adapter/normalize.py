@@ -44,7 +44,13 @@ from __future__ import annotations
 import sys
 from typing import IO
 
-from s3_listing_study.manager.duckdb_adapter import connect, emit_result, staged
+from s3_listing_study.manager.duckdb_adapter import (
+    connect,
+    count_lf_lines,
+    count_query,
+    emit_result,
+    staged,
+)
 from s3_listing_study.manager.normalizer_cli import normalizer_main
 
 UNKNOWN_MODE_EXIT = 3
@@ -122,6 +128,26 @@ QUERIES = {
         SELECT line, NULL, NULL, NULL, NULL FROM {LINES} WHERE line <> ''
     """,
 }
+
+
+def count_rows(data: bytes, mode: str, prefix: str = "", native_root: str = "") -> int:
+    if mode in TSV_MODES or mode == "recursive-one":
+        return count_lf_lines(data, bool)
+    if mode == "recursive-aligned":
+
+        def selected(line: bytes) -> bool:
+            if len(line) < 43:
+                return False
+            date = line[:25].strip(b" ")
+            size_or_marker = line[27:41].strip(b" ")
+            key = line[43:]
+            return bool(key) and (size_or_marker == b"PRE" or bool(date and size_or_marker))
+
+        return count_lf_lines(data, selected)
+    if mode != "recursive-json":
+        raise ValueError(f"unknown mode: {mode}")
+    with staged(data) as path:
+        return count_query(connect(), QUERIES["recursive-json"], {"path": path})
 
 
 def normalize(out: IO[bytes], data: bytes, mode: str, prefix: str = "") -> int:

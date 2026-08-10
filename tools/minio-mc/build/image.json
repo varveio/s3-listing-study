@@ -1,7 +1,7 @@
 {
   "tool": "minio-mc",
   "tool_version": "RELEASE.2025-08-13T08-35-41Z",
-  "shared_base_source_sha256": "a2643461eead4bcdafa978c63730b90ff77376d8ac7df6e1da6d90d7170f658b",
+  "shared_base_source_sha256": "c953a4b672ffb9cabad1d5e9cd86081790489e6494362883d93c337590c16d1f",
   "tool_build_sha256": "eb6be6e1d203d4766c61c4ffa894a186609416d6d482aae9b2cdab041ab28066",
   "tool_artifact": {"kind":"release-binary","locator":"https://dl.min.io/client/mc/release/linux-amd64/archive/mc.RELEASE.2025-08-13T08-35-41Z","sha256":"01f866e9c5f9b87c2b09116fa5d7c06695b106242d829a8bb32990c00312e891"},
   "subject_workdir": "/",
@@ -10,5 +10,5 @@
   ],
   "command": "adapter/command.py",
   "normalizer": "adapter/normalize.py",
-  "adapter_bundle_sha256": "12d0fb6c2d0b843e28d3efdb316b609f5895a6e16237de061dac3e99bd852f59"
+  "adapter_bundle_sha256": "34480cae78505a9fcb9094fee81303e0380ac7151b6dbf66d831247ae66a55a1"
 }

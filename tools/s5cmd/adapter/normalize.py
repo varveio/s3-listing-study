@@ -41,10 +41,17 @@ is fair game here — never inside a timed window.
 
 from __future__ import annotations
 
+import re
 import sys
 from typing import IO
 
-from s3_listing_study.manager.duckdb_adapter import connect, emit_result, staged
+from s3_listing_study.manager.duckdb_adapter import (
+    connect,
+    count_lf_lines,
+    count_query,
+    emit_result,
+    staged,
+)
 from s3_listing_study.manager.normalizer_cli import normalizer_main
 
 UNKNOWN_MODE_EXIT = 2
@@ -125,6 +132,26 @@ QUERIES = {
         WHERE "type" IS DISTINCT FROM 'dir'
     """,
 }
+
+
+def count_rows(data: bytes, mode: str, prefix: str = "", native_root: str = "") -> int:
+    if mode == "fullpath":
+        return count_lf_lines(data, bool)
+    if mode in RECURSIVE_MODES | {"allversions", "delimiter"}:
+        fields = re.compile(rb"[ \t]+")
+
+        def selected(line: bytes) -> bool:
+            stripped = line.strip(b" ")
+            if not stripped:
+                return False
+            first = fields.split(stripped, maxsplit=1)[0]
+            return mode == "delimiter" or first != b"DIR"
+
+        return count_lf_lines(data, selected)
+    if mode != "json":
+        raise ValueError(f"unknown mode: {mode}")
+    with staged(data) as path:
+        return count_query(connect(), QUERIES["json"], {"path": path})
 
 
 def normalize(out: IO[bytes], data: bytes, mode: str, prefix: str) -> int:

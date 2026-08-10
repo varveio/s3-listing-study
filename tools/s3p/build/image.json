@@ -1,7 +1,7 @@
 {
   "tool": "s3p",
   "tool_version": "3.7.2",
-  "shared_base_source_sha256": "a2643461eead4bcdafa978c63730b90ff77376d8ac7df6e1da6d90d7170f658b",
+  "shared_base_source_sha256": "c953a4b672ffb9cabad1d5e9cd86081790489e6494362883d93c337590c16d1f",
   "tool_build_sha256": "2d65eafb0b8e277ea6dd1a7c314d389631223963c6dbe9924952b64afc10b2d1",
   "tool_artifact": {"kind":"npm-package","locator":"https://registry.npmjs.org/s3p/-/s3p-3.7.2.tgz","sha256":"56e51536d2d34fa2988e53e04b2eb0a81aee695abe8fe4525ec0cc879ef24a51"},
   "subject_workdir": "/",
@@ -10,5 +10,5 @@
   ],
   "command": "adapter/command.py",
   "normalizer": "adapter/normalize.py",
-  "adapter_bundle_sha256": "73d335578db3a749baec4981b8c1e1204a7f90476cc7965832247f01a0f66d67"
+  "adapter_bundle_sha256": "d42157f2fbdff3b818d7a103e639fe972da3134f7dea8785b80938e472d68123"
 }

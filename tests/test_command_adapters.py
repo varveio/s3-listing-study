@@ -29,6 +29,7 @@ from s3_listing_study.common.command_adapter import (
     CommandRequest,
     load_command_adapter,
 )
+from s3_listing_study.common.ijson_runtime import IjsonRuntimeError
 
 REPO = Path(__file__).resolve().parents[1]
 TOOLS = (
@@ -684,16 +685,47 @@ def test_shared_base_builder_embeds_its_canonical_source_hash(
 ) -> None:
     python = tmp_path / "python"
     duckdb = tmp_path / "duckdb"
+    ijson = tmp_path / "ijson"
     python.mkdir()
     duckdb.mkdir()
+    ijson.mkdir()
     monkeypatch.setattr(build_selection, "ensure_runtime", lambda *_args: python)
     monkeypatch.setattr(build_selection, "ensure_duckdb", lambda *_args: duckdb)
+    monkeypatch.setattr(build_selection, "ensure_ijson", lambda *_args: ijson)
 
     expected = build_selection.shared_base_source_sha256(REPO)
     command = build_selection.shared_base_build_command(REPO, "study/base:test")
 
     index = command.index("--build-arg")
     assert command[index + 1] == f"SHARED_BASE_SOURCE_SHA256={expected}"
+    assert f"python={python}" in command
+    assert f"duckdb={duckdb}" in command
+    assert f"ijson={ijson}" in command
+
+
+def test_shared_base_source_hash_includes_ijson_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: list[tuple[Path, ...]] = []
+
+    def observe(_root: Path, inputs: tuple[Path, ...], _header: bytes) -> str:
+        observed.append(inputs)
+        return "0" * 64
+
+    monkeypatch.setattr(build_selection, "_input_bundle_sha256", observe)
+    assert build_selection.shared_base_source_sha256(REPO) == "0" * 64
+    assert REPO / "src/s3_listing_study/common/ijson_runtime.py" in observed[0]
+
+
+def test_shared_base_cli_reports_ijson_staging_failure(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def fail(_root: Path, _tag: str) -> tuple[str, ...]:
+        raise IjsonRuntimeError("locked ijson unavailable")
+
+    monkeypatch.setattr(build_selection, "shared_base_build_command", fail)
+    assert build_selection.build_shared_image_main(["--tag", "study/base:test"]) == 2
+    assert capsys.readouterr().err == "build-shared-image: locked ijson unavailable\n"
 
 
 def test_shared_base_recipe_pins_apt_snapshot_and_marker_contract() -> None:
@@ -712,6 +744,11 @@ def test_shared_base_recipe_pins_apt_snapshot_and_marker_contract() -> None:
         assert package in dockerfile
     assert "ARG SHARED_BASE_SOURCE_SHA256" in dockerfile
     assert "> /opt/s3-listing-study/shared-base-source.sha256" in dockerfile
+    assert "COPY --from=ijson . /opt/s3-listing-study/python/lib/python3.12/site-packages/" in (
+        dockerfile
+    )
+    assert "ijson.__version__ == '3.5.1'" in dockerfile
+    assert "ijson.backend == 'yajl2_c'" in dockerfile
 
 
 def test_final_selection_validates_exact_shared_base_marker(tmp_path: Path) -> None:

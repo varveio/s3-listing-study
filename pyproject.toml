@@ -8,6 +8,9 @@ license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 dependencies = [
     "duckdb>=1.1",
+    # AWS's buffered JSON output is counted incrementally after timing. Require
+    # ijson's compiled YAJL backend so this cannot silently fall back to Python.
+    "ijson==3.5.1",
     # s3_listing_study.repo.capsule validates tool.json/claims.json against the
     # Draft 2020-12 schemas in schemas/; the capsule gate is a real dependency
     # of this package, not something the CI runner provisions on the side.
@@ -78,6 +81,10 @@ warn_unreachable = true
 
 [[tool.mypy.overrides]]
 module = "duckdb.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "ijson.*"
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

@@ -28,6 +28,8 @@ from s3_listing_study import __version__
 from s3_listing_study.common.command_adapter import CommandAdapterError, load_command_adapter
 from s3_listing_study.common.duckdb_runtime import DuckDBRuntimeError
 from s3_listing_study.common.duckdb_runtime import ensure_runtime as ensure_duckdb
+from s3_listing_study.common.ijson_runtime import IjsonRuntimeError
+from s3_listing_study.common.ijson_runtime import ensure_runtime as ensure_ijson
 from s3_listing_study.common.python_runtime import PythonRuntimeError, ensure_runtime
 
 SLUG_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
@@ -342,6 +344,7 @@ def shared_base_source_sha256(root: Path) -> str:
             root / "harness/shared-image/docker-bake.hcl",
             root / "src/s3_listing_study/common/python_runtime.py",
             root / "src/s3_listing_study/common/duckdb_runtime.py",
+            root / "src/s3_listing_study/common/ijson_runtime.py",
         ),
         b"s3-listing-study-shared-base-input-v1\0",
     )
@@ -428,6 +431,7 @@ def shared_base_build_command(root: Path, tag: str) -> tuple[str, ...]:
     source_sha256 = shared_base_source_sha256(root)
     interpreter = ensure_runtime(platform.machine(), "gnu")
     duckdb_runtime = ensure_duckdb(platform.machine())
+    ijson_runtime = ensure_ijson(platform.machine())
     return (
         "docker",
         "build",
@@ -439,6 +443,8 @@ def shared_base_build_command(root: Path, tag: str) -> tuple[str, ...]:
         f"python={interpreter}",
         "--build-context",
         f"duckdb={duckdb_runtime}",
+        "--build-context",
+        f"ijson={ijson_runtime}",
         "--tag",
         tag,
         str(root),
@@ -454,7 +460,7 @@ def build_shared_image_main(argv: Sequence[str] | None = None) -> int:
     try:
         root = Path.cwd().resolve(strict=True)
         command = shared_base_build_command(root, args.tag)
-    except (BuildSelectionError, DuckDBRuntimeError, PythonRuntimeError) as exc:
+    except (BuildSelectionError, DuckDBRuntimeError, IjsonRuntimeError, PythonRuntimeError) as exc:
         print(f"build-shared-image: {exc}", file=sys.stderr)
         return 2
     try:

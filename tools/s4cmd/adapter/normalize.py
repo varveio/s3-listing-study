@@ -50,7 +50,12 @@ from __future__ import annotations
 import sys
 from typing import IO
 
-from s3_listing_study.manager.duckdb_adapter import connect, emit_result, staged
+from s3_listing_study.manager.duckdb_adapter import (
+    connect,
+    count_lf_lines,
+    emit_result,
+    staged,
+)
 from s3_listing_study.manager.normalizer_cli import normalizer_main
 
 UNKNOWN_MODE_EXIT = 2
@@ -80,6 +85,23 @@ QUERY = rf"""
           WHERE position('/' IN "rest") > 0)
     WHERE "key" <> ''
 """
+
+
+def count_rows(data: bytes, mode: str, prefix: str = "", native_root: str = "") -> int:
+    if mode == "du":
+        return 0
+    if mode not in LISTING_MODES:
+        raise ValueError(f"unknown mode: {mode}")
+
+    def selected(line: bytes) -> bool:
+        marker = line.find(b"s3://")
+        if marker < 0:
+            return False
+        rest = line[marker + 5 :]
+        slash = rest.find(b"/")
+        return slash >= 0 and bool(rest[slash + 1 :])
+
+    return count_lf_lines(data, selected)
 
 
 def normalize(out: IO[bytes], data: bytes, mode: str, prefix: str = "") -> int:

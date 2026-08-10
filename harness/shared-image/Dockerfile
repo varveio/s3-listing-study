@@ -2,8 +2,8 @@
 # One stable runtime for every measured tool. Worker and adapter bytes are
 # deliberately added by the final assembly stage, after the independently
 # cached tool payload, so changing Python harness code never rebuilds a tool.
-# The Debian root is digest-pinned; the Python and DuckDB contexts are fetched
-# and checksum-verified by the host.
+# The Debian root is digest-pinned; the Python, DuckDB, and ijson contexts are
+# fetched and checksum-verified by the host.
 FROM debian@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639d36e7456b0b229241
 
 RUN test -f /etc/apt/sources.list.d/debian.sources \
@@ -36,4 +36,6 @@ LABEL io.varve.s3-listing-study.shared-base-source-sha256="${SHARED_BASE_SOURCE_
 
 COPY --from=python . /opt/s3-listing-study/python/
 COPY --from=duckdb . /opt/s3-listing-study/python/lib/python3.12/site-packages/
+COPY --from=ijson . /opt/s3-listing-study/python/lib/python3.12/site-packages/
 RUN ["/opt/s3-listing-study/python/bin/python3", "-I", "-B", "-c", "import duckdb; assert duckdb.__version__ == '1.5.5', duckdb.__version__"]
+RUN ["/opt/s3-listing-study/python/bin/python3", "-I", "-B", "-c", "import ijson; import ijson.backends._yajl2; assert ijson.__version__ == '3.5.1', ijson.__version__; assert ijson.backend == 'yajl2_c', ijson.backend"]

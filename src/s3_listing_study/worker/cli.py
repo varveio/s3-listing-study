@@ -31,14 +31,14 @@ from .upload import UploadError, upload_attempt
 # own verdict is sealed in result.json before any of this runs, so a failure to
 # count or upload must not be reported as a failed attempt.
 POST_ATTEMPT_EXIT = 3
-NORMALIZER_PATH = Path("/opt/s3-listing-study/tool/normalize.py")
+ADAPTER_PATH = Path("/opt/s3-listing-study/tool/normalize.py")
 CASE_ENV_KEYS = frozenset(("JAVA_TOOL_OPTIONS", "NODE_OPTIONS"))
 
 
-def _normalizer_path(tool: str) -> Path:
+def _adapter_path(tool: str) -> Path:
     """Use the staged adapter in-image, or its checkout path for local tests."""
-    if NORMALIZER_PATH.is_file():
-        return NORMALIZER_PATH
+    if ADAPTER_PATH.is_file():
+        return ADAPTER_PATH
     return Path.cwd() / "tools" / tool / "adapter" / "normalize.py"
 
 
@@ -257,7 +257,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     scope=args.scope,
                     concurrency=concurrency,
                     sink_dir=sink_dir,
-                    normalizer_path=_normalizer_path(args.tool),
+                    adapter_path=_adapter_path(args.tool),
                     campaign=campaign,
                     results_destination=args.destination,
                     credential_env=credential_env,

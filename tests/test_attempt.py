@@ -88,7 +88,7 @@ def test_attempt_cli_forwards_only_explicit_managed_runtime_environment(
             {"MC_HOST_s3": "https://s3.amazonaws.com"},
         ),
     )
-    monkeypatch.setattr(cli, "_normalizer_path", lambda _tool: None)
+    monkeypatch.setattr(cli, "_adapter_path", lambda _tool: None)
 
     def fake_run(options: AttemptOptions) -> tuple[dict[str, object], int]:
         observed.append(options)
@@ -127,7 +127,7 @@ def test_attempt_cli_records_forwarded_managed_runtime_environment(
             ADAPTER_BUNDLE_SHA256,
         ),
     )
-    monkeypatch.setattr(cli, "_normalizer_path", lambda _tool: None)
+    monkeypatch.setattr(cli, "_adapter_path", lambda _tool: None)
     output = tmp_path / "attempt"
     assert (
         cli.main(
@@ -221,7 +221,7 @@ def test_attempt_cli_passes_typed_concurrency_and_records_it(
         return ResolvedInvocation(_python("pass"), ADAPTER_BUNDLE_SHA256)
 
     monkeypatch.setattr(cli, "resolve_invocation", resolve)
-    monkeypatch.setattr(cli, "_normalizer_path", lambda _tool: None)
+    monkeypatch.setattr(cli, "_adapter_path", lambda _tool: None)
     output = tmp_path / "attempt"
     logical_args = list(LOGICAL_ARGS)
     logical_args[logical_args.index("--tool") + 1] = "s4cmd"
@@ -359,43 +359,74 @@ def test_worker_mints_a_distinct_uuid_for_each_container_execution(tmp_path: Pat
     assert len(set(results)) == 2
 
 
-def test_completed_attempt_is_counted_from_existing_raw_path(tmp_path: Path) -> None:
-    root = Path(__file__).resolve().parents[1]
+def test_completed_attempt_counts_native_rows_without_normalizing(tmp_path: Path) -> None:
     payload = (
         b'a.txt\t1\t"aa"\t2026-03-16T14:41:50+00:00\tSTANDARD\n'
         b'b.txt\t2\t"bb"\t2026-03-16T14:41:51+00:00\tSTANDARD\n'
+    )
+    sink = tmp_path / "sink"
+    (sink / "dataset").mkdir(parents=True)
+    (sink / "dataset" / "part-0.native").write_bytes(b"original native rows")
+    adapter = tmp_path / "normalize.py"
+    adapter.write_text(
+        f"""
+from pathlib import Path
+from s3_listing_study.common.duckdb_adapter import staged
+
+def normalize(*args, **kwargs):
+    raise AssertionError("worker must not normalize routine attempts")
+
+def count_rows(data, mode, prefix='', native_root=''):
+    assert type(data).__name__ == "PathInput"
+    assert mode == "native-mode"
+    assert prefix == "requested/prefix"
+    assert native_root == {str(sink)!r}
+    assert Path(native_root, "dataset", "part-0.native").read_bytes() == b"original native rows"
+    with staged(data) as path:
+        assert Path(path).read_bytes() == {payload!r}
+    return 2
+"""
     )
     source = f"import os; os.write(1, {payload!r})"
     result, runner_exit = _run(
         tmp_path,
         source,
-        mode="s3api-v2-text",
-        normalizer_path=root / "tools/aws-cli/adapter/normalize.py",
+        mode="native-mode",
+        prefix="requested/prefix",
+        sink_dir=str(sink),
+        adapter_path=adapter,
     )
     assert runner_exit == 0
+    assert result["summary"]["schema_version"] == 2  # type: ignore[index]
     assert result["summary"]["status"] == "counted"  # type: ignore[index]
     assert result["summary"]["row_count"] == 2  # type: ignore[index]
     assert result["summary"]["duckdb_version"] == "1.5.5"  # type: ignore[index]
+    assert gzip.decompress((tmp_path / "attempt/stdout.raw.gz").read_bytes()) == payload
+    assert (tmp_path / "attempt/native/dataset/part-0.native").read_bytes() == (
+        b"original native rows"
+    )
 
 
 def test_summary_failure_keeps_raw_evidence_and_has_distinct_exit(tmp_path: Path) -> None:
-    normalizer = tmp_path / "normalize.py"
+    adapter = tmp_path / "normalize.py"
     secret = "customer/key/that/must/not/enter/result.json"
-    normalizer.write_text(
-        f"def normalize(out, data, mode, prefix=''):\n    raise RuntimeError({secret!r})\n"
+    adapter.write_text(
+        f"def count_rows(data, mode, prefix='', native_root=''):\n"
+        f"    raise RuntimeError({secret!r})\n"
     )
     result, runner_exit = _run(
         tmp_path,
         "print('retained raw evidence')",
         mode="synthetic",
-        normalizer_path=normalizer,
+        adapter_path=adapter,
     )
     assert runner_exit == cli.POST_ATTEMPT_EXIT
     assert _outcome(result)["status"] == "completed"
+    assert result["summary"]["schema_version"] == 2  # type: ignore[index]
     assert result["summary"]["status"] == "error"  # type: ignore[index]
     assert result["summary"]["row_count"] is None  # type: ignore[index]
     assert result["summary"]["error"] == {  # type: ignore[index]
-        "code": "normalizer_failed",
+        "code": "row_count_failed",
         "type": "RuntimeError",
     }
     assert secret not in (tmp_path / "attempt/result.json").read_text()
@@ -403,14 +434,43 @@ def test_summary_failure_keeps_raw_evidence_and_has_distinct_exit(tmp_path: Path
     assert gzip.decompress((tmp_path / "attempt/stdout.raw.gz").read_bytes())
 
 
-def test_failed_tool_skips_summary_without_opening_normalizer(tmp_path: Path) -> None:
+def test_worker_requires_count_rows_and_never_falls_back_to_normalize(tmp_path: Path) -> None:
+    adapter = tmp_path / "normalize.py"
+    marker = tmp_path / "normalize-was-called"
+    adapter.write_text(
+        "from pathlib import Path\n"
+        "def normalize(*args, **kwargs):\n"
+        f"    Path({str(marker)!r}).touch()\n"
+        "    return 0\n"
+    )
+    result, runner_exit = _run(
+        tmp_path,
+        "print('retained original')",
+        mode="synthetic",
+        adapter_path=adapter,
+    )
+
+    assert runner_exit == cli.POST_ATTEMPT_EXIT
+    assert result["summary"]["status"] == "error"  # type: ignore[index]
+    assert result["summary"]["error"] == {  # type: ignore[index]
+        "code": "row_count_failed",
+        "type": "SummaryError",
+    }
+    assert not marker.exists()
+    assert gzip.decompress((tmp_path / "attempt/stdout.raw.gz").read_bytes()) == (
+        b"retained original\n"
+    )
+
+
+def test_failed_tool_skips_summary_without_opening_adapter(tmp_path: Path) -> None:
     result, runner_exit = _run(
         tmp_path,
         "print('partial'); raise SystemExit(4)",
         mode="any",
-        normalizer_path=tmp_path / "does-not-exist.py",
+        adapter_path=tmp_path / "does-not-exist.py",
     )
     assert runner_exit == 0
+    assert result["summary"]["schema_version"] == 2  # type: ignore[index]
     assert result["summary"]["status"] == "skipped"  # type: ignore[index]
     assert result["summary"]["reason"] == "tool_outcome_failed"  # type: ignore[index]
     assert result["summary"]["row_count"] is None  # type: ignore[index]

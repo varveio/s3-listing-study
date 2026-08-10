@@ -21,8 +21,8 @@ clean timeouts are recorded outcomes; they are not runner failures. Inside the
 worker container, the subject is a supervised subprocess tree, not another
 container. The timer uses `time.monotonic_ns()` from immediately before launch
 through reap of that tree. Credential-shape scanning of the complete opaque raw
-streams, deterministic gzip, worker-side normalization and row counting, result
-finalization, and GCS upload happen only after that clock stops. A flagged
+streams, native-row counting, deterministic gzip, result finalization, and GCS
+upload happen only after that clock stops. A flagged
 stream or scanner error is a harness failure: the runner exits 2 and publishes
 none of the artifacts. A clean scan is recorded in `result.json`.
 
@@ -120,10 +120,20 @@ NAME`), never as `-e NAME=value`, which would put the secret in argv.
 
 ## After subject timing
 
-The worker normalizes enough of the captured listing to compute the row count
-after `elapsed_ns` has closed, then records that small summary directly in
-`result.json`. It deterministically compresses the raw streams. Each execution
-publishes one authoritative attempt tree:
+The worker calls the selected adapter's `count_rows` function after
+`elapsed_ns` has closed, then records that small summary directly in
+`result.json`. This path counts the mode's native logical listing rows without
+constructing or storing the verifier's five-field records. It deterministically
+compresses the original raw streams and preserves native directory output
+unchanged. Explicit correctness verification may later normalize those retained
+artifacts on the manager; routine attempts do not. Each execution publishes one
+authoritative attempt tree:
+
+The nested `result.json.summary` uses schema version 2 for this count-only
+contract. A completed attempt with no counting adapter records
+`reason: adapter_not_configured`; a counting exception records
+`error.code: row_count_failed`. Version 1 is the superseded worker-normalization
+contract and retains its historical vocabulary in old result objects.
 
 ```text
 campaigns/<campaign>/results/<bucket>/<tool>/<case>/run-<n>/<attempt-id>/

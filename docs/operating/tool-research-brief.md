@@ -593,6 +593,11 @@ story is "generate N invocations":
      path-relative names needs it to reconstruct full keys — without it such
      modes are normalizable only at the bucket root. The verifier calls this
      adapter; the benchmark phase inherits it.
+     The same module exports
+     `count_rows(data, mode, prefix="", native_root="") -> int`, applying the
+     same row-selection semantics without constructing normalized records.
+     Routine benchmark workers call only `count_rows`; conversion remains an
+     explicit verifier operation.
    - `tools/TOOL/adapter/command.py`: exports typed
      `build_command(CommandRequest) -> tuple[str, ...]`, returning complete
      subject argv including its executable. The generic image bundles the

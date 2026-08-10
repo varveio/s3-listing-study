@@ -44,7 +44,12 @@ from __future__ import annotations
 import sys
 from typing import IO
 
-from s3_listing_study.manager.duckdb_adapter import connect, emit_result, staged
+from s3_listing_study.manager.duckdb_adapter import (
+    connect,
+    count_query,
+    emit_result,
+    staged,
+)
 from s3_listing_study.manager.normalizer_cli import normalizer_main
 
 UNKNOWN_MODE_EXIT = 3
@@ -64,6 +69,20 @@ QUERY = """
            NULL
     FROM read_parquet($path)
 """
+
+
+def count_rows(data: bytes, mode: str, prefix: str = "", native_root: str = "") -> int:
+    import duckdb
+
+    if mode not in MODES:
+        raise ValueError(f"unknown mode: {mode}")
+    if not data:
+        return 0
+    with staged(data) as path:
+        try:
+            return count_query(connect(), "SELECT * FROM read_parquet($path)", {"path": path})
+        except duckdb.Error as exc:
+            raise ValueError(f"input is not readable parquet: {exc}") from exc
 
 
 def normalize(out: IO[bytes], data: bytes, mode: str, prefix: str = "") -> int:

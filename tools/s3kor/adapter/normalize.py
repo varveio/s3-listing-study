@@ -59,7 +59,12 @@ from __future__ import annotations
 import sys
 from typing import IO
 
-from s3_listing_study.manager.duckdb_adapter import connect, emit_result, staged
+from s3_listing_study.manager.duckdb_adapter import (
+    connect,
+    count_lf_lines,
+    emit_result,
+    staged,
+)
 from s3_listing_study.manager.normalizer_cli import normalizer_main
 
 UNKNOWN_MODE_EXIT = 2
@@ -79,6 +84,14 @@ QUERIES = {
         FROM {LINES} WHERE position(' ' IN line) > 0
     """,
 }
+
+
+def count_rows(data: bytes, mode: str, prefix: str = "", native_root: str = "") -> int:
+    if mode not in QUERIES:
+        raise ValueError(f"unknown mode: {mode}")
+    if mode == "list":
+        return count_lf_lines(data, bool)
+    return count_lf_lines(data, lambda line: b" " in line)
 
 
 def normalize(out: IO[bytes], data: bytes, mode: str, prefix: str = "") -> int:

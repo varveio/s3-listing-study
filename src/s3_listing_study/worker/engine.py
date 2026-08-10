@@ -156,7 +156,7 @@ class AttemptOptions:
     scope: str | None = None
     concurrency: int | None = None
     sink_dir: str | None = None
-    normalizer_path: Path | None = None
+    adapter_path: Path | None = None
     campaign: CampaignProvenance | None = None
     results_destination: str | None = None
     credential_env: Mapping[str, str] | None = None
@@ -504,7 +504,7 @@ def _validate(options: AttemptOptions) -> AttemptOptions:
         scope=options.scope,
         concurrency=options.concurrency,
         sink_dir=options.sink_dir,
-        normalizer_path=options.normalizer_path,
+        adapter_path=options.adapter_path,
         campaign=options.campaign,
         results_destination=results_destination,
         credential_env=options.credential_env,
@@ -863,7 +863,7 @@ def _execute(
             _signal_group(process_group, signal.SIGKILL)
             raise AttemptError("subject root process could not be reaped after SIGKILL") from None
         # The timed interval ends at reap.  Every measurement snapshot and all
-        # normalization/compression/upload work follows this point.
+        # row-counting/compression/upload work follows this point.
         end_ns = time.monotonic_ns()
         ended_at_utc = _utc_now()
         cgroup_after = _cgroup_snapshot(cgroup_directory)
@@ -1320,13 +1320,11 @@ def run_attempt(
                 summary = summarize(
                     outcome_status=str(outcome["status"]),
                     adapter_bundle_sha256=options.adapter_bundle_sha256,
-                    normalizer_path=options.normalizer_path,
+                    adapter_path=options.adapter_path,
                     mode=options.mode,
                     prefix=options.prefix,
                     stdout_path=scratch / "stdout.raw",
-                    dataset_path=(
-                        Path(options.sink_dir) if native_output and options.sink_dir else None
-                    ),
+                    native_root=Path(options.sink_dir) if options.sink_dir else None,
                 )
 
         artifact_uri, result_uri = _result_locations(options)
