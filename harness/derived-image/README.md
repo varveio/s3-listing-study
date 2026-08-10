@@ -1,166 +1,85 @@
-# Shared derived attempt image
+# Final per-tool attempt image
 
-[`Dockerfile`](Dockerfile) is the single derived-image recipe, used unchanged by
-every registered tool. Tool capsules never copy or fork it; they contribute
-declarative inputs in `build/image.json` and nothing else.
+[`Dockerfile`](Dockerfile) is the common final assembly recipe. It combines the
+exact published shared base, one capsule-owned `/tool-root` payload, and current
+worker/common code with one adapter and selection record. The output is one
+image and digest per tool, scheduled directly by Batch.
 
-## How one recipe serves every subject
+Tool payloads prefer checksum-pinned official distributions; `s3-fast-list` is
+the sole native source-build exception. The common base fixes shared filesystem
+inputs but does not erase bundled or static runtime differences. Full capsule
+and registration rules live in
+[`../../docs/operating/tool-structure.md`](../../docs/operating/tool-structure.md)
+§ Executable integration and builds.
 
-Nothing in the Dockerfile names a tool. It opens with
+Worker or adapter edits do not invalidate the separate tool target. Reusing it
+requires retained or restored BuildKit cache; registry-backed cache for fresh
+builders is not implemented yet.
 
-```dockerfile
-FROM subject AS attempt-builder
-```
+## Build and publication flow
 
-where `subject` is not an image on a registry but a **BuildKit named context**,
-bound at invocation to the digest the capsule registered. The build binds four:
-
-| Context | Bound to | Used for |
-| --- | --- | --- |
-| `subject` | `docker-image://<registered digest>` | both `FROM` stages |
-| `python` | the pinned interpreter tree on the build host | `COPY --from=python` |
-| `adapter` | `tools/<tool>/adapter/` | the tool's `command.py` and `normalize.py` |
-| `selection` | `tools/<tool>/build/` | `image.json`, shipped as `selection.json` |
-
-Because the subject is a context rather than a literal `FROM`, the same file
-builds all eleven subjects with no templating and no generated Dockerfiles.
-Reading the recipe alone therefore does not tell you which subject an image came
-from; that comes from the registration and the build command below.
-
-## The interpreter is a study input
-
-The attempt engine runs *inside* the subject image, so it needs a Python there,
-and only `aws-cli` ships one — Swath's image is a Temurin JRE, s5cmd's and
-rclone's are Go binaries on minimal bases. The recipe therefore does not use the
-subject's interpreter and does not install one: it binds a single pinned
-[python-build-standalone](https://github.com/astral-sh/python-build-standalone)
-CPython, digest-verified on the host by
-[`../../src/s3_listing_study/common/python_runtime.py`](../../src/s3_listing_study/common/python_runtime.py)
-and copied to `/opt/s3-listing-study/python/`. No package manager runs inside a
-subject image and the subject's own package set is untouched.
-
-One interpreter for every subject is also one fewer uncontrolled difference in
-the comparison this repository exists to make.
-
-`python_libc` in `image.json` selects which build is bound. All eleven current
-registrations use `gnu`: the three former Alpine registrations (`rclone`,
-`s3kor`, and `s5cmd`) moved to the study's pinned glibc base on 2026-08-10.
-It is declared per capsule rather than sniffed, because guessing wrong yields
-an interpreter that loads on the build host and dies inside the subject.
-`validate_selection.py` runs on the bound interpreter during the build and
-refuses a registration that declares the other one.
-
-## The payload is the worker half of the package
-
-The package is split by which role runs the code, using this system's own
-vocabulary — a Cloud Batch task is the worker, while the side that submits jobs
-and reconciles their compact summaries is the manager. The Dockerfile copies
-the two layers a worker executes:
-
-| Layer | Runs | Ships in a subject image |
-| --- | --- | --- |
-| `s3_listing_study/worker/` | inside the Batch attempt image; execution, post-timing summary, and upload | yes |
-| `s3_listing_study/common/` | reached by both roles | yes |
-| `s3_listing_study/manager/` | on the orchestrating side | no |
-| `s3_listing_study/repo/` | wherever this repository is being edited | no |
-
-The zipapp's entry point is `worker.cli`, and `common/` is exactly the
-intersection: what that entry point and the manager both reach. Verification,
-receipts, campaign reconciliation, and comparative reporting stay in
-`manager/`; capsule validation, link checking and source-anchor checking are
-not orchestration at all and stay in `repo/`.
-
-Two things follow, and both matter for a campaign. A subject image carries only
-code an attempt needs, including the standard-library GCS uploader and the
-adapter used for its post-timing row count. A subject image's digest also stops
-moving when manager-side code is edited, so orchestrator work does not invalidate
-the digests a campaign pins.
-
-`tests/test_payload_boundary.py` holds the boundary: it fails if anything in the
-shipped layers imports an unshipped one, if a module in `common/` is not
-genuinely reached from both roles, or if this Dockerfile stops matching the
-split. A missing import is a fast local failure naming the module, rather than an
-ImportError inside a container at attempt time.
-
-`validate_selection.py` imports the entry point during the build, so a payload
-that does not import fails the build instead of surfacing inside a benchmark
-attempt on a shipped image.
-
-## Registration
-
-Tool capsules record their declarative build inputs in `build/image.json`:
-
-```json
-{
-  "tool": "swath",
-  "subject_image": "ghcr.io/varveio/swath@sha256:e03f7be9c025…",
-  "subject_version": "0.2.2",
-  "python_libc": "gnu",
-  "subject_workdir": "/opt/swath",
-  "executable": ["/opt/java/openjdk/bin/java", "-jar", "/opt/swath/swath.jar"],
-  "command": "adapter/command.py",
-  "normalizer": "adapter/normalize.py",
-  "adapter_bundle_sha256": "e202a8de6ab5…"
-}
-```
-
-The field set is exact — an unknown or missing key is refused. `subject_image`
-must be digest-pinned. `executable[0]` is a canonical absolute path; later
-elements are literal argv tokens, so a JVM prefix works, and the whole array must
-equal the adapter's own `fixed_command_prefix`. `subject_version` names the
-release that digest contains; it is declared here rather than read from
-`data/tool.json`, whose `tested.version` records what the study's receipts and
-claims are anchored to — a related but distinct fact that legitimately lags the
-pinned digest during a version bump.
-
-## Building
-
-Build from the repository root through the slug-only command:
+First build the shared base once, tag it in the target registry namespace, push
+it, and resolve the registry's immutable digest. There is no publication helper
+for this step yet:
 
 ```sh
-s3-listing-study build-derived-image --tool swath
+BASE_TAG=us-east1-docker.pkg.dev/PROJECT/REPOSITORY/shared-base:2026-08-10
+uv run s3-listing-study build-shared-image --tag "$BASE_TAG"
+docker push "$BASE_TAG"
+docker image inspect --format '{{json .RepoDigests}}' "$BASE_TAG"
 ```
 
-Subject image, interpreter, workdir, executable, and component paths are never
-independent build arguments; the command resolves them from the registration.
+Select the one returned reference for that repository and keep the complete
+`REGISTRY/...@sha256:<64 lowercase hex>` value:
 
-With no `--tag`, the image is named from what was registered:
+```sh
+BASE_IMAGE=us-east1-docker.pkg.dev/PROJECT/REPOSITORY/shared-base@sha256:BASE_DIGEST
+```
+
+Build one final image locally from that exact base:
+
+```sh
+uv run s3-listing-study build-derived-image \
+  --tool swath \
+  --shared-base-image "$BASE_IMAGE"
+```
+
+Or build, push, inspect, and atomically add it to a campaign image set:
+
+```sh
+uv run s3-listing-study publish-derived-image \
+  --tool swath \
+  --repository us-east1-docker.pkg.dev/PROJECT/REPOSITORY \
+  --image-set build/images.json \
+  --shared-base-image "$BASE_IMAGE"
+```
+
+The production commands reject a mutable base tag. Reuse the same
+`BASE_IMAGE` for every tool in an image set; image-set validation rejects mixed
+base digests or source identities.
+
+With no explicit `--tag`, the readable local name is:
 
 ```text
-s3-listing-study/swath:0.2.2-h0.1.0-e03f7be9c025
-                └tool  └subject └harness └subject digest
+s3-listing-study/swath:0.2.2-h0.1.0-5dbe7637c089
+                └tool  └release └harness └tool-build prefix
 ```
 
-A derived image is neither the subject nor the harness alone, so a name carrying
-one version misreads as the other — `swath:0.2.2` has already been mistaken for
-upstream's own `ghcr.io/varveio/swath:0.2.2` in a local image list. The tag is a
-label for humans; **identity is the derived image's own digest**, which the
-attempt engine requires as `--derived-image` and records in `result.json`. Two
-builds differing only in adapter bytes share a name and are told apart there.
-
-`--tag` still accepts an explicit name for a throwaway or CI-specific build.
-
-## Adapter identity
-
-`adapter_bundle_sha256` is the sole adapter identity recorded in new attempt
-results. It hashes a canonical manifest: the ASCII header
-`s3-listing-study-adapter-bundle-v1` plus NUL; then, in `command.py`,
-`normalize.py` order, the UTF-8 filename plus NUL, an unsigned eight-byte
-big-endian byte length, and the exact file bytes. Selection computes this hash
-without importing the normalizer.
+That tag is not an identity. Publication records the final image's own immutable
+URI and digest, the shared-base URI/digest/source identity, tool build and
+artifact identities, adapter bundle, and harness revision. The worker result
+records the same execution-relevant provenance.
 
 ## Running
 
-The final image fixes this entrypoint; schedulers append only the logical
-request and never replace it:
+The final image fixes this entry point; schedulers append typed logical request
+arguments and never replace it:
 
 ```text
-/opt/s3-listing-study/python/bin/python3 -I /opt/s3-listing-study/attempt.pyz \
-  --tool swath --operation list --mode recursive-tsv \
-  --bucket BUCKET --region REGION --prefix '' --scope full
+/opt/s3-listing-study/python/bin/python3 -I /opt/s3-listing-study/attempt.pyz
 ```
 
-Mount a unique empty attempt directory at `/output` and set
-`S3_STUDY_ATTEMPT_OUT=/output`. The final stage keeps the subject image's own
-user and workdir — the root-privileged builder stage is discarded — so that
-directory must be writable by the subject's uid (Swath's is `10001:10001`).
+The child process receives a minimal allowlisted environment rather than the
+worker's Python or TLS settings. Runtime, security, output, and authentication
+details are documented in [`../README.md`](../README.md) and
+[`../../docs/operating/runner-security.md`](../../docs/operating/runner-security.md).

@@ -5,11 +5,19 @@
 # Without this file every derived-image build ships the whole 187 MB tree —
 # receipts, research, capsule data, and .git — to the daemon for nothing.
 #
-# The per-tool subject recipes under tools/*/build/ are unaffected: they either
-# copy nothing from a context (s3p, s4cmd, s3kor, ps3) or are documented to
-# build inside an upstream checkout rather than this repository (s3-fast-list).
+# Child recipes fetch their pinned artifact directly. The two package-managed
+# tools additionally need their checked-in lock input, so only those exact
+# files are admitted from tools/.
 *
 !src
 !harness
+!tools
+!tools/s3p
+!tools/s3p/build
+!tools/s3p/build/package.json
+!tools/s3p/build/package-lock.json
+!tools/s4cmd
+!tools/s4cmd/build
+!tools/s4cmd/build/requirements.txt
 **/__pycache__
 **/*.pyc

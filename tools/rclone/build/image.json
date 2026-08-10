@@ -1,8 +1,9 @@
 {
   "tool": "rclone",
-  "subject_image": "registry.local/rclone@sha256:76bee13ae67db1133de505ebdbc8eab20f515bd5e4c103a01bf456774937af07",
-  "subject_version": "1.74.4",
-  "python_libc": "gnu",
+  "tool_version": "1.74.4",
+  "shared_base_source_sha256": "a2643461eead4bcdafa978c63730b90ff77376d8ac7df6e1da6d90d7170f658b",
+  "tool_build_sha256": "94e0ad265b08fb27a2e060f89effb820b5ad13189feb716715d8b9eb1c873e6a",
+  "tool_artifact": {"kind":"release-archive","locator":"https://downloads.rclone.org/v1.74.4/rclone-v1.74.4-linux-amd64.zip","sha256":"fe435e0c36228e7c2f116a8701f01127bb1f694005fc11d1f27186c8bca4115d"},
   "subject_workdir": "/data",
   "executable": [
     "/usr/local/bin/rclone"

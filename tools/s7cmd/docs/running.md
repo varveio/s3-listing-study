@@ -8,6 +8,10 @@ detail. Evidence labels and claim references are as defined in the
 [`mechanism.md`](mechanism.md) preamble, and claim IDs resolve in
 [`../data/claims.json`](../data/claims.json).
 
+## Comparative image prepared 2026-08-10 (not run evidence)
+
+[image.json](../build/image.json) selects official s7cmd v1.5.0 Linux x86-64 glibc release archive. Shared assembly is defined once in [tool-structure.md](../../../docs/operating/tool-structure.md). Historical receipts below continue to describe the images and artifacts they name.
+
 ## Build
 
 **No upstream container-image channel was found.** No image is referenced in

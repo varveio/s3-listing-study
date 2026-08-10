@@ -5,6 +5,10 @@ with its invocation, and how to
 re-run any receipt or the fan-out union from scratch. Groundwork pass:
 2026-07-17, aws-cli **2.36.1**, bucket `noaa-normals-pds`, all anonymous.
 
+## Comparative image prepared 2026-08-10 (not run evidence)
+
+[image.json](../build/image.json) selects the official AWS CLI v2.36.1 Linux x86-64 installer archive. Shared assembly is defined once in [tool-structure.md](../../../docs/operating/tool-structure.md). Historical receipts below continue to describe the images and artifacts they name.
+
 ## Install / image
 
 **Image chosen: the official upstream image**, pinned by digest —

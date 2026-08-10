@@ -1,4 +1,4 @@
-"""Orchestration-side modules that never ship inside a subject image.
+"""Orchestration-side modules that never ship inside a final per-tool image.
 
 The manager submits and monitors work and owns verification, receipts, capsule
 validation, and maintenance commands. It may import the deliberately shared

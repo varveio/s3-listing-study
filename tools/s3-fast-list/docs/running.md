@@ -7,6 +7,10 @@ architecture matrix. Canonical identity and tested-revision data lives in
 Evidence labels and claim references are as in
 [`mechanism.md`](mechanism.md).
 
+## Comparative image prepared 2026-08-10 (not run evidence)
+
+[image.json](../build/image.json) selects fork commit 6c72f596e2ffe7311dec8cb7de29b114c0251207, the sole native source-build exception because no matching release binary exists. Shared assembly is defined once in [tool-structure.md](../../../docs/operating/tool-structure.md). Historical receipts below continue to describe the images and artifacts they name.
+
 ## Build
 
 **No upstream container image is published** — upstream ships only a

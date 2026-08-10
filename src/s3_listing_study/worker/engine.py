@@ -21,7 +21,7 @@ import threading
 import time
 import uuid
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from types import MappingProxyType
@@ -131,8 +131,17 @@ class AttemptOptions:
     argv: tuple[str, ...]
     timeout_s: float
     adapter_bundle_sha256: str
-    subject_image: str
+    shared_base_digest: str
+    shared_base_uri: str
     derived_image: str
+    subject_workdir: str = "/"
+    shared_base_source_sha256: str = "0" * 64
+    tool_build_sha256: str = "0" * 64
+    tool_artifact: Mapping[str, str] = field(
+        default_factory=lambda: MappingProxyType(
+            {"kind": "synthetic", "locator": "test", "sha256": "0" * 64}
+        )
+    )
     term_grace_s: float = 5.0
     attempt_id: str = ""
     tool: str = "unknown"
@@ -407,14 +416,38 @@ def _validate(options: AttemptOptions) -> AttemptOptions:
         raise AttemptError("the subject argv is empty")
     if any("\x00" in argument for argument in options.argv):
         raise AttemptError("the subject argv contains a NUL byte")
+    workdir = Path(options.subject_workdir)
+    if (
+        not options.subject_workdir.startswith("/")
+        or "\x00" in options.subject_workdir
+        or workdir.as_posix() != options.subject_workdir
+        or ".." in workdir.parts
+    ):
+        raise AttemptError("subject workdir must be a canonical absolute path")
+    if not workdir.is_dir():
+        raise AttemptError(f"subject workdir does not exist: {options.subject_workdir}")
     if not math.isfinite(options.timeout_s) or options.timeout_s <= 0:
         raise AttemptError("timeout must be a finite number greater than zero")
     if not math.isfinite(options.term_grace_s) or options.term_grace_s < 0:
         raise AttemptError("TERM grace must be a finite nonnegative number")
     if re.fullmatch(r"[0-9a-f]{64}", options.adapter_bundle_sha256) is None:
         raise AttemptError("adapter bundle identity must be 64 lowercase hexadecimal digits")
-    if IMAGE_DIGEST_RE.fullmatch(options.subject_image) is None:
-        raise AttemptError("subject image identity must be sha256:<64 lowercase hex digits>")
+    if IMAGE_DIGEST_RE.fullmatch(options.shared_base_digest) is None:
+        raise AttemptError("shared base image identity must be sha256:<64 lowercase hex digits>")
+    if not options.shared_base_uri.endswith(f"@{options.shared_base_digest}") or any(
+        character.isspace() for character in options.shared_base_uri
+    ):
+        raise AttemptError("shared base URI must end with its sha256 digest")
+    for identity_name, value in (
+        ("shared base source", options.shared_base_source_sha256),
+        ("tool build", options.tool_build_sha256),
+    ):
+        if re.fullmatch(r"[0-9a-f]{64}", value) is None:
+            raise AttemptError(f"{identity_name} identity must be 64 lowercase hexadecimal digits")
+    if set(options.tool_artifact) != {"kind", "locator", "sha256"}:
+        raise AttemptError("tool artifact identity must contain kind, locator, and sha256")
+    if re.fullmatch(r"[0-9a-f]{64}", options.tool_artifact.get("sha256", "")) is None:
+        raise AttemptError("tool artifact sha256 must be 64 lowercase hexadecimal digits")
     if IMAGE_DIGEST_RE.fullmatch(options.derived_image) is None:
         raise AttemptError("derived image identity must be sha256:<64 lowercase hex digits>")
     if options.auth not in ("anonymous", "authenticated"):
@@ -454,8 +487,13 @@ def _validate(options: AttemptOptions) -> AttemptOptions:
         attempt_id=attempt_id,
         tool=options.tool,
         tool_version=options.tool_version,
-        subject_image=options.subject_image,
+        shared_base_digest=options.shared_base_digest,
+        shared_base_uri=options.shared_base_uri,
+        shared_base_source_sha256=options.shared_base_source_sha256,
+        tool_build_sha256=options.tool_build_sha256,
+        tool_artifact=dict(options.tool_artifact),
         derived_image=options.derived_image,
+        subject_workdir=options.subject_workdir,
         harness_revision=options.harness_revision,
         operation=options.operation,
         auth=options.auth,
@@ -744,6 +782,7 @@ def _execute(
     timeout_s: float,
     term_grace_s: float,
     env: Mapping[str, str],
+    cwd: str,
 ) -> _Execution:
     _enable_child_subreaper()
     baseline_children = _direct_children()
@@ -774,6 +813,7 @@ def _execute(
                 stdout=stdout_file,
                 stderr=stderr_file,
                 env=env,
+                cwd=cwd,
                 start_new_session=True,
             )
         except OSError as exc:
@@ -1243,6 +1283,7 @@ def run_attempt(
                 timeout_s=options.timeout_s,
                 term_grace_s=options.term_grace_s,
                 env=child_env,
+                cwd=options.subject_workdir,
             )
             if post_measure_hook is not None:
                 post_measure_hook()
@@ -1295,8 +1336,20 @@ def run_attempt(
             "attempt_id": options.attempt_id,
             "tool": {"name": options.tool, "version": options.tool_version},
             "images": {
-                "subject": options.subject_image,
                 "derived": options.derived_image,
+                "shared_base": {
+                    "digest": options.shared_base_digest,
+                    "uri": options.shared_base_uri,
+                },
+            },
+            "build_inputs": {
+                "shared_base": {
+                    "source_sha256": options.shared_base_source_sha256,
+                },
+                "tool": {
+                    "build_sha256": options.tool_build_sha256,
+                    "artifact": dict(options.tool_artifact),
+                },
             },
             "harness_revision": options.harness_revision,
             "adapter_bundle_sha256": options.adapter_bundle_sha256,
@@ -1315,6 +1368,7 @@ def run_attempt(
             "interpreter": interpreter_identity(),
             "invocation": {
                 "argv": list(options.argv),
+                "working_directory": options.subject_workdir,
                 "authentication": options.auth,
                 "environment": _redacted_environment(child_env),
             },

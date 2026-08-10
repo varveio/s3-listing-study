@@ -48,7 +48,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Resolve and run one image-owned logical listing request.",
         allow_abbrev=False,
     )
-    parser.add_argument("--request-schema", action=UniqueStoreAction, choices=("1",), default="1")
+    parser.add_argument("--request-schema", action=UniqueStoreAction, choices=("2",), default="2")
     parser.add_argument(
         "--output", action=UniqueStoreAction, default=os.environ.get("S3_STUDY_ATTEMPT_OUT")
     )
@@ -57,6 +57,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--tool", action=UniqueStoreAction, required=True)
     parser.add_argument("--tool-version", action=UniqueStoreAction)
     parser.add_argument("--derived-image", action=UniqueStoreAction, required=True)
+    parser.add_argument("--shared-base-digest", action=UniqueStoreAction, required=True)
+    parser.add_argument("--shared-base-uri", action=UniqueStoreAction, required=True)
     parser.add_argument("--harness-revision", action=UniqueStoreAction)
     parser.add_argument("--operation", action=UniqueStoreAction, choices=("list",), required=True)
     parser.add_argument(
@@ -238,8 +240,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                     term_grace_s=term_grace,
                     tool=args.tool,
                     tool_version=args.tool_version,
-                    subject_image=invocation.subject_image_digest,
+                    shared_base_digest=args.shared_base_digest,
+                    shared_base_uri=args.shared_base_uri,
+                    shared_base_source_sha256=invocation.shared_base_source_sha256,
+                    tool_build_sha256=invocation.tool_build_sha256,
+                    tool_artifact=invocation.tool_artifact,
                     derived_image=args.derived_image,
+                    subject_workdir=invocation.subject_workdir,
                     harness_revision=args.harness_revision,
                     operation=args.operation,
                     auth=args.auth,

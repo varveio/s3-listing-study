@@ -28,6 +28,10 @@ reverse.**
 5. **`adapter/`** can be written any time after the CLI is understood, but it
    must be **validated against the real binary** before the capsule is claimed
    done — see the verification loop below.
+6. **`build/`** prefers a checksum-pinned official binary, archive, or package;
+   build from source only when the selected release has no matching
+   distribution. Follow the exact payload and registration contract in
+   [`tool-structure.md`](tool-structure.md) § Executable integration and builds.
 
 The ordering has one hard consequence worth stating plainly: **if a claim cannot
 be written, the sentence cannot be written either.** That is the mechanism by
@@ -128,6 +132,10 @@ Any skipped anchors mean the verification is incomplete.
 
 # Python command and normalization adapters match their shared contracts
 uv run pytest -q tests/test_command_adapters.py tests/test_adapters.py
+
+# Final-image integration uses the already-published common base by digest
+uv run s3-listing-study build-derived-image --tool <slug> \
+  --shared-base-image REGISTRY/...@sha256:<digest>
 ```
 
 Then the checks no script performs:
@@ -207,11 +215,10 @@ a whole-diff reviewer would have skimmed.
   runner fails at argument parsing, not at listing. Diff the adapter's flags
   against the new `--help` (see [`tool-onboarding.md`](tool-onboarding.md)
   § Re-deriving).
-- **The command adapter returns complete subject argv.** Where the subject image
-  entrypoint is already the binary, record that executable first and follow it
-  with the subcommand. Check with
-  `docker inspect -f '{{json .Config.Entrypoint}}'` before writing a mode. The
-  shared derived image replaces the subject entrypoint, so no prefix may remain
+- **The command adapter returns complete subject argv.** Element zero is the
+  explicit absolute path installed by `build/Dockerfile` through `/tool-root`;
+  follow it with every required subcommand or launcher token. Upstream image
+  entrypoints are not part of the production runtime, so no prefix may remain
   implicit in image packaging.
 - **Freeze the subject in a detached worktree** before dispatching readers.
   A moving upstream shifts line numbers underneath work in progress.
@@ -219,8 +226,9 @@ a whole-diff reviewer would have skimmed.
   derivation, and a priority-sampling reviewer found none of them because they
   clustered in unglamorous files. Run the anchor checker; do not delegate this
   to judgement.
-- **A registry image tag may not match the git tag.** Check the registry rather
-  than assuming (`v0.2.0` the git tag, `0.2.0` the image tag, in one case).
+- **Distribution tags may not match the git tag.** Check every official channel
+  rather than assuming (`v0.2.0` the git tag, `0.2.0` the container tag, in one
+  case), then pin the selected artifact by content digest.
 - **Reviews are invalidated by a moving tree.** Do not restructure files while a
   long review runs against them; the review will report on paths that no longer
   exist, and its result must be discarded.

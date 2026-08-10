@@ -6,6 +6,10 @@ and the architecture matrix. Evidence labels and claim references are as in
 [`mechanism.md`](mechanism.md); canonical tested identity (pinned SHAs, version)
 lives once in [`../data/tool.json`](../data/tool.json), and this page assumes it.
 
+## Comparative image prepared 2026-08-10 (not run evidence)
+
+[image.json](../build/image.json) selects s4cmd 2.1.0 official source-only PyPI sdist; recipe extracts s4cmd.py directly and uses hash-locked runtime dependencies, without installing/building the sdist as a package. Shared assembly is defined once in [tool-structure.md](../../../docs/operating/tool-structure.md). Historical receipts below continue to describe the images and artifacts they name.
+
 ## Image
 
 Upstream (bloomreach/s4cmd) ships **no published image and no Dockerfile** — the

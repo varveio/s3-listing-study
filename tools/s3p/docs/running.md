@@ -9,6 +9,10 @@ SHAs, versions, study states) lives in [`../data/tool.json`](../data/tool.json);
 this page supplies the operational detail. The blocked, auth-limited coverage
 described here is this page's owned caveat.
 
+## Comparative image prepared 2026-08-10 (not run evidence)
+
+[image.json](../build/image.json) selects official s3p 3.7.2 npm package with checked-in lock closure and Node from a digest-pinned discarded runtime stage. Shared assembly is defined once in [tool-structure.md](../../../docs/operating/tool-structure.md). Historical receipts below continue to describe the images and artifacts they name.
+
 ## Image (study-authored)
 
 **No upstream Docker image and no upstream Dockerfile exist** for s3p (v3.6.0 or

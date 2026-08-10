@@ -205,31 +205,39 @@ must be stated as a limitation or controlled by running in-region.
 **Settled: no tool is run directly on the host.** Each gets a pinned image, and
 every receipt records the image digest.
 
-This gives us three useful properties at once:
+**Material methodology change — 2026-08-10.** Every comparative image now uses
+the same published shared-base digest and a separately pinned tool payload.
+Final assembly adds the current worker and exactly one adapter, producing one
+execution image and digest per tool. We prefer the selected release's official
+binary, archive, or package; `s3-fast-list` is the only native source-build
+exception because its selected fork publishes no matching binary.
 
-- **Controlled, inspectable environments.** Every tool's complete userspace is
-  pinned, while the harness supplies the common network, security, timing, and
-  resource boundary. Bases, libc, TLS libraries, and runtimes can still differ
-  between tool images; those are recorded parts of each tested setup, not
-  properties containerization makes identical.
-- **Exact identity.** A digest identifies the image bytes that ran and satisfies
-  the pinned-versions rule above, because a tool version is not a build. It does
-  not by itself make a local image retrievable or reproducibly rebuildable; the
-  current availability and release gate are recorded in
-  [`artifact-availability.md`](operating/artifact-availability.md).
-- **Resource control** supports the limits-and-interruption checks. `--memory`
-  sets the memory limit, and `--cpus` lets us test the client-language
-  hypothesis (cross-cutting claim #2) by starving the client deliberately.
+This replaces the earlier preference for upstream tool containers. It holds the
+base filesystem, CA input, and shared libraries constant where tools consume
+them while keeping upstream provenance at the tool-artifact boundary. It does
+not make bundled or static runtimes identical: Node, Python, JRE, resolver, TLS,
+and allocator behavior carried by a tool payload remain part of that subject.
 
-**One image per tool, not one shared image.** The tool is the unit under test, so
-it's the unit that gets pinned. A shared image makes a version bump for one tool
-silently perturb every other tool's results — the sort of thing you discover three
-weeks into a campaign. Simple installs can share a base layer; they don't share an
-image.
+The final OCI digest is the execution identity. Image sets and results also
+record the base digest and source identity, tool artifact and build identities,
+adapter bundle, and harness revision. Historical receipts continue to describe
+the older images they name. The exact build and registration contract lives in
+[`tool-structure.md`](operating/tool-structure.md) § Executable integration and
+builds; availability remains a separate question in
+[`artifact-availability.md`](operating/artifact-availability.md).
 
-**Prefer the tool's own upstream image where one exists.** It's what users
-actually run, and it's built by the tool's own authors to their own spec. Fall
-back to our own Dockerfile only where upstream ships none, and say which was used.
+Rebuild scope follows the changed component:
+
+| Change | Required image work |
+| --- | --- |
+| manager or benchmark plan | none |
+| worker or one adapter | reassemble affected final image(s) |
+| one tool version or recipe | rebuild that tool payload and final image |
+| shared runtime | rebuild the base and every final image |
+
+Avoiding tool recompilation during final reassembly requires retained BuildKit
+cache. A fresh builder needs registry-backed cache, which is not implemented
+yet. Container resource limits remain the mechanism used for limits testing.
 
 Two details to handle up front:
 

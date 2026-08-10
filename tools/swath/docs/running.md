@@ -9,6 +9,10 @@ reference notation and the evidence vocabulary are defined once in
 [`mechanism.md`](mechanism.md); this page does not repeat them. Mechanism
 explanation lives there too.
 
+## Comparative image prepared 2026-08-10 (not run evidence)
+
+[image.json](../build/image.json) selects official Swath 0.2.2 JAR plus runtime tree from digest-pinned Temurin 25 JRE. Shared assembly is defined once in [tool-structure.md](../../../docs/operating/tool-structure.md). Historical receipts below continue to describe the images and artifacts they name.
+
 ## Tested subject: upstream's published image
 
 The subject is upstream's own published image, an OCI index at

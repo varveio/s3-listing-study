@@ -8,6 +8,10 @@ matrix. Canonical tested identity (pinned SHAs, versions, dates) lives in
 labels, the canonical status vocabulary, and claim `some-id` references are as
 in [`mechanism.md`](mechanism.md).
 
+## Comparative image prepared 2026-08-10 (not run evidence)
+
+[image.json](../build/image.json) selects the official s3kor v0.0.37 Linux amd64 GoReleaser archive. Shared assembly is defined once in [tool-structure.md](../../../docs/operating/tool-structure.md). Historical receipts below continue to describe the images and artifacts they name.
+
 ## Build — from source at the pinned tag
 
 **Upstream ships neither a published image nor a Dockerfile** — distribution is

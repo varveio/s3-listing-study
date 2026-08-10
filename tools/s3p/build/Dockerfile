@@ -11,7 +11,7 @@
 # for large-file COPIES (>100 MiB); all listing commands (ls, summarize, compare)
 # use the in-process @aws-sdk/client-s3 and need no aws-cli. This study runs
 # list-only, so node alone is sufficient.
-FROM node@sha256:2cf067cfed83d5ea958367df9f966191a942351a2df77d6f0193e162b5febfc0
+FROM node@sha256:2cf067cfed83d5ea958367df9f966191a942351a2df77d6f0193e162b5febfc0 AS install
 
 # VERSION CHOICE (see research/report.md § Container/Metadata):
 #   Source is anchored for [SRC] at git tag v3.6.0 (SHA 5a23b22e...), the latest
@@ -24,8 +24,16 @@ FROM node@sha256:2cf067cfed83d5ea958367df9f966191a942351a2df77d6f0193e162b5febfc
 #   architecture and its absence of any anonymous/unsigned access path are
 #   identical to v3.6.0 (verified against the installed build).
 # --ignore-scripts: s3p ships a prebuilt build/ in its npm tarball; no build step.
-RUN npm install -g --ignore-scripts s3p@3.7.2 \
- && npm cache clean --force
+WORKDIR /build
+COPY tools/s3p/build/package.json tools/s3p/build/package-lock.json ./
+RUN npm ci --ignore-scripts \
+ && npm cache clean --force \
+ && mkdir -p /out \
+ && printf '#!/bin/sh\nexec /usr/local/bin/node /opt/s3p/node_modules/s3p/bin/s3p "$@"\n' \
+      > /out/s3p \
+ && chmod 0755 /out/s3p
 
-# ENTRYPOINT is the tool binary; the command adapter includes it as argv[0].
-ENTRYPOINT ["s3p"]
+FROM scratch
+COPY --from=install /usr/local/bin/node /tool-root/usr/local/bin/node
+COPY --from=install /build/node_modules/ /tool-root/opt/s3p/node_modules/
+COPY --from=install /out/s3p /tool-root/usr/local/bin/s3p

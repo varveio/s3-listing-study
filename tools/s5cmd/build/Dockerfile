@@ -27,7 +27,7 @@
 # Safe on a glibc base because the binary is static: Go with CGO disabled needs
 # nothing from the base but a kernel. Verified by running it — `v2.3.0-991c9fb`.
 
-FROM debian@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639d36e7456b0b229241 AS fetch
+FROM base AS fetch
 # --checksum makes the digest a precondition of the fetch: a substituted or
 # corrupted archive fails the build rather than being unpacked.
 ADD --checksum=sha256:de0fdbfa3aceae55e069ba81a0fc17b2026567637603734a387b2fca06c299b4 \
@@ -35,14 +35,5 @@ ADD --checksum=sha256:de0fdbfa3aceae55e069ba81a0fc17b2026567637603734a387b2fca06
     /tmp/s5cmd.tgz
 RUN mkdir -p /out && tar xzf /tmp/s5cmd.tgz -C /out s5cmd
 
-FROM debian@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639d36e7456b0b229241
-# CA certificates so HTTPS to the S3 endpoint can be established (the tool still
-# needs credentials to sign; TLS trust is orthogonal).
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-COPY --from=fetch /out/s5cmd /s5cmd
-# Upstream's workdir, preserved so the registered subject_workdir keeps meaning
-# what it meant against the published image.
-WORKDIR /aws
-ENTRYPOINT ["/s5cmd"]
+FROM scratch
+COPY --from=fetch /out/s5cmd /tool-root/s5cmd

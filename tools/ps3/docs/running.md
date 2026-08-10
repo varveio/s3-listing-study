@@ -13,6 +13,10 @@ claim `some-id` reference notation are as defined in
 [`mechanism.md`](mechanism.md); statuses resolve in
 [`../data/claims.json`](../data/claims.json).
 
+## Comparative image prepared 2026-08-10 (not run evidence)
+
+[image.json](../build/image.json) selects upstream's committed, checksum-pinned pS3.0-1-16 amd64 binary. Shared assembly is defined once in [tool-structure.md](../../../docs/operating/tool-structure.md). Historical receipts below continue to describe the images and artifacts they name.
+
 ## Image
 
 Upstream ships **neither a published image nor a Dockerfile**, and the source at

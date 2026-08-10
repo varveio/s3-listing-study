@@ -1,4 +1,4 @@
-"""Validate and build one slug-selected shared derived image.
+"""Validate and build one slug-selected image from the shared study base.
 
 ``adapter_bundle_sha256`` is SHA-256 over this canonical byte manifest:
 
@@ -28,31 +28,32 @@ from s3_listing_study import __version__
 from s3_listing_study.common.command_adapter import CommandAdapterError, load_command_adapter
 from s3_listing_study.common.duckdb_runtime import DuckDBRuntimeError
 from s3_listing_study.common.duckdb_runtime import ensure_runtime as ensure_duckdb
-from s3_listing_study.common.python_runtime import LIBC_VALUES, PythonRuntimeError, ensure_runtime
+from s3_listing_study.common.python_runtime import PythonRuntimeError, ensure_runtime
 
 SLUG_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
-SUBJECT_IMAGE_RE = re.compile(
+SHA256_RE = re.compile(r"[0-9a-f]{64}")
+IMMUTABLE_IMAGE_RE = re.compile(
     r"(?:[a-z0-9]+(?:[._-][a-z0-9]+)*/)*"
     r"[a-z0-9]+(?:[._-][a-z0-9]+)*@sha256:[0-9a-f]{64}"
 )
-SHA256_RE = re.compile(r"[0-9a-f]{64}")
-SUBJECT_VERSION_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
-"""A subject version that is also a legal Docker tag component.
+TOOL_VERSION_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+"""A tool version that is also a legal Docker tag component.
 
-The derived-image name embeds it verbatim, so a value Docker would refuse has
+The final per-tool image name embeds it verbatim, so a value Docker would refuse has
 to fail at registration rather than at ``docker build``.
 """
 
 ADAPTER_FILES = ("command.py", "normalize.py")
 ADAPTER_MANIFEST_HEADER = b"s3-listing-study-adapter-bundle-v1\0"
 DERIVED_IMAGE_NAMESPACE = "s3-listing-study"
-"""Repository component of a derived image name, so it cannot read as upstream's."""
+"""Repository component that distinguishes a final image from a tool's own image."""
 
 REQUIRED_FIELDS = {
     "tool",
-    "subject_image",
-    "subject_version",
-    "python_libc",
+    "tool_version",
+    "shared_base_source_sha256",
+    "tool_build_sha256",
+    "tool_artifact",
     "subject_workdir",
     "executable",
     "command",
@@ -62,15 +63,18 @@ REQUIRED_FIELDS = {
 
 
 class BuildSelectionError(ValueError):
-    """A registered derived-image selection is invalid or inconsistent."""
+    """A registered final-image selection is invalid or inconsistent."""
 
 
 @dataclass(frozen=True, slots=True)
 class BuildSelection:
     tool: str
-    subject_image: str
-    subject_version: str
-    python_libc: str
+    tool_version: str
+    shared_base_source_sha256: str
+    tool_build_sha256: str
+    tool_artifact_kind: str
+    tool_artifact_locator: str
+    tool_artifact_sha256: str
     subject_workdir: str
     executable: tuple[str, ...]
     command: str
@@ -175,29 +179,40 @@ def load_staged_selection(
     if expected_tool is not None and tool != expected_tool:
         raise BuildSelectionError("selected tool does not match registered build metadata")
 
-    subject_image = raw["subject_image"]
-    if not isinstance(subject_image, str) or SUBJECT_IMAGE_RE.fullmatch(subject_image) is None:
-        raise BuildSelectionError("subject_image must be pinned by a lowercase sha256 digest")
-
-    # The digest is the subject's identity; this is the human-readable name for
-    # the same thing, and it exists so a derived image can say which release it
-    # wraps. It is declared here rather than read from `data/tool.json`, whose
+    # This is the human-readable release name for the selected tool artifact.
+    # It is declared here rather than read from `data/tool.json`, whose
     # `tested.version` records the version the study's receipts and claims are
     # anchored to — a different fact that legitimately lags the pinned digest
     # during a version bump.
-    subject_version = raw["subject_version"]
-    if not isinstance(subject_version, str) or not SUBJECT_VERSION_RE.fullmatch(subject_version):
+    tool_version = raw["tool_version"]
+    if not isinstance(tool_version, str) or not TOOL_VERSION_RE.fullmatch(tool_version):
         raise BuildSelectionError(
-            "subject_version must name the pinned image's release as a Docker tag component"
+            "tool_version must name the pinned tool release as a Docker tag component"
         )
-
-    python_libc = raw["python_libc"]
-    if python_libc not in LIBC_VALUES:
-        raise BuildSelectionError(
-            f"python_libc must be one of {LIBC_VALUES}; got: {python_libc!r}. "
-            "It selects the pinned interpreter build for this subject's base image, "
-            "and an Alpine subject needs the musl one."
-        )
+    shared_base_source_sha256 = raw["shared_base_source_sha256"]
+    tool_build_sha256 = raw["tool_build_sha256"]
+    for field, value in (
+        ("shared_base_source_sha256", shared_base_source_sha256),
+        ("tool_build_sha256", tool_build_sha256),
+    ):
+        if not isinstance(value, str) or SHA256_RE.fullmatch(value) is None:
+            raise BuildSelectionError(f"{field} must be 64 lowercase hexadecimal digits")
+    artifact = raw["tool_artifact"]
+    if not isinstance(artifact, dict) or set(artifact) != {"kind", "locator", "sha256"}:
+        raise BuildSelectionError("tool_artifact must contain exactly kind, locator, and sha256")
+    artifact_kind = artifact["kind"]
+    artifact_locator = artifact["locator"]
+    artifact_sha256 = artifact["sha256"]
+    if artifact_kind not in {"release-archive", "release-binary", "npm-package", "source-archive"}:
+        raise BuildSelectionError("tool_artifact kind is unsupported")
+    if (
+        not isinstance(artifact_locator, str)
+        or not artifact_locator
+        or any(character.isspace() for character in artifact_locator)
+    ):
+        raise BuildSelectionError("tool_artifact locator must be a non-empty token")
+    if not isinstance(artifact_sha256, str) or SHA256_RE.fullmatch(artifact_sha256) is None:
+        raise BuildSelectionError("tool_artifact sha256 must be 64 lowercase hexadecimal digits")
     subject_workdir = _canonical_absolute_path(raw["subject_workdir"], "subject_workdir")
 
     executable_raw = raw["executable"]
@@ -205,7 +220,7 @@ def load_staged_selection(
         raise BuildSelectionError("registered executable must be a non-empty path array")
     # Only the program itself is a path. A JVM tool's prefix continues with
     # literal argv tokens — Swath's is java, -jar, then the jar — and requiring
-    # every element to be an absolute path would exclude every such subject.
+    # every element to be an absolute path would exclude every such tool.
     executable = (
         _canonical_absolute_path(executable_raw[0], "executable[0]"),
         *(
@@ -237,9 +252,12 @@ def load_staged_selection(
 
     return BuildSelection(
         tool=tool,
-        subject_image=subject_image,
-        subject_version=subject_version,
-        python_libc=python_libc,
+        tool_version=tool_version,
+        shared_base_source_sha256=shared_base_source_sha256,
+        tool_build_sha256=tool_build_sha256,
+        tool_artifact_kind=artifact_kind,
+        tool_artifact_locator=artifact_locator,
+        tool_artifact_sha256=artifact_sha256,
         subject_workdir=subject_workdir,
         executable=executable,
         command=raw["command"],
@@ -264,10 +282,72 @@ def load_registered_selection(repo_root: Path, tool: str) -> BuildSelection:
     if resolved_metadata != expected_metadata:
         raise BuildSelectionError("build metadata is not at the expected capsule location")
     _contained(adapter_dir, root / "tools", "adapter directory")
-    return load_staged_selection(metadata, adapter_dir, expected_tool=tool)
+    selection = load_staged_selection(metadata, adapter_dir, expected_tool=tool)
+    shared_digest = shared_base_source_sha256(root)
+    if shared_digest != selection.shared_base_source_sha256:
+        raise BuildSelectionError("shared_base_source_sha256 does not match shared-base inputs")
+    build_inputs = tuple(
+        path for path in sorted(metadata.parent.iterdir()) if path.name != "image.json"
+    )
+    tool_digest = _input_bundle_sha256(
+        root,
+        build_inputs,
+        (
+            b"s3-listing-study-tool-build-input-v1\0"
+            + selection.tool_artifact_kind.encode()
+            + b"\0"
+            + selection.tool_artifact_locator.encode()
+            + b"\0"
+            + selection.tool_artifact_sha256.encode()
+            + b"\0"
+        ),
+    )
+    if tool_digest != selection.tool_build_sha256:
+        raise BuildSelectionError("tool_build_sha256 does not match tool build inputs")
+    return selection
 
 
-def load_selection(path: Path, *, expected_tool: str, subject_image: str) -> BuildSelection:
+def _input_bundle_sha256(root: Path, inputs: Sequence[Path], header: bytes) -> str:
+    """Hash named input bytes with paths, lengths, and no mutable filesystem metadata."""
+    digest = hashlib.sha256(header)
+    files: list[Path] = []
+    for item in inputs:
+        if item.is_dir():
+            files.extend(
+                path
+                for path in item.rglob("*")
+                if path.is_file() and "__pycache__" not in path.parts
+            )
+        elif item.is_file():
+            files.append(item)
+        else:
+            raise BuildSelectionError(f"registered build input is missing: {item}")
+    for path in sorted(files, key=lambda value: value.relative_to(root).as_posix()):
+        relative = path.relative_to(root).as_posix().encode("utf-8")
+        payload = path.read_bytes()
+        digest.update(relative)
+        digest.update(b"\0")
+        digest.update(len(payload).to_bytes(8, "big"))
+        digest.update(payload)
+    return digest.hexdigest()
+
+
+def shared_base_source_sha256(root: Path) -> str:
+    """Hash every repository input that can affect the stable shared base."""
+    return _input_bundle_sha256(
+        root,
+        (
+            root / ".dockerignore",
+            root / "harness/shared-image/Dockerfile",
+            root / "harness/shared-image/docker-bake.hcl",
+            root / "src/s3_listing_study/common/python_runtime.py",
+            root / "src/s3_listing_study/common/duckdb_runtime.py",
+        ),
+        b"s3-listing-study-shared-base-input-v1\0",
+    )
+
+
+def load_selection(path: Path, *, expected_tool: str) -> BuildSelection:
     """Validate capsule metadata for the repository's capsule gate.
 
     Image construction does not expose this compatibility validator; the build
@@ -282,54 +362,79 @@ def load_selection(path: Path, *, expected_tool: str, subject_image: str) -> Bui
         capsule / "adapter",
         expected_tool=expected_tool,
     )
-    if selection.subject_image != subject_image:
-        raise BuildSelectionError("subject image does not match the selected tool registration")
     return selection
 
 
 def derived_image_tag(selection: BuildSelection) -> str:
-    """The default name for the derived image built from one registration.
+    """The default name for the final per-tool image from one registration.
 
-    A derived image is neither the subject nor the harness alone, so a name
-    carrying one version misreads as the other: ``swath:0.2.2`` sat next to
-    upstream's own ``ghcr.io/varveio/swath:0.2.2`` in a local image list and was
-    taken for it. The name therefore states both versions and the subject digest
-    it wraps — ``s3-listing-study/swath:0.2.2-h0.1.0-e03f7be9c025``.
+    The tag combines the tool version, harness version, and the first twelve
+    characters of ``tool_build_sha256`` — for example,
+    ``s3-listing-study/swath:0.2.2-h0.1.0-e03f7be9c025``. The adapter bundle has
+    its own canonical hash and deliberately does not affect this human-readable
+    tag.
 
-    The tag is a label for humans, not an identity. Identity stays the derived
-    image's own digest, which the attempt engine requires as ``--derived-image``
-    and records in ``result.json``; two builds differing only in adapter bytes
-    share this name and are told apart there.
+    The tag is a label, not an identity. Identity stays the final image's own
+    digest, which the attempt engine requires as ``--derived-image`` and records
+    in ``result.json``; builds sharing a tag are told apart there.
     """
-    digest = selection.subject_image.partition("@sha256:")[2][:12]
+    digest = selection.tool_build_sha256[:12]
     return (
         f"{DERIVED_IMAGE_NAMESPACE}/{selection.tool}"
-        f":{selection.subject_version}-h{__version__}-{digest}"
+        f":{selection.tool_version}-h{__version__}-{digest}"
     )
 
 
-def derived_image_build_command(root: Path, selection: BuildSelection, tag: str) -> tuple[str, ...]:
+def derived_image_build_command(
+    root: Path, selection: BuildSelection, tag: str, shared_base_image: str
+) -> tuple[str, ...]:
     """Resolve the shared builder inputs and return its exact Docker argv."""
-    dockerfile = _contained(
-        root / "harness" / "derived-image" / "Dockerfile",
-        root,
-        "shared derived-image Dockerfile",
+    bakefile = _contained(
+        root / "harness" / "shared-image" / "docker-bake.hcl", root, "shared image Bake file"
     )
-    # Native-only build: the host architecture selects the subject and pinned
-    # interpreter payloads. A foreign build needs a separate explicit contract.
-    interpreter = ensure_runtime(platform.machine(), selection.python_libc)
+    tool_dockerfile = _contained(
+        selection.metadata_path.parent / "Dockerfile", root / "tools", "tool Dockerfile"
+    )
+    if IMMUTABLE_IMAGE_RE.fullmatch(shared_base_image) is None:
+        raise BuildSelectionError("shared base image must be an immutable digest reference")
+    return (
+        "docker",
+        "buildx",
+        "bake",
+        "--file",
+        str(bakefile),
+        "derived",
+        "--set",
+        f"tool.contexts.base=docker-image://{shared_base_image}",
+        "--set",
+        f"derived.contexts.base=docker-image://{shared_base_image}",
+        "--set",
+        f"tool.dockerfile={tool_dockerfile}",
+        "--set",
+        f"derived.contexts.adapter={selection.adapter_dir}",
+        "--set",
+        f"derived.contexts.selection={selection.metadata_path.parent}",
+        "--set",
+        f"derived.tags={tag}",
+        "--load",
+    )
+
+
+def shared_base_build_command(root: Path, tag: str) -> tuple[str, ...]:
+    """Build the one shared runtime image before any per-tool image is built."""
+    dockerfile = _contained(
+        root / "harness/shared-image/Dockerfile", root, "shared image Dockerfile"
+    )
+    source_sha256 = shared_base_source_sha256(root)
+    interpreter = ensure_runtime(platform.machine(), "gnu")
     duckdb_runtime = ensure_duckdb(platform.machine())
     return (
         "docker",
         "build",
         "--file",
         str(dockerfile),
-        "--build-context",
-        f"subject=docker-image://{selection.subject_image}",
-        "--build-context",
-        f"adapter={selection.adapter_dir}",
-        "--build-context",
-        f"selection={selection.metadata_path.parent}",
+        "--build-arg",
+        f"SHARED_BASE_SOURCE_SHA256={source_sha256}",
         "--build-context",
         f"python={interpreter}",
         "--build-context",
@@ -340,14 +445,34 @@ def derived_image_build_command(root: Path, selection: BuildSelection, tag: str)
     )
 
 
+def build_shared_image_main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="s3-listing-study build-shared-image")
+    parser.add_argument("--tag", required=True)
+    args = parser.parse_args(argv)
+    if not args.tag or "\x00" in args.tag:
+        parser.error("--tag must be a non-empty Docker image tag")
+    try:
+        root = Path.cwd().resolve(strict=True)
+        command = shared_base_build_command(root, args.tag)
+    except (BuildSelectionError, DuckDBRuntimeError, PythonRuntimeError) as exc:
+        print(f"build-shared-image: {exc}", file=sys.stderr)
+        return 2
+    try:
+        return subprocess.run(command, check=False).returncode
+    except OSError as exc:
+        print(f"build-shared-image: cannot invoke Docker: {exc}", file=sys.stderr)
+        return 2
+
+
 def build_derived_image_main(argv: Sequence[str] | None = None) -> int:
-    """Build one registered derived image from only its slug and output tag."""
+    """Build one registered final per-tool image from only its slug and output tag."""
     parser = argparse.ArgumentParser(prog="s3-listing-study build-derived-image")
     parser.add_argument("--tool", required=True)
     parser.add_argument(
         "--tag",
         help="output image name; defaults to the name derived from the registration",
     )
+    parser.add_argument("--shared-base-image", required=True)
     args = parser.parse_args(argv)
     if args.tag is not None and (not args.tag or "\x00" in args.tag):
         parser.error("--tag must be a non-empty Docker image tag")
@@ -355,14 +480,8 @@ def build_derived_image_main(argv: Sequence[str] | None = None) -> int:
         root = Path.cwd().resolve(strict=True)
         selection = load_registered_selection(root, args.tool)
         tag = derived_image_tag(selection) if args.tag is None else args.tag
-        command = derived_image_build_command(root, selection, tag)
+        command = derived_image_build_command(root, selection, tag, args.shared_base_image)
     except BuildSelectionError as exc:
-        print(f"build-derived-image: {exc}", file=sys.stderr)
-        return 2
-    except PythonRuntimeError as exc:
-        print(f"build-derived-image: {exc}", file=sys.stderr)
-        return 2
-    except DuckDBRuntimeError as exc:
         print(f"build-derived-image: {exc}", file=sys.stderr)
         return 2
 

@@ -23,8 +23,7 @@ only a README.
 1. **One public landing page.** The tool-directory root contains a concise
    `README.md`, not a mixture of documentation, JSON, shell, and Docker files.
 2. **Group by function.** A reader chooses `data/`, `docs/`, `adapter/`,
-   optional `build/`, `research/`, or `receipts/` according to what they need
-   to do.
+   `build/`, `research/`, or `receipts/` according to what they need to do.
 3. **Keep one source for each fact.** Current structured identity and claims
    live in JSON. Markdown explains them and links to them; it does not reproduce
    the full machine-readable ledger.
@@ -33,9 +32,9 @@ only a README.
    reviewed.
 5. **Preserve evidence in its native form.** Receipts and raw artifacts are not
    converted merely to make the tree look uniform.
-6. **Uniformity has limits.** `build/` and adapter fixtures exist only where
-   they serve a real function. Contextual entries do not receive empty capsule
-   directories.
+6. **Uniformity has limits.** Every runnable capsule owns build inputs; adapter
+   fixtures exist only where they serve a real function. Contextual entries do
+   not receive empty capsule directories.
 
 ## Directory map
 
@@ -52,9 +51,9 @@ tools/<tool>/
     command.py               typed friendly parameters to exact subject argv
     normalize.py             converts native output to the five-field contract
     fixtures/                synthetic adapter QA, only where applicable
-  build/                     optional tool-owned build inputs
-    Dockerfile               local subject build recipe, where needed
-    image.json               derived-image inputs, where needed
+  build/                     tool-owned build inputs
+    Dockerfile               one-tool payload recipe
+    image.json               final-image selection and provenance inputs
   research/                  preserved derivation and review history
     tool-page.md             frozen full pre-restructure landing page
     claims-migration.md      audit map from the old ledger to claims.json
@@ -69,7 +68,7 @@ The shortest reader routes are:
 | Reader | Start | Continue to |
 | --- | --- | --- |
 | Curious evaluator | `README.md` | `docs/` for explanation; `data/claims.json` for the full ledger |
-| Run operator | `docs/running.md` | `adapter/`, optional `build/`, and `receipts/` |
+| Run operator | `docs/running.md` | `adapter/`, `build/`, and `receipts/` |
 | Mechanism reviewer | `docs/mechanism.md` | source evidence in `data/claims.json` and derivation in `research/` |
 | Evidence auditor | `data/` | `research/claims-migration.md`, `research/`, and `receipts/` |
 
@@ -283,7 +282,7 @@ always linking back to the source record.
 
 `adapter/command.py` implements the shared typed command contract. It exports
 `build_command(CommandRequest) -> tuple[str, ...]`, returning the complete
-subject argv including the executable. The shared image build bundles exactly
+subject argv including the executable. The final image assembly bundles exactly
 one selected adapter; the in-image driver loads it and compiles argv from the
 scheduler's typed logical request. The adapter
 never runs Docker or the tool; the attempt engine owns execution, credentials,
@@ -302,30 +301,49 @@ boundary, not a stored canonical result.
 exists. Observed captures remain receipts. The current classified exceptions
 are documented in the migration playbook.
 
-`build/Dockerfile` exists only when the study carries a local subject build
-recipe; its header explains deviations from upstream and points to relevant
-research. `build/image.json` may instead record declarative inputs for the
-single shared `harness/derived-image/Dockerfile`. Tool capsules never copy or
-fork that shared attempt-runner recipe. Tools using an upstream image without
-derivation or another installation path do not receive an empty `build/`
-directory.
-Construction is slug-only through `s3-listing-study build-derived-image`; the
-command validates capsule containment and binds four named contexts — the
-registered `subject` image, the capsule's `adapter` and `selection` directories,
-and the study's pinned `python` interpreter, which the engine runs on so that a
-subject image need not ship one. `adapter_bundle_sha256` binds a documented
-canonical byte manifest of `command.py` and `normalize.py` and is the sole
-adapter identity in a new `result.json`.
+Every runnable capsule has a `build/Dockerfile` whose final scratch stage
+exports `/tool-root`: exactly one tool and the runtime files it needs, with no
+study worker. Recipes prefer the selected release's checksum-pinned official
+binary, archive, or package. `s3-fast-list` is the sole native source-build
+exception because its selected fork publishes no matching binary. Discarded,
+digest-pinned builder or runtime stages are allowed; upstream tool images are
+not execution bases or artifact donors.
 
-`image.json` declares, besides the adapter paths and that digest: the
-digest-pinned `subject_image`; `subject_version`, the release that digest
-contains, which names the derived image and is distinct from `data/tool.json`'s
-`tested.version`; `python_libc`, selecting the pinned interpreter build for the
-subject's base (`musl` for Alpine, otherwise `gnu`); `subject_workdir`; and
-`executable`, which must equal the adapter's `fixed_command_prefix`. With no
-`--tag`, the derived image is named
-`s3-listing-study/<tool>:<subject_version>-h<harness version>-<digest prefix>`,
-so it cannot be mistaken for the upstream image it wraps.
+The stable base in `harness/shared-image/` contains the pinned Debian/glibc
+userspace, CA trust, CPython, and DuckDB, but no tool or worker. The common final
+recipe in `harness/derived-image/` starts from that same base, applies
+`/tool-root`, and adds current `worker/`, worker-reachable `common/`, one
+adapter, and `image.json` as `selection.json`. Tool capsules do not copy either
+shared recipe. The base standardizes shared filesystem inputs; bundled or
+static Node, Python, JRE, resolver, TLS, and allocator behavior remains part of
+the tool payload.
+
+The target boundary defines invalidation:
+
+| Changed input | Invalidated target |
+| --- | --- |
+| manager or benchmark plan | none |
+| worker or adapter | affected final image(s) |
+| tool recipe or artifact | that tool payload and final image |
+| shared runtime | base and every final image |
+
+This avoids tool recompilation only when BuildKit cache is retained or restored;
+registry-backed cache for fresh builders is still open.
+
+`build/image.json` has an exact field set: `tool`, `tool_version`,
+`shared_base_source_sha256`, `tool_build_sha256`, structured `tool_artifact`,
+`subject_workdir`, `executable`, `command`, `normalizer`, and
+`adapter_bundle_sha256`. The tool-build hash covers the tool recipe, supporting
+build bytes, and declared artifact; it deliberately excludes the separately
+hashed adapter bundle. `executable` must equal the adapter's
+`fixed_command_prefix`.
+
+The build command accepts only a tool slug and an immutable shared-base URI;
+operator commands are in
+[`../../harness/derived-image/README.md`](../../harness/derived-image/README.md).
+Readable tags are labels, not identities. Publication and results record the
+final digest, shared-base URI/digest/source identity, tool build/artifact,
+adapter bundle, and harness revision. One image set cannot mix shared bases.
 
 ## Receipts and raw formats
 

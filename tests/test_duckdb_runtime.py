@@ -20,7 +20,7 @@ def _wheel() -> bytes:
     output = io.BytesIO()
     with zipfile.ZipFile(output, "w") as archive:
         archive.writestr("duckdb/__init__.py", "__version__ = '1.5.5'\n")
-        archive.writestr("_duckdb.cpython-313-test.so", b"native-placeholder")
+        archive.writestr("_duckdb.cpython-312-test.so", b"native-placeholder")
         archive.writestr("duckdb-1.5.5.dist-info/METADATA", "Version: 1.5.5\n")
     return output.getvalue()
 
@@ -38,7 +38,7 @@ def test_locked_wheel_is_hash_verified_and_extracted(
     monkeypatch.setattr(urllib.request, "urlopen", lambda *_args, **_kwargs: io.BytesIO(wheel))
     tree = duckdb_runtime.ensure_runtime("x86_64", cache_root=tmp_path)
     assert (tree / "duckdb/__init__.py").is_file()
-    assert (tree / "_duckdb.cpython-313-test.so").is_file()
+    assert (tree / "_duckdb.cpython-312-test.so").is_file()
     assert (tree / "duckdb-1.5.5.dist-info/METADATA").is_file()
     assert (tree.parent / "locked.whl").read_bytes() == wheel
 
@@ -93,7 +93,7 @@ def test_concurrent_callers_publish_one_authenticated_cache(
 
 @pytest.mark.parametrize(
     "relative",
-    ["duckdb/__init__.py", "_duckdb.cpython-313-test.so"],
+    ["duckdb/__init__.py", "_duckdb.cpython-312-test.so"],
 )
 def test_tampered_cached_payload_is_rejected(
     relative: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -115,7 +115,9 @@ def test_tampered_cached_payload_is_rejected(
 def test_filename_only_fake_cache_is_not_trusted(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    tree = tmp_path / duckdb_runtime.VERSION / "x86_64" / "site-packages"
+    tree = (
+        tmp_path / duckdb_runtime.VERSION / duckdb_runtime.PYTHON_TAG / "x86_64" / "site-packages"
+    )
     (tree / "duckdb").mkdir(parents=True)
     (tree / "duckdb/__init__.py").write_text("__version__ = '1.5.5'\n")
     (tree / "_duckdb.fake.so").write_bytes(b"attacker-controlled")
@@ -168,7 +170,7 @@ def test_wheel_traversal_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     with zipfile.ZipFile(output, "w") as archive:
         archive.writestr("../outside", b"must not escape")
         archive.writestr("duckdb/__init__.py", "__version__ = '1.5.5'\n")
-        archive.writestr("_duckdb.cpython-313-test.so", b"native-placeholder")
+        archive.writestr("_duckdb.cpython-312-test.so", b"native-placeholder")
         archive.writestr("duckdb-1.5.5.dist-info/METADATA", "Version: 1.5.5\n")
     wheel = output.getvalue()
     monkeypatch.setitem(
@@ -185,7 +187,7 @@ def test_wheel_traversal_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPa
 def test_only_native_campaign_architectures_have_locked_wheels() -> None:
     assert set(duckdb_runtime.WHEELS) == {"x86_64", "aarch64"}
     assert duckdb_runtime.VERSION == "1.5.5"
-    assert duckdb_runtime.PYTHON_TAG == "cp313-cp313"
+    assert duckdb_runtime.PYTHON_TAG == "cp312-cp312"
 
 
 def test_locked_wheel_urls_and_hashes_are_recorded_in_uv_lock() -> None:

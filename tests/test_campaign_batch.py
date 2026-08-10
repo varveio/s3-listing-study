@@ -50,10 +50,13 @@ def attempt(
         image={
             "derived_image": DIGEST,
             "image_uri": f"us-east1-docker.pkg.dev/study/images/swath@{DIGEST}",
-            "subject_image": SUBJECT,
-            "subject_version": "0.2.2",
+            "shared_base_digest": SUBJECT,
+            "shared_base_uri": f"registry.example/base@{SUBJECT}",
+            "shared_base_source_sha256": "a" * 64,
+            "tool_build_sha256": "b" * 64,
+            "tool_artifact": {"kind": "release-archive", "locator": "example", "sha256": "c" * 64},
+            "tool_version": "0.2.2",
             "adapter_bundle_sha256": "a" * 64,
-            "python_libc": "gnu",
             "harness_revision": "0.1.0",
         },
         fingerprint="f" * 64,
@@ -93,7 +96,7 @@ def test_renderer_emits_exact_worker_request_and_provenance() -> None:
     assert container["imageUri"].endswith(f"@{DIGEST}")
     assert container["commands"] == [
         "--request-schema",
-        "1",
+        "2",
         "--output",
         "/tmp/s3-listing-study-attempt",
         "--timeout",
@@ -104,6 +107,10 @@ def test_renderer_emits_exact_worker_request_and_provenance() -> None:
         "swath",
         "--tool-version",
         "0.2.2",
+        "--shared-base-digest",
+        SUBJECT,
+        "--shared-base-uri",
+        "registry.example/base@" + SUBJECT,
         "--derived-image",
         DIGEST,
         "--harness-revision",
@@ -217,6 +224,8 @@ def test_committed_managed_runtime_cases_render_their_explicit_environment() -> 
             {
                 "derived_image": DIGEST,
                 "image_uri": f"us-east1-docker.pkg.dev/study/images/{tool}@{DIGEST}",
+                "shared_base_digest": SUBJECT,
+                "shared_base_uri": f"registry.example/base@{SUBJECT}",
                 "harness_revision": "revision",
             }
         )

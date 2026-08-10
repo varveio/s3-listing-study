@@ -11,7 +11,7 @@ The expensive failure direction is a shipped worker/common module reaching into
 runner — the latest and most costly place to find out. Manager imports of
 ``common`` are intentional; that is the shared layer's purpose. The reachability
 test below keeps every common module genuinely shared so manager-only code does
-not drift into the image and change every derived-image digest.
+not drift into final assembly and change every final per-tool image's digest.
 """
 
 from __future__ import annotations
@@ -95,7 +95,7 @@ def test_shipped_layers_never_import_manager() -> None:
             if _layer(imported) in (MANAGER, REPO_LAYER):
                 offenders.append(f"{module} -> {imported}")
     assert not offenders, (
-        "modules that ship in a subject image import unshipped code, which will "
+        "modules that ship in a final per-tool image import unshipped code, which will "
         f"ImportError at attempt time: {offenders}"
     )
 
@@ -128,11 +128,11 @@ def test_dockerfile_ships_exactly_the_shipped_layers() -> None:
     text = DOCKERFILE.read_text(encoding="utf-8")
     for layer in SHIPPED:
         assert f"COPY src/s3_listing_study/{layer}/" in text, (
-            f"the derived image must copy s3_listing_study/{layer}/"
+            f"the final per-tool image must copy s3_listing_study/{layer}/"
         )
     for layer in (MANAGER, REPO_LAYER):
         assert f"COPY src/s3_listing_study/{layer}/" not in text, (
-            f"{layer}-only code must not be copied into a subject image"
+            f"{layer}-only code must not be copied into a final per-tool image"
         )
     assert "COPY src/s3_listing_study/ " not in text, (
         "copying the whole package puts manager-only modules back in the image"

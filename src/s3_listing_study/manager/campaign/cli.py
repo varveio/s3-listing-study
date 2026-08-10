@@ -35,12 +35,16 @@ from s3_listing_study.manager.campaign.batch import BatchConfig, render_job
 IMAGE_SET_FIELDS = {
     "derived_image",
     "image_uri",
-    "subject_image",
-    "subject_version",
+    "shared_base_digest",
+    "shared_base_uri",
+    "shared_base_source_sha256",
+    "tool_build_sha256",
+    "tool_artifact",
+    "tool_version",
     "adapter_bundle_sha256",
-    "python_libc",
     "harness_revision",
 }
+IMAGE_SET_SCHEMA_VERSION = 2
 
 
 class SubmissionError(RuntimeError):
@@ -102,8 +106,10 @@ def _read_image_set(path: Path) -> dict[str, dict[str, Any]]:
     unknown_top = sorted(set(document) - {"schema_version", "images"})
     if unknown_top:
         raise SubmissionError(f"image set has unknown key(s): {', '.join(unknown_top)}")
-    if document.get("schema_version") != 1 or isinstance(document.get("schema_version"), bool):
-        raise SubmissionError("image set schema_version must be 1")
+    if document.get("schema_version") != IMAGE_SET_SCHEMA_VERSION or isinstance(
+        document.get("schema_version"), bool
+    ):
+        raise SubmissionError(f"image set schema_version must be {IMAGE_SET_SCHEMA_VERSION}")
     images = document.get("images")
     if not isinstance(images, dict) or not images:
         raise SubmissionError("image set images must be a non-empty object")
@@ -127,12 +133,24 @@ def _read_image_set(path: Path) -> dict[str, dict[str, Any]]:
         image_uri = value["image_uri"]
         if not isinstance(image_uri, str) or not image_uri.endswith(f"@{derived_image}"):
             raise SubmissionError(f"{tool}: image_uri digest does not match derived_image")
-        subject_image = value["subject_image"]
-        if not isinstance(subject_image, str):
-            raise SubmissionError(f"{tool}: subject_image is not digest-pinned")
-        subject_digest = subject_image.rsplit("@", 1)[-1]
-        if DIGEST_RE.fullmatch(subject_digest) is None:
-            raise SubmissionError(f"{tool}: subject_image is not digest-pinned")
+        shared_digest = value["shared_base_digest"]
+        shared_uri = value["shared_base_uri"]
+        if not isinstance(shared_digest, str) or DIGEST_RE.fullmatch(shared_digest) is None:
+            raise SubmissionError(f"{tool}: shared_base_digest is not a sha256 digest")
+        if not isinstance(shared_uri, str) or not shared_uri.endswith(f"@{shared_digest}"):
+            raise SubmissionError(f"{tool}: shared_base_uri digest does not match")
+        for field in ("shared_base_source_sha256", "tool_build_sha256"):
+            identity = value[field]
+            if not isinstance(identity, str) or re.fullmatch(r"[0-9a-f]{64}", identity) is None:
+                raise SubmissionError(f"{tool}: {field} is not 64 lowercase hex digits")
+        artifact = value["tool_artifact"]
+        if not isinstance(artifact, dict) or set(artifact) != {"kind", "locator", "sha256"}:
+            raise SubmissionError(f"{tool}: tool_artifact has invalid fields")
+        if (
+            not isinstance(artifact["sha256"], str)
+            or re.fullmatch(r"[0-9a-f]{64}", artifact["sha256"]) is None
+        ):
+            raise SubmissionError(f"{tool}: tool_artifact sha256 is invalid")
         adapter = value["adapter_bundle_sha256"]
         if (
             not isinstance(adapter, str)
@@ -140,7 +158,7 @@ def _read_image_set(path: Path) -> dict[str, dict[str, Any]]:
             or any(character not in "0123456789abcdef" for character in adapter)
         ):
             raise SubmissionError(f"{tool}: adapter_bundle_sha256 is not 64 lowercase hex digits")
-        for field in ("subject_version", "python_libc", "harness_revision"):
+        for field in ("tool_version", "harness_revision"):
             field_value = value[field]
             if (
                 not isinstance(field_value, str)
@@ -148,8 +166,6 @@ def _read_image_set(path: Path) -> dict[str, dict[str, Any]]:
                 or any(character.isspace() for character in field_value)
             ):
                 raise SubmissionError(f"{tool}: {field} must be a non-empty token")
-        if value["python_libc"] not in ("gnu", "musl"):
-            raise SubmissionError(f"{tool}: python_libc must be gnu or musl")
         harness_revision = value["harness_revision"]
         if (
             not isinstance(harness_revision, str)
@@ -157,6 +173,14 @@ def _read_image_set(path: Path) -> dict[str, dict[str, Any]]:
         ):
             raise SubmissionError(f"{tool}: harness_revision must be a full lowercase commit ID")
         validated[tool] = dict(value)
+    shared_inputs = {
+        (image["shared_base_digest"], image["shared_base_source_sha256"])
+        for image in validated.values()
+    }
+    if len(shared_inputs) != 1:
+        raise SubmissionError(
+            "image set must use one shared base digest and source identity for every tool"
+        )
     return validated
 
 
@@ -174,10 +198,15 @@ def validate_registered_images(
             continue
         selection = load_registered_selection(base, tool)
         expected = {
-            "subject_image": selection.subject_image,
-            "subject_version": selection.subject_version,
+            "tool_version": selection.tool_version,
+            "shared_base_source_sha256": selection.shared_base_source_sha256,
+            "tool_build_sha256": selection.tool_build_sha256,
+            "tool_artifact": {
+                "kind": selection.tool_artifact_kind,
+                "locator": selection.tool_artifact_locator,
+                "sha256": selection.tool_artifact_sha256,
+            },
             "adapter_bundle_sha256": selection.adapter_bundle_sha256,
-            "python_libc": selection.python_libc,
         }
         mismatched = sorted(field for field, value in expected.items() if image.get(field) != value)
         if mismatched:

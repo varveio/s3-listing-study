@@ -11,14 +11,8 @@
 # amd64 only: the prebuilt binary is ELF x86-64. On an arm64 runner this image
 # runs under qemu emulation (smoke only) — see the receipts' arch/emulated.
 
-FROM debian@sha256:7b140f374b289a7c2befc338f42ebe6441b7ea838a042bbd5acbfca6ec875818
-
-# CA roots for HTTPS to S3; tzdata so TZ=UTC resolves. Pinned base digest above.
-RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates tzdata \
- && rm -rf /var/lib/apt/lists/*
-
-ENV TZ=UTC
+FROM base AS install
+USER root
 
 # The tool's shipped prebuilt binary, pinned by commit path AND content hash.
 # sha256 3bc7bbbb0d45d6f96b0130f98859ea7cfe693b13a8438461240423511322a9c2
@@ -28,4 +22,5 @@ ADD --checksum=sha256:3bc7bbbb0d45d6f96b0130f98859ea7cfe693b13a84384612404235113
 RUN chmod +x /usr/local/bin/pS3
 
 # Entrypoint is the tool binary; the command adapter includes it as argv[0].
-ENTRYPOINT ["/usr/local/bin/pS3"]
+FROM scratch
+COPY --from=install /usr/local/bin/pS3 /tool-root/usr/local/bin/pS3

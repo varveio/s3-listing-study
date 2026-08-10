@@ -1,0 +1,8 @@
+{
+  "name": "s3-listing-study-s3p-runtime",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "s3p": "https://registry.npmjs.org/s3p/-/s3p-3.7.2.tgz"
+  }
+}

@@ -1,8 +1,9 @@
 {
   "tool": "s3p",
-  "subject_image": "registry.local/s3p@sha256:a57122e3ecc56f81574afa2c455788a881d008e2ddbf208981e92a444d2ea127",
-  "subject_version": "3.7.2",
-  "python_libc": "gnu",
+  "tool_version": "3.7.2",
+  "shared_base_source_sha256": "a2643461eead4bcdafa978c63730b90ff77376d8ac7df6e1da6d90d7170f658b",
+  "tool_build_sha256": "2d65eafb0b8e277ea6dd1a7c314d389631223963c6dbe9924952b64afc10b2d1",
+  "tool_artifact": {"kind":"npm-package","locator":"https://registry.npmjs.org/s3p/-/s3p-3.7.2.tgz","sha256":"56e51536d2d34fa2988e53e04b2eb0a81aee695abe8fe4525ec0cc879ef24a51"},
   "subject_workdir": "/",
   "executable": [
     "/usr/local/bin/s3p"

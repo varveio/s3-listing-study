@@ -9,6 +9,10 @@ tested identity (pinned SHAs, versions, study states) lives in
 in [`../data/claims.json`](../data/claims.json). Study state uses the canonical
 status vocabulary (`supported`, `confirmed`, `unverified`, `unverifiable`).
 
+## Comparative image prepared 2026-08-10 (not run evidence)
+
+[image.json](../build/image.json) selects MinIO's official mc.RELEASE.2025-08-13T08-35-41Z Linux amd64 binary. Shared assembly is defined once in [tool-structure.md](../../../docs/operating/tool-structure.md). Historical receipts below continue to describe the images and artifacts they name.
+
 ## Image
 
 Upstream official `minio/mc:RELEASE.2025-08-13T08-35-41Z`, pinned by digest:

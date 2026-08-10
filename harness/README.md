@@ -50,6 +50,8 @@ logical request arguments and never replace it. There is no public
 ```sh
 /opt/s3-listing-study/python/bin/python3 -I /opt/s3-listing-study/attempt.pyz \
   --output /output \
+  --shared-base-digest sha256:SHARED_BASE_DIGEST \
+  --shared-base-uri REGISTRY/shared-base@sha256:SHARED_BASE_DIGEST \
   --derived-image sha256:DERIVED_IMAGE_DIGEST \
   --tool aws-cli \
   --operation list \
@@ -68,14 +70,14 @@ adding `tools/<tool>/build/image.json`. The selected tool's bundled `command.py`
 resolves complete subject argv inside the image through the typed driver API;
 there is no raw argv escape hatch. Adapters never execute or time the subject.
 
-Tool-specific image packaging uses one shared recipe, documented in
-[`derived-image/README.md`](derived-image/README.md). It runs the engine on a
-pinned interpreter bound at build time, so a subject image is not required to
-ship a Python of its own. Tool-specific subject digest, version, workdir, and
-libc inputs remain capsule-owned and are selected through
-`s3-listing-study build-derived-image --tool SLUG`, never free build arguments.
-Each result records the validated canonical `adapter_bundle_sha256` as its sole
-adapter identity, and the derived image's own digest as the image identity.
+Image construction is deliberately separate from this execution lifecycle: one
+published base, one capsule-owned tool payload, and one final image per tool.
+The shared base contains no worker, so worker and adapter changes only
+reassemble final images when the builder retains or restores its cache.
+
+Build, publication, identity, and cache rules are documented once in
+[`shared-image/README.md`](shared-image/README.md) and
+[`derived-image/README.md`](derived-image/README.md).
 
 ## Security boundary
 

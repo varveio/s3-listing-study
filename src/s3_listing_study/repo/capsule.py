@@ -24,8 +24,7 @@ except ImportError:
     raise SystemExit(2) from None
 
 
-from ..common.build_selection import BuildSelectionError, load_selection
-from ..common.command_adapter import CommandAdapterError, load_command_adapter
+from ..common.build_selection import BuildSelectionError, load_registered_selection
 
 REQUIRED_DIRS = {"data", "docs", "adapter", "research", "receipts"}
 ALLOWED_ROOT = REQUIRED_DIRS | {"README.md", "build"}
@@ -581,23 +580,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         errors.append("build/ exists without Dockerfile or image.json")
     image_metadata = capsule / "build" / "image.json"
     if image_metadata.is_file():
-        document = load_json(image_metadata, errors)
-        subject_image = document.get("subject_image") if isinstance(document, dict) else None
-        if isinstance(subject_image, str):
-            try:
-                selection = load_selection(
-                    image_metadata,
-                    expected_tool=args.tool,
-                    subject_image=subject_image,
-                )
-                adapter = load_command_adapter(
-                    capsule / "adapter" / "command.py",
-                    expected_tool=args.tool,
-                )
-                if adapter.fixed_command_prefix != selection.executable:
-                    errors.append("build/image.json executable disagrees with adapter/command.py")
-            except (BuildSelectionError, CommandAdapterError) as exc:
-                errors.append(f"build/image.json: {exc}")
+        try:
+            load_registered_selection(repo, args.tool)
+        except BuildSelectionError as exc:
+            errors.append(f"build/image.json: {exc}")
     if migration_regression:
         base_has_dockerfile = (
             git(

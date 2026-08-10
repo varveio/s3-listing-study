@@ -1,8 +1,9 @@
 {
   "tool": "aws-cli",
-  "subject_image": "amazon/aws-cli@sha256:406ca32d31e640a56e8d52921b40528cc64bfa59ec9cb4ee1456db6746cb7292",
-  "subject_version": "2.36.1",
-  "python_libc": "gnu",
+  "tool_version": "2.36.1",
+  "shared_base_source_sha256": "a2643461eead4bcdafa978c63730b90ff77376d8ac7df6e1da6d90d7170f658b",
+  "tool_build_sha256": "ad0f0b69890cf17f406f5f6f433610d9d7f8f23cb1026069e09f5a8b81452da2",
+  "tool_artifact": {"kind":"release-archive","locator":"https://awscli.amazonaws.com/awscli-exe-linux-x86_64-2.36.1.zip","sha256":"6b36b85980ab783db7ba0ff24ebb85924682fa6da1db7ca3c2fa6f27083c0f52"},
   "subject_workdir": "/aws",
   "executable": [
     "/usr/local/bin/aws"

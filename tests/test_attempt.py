@@ -47,9 +47,12 @@ LOGICAL_ARGS = [
     "region-y",
 ]
 ADAPTER_BUNDLE_SHA256 = "0" * 64
-SUBJECT_IMAGE_DIGEST = "sha256:" + "1" * 64
+SHARED_BASE_IMAGE_DIGEST = "sha256:" + "1" * 64
+SHARED_BASE_IMAGE_URI = "registry.example/study/base@" + SHARED_BASE_IMAGE_DIGEST
 DERIVED_IMAGE_DIGEST = "sha256:" + "2" * 64
 LOGICAL_ARGS.extend(["--derived-image", DERIVED_IMAGE_DIGEST])
+LOGICAL_ARGS.extend(["--shared-base-digest", SHARED_BASE_IMAGE_DIGEST])
+LOGICAL_ARGS.extend(["--shared-base-uri", SHARED_BASE_IMAGE_URI])
 
 
 def test_attempt_cli_is_strictly_logical_and_non_abbreviating() -> None:
@@ -63,6 +66,14 @@ def test_attempt_cli_is_strictly_logical_and_non_abbreviating() -> None:
         cli.build_parser().parse_args([*LOGICAL_ARGS, "--", "/bin/echo"])
 
 
+def test_attempt_cli_emits_and_accepts_only_request_schema_two() -> None:
+    parser = cli.build_parser()
+    assert parser.parse_args(LOGICAL_ARGS).request_schema == "2"
+    assert parser.parse_args([*LOGICAL_ARGS, "--request-schema", "2"]).request_schema == "2"
+    with pytest.raises(SystemExit):
+        parser.parse_args([*LOGICAL_ARGS, "--request-schema", "1"])
+
+
 def test_attempt_cli_forwards_only_explicit_managed_runtime_environment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -74,7 +85,6 @@ def test_attempt_cli_forwards_only_explicit_managed_runtime_environment(
         lambda _request: ResolvedInvocation(
             _python("pass"),
             ADAPTER_BUNDLE_SHA256,
-            SUBJECT_IMAGE_DIGEST,
             {"MC_HOST_s3": "https://s3.amazonaws.com"},
         ),
     )
@@ -115,7 +125,6 @@ def test_attempt_cli_records_forwarded_managed_runtime_environment(
         lambda _request: ResolvedInvocation(
             _python("import os; assert os.environ['NODE_OPTIONS'] == '--max-old-space-size=1536'"),
             ADAPTER_BUNDLE_SHA256,
-            SUBJECT_IMAGE_DIGEST,
         ),
     )
     monkeypatch.setattr(cli, "_normalizer_path", lambda _tool: None)
@@ -209,7 +218,7 @@ def test_attempt_cli_passes_typed_concurrency_and_records_it(
 
     def resolve(request: CommandRequest) -> ResolvedInvocation:
         observed.append(request)
-        return ResolvedInvocation(_python("pass"), ADAPTER_BUNDLE_SHA256, SUBJECT_IMAGE_DIGEST)
+        return ResolvedInvocation(_python("pass"), ADAPTER_BUNDLE_SHA256)
 
     monkeypatch.setattr(cli, "resolve_invocation", resolve)
     monkeypatch.setattr(cli, "_normalizer_path", lambda _tool: None)
@@ -243,9 +252,7 @@ def test_attempt_cli_reports_adapter_concurrency_rejection_without_output(
 
     def resolve(request: CommandRequest) -> ResolvedInvocation:
         adapter = load_command_adapter(root / "tools" / tool / "adapter" / "command.py")
-        return ResolvedInvocation(
-            adapter.compile(request), ADAPTER_BUNDLE_SHA256, SUBJECT_IMAGE_DIGEST
-        )
+        return ResolvedInvocation(adapter.compile(request), ADAPTER_BUNDLE_SHA256)
 
     monkeypatch.setattr(cli, "resolve_invocation", resolve)
     logical_args = list(LOGICAL_ARGS)
@@ -274,7 +281,8 @@ def _run(tmp_path: Path, source: str, **changes: object) -> tuple[dict[str, obje
         "argv": _python(source),
         "timeout_s": 2.0,
         "adapter_bundle_sha256": ADAPTER_BUNDLE_SHA256,
-        "subject_image": SUBJECT_IMAGE_DIGEST,
+        "shared_base_digest": SHARED_BASE_IMAGE_DIGEST,
+        "shared_base_uri": SHARED_BASE_IMAGE_URI,
         "derived_image": DERIVED_IMAGE_DIGEST,
         "term_grace_s": 0.1,
         "attempt_id": "test-attempt",
@@ -318,6 +326,22 @@ def test_success_records_direct_argv_and_binary_streams(tmp_path: Path) -> None:
         "status": "clean",
         "streams": {"stdout": "clean", "stderr": "clean"},
     }
+
+
+def test_subject_runs_in_registered_working_directory(tmp_path: Path) -> None:
+    workdir = tmp_path / "subject-workdir"
+    workdir.mkdir()
+    result, runner_exit = _run(
+        tmp_path,
+        "import os; print(os.getcwd())",
+        subject_workdir=str(workdir),
+    )
+
+    assert runner_exit == 0
+    assert gzip.decompress((tmp_path / "attempt/stdout.raw.gz").read_bytes()) == (
+        f"{workdir}\n".encode()
+    )
+    assert result["invocation"]["working_directory"] == str(workdir)  # type: ignore[index]
 
 
 def test_worker_mints_a_distinct_uuid_for_each_container_execution(tmp_path: Path) -> None:
@@ -492,9 +516,7 @@ def test_tool_nonzero_is_a_recorded_outcome_and_cli_success(
     monkeypatch.setattr(
         cli,
         "resolve_invocation",
-        lambda _request: ResolvedInvocation(
-            _python("raise SystemExit(23)"), ADAPTER_BUNDLE_SHA256, SUBJECT_IMAGE_DIGEST
-        ),
+        lambda _request: ResolvedInvocation(_python("raise SystemExit(23)"), ADAPTER_BUNDLE_SHA256),
     )
     runner_exit = cli.main(
         [
@@ -504,6 +526,10 @@ def test_tool_nonzero_is_a_recorded_outcome_and_cli_success(
             "2",
             "--derived-image",
             DERIVED_IMAGE_DIGEST,
+            "--shared-base-digest",
+            SHARED_BASE_IMAGE_DIGEST,
+            "--shared-base-uri",
+            SHARED_BASE_IMAGE_URI,
             "--tool",
             "fixture-tool",
             "--operation",
@@ -554,9 +580,15 @@ def test_tool_nonzero_is_a_recorded_outcome_and_cli_success(
     }
     assert _result(output)["adapter_bundle_sha256"] == ADAPTER_BUNDLE_SHA256
     assert _result(output)["images"] == {
-        "subject": SUBJECT_IMAGE_DIGEST,
         "derived": DERIVED_IMAGE_DIGEST,
+        "shared_base": {
+            "digest": SHARED_BASE_IMAGE_DIGEST,
+            "uri": SHARED_BASE_IMAGE_URI,
+        },
     }
+    build_inputs = cast(Mapping[str, object], _result(output)["build_inputs"])
+    shared_base = cast(Mapping[str, object], build_inputs["shared_base"])
+    assert shared_base["source_sha256"] == "0" * 64
 
 
 def test_signal_is_not_misreported_as_an_exit_code(tmp_path: Path) -> None:
@@ -675,7 +707,8 @@ def test_completed_attempt_has_exactly_three_artifacts_and_result_is_last(
             argv=_python("pass"),
             timeout_s=2,
             adapter_bundle_sha256=ADAPTER_BUNDLE_SHA256,
-            subject_image=SUBJECT_IMAGE_DIGEST,
+            shared_base_digest=SHARED_BASE_IMAGE_DIGEST,
+            shared_base_uri=SHARED_BASE_IMAGE_URI,
             derived_image=DERIVED_IMAGE_DIGEST,
         ),
         post_measure_hook=before_finalization,
@@ -697,7 +730,8 @@ def test_post_measure_delay_is_excluded_from_elapsed_time(tmp_path: Path) -> Non
             argv=_python("pass"),
             timeout_s=2,
             adapter_bundle_sha256=ADAPTER_BUNDLE_SHA256,
-            subject_image=SUBJECT_IMAGE_DIGEST,
+            shared_base_digest=SHARED_BASE_IMAGE_DIGEST,
+            shared_base_uri=SHARED_BASE_IMAGE_URI,
             derived_image=DERIVED_IMAGE_DIGEST,
         ),
         post_measure_hook=lambda: time.sleep(delay_s),
@@ -760,7 +794,8 @@ def test_adapter_resolution_and_measurement_do_not_import_normalizer_or_duckdb(
             argv=_python("pass"),
             timeout_s=2,
             adapter_bundle_sha256=invocation.adapter_bundle_sha256,
-            subject_image=invocation.subject_image_digest,
+            shared_base_digest=SHARED_BASE_IMAGE_DIGEST,
+            shared_base_uri=SHARED_BASE_IMAGE_URI,
             derived_image=DERIVED_IMAGE_DIGEST,
         ),
         post_measure_hook=elapsed_boundary,
@@ -799,7 +834,8 @@ def test_anonymous_child_environment_is_a_strict_recorded_allowlist(tmp_path: Pa
             argv=_python(source),
             timeout_s=2,
             adapter_bundle_sha256=ADAPTER_BUNDLE_SHA256,
-            subject_image=SUBJECT_IMAGE_DIGEST,
+            shared_base_digest=SHARED_BASE_IMAGE_DIGEST,
+            shared_base_uri=SHARED_BASE_IMAGE_URI,
             derived_image=DERIVED_IMAGE_DIGEST,
         ),
         source_env=source_env,
@@ -874,9 +910,7 @@ def test_flagged_raw_stream_fails_closed_without_artifacts(
     monkeypatch.setattr(
         cli,
         "resolve_invocation",
-        lambda _request: ResolvedInvocation(
-            _python(source), ADAPTER_BUNDLE_SHA256, SUBJECT_IMAGE_DIGEST
-        ),
+        lambda _request: ResolvedInvocation(_python(source), ADAPTER_BUNDLE_SHA256),
     )
     runner_exit = cli.main(
         [
@@ -886,6 +920,10 @@ def test_flagged_raw_stream_fails_closed_without_artifacts(
             "2",
             "--derived-image",
             DERIVED_IMAGE_DIGEST,
+            "--shared-base-digest",
+            SHARED_BASE_IMAGE_DIGEST,
+            "--shared-base-uri",
+            SHARED_BASE_IMAGE_URI,
             "--tool",
             "fixture-tool",
             "--operation",
@@ -915,9 +953,7 @@ def test_scanner_error_fails_closed_without_artifacts(
     monkeypatch.setattr(
         cli,
         "resolve_invocation",
-        lambda _request: ResolvedInvocation(
-            _python("print('clean')"), ADAPTER_BUNDLE_SHA256, SUBJECT_IMAGE_DIGEST
-        ),
+        lambda _request: ResolvedInvocation(_python("print('clean')"), ADAPTER_BUNDLE_SHA256),
     )
     runner_exit = cli.main(
         [
@@ -927,6 +963,10 @@ def test_scanner_error_fails_closed_without_artifacts(
             "2",
             "--derived-image",
             DERIVED_IMAGE_DIGEST,
+            "--shared-base-digest",
+            SHARED_BASE_IMAGE_DIGEST,
+            "--shared-base-uri",
+            SHARED_BASE_IMAGE_URI,
             "--tool",
             "fixture-tool",
             "--operation",
@@ -957,7 +997,8 @@ def test_populated_output_is_refused_without_overwrite(tmp_path: Path) -> None:
                 argv=_python("pass"),
                 timeout_s=2,
                 adapter_bundle_sha256=ADAPTER_BUNDLE_SHA256,
-                subject_image=SUBJECT_IMAGE_DIGEST,
+                shared_base_digest=SHARED_BASE_IMAGE_DIGEST,
+                shared_base_uri=SHARED_BASE_IMAGE_URI,
                 derived_image=DERIVED_IMAGE_DIGEST,
             )
         )
@@ -968,7 +1009,7 @@ def test_populated_output_is_refused_without_overwrite(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     "field",
-    ["subject_image", "derived_image"],
+    ["shared_base_digest", "derived_image"],
 )
 @pytest.mark.parametrize(
     "identity",
@@ -987,14 +1028,15 @@ def test_direct_engine_requires_canonical_exact_image_digests(
     identity: str,
 ) -> None:
     output = tmp_path / "attempt"
-    with pytest.raises(AttemptError, match=f"{field.split('_')[0]} image identity"):
+    label = "shared base" if field == "shared_base_digest" else "derived"
+    with pytest.raises(AttemptError, match=f"{label} image identity"):
         _run(tmp_path, "pass", **{field: identity})
     assert not output.exists()
 
 
 def test_cli_has_no_subject_image_override_and_requires_derived_digest() -> None:
     with pytest.raises(SystemExit):
-        cli.build_parser().parse_args([*LOGICAL_ARGS, "--subject-image", SUBJECT_IMAGE_DIGEST])
+        cli.build_parser().parse_args([*LOGICAL_ARGS, "--subject-image", SHARED_BASE_IMAGE_DIGEST])
     without_derived = LOGICAL_ARGS[:-2]
     with pytest.raises(SystemExit):
         cli.build_parser().parse_args(without_derived)
@@ -1067,7 +1109,8 @@ def test_publication_stays_anchored_when_output_parent_path_is_swapped(tmp_path:
             argv=_python("print('anchored')"),
             timeout_s=2,
             adapter_bundle_sha256=ADAPTER_BUNDLE_SHA256,
-            subject_image=SUBJECT_IMAGE_DIGEST,
+            shared_base_digest=SHARED_BASE_IMAGE_DIGEST,
+            shared_base_uri=SHARED_BASE_IMAGE_URI,
             derived_image=DERIVED_IMAGE_DIGEST,
         ),
         post_measure_hook=swap_parent_path,
@@ -1110,37 +1153,18 @@ def test_generic_dockerfile_bakes_no_tool_specific_command_prefix() -> None:
     root = Path(__file__).resolve().parents[1]
     dockerfile = (root / "harness/derived-image/Dockerfile").read_text()
 
-    assert dockerfile.count("FROM subject") == 2
+    assert dockerfile.count("FROM base") == 1
     # Which package layers make up the payload is owned by
     # tests/test_payload_boundary.py; this only pins that the recipe stays
     # generic, so assert the copy exists without restating the boundary.
-    assert "COPY src/s3_listing_study/worker/" in dockerfile
-    assert "COPY harness/derived-image/zipapp_main.py /build/payload/" in dockerfile
-    assert "COPY --from=adapter command.py /build/tool/command.py" in dockerfile
-    assert "COPY --from=adapter normalize.py /build/tool/normalize.py" in dockerfile
-    assert "COPY --from=selection image.json /build/image.json" in dockerfile
-    assert "COPY --from=attempt-builder /build/image.json" in dockerfile
+    assert "COPY --from=adapter command.py /opt/s3-listing-study/tool/command.py" in dockerfile
+    assert "COPY --from=adapter normalize.py /opt/s3-listing-study/tool/normalize.py" in dockerfile
+    assert "COPY --from=selection image.json /opt/s3-listing-study/selection.json" in dockerfile
     assert "ARG " not in dockerfile
     assert "WORKDIR ${SUBJECT_WORKDIR}" not in dockerfile
-    assert 'ENTRYPOINT ["/opt/s3-listing-study/python/bin/python3", "-I"' in dockerfile
-    assert "COPY --from=python . /opt/s3-listing-study/python/" in dockerfile
     assert "aws-cli" not in dockerfile
     assert "command-prefix" not in dockerfile
     assert "sh -c" not in dockerfile
     assert "S3_STUDY_ATTEMPT_OUT" not in dockerfile
     assert not (root / "harness/images/aws-cli").exists()
-    assert not (root / "tools/aws-cli/build/Dockerfile").exists()
-    aws_inputs = json.loads((root / "tools/aws-cli/build/image.json").read_text())
-    assert aws_inputs == {
-        "tool": "aws-cli",
-        "subject_image": (
-            "amazon/aws-cli@sha256:406ca32d31e640a56e8d52921b40528cc64bfa59ec9cb4ee1456db6746cb7292"
-        ),
-        "subject_version": "2.36.1",
-        "python_libc": "gnu",
-        "subject_workdir": "/aws",
-        "executable": ["/usr/local/bin/aws"],
-        "command": "adapter/command.py",
-        "normalizer": "adapter/normalize.py",
-        "adapter_bundle_sha256": "54f58541f4efbbc0822f5352cce1e7de228e2fb21c2f13d4df05c9da88aabb39",
-    }
+    assert (root / "tools/aws-cli/build/Dockerfile").exists()

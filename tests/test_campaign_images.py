@@ -37,9 +37,12 @@ def install_fakes(
     tags: list[str] = []
     monkeypatch.setattr(image_publish, "repo_root", lambda: ROOT)
 
-    def fake_builder(root: Path, selection: BuildSelection, tag: str) -> tuple[str, ...]:
+    def fake_builder(
+        root: Path, selection: BuildSelection, tag: str, shared_base: str
+    ) -> tuple[str, ...]:
         assert root == ROOT
         assert selection.tool == "aws-cli"
+        assert shared_base.endswith("@" + "sha256:" + "a" * 64)
         tags.append(tag)
         return "docker", "build", "--tag", tag, str(root)
 
@@ -74,6 +77,8 @@ def publish_args(path: Path) -> list[str]:
         REPOSITORY,
         "--image-set",
         str(path),
+        "--shared-base-image",
+        "registry.example/shared-base@sha256:" + "a" * 64,
     ]
 
 
@@ -88,14 +93,17 @@ def test_publisher_captures_pushed_digest_and_exact_registered_fields(
     document = json.loads(path.read_text(encoding="utf-8"))
     image = document["images"]["aws-cli"]
     registration = json.loads((ROOT / "tools/aws-cli/build/image.json").read_text(encoding="utf-8"))
-    assert document["schema_version"] == 1
+    assert document["schema_version"] == 2
     assert image == {
         "derived_image": DIGEST,
         "image_uri": f"{tags[0].rsplit(':', 1)[0]}@{DIGEST}",
-        "subject_image": registration["subject_image"],
-        "subject_version": registration["subject_version"],
+        "shared_base_digest": "sha256:" + "a" * 64,
+        "shared_base_uri": "registry.example/shared-base@sha256:" + "a" * 64,
+        "tool_build_sha256": registration["tool_build_sha256"],
+        "tool_artifact": registration["tool_artifact"],
+        "tool_version": registration["tool_version"],
         "adapter_bundle_sha256": registration["adapter_bundle_sha256"],
-        "python_libc": registration["python_libc"],
+        "shared_base_source_sha256": registration["shared_base_source_sha256"],
         "harness_revision": REVISION,
     }
     assert calls[2] == ("docker", "build", "--tag", tags[0], str(ROOT))
@@ -156,10 +164,13 @@ def registered_image(tool: str, digest_character: str) -> dict[str, Any]:
     return {
         "derived_image": digest,
         "image_uri": f"{REPOSITORY}/{tool}@{digest}",
-        "subject_image": registration["subject_image"],
-        "subject_version": registration["subject_version"],
+        "shared_base_digest": "sha256:" + "a" * 64,
+        "shared_base_uri": "registry.example/shared-base@sha256:" + "a" * 64,
+        "tool_build_sha256": registration["tool_build_sha256"],
+        "tool_artifact": registration["tool_artifact"],
+        "tool_version": registration["tool_version"],
         "adapter_bundle_sha256": registration["adapter_bundle_sha256"],
-        "python_libc": registration["python_libc"],
+        "shared_base_source_sha256": registration["shared_base_source_sha256"],
         "harness_revision": "a" * 40,
     }
 
@@ -170,18 +181,48 @@ def test_publisher_merges_other_valid_tools_and_refuses_bad_existing_claims(
     path = tmp_path / "images.json"
     rclone = registered_image("rclone", "e")
     path.write_text(
-        json.dumps({"schema_version": 1, "images": {"rclone": rclone}}), encoding="utf-8"
+        json.dumps({"schema_version": 2, "images": {"rclone": rclone}}), encoding="utf-8"
     )
     install_fakes(monkeypatch, successful)
     assert image_publish.publish_derived_image_main(publish_args(path)) == 0
     assert json.loads(path.read_text())["images"]["rclone"] == rclone
 
     document = json.loads(path.read_text())
-    document["images"]["rclone"]["subject_version"] = "fabricated"
+    document["images"]["rclone"]["tool_version"] = "fabricated"
     path.write_text(json.dumps(document), encoding="utf-8")
     calls, _tags = install_fakes(monkeypatch, successful)
     assert image_publish.publish_derived_image_main(publish_args(path)) == 1
     assert not calls  # Refused before Git, Docker build, or push.
+
+
+@pytest.mark.parametrize(
+    "mismatch",
+    ["shared_base_uri", "shared_base_digest", "shared_base_source_sha256"],
+)
+def test_publisher_refuses_an_existing_set_from_another_shared_base_before_build(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    mismatch: str,
+) -> None:
+    path = tmp_path / "images.json"
+    existing = registered_image("aws-cli", "e")
+    if mismatch == "shared_base_uri":
+        existing[mismatch] = "another.example/shared-base@sha256:" + "a" * 64
+    elif mismatch == "shared_base_digest":
+        existing[mismatch] = "sha256:" + "b" * 64
+        existing["shared_base_uri"] = "registry.example/shared-base@sha256:" + "b" * 64
+    else:
+        existing[mismatch] = "b" * 64
+    path.write_text(
+        json.dumps({"schema_version": 2, "images": {"aws-cli": existing}}),
+        encoding="utf-8",
+    )
+
+    calls, _tags = install_fakes(monkeypatch, successful)
+    assert image_publish.publish_derived_image_main(publish_args(path)) == 1
+    assert not calls
+    assert mismatch in capsys.readouterr().err
 
 
 def test_dirty_payload_is_refused_before_build(

@@ -61,6 +61,12 @@ def _publish_derived_image_main(argv: Sequence[str] | None) -> int:
     return publish_derived_image_main(argv)
 
 
+def _build_shared_image_main(argv: Sequence[str] | None) -> int:
+    from s3_listing_study.common.build_selection import build_shared_image_main
+
+    return build_shared_image_main(argv)
+
+
 def _upload_attempt_main(argv: Sequence[str] | None) -> int:
     from s3_listing_study.manager.upload import upload_attempt_main
 
@@ -78,6 +84,11 @@ COMMANDS = (
     Command("verify", "audit tool output against a recorded manifest", _verify_main),
     Command("receipt", "inspect retained historical receipt material", _receipt_main),
     Command("validate-capsule", "validate one tool capsule", _capsule_main),
+    Command(
+        "build-shared-image",
+        "build the one common worker/runtime base",
+        _build_shared_image_main,
+    ),
     Command(
         "build-derived-image",
         "build one slug-selected shared derived image",

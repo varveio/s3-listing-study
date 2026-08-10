@@ -15,7 +15,7 @@ from pathlib import Path, PurePosixPath
 from typing import IO, Final
 
 VERSION: Final = "1.5.5"
-PYTHON_TAG: Final = "cp313-cp313"
+PYTHON_TAG: Final = "cp312-cp312"
 FETCH_TIMEOUT_S: Final = 120.0
 
 # Recorded verbatim from uv.lock's duckdb 1.5.5 wheel metadata.  Derived
@@ -23,12 +23,12 @@ FETCH_TIMEOUT_S: Final = 120.0
 # allowed inside Docker.
 WHEELS: Final[dict[str, tuple[str, str]]] = {
     "aarch64": (
-        "https://files.pythonhosted.org/packages/e4/cb/023c89f51978545b9fab318581bba0c457a58e7530d2d933e54ae7d8647c/duckdb-1.5.5-cp313-cp313-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl",
-        "a736217825461732b5442d05a220f3da2e23a0dae114efbf08c9bf171b53098a",
+        "https://files.pythonhosted.org/packages/ea/a9/5f1f09da421d8e930e0b063d11c1b3f90363f40ede74438cd188afdd13a2/duckdb-1.5.5-cp312-cp312-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl",
+        "f316eae2323d9a851883fdf2dee91c1f9efe251ab33e14a2272f82a913422ed6",
     ),
     "x86_64": (
-        "https://files.pythonhosted.org/packages/3e/c5/41bef391fb8b23dbc133c9f2ba016e7a7a8124513d2cc1b430f1897d87e4/duckdb-1.5.5-cp313-cp313-manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl",
-        "078e6a60dd8eedde5832f45422ca5c4a6b8c837aeabd8a56ca0b7d933f588053",
+        "https://files.pythonhosted.org/packages/4f/98/6549769f158126fa64fd6c1ac2eb59a18282146c939867a3eb31b7c1db07/duckdb-1.5.5-cp312-cp312-manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl",
+        "7a6d2d11859d82a936ebdcb30ce3d8a1cbb3e990bff05c12abb9b54c44fa7bd1",
     ),
 }
 
@@ -179,7 +179,7 @@ def _authenticate(install: Path, expected: str) -> Path:
 
 
 def ensure_runtime(architecture: str, *, cache_root: Path | None = None) -> Path:
-    """Return extracted site-packages for the locked native CPython 3.13 wheel."""
+    """Return extracted site-packages for the locked native CPython 3.12 wheel."""
     try:
         url, expected = WHEELS[architecture]
     except KeyError:
@@ -187,7 +187,10 @@ def ensure_runtime(architecture: str, *, cache_root: Path | None = None) -> Path
             f"no locked DuckDB {VERSION} wheel for native architecture {architecture!r}"
         ) from None
     root = default_cache_root() if cache_root is None else cache_root
-    version_root = root / VERSION
+    # A DuckDB release has distinct native wheels for each CPython ABI. Keep
+    # those payloads in distinct cache namespaces so changing the one shared
+    # interpreter cannot collide with an authenticated wheel for the old ABI.
+    version_root = root / VERSION / PYTHON_TAG
     version_root.mkdir(parents=True, exist_ok=True)
     install = version_root / architecture
     lock_path = version_root / f".{architecture}.lock"

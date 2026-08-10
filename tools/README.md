@@ -124,8 +124,7 @@ Every runnable tool uses the same layout:
 - `docs/` — how it works (`mechanism.md`) and how to run it (`running.md`)
 - `adapter/` — typed Python command compilation and normalization, with
   `fixtures/` where a tool has synthetic adapter QA
-- `build/` — local subject recipes or declarative shared-derived-image inputs,
-  only where a tool needs them
+- `build/` — the pinned tool-payload recipe and image registration
 - `research/` — the frozen research trail the page was derived from
 - `receipts/` — immutable run records
 
@@ -134,6 +133,6 @@ The purpose and content contract for every layer is defined in
 (`pure-storage`, `s3-inventory`) are README-only directories.
 
 Nothing is run on the host — see
-[`../docs/methodology.md`](../docs/methodology.md) § 3a. We prefer a tool's own
-upstream image over a Dockerfile of ours: it's what users actually run, and it
-reduces the chance that our setup differs from a normal installation.
+[`../docs/methodology.md`](../docs/methodology.md) § 3a. Comparative images use
+one published study base and one final image per tool. Each payload prefers the
+selected release's checksum-pinned official binary, archive, or package.

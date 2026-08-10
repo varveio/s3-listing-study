@@ -6,17 +6,14 @@ were called, and where their artifacts land.
 
 **Identity is two-layer, because the two are known at different times.** A case
 fingerprint covers the resolved case and nothing else, so ``resolve-plan`` can
-compute it while contacting nothing. An *attempt* fingerprint folds in the image
-that ran it, which exists only once images are built. That is what lets a fixed
-tool be re-run inside a campaign the other ten already completed: the same case,
-a different attempt.
+compute it while contacting nothing. An *attempt* fingerprint folds in the final
+per-tool image's registered components, which exist only once images are built.
+That is what lets a fixed tool be re-run inside a campaign the other ten already
+completed: the same case, a different attempt.
 
-It folds in the image's **components** — subject digest, adapter bundle,
-interpreter, harness — rather than the derived digest, because the derived image
-also carries post-timing summarization and upload code, which cannot reach the
-measurement. Fingerprinting the whole digest would let an
-edit to orchestrator code invalidate every case's identity. The derived digest
-is recorded in ``result.json`` and the manifest regardless.
+Those **components** are the shared-base digest and source hash, tool artifact
+and build hash, adapter bundle, and harness revision. The final image digest is
+recorded in ``result.json`` and the manifest as well.
 
 **An address is not an identity.** A path names a case in the plan's own
 vocabulary, readable by someone who has the plan open; the image is deliberately
@@ -63,13 +60,20 @@ CAMPAIGN_RE = re.compile(r"\A\d{4}-\d{2}-\d{2}-[a-z][a-z0-9]*\Z")
 
 DIGEST_RE = re.compile(r"\Asha256:[0-9a-f]{64}\Z")
 
-ATTEMPT_FINGERPRINT_VERSION = 1
+ATTEMPT_FINGERPRINT_VERSION = 2
 
 # Everything about the image that a measurement can depend on. `provisioning`
 # is deliberately absent: a spot VM is the same machine type at a different
 # price, so it changes the odds of being preempted and nothing a completed run
 # measured.
-IMAGE_COMPONENTS = ("subject_image", "adapter_bundle_sha256", "python_libc", "harness_revision")
+IMAGE_COMPONENTS = (
+    "shared_base_digest",
+    "shared_base_source_sha256",
+    "tool_build_sha256",
+    "tool_artifact",
+    "adapter_bundle_sha256",
+    "harness_revision",
+)
 
 
 class CampaignError(Exception):
@@ -166,10 +170,7 @@ def attempt_prefix(
     target. The worker appends its own execution UUID under this manager-owned
     run prefix.
     """
-    return (
-        f"{campaign_prefix(campaign)}/results/"
-        f"{bucket}/{tool}/{case_id}/run-{run_ordinal}"
-    )
+    return f"{campaign_prefix(campaign)}/results/{bucket}/{tool}/{case_id}/run-{run_ordinal}"
 
 
 @dataclass(frozen=True)
@@ -180,7 +181,7 @@ class Attempt:
     bucket: str
     region: str
     case: Case
-    # The whole registration: the derived digest that ran, and the components
+    # The whole registration: the final image digest that ran, and the components
     # the fingerprint is taken over.
     image: Mapping[str, Any]
     fingerprint: str
@@ -232,7 +233,8 @@ def attempts_for(
     missing = sorted({case.tool for case in plan.cases} - set(images))
     if missing:
         raise CampaignError(
-            f"no derived image digest for {', '.join(missing)} — a campaign runs the images "
+            f"no final per-tool image digest for {', '.join(missing)} — a campaign runs "
+            "the images "
             "it froze, so every tool it submits must be in the image set"
         )
     attempts: list[Attempt] = []
@@ -289,7 +291,7 @@ def manifest(
     from the VM to the store, and spot changes the odds of being preempted.
     """
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "campaign": validate_campaign_id(campaign),
         "results_bucket": results_bucket,
         "attempt_fingerprint_version": ATTEMPT_FINGERPRINT_VERSION,

@@ -22,11 +22,10 @@ from s3_listing_study.common.build_selection import (
     derived_image_tag,
     load_registered_selection,
 )
-from s3_listing_study.common.duckdb_runtime import DuckDBRuntimeError
-from s3_listing_study.common.python_runtime import PythonRuntimeError
 from s3_listing_study.manager.bench.cli import repo_root
 from s3_listing_study.manager.campaign import DIGEST_RE
 from s3_listing_study.manager.campaign.cli import (
+    IMAGE_SET_SCHEMA_VERSION,
     SubmissionError,
     _read_image_set,
     validate_registered_images,
@@ -47,6 +46,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Artifact Registry Docker repository without an image name",
     )
     parser.add_argument("--image-set", action=UniqueStoreAction, required=True)
+    parser.add_argument(
+        "--shared-base-image",
+        action=UniqueStoreAction,
+        required=True,
+        help="immutable registry URI of the once-built shared base",
+    )
     return parser
 
 
@@ -69,8 +74,9 @@ def _revision(root: Path, tool: str) -> str:
         "src/s3_listing_study/common",
         "src/s3_listing_study/worker",
         "harness/derived-image",
+        "harness/shared-image",
         f"tools/{tool}/adapter",
-        f"tools/{tool}/build/image.json",
+        f"tools/{tool}/build",
     )
     status = _run(
         (
@@ -138,7 +144,7 @@ def _pushed_digest(target_tag: str, output: bytes) -> tuple[str, str]:
 
 
 def _atomic_image_set(path: Path, images: Mapping[str, Mapping[str, Any]]) -> None:
-    document = {"schema_version": 1, "images": images}
+    document = {"schema_version": IMAGE_SET_SCHEMA_VERSION, "images": images}
     content = (json.dumps(document, sort_keys=True, indent=2, ensure_ascii=False) + "\n").encode(
         "utf-8"
     )
@@ -157,6 +163,27 @@ def _atomic_image_set(path: Path, images: Mapping[str, Mapping[str, Any]]) -> No
         raise
 
 
+def _validate_existing_shared_base(
+    images: Mapping[str, Mapping[str, Any]],
+    *,
+    uri: str,
+    digest: str,
+    source_sha256: str,
+) -> None:
+    """Refuse to extend or replace an image set from another shared base."""
+    expected = {
+        "shared_base_uri": uri,
+        "shared_base_digest": digest,
+        "shared_base_source_sha256": source_sha256,
+    }
+    for tool, image in images.items():
+        mismatched = sorted(field for field, value in expected.items() if image.get(field) != value)
+        if mismatched:
+            raise SubmissionError(
+                f"{tool}: existing image set disagrees with requested {', '.join(mismatched)}"
+            )
+
+
 def publish_derived_image_main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
@@ -165,9 +192,22 @@ def publish_derived_image_main(argv: Sequence[str] | None = None) -> int:
         target_tag = _target_tag(args.repository, selection)
         image_set_path = Path(args.image_set)
         existing = _read_image_set(image_set_path) if image_set_path.exists() else {}
+        shared_repository, separator, shared_base_digest = args.shared_base_image.rpartition("@")
+        if (
+            not separator
+            or not shared_repository
+            or DIGEST_RE.fullmatch(shared_base_digest) is None
+        ):
+            raise SubmissionError("shared base image must be an immutable URI with sha256 digest")
+        _validate_existing_shared_base(
+            existing,
+            uri=args.shared_base_image,
+            digest=shared_base_digest,
+            source_sha256=selection.shared_base_source_sha256,
+        )
         validate_registered_images(existing, root=root, skip={selection.tool})
         harness_revision = _revision(root, selection.tool)
-        build = derived_image_build_command(root, selection, target_tag)
+        build = derived_image_build_command(root, selection, target_tag, args.shared_base_image)
         built = _run(build)
         if built.returncode != 0:
             raise _failure("derived-image build", built)
@@ -185,10 +225,17 @@ def publish_derived_image_main(argv: Sequence[str] | None = None) -> int:
         registration = {
             "derived_image": derived_image,
             "image_uri": image_uri,
-            "subject_image": selection.subject_image,
-            "subject_version": selection.subject_version,
+            "shared_base_digest": shared_base_digest,
+            "shared_base_uri": args.shared_base_image,
+            "shared_base_source_sha256": selection.shared_base_source_sha256,
+            "tool_build_sha256": selection.tool_build_sha256,
+            "tool_artifact": {
+                "kind": selection.tool_artifact_kind,
+                "locator": selection.tool_artifact_locator,
+                "sha256": selection.tool_artifact_sha256,
+            },
+            "tool_version": selection.tool_version,
             "adapter_bundle_sha256": selection.adapter_bundle_sha256,
-            "python_libc": selection.python_libc,
             "harness_revision": harness_revision,
         }
         _atomic_image_set(image_set_path, {**existing, selection.tool: registration})
@@ -196,9 +243,7 @@ def publish_derived_image_main(argv: Sequence[str] | None = None) -> int:
         return 0
     except (
         BuildSelectionError,
-        DuckDBRuntimeError,
         OSError,
-        PythonRuntimeError,
         SubmissionError,
     ) as exc:
         print(f"publish-derived-image: {exc}", file=sys.stderr)

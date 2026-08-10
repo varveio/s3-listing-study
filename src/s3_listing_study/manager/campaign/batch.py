@@ -98,7 +98,7 @@ def _commands(attempt: Attempt, config: BatchConfig) -> list[str]:
     container_memory = resources.container_memory_gb
     commands = [
         "--request-schema",
-        "1",
+        "2",
         "--output",
         config.output_path,
         "--timeout",
@@ -108,7 +108,11 @@ def _commands(attempt: Attempt, config: BatchConfig) -> list[str]:
         "--tool",
         attempt.case.tool,
         "--tool-version",
-        _image_token(attempt, "subject_version"),
+        _image_token(attempt, "tool_version"),
+        "--shared-base-digest",
+        str(attempt.image["shared_base_digest"]),
+        "--shared-base-uri",
+        str(attempt.image["shared_base_uri"]),
         "--derived-image",
         str(attempt.image["derived_image"]),
         "--harness-revision",

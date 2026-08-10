@@ -483,21 +483,33 @@ def test_bundled_driver_refuses_tool_mix_and_match() -> None:
         load_command_adapter(adapter_path("aws-cli"), expected_tool="rclone")
 
 
-def test_registered_build_selection_binds_tool_and_subject_digest() -> None:
+def test_registered_build_selection_binds_tool_and_build_inputs() -> None:
     path = REPO / "tools/aws-cli/build/image.json"
-    subject = (
-        "amazon/aws-cli@sha256:406ca32d31e640a56e8d52921b40528cc64bfa59ec9cb4ee1456db6746cb7292"
-    )
-    selected = load_selection(path, expected_tool="aws-cli", subject_image=subject)
+    selected = load_selection(path, expected_tool="aws-cli")
     assert selected.executable == ("/usr/local/bin/aws",)
     assert selected.command == "adapter/command.py"
     assert selected.normalizer == "adapter/normalize.py"
     assert selected.adapter_bundle_sha256 == adapter_bundle_sha256(REPO / "tools/aws-cli/adapter")
     assert load_registered_selection(REPO, "aws-cli") == selected
     with pytest.raises(BuildSelectionError, match="expected capsule location"):
-        load_selection(path, expected_tool="rclone", subject_image=subject)
-    with pytest.raises(BuildSelectionError, match="subject image"):
-        load_selection(path, expected_tool="aws-cli", subject_image="wrong@sha256:0")
+        load_selection(path, expected_tool="rclone")
+
+
+def test_tool_build_digest_excludes_the_independent_adapter_bundle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    headers: list[bytes] = []
+    original = build_selection._input_bundle_sha256
+
+    def observe(root: Path, inputs: tuple[Path, ...], header: bytes) -> str:
+        headers.append(header)
+        return original(root, inputs, header)
+
+    monkeypatch.setattr(build_selection, "_input_bundle_sha256", observe)
+    selected = load_registered_selection(REPO, "aws-cli")
+
+    assert len(headers) == 2
+    assert selected.adapter_bundle_sha256.encode() not in headers[1]
 
 
 def _registered_fixture(tmp_path: Path) -> tuple[Path, Path, dict[str, object]]:
@@ -510,11 +522,14 @@ def _registered_fixture(tmp_path: Path) -> tuple[Path, Path, dict[str, object]]:
     shutil.copyfile(REPO / "tools/aws-cli/adapter/normalize.py", adapter / "normalize.py")
     metadata: dict[str, object] = {
         "tool": "aws-cli",
-        "subject_image": (
-            "amazon/aws-cli@sha256:406ca32d31e640a56e8d52921b40528cc64bfa59ec9cb4ee1456db6746cb7292"
-        ),
-        "subject_version": "2.36.1",
-        "python_libc": "gnu",
+        "tool_version": "2.36.1",
+        "shared_base_source_sha256": "0" * 64,
+        "tool_build_sha256": "1" * 64,
+        "tool_artifact": {
+            "kind": "release-archive",
+            "locator": "https://example.test/a",
+            "sha256": "2" * 64,
+        },
         "subject_workdir": "/aws",
         "executable": ["/usr/local/bin/aws"],
         "command": "adapter/command.py",
@@ -548,7 +563,6 @@ def test_selection_rejects_duplicate_json_keys(tmp_path: Path) -> None:
         load_selection(
             metadata_path,
             expected_tool="aws-cli",
-            subject_image=str(metadata["subject_image"]),
         )
 
 
@@ -556,16 +570,12 @@ def test_selection_rejects_duplicate_json_keys(tmp_path: Path) -> None:
     ("field", "value", "message"),
     [
         ("tool", "rclone", "selected tool"),
-        ("subject_image", "amazon/aws-cli:latest", "pinned"),
-        ("subject_image", "amazon/aws-cli@sha256:ABC", "pinned"),
-        ("subject_image", "../aws-cli@sha256:" + "0" * 64, "pinned"),
-        ("subject_version", "", "subject_version"),
-        ("subject_version", "-2.36.1", "subject_version"),
-        ("subject_version", "2.36.1 ", "subject_version"),
-        ("subject_version", "2.36.1/beta", "subject_version"),
-        ("subject_version", 2, "subject_version"),
-        ("python_libc", "glibc", "python_libc must be one of"),
-        ("python_libc", "", "python_libc must be one of"),
+        ("tool_version", "", "tool_version"),
+        ("tool_version", "-2.36.1", "tool_version"),
+        ("tool_version", "2.36.1 ", "tool_version"),
+        ("shared_base_source_sha256", "0" * 63, "64 lowercase"),
+        ("tool_build_sha256", "A" * 64, "64 lowercase"),
+        ("tool_artifact", {}, "exactly"),
         ("subject_workdir", "/aws/", "canonical absolute"),
         ("executable", ["aws"], "canonical absolute"),
         ("executable", ["/usr/bin/java", ""], "argv token"),
@@ -588,7 +598,6 @@ def test_selection_rejects_invalid_metadata_values(
         load_selection(
             metadata_path,
             expected_tool="aws-cli",
-            subject_image=str(metadata["subject_image"]),
         )
 
 
@@ -602,7 +611,6 @@ def test_selection_rejects_adapter_bundle_and_tool_executable_mix(tmp_path: Path
         load_selection(
             metadata_path,
             expected_tool="aws-cli",
-            subject_image=str(metadata["subject_image"]),
         )
 
     command.write_text(command.read_text().replace('TOOL = "rclone"', 'TOOL = "aws-cli"'))
@@ -613,26 +621,23 @@ def test_selection_rejects_adapter_bundle_and_tool_executable_mix(tmp_path: Path
         load_selection(
             metadata_path,
             expected_tool="aws-cli",
-            subject_image=str(metadata["subject_image"]),
         )
 
 
 def test_selection_rejects_missing_or_changed_adapter_bytes(tmp_path: Path) -> None:
-    _root, metadata_path, metadata = _registered_fixture(tmp_path)
+    _root, metadata_path, _metadata = _registered_fixture(tmp_path)
     normalizer = metadata_path.parents[1] / "adapter" / "normalize.py"
     normalizer.write_text(normalizer.read_text() + "\n# changed\n")
     with pytest.raises(BuildSelectionError, match="bundle digest"):
         load_selection(
             metadata_path,
             expected_tool="aws-cli",
-            subject_image=str(metadata["subject_image"]),
         )
     normalizer.unlink()
     with pytest.raises(BuildSelectionError, match="escapes"):
         load_selection(
             metadata_path,
             expected_tool="aws-cli",
-            subject_image=str(metadata["subject_image"]),
         )
 
 
@@ -649,49 +654,91 @@ def test_slug_only_builder_registers_exact_named_contexts(
         calls.append(command)
         return Completed()
 
-    # The real provisioner downloads a quarter-gigabyte interpreter archive; the
-    # offline suite must never reach the network, so the tree is faked here and
-    # the bound context asserted against it.
-    interpreter = tmp_path / "python"
-    interpreter.mkdir()
-    duckdb_payload = tmp_path / "duckdb"
-    duckdb_payload.mkdir()
-
-    def fake_ensure_runtime(architecture: str, libc: str, **kwargs: object) -> Path:
-        assert libc == "gnu"
-        return interpreter
-
     monkeypatch.chdir(REPO)
     monkeypatch.setattr(subprocess, "run", fake_run)
-    monkeypatch.setattr(build_selection, "ensure_runtime", fake_ensure_runtime)
-    monkeypatch.setattr(build_selection, "ensure_duckdb", lambda _architecture: duckdb_payload)
-    assert build_derived_image_main(["--tool", "aws-cli", "--tag", "study:test"]) == 0
+    base = "registry.example/base@sha256:" + "a" * 64
+    assert (
+        build_derived_image_main(
+            ["--tool", "aws-cli", "--tag", "study:test", "--shared-base-image", base]
+        )
+        == 0
+    )
     assert len(calls) == 1
     command = calls[0]
     assert "--build-arg" not in command
-    assert command.count("--build-context") == 5
-    assert f"python={interpreter}" in command
-    assert f"duckdb={duckdb_payload}" in command
-    assert any(item.startswith("subject=docker-image://amazon/aws-cli@sha256:") for item in command)
-    assert f"adapter={REPO / 'tools/aws-cli/adapter'}" in command
-    assert f"selection={REPO / 'tools/aws-cli/build'}" in command
-    assert command[-3:] == ("--tag", "study:test", str(REPO))
+    assert command[:3] == ("docker", "buildx", "bake")
+    assert f"tool.contexts.base=docker-image://{base}" in command
+    assert f"derived.contexts.base=docker-image://{base}" in command
+    assert f"derived.contexts.adapter={REPO / 'tools/aws-cli/adapter'}" in command
+    assert f"derived.contexts.selection={REPO / 'tools/aws-cli/build'}" in command
+    assert "derived.tags=study:test" in command
 
     # Omitting --tag must not fall back to a bare, upstream-looking name.
     calls.clear()
-    assert build_derived_image_main(["--tool", "aws-cli"]) == 0
-    assert calls[0][-3:] == (
-        "--tag",
-        f"s3-listing-study/aws-cli:2.36.1-h{__version__}-406ca32d31e6",
-        str(REPO),
-    )
+    assert build_derived_image_main(["--tool", "aws-cli", "--shared-base-image", base]) == 0
+    assert f"derived.tags=s3-listing-study/aws-cli:2.36.1-h{__version__}-ad0f0b69890c" in calls[0]
 
 
-def test_derived_image_tag_states_both_versions_and_the_subject_digest() -> None:
+def test_shared_base_builder_embeds_its_canonical_source_hash(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    python = tmp_path / "python"
+    duckdb = tmp_path / "duckdb"
+    python.mkdir()
+    duckdb.mkdir()
+    monkeypatch.setattr(build_selection, "ensure_runtime", lambda *_args: python)
+    monkeypatch.setattr(build_selection, "ensure_duckdb", lambda *_args: duckdb)
+
+    expected = build_selection.shared_base_source_sha256(REPO)
+    command = build_selection.shared_base_build_command(REPO, "study/base:test")
+
+    index = command.index("--build-arg")
+    assert command[index + 1] == f"SHARED_BASE_SOURCE_SHA256={expected}"
+
+
+def test_shared_base_recipe_pins_apt_snapshot_and_marker_contract() -> None:
+    dockerfile = (REPO / "harness/shared-image/Dockerfile").read_text()
+
+    assert "snapshot.debian.org/archive/debian/20260803T000000Z" in dockerfile
+    assert "snapshot.debian.org/archive/debian-security/20260803T000000Z" in dockerfile
+    assert 'Acquire::Check-Valid-Until "false";' in dockerfile
+    for package in (
+        "ca-certificates=20230311+deb12u1",
+        "libssl3=3.0.20-1~deb12u2",
+        "openssl=3.0.20-1~deb12u2",
+        "libstdc++6)\" = '12.2.0-14+deb12u1'",
+        "tzdata)\" = '2026b-0+deb12u1'",
+    ):
+        assert package in dockerfile
+    assert "ARG SHARED_BASE_SOURCE_SHA256" in dockerfile
+    assert "> /opt/s3-listing-study/shared-base-source.sha256" in dockerfile
+
+
+def test_final_selection_validates_exact_shared_base_marker(tmp_path: Path) -> None:
+    path = REPO / "harness/derived-image/validate_selection.py"
+    spec = importlib.util.spec_from_file_location("_validate_selection_test", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    validate = module.validate_shared_base_marker
+    expected = "a" * 64
+    marker = tmp_path / "shared-base-source.sha256"
+    marker.write_text(expected + "\n")
+
+    validate(expected, marker)
+    marker.write_text("b" * 64 + "\n")
+    with pytest.raises(ValueError, match="does not match"):
+        validate(expected, marker)
+    marker.unlink()
+    with pytest.raises(ValueError, match="cannot read"):
+        validate(expected, marker)
+
+
+def test_derived_image_tag_states_both_versions_and_the_tool_build_digest() -> None:
     """The name a reader sees must not be mistakable for the upstream image."""
     selection = load_registered_selection(REPO, "swath")
     tag = derived_image_tag(selection)
-    assert tag == f"s3-listing-study/swath:0.2.2-h{__version__}-e03f7be9c025"
+    assert tag == f"s3-listing-study/swath:0.2.2-h{__version__}-5dbe7637c089"
     # A Docker reference: one repository component, one legal tag component.
     repository, _, reference = tag.partition(":")
     assert re.fullmatch(

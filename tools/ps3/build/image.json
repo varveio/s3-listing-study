@@ -1,8 +1,9 @@
 {
   "tool": "ps3",
-  "subject_image": "registry.local/ps3@sha256:9c17987701d3fdccaa41b8ce41fbdf386a9872d663e1877b248697dfec712097",
-  "subject_version": "0.1.16",
-  "python_libc": "gnu",
+  "tool_version": "0.1.16",
+  "shared_base_source_sha256": "a2643461eead4bcdafa978c63730b90ff77376d8ac7df6e1da6d90d7170f658b",
+  "tool_build_sha256": "7531226c3059ddfcc626b7f29ef514583c9783b889bdb22ee829fc411e502d48",
+  "tool_artifact": {"kind":"release-binary","locator":"https://raw.githubusercontent.com/jboothomas/ps3/9428492291ef3aa824dba0b495583279c3d33760/pS3.0-1-16","sha256":"3bc7bbbb0d45d6f96b0130f98859ea7cfe693b13a8438461240423511322a9c2"},
   "subject_workdir": "/",
   "executable": [
     "/usr/local/bin/pS3"

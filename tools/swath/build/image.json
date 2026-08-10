@@ -1,8 +1,9 @@
 {
   "tool": "swath",
-  "subject_image": "ghcr.io/varveio/swath@sha256:e03f7be9c025b91794152f9b07550565beadd0acb543bb66f2ec3923b5497978",
-  "subject_version": "0.2.2",
-  "python_libc": "gnu",
+  "tool_version": "0.2.2",
+  "shared_base_source_sha256": "a2643461eead4bcdafa978c63730b90ff77376d8ac7df6e1da6d90d7170f658b",
+  "tool_build_sha256": "5dbe7637c0894ebac246673855fdf2d9719ac9ba510b63adfacfb34f7086986a",
+  "tool_artifact": {"kind":"release-archive","locator":"https://github.com/varveio/swath/releases/download/v0.2.2/swath-0.2.2.jar","sha256":"4bd2204d17db657436046d3bf4cb1aedc44fdcd645f35c4b6fed4108ca251a02"},
   "subject_workdir": "/opt/swath",
   "executable": [
     "/opt/java/openjdk/bin/java",

@@ -5,6 +5,10 @@ blocked, what the harness verified, and how to reproduce it. Canonical tested
 identity lives in [`../data/tool.json`](../data/tool.json); evidence labels and
 claim references are as in [`mechanism.md`](mechanism.md).
 
+## Comparative image prepared 2026-08-10 (not run evidence)
+
+[image.json](../build/image.json) selects rclone's official v1.74.4 Linux amd64 release archive. Shared assembly is defined once in [tool-structure.md](../../../docs/operating/tool-structure.md). Historical receipts below continue to describe the images and artifacts they name.
+
 ## Image
 
 Upstream `rclone/rclone`, pinned by **manifest-list digest**:

@@ -46,15 +46,18 @@ def write_inputs(tmp_path: Path, *, auth: str = "anonymous") -> tuple[Path, Path
     image_set.write_text(
         json.dumps(
             {
-                "schema_version": 1,
+                "schema_version": 2,
                 "images": {
                     "aws-cli": {
                         "derived_image": DIGEST,
                         "image_uri": f"us-east1-docker.pkg.dev/study/images/aws-cli@{DIGEST}",
-                        "subject_image": registration["subject_image"],
-                        "subject_version": registration["subject_version"],
+                        "shared_base_digest": "sha256:" + "b" * 64,
+                        "shared_base_uri": "registry.example/base@sha256:" + "b" * 64,
+                        "tool_build_sha256": registration["tool_build_sha256"],
+                        "tool_artifact": registration["tool_artifact"],
+                        "tool_version": registration["tool_version"],
                         "adapter_bundle_sha256": registration["adapter_bundle_sha256"],
-                        "python_libc": registration["python_libc"],
+                        "shared_base_source_sha256": registration["shared_base_source_sha256"],
                         "harness_revision": "a" * 40,
                     }
                 },
@@ -99,6 +102,16 @@ def test_spot_is_the_default_provisioning_model(tmp_path: Path) -> None:
     assert parsed.provisioning == "SPOT"
 
 
+def test_image_set_refuses_the_previous_schema(tmp_path: Path) -> None:
+    _plan, image_set = write_inputs(tmp_path)
+    document = json.loads(image_set.read_text(encoding="utf-8"))
+    document["schema_version"] = 1
+    image_set.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(campaign_cli.SubmissionError, match="schema_version must be 2"):
+        campaign_cli._read_image_set(image_set)
+
+
 def test_dry_run_is_deterministic_and_touches_no_subprocess_or_ledger(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -127,7 +140,7 @@ def test_submit_refuses_image_components_that_disagree_with_registration(
 ) -> None:
     plan, image_set = write_inputs(tmp_path)
     document = json.loads(image_set.read_text(encoding="utf-8"))
-    document["images"]["aws-cli"]["subject_version"] = "fabricated"
+    document["images"]["aws-cli"]["tool_version"] = "fabricated"
     image_set.write_text(json.dumps(document), encoding="utf-8")
     monkeypatch.setattr(
         campaign_cli,
@@ -137,7 +150,7 @@ def test_submit_refuses_image_components_that_disagree_with_registration(
     assert (
         campaign_cli.submit_campaign_main([*arguments(tmp_path, plan, image_set), "--dry-run"]) == 1
     )
-    assert "disagrees with registered subject_version" in capsys.readouterr().err
+    assert "disagrees with registered tool_version" in capsys.readouterr().err
     assert not (tmp_path / "ledger.sqlite3").exists()
 
 

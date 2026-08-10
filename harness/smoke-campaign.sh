@@ -12,8 +12,13 @@
 # with if_generation_match=0.
 #
 # Usage:
-#   harness/smoke-campaign.sh [--tool SLUG]... [--credential-file PATH] \
-#                              [--jobs N] [--keep-going]
+#   harness/smoke-campaign.sh \
+#     --shared-base-image REGISTRY/...@sha256:<digest> \
+#     [--tool SLUG]... [--credential-file PATH] [--jobs N] [--keep-going]
+#
+# --shared-base-image is the immutable shared runtime image used to build every
+# selected tool. The same URI and exact digest suffix are recorded by each
+# worker attempt.
 #
 # Every attempt normalizes and counts locally after its subject measurement;
 # the small summary is sealed into result.json. GCS upload is a separate step
@@ -84,20 +89,41 @@ TOOL_SMOKE_PLAN=(
 )
 
 CREDENTIAL_FILE=""
+SHARED_BASE_IMAGE=""
+SHARED_BASE_DIGEST=""
 KEEP_GOING=no
 JOBS=1
 declare -a ONLY_TOOLS=()
+
+usage() {
+  echo "usage: harness/smoke-campaign.sh --shared-base-image REGISTRY/...@sha256:<digest> [--tool SLUG]... [--credential-file PATH] [--jobs N] [--keep-going]"
+}
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --tool) ONLY_TOOLS+=("$2"); shift 2 ;;
     --credential-file) CREDENTIAL_FILE="$2"; shift 2 ;;
+    --shared-base-image)
+      [ "$#" -ge 2 ] || { echo "smoke-campaign: --shared-base-image requires a value" >&2; exit 2; }
+      SHARED_BASE_IMAGE="$2"
+      shift 2
+      ;;
     --jobs) JOBS="$2"; shift 2 ;;
     --keep-going) KEEP_GOING=yes; shift ;;
+    -h|--help) usage; exit 0 ;;
     *) echo "smoke-campaign: unknown argument: $1" >&2; exit 2 ;;
   esac
 done
 case "$JOBS" in ''|*[!0-9]*|0) echo "smoke-campaign: --jobs must be a positive integer" >&2; exit 2 ;; esac
+if [ -z "$SHARED_BASE_IMAGE" ]; then
+  echo "smoke-campaign: --shared-base-image is required" >&2
+  exit 2
+fi
+if [[ ! "$SHARED_BASE_IMAGE" =~ ^[a-z0-9]+([._-][a-z0-9]+)*/([a-z0-9]+([._-][a-z0-9]+)*/)*[a-z0-9]+([._-][a-z0-9]+)*@sha256:[0-9a-f]{64}$ ]]; then
+  echo "smoke-campaign: --shared-base-image must be REGISTRY/...@sha256:<64 lowercase hex digits>" >&2
+  exit 2
+fi
+SHARED_BASE_DIGEST="${SHARED_BASE_IMAGE##*@}"
 
 command -v docker >/dev/null 2>&1 || { echo "smoke-campaign: docker not found" >&2; exit 2; }
 sudo docker network inspect "$NETWORK" >/dev/null 2>&1 || {
@@ -136,15 +162,44 @@ run_one_tool() {
     return 0
   fi
 
-  echo "-- build --"
-  sg docker -c "uv run s3-listing-study build-derived-image --tool '$tool'"
+  local tag digest repo_tags
+  tag="$(
+    uv run python - "$tool" <<'PY'
+import sys
+from pathlib import Path
 
-  local tag digest
-  tag="$(sudo docker images --filter "reference=s3-listing-study/$tool" \
-    --format '{{.Repository}}:{{.Tag}}' | head -1)"
-  [ -n "$tag" ] || { echo "could not find a built image for $tool"; return 1; }
-  digest="$(sudo docker inspect "$tag" --format '{{index .RepoDigests 0}}' | cut -d@ -f2)"
-  [ -n "$digest" ] || { echo "could not resolve built image digest for $tool"; return 1; }
+from s3_listing_study.common.build_selection import derived_image_tag, load_registered_selection
+
+root = Path.cwd().resolve(strict=True)
+print(derived_image_tag(load_registered_selection(root, sys.argv[1])))
+PY
+  )" || { echo "could not resolve the registered image tag for $tool"; return 1; }
+  case "$tag" in
+    "s3-listing-study/$tool:"*) ;;
+    *) echo "registered image tag for $tool has an unexpected namespace"; return 1 ;;
+  esac
+
+  echo "-- build --"
+  sg docker -c "uv run s3-listing-study build-derived-image --tool '$tool' --shared-base-image '$SHARED_BASE_IMAGE' --tag '$tag'"
+
+  digest="$(sudo docker image inspect "$tag" --format '{{.Id}}')" || {
+    echo "could not inspect the image built as $tag"
+    return 1
+  }
+  [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+    echo "built image for $tool has no sha256 image ID"
+    return 1
+  }
+  repo_tags="$(sudo docker image inspect "$tag" --format '{{json .RepoTags}}')" || {
+    echo "could not inspect tags for the image built as $tag"
+    return 1
+  }
+  if ! printf '%s' "$repo_tags" | python3 -c \
+    'import json, sys; tags = json.load(sys.stdin); raise SystemExit(0 if isinstance(tags, list) and sys.argv[1] in tags else 1)' \
+    "$tag"; then
+    echo "built image does not carry the exact requested tag $tag"
+    return 1
+  fi
 
   echo "-- smoke ($mode, $auth) --"
   local mode_dir="tools/$tool/receipts/smoke/$mode"
@@ -182,10 +237,10 @@ AWS_SECRET_ACCESS_KEY=$aws_secret_key"
     sudo_args=(--preserve-env=S3_STUDY_AWS_CREDENTIAL)
   fi
 
-  local subject_version
-  subject_version="$(python3 -c "
+  local tool_version
+  tool_version="$(python3 -c "
 import json, sys
-print(json.load(open(sys.argv[1]))['subject_version'])" "tools/$tool/build/image.json")"
+print(json.load(open(sys.argv[1]))['tool_version'])" "tools/$tool/build/image.json")"
 
   local run_status=0
   sudo "${sudo_args[@]}" docker run --rm \
@@ -194,11 +249,13 @@ print(json.load(open(sys.argv[1]))['subject_version'])" "tools/$tool/build/image
     -v "$abs_attempt_dir:/output" \
     -e S3_STUDY_ATTEMPT_OUT=/output \
     "${env_args[@]}" \
-    "s3-listing-study/$tool@$digest" \
+    "$digest" \
     --output /output \
     --derived-image "$digest" \
+    --shared-base-uri "$SHARED_BASE_IMAGE" \
+    --shared-base-digest "$SHARED_BASE_DIGEST" \
     --tool "$tool" \
-    --tool-version "$subject_version" \
+    --tool-version "$tool_version" \
     --harness-revision "$HARNESS_REVISION" \
     --operation list \
     --auth "$auth" \

@@ -6,6 +6,10 @@ this page supplies the operational detail. Evidence labels and claim references
 are as in [`mechanism.md`](mechanism.md): references of the form claim `some-id`
 resolve in [`../data/claims.json`](../data/claims.json).
 
+## Comparative image prepared 2026-08-10 (not run evidence)
+
+[image.json](../build/image.json) selects official s5cmd v2.3.0 Linux 64-bit release archive. Shared assembly is defined once in [tool-structure.md](../../../docs/operating/tool-structure.md). Historical receipts below continue to describe the images and artifacts they name.
+
 ## Image
 
 Upstream `peakcom/s5cmd:v2.3.0`, pinned by digest:

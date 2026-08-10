@@ -1,18 +1,11 @@
-"""Provision the one interpreter every derived image runs the attempt engine on.
+"""Provision the pinned interpreter staged into the stable shared base.
 
-The attempt engine runs *inside* the subject image, so it needs a Python there.
-Only one of the eleven subjects ships one: ``aws-cli`` is itself written in
-Python. Swath's image is a Temurin JRE, s5cmd's and rclone's are Go binaries on
-minimal bases, and none of them has ``/usr/bin/python3``. Depending on the
-subject's own interpreter therefore does not merely fail for ten tools — it
-would also make the interpreter one more uncontrolled difference across the
-comparison this repository exists to make fair.
-
-So the interpreter is an input the study pins, not something a subject supplies:
-one python-build-standalone build, the same version for every subject, verified
-by digest on the host and bound into the build as the ``python`` named context.
-Nothing runs a package manager inside a subject image, no build step needs
-network beyond this fetch, and the subject's own package set is untouched.
+The shared base supplies one controlled Python runtime for the attempt engine
+used by every final per-tool image. The interpreter is a pinned study input,
+not a property inherited from a tool artifact: one python-build-standalone
+build, verified by digest on the host and bound into the shared-base build as
+the ``python`` named context. No package manager runs while assembling a final
+per-tool image, and the tool artifact remains untouched.
 
 The archive is fetched once into a user cache and reused. It is verified against
 the digest recorded below BEFORE it is extracted, because an unverified archive
@@ -21,37 +14,40 @@ that has already been unpacked has already run its content through ``tarfile``.
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
+import os
 import platform
 import shutil
+import stat
 import sysconfig
 import tarfile
 import tempfile
 import urllib.error
 import urllib.request
-from pathlib import Path
-from typing import Final
+from pathlib import Path, PurePosixPath
+from typing import IO, Final
 
 RELEASE: Final = "20260807"
 """The pinned python-build-standalone release tag."""
 
-VERSION: Final = "3.13.15"
+VERSION: Final = "3.12.13"
 """The pinned CPython version inside that release."""
 
 _BASE_URL: Final = "https://github.com/astral-sh/python-build-standalone/releases/download"
 
 ARCHIVES: Final[dict[tuple[str, str], str]] = {
-    ("aarch64", "gnu"): "68159637492dcf3501c0967b69e07665c3dda070fb42231737055f72963f66fc",
-    ("aarch64", "musl"): "38a9cf47dba720794f5f60b974bd3d3e9f9e42801b0b0536a131c6357aecb3c6",
-    ("x86_64", "gnu"): "7253808c3413d9ebd03e76b3853c895b9287f12e0750a30fce1cbf430e516113",
-    ("x86_64", "musl"): "2af970fab79c436cb3292f7914bc2812e83fcb4152031e0a27c51660bae6d9d7",
+    ("aarch64", "gnu"): "e2a33a26bae0f0975a9786c2e3beaee9cfeb35f856bdd273ff10ae35cf7e06ce",
+    ("aarch64", "musl"): "3dc546520b90bc1852cc6494212c1ca3af307e533ce764b43733027311004d55",
+    ("x86_64", "gnu"): "5bd6f36fd7ef02b909234c94dca9994ef0da06ace3bc3cece4fe27870e9cdbbe",
+    ("x86_64", "musl"): "b4359517553d83126658c5df5a11e611c0c3129505fe57755755a103b8c3c7c4",
 }
 """``(architecture, libc)`` to the SHA-256 of its ``install_only`` archive.
 
-Recorded from the release's own ``SHA256SUMS``. A subject whose base is Alpine
-needs the ``musl`` build; everything else takes ``gnu``. The pair is declared per
-capsule rather than sniffed, because guessing wrong produces an interpreter that
-loads on the build host and dies inside the subject.
+Recorded from the release's own ``SHA256SUMS``. The stable shared base currently
+selects ``gnu``; ``musl`` remains supported for a future shared-base variant.
+Callers select the pair explicitly rather than sniffing it, because choosing the
+wrong archive produces an interpreter that cannot run in its target base.
 """
 
 LIBC_VALUES: Final = ("gnu", "musl")
@@ -60,10 +56,10 @@ FETCH_TIMEOUT_S: Final = 120.0
 """Per-socket-operation deadline on the archive fetch, so a build cannot hang."""
 
 INSTALL_PREFIX: Final = "/opt/s3-listing-study/python"
-"""Where the provisioned tree lands inside a derived image."""
+"""Where the provisioned tree lands inside the stable shared base."""
 
 INTERPRETER: Final = f"{INSTALL_PREFIX}/bin/python3"
-"""The absolute interpreter path the shared derived-image recipe invokes."""
+"""The absolute interpreter path the shared-base recipe provides."""
 
 
 class PythonRuntimeError(RuntimeError):
@@ -131,11 +127,147 @@ def _verify(archive: Path, expected: str) -> None:
 
 def _extract(archive: Path, destination: Path) -> None:
     """Unpack the verified archive, which contains a single ``python/`` tree."""
-    with tarfile.open(archive, "r:gz") as bundle:
-        # ``data`` refuses absolute paths, traversal, links out of the tree, and
-        # device nodes. The archive is already digest-verified; this is the
-        # second gate, not the first.
-        bundle.extractall(destination, filter="data")
+    try:
+        with tarfile.open(archive, "r:gz") as bundle:
+            # ``data`` refuses absolute paths, traversal, links out of the tree,
+            # and device nodes. The archive is already digest-verified; this is
+            # the second gate, not the first.
+            bundle.extractall(destination, filter="data")
+    except tarfile.TarError as exc:
+        raise PythonRuntimeError("pinned interpreter archive is not a valid tar archive") from exc
+
+
+def _digest(source: IO[bytes]) -> str:
+    digest = hashlib.sha256()
+    for chunk in iter(lambda: source.read(1024 * 1024), b""):
+        digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _member_name(member: tarfile.TarInfo) -> str:
+    path = PurePosixPath(member.name)
+    canonical = path.as_posix()
+    if (
+        not canonical
+        or path.is_absolute()
+        or ".." in path.parts
+        or member.name.rstrip("/") != canonical
+        or not path.parts
+        or path.parts[0] != "python"
+    ):
+        raise PythonRuntimeError(f"pinned interpreter archive contains unsafe path: {member.name}")
+    relative = PurePosixPath(*path.parts[1:]).as_posix()
+    return "" if relative == "." else relative
+
+
+def _archive_entries(
+    bundle: tarfile.TarFile,
+) -> tuple[dict[str, tarfile.TarInfo], dict[str, tarfile.TarInfo], set[str]]:
+    """Return authenticated file, symlink, and directory entries."""
+    files: dict[str, tarfile.TarInfo] = {}
+    links: dict[str, tarfile.TarInfo] = {}
+    directories: set[str] = set()
+    seen: set[str] = set()
+    for member in bundle.getmembers():
+        relative = _member_name(member)
+        if relative in seen:
+            raise PythonRuntimeError(
+                f"pinned interpreter archive contains duplicate path: {member.name}"
+            )
+        seen.add(relative)
+        if relative:
+            parent = PurePosixPath(relative).parent
+            while parent.as_posix() != ".":
+                directories.add(parent.as_posix())
+                parent = parent.parent
+        if member.isdir():
+            if relative:
+                directories.add(relative)
+        elif member.isreg() or member.islnk():
+            if not relative:
+                raise PythonRuntimeError("pinned interpreter archive has a non-directory root")
+            files[relative] = member
+        elif member.issym():
+            if not relative:
+                raise PythonRuntimeError("pinned interpreter archive has a symlink root")
+            links[relative] = member
+        else:
+            raise PythonRuntimeError(
+                f"pinned interpreter archive contains non-file entry: {member.name}"
+            )
+    return files, links, directories
+
+
+def _tree_entries(tree: Path) -> tuple[dict[str, Path], dict[str, Path], set[str]]:
+    if not tree.is_dir() or tree.is_symlink():
+        raise PythonRuntimeError("cached interpreter tree is not a directory")
+    files: dict[str, Path] = {}
+    links: dict[str, Path] = {}
+    directories: set[str] = set()
+    pending = [tree]
+    while pending:
+        directory = pending.pop()
+        for child in directory.iterdir():
+            relative = child.relative_to(tree).as_posix()
+            mode = child.lstat().st_mode
+            if stat.S_ISLNK(mode):
+                links[relative] = child
+            elif stat.S_ISDIR(mode):
+                directories.add(relative)
+                pending.append(child)
+            elif stat.S_ISREG(mode):
+                files[relative] = child
+            else:
+                raise PythonRuntimeError(
+                    f"cached interpreter tree contains non-file entry: {relative}"
+                )
+    return files, links, directories
+
+
+def _verify_extraction(archive: Path, tree: Path) -> None:
+    """Compare every cached file and symlink with the authenticated archive."""
+    try:
+        with tarfile.open(archive, "r:gz") as bundle:
+            expected_files, expected_links, expected_directories = _archive_entries(bundle)
+            files, links, directories = _tree_entries(tree)
+            if (
+                set(files) != set(expected_files)
+                or set(links) != set(expected_links)
+                or directories != expected_directories
+            ):
+                raise PythonRuntimeError(
+                    "cached interpreter tree does not match locked archive entry set"
+                )
+            for name, member in expected_files.items():
+                expected = bundle.extractfile(member)
+                if expected is None:
+                    raise PythonRuntimeError(
+                        f"pinned interpreter archive cannot read file entry: {name}"
+                    )
+                with expected, files[name].open("rb") as actual:
+                    if _digest(expected) != _digest(actual):
+                        raise PythonRuntimeError(
+                            f"cached interpreter tree does not match locked archive: {name}"
+                        )
+            for name, member in expected_links.items():
+                if os.readlink(links[name]) != member.linkname:
+                    raise PythonRuntimeError(
+                        f"cached interpreter link does not match locked archive: {name}"
+                    )
+    except tarfile.TarError as exc:
+        raise PythonRuntimeError("pinned interpreter archive is not a valid tar archive") from exc
+
+
+def _authenticate(install: Path, expected: str) -> Path:
+    archive = install / "locked.tar.gz"
+    tree = install / "python"
+    if not archive.is_file() or archive.is_symlink():
+        raise PythonRuntimeError("cached interpreter has no authenticated locked archive")
+    _verify(archive, expected)
+    _verify_extraction(archive, tree)
+    if not (tree / "bin" / "python3").is_file():
+        raise PythonRuntimeError("locked interpreter archive has no python/bin/python3")
+    return tree
 
 
 def ensure_runtime(
@@ -146,9 +278,9 @@ def ensure_runtime(
 ) -> Path:
     """Return the extracted interpreter tree for one platform, fetching if absent.
 
-    The returned directory is what the build binds as the ``python`` context: it
-    holds ``bin/``, ``lib/`` and the rest, and is copied to
-    :data:`INSTALL_PREFIX` inside the derived image.
+    The returned directory is what the shared-base build binds as the ``python``
+    context: it holds ``bin/``, ``lib/`` and the rest, and is copied to
+    :data:`INSTALL_PREFIX` inside the stable shared base.
     """
     if libc not in LIBC_VALUES:
         raise PythonRuntimeError(f"unsupported libc: {libc!r}; expected one of {LIBC_VALUES}")
@@ -162,38 +294,64 @@ def ensure_runtime(
 
     root = default_cache_root() if cache_root is None else cache_root
     name = archive_name(architecture, libc)
-    tree = root / RELEASE / f"{architecture}-{libc}" / "python"
-    if (tree / "bin" / "python3").exists():
-        return tree
+    # One python-build-standalone release can publish several CPython versions.
+    # Namespace by both values so a version change cannot silently reuse the
+    # authenticated tree for a different interpreter from the same release.
+    version_root = root / RELEASE / VERSION
+    version_root.mkdir(parents=True, exist_ok=True)
+    install = version_root / f"{architecture}-{libc}"
+    lock_path = version_root / f".{architecture}-{libc}.lock"
+    with lock_path.open("a+b") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if os.path.lexists(install):
+            try:
+                return _authenticate(install, expected)
+            except PythonRuntimeError as exc:
+                locked = install / "locked.tar.gz"
+                # Any cache with a retained archive is expected to be the new,
+                # authenticated shape. Corruption must fail closed rather than
+                # being hidden by a network refetch. The former tree-only shape
+                # is replaceable, but only after a successful authenticated fetch.
+                if install.is_dir() and not install.is_symlink() and os.path.lexists(locked):
+                    raise
+                unauthenticated = exc
+        else:
+            unauthenticated = None
 
-    root.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix=".python-runtime-", dir=root) as scratch_name:
-        scratch = Path(scratch_name)
-        archive = scratch / name
-        url = f"{_BASE_URL}/{RELEASE}/{name}"
-        try:
-            with (
-                urllib.request.urlopen(url, timeout=FETCH_TIMEOUT_S) as response,
-                archive.open("wb") as sink,
-            ):
-                shutil.copyfileobj(response, sink)
-        except (urllib.error.URLError, OSError) as exc:
-            raise PythonRuntimeError(f"cannot fetch pinned interpreter {url}: {exc}") from exc
-        _verify(archive, expected)
-        _extract(archive, scratch)
-        extracted = scratch / "python"
-        if not (extracted / "bin" / "python3").exists():
-            raise PythonRuntimeError(
-                f"pinned interpreter archive has no python/bin/python3: {name}"
-            )
-        tree.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            extracted.replace(tree)
-        except OSError as exc:
-            # A concurrent build can win the race and leave a populated
-            # directory here, which rename refuses with ENOTEMPTY. Its tree came
-            # from the same digest-verified archive, so it is the same tree.
-            if (tree / "bin" / "python3").exists():
-                return tree
-            raise PythonRuntimeError(f"cannot install interpreter tree at {tree}: {exc}") from exc
-    return tree
+        with tempfile.TemporaryDirectory(
+            prefix=".python-runtime-", dir=version_root
+        ) as scratch_name:
+            scratch = Path(scratch_name)
+            candidate = scratch / "install"
+            candidate.mkdir()
+            archive = candidate / "locked.tar.gz"
+            url = f"{_BASE_URL}/{RELEASE}/{name}"
+            try:
+                with (
+                    urllib.request.urlopen(url, timeout=FETCH_TIMEOUT_S) as response,
+                    archive.open("xb") as sink,
+                ):
+                    shutil.copyfileobj(response, sink)
+            except (urllib.error.URLError, OSError) as exc:
+                detail = (
+                    f"; unauthenticated prior cache: {unauthenticated}" if unauthenticated else ""
+                )
+                raise PythonRuntimeError(
+                    f"cannot fetch pinned interpreter {url}: {exc}{detail}"
+                ) from exc
+            _verify(archive, expected)
+            _extract(archive, candidate)
+            _authenticate(candidate, expected)
+
+            stale = scratch / "stale"
+            if os.path.lexists(install):
+                install.replace(stale)
+            try:
+                candidate.replace(install)
+            except OSError as exc:
+                if os.path.lexists(stale):
+                    stale.replace(install)
+                raise PythonRuntimeError(
+                    f"cannot install interpreter cache at {install}: {exc}"
+                ) from exc
+        return _authenticate(install, expected)

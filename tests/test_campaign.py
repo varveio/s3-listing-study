@@ -32,9 +32,12 @@ def registration(*, subject: str = "a", derived: str = "d") -> dict[str, object]
     """One tool's image: the digest that ran, plus what it was built from."""
     return {
         "derived_image": "sha256:" + derived * 64,
-        "subject_image": "sha256:" + subject * 64,
+        "shared_base_digest": "sha256:" + subject * 64,
+        "shared_base_uri": "registry.example/base@sha256:" + subject * 64,
+        "shared_base_source_sha256": subject * 64,
+        "tool_build_sha256": subject * 64,
+        "tool_artifact": {"kind": "release-binary", "locator": "example", "sha256": subject * 64},
         "adapter_bundle_sha256": subject * 64,
-        "python_libc": "gnu",
         "harness_revision": "0.1.0",
     }
 
@@ -242,7 +245,7 @@ def test_a_tool_with_no_image_is_refused() -> None:
     plan = committed_plan()
     images = image_set(plan)
     del images["swath"]
-    with pytest.raises(CampaignError, match="no derived image digest for swath"):
+    with pytest.raises(CampaignError, match="no final per-tool image digest for swath"):
         attempts_for(plan, campaign="2026-08-10-first", images=images)
 
 
@@ -265,9 +268,11 @@ def test_the_manifest_indexes_every_job_and_names_the_image_components() -> None
         zone="us-east4-a",
     )
     assert len(document["attempts"]) == 14
+    assert document["schema_version"] == 3
+    assert document["attempt_fingerprint_version"] == 2
     assert {a["job_id"] for a in document["attempts"]} == {a.job_id for a in generated}
     assert document["plans"][0]["sha256"] == plan.digest
-    assert document["images"]["swath"]["subject_image"] == IMAGE["subject_image"]
+    assert document["images"]["swath"]["shared_base_digest"] == IMAGE["shared_base_digest"]
     # Neither is in any fingerprint, and a reader will ask about both.
     assert (document["provisioning"], document["zone"]) == ("SPOT", "us-east4-a")
 

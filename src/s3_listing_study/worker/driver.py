@@ -23,8 +23,13 @@ class ResolvedInvocation:
 
     argv: tuple[str, ...]
     adapter_bundle_sha256: str
-    subject_image_digest: str
     functional_env: dict[str, str] = field(default_factory=dict)
+    shared_base_source_sha256: str = "0" * 64
+    tool_build_sha256: str = "0" * 64
+    tool_artifact: dict[str, str] = field(
+        default_factory=lambda: {"kind": "synthetic", "locator": "test", "sha256": "0" * 64}
+    )
+    subject_workdir: str = "/"
 
 
 def validate_request(request: CommandRequest) -> None:
@@ -77,10 +82,16 @@ def resolve_invocation(
         expected_tool=request.tool,
     )
     command = adapter.compile(request)
-    _reference, subject_image_digest = selection.subject_image.rsplit("@", 1)
     return ResolvedInvocation(
-        command,
-        selection.adapter_bundle_sha256,
-        subject_image_digest,
-        adapter.functional_env,
+        argv=command,
+        adapter_bundle_sha256=selection.adapter_bundle_sha256,
+        functional_env=adapter.functional_env,
+        shared_base_source_sha256=selection.shared_base_source_sha256,
+        tool_build_sha256=selection.tool_build_sha256,
+        tool_artifact={
+            "kind": selection.tool_artifact_kind,
+            "locator": selection.tool_artifact_locator,
+            "sha256": selection.tool_artifact_sha256,
+        },
+        subject_workdir=selection.subject_workdir,
     )
