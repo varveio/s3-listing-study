@@ -24,7 +24,9 @@ jobs:
       - name: Install pinned shellcheck (user path — no privileged host mutation)
         run: |
           set -euo pipefail
-          curl -sSL -o /tmp/shellcheck.tar.xz \
+          curl --fail --silent --show-error --location \
+            --retry 5 --retry-all-errors --connect-timeout 30 \
+            -o /tmp/shellcheck.tar.xz \
             https://github.com/koalaman/shellcheck/releases/download/v0.10.0/shellcheck-v0.10.0.linux.x86_64.tar.xz
           echo "6c881ab0698e4e6ea235245f22832860544f17ba386442fe7e9d629f8cbedf87  /tmp/shellcheck.tar.xz" | sha256sum -c -
           tar -xJf /tmp/shellcheck.tar.xz -C /tmp
@@ -41,7 +43,9 @@ jobs:
       - name: Validate GitHub Actions workflows
         run: |
           set -euo pipefail
-          curl -fsSL -o /tmp/actionlint.tar.gz \
+          curl --fail --silent --show-error --location \
+            --retry 5 --retry-all-errors --connect-timeout 30 \
+            -o /tmp/actionlint.tar.gz \
             https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
           echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  /tmp/actionlint.tar.gz" | sha256sum -c -
           tar -xzf /tmp/actionlint.tar.gz -C /tmp actionlint
