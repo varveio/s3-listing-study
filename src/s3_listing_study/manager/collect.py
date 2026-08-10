@@ -8,6 +8,15 @@ subprocess, through its documented CLI contract (raw bytes on stdin,
 contract-v2 TSV on stdout, or ``--dataset DIR`` for a mode whose sink is a
 directory) — this module holds no per-tool parsing logic of its own.
 
+**Manager-side, and it cannot be otherwise.** Counting an attempt inside its
+own image was tried and abandoned: all eleven ``normalize.py`` adapters import
+``manager.duckdb_adapter``, so in-image counting would mean shipping DuckDB
+into every derived image — heavier than the GCS SDK that
+``worker.upload`` was rewritten to avoid, and for a file no image reads. The
+worker uploads the raw streams; the count is computed from them here. A row
+count is always recoverable from evidence that was uploaded, which is why
+losing it in the image costs nothing.
+
 Writes a companion ``collected.json`` next to the attempt directory's own
 ``result.json``; never rewrites ``result.json`` itself, which the attempt
 engine already documents as written atomically and last.
@@ -88,6 +97,10 @@ def _write_parquet(tsv: bytes, parquet_path: Path) -> None:
 def _collect(attempt_dir: Path, tool: str, *, convert_parquet: bool) -> dict[str, Any]:
     result = json.loads((attempt_dir / "result.json").read_text())
     if result["outcome"]["status"] != "completed":
+        # A partial listing does have a row count, but it is not a measurement
+        # of the bucket — reporting one would understate the target by exactly
+        # the amount the timeout cut off, which is the failure the row-count
+        # tier exists to catch.
         return {"schema_version": 1, "row_count": None, "reason": "attempt did not complete"}
 
     mode = result["target"]["mode"]
@@ -100,10 +113,10 @@ def _collect(attempt_dir: Path, tool: str, *, convert_parquet: bool) -> dict[str
         stdin_data = gzip.decompress((attempt_dir / "stdout.raw.gz").read_bytes())
         dataset = None
 
+    # Normalized once and used for both: the normalizer is a subprocess over
+    # the whole listing, and Parquet is already the expensive half.
     tsv = _normalize(tool, mode, prefix, stdin_data, dataset)
-    row_count = tsv.count(b"\n")
-
-    collected: dict[str, Any] = {"schema_version": 1, "row_count": row_count}
+    collected: dict[str, Any] = {"schema_version": 1, "row_count": tsv.count(b"\n")}
 
     if convert_parquet:
         parquet_path = attempt_dir / "normalized.parquet"

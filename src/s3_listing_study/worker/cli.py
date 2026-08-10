@@ -23,6 +23,12 @@ from .engine import (
     parse_credential_env,
     run_attempt,
 )
+from .upload import UploadError, upload_attempt
+
+# A listing outcome and a publishing outcome are different facts. The attempt's
+# own verdict is sealed in result.json before any of this runs, so a failure to
+# count or upload must not be reported as a failed attempt.
+POST_ATTEMPT_EXIT = 3
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -55,6 +61,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--prefix", action=UniqueStoreAction, default="")
     parser.add_argument("--scope", action=UniqueStoreAction)
     parser.add_argument("--concurrency", action=UniqueStoreAction)
+    # Optional on purpose. Omitting it is what makes a local run — the repo's
+    # own smoke campaign — need no bucket, no credentials, and no network
+    # beyond the one the subject itself uses.
+    parser.add_argument(
+        "--destination",
+        action=UniqueStoreAction,
+        help="gs://bucket/prefix to upload this attempt under; omit to keep the attempt local",
+    )
     return parser
 
 
@@ -112,7 +126,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 sink_dir=sink_dir,
             )
             invocation = resolve_invocation(request)
-            _result, runner_exit = run_attempt(
+            result, runner_exit = run_attempt(
                 AttemptOptions(
                     output=Path(args.output),
                     argv=invocation.argv,
@@ -141,4 +155,38 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (AttemptError, BuildSelectionError, CommandAdapterError, OSError) as exc:
         print(f"attempt-runner: {exc}", file=sys.stderr)
         return 2
+    if args.destination is None:
+        return runner_exit
+    return _publish(Path(args.output), args.destination, result, runner_exit)
+
+
+def _publish(
+    attempt_dir: Path,
+    destination: str,
+    result: dict[str, object],
+    runner_exit: int,
+) -> int:
+    """Upload a finalized attempt; report an upload failure separately.
+
+    Everything here runs after the engine stopped the clock, read ``getrusage``
+    and joined the disk sampler, so none of it can reach a figure the attempt
+    reports. A failure to upload is reported as ``POST_ATTEMPT_EXIT`` rather
+    than as a listing outcome: the attempt itself either ran or it did not, and
+    that verdict is already sealed in ``result.json``.
+
+    Only the raw attempt directory goes up. The row count is computed
+    host-side by ``manager.collect``, which needs each tool's DuckDB-backed
+    normalizer — see that module for why it cannot run here.
+    """
+    # The run leaf is named here because only this process knows the attempt id
+    # it minted — a submitter-chosen leaf would be written twice by a task
+    # re-execution, after the run was already paid for.
+    leaf = str(result["attempt_id"])
+    try:
+        uploaded = upload_attempt(attempt_dir, f"{destination.rstrip('/')}/{leaf}")
+    except (UploadError, OSError) as exc:
+        print(f"attempt-runner: upload failed: {exc}", file=sys.stderr)
+        return POST_ATTEMPT_EXIT
+    for blob_path in uploaded:
+        print(f"attempt-runner: uploaded {blob_path}", file=sys.stderr)
     return runner_exit
