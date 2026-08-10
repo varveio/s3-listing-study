@@ -1,0 +1,335 @@
+name: image builds
+
+on:
+  pull_request:
+    paths:
+      - .dockerignore
+      - .github/workflows/images-pr.yml
+      - harness/derived-image/**
+      - harness/shared-image/**
+      - pyproject.toml
+      - src/s3_listing_study/__init__.py
+      - src/s3_listing_study/common/**
+      - src/s3_listing_study/manager/campaign/**
+      - src/s3_listing_study/manager/cli.py
+      - src/s3_listing_study/worker/**
+      - tools/*/adapter/**
+      - tools/*/build/**
+      - uv.lock
+  push:
+    branches: [main]
+    paths:
+      - .dockerignore
+      - .github/workflows/images-pr.yml
+      - harness/derived-image/**
+      - harness/shared-image/**
+      - pyproject.toml
+      - src/s3_listing_study/__init__.py
+      - src/s3_listing_study/common/**
+      - src/s3_listing_study/manager/campaign/**
+      - src/s3_listing_study/manager/cli.py
+      - src/s3_listing_study/worker/**
+      - tools/*/adapter/**
+      - tools/*/build/**
+      - uv.lock
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: images-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SHARED_ARCHIVE_TAG: s3-listing-study/shared-ci:content
+  LOCAL_REGISTRY: localhost:5000
+
+jobs:
+  shared-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out proposed merge
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Calculate shared-runtime cache key
+        id: shared-key
+        run: echo "value=${{ hashFiles('.dockerignore', 'harness/shared-image/**', 'src/s3_listing_study/common/duckdb_runtime.py', 'src/s3_listing_study/common/runtime_identity.py') }}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore shared-runtime archive
+        id: shared-cache
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: shared-runtime.tar.gz
+          key: image-shared-${{ runner.os }}-${{ steps.shared-key.outputs.value }}
+
+      - name: Install uv
+        if: steps.shared-cache.outputs.cache-hit != 'true'
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+
+      - name: Sync locked environment
+        if: steps.shared-cache.outputs.cache-hit != 'true'
+        run: uv sync --locked
+
+      - name: Set up Buildx
+        if: steps.shared-cache.outputs.cache-hit != 'true'
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Build shared runtime on cache miss
+        if: steps.shared-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          uv run s3-listing-study build-shared-image --tag "$SHARED_ARCHIVE_TAG"
+          docker image save "$SHARED_ARCHIVE_TAG" | gzip -1 > shared-runtime.tar.gz
+
+      - name: Load and probe shared runtime
+        run: |
+          set -euo pipefail
+          gunzip -c shared-runtime.tar.gz | docker image load
+          test "$(docker image inspect --format '{{.Config.User}}' "$SHARED_ARCHIVE_TAG")" = "10001:10001"
+          docker run --rm --pull=never "$SHARED_ARCHIVE_TAG" \
+            /usr/bin/python3 -I -c 'import duckdb, json, platform; print(json.dumps({"duckdb": duckdb.__version__, "python": platform.python_version()}, sort_keys=True))'
+
+      - name: Upload shared runtime
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: shared-runtime
+          path: shared-runtime.tar.gz
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 7
+
+  tool-execution:
+    needs: shared-runtime
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        tool:
+          - aws-cli
+          - minio-mc
+          - ps3
+          - rclone
+          - s3-fast-list
+          - s3kor
+          - s3p
+          - s4cmd
+          - s5cmd
+          - s7cmd
+          - swath
+    steps:
+      - name: Check out proposed merge
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+
+      - name: Sync locked environment
+        run: uv sync --locked
+
+      - name: Download shared runtime
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: shared-runtime
+
+      - name: Start job-local registry
+        run: |
+          set -euo pipefail
+          gunzip -c shared-runtime.tar.gz | docker image load
+          docker run --detach --name image-registry --publish 5000:5000 \
+            registry@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://localhost:5000/v2/ >/dev/null; then break; fi
+            if [ "$attempt" -eq 30 ]; then exit 1; fi
+            sleep 1
+          done
+          docker image tag "$SHARED_ARCHIVE_TAG" "$LOCAL_REGISTRY/runtime/shared:ci"
+          docker image push "$LOCAL_REGISTRY/runtime/shared:ci"
+
+      - name: Resolve shared runtime digest
+        id: shared
+        run: |
+          set -euo pipefail
+          reference=$(docker image inspect --format '{{index .RepoDigests 0}}' "$LOCAL_REGISTRY/runtime/shared:ci")
+          case "$reference" in
+            "$LOCAL_REGISTRY/runtime/shared@sha256:"*) ;;
+            *) echo "unexpected shared-runtime reference: $reference" >&2; exit 1 ;;
+          esac
+          echo "reference=$reference" >> "$GITHUB_OUTPUT"
+          echo "digest=${reference##*@}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up digest-aware Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+        with:
+          driver-opts: network=host
+          buildkitd-config-inline: |
+            [registry."localhost:5000"]
+              http = true
+              insecure = true
+
+      - name: Restore tool-parent archive
+        id: tool-cache
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: tool-cache/${{ matrix.tool }}.tar.gz
+          key: image-tool-${{ runner.os }}-${{ steps.shared.outputs.digest }}-${{ hashFiles(format('tools/{0}/build/**', matrix.tool)) }}
+
+      - name: Load or build tool image
+        env:
+          TOOL: ${{ matrix.tool }}
+          SHARED_REFERENCE: ${{ steps.shared.outputs.reference }}
+        run: |
+          set -euo pipefail
+          tool_tag="$LOCAL_REGISTRY/tool/$TOOL:ci"
+          mkdir -p tool-cache
+          if [ "${{ steps.tool-cache.outputs.cache-hit }}" = "true" ]; then
+            gunzip -c "tool-cache/$TOOL.tar.gz" | docker image load
+          else
+            uv run s3-listing-study build-tool-image \
+              --tool "$TOOL" --shared-base-image "$SHARED_REFERENCE" --tag "$tool_tag"
+            docker image save "$tool_tag" | gzip -1 > "tool-cache/$TOOL.tar.gz"
+          fi
+          docker image push "$tool_tag"
+          tool_reference=$(docker image inspect --format '{{index .RepoDigests 0}}' "$tool_tag")
+          printf 'TOOL_TAG=%s\nTOOL_REFERENCE=%s\n' \
+            "$tool_tag" "$tool_reference" >> "$GITHUB_ENV"
+
+      - name: Build execution image
+        env:
+          TOOL: ${{ matrix.tool }}
+        run: |
+          set -euo pipefail
+          execution_tag="$LOCAL_REGISTRY/execution/$TOOL:ci"
+          uv run s3-listing-study build-derived-image \
+            --tool "$TOOL" --tool-image "$TOOL_REFERENCE" --tag "$execution_tag"
+          docker image push "$execution_tag"
+          execution_reference=$(docker image inspect --format '{{index .RepoDigests 0}}' "$execution_tag")
+          printf 'EXECUTION_TAG=%s\nEXECUTION_REFERENCE=%s\n' \
+            "$execution_tag" "$execution_reference" >> "$GITHUB_ENV"
+
+      - name: Probe tool and worker images
+        env:
+          TOOL: ${{ matrix.tool }}
+        run: |
+          set -euo pipefail
+          test "$(docker image inspect --format '{{.Config.User}}' "$TOOL_TAG")" = "10001:10001"
+          test "$(docker image inspect --format '{{.Config.User}}' "$EXECUTION_TAG")" = "10001:10001"
+          test "$(docker image inspect --format '{{json .Config.Entrypoint}}' "$EXECUTION_TAG")" = \
+            '["/usr/bin/python3","-I","/opt/s3-listing-study/attempt.pyz"]'
+          docker run --rm --pull=never --entrypoint /usr/bin/python3 "$EXECUTION_TAG" \
+            -I -c 'import json,sys; p=json.load(open("/opt/s3-listing-study/image-provenance.json")); assert p["tool_image"]["uri"] == sys.argv[1]; assert len(p["selection_sha256"]) == 64' \
+            "$TOOL_REFERENCE"
+          mapfile -t executable < <(uv run python -c \
+            'import json,sys; print(*json.load(open(f"tools/{sys.argv[1]}/build/image.json"))["executable"], sep="\n")' \
+            "$TOOL")
+          docker run --rm --pull=never --entrypoint "${executable[0]}" \
+            "$TOOL_TAG" "${executable[@]:1}" --help >/dev/null
+          docker run --rm --pull=never "$EXECUTION_TAG" --help >/dev/null
+
+      - name: Export images and registration
+        env:
+          TOOL: ${{ matrix.tool }}
+          SHARED_REFERENCE: ${{ steps.shared.outputs.reference }}
+        run: |
+          set -euo pipefail
+          mkdir -p image-artifacts
+          cp "tool-cache/$TOOL.tar.gz" "image-artifacts/$TOOL-tool.tar.gz"
+          docker image save "$EXECUTION_TAG" | gzip -1 > "image-artifacts/$TOOL-execution.tar.gz"
+          uv run python - "$TOOL" "$SHARED_REFERENCE" "$TOOL_REFERENCE" "$EXECUTION_REFERENCE" <<'PY'
+          import json
+          import os
+          import pathlib
+          import sys
+
+          tool, shared, tool_image, execution = sys.argv[1:]
+          digest = lambda reference: reference.rsplit("@", 1)[1]
+          record = {
+              "execution_archive": f"{tool}-execution.tar.gz",
+              "execution_image_digest": digest(execution),
+              "shared_runtime_digest": digest(shared),
+              "source_revision": os.environ["GITHUB_SHA"],
+              "tool": tool,
+              "tool_archive": f"{tool}-tool.tar.gz",
+              "tool_image_digest": digest(tool_image),
+          }
+          pathlib.Path(f"image-artifacts/{tool}.json").write_text(
+              json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+          )
+          PY
+
+      - name: Upload tool and execution images
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: images-${{ matrix.tool }}
+          path: image-artifacts/*.tar.gz
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload image registration
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: registration-${{ matrix.tool }}
+          path: image-artifacts/${{ matrix.tool }}.json
+          if-no-files-found: error
+          retention-days: 7
+
+  summary:
+    needs: tool-execution
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download image registrations
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: registration-*
+          path: registrations
+
+      - name: Assemble and validate CI build manifest
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import pathlib
+
+          expected = {
+              "aws-cli", "minio-mc", "ps3", "rclone", "s3-fast-list", "s3kor",
+              "s3p", "s4cmd", "s5cmd", "s7cmd", "swath",
+          }
+          records = [json.loads(path.read_text()) for path in pathlib.Path("registrations").glob("**/*.json")]
+          by_tool = {record["tool"]: record for record in records}
+          if len(records) != len(by_tool) or set(by_tool) != expected:
+              raise SystemExit("image registrations are missing, duplicated, or unexpected")
+          shared = {record["shared_runtime_digest"] for record in records}
+          if len(shared) != 1:
+              raise SystemExit("tool images do not share one runtime digest")
+          revisions = {record["source_revision"] for record in records}
+          if len(revisions) != 1:
+              raise SystemExit("tool images do not share one source revision")
+          document = {
+              "kind": "github-actions-image-build",
+              "schema_version": 1,
+              "images": by_tool,
+          }
+          pathlib.Path("image-build-manifest.json").write_text(
+              json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+          )
+          PY
+
+      - name: Upload aggregate CI build manifest
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: image-build-manifest
+          path: image-build-manifest.json
+          if-no-files-found: error
+          retention-days: 7

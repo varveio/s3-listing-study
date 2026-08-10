@@ -38,6 +38,16 @@ jobs:
           set -euo pipefail
           git ls-files '*.sh' | while read -r f; do bash -n "$f"; done
 
+      - name: Validate GitHub Actions workflows
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/actionlint.tar.gz \
+            https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  /tmp/actionlint.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/actionlint.tar.gz -C /tmp actionlint
+          install -m 0755 /tmp/actionlint "$HOME/.local/bin/actionlint"
+          actionlint
+
       - name: Mask docker for the static gates
         # The suites are designed to run without Docker, but one regression
         # path issues a read-only `docker image inspect` that would reach the
