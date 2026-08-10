@@ -8,7 +8,7 @@ import os
 import re
 import sys
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from s3_listing_study.common.argparse_utils import UniqueStoreAction
@@ -32,6 +32,7 @@ from .upload import UploadError, upload_attempt
 # count or upload must not be reported as a failed attempt.
 POST_ATTEMPT_EXIT = 3
 NORMALIZER_PATH = Path("/opt/s3-listing-study/tool/normalize.py")
+CASE_ENV_KEYS = frozenset(("JAVA_TOOL_OPTIONS", "NODE_OPTIONS"))
 
 
 def _normalizer_path(tool: str) -> Path:
@@ -70,6 +71,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--prefix", action=UniqueStoreAction, default="")
     parser.add_argument("--scope", action=UniqueStoreAction)
     parser.add_argument("--concurrency", action=UniqueStoreAction)
+    parser.add_argument(
+        "--case-env",
+        action="append",
+        default=[],
+        metavar="NAME=VALUE",
+        help="repeatable managed-runtime environment selected by the resolved case",
+    )
     parser.add_argument("--campaign-id", action=UniqueStoreAction)
     parser.add_argument("--job-id", action=UniqueStoreAction)
     parser.add_argument("--case-id", action=UniqueStoreAction)
@@ -124,6 +132,25 @@ def _positive_int(option: str, raw: str) -> int:
     if re.fullmatch(r"[0-9]+", raw) is None or int(raw) < 1:
         raise CommandAdapterError(f"{option} must be a positive ASCII integer")
     return int(raw)
+
+
+def _parse_case_env(values: Sequence[str], capsule_env: Mapping[str, str]) -> dict[str, str]:
+    parsed: dict[str, str] = {}
+    for raw in values:
+        if "\x00" in raw or "=" not in raw:
+            raise CommandAdapterError("--case-env must be NAME=VALUE without NUL bytes")
+        name, value = raw.split("=", 1)
+        if name not in CASE_ENV_KEYS:
+            allowed = "|".join(sorted(CASE_ENV_KEYS))
+            raise CommandAdapterError(f"--case-env key must be one of {allowed}: {name!r}")
+        if not value:
+            raise CommandAdapterError(f"--case-env {name} value must not be empty")
+        if name in parsed:
+            raise CommandAdapterError(f"--case-env repeats {name}")
+        if name in capsule_env:
+            raise CommandAdapterError(f"--case-env {name} collides with capsule environment")
+        parsed[name] = value
+    return parsed
 
 
 def _parse_campaign(args: argparse.Namespace) -> CampaignProvenance | None:
@@ -201,6 +228,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 sink_dir=sink_dir,
             )
             invocation = resolve_invocation(request)
+            case_env = _parse_case_env(args.case_env, invocation.functional_env)
             result, runner_exit = run_attempt(
                 AttemptOptions(
                     output=Path(args.output),
@@ -226,7 +254,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     campaign=campaign,
                     results_destination=args.destination,
                     credential_env=credential_env,
-                    functional_env=invocation.functional_env,
+                    functional_env={**invocation.functional_env, **case_env},
                 )
             )
     except (AttemptError, BuildSelectionError, CommandAdapterError, OSError) as exc:

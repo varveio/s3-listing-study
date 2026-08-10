@@ -63,6 +63,97 @@ def test_attempt_cli_is_strictly_logical_and_non_abbreviating() -> None:
         cli.build_parser().parse_args([*LOGICAL_ARGS, "--", "/bin/echo"])
 
 
+def test_attempt_cli_forwards_only_explicit_managed_runtime_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    observed: list[AttemptOptions] = []
+
+    monkeypatch.setattr(
+        cli,
+        "resolve_invocation",
+        lambda _request: ResolvedInvocation(
+            _python("pass"),
+            ADAPTER_BUNDLE_SHA256,
+            SUBJECT_IMAGE_DIGEST,
+            {"MC_HOST_s3": "https://s3.amazonaws.com"},
+        ),
+    )
+    monkeypatch.setattr(cli, "_normalizer_path", lambda _tool: None)
+
+    def fake_run(options: AttemptOptions) -> tuple[dict[str, object], int]:
+        observed.append(options)
+        return {}, 0
+
+    monkeypatch.setattr(cli, "run_attempt", fake_run)
+    assert (
+        cli.main(
+            [
+                "--output",
+                str(tmp_path / "attempt"),
+                *LOGICAL_ARGS,
+                "--case-env",
+                "JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=75",
+                "--case-env",
+                "NODE_OPTIONS=--max-old-space-size=1536",
+            ]
+        )
+        == 0
+    )
+    assert observed[0].functional_env == {
+        "MC_HOST_s3": "https://s3.amazonaws.com",
+        "JAVA_TOOL_OPTIONS": "-XX:MaxRAMPercentage=75",
+        "NODE_OPTIONS": "--max-old-space-size=1536",
+    }
+
+
+def test_attempt_cli_records_forwarded_managed_runtime_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        cli,
+        "resolve_invocation",
+        lambda _request: ResolvedInvocation(
+            _python("import os; assert os.environ['NODE_OPTIONS'] == '--max-old-space-size=1536'"),
+            ADAPTER_BUNDLE_SHA256,
+            SUBJECT_IMAGE_DIGEST,
+        ),
+    )
+    monkeypatch.setattr(cli, "_normalizer_path", lambda _tool: None)
+    output = tmp_path / "attempt"
+    assert (
+        cli.main(
+            [
+                "--output",
+                str(output),
+                *LOGICAL_ARGS,
+                "--case-env",
+                "NODE_OPTIONS=--max-old-space-size=1536",
+            ]
+        )
+        == 0
+    )
+    result = json.loads((output / "result.json").read_text(encoding="utf-8"))
+    assert result["invocation"]["environment"]["NODE_OPTIONS"] == "--max-old-space-size=1536"
+
+
+@pytest.mark.parametrize(
+    ("values", "capsule", "message"),
+    [
+        (["OTHER=value"], {}, "key must be one of"),
+        (["JAVA_TOOL_OPTIONS=a", "JAVA_TOOL_OPTIONS=b"], {}, "repeats"),
+        (["JAVA_TOOL_OPTIONS"], {}, "NAME=VALUE"),
+        (["NODE_OPTIONS="], {}, "must not be empty"),
+        (["NODE_OPTIONS=a\x00b"], {}, "without NUL"),
+        (["NODE_OPTIONS=case"], {"NODE_OPTIONS": "capsule"}, "collides"),
+    ],
+)
+def test_attempt_cli_refuses_invalid_case_environment(
+    values: list[str], capsule: dict[str, str], message: str
+) -> None:
+    with pytest.raises(CommandAdapterError, match=message):
+        cli._parse_case_env(values, capsule)
+
+
 @pytest.mark.parametrize(
     ("option", "value"),
     [
