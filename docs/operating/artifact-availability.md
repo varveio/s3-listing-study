@@ -103,6 +103,58 @@ describes the recorded provenance, not a new registry pull or rebuild test.
 A digest is still the correct identity for what ran. It is not proof that a
 reader can retrieve that image or regenerate it from current package indexes.
 
+## Rebase onto a uniform glibc base (2026-08-10)
+
+The table above describes provenance as it stood for the receipts recorded
+before this date. Three subjects have since moved: **rclone**, **s5cmd** and
+**s3kor** ran on Alpine images and now run on the study's pinned
+`debian:12-slim` base.
+
+The reason is not preference. The payload carries its own CPython, which links
+the base image's libc, and compiled Python wheels are published per libc.
+DuckDB — which every `normalize.py` adapter imports — publishes manylinux
+wheels only, with no musllinux build at any version. On a musl base the worker
+cannot run the study's own code, so the subject's packaging was deciding the
+harness runtime.
+
+What this does and does not change:
+
+- **s3kor** is a study build already; only its runtime stage changed base. Same
+  source commit, same `CGO_ENABLED=0` build stage.
+- **rclone** and **s5cmd** move from a public upstream *image* reference to
+  upstream's published *release archive*, fetched by URL and verified by digest
+  at build time (`ADD --checksum`), then placed on the base. Nothing is rebuilt
+  from source.
+
+  **The subject changed, and the change is recorded rather than absorbed.** The
+  binary in a vendor's image is not the binary in their release archive:
+
+  | Tool | In upstream's image | In upstream's release archive |
+  | --- | --- | --- |
+  | rclone | `d67c485534687d1f2d5fbe467104a8c9f82cc491796f9cd13acc33100852527f` | `9f56ca5edfac24a3ed37226c2ba1de69f1ec9e05fa2526cddee5cd97e202be6b` |
+  | s5cmd | `6a645f4f53ffe03911e531586c167b35e36e2d33e0f10a9404cb1f665eeaaa98` | `672299fea8941281702bd52a4e51c330a4e39c1540f4bdfc3b4e737823ac2878` |
+
+  Both pairs self-report the same version (`rclone v1.74.4`,
+  `s5cmd v2.3.0-991c9fb`), so these are the same releases built in different
+  environments — not different versions. Receipts, research reports and tool
+  pages recorded before this date describe the *image* binary; anything citing
+  them for rclone or s5cmd is citing a different artifact from the one now
+  registered.
+
+  The release archive is preferred because it is content-addressed and a reader
+  can fetch and verify it directly, without pulling and unpacking a container
+  image to reach the bytes. Both are static Go binaries, so the base supplies
+  nothing but a kernel and the CA bundle the recipes install. Each returned
+  2,549 rows against `noaa-normals-pds/normals-hourly/` after the move — the
+  same count the other nine subjects return.
+
+The cost is that two subjects no longer run upstream's published image, and
+their pre-2026-08-10 evidence describes a different binary. The gain is that
+every worker can run the study's code, that the registered artifact is one a
+reader can verify by digest from upstream's own download, and that libc,
+malloc, the DNS resolver and the TLS stack stop varying between subjects inside
+a comparison whose premise is that only the tool differs.
+
 ## Public evidence gate
 
 Before calling the evidence package reproducible from a fresh clone:

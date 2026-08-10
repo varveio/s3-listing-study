@@ -1,8 +1,8 @@
 {
   "tool": "rclone",
-  "subject_image": "rclone/rclone@sha256:c61954aaa32328a5486715dd063a81c7879f5195ad3505cd362deddd509dc4a1",
+  "subject_image": "registry.local/rclone@sha256:76bee13ae67db1133de505ebdbc8eab20f515bd5e4c103a01bf456774937af07",
   "subject_version": "1.74.4",
-  "python_libc": "musl",
+  "python_libc": "gnu",
   "subject_workdir": "/data",
   "executable": [
     "/usr/local/bin/rclone"

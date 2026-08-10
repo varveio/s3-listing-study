@@ -1,8 +1,8 @@
 {
   "tool": "s5cmd",
-  "subject_image": "peakcom/s5cmd@sha256:2ff939e2ee3c76adcadd78dbfc3e2569b18a3743ed9dcfccb1ec589af7fb9903",
+  "subject_image": "registry.local/s5cmd@sha256:c97825bbcc5c51ca05d6c12f6b08a2aa3d27255d776b6b056edcced2338e66be",
   "subject_version": "v2.3.0",
-  "python_libc": "musl",
+  "python_libc": "gnu",
   "subject_workdir": "/aws",
   "executable": [
     "/s5cmd"

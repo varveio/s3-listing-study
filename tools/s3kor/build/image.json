@@ -1,8 +1,8 @@
 {
   "tool": "s3kor",
-  "subject_image": "registry.local/s3kor@sha256:765aa9c3f75451502ff4895893c943e5e19eb36f4d06179a6049eaaf27ea3a9a",
+  "subject_image": "registry.local/s3kor@sha256:47bb816636045263208802cb04354b65c319ebd6f0a4db3af973e27cfa51d6d0",
   "subject_version": "v0.0.37",
-  "python_libc": "musl",
+  "python_libc": "gnu",
   "subject_workdir": "/",
   "executable": [
     "/usr/local/bin/s3kor"
