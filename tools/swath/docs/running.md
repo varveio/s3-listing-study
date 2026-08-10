@@ -11,7 +11,7 @@ explanation lives there too.
 
 ## Comparative image prepared 2026-08-10 (not run evidence)
 
-[image.json](../build/image.json) selects official Swath 0.2.2 JAR plus runtime tree from digest-pinned Temurin 25 JRE. Shared assembly is defined once in [tool-structure.md](../../../docs/operating/tool-structure.md). Historical receipts below continue to describe the images and artifacts they name.
+[image.json](../build/image.json) selects official Swath 0.2.4 JAR plus runtime tree from digest-pinned Temurin 25 JRE. Shared assembly is defined once in [tool-structure.md](../../../docs/operating/tool-structure.md). Historical receipts below continue to describe the images and artifacts they name.
 
 ## Tested subject: upstream's published image
 
@@ -49,22 +49,17 @@ inspected a bare host needs a local JDK 25 already installed — claim
 `language-is-java`. `docker build .` from the repo root is
 self-contained; only CI substitutes the promoted jar.
 
-## No receipts: the runner-security blocker
+## Diagnostic attempt receipts, but no verifier verdict
 
-**This is the owning statement for every "no receipt, no verdict" clause
-elsewhere in this capsule.**
+**This is the owning statement for every "no verifier verdict, no confirmed
+claim" clause elsewhere in this capsule.**
 
-The study's mandatory runner-security profile is not provisioned on the machine
-this pass ran on, and that machine categorically cannot satisfy it: it is a
-shared devcontainer carrying unrelated workloads and private checkouts, not a
-provisioned runner. The retired wrapper-era evidence path was therefore never used
-and no receipt exists for any run of this subject. No claim about it is
-`confirmed`, and none can be until the work is re-run on a provisioned runner
-through the single derived-image attempt contract in
-[`../../../harness/README.md`](../../../harness/README.md). A Swath derived image
-has not been implemented yet.
+The v0.2.0 derivation ran on a shared devcontainer carrying unrelated workloads
+and private checkouts, not a runner provisioned to the study's mandatory
+security profile. The retired wrapper-era evidence path was therefore never
+used, and no wrapper-era receipt exists for those runs.
 
-Everything under "What ran" below is therefore a direct container observation:
+Those v0.2.0 runs under "What ran" below remain direct container observations:
 `docker run` with `--cap-drop ALL`, `--security-opt no-new-privileges:true`, and
 credential starvation (metadata service disabled, credential environment emptied,
 AWS config and credential files pointed at a nonexistent path). That reproduces
@@ -73,6 +68,16 @@ confinement, timeout enforcement, payload hygiene pipeline, or receipt schema.
 The captured stderr, a stdout sample and payload hashes are preserved under
 [`../receipts/observations-v0.2.0/`](../receipts/observations-v0.2.0/) and are
 labelled as observations, not receipts.
+
+Later derived-image diagnostic attempt receipts do exist. The latest,
+[`attempt-3`](../receipts/smoke/recursive-tsv/attempt-3/), ran Swath 0.2.4 on
+amd64, anonymously listing `normals-hourly/` as recursive TSV. It completed with
+exit 0, passed the secret scan, and counted 2,549 rows. It carries no verifier
+verdict or completeness result, so it is not a benchmark result and cannot
+confirm any canonical v0.2.0 claim. Earlier attempt receipts remain historical.
+No claim on this subject is `confirmed`; promotion still requires the required
+execution profile plus the reference/verifier path described in
+[`../../../harness/README.md`](../../../harness/README.md).
 
 ## What the verifier could not check
 
@@ -201,9 +206,9 @@ top-level option or the `list` subcommand, not at a binary name.
 `../adapter/normalize.py` converts native output into the historical verifier's
 five-field normalized stream.
 
-**Both adapter modules target v0.2.0.** Their typed contracts and argv are
-covered by repository tests; the historical observations below do not by
-themselves prove the newly cut-over modules execute in-image. They
+**Both adapter modules were derived against v0.2.0.** Their typed contracts and
+argv are covered by repository tests, and `recursive-tsv` has now executed
+in-image against Swath 0.2.4 in diagnostic attempt 3. They
 emit `--concurrency`, `--format table`, `--tune seed.mode=none` and — for the
 sort disk guard — `--tune sort.ignore-disk-check=on`, there being no
 `--force-sort` option at all even though the guard's own error message names one
@@ -216,8 +221,9 @@ A four-mode adapter summary from 2026-08-02 is preserved as an
 [observation note](../receipts/observations-v0.2.0/adapter-modes/observation.md),
 but its exact expanded commands and raw normalized outputs were not retained.
 The summary is therefore not independently auditable and supports no canonical
-runtime or cross-mode-agreement claim. The adapter must be exercised again in a
-registered derived-image attempt before those modes receive runtime coverage.
+runtime or cross-mode-agreement claim. Of those modes, only `recursive-tsv` now
+has later diagnostic-attempt runtime coverage; the others still need registered
+derived-image attempts.
 
 **What the current attempt path can publish.** The text modes flow through the
 captured raw streams. `command.py` directs both Parquet probes to `/tmp/swout`,
@@ -246,7 +252,8 @@ claim `mode-inventory-v020`.
 | --- | --- | --- |
 | `--format jsonl` | Observed twice directly, exit 0; no receipt, no verifier verdict | Runner-security blocker |
 | `--tune seed.mode=shallow` (default) | Observed in both direct runs | Default; no receipt |
-| `--format tsv`, `--format table` | Unverified | Present only in an unauditable historical adapter summary; re-run required |
+| `--format tsv` | Diagnostic attempt completed, exit 0; no verifier verdict | Swath 0.2.4 attempt 3 counted 2,549 rows under `normals-hourly/`; this does not confirm a v0.2.0 claim |
+| `--format table` | Unverified | Present only in an unauditable historical adapter summary; re-run required |
 | `--tune seed.mode=none` | Unverified | Present only in an unauditable historical adapter summary; the seed-cost arms remain uncompared — claim `seed-cost-direction-at-smoke` |
 | `--tune seed.mode=hints` | Unexercised | Declared but unreachable: it throws at seed time, after the checkpoint database is opened and the S3 client is built — claim `seed-hints-unimplemented`. Worth one capability probe of the exit-2 failure |
 | `--format parquet` probes | Not published by current attempt path | Driver writes `/tmp/swout`; minimal artifacts omit native outputs — claim `file-sinks-not-harness-capturable` |
@@ -280,17 +287,16 @@ docker run --rm --pull=never --cap-drop ALL --security-opt no-new-privileges:tru
 The full-bucket run is the same invocation with `s3://noaa-normals-pds/`. The
 image must be pulled by digest first; the tag, if you use one, is `0.2.0`.
 
-**A receipted re-run is a different procedure, and it is now blocked on two
-things**: a runner provisioned to the study's security profile plus a Swath
-derived image using the shared Python attempt engine; and the
-reference manifest present, so the shared verifier can produce a verdict.
-The third blocker, a v0.2.0 adapter, is closed — `tsv`, `table`, `jsonl` and
-`seed.mode=none` all run through it already, so the re-run is a matter of
-executing those four through the derived-image attempt path and adding a `seed.mode=hints` capability
-probe.
+**A claim-confirming re-run is a different procedure.** The Swath derived image
+and adapter are implemented; what remains is execution under the required
+profile with the reference/verifier path available so the run can produce a
+verdict. The other text modes and `seed.mode=none` still need current attempts,
+and `seed.mode=hints` remains a capability probe.
 
-Everything under [`../receipts/`](../receipts/) is about v0.2.0, and all of it is
-observation rather than receipt.
+[`../receipts/observations-v0.2.0/`](../receipts/observations-v0.2.0/) preserves
+the canonical v0.2.0 observations. [`../receipts/smoke/`](../receipts/smoke/)
+holds later diagnostic attempt receipts, most recently the v0.2.4 attempt 3;
+they do not supersede the observations or confirm their claims.
 
 ## Deferred coverage
 
@@ -312,10 +318,11 @@ Each of these stays `unverified`, with its own reason:
   seed, and the one `seed.mode=none` run captured output only, with no
   `list_run_summary` counters, so no cost comparison of the two arms exists at
   v0.2.0 (claim `seed-cost-direction-at-smoke`).
-- **amd64 execution** — amd64 is supported across every channel, including a real
-  child manifest in the published index and dual-platform CI builds, but every run
-  here was native arm64 (claims `amd64-built-and-smoked-upstream`,
-  `arm64-not-runtime-smoked-at-v020`).
+- **amd64 execution at v0.2.0** — amd64 is supported across every channel,
+  including a real child manifest in the published index and dual-platform CI
+  builds, but both canonical v0.2.0 observations were native arm64. The later
+  v0.2.4 diagnostic attempt ran on amd64 and does not settle the v0.2.0 claim
+  (claims `amd64-built-and-smoked-upstream`, `arm64-not-runtime-smoked-at-v020`).
 - **Concurrency above 8, AIMD necessity, and JVM cost at high list rates** — no
   run here went above `--concurrency 8`, nothing throttled, and neither run was a
   high-rate one (claims `parallelism-ratio-at-higher-concurrency`,

@@ -5,6 +5,6 @@ FROM eclipse-temurin:25-jre-noble@sha256:2f1da100788559b397bcf48c736169ea5b070bd
 
 FROM scratch
 COPY --from=jre /opt/java/openjdk/ /tool-root/opt/java/openjdk/
-ADD --checksum=sha256:4bd2204d17db657436046d3bf4cb1aedc44fdcd645f35c4b6fed4108ca251a02 \
-    https://github.com/varveio/swath/releases/download/v0.2.2/swath-0.2.2.jar \
+ADD --checksum=sha256:01a55d46a7173094f5e66959c24347f85e87f28edeeb4652a535795ac97f2b52 \
+    https://github.com/varveio/swath/releases/download/v0.2.4/swath-0.2.4.jar \
     /tool-root/opt/swath/swath.jar

@@ -16,9 +16,10 @@ evidence strength, its source, documentation, observation and run anchors, and
 its qualification. This page does not repeat those anchors. Statuses use the
 canonical vocabulary — `supported`, `unverified`, `unverifiable`, `confirmed` —
 as defined in [`../../../docs/methodology.md`](../../../docs/methodology.md)
-§ Evidence language. **No claim on this subject is `confirmed`**, because no run
-of it produced a receipt; the reason is owned by
-[`running.md`](running.md#no-receipts-the-runner-security-blocker). Narrative
+§ Evidence language. **No claim on this subject is `confirmed`**: later
+diagnostic attempt receipts carry no verifier verdict or claim-confirming
+evidence. The boundary is owned by
+[`running.md`](running.md#diagnostic-attempt-receipts-but-no-verifier-verdict). Narrative
 that is not represented by a canonical claim is attributed inline to the
 derivation in [`../research/report.md`](../research/report.md),
 whose known anchor defects are listed in

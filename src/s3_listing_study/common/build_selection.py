@@ -370,7 +370,7 @@ def derived_image_tag(selection: BuildSelection) -> str:
 
     The tag combines the tool version, harness version, and the first twelve
     characters of ``tool_build_sha256`` — for example,
-    ``s3-listing-study/swath:0.2.2-h0.1.0-e03f7be9c025``. The adapter bundle has
+    ``s3-listing-study/swath:0.2.4-h0.1.0-e8657c00fd00``. The adapter bundle has
     its own canonical hash and deliberately does not affect this human-readable
     tag.
 

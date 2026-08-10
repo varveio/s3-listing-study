@@ -61,7 +61,7 @@ base digests or source identities.
 With no explicit `--tag`, the readable local name is:
 
 ```text
-s3-listing-study/swath:0.2.2-h0.1.0-5dbe7637c089
+s3-listing-study/swath:0.2.4-h0.1.0-e8657c00fd00
                 └tool  └release └harness └tool-build prefix
 ```
 
