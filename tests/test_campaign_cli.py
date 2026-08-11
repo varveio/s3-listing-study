@@ -14,10 +14,12 @@ from typing import Any
 import pytest
 from temporalio.envconfig import ClientConfig as TemporalClientConfig
 
+from s3_listing_study.common.build_selection import load_registered_selection
 from s3_listing_study.manager import cli as manager_cli
 from s3_listing_study.manager.bench import plan as bench
 from s3_listing_study.manager.campaign import CampaignError
 from s3_listing_study.manager.campaign import cli as campaign_cli
+from s3_listing_study.manager.campaign import report as campaign_report
 from tests.test_campaign_batch import DIGEST, attempt
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -92,6 +94,7 @@ def write_plan(path: Path, *, bucket: str, tool: str = "aws-cli") -> Path:
 def write_image_set(path: Path, tools: set[str]) -> Path:
     images: dict[str, dict[str, Any]] = {}
     for tool in tools:
+        selection = load_registered_selection(ROOT, tool)
         registration = json.loads(
             (ROOT / f"tools/{tool}/build/image.json").read_text(encoding="utf-8")
         )
@@ -106,8 +109,11 @@ def write_image_set(path: Path, tools: set[str]) -> Path:
             "adapter_bundle_sha256": registration["adapter_bundle_sha256"],
             "shared_base_source_sha256": registration["shared_base_source_sha256"],
             "harness_revision": "a" * 40,
+            "tool_image_digest": "sha256:" + "c" * 64,
+            "tool_image_uri": f"registry.example/tool/{tool}@sha256:" + "c" * 64,
+            "selection_sha256": selection.selection_sha256,
         }
-    path.write_text(json.dumps({"schema_version": 2, "images": images}), encoding="utf-8")
+    path.write_text(json.dumps({"schema_version": 3, "images": images}), encoding="utf-8")
     return path
 
 
@@ -256,12 +262,13 @@ def test_duplicate_plan_bucket_is_rejected_before_rendering(
     assert "more than one plan for bucket 'same'" in capsys.readouterr().err
 
 
-def test_image_set_refuses_an_unknown_schema(tmp_path: Path) -> None:
+@pytest.mark.parametrize("schema_version", [2, 99])
+def test_image_set_refuses_noncurrent_schema(tmp_path: Path, schema_version: int) -> None:
     _plan, image_set = write_inputs(tmp_path)
     document = json.loads(image_set.read_text(encoding="utf-8"))
-    document["schema_version"] = 99
+    document["schema_version"] = schema_version
     image_set.write_text(json.dumps(document), encoding="utf-8")
-    with pytest.raises(campaign_cli.SubmissionError, match="schema_version must be 2 or 3"):
+    with pytest.raises(campaign_cli.SubmissionError, match="schema_version must be 3"):
         campaign_cli._read_image_set(image_set)
 
 
@@ -468,6 +475,52 @@ def test_different_temporal_scope_changes_frozen_input_bytes(tmp_path: Path) -> 
         args, campaign_cli.TemporalScope("second.example.invalid:7233", "study-b")
     )[2]
     assert first != second
+
+
+def test_submit_wait_hands_the_owned_campaign_to_stateless_reporter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    plan, image_set = write_inputs(tmp_path)
+
+    def run(argv: Any, **_kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+        if tuple(argv[:3]) == ("gcloud", "storage", "cat"):
+            return completed(1, stderr=b"not found")
+        return completed()
+
+    async def start(**kwargs: Any) -> str:
+        return str(kwargs["campaign"])
+
+    reported: list[str] = []
+
+    def report(argv: Any) -> int:
+        reported.extend(argv)
+        return 7
+
+    monkeypatch.setattr(campaign_cli, "_run", run)
+    monkeypatch.setattr(campaign_cli, "_start_workflow", start)
+    monkeypatch.setattr(campaign_report, "report_campaign_main", report)
+    assert (
+        campaign_cli.submit_campaign_main(
+            [
+                *arguments(plan, image_set),
+                "--wait",
+                "--poll-interval-s",
+                "0.25",
+                "--publish-report",
+            ]
+        )
+        == 7
+    )
+    assert reported == [
+        "--campaign",
+        "2026-08-10-first",
+        "--results-bucket",
+        "study-results",
+        "--wait",
+        "--poll-interval-s",
+        "0.25",
+        "--publish",
+    ]
 
 
 def test_oversized_valid_workflow_input_stops_before_cloud(

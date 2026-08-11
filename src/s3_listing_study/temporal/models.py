@@ -27,3 +27,13 @@ class CampaignWorkflowInput:
 class BatchJobOutcome:
     resource_name: str
     state: str
+
+
+@dataclass(frozen=True)
+class CaseControllerProgress:
+    job_id: str
+    child_run_id: str | None
+    phase: str
+    provider_state: str | None
+    failure_type: str | None
+    provider_resource_name: str | None = None

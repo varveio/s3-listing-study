@@ -61,6 +61,12 @@ def _submit_campaign_main(argv: Sequence[str] | None) -> int:
     return submit_campaign_main(argv)
 
 
+def _report_campaign_main(argv: Sequence[str] | None) -> int:
+    from s3_listing_study.manager.campaign.report import report_campaign_main
+
+    return report_campaign_main(argv)
+
+
 def _publish_derived_image_main(argv: Sequence[str] | None) -> int:
     from s3_listing_study.manager.campaign.images import publish_derived_image_main
 
@@ -120,6 +126,11 @@ COMMANDS = (
         "submit-campaign",
         "freeze and start one resolved campaign through Temporal",
         _submit_campaign_main,
+    ),
+    Command(
+        "report-campaign",
+        "observe and reconcile one frozen Temporal campaign",
+        _report_campaign_main,
     ),
     Command(
         "publish-derived-image",

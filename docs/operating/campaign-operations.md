@@ -1,98 +1,166 @@
 # Campaign operations
 
-The production campaign controller is a local SQLite state machine over exact,
-deterministically named GCP Batch jobs. SQLite is operational state, not run
-evidence: the frozen `campaign.json` and create-only attempt objects remain the
-evidence chain. Keep the ledger for the lifetime of a campaign and back it up
-like any other controller database.
+Production campaigns have no manager ledger. Temporal retains controller state;
+the results bucket retains frozen inputs and create-only worker evidence. The
+manager observer joins those two sources from scratch on every invocation.
 
-New campaigns accept image-set schema 3 only. Submission freezes each plan and
-the canonical campaign manifest before recording every case intent. It then
-creates Batch jobs in waves of eight, separated by one second, without waiting
-for those jobs to reach terminal provider states.
-Every job has automatic retries disabled and carries the full attempt
-fingerprint as `s3-study-attempt`. `--post-attempt-allowance-s` is a singleton;
-repeating it is an error.
+## Start, wait, and resume
+
+The normal production command freezes, starts, waits, reconciles, and prints the
+final report:
 
 ```sh
-uv run s3-listing-study submit-campaign \
-  --bucket noaa-ghcn-pds \
-  --campaign 2026-08-11-first \
-  --image-set image-set.json \
-  --project study --location us-east1 \
-  --results-bucket study-results \
-  --anonymous-worker-sa worker@study.iam.gserviceaccount.com \
-  --ledger campaign.sqlite3
+uv run s3-listing-study submit-campaign <campaign inputs> --wait
 ```
 
-Add `--wait` to stay attached until the report is final. Add
-`--publish-report` with `--wait` to create `report.json`; publication is refused
-without full provider settlement and uses `ifGenerationMatch=0`. A preexisting
-byte-identical report is accepted, while different content is a hard error.
-In `--dry-run` mode, `--publish-report` is accepted as part of command preview
-without requiring `--wait`; no report or other external state is created.
+Add `--publish-report` to create
+`campaigns/<campaign>/report.json` with `ifGenerationMatch=0`. An exact existing
+report is accepted; different content is refused. Omit `--wait` for asynchronous
+submission. `--dry-run` remains local: it renders the frozen documents and jobs
+without contacting GCS or Temporal, regardless of `--wait`.
 
-For a detached campaign, observe or publish it separately:
+Observation can be resumed from any manager with the same GCP ADC and the exact
+non-secret Temporal address/Namespace frozen by submission:
 
 ```sh
 uv run s3-listing-study report-campaign \
-  --campaign 2026-08-11-first --results-bucket study-results \
-  --ledger campaign.sqlite3 --wait --publish
+  --campaign <campaign-id> --results-bucket <results-bucket>
+
+uv run s3-listing-study report-campaign \
+  --campaign <campaign-id> --results-bucket <results-bucket> \
+  --wait --publish
 ```
 
-Campaign report schema 3 separates four facts: controller completion, provider
-settlement, report finality, and operational success. A final report with an
-accepted failure is valid evidence and exits zero even though
-`operational_success` is false. Evidence remains `pending` until the exact
-provider effect settles. The reconciler lists only immediate execution UUID
-children, validates each sealed `result.json` against the frozen manifest, and
-selects no canonical result when current-submission evidence is duplicated.
-Results from earlier submissions remain visible as historical leaves.
-The public engine-neutral identity is `controller_input_sha256` plus
-`engine.name`, `engine.execution_id`, `engine.run_id`, and `engine.status`;
-SQLite-specific durability diagnostics do not alter the common case schema.
+One-shot mode prints the current deterministic snapshot. `--wait` prints a
+concise progress line to stderr when controller or evidence state changes,
+polls until the owned parent Workflow is completed and every case controller is
+terminal, then prints the final report. A closed non-completed parent is an
+explicit error. It stores no durable cursor, cache, watcher state, or local
+database, so interruption only loses the current observation call; rerunning
+reconstructs the same report from retained state. A Temporal Worker must remain
+available for Workflow and Activity progress.
 
-## Retry and accepted failure
+If the exact owner exists but every case remains pending, the owner may have
+been frozen just before the submitter crashed without sending the claim Signal.
+Rerun the exact original `submit-campaign` command with the same frozen inputs
+and Temporal address/Namespace. Its idempotent ownership path validates the
+same retained Run and re-sends the matching claim. `report-campaign` is
+deliberately read-only and cannot send that recovery Signal. Do not start a new
+campaign or change any input: a mismatch is refused.
 
-A terminal provider failure, definitive `NOT_CREATED`, or settled name
-collision leaves the case in `awaiting_retry`. Retry only the exact next
-submission number. Submission numbers stop at 99 because the longest shared
-Batch job-ID layout uses the provider's full 63-character limit:
+## Ownership and controller observation
+
+The observer first reads the bounded, canonical, create-only
+`inputs/temporal-owner.json`. It connects to that exact Temporal scope and Run
+ID, then requires the retained Workflow's ID, Run ID, Namespace, type, Task
+Queue, and digest memo to match. It never follows “latest run” and never starts
+a replacement.
+
+`CampaignWorkflow.progress` exposes one row per manifest job in frozen order:
+pending before child start, running with the exact child Run ID, and terminal
+with either a provider-terminal `BatchJobOutcome` state or a controller failure
+type. Child failures are collected as data; one exhausted Activity or unexpected
+child failure cannot fail-fast the parent and abandon observation of siblings.
+
+For a nonterminal child, the observer uses the child's Temporal description and
+its one pending `run_batch_job` Activity to report the current attempt and the
+last heartbeat `{job_name, state}` when available. Attempt 2 or later is
+`retrying`. It does not fetch complete Event Histories on every poll. Terminal
+children need no history scan. These fields are operational diagnostics only:
+provider state and heartbeat state do not classify the subject and are not run
+evidence. Child descriptions are fetched concurrently with a fixed maximum of
+16 in flight. A provider-terminal outcome is accepted only when its exact
+resource name matches the frozen `temporal.json` case and its state is
+`SUCCEEDED` or `FAILED`.
+
+## Summary-only evidence reconciliation
+
+Only controller-terminal cases are harvested. During one `--wait` invocation,
+each terminal case's immutable evidence snapshot is cached so later polls do not
+re-list or re-download it; the cache is discarded on exit. For each terminal
+case, the observer takes the run prefix from frozen `campaign.json`, lists it
+with `delimiter=/`, and examines only immediate execution-UUID children. It
+GETs only each child's exact `result.json` commit marker; it never reads
+`stdout.raw.gz`, `stderr.raw.gz`, or native output during routine reporting.
+
+Discovery is also bounded: more than 256 immediate execution leaves below one
+run prefix is refused as an anomaly before any result object is downloaded.
+No canonical duplicate is chosen or retained.
+
+The evidence state is:
+
+| State | Meaning |
+| --- | --- |
+| `pending` | Controller is not terminal; GCS is not inspected. |
+| `missing` | Controller is terminal and the run prefix has zero UUID children. |
+| `recorded` | Exactly one canonical UUID has a bounded, valid, identity-matching `result.json`. |
+| `duplicate` | More than one immediate execution child exists; all are surfaced and none is canonical. |
+| `unsealed` | The sole canonical UUID child has no `result.json` commit marker. |
+| `invalid` | The sole child name, JSON, size, schema, identity, or summary metrics are invalid. |
+
+Leaf reason codes distinguish `invalid_attempt_id`, `missing_result_commit`,
+`invalid_result_size`, `invalid_result_json`, `invalid_result_identity`,
+`invalid_result_request`, `invalid_result_provenance`,
+`invalid_result_secret_scan`, `invalid_result_outcome`, and
+`invalid_result_metrics`. They never embed an exception message or object
+content.
+
+Strict identity checks bind the worker record to campaign, job, case and attempt
+fingerprints, run ordinal, submission, declared resources, the exact logical
+list request and target, tool/version, full derived/tool/shared-base image and
+build provenance, harness revision, adapter bundle, exact artifact/result URIs,
+and the worker's clean secret-scan structure. Outcome exit/signal/timeout facts
+and row-count summary semantics must also agree. The result bytes are checked
+using the worker's actual canonical JSON encoding, including its escaped
+non-ASCII representation. A valid single result exposes subject outcome
+(`completed`, `failed`, `timed_out`, `signaled`, or `harness_error`) separately
+from controller/provider state, plus `elapsed_ns`, peak child RSS, and row
+count. Missing, invalid, unsealed, and duplicate cases have no canonical
+subject outcome or metrics.
+
+Production submission accepts only image-set schema 3. The observer likewise
+requires attempt-fingerprint version 3 and every schema-3 image registration
+field, so the tool-image digest/URI and build-selection SHA-256 are always
+bound; there is no weaker production compatibility mode for historical image
+sets. Worker cleanup, outcome, and summary fields must have their exact typed,
+derivable relationships, and execution leaves must be canonical UUIDv4 values.
+
+Before querying Temporal, the observer generation-pins and validates both
+`campaign.json` and `inputs/temporal.json`. The Temporal-input SHA-256 must equal
+the owner digest; its manifest SHA-256 must equal the actual frozen manifest;
+and campaign, safe Temporal scope, Workflow type, Task Queue, ordered job IDs,
+and exact provider resource names must all agree. The cached bytes are reused
+within one wait invocation and neither job bodies nor credential configuration
+are emitted.
+
+The schema-version-1 report is deterministic: manifest case order, sorted leaf
+IDs, fixed aggregate keys, no observation timestamp, and canonical JSON when
+published. It includes the frozen campaign-manifest SHA-256, the safe owned
+Temporal-input digest, and separate controller, provider, evidence, and subject
+counts. Invalid and unsealed leaves carry stable reason codes rather than raw
+exception text or object content. `complete` means the parent Workflow is
+completed and every controller is terminal; it does not erase or reinterpret
+missing, duplicate, invalid, failed-provider, or failed-subject outcomes.
+
+## Permissions and current integration boundary
+
+The observer uses GCP Application Default Credentials. The Terraform
+manager/orchestrator bundle grants Batch control-plane access, `actAs` on worker
+identities, and results-bucket read/create access. Temporal credentials remain
+environment/config inputs and never enter reports, frozen documents, or argv.
+
+Focused tests use a fully orchestrated fake covering Workflow retry visibility,
+single/missing/duplicate/invalid/unsealed GCS states, metric extraction, and the
+submit-to-wait handoff. The manual local SDK test-server exercise is:
 
 ```sh
-uv run s3-listing-study retry-case \
-  --campaign 2026-08-11-first --ledger campaign.sqlite3 \
-  --job-id <original-s1-job-id> --submission 2
+env -u TEMPORAL_API_KEY uv run python harness/tests/temporal-controller-e2e.py
 ```
 
-The retry keeps the artifact run prefix, changes the deterministic Batch name
-to `-s2`, and updates both worker identity flags. The controller reserves the
-case as active under an immediate SQLite transaction before any Batch call, so
-finalization cannot race a retry into launching work after closure.
-
-If the settled failures are accepted, close them explicitly:
-
-```sh
-uv run s3-listing-study finalize-campaign \
-  --campaign 2026-08-11-first --ledger campaign.sqlite3
-```
-
-Finalization refuses pending, running, or provider-unsettled cases. It marks
-only `awaiting_retry` cases as accepted failures; a finalized campaign is then
-immutable and eligible for a final, operationally unsuccessful report.
-
-## Provider ownership
-
-Create rejection that proves no resource exists is recorded as `NOT_CREATED`.
-An existing deterministic name is adopted only when its resource name, attempt
-label, task groups, allocation policy, and logging policy match the frozen
-request after removing narrowly defined provider materialization (task-group
-names, the `batch-job-id` label, and only an added parent region). A mismatch is
-a collision. Because that resource may still execute, collision does not count
-as settled until the exact Batch job reaches `SUCCEEDED` or `FAILED`.
-
-The local controller does not provide replay or a durable event-history
-service. Its SQLite transaction durability and operator-managed database
-recovery are the intentional orchestration-engine boundary; the frozen inputs,
-Batch requests, result validation, report schema, retry rules, and publication
-contract do not depend on that boundary.
+It starts an isolated SDK test server, uses unique Workflow and job IDs, and
+runs the real Worker, claim Signal, parent, child, retrying Activity, progress
+query, exact owner/Run observation, terminal-missing reconciliation, stable
+report recomputation, and create-only publication/collision path against an
+in-memory GCS fake. On first use, the Temporal SDK lazily downloads its
+test-server binary. A live Temporal Cloud plus GCS canary of the observer is
+still required before the first production benchmark campaign.

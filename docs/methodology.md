@@ -40,23 +40,15 @@ only a count. The worker retains and uploads the original stdout, stderr, and
 native directory output. Five-field normalization is manager-side work invoked
 only for explicit correctness verification.
 
-Routine campaign reporting is summary-only. The campaign model owns a
+Required routine campaign reporting is summary-only. The campaign model owns a
 `run-<n>` ordinal for each scheduled run (`run-1` under the current policy),
 while every worker-container execution mints its own attempt UUID below that
-prefix. The manager reconciler discovers only immediate UUID children with a
-delimiter listing and reads their exact sealed `result.json` summaries. Raw
+prefix. The stateless manager reconciler discovers only immediate UUID children
+with a delimiter listing and reads their exact `result.json` summaries. Raw
 listings remain in the same GCS attempt trees and are fetched only for
-correctness verification or investigation. Multiple current-submission UUID
-children under one run are duplicate executions; the reconciler surfaces all
-and selects none as canonical. Historical retry leaves remain visible without
-competing with current-submission evidence.
-
-**Material reporting-safety change — 2026-08-11.** Controller completion is
-separate from provider settlement. A report is final and publishable only after
-every deterministic Batch effect is terminal, or a definitive create rejection
-proves `NOT_CREATED`; controller failure alone cannot authorize absent evidence.
-Finality and operational success are reported separately, so an explicitly
-accepted failure can produce a final report without being called successful.
+correctness verification or investigation. Multiple UUID children under one run
+are duplicate executions; the reconciler surfaces all and selects none as
+canonical. See [campaign operations](operating/campaign-operations.md).
 
 ## Evidence language
 

@@ -1,55 +1,68 @@
-"""Engine-neutral summary-only campaign reconciliation and immutable reporting."""
+"""Stateless Temporal observation and summary-only campaign reconciliation."""
 
 from __future__ import annotations
 
 import argparse
+import asyncio
 import hashlib
 import json
 import math
 import re
 import sys
-import time
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import Path
+from datetime import timedelta
 from typing import Any, cast
 
 import google.cloud.storage as storage  # type: ignore[import-untyped]
 from google.api_core.exceptions import GoogleAPIError, PreconditionFailed
 from google.auth.exceptions import DefaultCredentialsError
+from temporalio.client import Client
+from temporalio.envconfig import ClientConfig
+from temporalio.exceptions import TemporalError
 
-from s3_listing_study.common.argparse_utils import UniqueStoreAction
 from s3_listing_study.manager.campaign import (
+    JOB_ID_MAX,
+    JOB_ID_RE,
     CampaignError,
     campaign_prefix,
-    controller,
-    ledger,
-    provider,
 )
-from s3_listing_study.manager.campaign.cli import IMAGE_SET_FIELDS, _canonical_json
-from s3_listing_study.manager.campaign.models import CaseControllerProgress
+from s3_listing_study.manager.campaign.cli import (
+    IMAGE_SET_FIELDS,
+    TEMPORAL_OWNER_MAX_BYTES,
+    SubmissionError,
+    TemporalOwner,
+    TemporalScope,
+    _canonical_json,
+    _parse_owner,
+)
+from s3_listing_study.temporal import TASK_QUEUE
+from s3_listing_study.temporal.models import CaseControllerProgress
+from s3_listing_study.temporal.workflows import CampaignWorkflow
 
 MANIFEST_MAX_BYTES = 8_000_000
+TEMPORAL_INPUT_MAX_BYTES = 1_900_000
 RESULT_MAX_BYTES = 1_000_000
 REPORT_MAX_BYTES = 8_000_000
+MAX_CONCURRENT_CHILD_DESCRIBES = 16
 MAX_EXECUTION_LEAVES_PER_RUN = 256
 DEFAULT_POLL_INTERVAL_S = 10.0
-CONTROLLER_PHASES = ("pending", "running", "awaiting_retry", "terminal")
-CONTROLLER_AGGREGATE_PHASES = (
-    "pending",
-    "running",
-    "retrying",
-    "awaiting_retry",
-    "terminal",
-)
+CONTROLLER_PHASES = ("pending", "running", "retrying", "terminal")
 EVIDENCE_STATES = ("pending", "missing", "recorded", "duplicate", "invalid", "unsealed")
-SUBJECT_STATES = ("completed", "failed", "timed_out", "signaled", "harness_error", "unavailable")
-PROVIDER_STATES = ("SUCCEEDED", "FAILED", "NOT_CREATED", "unavailable")
+SUBJECT_STATES = (
+    "completed",
+    "failed",
+    "timed_out",
+    "signaled",
+    "harness_error",
+    "unavailable",
+)
+PROVIDER_STATES = ("SUCCEEDED", "FAILED", "unavailable")
 
 
 class ReportError(RuntimeError):
-    """Frozen campaign, controller state, or result evidence is unsafe to report."""
+    """Frozen campaign, Temporal state, or result evidence is unsafe to report."""
 
 
 @dataclass(frozen=True)
@@ -77,6 +90,28 @@ class ManifestSnapshot:
 
 
 @dataclass(frozen=True)
+class TemporalCase:
+    project: str
+    location: str
+    job_id: str
+    resource_name: str
+
+
+@dataclass(frozen=True)
+class TemporalSnapshot:
+    bucket: str
+    campaign: str
+    generation: int
+    content: bytes
+    sha256: str
+    campaign_manifest_sha256: str
+    scope: TemporalScope
+    workflow_type: str
+    task_queue: str
+    cases: tuple[TemporalCase, ...]
+
+
+@dataclass(frozen=True)
 class EvidenceSnapshot:
     state: str
     leaves: tuple[dict[str, Any], ...]
@@ -93,15 +128,10 @@ class EvidenceSnapshot:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="s3-listing-study report-campaign", allow_abbrev=False)
-    parser.add_argument(
-        "--campaign", "--campaign-id", dest="campaign", action=UniqueStoreAction, required=True
-    )
-    parser.add_argument("--results-bucket", action=UniqueStoreAction, required=True)
-    parser.add_argument("--ledger", "--ledger-path", action=UniqueStoreAction, required=True)
+    parser.add_argument("--campaign", "--campaign-id", dest="campaign", required=True)
+    parser.add_argument("--results-bucket", required=True)
     parser.add_argument("--wait", action="store_true")
-    parser.add_argument(
-        "--poll-interval-s", action=UniqueStoreAction, default=DEFAULT_POLL_INTERVAL_S
-    )
+    parser.add_argument("--poll-interval-s", type=float, default=DEFAULT_POLL_INTERVAL_S)
     parser.add_argument("--publish", action="store_true")
     return parser
 
@@ -302,6 +332,197 @@ def _load_manifest(bucket: Any, campaign: str) -> ManifestSnapshot:
     )
 
 
+def _load_temporal_input(
+    bucket: Any,
+    campaign: str,
+    manifest: ManifestSnapshot,
+    owner: TemporalOwner,
+    scope: TemporalScope,
+) -> TemporalSnapshot:
+    name = f"{campaign_prefix(campaign)}/inputs/temporal.json"
+    blob = bucket.get_blob(name)
+    if blob is None:
+        raise ReportError(f"required gs://{bucket.name}/{name} is missing")
+    generation = blob.generation
+    if isinstance(generation, bool) or not isinstance(generation, int) or generation < 1:
+        raise ReportError(f"gs://{bucket.name}/{name} has no valid object generation")
+    content = _download(
+        blob, label=f"gs://{bucket.name}/{name}", max_bytes=TEMPORAL_INPUT_MAX_BYTES
+    )
+    document = _json_object(content, label="temporal.json", max_bytes=TEMPORAL_INPUT_MAX_BYTES)
+    if content != _canonical_json(document):
+        raise ReportError("temporal.json is not canonical")
+    fields = {
+        "schema_version",
+        "campaign",
+        "campaign_manifest_sha256",
+        "workflow_type",
+        "task_queue",
+        "temporal_scope",
+        "cases",
+    }
+    temporal_scope = document.get("temporal_scope")
+    raw_cases = document.get("cases")
+    digest = hashlib.sha256(content).hexdigest()
+    if (
+        set(document) != fields
+        or document.get("schema_version") != 1
+        or document.get("campaign") != campaign
+        or document.get("campaign_manifest_sha256") != manifest.sha256
+        or document.get("workflow_type") != CampaignWorkflow.__name__
+        or document.get("task_queue") != TASK_QUEUE
+        or temporal_scope != scope.document()
+        or owner.scope != scope
+        or digest != owner.campaign_digest
+        or not isinstance(raw_cases, list)
+    ):
+        raise ReportError("temporal.json does not match the frozen campaign owner and manifest")
+    cases: list[TemporalCase] = []
+    for raw in raw_cases:
+        if not isinstance(raw, dict) or set(raw) != {
+            "project",
+            "location",
+            "job_id",
+            "job",
+            "controller_timeout_s",
+        }:
+            raise ReportError("temporal.json has an invalid case shape")
+        project = raw["project"]
+        location = raw["location"]
+        job_id = raw["job_id"]
+        if (
+            any(not isinstance(value, str) or not value for value in (project, location, job_id))
+            or any(
+                re.fullmatch(r"[a-z0-9][a-z0-9-]*", value) is None for value in (project, location)
+            )
+            or len(job_id) > JOB_ID_MAX
+            or JOB_ID_RE.fullmatch(job_id) is None
+            or not isinstance(raw["job"], dict)
+            or not _is_int(raw["controller_timeout_s"], minimum=1)
+        ):
+            raise ReportError("temporal.json has invalid case identity values")
+        cases.append(
+            TemporalCase(
+                project=project,
+                location=location,
+                job_id=job_id,
+                resource_name=f"projects/{project}/locations/{location}/jobs/{job_id}",
+            )
+        )
+    if [item.job_id for item in cases] != [item.job_id for item in manifest.cases]:
+        raise ReportError("temporal.json job order does not match campaign.json")
+    return TemporalSnapshot(
+        bucket=bucket.name,
+        campaign=campaign,
+        generation=generation,
+        content=content,
+        sha256=digest,
+        campaign_manifest_sha256=manifest.sha256,
+        scope=scope,
+        workflow_type=CampaignWorkflow.__name__,
+        task_queue=TASK_QUEUE,
+        cases=tuple(cases),
+    )
+
+
+def _safe_heartbeat(value: Any) -> dict[str, str] | None:
+    if not isinstance(value, dict) or set(value) != {"job_name", "state"}:
+        return None
+    if any(not isinstance(item, str) or not item for item in value.values()):
+        return None
+    return {"job_name": value["job_name"], "state": value["state"]}
+
+
+async def _activity_view(client: Client, progress: CaseControllerProgress) -> dict[str, Any]:
+    attempt: int | None = None
+    heartbeat: dict[str, str] | None = None
+    if progress.child_run_id is not None and progress.phase != "terminal":
+        child = client.get_workflow_handle(progress.job_id, run_id=progress.child_run_id)
+        description = await child.describe()
+        pending = [
+            item
+            for item in description.raw_description.pending_activities
+            if item.activity_type.name == "run_batch_job"
+        ]
+        if len(pending) > 1:
+            raise ReportError(f"child Workflow {progress.job_id} has multiple Batch Activities")
+        if pending:
+            attempt = pending[0].attempt
+            if not _is_int(attempt, minimum=1):
+                raise ReportError(
+                    f"child Workflow {progress.job_id} has an invalid Activity attempt"
+                )
+            if pending[0].heartbeat_details.payloads:
+                decoded = await client.data_converter.decode(
+                    pending[0].heartbeat_details.payloads, [dict[str, str]]
+                )
+                if decoded:
+                    heartbeat = _safe_heartbeat(decoded[0])
+    phase = progress.phase
+    if phase == "running" and attempt is not None and attempt > 1:
+        phase = "retrying"
+    return {
+        "phase": phase,
+        "child_workflow_id": progress.job_id,
+        "child_run_id": progress.child_run_id,
+        "activity_attempt": attempt,
+        "last_heartbeat": heartbeat,
+        "terminal": (
+            {
+                "controller_state": "failed" if progress.failure_type else "completed",
+                "failure_type": progress.failure_type,
+                "provider_state": progress.provider_state,
+                "provider_resource_name": progress.provider_resource_name,
+            }
+            if progress.phase == "terminal"
+            else None
+        ),
+    }
+
+
+async def _activity_views(
+    client: Client, progress: Sequence[CaseControllerProgress]
+) -> list[dict[str, Any]]:
+    semaphore = asyncio.Semaphore(MAX_CONCURRENT_CHILD_DESCRIBES)
+
+    async def bounded(item: CaseControllerProgress) -> dict[str, Any]:
+        async with semaphore:
+            return await _activity_view(client, item)
+
+    return list(await asyncio.gather(*(bounded(item) for item in progress)))
+
+
+def _validate_progress(
+    progress: Sequence[CaseControllerProgress],
+    cases: Sequence[ManifestCase],
+    temporal_cases: Sequence[TemporalCase],
+) -> None:
+    if [item.job_id for item in progress] != [case.job_id for case in cases]:
+        raise ReportError("Workflow progress does not exactly match campaign.json order")
+    expected_resources = {item.job_id: item.resource_name for item in temporal_cases}
+    for item in progress:
+        if item.phase not in ("pending", "running", "terminal"):
+            raise ReportError(f"Workflow progress for {item.job_id} has an invalid phase")
+        if (
+            item.phase == "terminal"
+            and item.failure_type is None
+            and (
+                item.provider_state not in ("SUCCEEDED", "FAILED")
+                or item.provider_resource_name != expected_resources[item.job_id]
+            )
+        ):
+            raise ReportError(f"Workflow progress for {item.job_id} has no terminal outcome")
+        if item.failure_type is not None and (
+            item.provider_state is not None or item.provider_resource_name is not None
+        ):
+            raise ReportError(f"Workflow progress for {item.job_id} merges failure/provider state")
+        if item.phase != "terminal" and any(
+            value is not None
+            for value in (item.provider_state, item.failure_type, item.provider_resource_name)
+        ):
+            raise ReportError(f"Workflow progress for {item.job_id} has premature terminal state")
+
+
 def _list_leaves(bucket: Any, prefix: str) -> list[str]:
     found: set[str] = set()
     iterator = bucket.list_blobs(prefix=f"{prefix}/", delimiter="/")
@@ -318,12 +539,7 @@ def _list_leaves(bucket: Any, prefix: str) -> list[str]:
 
 
 def _validated_result(
-    bucket: Any,
-    case: ManifestCase,
-    leaf: str,
-    *,
-    current_job_id: str | None = None,
-    current_submission: int | None = None,
+    bucket: Any, case: ManifestCase, leaf: str
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
     result_name = f"{case.prefix}/{leaf}/result.json"
     result_uri = f"gs://{bucket.name}/{result_name}"
@@ -396,14 +612,12 @@ def _validated_result(
     assert isinstance(target, dict)
     expected_campaign = {
         "campaign_id": case.campaign,
-        "job_id": current_job_id or case.job_id,
+        "job_id": case.job_id,
         "case_id": case.case_id,
         "case_fingerprint": case.record.get("case_fingerprint"),
         "attempt_fingerprint": case.attempt_fingerprint,
         "run_ordinal": case.run_ordinal,
-        "submission_number": (
-            current_submission if current_submission is not None else case.record.get("submission")
-        ),
+        "submission_number": case.record.get("submission"),
         "declared_resources": case.record.get("resources"),
     }
     expected_artifact_uri = f"gs://{bucket.name}/{case.prefix}/{leaf}"
@@ -636,280 +850,108 @@ def _validated_result(
     return leaf_record("recorded", None), normalized
 
 
-def _evidence(
-    bucket: Any,
-    case: ManifestCase,
-    *,
-    terminal: bool,
-    current_job_id: str | None = None,
-    current_submission: int | None = None,
-) -> EvidenceSnapshot:
+def _evidence(bucket: Any, case: ManifestCase, *, terminal: bool) -> EvidenceSnapshot:
     if not terminal:
         return EvidenceSnapshot("pending", (), None, None)
     leaf_names = _list_leaves(bucket, case.prefix)
     if not leaf_names:
         return EvidenceSnapshot("missing", (), None, None)
-    checked: list[tuple[dict[str, Any], dict[str, Any] | None]] = []
-    for leaf in leaf_names:
-        validated = _validated_result(
-            bucket,
-            case,
-            leaf,
-            current_job_id=current_job_id,
-            current_submission=current_submission,
-        )
-        leaf_record, _normalized = validated
-        if (
-            current_submission is not None
-            and current_submission > 1
-            and leaf_record["reason"] == "invalid_result_identity"
-        ):
-            result_name = f"{case.prefix}/{leaf}/result.json"
-            blob = bucket.get_blob(result_name)
-            try:
-                content = (
-                    _download(
-                        blob, label=str(leaf_record["result_uri"]), max_bytes=RESULT_MAX_BYTES
-                    )
-                    if blob is not None
-                    else b""
-                )
-                document = _json_object(
-                    content, label=str(leaf_record["result_uri"]), max_bytes=RESULT_MAX_BYTES
-                )
-                campaign = document.get("campaign")
-            except ReportError:
-                campaign = None
-            if isinstance(campaign, dict):
-                prior_submission = campaign.get("submission_number")
-                prior_job_id = campaign.get("job_id")
-                prior_number = cast(int, prior_submission)
-                current_number = current_submission
-                if _is_int(prior_submission, minimum=1) and prior_number < current_number:
-                    stem, separator, original = case.job_id.rpartition("-s")
-                    expected_prior_job = (
-                        case.job_id
-                        if prior_number == 1
-                        else f"{stem}-s{prior_number}"
-                        if separator and original == "1"
-                        else None
-                    )
-                    if isinstance(prior_job_id, str) and prior_job_id == expected_prior_job:
-                        prior_leaf, prior_normalized = _validated_result(
-                            bucket,
-                            case,
-                            leaf,
-                            current_job_id=prior_job_id,
-                            current_submission=prior_number,
-                        )
-                        if prior_leaf["state"] == "recorded" and prior_normalized is not None:
-                            prior_leaf = {
-                                **prior_leaf,
-                                "state": "historical",
-                                "submission_number": prior_number,
-                                "job_id": prior_job_id,
-                            }
-                            validated = (prior_leaf, None)
-        checked.append(validated)
+    checked = [_validated_result(bucket, case, leaf) for leaf in leaf_names]
     leaves = tuple(item[0] for item in checked)
-    current = [item for item in checked if item[0]["state"] != "historical"]
-    if not current:
-        return EvidenceSnapshot("missing", leaves, None, None)
-    if len(current) > 1:
+    if len(checked) > 1:
         return EvidenceSnapshot("duplicate", leaves, None, None)
-    current_leaf, normalized = current[0]
-    state = str(current_leaf["state"])
+    leaf, normalized = checked[0]
+    state = str(leaf["state"])
     return EvidenceSnapshot(
         state,
         leaves,
-        str(current_leaf["result_uri"]) if state == "recorded" else None,
+        str(leaf["result_uri"]) if state == "recorded" else None,
         normalized,
     )
 
 
-def _controller_view(item: CaseControllerProgress) -> dict[str, Any]:
-    return {
-        "phase": item.phase,
-        "child_workflow_id": None,
-        "child_run_id": None,
-        "activity_attempt": None,
-        "last_heartbeat": None,
-        "terminal": (
-            {
-                "controller_state": "failed" if item.failure_type else "completed",
-                "failure_type": item.failure_type,
-                "provider_settled": item.provider_settled,
-                "provider_state": item.provider_state,
-                "provider_resource_name": item.provider_resource_name,
-            }
-            if item.phase in ("awaiting_retry", "terminal")
-            else None
-        ),
-    }
-
-
-def _validate_progress(
-    progress: Sequence[CaseControllerProgress],
-    cases: Sequence[ManifestCase],
+async def observe_once(
     *,
-    project: str,
-    location: str,
-) -> None:
-    if [item.job_id for item in progress] != [case.job_id for case in cases]:
-        raise ReportError("controller progress does not exactly match campaign.json jobs")
-    expected = {case.job_id: case for case in cases}
-    for item in progress:
-        if item.phase not in CONTROLLER_PHASES:
-            raise ReportError(f"controller progress for {item.job_id} has an invalid phase")
-        case = expected[item.job_id]
-        current_job_id = item.current_job_id or item.job_id
-        if not _is_int(item.current_submission, minimum=1):
-            raise ReportError(f"controller progress for {item.job_id} has invalid submission")
-        stem, separator, original = item.job_id.rpartition("-s")
-        wanted = (
-            item.job_id if item.current_submission == 1 else f"{stem}-s{item.current_submission}"
-        )
-        if not separator or original != "1" or current_job_id != wanted:
-            raise ReportError(f"controller progress for {item.job_id} has invalid current job")
-        if item.phase in ("pending", "running"):
-            expected_resource = f"projects/{project}/locations/{location}/jobs/{current_job_id}"
-            pending_clean = item.phase == "pending" and all(
-                value is None
-                for value in (item.provider_state, item.failure_type, item.provider_resource_name)
-            )
-            running_valid = item.phase == "running" and (
-                all(
-                    value is None
-                    for value in (
-                        item.provider_state,
-                        item.failure_type,
-                        item.provider_resource_name,
-                    )
-                )
-                or (
-                    item.provider_state not in ("SUCCEEDED", "FAILED", "NOT_CREATED")
-                    and item.failure_type in (None, "BatchJobCollision")
-                    and item.provider_resource_name == expected_resource
-                )
-            )
-            if item.provider_settled or not (pending_clean or running_valid):
-                raise ReportError(f"controller progress for {item.job_id} settles prematurely")
-            continue
-        if item.phase == "awaiting_retry" and (
-            not item.provider_settled
-            or (item.provider_state == "SUCCEEDED" and item.failure_type is None)
-        ):
-            raise ReportError(f"controller progress for {item.job_id} has invalid retry wait")
-        if not item.provider_settled:
-            raise ReportError(f"terminal controller progress for {item.job_id} is unsettled")
-        if item.provider_state in ("SUCCEEDED", "FAILED"):
-            expected_resource = f"projects/{project}/locations/{location}/jobs/{current_job_id}"
-            if item.provider_resource_name != expected_resource or item.failure_type not in (
-                None,
-                "BatchJobCollision",
-            ):
-                raise ReportError(f"controller progress for {item.job_id} has invalid outcome")
-        elif item.provider_state == "NOT_CREATED":
-            if item.provider_resource_name is not None or item.failure_type not in (
-                "PermanentGoogleError",
-                "BatchJobCollision",
-            ):
-                raise ReportError(
-                    f"controller progress for {item.job_id} has invalid no-effect proof"
-                )
-        else:
-            raise ReportError(f"controller progress for {item.job_id} has no settled outcome")
-        if item.accepted_failure and item.phase != "terminal":
-            raise ReportError(
-                f"controller progress for {item.job_id} accepts a nonterminal failure"
-            )
-        if case.job_id != item.job_id:
-            raise ReportError("controller case identity changed")
-
-
-def observe_once(
-    *,
+    temporal_client: Client,
     bucket: Any,
     campaign: str,
-    ledger_path: Path,
+    owner: TemporalOwner,
+    scope: TemporalScope,
     manifest_cache: ManifestSnapshot | None = None,
+    temporal_cache: TemporalSnapshot | None = None,
     evidence_cache: dict[str, EvidenceSnapshot] | None = None,
 ) -> dict[str, Any]:
     manifest = manifest_cache or _load_manifest(bucket, campaign)
-    with ledger.open_ledger(ledger_path) as connection:
-        owner = ledger.campaign_record(connection, campaign)
-        controller_inputs = ledger.controller_inputs(connection, campaign)
-    if (
-        owner["results_bucket"] != bucket.name
-        or owner["manifest_sha256"] != manifest.sha256
-        or manifest.bucket != bucket.name
-        or manifest.campaign != campaign
-    ):
-        raise ReportError("local controller owner does not match the frozen campaign")
-    progress = controller.reconcile_once(ledger_path=ledger_path, campaign=campaign)
-    _validate_progress(
-        progress,
-        manifest.cases,
-        project=str(owner["project"]),
-        location=str(owner["location"]),
+    if manifest.bucket != bucket.name or manifest.campaign != campaign:
+        raise ReportError("manifest cache does not match the requested bucket and campaign")
+    temporal_input = temporal_cache or _load_temporal_input(
+        bucket, campaign, manifest, owner, scope
     )
-    by_id = {case.job_id: case for case in manifest.cases}
-    progress_by_id = {item.job_id: item for item in progress}
-    ordered_progress = tuple(progress_by_id[case.job_id] for case in manifest.cases)
+    if (
+        temporal_input.bucket != bucket.name
+        or temporal_input.campaign != campaign
+        or temporal_input.sha256 != owner.campaign_digest
+        or temporal_input.campaign_manifest_sha256 != manifest.sha256
+        or temporal_input.scope != scope
+        or temporal_input.workflow_type != CampaignWorkflow.__name__
+        or temporal_input.task_queue != TASK_QUEUE
+        or [item.job_id for item in temporal_input.cases]
+        != [item.job_id for item in manifest.cases]
+    ):
+        raise ReportError("temporal input cache does not match the requested frozen chain")
+    cases = manifest.cases
+    handle = temporal_client.get_workflow_handle(owner.workflow_id, run_id=owner.run_id)
+    description = await handle.describe()
+    try:
+        digest = await description.memo_value("campaign_digest", type_hint=str)
+    except KeyError:
+        digest = None
+    if (
+        owner.campaign != campaign
+        or owner.workflow_id != campaign
+        or owner.scope != scope
+        or description.id != owner.workflow_id
+        or description.run_id != owner.run_id
+        or description.namespace != scope.namespace
+        or description.workflow_type != CampaignWorkflow.__name__
+        or description.task_queue != TASK_QUEUE
+        or digest != owner.campaign_digest
+    ):
+        raise ReportError("Temporal owner does not exactly match the retained Workflow Run")
+    progress = await handle.query(
+        CampaignWorkflow.progress,
+        rpc_timeout=timedelta(seconds=10),
+    )
+    _validate_progress(progress, cases, temporal_input.cases)
+    controllers = await _activity_views(temporal_client, progress)
     rows: list[dict[str, Any]] = []
-    for item in ordered_progress:
-        case = by_id[item.job_id]
-        current_job_id = item.current_job_id or item.job_id
-        provider_resource_name = (
-            f"projects/{owner['project']}/locations/{owner['location']}/jobs/{current_job_id}"
-        )
-        evidence_key = f"{case.job_id}:s{item.current_submission}"
-        if item.provider_settled and evidence_cache is not None:
-            evidence = evidence_cache.get(evidence_key)
+    for case, temporal_case, item, controller in zip(
+        cases, temporal_input.cases, progress, controllers, strict=True
+    ):
+        if item.phase == "terminal" and evidence_cache is not None:
+            evidence = evidence_cache.get(case.job_id)
             if evidence is None:
-                evidence = _evidence(
-                    bucket,
-                    case,
-                    terminal=True,
-                    current_job_id=current_job_id,
-                    current_submission=item.current_submission,
-                )
-                evidence_cache[evidence_key] = evidence
+                evidence = _evidence(bucket, case, terminal=True)
+                evidence_cache[case.job_id] = evidence
         else:
-            evidence = _evidence(
-                bucket,
-                case,
-                terminal=item.provider_settled,
-                current_job_id=current_job_id,
-                current_submission=item.current_submission,
-            )
+            evidence = _evidence(bucket, case, terminal=item.phase == "terminal")
         normalized = evidence.normalized
         rows.append(
             {
                 "job_id": case.job_id,
-                "current_job_id": current_job_id,
-                "current_submission": item.current_submission,
                 "bucket": case.bucket,
                 "tool": case.tool,
                 "case_id": case.case_id,
                 "run_ordinal": case.run_ordinal,
                 "run_prefix": f"gs://{bucket.name}/{case.prefix}",
-                "provider_resource_name": provider_resource_name,
-                "controller_complete": item.phase == "terminal",
-                "provider_settled": item.provider_settled,
-                "controller": _controller_view(item),
+                "provider_resource_name": temporal_case.resource_name,
+                "controller": controller,
                 "evidence": evidence.document(),
                 "subject": normalized["subject"] if normalized else None,
                 "metrics": normalized["metrics"] if normalized else None,
-                "operational_success": (
-                    item.provider_settled
-                    and item.failure_type is None
-                    and item.provider_state == "SUCCEEDED"
-                    and evidence.state == "recorded"
-                ),
             }
         )
-    controller_counts = dict.fromkeys(CONTROLLER_AGGREGATE_PHASES, 0)
+    controller_counts = dict.fromkeys(CONTROLLER_PHASES, 0)
     evidence_counts = dict.fromkeys(EVIDENCE_STATES, 0)
     subject_counts = dict.fromkeys(SUBJECT_STATES, 0)
     provider_counts = dict.fromkeys(PROVIDER_STATES, 0)
@@ -918,46 +960,28 @@ def observe_once(
         evidence_counts[row["evidence"]["state"]] += 1
         subject = row["subject"]
         subject_counts[subject["status"] if subject else "unavailable"] += 1
-        terminal = row["controller"]["terminal"]
-        state = terminal["provider_state"] if terminal else "unavailable"
-        provider_counts[state if state in PROVIDER_STATES[:-1] else "unavailable"] += 1
-    controller_complete = all(item.phase == "terminal" for item in ordered_progress)
-    provider_settled = all(item.provider_settled for item in ordered_progress)
-    report_final = controller_complete and provider_settled
-    operational_success = report_final and all(row["operational_success"] for row in rows)
-    controller_input = {
+        provider_state = row["controller"]["terminal"]
+        provider_counts[
+            provider_state["provider_state"]
+            if provider_state and provider_state["provider_state"] in PROVIDER_STATES[:-1]
+            else "unavailable"
+        ] += 1
+    status = description.status.name.lower() if description.status is not None else "unknown"
+    all_terminal = all(item.phase == "terminal" for item in progress)
+    if status == "completed" and not all_terminal:
+        raise ReportError("completed campaign Workflow has nonterminal case progress")
+    return {
         "schema_version": 1,
         "campaign": campaign,
         "campaign_manifest_sha256": manifest.sha256,
-        "project": owner["project"],
-        "location": owner["location"],
-        "results_bucket": owner["results_bucket"],
-        "cases": [
-            {
-                "base_job_id": item["base_job_id"],
-                "job": json.loads(str(item["job_json"])),
-                "controller_timeout_s": item["controller_timeout_s"],
-            }
-            for item in controller_inputs
-        ],
-    }
-    campaign_digest = hashlib.sha256(_canonical_json(controller_input)).hexdigest()
-    return {
-        "schema_version": 3,
-        "campaign": campaign,
-        "campaign_manifest_sha256": manifest.sha256,
-        "campaign_digest": campaign_digest,
-        "controller_input_sha256": campaign_digest,
-        "engine": {
-            "name": "sqlite-gcp-batch",
-            "execution_id": campaign,
-            "run_id": None,
-            "status": "completed" if controller_complete else "running",
+        "campaign_digest": owner.campaign_digest,
+        "temporal_input_sha256": temporal_input.sha256,
+        "workflow": {
+            "workflow_id": owner.workflow_id,
+            "run_id": owner.run_id,
+            "status": status,
         },
-        "controller_complete": controller_complete,
-        "provider_settled": provider_settled,
-        "report_final": report_final,
-        "operational_success": operational_success,
+        "complete": status == "completed" and all_terminal,
         "aggregate": {
             "cases_total": len(rows),
             "controller": controller_counts,
@@ -970,8 +994,6 @@ def observe_once(
 
 
 def _publish(bucket: Any, campaign: str, report: Mapping[str, Any]) -> None:
-    if report.get("report_final") is not True:
-        raise ReportError("refusing to publish a report without provider settlement")
     content = _canonical_json(report)
     if len(content) > REPORT_MAX_BYTES:
         raise ReportError(f"final campaign report exceeds {REPORT_MAX_BYTES} bytes")
@@ -991,53 +1013,89 @@ def _publish(bucket: Any, campaign: str, report: Mapping[str, Any]) -> None:
             ) from None
 
 
-def _run_report(args: argparse.Namespace) -> dict[str, Any]:
-    try:
-        poll_interval_s = float(args.poll_interval_s)
-    except (TypeError, ValueError):
-        raise ReportError("--poll-interval-s must be a number") from None
-    if not math.isfinite(poll_interval_s) or poll_interval_s <= 0:
+async def _run_report(args: argparse.Namespace) -> dict[str, Any]:
+    if not math.isfinite(args.poll_interval_s) or args.poll_interval_s <= 0:
         raise ReportError("--poll-interval-s must be finite and positive")
-    bucket = storage.Client().bucket(args.results_bucket)
+    prefix = campaign_prefix(args.campaign)
+    connect_config = ClientConfig.load_client_connect_config()
+    target_host = connect_config.get("target_host")
+    namespace = connect_config.get("namespace")
+    if (
+        not isinstance(target_host, str)
+        or not target_host
+        or not isinstance(namespace, str)
+        or not namespace
+    ):
+        raise ReportError("Temporal client config needs target_host and namespace")
+    scope = TemporalScope(target_host, namespace)
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(args.results_bucket)
+    owner_name = f"{prefix}/inputs/temporal-owner.json"
+    owner_content = _required_blob(bucket, owner_name, max_bytes=TEMPORAL_OWNER_MAX_BYTES)
+    try:
+        owner = _parse_owner(owner_content, f"gs://{bucket.name}/{owner_name}")
+    except SubmissionError as exc:
+        raise ReportError(str(exc)) from None
+    temporal_client = await Client.connect(**connect_config)
     manifest_cache = _load_manifest(bucket, args.campaign)
+    temporal_cache = _load_temporal_input(bucket, args.campaign, manifest_cache, owner, scope)
     evidence_cache: dict[str, EvidenceSnapshot] = {}
     previous_progress: tuple[Any, ...] | None = None
     while True:
-        report = observe_once(
+        report = await observe_once(
+            temporal_client=temporal_client,
             bucket=bucket,
             campaign=args.campaign,
-            ledger_path=Path(args.ledger),
+            owner=owner,
+            scope=scope,
             manifest_cache=manifest_cache,
+            temporal_cache=temporal_cache,
             evidence_cache=evidence_cache,
         )
+        workflow_status = str(report["workflow"]["status"])
+        case_state = tuple(
+            (
+                row["job_id"],
+                row["controller"]["phase"],
+                row["controller"]["activity_attempt"],
+                (
+                    row["controller"]["last_heartbeat"]["state"]
+                    if row["controller"]["last_heartbeat"]
+                    else None
+                ),
+                row["evidence"]["state"],
+            )
+            for row in report["cases"]
+        )
         progress_key = (
-            report["controller_complete"],
-            report["provider_settled"],
-            report["report_final"],
-            report["operational_success"],
-            tuple(
-                (row["job_id"], row["controller"]["phase"], row["evidence"]["state"])
-                for row in report["cases"]
-            ),
+            workflow_status,
+            case_state,
         )
         if args.wait and progress_key != previous_progress:
+            controller = report["aggregate"]["controller"]
+            evidence = report["aggregate"]["evidence"]
             print(
-                "report-campaign: finality["
-                f"controller_complete={str(report['controller_complete']).lower()},"
-                f"provider_settled={str(report['provider_settled']).lower()},"
-                f"report_final={str(report['report_final']).lower()},"
-                f"operational_success={str(report['operational_success']).lower()}]",
+                "report-campaign: "
+                f"workflow={workflow_status} "
+                "controller["
+                + ",".join(f"{key}={value}" for key, value in controller.items())
+                + "] evidence["
+                + ",".join(f"{key}={value}" for key, value in evidence.items())
+                + "]",
                 file=sys.stderr,
             )
             previous_progress = progress_key
-        if not args.wait or report["report_final"]:
+        if not args.wait or report["complete"]:
             break
-        time.sleep(poll_interval_s)
-    if args.publish:
-        if not report["report_final"]:
+        if workflow_status not in ("running", "completed"):
             raise ReportError(
-                "refusing to publish before every provider effect has settled; use --wait"
+                f"owned campaign Workflow closed with status {workflow_status} "
+                "before completing all case controllers"
             )
+        await asyncio.sleep(args.poll_interval_s)
+    if args.publish:
+        if not report["complete"]:
+            raise ReportError("refusing to publish a non-final campaign snapshot; use --wait")
         _publish(bucket, args.campaign, report)
     return report
 
@@ -1045,18 +1103,16 @@ def _run_report(args: argparse.Namespace) -> dict[str, Any]:
 def report_campaign_main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        report = _run_report(args)
+        report = asyncio.run(_run_report(args))
         print(json.dumps(report, sort_keys=True, indent=2, ensure_ascii=False))
         return 0
     except (
         CampaignError,
-        controller.ControllerError,
         DefaultCredentialsError,
         GoogleAPIError,
         OSError,
-        provider.ProviderError,
         ReportError,
-        ledger.LedgerError,
+        TemporalError,
     ) as exc:
         print(f"report-campaign: {exc}", file=sys.stderr)
         return 1

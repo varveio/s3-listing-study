@@ -247,8 +247,9 @@ resubmission numbering remain manager concerns.
 
 The campaign sets automatic Batch retries to 0. Even so, its trust model does
 not assume a scheduled job and a worker execution are one-to-one. For each
-manifest-known run prefix, the required manager reconciler must use a GCS
+manifest-known run prefix, the stateless manager reconciler uses a GCS
 delimiter listing to discover only its immediate UUID children, without
 descending into or downloading raw artifacts, then GET the exact `result.json`
 from each child. More than one child under one run is a duplicate-execution
-anomaly; the reconciler must surface every result and select none as canonical.
+anomaly; the reconciler surfaces every result and selects none as canonical.
+See [`docs/operating/campaign-operations.md`](../docs/operating/campaign-operations.md).
