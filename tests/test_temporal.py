@@ -70,6 +70,10 @@ def provider_job(selected: BatchJobSpec, state: str, *, mismatch: bool = False) 
         body["allocationPolicy"] = {"instances": [{"policy": {"machineType": "n4-highcpu-4"}}]}
     job = activities._job_from_json(body)
     job.name = selected.resource_name
+    job.allocation_policy.labels["batch-job-id"] = selected.job_id
+    job.allocation_policy.location.allowed_locations.extend(
+        ("regions/us-east1", "zones/us-east1-b")
+    )
     job.status.state = getattr(batch_v1.JobStatus.State, state)
     return job
 
