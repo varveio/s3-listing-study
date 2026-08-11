@@ -50,6 +50,8 @@ ADAPTER_BUNDLE_SHA256 = "0" * 64
 SHARED_BASE_IMAGE_DIGEST = "sha256:" + "1" * 64
 SHARED_BASE_IMAGE_URI = "registry.example/study/base@" + SHARED_BASE_IMAGE_DIGEST
 DERIVED_IMAGE_DIGEST = "sha256:" + "2" * 64
+TOOL_IMAGE_DIGEST = "sha256:" + "3" * 64
+TOOL_IMAGE_URI = "registry.example/study/tool@" + TOOL_IMAGE_DIGEST
 LOGICAL_ARGS.extend(["--derived-image", DERIVED_IMAGE_DIGEST])
 LOGICAL_ARGS.extend(["--shared-base-digest", SHARED_BASE_IMAGE_DIGEST])
 LOGICAL_ARGS.extend(["--shared-base-uri", SHARED_BASE_IMAGE_URI])
@@ -326,6 +328,23 @@ def test_success_records_direct_argv_and_binary_streams(tmp_path: Path) -> None:
         "status": "clean",
         "streams": {"stdout": "clean", "stderr": "clean"},
     }
+
+
+def test_engine_preserves_validated_tool_image_provenance(tmp_path: Path) -> None:
+    result, runner_exit = _run(
+        tmp_path,
+        "pass",
+        tool_image_digest=TOOL_IMAGE_DIGEST,
+        tool_image_uri=TOOL_IMAGE_URI,
+        selection_sha256="4" * 64,
+    )
+
+    assert runner_exit == 0
+    assert result["images"]["tool"] == {  # type: ignore[index]
+        "digest": TOOL_IMAGE_DIGEST,
+        "uri": TOOL_IMAGE_URI,
+    }
+    assert result["build_inputs"]["tool"]["selection_sha256"] == "4" * 64  # type: ignore[index]
 
 
 def test_subject_runs_in_registered_working_directory(tmp_path: Path) -> None:
@@ -1096,6 +1115,30 @@ def test_direct_engine_requires_canonical_exact_image_digests(
     with pytest.raises(AttemptError, match=f"{label} image identity"):
         _run(tmp_path, "pass", **{field: identity})
     assert not output.exists()
+
+
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    [
+        ({"tool_image_digest": "sha256:0"}, "tool image identity"),
+        (
+            {
+                "tool_image_digest": TOOL_IMAGE_DIGEST,
+                "tool_image_uri": "registry.example/study/other@" + DERIVED_IMAGE_DIGEST,
+            },
+            "tool image URI",
+        ),
+        ({"selection_sha256": "A" * 64}, "tool selection identity"),
+    ],
+)
+def test_direct_engine_rejects_invalid_tool_image_provenance(
+    tmp_path: Path,
+    changes: dict[str, str],
+    message: str,
+) -> None:
+    with pytest.raises(AttemptError, match=message):
+        _run(tmp_path, "pass", **changes)
+    assert not (tmp_path / "attempt").exists()
 
 
 def test_cli_has_no_subject_image_override_and_requires_derived_digest() -> None:

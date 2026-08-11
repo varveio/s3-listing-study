@@ -453,6 +453,14 @@ def _validate(options: AttemptOptions) -> AttemptOptions:
         raise AttemptError("tool artifact sha256 must be 64 lowercase hexadecimal digits")
     if IMAGE_DIGEST_RE.fullmatch(options.derived_image) is None:
         raise AttemptError("derived image identity must be sha256:<64 lowercase hex digits>")
+    if IMAGE_DIGEST_RE.fullmatch(options.tool_image_digest) is None:
+        raise AttemptError("tool image identity must be sha256:<64 lowercase hex digits>")
+    if not options.tool_image_uri.endswith(f"@{options.tool_image_digest}") or any(
+        character.isspace() for character in options.tool_image_uri
+    ):
+        raise AttemptError("tool image URI must end with its sha256 digest")
+    if re.fullmatch(r"[0-9a-f]{64}", options.selection_sha256) is None:
+        raise AttemptError("tool selection identity must be 64 lowercase hexadecimal digits")
     if options.auth not in ("anonymous", "authenticated"):
         raise AttemptError("auth must be anonymous or authenticated")
     if options.auth == "anonymous":
@@ -496,6 +504,9 @@ def _validate(options: AttemptOptions) -> AttemptOptions:
         tool_build_sha256=options.tool_build_sha256,
         tool_artifact=dict(options.tool_artifact),
         derived_image=options.derived_image,
+        tool_image_digest=options.tool_image_digest,
+        tool_image_uri=options.tool_image_uri,
+        selection_sha256=options.selection_sha256,
         subject_workdir=options.subject_workdir,
         harness_revision=options.harness_revision,
         operation=options.operation,
