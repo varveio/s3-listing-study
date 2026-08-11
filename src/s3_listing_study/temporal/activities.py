@@ -39,6 +39,10 @@ def _validated_adoption(spec: BatchJobSpec, job: batch_v1.Job) -> None:
     actual = batch_v1.Job(job)
     for group in actual.task_groups:
         group.name = ""  # Batch supplies this output-only child resource name.
+    if not expected.allocation_policy.labels:
+        actual.allocation_policy.labels = {}
+    if not expected.allocation_policy.location.allowed_locations:
+        actual.allocation_policy.location = cast(Any, None)
     immutable = ("labels", "task_groups", "allocation_policy", "logs_policy")
     if any(getattr(expected, field) != getattr(actual, field) for field in immutable):
         raise _collision(
