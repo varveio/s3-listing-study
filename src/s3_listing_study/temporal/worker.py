@@ -7,7 +7,11 @@ from temporalio.envconfig import ClientConfig
 from temporalio.worker import Worker
 
 from s3_listing_study.temporal import TASK_QUEUE
-from s3_listing_study.temporal.activities import run_batch_job
+from s3_listing_study.temporal.activities import (
+    ensure_batch_job,
+    run_batch_job,
+    wait_for_batch_job,
+)
 from s3_listing_study.temporal.workflows import CampaignWorkflow, CaseWorkflow
 
 
@@ -17,7 +21,7 @@ async def run_worker() -> None:
         client,
         task_queue=TASK_QUEUE,
         workflows=(CampaignWorkflow, CaseWorkflow),
-        activities=(run_batch_job,),
+        activities=(ensure_batch_job, wait_for_batch_job, run_batch_job),
     )
     await worker.run()
 

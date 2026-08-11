@@ -31,6 +31,19 @@ class BatchJobOutcome:
 
 
 @dataclass(frozen=True)
+class BatchJobHandle:
+    resource_name: str
+    state: str
+    failure_type: str | None = None
+
+
+@dataclass(frozen=True)
+class RetryCaseRequest:
+    job_id: str
+    submission: int
+
+
+@dataclass(frozen=True)
 class CaseControllerProgress:
     job_id: str
     child_run_id: str | None
@@ -39,3 +52,5 @@ class CaseControllerProgress:
     failure_type: str | None
     provider_resource_name: str | None = None
     provider_settled: bool = False
+    current_submission: int = 1
+    current_job_id: str | None = None

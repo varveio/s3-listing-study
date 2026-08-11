@@ -67,6 +67,18 @@ def _report_campaign_main(argv: Sequence[str] | None) -> int:
     return report_campaign_main(argv)
 
 
+def _retry_case_main(argv: Sequence[str] | None) -> int:
+    from s3_listing_study.manager.campaign.control import retry_case_main
+
+    return retry_case_main(argv)
+
+
+def _finalize_campaign_main(argv: Sequence[str] | None) -> int:
+    from s3_listing_study.manager.campaign.control import finalize_campaign_main
+
+    return finalize_campaign_main(argv)
+
+
 def _publish_derived_image_main(argv: Sequence[str] | None) -> int:
     from s3_listing_study.manager.campaign.images import publish_derived_image_main
 
@@ -131,6 +143,16 @@ COMMANDS = (
         "report-campaign",
         "observe and reconcile one frozen Temporal campaign",
         _report_campaign_main,
+    ),
+    Command(
+        "retry-case",
+        "retry one failed case inside its existing Temporal campaign",
+        _retry_case_main,
+    ),
+    Command(
+        "finalize-campaign",
+        "accept settled failed cases and close an existing Temporal campaign",
+        _finalize_campaign_main,
     ),
     Command(
         "publish-derived-image",

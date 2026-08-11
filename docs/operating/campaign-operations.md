@@ -43,6 +43,52 @@ cursor, watcher state, or local database, so interruption only loses the current
 observation call; rerunning reconstructs the same report from retained state. A
 Temporal Worker must remain available for Workflow and Activity progress.
 
+## Retry or accept settled failures
+
+A newly started campaign remains open when a case reaches a settled operational
+failure: Batch `FAILED`, an explicit `NOT_CREATED`, or a settled job-identity
+collision. The case phase becomes `awaiting_retry`; other cases continue and no
+final report can be published while that decision is outstanding. List the exact
+original job IDs and current submissions from a one-shot report:
+
+```sh
+uv run s3-listing-study report-campaign \
+  --campaign <campaign-id> --results-bucket <results-bucket> \
+  | jq -r '.cases[] | select(.controller.phase == "awaiting_retry") |
+      [.job_id, .current_submission, .controller.terminal.provider_state] | @tsv'
+```
+
+Retry one case without editing or regenerating a plan:
+
+```sh
+uv run s3-listing-study retry-case \
+  --campaign <campaign-id> --results-bucket <results-bucket> \
+  --job-id <original-job-id-ending-in-s1> --submission <current-plus-one>
+```
+
+The command is bound to the exact frozen GCS owner and Temporal Run. The
+submission must be exactly the current value plus one. Temporal gives the Update
+the deterministic ID `retry-<job-id>-s<N>`, so retrying the same command after a
+client timeout returns the same accepted result instead of launching another
+submission. The Workflow derives the `-s<N>` Batch ID and rewrites only the
+worker's `--job-id` and `--submission-number`; case identity, attempt
+fingerprint, resources, image, and stable result prefix remain frozen.
+
+If a settled failure is accepted rather than retried, close the campaign
+explicitly:
+
+```sh
+uv run s3-listing-study finalize-campaign \
+  --campaign <campaign-id> --results-bucket <results-bucket>
+```
+
+Finalization refuses active cases, converts all `awaiting_retry` cases to
+terminal, and lets the parent complete. It does not claim success: the final
+report still records the provider failure and `operational_success: false`.
+Both commands refuse a mismatched owner, a closed parent, and campaigns created
+before targeted retries were introduced. A published or otherwise closed
+historical campaign is immutable; rerun its failed cases in a new campaign.
+
 If the exact owner exists but every case remains pending, the owner may have
 been frozen just before the submitter crashed without sending the claim Signal.
 Rerun the exact original `submit-campaign` command with the same frozen inputs
@@ -69,20 +115,28 @@ itself has `provider_settled: false`; it can never turn absent GCS evidence into
 an immutable negative result. Child failures are collected as data so siblings
 remain observable, but they do not manufacture provider finality.
 
-The Batch Activity has no total retry-attempt or schedule-to-close limit. Once a
-deterministic job may exist, each retry adopts it and continues until Batch is
-terminal. Each Activity attempt is still bounded by `controller_timeout_s`,
-heartbeats every 30 seconds, and each Batch RPC has a 20-second timeout. A
-definitive create rejection is the only error path that returns `NOT_CREATED`;
-errors while creating ambiguously, adopting, or polling remain retryable. An
-unexpected pre-existing or identity-mismatched deterministic job is followed to
-provider terminal state and then recorded as a settled `BatchJobCollision`, not
-failed early. A Temporal patch marker preserves the old Activity command options
-when retained pre-change Workflow histories replay.
+Each case has two explicit Activity boundaries. `ensure_batch_job` idempotently
+creates or validates and adopts the deterministic Batch resource. Once it
+returns a durable handle, `wait_for_batch_job` GETs that exact resource every ten
+seconds until Batch reports `SUCCEEDED` or `FAILED`. The wait has no total
+retry-attempt or schedule-to-close limit; after a Worker restart Temporal reruns
+the wait from its recorded input rather than trying to create again. Each wait
+attempt is bounded by `controller_timeout_s`, heartbeats every 30 seconds, and
+each Batch RPC has a 20-second timeout.
+
+Create remains idempotent because an `ensure_batch_job` Activity attempt can
+itself fail after the provider accepted the request but before Temporal recorded
+the return. Its retry validates and adopts the same deterministic resource. A
+definitive create rejection is the only path that returns `NOT_CREATED`; errors
+while creating ambiguously, adopting, or polling remain retryable. An unexpected
+pre-existing or identity-mismatched deterministic job is followed to provider
+terminal state and then recorded as a settled `BatchJobCollision`, not failed
+early. Patch markers retain the legacy combined `run_batch_job` command only for
+replay of pre-change histories.
 
 For a nonterminal child, the observer uses the child's Temporal description and
-its one pending `run_batch_job` Activity to report the current attempt and the
-last heartbeat `{job_name, state}` when available. Attempt 2 or later is
+its pending ensure, wait, or legacy Activity to report the current attempt and
+the last heartbeat `{job_name, state}` when available. Attempt 2 or later is
 `retrying`. It does not fetch complete Event Histories on every poll. Terminal
 children need no history scan. These fields are operational diagnostics only:
 provider state and heartbeat state do not classify the subject and are not run
@@ -92,9 +146,9 @@ resource name matches the frozen `temporal.json` case and its state is
 `SUCCEEDED` or `FAILED`.
 
 All case children remain concurrently runnable to preserve the campaign's
-same-window methodology. Their sequential Workflow start commands may still
-create a short synchronized Batch API burst; a launch rate limiter is deferred
-because limiting active children would change the experiment.
+same-window methodology. New campaigns start children in deterministic waves of
+eight with a one-second gap, smoothing the create-API burst without imposing an
+active-job concurrency limit.
 
 Cancellation retains Temporal abandonment semantics: canceling the parent does
 not cancel or settle a Batch job. The owned Workflow closes non-completed,
@@ -114,7 +168,12 @@ GETs only each child's exact `result.json` commit marker; it never reads
 
 Discovery is also bounded: more than 256 immediate execution leaves below one
 run prefix is refused as an anomaly before any result object is downloaded.
-No canonical duplicate is chosen or retained.
+Every leaf is strictly validated. A fully valid sealed result from an earlier
+submission of the same logical case is surfaced as `historical` with its job ID
+and submission number, but does not compete with the current submission's
+canonical result. A malformed or merely identity-mismatched leaf is never
+treated as history. More than one current-submission leaf remains a duplicate;
+no canonical duplicate is chosen or retained.
 
 The evidence state is:
 
@@ -122,8 +181,8 @@ The evidence state is:
 | --- | --- |
 | `pending` | Provider is not settled; GCS is not inspected, even if the controller is terminal. |
 | `missing` | Provider is settled (including explicit `NOT_CREATED`) and the run prefix has zero UUID children. |
-| `recorded` | Exactly one canonical UUID has a bounded, valid, identity-matching `result.json`. |
-| `duplicate` | More than one immediate execution child exists; all are surfaced and none is canonical. |
+| `recorded` | Exactly one current-submission UUID has a bounded, valid, identity-matching `result.json`; valid earlier submissions may also be surfaced as history. |
+| `duplicate` | More than one current-submission execution child exists; all leaves are surfaced and no current result is canonical. |
 | `unsealed` | The sole canonical UUID child has no `result.json` commit marker. |
 | `invalid` | The sole child name, JSON, size, schema, identity, or summary metrics are invalid. |
 
@@ -162,6 +221,22 @@ and exact provider resource names must all agree. The cached bytes are reused
 within one wait invocation and neither job bodies nor credential configuration
 are emitted.
 
+The retained GCS control and evidence layout is:
+
+```text
+campaigns/<campaign>/
+  campaign.json
+  inputs/temporal.json
+  inputs/temporal-owner.json
+  plans/<frozen-plan>.yaml
+  results/<bucket>/<tool>/<case>/run-<n>/<attempt-uuid>/result.json
+  report.json                         # only after report_final=true
+```
+
+`campaign.json` is the ordered human-readable case manifest. Temporal Event
+History is the durable live state; the JSON file is frozen input, not a mutable
+attempt ledger.
+
 The schema-version-2 report is deterministic: manifest case order, sorted leaf
 IDs, fixed aggregate keys, no observation timestamp, and canonical JSON when
 published. It includes the frozen campaign-manifest SHA-256, the safe owned
@@ -197,9 +272,27 @@ env -u TEMPORAL_API_KEY uv run python harness/tests/temporal-controller-e2e.py
 ```
 
 It starts an isolated SDK test server, uses unique Workflow and job IDs, and
-runs the real Worker, claim Signal, parent, child, retrying Activity, progress
-query, exact owner/Run observation, terminal-missing reconciliation, stable
-report recomputation, and create-only publication/collision path against an
-in-memory GCS fake. On first use, the Temporal SDK lazily downloads its
-test-server binary. A live Temporal Cloud plus GCS canary of the observer is
-still required before the first production benchmark campaign.
+runs the real Worker, claim Signal, parent, child, ensure retry, settled failure,
+`retry_case` Workflow Update, second submission, progress query, exact owner/Run
+observation, terminal-missing reconciliation, stable report recomputation, and
+create-only publication/collision path against an in-memory GCS fake. On first
+use, the Temporal SDK lazily downloads its test-server binary.
+
+## Durable local Temporal service
+
+For a durable single-machine controller, run the Temporal development server
+with an explicit SQLite file outside the repository:
+
+```sh
+temporal server start-dev \
+  --ip 127.0.0.1 --port 7233 \
+  --db-filename /absolute/path/to/s3-study-temporal.db
+```
+
+Set `TEMPORAL_ADDRESS=127.0.0.1:7233`, `TEMPORAL_NAMESPACE=default`, and
+`TEMPORAL_TLS=false` for the Worker and manager. The database file retains
+Workflow Event Histories across service restarts; the Worker is still a
+separate supervised process and GCS/Batch remain external. A Docker deployment
+is equivalent when the server's persistence path is on a mounted host volume.
+The SDK test-server exercise above is intentionally ephemeral and is not this
+durable operating profile.
