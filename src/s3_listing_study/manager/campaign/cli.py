@@ -341,7 +341,13 @@ def _already_exists(stderr: bytes) -> bool:
 
 def _not_found(stderr: bytes) -> bool:
     message = stderr.decode("utf-8", errors="replace").lower()
-    markers = ("not found", "no urls matched", "does not exist", "404")
+    markers = (
+        "not found",
+        "no urls matched",
+        "matched no objects or files",
+        "does not exist",
+        "404",
+    )
     return any(token in message for token in markers)
 
 
