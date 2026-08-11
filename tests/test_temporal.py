@@ -81,9 +81,7 @@ def provider_job(selected: BatchJobSpec, state: str, *, mismatch: bool = False) 
     job = activities._job_from_json(body)
     job.name = selected.resource_name
     job.allocation_policy.labels["batch-job-id"] = selected.job_id
-    job.allocation_policy.location.allowed_locations.extend(
-        ("regions/us-east1", "zones/us-east1-b")
-    )
+    job.allocation_policy.location.allowed_locations.append("regions/us-east1")
     job.status.state = getattr(batch_v1.JobStatus.State, state)
     return job
 
@@ -193,6 +191,28 @@ def test_later_activity_attempt_adopts_exact_provider_normalized_job(
     ]
     assert client.gets == 2
     assert client.closed
+
+
+def test_adoption_normalizes_only_provider_parent_region_with_requested_zone() -> None:
+    selected = spec()
+    selected.job["allocationPolicy"]["location"] = {"allowedLocations": ["zones/us-east1-b"]}
+    actual = provider_job(selected, "QUEUED")
+    assert list(actual.allocation_policy.location.allowed_locations) == [
+        "zones/us-east1-b",
+        "regions/us-east1",
+    ]
+    activities._validated_adoption(selected, actual)
+
+
+@pytest.mark.parametrize("unexpected", ["zones/us-east1-c", "regions/us-west1"])
+def test_adoption_refuses_other_provider_location_differences(unexpected: str) -> None:
+    selected = spec()
+    selected.job["allocationPolicy"]["location"] = {"allowedLocations": ["zones/us-east1-b"]}
+    actual = provider_job(selected, "QUEUED")
+    actual.allocation_policy.location.allowed_locations.append(unexpected)
+    with pytest.raises(ApplicationError) as raised:
+        activities._validated_adoption(selected, actual)
+    assert raised.value.type == "BatchJobCollision"
 
 
 def test_later_activity_attempt_settles_mismatched_adoption_before_reporting_collision(
