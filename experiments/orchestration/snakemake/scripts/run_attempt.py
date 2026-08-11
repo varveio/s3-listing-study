@@ -1,7 +1,5 @@
 """Run the image-owned worker, then write its validated result pointer."""
 
-from __future__ import annotations
-
 import hashlib
 import json
 import subprocess

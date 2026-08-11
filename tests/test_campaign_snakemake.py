@@ -67,7 +67,7 @@ def images_for(plan: bench.Plan) -> dict[str, dict[str, object]]:
 
 def execution_profile() -> dict[str, object]:
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "project": "study1",
         "location": "us-east1",
         "results_bucket": "study-results",
@@ -87,9 +87,10 @@ def execution_profile() -> dict[str, object]:
         "n4_boot_disk": {"type": "hyperdisk-balanced", "image": "batch-cos"},
         "executor": {
             "name": "snakemake-executor-plugin-googlebatch",
-            "plugin_version": "0.5.1",
+            "adapter_version": "0.5.1",
+            "upstream_plugin_version": "0.5.1",
             "snakemake_version": "9.25.1",
-            "patch_identity": "unpatched-local-projection-only",
+            "adapter_source_sha256": "c" * 64,
         },
     }
 
@@ -98,9 +99,10 @@ def runnable_execution_profile() -> dict[str, object]:
     profile = execution_profile()
     profile["executor"] = {
         "name": "snakemake-executor-plugin-googlebatch-study",
-        "plugin_version": "0.1.0",
+        "adapter_version": "0.1.0",
+        "upstream_plugin_version": "0.5.1",
         "snakemake_version": "9.25.1",
-        "patch_identity": "googlebatch-study-0.1.0",
+        "adapter_source_sha256": "d" * 64,
         "runtime_image": ("us-east1-docker.pkg.dev/study/runtime/snakemake@sha256:" + "d" * 64),
     }
     return profile
@@ -364,6 +366,13 @@ def test_remote_deployment_source_archive_is_complete_and_importable(tmp_path: P
     profile_bytes = canonical_profile_bytes(execution)
     campaign_path.write_bytes(campaign_bytes)
     profile_path.write_bytes(profile_bytes)
+    campaign = load_campaign(campaign_path)
+    exact_target = marker_path(
+        campaign=campaign["campaign"],
+        campaign_sha256=hashlib.sha256(campaign_bytes).hexdigest(),
+        execution_sha256=hashlib.sha256(profile_bytes).hexdigest(),
+        attempt=campaign["attempts"][0],
+    )
     proposed_index = tmp_path / "git-index"
     index_path = subprocess.run(
         ["git", "rev-parse", "--git-path", "index"],
@@ -397,6 +406,7 @@ def test_remote_deployment_source_archive_is_complete_and_importable(tmp_path: P
                 ),
                 "--snakefile",
                 "experiments/orchestration/snakemake/Snakefile",
+                exact_target,
                 "--profile",
                 "experiments/orchestration/snakemake/profiles/googlebatch",
                 "--quiet",

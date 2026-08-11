@@ -5,7 +5,9 @@ from snakemake_interface_executor_plugins.settings import CommonSettings
 
 from .executor import (
     RUNTIME_PATH,
+    adapter_source_sha256,
     build_create_job_request,
+    installed_executor_identity,
 )
 from .executor import (
     StudyGoogleBatchExecutor as Executor,
@@ -31,6 +33,8 @@ __all__ = [
     "RUNTIME_PATH",
     "Executor",
     "ExecutorSettings",
+    "adapter_source_sha256",
     "build_create_job_request",
     "common_settings",
+    "installed_executor_identity",
 ]

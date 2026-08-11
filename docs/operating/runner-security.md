@@ -52,6 +52,29 @@ The required manager reconciler must list each expected run prefix with GCS
 artifacts stay in the same attempt tree and are fetched only for correctness
 verification or a specific investigation.
 
+### GCP Batch: Snakemake orchestration diagnostic profile
+
+The workflow under `experiments/orchestration/snakemake/` is an orchestration
+evaluation, not the cooperative production profile above. Its results are
+diagnostic and must not be presented as production-profile benchmark evidence.
+Nested Snakemake and the third-party subject run in one Batch task and therefore
+share one task service account. Snakemake must read and update its remote source,
+state and marker objects, while the subject-side evidence uploader creates its
+attempt objects. This diagnostic composition currently requires bucket-scoped
+`roles/storage.objectAdmin` for object create, read, update, delete and list
+operations; it deliberately does not weaken or replace the production
+create-only contract.
+
+`roles/storage.objectAdmin` does not include the bucket-metadata permission
+`storage.buckets.get`. The GCS storage plugin invokes `Bucket.exists()` both on
+the outer runner before source deployment and in the nested worker. Consequently
+both the runner service account and the selected worker service account need an
+additional bucket-scoped grant containing `storage.buckets.get` (for example,
+`roles/storage.legacyBucketReader`, or a narrower custom role). This permission
+is for the diagnostic orchestration path only. Anonymous and authenticated
+workers remain distinct; authenticated diagnostics additionally need the
+documented AWS-secret access.
+
 ### Local Docker: stricter manager-host profile
 
 Local runs may share a more-privileged manager/runner host, so they retain the

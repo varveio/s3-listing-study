@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import re
 import shlex
 from collections.abc import Mapping
+from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
 from typing import Any
 
+from google.api_core.exceptions import DeadlineExceeded
 from google.cloud import batch_v1
 from snakemake_executor_plugin_googlebatch.executor import GoogleBatchExecutor
 from snakemake_interface_common.exceptions import WorkflowError
@@ -18,6 +23,54 @@ PINNED_IMAGE_RE = re.compile(r"\A[^\s@]+@sha256:[0-9a-f]{64}\Z")
 WORKDIR = "/tmp/workdir"
 RUNTIME_PATH = f"{WORKDIR}/runtime"
 UNSET = "__unset__"
+ADAPTER_VERSION = "0.1.0"
+ADAPTER_SOURCE_FILES = ("__init__.py", "executor.py")
+
+
+def adapter_source_sha256() -> str:
+    """Hash the named adapter sources with unambiguous path/length framing."""
+    digest = hashlib.sha256()
+    root = Path(__file__).resolve().parent
+    for name in ADAPTER_SOURCE_FILES:
+        content = (root / name).read_bytes()
+        encoded_name = name.encode()
+        digest.update(len(encoded_name).to_bytes(4, "big"))
+        digest.update(encoded_name)
+        digest.update(len(content).to_bytes(8, "big"))
+        digest.update(content)
+    return digest.hexdigest()
+
+
+def installed_executor_identity() -> dict[str, str]:
+    try:
+        adapter_distribution_version = version("s3-listing-snakemake-trial")
+        snakemake_version = version("snakemake")
+        upstream_version = version("snakemake-executor-plugin-googlebatch")
+    except PackageNotFoundError as exc:
+        raise ValueError(f"required executor distribution is not installed: {exc.name}") from None
+    if adapter_distribution_version != ADAPTER_VERSION:
+        raise ValueError(
+            "installed adapter distribution version disagrees with adapter source: "
+            f"{adapter_distribution_version} != {ADAPTER_VERSION}"
+        )
+    return {
+        "name": "snakemake-executor-plugin-googlebatch-study",
+        "adapter_version": ADAPTER_VERSION,
+        "upstream_plugin_version": upstream_version,
+        "snakemake_version": snakemake_version,
+        "adapter_source_sha256": adapter_source_sha256(),
+    }
+
+
+def validate_installed_executor_identity(expected: Mapping[str, Any]) -> None:
+    actual = installed_executor_identity()
+    comparable = {key: expected.get(key) for key in actual}
+    if comparable != actual:
+        mismatches = [key for key in actual if comparable[key] != actual[key]]
+        raise ValueError(
+            "frozen executor identity does not match installed code/environment: "
+            + ", ".join(mismatches)
+        )
 
 
 def _optional(value: Any) -> Any:
@@ -210,7 +263,9 @@ class StudyGoogleBatchExecutor(GoogleBatchExecutor):
         if boot_type is not None or boot_image is not None or boot_size is not None:
             if boot_type is None or boot_image is None:
                 raise WorkflowError("boot disk type and image must be provided together")
-            boot_disk = {"type": boot_type, "image": boot_image, "size_gb": boot_size}
+            boot_disk = {"type": boot_type, "image": boot_image}
+            if boot_size is not None:
+                boot_disk["size_gb"] = boot_size
         return {
             "job_id": self.get_param(job, "planned_job_id"),
             "image_uri": self.get_param(job, "container"),
@@ -229,15 +284,53 @@ class StudyGoogleBatchExecutor(GoogleBatchExecutor):
             "secret_resource": _optional(self.get_param(job, "secret_resource")),
         }
 
+    def _storage_gcs_project(self) -> Any:
+        providers = self.workflow.storage_provider_settings or {}
+        tagged = providers.get("gcs")
+        if tagged is None:
+            return None
+        settings = tagged.get_settings()
+        return None if settings is None else settings.project
+
+    def _validate_frozen_submission(self, job: Any) -> dict[str, Any]:
+        try:
+            frozen = json.loads(job.params["frozen_provider_projection"])
+        except (KeyError, TypeError, json.JSONDecodeError) as exc:
+            raise WorkflowError(f"missing or invalid frozen provider projection: {exc}") from None
+        try:
+            validate_installed_executor_identity(frozen["executor_identity"])
+        except (KeyError, ValueError) as exc:
+            raise WorkflowError(str(exc)) from None
+        storage = self.workflow.storage_settings
+        actual = {
+            "batch": self._projection(job),
+            "threads": job.threads,
+            "project": self.get_param(job, "project"),
+            "location": self.get_param(job, "region"),
+            "runtime_image": self.get_param(job, "runtime_image"),
+            "default_storage_provider": storage.default_storage_provider,
+            "default_storage_prefix": storage.default_storage_prefix,
+            "storage_gcs_project": self._storage_gcs_project(),
+            "executor_identity": installed_executor_identity(),
+        }
+        if actual != frozen:
+            mismatches = sorted(key for key in frozen if actual.get(key) != frozen[key])
+            raise WorkflowError(
+                "effective Snakemake launch differs from frozen provider projection: "
+                + ", ".join(mismatches)
+            )
+        return actual
+
     def run_job(self, job: Any) -> None:
+        frozen = self._validate_frozen_submission(job)
         logfile = job.logfile_suggestion(".snakemake/googlebatch_logs")
         os.makedirs(os.path.dirname(logfile), exist_ok=True)
         actual_job_id = self.generate_jobid(job)
         request = build_create_job_request(
-            self._projection(job),
-            project=self.get_param(job, "project"),
-            location=self.get_param(job, "region"),
-            runtime_image=self.get_param(job, "runtime_image"),
+            frozen["batch"],
+            project=frozen["project"],
+            location=frozen["location"],
+            runtime_image=frozen["runtime_image"],
             nested_command=self.format_job_exec(job),
             actual_job_id=actual_job_id,
         )
@@ -250,3 +343,40 @@ class StudyGoogleBatchExecutor(GoogleBatchExecutor):
             "provider_job_id": actual_job_id,
         }
         self.report_job_submission(SubmittedJobInfo(job, external_jobid=created_job.name, aux=aux))
+
+    async def check_active_jobs(self, active_jobs: list[SubmittedJobInfo]):
+        """Keep transient polling timeouts active instead of misclassifying them."""
+        for submitted in active_jobs:
+            job_id = submitted.external_jobid
+            request = batch_v1.GetJobRequest(name=job_id)
+            aux_logs = [submitted.aux["logfile"]]
+            last_seen = submitted.aux["last_seen"]
+            try:
+                response = self.batch.get_job(request=request)
+            except DeadlineExceeded:
+                self.logger.warning(
+                    f"Google Batch status poll for '{job_id}' exceeded its deadline; "
+                    "the job remains active and will be checked again"
+                )
+                yield submitted
+                continue
+
+            self.logger.info(f"Job {job_id} has state {response.status.state.name}")
+            for event in response.status.status_events:
+                if not last_seen or event.event_time.nanosecond > last_seen:
+                    self.logger.info(f"{event.type_}: {event.description}")
+                    last_seen = event.event_time.nanosecond
+            submitted.aux["last_seen"] = last_seen
+            state = response.status.state.name
+            if state in ("FAILED", "SUCCEEDED"):
+                self.save_finished_job_logs(submitted)
+            if state == "FAILED":
+                self.report_job_error(
+                    submitted,
+                    msg=f"Google Batch job '{job_id}' failed. ",
+                    aux_logs=aux_logs,
+                )
+            elif state == "SUCCEEDED":
+                self.report_job_success(submitted)
+            else:
+                yield submitted

@@ -1,6 +1,8 @@
 import os
 import sys
 
+from snakemake_interface_executor_plugins.settings import ExecMode
+
 # Source archives are extracted at the repository root. The study package is
 # deliberately loaded from the deployed source, not from an editable host
 # installation that will not exist in Batch.
@@ -10,6 +12,7 @@ sys.path.insert(0, "experiments/orchestration/snakemake/scripts")
 from workflow import (  # noqa: E402
     MARKER_ROOT,
     attempt_for_wildcards,
+    canonical_provider_projection,
     deployable_source_paths,
     executor_runtime_image,
     load_campaign,
@@ -27,9 +30,21 @@ def required_config(name):
     return value
 
 
+RUN_DIR = os.environ.get("S3_STUDY_RUN_DIR")
+if not RUN_DIR:
+    raise ValueError("S3_STUDY_RUN_DIR is required")
+EXPECTED_CAMPAIGN_PATH = f"{RUN_DIR}/campaign.json"
+EXPECTED_EXECUTION_PROFILE_PATH = f"{RUN_DIR}/execution-profile.json"
+for name, expected in (
+    ("campaign_path", EXPECTED_CAMPAIGN_PATH),
+    ("execution_profile_path", EXPECTED_EXECUTION_PROFILE_PATH),
+):
+    if required_config(name) != expected:
+        raise ValueError(f"Snakemake --config cannot override frozen {name}")
+
 CAMPAIGN_PATH, EXECUTION_PROFILE_PATH = deployable_source_paths(
-    required_config("campaign_path"),
-    required_config("execution_profile_path"),
+    EXPECTED_CAMPAIGN_PATH,
+    EXPECTED_EXECUTION_PROFILE_PATH,
     working_directory=os.getcwd(),
 )
 # Nested Snakemake receives paths relative to the deployed archive root rather
@@ -53,6 +68,10 @@ configfile: EXECUTION_PROFILE_PATH
 CAMPAIGN = load_campaign(CAMPAIGN_PATH)
 EXECUTION = load_execution_profile(EXECUTION_PROFILE_PATH)
 RUNTIME_IMAGE = executor_runtime_image(EXECUTION)
+if workflow.resource_settings.overwrite_resources:
+    raise ValueError("--set-resources cannot override a frozen Snakemake launch")
+if workflow.resource_settings.overwrite_threads:
+    raise ValueError("--set-threads cannot override a frozen Snakemake launch")
 ATTEMPTS = {
     (row["bucket"], row["tool"], row["case_id"], str(row["run_ordinal"])): row
     for row in CAMPAIGN["attempts"]
@@ -72,6 +91,50 @@ MARKER_PATTERN = (
 )
 
 
+def validate_exact_target():
+    mode = workflow.workflow_settings.exec_mode
+    targets = tuple(workflow.dag_settings.targets)
+    target_jobs = tuple(workflow.dag_settings.target_jobs)
+    if mode == ExecMode.DEFAULT:
+        if target_jobs or len(targets) != 1 or targets[0] not in MARKERS:
+            raise ValueError(
+                "outer Snakemake invocation requires exactly one frozen campaign marker target"
+            )
+        return
+    if mode == ExecMode.SUBPROCESS:
+        if targets or len(target_jobs) != 1:
+            raise ValueError("nested Snakemake requires exactly one attempt target job")
+        target = target_jobs[0]
+        expected_keys = ("bucket", "tool", "case_id", "run_ordinal")
+        wildcards = target.wildcards_dict
+        if target.rulename != "attempt" or set(wildcards) != set(expected_keys):
+            raise ValueError("nested Snakemake target job is not one frozen attempt")
+        coordinate = tuple(str(wildcards[key]) for key in expected_keys)
+        if coordinate not in ATTEMPTS:
+            raise ValueError("nested Snakemake target job is not one frozen attempt")
+        return
+    raise ValueError("unsupported Snakemake execution mode for frozen launch")
+
+
+def validate_executor_and_campaign_input():
+    validate_exact_target()
+    mode = workflow.workflow_settings.exec_mode
+    plugin = workflow.executor_plugin
+    executor_name = None if plugin is None else plugin.name
+    if mode == ExecMode.DEFAULT:
+        if workflow.output_settings.dryrun:
+            if executor_name != "dryrun":
+                raise ValueError("normal --dry-run must use Snakemake's dryrun executor")
+        elif executor_name != "googlebatch-study":
+            raise ValueError("frozen launch requires the googlebatch-study executor")
+    elif mode == ExecMode.SUBPROCESS:
+        if executor_name != "local":
+            raise ValueError("nested attempt execution requires Snakemake's local executor")
+    else:
+        raise ValueError("unsupported Snakemake execution mode for frozen launch")
+    return CAMPAIGN_PATH
+
+
 def selected(wildcards):
     return attempt_for_wildcards(ATTEMPTS, wildcards)
 
@@ -87,7 +150,7 @@ rule all:
 
 rule attempt:
     input:
-        campaign=local(CAMPAIGN_PATH),
+        campaign=local(lambda wildcards: validate_executor_and_campaign_input()),
         execution_profile=local(EXECUTION_PROFILE_PATH),
     output:
         marker=MARKER_PATTERN,
@@ -125,5 +188,8 @@ rule attempt:
         submission_number=lambda wildcards: selected(wildcards)["submission"],
         campaign_sha256=CAMPAIGN_SHA256,
         execution_sha256=EXECUTION_SHA256,
+        frozen_provider_projection=lambda wildcards: canonical_provider_projection(
+            CAMPAIGN, selected(wildcards), EXECUTION
+        ),
     script:
         "scripts/run_attempt.py"

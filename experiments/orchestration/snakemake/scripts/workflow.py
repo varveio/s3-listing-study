@@ -102,7 +102,13 @@ ATTEMPT_FIELDS = {
     "prefix",
 }
 RESOURCE_FIELDS = {"vcpus", "memory_gb", "machine_type", "container_memory_gb"}
-EXECUTOR_FIELDS = {"name", "plugin_version", "snakemake_version", "patch_identity"}
+EXECUTOR_FIELDS = {
+    "name",
+    "adapter_version",
+    "upstream_plugin_version",
+    "snakemake_version",
+    "adapter_source_sha256",
+}
 EXECUTOR_RUNTIME_FIELDS = EXECUTOR_FIELDS | {"runtime_image"}
 
 HEX_RE = re.compile(r"\A[0-9a-f]{64}\Z")
@@ -456,8 +462,8 @@ def load_campaign(path: str | Path) -> dict[str, Any]:
 
 def load_execution_profile(path: str | Path) -> dict[str, Any]:
     document = _exact_fields(_load_json(path), PROFILE_FIELDS, label="execution profile")
-    if document["schema_version"] != 1 or isinstance(document["schema_version"], bool):
-        raise WorkflowInputError("execution profile schema_version must be 1")
+    if document["schema_version"] != 2 or isinstance(document["schema_version"], bool):
+        raise WorkflowInputError("execution profile schema_version must be 2")
     project = _token(document["project"], label="execution project")
     location = _token(document["location"], label="execution location")
     if PROJECT_RE.fullmatch(project) is None:
@@ -548,10 +554,10 @@ def load_execution_profile(path: str | Path) -> dict[str, Any]:
         executor = _exact_fields(raw_executor, EXECUTOR_FIELDS, label="execution executor")
     else:
         raise WorkflowInputError("execution executor name is invalid")
-    for field in ("plugin_version", "snakemake_version"):
+    for field in ("adapter_version", "upstream_plugin_version", "snakemake_version"):
         if not isinstance(executor[field], str) or VERSION_RE.fullmatch(executor[field]) is None:
             raise WorkflowInputError(f"execution executor {field} is invalid")
-    _token(executor["patch_identity"], label="execution executor patch_identity")
+    _hex(executor["adapter_source_sha256"], label="execution executor adapter source SHA-256")
     return document
 
 
@@ -569,6 +575,17 @@ def canonical_profile_bytes(document: Mapping[str, Any]) -> bytes:
 
 def freeze_execution_profile(source: str | Path, destination: str | Path) -> tuple[bool, str]:
     document = load_execution_profile(source)
+    if document["executor"]["name"] == "snakemake-executor-plugin-googlebatch-study":
+        # This dependency-heavy import is intentionally limited to the outer
+        # freeze command. Nested Snakemake only performs schema validation.
+        from snakemake_executor_plugin_googlebatch_study.executor import (
+            validate_installed_executor_identity,
+        )
+
+        try:
+            validate_installed_executor_identity(document["executor"])
+        except ValueError as exc:
+            raise WorkflowInputError(str(exc)) from None
     content = canonical_profile_bytes(document)
     target = Path(destination)
     try:
@@ -707,3 +724,63 @@ def project_attempt(
         "parallelism": "1",
         "logs_destination": "CLOUD_LOGGING",
     }
+
+
+def frozen_provider_projection(
+    campaign: Mapping[str, Any], attempt: Mapping[str, Any], profile: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Return the submission contract through a non-resource rule parameter."""
+    projected = project_attempt(campaign, attempt, profile)
+    batch_fields = {
+        key: projected[key]
+        for key in (
+            "job_id",
+            "image_uri",
+            "machine_type",
+            "cpu_milli",
+            "memory_mib",
+            "container_options",
+            "boot_disk",
+            "retry_count",
+            "max_run_duration",
+            "provisioning",
+            "zone",
+            "network",
+            "subnetwork",
+            "service_account",
+            "secret_resource",
+        )
+    }
+    executor = profile["executor"]
+    return {
+        "batch": batch_fields,
+        "threads": projected["vcpus"],
+        "project": profile["project"],
+        "location": profile["location"],
+        "runtime_image": executor_runtime_image(profile),
+        "default_storage_provider": "gcs",
+        "default_storage_prefix": (
+            f"gcs://{profile['results_bucket']}/{profile['orchestration_prefix']}"
+        ),
+        "storage_gcs_project": profile["project"],
+        "executor_identity": {
+            key: executor[key]
+            for key in (
+                "name",
+                "adapter_version",
+                "upstream_plugin_version",
+                "snakemake_version",
+                "adapter_source_sha256",
+            )
+        },
+    }
+
+
+def canonical_provider_projection(
+    campaign: Mapping[str, Any], attempt: Mapping[str, Any], profile: Mapping[str, Any]
+) -> str:
+    return json.dumps(
+        frozen_provider_projection(campaign, attempt, profile),
+        sort_keys=True,
+        separators=(",", ":"),
+    )

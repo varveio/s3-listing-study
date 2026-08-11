@@ -56,6 +56,14 @@ uv run --project experiments/orchestration/snakemake python \
 ```
 
 The command refuses malformed profiles and refuses to replace different bytes.
+Execution-profile schema 2 replaces the earlier schema-1 executor identity.
+Existing ignored schema-1 profiles and targets containing their old execution
+digest are obsolete; do not edit or overwrite them. Create a new run directory,
+fill the schema-2 identity fields from the installed adapter, freeze a new
+`execution-profile.json` with the command above, and record the new SHA-256 it
+prints as the execution digest used by the marker target. This preserves the
+create-only history while making code and dependency changes visible in target
+identity.
 The workflow accepts both frozen inputs only from the same
 `.snakemake/runs/<run>/` directory beneath its working directory. That ignored,
 in-repository placement lets Snakemake include their exact bytes in the remote
@@ -65,18 +73,27 @@ absolute path, traversal, extra nesting, or alternate spelling is rejected
 before DAG construction because it would not be portable inside the extracted
 remote source archive. Keep the generated frozen files uncommitted.
 
-The real trial uses the existing results bucket. The frozen profile remaps each
+The real trial uses the existing results bucket as a separate diagnostic
+orchestration-evaluation profile. These runs are diagnostics, not production-
+profile benchmark evidence. The frozen profile remaps each
 logical campaign attempt prefix to
 `snakemake/evidence/<campaign>/results/<bucket>/<tool>/<case>/run-N/`; worker
 object names remain confined by the experiment to `snakemake/**`. The worker
 currently has bucket-wide `roles/storage.objectAdmin` (owner decision on
 `origin/main` at `e0843b3`); this namespace split is an experiment invariant,
-not an IAM prefix boundary. Snakemake source, manifests, profiles and mutable
-markers live under `snakemake/orchestration/` in the same bucket. The
-authenticated worker remains a distinct, create-only identity and needs the
-corresponding object-read/update and Secret Manager access before an
-authenticated case can run. That prerequisite is external to this experiment;
-this work makes no Terraform changes.
+not an IAM prefix boundary. That role supplies object create/read/update/delete
+and list operations, but not the bucket-metadata permission
+`storage.buckets.get`. Both the outer runner and nested worker invoke the GCS
+plugin's `Bucket.exists()`, so both identities also need a bucket-scoped grant
+containing `storage.buckets.get` (for example `roles/storage.legacyBucketReader`
+or a narrower custom role). This broader diagnostic identity does not alter the
+authoritative production create-only profile in `docs/operating/runner-security.md`.
+Snakemake source, manifests, profiles and mutable markers live under
+`snakemake/orchestration/` in the same bucket. The authenticated worker remains
+a distinct identity and needs the same diagnostic object and bucket-metadata
+permissions plus Secret Manager access before an authenticated case can run.
+That prerequisite is external to this experiment; this work makes no Terraform
+changes.
 
 ```sh
 uv run --project experiments/orchestration/snakemake python \
@@ -84,11 +101,16 @@ uv run --project experiments/orchestration/snakemake python \
   --campaign "$run_dir/campaign.json" \
   --execution-profile "$run_dir/execution-profile.json"
 
+campaign_sha256=$(sha256sum "$run_dir/campaign.json" | cut -d' ' -f1)
+execution_sha256=$(sha256sum "$run_dir/execution-profile.json" | cut -d' ' -f1)
+target="markers/2026-08-11-snake/$campaign_sha256/$execution_sha256/noaa-rtma-pds/aws-cli/s3api-v2-text/run-1.json"
+
 S3_STUDY_RUN_DIR="$run_dir" \
 uv run --project experiments/orchestration/snakemake snakemake \
   --snakefile experiments/orchestration/snakemake/Snakefile \
   --profile experiments/orchestration/snakemake/profiles/googlebatch \
-  --dry-run
+  --dry-run \
+  "$target"
 ```
 
 This operator dry-run consults marker state through the configured GCS storage
@@ -122,6 +144,13 @@ service account and secret reference. Tests derive those fields directly from
 the frozen campaign rows and execution profile for every resolved
 `noaa-rtma-pds` attempt, then check the adapted executor's actual Google Batch
 request against that projection.
+The same canonical provider projection is carried as a rule parameter and the
+executor compares it with effective job resources, threads, project, region,
+runtime helper and GCS storage settings immediately before submission.
+`--set-resources`, `--set-threads`, provider flags and storage flags therefore
+cannot silently mutate a launch while retaining the frozen digests. Workflow
+configuration paths remain derived from `S3_STUDY_RUN_DIR`; `--config` cannot
+replace them or their hashes.
 
 ## Runtime helper and executor
 
@@ -133,6 +162,12 @@ retry zero, the selected allocation and identity, cgroup options, and Secret
 Manager mapping. It labels the Batch Job with the stable campaign
 `Attempt.job_id`, while using a separate random Batch resource ID for provider
 operations.
+The execution profile schema records the installed Snakemake version, local
+adapter version, upstream Google Batch plugin version, and a deterministic
+SHA-256 over `__init__.py` and `executor.py` (path and byte lengths are framed
+before hashing). Freezing and submission both validate that identity. Any code
+or environment change requires a newly frozen profile and therefore a new
+execution digest and marker namespace.
 
 The current immutable subject images are not rebuilt. A small helper image
 copies a locked Snakemake 9.25.1 plus GCS-provider runtime into the Batch
@@ -184,13 +219,16 @@ googlebatch-study-image-project: cos-cloud
 The default storage prefix is the only remote root for marker paths. The
 Snakefile fixes their logical names below `markers/`; do not repeat
 `snakemake/orchestration/` in a marker path. Launch through the same frozen run
-directory used by dry-run and no custom submit, poll, or watch wrapper:
+directory used by dry-run and no custom submit, poll, or watch wrapper. Always
+provide exactly one marker target; the current diagnostic gate must never
+default to `rule all` and all 17 attempts:
 
 ```sh
 S3_STUDY_RUN_DIR="$run_dir" \
 uv run --project experiments/orchestration/snakemake snakemake \
   --snakefile experiments/orchestration/snakemake/Snakefile \
-  --profile experiments/orchestration/snakemake/profiles/googlebatch
+  --profile experiments/orchestration/snakemake/profiles/googlebatch \
+  "$target"
 ```
 
 `scripts/` intentionally contains only the rule runner and its workflow support

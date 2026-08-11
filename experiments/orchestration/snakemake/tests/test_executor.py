@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
@@ -13,20 +14,27 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from google.api_core.exceptions import DeadlineExceeded
 
 ROOT = Path(__file__).resolve().parents[4]
 EXPERIMENT = ROOT / "experiments" / "orchestration" / "snakemake"
 sys.path.insert(0, str(EXPERIMENT))
 
 from scripts.workflow import (  # noqa: E402
+    WorkflowInputError,
+    canonical_provider_projection,
     executor_runtime_image,
+    freeze_execution_profile,
     load_campaign,
     load_execution_profile,
+    marker_path,
     project_attempt,
 )
 from snakemake_executor_plugin_googlebatch_study import (  # noqa: E402
     RUNTIME_PATH,
+    adapter_source_sha256,
     build_create_job_request,
+    installed_executor_identity,
 )
 from snakemake_executor_plugin_googlebatch_study import (  # noqa: E402
     Executor as StudyGoogleBatchExecutor,
@@ -68,7 +76,7 @@ def _images(plan: bench.Plan) -> dict[str, dict[str, object]]:
 
 def _profile() -> dict[str, object]:
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "project": "study1",
         "location": "us-east1",
         "results_bucket": "study-results",
@@ -88,9 +96,10 @@ def _profile() -> dict[str, object]:
         "n4_boot_disk": {"type": "hyperdisk-balanced", "image": "batch-cos"},
         "executor": {
             "name": "snakemake-executor-plugin-googlebatch-study",
-            "plugin_version": "0.1.0",
+            "adapter_version": "0.1.0",
+            "upstream_plugin_version": "0.5.1",
             "snakemake_version": "9.25.1",
-            "patch_identity": "googlebatch-study-0.1.0",
+            "adapter_source_sha256": adapter_source_sha256(),
             "runtime_image": RUNTIME_IMAGE,
         },
     }
@@ -237,6 +246,185 @@ def test_falsey_job_resource_overrides_executor_default() -> None:
 def test_runtime_helper_identity_comes_from_frozen_profile() -> None:
     profile = _profile()
     assert executor_runtime_image(profile) == RUNTIME_IMAGE
+    assert profile["executor"] == {**installed_executor_identity(), "runtime_image": RUNTIME_IMAGE}
+
+
+def test_runnable_profile_freeze_binds_installed_executor_identity(tmp_path: Path) -> None:
+    source = tmp_path / "source.json"
+    destination = tmp_path / "execution-profile.json"
+    source.write_text(json.dumps(_profile()), encoding="utf-8")
+    assert freeze_execution_profile(source, destination)[0] is True
+
+    tampered = _profile()
+    tampered["executor"]["adapter_source_sha256"] = "0" * 64
+    source.write_text(json.dumps(tampered), encoding="utf-8")
+    with pytest.raises(WorkflowInputError, match="adapter_source_sha256"):
+        freeze_execution_profile(source, tmp_path / "tampered.json")
+
+
+def _executor_validation_fixture(tmp_path: Path):
+    _, campaign, profile = _compiled(tmp_path)
+    row = campaign["attempts"][0]
+    projected = project_attempt(campaign, row, profile)
+    resources = {
+        "googlebatch_planned_job_id": projected["job_id"],
+        "googlebatch_container": projected["image_uri"],
+        "googlebatch_machine_type": projected["machine_type"],
+        "googlebatch_cpu_milli": projected["cpu_milli"],
+        "googlebatch_memory": projected["memory_mib"],
+        "googlebatch_container_options": projected["container_options"] or "__unset__",
+        "googlebatch_boot_disk_type": (
+            projected["boot_disk"]["type"] if projected["boot_disk"] else "__unset__"
+        ),
+        "googlebatch_boot_disk_image": (
+            projected["boot_disk"]["image"] if projected["boot_disk"] else "__unset__"
+        ),
+        "googlebatch_retry_count": projected["retry_count"],
+        "googlebatch_max_run_duration": projected["max_run_duration"],
+        "googlebatch_provisioning": projected["provisioning"],
+        "googlebatch_zone": projected["zone"] or "__unset__",
+        "googlebatch_network": projected["network"] or "__unset__",
+        "googlebatch_subnetwork": projected["subnetwork"] or "__unset__",
+        "googlebatch_service_account": projected["service_account"],
+        "googlebatch_secret_resource": projected["secret_resource"] or "__unset__",
+        "googlebatch_runtime_image": RUNTIME_IMAGE,
+    }
+    job = SimpleNamespace(
+        resources=resources,
+        threads=projected["vcpus"],
+        params={
+            "frozen_provider_projection": canonical_provider_projection(campaign, row, profile)
+        },
+    )
+    tagged = SimpleNamespace(get_settings=lambda: SimpleNamespace(project=profile["project"]))
+    executor = object.__new__(StudyGoogleBatchExecutor)
+    executor.executor_settings = SimpleNamespace(
+        project=profile["project"], region=profile["location"]
+    )
+    executor.workflow = SimpleNamespace(
+        storage_settings=SimpleNamespace(
+            default_storage_provider="gcs",
+            default_storage_prefix=(
+                f"gcs://{profile['results_bucket']}/{profile['orchestration_prefix']}"
+            ),
+        ),
+        storage_provider_settings={"gcs": tagged},
+    )
+    return executor, job
+
+
+def test_effective_launch_matches_frozen_provider_projection(tmp_path: Path) -> None:
+    executor, job = _executor_validation_fixture(tmp_path)
+    actual = executor._validate_frozen_submission(job)
+    assert actual["batch"]["retry_count"] == 0
+    assert actual["threads"] == 2
+
+
+@pytest.mark.parametrize(
+    ("mutation", "mismatch"),
+    (
+        (lambda executor, job: job.resources.__setitem__("googlebatch_retry_count", 1), "batch"),
+        (lambda executor, job: setattr(job, "threads", job.threads + 1), "threads"),
+        (
+            lambda executor, job: job.resources.__setitem__("googlebatch_project", "other1"),
+            "project",
+        ),
+        (
+            lambda executor, job: job.resources.__setitem__("googlebatch_region", "us-west1"),
+            "location",
+        ),
+        (
+            lambda executor, job: job.resources.__setitem__(
+                "googlebatch_runtime_image",
+                "us-east1-docker.pkg.dev/study/runtime/other@sha256:" + "e" * 64,
+            ),
+            "runtime_image",
+        ),
+        (
+            lambda executor, job: setattr(
+                executor.workflow.storage_settings,
+                "default_storage_prefix",
+                "gcs://other-bucket/snakemake/orchestration/",
+            ),
+            "default_storage_prefix",
+        ),
+        (
+            lambda executor, job: executor.workflow.storage_provider_settings.__setitem__(
+                "gcs",
+                SimpleNamespace(get_settings=lambda: SimpleNamespace(project="other1")),
+            ),
+            "storage_gcs_project",
+        ),
+    ),
+)
+def test_effective_launch_refuses_generic_overrides(
+    tmp_path: Path, mutation, mismatch: str
+) -> None:
+    executor, job = _executor_validation_fixture(tmp_path)
+    mutation(executor, job)
+    with pytest.raises(Exception, match=mismatch):
+        executor._validate_frozen_submission(job)
+
+
+def _poll_executor(response_or_error):
+    executor = object.__new__(StudyGoogleBatchExecutor)
+
+    def get_job(*, request):
+        if isinstance(response_or_error, Exception):
+            raise response_or_error
+        return response_or_error
+
+    events: list[str] = []
+    executor.batch = SimpleNamespace(get_job=get_job)
+    executor.logger = SimpleNamespace(
+        info=lambda message: events.append(f"info:{message}"),
+        warning=lambda message: events.append(f"warning:{message}"),
+    )
+    executor.save_finished_job_logs = lambda job: events.append("saved")
+    executor.report_job_error = lambda job, **kwargs: events.append("failed")
+    executor.report_job_success = lambda job: events.append("succeeded")
+    return executor, events
+
+
+def _collect_poll(executor, submitted):
+    async def collect():
+        return [job async for job in executor.check_active_jobs([submitted])]
+
+    return asyncio.run(collect())
+
+
+def test_poll_deadline_keeps_job_active_without_terminal_report() -> None:
+    executor, events = _poll_executor(DeadlineExceeded("transient"))
+    submitted = SimpleNamespace(
+        external_jobid="projects/study1/locations/us-east1/jobs/job1",
+        aux={"logfile": "job.log", "last_seen": None},
+    )
+    assert _collect_poll(executor, submitted) == [submitted]
+    assert events == [
+        "warning:Google Batch status poll for "
+        "'projects/study1/locations/us-east1/jobs/job1' exceeded its deadline; "
+        "the job remains active and will be checked again"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("state", "yielded", "terminal"),
+    (("RUNNING", True, None), ("SUCCEEDED", False, "succeeded"), ("FAILED", False, "failed")),
+)
+def test_poll_preserves_normal_states(state: str, yielded: bool, terminal: str | None) -> None:
+    response = SimpleNamespace(
+        status=SimpleNamespace(state=SimpleNamespace(name=state), status_events=[])
+    )
+    executor, events = _poll_executor(response)
+    submitted = SimpleNamespace(
+        external_jobid="projects/study1/locations/us-east1/jobs/job1",
+        aux={"logfile": "job.log", "last_seen": None},
+    )
+    assert bool(_collect_poll(executor, submitted)) is yielded
+    if terminal is None:
+        assert "saved" not in events
+    else:
+        assert events[-2:] == ["saved", terminal]
 
 
 def test_remote_source_layout_is_narrow_and_host_independent() -> None:
@@ -270,8 +458,13 @@ def test_plugin_is_discoverable_by_snakemake_registry() -> None:
 
 def _checked_in_profile_dry_run(
     tmp_path: Path,
+    *extra_args: str,
+    targets: tuple[str, ...] | None = None,
+    target_count: int = 1,
+    dry_run: bool = True,
+    nested: bool = False,
 ) -> subprocess.CompletedProcess[str]:
-    compiled, _, _ = _compiled(tmp_path)
+    compiled, campaign, _ = _compiled(tmp_path)
     run_dir = ROOT / ".snakemake" / "runs" / f"executor-test-{uuid.uuid4().hex}"
     run_dir.mkdir(parents=True)
     try:
@@ -279,6 +472,40 @@ def _checked_in_profile_dry_run(
         profile_path = run_dir / "execution-profile.json"
         campaign_path.write_bytes(compiled.content)
         profile_path.write_text(json.dumps(_profile()), encoding="utf-8")
+        if targets is None:
+            targets = tuple(
+                marker_path(
+                    campaign=campaign["campaign"],
+                    campaign_sha256=hashlib.sha256(campaign_path.read_bytes()).hexdigest(),
+                    execution_sha256=hashlib.sha256(profile_path.read_bytes()).hexdigest(),
+                    attempt=row,
+                )
+                for row in campaign["attempts"][:target_count]
+            )
+        if nested:
+            row = campaign["attempts"][0]
+            target_job = "attempt:" + ",".join(
+                f"{key}={row[key]}"
+                for key in ("bucket", "tool", "case_id", "run_ordinal")
+            )
+            targets = ()
+            dry_run = False
+            extra_args = (
+                "--mode",
+                "subprocess",
+                "--target-jobs",
+                target_job,
+                "--executor",
+                "local",
+                "--cores",
+                "1",
+                "--config",
+                f"campaign_path={campaign_path.relative_to(ROOT)}",
+                f"execution_profile_path={profile_path.relative_to(ROOT)}",
+                f"campaign_sha256={hashlib.sha256(campaign_path.read_bytes()).hexdigest()}",
+                f"execution_sha256={hashlib.sha256(profile_path.read_bytes()).hexdigest()}",
+                *extra_args,
+            )
         command = [
             sys.executable,
             "-c",
@@ -289,11 +516,14 @@ def _checked_in_profile_dry_run(
             ),
             "--snakefile",
             str(EXPERIMENT / "Snakefile"),
+            *targets,
             "--profile",
             str(EXPERIMENT / "profiles" / "googlebatch"),
-            "--dry-run",
             "--quiet",
+            *extra_args,
         ]
+        if dry_run:
+            command.append("--dry-run")
         environment = os.environ.copy()
         environment["S3_STUDY_RUN_DIR"] = run_dir.relative_to(ROOT).as_posix()
         completed = subprocess.run(
@@ -314,6 +544,85 @@ def test_checked_in_compute_profile_builds_dag_with_mocked_storage_inventory(
 ) -> None:
     completed = _checked_in_profile_dry_run(tmp_path)
     assert completed.returncode == 0, completed.stdout + completed.stderr
+
+
+def test_checked_in_profile_rejects_omitted_target(tmp_path: Path) -> None:
+    completed = _checked_in_profile_dry_run(tmp_path, targets=())
+    assert completed.returncode != 0
+    assert "requires exactly one frozen campaign marker target" in (
+        completed.stdout + completed.stderr
+    )
+
+
+@pytest.mark.parametrize("target", ("all", "markers/not-frozen.json"))
+def test_checked_in_profile_rejects_rule_or_unknown_target(
+    tmp_path: Path, target: str
+) -> None:
+    completed = _checked_in_profile_dry_run(tmp_path, targets=(target,))
+    assert completed.returncode != 0
+    if target == "all":
+        assert "requires exactly one frozen campaign marker target" in (
+            completed.stdout + completed.stderr
+        )
+
+
+def test_checked_in_profile_rejects_multiple_targets(tmp_path: Path) -> None:
+    first = _checked_in_profile_dry_run(tmp_path)
+    assert first.returncode == 0, first.stdout + first.stderr
+    completed = _checked_in_profile_dry_run(tmp_path, target_count=2)
+    assert completed.returncode != 0
+    assert "requires exactly one frozen campaign marker target" in (
+        completed.stdout + completed.stderr
+    )
+
+
+@pytest.mark.parametrize("executor", ("local", "dryrun"))
+def test_real_launch_rejects_nonstudy_executor(tmp_path: Path, executor: str) -> None:
+    completed = _checked_in_profile_dry_run(
+        tmp_path, "--executor", executor, dry_run=False
+    )
+    assert completed.returncode != 0
+    assert "frozen launch requires the googlebatch-study executor" in (
+        completed.stdout + completed.stderr
+    )
+
+
+def test_nested_target_job_reaches_generated_script_without_future_syntax_error(
+    tmp_path: Path,
+) -> None:
+    completed = _checked_in_profile_dry_run(tmp_path, nested=True)
+    output = completed.stdout + completed.stderr
+    assert completed.returncode != 0
+    assert "can't open file '/opt/s3-listing-study/attempt.pyz'" in output
+    assert "from __future__ imports must occur at the beginning" not in output
+    assert "nested Snakemake target job" not in output
+    assert "nested attempt execution requires" not in output
+
+
+@pytest.mark.parametrize(
+    "override",
+    (
+        ("--set-resources", "attempt:googlebatch_retry_count=1"),
+        ("--set-resources", "attempt:googlebatch_project=other1"),
+        ("--set-resources", "attempt:googlebatch_region=us-west1"),
+        ("--set-resources", "attempt:googlebatch_runtime_image=other"),
+        ("--set-threads", "attempt=4"),
+    ),
+)
+def test_checked_in_profile_dry_run_rejects_generic_overrides(
+    tmp_path: Path, override: tuple[str, str]
+) -> None:
+    completed = _checked_in_profile_dry_run(tmp_path, *override)
+    assert completed.returncode != 0
+    assert "cannot override a frozen Snakemake launch" in completed.stdout + completed.stderr
+
+
+def test_checked_in_profile_rejects_config_path_override(tmp_path: Path) -> None:
+    completed = _checked_in_profile_dry_run(
+        tmp_path, "--config", "campaign_path=.snakemake/runs/other/campaign.json"
+    )
+    assert completed.returncode != 0
+    assert "--config cannot override frozen campaign_path" in completed.stdout + completed.stderr
 
 
 @pytest.mark.parametrize(

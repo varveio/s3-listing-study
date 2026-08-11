@@ -4,10 +4,11 @@
   "aws_credential_secret": "projects/example/secrets/aws-listing/versions/1",
   "executor": {
     "name": "snakemake-executor-plugin-googlebatch-study",
-    "patch_identity": "googlebatch-study-0.1.0",
-    "plugin_version": "0.1.0",
+    "adapter_source_sha256": "661c0f546edb34b4e8c7cbd02dd175f6ea4744a11ab18ecc1f8d7c429837ef59",
+    "adapter_version": "0.1.0",
     "runtime_image": "us-east1-docker.pkg.dev/example/runtime/snakemake@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    "snakemake_version": "9.25.1"
+    "snakemake_version": "9.25.1",
+    "upstream_plugin_version": "0.5.1"
   },
   "evidence_prefix": "snakemake/evidence/",
   "location": "us-east1",
@@ -23,7 +24,7 @@
   "provisioning": "SPOT",
   "results_bucket": "example-results",
   "retry_count": 0,
-  "schema_version": 1,
+  "schema_version": 2,
   "subnetwork": null,
   "term_grace_s": 5,
   "zone": null
