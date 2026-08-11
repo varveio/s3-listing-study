@@ -274,12 +274,12 @@ def _already_exists(stderr: bytes) -> bool:
     return any(token in message for token in markers)
 
 
-def _freeze(uri: str, content: bytes) -> None:
+def _freeze(uri: str, content: bytes) -> bool:
     created = _run(
         ("gcloud", "storage", "cp", "-", uri, "--if-generation-match=0"), payload=content
     )
     if created.returncode == 0:
-        return
+        return True
     if not _already_exists(created.stderr):
         detail = created.stderr.decode("utf-8", errors="replace").strip()
         raise SubmissionError(f"could not create {uri}: {detail or f'exit {created.returncode}'}")
@@ -290,6 +290,7 @@ def _freeze(uri: str, content: bytes) -> None:
         raise SubmissionError(f"could not read existing {uri}: {reason}")
     if existing.stdout != content:
         raise SubmissionError(f"{uri} already exists with different content")
+    return False
 
 
 def _load_plans(args: argparse.Namespace) -> tuple[bench.Plan, ...]:
