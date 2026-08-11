@@ -172,10 +172,12 @@ matching Temporal campaign Workflow by its stable campaign ID. One child
 Workflow represents each
 scheduled run; one long-running, heartbeating Activity submits or validates and
 adopts its deterministic Batch job, then follows that job to a provider terminal
-state. Batch automatic retries remain disabled. Temporal Event History is
-operational state, not run evidence. `BatchJobOutcome` remains only the provider
-terminal state; `report-campaign` separately classifies sealed evidence and the
-subject outcome.
+state. Its retry lifetime is unbounded once a provider effect may exist, while
+each Activity attempt and Batch RPC remains bounded. A definitive create
+rejection returns explicit `NOT_CREATED`; an Activity or child failure alone is
+not provider settlement. Batch automatic retries remain disabled. Temporal
+Event History is operational state, not run evidence. `report-campaign`
+separately classifies provider settlement, sealed evidence, and subject outcome.
 
 Temporal's UI, CLI, and API expose raw controller visibility; the stateless
 `report-campaign` command joins that state to sealed GCS evidence without a
@@ -221,8 +223,9 @@ uv run s3-listing-study submit-campaign \
   --wait --publish-report
 ```
 
-This normal path waits, reconciles summary-only evidence, prints the final
-schema-versioned report, and create-only publishes it. Omit `--wait` and
+This normal path waits for both controller completion and provider settlement,
+reconciles summary-only evidence, prints the final schema-versioned report, and
+create-only publishes it. Omit `--wait` and
 `--publish-report` for asynchronous submission. A later shell can resume without
 local state:
 
@@ -263,6 +266,8 @@ perform this recovery.
 The complete observer state model, identity checks, duplicate policy, and live
 canary boundary are in
 [`docs/operating/campaign-operations.md`](../docs/operating/campaign-operations.md).
+Only `report_final: true` authorizes publication. Cancellation uses abandonment
+and therefore never finalizes a still-running Batch effect.
 
 Before a production canary, exercise the real local Temporal SDK server and
 Worker path (claim Signal, child Workflow, Activity, progress query, and final

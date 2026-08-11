@@ -143,15 +143,32 @@ def run_activity(
     return asyncio.run(activities.run_batch_job(client.selected)), heartbeats
 
 
-def test_first_activity_attempt_collision_is_nonretryable(
+def test_first_activity_attempt_collision_waits_for_provider_settlement(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     selected = spec()
-    client = FakeBatchClient(selected, [], collision=True)
-    with pytest.raises(ApplicationError) as raised:
-        run_activity(monkeypatch, client, attempt=1)
-    assert raised.value.type == "BatchJobCollision"
-    assert raised.value.non_retryable
+    client = FakeBatchClient(selected, [provider_job(selected, "FAILED")], collision=True)
+    outcome, _heartbeats = run_activity(monkeypatch, client, attempt=1)
+    assert outcome == BatchJobOutcome(selected.resource_name, "FAILED", "BatchJobCollision")
+    assert client.gets == 1
+    assert client.closed
+
+
+def test_definitive_create_rejection_returns_explicit_no_effect_outcome(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    selected = spec()
+
+    class RejectedCreateClient(FakeBatchClient):
+        async def create_job(self, **kwargs: Any) -> batch_v1.Job:
+            self.creates += 1
+            error = cast(type[Exception], google_exceptions.Forbidden)
+            raise error("create rejected")
+
+    client = RejectedCreateClient(selected, [], collision=False)
+    outcome, heartbeats = run_activity(monkeypatch, client, attempt=1)
+    assert outcome == BatchJobOutcome(selected.resource_name, "NOT_CREATED", "PermanentGoogleError")
+    assert heartbeats[-1] == {"job_name": selected.resource_name, "state": "NOT_CREATED"}
     assert client.gets == 0
     assert client.closed
 
@@ -178,20 +195,24 @@ def test_later_activity_attempt_adopts_exact_provider_normalized_job(
     assert client.closed
 
 
-def test_later_activity_attempt_refuses_mismatched_adoption(
+def test_later_activity_attempt_settles_mismatched_adoption_before_reporting_collision(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     selected = spec()
     client = FakeBatchClient(
-        selected, [provider_job(selected, "QUEUED", mismatch=True)], collision=True
+        selected,
+        [
+            provider_job(selected, "QUEUED", mismatch=True),
+            provider_job(selected, "FAILED", mismatch=True),
+        ],
+        collision=True,
     )
-    with pytest.raises(ApplicationError) as raised:
-        run_activity(monkeypatch, client, attempt=2)
-    assert raised.value.type == "BatchJobCollision"
-    assert raised.value.non_retryable
+    outcome, _heartbeats = run_activity(monkeypatch, client, attempt=2)
+    assert outcome == BatchJobOutcome(selected.resource_name, "FAILED", "BatchJobCollision")
+    assert client.gets == 2
 
 
-def test_campaign_waits_for_exact_claim_then_fans_out_without_spike_cap(
+def test_campaign_waits_for_exact_claim_then_fans_out_all_cases(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     selected = spec()
@@ -236,6 +257,7 @@ def test_campaign_waits_for_exact_claim_then_fans_out_without_spike_cap(
     result = asyncio.run(run())
     assert len(result) == len(cases)
     assert all(item.phase == "terminal" and item.provider_state == "SUCCEEDED" for item in result)
+    assert all(item.provider_settled for item in result)
     assert [call["id"] for call in calls] == [case.job_id for case in cases]
     assert all(call["parent_close_policy"] is ParentClosePolicy.ABANDON for call in calls)
     assert all(call["cancellation_type"] is ChildWorkflowCancellationType.ABANDON for call in calls)
@@ -304,8 +326,10 @@ def test_campaign_records_one_child_failure_without_abandoning_sibling(
     result = asyncio.run(campaign.run(CampaignWorkflowInput(cases, DIGEST)))
     assert result[0].failure_type == "PermanentGoogleError"
     assert result[0].provider_state is None
+    assert not result[0].provider_settled
     assert result[1].failure_type is None
     assert result[1].provider_state == "FAILED"
+    assert result[1].provider_settled
 
 
 @pytest.mark.parametrize("failure", [RuntimeError("bug"), CancelledError()])
@@ -365,7 +389,9 @@ def test_campaign_records_child_id_collision_and_runs_sibling(
     campaign.claim(DIGEST)
     result = asyncio.run(campaign.run(CampaignWorkflowInput(cases, DIGEST)))
     assert result[0].failure_type == "WorkflowAlreadyStartedError"
+    assert not result[0].provider_settled
     assert result[1].provider_state == "SUCCEEDED"
+    assert result[1].provider_settled
 
 
 @pytest.mark.parametrize(
@@ -373,6 +399,9 @@ def test_campaign_records_child_id_collision_and_runs_sibling(
     [
         BatchJobOutcome("projects/other/locations/us-east1/jobs/wrong", "SUCCEEDED"),
         BatchJobOutcome(spec().resource_name, "QUEUED"),
+        BatchJobOutcome(spec().resource_name, "SUCCEEDED", "PermanentGoogleError"),
+        BatchJobOutcome(spec().resource_name, "NOT_CREATED"),
+        BatchJobOutcome(spec().resource_name, "NOT_CREATED", "ActivityError"),
     ],
 )
 def test_campaign_refuses_invalid_batch_job_outcome(
@@ -401,6 +430,7 @@ def test_campaign_refuses_invalid_batch_job_outcome(
     assert result[0].failure_type == "InvalidBatchJobOutcome"
     assert result[0].provider_state is None
     assert result[0].provider_resource_name is None
+    assert not result[0].provider_settled
 
 
 def test_campaign_propagates_unexpected_child_start_fault(
@@ -430,6 +460,7 @@ def test_case_declares_activity_retries_timeouts_and_abandonment(
         return BatchJobOutcome(spec().resource_name, "FAILED")
 
     monkeypatch.setattr(temporal_workflow, "execute_activity", execute)
+    monkeypatch.setattr(temporal_workflow, "patched", lambda _patch: True)
     selected = spec(controller_timeout_s=34_205)
     result = asyncio.run(workflows.CaseWorkflow().run(selected))
     assert result.state == "FAILED"
@@ -439,17 +470,33 @@ def test_case_declares_activity_retries_timeouts_and_abandonment(
     batch_max_run_duration_s = 28_800 + 5 + 1800
     assert selected.controller_timeout_s == batch_max_run_duration_s + 3600
     assert captured["start_to_close_timeout"] == timedelta(seconds=selected.controller_timeout_s)
-    assert captured["schedule_to_close_timeout"] == timedelta(
-        seconds=selected.controller_timeout_s * 3
-    )
+    assert "schedule_to_close_timeout" not in captured
     assert captured["start_to_close_timeout"] > timedelta(seconds=batch_max_run_duration_s)
     assert captured["heartbeat_timeout"] == timedelta(seconds=30)
+    assert captured["retry_policy"].maximum_attempts == 0
+    assert not captured["retry_policy"].non_retryable_error_types
+    assert captured["cancellation_type"] is ActivityCancellationType.ABANDON
+
+
+def test_case_replay_path_retains_legacy_activity_command_options(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    async def execute(*_args: Any, **kwargs: Any) -> BatchJobOutcome:
+        captured.update(kwargs)
+        return BatchJobOutcome(spec().resource_name, "FAILED")
+
+    monkeypatch.setattr(temporal_workflow, "execute_activity", execute)
+    monkeypatch.setattr(temporal_workflow, "patched", lambda _patch: False)
+    selected = spec(controller_timeout_s=9000)
+    asyncio.run(workflows.CaseWorkflow().run(selected))
+    assert captured["schedule_to_close_timeout"] == timedelta(seconds=27_000)
     assert captured["retry_policy"].maximum_attempts == 8
     assert captured["retry_policy"].non_retryable_error_types == (
         "PermanentGoogleError",
         "BatchJobCollision",
     )
-    assert captured["cancellation_type"] is ActivityCancellationType.ABANDON
 
 
 class Description:

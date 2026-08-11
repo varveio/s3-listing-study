@@ -32,13 +32,16 @@ uv run s3-listing-study report-campaign \
 ```
 
 One-shot mode prints the current deterministic snapshot. `--wait` prints a
-concise progress line to stderr when controller or evidence state changes,
-polls until the owned parent Workflow is completed and every case controller is
-terminal, then prints the final report. A closed non-completed parent is an
-explicit error. It stores no durable cursor, cache, watcher state, or local
-database, so interruption only loses the current observation call; rerunning
-reconstructs the same report from retained state. A Temporal Worker must remain
-available for Workflow and Activity progress.
+concise progress line to stderr when controller or evidence state changes and
+polls until `report_final` is true: the owned parent Workflow completed, every
+case controller completed, and every possible provider effect settled. A closed
+non-completed parent is an explicit error. A completed controller with an
+unsettled provider is also an actionable error, not a final report: the command
+names the affected job IDs, refuses publication, and leaves the deterministic
+Batch resource names in the snapshot for investigation. It stores no durable
+cursor, watcher state, or local database, so interruption only loses the current
+observation call; rerunning reconstructs the same report from retained state. A
+Temporal Worker must remain available for Workflow and Activity progress.
 
 If the exact owner exists but every case remains pending, the owner may have
 been frozen just before the submitter crashed without sending the claim Signal.
@@ -58,9 +61,24 @@ a replacement.
 
 `CampaignWorkflow.progress` exposes one row per manifest job in frozen order:
 pending before child start, running with the exact child Run ID, and terminal
-with either a provider-terminal `BatchJobOutcome` state or a controller failure
-type. Child failures are collected as data; one exhausted Activity or unexpected
-child failure cannot fail-fast the parent and abandon observation of siblings.
+with a controller result. A terminal row separately records
+`provider_settled`. Settlement is true only for an exact Batch resource observed
+in provider-terminal `SUCCEEDED` or `FAILED`, or the explicit `NOT_CREATED`
+outcome returned by a definitive create rejection. A controller failure by
+itself has `provider_settled: false`; it can never turn absent GCS evidence into
+an immutable negative result. Child failures are collected as data so siblings
+remain observable, but they do not manufacture provider finality.
+
+The Batch Activity has no total retry-attempt or schedule-to-close limit. Once a
+deterministic job may exist, each retry adopts it and continues until Batch is
+terminal. Each Activity attempt is still bounded by `controller_timeout_s`,
+heartbeats every 30 seconds, and each Batch RPC has a 20-second timeout. A
+definitive create rejection is the only error path that returns `NOT_CREATED`;
+errors while creating ambiguously, adopting, or polling remain retryable. An
+unexpected pre-existing or identity-mismatched deterministic job is followed to
+provider terminal state and then recorded as a settled `BatchJobCollision`, not
+failed early. A Temporal patch marker preserves the old Activity command options
+when retained pre-change Workflow histories replay.
 
 For a nonterminal child, the observer uses the child's Temporal description and
 its one pending `run_batch_job` Activity to report the current attempt and the
@@ -73,11 +91,22 @@ evidence. Child descriptions are fetched concurrently with a fixed maximum of
 resource name matches the frozen `temporal.json` case and its state is
 `SUCCEEDED` or `FAILED`.
 
+All case children remain concurrently runnable to preserve the campaign's
+same-window methodology. Their sequential Workflow start commands may still
+create a short synchronized Batch API burst; a launch rate limiter is deferred
+because limiting active children would change the experiment.
+
+Cancellation retains Temporal abandonment semantics: canceling the parent does
+not cancel or settle a Batch job. The owned Workflow closes non-completed,
+`controller_complete` and `report_final` remain false, and publication is
+prohibited. Operators must let the controller recover or separately establish
+provider settlement; cancellation is not a finalization procedure.
+
 ## Summary-only evidence reconciliation
 
-Only controller-terminal cases are harvested. During one `--wait` invocation,
-each terminal case's immutable evidence snapshot is cached so later polls do not
-re-list or re-download it; the cache is discarded on exit. For each terminal
+Only provider-settled cases are harvested. During one `--wait` invocation,
+each settled case's immutable evidence snapshot is cached so later polls do not
+re-list or re-download it; the cache is discarded on exit. For each settled
 case, the observer takes the run prefix from frozen `campaign.json`, lists it
 with `delimiter=/`, and examines only immediate execution-UUID children. It
 GETs only each child's exact `result.json` commit marker; it never reads
@@ -91,8 +120,8 @@ The evidence state is:
 
 | State | Meaning |
 | --- | --- |
-| `pending` | Controller is not terminal; GCS is not inspected. |
-| `missing` | Controller is terminal and the run prefix has zero UUID children. |
+| `pending` | Provider is not settled; GCS is not inspected, even if the controller is terminal. |
+| `missing` | Provider is settled (including explicit `NOT_CREATED`) and the run prefix has zero UUID children. |
 | `recorded` | Exactly one canonical UUID has a bounded, valid, identity-matching `result.json`. |
 | `duplicate` | More than one immediate execution child exists; all are surfaced and none is canonical. |
 | `unsealed` | The sole canonical UUID child has no `result.json` commit marker. |
@@ -133,14 +162,24 @@ and exact provider resource names must all agree. The cached bytes are reused
 within one wait invocation and neither job bodies nor credential configuration
 are emitted.
 
-The schema-version-1 report is deterministic: manifest case order, sorted leaf
+The schema-version-2 report is deterministic: manifest case order, sorted leaf
 IDs, fixed aggregate keys, no observation timestamp, and canonical JSON when
 published. It includes the frozen campaign-manifest SHA-256, the safe owned
 Temporal-input digest, and separate controller, provider, evidence, and subject
-counts. Invalid and unsealed leaves carry stable reason codes rather than raw
-exception text or object content. `complete` means the parent Workflow is
-completed and every controller is terminal; it does not erase or reinterpret
-missing, duplicate, invalid, failed-provider, or failed-subject outcomes.
+counts. `NOT_CREATED` is counted separately from `SUCCEEDED`, `FAILED`, and
+`unavailable`. Invalid and unsealed leaves carry stable reason codes rather than
+raw exception text or object content. Finality and success are separate:
+
+- `controller_complete`: the exact owned parent completed and every case
+  controller is terminal.
+- `provider_settled`: every case has an exact provider-terminal outcome or
+  explicit proof that the create request produced no effect.
+- `report_final`: both preceding conditions hold. Only this authorizes
+  `--publish` or `--publish-report` and immutable negative-evidence states.
+- `operational_success`: the report is final and every case has a controller
+  success, provider `SUCCEEDED`, and exactly one valid recorded result. Subject
+  failures and timeouts may still be valid recorded evidence; they do not by
+  themselves make collection operationally unsuccessful.
 
 ## Permissions and current integration boundary
 

@@ -255,14 +255,17 @@ async def exercise() -> None:
             scope=scope,
         )
         assert report == repeated
-        assert report["complete"]
+        assert report["controller_complete"]
+        assert report["provider_settled"]
+        assert report["report_final"]
+        assert not report["operational_success"]
         assert report["cases"][0]["evidence"]["state"] == "missing"
         assert report["cases"][0]["provider_resource_name"] == case.resource_name
 
         _publish(bucket, campaign_id, report)
         _publish(bucket, campaign_id, report)
         changed = json.loads(json.dumps(report))
-        changed["complete"] = False
+        changed["operational_success"] = True
         try:
             _publish(bucket, campaign_id, changed)
         except ReportError:
