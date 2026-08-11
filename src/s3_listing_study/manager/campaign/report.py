@@ -1130,13 +1130,14 @@ async def observe_once(
     report_final = controller_complete and provider_settled
     operational_success = report_final and all(row["operational_success"] for row in rows)
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "campaign": campaign,
         "campaign_manifest_sha256": manifest.sha256,
         "campaign_digest": owner.campaign_digest,
-        "temporal_input_sha256": temporal_input.sha256,
-        "workflow": {
-            "workflow_id": owner.workflow_id,
+        "controller_input_sha256": temporal_input.sha256,
+        "engine": {
+            "name": "temporal",
+            "execution_id": owner.workflow_id,
             "run_id": owner.run_id,
             "status": status,
         },
@@ -1220,7 +1221,7 @@ async def _run_report(args: argparse.Namespace) -> dict[str, Any]:
             temporal_cache=temporal_cache,
             evidence_cache=evidence_cache,
         )
-        workflow_status = str(report["workflow"]["status"])
+        workflow_status = str(report["engine"]["status"])
         case_state = tuple(
             (
                 row["job_id"],

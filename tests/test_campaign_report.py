@@ -528,7 +528,32 @@ def test_final_report_records_single_missing_and_duplicate_without_raw_reads() -
             evidence_cache=evidence_cache,
         )
     )
-    assert report["schema_version"] == 2
+    assert report["schema_version"] == 3
+    assert set(report) == {
+        "schema_version",
+        "campaign",
+        "campaign_manifest_sha256",
+        "campaign_digest",
+        "controller_input_sha256",
+        "engine",
+        "controller_complete",
+        "provider_settled",
+        "report_final",
+        "operational_success",
+        "aggregate",
+        "cases",
+    }
+    assert (
+        report["controller_input_sha256"]
+        == hashlib.sha256(temporal_input(manifest_bytes, attempts)).hexdigest()
+    )
+    assert report["engine"] == {
+        "name": "temporal",
+        "execution_id": CAMPAIGN,
+        "run_id": "parent-run",
+        "status": "completed",
+    }
+    assert set(report["engine"]) == {"name", "execution_id", "run_id", "status"}
     assert report["controller_complete"]
     assert report["provider_settled"]
     assert report["report_final"]
@@ -708,7 +733,7 @@ def test_terminal_controller_failure_never_finalizes_unsettled_provider() -> Non
             scope=SCOPE,
         )
     )
-    assert report["workflow"]["status"] == "running"
+    assert report["engine"]["status"] == "running"
     assert not report["controller_complete"]
     assert not report["provider_settled"]
     assert not report["report_final"]
@@ -1170,7 +1195,7 @@ def test_observer_refuses_owner_run_mismatch_before_query_or_harvest() -> None:
 
 def test_publish_uses_create_only_report_commit() -> None:
     bucket = FakeBucket({})
-    report = {"schema_version": 2, "campaign": CAMPAIGN, "report_final": True}
+    report = {"schema_version": 3, "campaign": CAMPAIGN, "report_final": True}
     campaign_report._publish(bucket, CAMPAIGN, report)
     blob = bucket.objects[f"campaigns/{CAMPAIGN}/report.json"]
     assert blob.uploads == [
@@ -1187,7 +1212,7 @@ def test_publish_refuses_nonfinal_report_before_creating_object() -> None:
         campaign_report._publish(
             bucket,
             CAMPAIGN,
-            {"schema_version": 2, "campaign": CAMPAIGN, "report_final": False},
+            {"schema_version": 3, "campaign": CAMPAIGN, "report_final": False},
         )
     assert f"campaigns/{CAMPAIGN}/report.json" not in bucket.objects
 
@@ -1232,7 +1257,7 @@ def test_wait_refuses_closed_failure_or_unsettled_provider(
         "provider_settled": provider_settled,
         "report_final": False,
         "operational_success": False,
-        "workflow": {"status": workflow_status},
+        "engine": {"status": workflow_status},
         "cases": cases,
         "aggregate": {
             "controller": {"pending": 0, "running": 0, "retrying": 0, "terminal": 3},
