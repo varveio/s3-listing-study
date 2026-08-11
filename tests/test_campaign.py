@@ -1,11 +1,8 @@
-"""Campaign identity, job naming, artifact layout, and the submission ledger."""
+"""Campaign identity, job naming, artifact layout, and frozen manifests."""
 
 from __future__ import annotations
 
-import json
-import sqlite3
 from dataclasses import replace
-from pathlib import Path
 
 import pytest
 
@@ -14,7 +11,6 @@ from s3_listing_study.manager.campaign import (
     CAMPAIGN_MAX,
     JOB_ID_MAX,
     JOB_ID_RE,
-    Attempt,
     CampaignError,
     attempt_fingerprint,
     attempt_prefix,
@@ -23,9 +19,6 @@ from s3_listing_study.manager.campaign import (
     manifest,
     validate_campaign_id,
 )
-from s3_listing_study.manager.campaign import ledger as ledger_module
-
-NOW = "2026-08-10T12:00:00Z"
 
 
 def registration(*, subject: str = "a", derived: str = "d") -> dict[str, object]:
@@ -275,219 +268,3 @@ def test_the_manifest_indexes_every_job_and_names_the_image_components() -> None
     assert document["images"]["swath"]["shared_base_digest"] == IMAGE["shared_base_digest"]
     # Neither is in any fingerprint, and a reader will ask about both.
     assert (document["provisioning"], document["zone"]) == ("SPOT", "us-east4-a")
-
-
-# ── the ledger ───────────────────────────────────────────────────────────────
-
-
-def one_attempt(submission: int = 1) -> Attempt:
-    plan = committed_plan()
-    return attempts_for(
-        plan, campaign="2026-08-10-first", images=image_set(plan), submission=submission
-    )[0]
-
-
-def test_the_ledger_refuses_the_same_attempt_twice(tmp_path: Path) -> None:
-    """The guard against paying for one case twice under two names."""
-    attempt = one_attempt()
-    with ledger_module.open_ledger(tmp_path / "ledger.sqlite3") as connection:
-        ledger_module.record_intent(
-            connection, attempt=attempt.as_dict(), campaign=attempt.campaign, now=NOW
-        )
-        with pytest.raises(ledger_module.LedgerError, match="already in the ledger"):
-            ledger_module.record_intent(
-                connection, attempt=attempt.as_dict(), campaign=attempt.campaign, now=NOW
-            )
-
-
-def test_the_ledger_records_what_was_invoked_and_not_only_its_digest(tmp_path: Path) -> None:
-    """A fingerprint says whether two attempts match, never what either one was.
-
-    The sweep's own variable is the point: "everything at 2 GB" has to be a
-    WHERE clause on the record of what ran, not a join against a manifest in a
-    bucket the runner may not be able to reach.
-    """
-    plan = committed_plan()
-    swept = next(
-        a
-        for a in attempts_for(plan, campaign="2026-08-10-first", images=image_set(plan))
-        if a.case.resources.container_memory_gb == 2
-    )
-    with ledger_module.open_ledger(tmp_path / "ledger.sqlite3") as connection:
-        ledger_module.record_intent(
-            connection, attempt=swept.as_dict(), campaign=swept.campaign, now=NOW
-        )
-        row = ledger_module.attempts(connection, campaign=swept.campaign)[0]
-
-    assert row["mode"] == "recursive-parquet-sorted"
-    assert row["machine_type"] == "n4-highcpu-2"
-    assert (row["vcpus"], row["memory_gb"], row["container_memory_gb"]) == (2, 4, 2)
-    assert row["timeout_s"] == 3600
-    assert row["region"] == "us-east-1"
-    # The heap share, as the environment the runtime was actually told through.
-    assert json.loads(row["env_json"]) == [["JAVA_TOOL_OPTIONS", "-XX:MaxRAMPercentage=75"]]
-    # And the whole thing verbatim, so a column nobody thought to add is still
-    # recoverable from the row written at the time.
-    assert json.loads(row["case_json"]) == swept.as_dict()
-
-
-def test_no_ceiling_is_recorded_as_null_rather_than_a_number(tmp_path: Path) -> None:
-    """Absent is a real answer — the container saw the whole box — not a zero."""
-    plan = committed_plan()
-    unswept = next(
-        a
-        for a in attempts_for(plan, campaign="2026-08-10-first", images=image_set(plan))
-        if a.case.tool == "s5cmd"
-    )
-    with ledger_module.open_ledger(tmp_path / "ledger.sqlite3") as connection:
-        ledger_module.record_intent(
-            connection, attempt=unswept.as_dict(), campaign=unswept.campaign, now=NOW
-        )
-        row = ledger_module.attempts(connection, campaign=unswept.campaign)[0]
-    assert row["container_memory_gb"] is None
-
-
-def test_a_state_change_keeps_its_history(tmp_path: Path) -> None:
-    """An UPDATE alone would leave a misbehaving campaign with no account of how."""
-    attempt = one_attempt()
-    with ledger_module.open_ledger(tmp_path / "ledger.sqlite3") as connection:
-        ledger_module.record_intent(
-            connection, attempt=attempt.as_dict(), campaign=attempt.campaign, now=NOW
-        )
-        ledger_module.record_state(connection, job_id=attempt.job_id, state="submitted", now=NOW)
-        ledger_module.record_state(
-            connection, job_id=attempt.job_id, state="failed", now=NOW, detail={"reason": "quota"}
-        )
-        rows = ledger_module.attempts(connection, campaign=attempt.campaign)
-        assert [row["state"] for row in rows] == ["failed"]
-        events = connection.execute(
-            "SELECT event FROM events WHERE job_id = ? ORDER BY id", (attempt.job_id,)
-        ).fetchall()
-        assert [e["event"] for e in events] == ["submitting", "submitted", "failed"]
-
-
-def test_an_intent_and_its_first_event_are_atomic(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    attempt = one_attempt()
-    with ledger_module.open_ledger(tmp_path / "ledger.sqlite3") as connection:
-        monkeypatch.setattr(
-            ledger_module,
-            "_event",
-            lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("event write failed")),
-        )
-        with pytest.raises(RuntimeError, match="event write failed"):
-            ledger_module.record_intent(
-                connection, attempt=attempt.as_dict(), campaign=attempt.campaign, now=NOW
-            )
-        assert ledger_module.attempts(connection, campaign=attempt.campaign) == []
-
-
-def test_a_state_and_its_event_are_atomic(tmp_path: Path) -> None:
-    attempt = one_attempt()
-    with ledger_module.open_ledger(tmp_path / "ledger.sqlite3") as connection:
-        ledger_module.record_intent(
-            connection, attempt=attempt.as_dict(), campaign=attempt.campaign, now=NOW
-        )
-        with pytest.raises(TypeError, match="JSON serializable"):
-            ledger_module.record_state(
-                connection,
-                job_id=attempt.job_id,
-                state="submitted",
-                now=NOW,
-                detail={"not_json": object()},
-            )
-        [row] = ledger_module.attempts(connection, campaign=attempt.campaign)
-        assert row["state"] == "submitting"
-        events = connection.execute(
-            "SELECT event FROM events WHERE job_id = ? ORDER BY id", (attempt.job_id,)
-        ).fetchall()
-        assert [event["event"] for event in events] == ["submitting"]
-
-
-def test_the_ledger_knows_the_next_submission_number(tmp_path: Path) -> None:
-    """Batch cannot answer this: a spent job id is never deleted and never reused."""
-    first = one_attempt()
-    with ledger_module.open_ledger(tmp_path / "ledger.sqlite3") as connection:
-        assert (
-            ledger_module.next_submission(
-                connection, campaign=first.campaign, fingerprint=first.fingerprint
-            )
-            == 1
-        )
-        ledger_module.record_intent(
-            connection, attempt=first.as_dict(), campaign=first.campaign, now=NOW
-        )
-        assert (
-            ledger_module.next_submission(
-                connection, campaign=first.campaign, fingerprint=first.fingerprint
-            )
-            == 2
-        )
-
-
-def test_a_state_for_an_unknown_job_is_refused(tmp_path: Path) -> None:
-    with (
-        ledger_module.open_ledger(tmp_path / "ledger.sqlite3") as connection,
-        pytest.raises(ledger_module.LedgerError, match="no such attempt"),
-    ):
-        ledger_module.record_state(connection, job_id="c-nope", state="running", now=NOW)
-
-
-def test_a_conditional_state_change_loses_cleanly_without_an_event(tmp_path: Path) -> None:
-    attempt = one_attempt()
-    with ledger_module.open_ledger(tmp_path / "ledger.sqlite3") as connection:
-        ledger_module.record_intent(
-            connection, attempt=attempt.as_dict(), campaign=attempt.campaign, now=NOW
-        )
-        ledger_module.record_state(connection, job_id=attempt.job_id, state="succeeded", now=NOW)
-
-        changed = ledger_module.record_state_if_current(
-            connection,
-            job_id=attempt.job_id,
-            expected_state="submitted",
-            state="running",
-            now=NOW,
-        )
-
-        assert changed is False
-        [row] = ledger_module.attempts(connection, campaign=attempt.campaign)
-        assert row["state"] == "succeeded"
-        recorded = connection.execute(
-            "SELECT event FROM events WHERE job_id = ? ORDER BY id", (attempt.job_id,)
-        ).fetchall()
-        assert [event["event"] for event in recorded] == ["submitting", "succeeded"]
-
-
-def test_an_unknown_state_is_refused(tmp_path: Path) -> None:
-    attempt = one_attempt()
-    with ledger_module.open_ledger(tmp_path / "ledger.sqlite3") as connection:
-        ledger_module.record_intent(
-            connection, attempt=attempt.as_dict(), campaign=attempt.campaign, now=NOW
-        )
-        with pytest.raises(ledger_module.LedgerError, match="unknown state"):
-            ledger_module.record_state(connection, job_id=attempt.job_id, state="done", now=NOW)
-
-
-def test_the_ledger_applies_its_schema_to_a_fresh_file(tmp_path: Path) -> None:
-    path = tmp_path / "nested" / "ledger.sqlite3"
-    with ledger_module.open_ledger(path) as connection:
-        tables = {
-            row["name"]
-            for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
-        }
-    assert {"attempts", "events"} <= tables
-    assert path.is_file()
-
-
-def test_reopening_the_ledger_keeps_what_was_written(tmp_path: Path) -> None:
-    """The runner submits across more than one invocation; the record has to survive."""
-    attempt = one_attempt()
-    path = tmp_path / "ledger.sqlite3"
-    with ledger_module.open_ledger(path) as connection:
-        ledger_module.record_intent(
-            connection, attempt=attempt.as_dict(), campaign=attempt.campaign, now=NOW
-        )
-    with ledger_module.open_ledger(path) as connection:
-        assert len(ledger_module.attempts(connection, campaign=attempt.campaign)) == 1
-        assert isinstance(connection, sqlite3.Connection)

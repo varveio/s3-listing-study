@@ -10,6 +10,7 @@ class BatchJobSpec:
     location: str
     job_id: str
     job: dict[str, Any]
+    controller_timeout_s: int
 
     @property
     def resource_name(self) -> str:
@@ -19,6 +20,7 @@ class BatchJobSpec:
 @dataclass(frozen=True)
 class CampaignWorkflowInput:
     cases: tuple[BatchJobSpec, ...]
+    campaign_digest: str
 
 
 @dataclass(frozen=True)

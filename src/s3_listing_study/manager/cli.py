@@ -61,24 +61,6 @@ def _submit_campaign_main(argv: Sequence[str] | None) -> int:
     return submit_campaign_main(argv)
 
 
-def _report_campaign_main(argv: Sequence[str] | None) -> int:
-    from s3_listing_study.manager.campaign.report import report_campaign_main
-
-    return report_campaign_main(argv)
-
-
-def _retry_case_main(argv: Sequence[str] | None) -> int:
-    from s3_listing_study.manager.campaign.control import retry_case_main
-
-    return retry_case_main(argv)
-
-
-def _finalize_campaign_main(argv: Sequence[str] | None) -> int:
-    from s3_listing_study.manager.campaign.control import finalize_campaign_main
-
-    return finalize_campaign_main(argv)
-
-
 def _publish_derived_image_main(argv: Sequence[str] | None) -> int:
     from s3_listing_study.manager.campaign.images import publish_derived_image_main
 
@@ -136,19 +118,8 @@ COMMANDS = (
     ),
     Command(
         "submit-campaign",
-        "freeze and submit one resolved campaign to GCP Batch",
+        "freeze and start one resolved campaign through Temporal",
         _submit_campaign_main,
-    ),
-    Command(
-        "report-campaign",
-        "reconcile summary evidence and render a stable campaign report",
-        _report_campaign_main,
-    ),
-    Command("retry-case", "submit exactly the next try for one settled case", _retry_case_main),
-    Command(
-        "finalize-campaign",
-        "accept settled failures and close a campaign",
-        _finalize_campaign_main,
     ),
     Command(
         "publish-derived-image",

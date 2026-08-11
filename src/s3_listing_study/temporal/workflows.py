@@ -12,7 +12,7 @@ from temporalio.workflow import (
     ParentClosePolicy,
 )
 
-from s3_listing_study.temporal import MAX_CASES, models
+from s3_listing_study.temporal import models
 
 
 @workflow.defn
@@ -23,8 +23,8 @@ class CaseWorkflow:
             "run_batch_job",
             request,
             cancellation_type=ActivityCancellationType.ABANDON,
-            start_to_close_timeout=timedelta(hours=8),
-            schedule_to_close_timeout=timedelta(hours=24),
+            start_to_close_timeout=timedelta(seconds=request.controller_timeout_s),
+            schedule_to_close_timeout=timedelta(seconds=request.controller_timeout_s * 3),
             heartbeat_timeout=timedelta(seconds=30),
             retry_policy=RetryPolicy(
                 maximum_attempts=8,
@@ -37,14 +37,23 @@ class CaseWorkflow:
 
 @workflow.defn
 class CampaignWorkflow:
+    def __init__(self) -> None:
+        self._claims: set[str] = set()
+
+    @workflow.signal
+    def claim(self, campaign_digest: str) -> None:
+        """Idempotently record a frozen-input ownership claim."""
+        self._claims.add(campaign_digest)
+
     @workflow.run
     async def run(self, request: models.CampaignWorkflowInput) -> list[models.BatchJobOutcome]:
-        if not request.cases or len(request.cases) > MAX_CASES:
+        if not request.cases:
             raise ApplicationError(
-                f"Temporal spike requires between 1 and {MAX_CASES} cases",
+                "campaign contains no scheduled runs",
                 type="InvalidCampaignInput",
                 non_retryable=True,
             )
+        await workflow.wait_condition(lambda: request.campaign_digest in self._claims)
         children = [
             workflow.execute_child_workflow(
                 CaseWorkflow.run,
