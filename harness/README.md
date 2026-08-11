@@ -149,13 +149,13 @@ not an implemented append-later command). Each worker-container execution mints
 the `attempt_id` UUID beneath that run prefix. The UUID is per execution, not the
 scheduled run or Batch job: one job may theoretically produce more than one
 UUID leaf if the task is duplicated despite the campaign setting automatic
-Batch retries to 0. Create-only upload preserves every leaf. The required
-reconciler must surface more than one result under the same run prefix as an
+Batch retries to 0. Create-only upload preserves every leaf. The stateless
+campaign reconciler surfaces more than one result under the same run prefix as an
 anomaly; it must never select one as the canonical result or collapse them into
 one attempt.
 
-The required routine manager reporting path must visit only manifest-known run
-prefixes. It must list each with GCS `delimiter=/` to discover immediate UUID
+The routine manager reporting path visits only manifest-known run prefixes. It
+lists each with GCS `delimiter=/` to discover immediate UUID
 children without descending into their contents, then GET each child's exact
 `result.json` and read its small worker-produced summary and metrics. Raw
 listing artifacts remain in GCS as audit and verification evidence. The
@@ -173,11 +173,13 @@ Workflow represents each
 scheduled run; one long-running, heartbeating Activity submits or validates and
 adopts its deterministic Batch job, then follows that job to a provider terminal
 state. Batch automatic retries remain disabled. Temporal Event History is
-operational state, not run evidence, and `BatchJobOutcome` is only a provider
-terminal state until the separate evidence classifier exists.
+operational state, not run evidence. `BatchJobOutcome` remains only the provider
+terminal state; `report-campaign` separately classifies sealed evidence and the
+subject outcome.
 
-Temporal's UI, CLI, and API own campaign visibility; the study has no local
-ledger, watcher, or status command. Temporal Cloud hosts the durable service,
+Temporal's UI, CLI, and API expose raw controller visibility; the stateless
+`report-campaign` command joins that state to sealed GCS evidence without a
+local ledger or watcher. Temporal Cloud hosts the durable service,
 but an independently deployed `s3-listing-study-temporal-worker` process must
 remain available to poll the campaign Task Queue. Stopping every Worker pauses
 controller progress without changing the Batch job or the sealed GCS evidence
@@ -215,7 +217,18 @@ uv run s3-listing-study submit-campaign \
   --path <plan.yaml> --campaign <new-campaign-id> --image-set <images.json> \
   --project <gcp-project> --location <batch-region> \
   --results-bucket <results-bucket> \
-  --anonymous-worker-sa <worker-service-account>
+  --anonymous-worker-sa <worker-service-account> \
+  --wait --publish-report
+```
+
+This normal path waits, reconciles summary-only evidence, prints the final
+schema-versioned report, and create-only publishes it. Omit `--wait` and
+`--publish-report` for asynchronous submission. A later shell can resume without
+local state:
+
+```sh
+uv run s3-listing-study report-campaign \
+  --campaign <campaign-id> --results-bucket <results-bucket> --wait
 ```
 
 Inspect the campaign in Temporal Cloud UI, or with the CLI under the same
@@ -240,6 +253,30 @@ owner and sent the idempotent matching claim Signal. Retained owner and Event
 History are operational recovery state, not study evidence. Worker availability
 is still required: without a polling Worker the claimed Workflow and its
 Activities do not progress.
+
+If that exact owner exists but every case stays pending after Worker recovery,
+rerun the exact original `submit-campaign` command with unchanged frozen inputs
+and the same Temporal scope. The idempotent submission path validates the owned
+Run and re-sends its claim Signal. `report-campaign` is read-only and cannot
+perform this recovery.
+
+The complete observer state model, identity checks, duplicate policy, and live
+canary boundary are in
+[`docs/operating/campaign-operations.md`](../docs/operating/campaign-operations.md).
+
+Before a production canary, exercise the real local Temporal SDK server and
+Worker path (claim Signal, child Workflow, Activity, progress query, and final
+result) without GCP:
+
+```sh
+env -u TEMPORAL_API_KEY uv run python harness/tests/temporal-controller-e2e.py
+```
+
+The script starts an isolated SDK test server, uses unique local IDs, exercises
+an Activity retry and the owner-bound observer through terminal missing-evidence
+classification and create-only report collision, and does not read or print
+connection configuration or secrets. The Temporal SDK lazily downloads its
+test-server binary on first use.
 
 All eleven subjects have run at smoke on amd64 through this engine, four with a
 scoped credential. Those runs are non-comparative and carry no verifier verdict:
@@ -272,7 +309,7 @@ their recorded registry and manifest. The offline union regression suite is
 `harness/tests/run-regressions.sh`; the host security regression suite is
 `harness/tests/runner-security-regressions.sh`.
 
-Evidence reconciliation and comparative reporting remain separate manager
-integration work. They must consume worker summaries for routine operation and
-must not introduce a second subject lifecycle, timing implementation, or eager
-raw-artifact download path.
+Comparative presentation and correctness verification remain separate manager
+work. Routine reconciliation now consumes worker summaries without introducing
+a second subject lifecycle, timing implementation, or eager raw-artifact
+download path.

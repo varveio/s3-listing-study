@@ -15,7 +15,14 @@ from temporalio import workflow as temporal_workflow
 from temporalio.client import Client as TemporalClient
 from temporalio.client import WorkflowExecutionStatus
 from temporalio.common import WorkflowIDConflictPolicy, WorkflowIDReusePolicy
-from temporalio.exceptions import ApplicationError, WorkflowAlreadyStartedError
+from temporalio.exceptions import (
+    ActivityError,
+    ApplicationError,
+    CancelledError,
+    ChildWorkflowError,
+    RetryState,
+    WorkflowAlreadyStartedError,
+)
 from temporalio.service import RPCError, RPCStatusCode
 from temporalio.workflow import (
     ActivityCancellationType,
@@ -191,19 +198,29 @@ def test_campaign_waits_for_exact_claim_then_fans_out_without_spike_cap(
     cases = tuple(replace(selected, job_id=f"campaign-case-{number}") for number in range(8))
     calls: list[dict[str, Any]] = []
 
-    async def child(*args: Any, **kwargs: Any) -> BatchJobOutcome:
+    async def child(*args: Any, **kwargs: Any) -> Any:
         calls.append(kwargs)
         request = args[1]
-        return BatchJobOutcome(request.resource_name, "SUCCEEDED")
+
+        class Handle:
+            first_execution_run_id = f"run-{request.job_id}"
+
+            def __await__(self) -> Any:
+                async def done() -> BatchJobOutcome:
+                    return BatchJobOutcome(request.resource_name, "SUCCEEDED")
+
+                return done().__await__()
+
+        return Handle()
 
     async def wait_condition(predicate: Any) -> None:
         while not predicate():
             await asyncio.sleep(0)
 
-    monkeypatch.setattr(temporal_workflow, "execute_child_workflow", child)
+    monkeypatch.setattr(temporal_workflow, "start_child_workflow", child)
     monkeypatch.setattr(temporal_workflow, "wait_condition", wait_condition)
 
-    async def run() -> list[BatchJobOutcome]:
+    async def run() -> list[Any]:
         campaign = workflows.CampaignWorkflow()
         task = asyncio.create_task(campaign.run(CampaignWorkflowInput(cases, DIGEST)))
         await asyncio.sleep(0)
@@ -218,6 +235,7 @@ def test_campaign_waits_for_exact_claim_then_fans_out_without_spike_cap(
 
     result = asyncio.run(run())
     assert len(result) == len(cases)
+    assert all(item.phase == "terminal" and item.provider_state == "SUCCEEDED" for item in result)
     assert [call["id"] for call in calls] == [case.job_id for case in cases]
     assert all(call["parent_close_policy"] is ParentClosePolicy.ABANDON for call in calls)
     assert all(call["cancellation_type"] is ChildWorkflowCancellationType.ABANDON for call in calls)
@@ -229,6 +247,177 @@ def test_campaign_workflow_refuses_empty_input() -> None:
         asyncio.run(workflows.CampaignWorkflow().run(CampaignWorkflowInput((), DIGEST)))
     assert raised.value.type == "InvalidCampaignInput"
     assert raised.value.non_retryable
+
+
+def test_campaign_records_one_child_failure_without_abandoning_sibling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cases = (spec(), replace(spec(), job_id="campaign-case-two"))
+
+    async def wait_condition(predicate: Any) -> None:
+        assert predicate()
+
+    async def start(*args: Any, **_kwargs: Any) -> Any:
+        request = args[1]
+
+        class Handle:
+            first_execution_run_id = f"run-{request.job_id}"
+
+            def __await__(self) -> Any:
+                async def done() -> BatchJobOutcome:
+                    if request.job_id == cases[0].job_id:
+                        application_error = ApplicationError(
+                            "safe message not exposed", type="PermanentGoogleError"
+                        )
+                        activity_error = ActivityError(
+                            "activity failed",
+                            scheduled_event_id=1,
+                            started_event_id=2,
+                            identity="worker",
+                            activity_type="run_batch_job",
+                            activity_id="activity-1",
+                            retry_state=RetryState.MAXIMUM_ATTEMPTS_REACHED,
+                        )
+                        activity_error.__cause__ = application_error
+                        child_error = ChildWorkflowError(
+                            "child failed",
+                            namespace="default",
+                            workflow_id=request.job_id,
+                            run_id=self.first_execution_run_id,
+                            workflow_type="CaseWorkflow",
+                            initiated_event_id=3,
+                            started_event_id=4,
+                            retry_state=RetryState.RETRY_POLICY_NOT_SET,
+                        )
+                        child_error.__cause__ = activity_error
+                        raise child_error
+                    return BatchJobOutcome(request.resource_name, "FAILED")
+
+                return done().__await__()
+
+        return Handle()
+
+    monkeypatch.setattr(temporal_workflow, "wait_condition", wait_condition)
+    monkeypatch.setattr(temporal_workflow, "start_child_workflow", start)
+    campaign = workflows.CampaignWorkflow()
+    campaign.claim(DIGEST)
+    result = asyncio.run(campaign.run(CampaignWorkflowInput(cases, DIGEST)))
+    assert result[0].failure_type == "PermanentGoogleError"
+    assert result[0].provider_state is None
+    assert result[1].failure_type is None
+    assert result[1].provider_state == "FAILED"
+
+
+@pytest.mark.parametrize("failure", [RuntimeError("bug"), CancelledError()])
+def test_campaign_does_not_convert_local_or_cancellation_fault_to_success(
+    monkeypatch: pytest.MonkeyPatch, failure: BaseException
+) -> None:
+    async def wait_condition(predicate: Any) -> None:
+        assert predicate()
+
+    async def start(*_args: Any, **_kwargs: Any) -> Any:
+        class Handle:
+            first_execution_run_id = "run-local-fault"
+
+            def __await__(self) -> Any:
+                async def done() -> BatchJobOutcome:
+                    raise failure
+
+                return done().__await__()
+
+        return Handle()
+
+    monkeypatch.setattr(temporal_workflow, "wait_condition", wait_condition)
+    monkeypatch.setattr(temporal_workflow, "start_child_workflow", start)
+    campaign = workflows.CampaignWorkflow()
+    campaign.claim(DIGEST)
+    with pytest.raises(type(failure)):
+        asyncio.run(campaign.run(CampaignWorkflowInput((spec(),), DIGEST)))
+
+
+def test_campaign_records_child_id_collision_and_runs_sibling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cases = (spec(), replace(spec(), job_id="campaign-case-two"))
+
+    async def wait_condition(predicate: Any) -> None:
+        assert predicate()
+
+    async def start(*args: Any, **_kwargs: Any) -> Any:
+        request = args[1]
+        if request.job_id == cases[0].job_id:
+            raise WorkflowAlreadyStartedError(request.job_id, "CaseWorkflow")
+
+        class Handle:
+            first_execution_run_id = "run-sibling"
+
+            def __await__(self) -> Any:
+                async def done() -> BatchJobOutcome:
+                    return BatchJobOutcome(request.resource_name, "SUCCEEDED")
+
+                return done().__await__()
+
+        return Handle()
+
+    monkeypatch.setattr(temporal_workflow, "wait_condition", wait_condition)
+    monkeypatch.setattr(temporal_workflow, "start_child_workflow", start)
+    campaign = workflows.CampaignWorkflow()
+    campaign.claim(DIGEST)
+    result = asyncio.run(campaign.run(CampaignWorkflowInput(cases, DIGEST)))
+    assert result[0].failure_type == "WorkflowAlreadyStartedError"
+    assert result[1].provider_state == "SUCCEEDED"
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    [
+        BatchJobOutcome("projects/other/locations/us-east1/jobs/wrong", "SUCCEEDED"),
+        BatchJobOutcome(spec().resource_name, "QUEUED"),
+    ],
+)
+def test_campaign_refuses_invalid_batch_job_outcome(
+    monkeypatch: pytest.MonkeyPatch, outcome: BatchJobOutcome
+) -> None:
+    async def wait_condition(predicate: Any) -> None:
+        assert predicate()
+
+    async def start(*_args: Any, **_kwargs: Any) -> Any:
+        class Handle:
+            first_execution_run_id = "run-invalid-outcome"
+
+            def __await__(self) -> Any:
+                async def done() -> BatchJobOutcome:
+                    return outcome
+
+                return done().__await__()
+
+        return Handle()
+
+    monkeypatch.setattr(temporal_workflow, "wait_condition", wait_condition)
+    monkeypatch.setattr(temporal_workflow, "start_child_workflow", start)
+    campaign = workflows.CampaignWorkflow()
+    campaign.claim(DIGEST)
+    result = asyncio.run(campaign.run(CampaignWorkflowInput((spec(),), DIGEST)))
+    assert result[0].failure_type == "InvalidBatchJobOutcome"
+    assert result[0].provider_state is None
+    assert result[0].provider_resource_name is None
+
+
+def test_campaign_propagates_unexpected_child_start_fault(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def wait_condition(predicate: Any) -> None:
+        assert predicate()
+
+    async def start(*_args: Any, **_kwargs: Any) -> Any:
+        raise RuntimeError("local child-start bug")
+
+    monkeypatch.setattr(temporal_workflow, "wait_condition", wait_condition)
+    monkeypatch.setattr(temporal_workflow, "start_child_workflow", start)
+    campaign = workflows.CampaignWorkflow()
+    campaign.claim(DIGEST)
+    with pytest.raises(RuntimeError, match="local child-start bug"):
+        asyncio.run(campaign.run(CampaignWorkflowInput((spec(),), DIGEST)))
 
 
 def test_case_declares_activity_retries_timeouts_and_abandonment(

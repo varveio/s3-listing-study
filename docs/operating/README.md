@@ -8,6 +8,9 @@ the study and its findings should start at [`../README.md`](../README.md).
   third-party images: cooperative GCP Batch with a bounded task identity, and
   the stricter bridge/metadata-denial gate for local Docker. **Read before
   executing any subject or trusted reference container.**
+- [`campaign-operations.md`](campaign-operations.md) — production Temporal
+  submission, ownership recovery, controller observation, summary-only
+  evidence reconciliation, and deterministic final reporting.
 - [`tool-structure.md`](tool-structure.md) — the authoritative contract for a
   runnable tool directory: what every layer and Markdown file owns.
 - [`image-builds.md`](image-builds.md) — the shared-runtime, tool-parent and

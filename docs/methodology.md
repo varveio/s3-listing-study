@@ -43,12 +43,12 @@ only for explicit correctness verification.
 Required routine campaign reporting is summary-only. The campaign model owns a
 `run-<n>` ordinal for each scheduled run (`run-1` under the current policy),
 while every worker-container execution mints its own attempt UUID below that
-prefix. The manager reconciler still to be implemented must discover only
-immediate UUID children with a delimiter listing and read their exact
-`result.json` summaries. Raw listings remain in the same GCS attempt trees and
-are fetched only for correctness verification or investigation. Multiple UUID
-children under one run are duplicate executions; the reconciler must surface
-all and select none as canonical.
+prefix. The stateless manager reconciler discovers only immediate UUID children
+with a delimiter listing and reads their exact `result.json` summaries. Raw
+listings remain in the same GCS attempt trees and are fetched only for
+correctness verification or investigation. Multiple UUID children under one run
+are duplicate executions; the reconciler surfaces all and selects none as
+canonical. See [campaign operations](operating/campaign-operations.md).
 
 ## Evidence language
 

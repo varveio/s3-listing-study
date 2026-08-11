@@ -42,7 +42,7 @@ from s3_listing_study.temporal import TASK_QUEUE
 from s3_listing_study.temporal.models import BatchJobSpec, CampaignWorkflowInput
 from s3_listing_study.temporal.workflows import CampaignWorkflow
 
-IMAGE_SET_FIELDS_V2 = {
+IMAGE_SET_FIELDS = {
     "derived_image",
     "image_uri",
     "shared_base_digest",
@@ -53,8 +53,6 @@ IMAGE_SET_FIELDS_V2 = {
     "tool_version",
     "adapter_bundle_sha256",
     "harness_revision",
-}
-IMAGE_SET_FIELDS = IMAGE_SET_FIELDS_V2 | {
     "tool_image_digest",
     "tool_image_uri",
     "selection_sha256",
@@ -147,6 +145,9 @@ def build_parser() -> argparse.ArgumentParser:
         default=1800,
     )
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--wait", action="store_true")
+    parser.add_argument("--poll-interval-s", type=float, default=10.0)
+    parser.add_argument("--publish-report", action="store_true")
     return parser
 
 
@@ -171,9 +172,8 @@ def _read_image_set(path: Path) -> ImageSet:
     if unknown_top:
         raise SubmissionError(f"image set has unknown key(s): {', '.join(unknown_top)}")
     schema_version = document.get("schema_version")
-    if schema_version not in (2, IMAGE_SET_SCHEMA_VERSION) or isinstance(schema_version, bool):
-        raise SubmissionError("image set schema_version must be 2 or 3")
-    fields = IMAGE_SET_FIELDS if schema_version == 3 else IMAGE_SET_FIELDS_V2
+    if schema_version != IMAGE_SET_SCHEMA_VERSION or isinstance(schema_version, bool):
+        raise SubmissionError("image set schema_version must be 3")
     images = document.get("images")
     if not isinstance(images, dict) or not images:
         raise SubmissionError("image set images must be a non-empty object")
@@ -182,8 +182,8 @@ def _read_image_set(path: Path) -> ImageSet:
     for tool, value in images.items():
         if not isinstance(tool, str) or not tool or not isinstance(value, dict):
             raise SubmissionError("each image must be a tool-named object")
-        missing = sorted(fields - set(value))
-        unknown = sorted(set(value) - fields)
+        missing = sorted(IMAGE_SET_FIELDS - set(value))
+        unknown = sorted(set(value) - IMAGE_SET_FIELDS)
         if missing or unknown:
             detail = []
             if missing:
@@ -207,19 +207,18 @@ def _read_image_set(path: Path) -> ImageSet:
             identity = value[field]
             if not isinstance(identity, str) or re.fullmatch(r"[0-9a-f]{64}", identity) is None:
                 raise SubmissionError(f"{tool}: {field} is not 64 lowercase hex digits")
-        if schema_version == 3:
-            tool_digest = value["tool_image_digest"]
-            tool_uri = value["tool_image_uri"]
-            if not isinstance(tool_digest, str) or DIGEST_RE.fullmatch(tool_digest) is None:
-                raise SubmissionError(f"{tool}: tool_image_digest is not a sha256 digest")
-            if not isinstance(tool_uri, str) or not tool_uri.endswith(f"@{tool_digest}"):
-                raise SubmissionError(f"{tool}: tool_image_uri digest does not match")
-            selection_sha256 = value["selection_sha256"]
-            if (
-                not isinstance(selection_sha256, str)
-                or re.fullmatch(r"[0-9a-f]{64}", selection_sha256) is None
-            ):
-                raise SubmissionError(f"{tool}: selection_sha256 is not 64 lowercase hex digits")
+        tool_digest = value["tool_image_digest"]
+        tool_uri = value["tool_image_uri"]
+        if not isinstance(tool_digest, str) or DIGEST_RE.fullmatch(tool_digest) is None:
+            raise SubmissionError(f"{tool}: tool_image_digest is not a sha256 digest")
+        if not isinstance(tool_uri, str) or not tool_uri.endswith(f"@{tool_digest}"):
+            raise SubmissionError(f"{tool}: tool_image_uri digest does not match")
+        selection_sha256 = value["selection_sha256"]
+        if (
+            not isinstance(selection_sha256, str)
+            or re.fullmatch(r"[0-9a-f]{64}", selection_sha256) is None
+        ):
+            raise SubmissionError(f"{tool}: selection_sha256 is not 64 lowercase hex digits")
         artifact = value["tool_artifact"]
         if not isinstance(artifact, dict) or set(artifact) != {"kind", "locator", "sha256"}:
             raise SubmissionError(f"{tool}: tool_artifact has invalid fields")
@@ -269,8 +268,6 @@ def validate_registered_images(
 ) -> None:
     """Refuse component claims that disagree with the public capsule registration."""
     base = repo_root() if root is None else root
-    if getattr(images, "schema_version", IMAGE_SET_SCHEMA_VERSION) == 2:
-        return
     skipped = set() if skip is None else skip
     for tool, image in images.items():
         if tool in skipped:
@@ -366,20 +363,11 @@ def _freeze(uri: str, content: bytes) -> None:
         raise SubmissionError(f"{uri} already exists with different content")
 
 
-def _read_optional_owner(uri: str) -> TemporalOwner | None:
-    existing = _run(("gcloud", "storage", "cat", uri, f"--range=0-{TEMPORAL_OWNER_MAX_BYTES}"))
-    if existing.returncode != 0:
-        if _not_found(existing.stderr):
-            return None
-        detail = existing.stderr.decode("utf-8", errors="replace").strip()
-        raise SubmissionError(
-            f"could not read optional Temporal owner {uri}: "
-            f"{detail or f'exit {existing.returncode}'}"
-        )
-    if len(existing.stdout) > TEMPORAL_OWNER_MAX_BYTES:
+def _parse_owner(content: bytes, uri: str) -> TemporalOwner:
+    if len(content) > TEMPORAL_OWNER_MAX_BYTES:
         raise SubmissionError(f"Temporal owner {uri} exceeds {TEMPORAL_OWNER_MAX_BYTES} bytes")
     try:
-        document = json.loads(existing.stdout, object_pairs_hook=_reject_duplicate_keys)
+        document = json.loads(content, object_pairs_hook=_reject_duplicate_keys)
     except (UnicodeDecodeError, json.JSONDecodeError, SubmissionError) as exc:
         raise SubmissionError(f"Temporal owner {uri} is not valid JSON: {exc}") from None
     fields = {
@@ -428,7 +416,7 @@ def _read_optional_owner(uri: str) -> TemporalOwner | None:
         workflow_id=document["workflow_id"],
         run_id=document["run_id"],
     )
-    if existing.stdout != _canonical_json(owner.document()):
+    if content != _canonical_json(owner.document()):
         raise SubmissionError(f"Temporal owner {uri} is not canonical")
     if (
         document["workflow_type"] != CampaignWorkflow.__name__
@@ -436,6 +424,19 @@ def _read_optional_owner(uri: str) -> TemporalOwner | None:
     ):
         raise SubmissionError(f"Temporal owner {uri} names a different Temporal Workflow")
     return owner
+
+
+def _read_optional_owner(uri: str) -> TemporalOwner | None:
+    existing = _run(("gcloud", "storage", "cat", uri, f"--range=0-{TEMPORAL_OWNER_MAX_BYTES}"))
+    if existing.returncode != 0:
+        if _not_found(existing.stderr):
+            return None
+        detail = existing.stderr.decode("utf-8", errors="replace").strip()
+        raise SubmissionError(
+            f"could not read optional Temporal owner {uri}: "
+            f"{detail or f'exit {existing.returncode}'}"
+        )
+    return _parse_owner(existing.stdout, uri)
 
 
 def _freeze_owner(uri: str, owner: TemporalOwner) -> None:
@@ -711,6 +712,8 @@ def submit_campaign_main(argv: Sequence[str] | None = None) -> int:
         if args.dry_run:
             print(json.dumps(dry_run, sort_keys=True, indent=2, ensure_ascii=False))
             return 0
+        if args.publish_report and not args.wait:
+            raise SubmissionError("--publish-report requires --wait")
 
         _freeze_campaign(
             campaign=args.campaign,
@@ -735,6 +738,21 @@ def submit_campaign_main(argv: Sequence[str] | None = None) -> int:
                 owner=owner,
             )
         )
+        if args.wait:
+            from s3_listing_study.manager.campaign.report import report_campaign_main
+
+            report_args = [
+                "--campaign",
+                args.campaign,
+                "--results-bucket",
+                args.results_bucket,
+                "--wait",
+                "--poll-interval-s",
+                str(args.poll_interval_s),
+            ]
+            if args.publish_report:
+                report_args.append("--publish")
+            return report_campaign_main(report_args)
         print(json.dumps({"campaign": args.campaign, "workflow_id": workflow_id}, sort_keys=True))
         return 0
     except (

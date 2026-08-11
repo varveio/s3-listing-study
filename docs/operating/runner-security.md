@@ -43,14 +43,15 @@ does not assume a one-to-one scheduler outcome. The campaign model owns a stable
 `run-<n>` ordinal (`run-1` for the current `reps: 1` campaign); every
 worker-container execution mints a fresh attempt UUID and uploads create-only
 beneath that manifest-known run prefix. If one run produces multiple UUID
-children, the required reconciler must surface every result as duplicate
-execution and select none as canonical.
+children, the stateless campaign reconciler surfaces every result as duplicate
+execution and selects none as canonical.
 
-The required manager reconciler must list each expected run prefix with GCS
+The manager reconciler lists each expected run prefix with GCS
 `delimiter=/` to discover only immediate UUID children, then read each exact
 `result.json`. It must not descend into or download raw listing output. Raw
 artifacts stay in the same attempt tree and are fetched only for correctness
-verification or a specific investigation.
+verification or a specific investigation. Its resumable contract is documented
+in [campaign operations](campaign-operations.md).
 
 ### Local Docker: stricter manager-host profile
 
