@@ -1,0 +1,136 @@
+import os
+import sys
+
+# Source archives are extracted at the repository root. The study package is
+# deliberately loaded from the deployed source, not from an editable host
+# installation that will not exist in Batch.
+sys.path.insert(0, "src")
+sys.path.insert(0, "experiments/orchestration/snakemake/scripts")
+
+from workflow import (  # noqa: E402
+    MARKER_ROOT,
+    attempt_for_wildcards,
+    deployable_source_paths,
+    executor_runtime_image,
+    load_campaign,
+    load_execution_profile,
+    marker_path,
+    project_attempt,
+    require_sha256,
+    validate_ambient_execution,
+)
+
+
+def required_config(name):
+    value = config.get(name)
+    if not value:
+        raise ValueError(f"Snakemake config requires {name}=...")
+    return value
+
+
+CAMPAIGN_PATH, EXECUTION_PROFILE_PATH = deployable_source_paths(
+    required_config("campaign_path"),
+    required_config("execution_profile_path"),
+    working_directory=os.getcwd(),
+)
+# Nested Snakemake receives paths relative to the deployed archive root rather
+# than absolute paths from the submitting host.
+config["campaign_path"] = CAMPAIGN_PATH
+config["execution_profile_path"] = EXECUTION_PROFILE_PATH
+EXPECTED_CAMPAIGN_SHA256 = required_config("campaign_sha256")
+EXPECTED_EXECUTION_SHA256 = required_config("execution_sha256")
+CAMPAIGN_SHA256 = require_sha256(
+    CAMPAIGN_PATH, EXPECTED_CAMPAIGN_SHA256, label="campaign"
+)
+EXECUTION_SHA256 = require_sha256(
+    EXECUTION_PROFILE_PATH, EXPECTED_EXECUTION_SHA256, label="execution profile"
+)
+
+# Config files are part of Snakemake's deployed workflow source archive. The
+# rule inputs below are also explicitly local under a default remote provider.
+configfile: CAMPAIGN_PATH
+configfile: EXECUTION_PROFILE_PATH
+
+CAMPAIGN = load_campaign(CAMPAIGN_PATH)
+EXECUTION = load_execution_profile(EXECUTION_PROFILE_PATH)
+validate_ambient_execution(
+    EXECUTION,
+    project=required_config("ambient_project"),
+    results_bucket=required_config("ambient_results_bucket"),
+    location=required_config("ambient_location"),
+)
+RUNTIME_IMAGE = executor_runtime_image(EXECUTION)
+ATTEMPTS = {
+    (row["bucket"], row["tool"], row["case_id"], str(row["run_ordinal"])): row
+    for row in CAMPAIGN["attempts"]
+}
+MARKERS = [
+    marker_path(
+        campaign=CAMPAIGN["campaign"],
+        campaign_sha256=CAMPAIGN_SHA256,
+        execution_sha256=EXECUTION_SHA256,
+        attempt=row,
+    )
+    for row in CAMPAIGN["attempts"]
+]
+MARKER_PATTERN = (
+    f"{MARKER_ROOT}/{CAMPAIGN['campaign']}/{CAMPAIGN_SHA256}/{EXECUTION_SHA256}"
+    "/{bucket}/{tool}/{case_id}/run-{run_ordinal}.json"
+)
+
+
+def selected(wildcards):
+    return attempt_for_wildcards(ATTEMPTS, wildcards)
+
+
+def projection(wildcards):
+    return project_attempt(CAMPAIGN, selected(wildcards), EXECUTION)
+
+
+rule all:
+    input:
+        MARKERS,
+
+
+rule attempt:
+    input:
+        campaign=local(CAMPAIGN_PATH),
+        execution_profile=local(EXECUTION_PROFILE_PATH),
+    output:
+        marker=MARKER_PATTERN,
+    wildcard_constraints:
+        run_ordinal=r"\d+",
+    threads: lambda wildcards: projection(wildcards)["vcpus"]
+    resources:
+        googlebatch_machine_type=lambda wildcards: projection(wildcards)["machine_type"],
+        googlebatch_cpu_milli=lambda wildcards: projection(wildcards)["cpu_milli"],
+        googlebatch_memory=lambda wildcards: projection(wildcards)["memory_mib"],
+        googlebatch_boot_disk_type=lambda wildcards: projection(wildcards)["boot_disk"]["type"],
+        googlebatch_boot_disk_image=lambda wildcards: projection(wildcards)["boot_disk"]["image"],
+        googlebatch_retry_count=lambda wildcards: projection(wildcards)["retry_count"],
+        googlebatch_max_run_duration=lambda wildcards: projection(wildcards)["max_run_duration"],
+        googlebatch_container=lambda wildcards: projection(wildcards)["image_uri"],
+        googlebatch_runtime_image=RUNTIME_IMAGE,
+        googlebatch_container_options=lambda wildcards: projection(wildcards)["container_options"] or "__unset__",
+        googlebatch_service_account=lambda wildcards: projection(wildcards)["service_account"],
+        googlebatch_secret_resource=lambda wildcards: projection(wildcards)["secret_resource"] or "__unset__",
+        googlebatch_planned_job_id=lambda wildcards: projection(wildcards)["job_id"],
+        googlebatch_provisioning=lambda wildcards: projection(wildcards)["provisioning"],
+        googlebatch_zone=lambda wildcards: projection(wildcards)["zone"] or "__unset__",
+        googlebatch_network=lambda wildcards: projection(wildcards)["network"] or "__unset__",
+        googlebatch_subnetwork=lambda wildcards: projection(wildcards)["subnetwork"] or "__unset__",
+    params:
+        worker_argv=lambda wildcards: projection(wildcards)["worker_argv"],
+        output_path=lambda wildcards: projection(wildcards)["output_path"],
+        destination=lambda wildcards: projection(wildcards)["destination"],
+        campaign_id=CAMPAIGN["campaign"],
+        job_id=lambda wildcards: selected(wildcards)["job_id"],
+        case_id=lambda wildcards: selected(wildcards)["case_id"],
+        case_fingerprint=lambda wildcards: selected(wildcards)["case_fingerprint"],
+        attempt_fingerprint=lambda wildcards: selected(wildcards)["attempt_fingerprint"],
+        run_ordinal=lambda wildcards: selected(wildcards)["run_ordinal"],
+        submission_number=lambda wildcards: selected(wildcards)["submission"],
+        campaign_sha256=CAMPAIGN_SHA256,
+        execution_sha256=EXECUTION_SHA256,
+    script:
+        "scripts/run_attempt.py"

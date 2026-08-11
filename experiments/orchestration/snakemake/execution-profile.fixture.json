@@ -1,0 +1,30 @@
+{
+  "anonymous_worker_service_account": "anonymous-worker@example.iam.gserviceaccount.com",
+  "authenticated_worker_service_account": "authenticated-worker@example.iam.gserviceaccount.com",
+  "aws_credential_secret": "projects/example/secrets/aws-listing/versions/1",
+  "executor": {
+    "name": "snakemake-executor-plugin-googlebatch-study",
+    "patch_identity": "googlebatch-study-0.1.0",
+    "plugin_version": "0.1.0",
+    "runtime_image": "us-east1-docker.pkg.dev/example/runtime/snakemake@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "snakemake_version": "9.25.1"
+  },
+  "evidence_prefix": "snakemake/evidence/",
+  "location": "us-east1",
+  "n4_boot_disk": {
+    "image": "batch-cos",
+    "type": "hyperdisk-balanced"
+  },
+  "network": null,
+  "orchestration_prefix": "snakemake/orchestration/",
+  "output_path": "/tmp/s3-listing-study-attempt",
+  "post_attempt_allowance_s": 1800,
+  "project": "example",
+  "provisioning": "SPOT",
+  "results_bucket": "example-results",
+  "retry_count": 0,
+  "schema_version": 1,
+  "subnetwork": null,
+  "term_grace_s": 5,
+  "zone": null
+}

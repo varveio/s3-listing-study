@@ -235,6 +235,17 @@ class Attempt:
         }
 
 
+@dataclass(frozen=True)
+class CampaignCompilation:
+    """The pure, canonical result shared by submitters and workflow engines."""
+
+    plans: tuple[Plan, ...]
+    attempts: tuple[Attempt, ...]
+    document: Mapping[str, Any]
+    content: bytes
+    sha256: str
+
+
 def attempts_for(
     plan: Plan,
     *,
@@ -334,3 +345,50 @@ def manifest(
         "images": {tool: dict(image) for tool, image in sorted(images.items())},
         "attempts": [attempt.as_dict() for attempt in attempts],
     }
+
+
+def compile_campaign(
+    *,
+    campaign: str,
+    plans: Sequence[Plan],
+    images: Mapping[str, Mapping[str, Any]],
+    results_bucket: str,
+    provisioning: str = "SPOT",
+    zone: str | None = None,
+) -> CampaignCompilation:
+    """Resolve plans and frozen images into the one canonical campaign document."""
+    plan_tools = {tool for plan in plans for tool in plan.tools()}
+    if set(images) != plan_tools:
+        missing = sorted(plan_tools - set(images))
+        extra = sorted(set(images) - plan_tools)
+        detail = []
+        if missing:
+            detail.append(f"missing {', '.join(missing)}")
+        if extra:
+            detail.append(f"extra {', '.join(extra)}")
+        raise CampaignError(f"image set does not exactly cover the plans ({'; '.join(detail)})")
+    resolved_plans = tuple(plans)
+    generated = tuple(
+        attempt
+        for plan in resolved_plans
+        for attempt in attempts_for(plan, campaign=campaign, images=images)
+    )
+    document = manifest(
+        campaign=campaign,
+        plans=resolved_plans,
+        images=images,
+        attempts=generated,
+        results_bucket=results_bucket,
+        provisioning=provisioning,
+        zone=zone,
+    )
+    content = (
+        json.dumps(document, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n"
+    ).encode("utf-8")
+    return CampaignCompilation(
+        plans=resolved_plans,
+        attempts=generated,
+        document=document,
+        content=content,
+        sha256=hashlib.sha256(content).hexdigest(),
+    )

@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+
+install -d -m 0755 -o 10001 -g 10001 /tmp/workdir
+install -d -m 0755 -o 10001 -g 10001 /tmp/workdir/home
+install -d -m 0755 -o 10001 -g 10001 /tmp/workdir/runtime
+cp -a /runtime/site-packages/. /tmp/workdir/runtime/
+chown -R 10001:10001 /tmp/workdir/runtime

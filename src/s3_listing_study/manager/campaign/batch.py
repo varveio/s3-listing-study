@@ -8,13 +8,13 @@ from dataclasses import dataclass
 from typing import Any
 
 from s3_listing_study.manager.campaign import DIGEST_RE, Attempt, CampaignError
+from s3_listing_study.manager.campaign.request import evidence_prefix, worker_argv
 
 CREDENTIAL_ENV_VAR = "S3_STUDY_AWS_CREDENTIAL"
 DEFAULT_OUTPUT_PATH = "/tmp/s3-listing-study-attempt"
 DEFAULT_TERM_GRACE_S = 5
 DEFAULT_POST_ATTEMPT_ALLOWANCE_S = 1800
 PROVISIONING_MODELS = ("STANDARD", "SPOT")
-CASE_ENV_KEYS = frozenset(("JAVA_TOOL_OPTIONS", "NODE_OPTIONS"))
 N4_BOOT_DISK = {"type": "hyperdisk-balanced", "image": "batch-cos"}
 
 _SECRET_RE = re.compile(r"\Aprojects/[^/]+/secrets/[^/]+/versions/[^/]+\Z")
@@ -35,6 +35,7 @@ class BatchConfig:
     output_path: str = DEFAULT_OUTPUT_PATH
     term_grace_s: int = DEFAULT_TERM_GRACE_S
     post_attempt_allowance_s: int = DEFAULT_POST_ATTEMPT_ALLOWANCE_S
+    evidence_object_root: str | None = None
 
 
 def _validate_config(config: BatchConfig) -> None:
@@ -70,6 +71,12 @@ def _validate_config(config: BatchConfig) -> None:
         raise CampaignError("TERM grace must be nonnegative")
     if config.post_attempt_allowance_s < 1:
         raise CampaignError("post-attempt allowance must be positive")
+    if config.evidence_object_root is not None:
+        evidence_prefix(
+            campaign="2026-01-01-validation",
+            attempt_prefix="campaigns/2026-01-01-validation/results/example/tool/case/run-1",
+            object_root=config.evidence_object_root,
+        )
 
 
 def _image_uri(attempt: Attempt) -> str:
@@ -84,90 +91,6 @@ def _image_uri(attempt: Attempt) -> str:
     ):
         raise CampaignError(f"{attempt.case.tool}: image_uri must be pinned with @{derived}")
     return image_uri
-
-
-def _image_token(attempt: Attempt, field: str) -> str:
-    value = attempt.image.get(field)
-    if not isinstance(value, str) or not value or any(character.isspace() for character in value):
-        raise CampaignError(f"{attempt.case.tool}: image {field} must be a non-empty token")
-    return value
-
-
-def _commands(attempt: Attempt, config: BatchConfig) -> list[str]:
-    resources = attempt.case.resources
-    container_memory = resources.container_memory_gb
-    commands = [
-        "--request-schema",
-        "2",
-        "--output",
-        config.output_path,
-        "--timeout",
-        str(attempt.case.timeout_s),
-        "--term-grace",
-        str(config.term_grace_s),
-        "--tool",
-        attempt.case.tool,
-        "--tool-version",
-        _image_token(attempt, "tool_version"),
-        "--shared-base-digest",
-        str(attempt.image["shared_base_digest"]),
-        "--shared-base-uri",
-        str(attempt.image["shared_base_uri"]),
-        "--derived-image",
-        str(attempt.image["derived_image"]),
-        "--harness-revision",
-        _image_token(attempt, "harness_revision"),
-        "--operation",
-        "list",
-        "--auth",
-        attempt.case.auth,
-        "--mode",
-        attempt.case.mode,
-        "--bucket",
-        attempt.bucket,
-        "--region",
-        attempt.region,
-        "--prefix",
-        "",
-        "--scope",
-        "full",
-        "--campaign-id",
-        attempt.campaign,
-        "--job-id",
-        attempt.job_id,
-        "--case-id",
-        attempt.case.case_id,
-        "--case-fingerprint",
-        attempt.case.fingerprint,
-        "--attempt-fingerprint",
-        attempt.fingerprint,
-        "--run-ordinal",
-        str(attempt.run_ordinal),
-        "--submission-number",
-        str(attempt.submission),
-        "--machine-type",
-        resources.machine_type,
-        "--vcpus",
-        str(resources.vcpus),
-        "--memory-gb",
-        str(resources.memory_gb),
-        "--container-memory-gb",
-        "none" if container_memory is None else str(container_memory),
-        "--destination",
-        f"gs://{config.results_bucket}/{attempt.prefix}",
-    ]
-    seen: set[str] = set()
-    for name, value in attempt.case.env:
-        if name not in CASE_ENV_KEYS:
-            allowed = "|".join(sorted(CASE_ENV_KEYS))
-            raise CampaignError(f"case environment key must be one of {allowed}: {name!r}")
-        if name in seen:
-            raise CampaignError(f"case environment repeats {name}")
-        if not value or "\x00" in value:
-            raise CampaignError(f"case environment {name} value must be non-empty and NUL-free")
-        seen.add(name)
-        commands.extend(("--case-env", f"{name}={value}"))
-    return commands
 
 
 def render_job(attempt: Attempt, config: BatchConfig) -> dict[str, Any]:
@@ -197,7 +120,19 @@ def render_job(attempt: Attempt, config: BatchConfig) -> dict[str, Any]:
     container: dict[str, Any] = {
         "imageUri": image_uri,
         # Batch appends these to the fixed ENTRYPOINT embedded in the derived image.
-        "commands": _commands(attempt, config),
+        "commands": worker_argv(
+            campaign=attempt.campaign,
+            attempt=attempt.as_dict(),
+            image=attempt.image,
+            results_bucket=config.results_bucket,
+            output_path=config.output_path,
+            term_grace_s=config.term_grace_s,
+            destination_prefix=evidence_prefix(
+                campaign=attempt.campaign,
+                attempt_prefix=attempt.prefix,
+                object_root=config.evidence_object_root,
+            ),
+        ),
     }
     if attempt.case.resources.docker_options:
         container["options"] = shlex.join(attempt.case.resources.docker_options)

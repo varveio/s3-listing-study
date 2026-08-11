@@ -61,6 +61,12 @@ def _submit_campaign_main(argv: Sequence[str] | None) -> int:
     return submit_campaign_main(argv)
 
 
+def _compile_campaign_main(argv: Sequence[str] | None) -> int:
+    from s3_listing_study.manager.campaign.cli import compile_campaign_main
+
+    return compile_campaign_main(argv)
+
+
 def _watch_campaign_main(argv: Sequence[str] | None) -> int:
     from s3_listing_study.manager.campaign.watch import watch_campaign_main
 
@@ -121,6 +127,11 @@ COMMANDS = (
         "resolve-plan",
         "expand a bucket's benchmark plan and show every case it generates",
         _resolve_plan_main,
+    ),
+    Command(
+        "compile-campaign",
+        "freeze resolved plans and images as a canonical local campaign",
+        _compile_campaign_main,
     ),
     Command(
         "submit-campaign",

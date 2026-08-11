@@ -1,0 +1,349 @@
+"""Provider-request tests for the study's Snakemake Google Batch adapter."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import shutil
+import subprocess
+import sys
+import uuid
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[4]
+EXPERIMENT = ROOT / "experiments" / "orchestration" / "snakemake"
+sys.path.insert(0, str(EXPERIMENT))
+
+from scripts.workflow import (  # noqa: E402
+    executor_runtime_image,
+    load_campaign,
+    load_execution_profile,
+    project_attempt,
+    project_batch_job,
+)
+from snakemake_executor_plugin_googlebatch_study import (  # noqa: E402
+    RUNTIME_PATH,
+    build_create_job_request,
+)
+from snakemake_executor_plugin_googlebatch_study import (  # noqa: E402
+    Executor as StudyGoogleBatchExecutor,
+)
+
+from s3_listing_study.manager.bench import plan as bench  # noqa: E402
+from s3_listing_study.manager.campaign import compile_campaign  # noqa: E402
+from s3_listing_study.manager.campaign.batch import BatchConfig, render_job  # noqa: E402
+
+RUNTIME_IMAGE = "us-east1-docker.pkg.dev/study/runtime/snakemake@sha256:" + "f" * 64
+SECRET = "projects/study1/secrets/aws/versions/7"
+
+
+def _images(plan: bench.Plan) -> dict[str, dict[str, object]]:
+    result: dict[str, dict[str, object]] = {}
+    for index, tool in enumerate(plan.tools()):
+        registration = json.loads(
+            (ROOT / "tools" / tool / "build" / "image.json").read_text(encoding="utf-8")
+        )
+        digit = format(index, "x")
+        derived = "sha256:" + digit * 64
+        tool_digest = "sha256:" + format(index + 1, "x") * 64
+        result[tool] = {
+            "derived_image": derived,
+            "image_uri": f"us-east1-docker.pkg.dev/study/images/{tool}@{derived}",
+            "shared_base_digest": "sha256:" + "a" * 64,
+            "shared_base_uri": "registry.example/base@sha256:" + "a" * 64,
+            "shared_base_source_sha256": registration["shared_base_source_sha256"],
+            "tool_build_sha256": registration["tool_build_sha256"],
+            "tool_artifact": registration["tool_artifact"],
+            "tool_version": registration["tool_version"],
+            "adapter_bundle_sha256": registration["adapter_bundle_sha256"],
+            "harness_revision": "b" * 40,
+            "tool_image_digest": tool_digest,
+            "tool_image_uri": f"registry.example/{tool}@{tool_digest}",
+            "selection_sha256": format(index + 1, "x") * 64,
+        }
+    return result
+
+
+def _profile() -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "project": "study1",
+        "location": "us-east1",
+        "results_bucket": "study-results",
+        "provisioning": "SPOT",
+        "zone": "us-east1-b",
+        "network": "projects/study1/global/networks/study",
+        "subnetwork": "projects/study1/regions/us-east1/subnetworks/study",
+        "orchestration_prefix": "snakemake/orchestration/",
+        "evidence_prefix": "snakemake/evidence/",
+        "anonymous_worker_service_account": "worker@study.iam.gserviceaccount.com",
+        "authenticated_worker_service_account": "auth-worker@study.iam.gserviceaccount.com",
+        "aws_credential_secret": SECRET,
+        "output_path": "/tmp/s3-listing-study-attempt",
+        "term_grace_s": 5,
+        "post_attempt_allowance_s": 1800,
+        "retry_count": 0,
+        "n4_boot_disk": {"type": "hyperdisk-balanced", "image": "batch-cos"},
+        "executor": {
+            "name": "snakemake-executor-plugin-googlebatch-study",
+            "plugin_version": "0.1.0",
+            "snakemake_version": "9.25.1",
+            "patch_identity": "googlebatch-study-0.1.0",
+            "runtime_image": RUNTIME_IMAGE,
+        },
+    }
+
+
+def _compiled(tmp_path: Path):
+    plan = bench.Plan.load(bench.default_path("noaa-rtma-pds"))
+    compiled = compile_campaign(
+        campaign="2026-08-11-snake",
+        plans=(plan,),
+        images=_images(plan),
+        results_bucket="study-results",
+        provisioning="SPOT",
+        zone="us-east1-b",
+    )
+    campaign_path = tmp_path / "campaign.json"
+    profile_path = tmp_path / "profile.json"
+    campaign_path.write_bytes(compiled.content)
+    profile_path.write_text(json.dumps(_profile()), encoding="utf-8")
+    return compiled, load_campaign(campaign_path), load_execution_profile(profile_path)
+
+
+def test_all_17_real_attempts_render_exact_batch_allocation(tmp_path: Path) -> None:
+    compiled, campaign, profile = _compiled(tmp_path)
+    canonical_config = BatchConfig(
+        results_bucket="study-results",
+        anonymous_worker_service_account="worker@study.iam.gserviceaccount.com",
+        authenticated_worker_service_account="auth-worker@study.iam.gserviceaccount.com",
+        aws_credential_secret=SECRET,
+        network="projects/study1/global/networks/study",
+        subnetwork="projects/study1/regions/us-east1/subnetworks/study",
+        provisioning="SPOT",
+        zone="us-east1-b",
+        evidence_object_root="snakemake/evidence/",
+    )
+
+    assert len(compiled.attempts) == len(campaign["attempts"]) == 17
+    for canonical_attempt, row in zip(compiled.attempts, campaign["attempts"], strict=True):
+        projected = project_attempt(campaign, row, profile)
+        canonical = project_batch_job(render_job(canonical_attempt, canonical_config))
+        request = build_create_job_request(
+            projected,
+            project=profile["project"],
+            location=profile["location"],
+            runtime_image=RUNTIME_IMAGE,
+            nested_command="/usr/bin/python3 -m snakemake --version",
+            actual_job_id="snakemake-operational-a1b2c3",
+        )
+        job = request.job
+        task = job.task_groups[0].task_spec
+        subject = task.runnables[1]
+        policy = job.allocation_policy.instances[0].policy
+        interface = job.allocation_policy.network.network_interfaces[0]
+
+        assert projected["worker_argv"] == canonical["worker_argv"]
+        assert subject.container.image_uri == canonical["image_uri"]
+        assert policy.machine_type == canonical["machine_type"]
+        assert task.compute_resource.cpu_milli == canonical["cpu_milli"]
+        assert task.compute_resource.memory_mib == canonical["memory_mib"]
+        assert task.max_retry_count == canonical["retry_count"] == 0
+        assert f"{int(task.max_run_duration.total_seconds())}s" == canonical["max_run_duration"]
+        assert policy.provisioning_model.name == canonical["provisioning"]
+        assert list(job.allocation_policy.location.allowed_locations) == [
+            f"zones/{canonical['zone']}"
+        ]
+        assert interface.network == canonical["network"]
+        assert interface.subnetwork == canonical["subnetwork"]
+        assert job.allocation_policy.service_account.email == canonical["service_account"]
+        if canonical["boot_disk"] is None:
+            assert not policy.boot_disk
+        else:
+            assert policy.boot_disk.type_ == canonical["boot_disk"]["type"]
+            assert policy.boot_disk.image == canonical["boot_disk"]["image"]
+            assert policy.boot_disk.size_gb == canonical["boot_disk"].get("size_gb", 0)
+        expected_options = canonical["container_options"]
+        if expected_options:
+            for option in ("--memory=", "--memory-swap="):
+                assert option in subject.container.options
+        else:
+            assert "--memory=" not in subject.container.options
+            assert "--memory-swap=" not in subject.container.options
+        expected_secret = canonical["secret_resource"]
+        assert subject.environment.secret_variables.get("S3_STUDY_AWS_CREDENTIAL") == (
+            expected_secret or None
+        )
+        assert job.labels["planned-job-id"] == projected["job_id"]
+        assert request.job_id != projected["job_id"]
+        assert request.parent == "projects/study1/locations/us-east1"
+
+
+def test_runtime_staging_and_nested_command_do_not_install_or_mask_exit() -> None:
+    dockerfile = (EXPERIMENT / "runtime" / "Dockerfile").read_text(encoding="utf-8")
+    stage = (EXPERIMENT / "runtime" / "stage-runtime").read_text(encoding="utf-8")
+    runtime_project = (EXPERIMENT / "runtime" / "pyproject.toml").read_text(encoding="utf-8")
+    assert "@sha256:" in dockerfile
+    assert "uv sync" in dockerfile and "--frozen" in dockerfile
+    assert "pip install" not in dockerfile
+    assert "pip install" not in stage
+    assert "s3-listing-study" not in runtime_project
+    assert "snakemake-executor-plugin-googlebatch" not in runtime_project
+
+    projection = {
+        "job_id": "planned-job",
+        "image_uri": "registry.example/subject@sha256:" + "a" * 64,
+        "machine_type": "n4-standard-2",
+        "cpu_milli": 2000,
+        "memory_mib": 4096,
+        "container_options": "--memory=2g --memory-swap=2g",
+        "boot_disk": {"type": "hyperdisk-balanced", "image": "batch-cos", "size_gb": 40},
+        "retry_count": 0,
+        "max_run_duration": "99s",
+        "provisioning": "STANDARD",
+        "zone": None,
+        "network": None,
+        "subnetwork": None,
+        "service_account": "worker@study.iam.gserviceaccount.com",
+        "secret_resource": None,
+    }
+    request = build_create_job_request(
+        projection,
+        project="study1",
+        location="us-east1",
+        runtime_image=RUNTIME_IMAGE,
+        nested_command="exit 23",
+        actual_job_id="actual-job-a1b2c3",
+    )
+    task = request.job.task_groups[0].task_spec
+    assert task.max_retry_count == 0
+    assert task.runnables[0].container.entrypoint == "/usr/local/bin/stage-runtime"
+    assert task.runnables[1].environment.variables["PYTHONPATH"] == RUNTIME_PATH
+    assert task.runnables[1].ignore_exit_status is False
+    assert task.runnables[1].container.commands == ["-ceu", "exit 23"]
+    assert request.job.allocation_policy.instances[0].policy.boot_disk.size_gb == 40
+    assert subprocess.run(["/bin/sh", "-ceu", "exit 23"], check=False).returncode == 23
+
+
+def test_falsey_job_resource_overrides_executor_default() -> None:
+    executor = SimpleNamespace(executor_settings=SimpleNamespace(retry_count=1))
+    job = SimpleNamespace(resources={"googlebatch_retry_count": 0})
+    assert StudyGoogleBatchExecutor.get_param(executor, job, "retry_count") == 0
+
+
+def test_runtime_helper_identity_comes_from_frozen_profile() -> None:
+    profile = _profile()
+    assert executor_runtime_image(profile) == RUNTIME_IMAGE
+
+
+def test_remote_source_layout_is_narrow_and_host_independent() -> None:
+    snakefile = (EXPERIMENT / "Snakefile").read_text(encoding="utf-8")
+    workflow_support = (EXPERIMENT / "scripts" / "workflow.py").read_text(encoding="utf-8")
+    assert 'sys.path.insert(0, "src")' in snakefile
+    assert 'sys.path.insert(0, "experiments/orchestration/snakemake/scripts")' in snakefile
+    assert "from workflow import" in snakefile
+    assert 'script:\n        "scripts/run_attempt.py"' in snakefile
+    assert 'MARKER_ROOT = "markers"' in workflow_support
+    assert "marker_root" not in snakefile
+    assert sorted(
+        path.name for path in (EXPERIMENT / "scripts").iterdir() if path.suffix == ".py"
+    ) == ["run_attempt.py", "workflow.py"]
+
+
+def test_plugin_is_discoverable_by_snakemake_registry() -> None:
+    from snakemake_interface_executor_plugins.registry import ExecutorPluginRegistry
+
+    registry = ExecutorPluginRegistry()
+    assert registry.is_installed("googlebatch-study")
+    assert registry.get_plugin("googlebatch-study").common_settings.job_deploy_sources is True
+    assert (
+        registry.get_plugin(
+            "googlebatch-study"
+        ).common_settings.auto_deploy_default_storage_provider
+        is False
+    )
+
+
+def _checked_in_profile_dry_run(
+    tmp_path: Path,
+    *,
+    ambient_project: str = "study1",
+    ambient_bucket: str = "study-results",
+) -> subprocess.CompletedProcess[str]:
+    compiled, _, _ = _compiled(tmp_path)
+    run_dir = ROOT / ".snakemake" / "runs" / f"executor-test-{uuid.uuid4().hex}"
+    run_dir.mkdir(parents=True)
+    try:
+        campaign_path = run_dir / "campaign.json"
+        profile_path = run_dir / "execution-profile.json"
+        campaign_path.write_bytes(compiled.content)
+        profile_path.write_text(json.dumps(_profile()), encoding="utf-8")
+        command = [
+            sys.executable,
+            "-c",
+            (
+                "from google.cloud.storage import Bucket; "
+                "Bucket.exists=lambda self, *args, **kwargs: False; "
+                "from snakemake.cli import main; main()"
+            ),
+            "--snakefile",
+            str(EXPERIMENT / "Snakefile"),
+            "--profile",
+            str(EXPERIMENT / "profiles" / "googlebatch"),
+            "--dry-run",
+            "--quiet",
+            "--config",
+            f"campaign_path={campaign_path.relative_to(ROOT)}",
+            f"execution_profile_path={profile_path.relative_to(ROOT)}",
+            f"campaign_sha256={hashlib.sha256(compiled.content).hexdigest()}",
+            f"execution_sha256={hashlib.sha256(profile_path.read_bytes()).hexdigest()}",
+        ]
+        environment = os.environ.copy()
+        environment.update(
+            {
+                "S3_STUDY_GCP_PROJECT": ambient_project,
+                "S3_STUDY_RESULTS_BUCKET": ambient_bucket,
+                "S3_STUDY_GCP_LOCATION": "us-east1",
+            }
+        )
+        completed = subprocess.run(
+            command,
+            cwd=ROOT,
+            env=environment,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        return completed
+    finally:
+        shutil.rmtree(run_dir)
+
+
+def test_checked_in_compute_profile_parses_in_real_dry_run(tmp_path: Path) -> None:
+    completed = _checked_in_profile_dry_run(tmp_path)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+
+
+@pytest.mark.parametrize(
+    ("ambient_project", "ambient_bucket", "field"),
+    (
+        ("other-project", "study-results", "project"),
+        ("study1", "other-results", "results_bucket"),
+    ),
+)
+def test_checked_in_compute_profile_rejects_ambient_mismatch_before_dag(
+    tmp_path: Path, ambient_project: str, ambient_bucket: str, field: str
+) -> None:
+    completed = _checked_in_profile_dry_run(
+        tmp_path,
+        ambient_project=ambient_project,
+        ambient_bucket=ambient_bucket,
+    )
+    output = completed.stdout + completed.stderr
+    assert completed.returncode != 0
+    assert f"ambient {field} does not match frozen execution profile" in output
+    assert "Building DAG of jobs" not in output

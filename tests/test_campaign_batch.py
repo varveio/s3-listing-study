@@ -74,6 +74,7 @@ def config(
     *,
     network: str | None = None,
     subnetwork: str | None = None,
+    evidence_object_root: str | None = None,
 ) -> BatchConfig:
     return BatchConfig(
         results_bucket="study-results",
@@ -84,6 +85,7 @@ def config(
         subnetwork=subnetwork,
         provisioning="SPOT",
         zone="us-east1-b",
+        evidence_object_root=evidence_object_root,
     )
 
 
@@ -155,6 +157,23 @@ def test_renderer_emits_exact_worker_request_and_provenance() -> None:
         f"gs://study-results/{selected.prefix}",
     ]
     assert "uuid" not in container["commands"][-1]
+
+
+def test_renderer_can_project_an_isolated_evidence_object_root() -> None:
+    selected = attempt()
+    selected = replace(
+        selected,
+        prefix=(
+            "campaigns/2026-08-10-first/results/example-bucket/swath/"
+            "recursive-tsv.container_memory_gb-2/run-1"
+        ),
+    )
+    job = render_job(selected, config(evidence_object_root="snakemake/evidence/"))
+    commands = job["taskGroups"][0]["taskSpec"]["runnables"][0]["container"]["commands"]
+    assert commands[-1] == (
+        "gs://study-results/snakemake/evidence/2026-08-10-first/results/"
+        "example-bucket/swath/recursive-tsv.container_memory_gb-2/run-1"
+    )
 
 
 def test_renderer_reserves_the_whole_machine_and_disables_retries() -> None:

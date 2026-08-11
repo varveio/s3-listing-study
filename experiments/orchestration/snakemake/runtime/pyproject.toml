@@ -1,0 +1,8 @@
+[project]
+name = "s3-listing-snakemake-jobstep-runtime"
+version = "0.1.0"
+requires-python = "==3.11.*"
+dependencies = [
+    "snakemake==9.25.1",
+    "snakemake-storage-plugin-gcs==1.1.4",
+]

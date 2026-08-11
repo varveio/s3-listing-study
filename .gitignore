@@ -36,6 +36,7 @@ __pycache__/
 .ruff_cache/
 .mypy_cache/
 *.egg-info/
+.snakemake/
 # Anchored: unanchored `build/` would match at any depth and silently ignore new
 # files under the tracked tools/*/build/ vendored artifacts — a provenance hazard
 # in a repo whose rules turn on what is committed (see NOTICE).

@@ -260,6 +260,73 @@ def test_image_set_refuses_an_unknown_schema(tmp_path: Path) -> None:
         campaign_cli._read_image_set(image_set)
 
 
+def test_publication_manifest_converts_to_current_schema_three_registration(
+    tmp_path: Path,
+) -> None:
+    from s3_listing_study.common.build_selection import load_registered_selection
+
+    selection = load_registered_selection(ROOT, "aws-cli")
+    execution_digest = "sha256:" + "d" * 64
+    shared_digest = "sha256:" + "a" * 64
+    tool_digest = "sha256:" + "c" * 64
+    revision = "b" * 40
+    publication = tmp_path / "publication.json"
+    publication.write_text(
+        json.dumps(
+            {
+                "kind": "github-container-image-publication",
+                "format_version": 2,
+                "checkout_revision": revision,
+                "images": {
+                    "aws-cli": {
+                        "tool_name": "aws-cli",
+                        "tool_version": selection.tool_version,
+                        "selection_sha256": selection.selection_sha256,
+                        "worker_revision": revision,
+                        "shared": {
+                            "digest": shared_digest,
+                            "uri": f"registry.example/study@{shared_digest}",
+                            "source_sha256": selection.shared_base_source_sha256,
+                        },
+                        "tool": {
+                            "digest": tool_digest,
+                            "uri": f"registry.example/study@{tool_digest}",
+                            "build_sha256": selection.tool_build_sha256,
+                        },
+                        "execution": {
+                            "digest": execution_digest,
+                            "uri": f"registry.example/study@{execution_digest}",
+                        },
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    images = campaign_cli._read_publication_images(publication, root=ROOT)
+    assert images.schema_version == 3
+    assert images["aws-cli"] == {
+        "derived_image": execution_digest,
+        "image_uri": f"registry.example/study@{execution_digest}",
+        "shared_base_digest": shared_digest,
+        "shared_base_uri": f"registry.example/study@{shared_digest}",
+        "shared_base_source_sha256": selection.shared_base_source_sha256,
+        "tool_build_sha256": selection.tool_build_sha256,
+        "tool_image_digest": tool_digest,
+        "tool_image_uri": f"registry.example/study@{tool_digest}",
+        "selection_sha256": selection.selection_sha256,
+        "tool_artifact": {
+            "kind": selection.tool_artifact_kind,
+            "locator": selection.tool_artifact_locator,
+            "sha256": selection.tool_artifact_sha256,
+        },
+        "tool_version": selection.tool_version,
+        "adapter_bundle_sha256": selection.adapter_bundle_sha256,
+        "harness_revision": revision,
+    }
+
+
 def test_dry_run_is_deterministic_and_touches_no_subprocess_or_ledger(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -338,6 +405,66 @@ def test_freeze_accepts_only_byte_identical_existing_content(
     answers = iter([completed(1, stderr=b"already exists"), completed(stdout=b"different\n")])
     with pytest.raises(campaign_cli.SubmissionError, match="different content"):
         campaign_cli._freeze("gs://bucket/object", b"same\n")
+
+
+def test_compile_campaign_freezes_canonical_local_bytes_and_records_digest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan, image_set = write_inputs(tmp_path)
+    output = tmp_path / "campaign.json"
+    monkeypatch.setattr(campaign_cli, "validate_registered_images", lambda _images: None)
+    argv = [
+        "--path",
+        str(plan),
+        "--campaign",
+        "2026-08-10-first",
+        "--image-set",
+        str(image_set),
+        "--results-bucket",
+        "study-results",
+        "--output",
+        str(output),
+    ]
+
+    assert campaign_cli.compile_campaign_main(argv) == 0
+    first = json.loads(capsys.readouterr().out)
+    assert first["created"] is True
+    assert first["sha256"] == __import__("hashlib").sha256(output.read_bytes()).hexdigest()
+    assert output.read_bytes().endswith(b"\n")
+    assert json.loads(output.read_text(encoding="utf-8"))["schema_version"] == 3
+
+    assert campaign_cli.compile_campaign_main(argv) == 0
+    second = json.loads(capsys.readouterr().out)
+    assert second == {**first, "created": False}
+
+
+def test_compile_campaign_refuses_to_replace_different_local_content(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan, image_set = write_inputs(tmp_path)
+    output = tmp_path / "campaign.json"
+    output.write_bytes(b"different\n")
+    monkeypatch.setattr(campaign_cli, "validate_registered_images", lambda _images: None)
+
+    assert (
+        campaign_cli.compile_campaign_main(
+            [
+                "--path",
+                str(plan),
+                "--campaign",
+                "2026-08-10-first",
+                "--image-set",
+                str(image_set),
+                "--results-bucket",
+                "study-results",
+                "--output",
+                str(output),
+            ]
+        )
+        == 1
+    )
+    assert "already exists with different content" in capsys.readouterr().err
+    assert output.read_bytes() == b"different\n"
 
 
 def test_submission_writes_intent_before_gcloud_and_records_success_and_failure(

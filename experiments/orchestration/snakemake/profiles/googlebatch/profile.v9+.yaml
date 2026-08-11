@@ -1,0 +1,16 @@
+__use_yte__: true
+__definitions__:
+  - import os
+config:
+  - ?f"ambient_project={os.environ['S3_STUDY_GCP_PROJECT']}"
+  - ?f"ambient_results_bucket={os.environ['S3_STUDY_RESULTS_BUCKET']}"
+  - ?f"ambient_location={os.environ['S3_STUDY_GCP_LOCATION']}"
+executor: googlebatch-study
+jobs: 17
+default-storage-provider: gcs
+default-storage-prefix: gcs://${S3_STUDY_RESULTS_BUCKET}/snakemake/orchestration/
+storage-gcs-project: ${S3_STUDY_GCP_PROJECT}
+googlebatch-study-project: ${S3_STUDY_GCP_PROJECT}
+googlebatch-study-region: ${S3_STUDY_GCP_LOCATION}
+googlebatch-study-image-family: batch-cos
+googlebatch-study-image-project: cos-cloud

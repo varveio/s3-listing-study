@@ -24,11 +24,11 @@ from s3_listing_study.manager.bench.cli import registered_tools, repo_root
 from s3_listing_study.manager.campaign import (
     DIGEST_RE,
     Attempt,
+    CampaignCompilation,
     CampaignError,
-    attempts_for,
     campaign_prefix,
+    compile_campaign,
     ledger,
-    manifest,
 )
 from s3_listing_study.manager.campaign.batch import BatchConfig, render_job
 
@@ -64,8 +64,7 @@ class SubmissionError(RuntimeError):
     """Campaign inputs or a cloud command made submission unsafe."""
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="s3-listing-study submit-campaign", allow_abbrev=False)
+def _add_campaign_source(parser: argparse.ArgumentParser) -> None:
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument(
         "--bucket",
@@ -77,10 +76,25 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         help="path to a plan file (repeat for more plans)",
     )
+
+
+def _add_image_source(parser: argparse.ArgumentParser) -> None:
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--image-set", action=UniqueStoreAction)
+    source.add_argument(
+        "--publication-manifest",
+        action=UniqueStoreAction,
+        help="sealed schema-2 current-image publication ledger",
+    )
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="s3-listing-study submit-campaign", allow_abbrev=False)
+    _add_campaign_source(parser)
     parser.add_argument(
         "--campaign", "--campaign-id", dest="campaign", action=UniqueStoreAction, required=True
     )
-    parser.add_argument("--image-set", action=UniqueStoreAction, required=True)
+    _add_image_source(parser)
     parser.add_argument("--project", action=UniqueStoreAction, required=True)
     parser.add_argument("--location", action=UniqueStoreAction, required=True)
     parser.add_argument("--results-bucket", action=UniqueStoreAction, required=True)
@@ -104,6 +118,25 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--ledger", "--ledger-path", action=UniqueStoreAction, required=True)
     parser.add_argument("--dry-run", action="store_true")
+    return parser
+
+
+def build_compile_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="s3-listing-study compile-campaign", allow_abbrev=False)
+    _add_campaign_source(parser)
+    parser.add_argument(
+        "--campaign", "--campaign-id", dest="campaign", action=UniqueStoreAction, required=True
+    )
+    _add_image_source(parser)
+    parser.add_argument("--results-bucket", action=UniqueStoreAction, required=True)
+    parser.add_argument(
+        "--provisioning",
+        action=UniqueStoreAction,
+        choices=("STANDARD", "SPOT"),
+        default="SPOT",
+    )
+    parser.add_argument("--zone", action=UniqueStoreAction)
+    parser.add_argument("--output", action=UniqueStoreAction, required=True)
     return parser
 
 
@@ -218,6 +251,94 @@ def _read_image_set(path: Path) -> ImageSet:
     return ImageSet(validated, schema_version=schema_version)
 
 
+def _publication_reference(value: Any, *, label: str) -> tuple[str, str]:
+    if not isinstance(value, dict):
+        raise SubmissionError(f"publication {label} is not an object")
+    digest = value.get("digest")
+    uri = value.get("uri")
+    if not isinstance(digest, str) or DIGEST_RE.fullmatch(digest) is None:
+        raise SubmissionError(f"publication {label} digest is invalid")
+    if not isinstance(uri, str) or not uri.endswith(f"@{digest}"):
+        raise SubmissionError(f"publication {label} URI is not pinned to its digest")
+    return digest, uri
+
+
+def _read_publication_images(path: Path, *, root: Path | None = None) -> ImageSet:
+    """Convert one sealed current-image ledger to validated campaign registrations."""
+    try:
+        document = json.loads(
+            path.read_text(encoding="utf-8"), object_pairs_hook=_reject_duplicate_keys
+        )
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise SubmissionError(f"publication manifest is not readable JSON: {path}: {exc}") from None
+    if not isinstance(document, dict):
+        raise SubmissionError("publication manifest is not a JSON object")
+    if document.get("kind") != "github-container-image-publication":
+        raise SubmissionError("publication manifest has the wrong kind")
+    if document.get("format_version") != 2:
+        raise SubmissionError("publication manifest format_version must be 2")
+    revision = document.get("checkout_revision")
+    if not isinstance(revision, str) or re.fullmatch(r"[0-9a-f]{40}", revision) is None:
+        raise SubmissionError("publication checkout_revision must be a full SHA-1 commit ID")
+    published_images = document.get("images")
+    if not isinstance(published_images, dict) or not published_images:
+        raise SubmissionError("publication images must be a non-empty object")
+    base = repo_root() if root is None else root
+    registrations: dict[str, dict[str, Any]] = {}
+    for tool, published in published_images.items():
+        if not isinstance(tool, str) or not isinstance(published, dict):
+            raise SubmissionError("publication images must be tool-named objects")
+        if published.get("tool_name") != tool:
+            raise SubmissionError(f"publication {tool}: tool_name does not match its key")
+        if published.get("worker_revision") != revision:
+            raise SubmissionError(f"publication {tool}: worker_revision does not match checkout")
+        selection = load_registered_selection(base, tool)
+        expected = {
+            "tool_version": selection.tool_version,
+            "selection_sha256": selection.selection_sha256,
+        }
+        mismatched = sorted(key for key, value in expected.items() if published.get(key) != value)
+        shared = published.get("shared")
+        tool_image = published.get("tool")
+        if not isinstance(shared, dict) or not isinstance(tool_image, dict):
+            raise SubmissionError(f"publication {tool}: shared and tool must be objects")
+        if shared.get("source_sha256") != selection.shared_base_source_sha256:
+            mismatched.append("shared.source_sha256")
+        if tool_image.get("build_sha256") != selection.tool_build_sha256:
+            mismatched.append("tool.build_sha256")
+        if mismatched:
+            raise SubmissionError(
+                f"publication {tool} disagrees with registered {', '.join(sorted(mismatched))}"
+            )
+        derived_image, image_uri = _publication_reference(
+            published.get("execution"), label=f"{tool} execution"
+        )
+        shared_base_digest, shared_base_uri = _publication_reference(shared, label=f"{tool} shared")
+        tool_image_digest, tool_image_uri = _publication_reference(tool_image, label=f"{tool} tool")
+        registrations[tool] = {
+            "derived_image": derived_image,
+            "image_uri": image_uri,
+            "shared_base_digest": shared_base_digest,
+            "shared_base_uri": shared_base_uri,
+            "shared_base_source_sha256": selection.shared_base_source_sha256,
+            "tool_build_sha256": selection.tool_build_sha256,
+            "tool_image_digest": tool_image_digest,
+            "tool_image_uri": tool_image_uri,
+            "selection_sha256": selection.selection_sha256,
+            "tool_artifact": {
+                "kind": selection.tool_artifact_kind,
+                "locator": selection.tool_artifact_locator,
+                "sha256": selection.tool_artifact_sha256,
+            },
+            "tool_version": selection.tool_version,
+            "adapter_bundle_sha256": selection.adapter_bundle_sha256,
+            "harness_revision": revision,
+        }
+    images = ImageSet(registrations, schema_version=IMAGE_SET_SCHEMA_VERSION)
+    validate_registered_images(images, root=base)
+    return images
+
+
 def validate_registered_images(
     images: Mapping[str, Mapping[str, Any]],
     *,
@@ -256,6 +377,25 @@ def _canonical_json(document: Mapping[str, Any]) -> bytes:
     return (
         json.dumps(document, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n"
     ).encode("utf-8")
+
+
+def _freeze_local(path: Path, content: bytes) -> bool:
+    """Create ``path`` once, accepting an existing byte-identical freeze."""
+    try:
+        with path.open("xb") as destination:
+            destination.write(content)
+    except FileExistsError:
+        try:
+            existing = path.read_bytes()
+        except OSError as exc:
+            raise SubmissionError(f"could not read existing {path}: {exc}") from None
+        if existing != content:
+            raise SubmissionError(f"{path} already exists with different content") from None
+        return False
+    except OSError as exc:
+        raise SubmissionError(f"could not create {path}: {exc}") from None
+    path.chmod(0o444)
+    return True
 
 
 def _run(
@@ -428,29 +568,52 @@ def _load_plans(args: argparse.Namespace) -> tuple[bench.Plan, ...]:
     return tuple(loaded_plans)
 
 
+def _compile_from_args(args: argparse.Namespace) -> CampaignCompilation:
+    loaded_plans = _load_plans(args)
+    if args.image_set:
+        images = _read_image_set(Path(args.image_set))
+        validate_registered_images(images)
+    else:
+        images = _read_publication_images(Path(args.publication_manifest))
+    return compile_campaign(
+        campaign=args.campaign,
+        plans=loaded_plans,
+        images=images,
+        results_bucket=args.results_bucket,
+        provisioning=args.provisioning,
+        zone=args.zone,
+    )
+
+
+def compile_campaign_main(argv: Sequence[str] | None = None) -> int:
+    args = build_compile_parser().parse_args(argv)
+    try:
+        compiled = _compile_from_args(args)
+        output = Path(args.output)
+        created = _freeze_local(output, compiled.content)
+        print(
+            json.dumps(
+                {
+                    "campaign": args.campaign,
+                    "created": created,
+                    "path": str(output),
+                    "sha256": compiled.sha256,
+                },
+                sort_keys=True,
+            )
+        )
+        return 0
+    except (BuildSelectionError, CampaignError, SubmissionError, bench.PlanError, OSError) as exc:
+        print(f"compile-campaign: {exc}", file=sys.stderr)
+        return 1
+
+
 def submit_campaign_main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        loaded_plans = _load_plans(args)
-        images = _read_image_set(Path(args.image_set))
-        validate_registered_images(images)
-        plan_tools = {tool for loaded in loaded_plans for tool in loaded.tools()}
-        if set(images) != plan_tools:
-            missing = sorted(plan_tools - set(images))
-            extra = sorted(set(images) - plan_tools)
-            detail = []
-            if missing:
-                detail.append(f"missing {', '.join(missing)}")
-            if extra:
-                detail.append(f"extra {', '.join(extra)}")
-            mismatch = "; ".join(detail)
-            raise SubmissionError(f"image set does not exactly cover the plans ({mismatch})")
-
-        generated = tuple(
-            attempt
-            for loaded in loaded_plans
-            for attempt in attempts_for(loaded, campaign=args.campaign, images=images)
-        )
+        compiled = _compile_from_args(args)
+        loaded_plans = compiled.plans
+        generated = compiled.attempts
         config = BatchConfig(
             results_bucket=args.results_bucket,
             anonymous_worker_service_account=args.anonymous_worker_sa,
@@ -463,15 +626,7 @@ def submit_campaign_main(argv: Sequence[str] | None = None) -> int:
             post_attempt_allowance_s=args.post_attempt_allowance_s,
         )
         jobs = [render_job(attempt, config) for attempt in generated]
-        campaign_document = manifest(
-            campaign=args.campaign,
-            plans=loaded_plans,
-            images=images,
-            attempts=generated,
-            results_bucket=args.results_bucket,
-            provisioning=args.provisioning,
-            zone=args.zone,
-        )
+        campaign_document = compiled.document
         dry_run = {
             "campaign.json": campaign_document,
             "jobs": [
