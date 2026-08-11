@@ -467,6 +467,11 @@ jobs:
           subject-digest: ${{ steps.ledger.outputs.digest }}
           push-to-registry: true
 
+      # The digests, on the run page. Without this the only way to learn what a
+      # publication produced is to download an artifact or pull the ledger.
+      - name: Report the published set
+        run: uv run s3-listing-study ci published --plan published-plan.json
+
       - name: Upload the publication record
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

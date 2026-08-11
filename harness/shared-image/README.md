@@ -1,5 +1,8 @@
 # Shared study runtime
 
+Part of the image chain described in
+[`docs/operating/image-builds.md`](../../docs/operating/image-builds.md).
+
 [`Dockerfile`](Dockerfile) is the controlled parent inherited by every tool
 image. It installs Debian's Python 3.11 from the signed 2026-08-03 Bookworm
 snapshot, verifies the complete installed `package:arch=version` closure against

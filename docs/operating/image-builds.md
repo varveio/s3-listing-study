@@ -132,6 +132,71 @@ Actions artifact retention. Individual execution channels may move one at a time
 but the set channel moves **last**, after every promotion has been verified, so it
 never advertises an incomplete set.
 
+## Finding out what a build produced
+
+A tag says what an image is made of; a **digest** is what you pin in a campaign
+or hand to `docker run`. After a publication both are reported in three places,
+in increasing order of durability:
+
+1. **The run page.** The `plan` step summarises what the run decided to do, and
+   the publishing job ends with a *Published image set* table listing every
+   execution tag and its digest.
+2. **The run's artifacts.** `image-build-plan` holds the decision;
+   `publication-record` holds the sealed manifest, the promotion report, and the
+   fully resolved plan.
+3. **The `set-v2-<manifest12>` ledger**, an image whose only content is that
+   manifest. It outlives artifact retention and is the durable record.
+
+You do not need a CI run to ask. This resolves the current published set for any
+branch straight from the registry, in about five seconds and without pulling a
+layer:
+
+```sh
+uv run s3-listing-study ci published \
+  --repository ghcr.io/varveio/s3-listing-study \
+  --ref-name "$(git branch --show-current)"
+```
+
+It prints each tool's execution digest, the version tag that names it, and the
+movable channel that tracks it — and `--json` emits the whole resolved plan.
+Anything not yet built shows as `not published`, so the same command answers
+"did my push finish?" as well as "what are the IDs?".
+
+For consumers there is a choice worth making deliberately: pin the **digest**
+when a result must be reproducible forever, and use the **channel** tag
+(`execution-<tool>-<suffix>`) when you want whatever is current for that branch.
+Receipts always record the digest.
+
+## Trying a change without waiting for CI
+
+Do not push to find out whether a worker change works. Build the one tool you
+care about against its published parent — measured at **4.1s** for a rebuild
+after an edit, against roughly 76s for a CI round trip:
+
+```sh
+TOOL=s5cmd
+TOOL_IMAGE=$(uv run s3-listing-study ci published \
+  --repository ghcr.io/varveio/s3-listing-study --ref-name "$(git branch --show-current)" \
+  --json | python3 -c "import json,sys,os
+plan = json.load(sys.stdin)
+tool = next(t for t in plan['tools'] if t['tool'] == os.environ['TOOL'])
+print(plan['repository'] + '@' + tool['tool_digest'])")
+
+uv run s3-listing-study build-derived-image \
+  --tool "$TOOL" --tool-image "$TOOL_IMAGE" --tag "local/$TOOL:dev" --output type=docker
+```
+
+That is the same recipe CI runs, so a local pass means the image is built the
+same way — `validate_selection.py` runs inside the build here too, and fails it
+the same way.
+
+Rebuilding the *whole* roster locally is a different matter: the builds are
+CPU-bound, and on a two-core machine eleven of them take about 85s against 41s
+on a four-core runner. Iterate on one tool locally; let CI do the sweep.
+
+For work that does not need a subject tool at all, the test suite runs on the
+host in seconds and never touches Docker.
+
 ## Retention
 
 Old images do not need routine cleaning, and the layer split is why. Measured

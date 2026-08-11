@@ -1054,3 +1054,32 @@ def test_verify_published_reads_identity_from_manifests_and_refuses_a_mismatch(
     labels[item.execution_tag] = {ci_cli.WORKER_SOURCE_LABEL: item.worker_source_sha256}
     monkeypatch.setattr(registry_module, "image_user", lambda _ref: "0:0")
     assert ci_cli.main(["verify-published", "--plan", str(path)]) == 2
+
+
+def test_published_reports_digests_and_what_is_missing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The answer to "I pushed, what are the IDs" must name digests, not just tags."""
+    plan = _complete_plan()
+    path = tmp_path / "plan.json"
+    path.write_text(json.dumps(plan.as_json()), encoding="utf-8")
+    assert ci_cli.main(["published", "--plan", str(path)]) == 0
+    out = capsys.readouterr().out
+    assert DIGEST_C in out
+    assert plan.tools[0].execution_tag.rsplit(":", 1)[1] in out
+    assert plan.channel_suffix in out
+
+    incomplete = replace(
+        plan,
+        tools=tuple(
+            replace(item, execution_digest=None) if index == 0 else item
+            for index, item in enumerate(plan.tools)
+        ),
+    )
+    path.write_text(json.dumps(incomplete.as_json()), encoding="utf-8")
+    assert ci_cli.main(["published", "--plan", str(path)]) == 0
+    assert "not published" in capsys.readouterr().out
+
+
+def test_published_needs_somewhere_to_look() -> None:
+    assert ci_cli.main(["published"]) == 2

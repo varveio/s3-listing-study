@@ -494,6 +494,75 @@ def _assert_promoted_main(argv: Sequence[str]) -> int:
     return 0
 
 
+def _published_table(plan: Plan) -> str:
+    """The table a reader wants after a build: what exists, and its exact digest.
+
+    Tags say what an image is made of; a digest is what you pin in a campaign or
+    paste into `docker run`. Both belong in the same place.
+    """
+    shared_tag = plan.shared_tag.rsplit(":", 1)[1]
+    lines = [
+        f"Shared runtime `{shared_tag}`",
+        f"`{plan.shared_digest or 'not published'}`",
+        "",
+        "| Tool | Execution tag | Digest |",
+        "| --- | --- | --- |",
+    ]
+    for item in plan.tools:
+        lines.append(
+            f"| `{item.tool}` | `{item.execution_tag.rsplit(':', 1)[1]}` | "
+            f"`{item.execution_digest or 'not published'}` |"
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _published_main(argv: Sequence[str]) -> int:
+    """Show the published image set for a ref — tags, digests, and what is missing.
+
+    The answer to "I pushed, something built, what are the IDs". Runs anywhere
+    with registry read access and needs no CI run.
+    """
+    parser = argparse.ArgumentParser(prog="s3-listing-study ci published", allow_abbrev=False)
+    parser.add_argument("--repository")
+    parser.add_argument("--ref-name")
+    parser.add_argument("--main-publication", action="store_true")
+    parser.add_argument("--plan", type=Path, help="read a resolved plan instead of probing")
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args(argv)
+    if not args.plan and not (args.repository and args.ref_name):
+        raise CIError("give --plan, or --repository and --ref-name to probe the registry")
+    if args.plan:
+        plan = _load_plan(args.plan)
+    else:
+        root = _root()
+        provisional = build_plan(
+            root,
+            repository=args.repository,
+            ref_name=args.ref_name,
+            is_main_publication=args.main_publication,
+            existing={},
+        )
+        existing = registry_module.probe_many(candidate_references(provisional))
+        plan = build_plan(
+            root,
+            repository=args.repository,
+            ref_name=args.ref_name,
+            is_main_publication=args.main_publication,
+            existing=existing,
+        )
+    if args.json:
+        print(json.dumps(plan.as_json(), indent=2, sort_keys=True))
+        return 0
+    print(f"channel: {plan.channel_suffix}")
+    print(f"shared : {plan.shared_tag.rsplit(':', 1)[1]}  {plan.shared_digest or 'not published'}")
+    for item in plan.tools:
+        print(f"  {item.tool:14} {item.execution_digest or 'not published':71}")
+        print(f"  {'':14} {item.execution_tag.rsplit(':', 1)[1]}")
+        print(f"  {'':14} channel {item.execution_channel_tag.rsplit(':', 1)[1]}")
+    _append_summary("## Published image set\n\n" + _published_table(plan))
+    return 0
+
+
 def _roster_main(argv: Sequence[str]) -> int:
     parser = argparse.ArgumentParser(prog="s3-listing-study ci roster", allow_abbrev=False)
     parser.add_argument("--json", action="store_true")
@@ -516,6 +585,7 @@ SUBCOMMANDS = {
     "reconcile": _reconcile_main,
     "ledger-tag": _ledger_tag_main,
     "assert-promoted": _assert_promoted_main,
+    "published": _published_main,
     "roster": _roster_main,
 }
 

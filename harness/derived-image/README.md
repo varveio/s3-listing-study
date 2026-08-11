@@ -1,5 +1,9 @@
 # Tool and execution images
 
+This file describes the recipe. For how the layers fit together, what a change
+rebuilds, how CI decides what to build, and how to find a published digest, see
+[`docs/operating/image-builds.md`](../../docs/operating/image-builds.md).
+
 The runnable image chain is explicit OCI parentage:
 
 ```text
