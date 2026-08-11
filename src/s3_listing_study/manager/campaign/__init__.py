@@ -60,7 +60,7 @@ CAMPAIGN_RE = re.compile(r"\A\d{4}-\d{2}-\d{2}-[a-z][a-z0-9]*\Z")
 
 DIGEST_RE = re.compile(r"\Asha256:[0-9a-f]{64}\Z")
 
-ATTEMPT_FINGERPRINT_VERSION = 2
+ATTEMPT_FINGERPRINT_VERSION = 3
 
 # Everything about the image that a measurement can depend on. `provisioning`
 # is deliberately absent: a spot VM is the same machine type at a different
@@ -73,6 +73,18 @@ IMAGE_COMPONENTS = (
     "tool_artifact",
     "adapter_bundle_sha256",
     "harness_revision",
+    "tool_image_digest",
+    "selection_sha256",
+)
+SPLIT_LAYER_COMPONENTS = ("tool_image_digest", "selection_sha256")
+"""The components that only a split-layer (schema 3) image set records.
+
+Named rather than sliced off the end of :data:`IMAGE_COMPONENTS`: appending a
+twelfth component later would otherwise silently redefine both what counts as a
+historical set and which sets are recognised as current.
+"""
+HISTORICAL_IMAGE_COMPONENTS = tuple(
+    name for name in IMAGE_COMPONENTS if name not in SPLIT_LAYER_COMPONENTS
 )
 
 
@@ -100,13 +112,20 @@ def attempt_fingerprint(*, case_fingerprint: str, components: Mapping[str, Any])
     Separate from the case fingerprint rather than replacing it, so a plan stays
     readable without a registry: `resolve-plan` still contacts nothing.
     """
-    missing = sorted(set(IMAGE_COMPONENTS) - set(components))
+    selected = (
+        IMAGE_COMPONENTS
+        if all(name in components for name in SPLIT_LAYER_COMPONENTS)
+        else HISTORICAL_IMAGE_COMPONENTS
+    )
+    missing = sorted(set(selected) - set(components))
     if missing:
         raise CampaignError(f"image components are missing {', '.join(missing)}")
     payload = {
-        "attempt_fingerprint_version": ATTEMPT_FINGERPRINT_VERSION,
+        "attempt_fingerprint_version": (
+            ATTEMPT_FINGERPRINT_VERSION if selected is IMAGE_COMPONENTS else 2
+        ),
         "case_fingerprint": case_fingerprint,
-        "image": {name: components[name] for name in IMAGE_COMPONENTS},
+        "image": {name: components[name] for name in selected},
     }
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
@@ -294,7 +313,13 @@ def manifest(
         "schema_version": 3,
         "campaign": validate_campaign_id(campaign),
         "results_bucket": results_bucket,
-        "attempt_fingerprint_version": ATTEMPT_FINGERPRINT_VERSION,
+        "attempt_fingerprint_version": (
+            ATTEMPT_FINGERPRINT_VERSION
+            if all(
+                all(field in image for field in SPLIT_LAYER_COMPONENTS) for image in images.values()
+            )
+            else 2
+        ),
         "provisioning": provisioning,
         "zone": zone,
         "plans": [

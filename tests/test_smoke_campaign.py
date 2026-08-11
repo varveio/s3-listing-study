@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "harness" / "smoke-campaign.sh"
 
 
-def test_smoke_campaign_help_names_the_required_shared_base() -> None:
+def test_smoke_campaign_help_names_the_required_image_inputs() -> None:
     result = subprocess.run(
         ("bash", str(SCRIPT), "--help"),
         cwd=ROOT,
@@ -19,11 +19,15 @@ def test_smoke_campaign_help_names_the_required_shared_base() -> None:
     )
     assert result.returncode == 0
     assert "--shared-base-image REGISTRY/...@sha256:<digest>" in result.stdout
+    assert "--build-repository REGISTRY/REPOSITORY" in result.stdout
 
 
 def test_smoke_campaign_never_selects_the_first_matching_local_tag() -> None:
     text = SCRIPT.read_text(encoding="utf-8")
     assert "derived_image_tag, load_registered_selection" in text
+    assert "build-tool-image" in text
+    assert "docker image push '$tool_tag'" in text
+    assert "--tool-image '$tool_image'" in text
     assert "--tag '$tag'" in text
     assert 'docker image inspect "$tag"' in text
     assert '    "$digest" \\\n' in text

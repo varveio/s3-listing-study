@@ -14,6 +14,10 @@ from pathlib import Path
 from s3_listing_study.common.argparse_utils import UniqueStoreAction
 from s3_listing_study.common.build_selection import BuildSelectionError
 from s3_listing_study.common.command_adapter import CommandAdapterError, CommandRequest
+from s3_listing_study.worker.image_provenance import (
+    ImageProvenanceError,
+    load_image_provenance,
+)
 
 from .driver import resolve_invocation
 from .engine import (
@@ -230,6 +234,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                 sink_dir=sink_dir,
             )
             invocation = resolve_invocation(request)
+            provenance = (
+                load_image_provenance()
+                if Path("/opt/s3-listing-study/image-provenance.json").is_file()
+                else {
+                    "selection_sha256": invocation.selection_sha256,
+                    "tool_image_digest": "sha256:" + "0" * 64,
+                    "tool_image_uri": "local/tool@sha256:" + "0" * 64,
+                }
+            )
+            if provenance["selection_sha256"] != invocation.selection_sha256:
+                raise CommandAdapterError("baked image provenance disagrees with selection")
             case_env = _parse_case_env(args.case_env, invocation.functional_env)
             result, runner_exit = run_attempt(
                 AttemptOptions(
@@ -246,6 +261,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                     tool_build_sha256=invocation.tool_build_sha256,
                     tool_artifact=invocation.tool_artifact,
                     derived_image=args.derived_image,
+                    tool_image_digest=provenance["tool_image_digest"],
+                    tool_image_uri=provenance["tool_image_uri"],
+                    selection_sha256=provenance["selection_sha256"],
                     subject_workdir=invocation.subject_workdir,
                     harness_revision=args.harness_revision,
                     operation=args.operation,
@@ -264,7 +282,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                     functional_env={**invocation.functional_env, **case_env},
                 )
             )
-    except (AttemptError, BuildSelectionError, CommandAdapterError, OSError) as exc:
+    except (
+        AttemptError,
+        BuildSelectionError,
+        CommandAdapterError,
+        ImageProvenanceError,
+        OSError,
+    ) as exc:
         print(f"attempt-runner: {exc}", file=sys.stderr)
         return 2
     if args.destination is None:

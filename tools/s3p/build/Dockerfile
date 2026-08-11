@@ -1,4 +1,5 @@
 # s3p — no upstream Docker image and no upstream Dockerfile exist (v3.6.0).
+ARG SHARED_BASE_IMAGE
 # s3p is distributed only as an npm package (run via `npx s3p` or a global
 # install), so this image is study-authored per BRIEF.md Stage B: base pinned by
 # digest, the tool installed at the exact pinned version.
@@ -33,7 +34,12 @@ RUN npm ci --ignore-scripts \
       > /out/s3p \
  && chmod 0755 /out/s3p
 
-FROM scratch
-COPY --from=install /usr/local/bin/node /tool-root/usr/local/bin/node
-COPY --from=install /build/node_modules/ /tool-root/opt/s3p/node_modules/
-COPY --from=install /out/s3p /tool-root/usr/local/bin/s3p
+FROM ${SHARED_BASE_IMAGE}
+USER root
+COPY --from=install /usr/local/bin/node /usr/local/bin/node
+COPY --from=install /build/node_modules/ /opt/s3p/node_modules/
+COPY --from=install /out/s3p /usr/local/bin/s3p
+ARG TOOL_BUILD_SHA256
+LABEL io.varve.s3-listing-study.tool-build-sha256="${TOOL_BUILD_SHA256}"
+USER 10001:10001
+WORKDIR /

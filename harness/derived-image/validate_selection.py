@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
 SHARED_BASE_SOURCE_MARKER = Path("/opt/s3-listing-study/shared-base-source.sha256")
+IMAGE_PROVENANCE = Path("/opt/s3-listing-study/image-provenance.json")
 
 
 def validate_shared_base_marker(expected: str, marker_path: Path) -> None:
@@ -39,6 +41,29 @@ def main() -> None:
             selection.shared_base_source_sha256,
             SHARED_BASE_SOURCE_MARKER,
         )
+        provenance = json.loads(IMAGE_PROVENANCE.read_text(encoding="utf-8"))
+        if provenance.get("schema_version") != 2:
+            raise ValueError("image provenance does not use schema 2")
+        if provenance.get("selection_sha256") != selection.selection_sha256:
+            raise ValueError("image provenance selection digest does not match selection")
+        worker_source_sha256 = provenance.get("worker_source_sha256")
+        if (
+            not isinstance(worker_source_sha256, str)
+            or len(worker_source_sha256) != 64
+            or any(character not in "0123456789abcdef" for character in worker_source_sha256)
+        ):
+            raise ValueError("image provenance has invalid worker source identity")
+        tool_image = provenance.get("tool_image")
+        if not isinstance(tool_image, dict) or set(tool_image) != {"digest", "uri"}:
+            raise ValueError("image provenance has invalid tool-image fields")
+        digest = tool_image["digest"]
+        uri = tool_image["uri"]
+        if (
+            not isinstance(digest, str)
+            or not isinstance(uri, str)
+            or not uri.endswith("@" + digest)
+        ):
+            raise ValueError("image provenance tool-image URI does not match digest")
     except (BuildSelectionError, ValueError) as exc:
         raise SystemExit(f"derived-image selection refused: {exc}") from None
 

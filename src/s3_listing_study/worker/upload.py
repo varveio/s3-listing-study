@@ -146,7 +146,7 @@ def _native_files(root: Path) -> set[str]:
 
 
 def _validated_upload_files(attempt_dir: Path) -> tuple[Path, list[Path]]:
-    """Authenticate the finalized schema-2 evidence set before uploading any byte."""
+    """Authenticate a finalized compatible evidence set before uploading any byte."""
     try:
         root = attempt_dir.resolve(strict=True)
     except OSError as exc:
@@ -160,8 +160,8 @@ def _validated_upload_files(attempt_dir: Path) -> tuple[Path, list[Path]]:
         result = json.loads(result_path.read_bytes())
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise UploadError("result.json is not valid UTF-8 JSON") from exc
-    if not isinstance(result, dict) or result.get("schema_version") != 2:
-        raise UploadError("result.json must be a schema-version-2 object")
+    if not isinstance(result, dict) or result.get("schema_version") not in (2, 3):
+        raise UploadError("result.json must be a schema-version-2-or-3 object")
 
     streams = result.get("streams")
     if not isinstance(streams, dict) or set(streams) != {"stdout", "stderr"}:

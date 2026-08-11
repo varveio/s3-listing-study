@@ -1,8 +1,8 @@
 {
   "tool": "s4cmd",
   "tool_version": "2.1.0",
-  "shared_base_source_sha256": "c953a4b672ffb9cabad1d5e9cd86081790489e6494362883d93c337590c16d1f",
-  "tool_build_sha256": "ded77fa3e41efeedf82496e9898b3b0cd44bfa4c13e842511a3651bcced64796",
+  "shared_base_source_sha256": "ae5505fcb29858ed27b385a05b5057bd9d71de2a04f85dff8b769306ed80dbb8",
+  "tool_build_sha256": "cd31a514bb9421f303c26adc5b5b992787615a89f6614052ee4b45cb644123bb",
   "tool_artifact": {"kind":"source-archive","locator":"https://files.pythonhosted.org/packages/42/b4/0061f4930958cd790098738659c1c39f8feaf688e698142435eedaa4ae34/s4cmd-2.1.0.tar.gz","sha256":"42566058a74d3e1e553351966efaaffa08e4b6ac28a19e72a51be21151ea9534"},
   "subject_workdir": "/",
   "executable": [

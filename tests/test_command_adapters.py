@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tomllib
 from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
@@ -20,7 +21,9 @@ from s3_listing_study.common.build_selection import (
     BuildSelectionError,
     adapter_bundle_sha256,
     build_derived_image_main,
+    derived_image_source_sha256,
     derived_image_tag,
+    docker_tag_version,
     load_registered_selection,
     load_selection,
 )
@@ -512,6 +515,39 @@ def test_tool_build_digest_excludes_the_independent_adapter_bundle(
     assert len(headers) == 2
     assert selected.adapter_bundle_sha256.encode() not in headers[1]
 
+    command = build_selection.tool_image_build_command(
+        REPO,
+        selected,
+        "study/tool:test",
+        "registry.example/shared@sha256:" + "a" * 64,
+    )
+    assert not any("SELECTION_SHA256" in argument for argument in command)
+    for dockerfile in REPO.glob("tools/*/build/Dockerfile"):
+        assert "SELECTION_SHA256" not in dockerfile.read_text()
+        assert "selection-sha256" not in dockerfile.read_text()
+
+
+def test_adapter_change_only_changes_execution_source_identity(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    shutil.copyfile(REPO / ".dockerignore", root / ".dockerignore")
+    shutil.copytree(REPO / "harness/derived-image", root / "harness/derived-image")
+    shutil.copytree(REPO / "src/s3_listing_study", root / "src/s3_listing_study")
+    shutil.copytree(REPO / "tools/aws-cli", root / "tools/aws-cli")
+    metadata_path = root / "tools/aws-cli/build/image.json"
+    before = load_selection(metadata_path, expected_tool="aws-cli")
+    before_source = derived_image_source_sha256(root, before)
+
+    normalizer = root / "tools/aws-cli/adapter/normalize.py"
+    normalizer.write_text(normalizer.read_text() + "\n# identity regression\n")
+    metadata = json.loads(metadata_path.read_text())
+    metadata["adapter_bundle_sha256"] = adapter_bundle_sha256(normalizer.parent)
+    metadata_path.write_text(json.dumps(metadata))
+    after = load_selection(metadata_path, expected_tool="aws-cli")
+
+    assert after.tool_build_sha256 == before.tool_build_sha256
+    assert derived_image_source_sha256(root, after) != before_source
+
 
 def _registered_fixture(tmp_path: Path) -> tuple[Path, Path, dict[str, object]]:
     root = tmp_path / "repo"
@@ -657,39 +693,38 @@ def test_slug_only_builder_registers_exact_named_contexts(
 
     monkeypatch.chdir(REPO)
     monkeypatch.setattr(subprocess, "run", fake_run)
-    base = "registry.example/base@sha256:" + "a" * 64
+    base = "registry.example/tool@sha256:" + "a" * 64
     assert (
-        build_derived_image_main(
-            ["--tool", "aws-cli", "--tag", "study:test", "--shared-base-image", base]
-        )
+        build_derived_image_main(["--tool", "aws-cli", "--tag", "study:test", "--tool-image", base])
         == 0
     )
     assert len(calls) == 1
     command = calls[0]
-    assert "--build-arg" not in command
-    assert command[:3] == ("docker", "buildx", "bake")
-    assert f"tool.contexts.base=docker-image://{base}" in command
-    assert f"derived.contexts.base=docker-image://{base}" in command
-    assert f"derived.contexts.adapter={REPO / 'tools/aws-cli/adapter'}" in command
-    assert f"derived.contexts.selection={REPO / 'tools/aws-cli/build'}" in command
-    assert "derived.tags=study:test" in command
+    assert command[:3] == ("docker", "buildx", "build")
+    # Attestations are stated, never inherited: BuildKit's default wraps a
+    # registry output in an index, and the study publishes plain image digests.
+    assert "--provenance=false" in command
+    assert "--sbom=false" in command
+    assert f"TOOL_IMAGE={base}" in command
+    assert f"adapter={REPO / 'tools/aws-cli/adapter'}" in command
+    assert f"selection={REPO / 'tools/aws-cli/build'}" in command
+    selection = load_registered_selection(REPO, "aws-cli")
+    assert f"WORKER_SOURCE_SHA256={derived_image_source_sha256(REPO, selection)}" in command
+    assert "study:test" in command
 
     # Omitting --tag must not fall back to a bare, upstream-looking name.
     calls.clear()
-    assert build_derived_image_main(["--tool", "aws-cli", "--shared-base-image", base]) == 0
-    assert f"derived.tags=s3-listing-study/aws-cli:2.36.1-h{__version__}-ad0f0b69890c" in calls[0]
+    assert build_derived_image_main(["--tool", "aws-cli", "--tool-image", base]) == 0
+    assert f"s3-listing-study/aws-cli:2.36.1-h{__version__}-ad24983324e6" in calls[0]
 
 
 def test_shared_base_builder_embeds_its_canonical_source_hash(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    python = tmp_path / "python"
     duckdb = tmp_path / "duckdb"
     ijson = tmp_path / "ijson"
-    python.mkdir()
     duckdb.mkdir()
     ijson.mkdir()
-    monkeypatch.setattr(build_selection, "ensure_runtime", lambda *_args: python)
     monkeypatch.setattr(build_selection, "ensure_duckdb", lambda *_args: duckdb)
     monkeypatch.setattr(build_selection, "ensure_ijson", lambda *_args: ijson)
 
@@ -698,7 +733,8 @@ def test_shared_base_builder_embeds_its_canonical_source_hash(
 
     index = command.index("--build-arg")
     assert command[index + 1] == f"SHARED_BASE_SOURCE_SHA256={expected}"
-    assert f"python={python}" in command
+    # No standalone-CPython context: the runtime is Debian's own python3.11.
+    assert not any(argument.startswith("python=") for argument in command)
     assert f"duckdb={duckdb}" in command
     assert f"ijson={ijson}" in command
 
@@ -720,12 +756,90 @@ def test_shared_base_source_hash_includes_ijson_runtime(
 def test_shared_base_cli_reports_ijson_staging_failure(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    def fail(_root: Path, _tag: str) -> tuple[str, ...]:
+    def fail(_root: Path, _tag: str, **_kwargs: object) -> tuple[str, ...]:
         raise IjsonRuntimeError("locked ijson unavailable")
 
     monkeypatch.setattr(build_selection, "shared_base_build_command", fail)
     assert build_selection.build_shared_image_main(["--tag", "study/base:test"]) == 2
     assert capsys.readouterr().err == "build-shared-image: locked ijson unavailable\n"
+
+
+def test_derived_source_identity_and_workflow_triggers_cover_every_copy_input() -> None:
+    """Both callers must trigger on every input that can change an image.
+
+    The path filters and the identity hashes are two statements of one fact. If a
+    file is copied into an image but does not appear in a trigger, a change to it
+    silently publishes nothing; if it appears in a trigger but not the hash, the
+    tag stops naming its own content. This asserts the first direction for every
+    repository input the two source-identity functions actually read.
+    """
+    selection = load_registered_selection(REPO, "aws-cli")
+    digest = derived_image_source_sha256(REPO, selection)
+    assert re.fullmatch(r"[0-9a-f]{64}", digest)
+
+    required = (
+        "- .dockerignore",
+        "- harness/derived-image/**",
+        "- harness/shared-image/**",
+        "- src/s3_listing_study/__init__.py",
+        "- src/s3_listing_study/common/**",
+        "- src/s3_listing_study/worker/**",
+        "- tools/*/adapter/**",
+        "- tools/*/build/**",
+        # The worker version is read from pyproject and goes straight into the
+        # execution tag, and uv.lock pins the environment the build runs in.
+        "- pyproject.toml",
+        "- uv.lock",
+        # The planner decides what a run builds, so a change to it must re-run.
+        "- src/s3_listing_study/ci/**",
+    )
+    callers = (
+        REPO / ".github/workflows/images-pr.yml",
+        REPO / ".github/workflows/images-publish.yml",
+    )
+    for caller in callers:
+        workflow = caller.read_text(encoding="utf-8")
+        # The reusable workflow itself is a build input: a change to it must
+        # re-run both paths.
+        assert "- .github/workflows/images.yml" in workflow, caller.name
+        for trigger in required:
+            assert workflow.count(trigger) == 1, f"{caller.name} is missing {trigger}"
+
+
+def test_only_the_publish_caller_can_write_packages() -> None:
+    """The permission boundary is a file boundary, not a boolean.
+
+    `permissions:` cannot take an expression, so a single workflow cannot grant
+    write conditionally. Keeping `packages: write` in exactly one file is what
+    makes "ordinary pull-request jobs never publish" enforceable rather than
+    merely intended.
+    """
+
+    def uncommented(path: Path) -> str:
+        return "\n".join(
+            line
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if not line.lstrip().startswith("#")
+        )
+
+    workflows = sorted((REPO / ".github/workflows").glob("*.yml"))
+    writers = [path.name for path in workflows if "packages: write" in uncommented(path)]
+    assert writers == ["images-publish.yml"]
+
+    publish = (REPO / ".github/workflows/images-publish.yml").read_text(encoding="utf-8")
+    # A labelled pull request may publish only from a branch in this repository.
+    assert "github.event.pull_request.head.repo.full_name == github.repository" in publish
+    assert "publish-images" in publish
+
+
+def test_project_and_runtime_package_versions_match() -> None:
+    project = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
+    assert project["project"]["version"] == __version__
+
+
+@pytest.mark.parametrize(("value", "expected"), [("v2.3.0", "2.3.0"), ("RELEASE.X", "release.x")])
+def test_docker_tag_version_has_one_canonical_spelling(value: str, expected: str) -> None:
+    assert docker_tag_version(value) == expected
 
 
 def test_shared_base_recipe_pins_apt_snapshot_and_marker_contract() -> None:
@@ -738,17 +852,28 @@ def test_shared_base_recipe_pins_apt_snapshot_and_marker_contract() -> None:
         "ca-certificates=20230311+deb12u1",
         "libssl3=3.0.20-1~deb12u2",
         "openssl=3.0.20-1~deb12u2",
-        "libstdc++6)\" = '12.2.0-14+deb12u1'",
-        "tzdata)\" = '2026b-0+deb12u1'",
+        "python3=3.11.2-1+b1",
+        "python3-minimal=3.11.2-1+b1",
     ):
         assert package in dockerfile
     assert "ARG SHARED_BASE_SOURCE_SHA256" in dockerfile
     assert "> /opt/s3-listing-study/shared-base-source.sha256" in dockerfile
-    assert "COPY --from=ijson . /opt/s3-listing-study/python/lib/python3.12/site-packages/" in (
-        dockerfile
-    )
+    # ijson survives the move to the Debian runtime: same version and compiled
+    # backend, staged into 3.11's dist-packages rather than a bundled 3.12.
+    assert "COPY --from=ijson . /usr/local/lib/python3.11/dist-packages/" in dockerfile
     assert "ijson.__version__ == '3.5.1'" in dockerfile
     assert "ijson.backend == 'yajl2_c'" in dockerfile
+    assert "cmp /tmp/debian-packages.lock /tmp/installed-packages.lock" in dockerfile
+    assert "USER 10001:10001" in dockerfile
+
+
+def test_derived_recipe_bakes_source_identity_and_normalizes_zipapp_mtimes() -> None:
+    dockerfile = (REPO / "harness/derived-image/Dockerfile").read_text()
+
+    assert "ARG WORKER_SOURCE_SHA256" in dockerfile
+    assert 'worker-source-sha256="${WORKER_SOURCE_SHA256}"' in dockerfile
+    assert '"schema_version":2' in dockerfile
+    assert "1980-01-01 00:00:00 UTC" in dockerfile
 
 
 def test_final_selection_validates_exact_shared_base_marker(tmp_path: Path) -> None:
@@ -775,7 +900,7 @@ def test_derived_image_tag_states_both_versions_and_the_tool_build_digest() -> N
     """The name a reader sees must not be mistakable for the upstream image."""
     selection = load_registered_selection(REPO, "swath")
     tag = derived_image_tag(selection)
-    assert tag == f"s3-listing-study/swath:0.2.4-h{__version__}-e8657c00fd00"
+    assert tag == f"s3-listing-study/swath:0.2.4-h{__version__}-27df7713beda"
     # A Docker reference: one repository component, one legal tag component.
     repository, _, reference = tag.partition(":")
     assert re.fullmatch(

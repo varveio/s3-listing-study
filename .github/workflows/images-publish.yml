@@ -1,0 +1,92 @@
+# The only file in the repository that holds `packages: write`.
+#
+# Three ways to publish, and the conditions are written once each rather than
+# repeated across every job:
+#
+#   * a push to main publishes to the main channel;
+#   * a manual dispatch publishes the selected branch, but only with an explicit
+#     opt-in, and optionally only some tools;
+#   * a same-repository pull request labelled `publish-images` publishes its
+#     proposed merge before it lands.
+#
+# A fork pull request cannot reach this: GitHub issues fork `pull_request` runs a
+# read-only token whatever a workflow declares, and the head-repository check
+# below states the same requirement explicitly rather than relying on that alone.
+name: image builds (publish)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .dockerignore
+      - .github/workflows/images-publish.yml
+      - .github/workflows/images.yml
+      - harness/derived-image/**
+      - harness/shared-image/**
+      - pyproject.toml
+      - src/s3_listing_study/__init__.py
+      - src/s3_listing_study/ci/**
+      - src/s3_listing_study/common/**
+      - src/s3_listing_study/worker/**
+      - tools/*/adapter/**
+      - tools/*/build/**
+      - uv.lock
+  pull_request:
+    types: [labeled]
+  workflow_dispatch:
+    inputs:
+      publish_to_ghcr:
+        description: Publish this branch's validated images to GHCR
+        required: true
+        default: false
+        type: boolean
+      tools:
+        description: Comma-separated tool slugs to build, or empty for all eleven
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+  packages: read
+
+# Keyed by the channel being published, so a main publication and a branch
+# publication can never displace one another. GitHub keeps one running and one
+# pending member per group, so a shared group meant a queued main publication
+# could be evicted and main would silently stop advancing until the next push.
+#
+# Concurrency is evaluated when the run is created, before the job `if:` below
+# is considered — so a labelled pull request enters a group even when it will
+# not publish. A fork's head branch is usually named `main`, so keying on the
+# raw ref would put such a run in the main publication's group and evict it.
+# Pull-request groups are therefore prefixed `pr-`, which no branch or dispatch
+# group can ever equal.
+concurrency:
+  group: >-
+    images-publish-${{
+      (github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number)) ||
+      (github.event_name == 'push' && 'main') ||
+      github.ref_name
+    }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: >-
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' && inputs.publish_to_ghcr) ||
+      (github.event_name == 'pull_request' &&
+       github.event.label.name == 'publish-images' &&
+       github.event.pull_request.head.repo.full_name == github.repository)
+    uses: ./.github/workflows/images.yml
+    permissions:
+      contents: read
+      packages: write
+      # Required by actions/attest-build-provenance to sign the publication set.
+      id-token: write
+      attestations: write
+    with:
+      push: true
+      main-publication: ${{ github.event_name != 'pull_request' && github.ref_name == 'main' }}
+      ref-name: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
+      tools: ${{ inputs.tools || '' }}

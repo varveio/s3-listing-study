@@ -134,8 +134,12 @@ Any skipped anchors mean the verification is incomplete.
 uv run pytest -q tests/test_command_adapters.py tests/test_adapters.py
 
 # Final-image integration uses the already-published common base by digest
+uv run s3-listing-study build-tool-image --tool <slug> \
+  --shared-base-image REGISTRY/...@sha256:<digest> \
+  --tag study/tool-<slug>:candidate
+# Resolve that tool image by digest, then add the worker layer.
 uv run s3-listing-study build-derived-image --tool <slug> \
-  --shared-base-image REGISTRY/...@sha256:<digest>
+  --tool-image REGISTRY/...@sha256:<digest>
 ```
 
 Then the checks no script performs:
@@ -216,7 +220,7 @@ a whole-diff reviewer would have skimmed.
   against the new `--help` (see [`tool-onboarding.md`](tool-onboarding.md)
   § Re-deriving).
 - **The command adapter returns complete subject argv.** Element zero is the
-  explicit absolute path installed by `build/Dockerfile` through `/tool-root`;
+  explicit absolute path installed by the final stage of `build/Dockerfile`;
   follow it with every required subcommand or launcher token. Upstream image
   entrypoints are not part of the production runtime, so no prefix may remain
   implicit in image packaging.

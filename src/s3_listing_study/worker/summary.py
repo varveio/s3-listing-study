@@ -13,7 +13,7 @@ from typing import Any
 from s3_listing_study.common.duckdb_adapter import existing_input_path
 from s3_listing_study.common.duckdb_runtime import VERSION as DUCKDB_VERSION
 from s3_listing_study.common.normalizer_cli import mapped_input
-from s3_listing_study.common.python_runtime import interpreter_identity
+from s3_listing_study.worker.runtime_identity import interpreter_identity
 
 
 class SummaryError(RuntimeError):

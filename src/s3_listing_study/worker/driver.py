@@ -26,6 +26,7 @@ class ResolvedInvocation:
     functional_env: dict[str, str] = field(default_factory=dict)
     shared_base_source_sha256: str = "0" * 64
     tool_build_sha256: str = "0" * 64
+    selection_sha256: str = "0" * 64
     tool_artifact: dict[str, str] = field(
         default_factory=lambda: {"kind": "synthetic", "locator": "test", "sha256": "0" * 64}
     )
@@ -88,6 +89,7 @@ def resolve_invocation(
         functional_env=adapter.functional_env,
         shared_base_source_sha256=selection.shared_base_source_sha256,
         tool_build_sha256=selection.tool_build_sha256,
+        selection_sha256=selection.selection_sha256,
         tool_artifact={
             "kind": selection.tool_artifact_kind,
             "locator": selection.tool_artifact_locator,

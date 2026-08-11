@@ -15,7 +15,7 @@ from pathlib import Path, PurePosixPath
 from typing import IO, Final
 
 VERSION: Final = "3.5.1"
-PYTHON_TAG: Final = "cp312-cp312"
+PYTHON_TAG: Final = "cp311-cp311"
 BACKEND: Final = "yajl2_c"
 FETCH_TIMEOUT_S: Final = 120.0
 
@@ -24,12 +24,12 @@ FETCH_TIMEOUT_S: Final = 120.0
 # inside Docker.
 WHEELS: Final[dict[str, tuple[str, str]]] = {
     "aarch64": (
-        "https://files.pythonhosted.org/packages/41/fb/f9c1664d75467453e6bd4e5f9cd2211b730b09e049445ab64cbac68cc6a3/ijson-3.5.1-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
-        "350caea815e53151994b597abc80cf669454276b5ac6aadcec69ef6d48f7e90b",
+        "https://files.pythonhosted.org/packages/1d/1f/b4547461d75db40744616e40c0a06cf2f46a14e60742f6d12510f4612985/ijson-3.5.1-cp311-cp311-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
+        "6ee1e6d59c800aa819952f6cb5ff08707ecd576b29cc9c3d00e33c2b371a92ce",
     ),
     "x86_64": (
-        "https://files.pythonhosted.org/packages/43/80/d20b1c49c4aa7cc6644131e2e57192b45346ef4816566ed1cd9fd05bae38/ijson-3.5.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
-        "e4fcebfe1685bb7ba06a8255a5d428ea6b4b895d7acf979cb637d8bbc9db2f47",
+        "https://files.pythonhosted.org/packages/a7/30/7ecba8377509eaea2666db5b39a1a99e23f5e3e1e7ee371ec366cbfc4f7c/ijson-3.5.1-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+        "affb85eb75fa03a21d1f790bbf26a0e66e5701672062a30dc5c3c6a29c5c0a63",
     ),
 }
 

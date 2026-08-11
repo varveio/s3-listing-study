@@ -1,43 +1,51 @@
-# Shared study base
+# Shared study runtime
 
-[`Dockerfile`](Dockerfile) defines the base inherited by every comparative
-image. It contains only:
+Part of the image chain described in
+[`docs/operating/image-builds.md`](../../docs/operating/image-builds.md).
+
+[`Dockerfile`](Dockerfile) is the controlled parent inherited by every tool
+image. It installs Debian's Python 3.11 from the signed 2026-08-03 Bookworm
+snapshot, verifies the complete installed `package:arch=version` closure against
+[`debian-packages.lock`](debian-packages.lock), and installs the checksum-locked
+DuckDB 1.5.5 wheel into `/usr/local/lib/python3.11/dist-packages`.
 
 - a digest-pinned Debian/glibc userspace;
 - the Debian CA trust store and minimal runtime libraries;
-- one checksum-verified python-build-standalone CPython 3.12 distribution; and
+- Debian's own Python 3.11, version-pinned from one signed snapshot;
 - one checksum-verified DuckDB runtime for that interpreter; and
 - one checksum-verified ijson 3.5.1 runtime with its compiled `yajl2_c` backend.
 
-It contains no tool, worker, adapter, manager, benchmark plan, or receipt. Its
-Debian packages resolve from one signed snapshot and are version-pinned; the
-Python archive and the DuckDB and ijson wheels are checksum-verified before they
-enter the build.
+The image contains no tool, adapter, worker, manager, plan, or receipt. Its
+Debian packages resolve from one signed snapshot and are version-pinned, and the
+whole installed set is compared against a committed lock file; the DuckDB and
+ijson wheels are checksum-verified before they enter the build.
 
 This is a common base filesystem, not a claim that every tool uses the same
 runtime internals. Static binaries and bundled Node, Python, or JRE payloads may
 retain their own resolver, TLS, allocator, and language-runtime behavior.
 
-Build it once from the repository root:
+It ends as fixed user `10001:10001`, with writable `HOME=/home/s3study`.
+Root-owned markers under `/opt/s3-listing-study/` record the source-input hash,
+package closure, and runtime identity. This is content-pinned and recorded for
+reuse; package installation is not claimed to produce a bit-identical OCI digest
+on every rebuild.
+
+Build it from the repository root:
 
 ```sh
-BASE_TAG=us-east1-docker.pkg.dev/PROJECT/REPOSITORY/shared-base:2026-08-10
-uv run s3-listing-study build-shared-image --tag "$BASE_TAG"
+uv run s3-listing-study build-shared-image --tag study/runtime:candidate
 ```
 
-The command builds a local tag. It does not publish or resolve a registry
-digest, so the operator must do both explicitly:
+Before building tool children, export or push the image and resolve its
+immutable `REGISTRY/IMAGE@sha256:<digest>` reference. The tool command rejects
+mutable parent tags:
 
 ```sh
-docker push "$BASE_TAG"
-docker image inspect --format '{{json .RepoDigests}}' "$BASE_TAG"
+uv run s3-listing-study build-tool-image \
+  --tool rclone \
+  --shared-base-image "$SHARED_RUNTIME_IMAGE" \
+  --tag study/tool-rclone:candidate
 ```
 
-Every subsequent `build-derived-image` or `publish-derived-image` invocation
-receives the same complete immutable reference through
-`--shared-base-image REGISTRY/...@sha256:<digest>`. A canonical
-`shared_base_source_sha256` records the source inputs, but it does not substitute
-for the actual OCI URI and digest; image sets and results retain both.
-
-See [`../derived-image/README.md`](../derived-image/README.md) for tool payload,
-final assembly, registration, and publication details.
+See [`../derived-image/README.md`](../derived-image/README.md) for the complete
+three-layer flow.

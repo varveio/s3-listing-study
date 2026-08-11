@@ -14,11 +14,14 @@
 # Usage:
 #   harness/smoke-campaign.sh \
 #     --shared-base-image REGISTRY/...@sha256:<digest> \
+#     --build-repository REGISTRY/REPOSITORY \
 #     [--tool SLUG]... [--credential-file PATH] [--jobs N] [--keep-going]
 #
 # --shared-base-image is the immutable shared runtime image used to build every
-# selected tool. The same URI and exact digest suffix are recorded by each
-# worker attempt.
+# selected tool. --build-repository is where the script pushes each tool parent
+# so its manifest digest can become the execution image's immutable parent. Use
+# a job-local registry for smoke (for example localhost:5000/s3-study); the
+# script never chooses or authenticates to a production registry.
 #
 # Every attempt normalizes and counts locally after its subject measurement;
 # the small summary is sealed into result.json. GCS upload is a separate step
@@ -91,12 +94,13 @@ TOOL_SMOKE_PLAN=(
 CREDENTIAL_FILE=""
 SHARED_BASE_IMAGE=""
 SHARED_BASE_DIGEST=""
+BUILD_REPOSITORY=""
 KEEP_GOING=no
 JOBS=1
 declare -a ONLY_TOOLS=()
 
 usage() {
-  echo "usage: harness/smoke-campaign.sh --shared-base-image REGISTRY/...@sha256:<digest> [--tool SLUG]... [--credential-file PATH] [--jobs N] [--keep-going]"
+  echo "usage: harness/smoke-campaign.sh --shared-base-image REGISTRY/...@sha256:<digest> --build-repository REGISTRY/REPOSITORY [--tool SLUG]... [--credential-file PATH] [--jobs N] [--keep-going]"
 }
 
 while [ "$#" -gt 0 ]; do
@@ -106,6 +110,11 @@ while [ "$#" -gt 0 ]; do
     --shared-base-image)
       [ "$#" -ge 2 ] || { echo "smoke-campaign: --shared-base-image requires a value" >&2; exit 2; }
       SHARED_BASE_IMAGE="$2"
+      shift 2
+      ;;
+    --build-repository)
+      [ "$#" -ge 2 ] || { echo "smoke-campaign: --build-repository requires a value" >&2; exit 2; }
+      BUILD_REPOSITORY="${2%/}"
       shift 2
       ;;
     --jobs) JOBS="$2"; shift 2 ;;
@@ -119,8 +128,16 @@ if [ -z "$SHARED_BASE_IMAGE" ]; then
   echo "smoke-campaign: --shared-base-image is required" >&2
   exit 2
 fi
-if [[ ! "$SHARED_BASE_IMAGE" =~ ^[a-z0-9]+([._-][a-z0-9]+)*/([a-z0-9]+([._-][a-z0-9]+)*/)*[a-z0-9]+([._-][a-z0-9]+)*@sha256:[0-9a-f]{64}$ ]]; then
+if [[ ! "$SHARED_BASE_IMAGE" =~ ^[a-z0-9]+([._-][a-z0-9]+)*(:[0-9]+)?/([a-z0-9]+([._-][a-z0-9]+)*/)*[a-z0-9]+([._-][a-z0-9]+)*@sha256:[0-9a-f]{64}$ ]]; then
   echo "smoke-campaign: --shared-base-image must be REGISTRY/...@sha256:<64 lowercase hex digits>" >&2
+  exit 2
+fi
+if [ -z "$BUILD_REPOSITORY" ]; then
+  echo "smoke-campaign: --build-repository is required" >&2
+  exit 2
+fi
+if [[ ! "$BUILD_REPOSITORY" =~ ^[a-z0-9]+([._-][a-z0-9]+)*(:[0-9]+)?(/[a-z0-9]+([._-][a-z0-9]+)*)+$ ]]; then
+  echo "smoke-campaign: --build-repository must be REGISTRY/REPOSITORY without a tag" >&2
   exit 2
 fi
 SHARED_BASE_DIGEST="${SHARED_BASE_IMAGE##*@}"
@@ -162,25 +179,40 @@ run_one_tool() {
     return 0
   fi
 
-  local tag digest repo_tags
-  tag="$(
-    uv run python - "$tool" <<'PY'
+  local tag tool_tag tool_image digest repo_tags build_tag_output
+  local -a build_tags=()
+  build_tag_output="$(
+    uv run python - "$tool" "$BUILD_REPOSITORY" <<'PY'
 import sys
 from pathlib import Path
 
 from s3_listing_study.common.build_selection import derived_image_tag, load_registered_selection
 
 root = Path.cwd().resolve(strict=True)
-print(derived_image_tag(load_registered_selection(root, sys.argv[1])))
+selection = load_registered_selection(root, sys.argv[1])
+print(derived_image_tag(selection))
+print(f"{sys.argv[2]}/tool/{selection.tool}:{selection.selection_sha256}")
 PY
-  )" || { echo "could not resolve the registered image tag for $tool"; return 1; }
+  )" || { echo "could not resolve the registered image tags for $tool"; return 1; }
+  readarray -t build_tags <<< "$build_tag_output"
+  [ "${#build_tags[@]}" -eq 2 ] || { echo "could not resolve two image tags for $tool"; return 1; }
+  tag="${build_tags[0]}"
+  tool_tag="${build_tags[1]}"
   case "$tag" in
     "s3-listing-study/$tool:"*) ;;
     *) echo "registered image tag for $tool has an unexpected namespace"; return 1 ;;
   esac
 
   echo "-- build --"
-  sg docker -c "uv run s3-listing-study build-derived-image --tool '$tool' --shared-base-image '$SHARED_BASE_IMAGE' --tag '$tag'"
+  sg docker -c "uv run s3-listing-study build-tool-image --tool '$tool' --shared-base-image '$SHARED_BASE_IMAGE' --tag '$tool_tag'"
+  sg docker -c "docker image push '$tool_tag'"
+  tool_image="$(
+    sudo docker image inspect "$tool_tag" --format '{{json .RepoDigests}}' \
+      | python3 -c \
+        'import json,sys; repository=sys.argv[1].rsplit(":",1)[0]; references=json.load(sys.stdin); matches=[value for value in references if value.startswith(repository+"@sha256:")]; raise SystemExit(print(matches[0]) if len(matches)==1 else 1)' \
+        "$tool_tag"
+  )" || { echo "could not resolve the pushed tool image digest for $tool"; return 1; }
+  sg docker -c "uv run s3-listing-study build-derived-image --tool '$tool' --tool-image '$tool_image' --tag '$tag'"
 
   digest="$(sudo docker image inspect "$tag" --format '{{.Id}}')" || {
     echo "could not inspect the image built as $tag"

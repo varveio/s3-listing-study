@@ -305,21 +305,21 @@ is an executable compatibility boundary rather than a stored canonical result.
 exists. Observed captures remain receipts. The current classified exceptions
 are documented in the migration playbook.
 
-Every runnable capsule has a `build/Dockerfile` whose final scratch stage
-exports `/tool-root`: exactly one tool and the runtime files it needs, with no
-study worker. Recipes prefer the selected release's checksum-pinned official
+Every runnable capsule has a `build/Dockerfile` whose final stage inherits the
+immutable shared runtime and installs exactly one tool plus the runtime files
+it needs, with no study worker. Recipes prefer the selected release's checksum-pinned official
 binary, archive, or package. `s3-fast-list` is the sole native source-build
 exception because its selected fork publishes no matching binary. Discarded,
 digest-pinned builder or runtime stages are allowed; upstream tool images are
 not execution bases or artifact donors.
 
 The stable base in `harness/shared-image/` contains the pinned Debian/glibc
-userspace, CA trust, CPython, DuckDB, and the pinned compiled ijson runtime, but
-no tool or worker. The common final
-recipe in `harness/derived-image/` starts from that same base, applies
-`/tool-root`, and adds current `worker/`, worker-reachable `common/`, one
-adapter, and `image.json` as `selection.json`. Tool capsules do not copy either
-shared recipe. The base standardizes shared filesystem inputs; bundled or
+userspace, CA trust, Debian Python, DuckDB, and the pinned compiled ijson
+runtime, but no tool or worker. The common recipe in `harness/derived-image/`
+starts from the immutable tool image and adds current `worker/`,
+worker-reachable `common/`, one adapter, and `image.json` as `selection.json`.
+Tool capsules do not copy either shared recipe. The base standardizes shared
+filesystem inputs; bundled or
 static Node, Python, JRE, resolver, TLS, and allocator behavior remains part of
 the tool payload.
 
@@ -328,12 +328,12 @@ The target boundary defines invalidation:
 | Changed input | Invalidated target |
 | --- | --- |
 | manager or benchmark plan | none |
-| worker or adapter | affected final image(s) |
-| tool recipe or artifact | that tool payload and final image |
-| shared runtime | base and every final image |
+| worker or adapter | affected execution image(s) |
+| tool recipe or artifact | that tool image and execution image |
+| shared runtime | base, every tool image, and every execution image |
 
-This avoids tool recompilation only when BuildKit cache is retained or restored;
-registry-backed cache for fresh builders is still open.
+Because each child consumes its parent by OCI digest, worker-only builds reuse a
+published tool image without depending on retained BuildKit state.
 
 `build/image.json` has an exact field set: `tool`, `tool_version`,
 `shared_base_source_sha256`, `tool_build_sha256`, structured `tool_artifact`,

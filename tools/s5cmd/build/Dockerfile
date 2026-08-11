@@ -27,13 +27,18 @@
 # Safe on a glibc base because the binary is static: Go with CGO disabled needs
 # nothing from the base but a kernel. Verified by running it — `v2.3.0-991c9fb`.
 
-FROM base AS fetch
+ARG SHARED_BASE_IMAGE
+FROM ${SHARED_BASE_IMAGE}
+USER root
 # --checksum makes the digest a precondition of the fetch: a substituted or
 # corrupted archive fails the build rather than being unpacked.
 ADD --checksum=sha256:de0fdbfa3aceae55e069ba81a0fc17b2026567637603734a387b2fca06c299b4 \
     https://github.com/peak/s5cmd/releases/download/v2.3.0/s5cmd_2.3.0_Linux-64bit.tar.gz \
     /tmp/s5cmd.tgz
-RUN mkdir -p /out && tar xzf /tmp/s5cmd.tgz -C /out s5cmd
-
-FROM scratch
-COPY --from=fetch /out/s5cmd /tool-root/s5cmd
+RUN tar xzf /tmp/s5cmd.tgz -C / s5cmd \
+    && chmod 0755 /s5cmd \
+    && install -d -o 10001 -g 10001 /aws
+ARG TOOL_BUILD_SHA256
+LABEL io.varve.s3-listing-study.tool-build-sha256="${TOOL_BUILD_SHA256}"
+USER 10001:10001
+WORKDIR /aws

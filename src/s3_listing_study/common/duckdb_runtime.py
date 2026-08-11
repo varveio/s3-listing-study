@@ -15,7 +15,7 @@ from pathlib import Path, PurePosixPath
 from typing import IO, Final
 
 VERSION: Final = "1.5.5"
-PYTHON_TAG: Final = "cp312-cp312"
+PYTHON_TAG: Final = "cp311-cp311"
 FETCH_TIMEOUT_S: Final = 120.0
 
 # Recorded verbatim from uv.lock's duckdb 1.5.5 wheel metadata.  Derived
@@ -23,12 +23,12 @@ FETCH_TIMEOUT_S: Final = 120.0
 # allowed inside Docker.
 WHEELS: Final[dict[str, tuple[str, str]]] = {
     "aarch64": (
-        "https://files.pythonhosted.org/packages/ea/a9/5f1f09da421d8e930e0b063d11c1b3f90363f40ede74438cd188afdd13a2/duckdb-1.5.5-cp312-cp312-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl",
-        "f316eae2323d9a851883fdf2dee91c1f9efe251ab33e14a2272f82a913422ed6",
+        "https://files.pythonhosted.org/packages/6f/1d/9840179c2607b90523a2884a129c4d4e6dbdc1178ba62a976c1043beba88/duckdb-1.5.5-cp311-cp311-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl",
+        "2e72f9e1a4f90a5c8483ad4d540e495bf0834ba61c360b52499a573d7ed62a3f",
     ),
     "x86_64": (
-        "https://files.pythonhosted.org/packages/4f/98/6549769f158126fa64fd6c1ac2eb59a18282146c939867a3eb31b7c1db07/duckdb-1.5.5-cp312-cp312-manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl",
-        "7a6d2d11859d82a936ebdcb30ce3d8a1cbb3e990bff05c12abb9b54c44fa7bd1",
+        "https://files.pythonhosted.org/packages/b5/55/f9641a4eebcc2f4df631287d6c3b9ed2eea3b92644f93acbad825e3972b6/duckdb-1.5.5-cp311-cp311-manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl",
+        "b9b6f86ed85d4ef5e0211eaebf75d057bd8bb520bba438a95dd0f4e42234bbfe",
     ),
 }
 
