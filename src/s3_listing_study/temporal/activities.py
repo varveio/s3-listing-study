@@ -41,7 +41,15 @@ def _validated_adoption(spec: BatchJobSpec, job: batch_v1.Job) -> None:
         group.name = ""  # Batch supplies this output-only child resource name.
     if not expected.allocation_policy.labels:
         actual.allocation_policy.labels = {}
-    if not expected.allocation_policy.location.allowed_locations:
+    expected_locations = expected.allocation_policy.location.allowed_locations
+    parent_region = f"regions/{spec.location}"
+    actual_locations = actual.allocation_policy.location.allowed_locations
+    if parent_region not in expected_locations and parent_region in actual_locations:
+        # Batch adds the job's parent region to the requested allowed locations.
+        # Remove exactly that provider-owned value; every other difference remains
+        # visible to the immutable-field comparison below.
+        actual_locations.remove(parent_region)
+    if not expected_locations and not actual_locations:
         actual.allocation_policy.location = cast(Any, None)
     immutable = ("labels", "task_groups", "allocation_policy", "logs_policy")
     if any(getattr(expected, field) != getattr(actual, field) for field in immutable):
