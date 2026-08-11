@@ -27,17 +27,14 @@ dependencies = [
     # a large SDK and compiled dependency to every pinned image. It needs
     # one POST and one ifGenerationMatch=0 header, so it uses urllib and the
     # study depends on nothing for it.
-]
-
-[project.optional-dependencies]
-temporal = [
+    # Temporal is the production campaign controller. These dependencies stay
+    # manager-side because derived subject images copy only common/worker code.
     "google-cloud-batch>=0.17.36",
     "temporalio>=1.17.0",
 ]
 
 [project.scripts]
 s3-listing-study = "s3_listing_study.manager.cli:main"
-s3-listing-study-temporal-start = "s3_listing_study.temporal.starter:main"
 s3-listing-study-temporal-worker = "s3_listing_study.temporal.worker:main"
 
 [dependency-groups]

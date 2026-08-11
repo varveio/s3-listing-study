@@ -141,7 +141,7 @@ jobs:
           enable-cache: true
 
       - name: Sync (locked)
-        run: uv sync --locked --extra temporal
+        run: uv sync --locked
 
       - name: ruff check
         run: uv run ruff check

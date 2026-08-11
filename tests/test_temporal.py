@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import argparse
 import asyncio
-import hashlib
+import json
 from dataclasses import replace
 from datetime import timedelta
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -17,8 +15,7 @@ from temporalio import workflow as temporal_workflow
 from temporalio.client import Client as TemporalClient
 from temporalio.client import WorkflowExecutionStatus
 from temporalio.common import WorkflowIDConflictPolicy, WorkflowIDReusePolicy
-from temporalio.envconfig import ClientConfig as TemporalClientConfig
-from temporalio.exceptions import ApplicationError
+from temporalio.exceptions import ApplicationError, WorkflowAlreadyStartedError
 from temporalio.service import RPCError, RPCStatusCode
 from temporalio.workflow import (
     ActivityCancellationType,
@@ -26,19 +23,24 @@ from temporalio.workflow import (
     ParentClosePolicy,
 )
 
-from s3_listing_study.manager.bench.plan import Plan
-from s3_listing_study.manager.campaign import Attempt
 from s3_listing_study.manager.campaign import cli as campaign_cli
-from s3_listing_study.manager.campaign.batch import BatchConfig
-from s3_listing_study.temporal import TASK_QUEUE, activities, starter, workflows
+from s3_listing_study.temporal import TASK_QUEUE, activities, workflows
 from s3_listing_study.temporal.models import (
     BatchJobOutcome,
     BatchJobSpec,
     CampaignWorkflowInput,
 )
 
+DIGEST = "d" * 64
+SCOPE = campaign_cli.TemporalScope("temporal.example.invalid:7233", "s3-study")
+CLIENT_CONFIG: dict[str, Any] = {
+    **SCOPE.document(),
+    "api_key": "temporal-test-api-key",
+    "tls": True,
+}
 
-def spec() -> BatchJobSpec:
+
+def spec(*, controller_timeout_s: int = 9000) -> BatchJobSpec:
     identity = "a" * 52
     return BatchJobSpec(
         project="study",
@@ -61,6 +63,7 @@ def spec() -> BatchJobSpec:
             "allocationPolicy": {"instances": [{"policy": {"machineType": "n4-highcpu-2"}}]},
             "logsPolicy": {"destination": "CLOUD_LOGGING"},
         },
+        controller_timeout_s=controller_timeout_s,
     )
 
 
@@ -133,7 +136,9 @@ def run_activity(
     return asyncio.run(activities.run_batch_job(client.selected)), heartbeats
 
 
-def test_first_attempt_collision_is_nonretryable(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_first_activity_attempt_collision_is_nonretryable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     selected = spec()
     client = FakeBatchClient(selected, [], collision=True)
     with pytest.raises(ApplicationError) as raised:
@@ -144,7 +149,7 @@ def test_first_attempt_collision_is_nonretryable(monkeypatch: pytest.MonkeyPatch
     assert client.closed
 
 
-def test_retry_adopts_exact_job_and_rereads_terminal_state(
+def test_later_activity_attempt_adopts_exact_provider_normalized_job(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     selected = spec()
@@ -166,7 +171,9 @@ def test_retry_adopts_exact_job_and_rereads_terminal_state(
     assert client.closed
 
 
-def test_retry_refuses_mismatched_adoption(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_later_activity_attempt_refuses_mismatched_adoption(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     selected = spec()
     client = FakeBatchClient(
         selected, [provider_job(selected, "QUEUED", mismatch=True)], collision=True
@@ -177,9 +184,11 @@ def test_retry_refuses_mismatched_adoption(monkeypatch: pytest.MonkeyPatch) -> N
     assert raised.value.non_retryable
 
 
-def test_campaign_fans_out_typed_child_outcomes(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_campaign_waits_for_exact_claim_then_fans_out_without_spike_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     selected = spec()
-    cases = tuple(replace(selected, job_id=f"campaign-case-{number}") for number in range(2))
+    cases = tuple(replace(selected, job_id=f"campaign-case-{number}") for number in range(8))
     calls: list[dict[str, Any]] = []
 
     async def child(*args: Any, **kwargs: Any) -> BatchJobOutcome:
@@ -187,223 +196,271 @@ def test_campaign_fans_out_typed_child_outcomes(monkeypatch: pytest.MonkeyPatch)
         request = args[1]
         return BatchJobOutcome(request.resource_name, "SUCCEEDED")
 
+    async def wait_condition(predicate: Any) -> None:
+        while not predicate():
+            await asyncio.sleep(0)
+
     monkeypatch.setattr(temporal_workflow, "execute_child_workflow", child)
-    result = asyncio.run(workflows.CampaignWorkflow().run(CampaignWorkflowInput(cases)))
-    assert all(isinstance(item, BatchJobOutcome) for item in result)
+    monkeypatch.setattr(temporal_workflow, "wait_condition", wait_condition)
+
+    async def run() -> list[BatchJobOutcome]:
+        campaign = workflows.CampaignWorkflow()
+        task = asyncio.create_task(campaign.run(CampaignWorkflowInput(cases, DIGEST)))
+        await asyncio.sleep(0)
+        assert calls == []
+        campaign.claim("wrong")
+        await asyncio.sleep(0)
+        assert calls == []
+        campaign.claim(DIGEST)
+        campaign.claim(DIGEST)
+        assert campaign._claims == {"wrong", DIGEST}
+        return await task
+
+    result = asyncio.run(run())
+    assert len(result) == len(cases)
     assert [call["id"] for call in calls] == [case.job_id for case in cases]
     assert all(call["parent_close_policy"] is ParentClosePolicy.ABANDON for call in calls)
     assert all(call["cancellation_type"] is ChildWorkflowCancellationType.ABANDON for call in calls)
+    assert all("retry_policy" not in call for call in calls)
 
 
-def test_campaign_refuses_invalid_case_count_without_workflow_task_loop() -> None:
+def test_campaign_workflow_refuses_empty_input() -> None:
     with pytest.raises(ApplicationError) as raised:
-        asyncio.run(workflows.CampaignWorkflow().run(CampaignWorkflowInput(())))
+        asyncio.run(workflows.CampaignWorkflow().run(CampaignWorkflowInput((), DIGEST)))
     assert raised.value.type == "InvalidCampaignInput"
     assert raised.value.non_retryable
 
 
-def test_case_declares_activity_retries_and_all_timeouts(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_case_declares_activity_retries_timeouts_and_abandonment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     captured: dict[str, Any] = {}
 
-    async def execute(*args: Any, **kwargs: Any) -> BatchJobOutcome:
+    async def execute(*_args: Any, **kwargs: Any) -> BatchJobOutcome:
         captured.update(kwargs)
         return BatchJobOutcome(spec().resource_name, "FAILED")
 
     monkeypatch.setattr(temporal_workflow, "execute_activity", execute)
-    result = asyncio.run(workflows.CaseWorkflow().run(spec()))
+    selected = spec(controller_timeout_s=34_205)
+    result = asyncio.run(workflows.CaseWorkflow().run(selected))
     assert result.state == "FAILED"
-    assert captured["start_to_close_timeout"] == timedelta(hours=8)
-    assert captured["schedule_to_close_timeout"] == timedelta(hours=24)
+    # The committed plan boundary allows 28,800 seconds of subject time. Batch
+    # then permits TERM grace and post-attempt finalization before the explicit
+    # one-hour queue/control allowance ends.
+    batch_max_run_duration_s = 28_800 + 5 + 1800
+    assert selected.controller_timeout_s == batch_max_run_duration_s + 3600
+    assert captured["start_to_close_timeout"] == timedelta(seconds=selected.controller_timeout_s)
+    assert captured["schedule_to_close_timeout"] == timedelta(
+        seconds=selected.controller_timeout_s * 3
+    )
+    assert captured["start_to_close_timeout"] > timedelta(seconds=batch_max_run_duration_s)
     assert captured["heartbeat_timeout"] == timedelta(seconds=30)
     assert captured["retry_policy"].maximum_attempts == 8
+    assert captured["retry_policy"].non_retryable_error_types == (
+        "PermanentGoogleError",
+        "BatchJobCollision",
+    )
     assert captured["cancellation_type"] is ActivityCancellationType.ABANDON
 
 
-def test_starter_freezes_prepared_bytes_and_uses_stable_id_policy(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    request = CampaignWorkflowInput((spec(),))
-    monkeypatch.setattr(starter, "prepare", lambda _args: (request, b"{}\n", (("bucket", b"old"),)))
+class Description:
+    def __init__(self) -> None:
+        self.id = "2026-08-11-trial"
+        self.run_id = "run-a"
+        self.namespace = SCOPE.namespace
+        self.status = WorkflowExecutionStatus.RUNNING
+        self.workflow_type = "CampaignWorkflow"
+        self.task_queue = TASK_QUEUE
+        self.digest: str | None = DIGEST
+
+    async def memo_value(self, key: str, *, type_hint: type[str]) -> str:
+        assert (key, type_hint) == ("campaign_digest", str)
+        if self.digest is None:
+            raise KeyError(key)
+        return self.digest
+
+
+class Handle:
+    id = "2026-08-11-trial"
+
+    def __init__(self, description: Description | BaseException) -> None:
+        self.description = description
+        self.signals: list[tuple[Any, Any]] = []
+
+    async def describe(self) -> Description:
+        if isinstance(self.description, BaseException):
+            raise self.description
+        return self.description
+
+    async def signal(self, signal: Any, arg: Any) -> None:
+        self.signals.append((signal, arg))
+
+
+class FakeTemporalClient:
+    def __init__(self, handle: Handle | BaseException) -> None:
+        self.handle = handle
+        self.start_calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+        self.get_calls: list[tuple[str, str | None]] = []
+
+    async def start_workflow(self, *args: Any, **kwargs: Any) -> Handle:
+        self.start_calls.append((args, kwargs))
+        if isinstance(self.handle, BaseException):
+            raise self.handle
+        return self.handle
+
+    def get_workflow_handle(self, workflow_id: str, *, run_id: str | None = None) -> Handle:
+        self.get_calls.append((workflow_id, run_id))
+        if isinstance(self.handle, BaseException):
+            raise self.handle
+        return self.handle
+
+
+def owner(*, digest: str = DIGEST, scope: campaign_cli.TemporalScope = SCOPE) -> Any:
+    return campaign_cli.TemporalOwner(
+        campaign=Handle.id,
+        campaign_digest=digest,
+        scope=scope,
+        workflow_id=Handle.id,
+        run_id="run-a",
+    )
+
+
+def run_start(
+    monkeypatch: pytest.MonkeyPatch,
+    client: FakeTemporalClient,
+    *,
+    existing_owner: campaign_cli.TemporalOwner | None = None,
+) -> tuple[str, list[tuple[str, bytes]]]:
     frozen: list[tuple[str, bytes]] = []
-
-    def freeze(uri: str, data: bytes) -> bool:
-        frozen.append((uri, data))
-        return True
-
-    monkeypatch.setattr(campaign_cli, "_freeze", freeze)
-    plan = tmp_path / "plan.yaml"
-    plan.write_bytes(b"changed after prepare")
-    captured: dict[str, Any] = {}
-
-    class FakeClient:
-        async def start_workflow(self, *args: Any, **kwargs: Any) -> Any:
-            captured.update(kwargs)
-            return SimpleNamespace(id=kwargs["id"])
-
-    monkeypatch.setattr(TemporalClientConfig, "load_client_connect_config", lambda: {})
-    monkeypatch.setattr(TemporalClient, "connect", lambda **_kwargs: asyncio.sleep(0, FakeClient()))
-    args = argparse.Namespace(
-        campaign="2026-08-11-trial",
-        results_bucket="results",
-        path=[str(plan)],
-        prepare_only=False,
-    )
-    assert asyncio.run(starter.start(args)) == args.campaign
-    assert captured["id"] == args.campaign
-    assert captured["task_queue"] == TASK_QUEUE
-    assert captured["id_reuse_policy"] is WorkflowIDReusePolicy.REJECT_DUPLICATE
-    assert captured["id_conflict_policy"] is WorkflowIDConflictPolicy.FAIL
-    assert captured["memo"] == {"campaign_digest": hashlib.sha256(b"{}\n").hexdigest()}
-    assert all("/temporal/campaigns/2026-08-11-trial/" in uri for uri, _data in frozen)
-    assert frozen[0][1] == b"old"
-
-
-def test_existing_reservation_returns_only_matching_workflow(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    request = CampaignWorkflowInput((spec(),))
-    monkeypatch.setattr(starter, "prepare", lambda _args: (request, b"{}\n", ()))
-    monkeypatch.setattr(campaign_cli, "_freeze", lambda *_args: False)
-
-    class Description:
-        status = WorkflowExecutionStatus.RUNNING
-        workflow_type = "CampaignWorkflow"
-        task_queue = TASK_QUEUE
-        digest = hashlib.sha256(b"{}\n").hexdigest()
-
-        async def memo_value(self, key: str, *, type_hint: type[str]) -> str:
-            assert (key, type_hint) == ("campaign_digest", str)
-            return self.digest
-
-    description = Description()
-
-    class Handle:
-        id = "2026-08-11-trial"
-
-        async def describe(self) -> Any:
-            return description
-
-    class FakeClient:
-        def get_workflow_handle(self, workflow_id: str) -> Handle:
-            assert workflow_id == Handle.id
-            return Handle()
-
-        async def start_workflow(self, *_args: Any, **_kwargs: Any) -> Any:
-            pytest.fail("existing reservation started a new Workflow")
-
-    monkeypatch.setattr(TemporalClientConfig, "load_client_connect_config", lambda: {})
-    monkeypatch.setattr(TemporalClient, "connect", lambda **_kwargs: asyncio.sleep(0, FakeClient()))
-    args = argparse.Namespace(campaign=Handle.id, results_bucket="results")
-    assert asyncio.run(starter.start(args)) == Handle.id
-
-    description.task_queue = "foreign"
-    with pytest.raises(RuntimeError, match="different Temporal Workflow"):
-        asyncio.run(starter.start(args))
-
-    description.task_queue = TASK_QUEUE
-    description.digest = "wrong"
-    with pytest.raises(RuntimeError, match="different Temporal Workflow"):
-        asyncio.run(starter.start(args))
-
-    description.digest = hashlib.sha256(b"{}\n").hexdigest()
-    description.status = WorkflowExecutionStatus.COMPLETED
-    with pytest.raises(RuntimeError, match="different Temporal Workflow"):
-        asyncio.run(starter.start(args))
-
-
-def test_existing_reservation_refuses_missing_or_expired_workflow(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    request = CampaignWorkflowInput((spec(),))
-    monkeypatch.setattr(starter, "prepare", lambda _args: (request, b"{}\n", ()))
-    monkeypatch.setattr(campaign_cli, "_freeze", lambda *_args: False)
-
-    class Handle:
-        id = "2026-08-11-trial"
-
-        async def describe(self) -> Any:
-            raise RPCError("missing", RPCStatusCode.NOT_FOUND, b"")
-
-    client = SimpleNamespace(get_workflow_handle=lambda _workflow_id: Handle())
-    monkeypatch.setattr(TemporalClientConfig, "load_client_connect_config", lambda: {})
     monkeypatch.setattr(TemporalClient, "connect", lambda **_kwargs: asyncio.sleep(0, client))
-    args = argparse.Namespace(campaign=Handle.id, results_bucket="results")
-    with pytest.raises(RuntimeError, match="unstarted or expired"):
-        asyncio.run(starter.start(args))
+    monkeypatch.setattr(
+        campaign_cli,
+        "_freeze_owner",
+        lambda uri, selected_owner: frozen.append(
+            (uri, campaign_cli._canonical_json(selected_owner.document()))
+        ),
+    )
+    result = asyncio.run(
+        campaign_cli._start_workflow(
+            campaign=Handle.id,
+            request=CampaignWorkflowInput((spec(),), DIGEST),
+            campaign_digest=DIGEST,
+            client_config=CLIENT_CONFIG,
+            temporal_scope=SCOPE,
+            owner_uri="gs://results/campaigns/trial/inputs/temporal-owner.json",
+            owner=existing_owner,
+        )
+    )
+    return result, frozen
 
 
-def test_prepare_passes_explicit_network_pair(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+def test_owner_absent_ambiguous_open_start_is_adopted_owned_then_signaled(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    captured: list[BatchConfig] = []
+    description = Description()
+    handle = Handle(description)
+    client = FakeTemporalClient(handle)
+    workflow_id, frozen = run_start(monkeypatch, client)
+    assert workflow_id == Handle.id
+    assert len(client.start_calls) == 1
+    _args, options = client.start_calls[0]
+    assert options["id"] == Handle.id
+    assert options["task_queue"] == TASK_QUEUE
+    assert options["id_reuse_policy"] is WorkflowIDReusePolicy.REJECT_DUPLICATE
+    assert options["id_conflict_policy"] is WorkflowIDConflictPolicy.USE_EXISTING
+    assert options["memo"] == {"campaign_digest": DIGEST}
+    assert "retry_policy" not in options
+    assert len(frozen) == 1
+    owner_document = json.loads(frozen[0][1])
+    assert owner_document == owner().document()
+    assert CLIENT_CONFIG["api_key"] not in frozen[0][1].decode()
+    assert handle.signals == [(workflows.CampaignWorkflow.claim, DIGEST)]
 
-    def render(selected_attempt: Any, config: BatchConfig) -> dict[str, Any]:
-        assert selected_attempt.prefix.startswith("temporal/campaigns/")
-        captured.append(config)
-        return spec().job
 
-    plan_path = tmp_path / "plan.yaml"
-    plan_path.write_bytes(b"plan")
-    plan = SimpleNamespace(
-        path=plan_path,
-        digest=hashlib.sha256(b"plan").hexdigest(),
-        bucket="bucket",
-        tools=lambda: ("aws-cli",),
+def test_existing_owner_uses_recorded_run_without_start_and_resignals(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    handle = Handle(Description())
+    client = FakeTemporalClient(handle)
+    workflow_id, frozen = run_start(monkeypatch, client, existing_owner=owner())
+    assert workflow_id == Handle.id
+    assert client.start_calls == []
+    assert client.get_calls == [(Handle.id, "run-a")]
+    assert frozen == []
+    assert handle.signals == [(workflows.CampaignWorkflow.claim, DIGEST)]
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("workflow_type", "ForeignWorkflow", "different Temporal Workflow"),
+        ("task_queue", "foreign", "different Temporal Workflow"),
+        ("digest", "wrong", "different Temporal Workflow"),
+        ("digest", None, "different Temporal Workflow"),
+        ("namespace", "foreign", "different Temporal Workflow"),
+        ("run_id", "run-b", "different Temporal Workflow"),
+        ("status", WorkflowExecutionStatus.COMPLETED, "already closed"),
+    ],
+)
+def test_start_refuses_mismatched_or_closed_ownership(
+    monkeypatch: pytest.MonkeyPatch, field: str, value: Any, message: str
+) -> None:
+    description = Description()
+    setattr(description, field, value)
+    with pytest.raises(campaign_cli.SubmissionError, match=message):
+        run_start(monkeypatch, FakeTemporalClient(Handle(description)), existing_owner=owner())
+
+
+def test_existing_owner_with_missing_history_refuses_without_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expired = RPCError("missing", RPCStatusCode.NOT_FOUND, b"")
+    client = FakeTemporalClient(Handle(expired))
+    with pytest.raises(campaign_cli.SubmissionError, match="missing or expired"):
+        run_start(monkeypatch, client, existing_owner=owner())
+    assert client.start_calls == []
+    assert client.get_calls == [(Handle.id, "run-a")]
+
+
+def test_owner_scope_digest_or_run_mismatch_refuses_without_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mismatches = (
+        owner(digest="e" * 64),
+        owner(scope=campaign_cli.TemporalScope("other.example.invalid:7233", SCOPE.namespace)),
+        replace(owner(), run_id="run-b"),
     )
-    attempt = Attempt(
-        campaign="2026-08-11-trial",
-        bucket="bucket",
-        region="us-east-1",
-        case=cast(Any, SimpleNamespace(auth="anonymous")),
-        image={},
-        fingerprint="a" * 64,
-        job_id="job",
-        submission=1,
-        run_ordinal=1,
-        prefix="campaigns/2026-08-11-trial/results/bucket/aws-cli/case/run-1",
-    )
-    monkeypatch.setattr(Plan, "load", lambda _path: plan)
-    monkeypatch.setattr(campaign_cli, "_read_image_set", lambda _path: {"aws-cli": {}})
-    monkeypatch.setattr(campaign_cli, "validate_registered_images", lambda _images: None)
-    monkeypatch.setattr(starter, "attempts_for", lambda *_args, **_kwargs: (attempt,))
-    monkeypatch.setattr(starter, "render_job", render)
-    monkeypatch.setattr(starter, "manifest", lambda **_kwargs: {"plans": []})
-    args = starter.build_parser().parse_args(
-        [
-            "--path",
-            str(plan_path),
-            "--campaign",
-            "2026-08-11-trial",
-            "--image-set",
-            "images",
-            "--project",
-            "study",
-            "--location",
-            "us-east1",
-            "--results-bucket",
-            "results",
-            "--anonymous-worker-sa",
-            "worker@example",
-            "--network",
-            "network",
-            "--subnetwork",
-            "subnetwork",
-        ]
-    )
-    starter.prepare(args)
-    assert (captured[0].network, captured[0].subnetwork) == ("network", "subnetwork")
-
-    monkeypatch.setattr(starter, "attempts_for", lambda *_args, **_kwargs: (attempt, attempt))
-    with pytest.raises(RuntimeError, match="duplicate Batch job IDs"):
-        starter.prepare(args)
-
-    args.path.append(str(plan_path))
-    with pytest.raises(RuntimeError, match="duplicate plan buckets"):
-        starter.prepare(args)
+    for mismatched in mismatches[:2]:
+        client = FakeTemporalClient(Handle(Description()))
+        with pytest.raises(campaign_cli.SubmissionError, match="does not exactly match"):
+            run_start(monkeypatch, client, existing_owner=mismatched)
+        assert client.start_calls == []
+        assert client.get_calls == []
+    run_mismatch = mismatches[2]
+    client = FakeTemporalClient(Handle(Description()))
+    with pytest.raises(campaign_cli.SubmissionError, match="different Temporal Workflow"):
+        run_start(monkeypatch, client, existing_owner=run_mismatch)
+    assert client.start_calls == []
+    assert client.get_calls == [(Handle.id, "run-b")]
 
 
-def test_temporal_payload_uses_digest_pinned_image_and_full_identity_label() -> None:
+def test_absent_owner_refuses_retained_closed_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    closed = WorkflowAlreadyStartedError(Handle.id, "CampaignWorkflow")
+    with pytest.raises(campaign_cli.SubmissionError, match="closed"):
+        run_start(monkeypatch, FakeTemporalClient(closed))
+
+
+def test_temporal_payload_is_compact_and_carries_provider_terminal_state_only() -> None:
     selected = spec()
+    request = CampaignWorkflowInput((selected,), DIGEST)
+    assert tuple(request.__dict__) == ("cases", "campaign_digest")
+    assert tuple(selected.__dict__) == (
+        "project",
+        "location",
+        "job_id",
+        "job",
+        "controller_timeout_s",
+    )
     container = selected.job["taskGroups"][0]["taskSpec"]["runnables"][0]["container"]
     assert "@sha256:" in container["imageUri"]
-    assert len(selected.job["labels"]["s3-study-attempt"]) == 52
+    assert BatchJobOutcome(selected.resource_name, "FAILED").state == "FAILED"

@@ -61,12 +61,6 @@ def _submit_campaign_main(argv: Sequence[str] | None) -> int:
     return submit_campaign_main(argv)
 
 
-def _watch_campaign_main(argv: Sequence[str] | None) -> int:
-    from s3_listing_study.manager.campaign.watch import watch_campaign_main
-
-    return watch_campaign_main(argv)
-
-
 def _publish_derived_image_main(argv: Sequence[str] | None) -> int:
     from s3_listing_study.manager.campaign.images import publish_derived_image_main
 
@@ -124,13 +118,8 @@ COMMANDS = (
     ),
     Command(
         "submit-campaign",
-        "freeze and submit one resolved campaign to GCP Batch",
+        "freeze and start one resolved campaign through Temporal",
         _submit_campaign_main,
-    ),
-    Command(
-        "watch-campaign",
-        "watch GCP Batch and update one campaign's ledger states",
-        _watch_campaign_main,
     ),
     Command(
         "publish-derived-image",

@@ -1,18 +1,27 @@
-"""Freeze and submit one resolved campaign to GCP Batch."""
+"""Freeze one campaign and start its Temporal controller Workflow."""
 
 from __future__ import annotations
 
 import argparse
+import asyncio
+import base64
 import hashlib
 import json
 import re
-import sqlite3
 import subprocess
 import sys
 from collections.abc import Mapping, Sequence
-from datetime import UTC, datetime
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from temporalio.api.common.v1 import Payloads
+from temporalio.client import Client, WorkflowExecutionStatus
+from temporalio.common import WorkflowIDConflictPolicy, WorkflowIDReusePolicy
+from temporalio.converter import DataConverter
+from temporalio.envconfig import ClientConfig
+from temporalio.exceptions import TemporalError, WorkflowAlreadyStartedError
+from temporalio.service import RPCError, RPCStatusCode
 
 from s3_listing_study.common.argparse_utils import UniqueStoreAction
 from s3_listing_study.common.build_selection import (
@@ -23,14 +32,15 @@ from s3_listing_study.manager.bench import plan as bench
 from s3_listing_study.manager.bench.cli import registered_tools, repo_root
 from s3_listing_study.manager.campaign import (
     DIGEST_RE,
-    Attempt,
     CampaignError,
     attempts_for,
     campaign_prefix,
-    ledger,
     manifest,
 )
 from s3_listing_study.manager.campaign.batch import BatchConfig, render_job
+from s3_listing_study.temporal import TASK_QUEUE
+from s3_listing_study.temporal.models import BatchJobSpec, CampaignWorkflowInput
+from s3_listing_study.temporal.workflows import CampaignWorkflow
 
 IMAGE_SET_FIELDS_V2 = {
     "derived_image",
@@ -50,6 +60,41 @@ IMAGE_SET_FIELDS = IMAGE_SET_FIELDS_V2 | {
     "selection_sha256",
 }
 IMAGE_SET_SCHEMA_VERSION = 3
+TEMPORAL_WORKFLOW_INPUT_MAX_BYTES = 1_900_000
+TEMPORAL_OWNER_MAX_BYTES = 4096
+# Batch maxRunDuration covers the task itself. The controller also has to survive
+# VM queue/provisioning delay and bounded create/get/poll control-plane work.
+BATCH_QUEUE_CONTROL_ALLOWANCE_S = 3600
+
+
+@dataclass(frozen=True)
+class TemporalScope:
+    target_host: str
+    namespace: str
+
+    def document(self) -> dict[str, str]:
+        return {"target_host": self.target_host, "namespace": self.namespace}
+
+
+@dataclass(frozen=True)
+class TemporalOwner:
+    campaign: str
+    campaign_digest: str
+    scope: TemporalScope
+    workflow_id: str
+    run_id: str
+
+    def document(self) -> dict[str, Any]:
+        return {
+            "schema_version": 1,
+            "campaign": self.campaign,
+            "campaign_digest": self.campaign_digest,
+            "temporal_scope": self.scope.document(),
+            "workflow_type": CampaignWorkflow.__name__,
+            "task_queue": TASK_QUEUE,
+            "workflow_id": self.workflow_id,
+            "run_id": self.run_id,
+        }
 
 
 class ImageSet(dict[str, dict[str, Any]]):
@@ -98,11 +143,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--zone", action=UniqueStoreAction)
     parser.add_argument(
         "--post-attempt-allowance-s",
-        action=UniqueStoreAction,
         type=int,
         default=1800,
     )
-    parser.add_argument("--ledger", "--ledger-path", action=UniqueStoreAction, required=True)
     parser.add_argument("--dry-run", action="store_true")
     return parser
 
@@ -258,6 +301,32 @@ def _canonical_json(document: Mapping[str, Any]) -> bytes:
     ).encode("utf-8")
 
 
+def _load_temporal_config() -> tuple[dict[str, Any], TemporalScope]:
+    config = dict(ClientConfig.load_client_connect_config())
+    target_host = config.get("target_host")
+    namespace = config.get("namespace")
+    if not isinstance(target_host, str) or not target_host:
+        raise SubmissionError("Temporal client config has no non-empty target_host")
+    if not isinstance(namespace, str) or not namespace:
+        raise SubmissionError("Temporal client config has no non-empty namespace")
+    return config, TemporalScope(target_host=target_host, namespace=namespace)
+
+
+async def _workflow_input_size(request: CampaignWorkflowInput) -> int:
+    payloads = await DataConverter.default.encode([request])
+    return len(Payloads(payloads=payloads).SerializeToString())
+
+
+def _preflight_workflow_input(request: CampaignWorkflowInput) -> None:
+    encoded_size = asyncio.run(_workflow_input_size(request))
+    if encoded_size > TEMPORAL_WORKFLOW_INPUT_MAX_BYTES:
+        raise SubmissionError(
+            "encoded Temporal Workflow input is "
+            f"{encoded_size} bytes, above the {TEMPORAL_WORKFLOW_INPUT_MAX_BYTES}-byte "
+            "safe request limit; split the campaign into smaller frozen campaigns"
+        )
+
+
 def _run(
     argv: Sequence[str], *, payload: bytes | None = None
 ) -> subprocess.CompletedProcess[bytes]:
@@ -273,12 +342,18 @@ def _already_exists(stderr: bytes) -> bool:
     return any(token in message for token in markers)
 
 
-def _freeze(uri: str, content: bytes) -> bool:
+def _not_found(stderr: bytes) -> bool:
+    message = stderr.decode("utf-8", errors="replace").lower()
+    markers = ("not found", "no urls matched", "does not exist", "404")
+    return any(token in message for token in markers)
+
+
+def _freeze(uri: str, content: bytes) -> None:
     created = _run(
         ("gcloud", "storage", "cp", "-", uri, "--if-generation-match=0"), payload=content
     )
     if created.returncode == 0:
-        return True
+        return
     if not _already_exists(created.stderr):
         detail = created.stderr.decode("utf-8", errors="replace").strip()
         raise SubmissionError(f"could not create {uri}: {detail or f'exit {created.returncode}'}")
@@ -289,123 +364,95 @@ def _freeze(uri: str, content: bytes) -> bool:
         raise SubmissionError(f"could not read existing {uri}: {reason}")
     if existing.stdout != content:
         raise SubmissionError(f"{uri} already exists with different content")
-    return False
 
 
-def _utc_now() -> str:
-    return datetime.now(UTC).isoformat(timespec="microseconds").replace("+00:00", "Z")
-
-
-def _ledger_attempt(connection: sqlite3.Connection, attempt: Attempt) -> tuple[str, bool] | None:
-    row = connection.execute(
-        "SELECT campaign, state, case_json FROM attempts WHERE job_id = ?", (attempt.job_id,)
-    ).fetchone()
-    if row is None:
-        return None
+def _read_optional_owner(uri: str) -> TemporalOwner | None:
+    existing = _run(("gcloud", "storage", "cat", uri, f"--range=0-{TEMPORAL_OWNER_MAX_BYTES}"))
+    if existing.returncode != 0:
+        if _not_found(existing.stderr):
+            return None
+        detail = existing.stderr.decode("utf-8", errors="replace").strip()
+        raise SubmissionError(
+            f"could not read optional Temporal owner {uri}: "
+            f"{detail or f'exit {existing.returncode}'}"
+        )
+    if len(existing.stdout) > TEMPORAL_OWNER_MAX_BYTES:
+        raise SubmissionError(f"Temporal owner {uri} exceeds {TEMPORAL_OWNER_MAX_BYTES} bytes")
     try:
-        recorded = json.loads(row["case_json"])
-    except (TypeError, json.JSONDecodeError):
-        return str(row["state"]), False
-    exact = row["campaign"] == attempt.campaign and recorded == attempt.as_dict()
-    return str(row["state"]), exact
+        document = json.loads(existing.stdout, object_pairs_hook=_reject_duplicate_keys)
+    except (UnicodeDecodeError, json.JSONDecodeError, SubmissionError) as exc:
+        raise SubmissionError(f"Temporal owner {uri} is not valid JSON: {exc}") from None
+    fields = {
+        "schema_version",
+        "campaign",
+        "campaign_digest",
+        "temporal_scope",
+        "workflow_type",
+        "task_queue",
+        "workflow_id",
+        "run_id",
+    }
+    if not isinstance(document, dict) or set(document) != fields:
+        raise SubmissionError(f"Temporal owner {uri} has invalid fields")
+    scope_document = document["temporal_scope"]
+    if not isinstance(scope_document, dict) or set(scope_document) != {
+        "target_host",
+        "namespace",
+    }:
+        raise SubmissionError(f"Temporal owner {uri} has invalid scope")
+    string_fields = (
+        "campaign",
+        "campaign_digest",
+        "workflow_type",
+        "task_queue",
+        "workflow_id",
+        "run_id",
+    )
+    if (
+        document["schema_version"] != 1
+        or any(
+            not isinstance(document[field], str) or not document[field] for field in string_fields
+        )
+        or any(
+            not isinstance(scope_document[field], str) or not scope_document[field]
+            for field in ("target_host", "namespace")
+        )
+    ):
+        raise SubmissionError(f"Temporal owner {uri} has invalid values")
+    owner = TemporalOwner(
+        campaign=document["campaign"],
+        campaign_digest=document["campaign_digest"],
+        scope=TemporalScope(
+            target_host=scope_document["target_host"], namespace=scope_document["namespace"]
+        ),
+        workflow_id=document["workflow_id"],
+        run_id=document["run_id"],
+    )
+    if existing.stdout != _canonical_json(owner.document()):
+        raise SubmissionError(f"Temporal owner {uri} is not canonical")
+    if (
+        document["workflow_type"] != CampaignWorkflow.__name__
+        or document["task_queue"] != TASK_QUEUE
+    ):
+        raise SubmissionError(f"Temporal owner {uri} names a different Temporal Workflow")
+    return owner
 
 
-def _batch_already_exists(result: subprocess.CompletedProcess[bytes]) -> bool:
-    message = (result.stdout + b"\n" + result.stderr).decode("utf-8", errors="replace").lower()
-    markers = ("already_exists", "already exists", "code=409", "http 409")
-    return result.returncode != 0 and any(marker in message for marker in markers)
-
-
-def _submit_jobs(
-    attempts: Sequence[Attempt],
-    jobs: Sequence[Mapping[str, Any]],
-    *,
-    project: str,
-    location: str,
-    ledger_path: Path,
-) -> tuple[list[dict[str, Any]], bool]:
-    statuses: list[dict[str, Any]] = []
-    failed = False
-    with ledger.open_ledger(ledger_path) as connection:
-        for attempt, job in zip(attempts, jobs, strict=True):
-            existing = _ledger_attempt(connection, attempt)
-            preexisting_intent = existing is not None
-            if existing is None:
-                ledger.record_intent(
-                    connection,
-                    attempt=attempt.as_dict(),
-                    campaign=attempt.campaign,
-                    now=_utc_now(),
-                )
-            else:
-                state, exact = existing
-                if not exact:
-                    failed = True
-                    statuses.append({"job_id": attempt.job_id, "state": "ledger-mismatch"})
-                    continue
-                if state in ("submitted", "running", "succeeded"):
-                    statuses.append({"job_id": attempt.job_id, "state": state})
-                    continue
-                if state in ("failed", "abandoned"):
-                    failed = True
-                    statuses.append({"job_id": attempt.job_id, "state": state})
-                    continue
-                if state != "submitting":
-                    failed = True
-                    statuses.append(
-                        {"job_id": attempt.job_id, "state": f"unknown-ledger-state:{state}"}
-                    )
-                    continue
-            try:
-                result = _run(
-                    (
-                        "gcloud",
-                        "batch",
-                        "jobs",
-                        "submit",
-                        attempt.job_id,
-                        "--project",
-                        project,
-                        "--location",
-                        location,
-                        "--config=-",
-                        "--quiet",
-                    ),
-                    payload=_canonical_json(job),
-                )
-            except SubmissionError as exc:
-                failed = True
-                error_detail = {"error": str(exc)}
-                ledger.record_state(
-                    connection,
-                    job_id=attempt.job_id,
-                    state="failed",
-                    now=_utc_now(),
-                    detail=error_detail,
-                )
-                statuses.append({"job_id": attempt.job_id, "state": "failed"})
-                continue
-            recovered = preexisting_intent and _batch_already_exists(result)
-            if recovered:
-                result = subprocess.CompletedProcess(result.args, 0, result.stdout, result.stderr)
-            state = "submitted" if result.returncode == 0 else "failed"
-            detail: dict[str, Any] = {"returncode": result.returncode}
-            if recovered:
-                detail["recovered_from_already_exists"] = True
-            if result.returncode != 0:
-                failed = True
-                message = result.stderr.decode("utf-8", errors="replace").strip()
-                if message:
-                    detail["stderr"] = message
-            ledger.record_state(
-                connection,
-                job_id=attempt.job_id,
-                state=state,
-                now=_utc_now(),
-                detail=detail,
-            )
-            statuses.append({"job_id": attempt.job_id, "state": state})
-    return statuses, failed
+def _freeze_owner(uri: str, owner: TemporalOwner) -> None:
+    content = _canonical_json(owner.document())
+    created = _run(
+        ("gcloud", "storage", "cp", "-", uri, "--if-generation-match=0"), payload=content
+    )
+    if created.returncode == 0:
+        return
+    if not _already_exists(created.stderr):
+        detail = created.stderr.decode("utf-8", errors="replace").strip()
+        raise SubmissionError(f"could not create {uri}: {detail or f'exit {created.returncode}'}")
+    existing = _read_optional_owner(uri)
+    if existing is None:
+        raise SubmissionError(f"Temporal owner {uri} disappeared after create collision")
+    if existing != owner:
+        raise SubmissionError(f"{uri} already exists with different content")
 
 
 def _load_plans(args: argparse.Namespace) -> tuple[bench.Plan, ...]:
@@ -429,87 +476,273 @@ def _load_plans(args: argparse.Namespace) -> tuple[bench.Plan, ...]:
     return tuple(loaded_plans)
 
 
+PreparedCampaign = tuple[
+    CampaignWorkflowInput,
+    bytes,
+    bytes,
+    tuple[tuple[str, bytes], ...],
+    dict[str, Any],
+]
+
+
+def _attempt_label(fingerprint: str) -> str:
+    return base64.b32encode(bytes.fromhex(fingerprint)).decode().rstrip("=").lower()
+
+
+def _prepare(args: argparse.Namespace, temporal_scope: TemporalScope) -> PreparedCampaign:
+    loaded_plans = _load_plans(args)
+    images = _read_image_set(Path(args.image_set))
+    validate_registered_images(images)
+    plan_tools = {tool for loaded in loaded_plans for tool in loaded.tools()}
+    if set(images) != plan_tools:
+        missing = sorted(plan_tools - set(images))
+        extra = sorted(set(images) - plan_tools)
+        detail = []
+        if missing:
+            detail.append(f"missing {', '.join(missing)}")
+        if extra:
+            detail.append(f"extra {', '.join(extra)}")
+        raise SubmissionError(f"image set does not exactly cover the plans ({'; '.join(detail)})")
+
+    generated = tuple(
+        attempt
+        for loaded in loaded_plans
+        for attempt in attempts_for(loaded, campaign=args.campaign, images=images)
+    )
+    if not generated:
+        raise SubmissionError("campaign contains no scheduled runs")
+    job_ids = [attempt.job_id for attempt in generated]
+    if len(job_ids) != len(set(job_ids)):
+        raise SubmissionError("campaign contains duplicate Batch job IDs")
+
+    plan_contents: list[bytes] = []
+    for loaded in loaded_plans:
+        plan_bytes = loaded.path.read_bytes()
+        if hashlib.sha256(plan_bytes).hexdigest() != loaded.digest:
+            raise SubmissionError(f"plan changed after it was resolved: {loaded.path}")
+        plan_contents.append(plan_bytes)
+
+    config = BatchConfig(
+        results_bucket=args.results_bucket,
+        anonymous_worker_service_account=args.anonymous_worker_sa,
+        authenticated_worker_service_account=args.authenticated_worker_sa,
+        aws_credential_secret=args.secret_resource,
+        network=args.network,
+        subnetwork=args.subnetwork,
+        provisioning=args.provisioning,
+        zone=args.zone,
+        post_attempt_allowance_s=args.post_attempt_allowance_s,
+    )
+    jobs: list[dict[str, Any]] = []
+    cases: list[BatchJobSpec] = []
+    for attempt in generated:
+        job = render_job(attempt, config)
+        job["labels"] = {
+            **job.get("labels", {}),
+            "s3-study-attempt": _attempt_label(attempt.fingerprint),
+        }
+        jobs.append(job)
+        controller_timeout_s = (
+            attempt.case.timeout_s
+            + config.term_grace_s
+            + config.post_attempt_allowance_s
+            + BATCH_QUEUE_CONTROL_ALLOWANCE_S
+        )
+        cases.append(
+            BatchJobSpec(
+                args.project,
+                args.location,
+                attempt.job_id,
+                job,
+                controller_timeout_s,
+            )
+        )
+
+    campaign_document = manifest(
+        campaign=args.campaign,
+        plans=loaded_plans,
+        images=images,
+        attempts=generated,
+        results_bucket=args.results_bucket,
+        provisioning=args.provisioning,
+        zone=args.zone,
+    )
+    manifest_bytes = _canonical_json(campaign_document)
+    temporal_document = {
+        "schema_version": 1,
+        "campaign": args.campaign,
+        "campaign_manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
+        "workflow_type": CampaignWorkflow.__name__,
+        "task_queue": TASK_QUEUE,
+        "temporal_scope": temporal_scope.document(),
+        "cases": [
+            {
+                "project": case.project,
+                "location": case.location,
+                "job_id": case.job_id,
+                "job": case.job,
+                "controller_timeout_s": case.controller_timeout_s,
+            }
+            for case in cases
+        ],
+    }
+    temporal_bytes = _canonical_json(temporal_document)
+    campaign_digest = hashlib.sha256(temporal_bytes).hexdigest()
+    plan_inputs = tuple(
+        (str(record["path"]), content)
+        for record, content in zip(campaign_document["plans"], plan_contents, strict=True)
+    )
+    dry_run = {
+        "campaign.json": campaign_document,
+        "temporal.json": temporal_document,
+        "jobs": [
+            {"job_id": attempt.job_id, "job": job}
+            for attempt, job in zip(generated, jobs, strict=True)
+        ],
+    }
+    return (
+        CampaignWorkflowInput(tuple(cases), campaign_digest),
+        manifest_bytes,
+        temporal_bytes,
+        plan_inputs,
+        dry_run,
+    )
+
+
+def _freeze_campaign(
+    *,
+    campaign: str,
+    results_bucket: str,
+    manifest_bytes: bytes,
+    temporal_bytes: bytes,
+    plan_inputs: Sequence[tuple[str, bytes]],
+) -> None:
+    for path, content in plan_inputs:
+        _freeze(f"gs://{results_bucket}/{path}", content)
+    base = f"gs://{results_bucket}/{campaign_prefix(campaign)}"
+    _freeze(f"{base}/campaign.json", manifest_bytes)
+    _freeze(f"{base}/inputs/temporal.json", temporal_bytes)
+
+
+async def _start_workflow(
+    *,
+    campaign: str,
+    request: CampaignWorkflowInput,
+    campaign_digest: str,
+    client_config: Mapping[str, Any],
+    temporal_scope: TemporalScope,
+    owner_uri: str,
+    owner: TemporalOwner | None,
+) -> str:
+    if request.campaign_digest != campaign_digest:
+        raise SubmissionError("Workflow input digest does not match the frozen Temporal input")
+    if owner is not None and owner != TemporalOwner(
+        campaign=campaign,
+        campaign_digest=campaign_digest,
+        scope=temporal_scope,
+        workflow_id=campaign,
+        run_id=owner.run_id,
+    ):
+        raise SubmissionError("Temporal owner does not exactly match this campaign and scope")
+
+    client = await Client.connect(**dict(client_config))
+    if owner is None:
+        try:
+            handle = await client.start_workflow(
+                CampaignWorkflow.run,
+                request,
+                id=campaign,
+                task_queue=TASK_QUEUE,
+                memo={"campaign_digest": campaign_digest},
+                id_reuse_policy=WorkflowIDReusePolicy.REJECT_DUPLICATE,
+                id_conflict_policy=WorkflowIDConflictPolicy.USE_EXISTING,
+            )
+        except WorkflowAlreadyStartedError:
+            raise SubmissionError(
+                "campaign Workflow is closed and its stable ID may not be reused"
+            ) from None
+    else:
+        handle = client.get_workflow_handle(campaign, run_id=owner.run_id)
+
+    try:
+        description = await handle.describe()
+    except RPCError as exc:
+        if exc.status is RPCStatusCode.NOT_FOUND:
+            raise SubmissionError("campaign Workflow history is missing or expired") from None
+        raise
+    try:
+        recorded_digest = await description.memo_value("campaign_digest", type_hint=str)
+    except KeyError:
+        recorded_digest = None
+    if description.status is not WorkflowExecutionStatus.RUNNING:
+        raise SubmissionError("campaign Workflow is already closed")
+    expected_run_id = owner.run_id if owner is not None else description.run_id
+    if (
+        description.id != campaign
+        or description.run_id != expected_run_id
+        or description.namespace != temporal_scope.namespace
+        or description.workflow_type != CampaignWorkflow.__name__
+        or description.task_queue != TASK_QUEUE
+        or recorded_digest != campaign_digest
+    ):
+        raise SubmissionError("campaign ID belongs to a different Temporal Workflow")
+
+    if owner is None:
+        owner = TemporalOwner(
+            campaign=campaign,
+            campaign_digest=campaign_digest,
+            scope=temporal_scope,
+            workflow_id=campaign,
+            run_id=description.run_id,
+        )
+        _freeze_owner(owner_uri, owner)
+    await handle.signal(CampaignWorkflow.claim, campaign_digest)
+    return str(handle.id)
+
+
 def submit_campaign_main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        loaded_plans = _load_plans(args)
-        images = _read_image_set(Path(args.image_set))
-        validate_registered_images(images)
-        plan_tools = {tool for loaded in loaded_plans for tool in loaded.tools()}
-        if set(images) != plan_tools:
-            missing = sorted(plan_tools - set(images))
-            extra = sorted(set(images) - plan_tools)
-            detail = []
-            if missing:
-                detail.append(f"missing {', '.join(missing)}")
-            if extra:
-                detail.append(f"extra {', '.join(extra)}")
-            mismatch = "; ".join(detail)
-            raise SubmissionError(f"image set does not exactly cover the plans ({mismatch})")
-
-        generated = tuple(
-            attempt
-            for loaded in loaded_plans
-            for attempt in attempts_for(loaded, campaign=args.campaign, images=images)
+        client_config, temporal_scope = _load_temporal_config()
+        request, manifest_bytes, temporal_bytes, plan_inputs, dry_run = _prepare(
+            args, temporal_scope
         )
-        config = BatchConfig(
-            results_bucket=args.results_bucket,
-            anonymous_worker_service_account=args.anonymous_worker_sa,
-            authenticated_worker_service_account=args.authenticated_worker_sa,
-            aws_credential_secret=args.secret_resource,
-            network=args.network,
-            subnetwork=args.subnetwork,
-            provisioning=args.provisioning,
-            zone=args.zone,
-            post_attempt_allowance_s=args.post_attempt_allowance_s,
-        )
-        jobs = [render_job(attempt, config) for attempt in generated]
-        campaign_document = manifest(
-            campaign=args.campaign,
-            plans=loaded_plans,
-            images=images,
-            attempts=generated,
-            results_bucket=args.results_bucket,
-            provisioning=args.provisioning,
-            zone=args.zone,
-        )
-        dry_run = {
-            "campaign.json": campaign_document,
-            "jobs": [
-                {"job_id": attempt.job_id, "job": job}
-                for attempt, job in zip(generated, jobs, strict=True)
-            ],
-        }
+        _preflight_workflow_input(request)
         if args.dry_run:
             print(json.dumps(dry_run, sort_keys=True, indent=2, ensure_ascii=False))
             return 0
 
-        plan_contents: list[bytes] = []
-        for loaded in loaded_plans:
-            plan_bytes = loaded.path.read_bytes()
-            if hashlib.sha256(plan_bytes).hexdigest() != loaded.digest:
-                raise SubmissionError(f"plan changed after it was resolved: {loaded.path}")
-            plan_contents.append(plan_bytes)
-        base = f"gs://{args.results_bucket}/{campaign_prefix(args.campaign)}"
-        for plan_record, plan_bytes in zip(campaign_document["plans"], plan_contents, strict=True):
-            plan_uri = f"gs://{args.results_bucket}/{plan_record['path']}"
-            _freeze(plan_uri, plan_bytes)
-        _freeze(f"{base}/campaign.json", _canonical_json(campaign_document))
-        statuses, failed = _submit_jobs(
-            generated,
-            jobs,
-            project=args.project,
-            location=args.location,
-            ledger_path=Path(args.ledger),
+        _freeze_campaign(
+            campaign=args.campaign,
+            results_bucket=args.results_bucket,
+            manifest_bytes=manifest_bytes,
+            temporal_bytes=temporal_bytes,
+            plan_inputs=plan_inputs,
         )
-        print(json.dumps({"campaign": args.campaign, "submissions": statuses}, sort_keys=True))
-        return 1 if failed else 0
+        owner_uri = (
+            f"gs://{args.results_bucket}/{campaign_prefix(args.campaign)}"
+            "/inputs/temporal-owner.json"
+        )
+        owner = _read_optional_owner(owner_uri)
+        workflow_id = asyncio.run(
+            _start_workflow(
+                campaign=args.campaign,
+                request=request,
+                campaign_digest=request.campaign_digest,
+                client_config=client_config,
+                temporal_scope=temporal_scope,
+                owner_uri=owner_uri,
+                owner=owner,
+            )
+        )
+        print(json.dumps({"campaign": args.campaign, "workflow_id": workflow_id}, sort_keys=True))
+        return 0
     except (
         BuildSelectionError,
         CampaignError,
         SubmissionError,
+        TemporalError,
         bench.PlanError,
-        ledger.LedgerError,
         OSError,
     ) as exc:
         print(f"submit-campaign: {exc}", file=sys.stderr)

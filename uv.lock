@@ -1081,14 +1081,10 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "duckdb" },
+    { name = "google-cloud-batch" },
     { name = "ijson" },
     { name = "jsonschema" },
     { name = "pyyaml" },
-]
-
-[package.optional-dependencies]
-temporal = [
-    { name = "google-cloud-batch" },
     { name = "temporalio" },
 ]
 
@@ -1104,13 +1100,12 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "duckdb", specifier = ">=1.1" },
-    { name = "google-cloud-batch", marker = "extra == 'temporal'", specifier = ">=0.17.36" },
+    { name = "google-cloud-batch", specifier = ">=0.17.36" },
     { name = "ijson", specifier = "==3.5.1" },
     { name = "jsonschema", specifier = ">=4.23" },
     { name = "pyyaml", specifier = ">=6.0" },
-    { name = "temporalio", marker = "extra == 'temporal'", specifier = ">=1.17.0" },
+    { name = "temporalio", specifier = ">=1.17.0" },
 ]
-provides-extras = ["temporal"]
 
 [package.metadata.requires-dev]
 dev = [

@@ -165,11 +165,81 @@ download every listing, run routine manager-side collection over them, or write
 a companion `collected.json` into an attempt.
 
 `smoke-campaign.sh` remains the local all-tools diagnostic path. Production
-campaign modeling under `s3_listing_study.manager.campaign` resolves cases,
-freezes image and attempt manifests, assigns Batch job IDs, and records mutable
-submission state plus its append-only transition history in the local ledger.
-The mutable row answers current state; events retain submission/retry history
-after Batch ages jobs out. The ledger is operational and is not run evidence.
+campaigns are started with `s3-listing-study submit-campaign`. The manager
+resolves cases, freezes the exact plans, campaign manifest, and compact Temporal
+input create-only under `campaigns/<campaign>/`, and starts or obtains the
+matching Temporal campaign Workflow by its stable campaign ID. One child
+Workflow represents each
+scheduled run; one long-running, heartbeating Activity submits or validates and
+adopts its deterministic Batch job, then follows that job to a provider terminal
+state. Batch automatic retries remain disabled. Temporal Event History is
+operational state, not run evidence, and `BatchJobOutcome` is only a provider
+terminal state until the separate evidence classifier exists.
+
+Temporal's UI, CLI, and API own campaign visibility; the study has no local
+ledger, watcher, or status command. Temporal Cloud hosts the durable service,
+but an independently deployed `s3-listing-study-temporal-worker` process must
+remain available to poll the campaign Task Queue. Stopping every Worker pauses
+controller progress without changing the Batch job or the sealed GCS evidence
+boundary; restarting a Worker resumes Activity control under the declared retry
+and heartbeat policy.
+
+### Production Temporal operator path
+
+On the provisioned manager/runner, install the locked environment without
+changing dependency resolution:
+
+```sh
+uv sync --locked
+```
+
+Provide the Temporal connection through the SDK's environment variables:
+`TEMPORAL_ADDRESS`, `TEMPORAL_NAMESPACE`, `TEMPORAL_API_KEY`, and
+`TEMPORAL_TLS=true`. Inject the API key from the operator's secret facility into
+the process environment; never put its value in a command argument, shell
+history, service definition, or log. The address and Namespace are non-secret,
+but the submitter freezes both into `inputs/temporal.json`, so every submitting
+Client and Worker must use the same scope.
+
+Start and keep the Worker available in one supervised process:
+
+```sh
+uv run s3-listing-study-temporal-worker
+```
+
+From a second process with the same four Temporal environment variables and GCP
+Application Default Credentials, submit the fully specified campaign:
+
+```sh
+uv run s3-listing-study submit-campaign \
+  --path <plan.yaml> --campaign <new-campaign-id> --image-set <images.json> \
+  --project <gcp-project> --location <batch-region> \
+  --results-bucket <results-bucket> \
+  --anonymous-worker-sa <worker-service-account>
+```
+
+Inspect the campaign in Temporal Cloud UI, or with the CLI under the same
+Temporal environment:
+
+```sh
+temporal workflow describe --workflow-id <campaign-id>
+```
+
+The reusable Terraform module's
+[`orchestrator.tf`](../infra/terraform/modules/gcp/s3-listing-study/orchestrator.tf)
+is the manager permission bundle. The submitting ADC identity needs Batch job
+create/get access, `actAs` on every selected worker identity, and results-bucket
+read/create access; authenticated campaigns additionally select the dedicated
+authenticated worker identity provisioned by that module.
+
+Submission freezes plans, `campaign.json`, and the scope-bound `temporal.json`
+before contacting Temporal. A create-only `inputs/temporal-owner.json` then
+binds that frozen digest to one Workflow Run. The campaign Workflow starts in a
+durable waiting state and fans out no children until the Client has frozen the
+owner and sent the idempotent matching claim Signal. Retained owner and Event
+History are operational recovery state, not study evidence. Worker availability
+is still required: without a polling Worker the claimed Workflow and its
+Activities do not progress.
 
 All eleven subjects have run at smoke on amd64 through this engine, four with a
 scoped credential. Those runs are non-comparative and carry no verifier verdict:
@@ -202,7 +272,7 @@ their recorded registry and manifest. The offline union regression suite is
 `harness/tests/run-regressions.sh`; the host security regression suite is
 `harness/tests/runner-security-regressions.sh`.
 
-Provider submission/reconciliation and comparative reporting remain separate
-manager integration work. They must consume worker summaries for routine
-operation and must not introduce a second subject lifecycle, timing
-implementation, or eager raw-artifact download path.
+Evidence reconciliation and comparative reporting remain separate manager
+integration work. They must consume worker summaries for routine operation and
+must not introduce a second subject lifecycle, timing implementation, or eager
+raw-artifact download path.
