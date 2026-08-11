@@ -171,10 +171,23 @@ def test_all_17_real_attempts_build_exact_batch_requests(tmp_path: Path) -> None
 
 def test_runtime_staging_and_nested_command_do_not_install_or_mask_exit() -> None:
     dockerfile = (EXPERIMENT / "runtime" / "Dockerfile").read_text(encoding="utf-8")
+    readme = (EXPERIMENT / "README.md").read_text(encoding="utf-8")
     stage = (EXPERIMENT / "runtime" / "stage-runtime").read_text(encoding="utf-8")
     runtime_project = (EXPERIMENT / "runtime" / "pyproject.toml").read_text(encoding="utf-8")
     assert "@sha256:" in dockerfile
     assert "uv sync" in dockerfile and "--frozen" in dockerfile
+    assert "COPY pyproject.toml uv.lock ./" in dockerfile
+    assert "COPY stage-runtime /usr/local/bin/stage-runtime" in dockerfile
+    assert "COPY experiments/" not in dockerfile
+    assert (
+        "docker build \\\n"
+        "  --provenance=false \\\n"
+        "  --sbom=false \\\n"
+        "  -f experiments/orchestration/snakemake/runtime/Dockerfile \\\n"
+        "  -t us-east1-docker.pkg.dev/varve-oss/s3-listing-study/"
+        "snakemake-runtime:2026-08-11 \\\n"
+        "  experiments/orchestration/snakemake/runtime"
+    ) in readme
     assert "pip install" not in dockerfile
     assert "pip install" not in stage
     assert "s3-listing-study" not in runtime_project

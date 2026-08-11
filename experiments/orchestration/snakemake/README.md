@@ -148,9 +148,11 @@ resolve the pushed manifest digest:
 
 ```sh
 docker build \
+  --provenance=false \
+  --sbom=false \
   -f experiments/orchestration/snakemake/runtime/Dockerfile \
   -t us-east1-docker.pkg.dev/varve-oss/s3-listing-study/snakemake-runtime:2026-08-11 \
-  .
+  experiments/orchestration/snakemake/runtime
 docker push \
   us-east1-docker.pkg.dev/varve-oss/s3-listing-study/snakemake-runtime:2026-08-11
 docker buildx imagetools inspect \
