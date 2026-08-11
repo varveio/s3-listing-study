@@ -169,11 +169,11 @@ campaigns are started with `s3-listing-study submit-campaign`. The manager
 resolves cases, freezes the exact plans, campaign manifest, and compact Temporal
 input create-only under `campaigns/<campaign>/`, and starts or obtains the
 matching Temporal campaign Workflow by its stable campaign ID. One child
-Workflow represents each
-scheduled run; one long-running, heartbeating Activity submits or validates and
-adopts its deterministic Batch job, then follows that job to a provider terminal
-state. Its retry lifetime is unbounded once a provider effect may exist, while
-each Activity attempt and Batch RPC remains bounded. A definitive create
+Workflow represents each scheduled run. An idempotent ensure Activity creates
+or validates and adopts its deterministic Batch job; a separate heartbeating
+wait Activity follows the durable handle to a provider terminal state. Its retry
+lifetime is unbounded once a provider effect may exist, while each Activity
+attempt and Batch RPC remains bounded. A definitive create
 rejection returns explicit `NOT_CREATED`; an Activity or child failure alone is
 not provider settlement. Batch automatic retries remain disabled. Temporal
 Event History is operational state, not run evidence. `report-campaign`
@@ -234,6 +234,21 @@ uv run s3-listing-study report-campaign \
   --campaign <campaign-id> --results-bucket <results-bucket> --wait
 ```
 
+Settled operational failures leave the parent open in `awaiting_retry`. Retry
+one without editing a plan, using the original job ID and exactly the next
+submission number:
+
+```sh
+uv run s3-listing-study retry-case \
+  --campaign <campaign-id> --results-bucket <results-bucket> \
+  --job-id <original-job-id-ending-in-s1> --submission <current-plus-one>
+```
+
+Or accept all settled failures and close the campaign with
+`finalize-campaign --campaign <campaign-id> --results-bucket <results-bucket>`.
+The full retry/finality playbook is in
+[`campaign-operations.md`](../docs/operating/campaign-operations.md).
+
 Inspect the campaign in Temporal Cloud UI, or with the CLI under the same
 Temporal environment:
 
@@ -278,10 +293,13 @@ env -u TEMPORAL_API_KEY uv run python harness/tests/temporal-controller-e2e.py
 ```
 
 The script starts an isolated SDK test server, uses unique local IDs, exercises
-an Activity retry and the owner-bound observer through terminal missing-evidence
-classification and create-only report collision, and does not read or print
-connection configuration or secrets. The Temporal SDK lazily downloads its
-test-server binary on first use.
+the ensure/wait boundary, an Activity retry, a settled first-submission failure,
+the real targeted-retry Workflow Update, and the owner-bound observer through
+terminal missing-evidence classification and create-only report collision. It
+does not read or print connection configuration or secrets. The Temporal SDK
+lazily downloads its test-server binary on first use. For durable local service,
+run `temporal server start-dev --db-filename /absolute/path/to/temporal.db`; see
+the operating document for the full local profile.
 
 All eleven subjects have run at smoke on amd64 through this engine, four with a
 scoped credential. Those runs are non-comparative and carry no verifier verdict:

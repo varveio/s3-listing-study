@@ -9,6 +9,7 @@ import subprocess
 import textwrap
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -19,7 +20,9 @@ from s3_listing_study.manager import cli as manager_cli
 from s3_listing_study.manager.bench import plan as bench
 from s3_listing_study.manager.campaign import CampaignError
 from s3_listing_study.manager.campaign import cli as campaign_cli
+from s3_listing_study.manager.campaign import control as campaign_control
 from s3_listing_study.manager.campaign import report as campaign_report
+from s3_listing_study.temporal.models import CaseControllerProgress
 from tests.test_campaign_batch import DIGEST, attempt
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -159,6 +162,96 @@ def test_manager_dispatches_submit_and_has_no_deleted_watch_command(
     assert "watch-campaign" not in help_text
     with pytest.raises(SystemExit):
         manager_cli.main(["watch-campaign"])
+
+
+def test_manager_dispatches_retry_and_finalize_commands(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[tuple[str, list[str]]] = []
+
+    def retry(argv: Any) -> int:
+        seen.append(("retry", list(argv or ())))
+        return 7
+
+    def finalize(argv: Any) -> int:
+        seen.append(("finalize", list(argv or ())))
+        return 8
+
+    monkeypatch.setattr(
+        campaign_control,
+        "retry_case_main",
+        retry,
+    )
+    monkeypatch.setattr(
+        campaign_control,
+        "finalize_campaign_main",
+        finalize,
+    )
+    assert manager_cli.main(["retry-case", "--campaign", "campaign"]) == 7
+    assert manager_cli.main(["finalize-campaign", "--campaign", "campaign"]) == 8
+    assert seen == [
+        ("retry", ["--campaign", "campaign"]),
+        ("finalize", ["--campaign", "campaign"]),
+    ]
+
+
+def test_retry_update_uses_original_case_and_exact_submission(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[Any, Any, dict[str, Any]]] = []
+
+    class Handle:
+        async def execute_update(self, update: Any, arg: Any = None, **kwargs: Any) -> Any:
+            calls.append((update, arg, kwargs))
+            return CaseControllerProgress(
+                "job-s1", None, "running", None, None, None, False, 2, "job-s2"
+            )
+
+    async def owned(*_args: Any) -> tuple[Any, Any]:
+        frozen = (
+            SimpleNamespace(cases=(SimpleNamespace(job_id="job-s1"),)),
+            SimpleNamespace(cases=(SimpleNamespace(job_id="job-s1"),)),
+        )
+        return Handle(), frozen
+
+    monkeypatch.setattr(campaign_control, "_owned_handle", owned)
+    args = campaign_control.retry_parser().parse_args(
+        [
+            "--campaign",
+            "campaign",
+            "--results-bucket",
+            "results",
+            "--job-id",
+            "job-s1",
+            "--submission",
+            "2",
+        ]
+    )
+    result = asyncio.run(campaign_control._retry(args))
+    assert result["current_job_id"] == "job-s2"
+    assert calls[0][1].job_id == "job-s1"
+    assert calls[0][1].submission == 2
+    assert calls[0][2]["id"] == "retry-job-s1-s2"
+
+
+def test_finalize_uses_one_owner_bound_update(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[Any, dict[str, Any]]] = []
+
+    class Handle:
+        async def execute_update(self, update: Any, **kwargs: Any) -> Any:
+            calls.append((update, kwargs))
+            return [
+                CaseControllerProgress("job-s1", None, "terminal", "FAILED", None, "resource", True)
+            ]
+
+    async def owned(*_args: Any) -> tuple[Any, Any]:
+        return Handle(), (object(), object())
+
+    monkeypatch.setattr(campaign_control, "_owned_handle", owned)
+    args = campaign_control.finalize_parser().parse_args(
+        ["--campaign", "campaign", "--results-bucket", "results"]
+    )
+    result = asyncio.run(campaign_control._finalize(args))
+    assert result[0]["phase"] == "terminal"
+    assert "id" not in calls[0][1]
 
 
 def test_submit_help_exposes_temporal_inputs_and_no_ledger() -> None:

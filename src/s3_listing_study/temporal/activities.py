@@ -10,7 +10,7 @@ from google.protobuf.json_format import ParseDict
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
-from s3_listing_study.temporal.models import BatchJobOutcome, BatchJobSpec
+from s3_listing_study.temporal.models import BatchJobHandle, BatchJobOutcome, BatchJobSpec
 
 TERMINAL_STATES = frozenset(("SUCCEEDED", "FAILED"))
 PERMANENT_GOOGLE_ERRORS: tuple[type[BaseException], ...] = (
@@ -56,6 +56,59 @@ def _validated_adoption(spec: BatchJobSpec, job: batch_v1.Job) -> None:
         raise _collision(
             "preexisting Batch job does not match the expected attempt identity and execution"
         )
+
+
+@activity.defn
+async def ensure_batch_job(spec: BatchJobSpec) -> BatchJobHandle:
+    info = activity.info()
+    client = batch_v1.BatchServiceAsyncClient()
+    parent = f"projects/{spec.project}/locations/{spec.location}"
+    identity = spec.job.get("labels", {}).get("s3-study-attempt")
+    if not isinstance(identity, str) or not identity:
+        return BatchJobHandle(spec.resource_name, "NOT_CREATED", "BatchJobCollision")
+    try:
+        try:
+            await client.create_job(
+                parent=parent,
+                job=_job_from_json(spec.job),
+                job_id=spec.job_id,
+                retry=None,
+                timeout=20,
+            )
+        except google_exceptions.AlreadyExists:
+            job = await client.get_job(name=spec.resource_name, retry=None, timeout=20)
+            try:
+                _validated_adoption(spec, job)
+            except ApplicationError:
+                return BatchJobHandle(spec.resource_name, "READY", "BatchJobCollision")
+            return BatchJobHandle(
+                spec.resource_name,
+                "READY",
+                "BatchJobCollision" if info.attempt == 1 else None,
+            )
+        except PERMANENT_GOOGLE_ERRORS:
+            return BatchJobHandle(spec.resource_name, "NOT_CREATED", "PermanentGoogleError")
+        return BatchJobHandle(spec.resource_name, "READY")
+    finally:
+        close = cast(Callable[[], Awaitable[None]], client.transport.close)
+        await close()
+
+
+@activity.defn
+async def wait_for_batch_job(handle: BatchJobHandle) -> BatchJobOutcome:
+    client = batch_v1.BatchServiceAsyncClient()
+    try:
+        while True:
+            activity.heartbeat({"job_name": handle.resource_name, "state": "GETTING"})
+            job = await client.get_job(name=handle.resource_name, retry=None, timeout=20)
+            state = batch_v1.JobStatus.State(job.status.state).name
+            activity.heartbeat({"job_name": handle.resource_name, "state": state})
+            if state in TERMINAL_STATES:
+                return BatchJobOutcome(handle.resource_name, state, handle.failure_type)
+            await asyncio.sleep(10)
+    finally:
+        close = cast(Callable[[], Awaitable[None]], client.transport.close)
+        await close()
 
 
 @activity.defn

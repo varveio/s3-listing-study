@@ -48,7 +48,7 @@ REPORT_MAX_BYTES = 8_000_000
 MAX_CONCURRENT_CHILD_DESCRIBES = 16
 MAX_EXECUTION_LEAVES_PER_RUN = 256
 DEFAULT_POLL_INTERVAL_S = 10.0
-CONTROLLER_PHASES = ("pending", "running", "retrying", "terminal")
+CONTROLLER_PHASES = ("pending", "running", "retrying", "awaiting_retry", "terminal")
 EVIDENCE_STATES = ("pending", "missing", "recorded", "duplicate", "invalid", "unsealed")
 SUBJECT_STATES = (
     "completed",
@@ -436,13 +436,15 @@ def _safe_heartbeat(value: Any) -> dict[str, str] | None:
 async def _activity_view(client: Client, progress: CaseControllerProgress) -> dict[str, Any]:
     attempt: int | None = None
     heartbeat: dict[str, str] | None = None
-    if progress.child_run_id is not None and progress.phase != "terminal":
-        child = client.get_workflow_handle(progress.job_id, run_id=progress.child_run_id)
+    current_job_id = progress.current_job_id or progress.job_id
+    if progress.child_run_id is not None and progress.phase in ("running", "pending"):
+        child = client.get_workflow_handle(current_job_id, run_id=progress.child_run_id)
         description = await child.describe()
         pending = [
             item
             for item in description.raw_description.pending_activities
-            if item.activity_type.name == "run_batch_job"
+            if item.activity_type.name
+            in ("ensure_batch_job", "wait_for_batch_job", "run_batch_job")
         ]
         if len(pending) > 1:
             raise ReportError(f"child Workflow {progress.job_id} has multiple Batch Activities")
@@ -463,7 +465,7 @@ async def _activity_view(client: Client, progress: CaseControllerProgress) -> di
         phase = "retrying"
     return {
         "phase": phase,
-        "child_workflow_id": progress.job_id,
+        "child_workflow_id": current_job_id,
         "child_run_id": progress.child_run_id,
         "activity_attempt": attempt,
         "last_heartbeat": heartbeat,
@@ -475,7 +477,7 @@ async def _activity_view(client: Client, progress: CaseControllerProgress) -> di
                 "provider_state": progress.provider_state,
                 "provider_resource_name": progress.provider_resource_name,
             }
-            if progress.phase == "terminal"
+            if progress.phase in ("awaiting_retry", "terminal")
             else None
         ),
     }
@@ -500,24 +502,49 @@ def _validate_progress(
 ) -> None:
     if [item.job_id for item in progress] != [case.job_id for case in cases]:
         raise ReportError("Workflow progress does not exactly match campaign.json order")
-    expected_resources = {item.job_id: item.resource_name for item in temporal_cases}
+    expected_cases = {item.job_id: item for item in temporal_cases}
     for item in progress:
-        if item.phase not in ("pending", "running", "terminal"):
+        if item.phase not in ("pending", "running", "awaiting_retry", "terminal"):
             raise ReportError(f"Workflow progress for {item.job_id} has an invalid phase")
-        if item.phase != "terminal" and any(
+        current_job_id = item.current_job_id or item.job_id
+        if not _is_int(item.current_submission, minimum=1):
+            raise ReportError(f"Workflow progress for {item.job_id} has invalid submission")
+        if item.current_submission == 1:
+            if current_job_id != item.job_id:
+                raise ReportError(f"Workflow progress for {item.job_id} has invalid current job")
+        else:
+            stem, separator, original = item.job_id.rpartition("-s")
+            if (
+                not separator
+                or original != "1"
+                or current_job_id != (f"{stem}-s{item.current_submission}")
+            ):
+                raise ReportError(f"Workflow progress for {item.job_id} has invalid retry job")
+        temporal_case = expected_cases[item.job_id]
+        expected_resource = (
+            f"projects/{temporal_case.project}/locations/{temporal_case.location}/jobs/"
+            f"{current_job_id}"
+        )
+        if item.phase in ("pending", "running") and any(
             value is not None
             for value in (item.provider_state, item.failure_type, item.provider_resource_name)
         ):
             raise ReportError(f"Workflow progress for {item.job_id} has premature terminal state")
-        if item.phase != "terminal" and item.provider_settled:
+        if item.phase in ("pending", "running") and item.provider_settled:
             raise ReportError(f"Workflow progress for {item.job_id} settles prematurely")
-        if item.phase != "terminal":
+        if item.phase in ("pending", "running"):
             continue
+        if item.phase == "awaiting_retry" and (
+            not item.provider_settled
+            or (item.provider_state == "SUCCEEDED" and item.failure_type is None)
+        ):
+            raise ReportError(f"Workflow progress for {item.job_id} has invalid retry wait")
         if item.provider_settled:
             if item.provider_state in ("SUCCEEDED", "FAILED"):
-                if item.provider_resource_name != expected_resources[
-                    item.job_id
-                ] or item.failure_type not in (None, "BatchJobCollision"):
+                if item.provider_resource_name != expected_resource or item.failure_type not in (
+                    None,
+                    "BatchJobCollision",
+                ):
                     raise ReportError(
                         f"Workflow progress for {item.job_id} has an invalid settled outcome"
                     )
@@ -557,7 +584,12 @@ def _list_leaves(bucket: Any, prefix: str) -> list[str]:
 
 
 def _validated_result(
-    bucket: Any, case: ManifestCase, leaf: str
+    bucket: Any,
+    case: ManifestCase,
+    leaf: str,
+    *,
+    current_job_id: str | None = None,
+    current_submission: int | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
     result_name = f"{case.prefix}/{leaf}/result.json"
     result_uri = f"gs://{bucket.name}/{result_name}"
@@ -630,12 +662,14 @@ def _validated_result(
     assert isinstance(target, dict)
     expected_campaign = {
         "campaign_id": case.campaign,
-        "job_id": case.job_id,
+        "job_id": current_job_id or case.job_id,
         "case_id": case.case_id,
         "case_fingerprint": case.record.get("case_fingerprint"),
         "attempt_fingerprint": case.attempt_fingerprint,
         "run_ordinal": case.run_ordinal,
-        "submission_number": case.record.get("submission"),
+        "submission_number": (
+            current_submission if current_submission is not None else case.record.get("submission")
+        ),
         "declared_resources": case.record.get("resources"),
     }
     expected_artifact_uri = f"gs://{bucket.name}/{case.prefix}/{leaf}"
@@ -868,22 +902,93 @@ def _validated_result(
     return leaf_record("recorded", None), normalized
 
 
-def _evidence(bucket: Any, case: ManifestCase, *, terminal: bool) -> EvidenceSnapshot:
+def _evidence(
+    bucket: Any,
+    case: ManifestCase,
+    *,
+    terminal: bool,
+    current_job_id: str | None = None,
+    current_submission: int | None = None,
+) -> EvidenceSnapshot:
     if not terminal:
         return EvidenceSnapshot("pending", (), None, None)
     leaf_names = _list_leaves(bucket, case.prefix)
     if not leaf_names:
         return EvidenceSnapshot("missing", (), None, None)
-    checked = [_validated_result(bucket, case, leaf) for leaf in leaf_names]
+    checked: list[tuple[dict[str, Any], dict[str, Any] | None]] = []
+    for leaf in leaf_names:
+        validated = _validated_result(
+            bucket,
+            case,
+            leaf,
+            current_job_id=current_job_id,
+            current_submission=current_submission,
+        )
+        leaf_record, _normalized = validated
+        if (
+            current_submission is not None
+            and current_submission > 1
+            and leaf_record["reason"] == "invalid_result_identity"
+        ):
+            result_name = f"{case.prefix}/{leaf}/result.json"
+            blob = bucket.get_blob(result_name)
+            try:
+                content = (
+                    _download(
+                        blob, label=str(leaf_record["result_uri"]), max_bytes=RESULT_MAX_BYTES
+                    )
+                    if blob is not None
+                    else b""
+                )
+                document = _json_object(
+                    content, label=str(leaf_record["result_uri"]), max_bytes=RESULT_MAX_BYTES
+                )
+                campaign = document.get("campaign")
+            except ReportError:
+                campaign = None
+            if isinstance(campaign, dict):
+                prior_submission = campaign.get("submission_number")
+                prior_job_id = campaign.get("job_id")
+                prior_number = cast(int, prior_submission)
+                current_number = current_submission
+                if _is_int(prior_submission, minimum=1) and prior_number < current_number:
+                    stem, separator, original = case.job_id.rpartition("-s")
+                    expected_prior_job = (
+                        case.job_id
+                        if prior_number == 1
+                        else f"{stem}-s{prior_number}"
+                        if separator and original == "1"
+                        else None
+                    )
+                    if isinstance(prior_job_id, str) and prior_job_id == expected_prior_job:
+                        prior_leaf, prior_normalized = _validated_result(
+                            bucket,
+                            case,
+                            leaf,
+                            current_job_id=prior_job_id,
+                            current_submission=prior_number,
+                        )
+                        if prior_leaf["state"] == "recorded" and prior_normalized is not None:
+                            prior_leaf = {
+                                **prior_leaf,
+                                "state": "historical",
+                                "submission_number": prior_number,
+                                "job_id": prior_job_id,
+                            }
+                            validated = (prior_leaf, None)
+        checked.append(validated)
     leaves = tuple(item[0] for item in checked)
-    if len(checked) > 1:
+    current = [item for item in checked if item[0]["state"] != "historical"]
+    if not current:
+        return EvidenceSnapshot("missing", leaves, None, None)
+    if len(current) > 1:
         return EvidenceSnapshot("duplicate", leaves, None, None)
-    leaf, normalized = checked[0]
-    state = str(leaf["state"])
+    current_leaf, normalized = current[0]
+    state = str(current_leaf["state"])
     return EvidenceSnapshot(
         state,
         leaves,
-        str(leaf["result_uri"]) if state == "recorded" else None,
+        str(current_leaf["result_uri"]) if state == "recorded" else None,
         normalized,
     )
 
@@ -946,23 +1051,42 @@ async def observe_once(
     for case, temporal_case, item, controller in zip(
         cases, temporal_input.cases, progress, controllers, strict=True
     ):
+        current_job_id = item.current_job_id or item.job_id
+        evidence_key = f"{case.job_id}:s{item.current_submission}"
         if item.provider_settled and evidence_cache is not None:
-            evidence = evidence_cache.get(case.job_id)
+            evidence = evidence_cache.get(evidence_key)
             if evidence is None:
-                evidence = _evidence(bucket, case, terminal=True)
-                evidence_cache[case.job_id] = evidence
+                evidence = _evidence(
+                    bucket,
+                    case,
+                    terminal=True,
+                    current_job_id=current_job_id,
+                    current_submission=item.current_submission,
+                )
+                evidence_cache[evidence_key] = evidence
         else:
-            evidence = _evidence(bucket, case, terminal=item.provider_settled)
+            evidence = _evidence(
+                bucket,
+                case,
+                terminal=item.provider_settled,
+                current_job_id=current_job_id,
+                current_submission=item.current_submission,
+            )
         normalized = evidence.normalized
         rows.append(
             {
                 "job_id": case.job_id,
+                "current_job_id": current_job_id,
+                "current_submission": item.current_submission,
                 "bucket": case.bucket,
                 "tool": case.tool,
                 "case_id": case.case_id,
                 "run_ordinal": case.run_ordinal,
                 "run_prefix": f"gs://{bucket.name}/{case.prefix}",
-                "provider_resource_name": temporal_case.resource_name,
+                "provider_resource_name": (
+                    f"projects/{temporal_case.project}/locations/{temporal_case.location}/jobs/"
+                    f"{current_job_id}"
+                ),
                 "controller_complete": item.phase == "terminal",
                 "provider_settled": item.provider_settled,
                 "controller": controller,

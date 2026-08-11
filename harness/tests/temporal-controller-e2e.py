@@ -25,9 +25,11 @@ from s3_listing_study.manager.campaign.cli import (
 from s3_listing_study.manager.campaign.report import ReportError, _publish, observe_once
 from s3_listing_study.temporal import TASK_QUEUE
 from s3_listing_study.temporal.models import (
+    BatchJobHandle,
     BatchJobOutcome,
     BatchJobSpec,
     CampaignWorkflowInput,
+    RetryCaseRequest,
 )
 from s3_listing_study.temporal.workflows import CampaignWorkflow, CaseWorkflow
 
@@ -163,26 +165,54 @@ async def exercise() -> None:
     campaign_id = f"2026-08-11-{suffix}"
     job_id = f"local-case-{suffix}"
     scope = TemporalScope("local-sdk-test-server", "default")
-    activity_started = asyncio.Event()
-    activity_release = asyncio.Event()
-    attempts: list[int] = []
+    retry_activity_started = asyncio.Event()
+    retry_activity_release = asyncio.Event()
+    ensure_attempts: list[tuple[str, int]] = []
 
-    @activity.defn(name="run_batch_job")
-    async def local_batch(spec: BatchJobSpec) -> BatchJobOutcome:
+    @activity.defn(name="ensure_batch_job")
+    async def local_ensure(spec: BatchJobSpec) -> BatchJobHandle:
         attempt = activity.info().attempt
-        attempts.append(attempt)
-        if attempt == 1:
+        ensure_attempts.append((spec.job_id, attempt))
+        if spec.job_id.endswith("-s1") and attempt == 1:
             raise ApplicationError("exercise retry", type="TransientLocalTest")
-        activity.heartbeat({"job_name": spec.resource_name, "state": "RUNNING"})
-        activity_started.set()
-        await activity_release.wait()
-        return BatchJobOutcome(spec.resource_name, "SUCCEEDED")
+        return BatchJobHandle(spec.resource_name, "READY")
+
+    @activity.defn(name="wait_for_batch_job")
+    async def local_wait(handle: BatchJobHandle) -> BatchJobOutcome:
+        if handle.resource_name.endswith("-s1"):
+            return BatchJobOutcome(handle.resource_name, "FAILED")
+        activity.heartbeat({"job_name": handle.resource_name, "state": "RUNNING"})
+        retry_activity_started.set()
+        await retry_activity_release.wait()
+        return BatchJobOutcome(handle.resource_name, "SUCCEEDED")
 
     case = BatchJobSpec(
         project="local-project",
         location="local-location",
-        job_id=job_id,
-        job={},
+        job_id=f"{job_id}-s1",
+        job={
+            "taskGroups": [
+                {
+                    "taskSpec": {
+                        "runnables": [
+                            {
+                                "container": {
+                                    "commands": [
+                                        "python",
+                                        "--job-id",
+                                        f"{job_id}-s1",
+                                        "--submission-number",
+                                        "1",
+                                        "--destination",
+                                        "gs://local-results/stable-run",
+                                    ]
+                                }
+                            }
+                        ]
+                    }
+                }
+            ]
+        },
         controller_timeout_s=60,
     )
     manifest_bytes, temporal_bytes, digest = frozen_inputs(campaign_id, case, scope)
@@ -198,7 +228,7 @@ async def exercise() -> None:
             environment.client,
             task_queue=TASK_QUEUE,
             workflows=[CampaignWorkflow, CaseWorkflow],
-            activities=[local_batch],
+            activities=[local_ensure, local_wait],
         ),
     ):
         handle = await environment.client.start_workflow(
@@ -210,7 +240,7 @@ async def exercise() -> None:
         )
         pending = await handle.query(CampaignWorkflow.progress)
         assert pending[0].phase == "pending"
-        assert not activity_started.is_set()
+        assert not retry_activity_started.is_set()
 
         run_id = handle.first_execution_run_id
         assert run_id is not None
@@ -225,21 +255,44 @@ async def exercise() -> None:
             _canonical_json(owner.document())
         )
         await handle.signal(CampaignWorkflow.claim, digest)
-        await asyncio.wait_for(activity_started.wait(), timeout=30)
-        retrying = await observe_once(
+        for _ in range(300):
+            pending_retry = await handle.query(CampaignWorkflow.progress)
+            if pending_retry[0].phase == "awaiting_retry":
+                break
+            await asyncio.sleep(0.1)
+        else:
+            raise AssertionError("first submission did not reach awaiting_retry")
+        awaiting_retry = await observe_once(
             temporal_client=environment.client,
             bucket=bucket,
             campaign=campaign_id,
             owner=owner,
             scope=scope,
         )
-        assert attempts == [1, 2]
-        assert retrying["cases"][0]["controller"]["phase"] == "retrying"
-        assert retrying["cases"][0]["controller"]["activity_attempt"] == 2
+        assert ensure_attempts == [(case.job_id, 1), (case.job_id, 2)]
+        assert awaiting_retry["cases"][0]["controller"]["phase"] == "awaiting_retry"
+        assert awaiting_retry["cases"][0]["current_submission"] == 1
+        assert not awaiting_retry["report_final"]
 
-        activity_release.set()
+        retry = await handle.execute_update(
+            CampaignWorkflow.retry_case,
+            RetryCaseRequest(case.job_id, 2),
+            id=f"retry-{case.job_id}-s2",
+        )
+        assert retry.current_submission == 2
+        assert retry.current_job_id == case.job_id.removesuffix("-s1") + "-s2"
+        duplicate = await handle.execute_update(
+            CampaignWorkflow.retry_case,
+            RetryCaseRequest(case.job_id, 2),
+            id=f"retry-{case.job_id}-s2",
+        )
+        assert duplicate == retry
+        await asyncio.wait_for(retry_activity_started.wait(), timeout=30)
+
+        retry_activity_release.set()
         result = await asyncio.wait_for(handle.result(), timeout=30)
-        assert result[0].provider_resource_name == case.resource_name
+        retry_resource = case.resource_name.removesuffix("-s1") + "-s2"
+        assert result[0].provider_resource_name == retry_resource
         report = await observe_once(
             temporal_client=environment.client,
             bucket=bucket,
@@ -260,7 +313,7 @@ async def exercise() -> None:
         assert report["report_final"]
         assert not report["operational_success"]
         assert report["cases"][0]["evidence"]["state"] == "missing"
-        assert report["cases"][0]["provider_resource_name"] == case.resource_name
+        assert report["cases"][0]["provider_resource_name"] == retry_resource
 
         _publish(bucket, campaign_id, report)
         _publish(bucket, campaign_id, report)

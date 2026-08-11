@@ -82,9 +82,12 @@ class FakeDescription:
     task_queue = TASK_QUEUE
     status = WorkflowExecutionStatus.RUNNING
 
+    def __init__(self) -> None:
+        self.digest = DIGEST
+
     async def memo_value(self, key: str, *, type_hint: type[str]) -> str:
         assert (key, type_hint) == ("campaign_digest", str)
-        return DIGEST
+        return self.digest
 
 
 class FakeParentHandle:
@@ -581,6 +584,111 @@ def test_final_report_records_single_missing_and_duplicate_without_raw_reads() -
     assert len(bucket.listed) == 3
     assert bucket.objects[first_result].downloads == 1
     assert client.handles == [(CAMPAIGN, "parent-run"), (CAMPAIGN, "parent-run")]
+
+
+def test_successful_second_submission_is_final_and_operationally_successful() -> None:
+    base_manifest, attempts, image = manifest()
+    document = json.loads(base_manifest)
+    document["attempts"][0]["job_id"] = "job-1-s1"
+    manifest_bytes = campaign_cli._canonical_json(document)
+    attempts = document["attempts"]
+    temporal_bytes = temporal_input(manifest_bytes, attempts)
+    digest = hashlib.sha256(temporal_bytes).hexdigest()
+    selected_owner = campaign_cli.TemporalOwner(CAMPAIGN, digest, SCOPE, CAMPAIGN, "parent-run")
+    retry_attempt = dict(attempts[0])
+    retry_attempt["job_id"] = "job-1-s2"
+    retry_attempt["submission"] = 2
+    historical_uuid = "44444444-4444-4444-8444-444444444444"
+    duplicate_uuid = "55555555-5555-4555-8555-555555555555"
+    objects = {
+        f"campaigns/{CAMPAIGN}/campaign.json": manifest_bytes,
+        f"campaigns/{CAMPAIGN}/inputs/temporal.json": temporal_bytes,
+        f"{attempts[0]['prefix']}/{UUIDS[0]}/result.json": result(
+            retry_attempt, image, UUIDS[0], "completed"
+        ),
+        f"{attempts[0]['prefix']}/{historical_uuid}/result.json": result(
+            attempts[0], image, historical_uuid, "failed"
+        ),
+        f"{attempts[1]['prefix']}/{UUIDS[1]}/result.json": result(
+            attempts[1], image, UUIDS[1], "completed"
+        ),
+        f"{attempts[2]['prefix']}/{UUIDS[2]}/result.json": result(
+            attempts[2], image, UUIDS[2], "completed"
+        ),
+    }
+    progress = [
+        CaseControllerProgress(
+            "job-1-s1",
+            "child-retry",
+            "terminal",
+            "SUCCEEDED",
+            None,
+            resource_name("job-1-s2"),
+            True,
+            2,
+            "job-1-s2",
+        ),
+        *[
+            CaseControllerProgress(
+                item["job_id"],
+                f"child-{index}",
+                "terminal",
+                "SUCCEEDED",
+                None,
+                resource_name(item["job_id"]),
+                True,
+                1,
+                item["job_id"],
+            )
+            for index, item in enumerate(attempts[1:], start=2)
+        ],
+    ]
+    client = FakeTemporalClient(progress, [])
+    client.description.status = WorkflowExecutionStatus.COMPLETED
+    client.description.digest = digest
+    bucket = FakeBucket(objects)
+    report = asyncio.run(
+        campaign_report.observe_once(
+            temporal_client=cast(TemporalClient, client),
+            bucket=bucket,
+            campaign=CAMPAIGN,
+            owner=selected_owner,
+            scope=SCOPE,
+        )
+    )
+    assert report["controller_complete"]
+    assert report["provider_settled"]
+    assert report["report_final"]
+    assert report["operational_success"]
+    assert report["cases"][0]["job_id"] == "job-1-s1"
+    assert report["cases"][0]["current_job_id"] == "job-1-s2"
+    assert report["cases"][0]["current_submission"] == 2
+    assert report["cases"][0]["evidence"]["state"] == "recorded"
+    assert [leaf["state"] for leaf in report["cases"][0]["evidence"]["leaves"]] == [
+        "recorded",
+        "historical",
+    ]
+    historical = report["cases"][0]["evidence"]["leaves"][1]
+    assert historical["submission_number"] == 1
+    assert historical["job_id"] == "job-1-s1"
+
+    duplicate_name = f"{attempts[0]['prefix']}/{duplicate_uuid}/result.json"
+    bucket.objects[duplicate_name] = FakeBlob(
+        result(retry_attempt, image, duplicate_uuid, "completed")
+    )
+    case = campaign_report._parse_manifest(
+        manifest_bytes, campaign=CAMPAIGN, results_bucket=BUCKET
+    )[0]
+    duplicate = campaign_report._evidence(
+        bucket,
+        case,
+        terminal=True,
+        current_job_id="job-1-s2",
+        current_submission=2,
+    )
+    assert duplicate.state == "duplicate"
+    assert [leaf["state"] for leaf in duplicate.leaves].count("recorded") == 2
+    assert [leaf["state"] for leaf in duplicate.leaves].count("historical") == 1
 
 
 def test_terminal_controller_failure_never_finalizes_unsettled_provider() -> None:
