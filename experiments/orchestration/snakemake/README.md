@@ -59,8 +59,11 @@ The command refuses malformed profiles and refuses to replace different bytes.
 The workflow accepts both frozen inputs only from the same
 `.snakemake/runs/<run>/` directory beneath its working directory. That ignored,
 in-repository placement lets Snakemake include their exact bytes in the remote
-source archive; external absolute paths fail before DAG construction. Keep the
-generated frozen files uncommitted.
+source archive. `S3_STUDY_RUN_DIR` must be spelled exactly as the canonical
+three-component repository-relative path `.snakemake/runs/<single-name>`; an
+absolute path, traversal, extra nesting, or alternate spelling is rejected
+before DAG construction because it would not be portable inside the extracted
+remote source archive. Keep the generated frozen files uncommitted.
 
 The real trial uses the existing results bucket. The frozen profile remaps each
 logical campaign attempt prefix to
@@ -81,19 +84,24 @@ uv run --project experiments/orchestration/snakemake python \
   --campaign "$run_dir/campaign.json" \
   --execution-profile "$run_dir/execution-profile.json"
 
-campaign_sha256=$(sha256sum "$run_dir/campaign.json" | cut -d' ' -f1)
-execution_sha256=$(sha256sum "$run_dir/execution-profile.json" | cut -d' ' -f1)
-
+S3_STUDY_RUN_DIR="$run_dir" \
 uv run --project experiments/orchestration/snakemake snakemake \
   --snakefile experiments/orchestration/snakemake/Snakefile \
-  --cores 1 --dry-run \
-  --config campaign_path="$run_dir/campaign.json" \
-           execution_profile_path="$run_dir/execution-profile.json" \
-           campaign_sha256="$campaign_sha256" \
-           execution_sha256="$execution_sha256"
+  --profile experiments/orchestration/snakemake/profiles/googlebatch \
+  --dry-run
 ```
 
-Both expected digests are mandatory and are checked before target construction.
+This operator dry-run consults marker state through the configured GCS storage
+provider. The local test suite replaces only that storage inventory lookup to
+exercise profile parsing and DAG construction offline; its success is not live
+GCS or Batch evidence.
+
+The run directory is the launch's single configuration input. The profile reads
+the two frozen files there, computes both expected digests, and derives the
+executor project/region and default GCS storage settings directly from the
+execution profile. There is no second ambient copy of those values and no
+command-line `--config` to replace the profile's workflow config. Both digests
+are mandatory and are checked before target construction.
 The two frozen inputs are local rule inputs even with default GCS storage, and
 are registered as workflow sources so remote execution deploys their exact
 bytes alongside the Snakefile and runner script.
@@ -151,12 +159,11 @@ Put the resulting `@sha256:...` URI in the frozen execution profile as
 `executor.runtime_image`; tags are rejected. That value becomes a per-job
 Snakemake resource, so there is no unfrozen CLI override and a runtime change
 also changes the execution-profile digest and marker namespace. The checked-in
-compute profile is
-`profiles/googlebatch/profile.v9+.yaml`; set `S3_STUDY_GCP_PROJECT` and
-`S3_STUDY_RESULTS_BUCKET`, and `S3_STUDY_GCP_LOCATION` before use. The profile
-passes all three expanded values into workflow config; the Snakefile refuses a
-project, results bucket, or location that differs from the frozen execution
-profile before constructing marker targets. Its effective shape is:
+compute profile is `profiles/googlebatch/profile.v9+.yaml`; set only
+`S3_STUDY_RUN_DIR` to the repository-relative frozen run directory before use.
+The profile loads the execution settings from that directory rather than
+accepting mutable project, bucket, or location overrides. Its effective shape
+is:
 
 ```yaml
 executor: googlebatch-study
@@ -172,17 +179,14 @@ googlebatch-study-image-project: cos-cloud
 
 The default storage prefix is the only remote root for marker paths. The
 Snakefile fixes their logical names below `markers/`; do not repeat
-`snakemake/orchestration/` in a marker path. Launch with the same four frozen
-input values used by dry-run and no custom submit, poll, or watch wrapper:
+`snakemake/orchestration/` in a marker path. Launch through the same frozen run
+directory used by dry-run and no custom submit, poll, or watch wrapper:
 
 ```sh
+S3_STUDY_RUN_DIR="$run_dir" \
 uv run --project experiments/orchestration/snakemake snakemake \
   --snakefile experiments/orchestration/snakemake/Snakefile \
-  --profile experiments/orchestration/snakemake/profiles/googlebatch \
-  --config campaign_path="$run_dir/campaign.json" \
-           execution_profile_path="$run_dir/execution-profile.json" \
-           campaign_sha256="$campaign_sha256" \
-           execution_sha256="$execution_sha256"
+  --profile experiments/orchestration/snakemake/profiles/googlebatch
 ```
 
 `scripts/` intentionally contains only the rule runner and its workflow support

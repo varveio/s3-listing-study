@@ -563,27 +563,6 @@ def executor_runtime_image(profile: Mapping[str, Any]) -> str:
     return str(executor["runtime_image"])
 
 
-def validate_ambient_execution(
-    profile: Mapping[str, Any],
-    *,
-    project: Any,
-    results_bucket: Any,
-    location: Any,
-) -> None:
-    """Bind the compute/storage profile to the separately frozen execution profile."""
-    ambient = {
-        "project": _token(project, label="ambient project"),
-        "results_bucket": _bucket(results_bucket, label="ambient results_bucket"),
-        "location": _token(location, label="ambient location"),
-    }
-    for field, value in ambient.items():
-        if value != profile[field]:
-            raise WorkflowInputError(
-                f"ambient {field} does not match frozen execution profile: "
-                f"{value!r} != {profile[field]!r}"
-            )
-
-
 def canonical_profile_bytes(document: Mapping[str, Any]) -> bytes:
     return (json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n").encode()
 

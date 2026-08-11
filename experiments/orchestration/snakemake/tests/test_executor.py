@@ -270,9 +270,6 @@ def test_plugin_is_discoverable_by_snakemake_registry() -> None:
 
 def _checked_in_profile_dry_run(
     tmp_path: Path,
-    *,
-    ambient_project: str = "study1",
-    ambient_bucket: str = "study-results",
 ) -> subprocess.CompletedProcess[str]:
     compiled, _, _ = _compiled(tmp_path)
     run_dir = ROOT / ".snakemake" / "runs" / f"executor-test-{uuid.uuid4().hex}"
@@ -296,20 +293,9 @@ def _checked_in_profile_dry_run(
             str(EXPERIMENT / "profiles" / "googlebatch"),
             "--dry-run",
             "--quiet",
-            "--config",
-            f"campaign_path={campaign_path.relative_to(ROOT)}",
-            f"execution_profile_path={profile_path.relative_to(ROOT)}",
-            f"campaign_sha256={hashlib.sha256(compiled.content).hexdigest()}",
-            f"execution_sha256={hashlib.sha256(profile_path.read_bytes()).hexdigest()}",
         ]
         environment = os.environ.copy()
-        environment.update(
-            {
-                "S3_STUDY_GCP_PROJECT": ambient_project,
-                "S3_STUDY_RESULTS_BUCKET": ambient_bucket,
-                "S3_STUDY_GCP_LOCATION": "us-east1",
-            }
-        )
+        environment["S3_STUDY_RUN_DIR"] = run_dir.relative_to(ROOT).as_posix()
         completed = subprocess.run(
             command,
             cwd=ROOT,
@@ -323,27 +309,101 @@ def _checked_in_profile_dry_run(
         shutil.rmtree(run_dir)
 
 
-def test_checked_in_compute_profile_parses_in_real_dry_run(tmp_path: Path) -> None:
+def test_checked_in_compute_profile_builds_dag_with_mocked_storage_inventory(
+    tmp_path: Path,
+) -> None:
     completed = _checked_in_profile_dry_run(tmp_path)
     assert completed.returncode == 0, completed.stdout + completed.stderr
 
 
 @pytest.mark.parametrize(
-    ("ambient_project", "ambient_bucket", "field"),
+    ("setting", "expected"),
     (
-        ("other-project", "study-results", "project"),
-        ("study1", "other-results", "results_bucket"),
+        ("googlebatch-study-project", "study1"),
+        ("default-storage-prefix", "gcs://study-results/snakemake/orchestration/"),
     ),
 )
-def test_checked_in_compute_profile_rejects_ambient_mismatch_before_dag(
-    tmp_path: Path, ambient_project: str, ambient_bucket: str, field: str
+def test_checked_in_compute_profile_derives_settings_from_frozen_profile(
+    monkeypatch: pytest.MonkeyPatch, setting: str, expected: str
 ) -> None:
-    completed = _checked_in_profile_dry_run(
-        tmp_path,
-        ambient_project=ambient_project,
-        ambient_bucket=ambient_bucket,
-    )
-    output = completed.stdout + completed.stderr
-    assert completed.returncode != 0
-    assert f"ambient {field} does not match frozen execution profile" in output
-    assert "Building DAG of jobs" not in output
+    from snakemake.profiles import ProfileConfigFileParser
+
+    run_dir = ROOT / ".snakemake" / "runs" / f"profile-test-{uuid.uuid4().hex}"
+    relative_run_dir = run_dir.relative_to(ROOT)
+    run_dir.mkdir(parents=True)
+    try:
+        campaign_path = run_dir / "campaign.json"
+        execution_profile_path = run_dir / "execution-profile.json"
+        campaign_path.write_bytes(b"frozen campaign\n")
+        execution_profile_path.write_text(json.dumps(_profile()), encoding="utf-8")
+        monkeypatch.chdir(ROOT)
+        monkeypatch.setenv("S3_STUDY_RUN_DIR", relative_run_dir.as_posix())
+
+        profile_path = EXPERIMENT / "profiles" / "googlebatch" / "profile.v9+.yaml"
+        with profile_path.open(encoding="utf-8") as stream:
+            rendered = ProfileConfigFileParser().parse(stream)
+
+        assert rendered[setting] == expected
+        assert rendered["config"] == [
+            f"campaign_path={relative_run_dir / 'campaign.json'}",
+            f"execution_profile_path={relative_run_dir / 'execution-profile.json'}",
+            f"campaign_sha256={hashlib.sha256(campaign_path.read_bytes()).hexdigest()}",
+            "execution_sha256="
+            + hashlib.sha256(execution_profile_path.read_bytes()).hexdigest(),
+        ]
+    finally:
+        shutil.rmtree(run_dir)
+
+
+@pytest.mark.parametrize(
+    "configured_run_dir",
+    (
+        "__absolute__",
+        "../.snakemake/runs/trial",
+        ".snakemake/runs/../trial",
+        ".snakemake/runs/trial/extra",
+        ".snakemake//runs/trial",
+        ".snakemake/runs/./trial",
+        ".snakemake/runs/trial/",
+        ".snakemake/runs/trial\\nested",
+    ),
+)
+def test_checked_in_compute_profile_rejects_noncanonical_run_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    configured_run_dir: str,
+) -> None:
+    from configargparse import ConfigFileParserException
+    from snakemake.profiles import ProfileConfigFileParser
+
+    if configured_run_dir == "__absolute__":
+        configured_run_dir = str(tmp_path)
+    monkeypatch.setenv("S3_STUDY_RUN_DIR", configured_run_dir)
+    profile_path = EXPERIMENT / "profiles" / "googlebatch" / "profile.v9+.yaml"
+    with profile_path.open(encoding="utf-8") as stream, pytest.raises(
+        ConfigFileParserException,
+        match=r"S3_STUDY_RUN_DIR must be exactly \.snakemake/runs/<single-name>",
+    ):
+        ProfileConfigFileParser().parse(stream)
+
+
+def test_checked_in_compute_profile_rejects_symlinked_run_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from configargparse import ConfigFileParserException
+    from snakemake.profiles import ProfileConfigFileParser
+
+    run_dir = ROOT / ".snakemake" / "runs" / f"profile-link-{uuid.uuid4().hex}"
+    run_dir.parent.mkdir(parents=True, exist_ok=True)
+    run_dir.symlink_to(tmp_path, target_is_directory=True)
+    try:
+        monkeypatch.chdir(ROOT)
+        monkeypatch.setenv("S3_STUDY_RUN_DIR", run_dir.relative_to(ROOT).as_posix())
+        profile_path = EXPERIMENT / "profiles" / "googlebatch" / "profile.v9+.yaml"
+        with profile_path.open(encoding="utf-8") as stream, pytest.raises(
+            ConfigFileParserException,
+            match="S3_STUDY_RUN_DIR and its parent directories must not be symlinks",
+        ):
+            ProfileConfigFileParser().parse(stream)
+    finally:
+        run_dir.unlink()

@@ -1,16 +1,33 @@
 __use_yte__: true
 __definitions__:
+  - import hashlib
+  - import json
   - import os
+  - from pathlib import Path, PurePosixPath
+  - raw_run_dir = os.environ["S3_STUDY_RUN_DIR"]
+  - run_dir_parts = PurePosixPath(raw_run_dir).parts
+  - canonical_run_dir = PurePosixPath(raw_run_dir).as_posix()
+  - assert raw_run_dir == canonical_run_dir and len(run_dir_parts) == 3 and run_dir_parts[:2] == (".snakemake", "runs") and run_dir_parts[2] not in (".", "..") and "\\" not in raw_run_dir, "S3_STUDY_RUN_DIR must be exactly .snakemake/runs/<single-name> using canonical repository-relative spelling"
+  - run_dir = Path(raw_run_dir)
+  - lexical_run_dir = Path.cwd() / run_dir
+  - assert lexical_run_dir == run_dir.resolve(), "S3_STUDY_RUN_DIR and its parent directories must not be symlinks"
+  - campaign_path = run_dir / "campaign.json"
+  - execution_profile_path = run_dir / "execution-profile.json"
+  - campaign_sha256 = hashlib.sha256(campaign_path.read_bytes()).hexdigest()
+  - execution_profile_bytes = execution_profile_path.read_bytes()
+  - execution_sha256 = hashlib.sha256(execution_profile_bytes).hexdigest()
+  - execution = json.loads(execution_profile_bytes)
 config:
-  - ?f"ambient_project={os.environ['S3_STUDY_GCP_PROJECT']}"
-  - ?f"ambient_results_bucket={os.environ['S3_STUDY_RESULTS_BUCKET']}"
-  - ?f"ambient_location={os.environ['S3_STUDY_GCP_LOCATION']}"
+  - ?f"campaign_path={campaign_path}"
+  - ?f"execution_profile_path={execution_profile_path}"
+  - ?f"campaign_sha256={campaign_sha256}"
+  - ?f"execution_sha256={execution_sha256}"
 executor: googlebatch-study
 jobs: 17
 default-storage-provider: gcs
-default-storage-prefix: gcs://${S3_STUDY_RESULTS_BUCKET}/snakemake/orchestration/
-storage-gcs-project: ${S3_STUDY_GCP_PROJECT}
-googlebatch-study-project: ${S3_STUDY_GCP_PROJECT}
-googlebatch-study-region: ${S3_STUDY_GCP_LOCATION}
-googlebatch-study-image-family: batch-cos
+default-storage-prefix: ?f"gcs://{execution['results_bucket']}/{execution['orchestration_prefix']}"
+storage-gcs-project: ?f"{execution['project']}"
+googlebatch-study-project: ?f"{execution['project']}"
+googlebatch-study-region: ?f"{execution['location']}"
+googlebatch-study-image-family: ?f"{execution['n4_boot_disk']['image']}"
 googlebatch-study-image-project: cos-cloud

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import tarfile
@@ -295,10 +296,11 @@ def test_deployable_sources_refuse_paths_outside_one_ignored_run(tmp_path: Path)
         deployable_source_paths(campaign, other, working_directory=tmp_path)
 
 
-def test_source_archive_contains_exact_frozen_campaign_and_profile() -> None:
+def test_remote_deployment_source_archive_is_complete_and_importable(tmp_path: Path) -> None:
     run_name = f"pytest-archive-{uuid4().hex}"
     run = ROOT / ".snakemake" / "runs" / run_name
-    archive = ROOT / ".snakemake" / f"{run_name}.tar.xz"
+    archive = tmp_path / "remote-sources.tar.xz"
+    extracted = tmp_path / "extracted"
     run.mkdir(parents=True)
     campaign_path = run / "campaign.json"
     profile_path = run / "execution-profile.json"
@@ -309,28 +311,36 @@ def test_source_archive_contains_exact_frozen_campaign_and_profile() -> None:
     profile_bytes = canonical_profile_bytes(execution)
     campaign_path.write_bytes(campaign_bytes)
     profile_path.write_bytes(profile_bytes)
-    campaign_sha256 = hashlib.sha256(campaign_bytes).hexdigest()
-    execution_sha256 = hashlib.sha256(profile_bytes).hexdigest()
     try:
         completed = subprocess.run(
             [
-                str(ROOT / "experiments/orchestration/snakemake/.venv/bin/snakemake"),
+                str(ROOT / "experiments/orchestration/snakemake/.venv/bin/python"),
+                "-c",
+                (
+                    "import os; from pathlib import Path; "
+                    "from google.cloud.storage import Bucket; "
+                    "Bucket.exists=lambda self, *args, **kwargs: False; "
+                    "from snakemake.cli import main; "
+                    "from snakemake.workflow import Workflow; "
+                    "capture=lambda self: ("
+                    "self.write_source_archive("
+                    "Path(os.environ['S3_STUDY_CAPTURE_SOURCE_ARCHIVE'])), "
+                    "(_ for _ in ()).throw(SystemExit(0)))[1]; "
+                    "Workflow.upload_sources=capture; "
+                    "main()"
+                ),
                 "--snakefile",
                 "experiments/orchestration/snakemake/Snakefile",
-                "--cores",
-                "1",
-                "--config",
-                f"campaign_path={campaign_path.relative_to(ROOT)}",
-                f"execution_profile_path={profile_path.relative_to(ROOT)}",
-                f"campaign_sha256={campaign_sha256}",
-                f"execution_sha256={execution_sha256}",
-                f"ambient_project={execution['project']}",
-                f"ambient_results_bucket={execution['results_bucket']}",
-                f"ambient_location={execution['location']}",
-                "--archive",
-                str(archive),
+                "--profile",
+                "experiments/orchestration/snakemake/profiles/googlebatch",
+                "--quiet",
             ],
             cwd=ROOT,
+            env={
+                **os.environ,
+                "S3_STUDY_RUN_DIR": run.relative_to(ROOT).as_posix(),
+                "S3_STUDY_CAPTURE_SOURCE_ARCHIVE": str(archive),
+            },
             check=False,
             capture_output=True,
             text=True,
@@ -339,11 +349,47 @@ def test_source_archive_contains_exact_frozen_campaign_and_profile() -> None:
         with tarfile.open(archive, "r:xz") as frozen:
             campaign_member = f".snakemake/runs/{run_name}/campaign.json"
             profile_member = f".snakemake/runs/{run_name}/execution-profile.json"
+            members = set(frozen.getnames())
+            assert {
+                campaign_member,
+                profile_member,
+                "experiments/orchestration/snakemake/Snakefile",
+                "experiments/orchestration/snakemake/scripts/workflow.py",
+                "experiments/orchestration/snakemake/scripts/run_attempt.py",
+                "src/s3_listing_study/manager/campaign/request.py",
+            } <= members
             assert frozen.extractfile(campaign_member).read() == campaign_bytes
             assert frozen.extractfile(profile_member).read() == profile_bytes
+            assert not any(".venv" in Path(member).parts for member in members)
+            assert {
+                member for member in members if ".snakemake" in Path(member).parts
+            } == {campaign_member, profile_member}
+            frozen.extractall(extracted)
+
+        imported = subprocess.run(
+            [
+                str(ROOT / "experiments/orchestration/snakemake/.venv/bin/python"),
+                "-I",
+                "-c",
+                (
+                    "import pathlib, sys; root=pathlib.Path(sys.argv[1]).resolve(); "
+                    "scripts=root/'experiments/orchestration/snakemake/scripts'; "
+                    "src=root/'src'; sys.path[:0]=[str(scripts), str(src)]; "
+                    "import workflow; "
+                    "import s3_listing_study.manager.campaign.request as request; "
+                    "assert pathlib.Path(workflow.__file__).resolve().is_relative_to(root); "
+                    "assert pathlib.Path(request.__file__).resolve().is_relative_to(root)"
+                ),
+                str(extracted),
+            ],
+            cwd=extracted,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert imported.returncode == 0, imported.stderr
     finally:
         shutil.rmtree(run)
-        archive.unlink(missing_ok=True)
 
 
 def test_marker_namespace_contains_both_frozen_input_digests() -> None:

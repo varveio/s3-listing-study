@@ -17,7 +17,6 @@ from workflow import (  # noqa: E402
     marker_path,
     project_attempt,
     require_sha256,
-    validate_ambient_execution,
 )
 
 
@@ -53,12 +52,6 @@ configfile: EXECUTION_PROFILE_PATH
 
 CAMPAIGN = load_campaign(CAMPAIGN_PATH)
 EXECUTION = load_execution_profile(EXECUTION_PROFILE_PATH)
-validate_ambient_execution(
-    EXECUTION,
-    project=required_config("ambient_project"),
-    results_bucket=required_config("ambient_results_bucket"),
-    location=required_config("ambient_location"),
-)
 RUNTIME_IMAGE = executor_runtime_image(EXECUTION)
 ATTEMPTS = {
     (row["bucket"], row["tool"], row["case_id"], str(row["run_ordinal"])): row
