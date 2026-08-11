@@ -91,6 +91,20 @@ validates through its pull request but publishes nothing; a branch image set
 reaches GHCR only through the label or a manual dispatch. A dispatch also accepts
 a `tools` filter, so one subject can be rebuilt without the other ten.
 
+Two behaviours regularly surprise people:
+
+*Every push to a pull request re-runs image validation, even a documentation-only
+one.* On `pull_request` events GitHub matches the path filter against the pull
+request's whole head-versus-base diff, not against the commits just pushed — so
+once a branch touches any image input, every later push matches. This is cheap
+rather than wasteful: with the parents published, such a run finds everything in
+`adopt` and finishes in seconds.
+
+*Labelling and pushing are separate triggers.* Applying the label while a
+validation run is still going starts a second, concurrent run, and the two cannot
+share work — validation holds no write token, so the publishing run necessarily
+rebuilds what it publishes. Push, wait for green, then label.
+
 Publication requires `packages: write`, and that permission is granted in exactly
 one file — `.github/workflows/images-publish.yml`. GitHub does not allow
 permissions to be computed from an expression, so the pull-request caller and the
