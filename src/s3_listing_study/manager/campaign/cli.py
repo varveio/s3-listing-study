@@ -7,6 +7,7 @@ import asyncio
 import base64
 import hashlib
 import json
+import math
 import re
 import subprocess
 import sys
@@ -146,7 +147,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--wait", action="store_true")
-    parser.add_argument("--poll-interval-s", type=float, default=10.0)
+    parser.add_argument("--poll-interval-s", action=UniqueStoreAction, default=10.0)
     parser.add_argument("--publish-report", action="store_true")
     return parser
 
@@ -714,6 +715,12 @@ async def _start_workflow(
 def submit_campaign_main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        try:
+            poll_interval_s = float(args.poll_interval_s)
+        except (TypeError, ValueError):
+            raise SubmissionError("--poll-interval-s must be a number") from None
+        if not math.isfinite(poll_interval_s) or poll_interval_s <= 0:
+            raise SubmissionError("--poll-interval-s must be finite and positive")
         client_config, temporal_scope = _load_temporal_config()
         request, manifest_bytes, temporal_bytes, plan_inputs, dry_run = _prepare(
             args, temporal_scope
@@ -758,7 +765,7 @@ def submit_campaign_main(argv: Sequence[str] | None = None) -> int:
                 args.results_bucket,
                 "--wait",
                 "--poll-interval-s",
-                str(args.poll_interval_s),
+                str(poll_interval_s),
             ]
             if args.publish_report:
                 report_args.append("--publish")

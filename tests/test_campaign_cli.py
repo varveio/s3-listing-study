@@ -489,6 +489,55 @@ def test_post_attempt_allowance_rejects_duplicate_option(
     assert "--post-attempt-allowance-s may only be specified once" in capsys.readouterr().err
 
 
+def test_submit_rejects_duplicate_poll_interval_option(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan, image_set = write_inputs(tmp_path)
+    with pytest.raises(SystemExit):
+        campaign_cli.build_parser().parse_args(
+            [
+                *arguments(plan, image_set),
+                "--poll-interval-s",
+                "1",
+                "--poll-interval-s",
+                "2",
+            ]
+        )
+    assert "--poll-interval-s may only be specified once" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("value", "message"),
+    [
+        ("not-a-number", "must be a number"),
+        ("-1", "must be finite and positive"),
+        ("nan", "must be finite and positive"),
+    ],
+)
+def test_submit_rejects_invalid_poll_interval_before_external_work(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    value: str,
+    message: str,
+) -> None:
+    plan, image_set = write_inputs(tmp_path)
+    monkeypatch.setattr(
+        campaign_cli,
+        "_load_temporal_config",
+        lambda: pytest.fail("invalid poll interval loaded Temporal configuration"),
+    )
+    assert (
+        campaign_cli.submit_campaign_main(
+            [*arguments(plan, image_set), "--poll-interval-s", value, "--dry-run"]
+        )
+        == 1
+    )
+    error = capsys.readouterr().err
+    assert message in error
+    assert "Traceback" not in error
+
+
 def test_prepare_rejects_empty_and_duplicate_job_sets(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

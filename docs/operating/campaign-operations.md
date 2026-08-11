@@ -237,13 +237,14 @@ campaigns/<campaign>/
 History is the durable live state; the JSON file is frozen input, not a mutable
 attempt ledger.
 
-The schema-version-2 report is deterministic: manifest case order, sorted leaf
+The schema-version-3 report is deterministic: manifest case order, sorted leaf
 IDs, fixed aggregate keys, no observation timestamp, and canonical JSON when
 published. It includes the frozen campaign-manifest SHA-256, the safe owned
-Temporal-input digest, and separate controller, provider, evidence, and subject
-counts. `NOT_CREATED` is counted separately from `SUCCEEDED`, `FAILED`, and
-`unavailable`. Invalid and unsealed leaves carry stable reason codes rather than
-raw exception text or object content. Finality and success are separate:
+controller-input digest, the engine identity and status, and separate controller,
+provider, evidence, and subject counts. `NOT_CREATED` is counted separately from
+`SUCCEEDED`, `FAILED`, and `unavailable`. Invalid and unsealed leaves carry stable
+reason codes rather than raw exception text or object content. Finality and success
+are separate:
 
 - `controller_complete`: the exact owned parent completed and every case
   controller is terminal.
