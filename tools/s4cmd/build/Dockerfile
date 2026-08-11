@@ -36,8 +36,6 @@ RUN apt-get update \
     && chmod 0755 /usr/local/bin/s4cmd \
     && rm -rf /var/lib/apt/lists/*
 ARG TOOL_BUILD_SHA256
-ARG SELECTION_SHA256
-LABEL io.varve.s3-listing-study.tool-build-sha256="${TOOL_BUILD_SHA256}" \
-      io.varve.s3-listing-study.selection-sha256="${SELECTION_SHA256}"
+LABEL io.varve.s3-listing-study.tool-build-sha256="${TOOL_BUILD_SHA256}"
 USER 10001:10001
 WORKDIR /

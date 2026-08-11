@@ -63,6 +63,18 @@ REQUIRED_FIELDS = {
 }
 
 
+def docker_tag_version(value: str) -> str:
+    """Return the one canonical Docker-tag spelling for a validated version."""
+    rendered = value.strip().lower()
+    if rendered.startswith("v"):
+        rendered = rendered[1:]
+    rendered = re.sub(r"[^a-z0-9._-]+", "-", rendered)
+    rendered = re.sub(r"-+", "-", rendered).strip(".-")
+    if not rendered:
+        raise BuildSelectionError("version does not produce a safe Docker tag component")
+    return rendered
+
+
 class BuildSelectionError(ValueError):
     """A registered final-image selection is invalid or inconsistent."""
 
@@ -354,6 +366,26 @@ def shared_base_source_sha256(root: Path) -> str:
     )
 
 
+def derived_image_source_sha256(root: Path, selection: BuildSelection) -> str:
+    """Hash every repository byte copied or executed by the derived-image recipe."""
+    return _input_bundle_sha256(
+        root,
+        (
+            root / ".dockerignore",
+            root / "harness/derived-image/Dockerfile",
+            root / "harness/derived-image/zipapp_main.py",
+            root / "harness/derived-image/validate_selection.py",
+            root / "src/s3_listing_study/__init__.py",
+            root / "src/s3_listing_study/common",
+            root / "src/s3_listing_study/worker",
+            selection.metadata_path,
+            selection.adapter_dir / "command.py",
+            selection.adapter_dir / "normalize.py",
+        ),
+        b"s3-listing-study-derived-image-input-v1\0",
+    )
+
+
 def load_selection(path: Path, *, expected_tool: str) -> BuildSelection:
     """Validate capsule metadata for the repository's capsule gate.
 
@@ -418,8 +450,6 @@ def tool_image_build_command(
         f"SHARED_BASE_IMAGE={shared_base_image}",
         "--build-arg",
         f"TOOL_BUILD_SHA256={selection.tool_build_sha256}",
-        "--build-arg",
-        f"SELECTION_SHA256={selection.selection_sha256}",
         "--build-context",
         f"tool_build={selection.metadata_path.parent}",
         "--tag",
@@ -438,6 +468,7 @@ def derived_image_build_command(
     if IMMUTABLE_IMAGE_RE.fullmatch(tool_image) is None:
         raise BuildSelectionError("tool image must be an immutable digest reference")
     _, _, digest = tool_image.rpartition("@")
+    worker_source_sha256 = derived_image_source_sha256(root, selection)
     return (
         "docker",
         "build",
@@ -451,6 +482,8 @@ def derived_image_build_command(
         f"TOOL_IMAGE_URI={tool_image}",
         "--build-arg",
         f"SELECTION_SHA256={selection.selection_sha256}",
+        "--build-arg",
+        f"WORKER_SOURCE_SHA256={worker_source_sha256}",
         "--build-context",
         f"adapter={selection.adapter_dir}",
         "--build-context",

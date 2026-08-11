@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tomllib
 from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
@@ -20,7 +21,9 @@ from s3_listing_study.common.build_selection import (
     BuildSelectionError,
     adapter_bundle_sha256,
     build_derived_image_main,
+    derived_image_source_sha256,
     derived_image_tag,
+    docker_tag_version,
     load_registered_selection,
     load_selection,
 )
@@ -512,6 +515,39 @@ def test_tool_build_digest_excludes_the_independent_adapter_bundle(
     assert len(headers) == 2
     assert selected.adapter_bundle_sha256.encode() not in headers[1]
 
+    command = build_selection.tool_image_build_command(
+        REPO,
+        selected,
+        "study/tool:test",
+        "registry.example/shared@sha256:" + "a" * 64,
+    )
+    assert not any("SELECTION_SHA256" in argument for argument in command)
+    for dockerfile in REPO.glob("tools/*/build/Dockerfile"):
+        assert "SELECTION_SHA256" not in dockerfile.read_text()
+        assert "selection-sha256" not in dockerfile.read_text()
+
+
+def test_adapter_change_only_changes_execution_source_identity(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    shutil.copyfile(REPO / ".dockerignore", root / ".dockerignore")
+    shutil.copytree(REPO / "harness/derived-image", root / "harness/derived-image")
+    shutil.copytree(REPO / "src/s3_listing_study", root / "src/s3_listing_study")
+    shutil.copytree(REPO / "tools/aws-cli", root / "tools/aws-cli")
+    metadata_path = root / "tools/aws-cli/build/image.json"
+    before = load_selection(metadata_path, expected_tool="aws-cli")
+    before_source = derived_image_source_sha256(root, before)
+
+    normalizer = root / "tools/aws-cli/adapter/normalize.py"
+    normalizer.write_text(normalizer.read_text() + "\n# identity regression\n")
+    metadata = json.loads(metadata_path.read_text())
+    metadata["adapter_bundle_sha256"] = adapter_bundle_sha256(normalizer.parent)
+    metadata_path.write_text(json.dumps(metadata))
+    after = load_selection(metadata_path, expected_tool="aws-cli")
+
+    assert after.tool_build_sha256 == before.tool_build_sha256
+    assert derived_image_source_sha256(root, after) != before_source
+
 
 def _registered_fixture(tmp_path: Path) -> tuple[Path, Path, dict[str, object]]:
     root = tmp_path / "repo"
@@ -668,12 +704,14 @@ def test_slug_only_builder_registers_exact_named_contexts(
     assert f"TOOL_IMAGE={base}" in command
     assert f"adapter={REPO / 'tools/aws-cli/adapter'}" in command
     assert f"selection={REPO / 'tools/aws-cli/build'}" in command
+    selection = load_registered_selection(REPO, "aws-cli")
+    assert f"WORKER_SOURCE_SHA256={derived_image_source_sha256(REPO, selection)}" in command
     assert "study:test" in command
 
     # Omitting --tag must not fall back to a bare, upstream-looking name.
     calls.clear()
     assert build_derived_image_main(["--tool", "aws-cli", "--tool-image", base]) == 0
-    assert f"s3-listing-study/aws-cli:2.36.1-h{__version__}-dfdff159b0d7" in calls[0]
+    assert f"s3-listing-study/aws-cli:2.36.1-h{__version__}-ad24983324e6" in calls[0]
 
 
 def test_shared_base_builder_embeds_its_canonical_source_hash(
@@ -721,6 +759,34 @@ def test_shared_base_cli_reports_ijson_staging_failure(
     assert capsys.readouterr().err == "build-shared-image: locked ijson unavailable\n"
 
 
+def test_derived_source_identity_and_workflow_triggers_cover_every_copy_input() -> None:
+    selection = load_registered_selection(REPO, "aws-cli")
+    digest = derived_image_source_sha256(REPO, selection)
+    assert re.fullmatch(r"[0-9a-f]{64}", digest)
+
+    workflow = (REPO / ".github/workflows/images-pr.yml").read_text(encoding="utf-8")
+    for trigger in (
+        "- .dockerignore",
+        "- harness/derived-image/**",
+        "- src/s3_listing_study/__init__.py",
+        "- src/s3_listing_study/common/**",
+        "- src/s3_listing_study/worker/**",
+        "- tools/*/adapter/**",
+        "- tools/*/build/**",
+    ):
+        assert workflow.count(trigger) == 2
+
+
+def test_project_and_runtime_package_versions_match() -> None:
+    project = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
+    assert project["project"]["version"] == __version__
+
+
+@pytest.mark.parametrize(("value", "expected"), [("v2.3.0", "2.3.0"), ("RELEASE.X", "release.x")])
+def test_docker_tag_version_has_one_canonical_spelling(value: str, expected: str) -> None:
+    assert docker_tag_version(value) == expected
+
+
 def test_shared_base_recipe_pins_apt_snapshot_and_marker_contract() -> None:
     dockerfile = (REPO / "harness/shared-image/Dockerfile").read_text()
 
@@ -744,6 +810,15 @@ def test_shared_base_recipe_pins_apt_snapshot_and_marker_contract() -> None:
     assert "ijson.backend == 'yajl2_c'" in dockerfile
     assert "cmp /tmp/debian-packages.lock /tmp/installed-packages.lock" in dockerfile
     assert "USER 10001:10001" in dockerfile
+
+
+def test_derived_recipe_bakes_source_identity_and_normalizes_zipapp_mtimes() -> None:
+    dockerfile = (REPO / "harness/derived-image/Dockerfile").read_text()
+
+    assert "ARG WORKER_SOURCE_SHA256" in dockerfile
+    assert 'worker-source-sha256="${WORKER_SOURCE_SHA256}"' in dockerfile
+    assert '"schema_version":2' in dockerfile
+    assert "1980-01-01 00:00:00 UTC" in dockerfile
 
 
 def test_final_selection_validates_exact_shared_base_marker(tmp_path: Path) -> None:
@@ -770,7 +845,7 @@ def test_derived_image_tag_states_both_versions_and_the_tool_build_digest() -> N
     """The name a reader sees must not be mistakable for the upstream image."""
     selection = load_registered_selection(REPO, "swath")
     tag = derived_image_tag(selection)
-    assert tag == f"s3-listing-study/swath:0.2.4-h{__version__}-49d63b4d4465"
+    assert tag == f"s3-listing-study/swath:0.2.4-h{__version__}-27df7713beda"
     # A Docker reference: one repository component, one legal tag component.
     repository, _, reference = tag.partition(":")
     assert re.fullmatch(

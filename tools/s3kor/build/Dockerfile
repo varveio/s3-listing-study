@@ -12,8 +12,6 @@ RUN mkdir -p /out \
     && tar xzf /tmp/s3kor.tar.gz -C /out s3kor \
     && install -m 0755 /out/s3kor /usr/local/bin/s3kor
 ARG TOOL_BUILD_SHA256
-ARG SELECTION_SHA256
-LABEL io.varve.s3-listing-study.tool-build-sha256="${TOOL_BUILD_SHA256}" \
-      io.varve.s3-listing-study.selection-sha256="${SELECTION_SHA256}"
+LABEL io.varve.s3-listing-study.tool-build-sha256="${TOOL_BUILD_SHA256}"
 USER 10001:10001
 WORKDIR /

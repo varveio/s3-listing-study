@@ -22,8 +22,6 @@ ADD --checksum=sha256:3bc7bbbb0d45d6f96b0130f98859ea7cfe693b13a84384612404235113
     /usr/local/bin/pS3
 RUN chmod +x /usr/local/bin/pS3
 ARG TOOL_BUILD_SHA256
-ARG SELECTION_SHA256
-LABEL io.varve.s3-listing-study.tool-build-sha256="${TOOL_BUILD_SHA256}" \
-      io.varve.s3-listing-study.selection-sha256="${SELECTION_SHA256}"
+LABEL io.varve.s3-listing-study.tool-build-sha256="${TOOL_BUILD_SHA256}"
 USER 10001:10001
 WORKDIR /

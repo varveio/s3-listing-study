@@ -33,9 +33,44 @@ uv run s3-listing-study build-derived-image \
 A worker-only change therefore rebuilds only the final layer when the tool
 parent is supplied by digest; it does not depend on retained BuildKit cache.
 The execution image runs as `10001:10001`, uses `/usr/bin/python3`, and records
-its exact tool parent and canonical selection hash in
-`/opt/s3-listing-study/image-provenance.json`. New results use schema 3;
-historical schema-2 results and image sets remain readable.
+its exact tool parent, canonical selection hash, and canonical worker source
+hash in `/opt/s3-listing-study/image-provenance.json`. New provenance uses
+schema 2; schema-1 provenance remains readable. The worker source hash is an
+image-assembly identity, not a field in an individual attempt's `result.json`.
+
+Benchmark results and campaign image sets have a separate compatibility
+contract: current results/image sets use schema 3, while their historical
+schema-2 readers remain supported. Publication ledgers avoid that vocabulary;
+they carry a kind-specific `format_version` instead.
+
+## GHCR tags and publication
+
+The public package uses four immutable version-tag families:
+
+- `shared-python3.11-<source12>` identifies canonical shared-runtime inputs.
+- `tool-<tool>-v<version>-base-<source12>-build-<build12>` identifies a tool
+  parent independently of adapters and worker code.
+- `execution-<tool>-v<version>-base-<source12>-build-<build12>-worker-v<version>-src-<source12>`
+  identifies the complete worker/tool assembly.
+- `set-v2-<manifest12>` stores a durable publication manifest at
+  `/manifest.json`.
+
+Those are guarded version tags: publication adopts an existing tag only after
+validating its identity and never intentionally moves it. Execution
+`*-main`/`*-branch-*` tags and `set-main`/`set-branch-*` tags are movable
+channels. The set channel advances last and is the authority that all eleven
+execution channels form one ready publication. The `set-v2` suffix hashes the
+exact manifest bytes, including checkout and reuse metadata, so a later
+publication of the same image digests can intentionally create a different
+ledger entry. Historical `*-run-*` and `*-sha256-*` tags are left untouched
+until a separate retention audit decides their fate.
+
+A relevant push to `main` publishes automatically. Pull requests remain
+build-only unless a same-repository maintainer applies the `publish-images`
+label; `workflow_dispatch` with `publish_to_ghcr=true` is the other explicit
+publication path. Pull-request path filters still apply to the label event: if
+the PR changes none of the image inputs listed in the workflow, applying the
+label starts no publication run because there is no changed image set.
 
 Schedulers append typed logical-request arguments to the fixed entry point:
 

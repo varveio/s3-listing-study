@@ -2,7 +2,7 @@
   "tool": "s7cmd",
   "tool_version": "1.5.0",
   "shared_base_source_sha256": "ae5505fcb29858ed27b385a05b5057bd9d71de2a04f85dff8b769306ed80dbb8",
-  "tool_build_sha256": "653b51095b1baade3a830c71ae4fbbb97cc76465de8c89b7f3359f0dc56af394",
+  "tool_build_sha256": "ec001c1dae71537eb8bc99359334b3be91c1bcaed1e7cca2271dede602f43d60",
   "tool_artifact": {"kind":"release-archive","locator":"https://github.com/nidor1998/s7cmd/releases/download/v1.5.0/s7cmd-1.5.0-linux-glibc2.28-x86_64.tar.gz","sha256":"34ecf3a725e835e88ad115a73d6e7b3a324c95677439c43f5baec536d8a6b3ad"},
   "subject_workdir": "/home/s7cmd",
   "executable": [

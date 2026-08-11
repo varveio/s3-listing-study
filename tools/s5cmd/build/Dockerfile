@@ -39,8 +39,6 @@ RUN tar xzf /tmp/s5cmd.tgz -C / s5cmd \
     && chmod 0755 /s5cmd \
     && install -d -o 10001 -g 10001 /aws
 ARG TOOL_BUILD_SHA256
-ARG SELECTION_SHA256
-LABEL io.varve.s3-listing-study.tool-build-sha256="${TOOL_BUILD_SHA256}" \
-      io.varve.s3-listing-study.selection-sha256="${SELECTION_SHA256}"
+LABEL io.varve.s3-listing-study.tool-build-sha256="${TOOL_BUILD_SHA256}"
 USER 10001:10001
 WORKDIR /aws

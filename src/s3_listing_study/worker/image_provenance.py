@@ -20,14 +20,16 @@ def load_image_provenance(path: Path = PROVENANCE_PATH) -> dict[str, str]:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise ImageProvenanceError(f"cannot read image provenance: {exc}") from exc
-    if not isinstance(value, dict) or set(value) != {
-        "schema_version",
-        "selection_sha256",
-        "tool_image",
-    }:
+    if not isinstance(value, dict):
         raise ImageProvenanceError("image provenance has an unexpected field set")
-    if value["schema_version"] != 1:
+    schema_version = value.get("schema_version")
+    expected_fields = {"schema_version", "selection_sha256", "tool_image"}
+    if schema_version == 2:
+        expected_fields.add("worker_source_sha256")
+    elif schema_version != 1:
         raise ImageProvenanceError("unsupported image provenance schema")
+    if set(value) != expected_fields:
+        raise ImageProvenanceError("image provenance has an unexpected field set")
     selection = value["selection_sha256"]
     tool_image = value["tool_image"]
     if not isinstance(selection, str) or re.fullmatch(r"[0-9a-f]{64}", selection) is None:
@@ -43,8 +45,17 @@ def load_image_provenance(path: Path = PROVENANCE_PATH) -> dict[str, str]:
         or not uri.endswith("@" + digest)
     ):
         raise ImageProvenanceError("image provenance tool image identity is invalid")
-    return {
+    result = {
         "selection_sha256": selection,
         "tool_image_digest": digest,
         "tool_image_uri": uri,
     }
+    if schema_version == 2:
+        worker_source_sha256 = value["worker_source_sha256"]
+        if (
+            not isinstance(worker_source_sha256, str)
+            or re.fullmatch(r"[0-9a-f]{64}", worker_source_sha256) is None
+        ):
+            raise ImageProvenanceError("image provenance worker source digest is invalid")
+        result["worker_source_sha256"] = worker_source_sha256
+    return result

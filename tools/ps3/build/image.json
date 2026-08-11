@@ -2,7 +2,7 @@
   "tool": "ps3",
   "tool_version": "0.1.16",
   "shared_base_source_sha256": "ae5505fcb29858ed27b385a05b5057bd9d71de2a04f85dff8b769306ed80dbb8",
-  "tool_build_sha256": "b7774323f6f0e76951f254a3ef8a831d5282ab510aed0d3f10ca04baf173a2bf",
+  "tool_build_sha256": "3f0e3a697abf37089aed33b62e4f91e45a42372092af5ff84043c4af13b64e94",
   "tool_artifact": {"kind":"release-binary","locator":"https://raw.githubusercontent.com/jboothomas/ps3/9428492291ef3aa824dba0b495583279c3d33760/pS3.0-1-16","sha256":"3bc7bbbb0d45d6f96b0130f98859ea7cfe693b13a8438461240423511322a9c2"},
   "subject_workdir": "/",
   "executable": [

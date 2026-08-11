@@ -13,8 +13,6 @@ RUN mkdir -p /out \
     && install -m 0755 /out/s7cmd /usr/local/bin/s7cmd \
     && install -d -o 10001 -g 10001 /home/s7cmd
 ARG TOOL_BUILD_SHA256
-ARG SELECTION_SHA256
-LABEL io.varve.s3-listing-study.tool-build-sha256="${TOOL_BUILD_SHA256}" \
-      io.varve.s3-listing-study.selection-sha256="${SELECTION_SHA256}"
+LABEL io.varve.s3-listing-study.tool-build-sha256="${TOOL_BUILD_SHA256}"
 USER 10001:10001
 WORKDIR /home/s7cmd

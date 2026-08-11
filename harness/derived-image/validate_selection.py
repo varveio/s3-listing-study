@@ -42,8 +42,17 @@ def main() -> None:
             SHARED_BASE_SOURCE_MARKER,
         )
         provenance = json.loads(IMAGE_PROVENANCE.read_text(encoding="utf-8"))
+        if provenance.get("schema_version") != 2:
+            raise ValueError("image provenance does not use schema 2")
         if provenance.get("selection_sha256") != selection.selection_sha256:
             raise ValueError("image provenance selection digest does not match selection")
+        worker_source_sha256 = provenance.get("worker_source_sha256")
+        if (
+            not isinstance(worker_source_sha256, str)
+            or len(worker_source_sha256) != 64
+            or any(character not in "0123456789abcdef" for character in worker_source_sha256)
+        ):
+            raise ValueError("image provenance has invalid worker source identity")
         tool_image = provenance.get("tool_image")
         if not isinstance(tool_image, dict) or set(tool_image) != {"digest", "uri"}:
             raise ValueError("image provenance has invalid tool-image fields")

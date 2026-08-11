@@ -2,7 +2,7 @@
   "tool": "minio-mc",
   "tool_version": "RELEASE.2025-08-13T08-35-41Z",
   "shared_base_source_sha256": "ae5505fcb29858ed27b385a05b5057bd9d71de2a04f85dff8b769306ed80dbb8",
-  "tool_build_sha256": "c7c7e70b026af2e61ac708c0c10f5d081847eea849aa8243e3364e84681a65eb",
+  "tool_build_sha256": "f8d569d086d6be10e7254e54a9c54b5e3496e85d0441229f032291505003dcb4",
   "tool_artifact": {"kind":"release-binary","locator":"https://dl.min.io/client/mc/release/linux-amd64/archive/mc.RELEASE.2025-08-13T08-35-41Z","sha256":"01f866e9c5f9b87c2b09116fa5d7c06695b106242d829a8bb32990c00312e891"},
   "subject_workdir": "/",
   "executable": [

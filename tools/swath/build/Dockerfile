@@ -13,8 +13,6 @@ ADD --checksum=sha256:01a55d46a7173094f5e66959c24347f85e87f28edeeb4652a535795ac9
 RUN chown -R root:root /opt/java /opt/swath \
     && chmod 0444 /opt/swath/swath.jar
 ARG TOOL_BUILD_SHA256
-ARG SELECTION_SHA256
-LABEL io.varve.s3-listing-study.tool-build-sha256="${TOOL_BUILD_SHA256}" \
-      io.varve.s3-listing-study.selection-sha256="${SELECTION_SHA256}"
+LABEL io.varve.s3-listing-study.tool-build-sha256="${TOOL_BUILD_SHA256}"
 USER 10001:10001
 WORKDIR /opt/swath

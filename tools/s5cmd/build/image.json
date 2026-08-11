@@ -2,7 +2,7 @@
   "tool": "s5cmd",
   "tool_version": "v2.3.0",
   "shared_base_source_sha256": "ae5505fcb29858ed27b385a05b5057bd9d71de2a04f85dff8b769306ed80dbb8",
-  "tool_build_sha256": "b92f06cf44c111b30c6b20329056304f28623a487bc1cb2f9c8eee3607a0cd7e",
+  "tool_build_sha256": "c3d87debb28e7c9d545996083089af85b26706f00c12386b488398600d4f83f5",
   "tool_artifact": {"kind":"release-archive","locator":"https://github.com/peak/s5cmd/releases/download/v2.3.0/s5cmd_2.3.0_Linux-64bit.tar.gz","sha256":"de0fdbfa3aceae55e069ba81a0fc17b2026567637603734a387b2fca06c299b4"},
   "subject_workdir": "/aws",
   "executable": [
