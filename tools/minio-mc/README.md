@@ -118,6 +118,7 @@ resolve in [`data/claims.json`](data/claims.json).
 | Reproduce the image and see every smoked and recorded-not-smoked mode | [`docs/running.md`](docs/running.md) |
 | Inspect canonical identity, study states, and claim status data | [`data/tool.json`](data/tool.json) and [`data/claims.json`](data/claims.json) |
 | Integrate the subject with the shared harness | [`adapter/`](adapter/) |
+| Inspect registered inputs for the shared derived-image build | [`build/image.json`](build/image.json) |
 | Audit how every old ledger row and status-bearing prose claim became atomic current claims | [`research/claims-migration.md`](research/claims-migration.md) and the preserved reconciliation in [`research/`](research/) |
 | Read the historical pre-restructure landing page | [`research/tool-page.md`](research/tool-page.md) — frozen historical research, not the current entry point |
 | Inspect the observations and immutable run records | [`receipts/`](receipts/) |

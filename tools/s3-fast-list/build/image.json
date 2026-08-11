@@ -1,0 +1,14 @@
+{
+  "tool": "s3-fast-list",
+  "tool_version": "1.1.0",
+  "shared_base_source_sha256": "c953a4b672ffb9cabad1d5e9cd86081790489e6494362883d93c337590c16d1f",
+  "tool_build_sha256": "4c995df86788e6aeaa07b9c012211a72670ff9bbf8ecedd3bf8a6a541d86560a",
+  "tool_artifact": {"kind":"source-archive","locator":"https://github.com/sagiba/s3-fast-list/archive/6c72f596e2ffe7311dec8cb7de29b114c0251207.tar.gz","sha256":"43bebce8cc64c85c25ff4d7b5fe497b46849825b4ff37fb0c7c230dcdf4bb6a0"},
+  "subject_workdir": "/",
+  "executable": [
+    "/usr/bin/s3-fast-list"
+  ],
+  "command": "adapter/command.py",
+  "normalizer": "adapter/normalize.py",
+  "adapter_bundle_sha256": "a543b56e7a8a255f1a28748a842687596f4bdbe2ba31940e3e85fa3a40f4a688"
+}

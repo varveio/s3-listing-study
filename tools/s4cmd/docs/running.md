@@ -6,6 +6,10 @@ and the architecture matrix. Evidence labels and claim references are as in
 [`mechanism.md`](mechanism.md); canonical tested identity (pinned SHAs, version)
 lives once in [`../data/tool.json`](../data/tool.json), and this page assumes it.
 
+## Comparative image prepared 2026-08-10 (not run evidence)
+
+[image.json](../build/image.json) selects s4cmd 2.1.0 official source-only PyPI sdist; recipe extracts s4cmd.py directly and uses hash-locked runtime dependencies, without installing/building the sdist as a package. Shared assembly is defined once in [tool-structure.md](../../../docs/operating/tool-structure.md). Historical receipts below continue to describe the images and artifacts they name.
+
 ## Image
 
 Upstream (bloomreach/s4cmd) ships **no published image and no Dockerfile** — the
@@ -81,7 +85,7 @@ s4cmd's.
 
 | | |
 | --- | --- |
-| Invocation | `s4cmd ls -r -c 4 s3://noaa-normals-pds/normals-hourly/` (via `run.sh recursive`) |
+| Invocation | `s4cmd ls -r -c 4 s3://noaa-normals-pds/normals-hourly/` (mode `recursive`) |
 | Auth | `anonymous` (credential-starved, wrapper-enforced) |
 | Exit | **1** |
 | Wall-clock | 0.212 s |
@@ -125,25 +129,25 @@ multipart-ETag; claim `edge-key-fidelity-deferred`). **Request-behavior
 observations:** none capturable — s4cmd issued **zero** S3 API calls (failed
 before the first request).
 
-## Run scripts and the concurrency-cap guard
+## Command adapter and the concurrency-cap guard
 
-[`../adapter/run.sh`](../adapter/run.sh) prints only the s4cmd argv
-(NUL-delimited) for a mode; the wrapper owns `docker run`, mounts, credential
-injection/starving, timeout, and measurement. The argv starts at the
-**subcommand** because the image entrypoint is `["s4cmd"]`.
+[`../adapter/command.py`](../adapter/command.py) is the typed s4cmd command
+compiler; the shared Python runner owns subject execution, capture, credential
+starvation, timeout, and measurement. The argv
+starts at the **subcommand** because the fixed tool prefix is `["s4cmd"]`.
 
 Because s4cmd's default thread count is `cpu_count*4` (`s4cmd.py:120-121`) — 32 on
 the runner, 4× the `CONCURRENCY_CAP=8` — every mode pins `-c` (claim
-`num-threads-default-is-cpu-count-times-four`). The default is 4, overridable via
-`S4CMD_SMOKE_THREADS`, and the guard is **enforced in the script, not just in
-prose**: a value outside `1..8` (or a non-integer) exits 2 rather than emitting a
-stray `-c 99` [`../adapter/run.sh:32-35`]. `run.sh`'s `case` covers `recursive`,
+`num-threads-default-is-cpu-count-times-four`). The adapter default is 4. A
+scheduler may override it only through the typed `--concurrency` request field;
+`command.py` rejects a value outside `1..8` (or a non-integer) rather than
+emitting a stray `-c 99` [`../adapter/command.py`](../adapter/command.py). Its modes are `recursive`,
 `shallow`, `show-directory`, `du`.
 
 The `region` argument is **accepted but intentionally unused**: s4cmd 2.1.0
 exposes no region flag, so boto3 resolves region itself. It is taken for
 interface uniformity and recorded so it is not mistaken for a dropped knob
-[`../adapter/run.sh` header].
+[`../adapter/command.py`](../adapter/command.py).
 
 ## What a credentialed run would need
 
@@ -160,27 +164,23 @@ compatibility — are the `unverified` claims in
 [`../research/tool-page.md`](../research/tool-page.md) § "Open hypotheses for the
 benchmark".
 
-## Reproduction via `harness/smoke-run.sh`
+## Historical reproduction command (runner retired)
 
-Every capability receipt was produced by the shared wrapper, never a bare `docker
-run`. To reproduce the canonical capability probe:
+The command below records how the committed receipts were produced, but it is
+not runnable in the current checkout. New attempts use the single derived-image
+contract described in [`../../../harness/README.md`](../../../harness/README.md);
+the shared derived-image recipe exists, but this subject has not passed its compatibility gate.
 
-```sh
-harness/smoke-run.sh \
-  --tool s4cmd --mode recursive \
-  --image 'localhost:5000/s4cmd-study@sha256:d458ef5096180e517840712e29b0b8705ec97cebf48f717cad2fea3805105813' \
-  --run-script tools/s4cmd/adapter/run.sh \
-  --bucket noaa-normals-pds --region us-east-1 --prefix normals-hourly/ \
-  --auth anonymous \
-  --out tools/s4cmd/receipts/smoke/_capability/anon-nocredentials
-```
+Every capability receipt was produced by the retired shared wrapper, never a
+bare `docker run`, and retains its exact original invocation.
 
-Swap `--mode` for any row in `run.sh`'s `case` (`recursive`, `shallow`,
+Swap `--mode` for any declared `command.py` mode (`recursive`, `shallow`,
 `show-directory`, `du`); under `CREDS=none` every mode blocks identically at
 client construction. The image ref requires the local `registry:2` to be running
-(see Image above). The adapter scripts and everything under
-[`../research/`](../research/) and [`../receipts/`](../receipts/) are immutable
-inputs to this page — a new receipt is added rather than editing an existing one.
+(see Image above). The Python adapters are living integration code and changed
+in this cutover. Everything under [`../research/`](../research/) and
+[`../receipts/`](../receipts/) remains immutable evidence; a new receipt is
+added rather than editing an existing one.
 
 ## Architecture matrix
 

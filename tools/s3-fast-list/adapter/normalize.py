@@ -6,7 +6,7 @@ per line::
 
     key<TAB>size<TAB>etag<TAB>mtime<TAB>storage_class   (`-` where unexposed)
 
-What s3-fast-list emits is a PARQUET file, which ``run.sh`` routes to
+What s3-fast-list emits is a PARQUET file, which the attempt pipeline routes to
 ``/dev/stdout``, so stdin here is a raw parquet byte stream. Its Arrow schema
 (``s3-fast-list/src/utils.rs @ 6c72f59``) is::
 
@@ -44,7 +44,13 @@ from __future__ import annotations
 import sys
 from typing import IO
 
-from s3_listing_study.duckdb_adapter import connect, emit_result, staged
+from s3_listing_study.manager.duckdb_adapter import (
+    connect,
+    count_query,
+    emit_result,
+    staged,
+)
+from s3_listing_study.manager.normalizer_cli import normalizer_main
 
 UNKNOWN_MODE_EXIT = 3
 UNREADABLE_EXIT = 1
@@ -65,7 +71,21 @@ QUERY = """
 """
 
 
-def normalize(out: IO[bytes], data: bytes, mode: str) -> int:
+def count_rows(data: bytes, mode: str, prefix: str = "", native_root: str = "") -> int:
+    import duckdb
+
+    if mode not in MODES:
+        raise ValueError(f"unknown mode: {mode}")
+    if not data:
+        return 0
+    with staged(data) as path:
+        try:
+            return count_query(connect(), "SELECT * FROM read_parquet($path)", {"path": path})
+        except duckdb.Error as exc:
+            raise ValueError(f"input is not readable parquet: {exc}") from exc
+
+
+def normalize(out: IO[bytes], data: bytes, mode: str, prefix: str = "") -> int:
     import duckdb
 
     if mode not in MODES:
@@ -83,12 +103,15 @@ def normalize(out: IO[bytes], data: bytes, mode: str) -> int:
     return 0
 
 
-def main(argv: list[str]) -> int:
-    if len(argv) < 2:
-        print("normalize.py: mode required", file=sys.stderr)
-        return UNKNOWN_MODE_EXIT
-    return normalize(sys.stdout.buffer, sys.stdin.buffer.read(), argv[1])
+def main(argv: list[str] | None = None) -> int:
+    return normalizer_main(
+        normalize,
+        modes=MODES,
+        prog="s3-fast-list normalize",
+        argv=argv,
+        error_exit=UNKNOWN_MODE_EXIT,
+    )
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv))
+    sys.exit(main())

@@ -9,6 +9,10 @@ reference notation and the evidence vocabulary are defined once in
 [`mechanism.md`](mechanism.md); this page does not repeat them. Mechanism
 explanation lives there too.
 
+## Comparative image prepared 2026-08-10 (not run evidence)
+
+[image.json](../build/image.json) selects official Swath 0.2.4 JAR plus runtime tree from digest-pinned Temurin 25 JRE. Shared assembly is defined once in [tool-structure.md](../../../docs/operating/tool-structure.md). Historical receipts below continue to describe the images and artifacts they name.
+
 ## Tested subject: upstream's published image
 
 The subject is upstream's own published image, an OCI index at
@@ -45,20 +49,17 @@ inspected a bare host needs a local JDK 25 already installed — claim
 `language-is-java`. `docker build .` from the repo root is
 self-contained; only CI substitutes the promoted jar.
 
-## No receipts: the runner-security blocker
+## Diagnostic attempt receipts, but no verifier verdict
 
-**This is the owning statement for every "no receipt, no verdict" clause
-elsewhere in this capsule.**
+**This is the owning statement for every "no verifier verdict, no confirmed
+claim" clause elsewhere in this capsule.**
 
-The study's mandatory runner-security profile is not provisioned on the machine
-this pass ran on, and that machine categorically cannot satisfy it: it is a
-shared devcontainer carrying unrelated workloads and private checkouts, not a
-provisioned runner. `harness/smoke-run.sh` performs that preflight and owns the
-receipt format, so **the wrapper was never used and no receipt exists for any
-run of this subject.** No claim about it is `confirmed`, and none can be until
-the work is re-run under the wrapper on a provisioned runner.
+The v0.2.0 derivation ran on a shared devcontainer carrying unrelated workloads
+and private checkouts, not a runner provisioned to the study's mandatory
+security profile. The retired wrapper-era evidence path was therefore never
+used, and no wrapper-era receipt exists for those runs.
 
-Everything under "What ran" below is therefore a direct container observation:
+Those v0.2.0 runs under "What ran" below remain direct container observations:
 `docker run` with `--cap-drop ALL`, `--security-opt no-new-privileges:true`, and
 credential starvation (metadata service disabled, credential environment emptied,
 AWS config and credential files pointed at a nonexistent path). That reproduces
@@ -67,6 +68,16 @@ confinement, timeout enforcement, payload hygiene pipeline, or receipt schema.
 The captured stderr, a stdout sample and payload hashes are preserved under
 [`../receipts/observations-v0.2.0/`](../receipts/observations-v0.2.0/) and are
 labelled as observations, not receipts.
+
+Later derived-image diagnostic attempt receipts do exist. The latest,
+[`attempt-3`](../receipts/smoke/recursive-tsv/attempt-3/), ran Swath 0.2.4 on
+amd64, anonymously listing `normals-hourly/` as recursive TSV. It completed with
+exit 0, passed the secret scan, and counted 2,549 rows. It carries no verifier
+verdict or completeness result, so it is not a benchmark result and cannot
+confirm any canonical v0.2.0 claim. Earlier attempt receipts remain historical.
+No claim on this subject is `confirmed`; promotion still requires the required
+execution profile plus the reference/verifier path described in
+[`../../../harness/README.md`](../../../harness/README.md).
 
 ## What the verifier could not check
 
@@ -188,14 +199,16 @@ anonymous quickstarts omit it.
 
 ## Adapter and harness contract
 
-`../adapter/run.sh` implements the shared harness's argv contract: it prints a
-NUL-delimited argv and never runs Docker or the tool. Because the image
-entrypoint is `["java","-jar","/opt/swath/swath.jar"]`, that argv starts at the
+`../adapter/command.py` implements the shared typed command contract without
+shell or NUL transport and never runs Docker or the tool. The subject image
+entrypoint is `["java","-jar","/opt/swath/swath.jar"]`, and the adapter preserves that
 top-level option or the `list` subcommand, not at a binary name.
-`../adapter/normalize.py` converts native output into the frozen smoke harness's
+`../adapter/normalize.py` converts native output into the historical verifier's
 five-field normalized stream.
 
-**Both adapter scripts are written for v0.2.0 and validated by execution.** They
+**Both adapter modules were derived against v0.2.0.** Their typed contracts and
+argv are covered by repository tests, and `recursive-tsv` has now executed
+in-image against Swath 0.2.4 in diagnostic attempt 3. They
 emit `--concurrency`, `--format table`, `--tune seed.mode=none` and — for the
 sort disk guard — `--tune sort.ignore-disk-check=on`, there being no
 `--force-sort` option at all even though the guard's own error message names one
@@ -208,17 +221,17 @@ A four-mode adapter summary from 2026-08-02 is preserved as an
 [observation note](../receipts/observations-v0.2.0/adapter-modes/observation.md),
 but its exact expanded commands and raw normalized outputs were not retained.
 The summary is therefore not independently auditable and supports no canonical
-runtime or cross-mode-agreement claim. The adapter must be exercised again under
-the wrapper before those modes receive runtime coverage.
+runtime or cross-mode-agreement claim. Of those modes, only `recursive-tsv` now
+has later diagnostic-attempt runtime coverage; the others still need registered
+derived-image attempts.
 
-**What the harness can capture.** Only the three text formats are capturable:
-Parquet as a file sink, Parquet as a directory dataset, sorted Parquet, and
-resume are structurally uncapturable because the harness bind-mounts nothing and
-Parquet refuses stdout outright — claim `file-sinks-not-harness-capturable`. That
-is a harness limitation, not a tool limitation, and those modes should be
-recorded as not verified for that reason rather than as untested. Closing the gap
-needs a bind mount plus a post-run archive step, or an out-of-harness run
-normalized separately. Note the cost of leaving it open: Parquet is Swath's only
+**What the current attempt path can publish.** The text modes flow through the
+captured raw streams. `command.py` directs both Parquet probes to `/tmp/swout`,
+while the current minimal attempt contract publishes only `result.json` and the
+two raw streams; it has no native-output collection stage. Parquet also refuses
+stdout outright — claim `file-sinks-not-harness-capturable`. This is a current
+driver/publication limitation, not a tool limitation or a claim that file sinks
+are permanently uncapturable. Note the cost of leaving it open: Parquet is Swath's only
 byte-exact output path (claim `parquet-key-column-is-byte-exact`), so excluding
 it means the study never exercises that path.
 
@@ -239,12 +252,13 @@ claim `mode-inventory-v020`.
 | --- | --- | --- |
 | `--format jsonl` | Observed twice directly, exit 0; no receipt, no verifier verdict | Runner-security blocker |
 | `--tune seed.mode=shallow` (default) | Observed in both direct runs | Default; no receipt |
-| `--format tsv`, `--format table` | Unverified | Present only in an unauditable historical adapter summary; re-run required |
+| `--format tsv` | Diagnostic attempt completed, exit 0; no verifier verdict | Swath 0.2.4 attempt 3 counted 2,549 rows under `normals-hourly/`; this does not confirm a v0.2.0 claim |
+| `--format table` | Unverified | Present only in an unauditable historical adapter summary; re-run required |
 | `--tune seed.mode=none` | Unverified | Present only in an unauditable historical adapter summary; the seed-cost arms remain uncompared — claim `seed-cost-direction-at-smoke` |
 | `--tune seed.mode=hints` | Unexercised | Declared but unreachable: it throws at seed time, after the checkpoint database is opened and the S3 client is built — claim `seed-hints-unimplemented`. Worth one capability probe of the exit-2 failure |
-| `--format parquet` (file and directory) | Not capturable | Directory or file sink; harness mounts nothing — claim `file-sinks-not-harness-capturable` |
-| `--sort` | Not capturable | Parquet-only by construction |
-| `swath resume <dir>` | Not capturable | Needs a durable checkpoint, hence a directory dataset, hence a mount — claim `only-parquet-directory-is-resumable` |
+| `--format parquet` probes | Not published by current attempt path | Driver writes `/tmp/swout`; minimal artifacts omit native outputs — claim `file-sinks-not-harness-capturable` |
+| `--sort` | Not published by current attempt path | Parquet-only by construction; driver writes `/tmp/swout` |
+| `swath resume <dir>` | Unexercised | Needs a durable checkpoint and is not a declared current driver mode — claim `only-parquet-directory-is-resumable` |
 | `--fetch-owner` | Unexercised | Request-shape variant rather than a mode; one representative run recommended |
 
 Edge-key fidelity was not exercised at all: the study registry configures no edge
@@ -273,17 +287,16 @@ docker run --rm --pull=never --cap-drop ALL --security-opt no-new-privileges:tru
 The full-bucket run is the same invocation with `s3://noaa-normals-pds/`. The
 image must be pulled by digest first; the tag, if you use one, is `0.2.0`.
 
-**A receipted re-run is a different procedure, and it is now blocked on two
-things**: a runner provisioned to the study's security profile, so
-`harness/smoke-run.sh` can own execution, timeouts and measurement; and the
-reference manifest present, so `harness/verify-listing.sh` can produce a verdict.
-The third blocker, a v0.2.0 adapter, is closed — `tsv`, `table`, `jsonl` and
-`seed.mode=none` all run through it already, so the re-run is a matter of
-executing those four under the wrapper and adding a `seed.mode=hints` capability
-probe.
+**A claim-confirming re-run is a different procedure.** The Swath derived image
+and adapter are implemented; what remains is execution under the required
+profile with the reference/verifier path available so the run can produce a
+verdict. The other text modes and `seed.mode=none` still need current attempts,
+and `seed.mode=hints` remains a capability probe.
 
-Everything under [`../receipts/`](../receipts/) is about v0.2.0, and all of it is
-observation rather than receipt.
+[`../receipts/observations-v0.2.0/`](../receipts/observations-v0.2.0/) preserves
+the canonical v0.2.0 observations. [`../receipts/smoke/`](../receipts/smoke/)
+holds later diagnostic attempt receipts, most recently the v0.2.4 attempt 3;
+they do not supersede the observations or confirm their claims.
 
 ## Deferred coverage
 
@@ -305,10 +318,11 @@ Each of these stays `unverified`, with its own reason:
   seed, and the one `seed.mode=none` run captured output only, with no
   `list_run_summary` counters, so no cost comparison of the two arms exists at
   v0.2.0 (claim `seed-cost-direction-at-smoke`).
-- **amd64 execution** — amd64 is supported across every channel, including a real
-  child manifest in the published index and dual-platform CI builds, but every run
-  here was native arm64 (claims `amd64-built-and-smoked-upstream`,
-  `arm64-not-runtime-smoked-at-v020`).
+- **amd64 execution at v0.2.0** — amd64 is supported across every channel,
+  including a real child manifest in the published index and dual-platform CI
+  builds, but both canonical v0.2.0 observations were native arm64. The later
+  v0.2.4 diagnostic attempt ran on amd64 and does not settle the v0.2.0 claim
+  (claims `amd64-built-and-smoked-upstream`, `arm64-not-runtime-smoked-at-v020`).
 - **Concurrency above 8, AIMD necessity, and JVM cost at high list rates** — no
   run here went above `--concurrency 8`, nothing throttled, and neither run was a
   high-rate one (claims `parallelism-ratio-at-higher-concurrency`,

@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from s3_listing_study.receipt.scan import (
+from s3_listing_study.manager.receipt.scan import (
     LINE_SIZE_LIMIT,
     Outcome,
     TreeScanError,

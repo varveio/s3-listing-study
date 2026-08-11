@@ -23,8 +23,7 @@ only a README.
 1. **One public landing page.** The tool-directory root contains a concise
    `README.md`, not a mixture of documentation, JSON, shell, and Docker files.
 2. **Group by function.** A reader chooses `data/`, `docs/`, `adapter/`,
-   optional `build/`, `research/`, or `receipts/` according to what they need
-   to do.
+   `build/`, `research/`, or `receipts/` according to what they need to do.
 3. **Keep one source for each fact.** Current structured identity and claims
    live in JSON. Markdown explains them and links to them; it does not reproduce
    the full machine-readable ledger.
@@ -33,9 +32,9 @@ only a README.
    reviewed.
 5. **Preserve evidence in its native form.** Receipts and raw artifacts are not
    converted merely to make the tree look uniform.
-6. **Uniformity has limits.** `build/` and adapter fixtures exist only where
-   they serve a real function. Contextual entries do not receive empty capsule
-   directories.
+6. **Uniformity has limits.** Every runnable capsule owns build inputs; adapter
+   fixtures exist only where they serve a real function. Contextual entries do
+   not receive empty capsule directories.
 
 ## Directory map
 
@@ -48,12 +47,13 @@ tools/<tool>/
   docs/                      current human explanation
     mechanism.md             how the tool works
     running.md               how this study built, ran, and checked it
-  adapter/                   shared-harness integration
-    run.sh                   prints tool argv; never launches the tool
-    normalize.py             converts native output to the smoke contract
+  adapter/                   shared Python integration
+    command.py               typed friendly parameters to exact subject argv
+    normalize.py             converts native output to the five-field contract
     fixtures/                synthetic adapter QA, only where applicable
-  build/                     optional local image construction
-    Dockerfile               study build recipe
+  build/                     tool-owned build inputs
+    Dockerfile               one-tool payload recipe
+    image.json               final-image selection and provenance inputs
   research/                  preserved derivation and review history
     tool-page.md             frozen full pre-restructure landing page
     claims-migration.md      audit map from the old ledger to claims.json
@@ -68,7 +68,7 @@ The shortest reader routes are:
 | Reader | Start | Continue to |
 | --- | --- | --- |
 | Curious evaluator | `README.md` | `docs/` for explanation; `data/claims.json` for the full ledger |
-| Run operator | `docs/running.md` | `adapter/`, optional `build/`, and `receipts/` |
+| Run operator | `docs/running.md` | `adapter/`, `build/`, and `receipts/` |
 | Mechanism reviewer | `docs/mechanism.md` | source evidence in `data/claims.json` and derivation in `research/` |
 | Evidence auditor | `data/` | `research/claims-migration.md`, `research/`, and `receipts/` |
 
@@ -280,24 +280,75 @@ always linking back to the source record.
 
 ## Executable integration and builds
 
-`adapter/run.sh` implements the shared harness's argv contract. It prints a
-NUL-delimited argv and never runs Docker or the tool; the harness owns
-execution, credentials, timeouts, and measurement.
+`adapter/command.py` implements the shared typed command contract. It exports
+`build_command(CommandRequest) -> tuple[str, ...]`, returning the complete
+subject argv including the executable. The final image assembly bundles exactly
+one selected adapter; the in-image driver loads it and compiles argv from the
+scheduler's typed logical request. The adapter
+never runs Docker or the tool; the attempt engine owns execution, credentials,
+timeouts, and measurement. Its argparse boundary prints JSON only for operator
+inspection and normal `--help`, not as a scheduler transport.
+Optional concurrency is a typed logical field, never an environment lookup.
+Adapters reject it unless they explicitly declare a supported range.
 
-`adapter/normalize.py` converts the tool's native output into the frozen smoke
-harness's normalized stream. That stream is an executable compatibility
-boundary, not a stored canonical result. The future benchmark design may use
-JSON Lines, but this structure migration does not rewrite the frozen smoke
-harness.
+`adapter/normalize.py` owns both native row selection and explicit verifier
+conversion. Its `count_rows(data, mode, prefix="", native_root="") -> int`
+library function counts the selected native rows without constructing the
+historical five-field records; this is the only path routine worker attempts
+invoke. Its separate `normalize` library function converts the same selected
+rows into the verifier's normalized stream and uses the shared argparse boundary
+in `s3_listing_study.manager.normalizer_cli`. Normalization is explicit
+manager-side verification work, not part of a routine attempt, and its stream
+is an executable compatibility boundary rather than a stored canonical result.
 
 `adapter/fixtures/` is allowed only for synthetic adapter QA that already
 exists. Observed captures remain receipts. The current classified exceptions
 are documented in the migration playbook.
 
-`build/Dockerfile` exists only when the study carries a local build recipe. Its
-header explains deviations from upstream and points to the relevant research.
-Tools using an upstream image or another installation path do not receive an
-empty `build/` directory.
+Every runnable capsule has a `build/Dockerfile` whose final scratch stage
+exports `/tool-root`: exactly one tool and the runtime files it needs, with no
+study worker. Recipes prefer the selected release's checksum-pinned official
+binary, archive, or package. `s3-fast-list` is the sole native source-build
+exception because its selected fork publishes no matching binary. Discarded,
+digest-pinned builder or runtime stages are allowed; upstream tool images are
+not execution bases or artifact donors.
+
+The stable base in `harness/shared-image/` contains the pinned Debian/glibc
+userspace, CA trust, CPython, DuckDB, and the pinned compiled ijson runtime, but
+no tool or worker. The common final
+recipe in `harness/derived-image/` starts from that same base, applies
+`/tool-root`, and adds current `worker/`, worker-reachable `common/`, one
+adapter, and `image.json` as `selection.json`. Tool capsules do not copy either
+shared recipe. The base standardizes shared filesystem inputs; bundled or
+static Node, Python, JRE, resolver, TLS, and allocator behavior remains part of
+the tool payload.
+
+The target boundary defines invalidation:
+
+| Changed input | Invalidated target |
+| --- | --- |
+| manager or benchmark plan | none |
+| worker or adapter | affected final image(s) |
+| tool recipe or artifact | that tool payload and final image |
+| shared runtime | base and every final image |
+
+This avoids tool recompilation only when BuildKit cache is retained or restored;
+registry-backed cache for fresh builders is still open.
+
+`build/image.json` has an exact field set: `tool`, `tool_version`,
+`shared_base_source_sha256`, `tool_build_sha256`, structured `tool_artifact`,
+`subject_workdir`, `executable`, `command`, `normalizer`, and
+`adapter_bundle_sha256`. The tool-build hash covers the tool recipe, supporting
+build bytes, and declared artifact; it deliberately excludes the separately
+hashed adapter bundle. `executable` must equal the adapter's
+`fixed_command_prefix`.
+
+The build command accepts only a tool slug and an immutable shared-base URI;
+operator commands are in
+[`../../harness/derived-image/README.md`](../../harness/derived-image/README.md).
+Readable tags are labels, not identities. Publication and results record the
+final digest, shared-base URI/digest/source identity, tool build/artifact,
+adapter bundle, and harness revision. One image set cannot mix shared bases.
 
 ## Receipts and raw formats
 
@@ -310,6 +361,14 @@ Machine-readable current records should be JSON, but raw evidence stays in the
 format actually produced: Markdown receipts, JSON metadata, logs, Parquet,
 stdout, stderr, hashes, or other native artifacts. Converting or deduplicating
 those files would change the evidence rather than improve its organization.
+
+One mode directory may therefore hold records of two different shapes at once:
+wrapper-era `receipt.md` / `run.meta` / `verify.md` / `stderr.txt` files, and
+`attempt-N/` directories written by the attempt engine. They are separate runs
+and neither supersedes the other; a rerun takes the next free `attempt-N` and
+removes nothing. See [`harness/README.md`](../../harness/README.md) § Historical
+receipts and verification for what distinguishes them and why the older files
+still name a wrapper that no longer exists.
 
 ## Duplication boundary
 
@@ -387,7 +446,7 @@ format. Validate the living capsule contract with:
 uv run s3-listing-study validate-capsule --tool <tool>
 ```
 
-The gate is `s3_listing_study.capsule`, part of the packaged CLI: it validates
+The gate is `s3_listing_study.repo.capsule`, part of the packaged CLI: it validates
 `data/tool.json` and `data/claims.json` against the Draft 2020-12 schemas in
 `schemas/`, checks evidence references, verifies the root layout and the README
 contract, and resolves local Markdown links and fragments. Run it from the

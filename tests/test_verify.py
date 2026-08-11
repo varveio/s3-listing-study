@@ -19,9 +19,9 @@ from pathlib import Path
 
 import pytest
 
-from s3_listing_study.verify import cli, common, compare, report, security, union
-from s3_listing_study.verify.errors import ERROR_EXIT, VerifierError
-from s3_listing_study.verify.registry_source import RegistrySource
+from s3_listing_study.manager.verify import cli, common, compare, report, security, union
+from s3_listing_study.manager.verify.errors import ERROR_EXIT, VerifierError
+from s3_listing_study.manager.verify.registry_source import RegistrySource
 
 REPO = Path(__file__).resolve().parents[1]
 REGRESSIONS = REPO / "harness" / "tests" / "run-regressions.sh"
@@ -237,8 +237,19 @@ def test_the_preflight_seam_cannot_widen() -> None:
 
 def test_no_argv_can_disable_the_preflight() -> None:
     """The gate is `docs/operating/runner-security.md`'s activation gate, not an option."""
-    assert "--skip-preflight" not in cli._TAKES_VALUE
+    assert "--skip-preflight" not in cli.build_parser()._option_string_actions
     assert cli.main(["--skip-preflight"]) == ERROR_EXIT
+
+
+def test_verifier_help_is_normal_argparse_help(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as stopped:
+        cli.main(["--help"])
+    assert stopped.value.code == 0
+    assert "usage: s3-listing-study verify" in capsys.readouterr().out
+
+
+def test_duplicate_singleton_option_is_an_error() -> None:
+    assert cli.main(["--scope", "full", "--scope", "prefix"]) == ERROR_EXIT
 
 
 # ----------------------------------------------------------------- the refusals
@@ -286,10 +297,8 @@ def _stage_regressions(root: Path) -> Path:
     """A copy of the shipped harness tree, run against this checkout's sources."""
     harness = root / "harness"
     shutil.copytree(REPO / "harness", harness)
-    # The suite stages a hermetic fake-Docker copy of smoke-run.sh, and resolves
-    # the verifier itself, from its own ../src. Copied here too, so this staged
-    # tree resolves both exactly as the repo does and never through whatever
-    # `s3_listing_study` the ambient interpreter happens to have.
+    # The verifier resolves from its own ../src. Copy it here so the staged tree
+    # tests this checkout and never an ambient `s3_listing_study` installation.
     shutil.copytree(REPO / "src", root / "src")
     return harness / "tests" / "run-regressions.sh"
 

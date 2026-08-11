@@ -22,7 +22,7 @@
 #   builds a binary needing GLIBC_2.39 that the debian12 runtime cannot load.
 #   Nothing else is changed. The BUILT IMAGE'S DIGEST (recorded in every receipt)
 #   is the run's identity; this file is the best-effort recipe.
-FROM rust:1.94-slim-bookworm AS builder
+FROM rust@sha256:cf9dd0ec73e75f827fe59123fff9dc65af1a1c8363c3c31ee8d7f8ad0b6a5fb2 AS builder
 
 WORKDIR /usr/src/app
 
@@ -32,7 +32,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
-COPY . .
+ADD --checksum=sha256:43bebce8cc64c85c25ff4d7b5fe497b46849825b4ff37fb0c7c230dcdf4bb6a0 \
+    https://github.com/sagiba/s3-fast-list/archive/6c72f596e2ffe7311dec8cb7de29b114c0251207.tar.gz \
+    /tmp/source.tar.gz
+RUN tar xzf /tmp/source.tar.gz --strip-components=1
 
 # Cache Cargo deps and build with optimal caching
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
@@ -40,9 +43,8 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build --release
 
 
-# Runtime image - use distroless for smallest secure image
-FROM gcr.io/distroless/cc-debian12
-
-# Copy binaries to a directory in PATH
-COPY --from=builder /usr/src/app/target/release/s3-fast-list /usr/bin/
-COPY --from=builder /usr/src/app/target/release/ks-tool /usr/bin/
+# Export only the tool payload. The final image applies this overlay to the
+# shared runtime after the independently cached compile has completed.
+FROM scratch
+COPY --from=builder /usr/src/app/target/release/s3-fast-list /tool-root/usr/bin/s3-fast-list
+COPY --from=builder /usr/src/app/target/release/ks-tool /tool-root/usr/bin/ks-tool

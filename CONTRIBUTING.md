@@ -42,7 +42,7 @@ result, we will fill in the complete run record so the update remains checkable:
 
 - **`VERIFIED: no` means nobody ran it.** Not "we're fairly confident." Promotion
   to `CONFIRMED` / `CORRECTED` / `UNVERIFIABLE` requires a committed receipt:
-  exact invocation, tool version, box spec, bucket identity and shape, exit code,
+  exact invocation, tool version, declared machine type/resources, bucket identity and shape, exit code,
   wall-clock, peak RSS, raw output. **A reputable source is not a receipt. AWS's
   own docs are not a receipt. Source reading is not a receipt.**
 - **Surprising or consequential observations need a reproducer.** We include the
@@ -50,14 +50,15 @@ result, we will fill in the complete run record so the update remains checkable:
 - **Label mixed provenance.** If a fact came from somewhere other than a run in
   this repo, say so on that page.
 - **Third-party published numbers are context, not part of our comparison.**
-  Every comparison we publish uses the same runner and workload window.
+  Every comparison we publish uses fresh VMs with the same declared machine
+  type/resources and the same workload window.
 
 ## Repo layout
 
 | Path | What |
 | --- | --- |
 | `docs/methodology.md` | How runs are conducted; written down before the comparisons. |
-| `docs/operating/runner-security.md` | Mandatory runner provisioning, isolation, and activation contract for networked containers. |
+| `docs/operating/runner-security.md` | Cooperative Batch and stricter local-Docker execution profiles. |
 | `docs/open-questions.md` | Questions and observations spanning several tools. |
 | `docs/operating/tool-structure.md` | Authoritative directory and document-role contract for runnable tools. |
 | `docs/operating/tool-onboarding.md` | The sequence for adding a new subject; pointer-based, owns the seams only. |
@@ -77,7 +78,8 @@ network:
 
 ```sh
 harness/tests/run-regressions.sh     # adapter + verifier regressions, plus the shellcheck lint gate
-harness/tests/scan-fixtures-run.sh   # proves the secret scanner catches planted secrets
+uv run pytest -q tests/test_receipt_scan.py tests/test_receipt_pipeline.py
+                                      # scanner fixtures and full receipt scan/publish behavior
 ```
 
 The two repository-structure gates are subcommands of the packaged CLI, so they
@@ -89,7 +91,7 @@ uv run s3-listing-study check-links                      # relative Markdown lin
 ```
 
 Note `harness/tests/run.sh` is **not** the test runner — it's a fixture
-stand-in tool. The two scripts above are the entry points. The lint gate skips
+stand-in tool. The commands above are the relevant entry points. The lint gate skips
 (loudly) if `shellcheck` isn't installed, so install it to get real coverage.
 
 ## Commits

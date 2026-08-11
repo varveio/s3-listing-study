@@ -3,10 +3,9 @@
 This repository evaluates third-party object-store listing tools. It vendors no
 third-party source code (with one narrow exception noted below). Each tool is
 fetched or built from upstream at a pinned revision, invoked as a separate
-program, and never redistributed from here. Some are exercised only at a
-capability probe (they have no unsigned request path, so their listing modes are
-blocked without credentials) rather than in a full listing run — see
-[`tools/README.md`](tools/README.md) for which.
+program, and never redistributed from here. Some have no unsigned request path
+and are therefore exercised under a scoped list-only credential rather than
+anonymously — see [`tools/README.md`](tools/README.md) for which.
 
 This file, unlike [`NOTICE`](NOTICE), is a maintained research record — it is
 expected to change as the study verifies more of what it currently only
@@ -67,8 +66,8 @@ for any of them:
   none). No image, and no binary, is pushed to a registry or otherwise conveyed.
   A copyleft obligation to offer Corresponding Source attaches on *conveying*
   object code — the operative fact here is that nothing is conveyed.
-- The tools are run as separate programs. The study's own `run.sh` /
-  `normalize.py` never link against them — `run.sh` emits argv and does not
+- The tools are run as separate programs. The study's own `command.py` /
+  `normalize.py` never link against them — `command.py` emits argv and does not
   execute, and `normalize.py` parses captured stdout after the fact. Apache-2.0
   scripts alongside a GPL/AGPL binary in a container is mere aggregation, not a
   derivative work.

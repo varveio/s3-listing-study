@@ -63,7 +63,7 @@ could authenticate*. Claims `alphabet-is-fixed-81-char-var`,
 
 **No delimiter, full-bucket only.** There is no `--prefix`, no delimiter, and no
 max-keys flag [RUN `receipts/smoke/_capability/help`]; the tool cannot scope a
-listing to a key prefix at all, which is why `run.sh` refuses a prefix argument
+listing to a key prefix at all, which is why `command.py` refuses a prefix argument
 rather than silently listing the whole bucket under a "scoped" label.
 
 ## Concurrency: a 256 pager `var`, unbounded discovery

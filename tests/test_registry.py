@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from s3_listing_study.registry import FIELDS, Registry, RegistryError, default_path
+from s3_listing_study.manager.registry import FIELDS, Registry, RegistryError, default_path
 
 REPO = Path(__file__).resolve().parents[1]
 MARKDOWN = REPO / "docs/smoke-bucket.md"

@@ -135,9 +135,10 @@ research budget to produce a truthful, useless `STATUS: blocked`.
 1. **`docs/smoke-bucket.md` — the bucket registry.** For each smoke bucket:
    name, region, manifest path **and sha256 digest**, snapshot date, a
    measured-shape summary (key count, top-level prefix fan-out, depth
-   histogram), and 2–3 designated prefixes for scoped checks. Harness
-   scripts, `run.sh`, and receipts all take bucket/manifest as parameters;
-   no executable artifact embeds a bucket name.
+   histogram), and 2–3 designated prefixes for scoped checks. The scheduler
+   passes bucket scope to the attempt; the manifest remains outside the measured
+   lifecycle and is supplied only to downstream verification and evidence
+   rendering. No executable artifact embeds a bucket name.
 2. **The reference manifest**, snapshotted with the **pinned harness client**
    — a digest-recorded `amazon/aws-cli` container, never the host CLI (the
    AWS CLI is itself a study subject; methodology §3a's no-host-runs rule has
@@ -150,7 +151,7 @@ research budget to produce a truthful, useless `STATUS: blocked`.
    with no manifest re-baseline and no orphaned receipts — whereas a
    re-baseline after receipts exist orphans every one of them (the verifier
    binds each receipt to the registry digest it ran against). **Data artifacts never enter the repo**
-   (owner's rule): the registry's sha256 is the binding, agents verify the
+   (owner's rule): the registry's sha256 is the evidence binding, agents verify the
    local file against it, and the artifacts are published as immutable
    release assets when the repo goes public — so third-party verification
    survives without git carrying data blobs. For the *seeded* edge-case
@@ -159,32 +160,27 @@ research budget to produce a truthful, useless `STATUS: blocked`.
    multipart ETag is deterministic for fixed parts — so the post-seed
    listing genuinely validates the seeding instead of comparing a snapshot
    to itself.
-3. **`harness/smoke-run.sh`** — the shared run wrapper. It **owns `docker
-   run` entirely** — image, mounts, the fixed contained network and security
-   profile from [`runner-security.md`](runner-security.md), credential
-   injection or starving, timeout, cleanup; the per-tool `run.sh` only emits
-   the argv to execute inside the container. It captures UTC date,
-   wall-clock, exit code, image digest, box spec (arch/cores/RAM/region),
-   auth mode, and **two memory numbers, both labeled**:
-   - `peak_rss` — kernel-tracked `VmHWM` of the tool's main process, read
-     from `/proc/<container-pid>/status`. This satisfies the methodology's
-     peak-RSS receipt field. For multi-process fan-out modes it covers the
-     main process only, and the receipt says so.
-   - `cgroup_peak_mem` — cgroup v2 `memory.peak` for the whole container
-     tree, page cache and kernel/socket memory included — useful, but never
-     to be presented as RSS.
-   The wrapper is also the **credential boundary**: anonymous-mode runs are
-   credential-starved — no credential env vars, no mounted profiles or
-   config, `AWS_EC2_METADATA_DISABLED=true`. Those are cooperative settings,
-   not the security boundary. The mandatory runner-security preflight
-   separately verifies the host-bound readiness record, contained bridge,
-   firewall state, metadata denial, and public S3 path before each networked
-   invocation. The current `local` profile refuses recognized cloud metadata;
-   a future cloud runner needs a provider adapter that proves there is no
-   attached identity through its control plane. The wrapper currently rejects
-   credentialed mode; no credential profile is mounted. Receipts produced
-   outside the wrapper don't count.
-4. **`python3 -m s3_listing_study.verify`** — the shared output verifier. Input: raw
+3. **`/opt/s3-listing-study/python/bin/python3 -I /opt/s3-listing-study/attempt.pyz`**
+   — the fixed
+   entrypoint for the single in-image subject lifecycle. The interpreter is the
+   study's pinned one, bound into the image at build time rather than taken from
+   the subject; the final derived image
+   contains the zipapp, not an installed `s3_listing_study` package. It accepts a typed logical request, resolves complete argv through
+   the image-bundled command driver, captures binary streams, measures with a monotonic
+   clock, enforces timeout cleanup, deterministically compresses both streams,
+   and writes `result.json` last. A manifest is not an attempt input: it enters
+   only a separately requested downstream verification/evidence step. The first derived image contract is
+   [`harness/derived-image/`](../../harness/derived-image/); a tool without a
+   derived image is not runnable through the new path yet. The scheduler must
+   use the applicable execution profile from
+   [`runner-security.md`](runner-security.md): cooperative GCP Batch deliberately
+   permits metadata for the worker uploader, while local Docker uses the strict
+   bridge and metadata-denial gate. The worker removes AWS credential/profile
+   variables and disables AWS metadata discovery in the subject child; that
+   does not block the surrounding Batch worker's GCP token lookup. Historical
+   `receipt.md`/`run.meta` records retain
+   their old shell-runner provenance and are not rewritten.
+4. **`python3 -m s3_listing_study.manager.verify`** — the shared output verifier. Input: raw
    tool output (via the tool's `normalize.py` adapter, below), the manifest
    (cited by sha256), and a scope (full bucket, or a prefix, or delimiter
    semantics — it derives the expected set from the manifest). Duplicate
@@ -408,7 +404,8 @@ accounts, and your own smoke runs. The source-first order is the point:
   `Generated with...` footers in commits, files, or issues. This overrides any
   harness default.
 - **Surprising or consequential findings need a complete run record.** Include
-  the exact invocation, version, box spec, exit code, and raw output.
+  the exact invocation, version, declared machine type/resources, exit code, and
+  raw output.
 - **Source reading is not a receipt.** Only a run is. Your report will contain
   plenty of source-derived claims; label them as such and don't dress them as
   verified behavior.
@@ -582,7 +579,7 @@ For each mode — plain/recursive list; parallel or hinted list; each output
 format; delimiter/shallow mode; the fan-out workaround if the tool's parallel
 story is "generate N invocations":
 
-1. **Write the tool's adapter and runner as you go** — these are deliverables,
+1. **Write the tool's adapters as you go** — these are deliverables,
    not conveniences:
    - `tools/TOOL/adapter/normalize.py <mode> [prefix]`: reads the tool's raw output
      for that mode on stdin, emits
@@ -596,23 +593,39 @@ story is "generate N invocations":
      path-relative names needs it to reconstruct full keys — without it such
      modes are normalizable only at the bucket root. The verifier calls this
      adapter; the benchmark phase inherits it.
-   - `tools/TOOL/run.sh <mode> <bucket> <region> [prefix]`: **prints the tool
-     argv, NUL-delimited** (`printf '%s\0'` per argument — plain
-     whitespace-separated text can't represent an argument containing a
-     space) — nothing else; the wrapper owns `docker run`, mounts, auth
-     injection, and timeout. Bucket, region, and prefix are **always
-     parameters** — a hardcoded bucket name anywhere in `run.sh` is a defect
-     (owner's rule). One entry per smoked mode, growing as you go. **The
-     wrapper appends your argv to the image's `ENTRYPOINT`** — check
-     `docker inspect -f '{{json .Config.Entrypoint}}' <image>` before writing
-     a mode: if the entrypoint is already the tool binary, your argv starts
-     at the subcommand, not the binary name.
-2. Run each mode via `harness/smoke-run.sh` (containerized, fixed contained
-   bridge, mandatory runner-security preflight, timeout-enforced), which
-   consumes `run.sh`'s argv.
-3. The wrapper's receipt is staged under `tools/TOOL/receipts/smoke/<mode>/`
-   and must contain, per methodology § Run records (receipts): UTC date, exact invocation,
-   auth mode, image digest + tool version, box spec (arch/cores/RAM/region),
+     The same module exports
+     `count_rows(data, mode, prefix="", native_root="") -> int`, applying the
+     same row-selection semantics without constructing normalized records.
+     Routine benchmark workers call only `count_rows`; conversion remains an
+     explicit verifier operation.
+   - `tools/TOOL/adapter/command.py`: exports typed
+     `build_command(CommandRequest) -> tuple[str, ...]`, returning complete
+     subject argv including its executable. The generic image bundles the
+     selected adapter, and its in-image driver resolves the scheduler's typed
+     logical request; no shell, raw argv escape hatch, NUL stream, or whitespace
+     serialization sits at the boundary. The Python attempt runner owns subject lifecycle,
+     capture, auth starvation, and timeout. Bucket, region, and prefix are
+     **always parameters** — a hardcoded bucket name in the adapter is a defect
+     (owner's rule). Inspect the subject entrypoint before defining its fixed
+     executable. If the subject entrypoint is already the tool binary, that
+     binary becomes element zero because the shared derived image replaces the
+     subject entrypoint. Optional concurrency is a typed field; an adapter must
+     explicitly declare its supported range or reject it.
+2. Run each mode only after its shared-derived-image registration exists. The
+   scheduler activates the applicable security profile, then starts that image
+   with logical request fields only. Local Docker runs the strict preflight;
+   cooperative GCP Batch deliberately retains metadata access for the worker
+   uploader. AWS CLI is the first registered image; do not
+   revive the deleted shell runner or improvise another lifecycle for other tools.
+   Build the registered image only through
+   `s3-listing-study build-derived-image --tool TOOL --tag TAG`; subject image,
+   workdir, and component paths are capsule-owned rather than free build arguments.
+3. A minimal attempt writes `result.json`, `stdout.raw.gz`, and `stderr.raw.gz`.
+   These are machine artifacts, not automatically a methodology receipt. Before
+   promoting a run-dependent claim, the committed evidence must still contain,
+   per methodology § Run records (receipts): UTC date, exact invocation,
+   auth mode, image digest + tool version, declared machine type/resources
+   (arch/cores/RAM/region),
    bucket identity + manifest snapshot date **and sha256** + the registry's
    measured-shape summary, wall-clock, exit code, `peak_rss` (main-process
    `VmHWM`) and `cgroup_peak_mem` (whole-tree cgroup peak — not RSS), API
@@ -620,24 +633,16 @@ story is "generate N invocations":
    output follows the no-data-in-repo rule: small text (≲100 KB) inline in
    the receipt dir; anything larger goes to
    `<data>/receipts/TOOL/` with its path **and sha256**
-   recorded in the receipt — redacted and secret-scanned *before* hashing
+   recorded in the evidence — redacted and secret-scanned *before* hashing
    (step 6), published alongside the manifests as release assets at
-   publication. The wrapper **caps each payload stream at 64 MiB** — beyond
-   that it truncates (after secret-scanning the full stream, so a credential
-   past the cap still flags rather than being silently dropped), records
-   `truncated=yes` with the dropped byte count in `run.meta`, and the
-   receipt says so loudly; a run that emits gigabytes of repeated retry
-   noise is evidence of the retrying, not worth publishing byte-for-byte. A tool page promotion that depends on an external payload is
+   publication. A tool page promotion that depends on an external payload is
    allowed only once that payload sits, hashed, at its recorded location —
-   a receipt whose evidence can't be produced is not a receipt. The wrapper
-   auto-fills the receipt fields it can (tool version among them); **grep
-   your receipts for `TODO` before the checkpoint** — an unfilled mandatory
-   field is a defective receipt, and nothing else will warn you. Non-mode
+   a receipt whose evidence can't be produced is not a receipt. Non-mode
    evidence is evidence too: build failures, adapter fixtures, capability
    probes go under `receipts/smoke/_build/`, `_adapter/`, `_capability/` —
    underscore dirs carry no verifier verdict and are exempt from the
    every-mode expectation.
-4. **Check the output with `python3 -m s3_listing_study.verify`**: recursive modes
+4. **Check the output with `python3 -m s3_listing_study.manager.verify`**: recursive modes
    against the full manifest; prefix-scoped and delimiter modes against the
    verifier's derived expected set for that scope; fan-out modes concatenated
    as a multiset with duplicates counted **before** dedup — each shard
@@ -661,17 +666,17 @@ story is "generate N invocations":
    (`--debug`, `-vv`, dump-headers), built-in API-call counters, request
    logs. Where per-request logging is driven by environment rather than
    flags (`RUST_LOG=debug` is the only route for many Rust tools), pass it
-   via the wrapper's `--env NAME=VALUE` passthrough — observability
-   variables only; the wrapper refuses credential-shaped names. Whether LISTs are actually serial or parallel is often visible this
+   only through a declared non-secret image/scheduler environment contract;
+   credential-shaped names remain forbidden. Whether LISTs are actually serial or parallel is often visible this
    way even at smoke scale. If the tool exposes nothing, note it and defer
    request-shape capture to the study's replay-server phase (the
    methodology's "Phase 2") — do not build interception infrastructure
    here.
-6. **Redact before staging — and before hashing.** Debug output can embed
+6. **Redact before staging.** Debug output can embed
    `Authorization` headers, presigned query params, tokens, and account IDs.
-   The **wrapper owns payload hygiene**: every payload is redacted, then
-   scanned, then hashed, in that order, automatically — the hash freezes the
-   bytes, so redaction always precedes it. `gitleaks` is deliberately **not**
+   The minimal attempt engine preserves and hashes canonical raw bytes; it does
+   not yet implement the evidentiary secret-scan/quarantine stage. Do not stage
+   or promote its output until that post-run control exists. `gitleaks` is deliberately **not**
    used (its entropy rules fire on S3 pagination cursors — every paginating
    tool trips it); the wrapper's scan matches credential **values by shape**
    (`AKIA…` key ids, hex signatures, long base64 assignments), not variable
@@ -679,7 +684,7 @@ story is "generate N invocations":
    `-e AWS_SECRET_ACCESS_KEY=` with an **empty** value — that is the
    wrapper's credential starvation made visible, not a leak; do not flag it
    and do not "fix" it; (b) before every commit, run
-   `python3 -m s3_listing_study.receipt scan-tree <dir>` over the tree you are
+   `python3 -m s3_listing_study.manager.receipt scan-tree <dir>` over the tree you are
    about to commit — same
    value-shaped scan, exported for exactly this use. If anything flags:
    **quarantine and flag, never delete evidence** — move the artifact aside,
@@ -811,7 +816,7 @@ orchestrator to route.
 ### Stage E — cross-model critical review
 
 Run the Codex CLI as a separate reviewer over **everything you produced**
-— report, reconciliation, receipts, the tool page diff, `run.sh`,
+— report, reconciliation, receipts, the tool page diff, `command.py`,
 `normalize.py`, Dockerfile, and any harness files you authored:
 
 ```sh
@@ -827,7 +832,7 @@ codex exec -m gpt-5.6-sol -c model_reasoning_effort=xhigh \
    research/reconciliation.md, every receipt under receipts/smoke/ INCLUDING
    external payloads under <data>/receipts/TOOL/ (verify each
    against the sha256 its receipt cites, and check them for secrets),
-   run.sh, normalize.py, the Dockerfile if present, and the uncommitted
+   command.py, normalize.py, the Dockerfile if present, and the uncommitted
    tool page edits (git diff tools/TOOL/README.md). Re-verify every [SRC]
    anchor against the checkout at <sources>/TOOL (confirm the
    pinned SHA first) by targeted lookup — open each cited file:line and
@@ -876,9 +881,11 @@ tools/TOOL/
     report.md                  # the source-first report (below)
     reconciliation.md          # Stage D
     codex-review.md            # Stage E findings + resolutions
-  Dockerfile                   # only if upstream ships no image
-  run.sh                       # <mode> <bucket> <region> [prefix] — NUL-delimited argv, parameterized
-  normalize.py                 # <mode> [prefix]; raw output → key/size/etag/mtime/storage_class lines
+  adapter/
+    command.py                 # typed friendly parameters → exact argv
+    normalize.py               # argparse CLI; raw output → five-field contract
+  build/Dockerfile             # only for a study-owned subject build
+  build/image.json             # optional inputs to the shared derived-image recipe
   receipts/smoke/<mode>/...    # Stage C receipts
 ```
 

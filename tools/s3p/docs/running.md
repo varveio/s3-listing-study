@@ -9,6 +9,10 @@ SHAs, versions, study states) lives in [`../data/tool.json`](../data/tool.json);
 this page supplies the operational detail. The blocked, auth-limited coverage
 described here is this page's owned caveat.
 
+## Comparative image prepared 2026-08-10 (not run evidence)
+
+[image.json](../build/image.json) selects official s3p 3.7.2 npm package with checked-in lock closure and Node from a digest-pinned discarded runtime stage. Shared assembly is defined once in [tool-structure.md](../../../docs/operating/tool-structure.md). Historical receipts below continue to describe the images and artifacts they name.
+
 ## Image (study-authored)
 
 **No upstream Docker image and no upstream Dockerfile exist** for s3p (v3.6.0 or
@@ -21,11 +25,11 @@ image is study-authored — [`../build/Dockerfile`](../build/Dockerfile):
   (multi-arch manifest-list digest, resolved 2026-07-17).
 - `RUN npm install -g --ignore-scripts s3p@3.7.2 && npm cache clean --force`
   (`--ignore-scripts`: s3p ships a prebuilt `build/`, no build step).
-- `ENTRYPOINT ["s3p"]` — so every `run.sh` argv starts at the **subcommand**.
+- `ENTRYPOINT ["s3p"]`; `command.py` preserves that fixed-prefix convention.
 - Built image digest
   `s3p@sha256:622d7ec0e110f49e8cddf1b65b8bae98f641690b0d6db317df6f21e573894b91`
   (arm64), `s3p@3.7.2`. [OBS `../receipts/smoke/_build/build-notes.md` — a build
-  note, not a wrapper `smoke-run.sh` receipt]
+  note, not a standard wrapper-era receipt]
 
 **Version choice — source pin vs smoked version.** `[SRC]` anchors need a git
 checkout, and the latest git *tag* is v3.6.0 → source is pinned there. But
@@ -107,7 +111,7 @@ against). This is why `tool.json` records `verification_status: blocked`.
 against **synthetic fixtures** under [`../adapter/fixtures/`](../adapter/fixtures/)
 (committed `*.expected.tsv` + `check.sh` → all PASS) — ETag unquoted,
 `LastModified` millis stripped to whole-second `…Z`, key-only modes correct,
-`summarize` empty [the fixture check `check.sh`, not a live wrapper `smoke-run.sh`
+`summarize` empty [the fixture check `check.sh`, not a live wrapper-era
 receipt] (claim `normalize-validated-against-synthetic-fixtures`). s3p prints
 **full keys** in every mode (never path-relative), so the `prefix` argument is
 accepted but unused for key reconstruction. Because containers run `TZ=UTC`, any
@@ -164,26 +168,18 @@ anything in this tool page.
 
 ## Reproduction
 
-Every receipt above was produced by the shared wrapper, never a bare `docker
-run`. `run.sh` only *prints* the argv (NUL-delimited) that the wrapper appends to
-the pinned image's entrypoint; `harness/smoke-run.sh` owns `docker run`, mounts,
-credential injection/starving, the timeout, and measurement. To reproduce a
-capability probe:
+The committed receipts are immutable wrapper-era evidence. New attempts use the single
+derived-image contract in
+[`../../../harness/README.md`](../../../harness/README.md), and an s3p image has
+not been implemented yet.
 
-```sh
-harness/smoke-run.sh \
-  --tool s3p --mode ls \
-  --image s3p@sha256:622d7ec0e110f49e8cddf1b65b8bae98f641690b0d6db317df6f21e573894b91 \
-  --run-script tools/s3p/adapter/run.sh \
-  --bucket noaa-normals-pds --region us-east-1 --prefix normals-hourly/ \
-  --auth anonymous \
-  --out tools/s3p/receipts/smoke/_capability/anon-ls
-```
-
-Swap `--mode` for `ls-raw` or `summarize` for the other two probes. The v3.6.0
+Every receipt above was produced by the retired shared wrapper, never a bare
+`docker run`. The current `command.py` is a typed compiler with no shell or NUL
+transport; execution, capture, timeout, and measurement belong to the attempt
+engine. Each immutable receipt retains its exact original invocation. The v3.6.0
 `colors` unstartable finding was a direct `docker run` of an `s3p@3.6.0` image,
 documented in `../receipts/smoke/_build/build-notes.md` — an `[OBS]` build note,
-**not** a `smoke-run.sh` receipt (claim `v3-6-0-cannot-start`).
+**not** a standard wrapper-era receipt (claim `v3-6-0-cannot-start`).
 
 The adapter scripts under [`../adapter/`](../adapter/) and everything under
 [`../research/`](../research/) and [`../receipts/`](../receipts/) are immutable

@@ -9,8 +9,8 @@ This study's groundwork is complete; no benchmark comparison has been run.
 | Question | Current answer |
 | --- | --- |
 | Tested subject | The upstream npm distribution `s3p@3.7.2` (the tool's own `version` self-report, captured in the build note), while `[SRC]` anchors use git tag v3.6.0 (`5a23b22e`). Full canonical identity is in [`data/tool.json`](data/tool.json). |
-| Exercised coverage | None completed. `ls`, `ls --raw`, and `summarize` were attempted as capability probes and all blocked at authentication; `ls --long` shares the code path and is blocked by inheritance. |
-| Correctness | No verifier verdict exists because no mode produced a listing to verify; verification is recorded as blocked. |
+| Exercised coverage | `ls` has completed under a scoped list-only credential. Anonymously, `ls`, `ls --raw` and `summarize` were probed and all blocked at authentication; `ls --long` shares that code path and is blocked by inheritance. |
+| Correctness | No verdict. The credentialed `ls` attempt produced a listing, but auditing an attempt against a reference manifest is not implemented, so verification remains recorded as blocked. |
 | Smoke observation | Blocked, not skipped. The `ls`, `ls --raw`, and `summarize` probes each failed at AWS-SDK credential resolution with exit 1 before any LIST completed — s3p has no anonymous access path. `ls --long` and the other modes share that code path and are blocked by inheritance rather than re-run, so the block is command-independent across the modes probed. No listing was produced. See [`Running details`](docs/running.md#the-blocked-smoke-state--every-capability-receipt). |
 | Results | No benchmark or comparative result exists. s3p is benchmark-eligible only if list-scoped credentials are supplied. |
 

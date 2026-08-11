@@ -19,10 +19,13 @@ been through the full groundwork pipeline (pinned builds, smoke runs,
 source-anchored reports, reconciliation, and critical cross-checks) and carries
 committed receipts. Smoke is not measurement — no benchmark or comparative
 performance result exists in this repo (receipts carry a wall-clock/RSS figure,
-but only as a fact about that one run). Two cohorts: `aws-cli`, `s5cmd`,
-`s7cmd`, `rclone`, `minio-mc`, `s3-fast-list`, and Swath ran anonymously at
-smoke (not all correctness-verified); `s3p`, `s3kor`, `s4cmd`, and `ps3` were
-blocked without credentials. Per-tool status: `tools/README.md`.
+but only as a fact about that one run). All eleven have now run at smoke on
+amd64 through the attempt engine — `aws-cli`, `s5cmd`, `s7cmd`, `rclone`,
+`minio-mc`, `s3-fast-list` and Swath anonymously, and `s3p`, `s3kor`, `s4cmd`
+and `ps3` with a credential, which previously blocked them. Running is not
+verifying: those engine attempts carry no verdict, because auditing one against
+a reference manifest is not implemented yet. Per-tool status:
+`tools/README.md`.
 
 ## Project principles
 
@@ -44,7 +47,7 @@ blocked without credentials. Per-tool status: `tools/README.md`.
   produced by us, on our corpus, with our tuning. A result must be run again on
   this harness before it is cited here.
 - **Third-party published numbers are context, never comparison.** Every published
-  head-to-head is our-box-vs-our-box.
+  head-to-head uses fresh VMs with the same declared machine type and resources.
 
 ## Routing — task to the docs you read
 
@@ -53,7 +56,7 @@ Read *one* index, not five guesses. Order: this table → `docs/README.md`.
 | If you're... | Read |
 | --- | --- |
 | Designing or changing how a run works | `docs/methodology.md` — especially the five decisions |
-| Provisioning a runner or executing a subject/reference container | `docs/operating/runner-security.md` — the mandatory execution boundary and activation gate |
+| Provisioning a runner or executing a subject/reference container | `docs/operating/runner-security.md` — the Batch and local execution profiles and the local activation gate |
 | About to state anything about a specific tool | `tools/<tool>/README.md` — the tool page, for current observations + provenance |
 | Changing a tool directory's structure or deciding which file owns content | `docs/operating/tool-structure.md` — the authoritative capsule and Markdown-role contract |
 | Actually writing a capsule — a new tool, or an existing one at a new upstream version | `docs/operating/capsule-authoring.md` — build order, agent topology, and the verification loop; `docs/operating/tool-onboarding.md` for where it sits in the sequence |
@@ -61,6 +64,7 @@ Read *one* index, not five guesses. Order: this table → `docs/README.md`.
 | Working on the documented S3 API contract (ordering, delimiter, pagination, encoding) | `docs/s3-reference.md` |
 | Working on an open cross-tool question (language bottleneck, resume, throttling) | `docs/open-questions.md` |
 | Promoting a claim out of `VERIFIED: no` | `docs/methodology.md` § Run records — then commit the receipt into `tools/<tool>/` |
+| Changing what a benchmark runs against a bucket | `bench/README.md` — the plan schema: layers, case rows, and case identity |
 | Looking for settled reference | `docs/README.md` |
 
 Each tool owns a directory under `tools/`; runnable-tool directory roles are
@@ -90,7 +94,8 @@ which go in `docs/open-questions.md`.
 - Never report another tool's runtime behavior from memory, from a blog post, or
   from source reading alone. Run it.
 - Surprising or consequential observations about another tool need the exact
-  invocation, tool version, box spec, bucket identity, exit code, and raw output.
+  invocation, tool version, declared machine type/resources, bucket identity,
+  exit code, and raw output.
   The rclone exit-0-on-OOM note is the live example: it describes a serious
   outcome and currently traces to a single GitHub issue, so it remains an open
   question until we reproduce it.
@@ -135,8 +140,8 @@ Three tiers:
 | Tier | Path | Trust |
 | --- | --- | --- |
 | **Docs** | `docs/` | Authoritative — act on it without re-checking |
-| **Notes** | Internal working notes (not part of this repository) | Current but informal — may evolve |
-| **Archive** | Internal archive (not part of this repository) | Superseded; background only |
+| **Notes** | Working notes, in a private repository — not this one | Current but informal — may evolve |
+| **Archive** | Superseded material, in that same private repository | Superseded; background only |
 
 Write a **note** while thinking; promote to a **doc** only once the decision is
 settled, describes current reality rather than the deliberation, and should be
@@ -151,10 +156,13 @@ costly/external gate; write the handoff, then stop. Durable design thinking,
 reviews, audits, execution journals, and decision records stay in ordinary
 indexed notes. Handoffs are not indexed individually.
 
-**Handoff notes are git-ignored** — session exhaust can carry absolute paths and
-local context that should not land in a public repo. We use `.gitignore` rather
-than a per-clone `.git/info/exclude`, because an exclude doesn't survive a fresh
-clone: the first session from a new machine would otherwise commit the exhaust.
+**Handoff notes live in the private notes repository, never in this one** —
+session exhaust can carry absolute paths and local context that should not land
+in a public repo. Writing one into this tree puts it in the wrong repository even
+when nothing commits it. This repository's `.gitignore` excludes `notes/` as a
+backstop for exactly that mistake, and uses `.gitignore` rather than a per-clone
+`.git/info/exclude` because an exclude doesn't survive a fresh clone: the first
+session from a new machine would otherwise commit the exhaust.
 
 ## Tier posture
 

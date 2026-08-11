@@ -41,10 +41,18 @@ is fair game here — never inside a timed window.
 
 from __future__ import annotations
 
+import re
 import sys
 from typing import IO
 
-from s3_listing_study.duckdb_adapter import connect, emit_result, staged
+from s3_listing_study.manager.duckdb_adapter import (
+    connect,
+    count_lf_lines,
+    count_query,
+    emit_result,
+    staged,
+)
+from s3_listing_study.manager.normalizer_cli import normalizer_main
 
 UNKNOWN_MODE_EXIT = 2
 
@@ -126,6 +134,26 @@ QUERIES = {
 }
 
 
+def count_rows(data: bytes, mode: str, prefix: str = "", native_root: str = "") -> int:
+    if mode == "fullpath":
+        return count_lf_lines(data, bool)
+    if mode in RECURSIVE_MODES | {"allversions", "delimiter"}:
+        fields = re.compile(rb"[ \t]+")
+
+        def selected(line: bytes) -> bool:
+            stripped = line.strip(b" ")
+            if not stripped:
+                return False
+            first = fields.split(stripped, maxsplit=1)[0]
+            return mode == "delimiter" or first != b"DIR"
+
+        return count_lf_lines(data, selected)
+    if mode != "json":
+        raise ValueError(f"unknown mode: {mode}")
+    with staged(data) as path:
+        return count_query(connect(), QUERIES["json"], {"path": path})
+
+
 def normalize(out: IO[bytes], data: bytes, mode: str, prefix: str) -> int:
     if mode in RECURSIVE_MODES:
         sql = QUERIES["recursive"]
@@ -142,13 +170,11 @@ def normalize(out: IO[bytes], data: bytes, mode: str, prefix: str) -> int:
     return 0
 
 
-def main(argv: list[str]) -> int:
-    if len(argv) < 2:
-        print("normalize.py: mode required", file=sys.stderr)
-        return UNKNOWN_MODE_EXIT
-    prefix = argv[2] if len(argv) > 2 else ""
-    return normalize(sys.stdout.buffer, sys.stdin.buffer.read(), argv[1], prefix)
+def main(argv: list[str] | None = None) -> int:
+    return normalizer_main(
+        normalize, modes=MODES, prog="s5cmd normalize", argv=argv, error_exit=UNKNOWN_MODE_EXIT
+    )
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv))
+    sys.exit(main())

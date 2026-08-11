@@ -5,6 +5,10 @@ with its invocation, and how to
 re-run any receipt or the fan-out union from scratch. Groundwork pass:
 2026-07-17, aws-cli **2.36.1**, bucket `noaa-normals-pds`, all anonymous.
 
+## Comparative image prepared 2026-08-10 (not run evidence)
+
+[image.json](../build/image.json) selects the official AWS CLI v2.36.1 Linux x86-64 installer archive. Shared assembly is defined once in [tool-structure.md](../../../docs/operating/tool-structure.md). Historical receipts below continue to describe the images and artifacts they name.
+
 ## Install / image
 
 **Image chosen: the official upstream image**, pinned by digest —
@@ -12,7 +16,7 @@ re-run any receipt or the fan-out union from scratch. Groundwork pass:
 `sha256:406ca32d31e640a56e8d52921b40528cc64bfa59ec9cb4ee1456db6746cb7292`.
 This is what AWS publishes and what users commonly run, so no self-authored
 Dockerfile is needed. The image entrypoint is `/usr/local/bin/aws`
-`[RUN docker inspect]`, so every invocation below (and every `run.sh` argv)
+`[RUN docker inspect]`, so every invocation below (and every `command.py` argv)
 starts at the subcommand (`s3api` / `s3`), not the `aws` binary name.
 
 In-container version confirmed:
@@ -32,7 +36,7 @@ Outside a container, aws-cli is already installed on most boxes; otherwise
 
 All commands below add `--no-sign-request` (anonymous) and `--region
 us-east-1`; `<bucket>` is `noaa-normals-pds`, `<prefix>` per row. The
-mode-name column matches `tools/aws-cli/adapter/run.sh` and `run.meta`'s `mode=`
+mode-name column matches `tools/aws-cli/adapter/command.py` and `run.meta`'s `mode=`
 field.
 
 | Mode | Invocation (inside the container) | Scope smoked | Receipt |
@@ -47,31 +51,22 @@ field.
 | `s3api-v2-delimiter` | `s3api list-objects-v2 --bucket <bucket> --region us-east-1 --no-sign-request --delimiter / --output json` | delimiter, root (5 entries) | `receipts/smoke/s3api-v2-delimiter/` |
 | `s3api-v2-remainder` | `s3api list-objects-v2 --bucket <bucket> --region us-east-1 --no-sign-request --delimiter / --query 'Contents[].[Key,Size,ETag,LastModified,StorageClass]' --output text` (Contents-only root run, used as the fan-out remainder shard) | root orphan key `index.html` (1) | `receipts/smoke/fanout/remainder/` |
 
-Each mode's exact argv-building logic lives in `adapter/run.sh` (do not edit; it's
-immutable per this consolidation's scope) — it prints the argv the wrapper
-executes, never runs anything itself.
+Each mode's exact current argv-building logic lives in `adapter/command.py`. It
+exports a typed complete-argv builder and never runs the subject itself.
 
-## Reproducing a receipt via `harness/smoke-run.sh`
+## Receipt provenance and new attempts
 
-Every receipt above was produced by the shared wrapper, never by running
-aws-cli directly on the host (methodology § Run records (receipts)). To reproduce one:
+The committed groundwork receipts are immutable wrapper-era evidence; their
+embedded invocations record the original procedure. New AWS CLI attempts use
+the shared derived-image contract in
+[`../../../harness/derived-image/README.md`](../../../harness/derived-image/README.md),
+with capsule-owned inputs in [`../build/image.json`](../build/image.json).
 
-```sh
-harness/smoke-run.sh \
-  --tool aws-cli --mode s3api-v2-text \
-  --image amazon/aws-cli@sha256:406ca32d31e640a56e8d52921b40528cc64bfa59ec9cb4ee1456db6746cb7292 \
-  --run-script tools/aws-cli/adapter/run.sh \
-  --bucket noaa-normals-pds --region us-east-1 [--prefix normals-hourly/] \
-  --auth anonymous \
-  --out <output-dir> --timeout 300 --tool-version 2.36.1
-```
-
-`smoke-run.sh` owns `docker run` entirely — image, mounts, network,
-credential injection or starving, timeout, cleanup, RSS/cgroup sampling, and
-the receipt (`receipt.md` + `run.meta`). It refuses a non-digest-pinned
-image and enforces the 300s/mode guardrail regardless of what `--timeout` is
-asked for. Output is checked against the registered smoke-bucket manifest
-(`docs/smoke-bucket.md`) by `s3-listing-study verify` via
+Every receipt above was produced by the retired shared wrapper, never by running
+aws-cli directly on the host (methodology § Run records (receipts)). The receipt
+records the image digest, logical scope, exact invocation, timeout, lifecycle,
+and cgroup observations. Output is checked against the registered smoke-bucket
+manifest (`docs/smoke-bucket.md`) by `s3-listing-study verify` via
 `tools/aws-cli/adapter/normalize.py`, which projects each mode's raw output into the
 common `key\tsize\tetag\tmtime\tstorage_class` shape the verifier compares.
 Do not edit `adapter/normalize.py`; it's an immutable input to this consolidation.
@@ -101,9 +96,8 @@ actually run, 2026-07-17:
    receipts: `receipts/smoke/fanout/{shard-monthly,shard-daily,shard-annualseasonal,remainder}/`
    (the `normals-hourly/` shard reuses `s3api-v2-text-hourly/`).
 
-To reproduce: run each shard through `smoke-run.sh` exactly as in
-"Reproducing a receipt" above with the shard's `--prefix` (or the delimiter
-flags for the remainder), then invoke
+Historical procedure: each shard used the wrapper-era evidence contract with
+the shard's prefix (or the delimiter flags for the remainder), then invoked
 `s3-listing-study verify --scope union` pointed at the shard receipt
 directories — see `receipts/smoke/fanout/union/union-verify.md` for the
 exact shard list it was pointed at.
@@ -111,7 +105,7 @@ exact shard list it was pointed at.
 ## Capability probes (not wrapper-measured modes)
 
 Two probes exist outside the mode table above because their invocations are
-either non-repeatable-by-`run.sh` (a dynamic resume token) or diagnostic
+either non-repeatable by `command.py` (a dynamic resume token) or diagnostic
 rather than a listing mode (`--debug`). Both are documented in full,
 including the exact `docker run` invocation, under
 `receipts/smoke/_capability/`:

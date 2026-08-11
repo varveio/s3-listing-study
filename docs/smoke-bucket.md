@@ -1,9 +1,9 @@
 # Smoke-bucket registry
 
 The binding source for every executable artifact in the smoke campaign:
-harness scripts, per-tool `run.sh`, subject cards, and receipts take buckets
+harness code, per-tool `command.py`, subject cards, and receipts take buckets
 as parameters resolved from this file — a bucket name hardcoded anywhere
-executable is a defect. The smoke protocol this registry serves is
+executable is a defect. The historical smoke protocol this registry serves is
 [`tool-research-brief.md`](operating/tool-research-brief.md).
 
 **The machine-read source is [`data/registry.toml`](../data/registry.toml).**
@@ -44,7 +44,7 @@ UTC); the pipeline rewrites the trailing `+00:00` to `Z`, giving the
 contract-v2 canonical `YYYY-MM-DDTHH:MM:SSZ`. Snapshot, pre-flight, and
 mismatch re-list all use this exact pipeline — same image, same query, same
 canonicalization. The mismatch re-list captures the full five-field record
-(see `s3_listing_study.verify`).
+(see `s3_listing_study.manager.verify`).
 
 ## Primary: `noaa-normals-pds`
 

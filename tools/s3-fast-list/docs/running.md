@@ -7,6 +7,10 @@ architecture matrix. Canonical identity and tested-revision data lives in
 Evidence labels and claim references are as in
 [`mechanism.md`](mechanism.md).
 
+## Comparative image prepared 2026-08-10 (not run evidence)
+
+[image.json](../build/image.json) selects fork commit 6c72f596e2ffe7311dec8cb7de29b114c0251207, the sole native source-build exception because no matching release binary exists. Shared assembly is defined once in [tool-structure.md](../../../docs/operating/tool-structure.md). Historical receipts below continue to describe the images and artifacts they name.
+
 ## Build
 
 **No upstream container image is published** — upstream ships only a
@@ -81,7 +85,7 @@ Exit, wall-clock, and peak RSS are facts from the harness runs. The manifest
 diffs used later direct captures and are grouped here only by intended scope;
 the two execution paths are not evidentially bound to one another.
 
-Full-bucket argv (via `../adapter/run.sh`, appended to the null entrypoint):
+Full-bucket argv (compiled by `../adapter/command.py`):
 `s3-fast-list --no-sign-request --output-parquet-file /dev/stdout
 --output-ks-file /dev/null list --region us-east-1 --bucket noaa-normals-pds`.
 Scoped runs add `--prefix <scope>`.
@@ -157,10 +161,10 @@ Detail: `../receipts/smoke/_capability/HARNESS-INCOMPATIBILITY.txt`.
 
 ## Reproduction
 
-Every **smoke-run** receipt (the four `list/` rows above) was produced by the
-shared harness — `../adapter/run.sh` only prints the argv (NUL-delimited; see its header for
-the contract), and `harness/smoke-run.sh` owns `docker run`, credential starving,
-timeout, measurement, and receipt-writing. The `_build/` receipts (the `docker
+Every standard wrapper-era receipt (the four `list/` rows above) was produced by the
+retired shared harness. The current `../adapter/command.py` is a typed command
+compiler with no shell or NUL transport; the attempt engine owns execution,
+capture, timeout, and measurement. The `_build/` receipts (the `docker
 build` above) and the `_capability/` direct captures were produced **out of band**
 — outside the smoke harness — and are labelled as such. Rebuilding the image
 first requires the pinned checkout at

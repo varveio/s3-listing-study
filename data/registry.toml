@@ -7,7 +7,7 @@
 #
 # Nothing executable in this repo embeds a bucket name (owner's rule): callers
 # pass the bucket as a parameter and resolve its facts through
-# `s3_listing_study.registry`, so a receipt cites what the registry says rather
+# `s3_listing_study.manager.registry`, so a receipt cites what the registry says rather
 # than what somebody retyped.
 #
 # Data artifacts (manifests, payloads) never enter the repo — see

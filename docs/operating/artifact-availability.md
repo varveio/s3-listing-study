@@ -15,8 +15,8 @@ but the complete public evidence package is not yet available.**
 > records and migration stratum were removed together, and no claim cites them.
 > Every count on this page is stated after that removal, and the figures below
 > therefore differ from the 2026-07-20 wave totals. Swath's current evidence is
-> observation rather than receipt: its runs were made outside
-> `harness/smoke-run.sh`, because the runner-security profile was not
+> observation rather than receipt: its runs were made outside the retired
+> wrapper-era evidence path, because the runner-security profile was not
 > provisioned. Historical
 receipts remain immutable while their subject stands: they are never edited,
 and are removed only when the whole subject is retired under
@@ -28,7 +28,7 @@ recreated and presented as the bytes from an old run.
 ## Receipt inventory
 
 The tree contains 74 `receipt.md` files. Seventy-three are standard
-`harness/smoke-run.sh` records with sibling `run.meta`; one is the separate pS3
+wrapper-era records with sibling `run.meta`; one is the separate pS3
 build-attempt receipt. Of the 73 wrapper records, 57 have an ordinary
 `verify.md`, and two fan-out groups have `union-verify.md` records. The remaining
 wrapper records are blockers, capability/debug probes, union shards, or
@@ -102,6 +102,28 @@ describes the recorded provenance, not a new registry pull or rebuild test.
 
 A digest is still the correct identity for what ran. It is not proof that a
 reader can retrieve that image or regenerate it from current package indexes.
+
+## Images prepared for comparative runs (2026-08-10)
+
+The table above remains the availability record for historical groundwork
+receipts. New comparative images follow the shared-base and per-tool payload
+contract in [`tool-structure.md`](tool-structure.md) and prefer checksum-pinned
+official distributions. `s3-fast-list` is the sole native source-build
+exception because its selected fork has no matching release binary. These new
+images have not produced benchmark evidence yet.
+
+For rclone and s5cmd, the selected official release-archive binary differs from
+the binary in the historical upstream image despite reporting the same release:
+
+| Tool | Historical upstream-image binary | Current release-archive binary |
+| --- | --- | --- |
+| rclone | `d67c485534687d1f2d5fbe467104a8c9f82cc491796f9cd13acc33100852527f` | `9f56ca5edfac24a3ed37226c2ba1de69f1ec9e05fa2526cddee5cd97e202be6b` |
+| s5cmd | `6a645f4f53ffe03911e531586c167b35e36e2d33e0f10a9404cb1f665eeaaa98` | `672299fea8941281702bd52a4e51c330a4e39c1540f4bdfc3b4e737823ac2878` |
+
+Image identity, registry availability, and rebuildability remain separate.
+Publication must record the final and shared-base OCI digests alongside their
+source, tool-artifact, adapter, and harness identities. Historical receipts
+continue to describe the older images and binaries they actually observed.
 
 ## Public evidence gate
 

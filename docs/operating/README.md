@@ -4,10 +4,10 @@ Machinery docs — how to provision a runner, reproduce a run, and add or shape 
 tool. These are for operators and contributors. Readers who want to understand
 the study and its findings should start at [`../README.md`](../README.md).
 
-- [`runner-security.md`](runner-security.md) — the mandatory execution boundary
-  for third-party images: identity-free disposable runner, contained bridge,
-  fail-closed checks, and the activation gate. **Read before executing any
-  subject or trusted reference container.**
+- [`runner-security.md`](runner-security.md) — the execution profiles for
+  third-party images: cooperative GCP Batch with a bounded task identity, and
+  the stricter bridge/metadata-denial gate for local Docker. **Read before
+  executing any subject or trusted reference container.**
 - [`tool-structure.md`](tool-structure.md) — the authoritative contract for a
   runnable tool directory: what every layer and Markdown file owns.
 - [`tool-onboarding.md`](tool-onboarding.md) — the sequence for adding a new

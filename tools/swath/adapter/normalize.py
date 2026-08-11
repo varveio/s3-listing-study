@@ -42,18 +42,35 @@ from __future__ import annotations
 
 import re
 import sys
+from pathlib import Path
 from typing import IO
 
-from s3_listing_study.contract import ContractViolation
-from s3_listing_study.duckdb_adapter import connect, emit_result, staged
+from s3_listing_study.manager.contract import ContractViolation
+from s3_listing_study.manager.duckdb_adapter import (
+    connect,
+    count_query,
+    emit_result,
+    iter_lf_lines,
+    staged,
+)
+from s3_listing_study.manager.normalizer_cli import normalizer_main
 
 UNKNOWN_MODE_EXIT = 2
+UNREADABLE_EXIT = 1
 
 # Declared rather than inferred, so the equivalence harness can name a mode no
 # committed payload exercises — untested by construction, and invisible otherwise.
 TSV_MODES = frozenset({"recursive-tsv", "seed-none"})
 
-MODES = TSV_MODES | {"recursive-jsonl", "recursive-table"}
+PARQUET_MODES = frozenset({"recursive-parquet", "recursive-parquet-sorted"})
+"""Modes read from the published dataset directory rather than from stdin.
+
+Swath refuses Parquet on stdout, so these modes have no stream to normalize:
+their output is the ``native/`` directory the attempt engine collected. Parts
+live under ``data/``; the run's sidecars sit beside it and are not listing rows.
+"""
+
+MODES = TSV_MODES | {"recursive-jsonl", "recursive-table"} | PARQUET_MODES
 
 CONTROL_ESCAPE = re.compile(rb"\\x[0-9a-fA-F]{2}")
 
@@ -145,7 +162,117 @@ def validate_text_framing(data: bytes, mode: str) -> None:
                 )
 
 
-def normalize(out: IO[bytes], data: bytes, mode: str) -> int:
+# The key column is Parquet BLOB, so it reaches the emit boundary as raw bytes
+# and is never narrowed to what UTF-8 can spell -- the one Swath output path
+# with that property. last_modified is TIMESTAMP WITH TIME ZONE; rendering it
+# through UTC keeps the contract's whole-second Zulu spelling.
+PARQUET_QUERY = """
+    SELECT "key", CAST("size" AS VARCHAR), "etag",
+           strftime("last_modified" AT TIME ZONE 'UTC', '%Y-%m-%dT%H:%M:%SZ'),
+           "storage_class"
+    FROM read_parquet($glob)
+    WHERE coalesce("row_type", 'OBJECT') = 'OBJECT'
+"""
+
+PARQUET_COUNT_QUERY = """
+    SELECT count(*)
+    FROM read_parquet($glob)
+    WHERE coalesce("row_type", 'OBJECT') = 'OBJECT'
+"""
+
+
+def _dataset_root(dataset: str) -> Path:
+    """Accept either Swath's dataset root or the native parent containing it."""
+    root = Path(dataset)
+    if (root / "_SUCCESS").is_file() or (root / "data").is_dir():
+        return root
+    listing = root / "listing"
+    if listing.exists():
+        return listing
+    return root
+
+
+def _dataset_parts(dataset: str) -> tuple[Path, list[Path]]:
+    root = _dataset_root(dataset)
+    if not (root / "_SUCCESS").is_file():
+        raise ValueError(
+            f"dataset has no _SUCCESS marker under {root}; the swath run did not finish writing it"
+        )
+    parts = sorted(root.glob("data/*.parquet"))
+    if not parts:
+        raise ValueError(f"no Parquet parts under {root / 'data'}")
+    return root, parts
+
+
+def count_rows(data: bytes, mode: str, prefix: str = "", native_root: str = "") -> int:
+    if mode in PARQUET_MODES:
+        import duckdb
+
+        try:
+            _root, parts = _dataset_parts(native_root)
+            row = (
+                connect()
+                .execute(PARQUET_COUNT_QUERY, {"glob": [str(part) for part in parts]})
+                .fetchone()
+            )
+        except (ValueError, duckdb.Error) as exc:
+            raise ValueError(f"dataset is not countable Parquet: {exc}") from exc
+        if row is None or not isinstance(row[0], int):  # pragma: no cover - DuckDB invariant
+            raise RuntimeError("DuckDB count query returned no integer row")
+        return row[0]
+    if mode == "recursive-table":
+        count = 0
+        for number, line in enumerate(iter_lf_lines(data), 1):
+            if not line:
+                continue
+            if len(line) < 43:
+                raise ContractViolation(f"table line {number} is shorter than 43 bytes")
+            if line[14:16] != b"  " or line[40:42] != b"  ":
+                raise ContractViolation(f"table line {number} has overflowing fixed-width columns")
+            key = line[42:]
+            if CONTROL_ESCAPE.search(key):
+                raise ContractViolation(
+                    "text-sink key carries an ambiguous swath \\xHH control escape; "
+                    "use recursive-jsonl",
+                    field="key",
+                )
+            size = line[:14].strip(b" ")
+            count += bool(key) and size not in (b"", b"-", b"PRE")
+        return count
+    if mode in TSV_MODES:
+        sql = QUERIES["tsv"]
+    elif mode in QUERIES:
+        sql = QUERIES[mode]
+    else:
+        raise ValueError(f"unknown mode: {mode}")
+    validate_text_framing(data, mode)
+    with staged(data) as path:
+        return count_query(connect(), sql, {"path": path})
+
+
+def _normalize_dataset(out: IO[bytes], mode: str, dataset: str) -> int:
+    import duckdb
+
+    # swath writes _SUCCESS last, after the manifest (v0.2.2). Without it the
+    # dataset is a killed run's valid-but-short parts, which would normalize
+    # cleanly into a short listing the verifier would blame on the tool.
+    try:
+        _root, parts = _dataset_parts(dataset)
+    except ValueError as exc:
+        print(f"normalize.py: {exc}", file=sys.stderr)
+        return UNREADABLE_EXIT
+    try:
+        result = connect().execute(PARQUET_QUERY, {"glob": [str(part) for part in parts]})
+    except duckdb.Error as exc:
+        print(f"normalize.py: dataset is not readable Parquet: {exc}", file=sys.stderr)
+        return UNREADABLE_EXIT
+    emit_result(out, result)
+    return 0
+
+
+def normalize(out: IO[bytes], data: bytes, mode: str, prefix: str = "", dataset: str = "") -> int:
+    if mode in PARQUET_MODES:
+        return _normalize_dataset(out, mode, dataset)
     if mode in TSV_MODES:
         sql = QUERIES["tsv"]
     elif mode in QUERIES:
@@ -159,17 +286,17 @@ def normalize(out: IO[bytes], data: bytes, mode: str) -> int:
     return 0
 
 
-def main(argv: list[str]) -> int:
-    if len(argv) < 2:
-        print("normalize.py: mode required", file=sys.stderr)
-        return UNKNOWN_MODE_EXIT
-    try:
-        return normalize(sys.stdout.buffer, sys.stdin.buffer.read(), argv[1])
-    except BrokenPipeError:
-        # A verifier or diagnostic consumer may close early. That is not a
-        # malformed listing and must behave consistently in every mode.
-        return 0
+def main(argv: list[str] | None = None) -> int:
+    return normalizer_main(
+        normalize,
+        modes=MODES,
+        dataset_modes=PARQUET_MODES,
+        prog="swath normalize",
+        argv=argv,
+        broken_pipe_is_success=True,
+        error_exit=UNKNOWN_MODE_EXIT,
+    )
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv))
+    sys.exit(main())

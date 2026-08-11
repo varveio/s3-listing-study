@@ -43,8 +43,17 @@ import re
 import sys
 from typing import IO, Any
 
-from s3_listing_study.contract import UNEXPOSED, emit
-from s3_listing_study.duckdb_adapter import connect, emit_result, staged
+from s3_listing_study.manager.contract import UNEXPOSED, emit
+from s3_listing_study.manager.duckdb_adapter import (
+    connect,
+    count_lf_lines,
+    count_query,
+    count_top_level_json_arrays,
+    emit_result,
+    iter_lf_lines,
+    staged,
+)
+from s3_listing_study.manager.normalizer_cli import normalizer_main
 
 UNKNOWN_MODE_EXIT = 2
 
@@ -187,6 +196,71 @@ def emit_yamlstream(out: IO[bytes], data: bytes) -> None:
                 )
 
 
+def _yamlstream_count(data: bytes) -> int:
+    """Count StreamedYAMLFormatter Contents entries from their fixed indentation."""
+    count = 0
+    item_indent: int | None = None
+    header = re.compile(rb"^(?P<list>- )?Contents:(?: (?P<value>.*))?$")
+    for number, raw_line in enumerate(iter_lf_lines(data), 1):
+        line = raw_line.removesuffix(b"\r")
+        stripped = line.lstrip(b" ")
+        indent = len(line) - len(stripped)
+        if item_indent is not None:
+            marker = b" " * item_indent + b"- "
+            if line.startswith(marker) and indent == item_indent:
+                first_field = line[len(marker) :]
+                if b":" not in first_field:
+                    raise ValueError(
+                        f"malformed yaml-stream Contents item at line {number}: "
+                        "expected a mapping entry"
+                    )
+                count += 1
+                continue
+            if not stripped or indent > item_indent:
+                continue
+            item_indent = None
+            if line not in (b"---", b"...") and b":" not in stripped:
+                raise ValueError(
+                    f"malformed yaml-stream structure at line {number}: "
+                    "expected a page mapping field or document boundary"
+                )
+        match = header.fullmatch(line)
+        if match is None:
+            continue
+        value = match.group("value")
+        if value not in (None, b"", b"[]", b"null", b"~"):
+            raise ValueError(
+                f"malformed yaml-stream Contents field at line {number}: "
+                "expected a block sequence, [], or null"
+            )
+        if value in (None, b""):
+            item_indent = 2 if match.group("list") else 0
+    return count
+
+
+def count_rows(data: bytes, mode: str, prefix: str = "", native_root: str = "") -> int:
+    if mode == "s3api-v2-yamlstream":
+        return _yamlstream_count(data)
+    if mode == "s3-ls-recursive":
+        pattern = re.compile(rb"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} +\d+ .*$")
+        return count_lf_lines(data, lambda line: pattern.match(line) is not None)
+    if mode == "s3-ls-delimiter":
+        obj = re.compile(rb"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} +\d+ .*$")
+        pre = re.compile(rb"^ *PRE (.+)$")
+        return count_lf_lines(
+            data, lambda line: pre.match(line) is not None or obj.match(line) is not None
+        )
+    if mode == "s3api-v2-json":
+        return count_top_level_json_arrays(data, {"Contents"})["Contents"]
+    if mode == "s3api-v2-delimiter":
+        counts = count_top_level_json_arrays(data, {"Contents", "CommonPrefixes"})
+        return counts["Contents"] + counts["CommonPrefixes"]
+    if mode in TEXT_MODES:
+        with staged(data) as path:
+            return count_query(connect(), QUERIES["text"], {"path": path})
+    raise ValueError(f"unknown mode: {mode}")
+
+
 def normalize(out: IO[bytes], data: bytes, mode: str, prefix: str) -> int:
     if mode == "s3api-v2-yamlstream":
         emit_yamlstream(out, data)
@@ -217,13 +291,11 @@ def normalize(out: IO[bytes], data: bytes, mode: str, prefix: str) -> int:
     return 0
 
 
-def main(argv: list[str]) -> int:
-    if len(argv) < 2:
-        print("normalize.py: mode required", file=sys.stderr)
-        return UNKNOWN_MODE_EXIT
-    prefix = argv[2] if len(argv) > 2 else ""
-    return normalize(sys.stdout.buffer, sys.stdin.buffer.read(), argv[1], prefix)
+def main(argv: list[str] | None = None) -> int:
+    return normalizer_main(
+        normalize, modes=MODES, prog="aws-cli normalize", argv=argv, error_exit=UNKNOWN_MODE_EXIT
+    )
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv))
+    sys.exit(main())

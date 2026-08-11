@@ -1,8 +1,8 @@
 """s3-listing-study: the Python package backing this repo's listing-tool study.
 
-One packaged implementation of the contract, registry, manifest, and verifier.
-``harness/`` keeps only what has to be shell: the docker lifecycle and the
-runner-security gate.
+One packaged implementation of the attempt engine, contract, registry,
+manifest, and verifier. ``harness/`` retains host security and orchestration
+helpers; subject lifecycle and timing live in ``s3_listing_study.worker``.
 """
 
 __version__ = "0.1.0"

@@ -9,8 +9,8 @@ This study's groundwork is complete; no benchmark comparison has been run.
 | Question | Current answer |
 | --- | --- |
 | Tested subject | Upstream `bloomreach/s4cmd` at pinned commit `80059bf` (release tag `2.1.0`), built into a local `python:3.7-slim` image with a 2018-era boto3 pin and run under the shared harness. Full canonical identity is in [`data/tool.json`](data/tool.json). |
-| Exercised coverage | **None of the four listing modes ran.** s4cmd has no unsigned/anonymous access, and this campaign was credential-less (`CREDS=none`), so every mode is *blocked, not skipped*. Source was read at the pinned commit. |
-| Correctness | Not attempted — no listing mode produced keys, so there was nothing for the verifier to check. |
+| Exercised coverage | `recursive` has run under a scoped list-only credential. s4cmd has no unsigned/anonymous access, so anonymously every mode is *blocked, not skipped*; the other three modes have not been run under credentials. Source was read at the pinned commit. |
+| Correctness | Not attempted. The credentialed `recursive` attempt produced keys, but auditing an attempt against a reference manifest is not implemented, so nothing has checked them. |
 | Capability finding | A receipted harness probe of `recursive` exited 1 at client construction, before any S3 request; canonical claim `recursive-blocked-without-credentials`. This is the block itself, not a listing run. |
 | Results | No benchmark or comparative result exists, and none can be produced anonymously; s4cmd requires credentials to list. |
 

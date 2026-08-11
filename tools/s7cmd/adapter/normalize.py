@@ -44,7 +44,14 @@ from __future__ import annotations
 import sys
 from typing import IO
 
-from s3_listing_study.duckdb_adapter import connect, emit_result, staged
+from s3_listing_study.manager.duckdb_adapter import (
+    connect,
+    count_lf_lines,
+    count_query,
+    emit_result,
+    staged,
+)
+from s3_listing_study.manager.normalizer_cli import normalizer_main
 
 UNKNOWN_MODE_EXIT = 3
 
@@ -123,7 +130,27 @@ QUERIES = {
 }
 
 
-def normalize(out: IO[bytes], data: bytes, mode: str) -> int:
+def count_rows(data: bytes, mode: str, prefix: str = "", native_root: str = "") -> int:
+    if mode in TSV_MODES or mode == "recursive-one":
+        return count_lf_lines(data, bool)
+    if mode == "recursive-aligned":
+
+        def selected(line: bytes) -> bool:
+            if len(line) < 43:
+                return False
+            date = line[:25].strip(b" ")
+            size_or_marker = line[27:41].strip(b" ")
+            key = line[43:]
+            return bool(key) and (size_or_marker == b"PRE" or bool(date and size_or_marker))
+
+        return count_lf_lines(data, selected)
+    if mode != "recursive-json":
+        raise ValueError(f"unknown mode: {mode}")
+    with staged(data) as path:
+        return count_query(connect(), QUERIES["recursive-json"], {"path": path})
+
+
+def normalize(out: IO[bytes], data: bytes, mode: str, prefix: str = "") -> int:
     if mode in TSV_MODES:
         sql = QUERIES["tsv"]
     elif mode in QUERIES:
@@ -136,12 +163,11 @@ def normalize(out: IO[bytes], data: bytes, mode: str) -> int:
     return 0
 
 
-def main(argv: list[str]) -> int:
-    if len(argv) < 2:
-        print("normalize.py: mode required", file=sys.stderr)
-        return UNKNOWN_MODE_EXIT
-    return normalize(sys.stdout.buffer, sys.stdin.buffer.read(), argv[1])
+def main(argv: list[str] | None = None) -> int:
+    return normalizer_main(
+        normalize, modes=MODES, prog="s7cmd normalize", argv=argv, error_exit=UNKNOWN_MODE_EXIT
+    )
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv))
+    sys.exit(main())

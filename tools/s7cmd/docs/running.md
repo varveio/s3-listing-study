@@ -8,6 +8,10 @@ detail. Evidence labels and claim references are as defined in the
 [`mechanism.md`](mechanism.md) preamble, and claim IDs resolve in
 [`../data/claims.json`](../data/claims.json).
 
+## Comparative image prepared 2026-08-10 (not run evidence)
+
+[image.json](../build/image.json) selects official s7cmd v1.5.0 Linux x86-64 glibc release archive. Shared assembly is defined once in [tool-structure.md](../../../docs/operating/tool-structure.md). Historical receipts below continue to describe the images and artifacts they name.
+
 ## Build
 
 **No upstream container-image channel was found.** No image is referenced in
@@ -96,26 +100,20 @@ versioned-bucket-fidelity gap.
 
 ## Reproduction
 
-Every receipt above was produced by the shared harness, never by a bespoke
-script — `run.sh` only prints the argv (see its header for the exact
-contract); `harness/smoke-run.sh` owns `docker run`, mounts, credential
-injection/starving, timeout, measurement, and receipt-writing. To reproduce
-any row:
+The committed receipts are immutable wrapper-era evidence. New attempts use the single
+derived-image contract in
+[`../../../harness/README.md`](../../../harness/README.md), and an s7cmd image has
+not been implemented yet.
 
-```sh
-harness/smoke-run.sh \
-  --tool s7cmd --mode <mode> \
-  --image 's7cmd@sha256:07091182512e74cde4bb897a97b1fc9a586757560c5008ae8c701d7fdb6974da' \
-  --run-script tools/s7cmd/adapter/run.sh \
-  --bucket noaa-normals-pds --region us-east-1 [--prefix <scope>] \
-  --auth anonymous \
-  --out <out-dir>
-```
+Every receipt above was produced by the shared harness, never by a bespoke
+script. The current `command.py` is a typed command compiler with no shell or
+NUL transport; the attempt engine owns execution, capture, timeout, and
+measurement. Each immutable receipt retains its exact original invocation.
 
 `<mode>` is one of `recursive-tsv`, `recursive-tsv-nosort`,
 `recursive-aligned`, `recursive-json`, `recursive-one`, `all-versions`,
 `max-depth`, `shallow-tsv`, `bucket-list` — see
-`tools/s7cmd/adapter/run.sh`'s `case` statement for the exact flags each maps
+`tools/s7cmd/adapter/command.py` for the exact flags each maps
 to. Rebuilding the image first
 requires the pinned `s7cmd` checkout at `d589df7ce691edbede05fc9a691ab1787cdb6b9e`
 and `docker build -t s7cmd:groundwork-v1.5.0 .` in it (see Build above);

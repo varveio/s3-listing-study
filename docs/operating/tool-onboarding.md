@@ -54,7 +54,7 @@ step 4 needs no exception:
   them, so a document with a ledger carries `legacy_origins` on *every* claim
   and one without a ledger carries it on none. Present, they validate exactly
   as before.
-- `src/s3_listing_study/capsule.py` — `research/tool-page.md` and
+- `src/s3_listing_study/manager/capsule.py` — `research/tool-page.md` and
   `research/claims-migration.md` moved out of `REQUIRED_FILES` into
   `MIGRATION_FILES`, required only for a capsule with a migration stratum. The README checks follow the same condition: navigation
   names the two files, and Provenance names `Mixed provenance`,
@@ -104,8 +104,8 @@ than patched. Only the seams that differ from the sequence above:
    subject each file describes — a research directory holding two versions of
    one tool is unreadable without that router (see
    [`../../tools/swath/research/README.md`](../../tools/swath/research/README.md)).
-3. **Check the adapter against the new version's real CLI.** Swath's committed
-   `run.sh` still emitted `--max-parallel-listings`, `--seed` and
+3. **Check the adapter against the new version's real CLI.** Swath's legacy
+   command wrapper still emitted `--max-parallel-listings`, `--seed` and
    `--force-sort`, none of which exist at v0.2.0 — every mode it drove would
    have failed at exit 2, silently rotted by a version bump. Diffing the
    adapter's flags against the new `--help` is cheap and should be routine.

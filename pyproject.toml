@@ -8,7 +8,10 @@ license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 dependencies = [
     "duckdb>=1.1",
-    # s3_listing_study.capsule validates tool.json/claims.json against the
+    # AWS's buffered JSON output is counted incrementally after timing. Require
+    # ijson's compiled YAJL backend so this cannot silently fall back to Python.
+    "ijson==3.5.1",
+    # s3_listing_study.repo.capsule validates tool.json/claims.json against the
     # Draft 2020-12 schemas in schemas/; the capsule gate is a real dependency
     # of this package, not something the CI runner provisions on the side.
     "jsonschema>=4.23",
@@ -17,10 +20,17 @@ dependencies = [
     # the same way a bare `python3` does; the oracle preflight also refuses to
     # judge without it rather than reporting a missing import as a port bug.
     "pyyaml>=6.0",
+    # No GCS SDK on purpose. s3_listing_study.worker.upload ships inside every
+    # derived image, and google-cloud-storage's google-crc32c dependency
+    # publishes no musllinux wheel at any version. All current subjects run on
+    # glibc, but keeping the worker uploader standard-library-only avoids adding
+    # a large SDK and compiled dependency to every pinned image. It needs
+    # one POST and one ifGenerationMatch=0 header, so it uses urllib and the
+    # study depends on nothing for it.
 ]
 
 [project.scripts]
-s3-listing-study = "s3_listing_study.cli:main"
+s3-listing-study = "s3_listing_study.manager.cli:main"
 
 [dependency-groups]
 dev = [
@@ -31,6 +41,9 @@ dev = [
     # ignore_missing_imports override: the validator's schema calls are worth
     # type-checking.
     "types-jsonschema>=4.23",
+    # Same reasoning for the bucket-plan reader: a plan is hand-written config,
+    # so the shape it comes back as is worth type-checking.
+    "types-PyYAML>=6.0",
 ]
 
 [build-system]
@@ -68,6 +81,10 @@ warn_unreachable = true
 
 [[tool.mypy.overrides]]
 module = "duckdb.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "ijson.*"
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

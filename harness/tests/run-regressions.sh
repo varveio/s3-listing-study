@@ -2,8 +2,8 @@
 # harness/tests/run-regressions.sh — durable regression suite for the harness.
 #
 # Covers everything runnable WITHOUT the real bucket or docker, by driving the
-# actual verifier (`s3_listing_study.verify --scope union`) and smoke-run.sh's
-# --env guard over synthetic registry/manifest/receipt fixtures built at runtime:
+# actual verifier (`s3_listing_study.manager.verify --scope union`) over synthetic
+# registry/manifest/receipt fixtures built at runtime:
 #
 #   * union scenarios (PASS, structural-ERROR, dup-FAIL, overlap-ERROR,
 #     undesignated-empty-prefix-ERROR, mixed-mode-ERROR, redaction-refusal,
@@ -12,8 +12,6 @@
 #     offset -> ERROR) via the union path (they die in compare_fields, no docker);
 #   * current run-meta-directory payload paths and legacy absolute payload paths
 #     through the union verifier;
-#   * per-tool env allowlist accept/reject matrix — smoke-run.sh dies at the
-#     guard before any Docker call; asserts exit code and message;
 #
 # Every case prints PASS/FAIL; the script exits nonzero if any case fails. Cases
 # that genuinely need the bucket or docker are listed at the end as not-covered.
@@ -23,7 +21,6 @@ export LC_ALL=C
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 HARNESS="$(cd -- "$HERE/.." && pwd)"
 REPO_ROOT="$(cd -- "$HARNESS/.." && pwd)"
-SMOKE="$HARNESS/smoke-run.sh"
 NORMALIZE="$HERE/adapters/normalize.sh"
 
 # The verifier is the Python package, and its field comparison runs on DuckDB, a declared project dependency, so the
@@ -40,7 +37,7 @@ if [ -z "$PYTHON" ]; then
     PYTHON="python3"
   fi
 fi
-if ! PYTHONPATH="$REPO_ROOT/src" "$PYTHON" -P -c 'import s3_listing_study.verify, duckdb' 2>/dev/null; then
+if ! PYTHONPATH="$REPO_ROOT/src" "$PYTHON" -P -c 'import s3_listing_study.manager.verify, duckdb' 2>/dev/null; then
   printf 'REGRESSION SUITE CANNOT RUN: %s cannot import the verifier and duckdb.\n' "$PYTHON" >&2
   printf '  Run `uv sync` in the repo root, or point S3STUDY_PYTHON at an interpreter that has them.\n' >&2
   exit 2
@@ -107,7 +104,7 @@ run_union() {  # <out> <args...> -> sets RC
   RC=0
   # --registry is the only redirection of the registry, and it is an argument,
   # never an environment variable.
-  PYTHONPATH="$REPO_ROOT/src" "$PYTHON" -P -m s3_listing_study.verify \
+  PYTHONPATH="$REPO_ROOT/src" "$PYTHON" -P -m s3_listing_study.manager.verify \
     --scope union --registry "$REG" --normalize "$NORMALIZE" --out "$out" "$@" \
     >/dev/null 2>"$out.err" || RC=$?
 }
@@ -276,69 +273,6 @@ run_union "$d/out" --receipt "$d" --remainder "$d"
 assert_rc "compare_fields malformed MANIFEST mtime -> ERROR" 3 "$RC"
 grep -qi 'manifest mtime is not contract-v2' "$d/out.err" 2>/dev/null && ok "malformed manifest mtime attributed to manifest" || bad "malformed manifest mtime message missing"
 
-# --- per-tool env matrix (smoke-run.sh dies before any docker) ----------------
-RS="$WORK/run.sh"
-{ printf '#!/usr/bin/env bash\nprintf '"'"'x\\0'"'"'\n'; } >"$RS"
-chmod +x "$RS"
-FAKE_IMG="busybox@sha256:$(printf '%064d' 0)"
-
-# reject: expect exit 2 and the guard's "refused" wording, no docker reached.
-env_reject() {  # <label> <tool> <ENV=VALUE>
-  local rc=0 out="$WORK/envr.$RANDOM.err"
-  "$SMOKE" --tool "$2" --mode m --image "$FAKE_IMG" --run-script "$RS" \
-    --bucket bogusbucket --auth anonymous --out "$WORK/envout.$RANDOM" \
-    --env "$3" >/dev/null 2>"$out" || rc=$?
-  if [ "$rc" -eq 2 ] && grep -qiE 'refused|control character|not allowlisted|must be exactly' "$out"; then
-    ok "env-guard rejects $1 (exit 2)"
-  else
-    bad "env-guard should reject $1 — exit $rc; $(head -1 "$out")"
-  fi
-}
-# accept: guard passes; smoke-run then fails later (bogus bucket) WITHOUT any
-# "refused" wording — proving the value cleared the guard, still no docker.
-env_accept() {  # <label> <tool> <ENV=VALUE>
-  local rc=0 out="$WORK/enva.$RANDOM.err"
-  "$SMOKE" --tool "$2" --mode m --image "$FAKE_IMG" --run-script "$RS" \
-    --bucket bogusbucket --auth anonymous --out "$WORK/envout.$RANDOM" \
-    --env "$3" >/dev/null 2>"$out" || rc=$?
-  if [ "$rc" -ne 0 ] && ! grep -qiE 'refused|credential class|denylist|control character' "$out"; then
-    ok "env-guard accepts $1 (passed guard, failed later at $(grep -oiE 'not registered|registry resolution failed' "$out" | head -1))"
-  else
-    bad "env-guard should accept $1 — exit $rc; $(head -1 "$out")"
-  fi
-}
-env_accept "s3-fast-list RUST_LOG" s3-fast-list "RUST_LOG=s3_fast_list=debug"
-env_accept "minio-mc anonymous alias" minio-mc "MC_HOST_s3=https://s3.amazonaws.com"
-env_reject "RUST_LOG for wrong tool" aws-cli "RUST_LOG=debug"
-env_reject "global retry behavior" aws-cli "AWS_MAX_ATTEMPTS=10"
-env_reject "minio-mc endpoint must be exact" minio-mc "MC_HOST_s3=https://user:pass@s3.amazonaws.com"
-env_reject "GITHUB_TOKEN (TOKEN class)" s3-fast-list "GITHUB_TOKEN=x"
-env_reject "MY_API_KEY (API_KEY class)" s3-fast-list "MY_API_KEY=x"
-env_reject "FOO_SECRET (SECRET class)" s3-fast-list "FOO_SECRET=x"
-env_reject "DB_PASSWORD (PASSWORD class)" s3-fast-list "DB_PASSWORD=x"
-env_reject "SESSION_AUTH (AUTH class)" s3-fast-list "SESSION_AUTH=x"
-env_reject "AWS_ACCESS_KEY_ID (ACCESS_KEY)" s3-fast-list "AWS_ACCESS_KEY_ID=x"
-env_reject "AWS_PROFILE (denylist)" s3-fast-list "AWS_PROFILE=x"
-env_reject "AWS_CONFIG_FILE (denylist)" s3-fast-list "AWS_CONFIG_FILE=/x"
-env_reject "AWS_EC2_METADATA_DISABLED (deny)" s3-fast-list "AWS_EC2_METADATA_DISABLED=false"
-env_reject "AWS_ENDPOINT_URL (deny)" s3-fast-list "AWS_ENDPOINT_URL=http://evil"
-env_reject "AWS_ENDPOINT_URL_S3 (deny)" s3-fast-list "AWS_ENDPOINT_URL_S3=http://evil"
-env_reject "AWS_CA_BUNDLE (deny)" s3-fast-list "AWS_CA_BUNDLE=/x"
-env_reject "AWS_ROLE_ARN (deny)" s3-fast-list "AWS_ROLE_ARN=arn:x"
-env_reject "HTTP_PROXY (proxy class)" s3-fast-list "HTTP_PROXY=http://127.0.0.1:9"
-env_reject "HTTPS_PROXY (proxy class)" s3-fast-list "HTTPS_PROXY=http://127.0.0.1:9"
-env_reject "https_proxy lowercase (proxy)" s3-fast-list "https_proxy=http://127.0.0.1:9"
-env_reject "ALL_PROXY (proxy class)" s3-fast-list "ALL_PROXY=socks5://127.0.0.1:9"
-env_reject "NO_PROXY (denylist)" s3-fast-list "NO_PROXY=example.com"
-env_reject "SSL_CERT_FILE (trust anchor)" s3-fast-list "SSL_CERT_FILE=/tmp/ca"
-env_reject "SSL_CERT_DIR (trust anchor)" s3-fast-list "SSL_CERT_DIR=/tmp/ca.d"
-env_reject "CURL_CA_BUNDLE (trust anchor)" s3-fast-list "CURL_CA_BUNDLE=/tmp/ca"
-env_reject "REQUESTS_CA_BUNDLE (trust anchor)" s3-fast-list "REQUESTS_CA_BUNDLE=/tmp/ca"
-env_reject "NODE_EXTRA_CA_CERTS (trust)" s3-fast-list "NODE_EXTRA_CA_CERTS=/tmp/ca"
-env_reject "PATH redirection" s3-fast-list "PATH=/tmp/bin"
-env_reject "LD_PRELOAD loader injection" s3-fast-list "LD_PRELOAD=/tmp/x.so"
-env_reject "control-char newline in value" s3-fast-list "$(printf 'RUST_LOG=a\nb')"
-
 # --- runner security (faked; never changes Docker/firewall) ------------------
 if "$HERE/runner-security-regressions.sh" >/dev/null 2>&1; then
   ok "runner security faked regressions"
@@ -364,7 +298,7 @@ fi
 printf '\n--- not covered here (needs the real bucket or docker) ---\n'
 printf '  * union missing/extra/field-mismatch FAIL vs DRIFT — the reference re-list runs a real\n'
 printf '    docker s3api list against the bucket; run one scoped real union to exercise it.\n'
-printf '  * single-receipt smoke-run.sh -> verify end-to-end PASS (needs docker + bucket).\n'
+printf '  * a derived-image attempt against a real bucket (needs Docker + bucket).\n'
 printf '  * payload 64 MiB truncation + full-raw secret scan on live output (needs a real run).\n'
 printf '  * live runner boundary controls (operator setup: docs/operating/runner-security.md).\n'
 

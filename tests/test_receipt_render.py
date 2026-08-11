@@ -22,12 +22,12 @@ from pathlib import Path
 
 import pytest
 
-from s3_listing_study.receipt.errors import ReceiptError
-from s3_listing_study.receipt.meta import RunFacts
-from s3_listing_study.receipt.meta import fields as meta_fields
-from s3_listing_study.receipt.meta import render as render_meta
-from s3_listing_study.receipt.redact import Payload
-from s3_listing_study.receipt.render import (
+from s3_listing_study.manager.receipt.errors import ReceiptError
+from s3_listing_study.manager.receipt.meta import RunFacts
+from s3_listing_study.manager.receipt.meta import fields as meta_fields
+from s3_listing_study.manager.receipt.meta import render as render_meta
+from s3_listing_study.manager.receipt.redact import Payload
+from s3_listing_study.manager.receipt.render import (
     VERDICT_PLACEHOLDER,
     ReceiptBlockError,
     html_escape,
@@ -35,7 +35,7 @@ from s3_listing_study.receipt.render import (
     md_safe_inline,
     render,
 )
-from s3_listing_study.verify.report import PLACEHOLDER
+from s3_listing_study.manager.verify.report import PLACEHOLDER
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "receipt"
 CASES = ("plain", "hostile")
@@ -51,9 +51,14 @@ def _case(name: str) -> tuple[RunFacts, Payload, Payload]:
 
 
 @pytest.mark.parametrize("name", CASES)
-def test_receipt_matches_the_shell_renderer(name: str) -> None:
+def test_receipt_preserves_frozen_bytes_except_retired_producer_wording(name: str) -> None:
     facts, stdout, stderr = _case(name)
-    assert render(facts, stdout, stderr) == (FIXTURES / f"{name}.receipt.md").read_bytes()
+    expected_lines = (FIXTURES / f"{name}.receipt.md").read_bytes().splitlines(keepends=True)
+    expected_lines[2:4] = [
+        b"Rendered for the retired groundwork receipt format. Not a benchmark: this run makes no\n",
+        b"comparative claim and its duration is a fact about this run only.\n",
+    ]
+    assert render(facts, stdout, stderr) == b"".join(expected_lines)
 
 
 @pytest.mark.parametrize("name", CASES)

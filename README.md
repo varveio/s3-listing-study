@@ -54,15 +54,17 @@ Groundwork split the roster into two cohorts:
   `minio-mc`, `s3-fast-list` (a disclosed fork build pending an upstream
   `--no-sign-request` contribution), and Swath. A smoke run does not by itself
   establish correctness or performance beyond that exact run.
-- **Blocked without credentials:** `s3p`, `s3kor`, `s4cmd`, and `ps3` expose no
-  unsigned request path. Their committed capability receipts document that
-  limitation; they have not successfully listed the smoke bucket.
+- **Ran with a scoped credential:** `s3p`, `s3kor`, `s4cmd`, and `ps3` expose no
+  unsigned request path, so they cannot be smoked anonymously at all. Their
+  committed capability receipts document that limitation, and they have since
+  listed the smoke bucket under a list-only credential. The same caveat applies:
+  a smoke run establishes nothing beyond that exact run.
 
 See [`tools/README.md`](tools/README.md) for the per-tool status,
 [`docs/methodology.md`](docs/methodology.md) for the measurement plan we wrote
 down before running the comparisons, and
-[`docs/operating/runner-security.md`](docs/operating/runner-security.md) for the mandatory boundary
-that must be activated before any further networked container execution.
+[`docs/operating/runner-security.md`](docs/operating/runner-security.md) for the
+cooperative GCP Batch profile and the stricter local-Docker boundary.
 
 ## What we do
 
@@ -74,13 +76,14 @@ For each tool in scope:
 2. **Run it for real** against sample buckets with known, differing keyspace
    shapes — flat, deep, dense-tailed, and sparse.
 3. **Try its real modes.** If it has a concurrency knob, sweep it. If it
-   accepts hints from a prior listing, run both cold and hinted paths. If it has
+   accepts hints from a prior listing, run both unhinted and hinted paths. If it has
    a fast-path flag, use it. We put comparable effort into finding a supported
    setup for each tool rather than testing only defaults.
 4. **Try it under limits and interruption.** Constrain memory, increase scale,
    and interrupt it mid-run. Record what happens, including whether output is
    complete and whether the exit status describes the result accurately.
-5. **Publish the run record.** Record the exact invocation, tool version, box spec,
+5. **Publish the run record.** Record the exact invocation, tool version,
+   declared machine type/resources,
    bucket identity, exit code, captured output or content-addressed artifact,
    and verifier result.
 
@@ -102,8 +105,9 @@ interested in the space, not a sales comparison.
   later changes are dated and explained, so the history stays easy to follow.
 - **The motivating workload is declared.** Swath was designed for first-contact
   listing: an unfamiliar bucket with no hints or prior inventory. That creates
-  a framing bias, so first-contact, hinted, and warm-path results are treated as
-  distinct workloads and reported separately.
+  a framing bias, so first-contact and explicitly hinted modes are treated as
+  distinct workloads and reported separately. The benchmark does not add
+  cold/warm machine-state arms.
 - **Swath is recorded on the same terms.** It uses the same correctness
   verifier, benchmark harness, resource limits, limits-and-interruption checks,
   run-record requirements, and review. Our familiarity with it does not turn an
@@ -166,9 +170,9 @@ reports observations; it does not decide correctness by itself.
 ## Running the checks in this repo
 
 The data-shaped core is Python: registry and receipt handling, listing adapters,
-and the DuckDB-backed verifier, including its reference re-list Docker execution
-through `SecurityBoundary`. Bash owns the smoke subject's container lifecycle,
-measurement, and the live runner-security gate. **Install the project before
+the in-worker subject lifecycle and timing, and the DuckDB-backed verifier,
+including its reference re-list Docker execution through `SecurityBoundary`.
+Bash schedules the local smoke containers and owns the live local runner-security gate. **Install the project before
 using either layer**, because the shell wrapper invokes the package and the
 adapters import `s3_listing_study`:
 

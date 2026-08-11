@@ -28,6 +28,10 @@ reverse.**
 5. **`adapter/`** can be written any time after the CLI is understood, but it
    must be **validated against the real binary** before the capsule is claimed
    done — see the verification loop below.
+6. **`build/`** prefers a checksum-pinned official binary, archive, or package;
+   build from source only when the selected release has no matching
+   distribution. Follow the exact payload and registration contract in
+   [`tool-structure.md`](tool-structure.md) § Executable integration and builds.
 
 The ordering has one hard consequence worth stating plainly: **if a claim cannot
 be written, the sentence cannot be written either.** That is the mechanism by
@@ -71,23 +75,26 @@ Two failure modes, both observed:
 The vocabulary is defined in [`../methodology.md`](../methodology.md). What it
 means while authoring:
 
-- **No receipt means nothing is `confirmed`.** The schema enforces it —
-  `confirmed` requires `kind: "run"` evidence, and a run evidence entry must
-  point at a receipt-shaped string. The validator checks local existence; Git
-  tracking is enforced separately below. If the runner-security profile was not
-  provisioned, `harness/smoke-run.sh` was not used and no receipt exists, full
-  stop.
-- **Never initiate subject execution outside the mandatory runner boundary.**
-  Failure to provision the runner-security profile is a stop condition, not an
+- **Historical `confirmed` claims stay receipt-bound.** Current capsule ledgers
+  use `confirmed` for observations backed by committed historical
+  `receipt.md`/`run.meta` records, and those records remain the evidence a
+  reader can audit. The validator checks local existence; Git tracking is
+  enforced separately below. A new minimal `result.json` attempt is diagnostic
+  development output until the benchmark methodology/security amendment and a
+  correctness path land. Do not promote a claim to `confirmed` from such an
+  attempt, and do not invent a replacement evidentiary path in a capsule.
+- **Never initiate subject execution outside a documented execution profile.**
+  Use the cooperative GCP Batch profile or the strict local Docker profile in
+  [`runner-security.md`](runner-security.md). Failure to provision the selected profile is a stop condition, not an
   alternate observation path. If pre-existing output from an external or
   earlier out-of-boundary execution must be preserved, label it `[OBS <how>]`
   in prose and `kind: "observation"` in the ledger, state exactly how it was
   produced, and keep it explicitly non-receipt. Such an observation may retain
   provenance and support only a proposition bounded to what its committed
   commands and artifacts make auditable. It cannot make a claim `confirmed` or
-  substitute for wrapper execution and verification. `receipts/` is scoped to
-  run records **and** preserved observations; the capsule must never let one
-  read as the other.
+  substitute for receipt-bound historical verification or the future benchmark
+  evidentiary path. `receipts/` is scoped to run records **and** preserved
+  observations; the capsule must never let one read as the other.
 - **Scale-dependent behaviour is not settleable at smoke scale.** Throughput,
   memory cliffs, OOM behaviour, high-concurrency behaviour and crash-resume stay
   `unverified` with a recorded reason, however suggestive a single run looked.
@@ -123,15 +130,20 @@ uv run s3-listing-study check-source-anchors --tool <slug> --markdown tools/<slu
 
 Any skipped anchors mean the verification is incomplete.
 
-# adapter is executable and matches the harness contract
-shellcheck -S warning tools/<slug>/adapter/*.sh
+# Python command and normalization adapters match their shared contracts
+uv run pytest -q tests/test_command_adapters.py tests/test_adapters.py
+
+# Final-image integration uses the already-published common base by digest
+uv run s3-listing-study build-derived-image --tool <slug> \
+  --shared-base-image REGISTRY/...@sha256:<digest>
 ```
 
 Then the checks no script performs:
 
-- **No claim is `confirmed`** unless a receipt genuinely exists. Counting the
-  word is not the check — parse the ledger, and for every `confirmed` claim
-  assert it carries `kind: "run"` evidence whose `receipt` path exists on disk:
+- **No current claim is `confirmed`** unless its historical receipt genuinely
+  exists. Counting the word is not the check — parse the ledger, and for every
+  `confirmed` claim assert it carries `kind: "run"` evidence whose `receipt`
+  path exists on disk:
 
   ```sh
   python3 - <<'EOF'
@@ -203,17 +215,20 @@ a whole-diff reviewer would have skimmed.
   runner fails at argument parsing, not at listing. Diff the adapter's flags
   against the new `--help` (see [`tool-onboarding.md`](tool-onboarding.md)
   § Re-deriving).
-- **`run.sh` argv is appended to the image `ENTRYPOINT`.** Where the entrypoint
-  is already the binary, correct argv starts at the subcommand. Check with
-  `docker inspect -f '{{json .Config.Entrypoint}}'` before writing a mode.
+- **The command adapter returns complete subject argv.** Element zero is the
+  explicit absolute path installed by `build/Dockerfile` through `/tool-root`;
+  follow it with every required subcommand or launcher token. Upstream image
+  entrypoints are not part of the production runtime, so no prefix may remain
+  implicit in image packaging.
 - **Freeze the subject in a detached worktree** before dispatching readers.
   A moving upstream shifts line numbers underneath work in progress.
 - **Anchor line numbers are not self-checking.** They were wrong 22 times in one
   derivation, and a priority-sampling reviewer found none of them because they
   clustered in unglamorous files. Run the anchor checker; do not delegate this
   to judgement.
-- **A registry image tag may not match the git tag.** Check the registry rather
-  than assuming (`v0.2.0` the git tag, `0.2.0` the image tag, in one case).
+- **Distribution tags may not match the git tag.** Check every official channel
+  rather than assuming (`v0.2.0` the git tag, `0.2.0` the container tag, in one
+  case), then pin the selected artifact by content digest.
 - **Reviews are invalidated by a moving tree.** Do not restructure files while a
   long review runs against them; the review will report on paths that no longer
   exist, and its result must be discarded.

@@ -115,12 +115,12 @@
       "scope": "operability",
       "status": "supported",
       "disposition": "retained",
-      "qualification": "Any real run must pin -c to at most eight; the smoke run.sh pins -c 4 and rejects overrides outside 1..8. Source-established default.",
+      "qualification": "Any real run must pin -c to at most eight; the typed command adapter pins -c 4 and rejects overrides outside 1..8. Source-established default.",
       "legacy_origins": ["T3"],
       "evidence": [
         {"kind":"source","subject":"tested-variant","repository":"https://github.com/bloomreach/s4cmd","commit":"80059bf","path":"s4cmd.py","lines":"121"},
         {"kind":"observation","artifact":"../receipts/smoke/_capability/anon-nocredentials/receipt.md"},
-        {"kind":"documentation","path":"../adapter/run.sh"}
+        {"kind":"documentation","path":"../adapter/command.py"}
       ]
     },
     {

@@ -5,6 +5,10 @@ blocked, what the harness verified, and how to reproduce it. Canonical tested
 identity lives in [`../data/tool.json`](../data/tool.json); evidence labels and
 claim references are as in [`mechanism.md`](mechanism.md).
 
+## Comparative image prepared 2026-08-10 (not run evidence)
+
+[image.json](../build/image.json) selects rclone's official v1.74.4 Linux amd64 release archive. Shared assembly is defined once in [tool-structure.md](../../../docs/operating/tool-structure.md). Historical receipts below continue to describe the images and artifacts they name.
+
 ## Image
 
 Upstream `rclone/rclone`, pinned by **manifest-list digest**:
@@ -16,8 +20,7 @@ rclone/rclone@sha256:c61954aaa32328a5486715dd063a81c7879f5195ad3505cd362deddd509
 This is upstream's own published multi-arch image (tag `1.74.4`) [DOC
 hub.docker.com/r/rclone/rclone], matching the normal packaged setup, so no
 self-built Dockerfile is staged (this capsule has no `build/`). Entrypoint is
-`["rclone"]`, so every `../adapter/run.sh` argv below starts at the subcommand,
-never at the binary.
+`["rclone"]`; `../adapter/command.py` preserves that fixed-prefix convention.
 
 **Tool version:** `rclone v1.74.4` in the image (`os/version: alpine 3.24.1`,
 `go/version: go1.26.5`, static) [RUN `../receipts/smoke/_build/version.md`] — the
@@ -96,7 +99,7 @@ correction block** rather than rewritten — it did list `normals-hourly/` compl
 and correctly, just via the flat path, not the walk it claimed. The genuine walk was
 then run separately as `recursive-walk` (PASS 9841/9841) with the wire trace in
 `_capability/walk-debug` (claim `forced-walk-under-disable-listr-traced`). This is why
-`../adapter/run.sh` carries a distinct `recursive-walk` mode (with `--disable ListR`)
+`../adapter/command.py` carries a distinct `recursive-walk` mode (with `--disable ListR`)
 and a `walk-debug` probe, and the `recursive-hierarchical` case carries a warning
 comment.
 
@@ -108,7 +111,7 @@ re-uploading objects under `normals-hourly/` and `normals-monthly/` — their
 `normals-hourly/` therefore returned `DRIFT` (2549/2549 keys present, size and
 storage_class unchanged, **mtime-only** divergence from the 2026-03-16-mtime
 manifest), independently confirmed by the harness aws-cli re-list [SRC
-`s3_listing_study.verify` drift path]. Per methodology this is the third-party
+`s3_listing_study.manager.verify` drift path]. Per methodology this is the third-party
 bucket moving under us — **not a tool finding** (claim `noaa-bucket-drift-event`).
 The walk was re-run and verified on the still-un-drifted
 `normals-annualseasonal/1981-2010/` scope (0/9,841 keys re-uploaded), where it PASSes
@@ -157,23 +160,17 @@ Only the citation provenance was corrected; the behavioral claim stays `unverifi
 The related at-scale memory claim (`fast-list-memory-at-scale`) carries the same
 version-delta caveat by reference.
 
-## Reproduction via `harness/smoke-run.sh`
+## Historical reproduction command (runner retired)
+
+The command below records how the committed receipts were produced, but it is
+not runnable in the current checkout. New attempts use the single derived-image
+contract described in [`../../../harness/README.md`](../../../harness/README.md);
+the shared derived-image recipe exists, but this subject has not passed its compatibility gate.
 
 Every receipt above was produced by the shared wrapper, never a bare `docker run`.
-`../adapter/run.sh` only *prints* the argv (NUL-delimited) that the wrapper appends
-to the pinned image's entrypoint; the wrapper owns `docker run`, mounts, credential
-starving, the timeout, and measurement.
-
-```sh
-harness/smoke-run.sh \
-  --tool rclone --mode recursive-walk \
-  --image rclone/rclone@sha256:c61954aaa32328a5486715dd063a81c7879f5195ad3505cd362deddd509dc4a1 \
-  --run-script tools/rclone/adapter/run.sh \
-  --bucket noaa-normals-pds --region us-east-1 \
-  --prefix normals-annualseasonal/1981-2010/ \
-  --auth anonymous --tool-version "rclone v1.74.4" \
-  --out tools/rclone/receipts/smoke/recursive-walk
-```
+The current `../adapter/command.py` is a typed command compiler with no shell or
+NUL transport. The attempt engine owns execution, capture, timeout, and
+measurement. Each immutable receipt retains its exact original invocation.
 
 Then verify (writes `verify.md` and the receipt verdict):
 
@@ -186,7 +183,7 @@ s3-listing-study verify \
   --receipt tools/rclone/receipts/smoke/recursive-walk
 ```
 
-Swap `--mode` for any row in `../adapter/run.sh`'s case statement
+Swap `--mode` for any mode declared by `../adapter/command.py`
 (`recursive-fastlist`, `recursive-walk`, `recursive-hierarchical`,
 `delimiter-shallow`, `listv1`, `lsf`) and adjust `--prefix`/`--scope-prefix`. The two
 capability probes use the `debug` and `walk-debug` modes and are **not** verified

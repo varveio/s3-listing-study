@@ -1,410 +1,208 @@
 # Harness
 
-Shared measurement and verification infrastructure for the smoke campaign
-([`docs/methodology.md`](../docs/methodology.md) § Execution order). Built
-**once**, by the orchestrator. Dispatch discipline and what blind agents may read are defined in
-[`../docs/operating/tool-research-brief.md`](../docs/operating/tool-research-brief.md).
+The active subject lifecycle is the stdlib-first Python package at
+`src/s3_listing_study/worker/`. It is the only implementation of process
+execution, byte capture, timing, timeout cleanup, and finalization for new
+attempts.
 
-## Status of the run-once prerequisites
+The worker accepts a typed logical listing request, resolves it through the
+selected in-image tool driver, starts the resulting argv without a shell,
+captures stdout and stderr as bytes, and commits one attempt directory containing:
 
-**Check this table before dispatching an agent** — rationale in
-[the brief](../docs/operating/tool-research-brief.md).
-
-| # | Prerequisite | Status |
-| --- | --- | --- |
-| 1 | `docs/smoke-bucket.md` — bucket registry | **live** — `noaa-normals-pds`, snapshot 2026-07-17 (contract-v2 re-baseline) |
-| 2 | Reference manifest, pinned harness client | **live** — 148,917 keys, **contract v2** (`key/size/etag/mtime/storage_class`), sha256 in the registry, in `<data>/manifests/` |
-| 3 | `smoke-run.sh` — run wrapper | **requires a set-up runner** — the contained-network security profile must pass its per-run gate |
-| 4 | `s3_listing_study.verify` — output verifier | **requires a set-up runner for reference re-lists** — same contained-network profile and gate |
-| 5 | `base.Dockerfile` — shared base layer | **not built** — deliberately. The brief marks it optional and it is only needed by a tool that ships no upstream image. The first such tool builds it; speculative infrastructure for nobody is worse than none. |
-
-Campaign parameters currently in force: `CREDS=none` (every run anonymous),
-`EDGE_BUCKET=none` (edge-case checks recorded **deferred**, not dropped).
-
-## Mandatory runner boundary
-
-Further networked execution requires the
-[`s3-listing-study-v1`](../docs/operating/runner-security.md) profile. The container
-hardening, host firewall, identity claims, and build/pull boundary are
-specified there; that document is the authoritative contract.
-
-`smoke-run.sh` and each reference re-list fail closed through
-`runner-security-check.sh`. The check enforces one property per run — that the
-run is anonymous by construction — by verifying live that no ambient credential
-variables are set, that no cloud metadata service answers on the host, that the
-subject bridge is the fixed profile on an `iptables` backend, that the live
-firewall carries exactly the deny policy rendered from
-`harness/security/policy.v1.env` plus the current Docker network subnets, and
-that a digest-pinned probe on that bridge finds link-local denied and public S3
-reachable. There is no readiness record: the expected policy comes from this
-repository, so nothing has to be re-hashed or boot-bound. Runner setup is a
-documented operator procedure in
-[`docs/operating/runner-security.md`](../docs/operating/runner-security.md),
-whose last step is this same gate.
-
-## Contract
-
-```
-        s3_listing_study.registry ── data/registry.toml (single source)
-                          │
-   passed --run-script PATH ┤ argv only, NUL-delimited, never executes
-                          ▼
-                    smoke-run.sh  ── owns docker run, auth, timeout, measurement
-                          │            → receipts/smoke/<mode>/receipt.md
-                          ▼
-   passed --normalize PATH ───► s3_listing_study.verify ── manifest (sha256-bound)
+```text
+result.json
+stdout.raw.gz
+stderr.raw.gz
+native/          only for a mode whose sink is a directory the tool writes itself
 ```
 
-Adapter locations are caller-supplied, not inferred by the harness. Every
-capsule passes `tools/<tool>/adapter/run.sh` and
-`tools/<tool>/adapter/normalize.py` (migration wave completed 2026-07-20);
-historical receipts cite the pre-migration root paths as run facts.
+`result.json` is written atomically and last. Tool nonzero exits, signals, and
+clean timeouts are recorded outcomes; they are not runner failures. Inside the
+worker container, the subject is a supervised subprocess tree, not another
+container. The timer uses `time.monotonic_ns()` from immediately before launch
+through reap of that tree. Credential-shape scanning of the complete opaque raw
+streams, native-row counting, deterministic gzip, result finalization, and GCS
+upload happen only after that clock stops. A flagged
+stream or scanner error is a harness failure: the runner exits 2 and publishes
+none of the artifacts. A clean scan is recorded in `result.json`.
 
-- **`python3 -m s3_listing_study.receipt registry --registry PATH --bucket BUCKET --field FIELD`** —
-  resolves `region`, `manifest`,
-  `manifest_sha256`, `snapshot_date`, `keys`, `shape` from the registry. Exists
-  so a receipt cites what the registry *says* rather than what somebody retyped:
-  a 64-hex digest transcribed by hand across twelve tools is a typo waiting to
-  certify a manifest that verified nothing. Strict — any ambiguity is a hard,
-  loud failure. `--path` / `--digest` bind a receipt to the registry it came
-  from.
-- **`smoke-run.sh`** — owns `docker run` entirely. **Receipts produced outside
-  this wrapper do not count** (methodology § Run records (receipts)). Writes `run.meta`
-  alongside `receipt.md`. Current records declare
-  `payload_path_base=run-meta-directory`: inline `stdout_path`/`stderr_path`
-  values are resolved relative to their sibling `run.meta`; large external
-  payloads remain absolute and hash-bound until the release-asset index gives
-  them stable public identities. Records without the base field are historical
-  and retain their original working-directory interpretation.
-  - **Payload hygiene** follows the brief's **redact → scan →
-    truncate → hash** order: it redacts the **whole raw stream** first (a legitimate
-    object key shaped like a credential is scrubbed, not falsely flagged), then
-    secret-scans the **full redacted stream** — every byte, *before* truncation — so
-    a credential redaction missed is still caught even when it sits beyond the
-    **64 MiB** cap, never silently dropped with the truncated tail. On a scan hit the
-    offending redacted stream is **quarantined to `<out>/quarantine/` before dying**
-    (the cleanup trap clears only `$TMP` and the container, never the quarantine
-    dir). Only then does it cap each stream at 64 MiB (keeping the head, recording
-    `truncated=yes` with the dropped byte count and saying so loudly), and hash.
-  - **Per-tool env guard.** Repeatable **`--env NAME=VALUE`** is a positive
-    per-tool allowlist, not a general passthrough. Current demonstrated needs are
-    `s3-fast-list:RUST_LOG` (observability) and
-    `minio-mc:MC_HOST_s3=https://s3.amazonaws.com` (validated functional
-    endpoint/anonymous-alias configuration). Receipts and `run.meta` record
-    observability and functional configuration separately. Credential, proxy,
-    endpoint/trust-anchor, loader, and path-redirection classes remain denied;
-    credentialed execution remains unimplemented.
-  - **Bounded, no-pull Docker lifecycle.** Every harness-owned container uses
-    `--pull=never`. Docker control-plane operations have a 30-second bound and
-    cleanup calls a 10-second bound. Timeout statuses 124 (TERM deadline) and
-    137 (follow-up KILL) are labeled as timeouts, but cleanup reconciliation is
-    required after **any** nonzero Docker client result because other failures
-    (including 125) can also leave daemon state uncertain. A smoke subject is
-    created under a random, wrapper-owned stable name and then started; its EXIT
-    path can still address that name after any lifecycle failure. The offline
-    version probe is also no-pull, networkless, bounded, and stably named. Each
-    evidentiary listing container receives
-    `--log-driver=json-file --log-opt max-size=-1`. Before a smoke subject starts,
-    its inspected effective config must be exactly that non-rotating local
-    contract; rotating, limited, remote, extra, or unknown options fail closed.
-    New `run.meta` records the validated driver, canonical-config SHA-256, and
-    base64-encoded option-key names only after validation. Raw option values are
-    never persisted. Reference re-lists use the same explicit config but consume
-    attached stdout directly; probes produce no listing evidence and need no
-    evidentiary log contract. Unlimited Docker logs avoid rotation, not host-disk
-    exhaustion.
-  - **Flat-record safety.** Every string emitted to line-oriented `run.meta` is
-    checked immediately before emission and rejected if it contains a control
-    byte below 0x20, including caller input and auto-detected Docker/version/host
-    values. An embedded newline or CR can therefore not forge a later field.
-    Dynamic human-receipt values use one HTML-entity renderer before entering
-    Markdown; pipes, backticks, and HTML delimiters cannot create cells or close
-    code spans, while controls are refused.
-  - **Version + TODO warnings.** Auto-fills the tool version (caller `--tool-version` wins, else
-    best-effort `--version` on the image), and any receipt field left as `TODO`
-    produces a loud warning on the wrapper's final summary.
-- **`python3 -m s3_listing_study.verify`** — the only thing that issues a verdict on output.
-  Requires `--receipt` and refuses to run without the wrapper's `run.meta`.
-  Parses the **contract-v2 5-field manifest and adapter output**
-  (`key/size/etag/mtime/storage_class`) and fails loudly if handed a 3-field
-  pre-2026-07-17 artifact. Field checking is **by policy**: keys are always
-  asserted; each of size/etag/mtime/storage_class is asserted only where the
-  adapter emitted a non-`-` value. `mtime` is compared by a canonical UTC form
-  (a manifest `…Z` and an adapter `…Z`/`…+00:00` denoting the same second compare
-  equal) in a single awk pass — no per-row `date` fork. **Refuses a verdict on a
-  truncated verified payload** (a cut-off listing cannot establish completeness;
-  stderr truncation alone does not block verifying a complete stdout). Passes the
-  run's prefix (from `run.meta`) to `normalize.py` as `$2`. Gains
-  **`--scope union`** (below).
+In `schema_version: 2`, the result records UTC subject start/end timestamps and
+observed worker facts (logical CPUs, host memory, and readable cgroup-v2
+location/limit). Its `resources` object records
+`rusage_children_max_child_peak_rss_kb`, `rusage_children_user_cpu_s`,
+`rusage_children_system_cpu_s`, `whole_filesystem_peak_used_delta_bytes` plus its
+sample path/interval, and `cgroup_v2_memory` snapshots before/after the subject
+with OOM/OOM-kill deltas. The RSS field is the largest single child's peak, not
+aggregate tree memory; cgroup memory is the whole container/task signal when
+available. The filesystem delta is attributable only when one attempt uses the
+host filesystem at a time.
 
-### `--scope union` — fan-out completeness across shards
+The runner opens and captures the subject's raw stdout/stderr byte streams
+inside the derived image. Docker json-file logs, `docker logs`, Batch logs, and
+other scheduler text streams are diagnostics only for new attempts; they are
+not the listing-data channel and cannot stand in for `stdout.raw.gz` /
+`stderr.raw.gz`.
 
-Takes multiple receipts (repeatable `--receipt`, or `--receipts-dir`) and a
-required **`--out <dir>`** — the union verdict is durable, written to
-`<dir>/union-verify.md` (verdict line, shard list with prefixes and receipt
-paths, counts including duplicates-before-dedup, structural status, the reference
-re-list result if one ran, the registry digest, and a UTC timestamp), not left on
-stdout. Each shard is **re-derived, not trusted**: it is normalized against its
-own prefix scope, then (a) all shards' outputs concatenate as a **multiset** with
-cross-shard duplicates counted **before** dedup, (b) the combined output is
-checked against the **full manifest** exactly, and (c) **scope coverage** is
-verified explicitly.
-
-Coverage needs an *explicit unprefixed-remainder shard* to attribute root-level
-keys (e.g. `index.html`) that live under no prefix.
-
-- An empty `run.meta` prefix is
-  **ambiguous** — it is also what an ordinary full-bucket root run records — so the
-  remainder must be **designated with `--remainder <receipt-dir>`** (whose
-  `run.meta` prefix must be empty); an empty-prefix shard that is *not* the
-  designated remainder is a hard `ERROR`.
-- **The remainder shard is typically a
-  delimiter-mode root listing** (`--delimiter /`, no prefix), which returns exactly
-  the root-level objects — so **its output must contain exactly the unprefixed keys;
-  a full recursive run cannot serve as the remainder** (it re-lists every prefixed
-  key, which then reads as out-of-scope extras and cross-shard duplicates).
-- Because
-  that root listing is a different request shape, **the remainder is EXEMPT from
-  mode binding**: it is normalized under its own `run.meta` mode against the orphan
-  keys, while the prefix shards are still held to one shared mode.
-- A union of
-  prefixes with a needed remainder missing is **structurally incomplete** — a
-  coverage defect in the fan-out **plan**, reported as **`ERROR` (exit 3)**,
-  distinct from and never mistaken for the tool dropping keys (`FAIL`).
-
-The union mirrors the single-receipt path everywhere it verifies: it **binds mode
-across the prefix shards** (they must share one `mode`; a caller `--mode` must
-equal it; the remainder is exempt as above), **refuses** any shard with
-`redaction_changed_bytes=yes` or a **truncated** verified stream, and
-copies-then-hashes-then-checks. **Stream selection**: by default it picks each
-shard's verified stream by heuristic — stdout unless stdout is empty and stderr is
-non-empty — which is a guess; a tool that prints a banner on stdout and its
-listing on stderr needs **`--stream stdout|stderr`**, which pins the stream for
-**all** shards (a fan-out set shares tool+mode, so it shares the stream). It
-**re-lists the reference before issuing any `FAIL`** — missing/extra keys, field
-mismatches, or a shard failing its own scope — so bucket drift is never attributed to
-the tool; only pure duplication (dups > 0, everything else clean) may `FAIL`
-without a re-list, since a bucket cannot drift into duplicates. Every plan-defect
-death after `--out` is parsed still writes a durable `union-verify.md` with
-`Verdict: ERROR`.
-
-Invocation-plan defects are `ERROR`, never a tool `FAIL`: a receipt named twice
-(realpath-deduped), or two shard prefixes where one is a string-prefix of another
-(overlap makes a correct tool double-emit the nested keys). All shards must cite
-the current registry digest, the same bucket, tool, and auth mode.
-
-### `run.meta` — the binding between a run and its verdict
-
-The verifier does **not** trust its own arguments. `smoke-run.sh` records what
-actually ran — tool, mode, auth, bucket, prefix, image, exit code, payload paths
-and their sha256 — and the verifier validates against it. Without this, tool,
-mode, bucket, scope and inputs are five independent claims: one mode's output
-can be checked against another mode's scope and stamped into a third mode's
-receipt, and every artifact still looks internally consistent. The verifier
-refuses when `--scope-prefix` contradicts the prefix the run actually used, and
-when an input's bytes no longer match the hash its receipt cites.
-
-Scope is passed as separate arguments — `--scope full|prefix|delimiter` plus
-`--scope-prefix` / `--scope-delimiter`. A packed `delimiter:D:P` string cannot
-represent a delimiter that is itself `:`.
-
-### Verdicts
-
-| | |
-| --- | --- |
-| `PASS` | Complete, no duplicates, fields match where the mode exposes them |
-| `FAIL` | A real discrepancy in **the tool output or this mode's `normalize.py`** (the verdict does not distinguish them, and says so). **Completeness and field `FAIL`s are always preceded by a fresh reference re-list that confirms the bucket did *not* move**. The **one exception** is duplication-only: cross-shard/multiset duplicates can be identified without a re-list, because bucket drift cannot create duplicate emitted records. Both the single-receipt and `--scope union` paths follow this rule. |
-| `DRIFT` | The bucket moved since the snapshot. **Stop — not a tool finding.** Only the orchestrator re-baselines. The mismatch re-list captures the full **5-field** record (`key/size/etag/mtime/storage_class`) with the manifest's exact canonicalization (`TZ=UTC`, ETag unquoted, mtime `+00:00`→`Z`) and compares full records — because an object replaced under the same key leaves the key set identical, and an *identical-byte* overwrite changes only `mtime`, which a key/size/etag-only check would miss and wrongly `FAIL`. |
-| `ERROR` | The verifier could not run. **Not a pass.** |
-
-### Credentialed mode is deliberately unimplemented
-
-`--auth credentialed` hard-fails. The obvious implementation — mount `~/.aws`
-read-only — hands every profile, SSO cache and `source_profile` chain on the box
-to a third-party binary, when the brief calls for a **list-only identity scoped
-to the registered buckets**, and a tool that ignores `AWS_PROFILE` reaches all of
-it. The campaign is `CREDS=none`, so nothing needs this path; building it
-approximately now, ready for a future `CREDS`, would be worse than its absence.
-Implement a minimal materialised single-profile bundle before enabling.
-
-### Footgun: `run.sh` argv is appended to the image `ENTRYPOINT`
-
-`run.sh` prints *"the argv to execute inside the container"*, which reads like a
-full command line. It is not. It is appended to whatever `ENTRYPOINT` the image
-declares. Many tool images set the tool binary itself as the entrypoint — in
-that case correct argv starts at the *subcommand*, not the binary name, and
-prefixing the binary name produces a confusing failure on the first run.
-Image-dependent and invisible until it bites. Check before writing `run.sh`:
+The derived image fixes this zipapp entrypoint; schedulers append only the
+logical request arguments and never replace it. There is no public
+`--attempt-id`: each worker-container execution mints its own UUID:
 
 ```sh
-docker inspect -f '{{json .Config.Entrypoint}}' <image>   # json form: prints null / ["/usr/local/bin/aws"] unambiguously
+/opt/s3-listing-study/python/bin/python3 -I /opt/s3-listing-study/attempt.pyz \
+  --output /output \
+  --shared-base-digest sha256:SHARED_BASE_DIGEST \
+  --shared-base-uri REGISTRY/shared-base@sha256:SHARED_BASE_DIGEST \
+  --derived-image sha256:DERIVED_IMAGE_DIGEST \
+  --tool aws-cli \
+  --operation list \
+  --mode s3api-v2-text \
+  --bucket BUCKET \
+  --region REGION \
+  --prefix '' \
+  --scope full
 ```
 
-Use `--entrypoint` on the wrapper if a tool needs it overridden.
+The scheduler passes only typed logical fields, including optional concurrency.
+An explicit concurrency is accepted only by an adapter that declares support;
+the current s4cmd adapter contract accepts `1..8` and defaults to `4`. All
+eleven runnable subjects are registered; a tool is registered by
+adding `tools/<tool>/build/image.json`. The selected tool's bundled `command.py`
+resolves complete subject argv inside the image through the typed driver API;
+there is no raw argv escape hatch. Adapters never execute or time the subject.
 
-### Measurement boundary — adapters are never on the clock
+Image construction is deliberately separate from this execution lifecycle: one
+published base, one capsule-owned tool payload, and one final image per tool.
+The shared base contains no worker, so worker and adapter changes only
+reassemble final images when the builder retains or restores its cache.
 
-The wrapper's wall-clock is the container's lifetime (`StartedAt→FinishedAt`,
-from `docker inspect`). `normalize.py`, the verifier, and all
-post-processing run **after the clock stops**. This is an invariant, not an
-implementation detail: adapter cost is the study's cost, not the tool's, and
-it must never sit inside a timed window at smoke scale or in the benchmark
-phase. Any future timing path that shells out to an adapter mid-window is a
-defect.
+Build, publication, identity, and cache rules are documented once in
+[`shared-image/README.md`](shared-image/README.md) and
+[`derived-image/README.md`](derived-image/README.md).
 
-### Bucket names are parameters, always
+## Security boundary
 
-The owner's rule — *no executable artifact embeds a bucket name* — is
-**enforced, not requested**: `smoke-run.sh` greps the tool's `run.sh` for the
-bucket name and refuses to run if it finds it.
+Networked execution uses the scheduler-specific profile in
+[`docs/operating/runner-security.md`](../docs/operating/runner-security.md).
+GCP Batch is cooperative: its metadata endpoint stays reachable because this
+worker's uploader needs the task service-account token. The identity can create
+but not read, replace, or delete results. Local Docker on the more-privileged
+manager/runner host retains the `s3-listing-study-v1` bridge, firewall, and
+metadata-denial gate; `runner-security-check.sh` applies there, not to Batch.
+The gate is required before a local invocation can claim the strict evidence
+profile. `smoke-campaign.sh` and `e2e-local.sh` are diagnostic paths that only
+inspect the bridge; their outputs are not strict-profile evidence.
 
-## Orchestrator-side staging — `stage-workspace.sh`
+In both profiles the attempt engine replaces the subject child's ambient
+environment with a fixed, minimal runtime environment and sets
+`AWS_EC2_METADATA_DISABLED=true`. That setting prevents the S3 client subprocess
+from discovering an AWS instance credential; it does not and must not prevent
+the surrounding Batch worker from reading its GCP token for upload. The exact
+child environment is recorded in `result.json`.
 
-`stage-workspace.sh <tool>` stages a blind research agent's workspace at
-`$S3_STUDY_SOURCES/<tool>-work` (default `<sources>`):
+### Authenticated attempts
 
-- accepts only the fixed runnable-subject set, refuses broad or repository-owned
-  roots, enters the canonical staging directory with `cd -P`, and uses only
-  fixed single-component names beneath that directory;
-- takes an exclusive `flock` on the staging root so cooperating dispatches are
-  single-writer;
-- copies `harness/` and `docs/smoke-bucket.md`, and extracts the brief's
-  **Part 2** as `BRIEF.md` (Part 1 is orchestrator-only);
-- **refuses to stage from a dirty tree** — if `harness/`, the brief, or the
-  registry have uncommitted changes, the staged copy would diverge from what
-  the repo can show was dispatched;
-- runs a **contamination check**: no *other* study subject may be named in
-  anything a blind agent reads (it caught its first real leak the day it was
-  promoted into `harness/`);
-- writes `PROVENANCE.txt` recording the source commit;
-- fully validates a sibling `.<tool>-work.new.*` generation before changing the
-  stable name, retires any existing stable entry—including a symlink—under a
-  unique `.<tool>-work.retired.*/workspace`, and publishes with same-directory
-  rename-only `mv --no-copy --no-target-directory` operations.
+`--auth authenticated` runs a signed request. The credential reaches the engine
+as one ambient variable, `S3_STUDY_AWS_CREDENTIAL`, holding the same
+`KEY=VALUE` lines the study's secret already uses; the name is deliberately not
+an `AWS_*` one, so no SDK can pick it up on its own. Only
+`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and `AWS_SESSION_TOKEN` are
+accepted, the first two required, with no unknown or duplicate keys.
 
-The retirement and publication renames leave a short interval in which the
-stable name is absent. A failed validation or rename leaves the unpublished and
-retired generations in place and reports their paths; the script deliberately
-performs no recursive deletion and has no cleanup trap. Inspect and reclaim
-those paths explicitly, or reclaim them by disposing of the dedicated staging
-filesystem/runner. This staging path requires `flock` (util-linux) and GNU
-`mv` with `--no-copy` and `--no-target-directory` support.
+It fails closed in both directions. `--auth authenticated` with the variable
+unset is an error, and the variable being *set* during `--auth anonymous` is
+equally an error: an anonymous receipt must never come from a process that had
+credential material in its environment. The child environment stays a fixed
+allowlist, `AWS_EC2_METADATA_DISABLED=true` stays set even when authenticated
+so the explicit static credential is the only one in play, and `result.json`
+records the two credential values as `<REDACTED>` — names visible, values
+never persisted. Callers must forward the variable by name (`docker run -e
+NAME`), never as `-e NAME=value`, which would put the secret in argv.
 
-Re-run it at **every** dispatch — staged copies go stale the moment the
-harness changes. Companion rule (journal, 2026-07-17): the orchestrator also
-archives the tool's external payload dir under
-`<data>/receipts/` at every re-dispatch, or the anti-clobber
-guard will refuse the fresh run.
+## After subject timing
 
-## Changing the smoke bucket
+The worker calls the selected adapter's `count_rows` function after
+`elapsed_ns` has closed, then records that small summary directly in
+`result.json`. This path counts the mode's native logical listing rows without
+constructing or storing the verifier's five-field records. It deterministically
+compresses the original raw streams and preserves native directory output
+unchanged. Explicit correctness verification may later normalize those retained
+artifacts on the manager; routine attempts do not. Each execution publishes one
+authoritative attempt tree:
 
-Owner requirement (2026-07-17): a bucket change must be **script-driven, not
-agentic**. The design already supports that — the per-tool `run.sh` +
-`normalize.py` adapters are parameterized by bucket/region/prefix, and
-nothing tool-specific encodes the bucket (the scan gate enforces it). The
-procedure:
+The nested `result.json.summary` uses schema version 2 for this count-only
+contract. A completed attempt with no counting adapter records
+`reason: adapter_not_configured`; a counting exception records
+`error.code: row_count_failed`. Version 1 is the superseded worker-normalization
+contract and retains its historical vocabulary in old result objects.
 
-1. **Update the registry** (`docs/smoke-bucket.md`): bucket, region, shape,
-   key count, snapshot date. The registry is the single source every receipt
-   binds to via the packaged registry reader — nothing else needs editing.
-2. **Re-baseline the reference manifest** with the pinned harness client:
-   full 5-field listing (`key/size/etag/mtime/storage_class`), the
-   canonicalization the verifier expects (`TZ=UTC`, ETag unquoted, mtime
-   `…Z`), gzipped into `<data>/manifests/`, sha256 recorded in
-   the registry.
-3. **Re-smoke the finished tools as a scripted sweep**: for each tool, loop
-   its `run.sh` modes through `smoke-run.sh` against the new registry entry.
-   No agent, no research — the expensive agentic work (adapters, mode
-   discovery) is already done and reusable by construction.
-4. **One decision to take when it first happens**: the receipt layout for a
-   second bucket (`receipts/smoke/` currently implies the registry bucket —
-   e.g. `receipts/smoke-<bucket>/` keeps snapshots separable). Decide once,
-   apply to all tools.
+```text
+campaigns/<campaign>/results/<bucket>/<tool>/<case>/run-<n>/<attempt-id>/
+```
 
-Receipts already committed stay valid evidence **for their snapshot** —
-claims cite the bucket and manifest they were verified against; a new bucket
-adds receipts, it does not invalidate old ones.
+Raw artifacts upload first and `result.json` uploads last, so the result record
+is also the commit marker for that execution. Every object is written create-only
+(`ifGenerationMatch=0`).
 
-## The two memory numbers
+The campaign model owns the `run-<n>` ordinal (`run-1` under the current
+`reps: 1` policy; higher ordinals are reserved for separately scheduled runs,
+not an implemented append-later command). Each worker-container execution mints
+the `attempt_id` UUID beneath that run prefix. The UUID is per execution, not the
+scheduled run or Batch job: one job may theoretically produce more than one
+UUID leaf if the task is duplicated despite the campaign setting automatic
+Batch retries to 0. Create-only upload preserves every leaf. The required
+reconciler must surface more than one result under the same run prefix as an
+anomaly; it must never select one as the canonical result or collapse them into
+one attempt.
 
-Both are **sampled** (polled while the process is alive; interval recorded in
-every receipt). The container's cgroup is destroyed the instant it exits, so
-neither can be read post-mortem. Both are kernel-maintained high-water marks, so
-a poll returns the true peak as of that read; the unmeasured window is between
-the last poll and exit.
+The required routine manager reporting path must visit only manifest-known run
+prefixes. It must list each with GCS `delimiter=/` to discover immediate UUID
+children without descending into their contents, then GET each child's exact
+`result.json` and read its small worker-produced summary and metrics. Raw
+listing artifacts remain in GCS as audit and verification evidence. The
+manager fetches raw bytes
+only for correctness verification or a specific investigation; it does not
+download every listing, run routine manager-side collection over them, or write
+a companion `collected.json` into an attempt.
 
-| | Counts | Does **not** count |
-| --- | --- | --- |
-| `peak_rss` (`VmHWM`) | Resident pages in the **main process's** address space, including shared/file-backed pages charged to another cgroup | Child processes — a fan-out mode's children are invisible; the receipt says so |
-| `cgroup_peak_mem` (`memory.peak`) | Memory **charged to this container's cgroup**, whole tree: anon + page cache it caused + kernel/socket | Pages charged elsewhere, e.g. image layers already hot in host page cache |
+`smoke-campaign.sh` remains the local all-tools diagnostic path. Production
+campaign modeling under `s3_listing_study.manager.campaign` resolves cases,
+freezes image and attempt manifests, assigns Batch job IDs, and records mutable
+submission state plus its append-only transition history in the local ledger.
+The mutable row answers current state; events retain submission/retry history
+after Batch ages jobs out. The ledger is operational and is not run evidence.
 
-**Neither bounds the other, and neither is a sanity check on the other.**
-`peak_rss > cgroup_peak_mem` is normal on a box where the image is already hot in
-page cache — observed here, stable across runs at a ~14 MB gap. An earlier draft
-of the receipt template asserted `cgroup_peak_mem ≥ peak_rss` "always"; the first
-run falsified it. See internal working notes (not published).
+All eleven subjects have run at smoke on amd64 through this engine, four with a
+scoped credential. Those runs are non-comparative and carry no verifier verdict:
+they prove the runner/image path can produce the machine artifacts, not that a
+tool claim should be promoted or a benchmark result published.
 
-Never present `cgroup_peak_mem` as RSS. `peak_rss` is the field methodology
-§ Run records (receipts) asks for.
+## Historical receipts and verification
 
-## Known limits, carried to the benchmark phase
+Committed smoke receipts predate the attempt engine and remain immutable audit
+evidence. Their `receipt.md`, `run.meta`, raw payload conventions, parsers, and
+verifier tests are retained. Current tool pages describe those records as
+wrapper-era receipts without presenting the deleted wrapper as an execution
+path.
 
-These are fine for smoke — which produces **no comparative numbers by design** —
-and are recorded so they cannot silently graduate:
+Each of those receipts names the wrapper that produced it, at the path the
+wrapper then occupied under `harness/`. That path no longer resolves, and the
+line is left standing anyway: a receipt records what actually ran, so editing it
+to name something that did not produce it would be a rewrite of evidence. The
+wrapper remains reachable in git history, which is where a reader who needs it
+should look. Consequently a mode directory can hold two unrelated shapes at
+once — wrapper-era `receipt.md` / `run.meta` / `verify.md` / `stderr.txt` files
+describing one run, and one or more `attempt-N/` directories from the engine
+describing others. They are separate runs on separate hosts, frequently on
+different architectures and against different scopes; nothing merges or
+supersedes across the two, and a reader must take the scope and date from the
+record in hand rather than from the directory it shares.
 
-1. **Runner placement is not frozen for the benchmark.** Historical smoke used
-   GCP `us-east1-b` against AWS `us-east-1`; that is a fact about those receipts,
-   not the future campaign. Cross-internet latency changes the network-to-CPU
-   ratio and may interact with client CPU, output back-pressure, throttling, and
-   concurrency, so do not assume it preserves a ranking. Choose the benchmark
-   location deliberately, keep it fixed within a campaign, and record it with
-   CPU time and wall-clock in every receipt.
-2. **The memory tail window.** Between the last poll and exit, unmeasured.
-   Memory is a headline claim in the benchmark (the rclone exit-0-on-OOM
-   allegation), so this may need revisiting — options are `getrusage` via an
-   in-container wrapper (invasive: it changes the container under test) or a
-   non-systemd cgroup (a parent slice was tried and rejected — it races
-   systemd's GC; `memory.peak` reset is a silent no-op on this kernel).
-3. **`peak_rss` measures the container's main process, whatever that is.** Not
-   just a fan-out caveat: if an image's entrypoint is a shell that forks the tool
-   **without `exec`**, the wrapper measures the idle shell and never sees the
-   tool — potentially reporting a dramatically understated RSS that looks like a
-   finding. Every receipt records the measured process name (`Measured process`);
-   if it is `sh`/`bash` rather than the tool, the number is about the shell.
-   Check it before quoting any memory figure.
-4. **`PASS` does not re-list the reference.** The reference is re-listed only
-   when a discrepancy is found. So a tool returning stale cached output that
-   happens to match an outdated manifest exactly would `PASS`, and the drift
-   would go unnoticed. Closing this means re-listing on every check — 149 pages
-   per full-bucket verification, per mode, per tool. The brief's design is
-   pre-flight once plus re-list on mismatch; changing it is an owner's
-   methodology decision, not an implementer's.
-5. **Aggregate concurrency ≤ 32 is not enforced by the wrapper.** The cap is on
-   the product of concurrent invocations and each invocation's *internal* listing
-   concurrency, which the wrapper cannot know — it is a per-mode fact the agent
-   establishes by reading the tool's flags. Enforcement stays with the agent and
-   the reviewer; the wrapper does not claim it.
-6. **PID reuse** is theoretically possible over a long run; the poll loop keys on
-   the container's main PID. Not observed, not defended against.
-7. **`run.sh` runs on the host**, before the container boundary. It only prints
-   argv, and the wrapper rejects credential-shaped argv, but a hostile `run.sh`
-   is not defended against — consistent with the brief's threat model
-   (accidental error, not a deliberately evasive agent).
-8. **The 64 MiB payload cap bounds what we *keep*, not what Docker *materializes*.**
-   The wrapper redacts and secret-scans the **full stream** before truncating (so a
-   credential beyond the cap is flagged and **quarantined to `<out>/quarantine/`**,
-   never silently dropped) and then keeps only the head — but `docker logs` has
-   already written the entire stream to Docker's log store on disk before we read
-   it, so a run emitting gigabytes can pressure Docker/TMP storage regardless of our
-   cap. The bounding control is the **300 s timeout**, which caps how long a runaway
-   can emit; the cap itself is about capture size, not disk safety. If a tool is
-   expected to emit enormous output, watch disk during the run.
-9. **The reference manifest is absent on a fresh box, so the packaged
-   `s3-listing-study verify` flow cannot run there at all.** The manifest lives
-   outside the working tree by the no-data-in-repo rule, and without it the
-   verifier issues no verdict no matter how the runner is provisioned. Fetching
-   the artifact and checking it against the registry sha256 is therefore a
-   **prerequisite distinct from the runner-security gate** — a clone plus a
-   provisioned runner still verifies nothing. Row 2 of the prerequisites table
-   describes the campaign's artifact, not any particular machine's copy of it; see
-   [`../docs/operating/artifact-availability.md`](../docs/operating/artifact-availability.md).
+`s3_listing_study.manager.verify` continues to audit those receipt-bound streams against
+their recorded registry and manifest. The offline union regression suite is
+`harness/tests/run-regressions.sh`; the host security regression suite is
+`harness/tests/runner-security-regressions.sh`.
+
+Provider submission/reconciliation and comparative reporting remain separate
+manager integration work. They must consume worker summaries for routine
+operation and must not introduce a second subject lifecycle, timing
+implementation, or eager raw-artifact download path.

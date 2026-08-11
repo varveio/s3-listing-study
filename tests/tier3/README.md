@@ -3,7 +3,7 @@
 Tier 1 (`tests/differential/`) replays every committed verdict in the repo. All
 57 of them are PASS, so the branch that matters most has no coverage at all: on
 any discrepancy the verifier re-lists the reference bucket **before attributing
-anything to the tool** (`s3_listing_study.verify.single`, union equivalent in `.union`) and
+anything to the tool** (`s3_listing_study.manager.verify.single`, union equivalent in `.union`) and
 splits the outcome three ways.
 
 | Re-list says | Verdict | Exit | Means |
@@ -26,7 +26,7 @@ the repo exercises these paths.
 
 `stage.py` makes them reachable without weakening a check:
 
-- the verifier under test is this checkout's `s3_listing_study.verify`, and
+- the verifier under test is this checkout's `s3_listing_study.manager.verify`, and
   `test_the_verifier_under_test_is_this_checkouts` asserts that — a stale install
   on the path would otherwise be judged instead. `harness/` is never written to.
 - `verifier_entry.py` passes `PreflightSkipped()` through the verifier's

@@ -1,0 +1,14 @@
+{
+  "tool": "s3kor",
+  "tool_version": "v0.0.37",
+  "shared_base_source_sha256": "c953a4b672ffb9cabad1d5e9cd86081790489e6494362883d93c337590c16d1f",
+  "tool_build_sha256": "b19db549234c037efdf7c43d7a4c73ef0713782e7c674a9288a17df6ec5f88bb",
+  "tool_artifact": {"kind":"release-archive","locator":"https://github.com/sethkor/s3kor/releases/download/v0.0.37/s3kor_0.0.37_Linux_amd64.tar.gz","sha256":"47047e8a40a84992914f02bb5c8dfc525abff0a42c3ed76a4ed042a8ef976103"},
+  "subject_workdir": "/",
+  "executable": [
+    "/usr/local/bin/s3kor"
+  ],
+  "command": "adapter/command.py",
+  "normalizer": "adapter/normalize.py",
+  "adapter_bundle_sha256": "4b40485dc67a852715e4eb6eb0a37d2c5971a52f4c28a5ff484d2ea2c12c459b"
+}

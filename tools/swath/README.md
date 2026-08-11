@@ -17,10 +17,10 @@ The tested-subject facts are stated here; the canonical record is
 | Question | Current answer |
 | --- | --- |
 | Tested subject | Upstream's own published image for `v0.2.0` — no fork, no patch, nothing built locally — pulled anonymously by digest, its `org.opencontainers.image.revision` label equal to the tested commit `cef8ec2`, self-reporting `swath 0.2.0 (cef8ec24a74f)`. The registry tag is `0.2.0`; `v0.2.0` is a 404. Run anonymously (`--no-sign-request`) at `--concurrency 8`, native arm64. Canonical identity: [`data/tool.json`](data/tool.json). |
-| Exercised coverage | Two direct `jsonl` observations, one on the full bucket and one prefix. A separate four-mode adapter summary lacks the exact commands and raw normalized outputs needed to support a canonical runtime claim. No Parquet, sorted-Parquet or resume run; no credentialed, edge-key, crash, or high-concurrency run. |
+| Exercised coverage | Two direct v0.2.0 `jsonl` observations, one on the full bucket and one prefix. A later diagnostic attempt ran v0.2.4 `recursive-tsv` over `normals-hourly/` on amd64. A separate four-mode adapter summary lacks the exact commands and raw normalized outputs needed to support a canonical runtime claim. No Parquet, sorted-Parquet or resume run; no credentialed, edge-key, crash, or high-concurrency run. |
 | Correctness and verifier state | **No verifier verdict exists for any run**, and **no completeness check was performed**: count-and-uniqueness against the registry's recorded figures is the only cross-check, and it cannot detect a substituted key or compensating errors — claim `smoke-output-count-and-uniqueness`, with the reasons in [`docs/running.md`](docs/running.md#what-the-verifier-could-not-check). |
-| Receipts | **None**, and no claim on this subject is `confirmed`. Runtime facts retained as evidence come from two direct container observations. Why, in one place: [`docs/running.md`](docs/running.md#no-receipts-the-runner-security-blocker). |
-| Smoke observation | The full-bucket run exited 0 having emitted 148,917 JSON Lines rows with zero duplicate keys, and reported eight concurrent listings in flight — claims `smoke-output-count-and-uniqueness`, `full-run-reported-parallel-listings`. A single unreplicated groundwork run, counted by the tool itself: not a benchmark result and not comparable to anything. |
+| Receipts | Diagnostic attempt receipts exist, but none has a verifier verdict or confirms a claim. Latest: Swath 0.2.4, anonymous amd64 `recursive-tsv` over `normals-hourly/`, exit 0, clean secret scan, 2,549 rows counted. Evidence boundary: [`docs/running.md`](docs/running.md#diagnostic-attempt-receipts-but-no-verifier-verdict). |
+| v0.2.0 smoke observation | The full-bucket observation exited 0 having emitted 148,917 JSON Lines rows with zero duplicate keys, and reported eight concurrent listings in flight — claims `smoke-output-count-and-uniqueness`, `full-run-reported-parallel-listings`. A single unreplicated groundwork run, counted by the tool itself: not a benchmark result and not comparable to anything. |
 | Results | No benchmark or comparative result exists. |
 
 ## How it works
@@ -40,10 +40,10 @@ Upstream's mode surface and what this study exercised are separate.
 
 | Mode | Upstream purpose | What this study exercised |
 | --- | --- | --- |
-| `list --format jsonl \| tsv \| table` | Fully enumerate a bucket to a text stream. | `jsonl` in two direct observations. A four-mode adapter summary is preserved but is not independently auditable and supports no canonical runtime claim. |
+| `list --format jsonl \| tsv \| table` | Fully enumerate a bucket to a text stream. | `jsonl` in two direct v0.2.0 observations; `tsv` in a later v0.2.4 diagnostic attempt with no verifier verdict. A four-mode adapter summary is preserved but is not independently auditable and supports no canonical runtime claim. |
 | `list --tune seed.mode=shallow \| none` | Change whether an up-front `delimiter=/` descent runs at all — a request-pattern change, not an output change. | `shallow` in the two direct observations. `none` appears only in the unauditable adapter summary, so the cost arms remain uncompared. |
 | `list --tune seed.mode=hints` | Declared hinted seeding. | Not run; it throws at seed time, so there is no hinted mode. |
-| `list --format parquet` / `--sort` | Write a multi-part, optionally globally key-sorted Parquet dataset to a directory. | Not run and not capturable: the harness bind-mounts nothing. Parquet is also Swath's only byte-exact output path. |
+| `list --format parquet` / `--sort` | Write a multi-part, optionally globally key-sorted Parquet dataset to a directory. | Not run; the current driver writes `/tmp/swout`, which the minimal attempt contract does not publish. Parquet is also Swath's only byte-exact output path. |
 | `swath resume <dir>` | Resume a crashed listing from a SQLite checkpoint. | Not run; it needs a durable checkpoint, which needs a directory dataset, which needs a mount. |
 
 Swath has no shallow `ls`-style output mode and no `inspect` or `diff`
@@ -71,10 +71,11 @@ resolve in [`data/claims.json`](data/claims.json).
   [`Engine defaults and the one supported rollback`](docs/mechanism.md#engine-defaults-and-the-one-supported-rollback)
   · `v020-engine-default-flips`, `engine-toggles-are-diagnostic`
 
-- **Nothing is receipt-backed and no verifier ran.** The retained observations
-  support only the facts their committed commands and payload samples expose.
-  The blockers, the absent completeness check and the bucket's drift are stated
-  once, in the linked section.
+- **No claim is receipt-backed and no verifier ran.** Later diagnostic attempt
+  receipts exist, but carry no verifier verdict and cannot confirm the canonical
+  v0.2.0 claims. The retained observations support only the facts their
+  committed commands and payload samples expose. The absent completeness check
+  and the bucket's drift are stated once, in the linked section.
   [`What the verifier could not check`](docs/running.md#what-the-verifier-could-not-check)
   · `smoke-output-count-and-uniqueness`, `aimd-idle-at-smoke`
 
@@ -104,25 +105,29 @@ resolve in [`data/claims.json`](data/claims.json).
   No credentialed, edge-key, crash, resume, or high-concurrency run — claims
   `control-char-key-fidelity-untested`, `crash-resume-works`,
   `exactly-once-under-crash`.
-- Every run was native arm64. amd64 is supported across every publishing channel,
-  including a real child manifest in the published index, but was not exercised
-  here, and the v0.2.0 workflows do not runtime-smoke arm64 because its runners
-  are amd64 —
+- Both canonical v0.2.0 observations were native arm64. A later v0.2.4
+  diagnostic attempt exercised amd64, but does not settle the v0.2.0 runtime
+  claim. amd64 is supported across every publishing channel, including a real
+  child manifest in the published index, and the v0.2.0 workflows do not
+  runtime-smoke arm64 because their runners are amd64 —
   claims `amd64-built-and-smoked-upstream`, `arm64-not-runtime-smoked-at-v020`.
 
 ### Harness and verifier blockers
 
-- No receipts and no verifier verdict for any run; see
-  [`docs/running.md`](docs/running.md#no-receipts-the-runner-security-blocker),
+- Diagnostic attempt receipts exist, but no run has a verifier verdict and no
+  claim is `confirmed`; see
+  [`docs/running.md`](docs/running.md#diagnostic-attempt-receipts-but-no-verifier-verdict),
   which owns that caveat.
-- Only the three stdout text formats are capturable. Parquet, sorted Parquet and
-  resume are structurally uncapturable under a harness that bind-mounts nothing —
-  a harness limitation, not a tool one. Because Parquet is Swath's only byte-exact
+- The current driver sends Parquet probes to `/tmp/swout`, while the minimal
+  attempt contract publishes only the two raw streams and `result.json`; those
+  native outputs are therefore not currently preserved. This is a driver and
+  publication limitation, not a tool one. Because Parquet is Swath's only byte-exact
   output path, leaving the gap open means never exercising it — claims
   `file-sinks-not-harness-capturable`, `parquet-key-column-is-byte-exact`.
-- The committed adapter has been rewritten for v0.2.0 and its four stdout modes
-  execute, so it is no longer a blocker; a harness run still waits on the
-  runner-security profile and the reference manifest — see
+- The committed adapter has been rewritten for v0.2.0, and `recursive-tsv` has
+  executed through the current derived-image attempt path on v0.2.4. A
+  claim-confirming run still needs the required execution profile and the
+  reference/verifier path — see
   [`docs/running.md`](docs/running.md#adapter-and-harness-contract).
 
 ### Tool findings and risks
@@ -162,6 +167,7 @@ resolve in [`data/claims.json`](data/claims.json).
 | See what image was selected, what ran, what was blocked, and how to reproduce it | [`docs/running.md`](docs/running.md) |
 | Inspect canonical identity, study states, and the full claim ledger | [`data/tool.json`](data/tool.json) and [`data/claims.json`](data/claims.json) |
 | Integrate the subject with the shared harness | [`adapter/`](adapter/) |
+| See which subject image the derived attempt image is built from | [`build/`](build/) |
 | Read the independent blind re-derivation at v0.2.0, its errata, and its cross-model review | [`research/`](research/) |
 | Audit an individual claim's evidence in depth | [`data/claims.json`](data/claims.json), then the owning `research/reader-*.md` |
 | Inspect the committed observations | [`receipts/`](receipts/) |
@@ -182,19 +188,21 @@ frozen pre-restructure page, no conservation map, and no claim in
 [`data/claims.json`](data/claims.json) carries a legacy origin. Every claim
 states the v0.2.0 subject on its own evidence.
 
-The two runtime observations are the study's own, and neither is **a run record**
-in the harness sense; source reading is not a run record either — see
-[`docs/running.md`](docs/running.md#no-receipts-the-runner-security-blocker).
+The two canonical v0.2.0 runtime observations are the study's own, and neither
+is **a run record** in the harness sense; source reading is not a run record
+either. Later diagnostic attempt receipts, most recently v0.2.4 attempt 3, are a
+separate evidence layer and carry no verifier verdict — see
+[`docs/running.md`](docs/running.md#diagnostic-attempt-receipts-but-no-verifier-verdict).
 
 ## Evidence boundary
 
 Source and documentation can establish a mechanism or a risk; they cannot
-establish that a run behaved as designed. A committed receipt is what
-`confirmed` requires, and this subject has
-[none](docs/running.md#no-receipts-the-runner-security-blocker). The runtime
-facts here are direct container observations — Swath's own self-reported
-counters and the rows it emitted — from single unreplicated runs, two of them
-instrumented. They are groundwork observations, not benchmark results, and no
+establish that a run behaved as designed. No receipt here carries the verifier
+verdict needed to support `confirmed`; the later diagnostic attempts do not
+change that boundary. The canonical runtime facts here are direct v0.2.0
+container observations — Swath's own self-reported counters and the rows it
+emitted — from single unreplicated runs, two of them instrumented. They and the
+later v0.2.4 diagnostic attempt are groundwork, not benchmark results, and no
 number here is comparative.
 
 ## Varve and Swath
@@ -206,7 +214,8 @@ tools, which makes us participants in the space we are studying. We apply the
 same harness, buckets, and run-record requirements to Swath as to every other
 tool, and publish the results on the same terms whether or not they favour it —
 which is why this page states plainly that Swath's v0.2.0 pass produced no
-receipts and no verifier verdict. Swath's earlier internal benchmark history is
+wrapper-era receipt and no verifier verdict, while later diagnostic receipts do
+not confirm its claims. Swath's earlier internal benchmark history is
 **not** used here; any number must be produced again on this harness. The
 structural control on the first-party source basis is that the v0.2.0 derivation
 was source-first and deliberately blind, every claim is anchored, and an

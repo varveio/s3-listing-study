@@ -28,8 +28,9 @@ request path. Full detail: [`docs/mechanism.md`](docs/mechanism.md).
 ## Modes and study coverage
 
 The upstream subcommand surface and this study's actual coverage are shown
-separately. Every mode is blocked under `CREDS=none` because pS3 cannot list
-anonymously.
+separately. No mode can run anonymously — pS3 has no unsigned request path — so
+anonymous coverage is blocked by capability, not by choice. The `list` mode has
+since run under a scoped list-only credential.
 
 | Mode | Upstream purpose | What this study exercised |
 | --- | --- | --- |

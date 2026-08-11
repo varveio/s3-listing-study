@@ -17,9 +17,9 @@ from pathlib import Path
 
 import pytest
 
-from s3_listing_study.receipt import cli
-from s3_listing_study.receipt.errors import ReceiptError
-from s3_listing_study.receipt.redact import (
+from s3_listing_study.manager.receipt import cli
+from s3_listing_study.manager.receipt.errors import ReceiptError
+from s3_listing_study.manager.receipt.redact import (
     INLINE_MAX,
     PAYLOAD_CAP,
     preserve_binary_file,
@@ -28,7 +28,7 @@ from s3_listing_study.receipt.redact import (
     scope_tag,
     truncate_head,
 )
-from s3_listing_study.receipt.scan import LINE_SIZE_LIMIT
+from s3_listing_study.manager.receipt.scan import LINE_SIZE_LIMIT
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "receipt"
 

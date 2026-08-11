@@ -18,13 +18,16 @@ import functools
 import io
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from s3_listing_study.contract import FIELD_COUNT, MTIME_RE, ContractViolation, read_records
-from s3_listing_study.duckdb_adapter import emit_result
+from s3_listing_study.common import duckdb_adapter
+from s3_listing_study.manager.contract import FIELD_COUNT, MTIME_RE, ContractViolation, read_records
+from s3_listing_study.manager.duckdb_adapter import emit_result, existing_input_path
+from s3_listing_study.manager.normalizer_cli import mapped_input
 from tests.adapters.equivalence import (
     corpus_shortfall,
     load_adapter,
@@ -54,13 +57,25 @@ PORTED = (
 # was blocked at auth. A mode LEAVING this map means coverage arrived; a mode
 # joining it means the equivalence run quietly stopped judging that mode, and the
 # port of it now rests on its FIXTURES entry alone.
+# Modes whose output is a DIRECTORY dataset, not a stream. They take no stdin,
+# so the stdin-payload fixture harness cannot express them; they are exercised
+# through a published native/ directory instead.
+DATASET_MODES = {("swath", "recursive-parquet"), ("swath", "recursive-parquet-sorted")}
+
 UNEXERCISED = {
     "ps3": {"list-versions"},
     "s3p": {"ls-long"},
     "s4cmd": {"du", "shallow", "show-directory"},
     # v0.1.0 receipts were retired with that subject; v0.2.0 currently has
     # observations only, so no mode has a replayable committed payload yet.
-    "swath": {"recursive-tsv", "recursive-jsonl", "recursive-table", "seed-none"},
+    "swath": {
+        "recursive-tsv",
+        "recursive-jsonl",
+        "recursive-table",
+        "seed-none",
+        "recursive-parquet",
+        "recursive-parquet-sorted",
+    },
 }
 
 # A mode whose input is a BINARY stream, where a lone newline is not an empty
@@ -457,8 +472,16 @@ def test_adapter_is_an_executable_the_verifier_can_invoke(tool: str) -> None:
 
 
 @pytest.mark.parametrize("tool", PORTED)
+def test_normalizer_has_standard_help(tool: str) -> None:
+    done = subprocess.run([str(adapter_path(tool)), "--help"], capture_output=True, check=False)
+    assert done.returncode == 0
+    assert b"usage:" in done.stdout
+
+
+@pytest.mark.parametrize("tool", PORTED)
 def test_every_declared_mode_has_a_fixture(tool: str) -> None:
     declared = set(load_adapter(REPO, tool).MODES)
+    declared -= {mode for fixture_tool, mode in DATASET_MODES if fixture_tool == tool}
     covered = {adapter_mode for adapter_tool, adapter_mode in FIXTURES if adapter_tool == tool}
     assert declared == covered
 
@@ -493,6 +516,248 @@ def test_output_conforms_to_contract_v2(tool: str, mode: str) -> None:
             assert record.size.isdigit()
 
 
+@pytest.mark.parametrize(("tool", "mode"), sorted(FIXTURES))
+def test_count_rows_matches_explicit_normalization_without_constructing_records(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, tool: str, mode: str
+) -> None:
+    payload, prefix, _expected_keys = FIXTURES[(tool, mode)]
+    normalized = run(tool, mode, prefix, payload)
+    assert normalized.returncode == 0, normalized.stderr
+    expected = len(normalized.stdout.splitlines())
+
+    adapter = load_adapter(REPO, tool)
+
+    def forbidden(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("count-only path crossed the contract emit boundary")
+
+    monkeypatch.setattr(duckdb_adapter, "Record", forbidden)
+    monkeypatch.setattr(adapter, "emit_result", forbidden)
+    if hasattr(adapter, "emit"):
+        monkeypatch.setattr(adapter, "emit", forbidden)
+    assert adapter.count_rows(payload, mode, prefix=prefix) == expected
+
+    raw = tmp_path / "stdout.raw"
+    raw.write_bytes(payload)
+    with existing_input_path(str(raw)), mapped_input(str(raw)) as file_data:
+        assert adapter.count_rows(file_data, mode, prefix=prefix) == expected
+
+
+def test_large_line_count_uses_the_binary_chunked_reader() -> None:
+    rows = 250_000
+    adapter = load_adapter(REPO, "s3kor")
+    assert adapter.count_rows(b"object\n" * rows, "list") == rows
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected"),
+    [
+        (b"", [b""]),
+        (b"\n", [b"", b""]),
+        (b"a", [b"a"]),
+        (b"a\n", [b"a", b""]),
+        (b"a\n\n", [b"a", b"", b""]),
+        (b"a\x00b\nc", [b"a\x00b", b"c"]),
+    ],
+)
+def test_binary_line_iterator_preserves_split_framing_across_chunks(
+    payload: bytes, expected: list[bytes]
+) -> None:
+    assert list(duckdb_adapter.iter_lf_lines(payload, chunk_size=2)) == expected
+    assert list(duckdb_adapter.iter_lf_lines(io.BytesIO(payload), chunk_size=2)) == expected
+
+
+@pytest.mark.parametrize(
+    ("tool", "mode", "payload"),
+    [
+        ("s3kor", "list", b"a\x00b\n"),
+        ("s3p", "ls", b"a\x00b\n"),
+        ("rclone", "lsf", b"a\x00b;1\n"),
+        ("s7cmd", "recursive-one", b"a\x00b\n"),
+    ],
+)
+def test_binary_line_counts_match_normalization_for_nul_keys(
+    tool: str, mode: str, payload: bytes
+) -> None:
+    normalized = run(tool, mode, "", payload)
+    assert normalized.returncode == 0, normalized.stderr
+    adapter = load_adapter(REPO, tool)
+    assert adapter.count_rows(payload, mode) == len(normalized.stdout.splitlines()) == 1
+
+
+def test_line_count_predicates_preserve_leading_tab_before_field_split() -> None:
+    payload = b"\ta b c\n"
+    normalized = run("s3p", "ls-long", "", payload)
+    assert normalized.returncode == 0, normalized.stderr
+    assert len(normalized.stdout.splitlines()) == 1
+    assert load_adapter(REPO, "s3p").count_rows(payload, "ls-long") == 1
+
+    # s5cmd's SQL similarly trims spaces, not tabs, before deciding whether the
+    # first field is DIR. Count the selected native relation directly because
+    # this deliberately malformed short row has no five-field record to emit.
+    s5cmd = load_adapter(REPO, "s5cmd")
+    with duckdb_adapter.staged(b"\tDIR prefix/\n") as path:
+        selected = duckdb_adapter.count_query(
+            duckdb_adapter.connect(), s5cmd.QUERIES["recursive"], {"path": path, "pfx": ""}
+        )
+    assert selected == 1
+    assert s5cmd.count_rows(b"\tDIR prefix/\n", "recursive") == selected
+
+
+class TinyReader(io.BytesIO):
+    def read(self, size: int | None = -1) -> bytes:
+        return super().read(3 if size is None or size < 0 else min(size, 3))
+
+
+def test_aws_json_counts_selected_arrays_across_tokens_and_chunk_boundaries() -> None:
+    payload = (
+        b'{"Noise":"\\"Contents\\":[{},] and [,] and CommonPrefixes",'
+        b'"Contents":[{"Key":"a,[]\\""},{"nested":[1,2,{"x":"CommonPrefixes"}]}],'
+        b'"CommonPrefixes":[{"Prefix":"a/"},{"Prefix":"b/"}]}'
+    )
+    adapter = load_adapter(REPO, "aws-cli")
+    assert adapter.count_rows(TinyReader(payload), "s3api-v2-json") == 2
+    assert adapter.count_rows(TinyReader(payload), "s3api-v2-delimiter") == 4
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected"),
+    [
+        (b"{}", 0),
+        (b'{"Contents":null}', 0),
+        (b'{"Contents":[]}', 0),
+        (b'{"Other":[],"CommonPrefixes":null}', 0),
+    ],
+)
+def test_aws_json_count_accepts_empty_null_and_missing_arrays(
+    payload: bytes, expected: int
+) -> None:
+    adapter = load_adapter(REPO, "aws-cli")
+    assert adapter.count_rows(payload, "s3api-v2-delimiter") == expected
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b"",
+        b'{"Contents":[}',
+        b'{"Contents":[{}] trailing}',
+        b'{"Contents":"not-an-array"}',
+        b'{"Contents":[],"Contents":[]}',
+        b'{"Contents":[1]}',
+        b'{"Contents":[{"Key":"unterminated}]}',
+        b'{"Contents":[{"Key","a"}]}',
+    ],
+)
+def test_aws_json_count_rejects_malformed_or_wrong_shaped_payloads(payload: bytes) -> None:
+    adapter = load_adapter(REPO, "aws-cli")
+    with pytest.raises(ValueError):
+        adapter.count_rows(payload, "s3api-v2-json")
+
+
+def test_aws_json_count_uses_the_required_c_backend() -> None:
+    from ijson.backends import yajl2_c
+
+    assert yajl2_c.backend == "yajl2_c"
+
+
+def test_aws_yaml_count_tracks_only_contents_items_across_pages_and_documents() -> None:
+    payload = (
+        b"---\n"
+        b"- Contents:\n"
+        b"  - Key: one\n"
+        b"    Note: '  - not an item'\n"
+        b"  - Key: two\n"
+        b"  OtherList:\n"
+        b"    - ignored\n"
+        b"- Other:\n"
+        b"  - Key: ignored\n"
+        b"- Contents: []\n"
+        b"---\n"
+        b"Contents:\n"
+        b"- Key: three\n"
+        b"  Note: Contents: [not structural]\n"
+        b"Other: value\n"
+    )
+    adapter = load_adapter(REPO, "aws-cli")
+    assert adapter.count_rows(TinyReader(payload), "s3api-v2-yamlstream") == 3
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b"Contents: scalar\n",
+        b"- Contents:\n  - scalar\n",
+        b"Contents:\nnot-a-mapping-field\n",
+    ],
+)
+def test_aws_yaml_count_rejects_unrecognized_contents_shapes(payload: bytes) -> None:
+    with pytest.raises(ValueError, match="malformed yaml-stream"):
+        load_adapter(REPO, "aws-cli").count_rows(payload, "s3api-v2-yamlstream")
+
+
+def test_aws_large_buffered_formats_keep_counting_out_of_the_python_parser_slow_path() -> None:
+    adapter = load_adapter(REPO, "aws-cli")
+    json_row = (
+        b'{"Key":"path/name","Size":123,"ETag":"\\"abc\\"",'
+        b'"LastModified":"2026-01-01T00:00:00Z","StorageClass":"STANDARD"}'
+    )
+    json_payload = b'{"Contents":[' + b",".join([json_row] * 10_000) + b"]}"
+    started = time.perf_counter()
+    assert adapter.count_rows(json_payload, "s3api-v2-json") == 10_000
+    assert time.perf_counter() - started < 1.0
+
+    yaml_row = (
+        b"  - ETag: '\"abc\"'\n"
+        b"    Key: path/name\n"
+        b"    LastModified: '2026-01-01T00:00:00+00:00'\n"
+        b"    Size: 123\n"
+        b"    StorageClass: STANDARD\n"
+    )
+    yaml_payload = b"- Contents:\n" + yaml_row * 10_000
+    started = time.perf_counter()
+    assert adapter.count_rows(yaml_payload, "s3api-v2-yamlstream") == 10_000
+    assert time.perf_counter() - started < 1.0
+
+
+@pytest.mark.parametrize("tool", PORTED)
+def test_normalizer_can_read_an_existing_raw_path_without_stdin(tool: str, tmp_path: Path) -> None:
+    """The worker path uses the same adapters without staging listing bytes."""
+    mode = next(mode for fixture_tool, mode in FIXTURES if fixture_tool == tool)
+    payload, prefix, _keys = FIXTURES[(tool, mode)]
+    raw = tmp_path / "stdout.raw"
+    raw.write_bytes(payload)
+    by_stdin = run(tool, mode, prefix, payload)
+    by_path = subprocess.run(
+        [str(adapter_path(tool)), mode, prefix, "--input", str(raw)],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        check=False,
+    )
+    assert by_path.returncode == by_stdin.returncode, by_path.stderr
+    assert by_path.stdout == by_stdin.stdout
+
+
+@pytest.mark.parametrize(
+    ("tool", "mode"),
+    sorted(set(FIXTURES) - DATASET_MODES),
+)
+def test_empty_existing_raw_path_matches_empty_stdin(tool: str, mode: str, tmp_path: Path) -> None:
+    """File-backed input preserves bytes-mode empty-listing/error semantics."""
+    prefix = FIXTURES[(tool, mode)][1]
+    raw = tmp_path / "stdout.raw"
+    raw.write_bytes(b"")
+    by_stdin = run(tool, mode, prefix, b"")
+    by_path = subprocess.run(
+        [str(adapter_path(tool)), mode, prefix, "--input", str(raw)],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        check=False,
+    )
+    assert by_path.returncode == by_stdin.returncode, by_path.stderr
+    assert by_path.stdout == by_stdin.stdout
+    assert by_path.stderr == by_stdin.stderr
+
+
 def test_swath_table_drops_non_object_rows() -> None:
     payload = (
         f"{'PRE':>14}  {'':24}  normals-hourly/prefix/\n"
@@ -517,7 +782,10 @@ def test_swath_text_modes_refuse_ambiguous_control_escapes(mode: str) -> None:
     assert b"ambiguous swath" in done.stderr
 
 
-@pytest.mark.parametrize("mode", sorted(load_adapter(REPO, "swath").MODES))
+@pytest.mark.parametrize(
+    "mode",
+    sorted(load_adapter(REPO, "swath").MODES - {mode for tool, mode in DATASET_MODES}),
+)
 def test_swath_treats_a_closed_downstream_as_success(
     monkeypatch: pytest.MonkeyPatch, mode: str
 ) -> None:
@@ -529,7 +797,7 @@ def test_swath_treats_a_closed_downstream_as_success(
     monkeypatch.setattr(adapter, "normalize", broken_pipe)
     monkeypatch.setattr(adapter.sys, "stdin", SimpleNamespace(buffer=io.BytesIO()))
     monkeypatch.setattr(adapter.sys, "stdout", SimpleNamespace(buffer=io.BytesIO()))
-    assert adapter.main(["normalize.py", mode]) == 0
+    assert adapter.main([mode]) == 0
 
 
 # Every (mode, empty payload) pair, minus the one combination that is not an
@@ -573,6 +841,97 @@ def test_a_newline_only_parquet_stream_is_refused() -> None:
     assert done.returncode == 1
     assert done.stdout == b""
     assert b"not readable parquet" in done.stderr
+
+
+def test_a_swath_dataset_without_its_success_marker_is_refused(tmp_path: Path) -> None:
+    """A killed swath run leaves valid-but-short parts and no ``_SUCCESS``.
+
+    Normalizing those parts would produce a clean short listing, which the
+    verifier would read as the tool having missed keys rather than as a run that
+    never finished.
+    """
+    dataset = tmp_path / "listing"
+    (dataset / "data").mkdir(parents=True)
+    (dataset / "data" / "part-w0-00000.parquet").write_bytes(b"PAR1")
+    done = subprocess.run(
+        [str(adapter_path("swath")), "recursive-parquet", "--dataset", str(dataset)],
+        capture_output=True,
+        check=False,
+    )
+    assert done.returncode == 1
+    assert done.stdout == b""
+    assert b"_SUCCESS" in done.stderr
+
+
+@pytest.mark.parametrize("mode", ["recursive-parquet", "recursive-parquet-sorted"])
+def test_swath_dataset_count_and_normalize_accept_native_parent(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mode: str
+) -> None:
+    import duckdb
+
+    native = tmp_path / "native"
+    dataset = native / "listing"
+    (dataset / "data").mkdir(parents=True)
+    part = dataset / "data" / "part-w0-00000.parquet"
+    duckdb.connect().execute(
+        """COPY (
+               SELECT 'object' AS "key", 1::UBIGINT AS "size", 'etag' AS "etag",
+                      TIMESTAMPTZ '2026-03-16 14:41:50+00' AS "last_modified",
+                      'STANDARD' AS "storage_class", 'OBJECT' AS "row_type"
+               UNION ALL
+               SELECT 'prefix/', NULL, NULL, NULL, NULL, 'COMMON_PREFIX'
+           ) TO $part (FORMAT parquet)""",
+        {"part": str(part)},
+    )
+    (dataset / "_SUCCESS").touch()
+
+    by_root = subprocess.run(
+        [str(adapter_path("swath")), mode, "--dataset", str(dataset)],
+        capture_output=True,
+        check=False,
+    )
+    by_parent = subprocess.run(
+        [str(adapter_path("swath")), mode, "--dataset", str(native)],
+        capture_output=True,
+        check=False,
+    )
+    assert by_root.returncode == 0, by_root.stderr
+    assert by_parent.returncode == 0, by_parent.stderr
+    assert by_parent.stdout == by_root.stdout
+    assert len(by_parent.stdout.splitlines()) == 1
+
+    adapter = load_adapter(REPO, "swath")
+
+    def forbidden(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("dataset count selected or emitted contract records")
+
+    monkeypatch.setattr(duckdb_adapter, "Record", forbidden)
+    monkeypatch.setattr(adapter, "emit_result", forbidden)
+    assert adapter.count_rows(b"", mode, native_root=str(native)) == 1
+
+
+def test_count_rows_preserves_malformed_and_row_filter_semantics() -> None:
+    import duckdb
+
+    aws = load_adapter(REPO, "aws-cli")
+    with pytest.raises(duckdb.Error, match="Expected Number of Columns: 5"):
+        aws.count_rows(
+            b'a/b.csv\t12\t"deadbeef"\t2026-03-16T14:41:50+00:00\n',
+            "s3api-v2-text",
+        )
+
+    swath = load_adapter(REPO, "swath")
+    payload = (
+        b"key\tsize\tlast_modified\tetag\tstorage_class\trow_type\n"
+        b"object\t1\t2026-03-16T14:41:50Z\te\tSTANDARD\tOBJECT\n"
+        b"prefix/\t\t\t\t\tCOMMON_PREFIX\n"
+    )
+    assert swath.count_rows(payload, "recursive-tsv") == 1
+    with pytest.raises(ContractViolation, match="ambiguous swath"):
+        swath.count_rows(
+            b"literal\\x09key\t1\t2026-03-16T14:41:50Z\te\tSTANDARD\tOBJECT\n",
+            "recursive-tsv",
+        )
 
 
 def test_a_short_text_row_is_refused_rather_than_padded() -> None:
