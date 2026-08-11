@@ -111,7 +111,7 @@ class ToolPlan:
         }
 
     @classmethod
-    def from_json(cls, document: dict[str, Any]) -> ToolPlan:
+    def from_json(cls, document: dict[str, Any], repository: str | None = None) -> ToolPlan:
         """Re-validate a plan read back from disk.
 
         A plan crosses a job boundary as a file, and everything downstream — the
@@ -123,6 +123,10 @@ class ToolPlan:
         try:
             for key in ("tool_tag", "execution_tag", "execution_channel_tag"):
                 tag_grammar.validate_tag(document[key])
+                # Grammar alone is not enough: these strings become `--tag`
+                # arguments, so each must name the repository this plan is for.
+                if repository is not None and not document[key].startswith(f"{repository}:"):
+                    raise CIError(f"{document['tool']}: {key} does not name {repository}")
             for key in ("tool_digest", "execution_digest"):
                 value = document[key]
                 if value is not None and tag_grammar.DIGEST_RE.fullmatch(value) is None:
@@ -213,9 +217,14 @@ class Plan:
             raise CIError("unsupported image build plan schema")
         try:
             shared = document["shared"]
-            tag_grammar.validate_repository(document["repository"])
-            tag_grammar.validate_tag(shared["tag"])
-            tag_grammar.validate_tag(document["set_channel_tag"])
+            repository = tag_grammar.validate_repository(document["repository"])
+            for key, value in (
+                ("shared tag", shared["tag"]),
+                ("set_channel_tag", document["set_channel_tag"]),
+            ):
+                tag_grammar.validate_tag(value)
+                if not value.startswith(f"{repository}:"):
+                    raise CIError(f"{key} does not name {repository}")
             if shared["digest"] is not None and (
                 tag_grammar.DIGEST_RE.fullmatch(shared["digest"]) is None
             ):
@@ -228,7 +237,7 @@ class Plan:
                 shared_tag=shared["tag"],
                 shared_digest=shared["digest"],
                 set_channel_tag=document["set_channel_tag"],
-                tools=tuple(ToolPlan.from_json(item) for item in document["tools"]),
+                tools=tuple(ToolPlan.from_json(item, repository) for item in document["tools"]),
             )
         except (KeyError, TypeError) as exc:
             raise CIError(f"malformed image build plan: {exc}") from exc

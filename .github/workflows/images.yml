@@ -375,27 +375,37 @@ jobs:
         id: ledger
         env:
           LEDGER_TAG: ${{ steps.ledger-tag.outputs.version-tag }}
+          LEDGER_EXISTS: ${{ steps.ledger-tag.outputs.exists }}
+          LEDGER_EXISTING_DIGEST: ${{ steps.ledger-tag.outputs.existing-digest }}
+          # Without this BuildKit stamps the image config with wall-clock time, so
+          # an identical manifest would still yield a new digest on a re-run.
+          SOURCE_DATE_EPOCH: "315532800"
         run: |
           set -euo pipefail
-          # A dedicated context. The repository's .dockerignore denies `*` and
-          # re-includes only src/, harness/ and three files under tools/, so a
-          # root-level file is invisible to a build rooted at the checkout and the
-          # ledger could never find its own input. Re-including it there instead
-          # would leak it into every derived-image context.
-          rm -rf ledger-context && mkdir ledger-context
-          cp ghcr-publication-manifest.json ledger-context/manifest.json
-          touch -d '1980-01-01 00:00:00 UTC' ledger-context/manifest.json
-          docker buildx build --provenance=false --sbom=false \
-            --file - --tag "$LEDGER_TAG" --output type=registry \
-            --metadata-file ledger-meta.json ledger-context <<'DOCKERFILE'
+          if [ "$LEDGER_EXISTS" = true ]; then
+            digest="$LEDGER_EXISTING_DIGEST"
+          else
+            # A dedicated context. The repository's .dockerignore denies `*` and
+            # re-includes only src/, harness/ and three files under tools/, so a
+            # root-level file is invisible to a build rooted at the checkout and the
+            # ledger could never find its own input. Re-including it there instead
+            # would leak it into every derived-image context.
+            rm -rf ledger-context && mkdir ledger-context
+            cp ghcr-publication-manifest.json ledger-context/manifest.json
+            touch -d '1980-01-01 00:00:00 UTC' ledger-context/manifest.json
+            docker buildx build --provenance=false --sbom=false \
+              --file - --tag "$LEDGER_TAG" --output type=registry \
+              --metadata-file ledger-meta.json ledger-context <<'DOCKERFILE'
           FROM scratch
           COPY manifest.json /manifest.json
           DOCKERFILE
-          digest=$(uv run python -c 'import json;print(json.load(open("ledger-meta.json"))["containerimage.digest"])')
+            digest=$(uv run python -c 'import json;print(json.load(open("ledger-meta.json"))["containerimage.digest"])')
+          fi
 
-          # Pull the sealed bytes back and compare them. `imagetools inspect --raw`
-          # returns the manifest, not the payload, so it could never have caught a
-          # ledger whose content differed from what we wrote.
+          # Pull the sealed bytes back and compare them, whether we just wrote them
+          # or adopted an earlier publication's. `imagetools inspect --raw` returns
+          # the manifest, not the payload, so it could never catch a ledger whose
+          # content differed from what we assembled.
           docker create --name ledger-check "$GHCR_REPOSITORY@$digest" /manifest.json > /dev/null
           docker cp ledger-check:/manifest.json pulled-ledger.json
           docker rm ledger-check > /dev/null

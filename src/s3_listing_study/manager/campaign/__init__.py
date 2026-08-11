@@ -76,7 +76,16 @@ IMAGE_COMPONENTS = (
     "tool_image_digest",
     "selection_sha256",
 )
-HISTORICAL_IMAGE_COMPONENTS = IMAGE_COMPONENTS[:-2]
+SPLIT_LAYER_COMPONENTS = ("tool_image_digest", "selection_sha256")
+"""The components that only a split-layer (schema 3) image set records.
+
+Named rather than sliced off the end of :data:`IMAGE_COMPONENTS`: appending a
+twelfth component later would otherwise silently redefine both what counts as a
+historical set and which sets are recognised as current.
+"""
+HISTORICAL_IMAGE_COMPONENTS = tuple(
+    name for name in IMAGE_COMPONENTS if name not in SPLIT_LAYER_COMPONENTS
+)
 
 
 class CampaignError(Exception):
@@ -105,7 +114,7 @@ def attempt_fingerprint(*, case_fingerprint: str, components: Mapping[str, Any])
     """
     selected = (
         IMAGE_COMPONENTS
-        if all(name in components for name in IMAGE_COMPONENTS[-2:])
+        if all(name in components for name in SPLIT_LAYER_COMPONENTS)
         else HISTORICAL_IMAGE_COMPONENTS
     )
     missing = sorted(set(selected) - set(components))
@@ -307,7 +316,7 @@ def manifest(
         "attempt_fingerprint_version": (
             ATTEMPT_FINGERPRINT_VERSION
             if all(
-                all(field in image for field in IMAGE_COMPONENTS[-2:]) for image in images.values()
+                all(field in image for field in SPLIT_LAYER_COMPONENTS) for image in images.values()
             )
             else 2
         ),

@@ -7,8 +7,8 @@ shared Debian/Python runtime -> tool image -> execution image
 ```
 
 Each `tools/<tool>/build/Dockerfile` consumes an immutable shared-runtime
-reference and produces a real runnable tool image. It no longer exports a
-scratch `/tool-root` overlay. The generic [`Dockerfile`](Dockerfile) then
+reference and produces a real runnable tool image. The generic
+[`Dockerfile`](Dockerfile) then
 consumes the immutable tool image and adds only the current worker zipapp,
 selected adapter, selection metadata, and root-owned provenance.
 

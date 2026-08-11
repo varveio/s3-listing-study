@@ -925,3 +925,132 @@ def test_a_layout_parent_must_still_be_named_by_digest() -> None:
     for mutable in (f"{REPOSITORY}:some-tag", "not-a-reference", f"{REPOSITORY}@sha256:short"):
         with pytest.raises(BuildSelectionError, match="immutable digest reference"):
             _layout_context(mutable, "/tmp/layout")
+
+
+def test_a_plan_naming_a_foreign_repository_is_refused() -> None:
+    """Tag grammar alone is not enough — these strings become `--tag` arguments."""
+    document = _complete_plan().as_json()
+    document["tools"][0]["execution_channel_tag"] = "ghcr.io/someone/else:execution-aws-cli-main"
+    with pytest.raises(CIError, match="does not name"):
+        Plan.from_json(document)
+
+
+def _published_and_subset(tmp_path: Path) -> tuple[Path, Path]:
+    """A realistic pair: the whole roster published, one tool planned and built."""
+    root = repo_root()
+    base = build_plan(
+        root, repository=REPOSITORY, ref_name="topic/x", is_main_publication=False, existing={}
+    )
+    existing: dict[str, str | None] = {base.shared_tag: DIGEST_A}
+    for item in base.tools:
+        existing[item.tool_tag] = DIGEST_B
+        existing[item.execution_tag] = DIGEST_C
+    published = build_plan(
+        root,
+        repository=REPOSITORY,
+        ref_name="topic/x",
+        is_main_publication=False,
+        existing=existing,
+    )
+    subset_existing = dict(existing)
+    del subset_existing[next(i.execution_tag for i in base.tools if i.tool == "s5cmd")]
+    planned_full = build_plan(
+        root,
+        repository=REPOSITORY,
+        ref_name="topic/x",
+        is_main_publication=False,
+        existing=subset_existing,
+    )
+    planned = replace(planned_full, tools=tuple(t for t in planned_full.tools if t.tool == "s5cmd"))
+    a, b = tmp_path / "planned.json", tmp_path / "published.json"
+    a.write_text(json.dumps(planned.as_json()), encoding="utf-8")
+    b.write_text(json.dumps(published.as_json()), encoding="utf-8")
+    return a, b
+
+
+def test_a_subset_publish_seals_a_whole_ledger_and_says_what_it_built(tmp_path: Path) -> None:
+    """A run may build one tool; the ledger it seals must still describe all eleven.
+
+    The set channel asserts that every execution channel forms one ready
+    publication, so a partial ledger would orphan the rest. What must stay
+    truthful is *which* images this run produced.
+    """
+    planned, published = _published_and_subset(tmp_path)
+    output = tmp_path / "merged.json"
+    assert (
+        ci_cli.main(
+            [
+                "reconcile",
+                "--planned",
+                str(planned),
+                "--published",
+                str(published),
+                "--output",
+                str(output),
+            ]
+        )
+        == 0
+    )
+    merged = json.loads(output.read_text())
+    sources = {item["tool"]: item["reuse_source"] for item in merged["tools"]}
+    assert len(merged["tools"]) == 11
+    assert sources["s5cmd"] == "built"
+    assert {tool for tool, src in sources.items() if src == "adopted"} == (
+        set(buildable_tools(repo_root())) - {"s5cmd"}
+    )
+
+
+def test_reconcile_refuses_a_planned_tool_the_published_set_does_not_cover(
+    tmp_path: Path,
+) -> None:
+    planned, published = _published_and_subset(tmp_path)
+    document = json.loads(published.read_text())
+    document["tools"] = [t for t in document["tools"] if t["tool"] != "s5cmd"]
+    published.write_text(json.dumps(document), encoding="utf-8")
+    assert (
+        ci_cli.main(
+            [
+                "reconcile",
+                "--planned",
+                str(planned),
+                "--published",
+                str(published),
+                "--output",
+                str(tmp_path / "out.json"),
+            ]
+        )
+        == 2
+    )
+
+
+def test_verify_published_reads_identity_from_manifests_and_refuses_a_mismatch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The step that proves a published image is the one the plan named."""
+    plan = _complete_plan()
+    path = tmp_path / "plan.json"
+    path.write_text(json.dumps(plan.as_json()), encoding="utf-8")
+    item = plan.tools[0]
+    labels = {
+        plan.shared_tag: {ci_cli.SHARED_SOURCE_LABEL: plan.shared_source_sha256},
+    }
+    for entry in plan.tools:
+        labels[entry.tool_tag] = {
+            ci_cli.TOOL_BUILD_LABEL: entry.tool_build_sha256,
+            ci_cli.SHARED_SOURCE_LABEL: entry.shared_source_sha256,
+        }
+        labels[entry.execution_tag] = {ci_cli.WORKER_SOURCE_LABEL: entry.worker_source_sha256}
+    monkeypatch.setattr(registry_module, "assert_plain_manifests", lambda _refs: None)
+    monkeypatch.setattr(registry_module, "image_labels", lambda ref: labels[ref])
+    monkeypatch.setattr(registry_module, "image_user", lambda _ref: ci_cli.EXPECTED_USER)
+    monkeypatch.setattr(
+        registry_module, "image_entrypoint", lambda _ref: ci_cli.EXPECTED_ENTRYPOINT
+    )
+    assert ci_cli.main(["verify-published", "--plan", str(path)]) == 0
+
+    labels[item.execution_tag] = {ci_cli.WORKER_SOURCE_LABEL: "0" * 64}
+    assert ci_cli.main(["verify-published", "--plan", str(path)]) == 2
+
+    labels[item.execution_tag] = {ci_cli.WORKER_SOURCE_LABEL: item.worker_source_sha256}
+    monkeypatch.setattr(registry_module, "image_user", lambda _ref: "0:0")
+    assert ci_cli.main(["verify-published", "--plan", str(path)]) == 2

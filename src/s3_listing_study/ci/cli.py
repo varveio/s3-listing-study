@@ -403,10 +403,16 @@ def _reconcile_main(argv: Sequence[str]) -> int:
         raise CIError("planned and published sets name different channels")
     planned_tools = {item.tool for item in planned.tools}
     published_tools = {item.tool for item in published.tools}
-    if planned_tools != published_tools:
+    # A run may build a subset, so the planned set is allowed to be smaller — the
+    # published set is always the whole roster, because the set channel asserts
+    # that every execution channel forms one ready publication and the ledger it
+    # points at must therefore describe all of them. Tools this run did not plan
+    # keep the bucket the registry reports, which is `adopt`; completeness is
+    # enforced by `missing()` below, not by counting names.
+    unknown = planned_tools - published_tools
+    if unknown:
         raise CIError(
-            "planned and published sets cover different tools: "
-            f"{sorted(planned_tools ^ published_tools)}"
+            "planned tools are absent from the published set: " + ", ".join(sorted(unknown))
         )
     buckets = {item.tool: item.bucket for item in planned.tools}
     merged = Plan(
@@ -416,7 +422,10 @@ def _reconcile_main(argv: Sequence[str]) -> int:
         shared_tag=published.shared_tag,
         shared_digest=published.shared_digest,
         set_channel_tag=published.set_channel_tag,
-        tools=tuple(replace(item, planned_bucket=buckets[item.tool]) for item in published.tools),
+        tools=tuple(
+            replace(item, planned_bucket=buckets.get(item.tool, item.bucket))
+            for item in published.tools
+        ),
     )
     missing = merged.missing()
     if missing:
@@ -442,10 +451,18 @@ def _ledger_tag_main(argv: Sequence[str]) -> int:
     except OSError as exc:
         raise CIError(f"cannot read the publication manifest: {exc}") from exc
     manifest_sha256 = hashlib.sha256(payload).hexdigest()
+    version_tag = set_ledger_tag(args.repository, manifest_sha256)
+    # Adopt-if-present, like every other version tag in the system. Republishing
+    # would move an immutable tag: the manifest bytes are identical on a re-run,
+    # so the tag is the same, but a fresh build stamps a new image config and
+    # therefore a new digest — leaving the previous ledger untagged.
+    existing = registry_module.probe(version_tag)
     _write_outputs(
         {
             "manifest-sha256": manifest_sha256,
-            "version-tag": set_ledger_tag(args.repository, manifest_sha256),
+            "version-tag": version_tag,
+            "exists": "true" if existing else "false",
+            "existing-digest": existing or "",
         }
     )
     return 0

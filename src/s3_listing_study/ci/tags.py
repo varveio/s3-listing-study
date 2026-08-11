@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import hashlib
 import re
-from dataclasses import dataclass
 from typing import Final
 
 from s3_listing_study.ci import CIError
@@ -104,23 +103,6 @@ def channel_suffix(ref_name: str, *, is_main_publication: bool) -> str:
     if CHANNEL_SUFFIX_RE.fullmatch(suffix) is None:
         raise CIError(f"invalid sanitized branch tag suffix: {suffix}")
     return suffix
-
-
-@dataclass(frozen=True, slots=True)
-class ToolTags:
-    """Every published reference for one tool, at one exact set of input hashes."""
-
-    tool: str
-    tool_version: str
-    tool_tag_version: str
-    worker_version: str
-    worker_tag_version: str
-    shared_source_sha256: str
-    tool_build_sha256: str
-    worker_source_sha256: str
-    tool_tag: str
-    execution_tag: str
-    execution_channel_tag: str
 
 
 def shared_tag(repository: str, shared_source_sha256: str) -> str:

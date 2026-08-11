@@ -333,8 +333,7 @@ The target boundary defines invalidation:
 | shared runtime | base, every tool image, and every execution image |
 
 Because each child consumes its parent by OCI digest, worker-only builds reuse a
-published or imported tool image without depending on retained BuildKit state.
-registry-backed cache for fresh builders is still open.
+published tool image without depending on retained BuildKit state.
 
 `build/image.json` has an exact field set: `tool`, `tool_version`,
 `shared_base_source_sha256`, `tool_build_sha256`, structured `tool_artifact`,
