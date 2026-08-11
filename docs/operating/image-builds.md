@@ -62,11 +62,11 @@ each tool into one bucket:
   tool is one target in a single `docker buildx bake`.
 - **adopt** — both are published. Nothing is built; the existing digest is used.
 
-An empty bucket costs nothing: the per-tool build matrix is generated from the
-plan, so an empty list creates zero jobs, and the single-job stages appear as
-`skipped` without claiming a runner. The shape of a run on the Actions page is
-therefore the answer to "what changed" — and nothing decides it from which files
-a commit touched, only from what the registry is missing.
+An empty bucket costs nothing. Its stage appears on the run as `skipped` — a
+generated matrix with no entries leaves a single placeholder rather than one job
+per tool — and no runner is claimed. The shape of a run is therefore the answer
+to "what changed", and nothing decides it from which files a commit touched, only
+from what the registry is missing.
 
 Run the same command yourself to see the plan in a second, without spending a
 CI run:
