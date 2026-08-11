@@ -15,6 +15,8 @@ from types import SimpleNamespace
 
 import pytest
 from google.api_core.exceptions import DeadlineExceeded
+from google.cloud import batch_v1
+from google.protobuf.timestamp_pb2 import Timestamp
 
 ROOT = Path(__file__).resolve().parents[4]
 EXPERIMENT = ROOT / "experiments" / "orchestration" / "snakemake"
@@ -427,6 +429,42 @@ def test_poll_preserves_normal_states(state: str, yielded: bool, terminal: str |
         assert events[-2:] == ["saved", terminal]
 
 
+def test_poll_logs_later_second_event_with_smaller_nanosecond_remainder() -> None:
+    first_event = batch_v1.StatusEvent(
+        type_="RUNNING",
+        description="first",
+        event_time=Timestamp(seconds=10, nanos=900),
+    )
+    second_event = batch_v1.StatusEvent(
+        type_="UPDATED",
+        description="second",
+        event_time=Timestamp(seconds=11, nanos=100),
+    )
+    first_response = SimpleNamespace(
+        status=SimpleNamespace(
+            state=SimpleNamespace(name="RUNNING"), status_events=[first_event]
+        )
+    )
+    executor, events = _poll_executor(first_response)
+    submitted = SimpleNamespace(
+        external_jobid="projects/study1/locations/us-east1/jobs/job1",
+        aux={"logfile": "job.log", "last_seen": None},
+    )
+
+    assert _collect_poll(executor, submitted) == [submitted]
+    submitted.aux["last_seen"] = list(submitted.aux["last_seen"])
+    executor.batch.get_job = lambda *, request: SimpleNamespace(
+        status=SimpleNamespace(
+            state=SimpleNamespace(name="RUNNING"), status_events=[first_event, second_event]
+        )
+    )
+    assert _collect_poll(executor, submitted) == [submitted]
+
+    assert submitted.aux["last_seen"] == (11, 100)
+    assert events.count("info:RUNNING: first") == 1
+    assert events.count("info:UPDATED: second") == 1
+
+
 def test_remote_source_layout_is_narrow_and_host_independent() -> None:
     snakefile = (EXPERIMENT / "Snakefile").read_text(encoding="utf-8")
     workflow_support = (EXPERIMENT / "scripts" / "workflow.py").read_text(encoding="utf-8")
@@ -463,9 +501,11 @@ def _checked_in_profile_dry_run(
     target_count: int = 1,
     dry_run: bool = True,
     nested: bool = False,
+    nested_split_paths: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     compiled, campaign, _ = _compiled(tmp_path)
     run_dir = ROOT / ".snakemake" / "runs" / f"executor-test-{uuid.uuid4().hex}"
+    split_run_dir = None
     run_dir.mkdir(parents=True)
     try:
         campaign_path = run_dir / "campaign.json"
@@ -484,6 +524,12 @@ def _checked_in_profile_dry_run(
             )
         if nested:
             row = campaign["attempts"][0]
+            nested_profile_path = profile_path
+            if nested_split_paths:
+                split_run_dir = run_dir.parent / f"{run_dir.name}-split"
+                split_run_dir.mkdir()
+                nested_profile_path = split_run_dir / profile_path.name
+                nested_profile_path.write_bytes(profile_path.read_bytes())
             target_job = "attempt:" + ",".join(
                 f"{key}={row[key]}"
                 for key in ("bucket", "tool", "case_id", "run_ordinal")
@@ -501,7 +547,7 @@ def _checked_in_profile_dry_run(
                 "1",
                 "--config",
                 f"campaign_path={campaign_path.relative_to(ROOT)}",
-                f"execution_profile_path={profile_path.relative_to(ROOT)}",
+                f"execution_profile_path={nested_profile_path.relative_to(ROOT)}",
                 f"campaign_sha256={hashlib.sha256(campaign_path.read_bytes()).hexdigest()}",
                 f"execution_sha256={hashlib.sha256(profile_path.read_bytes()).hexdigest()}",
                 *extra_args,
@@ -525,7 +571,10 @@ def _checked_in_profile_dry_run(
         if dry_run:
             command.append("--dry-run")
         environment = os.environ.copy()
-        environment["S3_STUDY_RUN_DIR"] = run_dir.relative_to(ROOT).as_posix()
+        if nested:
+            environment.pop("S3_STUDY_RUN_DIR", None)
+        else:
+            environment["S3_STUDY_RUN_DIR"] = run_dir.relative_to(ROOT).as_posix()
         completed = subprocess.run(
             command,
             cwd=ROOT,
@@ -537,6 +586,8 @@ def _checked_in_profile_dry_run(
         return completed
     finally:
         shutil.rmtree(run_dir)
+        if split_run_dir is not None:
+            shutil.rmtree(split_run_dir)
 
 
 def test_checked_in_compute_profile_builds_dag_with_mocked_storage_inventory(
@@ -597,6 +648,17 @@ def test_nested_target_job_reaches_generated_script_without_future_syntax_error(
     assert "from __future__ imports must occur at the beginning" not in output
     assert "nested Snakemake target job" not in output
     assert "nested attempt execution requires" not in output
+    assert "S3_STUDY_RUN_DIR is required" not in output
+
+
+def test_nested_target_job_rejects_frozen_paths_from_different_run_directories(
+    tmp_path: Path,
+) -> None:
+    completed = _checked_in_profile_dry_run(
+        tmp_path, nested=True, nested_split_paths=True
+    )
+    assert completed.returncode != 0
+    assert "share one frozen run directory" in completed.stdout + completed.stderr
 
 
 @pytest.mark.parametrize(

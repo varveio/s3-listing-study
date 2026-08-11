@@ -64,14 +64,18 @@ fill the schema-2 identity fields from the installed adapter, freeze a new
 prints as the execution digest used by the marker target. This preserves the
 create-only history while making code and dependency changes visible in target
 identity.
-The workflow accepts both frozen inputs only from the same
+The outer workflow accepts both frozen inputs only from the same
 `.snakemake/runs/<run>/` directory beneath its working directory. That ignored,
 in-repository placement lets Snakemake include their exact bytes in the remote
 source archive. `S3_STUDY_RUN_DIR` must be spelled exactly as the canonical
 three-component repository-relative path `.snakemake/runs/<single-name>`; an
 absolute path, traversal, extra nesting, or alternate spelling is rejected
 before DAG construction because it would not be portable inside the extracted
-remote source archive. Keep the generated frozen files uncommitted.
+remote source archive. Nested `SUBPROCESS` execution does not inherit or require
+that operator environment variable: it derives the same canonical run directory
+from the already-frozen `campaign_path` and `execution_profile_path` values in
+the deployed command, and requires those files to share one run directory. Keep
+the generated frozen files uncommitted.
 
 The real trial uses the existing results bucket as a separate diagnostic
 orchestration-evaluation profile. These runs are diagnostics, not production-
@@ -149,8 +153,10 @@ executor compares it with effective job resources, threads, project, region,
 runtime helper and GCS storage settings immediately before submission.
 `--set-resources`, `--set-threads`, provider flags and storage flags therefore
 cannot silently mutate a launch while retaining the frozen digests. Workflow
-configuration paths remain derived from `S3_STUDY_RUN_DIR`; `--config` cannot
-replace them or their hashes.
+For the outer `DEFAULT` invocation, configuration paths remain derived from
+`S3_STUDY_RUN_DIR`; `--config` cannot replace them or their hashes. The nested
+`SUBPROCESS` invocation has no ambient run-directory input and validates the
+canonical deployed paths and their exact hashes from frozen config.
 
 ## Runtime helper and executor
 
@@ -173,7 +179,9 @@ The current immutable subject images are not rebuilt. A small helper image
 copies a locked Snakemake 9.25.1 plus GCS-provider runtime into the Batch
 workdir. The unchanged subject image then invokes nested Snakemake with
 `/usr/bin/python3` and `PYTHONPATH=/tmp/workdir/runtime` as its existing UID
-10001. No Batch runnable downloads packages, and no trailing command can hide
+10001. It reconstructs the deployed run directory from the two frozen config
+paths rather than receiving `S3_STUDY_RUN_DIR` in the Batch environment. No
+Batch runnable downloads packages, and no trailing command can hide
 the nested invocation's exit status. The helper deliberately does not contain
 `s3-listing-study`: `scripts/workflow.py` and `src/s3_listing_study` must come from
 Snakemake's deployed source archive.

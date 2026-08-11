@@ -350,7 +350,8 @@ class StudyGoogleBatchExecutor(GoogleBatchExecutor):
             job_id = submitted.external_jobid
             request = batch_v1.GetJobRequest(name=job_id)
             aux_logs = [submitted.aux["logfile"]]
-            last_seen = submitted.aux["last_seen"]
+            saved_last_seen = submitted.aux["last_seen"]
+            last_seen = None if saved_last_seen is None else tuple(saved_last_seen)
             try:
                 response = self.batch.get_job(request=request)
             except DeadlineExceeded:
@@ -363,9 +364,11 @@ class StudyGoogleBatchExecutor(GoogleBatchExecutor):
 
             self.logger.info(f"Job {job_id} has state {response.status.state.name}")
             for event in response.status.status_events:
-                if not last_seen or event.event_time.nanosecond > last_seen:
+                timestamp = event.event_time.timestamp_pb()
+                event_time = (timestamp.seconds, timestamp.nanos)
+                if last_seen is None or event_time > last_seen:
                     self.logger.info(f"{event.type_}: {event.description}")
-                    last_seen = event.event_time.nanosecond
+                    last_seen = event_time
             submitted.aux["last_seen"] = last_seen
             state = response.status.state.name
             if state in ("FAILED", "SUCCEEDED"):

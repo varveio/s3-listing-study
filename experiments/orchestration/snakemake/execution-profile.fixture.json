@@ -4,7 +4,7 @@
   "aws_credential_secret": "projects/example/secrets/aws-listing/versions/1",
   "executor": {
     "name": "snakemake-executor-plugin-googlebatch-study",
-    "adapter_source_sha256": "661c0f546edb34b4e8c7cbd02dd175f6ea4744a11ab18ecc1f8d7c429837ef59",
+    "adapter_source_sha256": "cc6f084c715c642b4a843dda140e47438bfbeed0cecd4f14c64ac51f27b5b151",
     "adapter_version": "0.1.0",
     "runtime_image": "us-east1-docker.pkg.dev/example/runtime/snakemake@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "snakemake_version": "9.25.1",

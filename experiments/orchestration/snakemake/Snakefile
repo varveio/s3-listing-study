@@ -1,5 +1,6 @@
 import os
 import sys
+from pathlib import Path, PurePosixPath
 
 from snakemake_interface_executor_plugins.settings import ExecMode
 
@@ -30,23 +31,56 @@ def required_config(name):
     return value
 
 
-RUN_DIR = os.environ.get("S3_STUDY_RUN_DIR")
-if not RUN_DIR:
-    raise ValueError("S3_STUDY_RUN_DIR is required")
-EXPECTED_CAMPAIGN_PATH = f"{RUN_DIR}/campaign.json"
-EXPECTED_EXECUTION_PROFILE_PATH = f"{RUN_DIR}/execution-profile.json"
-for name, expected in (
-    ("campaign_path", EXPECTED_CAMPAIGN_PATH),
-    ("execution_profile_path", EXPECTED_EXECUTION_PROFILE_PATH),
-):
-    if required_config(name) != expected:
-        raise ValueError(f"Snakemake --config cannot override frozen {name}")
+MODE = workflow.workflow_settings.exec_mode
+if MODE == ExecMode.DEFAULT:
+    RUN_DIR = os.environ.get("S3_STUDY_RUN_DIR")
+    if not RUN_DIR:
+        raise ValueError("S3_STUDY_RUN_DIR is required")
+    run_dir_parts = PurePosixPath(RUN_DIR).parts
+    if (
+        RUN_DIR != PurePosixPath(RUN_DIR).as_posix()
+        or len(run_dir_parts) != 3
+        or run_dir_parts[:2] != (".snakemake", "runs")
+        or run_dir_parts[2] in (".", "..")
+        or "\\" in RUN_DIR
+    ):
+        raise ValueError(
+            "S3_STUDY_RUN_DIR must be exactly .snakemake/runs/<single-name> "
+            "using canonical repository-relative spelling"
+        )
+    expected_campaign_path = f"{RUN_DIR}/campaign.json"
+    expected_execution_profile_path = f"{RUN_DIR}/execution-profile.json"
+    for name, expected in (
+        ("campaign_path", expected_campaign_path),
+        ("execution_profile_path", expected_execution_profile_path),
+    ):
+        if required_config(name) != expected:
+            raise ValueError(f"Snakemake --config cannot override frozen {name}")
+elif MODE == ExecMode.SUBPROCESS:
+    expected_campaign_path = required_config("campaign_path")
+    expected_execution_profile_path = required_config("execution_profile_path")
+else:
+    raise ValueError("unsupported Snakemake execution mode for frozen launch")
 
 CAMPAIGN_PATH, EXECUTION_PROFILE_PATH = deployable_source_paths(
-    EXPECTED_CAMPAIGN_PATH,
-    EXPECTED_EXECUTION_PROFILE_PATH,
+    expected_campaign_path,
+    expected_execution_profile_path,
     working_directory=os.getcwd(),
 )
+if (
+    expected_campaign_path != CAMPAIGN_PATH
+    or expected_execution_profile_path != EXECUTION_PROFILE_PATH
+):
+    if MODE == ExecMode.DEFAULT:
+        raise ValueError(
+            "S3_STUDY_RUN_DIR and its parent directories must not be symlinks"
+        )
+    else:
+        raise ValueError(
+            "nested Snakemake config paths must use canonical "
+            ".snakemake/runs/<single-name>/ filenames"
+        )
+RUN_DIR = Path(CAMPAIGN_PATH).parent.as_posix()
 # Nested Snakemake receives paths relative to the deployed archive root rather
 # than absolute paths from the submitting host.
 config["campaign_path"] = CAMPAIGN_PATH
@@ -92,7 +126,7 @@ MARKER_PATTERN = (
 
 
 def validate_exact_target():
-    mode = workflow.workflow_settings.exec_mode
+    mode = MODE
     targets = tuple(workflow.dag_settings.targets)
     target_jobs = tuple(workflow.dag_settings.target_jobs)
     if mode == ExecMode.DEFAULT:
@@ -118,7 +152,7 @@ def validate_exact_target():
 
 def validate_executor_and_campaign_input():
     validate_exact_target()
-    mode = workflow.workflow_settings.exec_mode
+    mode = MODE
     plugin = workflow.executor_plugin
     executor_name = None if plugin is None else plugin.name
     if mode == ExecMode.DEFAULT:
