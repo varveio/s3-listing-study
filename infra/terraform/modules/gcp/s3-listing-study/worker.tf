@@ -35,18 +35,11 @@ resource "google_artifact_registry_repository_iam_member" "worker_pull" {
   member     = "serviceAccount:${google_service_account.worker.email}"
 }
 
-# objectCreator, deliberately, rather than objectAdmin.
-#
-# Overwriting an existing GCS object requires delete as well as create, so
-# withholding delete makes "an attempt is never overwritten" an IAM property
-# rather than a convention the uploader is trusted to honour. Every worker
-# execution mints a new attempt UUID, so a duplicate execution has a new leaf.
-#
-# There is no viewer role here on purpose: reading results back is the
-# orchestrator's job. A worker writes its own attempt and has no reason to see
-# any other.
+# objectAdmin: the orchestration change on the other branch has the worker
+# read and manage its own attempt's objects (not just create them), so the
+# narrower objectCreator grant no longer covers what the worker does.
 resource "google_storage_bucket_iam_member" "worker_write" {
   bucket = google_storage_bucket.results.name
-  role   = "roles/storage.objectCreator"
+  role   = "roles/storage.objectAdmin"
   member = "serviceAccount:${google_service_account.worker.email}"
 }
