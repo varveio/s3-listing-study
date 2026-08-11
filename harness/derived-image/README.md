@@ -42,10 +42,11 @@ hash in `/opt/s3-listing-study/image-provenance.json`. New provenance uses
 schema 2; schema-1 provenance remains readable. The worker source hash is an
 image-assembly identity, not a field in an individual attempt's `result.json`.
 
-Benchmark results and campaign image sets have a separate compatibility
-contract: current results/image sets use schema 3, while their historical
-schema-2 readers remain supported. Publication ledgers avoid that vocabulary;
-they carry a kind-specific `format_version` instead.
+Benchmark results and campaign image sets have separate compatibility
+contracts: historical result and image-provenance schemas remain readable, but
+retired campaign image-set inputs do not. Current campaign image sets require
+split-layer schema 3. Publication ledgers avoid that vocabulary; they carry a
+kind-specific `format_version` instead.
 
 ## GHCR tags and publication
 

@@ -17,15 +17,14 @@ recorded in ``result.json`` and the manifest as well.
 
 **An address is not an identity.** A path names a case in the plan's own
 vocabulary, readable by someone who has the plan open; the image is deliberately
-absent from it and recorded in ``result.json`` instead. The manager names an
+absent from it and recorded in ``result.json`` instead. The campaign names an
 intentional ``run-N`` directory; the UUID leaf below it is named by the worker
-at execution. Batch may re-execute a task (``BATCH_TASK_RETRY_ATTEMPT``), so a
-submitter-chosen execution leaf would be written twice — refused by the
+at execution. A scheduler may re-execute a task, so a scheduler-chosen
+execution leaf would be written twice — refused by the
 create-only upload only after the duplicate run had already cost what it cost.
 
-**Nothing is deleted and nothing is overwritten.** A submission that produced
-no artifacts re-submits under a new job ID and targets the same, still-empty
-path; a submission that did produce them needs no retry, since a tool exiting
+**Nothing is deleted and nothing is overwritten.** A retry targets the same
+planned path; a completed execution needs no retry, since a tool exiting
 nonzero is a recorded outcome rather than a failure to run.
 """
 
@@ -40,7 +39,7 @@ from typing import Any
 
 from s3_listing_study.manager.bench.plan import Case, Plan
 
-# Cloud Batch accepts `^[a-z]([a-z0-9-]*[a-z0-9])?$` and at most 63 characters.
+# Workflow job resources accept `^[a-z]([a-z0-9-]*[a-z0-9])?$` and at most 63 characters.
 # A case id carries `.` and `_` and reaches 46 characters on its own, so
 # `bucket-tool-case_id` is already 66 before a campaign name exists: a job id
 # cannot be the case's identity, and is built to a budget instead.
@@ -76,16 +75,6 @@ IMAGE_COMPONENTS = (
     "tool_image_digest",
     "selection_sha256",
 )
-SPLIT_LAYER_COMPONENTS = ("tool_image_digest", "selection_sha256")
-"""The components that only a split-layer (schema 3) image set records.
-
-Named rather than sliced off the end of :data:`IMAGE_COMPONENTS`: appending a
-twelfth component later would otherwise silently redefine both what counts as a
-historical set and which sets are recognised as current.
-"""
-HISTORICAL_IMAGE_COMPONENTS = tuple(
-    name for name in IMAGE_COMPONENTS if name not in SPLIT_LAYER_COMPONENTS
-)
 
 
 class CampaignError(Exception):
@@ -101,7 +90,7 @@ def validate_campaign_id(campaign: str) -> str:
     if len(campaign) > CAMPAIGN_MAX:
         raise CampaignError(
             f"campaign id {campaign!r} is {len(campaign)} characters, over the {CAMPAIGN_MAX} "
-            "a Batch job id can spare"
+            "a workflow job id can spare"
         )
     return campaign
 
@@ -112,27 +101,20 @@ def attempt_fingerprint(*, case_fingerprint: str, components: Mapping[str, Any])
     Separate from the case fingerprint rather than replacing it, so a plan stays
     readable without a registry: `resolve-plan` still contacts nothing.
     """
-    selected = (
-        IMAGE_COMPONENTS
-        if all(name in components for name in SPLIT_LAYER_COMPONENTS)
-        else HISTORICAL_IMAGE_COMPONENTS
-    )
-    missing = sorted(set(selected) - set(components))
+    missing = sorted(set(IMAGE_COMPONENTS) - set(components))
     if missing:
         raise CampaignError(f"image components are missing {', '.join(missing)}")
     payload = {
-        "attempt_fingerprint_version": (
-            ATTEMPT_FINGERPRINT_VERSION if selected is IMAGE_COMPONENTS else 2
-        ),
+        "attempt_fingerprint_version": ATTEMPT_FINGERPRINT_VERSION,
         "case_fingerprint": case_fingerprint,
-        "image": {name: components[name] for name in selected},
+        "image": {name: components[name] for name in IMAGE_COMPONENTS},
     }
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _slug(case_id: str) -> str:
-    """A case id reduced to what a Batch job id accepts, for reading in a console.
+    """A case id reduced to what a workflow job id accepts, for operator readability.
 
     Lossy on purpose: the hash beside it carries uniqueness, and the campaign
     manifest carries the truth. This only has to get a reader to the right row.
@@ -152,10 +134,11 @@ def job_id(
 ) -> str:
     """``c-2026-08-10-first-swath-recursive-pa-1f4a9c02-r1-s1``.
 
-    ``submission`` counts re-submissions of one attempt, never runs of it: a job
-    id is not deleted and not reused, so a job that failed to start leaves its
-    name spent. It appears nowhere in the artifact path, which names the attempt
-    rather than the try that produced it.
+    ``submission`` distinguishes explicitly planned submission generations of
+    one attempt, never intentional runs or scheduler retries. The resulting ID
+    is stable campaign provenance and may be reused across workflow restarts;
+    an executor gives each provider resource its own separate operational ID.
+    Submission is absent from the artifact path, which names the planned run.
     """
     validate_campaign_id(campaign)
     if submission < 1 or submission > 99:
@@ -171,7 +154,7 @@ def job_id(
     # Belt and braces: every component is bounded above, so this cannot fire
     # without one of those bounds being wrong.
     if len(rendered) > JOB_ID_MAX or not JOB_ID_RE.fullmatch(rendered):
-        raise CampaignError(f"generated an unusable Batch job id: {rendered!r}")
+        raise CampaignError(f"generated an unusable workflow job id: {rendered!r}")
     return rendered
 
 
@@ -186,7 +169,7 @@ def attempt_prefix(
 
     The bucket is in the path because a campaign covering two plans would
     otherwise collide on ``s5cmd/recursive`` — same tool, same case, different
-    target. The worker appends its own execution UUID under this manager-owned
+    target. The worker appends its own execution UUID under this compiler-planned
     run prefix.
     """
     return f"{campaign_prefix(campaign)}/results/{bucket}/{tool}/{case_id}/run-{run_ordinal}"
@@ -194,7 +177,7 @@ def attempt_prefix(
 
 @dataclass(frozen=True)
 class Attempt:
-    """One manager-assigned run of one case/image: one Batch job."""
+    """One compiler-planned run of one resolved case and frozen image."""
 
     campaign: str
     bucket: str
@@ -237,7 +220,7 @@ class Attempt:
 
 @dataclass(frozen=True)
 class CampaignCompilation:
-    """The pure, canonical result shared by submitters and workflow engines."""
+    """The pure, canonical input consumed by a workflow engine."""
 
     plans: tuple[Plan, ...]
     attempts: tuple[Attempt, ...]
@@ -253,7 +236,7 @@ def attempts_for(
     images: Mapping[str, Mapping[str, Any]],
     submission: int = 1,
 ) -> tuple[Attempt, ...]:
-    """Every manager-assigned run, one per case for each requested ``rep``.
+    """Every compiler-planned run, one per case for each requested ``rep``.
 
     The plan retains ``reps`` as the count, while each concrete job/result uses
     an explicit 1-based ``run_ordinal``. That ordinal distinguishes intentional
@@ -265,7 +248,7 @@ def attempts_for(
         raise CampaignError(
             f"no final per-tool image digest for {', '.join(missing)} — a campaign runs "
             "the images "
-            "it froze, so every tool it submits must be in the image set"
+            "it froze, so every planned tool must be in the image set"
         )
     attempts: list[Attempt] = []
     for case in plan.cases:
@@ -324,13 +307,7 @@ def manifest(
         "schema_version": 3,
         "campaign": validate_campaign_id(campaign),
         "results_bucket": results_bucket,
-        "attempt_fingerprint_version": (
-            ATTEMPT_FINGERPRINT_VERSION
-            if all(
-                all(field in image for field in SPLIT_LAYER_COMPONENTS) for image in images.values()
-            )
-            else 2
-        ),
+        "attempt_fingerprint_version": ATTEMPT_FINGERPRINT_VERSION,
         "provisioning": provisioning,
         "zone": zone,
         "plans": [

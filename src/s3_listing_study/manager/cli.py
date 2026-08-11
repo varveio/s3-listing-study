@@ -55,28 +55,10 @@ def _resolve_plan_main(argv: Sequence[str] | None) -> int:
     return resolve_plan_main(argv)
 
 
-def _submit_campaign_main(argv: Sequence[str] | None) -> int:
-    from s3_listing_study.manager.campaign.cli import submit_campaign_main
-
-    return submit_campaign_main(argv)
-
-
 def _compile_campaign_main(argv: Sequence[str] | None) -> int:
     from s3_listing_study.manager.campaign.cli import compile_campaign_main
 
     return compile_campaign_main(argv)
-
-
-def _watch_campaign_main(argv: Sequence[str] | None) -> int:
-    from s3_listing_study.manager.campaign.watch import watch_campaign_main
-
-    return watch_campaign_main(argv)
-
-
-def _publish_derived_image_main(argv: Sequence[str] | None) -> int:
-    from s3_listing_study.manager.campaign.images import publish_derived_image_main
-
-    return publish_derived_image_main(argv)
 
 
 def _build_shared_image_main(argv: Sequence[str] | None) -> int:
@@ -132,21 +114,6 @@ COMMANDS = (
         "compile-campaign",
         "freeze resolved plans and images as a canonical local campaign",
         _compile_campaign_main,
-    ),
-    Command(
-        "submit-campaign",
-        "freeze and submit one resolved campaign to GCP Batch",
-        _submit_campaign_main,
-    ),
-    Command(
-        "watch-campaign",
-        "watch GCP Batch and update one campaign's ledger states",
-        _watch_campaign_main,
-    ),
-    Command(
-        "publish-derived-image",
-        "build, push, and record one registered derived image",
-        _publish_derived_image_main,
     ),
     Command(
         "upload-attempt",

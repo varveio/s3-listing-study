@@ -50,11 +50,11 @@ def worker_argv(
     term_grace_s: int,
     destination_prefix: str | None = None,
 ) -> list[str]:
-    """Render the argv appended to the fixed execution-image entrypoint.
+    """Build the argv appended to the fixed execution-image entrypoint.
 
-    The input is the serialized campaign row on purpose: both the legacy Batch
-    renderer and a workflow engine consume the exact same frozen request rather
-    than growing scheduler-specific translations of worker flags.
+    The input is the compiler's serialized campaign row so the workflow engine
+    transports one frozen, provider-neutral worker request without translating
+    worker flags into scheduler-specific state.
     """
     resources = attempt["resources"]
     container_memory = resources["container_memory_gb"]

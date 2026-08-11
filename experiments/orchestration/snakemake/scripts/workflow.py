@@ -27,7 +27,6 @@ from s3_listing_study.manager.campaign import (
     job_id,
     validate_campaign_id,
 )
-from s3_listing_study.manager.campaign.batch import N4_BOOT_DISK
 from s3_listing_study.manager.campaign.request import (
     CASE_ENV_KEYS,
     evidence_prefix,
@@ -122,6 +121,7 @@ SECRET_RE = re.compile(
 )
 DEPLOYABLE_RUN_ROOT = Path(".snakemake") / "runs"
 MARKER_ROOT = "markers"
+N4_BOOT_DISK = {"type": "hyperdisk-balanced", "image": "batch-cos"}
 
 
 class WorkflowInputError(ValueError):
@@ -706,36 +706,4 @@ def project_attempt(
         "task_count": "1",
         "parallelism": "1",
         "logs_destination": "CLOUD_LOGGING",
-    }
-
-
-def project_batch_job(job: Mapping[str, Any]) -> dict[str, Any]:
-    """Normalize the current ``render_job`` result for executable parity tests."""
-    group = job["taskGroups"][0]
-    task = group["taskSpec"]
-    container_spec = task["runnables"][0]["container"]
-    allocation = job["allocationPolicy"]
-    policy = allocation["instances"][0]["policy"]
-    location = allocation.get("location", {}).get("allowedLocations", [None])[0]
-    interface = allocation.get("network", {}).get("networkInterfaces", [{}])[0]
-    secret = task.get("environment", {}).get("secretVariables", {}).get("S3_STUDY_AWS_CREDENTIAL")
-    return {
-        "image_uri": container_spec["imageUri"],
-        "worker_argv": container_spec["commands"],
-        "machine_type": policy["machineType"],
-        "cpu_milli": int(task["computeResource"]["cpuMilli"]),
-        "memory_mib": int(task["computeResource"]["memoryMib"]),
-        "container_options": container_spec.get("options"),
-        "boot_disk": policy.get("bootDisk"),
-        "retry_count": task["maxRetryCount"],
-        "max_run_duration": task["maxRunDuration"],
-        "provisioning": policy["provisioningModel"],
-        "zone": location.removeprefix("zones/") if location else None,
-        "network": interface.get("network"),
-        "subnetwork": interface.get("subnetwork"),
-        "service_account": allocation["serviceAccount"]["email"],
-        "secret_resource": secret,
-        "task_count": group["taskCount"],
-        "parallelism": group["parallelism"],
-        "logs_destination": job["logsPolicy"]["destination"],
     }

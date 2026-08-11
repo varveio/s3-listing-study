@@ -23,7 +23,6 @@ from scripts.workflow import (  # noqa: E402
     load_campaign,
     load_execution_profile,
     project_attempt,
-    project_batch_job,
 )
 from snakemake_executor_plugin_googlebatch_study import (  # noqa: E402
     RUNTIME_PATH,
@@ -35,7 +34,6 @@ from snakemake_executor_plugin_googlebatch_study import (  # noqa: E402
 
 from s3_listing_study.manager.bench import plan as bench  # noqa: E402
 from s3_listing_study.manager.campaign import compile_campaign  # noqa: E402
-from s3_listing_study.manager.campaign.batch import BatchConfig, render_job  # noqa: E402
 
 RUNTIME_IMAGE = "us-east1-docker.pkg.dev/study/runtime/snakemake@sha256:" + "f" * 64
 SECRET = "projects/study1/secrets/aws/versions/7"
@@ -115,24 +113,12 @@ def _compiled(tmp_path: Path):
     return compiled, load_campaign(campaign_path), load_execution_profile(profile_path)
 
 
-def test_all_17_real_attempts_render_exact_batch_allocation(tmp_path: Path) -> None:
+def test_all_17_real_attempts_build_exact_batch_requests(tmp_path: Path) -> None:
     compiled, campaign, profile = _compiled(tmp_path)
-    canonical_config = BatchConfig(
-        results_bucket="study-results",
-        anonymous_worker_service_account="worker@study.iam.gserviceaccount.com",
-        authenticated_worker_service_account="auth-worker@study.iam.gserviceaccount.com",
-        aws_credential_secret=SECRET,
-        network="projects/study1/global/networks/study",
-        subnetwork="projects/study1/regions/us-east1/subnetworks/study",
-        provisioning="SPOT",
-        zone="us-east1-b",
-        evidence_object_root="snakemake/evidence/",
-    )
 
     assert len(compiled.attempts) == len(campaign["attempts"]) == 17
     for canonical_attempt, row in zip(compiled.attempts, campaign["attempts"], strict=True):
         projected = project_attempt(campaign, row, profile)
-        canonical = project_batch_job(render_job(canonical_attempt, canonical_config))
         request = build_create_job_request(
             projected,
             project=profile["project"],
@@ -147,34 +133,34 @@ def test_all_17_real_attempts_render_exact_batch_allocation(tmp_path: Path) -> N
         policy = job.allocation_policy.instances[0].policy
         interface = job.allocation_policy.network.network_interfaces[0]
 
-        assert projected["worker_argv"] == canonical["worker_argv"]
-        assert subject.container.image_uri == canonical["image_uri"]
-        assert policy.machine_type == canonical["machine_type"]
-        assert task.compute_resource.cpu_milli == canonical["cpu_milli"]
-        assert task.compute_resource.memory_mib == canonical["memory_mib"]
-        assert task.max_retry_count == canonical["retry_count"] == 0
-        assert f"{int(task.max_run_duration.total_seconds())}s" == canonical["max_run_duration"]
-        assert policy.provisioning_model.name == canonical["provisioning"]
+        assert projected["job_id"] == canonical_attempt.job_id == row["job_id"]
+        assert subject.container.image_uri == projected["image_uri"]
+        assert policy.machine_type == projected["machine_type"]
+        assert task.compute_resource.cpu_milli == projected["cpu_milli"]
+        assert task.compute_resource.memory_mib == projected["memory_mib"]
+        assert task.max_retry_count == projected["retry_count"] == 0
+        assert f"{int(task.max_run_duration.total_seconds())}s" == projected["max_run_duration"]
+        assert policy.provisioning_model.name == projected["provisioning"]
         assert list(job.allocation_policy.location.allowed_locations) == [
-            f"zones/{canonical['zone']}"
+            f"zones/{projected['zone']}"
         ]
-        assert interface.network == canonical["network"]
-        assert interface.subnetwork == canonical["subnetwork"]
-        assert job.allocation_policy.service_account.email == canonical["service_account"]
-        if canonical["boot_disk"] is None:
+        assert interface.network == projected["network"]
+        assert interface.subnetwork == projected["subnetwork"]
+        assert job.allocation_policy.service_account.email == projected["service_account"]
+        if projected["boot_disk"] is None:
             assert not policy.boot_disk
         else:
-            assert policy.boot_disk.type_ == canonical["boot_disk"]["type"]
-            assert policy.boot_disk.image == canonical["boot_disk"]["image"]
-            assert policy.boot_disk.size_gb == canonical["boot_disk"].get("size_gb", 0)
-        expected_options = canonical["container_options"]
+            assert policy.boot_disk.type_ == projected["boot_disk"]["type"]
+            assert policy.boot_disk.image == projected["boot_disk"]["image"]
+            assert policy.boot_disk.size_gb == projected["boot_disk"].get("size_gb", 0)
+        expected_options = projected["container_options"]
         if expected_options:
             for option in ("--memory=", "--memory-swap="):
                 assert option in subject.container.options
         else:
             assert "--memory=" not in subject.container.options
             assert "--memory-swap=" not in subject.container.options
-        expected_secret = canonical["secret_resource"]
+        expected_secret = projected["secret_resource"]
         assert subject.environment.secret_variables.get("S3_STUDY_AWS_CREDENTIAL") == (
             expected_secret or None
         )
@@ -247,6 +233,7 @@ def test_remote_source_layout_is_narrow_and_host_independent() -> None:
     assert 'sys.path.insert(0, "experiments/orchestration/snakemake/scripts")' in snakefile
     assert "from workflow import" in snakefile
     assert 'script:\n        "scripts/run_attempt.py"' in snakefile
+    assert 'worker_argv=lambda wildcards: projection(wildcards)["worker_argv"]' in snakefile
     assert 'MARKER_ROOT = "markers"' in workflow_support
     assert "marker_root" not in snakefile
     assert sorted(

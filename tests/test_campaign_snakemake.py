@@ -1,4 +1,4 @@
-"""Parity between the generic Snakemake projection and the current Batch job."""
+"""The generic Snakemake projection over frozen real campaign rows."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ import subprocess
 import tarfile
 from copy import deepcopy
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -17,6 +18,7 @@ from experiments.orchestration.snakemake.scripts.run_attempt import (
     ResultPointerError,
     write_result_marker,
 )
+from experiments.orchestration.snakemake.scripts.run_attempt import main as run_attempt_main
 from experiments.orchestration.snakemake.scripts.workflow import (
     WorkflowInputError,
     canonical_profile_bytes,
@@ -26,13 +28,11 @@ from experiments.orchestration.snakemake.scripts.workflow import (
     load_execution_profile,
     marker_path,
     project_attempt,
-    project_batch_job,
     require_sha256,
 )
 
 from s3_listing_study.manager.bench import plan as bench
 from s3_listing_study.manager.campaign import compile_campaign
-from s3_listing_study.manager.campaign.batch import BatchConfig, render_job
 
 ROOT = Path(__file__).resolve().parents[1]
 SECRET = "projects/study1/secrets/aws/versions/7"
@@ -106,7 +106,7 @@ def runnable_execution_profile() -> dict[str, object]:
     return profile
 
 
-def test_every_real_plan_attempt_matches_the_existing_batch_projection(tmp_path: Path) -> None:
+def test_every_real_plan_attempt_projects_the_frozen_campaign_and_profile(tmp_path: Path) -> None:
     plan = bench.Plan.load(bench.default_path("noaa-rtma-pds"))
     compiled = compile_campaign(
         campaign="2026-08-11-snake",
@@ -122,29 +122,82 @@ def test_every_real_plan_attempt_matches_the_existing_batch_projection(tmp_path:
     _write_json(profile_path, execution_profile())
     campaign = load_campaign(campaign_path)
     profile = load_execution_profile(profile_path)
-    batch_config = BatchConfig(
-        results_bucket="study-results",
-        anonymous_worker_service_account="worker@study.iam.gserviceaccount.com",
-        authenticated_worker_service_account="auth-worker@study.iam.gserviceaccount.com",
-        aws_credential_secret=SECRET,
-        network="projects/study1/global/networks/study",
-        subnetwork="projects/study1/regions/us-east1/subnetworks/study",
-        provisioning="SPOT",
-        zone="us-east1-b",
-        evidence_object_root="snakemake/evidence/",
-    )
-
     assert len(compiled.attempts) == len(plan.cases) == 17
     for attempt, row in zip(compiled.attempts, campaign["attempts"], strict=True):
         projected = project_attempt(campaign, row, profile)
-        comparable = {
-            key: value
-            for key, value in projected.items()
-            if key not in {"job_id", "vcpus", "output_path", "destination"}
-        }
-        assert comparable == project_batch_job(render_job(attempt, batch_config))
+        resources = row["resources"]
+        assert projected["job_id"] == row["job_id"] == attempt.job_id
+        assert projected["image_uri"] == campaign["images"][row["tool"]]["image_uri"]
+        assert projected["machine_type"] == resources["machine_type"]
+        assert projected["vcpus"] == resources["vcpus"]
+        assert projected["cpu_milli"] == resources["vcpus"] * 1000
+        assert projected["memory_mib"] == resources["memory_gb"] * 1024
+        ceiling = resources["container_memory_gb"]
+        assert projected["container_options"] == (
+            None if ceiling is None else f"--memory={ceiling}g --memory-swap={ceiling}g"
+        )
+        assert projected["boot_disk"] == (
+            profile["n4_boot_disk"] if resources["machine_type"].startswith("n4-") else None
+        )
+        assert projected["retry_count"] == 0
+        assert projected["max_run_duration"] == f"{row['timeout_s'] + 5 + 1800}s"
+        assert projected["provisioning"] == campaign["provisioning"] == profile["provisioning"]
+        assert projected["zone"] == campaign["zone"] == profile["zone"]
+        assert projected["network"] == profile["network"]
+        assert projected["subnetwork"] == profile["subnetwork"]
+        assert projected["service_account"] == (
+            profile["anonymous_worker_service_account"]
+            if row["auth"] == "anonymous"
+            else profile["authenticated_worker_service_account"]
+        )
+        assert projected["secret_resource"] == (
+            None if row["auth"] == "anonymous" else profile["aws_credential_secret"]
+        )
         job_id_position = projected["worker_argv"].index("--job-id") + 1
         assert projected["worker_argv"][job_id_position] == attempt.job_id
+
+
+def test_run_script_passes_worker_argv_to_the_image_owned_attempt_worker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    worker_argv = ["--campaign-id", "2026-08-11-snake", "--job-id", "c-planned-r1-s1"]
+    observed: list[list[str]] = []
+
+    def run(command: list[str], *, check: bool) -> subprocess.CompletedProcess[str]:
+        assert check is False
+        observed.append(command)
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(
+        "experiments.orchestration.snakemake.scripts.run_attempt.subprocess.run", run
+    )
+    monkeypatch.setattr(
+        "experiments.orchestration.snakemake.scripts.run_attempt.write_result_marker",
+        lambda *_args, **_kwargs: None,
+    )
+    context = SimpleNamespace(
+        params=SimpleNamespace(
+            worker_argv=worker_argv,
+            output_path="/tmp/result",
+            destination="gs://study-results/evidence",
+            campaign_id="2026-08-11-snake",
+            job_id="c-planned-r1-s1",
+            case_id="case",
+            case_fingerprint="a" * 64,
+            attempt_fingerprint="b" * 64,
+            run_ordinal=1,
+            submission_number=1,
+            campaign_sha256="c" * 64,
+            execution_sha256="d" * 64,
+        ),
+        output=SimpleNamespace(marker="marker.json"),
+    )
+
+    run_attempt_main(context)
+
+    assert observed == [
+        ["/usr/bin/python3", "-I", "/opt/s3-listing-study/attempt.pyz", *worker_argv]
+    ]
 
 
 def _write_json(path: Path, document: object) -> None:
@@ -311,6 +364,19 @@ def test_remote_deployment_source_archive_is_complete_and_importable(tmp_path: P
     profile_bytes = canonical_profile_bytes(execution)
     campaign_path.write_bytes(campaign_bytes)
     profile_path.write_bytes(profile_bytes)
+    proposed_index = tmp_path / "git-index"
+    index_path = subprocess.run(
+        ["git", "rev-parse", "--git-path", "index"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    shutil.copy2(index_path, proposed_index)
+    archive_env = {**os.environ, "GIT_INDEX_FILE": str(proposed_index)}
+    subprocess.run(
+        ["git", "add", "-u"], cwd=ROOT, env=archive_env, check=True, capture_output=True
+    )
     try:
         completed = subprocess.run(
             [
@@ -337,7 +403,7 @@ def test_remote_deployment_source_archive_is_complete_and_importable(tmp_path: P
             ],
             cwd=ROOT,
             env={
-                **os.environ,
+                **archive_env,
                 "S3_STUDY_RUN_DIR": run.relative_to(ROOT).as_posix(),
                 "S3_STUDY_CAPTURE_SOURCE_ARCHIVE": str(archive),
             },

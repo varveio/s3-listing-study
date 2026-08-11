@@ -1,6 +1,6 @@
 # Snakemake real-campaign workflow
 
-This phase-1 workflow consumes the campaign manager's canonical schema-3
+This phase-1 workflow consumes the campaign compiler's canonical schema-3
 `campaign.json`. It expands the manifest's exact attempt rows before DAG
 construction and covers them with one generic `attempt` rule. Tool modes,
 product/zip resolution, image identity, worker provenance and stable job IDs
@@ -118,8 +118,10 @@ worker identity has bucket-wide `objectAdmin`.
 The local projection covers image digest, worker argv, stable `Attempt.job_id`,
 machine type, CPU milli, scheduling memory, N4 boot disk, container memory and
 swap options, retry zero, maximum duration, provisioning, zone, network,
-service account and secret reference. Tests compare those fields for every
-resolved `noaa-rtma-pds` attempt with the current `render_job()` projection.
+service account and secret reference. Tests derive those fields directly from
+the frozen campaign rows and execution profile for every resolved
+`noaa-rtma-pds` attempt, then check the adapted executor's actual Google Batch
+request against that projection.
 
 ## Runtime helper and executor
 
