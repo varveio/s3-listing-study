@@ -10,6 +10,10 @@ the study and its findings should start at [`../README.md`](../README.md).
   executing any subject or trusted reference container.**
 - [`tool-structure.md`](tool-structure.md) — the authoritative contract for a
   runnable tool directory: what every layer and Markdown file owns.
+- [`image-builds.md`](image-builds.md) — the shared-runtime, tool-parent and
+  execution-image chain: what a change to each rebuilds, how CI decides what to
+  build from what the registry is missing, which events publish and which only
+  validate, and what the published tags mean.
 - [`tool-onboarding.md`](tool-onboarding.md) — the sequence for adding a new
   subject and building its capsule, and for re-deriving one when its upstream
   releases a new version.
