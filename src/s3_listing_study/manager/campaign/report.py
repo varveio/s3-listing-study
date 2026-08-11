@@ -58,7 +58,7 @@ SUBJECT_STATES = (
     "harness_error",
     "unavailable",
 )
-PROVIDER_STATES = ("SUCCEEDED", "FAILED", "unavailable")
+PROVIDER_STATES = ("SUCCEEDED", "FAILED", "NOT_CREATED", "unavailable")
 
 
 class ReportError(RuntimeError):
@@ -471,6 +471,7 @@ async def _activity_view(client: Client, progress: CaseControllerProgress) -> di
             {
                 "controller_state": "failed" if progress.failure_type else "completed",
                 "failure_type": progress.failure_type,
+                "provider_settled": progress.provider_settled,
                 "provider_state": progress.provider_state,
                 "provider_resource_name": progress.provider_resource_name,
             }
@@ -503,24 +504,41 @@ def _validate_progress(
     for item in progress:
         if item.phase not in ("pending", "running", "terminal"):
             raise ReportError(f"Workflow progress for {item.job_id} has an invalid phase")
-        if (
-            item.phase == "terminal"
-            and item.failure_type is None
-            and (
-                item.provider_state not in ("SUCCEEDED", "FAILED")
-                or item.provider_resource_name != expected_resources[item.job_id]
-            )
-        ):
-            raise ReportError(f"Workflow progress for {item.job_id} has no terminal outcome")
-        if item.failure_type is not None and (
-            item.provider_state is not None or item.provider_resource_name is not None
-        ):
-            raise ReportError(f"Workflow progress for {item.job_id} merges failure/provider state")
         if item.phase != "terminal" and any(
             value is not None
             for value in (item.provider_state, item.failure_type, item.provider_resource_name)
         ):
             raise ReportError(f"Workflow progress for {item.job_id} has premature terminal state")
+        if item.phase != "terminal" and item.provider_settled:
+            raise ReportError(f"Workflow progress for {item.job_id} settles prematurely")
+        if item.phase != "terminal":
+            continue
+        if item.provider_settled:
+            if item.provider_state in ("SUCCEEDED", "FAILED"):
+                if item.provider_resource_name != expected_resources[
+                    item.job_id
+                ] or item.failure_type not in (None, "BatchJobCollision"):
+                    raise ReportError(
+                        f"Workflow progress for {item.job_id} has an invalid settled outcome"
+                    )
+            elif item.provider_state == "NOT_CREATED":
+                if item.provider_resource_name is not None or item.failure_type not in (
+                    "PermanentGoogleError",
+                    "BatchJobCollision",
+                ):
+                    raise ReportError(
+                        f"Workflow progress for {item.job_id} has invalid no-effect proof"
+                    )
+            else:
+                raise ReportError(
+                    f"Workflow progress for {item.job_id} has no settled provider outcome"
+                )
+        elif (
+            item.failure_type is None
+            or item.provider_state is not None
+            or item.provider_resource_name is not None
+        ):
+            raise ReportError(f"Workflow progress for {item.job_id} has invalid unsettled outcome")
 
 
 def _list_leaves(bucket: Any, prefix: str) -> list[str]:
@@ -928,13 +946,13 @@ async def observe_once(
     for case, temporal_case, item, controller in zip(
         cases, temporal_input.cases, progress, controllers, strict=True
     ):
-        if item.phase == "terminal" and evidence_cache is not None:
+        if item.provider_settled and evidence_cache is not None:
             evidence = evidence_cache.get(case.job_id)
             if evidence is None:
                 evidence = _evidence(bucket, case, terminal=True)
                 evidence_cache[case.job_id] = evidence
         else:
-            evidence = _evidence(bucket, case, terminal=item.phase == "terminal")
+            evidence = _evidence(bucket, case, terminal=item.provider_settled)
         normalized = evidence.normalized
         rows.append(
             {
@@ -945,10 +963,18 @@ async def observe_once(
                 "run_ordinal": case.run_ordinal,
                 "run_prefix": f"gs://{bucket.name}/{case.prefix}",
                 "provider_resource_name": temporal_case.resource_name,
+                "controller_complete": item.phase == "terminal",
+                "provider_settled": item.provider_settled,
                 "controller": controller,
                 "evidence": evidence.document(),
                 "subject": normalized["subject"] if normalized else None,
                 "metrics": normalized["metrics"] if normalized else None,
+                "operational_success": (
+                    item.provider_settled
+                    and item.failure_type is None
+                    and item.provider_state == "SUCCEEDED"
+                    and evidence.state == "recorded"
+                ),
             }
         )
     controller_counts = dict.fromkeys(CONTROLLER_PHASES, 0)
@@ -970,8 +996,12 @@ async def observe_once(
     all_terminal = all(item.phase == "terminal" for item in progress)
     if status == "completed" and not all_terminal:
         raise ReportError("completed campaign Workflow has nonterminal case progress")
+    controller_complete = status == "completed" and all_terminal
+    provider_settled = all(item.provider_settled for item in progress)
+    report_final = controller_complete and provider_settled
+    operational_success = report_final and all(row["operational_success"] for row in rows)
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "campaign": campaign,
         "campaign_manifest_sha256": manifest.sha256,
         "campaign_digest": owner.campaign_digest,
@@ -981,7 +1011,10 @@ async def observe_once(
             "run_id": owner.run_id,
             "status": status,
         },
-        "complete": status == "completed" and all_terminal,
+        "controller_complete": controller_complete,
+        "provider_settled": provider_settled,
+        "report_final": report_final,
+        "operational_success": operational_success,
         "aggregate": {
             "cases_total": len(rows),
             "controller": controller_counts,
@@ -994,6 +1027,8 @@ async def observe_once(
 
 
 def _publish(bucket: Any, campaign: str, report: Mapping[str, Any]) -> None:
+    if report.get("report_final") is not True:
+        raise ReportError("refusing to publish a report without provider settlement")
     content = _canonical_json(report)
     if len(content) > REPORT_MAX_BYTES:
         raise ReportError(f"final campaign report exceeds {REPORT_MAX_BYTES} bytes")
@@ -1069,6 +1104,10 @@ async def _run_report(args: argparse.Namespace) -> dict[str, Any]:
         )
         progress_key = (
             workflow_status,
+            report["controller_complete"],
+            report["provider_settled"],
+            report["report_final"],
+            report["operational_success"],
             case_state,
         )
         if args.wait and progress_key != previous_progress:
@@ -1077,6 +1116,12 @@ async def _run_report(args: argparse.Namespace) -> dict[str, Any]:
             print(
                 "report-campaign: "
                 f"workflow={workflow_status} "
+                "finality["
+                f"controller_complete={str(report['controller_complete']).lower()},"
+                f"provider_settled={str(report['provider_settled']).lower()},"
+                f"report_final={str(report['report_final']).lower()},"
+                f"operational_success={str(report['operational_success']).lower()}"
+                "] "
                 "controller["
                 + ",".join(f"{key}={value}" for key, value in controller.items())
                 + "] evidence["
@@ -1085,8 +1130,17 @@ async def _run_report(args: argparse.Namespace) -> dict[str, Any]:
                 file=sys.stderr,
             )
             previous_progress = progress_key
-        if not args.wait or report["complete"]:
+        if not args.wait or report["report_final"]:
             break
+        if report["controller_complete"] and not report["provider_settled"]:
+            unsettled = [row["job_id"] for row in report["cases"] if not row["provider_settled"]]
+            preview = ", ".join(unsettled[:8])
+            suffix = "" if len(unsettled) <= 8 else f" (+{len(unsettled) - 8} more)"
+            raise ReportError(
+                "case controllers completed without provider settlement for "
+                f"{preview}{suffix}; immutable publication remains prohibited; inspect the "
+                "deterministic Batch resources and retain this campaign for recovery"
+            )
         if workflow_status not in ("running", "completed"):
             raise ReportError(
                 f"owned campaign Workflow closed with status {workflow_status} "
@@ -1094,8 +1148,10 @@ async def _run_report(args: argparse.Namespace) -> dict[str, Any]:
             )
         await asyncio.sleep(args.poll_interval_s)
     if args.publish:
-        if not report["complete"]:
-            raise ReportError("refusing to publish a non-final campaign snapshot; use --wait")
+        if not report["report_final"]:
+            raise ReportError(
+                "refusing to publish before every provider effect has settled; use --wait"
+            )
         _publish(bucket, args.campaign, report)
     return report
 

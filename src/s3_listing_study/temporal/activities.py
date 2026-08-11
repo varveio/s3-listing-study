@@ -59,9 +59,10 @@ async def run_batch_job(spec: BatchJobSpec) -> BatchJobOutcome:
     job: batch_v1.Job | None = None
     identity = spec.job.get("labels", {}).get("s3-study-attempt")
     if not isinstance(identity, str) or not identity:
-        raise _collision("expected Batch job omits the full attempt identity label")
+        return BatchJobOutcome(spec.resource_name, "NOT_CREATED", "BatchJobCollision")
     try:
         activity.heartbeat({"job_name": spec.resource_name, "state": "STARTING"})
+        collision = False
         try:
             await client.create_job(
                 parent=parent,
@@ -71,27 +72,38 @@ async def run_batch_job(spec: BatchJobSpec) -> BatchJobOutcome:
                 timeout=20,
             )
         except google_exceptions.AlreadyExists:
-            if info.attempt == 1:
-                raise _collision("Batch job already exists on the first Activity attempt") from None
             adopted = True
+            collision = info.attempt == 1
             activity.heartbeat({"job_name": spec.resource_name, "state": "ADOPTING"})
             job = await client.get_job(name=spec.resource_name, retry=None, timeout=20)
+        except PERMANENT_GOOGLE_ERRORS:
+            # A definitive create rejection proves this request created no provider
+            # effect. Errors after create/adoption are intentionally retryable below.
+            activity.heartbeat({"job_name": spec.resource_name, "state": "NOT_CREATED"})
+            return BatchJobOutcome(spec.resource_name, "NOT_CREATED", "PermanentGoogleError")
         while True:
             if job is None:
                 activity.heartbeat({"job_name": spec.resource_name, "state": "GETTING"})
                 job = await client.get_job(name=spec.resource_name, retry=None, timeout=20)
             if adopted:
-                _validated_adoption(spec, job)
+                try:
+                    _validated_adoption(spec, job)
+                except ApplicationError:
+                    # A conflicting deterministic resource still has to settle before
+                    # its possible effects can be declared final.
+                    collision = True
             state = batch_v1.JobStatus.State(job.status.state).name
             activity.heartbeat({"job_name": spec.resource_name, "state": state})
             if state in TERMINAL_STATES:
-                return BatchJobOutcome(spec.resource_name, state)
+                return BatchJobOutcome(
+                    spec.resource_name,
+                    state,
+                    "BatchJobCollision" if collision else None,
+                )
             await asyncio.sleep(10)
             job = None
     except ApplicationError:
         raise
-    except PERMANENT_GOOGLE_ERRORS as exc:
-        raise ApplicationError(str(exc), type="PermanentGoogleError", non_retryable=True) from None
     finally:
         close = cast(Callable[[], Awaitable[None]], client.transport.close)
         await close()

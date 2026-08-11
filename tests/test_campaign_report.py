@@ -401,7 +401,10 @@ def test_retry_snapshot_does_not_list_or_read_nonterminal_evidence() -> None:
             scope=SCOPE,
         )
     )
-    assert not report["complete"]
+    assert not report["controller_complete"]
+    assert not report["provider_settled"]
+    assert not report["report_final"]
+    assert not report["operational_success"]
     assert report["cases"][0]["controller"] == {
         "phase": "retrying",
         "child_workflow_id": "job-1",
@@ -438,7 +441,7 @@ def test_wait_observations_download_bound_manifest_once() -> None:
                 manifest_cache=manifest_cache,
             )
         )
-        assert not report["complete"]
+        assert not report["report_final"]
     assert bucket.objects[manifest_name].downloads == 1
 
 
@@ -488,11 +491,25 @@ def test_final_report_records_single_missing_and_duplicate_without_raw_reads() -
     bucket = FakeBucket(objects)
     progress = [
         CaseControllerProgress(
-            "job-1", "child-1", "terminal", "SUCCEEDED", None, resource_name("job-1")
+            "job-1",
+            "child-1",
+            "terminal",
+            "SUCCEEDED",
+            None,
+            resource_name("job-1"),
+            True,
         ),
-        CaseControllerProgress("job-2", None, "terminal", None, "ActivityError"),
         CaseControllerProgress(
-            "job-3", "child-3", "terminal", "FAILED", None, resource_name("job-3")
+            "job-2", None, "terminal", "NOT_CREATED", "PermanentGoogleError", None, True
+        ),
+        CaseControllerProgress(
+            "job-3",
+            "child-3",
+            "terminal",
+            "FAILED",
+            None,
+            resource_name("job-3"),
+            True,
         ),
     ]
     client = FakeTemporalClient(progress, [])
@@ -508,7 +525,11 @@ def test_final_report_records_single_missing_and_duplicate_without_raw_reads() -
             evidence_cache=evidence_cache,
         )
     )
-    assert report["complete"]
+    assert report["schema_version"] == 2
+    assert report["controller_complete"]
+    assert report["provider_settled"]
+    assert report["report_final"]
+    assert not report["operational_success"]
     assert report["campaign_manifest_sha256"] == hashlib.sha256(manifest_bytes).hexdigest()
     assert report["campaign_digest"] == DIGEST
     assert [case["evidence"]["state"] for case in report["cases"]] == [
@@ -541,7 +562,8 @@ def test_final_report_records_single_missing_and_duplicate_without_raw_reads() -
     assert report["aggregate"]["provider"] == {
         "SUCCEEDED": 1,
         "FAILED": 1,
-        "unavailable": 1,
+        "NOT_CREATED": 1,
+        "unavailable": 0,
     }
     assert not any(name.endswith("stdout.raw.gz") for name in bucket.requested)
     assert bucket.objects[first_result].downloads == 1
@@ -561,16 +583,17 @@ def test_final_report_records_single_missing_and_duplicate_without_raw_reads() -
     assert client.handles == [(CAMPAIGN, "parent-run"), (CAMPAIGN, "parent-run")]
 
 
-def test_terminal_cases_are_not_final_until_parent_workflow_completes() -> None:
+def test_terminal_controller_failure_never_finalizes_unsettled_provider() -> None:
     manifest_bytes, attempts, _image = manifest()
     bucket = FakeBucket(frozen_objects(manifest_bytes, attempts))
     progress = [
         CaseControllerProgress(attempt["job_id"], None, "terminal", None, "failed")
         for attempt in attempts
     ]
+    client = FakeTemporalClient(progress, [])
     report = asyncio.run(
         campaign_report.observe_once(
-            temporal_client=cast(TemporalClient, FakeTemporalClient(progress, [])),
+            temporal_client=cast(TemporalClient, client),
             bucket=bucket,
             campaign=CAMPAIGN,
             owner=owner(),
@@ -578,7 +601,75 @@ def test_terminal_cases_are_not_final_until_parent_workflow_completes() -> None:
         )
     )
     assert report["workflow"]["status"] == "running"
-    assert not report["complete"]
+    assert not report["controller_complete"]
+    assert not report["provider_settled"]
+    assert not report["report_final"]
+    assert bucket.listed == []
+    client.description.status = WorkflowExecutionStatus.COMPLETED
+    unsettled = asyncio.run(
+        campaign_report.observe_once(
+            temporal_client=cast(TemporalClient, client),
+            bucket=bucket,
+            campaign=CAMPAIGN,
+            owner=owner(),
+            scope=SCOPE,
+        )
+    )
+    assert unsettled["controller_complete"]
+    assert not unsettled["provider_settled"]
+    assert not unsettled["report_final"]
+    assert all(case["evidence"]["state"] == "pending" for case in unsettled["cases"])
+    assert bucket.listed == []
+
+
+@pytest.mark.parametrize(
+    "hostile",
+    [
+        CaseControllerProgress(
+            "job-1",
+            "child-1",
+            "terminal",
+            "SUCCEEDED",
+            "PermanentGoogleError",
+            resource_name("job-1"),
+            True,
+        ),
+        CaseControllerProgress("job-1", "child-1", "terminal", "NOT_CREATED", None, None, True),
+        CaseControllerProgress(
+            "job-1", "child-1", "terminal", "NOT_CREATED", "ActivityError", None, True
+        ),
+    ],
+)
+def test_observer_rejects_invalid_settled_provider_failure_combinations(
+    hostile: CaseControllerProgress,
+) -> None:
+    manifest_bytes, attempts, _image = manifest()
+    cases = campaign_report._parse_manifest(
+        manifest_bytes, campaign=CAMPAIGN, results_bucket=BUCKET
+    )
+    temporal_cases = tuple(
+        campaign_report.TemporalCase(
+            "study", "us-east1", item["job_id"], resource_name(item["job_id"])
+        )
+        for item in attempts
+    )
+    progress = [
+        hostile,
+        *[
+            CaseControllerProgress(
+                item["job_id"],
+                f"child-{index}",
+                "terminal",
+                "SUCCEEDED",
+                None,
+                resource_name(item["job_id"]),
+                True,
+            )
+            for index, item in enumerate(attempts[1:], start=2)
+        ],
+    ]
+    with pytest.raises(campaign_report.ReportError, match=r"invalid .*outcome|no-effect proof"):
+        campaign_report._validate_progress(progress, cases, temporal_cases)
 
 
 def test_one_mismatched_or_unsealed_leaf_is_not_recorded() -> None:
@@ -592,8 +683,16 @@ def test_one_mismatched_or_unsealed_leaf_is_not_recorded() -> None:
     }
     bucket = FakeBucket(objects)
     progress = [
-        CaseControllerProgress(attempt["job_id"], None, "terminal", None, "failed")
-        for attempt in attempts
+        CaseControllerProgress(
+            attempt["job_id"],
+            f"child-{index}",
+            "terminal",
+            "SUCCEEDED",
+            None,
+            resource_name(attempt["job_id"]),
+            True,
+        )
+        for index, attempt in enumerate(attempts)
     ]
     report = asyncio.run(
         campaign_report.observe_once(
@@ -920,7 +1019,7 @@ def test_observer_refuses_owner_run_mismatch_before_query_or_harvest() -> None:
 
 def test_publish_uses_create_only_report_commit() -> None:
     bucket = FakeBucket({})
-    report = {"schema_version": 1, "campaign": CAMPAIGN, "complete": True}
+    report = {"schema_version": 2, "campaign": CAMPAIGN, "report_final": True}
     campaign_report._publish(bucket, CAMPAIGN, report)
     blob = bucket.objects[f"campaigns/{CAMPAIGN}/report.json"]
     assert blob.uploads == [
@@ -931,15 +1030,59 @@ def test_publish_uses_create_only_report_commit() -> None:
     ]
 
 
-def test_wait_reports_progress_then_refuses_closed_failed_workflow(
-    monkeypatch: Any, capsys: Any
+def test_publish_refuses_nonfinal_report_before_creating_object() -> None:
+    bucket = FakeBucket({})
+    with pytest.raises(campaign_report.ReportError, match="without provider settlement"):
+        campaign_report._publish(
+            bucket,
+            CAMPAIGN,
+            {"schema_version": 2, "campaign": CAMPAIGN, "report_final": False},
+        )
+    assert f"campaigns/{CAMPAIGN}/report.json" not in bucket.objects
+
+
+@pytest.mark.parametrize(
+    ("workflow_status", "controller_complete", "provider_settled", "cases", "message"),
+    [
+        ("failed", False, False, [], "closed with status failed"),
+        (
+            "completed",
+            True,
+            False,
+            [
+                {
+                    "job_id": "job-1",
+                    "provider_settled": False,
+                    "controller": {
+                        "phase": "terminal",
+                        "activity_attempt": None,
+                        "last_heartbeat": None,
+                    },
+                    "evidence": {"state": "pending"},
+                }
+            ],
+            "completed without provider settlement for job-1",
+        ),
+    ],
+)
+def test_wait_refuses_closed_failure_or_unsettled_provider(
+    monkeypatch: Any,
+    capsys: Any,
+    workflow_status: str,
+    controller_complete: bool,
+    provider_settled: bool,
+    cases: list[dict[str, Any]],
+    message: str,
 ) -> None:
     fake_bucket = SimpleNamespace(name=BUCKET)
     fake_client = object()
     report = {
-        "complete": False,
-        "workflow": {"status": "failed"},
-        "cases": [],
+        "controller_complete": controller_complete,
+        "provider_settled": provider_settled,
+        "report_final": False,
+        "operational_success": False,
+        "workflow": {"status": workflow_status},
+        "cases": cases,
         "aggregate": {
             "controller": {"pending": 0, "running": 0, "retrying": 0, "terminal": 3},
             "evidence": {
@@ -1000,9 +1143,9 @@ def test_wait_reports_progress_then_refuses_closed_failed_workflow(
     args = campaign_report.build_parser().parse_args(
         ["--campaign", CAMPAIGN, "--results-bucket", BUCKET, "--wait"]
     )
-    with pytest.raises(campaign_report.ReportError, match="closed with status failed"):
+    with pytest.raises(campaign_report.ReportError, match=message):
         asyncio.run(campaign_report._run_report(args))
-    assert "workflow=failed" in capsys.readouterr().err
+    assert f"workflow={workflow_status}" in capsys.readouterr().err
 
 
 def test_manager_dispatches_standalone_report_command(monkeypatch: Any) -> None:

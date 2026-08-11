@@ -50,6 +50,16 @@ correctness verification or investigation. Multiple UUID children under one run
 are duplicate executions; the reconciler surfaces all and selects none as
 canonical. See [campaign operations](operating/campaign-operations.md).
 
+**Material reporting-safety change — 2026-08-11.** Controller completion is no
+longer sufficient to finalize absent evidence. A report can be immutable only
+after every deterministic Batch effect is provider-terminal, or after a
+definitive create rejection proves that no effect was produced. Temporal
+Activities retry adoption and observation without a total retry-lifetime bound;
+per-attempt and per-RPC bounds remain. The report exposes controller completion,
+provider settlement, report finality, and operational success separately. This
+change was made before any benchmark campaign was submitted or comparative
+result existed.
+
 ## Evidence language
 
 Current documents use one evidence-strength vocabulary:

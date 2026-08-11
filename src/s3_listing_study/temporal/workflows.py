@@ -20,6 +20,10 @@ from temporalio.workflow import (
 
 from s3_listing_study.temporal import models
 
+SETTLED_PROVIDER_STATES = ("SUCCEEDED", "FAILED")
+NO_EFFECT_PROVIDER_STATE = "NOT_CREATED"
+SETTLEMENT_RETRY_PATCH = "provider-settlement-retry-v1"
+
 
 def _safe_failure_type(error: FailureError) -> str:
     """Return the deepest typed Temporal failure without exposing messages."""
@@ -35,18 +39,29 @@ def _safe_failure_type(error: FailureError) -> str:
 class CaseWorkflow:
     @workflow.run
     async def run(self, request: models.BatchJobSpec) -> models.BatchJobOutcome:
-        result: models.BatchJobOutcome = await workflow.execute_activity(
-            "run_batch_job",
-            request,
-            cancellation_type=ActivityCancellationType.ABANDON,
-            start_to_close_timeout=timedelta(seconds=request.controller_timeout_s),
-            schedule_to_close_timeout=timedelta(seconds=request.controller_timeout_s * 3),
-            heartbeat_timeout=timedelta(seconds=30),
-            retry_policy=RetryPolicy(
+        options: dict[str, Any] = {
+            "cancellation_type": ActivityCancellationType.ABANDON,
+            "start_to_close_timeout": timedelta(seconds=request.controller_timeout_s),
+            "heartbeat_timeout": timedelta(seconds=30),
+            "result_type": models.BatchJobOutcome,
+        }
+        if workflow.patched(SETTLEMENT_RETRY_PATCH):
+            # There is deliberately no schedule-to-close bound. Once a deterministic
+            # Batch job may exist, the controller must keep adopting and observing it
+            # until the provider settles. Each individual Activity attempt and RPC is
+            # still bounded.
+            options["retry_policy"] = RetryPolicy(maximum_attempts=0)
+        else:
+            # Replay compatibility for retained pre-settlement-safety histories.
+            options["schedule_to_close_timeout"] = timedelta(
+                seconds=request.controller_timeout_s * 3
+            )
+            options["retry_policy"] = RetryPolicy(
                 maximum_attempts=8,
                 non_retryable_error_types=("PermanentGoogleError", "BatchJobCollision"),
-            ),
-            result_type=models.BatchJobOutcome,
+            )
+        result: models.BatchJobOutcome = await workflow.execute_activity(
+            "run_batch_job", request, **options
         )
         return result
 
@@ -87,12 +102,22 @@ class CampaignWorkflow:
                     "terminal",
                     None,
                     _safe_failure_type(exc),
+                    None,
+                    False,
                 )
             )
         else:
-            if outcome.resource_name != case.resource_name or outcome.state not in (
-                "SUCCEEDED",
-                "FAILED",
+            terminal_job = outcome.state in SETTLED_PROVIDER_STATES
+            valid_terminal_job = terminal_job and outcome.failure_type in (
+                None,
+                "BatchJobCollision",
+            )
+            valid_no_effect = (
+                outcome.state == NO_EFFECT_PROVIDER_STATE
+                and outcome.failure_type in ("PermanentGoogleError", "BatchJobCollision")
+            )
+            if outcome.resource_name != case.resource_name or not (
+                valid_terminal_job or valid_no_effect
             ):
                 self._replace_progress(
                     models.CaseControllerProgress(
@@ -101,6 +126,8 @@ class CampaignWorkflow:
                         "terminal",
                         None,
                         "InvalidBatchJobOutcome",
+                        None,
+                        False,
                     )
                 )
             else:
@@ -110,8 +137,9 @@ class CampaignWorkflow:
                         handle.first_execution_run_id,
                         "terminal",
                         outcome.state,
-                        None,
-                        outcome.resource_name,
+                        outcome.failure_type,
+                        outcome.resource_name if terminal_job else None,
+                        True,
                     )
                 )
 
@@ -143,7 +171,13 @@ class CampaignWorkflow:
             except WorkflowAlreadyStartedError as exc:
                 self._replace_progress(
                     models.CaseControllerProgress(
-                        case.job_id, None, "terminal", None, _safe_failure_type(exc)
+                        case.job_id,
+                        None,
+                        "terminal",
+                        None,
+                        _safe_failure_type(exc),
+                        None,
+                        False,
                     )
                 )
                 continue

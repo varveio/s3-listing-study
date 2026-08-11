@@ -27,6 +27,7 @@ class CampaignWorkflowInput:
 class BatchJobOutcome:
     resource_name: str
     state: str
+    failure_type: str | None = None
 
 
 @dataclass(frozen=True)
@@ -37,3 +38,4 @@ class CaseControllerProgress:
     provider_state: str | None
     failure_type: str | None
     provider_resource_name: str | None = None
+    provider_settled: bool = False
