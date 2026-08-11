@@ -232,6 +232,52 @@ def test_retry_update_uses_original_case_and_exact_submission(
     assert calls[0][2]["id"] == "retry-job-s1-s2"
 
 
+def test_retry_rejects_duplicate_submission_option(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit):
+        campaign_control.retry_case_main(
+            [
+                "--campaign",
+                "campaign",
+                "--results-bucket",
+                "results",
+                "--job-id",
+                "job-s1",
+                "--submission",
+                "2",
+                "--submission",
+                "3",
+            ]
+        )
+    assert "--submission may only be specified once" in capsys.readouterr().err
+
+
+def test_retry_reports_malformed_submission_as_command_error(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    async def no_owner(*_args: Any) -> tuple[Any, Any]:
+        pytest.fail("malformed submission resolved a campaign owner")
+
+    monkeypatch.setattr(campaign_control, "_owned_handle", no_owner)
+    assert (
+        campaign_control.retry_case_main(
+            [
+                "--campaign",
+                "campaign",
+                "--results-bucket",
+                "results",
+                "--job-id",
+                "job-s1",
+                "--submission",
+                "not-an-integer",
+            ]
+        )
+        == 1
+    )
+    error = capsys.readouterr().err
+    assert "--submission must be an integer" in error
+    assert "Traceback" not in error
+
+
 def test_finalize_uses_one_owner_bound_update(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[Any, dict[str, Any]]] = []
 
@@ -424,6 +470,23 @@ def test_authenticated_configuration_reaches_the_pure_batch_renderer(
     assert allocation["network"]["networkInterfaces"][0]["network"].endswith("/benchmark")
     assert task["environment"]["secretVariables"]["S3_STUDY_AWS_CREDENTIAL"].endswith("/versions/7")
     assert task["maxRunDuration"] == "3682s"
+
+
+def test_post_attempt_allowance_rejects_duplicate_option(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan, image_set = write_inputs(tmp_path)
+    with pytest.raises(SystemExit):
+        campaign_cli.build_parser().parse_args(
+            [
+                *arguments(plan, image_set),
+                "--post-attempt-allowance-s",
+                "60",
+                "--post-attempt-allowance-s",
+                "90",
+            ]
+        )
+    assert "--post-attempt-allowance-s may only be specified once" in capsys.readouterr().err
 
 
 def test_prepare_rejects_empty_and_duplicate_job_sets(

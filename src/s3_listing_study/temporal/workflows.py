@@ -145,8 +145,14 @@ class CampaignWorkflow:
 
     @staticmethod
     def _retry_spec(case: models.BatchJobSpec, submission: int) -> models.BatchJobSpec:
+        if submission < 2 or submission > 99:
+            raise ApplicationError(
+                "retry submission must be between 2 and 99",
+                type="InvalidRetryRequest",
+                non_retryable=True,
+            )
         stem, separator, original = case.job_id.rpartition("-s")
-        if not separator or original != "1" or submission < 2:
+        if not separator or original != "1":
             raise ApplicationError(
                 "base Batch job ID is not a submission-1 identity",
                 type="InvalidRetryRequest",
@@ -266,6 +272,19 @@ class CampaignWorkflow:
             )
         base = self._base_cases[request.job_id]
         retry = self._retry_spec(base, request.submission)
+        self._replace_progress(
+            models.CaseControllerProgress(
+                request.job_id,
+                None,
+                "pending",
+                None,
+                None,
+                None,
+                False,
+                request.submission,
+                retry.job_id,
+            )
+        )
         return await self._start_case(request.job_id, retry, request.submission)
 
     @workflow.update
@@ -400,8 +419,11 @@ class CampaignWorkflow:
                     await workflow.sleep(START_WAVE_DELAY)
             await workflow.wait_condition(
                 lambda: (
-                    self._watcher_failure is not None
-                    or all(item.phase == "terminal" for item in self._progress)
+                    workflow.all_handlers_finished()
+                    and (
+                        self._watcher_failure is not None
+                        or all(item.phase == "terminal" for item in self._progress)
+                    )
                 )
             )
             if self._watcher_failure is not None:

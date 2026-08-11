@@ -14,7 +14,11 @@ from google.cloud import batch_v1
 from temporalio import activity as temporal_activity
 from temporalio import workflow as temporal_workflow
 from temporalio.client import Client as TemporalClient
-from temporalio.client import WorkflowExecutionStatus
+from temporalio.client import (
+    WorkflowExecutionStatus,
+    WorkflowUpdateFailedError,
+    WorkflowUpdateStage,
+)
 from temporalio.common import WorkflowIDConflictPolicy, WorkflowIDReusePolicy
 from temporalio.exceptions import (
     ActivityError,
@@ -25,6 +29,15 @@ from temporalio.exceptions import (
     WorkflowAlreadyStartedError,
 )
 from temporalio.service import RPCError, RPCStatusCode
+from temporalio.testing import WorkflowEnvironment
+from temporalio.worker import (
+    Interceptor,
+    StartChildWorkflowInput,
+    UnsandboxedWorkflowRunner,
+    Worker,
+    WorkflowInboundInterceptor,
+    WorkflowOutboundInterceptor,
+)
 from temporalio.workflow import (
     ActivityCancellationType,
     ChildWorkflowCancellationType,
@@ -49,11 +62,14 @@ CLIENT_CONFIG: dict[str, Any] = {
     "api_key": "temporal-test-api-key",
     "tls": True,
 }
+REAL_WORKFLOW_PATCHED = temporal_workflow.patched
+REAL_ALL_HANDLERS_FINISHED = temporal_workflow.all_handlers_finished
 
 
 @pytest.fixture(autouse=True)
 def legacy_workflow_patches(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(temporal_workflow, "patched", lambda _patch: False)
+    monkeypatch.setattr(temporal_workflow, "all_handlers_finished", lambda: True)
 
 
 def spec(*, controller_timeout_s: int = 9000) -> BatchJobSpec:
@@ -649,6 +665,143 @@ def test_failed_case_waits_for_targeted_next_submission_then_completes(
     ]
     assert retry_commands[retry_commands.index("--submission-number") + 1] == "2"
     assert retry_commands[retry_commands.index("--destination") + 1] == ("gs://bucket/stable/run-1")
+
+
+def test_retry_update_rejects_submission_above_provider_job_id_limit() -> None:
+    selected = retryable_spec()
+    current = CaseControllerProgress(
+        selected.job_id,
+        "run-99",
+        "awaiting_retry",
+        "FAILED",
+        None,
+        selected.resource_name.removesuffix("-s1") + "-s99",
+        True,
+        99,
+        selected.job_id.removesuffix("-s1") + "-s99",
+    )
+    campaign = workflows.CampaignWorkflow()
+    campaign._retryable = True
+    campaign._base_cases = {selected.job_id: selected}
+    campaign._progress = (current,)
+    retry_case = cast(
+        Callable[[RetryCaseRequest], Awaitable[CaseControllerProgress]],
+        campaign.retry_case,
+    )
+
+    async def exercise() -> None:
+        assert await retry_case(RetryCaseRequest(selected.job_id, 99)) == current
+        with pytest.raises(ApplicationError) as raised:
+            await retry_case(RetryCaseRequest(selected.job_id, 100))
+        assert raised.value.type == "InvalidRetryRequest"
+        assert raised.value.non_retryable
+        assert "between 2 and 99" in str(raised.value)
+
+    asyncio.run(exercise())
+    assert campaign._progress == (current,)
+
+
+def test_campaign_environment_serializes_suspended_retry_against_finalize(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(temporal_workflow, "patched", REAL_WORKFLOW_PATCHED)
+    monkeypatch.setattr(temporal_workflow, "all_handlers_finished", REAL_ALL_HANDLERS_FINISHED)
+    selected = retryable_spec()
+    retry_start_reached = asyncio.Event()
+    allow_retry_start = asyncio.Event()
+    batch_starts: list[str] = []
+
+    @temporal_activity.defn(name="test_pause_retry_child_start")
+    async def pause_retry_child_start() -> None:
+        retry_start_reached.set()
+        await allow_retry_start.wait()
+
+    @temporal_activity.defn(name="ensure_batch_job")
+    async def ensure_batch_job(request: BatchJobSpec) -> BatchJobHandle:
+        batch_starts.append(request.job_id)
+        return BatchJobHandle(request.resource_name, "READY")
+
+    @temporal_activity.defn(name="wait_for_batch_job")
+    async def wait_for_batch_job(handle: BatchJobHandle) -> BatchJobOutcome:
+        state = "FAILED" if handle.resource_name.endswith("-s1") else "SUCCEEDED"
+        return BatchJobOutcome(handle.resource_name, state)
+
+    class PauseRetryStartOutbound(WorkflowOutboundInterceptor):
+        async def start_child_workflow(
+            self, input: StartChildWorkflowInput
+        ) -> temporal_workflow.ChildWorkflowHandle[Any, Any]:
+            if input.id.endswith("-s2"):
+                await temporal_workflow.execute_activity(
+                    "test_pause_retry_child_start",
+                    start_to_close_timeout=timedelta(seconds=30),
+                )
+            return await super().start_child_workflow(input)
+
+    class PauseRetryStartInbound(WorkflowInboundInterceptor):
+        def init(self, outbound: WorkflowOutboundInterceptor) -> None:
+            super().init(PauseRetryStartOutbound(outbound))
+
+    class PauseRetryStartInterceptor(Interceptor):
+        def workflow_interceptor_class(
+            self, _input: Any
+        ) -> type[WorkflowInboundInterceptor] | None:
+            return PauseRetryStartInbound
+
+    async def exercise() -> None:
+        async with (
+            await WorkflowEnvironment.start_time_skipping() as environment,
+            Worker(
+                environment.client,
+                task_queue="retry-finalize-race",
+                workflows=[workflows.CampaignWorkflow, workflows.CaseWorkflow],
+                activities=[pause_retry_child_start, ensure_batch_job, wait_for_batch_job],
+                interceptors=[PauseRetryStartInterceptor()],
+                workflow_runner=UnsandboxedWorkflowRunner(),
+            ),
+        ):
+            handle = await environment.client.start_workflow(
+                workflows.CampaignWorkflow.run,
+                CampaignWorkflowInput((selected,), DIGEST),
+                id="retry-finalize-race",
+                task_queue="retry-finalize-race",
+            )
+            await handle.signal(workflows.CampaignWorkflow.claim, DIGEST)
+            while True:
+                progress = await handle.query(workflows.CampaignWorkflow.progress)
+                if progress[0].phase == "awaiting_retry":
+                    break
+                await asyncio.sleep(0)
+
+            retry_update = await handle.start_update(
+                workflows.CampaignWorkflow.retry_case,
+                RetryCaseRequest(selected.job_id, 2),
+                wait_for_stage=WorkflowUpdateStage.ACCEPTED,
+            )
+            await asyncio.wait_for(retry_start_reached.wait(), timeout=5)
+            reserved = await handle.query(workflows.CampaignWorkflow.progress)
+            assert reserved[0].phase == "pending"
+            assert reserved[0].current_submission == 2
+            assert batch_starts == [selected.job_id]
+
+            with pytest.raises(WorkflowUpdateFailedError) as raised:
+                await handle.execute_update(workflows.CampaignWorkflow.finalize_campaign)
+            assert isinstance(raised.value.cause, ApplicationError)
+            assert raised.value.cause.type == "CampaignStillRunning"
+            assert (await handle.describe()).status == WorkflowExecutionStatus.RUNNING
+            assert batch_starts == [selected.job_id]
+
+            allow_retry_start.set()
+            accepted = await retry_update.result()
+            assert accepted.phase == "running"
+            result = await handle.result()
+            assert result[0].phase == "terminal"
+            assert result[0].current_submission == 2
+            assert batch_starts == [
+                selected.job_id,
+                selected.job_id.removesuffix("-s1") + "-s2",
+            ]
+
+    asyncio.run(exercise())
 
 
 @pytest.mark.parametrize(

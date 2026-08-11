@@ -141,7 +141,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--zone", action=UniqueStoreAction)
     parser.add_argument(
         "--post-attempt-allowance-s",
-        type=int,
+        action=UniqueStoreAction,
         default=1800,
     )
     parser.add_argument("--dry-run", action="store_true")
@@ -497,6 +497,10 @@ def _attempt_label(fingerprint: str) -> str:
 
 
 def _prepare(args: argparse.Namespace, temporal_scope: TemporalScope) -> PreparedCampaign:
+    try:
+        post_attempt_allowance_s = int(args.post_attempt_allowance_s)
+    except (TypeError, ValueError):
+        raise SubmissionError("--post-attempt-allowance-s must be an integer") from None
     loaded_plans = _load_plans(args)
     images = _read_image_set(Path(args.image_set))
     validate_registered_images(images)
@@ -538,7 +542,7 @@ def _prepare(args: argparse.Namespace, temporal_scope: TemporalScope) -> Prepare
         subnetwork=args.subnetwork,
         provisioning=args.provisioning,
         zone=args.zone,
-        post_attempt_allowance_s=args.post_attempt_allowance_s,
+        post_attempt_allowance_s=post_attempt_allowance_s,
     )
     jobs: list[dict[str, Any]] = []
     cases: list[BatchJobSpec] = []

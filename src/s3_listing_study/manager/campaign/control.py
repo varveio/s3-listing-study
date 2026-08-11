@@ -18,6 +18,7 @@ from temporalio.client import Client
 from temporalio.envconfig import ClientConfig
 from temporalio.exceptions import TemporalError
 
+from s3_listing_study.common.argparse_utils import UniqueStoreAction
 from s3_listing_study.manager.campaign import CampaignError, campaign_prefix
 from s3_listing_study.manager.campaign.cli import (
     TEMPORAL_OWNER_MAX_BYTES,
@@ -42,17 +43,17 @@ class ControlError(RuntimeError):
 
 def retry_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="s3-listing-study retry-case", allow_abbrev=False)
-    parser.add_argument("--campaign", required=True)
-    parser.add_argument("--results-bucket", required=True)
-    parser.add_argument("--job-id", required=True)
-    parser.add_argument("--submission", required=True, type=int)
+    parser.add_argument("--campaign", action=UniqueStoreAction, required=True)
+    parser.add_argument("--results-bucket", action=UniqueStoreAction, required=True)
+    parser.add_argument("--job-id", action=UniqueStoreAction, required=True)
+    parser.add_argument("--submission", action=UniqueStoreAction, required=True)
     return parser
 
 
 def finalize_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="s3-listing-study finalize-campaign", allow_abbrev=False)
-    parser.add_argument("--campaign", required=True)
-    parser.add_argument("--results-bucket", required=True)
+    parser.add_argument("--campaign", action=UniqueStoreAction, required=True)
+    parser.add_argument("--results-bucket", action=UniqueStoreAction, required=True)
     return parser
 
 
@@ -101,7 +102,11 @@ async def _owned_handle(campaign: str, results_bucket: str) -> tuple[Any, Any]:
 
 
 async def _retry(args: argparse.Namespace) -> dict[str, Any]:
-    if args.submission < 2:
+    try:
+        submission = int(args.submission)
+    except (TypeError, ValueError):
+        raise ControlError("--submission must be an integer") from None
+    if submission < 2:
         raise ControlError("--submission must be at least 2")
     handle, frozen = await _owned_handle(args.campaign, args.results_bucket)
     manifest, temporal_input = frozen
@@ -112,8 +117,8 @@ async def _retry(args: argparse.Namespace) -> dict[str, Any]:
         raise ControlError("--job-id is not an original frozen manifest job ID")
     result = await handle.execute_update(
         CampaignWorkflow.retry_case,
-        RetryCaseRequest(args.job_id, args.submission),
-        id=f"retry-{args.job_id}-s{args.submission}",
+        RetryCaseRequest(args.job_id, submission),
+        id=f"retry-{args.job_id}-s{submission}",
         rpc_timeout=timedelta(seconds=30),
     )
     return asdict(result)
