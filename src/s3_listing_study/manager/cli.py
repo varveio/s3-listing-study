@@ -79,6 +79,12 @@ def _build_shared_image_main(argv: Sequence[str] | None) -> int:
     return build_shared_image_main(argv)
 
 
+def _ci_main(argv: Sequence[str] | None) -> int:
+    from s3_listing_study.ci.cli import main
+
+    return main(argv)
+
+
 def _upload_attempt_main(argv: Sequence[str] | None) -> int:
     from s3_listing_study.manager.upload import upload_attempt_main
 
@@ -135,6 +141,11 @@ COMMANDS = (
         "upload-attempt",
         "upload a finalized attempt directory to a GCS destination prefix",
         _upload_attempt_main,
+    ),
+    Command(
+        "ci",
+        "plan, bake, verify, and record the image build and publication",
+        _ci_main,
     ),
     Command("check-links", "check repository-local Markdown links", links_main),
     Command("check-source-anchors", "validate source anchors", _source_anchors_main),

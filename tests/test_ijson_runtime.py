@@ -175,7 +175,9 @@ def test_wheel_traversal_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPa
 def test_only_native_campaign_architectures_have_locked_wheels() -> None:
     assert set(ijson_runtime.WHEELS) == {"x86_64", "aarch64"}
     assert ijson_runtime.VERSION == "3.5.1"
-    assert ijson_runtime.PYTHON_TAG == "cp312-cp312"
+    # cp311, not cp312: the shared runtime is Debian's own python3.11, so a
+    # wheel built for 3.12 would not import its compiled yajl2_c backend.
+    assert ijson_runtime.PYTHON_TAG == "cp311-cp311"
     assert ijson_runtime.BACKEND == "yajl2_c"
 
 

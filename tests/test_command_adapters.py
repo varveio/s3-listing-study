@@ -700,7 +700,11 @@ def test_slug_only_builder_registers_exact_named_contexts(
     )
     assert len(calls) == 1
     command = calls[0]
-    assert command[:2] == ("docker", "build")
+    assert command[:3] == ("docker", "buildx", "build")
+    # Attestations are stated, never inherited: BuildKit's default wraps a
+    # registry output in an index, and the study publishes plain image digests.
+    assert "--provenance=false" in command
+    assert "--sbom=false" in command
     assert f"TOOL_IMAGE={base}" in command
     assert f"adapter={REPO / 'tools/aws-cli/adapter'}" in command
     assert f"selection={REPO / 'tools/aws-cli/build'}" in command
@@ -729,7 +733,8 @@ def test_shared_base_builder_embeds_its_canonical_source_hash(
 
     index = command.index("--build-arg")
     assert command[index + 1] == f"SHARED_BASE_SOURCE_SHA256={expected}"
-    assert f"python={python}" in command
+    # No standalone-CPython context: the runtime is Debian's own python3.11.
+    assert not any(argument.startswith("python=") for argument in command)
     assert f"duckdb={duckdb}" in command
     assert f"ijson={ijson}" in command
 
@@ -751,7 +756,7 @@ def test_shared_base_source_hash_includes_ijson_runtime(
 def test_shared_base_cli_reports_ijson_staging_failure(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    def fail(_root: Path, _tag: str) -> tuple[str, ...]:
+    def fail(_root: Path, _tag: str, **_kwargs: object) -> tuple[str, ...]:
         raise IjsonRuntimeError("locked ijson unavailable")
 
     monkeypatch.setattr(build_selection, "shared_base_build_command", fail)
@@ -760,21 +765,71 @@ def test_shared_base_cli_reports_ijson_staging_failure(
 
 
 def test_derived_source_identity_and_workflow_triggers_cover_every_copy_input() -> None:
+    """Both callers must trigger on every input that can change an image.
+
+    The path filters and the identity hashes are two statements of one fact. If a
+    file is copied into an image but does not appear in a trigger, a change to it
+    silently publishes nothing; if it appears in a trigger but not the hash, the
+    tag stops naming its own content. This asserts the first direction for every
+    repository input the two source-identity functions actually read.
+    """
     selection = load_registered_selection(REPO, "aws-cli")
     digest = derived_image_source_sha256(REPO, selection)
     assert re.fullmatch(r"[0-9a-f]{64}", digest)
 
-    workflow = (REPO / ".github/workflows/images-pr.yml").read_text(encoding="utf-8")
-    for trigger in (
+    required = (
         "- .dockerignore",
         "- harness/derived-image/**",
+        "- harness/shared-image/**",
         "- src/s3_listing_study/__init__.py",
         "- src/s3_listing_study/common/**",
         "- src/s3_listing_study/worker/**",
         "- tools/*/adapter/**",
         "- tools/*/build/**",
-    ):
-        assert workflow.count(trigger) == 2
+        # The worker version is read from pyproject and goes straight into the
+        # execution tag, and uv.lock pins the environment the build runs in.
+        "- pyproject.toml",
+        "- uv.lock",
+        # The planner decides what a run builds, so a change to it must re-run.
+        "- src/s3_listing_study/ci/**",
+    )
+    callers = (
+        REPO / ".github/workflows/images-pr.yml",
+        REPO / ".github/workflows/images-publish.yml",
+    )
+    for caller in callers:
+        workflow = caller.read_text(encoding="utf-8")
+        # The reusable workflow itself is a build input: a change to it must
+        # re-run both paths.
+        assert "- .github/workflows/images.yml" in workflow, caller.name
+        for trigger in required:
+            assert workflow.count(trigger) == 1, f"{caller.name} is missing {trigger}"
+
+
+def test_only_the_publish_caller_can_write_packages() -> None:
+    """The permission boundary is a file boundary, not a boolean.
+
+    `permissions:` cannot take an expression, so a single workflow cannot grant
+    write conditionally. Keeping `packages: write` in exactly one file is what
+    makes "ordinary pull-request jobs never publish" enforceable rather than
+    merely intended.
+    """
+
+    def uncommented(path: Path) -> str:
+        return "\n".join(
+            line
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if not line.lstrip().startswith("#")
+        )
+
+    workflows = sorted((REPO / ".github/workflows").glob("*.yml"))
+    writers = [path.name for path in workflows if "packages: write" in uncommented(path)]
+    assert writers == ["images-publish.yml"]
+
+    publish = (REPO / ".github/workflows/images-publish.yml").read_text(encoding="utf-8")
+    # A labelled pull request may publish only from a branch in this repository.
+    assert "github.event.pull_request.head.repo.full_name == github.repository" in publish
+    assert "publish-images" in publish
 
 
 def test_project_and_runtime_package_versions_match() -> None:

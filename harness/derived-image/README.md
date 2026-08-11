@@ -68,9 +68,26 @@ until a separate retention audit decides their fate.
 A relevant push to `main` publishes automatically. Pull requests remain
 build-only unless a same-repository maintainer applies the `publish-images`
 label; `workflow_dispatch` with `publish_to_ghcr=true` is the other explicit
-publication path. Pull-request path filters still apply to the label event: if
-the PR changes none of the image inputs listed in the workflow, applying the
-label starts no publication run because there is no changed image set.
+publication path, and it accepts a `tools` filter so one subject can be
+rebuilt without the other ten.
+
+Applying the label always starts a publication, whether or not that pull
+request changed an image input. The label states an intent — publish this
+branch's set — and an explicit action that silently does nothing is worse than
+one that quickly confirms the set is already published. Where nothing has
+changed, the run resolves every reference, finds the whole set present, and
+advances the branch channels onto the digests that already exist.
+
+What a run actually does is decided by what the registry is missing, not by
+which files changed. `s3-listing-study ci plan` resolves every shared, tool,
+and execution reference over the registry API — no layers, a few hundred
+milliseconds — and each tool lands in one of three buckets: build the parent
+and its child together, bake the worker layer onto a published parent, or adopt
+what is already published. A bucket that comes back empty produces no job, so
+the shape of the run is the answer to what changed. The common case, a change
+under `worker/` or `common/` or an adapter, is one `docker buildx bake` over
+every tool: the parents are fetched by digest, and pushing a child into the
+same repository as its parent uploads only the new layer.
 
 Schedulers append typed logical-request arguments to the fixed entry point:
 

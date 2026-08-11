@@ -19,7 +19,7 @@ import platform
 import re
 import subprocess
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -432,8 +432,62 @@ def tool_image_tag(selection: BuildSelection) -> str:
     )
 
 
+def _buildx_prefix(dockerfile: Path) -> tuple[str, ...]:
+    """The invariant head of every image build this repository performs.
+
+    ``buildx`` is named explicitly rather than relying on ``docker build`` being
+    aliased to it, and attestations are switched off rather than inherited.
+    Left to BuildKit's default, a registry output is wrapped in an OCI *index*
+    carrying a provenance manifest, so the digest that gets published and
+    promoted stops naming the image itself. Every identity claim in this study is
+    a digest, so the shape of what is pushed is stated, not assumed.
+    """
+    return (
+        "docker",
+        "buildx",
+        "build",
+        "--provenance=false",
+        "--sbom=false",
+        "--file",
+        str(dockerfile),
+    )
+
+
+def _buildx_suffix(
+    tag: str | None,
+    output: str | None,
+    metadata_file: str | None,
+    extra_contexts: Mapping[str, str] | None,
+) -> tuple[str, ...]:
+    """Output selection, shared by every build command.
+
+    ``output`` is what distinguishes a pull-request build from a publishing one:
+    ``type=registry`` pushes, ``type=oci,dest=…`` writes a content-addressed
+    layout whose digest a later build can consume, and ``type=cacheonly`` proves
+    only that the build succeeded — which on a pull request is the whole point,
+    because ``validate_selection.py`` runs as a build step and fails the build.
+    """
+    arguments: list[str] = []
+    for name, value in sorted((extra_contexts or {}).items()):
+        arguments.extend(("--build-context", f"{name}={value}"))
+    if tag is not None:
+        arguments.extend(("--tag", tag))
+    if output is not None:
+        arguments.extend(("--output", output))
+    if metadata_file is not None:
+        arguments.extend(("--metadata-file", metadata_file))
+    return tuple(arguments)
+
+
 def tool_image_build_command(
-    root: Path, selection: BuildSelection, tag: str, shared_base_image: str
+    root: Path,
+    selection: BuildSelection,
+    tag: str | None,
+    shared_base_image: str,
+    *,
+    output: str | None = None,
+    metadata_file: str | None = None,
+    extra_contexts: Mapping[str, str] | None = None,
 ) -> tuple[str, ...]:
     """Build one real tool image from an immutable shared-runtime parent."""
     dockerfile = _contained(
@@ -442,24 +496,27 @@ def tool_image_build_command(
     if IMMUTABLE_IMAGE_RE.fullmatch(shared_base_image) is None:
         raise BuildSelectionError("shared base image must be an immutable digest reference")
     return (
-        "docker",
-        "build",
-        "--file",
-        str(dockerfile),
+        *_buildx_prefix(dockerfile),
         "--build-arg",
         f"SHARED_BASE_IMAGE={shared_base_image}",
         "--build-arg",
         f"TOOL_BUILD_SHA256={selection.tool_build_sha256}",
         "--build-context",
         f"tool_build={selection.metadata_path.parent}",
-        "--tag",
-        tag,
+        *_buildx_suffix(tag, output, metadata_file, extra_contexts),
         str(root),
     )
 
 
 def derived_image_build_command(
-    root: Path, selection: BuildSelection, tag: str, tool_image: str
+    root: Path,
+    selection: BuildSelection,
+    tag: str | None,
+    tool_image: str,
+    *,
+    output: str | None = None,
+    metadata_file: str | None = None,
+    extra_contexts: Mapping[str, str] | None = None,
 ) -> tuple[str, ...]:
     """Build the thin worker layer from an immutable tool parent."""
     dockerfile = _contained(
@@ -470,10 +527,7 @@ def derived_image_build_command(
     _, _, digest = tool_image.rpartition("@")
     worker_source_sha256 = derived_image_source_sha256(root, selection)
     return (
-        "docker",
-        "build",
-        "--file",
-        str(dockerfile),
+        *_buildx_prefix(dockerfile),
         "--build-arg",
         f"TOOL_IMAGE={tool_image}",
         "--build-arg",
@@ -488,13 +542,18 @@ def derived_image_build_command(
         f"adapter={selection.adapter_dir}",
         "--build-context",
         f"selection={selection.metadata_path.parent}",
-        "--tag",
-        tag,
+        *_buildx_suffix(tag, output, metadata_file, extra_contexts),
         str(root),
     )
 
 
-def shared_base_build_command(root: Path, tag: str) -> tuple[str, ...]:
+def shared_base_build_command(
+    root: Path,
+    tag: str | None,
+    *,
+    output: str | None = None,
+    metadata_file: str | None = None,
+) -> tuple[str, ...]:
     """Build the one shared runtime image before any per-tool image is built."""
     dockerfile = _contained(
         root / "harness/shared-image/Dockerfile", root, "shared image Dockerfile"
@@ -503,18 +562,14 @@ def shared_base_build_command(root: Path, tag: str) -> tuple[str, ...]:
     duckdb_runtime = ensure_duckdb(platform.machine())
     ijson_runtime = ensure_ijson(platform.machine())
     return (
-        "docker",
-        "build",
-        "--file",
-        str(dockerfile),
+        *_buildx_prefix(dockerfile),
         "--build-arg",
         f"SHARED_BASE_SOURCE_SHA256={source_sha256}",
         "--build-context",
         f"duckdb={duckdb_runtime}",
         "--build-context",
         f"ijson={ijson_runtime}",
-        "--tag",
-        tag,
+        *_buildx_suffix(tag, output, metadata_file, None),
         str(root),
     )
 
@@ -522,12 +577,16 @@ def shared_base_build_command(root: Path, tag: str) -> tuple[str, ...]:
 def build_shared_image_main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="s3-listing-study build-shared-image")
     parser.add_argument("--tag", required=True)
+    parser.add_argument("--output", help="buildx --output specification")
+    parser.add_argument("--metadata-file", help="where buildx writes the resulting digest")
     args = parser.parse_args(argv)
     if not args.tag or "\x00" in args.tag:
         parser.error("--tag must be a non-empty Docker image tag")
     try:
         root = Path.cwd().resolve(strict=True)
-        command = shared_base_build_command(root, args.tag)
+        command = shared_base_build_command(
+            root, args.tag, output=args.output, metadata_file=args.metadata_file
+        )
     except (BuildSelectionError, DuckDBRuntimeError, IjsonRuntimeError) as exc:
         print(f"build-shared-image: {exc}", file=sys.stderr)
         return 2
@@ -547,6 +606,16 @@ def build_derived_image_main(argv: Sequence[str] | None = None) -> int:
         help="output image name; defaults to the name derived from the registration",
     )
     parser.add_argument("--tool-image", required=True)
+    parser.add_argument("--output", help="buildx --output specification")
+    parser.add_argument("--metadata-file", help="where buildx writes the resulting digest")
+    parser.add_argument(
+        "--parent-layout",
+        help=(
+            "an OCI layout directory to satisfy --tool-image from, instead of a registry. "
+            "The parent is still named and recorded by its digest, so the image built here "
+            "is identical to one built against the published parent."
+        ),
+    )
     args = parser.parse_args(argv)
     if args.tag is not None and (not args.tag or "\x00" in args.tag):
         parser.error("--tag must be a non-empty Docker image tag")
@@ -554,7 +623,19 @@ def build_derived_image_main(argv: Sequence[str] | None = None) -> int:
         root = Path.cwd().resolve(strict=True)
         selection = load_registered_selection(root, args.tool)
         tag = derived_image_tag(selection) if args.tag is None else args.tag
-        command = derived_image_build_command(root, selection, tag, args.tool_image)
+        contexts = None
+        if args.parent_layout:
+            _, _, parent_digest = args.tool_image.rpartition("@")
+            contexts = {args.tool_image: f"oci-layout://{args.parent_layout}@{parent_digest}"}
+        command = derived_image_build_command(
+            root,
+            selection,
+            tag,
+            args.tool_image,
+            output=args.output,
+            metadata_file=args.metadata_file,
+            extra_contexts=contexts,
+        )
     except BuildSelectionError as exc:
         print(f"build-derived-image: {exc}", file=sys.stderr)
         return 2
@@ -571,6 +652,12 @@ def build_tool_image_main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--tool", required=True)
     parser.add_argument("--tag")
     parser.add_argument("--shared-base-image", required=True)
+    parser.add_argument("--output", help="buildx --output specification")
+    parser.add_argument("--metadata-file", help="where buildx writes the resulting digest")
+    parser.add_argument(
+        "--parent-layout",
+        help="an OCI layout directory to satisfy --shared-base-image from, instead of a registry",
+    )
     args = parser.parse_args(argv)
     try:
         root = Path.cwd().resolve(strict=True)
@@ -578,7 +665,21 @@ def build_tool_image_main(argv: Sequence[str] | None = None) -> int:
         tag = tool_image_tag(selection) if args.tag is None else args.tag
         if not tag or "\x00" in tag:
             raise BuildSelectionError("--tag must be a non-empty Docker image tag")
-        command = tool_image_build_command(root, selection, tag, args.shared_base_image)
+        contexts = None
+        if args.parent_layout:
+            _, _, parent_digest = args.shared_base_image.rpartition("@")
+            contexts = {
+                args.shared_base_image: f"oci-layout://{args.parent_layout}@{parent_digest}"
+            }
+        command = tool_image_build_command(
+            root,
+            selection,
+            tag,
+            args.shared_base_image,
+            output=args.output,
+            metadata_file=args.metadata_file,
+            extra_contexts=contexts,
+        )
     except BuildSelectionError as exc:
         print(f"build-tool-image: {exc}", file=sys.stderr)
         return 2
