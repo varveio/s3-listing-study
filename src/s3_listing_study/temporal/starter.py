@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import base64
 import hashlib
+from dataclasses import replace
 from pathlib import Path
 
 from temporalio.client import Client, WorkflowExecutionStatus
@@ -19,6 +20,7 @@ from s3_listing_study.temporal import MAX_CASES, TASK_QUEUE, models
 from s3_listing_study.temporal.workflows import CampaignWorkflow
 
 PreparedCampaign = tuple[models.CampaignWorkflowInput, bytes, tuple[tuple[str, bytes], ...]]
+TEMPORAL_ROOT = "temporal"
 
 
 def _attempt_label(fingerprint: str) -> str:
@@ -41,7 +43,7 @@ def prepare(args: argparse.Namespace) -> PreparedCampaign:
     if set(images) != {tool for plan in plans for tool in plan.tools()}:
         raise RuntimeError("image set must exactly cover the selected plan tools")
     generated = tuple(
-        attempt
+        replace(attempt, prefix=f"{TEMPORAL_ROOT}/{attempt.prefix}")
         for plan in plans
         for attempt in attempts_for(plan, campaign=args.campaign, images=images)
     )
@@ -75,6 +77,8 @@ def prepare(args: argparse.Namespace) -> PreparedCampaign:
         provisioning=args.provisioning,
         zone=args.zone,
     )
+    for plan_record in document["plans"]:
+        plan_record["path"] = f"{TEMPORAL_ROOT}/{plan_record['path']}"
     request = models.CampaignWorkflowInput(tuple(cases))
     return request, campaign_cli._canonical_json(document), tuple(plan_inputs)
 
@@ -96,7 +100,8 @@ def build_parser() -> argparse.ArgumentParser:
 async def start(args: argparse.Namespace) -> str:
     request, campaign_bytes, plan_inputs = prepare(args)
     campaign_digest = hashlib.sha256(campaign_bytes).hexdigest()
-    base = f"gs://{args.results_bucket}/{campaign_prefix(args.campaign)}"
+    prefix = f"{TEMPORAL_ROOT}/{campaign_prefix(args.campaign)}"
+    base = f"gs://{args.results_bucket}/{prefix}"
     for bucket, content in plan_inputs:
         campaign_cli._freeze(f"{base}/inputs/plans/{bucket}.yaml", content)
     created = campaign_cli._freeze(f"{base}/campaign.json", campaign_bytes)

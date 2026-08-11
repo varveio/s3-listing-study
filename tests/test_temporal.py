@@ -27,6 +27,7 @@ from temporalio.workflow import (
 )
 
 from s3_listing_study.manager.bench.plan import Plan
+from s3_listing_study.manager.campaign import Attempt
 from s3_listing_study.manager.campaign import cli as campaign_cli
 from s3_listing_study.manager.campaign.batch import BatchConfig
 from s3_listing_study.temporal import TASK_QUEUE, activities, starter, workflows
@@ -249,6 +250,7 @@ def test_starter_freezes_prepared_bytes_and_uses_stable_id_policy(
     assert captured["id_reuse_policy"] is WorkflowIDReusePolicy.REJECT_DUPLICATE
     assert captured["id_conflict_policy"] is WorkflowIDConflictPolicy.FAIL
     assert captured["memo"] == {"campaign_digest": hashlib.sha256(b"{}\n").hexdigest()}
+    assert all("/temporal/campaigns/2026-08-11-trial/" in uri for uri, _data in frozen)
     assert frozen[0][1] == b"old"
 
 
@@ -331,7 +333,8 @@ def test_prepare_passes_explicit_network_pair(
 ) -> None:
     captured: list[BatchConfig] = []
 
-    def render(_attempt: Any, config: BatchConfig) -> dict[str, Any]:
+    def render(selected_attempt: Any, config: BatchConfig) -> dict[str, Any]:
+        assert selected_attempt.prefix.startswith("temporal/campaigns/")
         captured.append(config)
         return spec().job
 
@@ -343,15 +346,24 @@ def test_prepare_passes_explicit_network_pair(
         bucket="bucket",
         tools=lambda: ("aws-cli",),
     )
-    attempt = SimpleNamespace(
-        case=SimpleNamespace(auth="anonymous"), fingerprint="a" * 64, job_id="job"
+    attempt = Attempt(
+        campaign="2026-08-11-trial",
+        bucket="bucket",
+        region="us-east-1",
+        case=cast(Any, SimpleNamespace(auth="anonymous")),
+        image={},
+        fingerprint="a" * 64,
+        job_id="job",
+        submission=1,
+        run_ordinal=1,
+        prefix="campaigns/2026-08-11-trial/results/bucket/aws-cli/case/run-1",
     )
     monkeypatch.setattr(Plan, "load", lambda _path: plan)
     monkeypatch.setattr(campaign_cli, "_read_image_set", lambda _path: {"aws-cli": {}})
     monkeypatch.setattr(campaign_cli, "validate_registered_images", lambda _images: None)
     monkeypatch.setattr(starter, "attempts_for", lambda *_args, **_kwargs: (attempt,))
     monkeypatch.setattr(starter, "render_job", render)
-    monkeypatch.setattr(starter, "manifest", lambda **_kwargs: {})
+    monkeypatch.setattr(starter, "manifest", lambda **_kwargs: {"plans": []})
     args = starter.build_parser().parse_args(
         [
             "--path",
