@@ -408,6 +408,26 @@ def test_owner_create_collision_uses_bounded_exact_read(
         campaign_cli._read_optional_owner("gs://bucket/temporal-owner.json")
 
 
+def test_optional_owner_recognizes_real_gcloud_missing_object_error_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_missing = b"ERROR: (gcloud.storage.cat) The following URLs matched no objects or files:\n"
+    monkeypatch.setattr(
+        campaign_cli,
+        "_run",
+        lambda *_args, **_kwargs: completed(1, stderr=real_missing),
+    )
+    assert campaign_cli._read_optional_owner("gs://bucket/temporal-owner.json") is None
+
+    monkeypatch.setattr(
+        campaign_cli,
+        "_run",
+        lambda *_args, **_kwargs: completed(1, stderr=b"permission denied"),
+    )
+    with pytest.raises(campaign_cli.SubmissionError, match="permission denied"):
+        campaign_cli._read_optional_owner("gs://bucket/temporal-owner.json")
+
+
 def test_submit_freezes_canonical_inputs_before_temporal_start(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
