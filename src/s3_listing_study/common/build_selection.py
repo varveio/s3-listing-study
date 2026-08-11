@@ -597,6 +597,21 @@ def build_shared_image_main(argv: Sequence[str] | None = None) -> int:
         return 2
 
 
+def _layout_context(reference: str, layout: str) -> dict[str, str]:
+    """Serve a digest-pinned parent from a local OCI layout instead of a registry.
+
+    The context key must equal the ``FROM`` reference verbatim, because that is
+    how BuildKit decides a named context overrides it. Validating here rather
+    than relying on the callee means a malformed reference cannot be silently
+    turned into a context nobody matches — buildx would ignore it and resolve
+    from the registry, which on a pull request has nothing to resolve.
+    """
+    if IMMUTABLE_IMAGE_RE.fullmatch(reference) is None:
+        raise BuildSelectionError("parent image must be an immutable digest reference")
+    _, _, digest = reference.rpartition("@")
+    return {reference: f"oci-layout://{layout}@{digest}"}
+
+
 def build_derived_image_main(argv: Sequence[str] | None = None) -> int:
     """Build one registered final per-tool image from only its slug and output tag."""
     parser = argparse.ArgumentParser(prog="s3-listing-study build-derived-image")
@@ -625,8 +640,7 @@ def build_derived_image_main(argv: Sequence[str] | None = None) -> int:
         tag = derived_image_tag(selection) if args.tag is None else args.tag
         contexts = None
         if args.parent_layout:
-            _, _, parent_digest = args.tool_image.rpartition("@")
-            contexts = {args.tool_image: f"oci-layout://{args.parent_layout}@{parent_digest}"}
+            contexts = _layout_context(args.tool_image, args.parent_layout)
         command = derived_image_build_command(
             root,
             selection,
@@ -667,10 +681,7 @@ def build_tool_image_main(argv: Sequence[str] | None = None) -> int:
             raise BuildSelectionError("--tag must be a non-empty Docker image tag")
         contexts = None
         if args.parent_layout:
-            _, _, parent_digest = args.shared_base_image.rpartition("@")
-            contexts = {
-                args.shared_base_image: f"oci-layout://{args.parent_layout}@{parent_digest}"
-            }
+            contexts = _layout_context(args.shared_base_image, args.parent_layout)
         command = tool_image_build_command(
             root,
             selection,

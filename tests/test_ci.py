@@ -907,3 +907,21 @@ def test_the_roster_subcommand_agrees_with_the_package(
     monkeypatch.chdir(repo_root())
     assert ci_cli.main(["roster", "--json"]) == 0
     assert json.loads(capsys.readouterr().out) == list(buildable_tools(repo_root()))
+
+
+def test_a_layout_parent_must_still_be_named_by_digest() -> None:
+    """The layout shortcut cannot smuggle in a mutable parent.
+
+    Serving the parent from disk changes where the bytes come from, never how the
+    image is identified — so the same digest rule applies, and it is enforced
+    where the context is built rather than left to the callee.
+    """
+    from s3_listing_study.common.build_selection import BuildSelectionError, _layout_context
+
+    parent = f"{REPOSITORY}@{DIGEST_B}"
+    assert _layout_context(parent, "/tmp/layout") == {
+        parent: f"oci-layout:///tmp/layout@{DIGEST_B}"
+    }
+    for mutable in (f"{REPOSITORY}:some-tag", "not-a-reference", f"{REPOSITORY}@sha256:short"):
+        with pytest.raises(BuildSelectionError, match="immutable digest reference"):
+            _layout_context(mutable, "/tmp/layout")
