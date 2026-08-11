@@ -1029,6 +1029,49 @@ def test_poll_interval_must_be_finite_and_positive(interval: float) -> None:
         asyncio.run(campaign_report._run_report(args))
 
 
+def test_report_rejects_duplicate_poll_interval_option(capsys: Any) -> None:
+    with pytest.raises(SystemExit):
+        campaign_report.report_campaign_main(
+            [
+                "--campaign",
+                CAMPAIGN,
+                "--results-bucket",
+                BUCKET,
+                "--poll-interval-s",
+                "1",
+                "--poll-interval-s",
+                "2",
+            ]
+        )
+    assert "--poll-interval-s may only be specified once" in capsys.readouterr().err
+
+
+def test_report_maps_malformed_poll_interval_to_command_error(
+    monkeypatch: Any, capsys: Any
+) -> None:
+    monkeypatch.setattr(
+        vars(campaign_report)["storage"],
+        "Client",
+        lambda: pytest.fail("malformed poll interval contacted storage"),
+    )
+    assert (
+        campaign_report.report_campaign_main(
+            [
+                "--campaign",
+                CAMPAIGN,
+                "--results-bucket",
+                BUCKET,
+                "--poll-interval-s",
+                "not-a-number",
+            ]
+        )
+        == 1
+    )
+    error = capsys.readouterr().err
+    assert "--poll-interval-s must be a number" in error
+    assert "Traceback" not in error
+
+
 @pytest.mark.parametrize("status", ["timed_out", "harness_error"])
 def test_timeout_and_harness_error_are_recorded_subject_outcomes(status: str) -> None:
     manifest_bytes, attempts, image = manifest()

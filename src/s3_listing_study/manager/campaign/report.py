@@ -22,6 +22,7 @@ from temporalio.client import Client
 from temporalio.envconfig import ClientConfig
 from temporalio.exceptions import TemporalError
 
+from s3_listing_study.common.argparse_utils import UniqueStoreAction
 from s3_listing_study.manager.campaign import (
     JOB_ID_MAX,
     JOB_ID_RE,
@@ -128,10 +129,14 @@ class EvidenceSnapshot:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="s3-listing-study report-campaign", allow_abbrev=False)
-    parser.add_argument("--campaign", "--campaign-id", dest="campaign", required=True)
-    parser.add_argument("--results-bucket", required=True)
+    parser.add_argument(
+        "--campaign", "--campaign-id", dest="campaign", action=UniqueStoreAction, required=True
+    )
+    parser.add_argument("--results-bucket", action=UniqueStoreAction, required=True)
     parser.add_argument("--wait", action="store_true")
-    parser.add_argument("--poll-interval-s", type=float, default=DEFAULT_POLL_INTERVAL_S)
+    parser.add_argument(
+        "--poll-interval-s", action=UniqueStoreAction, default=DEFAULT_POLL_INTERVAL_S
+    )
     parser.add_argument("--publish", action="store_true")
     return parser
 
@@ -1173,7 +1178,11 @@ def _publish(bucket: Any, campaign: str, report: Mapping[str, Any]) -> None:
 
 
 async def _run_report(args: argparse.Namespace) -> dict[str, Any]:
-    if not math.isfinite(args.poll_interval_s) or args.poll_interval_s <= 0:
+    try:
+        poll_interval_s = float(args.poll_interval_s)
+    except (TypeError, ValueError):
+        raise ReportError("--poll-interval-s must be a number") from None
+    if not math.isfinite(poll_interval_s) or poll_interval_s <= 0:
         raise ReportError("--poll-interval-s must be finite and positive")
     prefix = campaign_prefix(args.campaign)
     connect_config = ClientConfig.load_client_connect_config()
@@ -1270,7 +1279,7 @@ async def _run_report(args: argparse.Namespace) -> dict[str, Any]:
                 f"owned campaign Workflow closed with status {workflow_status} "
                 "before completing all case controllers"
             )
-        await asyncio.sleep(args.poll_interval_s)
+        await asyncio.sleep(poll_interval_s)
     if args.publish:
         if not report["report_final"]:
             raise ReportError(
