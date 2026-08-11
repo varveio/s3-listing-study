@@ -306,6 +306,9 @@ def test_historical_schema_two_does_not_rehash_against_current_registration(
 def test_freeze_accepts_only_byte_identical_existing_content(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(campaign_cli, "_run", lambda *_args, **_kwargs: completed())
+    assert campaign_cli._freeze("gs://bucket/new", b"new\n") is True
+
     calls: list[tuple[tuple[str, ...], bytes | None]] = []
     answers = iter(
         [
@@ -319,7 +322,7 @@ def test_freeze_accepts_only_byte_identical_existing_content(
         return next(answers)
 
     monkeypatch.setattr(campaign_cli, "_run", fake_run)
-    campaign_cli._freeze("gs://bucket/object", b"same\n")
+    assert campaign_cli._freeze("gs://bucket/object", b"same\n") is False
     assert calls == [
         (
             (
