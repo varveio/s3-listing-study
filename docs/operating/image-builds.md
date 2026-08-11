@@ -62,9 +62,11 @@ each tool into one bucket:
   tool is one target in a single `docker buildx bake`.
 - **adopt** — both are published. Nothing is built; the existing digest is used.
 
-A bucket that comes back empty produces **no job at all**, so the shape of a run
-on the Actions page is the answer to "what changed". Nothing decides this from
-which files a commit touched; it is decided by what the registry is missing.
+An empty bucket costs nothing: the per-tool build matrix is generated from the
+plan, so an empty list creates zero jobs, and the single-job stages appear as
+`skipped` without claiming a runner. The shape of a run on the Actions page is
+therefore the answer to "what changed" — and nothing decides it from which files
+a commit touched, only from what the registry is missing.
 
 Run the same command yourself to see the plan in a second, without spending a
 CI run:
@@ -115,6 +117,36 @@ whose only content is the publication manifest — the durable ledger, outliving
 Actions artifact retention. Individual execution channels may move one at a time,
 but the set channel moves **last**, after every promotion has been verified, so it
 never advertises an incomplete set.
+
+## Retention
+
+Old images do not need routine cleaning, and the layer split is why. Measured
+against the published package:
+
+| | |
+| --- | --- |
+| Tags | 83 |
+| Distinct manifests | 48 |
+| Distinct layer blobs | 198 |
+| Actual stored bytes | 1.49 GB |
+| Same content without blob sharing | 10.25 GB |
+
+A registry stores each blob once, so a thin worker layer published on top of an
+already-stored parent costs only its own bytes. For `aws-cli` the tool parent is
+279.8 MB and its execution child is 280.0 MB, of which **110 KB is new** — a
+worker-only change across all eleven subjects adds about **1.2 MB**.
+
+So growth is a listing-hygiene question, not a storage one. What does accumulate
+is tag count: a worker change adds eleven execution version tags and one ledger,
+a tool change three, a shared-runtime change twenty-four.
+
+Deleting anything is deliberately out of scope, and the constraint is not
+"keep the newest N". One digest can be reachable from many publication sets, so
+retention has to reason from complete `set-v2-…` ledgers and live channels:
+preserve every digest reachable from a retained set, every version carrying a
+live channel, anything inside a grace period, and any tag shape the planner does
+not recognise. Roughly half the current tags are pre-rearchitecture `*-run-*`
+and `*-sha256-*` shapes, which stay untouched until that audit happens.
 
 ## Boundaries
 
