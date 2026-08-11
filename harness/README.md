@@ -149,13 +149,13 @@ not an implemented append-later command). Each worker-container execution mints
 the `attempt_id` UUID beneath that run prefix. The UUID is per execution, not the
 scheduled run or Batch job: one job may theoretically produce more than one
 UUID leaf if the task is duplicated despite the campaign setting automatic
-Batch retries to 0. Create-only upload preserves every leaf. The required
-reconciler must surface more than one result under the same run prefix as an
+Batch retries to 0. Create-only upload preserves every leaf. The campaign
+reconciler surfaces more than one current-submission result under the same run prefix as an
 anomaly; it must never select one as the canonical result or collapse them into
 one attempt.
 
-The required routine manager reporting path must visit only manifest-known run
-prefixes. It must list each with GCS `delimiter=/` to discover immediate UUID
+The routine manager reporting path visits only manifest-known run prefixes. It
+lists each with GCS `delimiter=/` to discover immediate UUID
 children without descending into their contents, then GET each child's exact
 `result.json` and read its small worker-produced summary and metrics. Raw
 listing artifacts remain in GCS as audit and verification evidence. The
@@ -170,6 +170,13 @@ freezes image and attempt manifests, assigns Batch job IDs, and records mutable
 submission state plus its append-only transition history in the local ledger.
 The mutable row answers current state; events retain submission/retry history
 after Batch ages jobs out. The ledger is operational and is not run evidence.
+The controller distinguishes completion from provider settlement, preserves
+the current deterministic resource and submission number, and requires an
+operator to retry a settled failed case or explicitly accept it before campaign
+finality. `report-campaign` validates summary-only sealed evidence and may
+create-only publish schema-version-3 `report.json` only after every possible
+provider effect is settled. See
+[`docs/operating/campaign-operations.md`](../docs/operating/campaign-operations.md).
 
 All eleven subjects have run at smoke on amd64 through this engine, four with a
 scoped credential. Those runs are non-comparative and carry no verifier verdict:
@@ -202,7 +209,7 @@ their recorded registry and manifest. The offline union regression suite is
 `harness/tests/run-regressions.sh`; the host security regression suite is
 `harness/tests/runner-security-regressions.sh`.
 
-Provider submission/reconciliation and comparative reporting remain separate
-manager integration work. They must consume worker summaries for routine
-operation and must not introduce a second subject lifecycle, timing
-implementation, or eager raw-artifact download path.
+Comparative presentation and correctness verification remain separate manager
+work. Routine reconciliation consumes worker summaries without introducing a
+second subject lifecycle, timing implementation, or eager raw-artifact download
+path.

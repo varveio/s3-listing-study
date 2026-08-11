@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
-import sqlite3
 import subprocess
 import textwrap
 from dataclasses import replace
@@ -12,11 +12,13 @@ from typing import Any
 
 import pytest
 
+from s3_listing_study.common.build_selection import load_registered_selection
 from s3_listing_study.manager.bench import plan as bench
-from s3_listing_study.manager.campaign import Attempt, CampaignError, ledger
+from s3_listing_study.manager.campaign import CampaignError, attempts_for
 from s3_listing_study.manager.campaign import cli as campaign_cli
+from s3_listing_study.manager.campaign import report as campaign_report
 from s3_listing_study.manager.campaign.batch import render_job as render_batch_job
-from tests.test_campaign_batch import DIGEST, attempt
+from tests.test_campaign_batch import DIGEST
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -45,10 +47,11 @@ def write_inputs(tmp_path: Path, *, auth: str = "anonymous") -> tuple[Path, Path
     )
     image_set = tmp_path / "images.json"
     registration = json.loads((ROOT / "tools/aws-cli/build/image.json").read_text(encoding="utf-8"))
+    selection = load_registered_selection(ROOT, "aws-cli")
     image_set.write_text(
         json.dumps(
             {
-                "schema_version": 2,
+                "schema_version": 3,
                 "images": {
                     "aws-cli": {
                         "derived_image": DIGEST,
@@ -61,6 +64,9 @@ def write_inputs(tmp_path: Path, *, auth: str = "anonymous") -> tuple[Path, Path
                         "adapter_bundle_sha256": registration["adapter_bundle_sha256"],
                         "shared_base_source_sha256": registration["shared_base_source_sha256"],
                         "harness_revision": "a" * 40,
+                        "tool_image_digest": "sha256:" + "c" * 64,
+                        "tool_image_uri": "registry.example/tool/aws-cli@sha256:" + "c" * 64,
+                        "selection_sha256": selection.selection_sha256,
                     }
                 },
             }
@@ -99,6 +105,7 @@ def write_image_set(path: Path, tools: set[str]) -> Path:
         registration = json.loads(
             (ROOT / f"tools/{tool}/build/image.json").read_text(encoding="utf-8")
         )
+        selection = load_registered_selection(ROOT, tool)
         images[tool] = {
             "derived_image": DIGEST,
             "image_uri": f"us-east1-docker.pkg.dev/study/images/{tool}@{DIGEST}",
@@ -110,9 +117,12 @@ def write_image_set(path: Path, tools: set[str]) -> Path:
             "adapter_bundle_sha256": registration["adapter_bundle_sha256"],
             "shared_base_source_sha256": registration["shared_base_source_sha256"],
             "harness_revision": "a" * 40,
+            "tool_image_digest": "sha256:" + "c" * 64,
+            "tool_image_uri": f"registry.example/tool/{tool}@sha256:" + "c" * 64,
+            "selection_sha256": selection.selection_sha256,
         }
     path.write_text(
-        json.dumps({"schema_version": 2, "images": images}),
+        json.dumps({"schema_version": 3, "images": images}),
         encoding="utf-8",
     )
     return path
@@ -250,13 +260,42 @@ def test_duplicate_plan_bucket_is_rejected_before_rendering(
     assert "more than one plan for bucket 'same'" in capsys.readouterr().err
 
 
+def test_duplicate_generated_batch_job_ids_are_rejected_before_rendering_or_freezing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan, image_set = write_inputs(tmp_path)
+    original = attempts_for
+
+    def duplicates(*args: Any, **kwargs: Any) -> tuple[Any, ...]:
+        generated = tuple(original(*args, **kwargs))
+        return generated + generated
+
+    monkeypatch.setattr(campaign_cli, "attempts_for", duplicates)
+    monkeypatch.setattr(
+        campaign_cli,
+        "render_job",
+        lambda *_args, **_kwargs: pytest.fail("duplicate campaign rendered a job"),
+    )
+    monkeypatch.setattr(
+        campaign_cli,
+        "_run",
+        lambda *_args, **_kwargs: pytest.fail("duplicate campaign froze an input"),
+    )
+
+    assert (
+        campaign_cli.submit_campaign_main([*arguments(tmp_path, plan, image_set), "--dry-run"]) == 1
+    )
+    assert "duplicate Batch job IDs" in capsys.readouterr().err
+    assert not (tmp_path / "ledger.sqlite3").exists()
+
+
 def test_image_set_refuses_an_unknown_schema(tmp_path: Path) -> None:
     _plan, image_set = write_inputs(tmp_path)
     document = json.loads(image_set.read_text(encoding="utf-8"))
     document["schema_version"] = 1
     image_set.write_text(json.dumps(document), encoding="utf-8")
 
-    with pytest.raises(campaign_cli.SubmissionError, match="schema_version must be 2 or 3"):
+    with pytest.raises(campaign_cli.SubmissionError, match="schema_version must be 3"):
         campaign_cli._read_image_set(image_set)
 
 
@@ -264,7 +303,7 @@ def test_dry_run_is_deterministic_and_touches_no_subprocess_or_ledger(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     plan, image_set = write_inputs(tmp_path)
-    argv = [*arguments(tmp_path, plan, image_set), "--dry-run"]
+    argv = [*arguments(tmp_path, plan, image_set), "--dry-run", "--publish-report"]
     monkeypatch.setattr(
         campaign_cli,
         "_run",
@@ -283,12 +322,12 @@ def test_dry_run_is_deterministic_and_touches_no_subprocess_or_ledger(
     assert not (tmp_path / "ledger.sqlite3").exists()
 
 
-def test_historical_schema_two_does_not_rehash_against_current_registration(
+def test_historical_schema_two_is_not_accepted_for_new_campaigns(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     plan, image_set = write_inputs(tmp_path)
     document = json.loads(image_set.read_text(encoding="utf-8"))
-    document["images"]["aws-cli"]["tool_version"] = "fabricated"
+    document["schema_version"] = 2
     image_set.write_text(json.dumps(document), encoding="utf-8")
     monkeypatch.setattr(
         campaign_cli,
@@ -296,10 +335,9 @@ def test_historical_schema_two_does_not_rehash_against_current_registration(
         lambda *_args, **_kwargs: pytest.fail("mismatched image contacted a subprocess"),
     )
     assert (
-        campaign_cli.submit_campaign_main([*arguments(tmp_path, plan, image_set), "--dry-run"]) == 0
+        campaign_cli.submit_campaign_main([*arguments(tmp_path, plan, image_set), "--dry-run"]) == 1
     )
-    rendered = json.loads(capsys.readouterr().out)
-    assert rendered["campaign.json"]["images"]["aws-cli"]["tool_version"] == "fabricated"
+    assert "schema_version must be 3" in capsys.readouterr().err
     assert not (tmp_path / "ledger.sqlite3").exists()
 
 
@@ -340,232 +378,6 @@ def test_freeze_accepts_only_byte_identical_existing_content(
         campaign_cli._freeze("gs://bucket/object", b"same\n")
 
 
-def test_submission_writes_intent_before_gcloud_and_records_success_and_failure(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    first = attempt()
-    second: Attempt = replace(
-        first,
-        job_id="c-2026-08-10-first-swath-recursive-ffffffff-r2-s1",
-        run_ordinal=2,
-        prefix=first.prefix.removesuffix("run-1") + "run-2",
-    )
-    ledger_path = tmp_path / "ledger.sqlite3"
-    seen: list[str] = []
-
-    def fake_run(argv: Any, *, payload: bytes | None = None) -> subprocess.CompletedProcess[bytes]:
-        del payload
-        job_id = argv[4]
-        connection = sqlite3.connect(ledger_path)
-        try:
-            state = connection.execute(
-                "SELECT state FROM attempts WHERE job_id = ?", (job_id,)
-            ).fetchone()
-        finally:
-            connection.close()
-        assert state == ("submitting",)
-        seen.append(job_id)
-        return completed(0) if job_id == first.job_id else completed(7, stderr=b"quota")
-
-    monkeypatch.setattr(campaign_cli, "_run", fake_run)
-    statuses, failed = campaign_cli._submit_jobs(
-        (first, second),
-        ({"one": 1}, {"two": 2}),
-        project="study",
-        location="us-east1",
-        ledger_path=ledger_path,
-    )
-
-    assert seen == [first.job_id, second.job_id]
-    assert failed is True
-    assert statuses == [
-        {"job_id": first.job_id, "state": "submitted"},
-        {"job_id": second.job_id, "state": "failed"},
-    ]
-    with ledger.open_ledger(ledger_path) as connection:
-        rows = ledger.attempts(connection, campaign=first.campaign)
-        assert {row["job_id"]: row["state"] for row in rows} == {
-            first.job_id: "submitted",
-            second.job_id: "failed",
-        }
-        failure = connection.execute(
-            "SELECT detail FROM events WHERE job_id = ? AND event = 'failed'", (second.job_id,)
-        ).fetchone()[0]
-        assert json.loads(failure) == {"returncode": 7, "stderr": "quota"}
-
-
-def seed_state(path: Path, selected: Attempt, state: str = "submitting") -> None:
-    with ledger.open_ledger(path) as connection:
-        ledger.record_intent(
-            connection,
-            attempt=selected.as_dict(),
-            campaign=selected.campaign,
-            now="2026-08-10T12:00:00Z",
-        )
-        if state != "submitting":
-            ledger.record_state(
-                connection,
-                job_id=selected.job_id,
-                state=state,
-                now="2026-08-10T12:00:01Z",
-            )
-
-
-def test_restart_reissues_an_intent_left_before_the_api_call(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    selected = attempt()
-    path = tmp_path / "ledger.sqlite3"
-    seed_state(path, selected)
-    calls: list[tuple[str, ...]] = []
-
-    def fake_run(argv: Any, *, payload: bytes | None = None) -> subprocess.CompletedProcess[bytes]:
-        del payload
-        calls.append(tuple(argv))
-        return completed()
-
-    monkeypatch.setattr(campaign_cli, "_run", fake_run)
-    statuses, failed = campaign_cli._submit_jobs(
-        (selected,), ({"job": 1},), project="study", location="us-east1", ledger_path=path
-    )
-    assert len(calls) == 1
-    assert statuses == [{"job_id": selected.job_id, "state": "submitted"}]
-    assert failed is False
-
-
-def test_restart_recovers_an_intent_when_batch_already_accepted_it(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    selected = attempt()
-    path = tmp_path / "ledger.sqlite3"
-    seed_state(path, selected)
-    monkeypatch.setattr(
-        campaign_cli,
-        "_run",
-        lambda *_args, **_kwargs: completed(1, stderr=b"ALREADY_EXISTS: job exists"),
-    )
-    statuses, failed = campaign_cli._submit_jobs(
-        (selected,), ({"job": 1},), project="study", location="us-east1", ledger_path=path
-    )
-    assert statuses == [{"job_id": selected.job_id, "state": "submitted"}]
-    assert failed is False
-    with ledger.open_ledger(path) as connection:
-        row = ledger.attempts(connection, campaign=selected.campaign)[0]
-        assert row["state"] == "submitted"
-        detail = connection.execute(
-            "SELECT detail FROM events WHERE job_id = ? AND event = 'submitted'",
-            (selected.job_id,),
-        ).fetchone()[0]
-        assert json.loads(detail)["recovered_from_already_exists"] is True
-
-
-def test_restart_skips_a_job_already_recorded_as_submitted(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    selected = attempt()
-    path = tmp_path / "ledger.sqlite3"
-    seed_state(path, selected, "submitted")
-    monkeypatch.setattr(
-        campaign_cli,
-        "_run",
-        lambda *_args, **_kwargs: pytest.fail("submitted job was created again"),
-    )
-    statuses, failed = campaign_cli._submit_jobs(
-        (selected,), ({"job": 1},), project="study", location="us-east1", ledger_path=path
-    )
-    assert statuses == [{"job_id": selected.job_id, "state": "submitted"}]
-    assert failed is False
-
-
-@pytest.mark.parametrize("state", ["failed", "abandoned"])
-def test_restart_never_reissues_terminal_unsuccessful_rows(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    state: str,
-) -> None:
-    selected = attempt()
-    path = tmp_path / "ledger.sqlite3"
-    seed_state(path, selected, state)
-    monkeypatch.setattr(
-        campaign_cli,
-        "_run",
-        lambda *_args, **_kwargs: pytest.fail(f"{state} job was created again"),
-    )
-    statuses, failed = campaign_cli._submit_jobs(
-        (selected,), ({"job": 1},), project="study", location="us-east1", ledger_path=path
-    )
-    assert statuses == [{"job_id": selected.job_id, "state": state}]
-    assert failed is True
-
-
-def test_restart_refuses_a_ledger_row_that_does_not_match_the_attempt(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    recorded = attempt()
-    requested = replace(recorded, prefix=recorded.prefix + "-different")
-    path = tmp_path / "ledger.sqlite3"
-    seed_state(path, recorded)
-    monkeypatch.setattr(
-        campaign_cli,
-        "_run",
-        lambda *_args, **_kwargs: pytest.fail("mismatched ledger row was submitted"),
-    )
-    statuses, failed = campaign_cli._submit_jobs(
-        (requested,), ({"job": 1},), project="study", location="us-east1", ledger_path=path
-    )
-    assert statuses == [{"job_id": requested.job_id, "state": "ledger-mismatch"}]
-    assert failed is True
-
-
-def test_partial_campaign_skips_completed_work_and_continues_later_attempts(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    first = attempt()
-    second = replace(
-        first,
-        job_id="c-2026-08-10-first-swath-recursive-ffffffff-r2-s1",
-        run_ordinal=2,
-        prefix=first.prefix.removesuffix("run-1") + "run-2",
-    )
-    path = tmp_path / "ledger.sqlite3"
-    seed_state(path, first, "submitted")
-    calls: list[str] = []
-
-    def fake_run(argv: Any, *, payload: bytes | None = None) -> subprocess.CompletedProcess[bytes]:
-        del payload
-        calls.append(argv[4])
-        return completed()
-
-    monkeypatch.setattr(campaign_cli, "_run", fake_run)
-    statuses, failed = campaign_cli._submit_jobs(
-        (first, second),
-        ({"job": 1}, {"job": 2}),
-        project="study",
-        location="us-east1",
-        ledger_path=path,
-    )
-    assert calls == [second.job_id]
-    assert [status["state"] for status in statuses] == ["submitted", "submitted"]
-    assert failed is False
-
-
-def test_new_ledger_intent_treats_an_existing_batch_name_as_a_collision(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    selected = attempt()
-    path = tmp_path / "ledger.sqlite3"
-    monkeypatch.setattr(
-        campaign_cli,
-        "_run",
-        lambda *_args, **_kwargs: completed(1, stderr=b"ALREADY_EXISTS: job exists"),
-    )
-    statuses, failed = campaign_cli._submit_jobs(
-        (selected,), ({"job": 1},), project="study", location="us-east1", ledger_path=path
-    )
-    assert statuses == [{"job_id": selected.job_id, "state": "failed"}]
-    assert failed is True
-
-
 def test_actual_cli_freezes_plan_then_manifest_before_submitting(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -577,6 +389,13 @@ def test_actual_cli_freezes_plan_then_manifest_before_submitting(
         return completed()
 
     monkeypatch.setattr(campaign_cli, "_run", fake_run)
+    started: list[dict[str, Any]] = []
+
+    def fake_start(**kwargs: Any) -> list[dict[str, Any]]:
+        started.append(kwargs)
+        return [{"job_id": kwargs["attempts"][0]["job_id"], "state": "QUEUED"}]
+
+    monkeypatch.setattr(campaign_cli, "start_campaign", fake_start)
     assert campaign_cli.submit_campaign_main(arguments(tmp_path, plan, image_set)) == 0
     assert calls[0][0][1:4] == ("storage", "cp", "-")
     assert calls[0][0][4].endswith("/inputs/plans/example-bucket.yaml")
@@ -584,13 +403,70 @@ def test_actual_cli_freezes_plan_then_manifest_before_submitting(
     assert calls[1][0][4].endswith("/campaign.json")
     assert calls[1][1] is not None
     assert json.loads(calls[1][1])["campaign"] == "2026-08-10-first"
-    assert calls[2][0][:5] == (
-        "gcloud",
-        "batch",
-        "jobs",
-        "submit",
-        json.loads(capsys.readouterr().out)["submissions"][0]["job_id"],
+    output = json.loads(capsys.readouterr().out)
+    assert output["submissions"][0]["state"] == "QUEUED"
+    assert len(calls) == 2
+    assert len(started) == 1
+    assert started[0]["manifest_sha256"] == hashlib.sha256(calls[1][1]).hexdigest()
+
+
+def test_wait_prints_only_the_final_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan, image_set = write_inputs(tmp_path)
+    monkeypatch.setattr(campaign_cli, "_run", lambda *_args, **_kwargs: completed())
+    monkeypatch.setattr(
+        campaign_cli,
+        "start_campaign",
+        lambda **kwargs: [{"job_id": kwargs["attempts"][0]["job_id"], "state": "QUEUED"}],
     )
+    forwarded: list[list[str]] = []
+
+    def fake_report(argv: list[str]) -> int:
+        forwarded.append(argv)
+        print('{"report_final":true}')
+        return 0
+
+    monkeypatch.setattr(campaign_report, "report_campaign_main", fake_report)
+
+    assert (
+        campaign_cli.submit_campaign_main(
+            [
+                *arguments(tmp_path, plan, image_set),
+                "--wait",
+                "--post-attempt-allowance-s",
+                "7",
+                "--poll-interval-s",
+                "0.25",
+            ]
+        )
+        == 0
+    )
+    assert capsys.readouterr().out == '{"report_final":true}\n'
+    assert forwarded[0][-3:] == ["--poll-interval-s", "0.25", "--wait"]
+
+
+def test_empty_campaign_is_rejected_before_freeze_or_ledger(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan, image_set = write_inputs(tmp_path)
+    empty = replace(bench.Plan.load(plan), cases=())
+    monkeypatch.setattr(campaign_cli, "_load_plans", lambda _args: (empty,))
+    monkeypatch.setattr(
+        campaign_cli,
+        "_read_image_set",
+        lambda _path: campaign_cli.ImageSet(schema_version=3),
+    )
+    monkeypatch.setattr(campaign_cli, "validate_registered_images", lambda _images: None)
+    monkeypatch.setattr(
+        campaign_cli,
+        "_freeze",
+        lambda *_args, **_kwargs: pytest.fail("empty campaign froze cloud inputs"),
+    )
+
+    assert campaign_cli.submit_campaign_main(arguments(tmp_path, plan, image_set)) == 1
+    assert "campaign contains no scheduled runs" in capsys.readouterr().err
+    assert not (tmp_path / "ledger.sqlite3").exists()
 
 
 def test_actual_cli_freezes_every_plan_before_one_manifest_and_all_jobs(
@@ -606,6 +482,13 @@ def test_actual_cli_freezes_every_plan_before_one_manifest_and_all_jobs(
         return completed()
 
     monkeypatch.setattr(campaign_cli, "_run", fake_run)
+    started: list[dict[str, Any]] = []
+
+    def fake_start(**kwargs: Any) -> list[dict[str, Any]]:
+        started.append(kwargs)
+        return [{"job_id": attempt["job_id"], "state": "QUEUED"} for attempt in kwargs["attempts"]]
+
+    monkeypatch.setattr(campaign_cli, "start_campaign", fake_start)
     argv = [
         "--path",
         str(first),
@@ -625,10 +508,8 @@ def test_actual_cli_freezes_every_plan_before_one_manifest_and_all_jobs(
     assert manifest_payload is not None
     manifest_document = json.loads(manifest_payload)
     assert [plan["bucket"] for plan in manifest_document["plans"]] == ["first", "second"]
-    assert [call[0][1:4] for call in calls[3:]] == [
-        ("batch", "jobs", "submit"),
-        ("batch", "jobs", "submit"),
-    ]
+    assert len(calls) == 3
+    assert len(started[0]["attempts"]) == 2
 
 
 def test_later_plan_hash_mismatch_prevents_every_cloud_and_ledger_mutation(

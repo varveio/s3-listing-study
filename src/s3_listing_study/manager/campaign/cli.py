@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
+import math
 import re
-import sqlite3
 import subprocess
 import sys
 from collections.abc import Mapping, Sequence
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from google.api_core.exceptions import GoogleAPIError
+from google.auth.exceptions import DefaultCredentialsError
 
 from s3_listing_study.common.argparse_utils import UniqueStoreAction
 from s3_listing_study.common.build_selection import (
@@ -23,7 +26,6 @@ from s3_listing_study.manager.bench import plan as bench
 from s3_listing_study.manager.bench.cli import registered_tools, repo_root
 from s3_listing_study.manager.campaign import (
     DIGEST_RE,
-    Attempt,
     CampaignError,
     attempts_for,
     campaign_prefix,
@@ -31,8 +33,10 @@ from s3_listing_study.manager.campaign import (
     manifest,
 )
 from s3_listing_study.manager.campaign.batch import BatchConfig, render_job
+from s3_listing_study.manager.campaign.controller import ControllerError, start_campaign
+from s3_listing_study.manager.campaign.provider import ProviderError
 
-IMAGE_SET_FIELDS_V2 = {
+IMAGE_SET_FIELDS = {
     "derived_image",
     "image_uri",
     "shared_base_digest",
@@ -43,8 +47,6 @@ IMAGE_SET_FIELDS_V2 = {
     "tool_version",
     "adapter_bundle_sha256",
     "harness_revision",
-}
-IMAGE_SET_FIELDS = IMAGE_SET_FIELDS_V2 | {
     "tool_image_digest",
     "tool_image_uri",
     "selection_sha256",
@@ -99,11 +101,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--post-attempt-allowance-s",
         action=UniqueStoreAction,
-        type=int,
         default=1800,
     )
     parser.add_argument("--ledger", "--ledger-path", action=UniqueStoreAction, required=True)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--wait", action="store_true")
+    parser.add_argument("--poll-interval-s", action=UniqueStoreAction, default=10.0)
+    parser.add_argument("--publish-report", action="store_true")
     return parser
 
 
@@ -128,9 +132,9 @@ def _read_image_set(path: Path) -> ImageSet:
     if unknown_top:
         raise SubmissionError(f"image set has unknown key(s): {', '.join(unknown_top)}")
     schema_version = document.get("schema_version")
-    if schema_version not in (2, IMAGE_SET_SCHEMA_VERSION) or isinstance(schema_version, bool):
-        raise SubmissionError("image set schema_version must be 2 or 3")
-    fields = IMAGE_SET_FIELDS if schema_version == 3 else IMAGE_SET_FIELDS_V2
+    if schema_version != IMAGE_SET_SCHEMA_VERSION or isinstance(schema_version, bool):
+        raise SubmissionError("image set schema_version must be 3")
+    fields = IMAGE_SET_FIELDS
     images = document.get("images")
     if not isinstance(images, dict) or not images:
         raise SubmissionError("image set images must be a non-empty object")
@@ -164,19 +168,18 @@ def _read_image_set(path: Path) -> ImageSet:
             identity = value[field]
             if not isinstance(identity, str) or re.fullmatch(r"[0-9a-f]{64}", identity) is None:
                 raise SubmissionError(f"{tool}: {field} is not 64 lowercase hex digits")
-        if schema_version == 3:
-            tool_digest = value["tool_image_digest"]
-            tool_uri = value["tool_image_uri"]
-            if not isinstance(tool_digest, str) or DIGEST_RE.fullmatch(tool_digest) is None:
-                raise SubmissionError(f"{tool}: tool_image_digest is not a sha256 digest")
-            if not isinstance(tool_uri, str) or not tool_uri.endswith(f"@{tool_digest}"):
-                raise SubmissionError(f"{tool}: tool_image_uri digest does not match")
-            selection_sha256 = value["selection_sha256"]
-            if (
-                not isinstance(selection_sha256, str)
-                or re.fullmatch(r"[0-9a-f]{64}", selection_sha256) is None
-            ):
-                raise SubmissionError(f"{tool}: selection_sha256 is not 64 lowercase hex digits")
+        tool_digest = value["tool_image_digest"]
+        tool_uri = value["tool_image_uri"]
+        if not isinstance(tool_digest, str) or DIGEST_RE.fullmatch(tool_digest) is None:
+            raise SubmissionError(f"{tool}: tool_image_digest is not a sha256 digest")
+        if not isinstance(tool_uri, str) or not tool_uri.endswith(f"@{tool_digest}"):
+            raise SubmissionError(f"{tool}: tool_image_uri digest does not match")
+        selection_sha256 = value["selection_sha256"]
+        if (
+            not isinstance(selection_sha256, str)
+            or re.fullmatch(r"[0-9a-f]{64}", selection_sha256) is None
+        ):
+            raise SubmissionError(f"{tool}: selection_sha256 is not 64 lowercase hex digits")
         artifact = value["tool_artifact"]
         if not isinstance(artifact, dict) or set(artifact) != {"kind", "locator", "sha256"}:
             raise SubmissionError(f"{tool}: tool_artifact has invalid fields")
@@ -226,8 +229,6 @@ def validate_registered_images(
 ) -> None:
     """Refuse component claims that disagree with the public capsule registration."""
     base = repo_root() if root is None else root
-    if getattr(images, "schema_version", IMAGE_SET_SCHEMA_VERSION) == 2:
-        return
     skipped = set() if skip is None else skip
     for tool, image in images.items():
         if tool in skipped:
@@ -291,122 +292,6 @@ def _freeze(uri: str, content: bytes) -> None:
         raise SubmissionError(f"{uri} already exists with different content")
 
 
-def _utc_now() -> str:
-    return datetime.now(UTC).isoformat(timespec="microseconds").replace("+00:00", "Z")
-
-
-def _ledger_attempt(connection: sqlite3.Connection, attempt: Attempt) -> tuple[str, bool] | None:
-    row = connection.execute(
-        "SELECT campaign, state, case_json FROM attempts WHERE job_id = ?", (attempt.job_id,)
-    ).fetchone()
-    if row is None:
-        return None
-    try:
-        recorded = json.loads(row["case_json"])
-    except (TypeError, json.JSONDecodeError):
-        return str(row["state"]), False
-    exact = row["campaign"] == attempt.campaign and recorded == attempt.as_dict()
-    return str(row["state"]), exact
-
-
-def _batch_already_exists(result: subprocess.CompletedProcess[bytes]) -> bool:
-    message = (result.stdout + b"\n" + result.stderr).decode("utf-8", errors="replace").lower()
-    markers = ("already_exists", "already exists", "code=409", "http 409")
-    return result.returncode != 0 and any(marker in message for marker in markers)
-
-
-def _submit_jobs(
-    attempts: Sequence[Attempt],
-    jobs: Sequence[Mapping[str, Any]],
-    *,
-    project: str,
-    location: str,
-    ledger_path: Path,
-) -> tuple[list[dict[str, Any]], bool]:
-    statuses: list[dict[str, Any]] = []
-    failed = False
-    with ledger.open_ledger(ledger_path) as connection:
-        for attempt, job in zip(attempts, jobs, strict=True):
-            existing = _ledger_attempt(connection, attempt)
-            preexisting_intent = existing is not None
-            if existing is None:
-                ledger.record_intent(
-                    connection,
-                    attempt=attempt.as_dict(),
-                    campaign=attempt.campaign,
-                    now=_utc_now(),
-                )
-            else:
-                state, exact = existing
-                if not exact:
-                    failed = True
-                    statuses.append({"job_id": attempt.job_id, "state": "ledger-mismatch"})
-                    continue
-                if state in ("submitted", "running", "succeeded"):
-                    statuses.append({"job_id": attempt.job_id, "state": state})
-                    continue
-                if state in ("failed", "abandoned"):
-                    failed = True
-                    statuses.append({"job_id": attempt.job_id, "state": state})
-                    continue
-                if state != "submitting":
-                    failed = True
-                    statuses.append(
-                        {"job_id": attempt.job_id, "state": f"unknown-ledger-state:{state}"}
-                    )
-                    continue
-            try:
-                result = _run(
-                    (
-                        "gcloud",
-                        "batch",
-                        "jobs",
-                        "submit",
-                        attempt.job_id,
-                        "--project",
-                        project,
-                        "--location",
-                        location,
-                        "--config=-",
-                        "--quiet",
-                    ),
-                    payload=_canonical_json(job),
-                )
-            except SubmissionError as exc:
-                failed = True
-                error_detail = {"error": str(exc)}
-                ledger.record_state(
-                    connection,
-                    job_id=attempt.job_id,
-                    state="failed",
-                    now=_utc_now(),
-                    detail=error_detail,
-                )
-                statuses.append({"job_id": attempt.job_id, "state": "failed"})
-                continue
-            recovered = preexisting_intent and _batch_already_exists(result)
-            if recovered:
-                result = subprocess.CompletedProcess(result.args, 0, result.stdout, result.stderr)
-            state = "submitted" if result.returncode == 0 else "failed"
-            detail: dict[str, Any] = {"returncode": result.returncode}
-            if recovered:
-                detail["recovered_from_already_exists"] = True
-            if result.returncode != 0:
-                failed = True
-                message = result.stderr.decode("utf-8", errors="replace").strip()
-                if message:
-                    detail["stderr"] = message
-            ledger.record_state(
-                connection,
-                job_id=attempt.job_id,
-                state=state,
-                now=_utc_now(),
-                detail=detail,
-            )
-            statuses.append({"job_id": attempt.job_id, "state": state})
-    return statuses, failed
-
-
 def _load_plans(args: argparse.Namespace) -> tuple[bench.Plan, ...]:
     paths = (
         [bench.default_path(bucket) for bucket in args.bucket]
@@ -428,9 +313,25 @@ def _load_plans(args: argparse.Namespace) -> tuple[bench.Plan, ...]:
     return tuple(loaded_plans)
 
 
+def _attempt_label(fingerprint: str) -> str:
+    return base64.b32encode(bytes.fromhex(fingerprint)).decode().rstrip("=").lower()
+
+
 def submit_campaign_main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        try:
+            post_attempt_allowance_s = int(args.post_attempt_allowance_s)
+        except (TypeError, ValueError):
+            raise SubmissionError("--post-attempt-allowance-s must be an integer") from None
+        try:
+            poll_interval_s = float(args.poll_interval_s)
+        except (TypeError, ValueError):
+            raise SubmissionError("--poll-interval-s must be a number") from None
+        if not math.isfinite(poll_interval_s) or poll_interval_s <= 0:
+            raise SubmissionError("--poll-interval-s must be finite and positive")
+        if args.publish_report and not args.wait and not args.dry_run:
+            raise SubmissionError("--publish-report requires --wait")
         loaded_plans = _load_plans(args)
         images = _read_image_set(Path(args.image_set))
         validate_registered_images(images)
@@ -451,6 +352,11 @@ def submit_campaign_main(argv: Sequence[str] | None = None) -> int:
             for loaded in loaded_plans
             for attempt in attempts_for(loaded, campaign=args.campaign, images=images)
         )
+        if not generated:
+            raise SubmissionError("campaign contains no scheduled runs")
+        job_ids = [attempt.job_id for attempt in generated]
+        if len(job_ids) != len(set(job_ids)):
+            raise SubmissionError("campaign contains duplicate Batch job IDs")
         config = BatchConfig(
             results_bucket=args.results_bucket,
             anonymous_worker_service_account=args.anonymous_worker_sa,
@@ -460,9 +366,23 @@ def submit_campaign_main(argv: Sequence[str] | None = None) -> int:
             subnetwork=args.subnetwork,
             provisioning=args.provisioning,
             zone=args.zone,
-            post_attempt_allowance_s=args.post_attempt_allowance_s,
+            post_attempt_allowance_s=post_attempt_allowance_s,
         )
-        jobs = [render_job(attempt, config) for attempt in generated]
+        jobs = []
+        controller_timeouts = []
+        for attempt in generated:
+            job = render_job(attempt, config)
+            job["labels"] = {
+                **job.get("labels", {}),
+                "s3-study-attempt": _attempt_label(attempt.fingerprint),
+            }
+            jobs.append(job)
+            controller_timeouts.append(
+                attempt.case.timeout_s
+                + config.term_grace_s
+                + config.post_attempt_allowance_s
+                + 3600
+            )
         campaign_document = manifest(
             campaign=args.campaign,
             plans=loaded_plans,
@@ -482,7 +402,6 @@ def submit_campaign_main(argv: Sequence[str] | None = None) -> int:
         if args.dry_run:
             print(json.dumps(dry_run, sort_keys=True, indent=2, ensure_ascii=False))
             return 0
-
         plan_contents: list[bytes] = []
         for loaded in loaded_plans:
             plan_bytes = loaded.path.read_bytes()
@@ -493,23 +412,49 @@ def submit_campaign_main(argv: Sequence[str] | None = None) -> int:
         for plan_record, plan_bytes in zip(campaign_document["plans"], plan_contents, strict=True):
             plan_uri = f"gs://{args.results_bucket}/{plan_record['path']}"
             _freeze(plan_uri, plan_bytes)
-        _freeze(f"{base}/campaign.json", _canonical_json(campaign_document))
-        statuses, failed = _submit_jobs(
-            generated,
-            jobs,
+        manifest_content = _canonical_json(campaign_document)
+        _freeze(f"{base}/campaign.json", manifest_content)
+        statuses = start_campaign(
+            ledger_path=Path(args.ledger),
+            campaign=args.campaign,
             project=args.project,
             location=args.location,
-            ledger_path=Path(args.ledger),
+            results_bucket=args.results_bucket,
+            manifest_sha256=hashlib.sha256(manifest_content).hexdigest(),
+            attempts=[attempt.as_dict() for attempt in generated],
+            jobs=jobs,
+            controller_timeouts=controller_timeouts,
         )
+        if args.wait:
+            from s3_listing_study.manager.campaign.report import report_campaign_main
+
+            forwarded = [
+                "--campaign",
+                args.campaign,
+                "--results-bucket",
+                args.results_bucket,
+                "--ledger",
+                args.ledger,
+                "--poll-interval-s",
+                str(poll_interval_s),
+            ]
+            forwarded.append("--wait")
+            if args.publish_report:
+                forwarded.append("--publish")
+            return report_campaign_main(forwarded)
         print(json.dumps({"campaign": args.campaign, "submissions": statuses}, sort_keys=True))
-        return 1 if failed else 0
+        return 0
     except (
         BuildSelectionError,
         CampaignError,
+        ControllerError,
+        DefaultCredentialsError,
+        GoogleAPIError,
         SubmissionError,
         bench.PlanError,
         ledger.LedgerError,
         OSError,
+        ProviderError,
     ) as exc:
         print(f"submit-campaign: {exc}", file=sys.stderr)
         return 1

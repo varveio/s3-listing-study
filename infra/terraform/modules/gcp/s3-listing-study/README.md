@@ -87,20 +87,21 @@ all either needs. SSH ingress is restricted to IAP's forwarding range regardless
 port 22 to the internet, and an estate that wants IAP-only SSH must delete that
 rule itself. This module will not touch a shared network's pre-existing rules.
 
-**The worker gets `objectCreator`, not `objectAdmin`.** The study's rule is that
-an attempt is never overwritten and a retry is always a new attempt. Overwriting
-an existing GCS object requires delete as well as create, so withholding delete
-makes that rule an IAM property rather than a convention the uploader is trusted
-to honour. Bucket versioning is on as well, so a violation is recoverable rather
-than silent.
-
-**The worker cannot read the bucket.** Reading results back is the orchestrator's
-job. A worker writes its own attempt and has no reason to see any other.
+**The primary anonymous worker currently gets bucket-level `objectAdmin`.** The
+worker implementation reads and manages objects in its own attempt tree as well
+as creating them, so `objectCreator` is insufficient. The grant is not scoped to
+an attempt prefix: IAM therefore also permits this cooperative worker to read or
+manage other result objects in the bucket. Cross-attempt isolation is not a
+property of this role. The uploader still uses create-only preconditions for
+committed attempt artifacts, and bucket versioning makes accidental replacement
+recoverable, but those are application and recovery controls rather than a
+least-privilege IAM boundary.
 
 **Batch metadata access is intentional.** The in-worker uploader obtains its
 OAuth token from the VM metadata server. The subjects are cooperative software,
-not treated as hostile; the attached identity is nevertheless limited to new
-result-object creation, Artifact Registry reads, and Batch/log reporting. Each
+not treated as hostile; the primary anonymous identity can manage the results
+bucket and is otherwise limited to Artifact Registry reads and Batch/log
+reporting. Each
 attempt has a fresh VM with one task in an otherwise disposable benchmark
 project. The strict metadata-denial bridge remains a local-Docker profile for
 direct runs on the more-privileged runner and is not a Batch prerequisite. The
@@ -147,7 +148,7 @@ verification or investigation. More than one UUID child under one run must be
 surfaced as duplicate execution and none may be silently selected.
 
 **Grants are additive (`google_*_iam_member`), never authoritative.** An
-authoritative binding on the bucket would clobber the worker's `objectCreator` on
+authoritative binding on the bucket would clobber the worker's `objectAdmin` on
 the same resource.
 
 ## Inputs and outputs
