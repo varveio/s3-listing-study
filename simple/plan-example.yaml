@@ -18,6 +18,14 @@ repetitions: 1
 tools:
   - name: aws-cli
     mode: s3api-v2-text
+    # An authenticated case would carry its credential as a Secret Manager
+    # version, never a literal value: campaign.py renders each key here as a
+    # Batch taskSpec secretVariable and a matching measure.py --pass-env flag,
+    # so the value itself never appears in the rendered job body, this plan,
+    # or result.json.
+    # credential_secret:
+    #   AWS_ACCESS_KEY_ID: projects/my-project/secrets/s3-study-aws-key-id/versions/1
+    #   AWS_SECRET_ACCESS_KEY: projects/my-project/secrets/s3-study-aws-secret/versions/1
   - name: s5cmd
     mode: recursive
   - name: rclone

@@ -1,5 +1,5 @@
-"""Walk campaign-state.json plus each attempt's result.json/verify.json and
-print one Markdown summary table.
+"""Walk campaign.db plus each latest-submission attempt's result.json/verify.json
+and print one Markdown summary table.
 
 This is a SKETCH standing in for the real report renderer (which produces a
 byte-identical verify.md as part of the audit record, with a frozen template
@@ -7,23 +7,28 @@ and stable field ordering the acceptance tests pin down). This one just
 prints Markdown to stdout; if two runs produce a differently-ordered table,
 nothing here cares.
 
+Opens campaign.db read-only (mode=ro): report.py only ever reads the ledger,
+so a stray write here is a bug this should fail loudly on, not tolerate.
+
 Like verify.py, a job's directory under --attempts-root is a *destination
 prefix*, not the attempt itself: report.py resolves it to the one attempt
 leaf underneath (see verify.resolve_leaf) and reports AMBIGUOUS or
 INCOMPLETE rather than guessing when that resolution doesn't land cleanly.
 
 Usage:
-    report.py --state campaign-state.json --attempts-root /local/attempts
+    report.py --state campaign.db --attempts-root /local/attempts
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import sqlite3
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
+from campaign import STATE_FILENAME, latest_submissions, open_db
 from verify import has_result_marker, resolve_leaf
 
 COLUMNS = ("tool", "mode", "wall_seconds", "max_rss_kb", "verdict")
@@ -35,24 +40,24 @@ def load_json(path: Path) -> dict | None:
     return json.loads(path.read_text())
 
 
-def row_for(job_id: str, record: dict, attempts_root: Path) -> dict:
-    destination = str(attempts_root / job_id)
+def row_for(row: sqlite3.Row, attempts_root: Path) -> dict:
+    destination = str(attempts_root / row["job_id"])
     leaf = resolve_leaf(destination)
     if leaf is None:
-        return {"tool": record.get("tool", "-"), "mode": record.get("mode", "-"),
+        return {"tool": row["tool"], "mode": row["mode"],
                 "wall_seconds": "-", "max_rss_kb": "-", "verdict": "AMBIGUOUS"}
     if not has_result_marker(leaf):
-        return {"tool": record.get("tool", "-"), "mode": record.get("mode", "-"),
+        return {"tool": row["tool"], "mode": row["mode"],
                 "wall_seconds": "-", "max_rss_kb": "-", "verdict": "INCOMPLETE"}
 
     result = load_json(Path(leaf) / "result.json") or {}
     verify = load_json(Path(leaf) / "verify.json") or {}
     return {
-        "tool": record.get("tool", "-"),
-        "mode": record.get("mode", "-"),
+        "tool": row["tool"],
+        "mode": row["mode"],
         "wall_seconds": result.get("wall_seconds", "-"),
         "max_rss_kb": result.get("max_rss_kb", "-"),
-        "verdict": verify.get("verdict", record.get("state", "-")),
+        "verdict": verify.get("verdict", row["state"]),
     }
 
 
@@ -81,7 +86,7 @@ def summary_line(rows: list[dict]) -> str:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Print a Markdown summary of a campaign's results.")
-    parser.add_argument("--state", required=True, help="campaign-state.json path")
+    parser.add_argument("--state", default=STATE_FILENAME, help="campaign.db path (sqlite3).")
     parser.add_argument(
         "--attempts-root", required=True,
         help="Local directory mirroring each job's GCS destination prefix, keyed by job id.",
@@ -91,13 +96,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    state = json.loads(Path(args.state).read_text())
     attempts_root = Path(args.attempts_root)
 
-    rows = [
-        row_for(job_id, record, attempts_root)
-        for job_id, record in sorted(state.get("jobs", {}).items())
-    ]
+    con = open_db(args.state, readonly=True)
+    try:
+        rows = [row_for(db_row, attempts_root) for db_row in latest_submissions(con)]
+    finally:
+        con.close()
+
     print(render_markdown(rows))
     return 0
 

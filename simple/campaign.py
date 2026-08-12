@@ -1,15 +1,19 @@
 """The orchestrator: read a plan, submit one GCP Batch job per (tool, mode,
-repetition), poll them, and track state in one JSON file.
+repetition), poll them, and track state in campaign.db.
 
 This is a SKETCH standing in for manager/campaign/ + manager/bench/plan.py
 (~3,000 lines combined). It trusts `gcloud batch jobs describe`'s reported
-state completely -- no fingerprinting, no duplicate-submission detection, no
-attempt-directory reconciliation, no retry policy, no case ID derivation
-scheme, no per-tool resource sizing beyond one machine type for the whole
-plan. campaign-state.json IS written via temp-file + os.replace() (see
-save_state) so a crash mid-write leaves the previous complete ledger rather
-than a corrupt one -- there is still no lock, so two concurrent campaign.py
-processes can race and one's update can be lost.
+state completely -- no fingerprinting, no attempt-directory reconciliation,
+no case ID derivation scheme, no per-tool resource sizing beyond one machine
+type for the whole plan.
+
+State lives in one sqlite3 database (mirroring, in miniature, the real
+manager/campaign/ledger.py's choice of a database over a flat file). This
+REPLACES round 1's JSON campaign-state.json + temp-file/os.replace() dance:
+sqlite's own journal now provides the crash-safety that hack approximated, so
+there is no equivalent atomic-rewrite code left to write. The trade-off is
+that campaign.db is no longer git-diffable or eyeballable in a text editor --
+inspect it with `sqlite3 campaign.db "SELECT * FROM submissions"` instead.
 
 Plan schema (see plan-example.yaml), deliberately smaller than
 bench/buckets/*.yaml + bench/tools.yaml:
@@ -25,33 +29,63 @@ bench/buckets/*.yaml + bench/tools.yaml:
     tools:
       - name: str
         mode: str
-        container_memory_gb: int   # optional; only swath/s3p heap-size off it
+        container_memory_gb: int          # optional; only swath/s3p heap-size off it
+        credential_secret: {str: str}     # optional; ENV_NAME -> Secret Manager version
 
-Subcommands: submit, poll, status, cancel.
+Subcommands: submit, poll, status, cancel, retry.
+
+Submission vs. physical execution, in miniature: a job id here identifies a
+*submission*. verify.py's one-leaf-per-destination rule only ever disambiguates
+*physical executions* Batch ran under that one submission (e.g. a silent Batch
+retry re-running the same task) -- it says nothing about, and does not dedupe,
+an operator or this module resubmitting the same case on purpose. `retry`
+exists for exactly that: every resubmission gets its own row, keyed by
+(base_job_id, submission), so a retried case's history is several
+honestly-numbered submissions in the ledger, never a mutated original. The
+real study keeps the same split at a different layer -- `Case.fingerprint`
+identifies the submission, TwinStamp's execution unit the physical run
+underneath it.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
+import sqlite3
 import subprocess
 import sys
 import tempfile
 import time
 from datetime import UTC, datetime
-from pathlib import Path
 
 import yaml
 
 from tools import TOOLS, heap_env_for
 
-STATE_FILENAME = "campaign-state.json"
+STATE_FILENAME = "campaign.db"
 TERMINAL_STATES = {"SUCCEEDED", "FAILED"}
 REQUIRED_PLAN_KEYS = (
     "bucket", "location", "results_bucket", "image", "machine_type", "tools",
 )
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS submissions (
+    base_job_id TEXT NOT NULL,
+    submission INTEGER NOT NULL,
+    job_id TEXT NOT NULL,
+    tool TEXT NOT NULL,
+    mode TEXT NOT NULL,
+    rep INTEGER NOT NULL,
+    container_memory_gb INTEGER,
+    credential_secret TEXT,
+    destination TEXT NOT NULL,
+    state TEXT NOT NULL,
+    submitted_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (base_job_id, submission)
+)
+"""
 
 
 def load_plan(path: str) -> dict:
@@ -66,7 +100,7 @@ def load_plan(path: str) -> dict:
 
 def validate_plan(plan: dict) -> None:
     """Fail loudly on a plan missing what campaign.py needs, rather than
-    letting a KeyError surface mid-submit with a half-tracked state file.
+    letting a KeyError surface mid-submit with a half-tracked ledger.
 
     Compare manager/bench/plan.py, which additionally validates a fingerprint
     scheme, inheritance across defaults/rows, and a product/zip case
@@ -82,6 +116,9 @@ def validate_plan(plan: dict) -> None:
             raise ValueError(f"tool entry must have name and mode: {entry!r}")
         if entry["name"] not in TOOLS:
             raise ValueError(f"unknown tool {entry['name']!r}; known tools: {sorted(TOOLS)}")
+        secret = entry.get("credential_secret")
+        if secret is not None and not all(isinstance(k, str) and isinstance(v, str) for k, v in secret.items()):
+            raise ValueError(f"credential_secret must map str env names to str secret versions: {secret!r}")
 
 
 def _slug(value: str) -> str:
@@ -110,6 +147,7 @@ def build_cases(plan: dict) -> list[dict]:
                     "mode": tool_entry["mode"],
                     "rep": rep,
                     "container_memory_gb": container_memory_gb,
+                    "credential_secret": tool_entry.get("credential_secret"),
                     "job_id": job_id_for(
                         plan["bucket"], tool_entry["name"], tool_entry["mode"], rep, container_memory_gb
                     ),
@@ -122,8 +160,8 @@ def render_batch_job(plan: dict, case: dict) -> dict:
     """Minimal Batch v1 job body: one task running measure.py in a container.
 
     Compare manager/campaign/batch.py's render_job(), which additionally
-    handles authenticated-credential secrets, N4 boot disks, network/subnet
-    pinning, provisioning model, and validates every field before rendering.
+    handles N4 boot disks, network/subnet pinning, provisioning model, and
+    validates every field before rendering.
     """
     destination = f"gs://{plan['results_bucket']}/{case['job_id']}/"
     container_memory_gb = case.get("container_memory_gb")
@@ -144,17 +182,24 @@ def render_batch_job(plan: dict, case: dict) -> dict:
     if heap_env is not None:
         commands.extend(("--case-env", f"{heap_env[0]}={heap_env[1]}"))
 
+    # Batch injects each secret as an ordinary env var on the task; --pass-env
+    # tells measure.py which of ITS OWN env vars to copy into the subject's
+    # env. Naming them here, not baking them into --case-env, keeps the
+    # credential values themselves out of this rendered job body entirely.
+    credential_secret = case.get("credential_secret") or {}
+    for env_name in credential_secret:
+        commands.extend(("--pass-env", env_name))
+
+    task_spec = {
+        "runnables": [{"container": {"imageUri": plan["image"], "commands": commands}}],
+        "computeResource": {"cpuMilli": "2000", "memoryMib": str(memory_mib)},
+        "maxRetryCount": 0,
+    }
+    if credential_secret:
+        task_spec["environment"] = {"secretVariables": credential_secret}
+
     return {
-        "taskGroups": [
-            {
-                "taskCount": "1",
-                "taskSpec": {
-                    "runnables": [{"container": {"imageUri": plan["image"], "commands": commands}}],
-                    "computeResource": {"cpuMilli": "2000", "memoryMib": str(memory_mib)},
-                    "maxRetryCount": 0,
-                },
-            }
-        ],
+        "taskGroups": [{"taskCount": "1", "taskSpec": task_spec}],
         "allocationPolicy": {
             "instances": [{"policy": {"machineType": plan["machine_type"]}}],
         },
@@ -196,68 +241,117 @@ def cancel_job(plan: dict, job_id: str) -> None:
     )
 
 
-def load_state(state_path: Path) -> dict:
-    if state_path.exists():
-        return json.loads(state_path.read_text())
-    return {"jobs": {}}
+def open_db(path: str, *, readonly: bool = False) -> sqlite3.Connection:
+    """Open campaign.db. A writer creates the table if absent (no migration
+    machinery beyond that); report.py's read-only callers use a `mode=ro`
+    URI so an accidental write there fails loudly instead of silently
+    succeeding against a file it has no business mutating.
+    """
+    if readonly:
+        con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    else:
+        con = sqlite3.connect(path)
+        con.execute(SCHEMA)
+        con.commit()
+    con.row_factory = sqlite3.Row
+    return con
 
 
-def save_state(state_path: Path, state: dict) -> None:
-    # Temp file in the same directory + os.replace(): a reader never sees a
-    # half-written ledger, only the previous complete one or the new one.
-    tmp_path = state_path.with_suffix(state_path.suffix + ".tmp")
-    tmp_path.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n")
-    os.replace(tmp_path, state_path)
+def insert_submission(con: sqlite3.Connection, row: dict) -> None:
+    con.execute(
+        """
+        INSERT INTO submissions
+            (base_job_id, submission, job_id, tool, mode, rep, container_memory_gb,
+             credential_secret, destination, state, submitted_at, updated_at)
+        VALUES (:base_job_id, :submission, :job_id, :tool, :mode, :rep, :container_memory_gb,
+                :credential_secret, :destination, :state, :submitted_at, :updated_at)
+        """,
+        row,
+    )
+    con.commit()
+
+
+def update_submission_state(con: sqlite3.Connection, base_job_id: str, submission: int, state: str) -> None:
+    con.execute(
+        "UPDATE submissions SET state = ?, updated_at = ? WHERE base_job_id = ? AND submission = ?",
+        (state, datetime.now(UTC).isoformat(), base_job_id, submission),
+    )
+    con.commit()
+
+
+def get_submission(con: sqlite3.Connection, job_id: str) -> sqlite3.Row | None:
+    return con.execute("SELECT * FROM submissions WHERE job_id = ?", (job_id,)).fetchone()
+
+
+def all_submissions(con: sqlite3.Connection) -> list[sqlite3.Row]:
+    return con.execute("SELECT * FROM submissions ORDER BY base_job_id, submission").fetchall()
+
+
+def latest_submissions(con: sqlite3.Connection) -> list[sqlite3.Row]:
+    """One row per base_job_id (case): the one with the highest submission."""
+    return con.execute(
+        """
+        SELECT s.* FROM submissions s
+        JOIN (SELECT base_job_id, MAX(submission) AS submission FROM submissions GROUP BY base_job_id) latest
+          ON s.base_job_id = latest.base_job_id AND s.submission = latest.submission
+        ORDER BY s.base_job_id
+        """
+    ).fetchall()
 
 
 def cmd_submit(args: argparse.Namespace) -> int:
     plan = load_plan(args.plan)
-    state_path = Path(args.state)
-    state = load_state(state_path)
-
-    for case in build_cases(plan):
-        job_id = case["job_id"]
-        if job_id in state["jobs"]:
-            print(f"campaign: skipping already-tracked job {job_id}")
-            continue
-        if args.dry_run:
-            print(f"campaign: [dry-run] would submit {job_id}")
-            print(json.dumps(render_batch_job(plan, case), indent=2))
-            continue
-        print(f"campaign: submitting {job_id}")
-        submit_job(plan, case)
-        now = datetime.now(UTC).isoformat()
-        state["jobs"][job_id] = {
-            "tool": case["tool"],
-            "mode": case["mode"],
-            "rep": case["rep"],
-            "destination": f"gs://{plan['results_bucket']}/{job_id}/",
-            "state": "SUBMITTED",
-            "submitted_at": now,
-            "updated_at": now,
-        }
-        save_state(state_path, state)
+    con = open_db(args.state)
+    try:
+        for case in build_cases(plan):
+            job_id = case["job_id"]
+            if get_submission(con, job_id) is not None:
+                print(f"campaign: skipping already-tracked job {job_id}")
+                continue
+            if args.dry_run:
+                print(f"campaign: [dry-run] would submit {job_id}")
+                print(json.dumps(render_batch_job(plan, case), indent=2))
+                continue
+            print(f"campaign: submitting {job_id}")
+            submit_job(plan, case)
+            now = datetime.now(UTC).isoformat()
+            insert_submission(con, {
+                "base_job_id": job_id,
+                "submission": 1,
+                "job_id": job_id,
+                "tool": case["tool"],
+                "mode": case["mode"],
+                "rep": case["rep"],
+                "container_memory_gb": case.get("container_memory_gb"),
+                "credential_secret": json.dumps(case["credential_secret"]) if case.get("credential_secret") else None,
+                "destination": f"gs://{plan['results_bucket']}/{job_id}/",
+                "state": "SUBMITTED",
+                "submitted_at": now,
+                "updated_at": now,
+            })
+    finally:
+        con.close()
     return 0
 
 
-def poll_once(plan: dict, state_path: Path, state: dict) -> bool:
-    """One describe-and-record pass. Returns True once every job is terminal."""
+def poll_once(plan: dict, con: sqlite3.Connection, rows: list[sqlite3.Row]) -> bool:
+    """One describe-and-record pass over `rows`. Returns True once every row
+    in it is terminal.
+    """
     all_terminal = True
-    for job_id, record in state["jobs"].items():
-        if record["state"] in TERMINAL_STATES:
+    for row in rows:
+        if row["state"] in TERMINAL_STATES:
             continue
         try:
-            described = describe_job(plan, job_id)
+            described = describe_job(plan, row["job_id"])
         except subprocess.CalledProcessError as exc:
-            print(f"campaign: describe failed for {job_id}: {exc}", file=sys.stderr)
+            print(f"campaign: describe failed for {row['job_id']}: {exc}", file=sys.stderr)
             all_terminal = False
             continue
-        new_state = described.get("status", {}).get("state", record["state"])
-        if new_state != record["state"]:
-            print(f"campaign: {job_id} {record['state']} -> {new_state}")
-        record["state"] = new_state
-        record["updated_at"] = datetime.now(UTC).isoformat()
-        save_state(state_path, state)
+        new_state = described.get("status", {}).get("state", row["state"])
+        if new_state != row["state"]:
+            print(f"campaign: {row['job_id']} {row['state']} -> {new_state}")
+        update_submission_state(con, row["base_job_id"], row["submission"], new_state)
         if new_state not in TERMINAL_STATES:
             all_terminal = False
     return all_terminal
@@ -265,55 +359,107 @@ def poll_once(plan: dict, state_path: Path, state: dict) -> bool:
 
 def cmd_poll(args: argparse.Namespace) -> int:
     plan = load_plan(args.plan)
-    state_path = Path(args.state)
-    state = load_state(state_path)
-
-    if not args.watch:
-        poll_once(plan, state_path, state)
+    con = open_db(args.state)
+    try:
+        # Default: only the latest submission per case. --all also polls
+        # superseded submissions (earlier retries) still sitting in flight.
+        rows_for = all_submissions if args.all else latest_submissions
+        if not args.watch:
+            poll_once(plan, con, rows_for(con))
+            return 0
+        # --watch trusts gcloud's reported state completely and just loops
+        # describing everything non-terminal until nothing is left to
+        # describe; no exponential backoff, no jitter, no wall-time cap.
+        while not poll_once(plan, con, rows_for(con)):
+            time.sleep(args.interval)
         return 0
-
-    # --watch trusts gcloud's reported state completely and just loops
-    # describing everything non-terminal until nothing is left to describe;
-    # no exponential backoff, no jitter, no cap on total wall time.
-    while not poll_once(plan, state_path, state):
-        time.sleep(args.interval)
-    return 0
+    finally:
+        con.close()
 
 
 def cmd_status(args: argparse.Namespace) -> int:
-    state = load_state(Path(args.state))
-    counts: dict[str, int] = {}
-    for job_id, record in sorted(state["jobs"].items()):
-        print(f"{job_id:<40} {record['state']:<12} {record['tool']:<12} rep={record['rep']}")
-        counts[record["state"]] = counts.get(record["state"], 0) + 1
-    summary = " ".join(f"{state_name}={count}" for state_name, count in sorted(counts.items()))
-    print(f"-- {len(state['jobs'])} job(s): {summary}")
+    con = open_db(args.state, readonly=True)
+    try:
+        rows = latest_submissions(con)
+        counts: dict[str, int] = {}
+        for row in rows:
+            print(f"{row['job_id']:<40} {row['state']:<12} {row['tool']:<12} "
+                  f"rep={row['rep']} submission={row['submission']}")
+            counts[row["state"]] = counts.get(row["state"], 0) + 1
+        total = con.execute("SELECT count(*) FROM submissions").fetchone()[0]
+        summary = " ".join(f"{state_name}={count}" for state_name, count in sorted(counts.items()))
+        print(f"-- {len(rows)} case(s), {total} total submission(s): {summary}")
+    finally:
+        con.close()
+    return 0
+
+
+def cmd_retry(args: argparse.Namespace) -> int:
+    plan = load_plan(args.plan)
+    con = open_db(args.state)
+    try:
+        for row in latest_submissions(con):
+            if args.job_id:
+                if row["job_id"] != args.job_id:
+                    continue
+            elif row["state"] != "FAILED":
+                continue
+
+            next_submission = row["submission"] + 1
+            base = row["base_job_id"]
+            retry_job_id = f"{base}-r{next_submission}"
+            case = {
+                "tool": row["tool"],
+                "mode": row["mode"],
+                "rep": row["rep"],
+                "container_memory_gb": row["container_memory_gb"],
+                "credential_secret": json.loads(row["credential_secret"]) if row["credential_secret"] else None,
+                "job_id": retry_job_id,
+            }
+            print(f"campaign: retrying {row['job_id']} (submission {row['submission']}) as {retry_job_id}")
+            submit_job(plan, case)
+            now = datetime.now(UTC).isoformat()
+            insert_submission(con, {
+                "base_job_id": base,
+                "submission": next_submission,
+                "job_id": retry_job_id,
+                "tool": row["tool"],
+                "mode": row["mode"],
+                "rep": row["rep"],
+                "container_memory_gb": row["container_memory_gb"],
+                "credential_secret": row["credential_secret"],
+                "destination": f"gs://{plan['results_bucket']}/{retry_job_id}/",
+                "state": "SUBMITTED",
+                "submitted_at": now,
+                "updated_at": now,
+            })
+    finally:
+        con.close()
     return 0
 
 
 def cmd_cancel(args: argparse.Namespace) -> int:
     plan = load_plan(args.plan)
-    state_path = Path(args.state)
-    state = load_state(state_path)
-
-    for job_id, record in state["jobs"].items():
-        if record["state"] in TERMINAL_STATES:
-            continue
-        print(f"campaign: cancelling {job_id}")
-        try:
-            cancel_job(plan, job_id)
-        except subprocess.CalledProcessError as exc:
-            print(f"campaign: cancel failed for {job_id}: {exc}", file=sys.stderr)
-            continue
-        record["state"] = "FAILED"
-        record["updated_at"] = datetime.now(UTC).isoformat()
-        save_state(state_path, state)
+    con = open_db(args.state)
+    try:
+        for row in all_submissions(con):
+            if row["state"] in TERMINAL_STATES:
+                continue
+            print(f"campaign: cancelling {row['job_id']}")
+            try:
+                cancel_job(plan, row["job_id"])
+            except subprocess.CalledProcessError as exc:
+                print(f"campaign: cancel failed for {row['job_id']}: {exc}", file=sys.stderr)
+                continue
+            update_submission_state(con, row["base_job_id"], row["submission"], "FAILED")
+    finally:
+        con.close()
     return 0
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Submit, poll, and report on a benchmark campaign.")
-    parser.add_argument("--state", default=STATE_FILENAME, help="campaign-state.json path")
+    parser.add_argument("--state", default=STATE_FILENAME, help="campaign.db path (sqlite3).")
     sub = parser.add_subparsers(dest="command", required=True)
 
     submit_p = sub.add_parser("submit")
@@ -323,8 +469,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
     poll_p = sub.add_parser("poll")
     poll_p.add_argument("--plan", required=True)
-    poll_p.add_argument("--watch", action="store_true", help="Loop until every job reaches a terminal state.")
+    poll_p.add_argument("--watch", action="store_true", help="Loop until every polled row reaches a terminal state.")
     poll_p.add_argument("--interval", type=int, default=30, help="Seconds between --watch polls.")
+    poll_p.add_argument("--all", action="store_true", help="Poll every submission, not just each case's latest.")
     poll_p.set_defaults(func=cmd_poll)
 
     status_p = sub.add_parser("status")
@@ -333,6 +480,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     cancel_p = sub.add_parser("cancel")
     cancel_p.add_argument("--plan", required=True)
     cancel_p.set_defaults(func=cmd_cancel)
+
+    retry_p = sub.add_parser("retry")
+    retry_p.add_argument("--plan", required=True)
+    retry_p.add_argument(
+        "--job-id", default=None,
+        help="Retry only this one job id, regardless of its state. Default: every FAILED case's latest submission.",
+    )
+    retry_p.set_defaults(func=cmd_retry)
 
     return parser.parse_args(argv)
 

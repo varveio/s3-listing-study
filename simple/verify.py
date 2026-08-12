@@ -8,12 +8,16 @@ verifier exists partly to make that case correct. It does not distinguish
 "manifest is corrupt" from "adapter violated the contract"; both just show up
 as noisy diffs.
 
-It does keep three cheap properties (see README.md's "The minimum rigor we
-kept"): it refuses rather than guesses when a job's destination holds zero or
-several attempt leaves, it refuses rather than verifies a leaf with no
-result.json (an incomplete or torn attempt), and it refuses rather than
-verifies a leaf whose recorded tool/bucket/prefix/mode don't match what the
-caller expected -- each a distinct exit code, not folded into FAIL.
+It does keep several cheap properties (see README.md's "The minimum rigor we
+kept" / "Round 2: purpose-fitness additions"): it refuses rather than guesses
+when a job's destination holds zero or several attempt leaves, it refuses
+rather than verifies a leaf with no result.json (an incomplete or torn
+attempt), it refuses rather than verifies a leaf whose recorded
+tool/bucket/prefix/mode don't match what the caller expected, and it refuses
+rather than silently corrupts a row whose key contains TAB/LF/CR -- each a
+distinct exit code, never folded into FAIL. Non-UTF-8 keys remain OUT of
+scope: everything here is DuckDB VARCHAR (UTF-8 text); see
+common/contract.py's bytes-based Record for the real answer.
 
 Contract (informal, matching src/s3_listing_study/common/contract.py in
 spirit): one record per line, TAB-separated:
@@ -52,14 +56,23 @@ from pathlib import Path
 
 import duckdb
 
-from tools import TOOLS
+from tools import TOOLS, FramingViolation, assert_framing_safe
 
 _COLUMNS = "{'key':'VARCHAR','size':'VARCHAR','etag':'VARCHAR','mtime':'VARCHAR','storage_class':'VARCHAR'}"
+# Disabling quote interpretation entirely: the contract TSV has no quoting
+# dialect of its own -- a key or etag containing a literal '"' is an ordinary
+# character, never the start of a quoted field. Without this, DuckDB's
+# default CSV quoting could reinterpret such a field and misplace columns,
+# an adapter-honest row read back as something it never was. read_csv() takes
+# these as keyword args; COPY ... TO takes them as space-separated options.
+_READ_CSV_OPTS = "quote='', escape=''"
+_COPY_OPTS = "QUOTE '', ESCAPE ''"
 
 EXIT_CODES = {"PASS": 0, "DRIFT": 2, "FAIL": 1}
 EXIT_AMBIGUOUS_LEAVES = 3
 EXIT_MISSING_MARKER = 4
 EXIT_BINDING_MISMATCH = 5
+EXIT_FRAMING_VIOLATION = 6
 SAMPLE_LIMIT = 5
 
 
@@ -138,13 +151,17 @@ def fetch_attempt_dir(leaf: str, work_dir: Path) -> Path:
     return local_dir
 
 
-def decompress_native_output(attempt_dir: Path, tool: str, work_dir: Path) -> Path:
-    """The sketch always treats stdout as the tool's native output.
+def locate_native_output(attempt_dir: Path, tool: str, work_dir: Path) -> Path:
+    """Where `tool`'s native output lives on local disk, ready for normalize_sql.
 
-    (Real modes that sink to a file instead of stdout -- e.g. swath's
-    Parquet mode -- would need a second code path here; the sketch only
-    covers the common stdout-listing case.)
+    Most tools stream to stdout, which measure.py gzips; decompress
+    stdout.log.gz. A tool declaring a file-sink "native" filename (tools.py's
+    swath-parquet, for example) wrote it directly into the attempt dir
+    uncompressed, so no decompression step applies -- it is simply there.
     """
+    native = TOOLS[tool].get("native", "stdout")
+    if native != "stdout":
+        return attempt_dir / native
     gz_path = attempt_dir / "stdout.log.gz"
     suffix = Path(TOOLS[tool]["native_file"]).suffix or ".out"
     native_path = work_dir / f"native{suffix}"
@@ -157,7 +174,8 @@ def normalize_to_tsv(tool: str, native_path: Path, out_path: Path) -> None:
     select_sql = TOOLS[tool]["normalize_sql"](str(native_path))
     con = duckdb.connect()
     try:
-        con.execute(f"COPY ({select_sql}) TO '{out_path}' (DELIMITER '\t', HEADER false)")
+        assert_framing_safe(con, select_sql)
+        con.execute(f"COPY ({select_sql}) TO '{out_path}' (DELIMITER '\t', HEADER false, {_COPY_OPTS})")
     finally:
         con.close()
 
@@ -165,7 +183,8 @@ def normalize_to_tsv(tool: str, native_path: Path, out_path: Path) -> None:
 def load_tables(con: duckdb.DuckDBPyConnection, manifest_path: Path, actual_path: Path) -> None:
     for name, path in (("manifest", manifest_path), ("actual", actual_path)):
         con.execute(
-            f"CREATE TABLE {name} AS SELECT * FROM read_csv(?, delim='\t', header=false, columns={_COLUMNS})",
+            f"CREATE TABLE {name} AS SELECT * FROM "
+            f"read_csv(?, delim='\t', header=false, columns={_COLUMNS}, {_READ_CSV_OPTS})",
             [str(path)],
         )
 
@@ -292,9 +311,13 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"  {mismatch}", file=sys.stderr)
             return EXIT_BINDING_MISMATCH
 
-        native_path = decompress_native_output(attempt_dir, args.tool, work_dir)
+        native_path = locate_native_output(attempt_dir, args.tool, work_dir)
         actual_tsv = work_dir / "actual.tsv"
-        normalize_to_tsv(args.tool, native_path, actual_tsv)
+        try:
+            normalize_to_tsv(args.tool, native_path, actual_tsv)
+        except FramingViolation as exc:
+            print(f"verify: {exc}", file=sys.stderr)
+            return EXIT_FRAMING_VIOLATION
 
         con = duckdb.connect()
         try:
