@@ -489,6 +489,9 @@ def _validate(options: AttemptOptions) -> AttemptOptions:
         results_destination = options.results_destination
     if options.campaign is not None and options.attempt_id:
         raise AttemptError("campaign attempt ID must be minted inside the worker invocation")
+    # Only the executing process can guarantee a fresh physical leaf; a
+    # submitter-selected ID could be reused by a task re-execution. _publish
+    # binds this UUID structurally to TwinStamp's physical profile.
     attempt_id = (
         PHYSICAL_EXECUTION.render(PhysicalExecutionUnit(uuid.uuid4()))
         if options.campaign is not None

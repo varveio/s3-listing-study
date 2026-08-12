@@ -37,7 +37,6 @@ class MarkerObservation:
     key: str
     state: MarkerState
     document: dict[str, Any] | None = None
-    version: str | int | None = None
     issue: MarkerIssue | None = None
 
     def __post_init__(self) -> None:
@@ -70,13 +69,13 @@ def parse_canonical_json_marker(
     content: bytes,
     *,
     key: str,
-    version: str | int | None = None,
-    trailing_newline: bool = True,
 ) -> MarkerObservation:
-    """Parse canonical UTF-8 JSON without duplicate keys.
+    """Parse canonical UTF-8 JSON without duplicate keys or non-finite numbers.
 
-    Canonical form uses sorted keys and compact separators. ``trailing_newline``
-    chooses whether exactly one final LF is part of the stored convention.
+    Canonical form uses sorted keys, compact separators, and exactly one final LF.
+    Invalid UTF-8, JSON syntax, non-finite numbers, and serialization failures
+    share ``INVALID_UTF8_JSON``; duplicate keys and noncanonical bytes retain
+    their more specific issues.
     """
 
     try:
@@ -86,32 +85,21 @@ def parse_canonical_json_marker(
             parse_constant=_reject_constant,
         )
     except _DuplicateKey:
-        return MarkerObservation(
-            key, MarkerState.INVALID, version=version, issue=MarkerIssue.DUPLICATE_KEY
-        )
+        return MarkerObservation(key, MarkerState.INVALID, issue=MarkerIssue.DUPLICATE_KEY)
     except (UnicodeDecodeError, json.JSONDecodeError, ValueError, RecursionError):
-        return MarkerObservation(
-            key, MarkerState.INVALID, version=version, issue=MarkerIssue.INVALID_UTF8_JSON
-        )
+        return MarkerObservation(key, MarkerState.INVALID, issue=MarkerIssue.INVALID_UTF8_JSON)
     if not isinstance(value, dict):
-        return MarkerObservation(
-            key, MarkerState.INVALID, version=version, issue=MarkerIssue.NOT_AN_OBJECT
-        )
+        return MarkerObservation(key, MarkerState.INVALID, issue=MarkerIssue.NOT_AN_OBJECT)
     try:
         canonical = json.dumps(
             value, sort_keys=True, separators=(",", ":"), allow_nan=False
         ).encode()
     except (TypeError, ValueError, RecursionError):
-        return MarkerObservation(
-            key, MarkerState.INVALID, version=version, issue=MarkerIssue.INVALID_UTF8_JSON
-        )
-    if trailing_newline:
-        canonical += b"\n"
+        return MarkerObservation(key, MarkerState.INVALID, issue=MarkerIssue.INVALID_UTF8_JSON)
+    canonical += b"\n"
     if content != canonical:
-        return MarkerObservation(
-            key, MarkerState.INVALID, version=version, issue=MarkerIssue.NONCANONICAL
-        )
-    return MarkerObservation(key, MarkerState.PRESENT, value, version)
+        return MarkerObservation(key, MarkerState.INVALID, issue=MarkerIssue.NONCANONICAL)
+    return MarkerObservation(key, MarkerState.PRESENT, value)
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,7 +108,6 @@ class CanonicalJsonMarker:
 
     name: str
     max_bytes: int
-    trailing_newline: bool = True
 
     def __post_init__(self) -> None:
         if not self.name or "/" in self.name:
@@ -143,9 +130,4 @@ class CanonicalJsonMarker:
             return MarkerObservation(key, MarkerState.INVALID, issue=issue)
         if stored is None:
             return MarkerObservation(key, MarkerState.ABSENT)
-        return parse_canonical_json_marker(
-            stored.content,
-            key=key,
-            version=stored.version,
-            trailing_newline=self.trailing_newline,
-        )
+        return parse_canonical_json_marker(stored.content, key=key)

@@ -96,6 +96,8 @@ def _image_token(attempt: Attempt, field: str) -> str:
 def _commands(attempt: Attempt, config: BatchConfig) -> list[str]:
     resources = attempt.case.resources
     container_memory = resources.container_memory_gb
+    # Keep --job-id and --submission-number as ordinary flag/value pairs:
+    # models.retry_job validates and rewrites exactly these two identities.
     pairs = (
         ("--request-schema", "2"),
         ("--output", config.output_path),

@@ -29,7 +29,11 @@ def utc_now() -> str:
 
 @contextmanager
 def _provider_call_lock(ledger_path: Path, job_id: str) -> Iterator[None]:
-    """Serialize one deterministic provider effect across processes and crashes."""
+    """Serialize one deterministic provider effect across live processes.
+
+    The durable journal, not ``flock``, makes a later process recover safely
+    after a crash.
+    """
 
     lock_dir = ledger_path.parent / f".{ledger_path.name}.provider-locks"
     lock_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -44,8 +48,10 @@ def _provider_call_lock(ledger_path: Path, job_id: str) -> Iterator[None]:
 
 def _status(result: ts.EnsureResult[CaseControllerProgress]) -> dict[str, Any]:
     progress, fact = result.progress, result.fact
-    state = progress.phase if fact is None else (
-        "unsettled" if isinstance(fact, ts.Ambiguous) else fact.settlement.state
+    state = (
+        progress.phase
+        if fact is None
+        else ("unsettled" if isinstance(fact, ts.Ambiguous) else fact.settlement.state)
     )
     status = {"job_id": progress.current_job_id or progress.job_id, "state": state}
     if isinstance(fact, ts.Ambiguous) and fact.error_type is not None:
@@ -54,15 +60,29 @@ def _status(result: ts.EnsureResult[CaseControllerProgress]) -> dict[str, Any]:
 
 
 def start_campaign(
-    *, ledger_path: Path, campaign: str, project: str, location: str,
-    results_bucket: str, manifest_sha256: str, attempts: Sequence[Mapping[str, Any]],
-    jobs: Sequence[dict[str, Any]], controller_timeouts: Sequence[int],
+    *,
+    ledger_path: Path,
+    campaign: str,
+    project: str,
+    location: str,
+    results_bucket: str,
+    manifest_sha256: str,
+    attempts: Sequence[Mapping[str, Any]],
+    jobs: Sequence[dict[str, Any]],
+    controller_timeouts: Sequence[int],
 ) -> list[dict[str, Any]]:
     """Persist all intent, then asynchronously create jobs in paced waves."""
     ledger.register_controller(
-        ledger_path, campaign=campaign, project=project, location=location,
-        results_bucket=results_bucket, manifest_sha256=manifest_sha256, attempts=attempts,
-        jobs=jobs, controller_timeouts=controller_timeouts, now=utc_now(),
+        ledger_path,
+        campaign=campaign,
+        project=project,
+        location=location,
+        results_bucket=results_bucket,
+        manifest_sha256=manifest_sha256,
+        attempts=attempts,
+        jobs=jobs,
+        controller_timeouts=controller_timeouts,
+        now=utc_now(),
     )
     journal = ledger.SQLiteIntentJournal(ledger_path, campaign)
     statuses: list[dict[str, Any]] = []
@@ -96,14 +116,18 @@ def retry_case(
     with _provider_call_lock(ledger_path, base_job_id):
         try:
             claim = ledger.claim_retry(
-                ledger_path, campaign=campaign, base_job_id=base_job_id, submission=submission,
+                ledger_path,
+                campaign=campaign,
+                base_job_id=base_job_id,
+                submission=submission,
                 now=utc_now(),
             )
         except (ValueError, ledger.LedgerError) as exc:
             raise ControllerError(str(exc)) from None
         if claim is not None:
             ts.ensure_claim(
-                claim, journal=ledger.SQLiteIntentJournal(ledger_path, campaign),
+                claim,
+                journal=ledger.SQLiteIntentJournal(ledger_path, campaign),
                 ensure=provider.ensure_batch_job,
                 now=utc_now(),
             )

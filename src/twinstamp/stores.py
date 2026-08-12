@@ -10,14 +10,9 @@ from typing import Protocol
 
 @dataclass(frozen=True, slots=True)
 class StoredObject:
-    """Bytes returned by a bounded object read, with an optional store version.
-
-    Adapters expose a generation, ETag, or analogous immutable observation in
-    ``version`` when their store supports one; the core does not interpret it.
-    """
+    """Bytes returned by a bounded, immutable object read."""
 
     content: bytes
-    version: str | int | None = None
 
 
 class ObjectReadIssue(StrEnum):

@@ -3,8 +3,8 @@
 TwinStamp is a small, dependency-free Python core for reconciling immutable
 evidence units stored beneath an object-store prefix.  It discovers immediate
 children, keeps recognized and anomalous evidence visible, lets the caller
-validate each leaf, and applies a caller-selected rule to choose—or decline to
-choose—a result.
+validate each canonical leaf, and applies a strict exact-one rule to choose—or
+decline to choose—a result.
 
 It is not a scheduler, production object-store adapter, domain-schema
 implementation, final-publication system, or a verdict engine. In particular,
@@ -12,13 +12,16 @@ a valid seal means that the caller validated a complete marker-last evidence
 unit.  It does **not** mean the worker succeeded, the result is correct, the
 payload is trustworthy, or the marker is a cryptographic signature.
 
-The name, Python API, and storage convention are provisional. The package is
-being extracted from the S3 listing study as a reusable evidence core and its
-API has not been frozen.
+The name, Python API, and storage convention are provisional and not frozen.
 
 The package root exposes the common reconciliation path. Publication and
 provider coordination live in `twinstamp.publication` and
 `twinstamp.coordination` so their specialist types do not inflate that surface.
+Import `EvidenceProfile` from `twinstamp.profiles`; `SlotResolution`,
+`Selection`, `CanonicalEvidenceUnit`, and `UnrecognizedEvidenceUnit` from
+`twinstamp.resolution`; `ChildLimitExceeded` from `twinstamp.discovery`; and
+`ObjectStoreReader` from `twinstamp.stores`. Test clients can use
+`twinstamp.testing.MemoryObjectStore`.
 
 ## Model and identities
 
@@ -83,8 +86,8 @@ Each leaf has an independent `SealState`:
 - `VALID`: a complete marker-last witness was validated and a `Seal` is present;
 - `INVALID`: malformed or failed validation evidence.
 
-A domain `LeafAssessment` can carry opaque `evidence`, `execution_outcome`, and
-`domain_verdict`; TwinStamp never interprets them. Before domain validation,
+A domain `LeafAssessment` can carry opaque `evidence` and `execution_outcome`;
+TwinStamp never interprets them. Before domain validation,
 the core itself constructs typed assessments for unrecognized units, missing
 markers, and invalid markers. An `UnrecognizedEvidenceUnit` therefore remains
 visible without invoking caller code or reading its marker.
@@ -98,11 +101,11 @@ leaves remain visible but are not candidates.
 ## Discovery and reconciliation
 
 Discovery reads only unique *immediate child prefixes* below the supplied prefix.
-Direct objects at the prefix are not units.  Children are sorted, invalid and
-unrecognized keys are retained as anomalies, and more than `max_children`
-accepted children raises `ChildLimitExceeded` instead of returning a truncated
-answer.  The limit bounds accepted children, not the underlying paginated list
-work.
+Direct objects at the prefix are not units. Children are sorted, and
+unrecognized keys are retained as anomalies. More than `max_children` retained
+children raises `ChildLimitExceeded` instead of returning a truncated answer.
+The bound counts every retained immediate child, including unrecognized keys,
+not the underlying paginated listing work.
 
 The caller supplies the storage adapter, marker convention, and leaf validator.
 The validator is invoked only with a `CanonicalEvidenceUnit`:
@@ -130,7 +133,7 @@ store = MemoryObjectStore(
 )
 
 
-def validate(candidate, submission):
+def validate(candidate):
     assert candidate.marker.state is MarkerState.PRESENT
     return LeafAssessment.valid(
         evidence=candidate.marker.document,
@@ -171,24 +174,31 @@ create. A missing, unreadable, versionless, or mismatching read-back refuses the
 unit and never reaches its marker. Successful, unambiguous large uploads are not
 read back.
 
-The Python helper is optional. The durable interoperability surface is the
-byte/path/order/state convention, represented by
-`golden/publication-v1.json`; workers in other languages need not import
-TwinStamp. The vectors include the canonical marker tree and bytes plus sealed,
-torn, conflict, ambiguous-exact, ambiguous-mismatch, and noncanonical cases.
-Conformance means producing trees the current reader
-validates, not using a particular implementation class.
+The Python helper is optional. `golden/publication-v1.json` is a portable
+fixture for the byte/path/order/state convention; its executable meaning is
+currently defined by the Python conformance test, not yet proven by independent
+implementations.
+
+The vector's `action` selects publication, a stopped/torn write, an injected
+conflict or ambiguity, or reader-only validation. `at`, `stop_after`, and
+`read_back` identify the affected object. When present, `objects` and `outcome`
+state the expected visible tree and seal result. `marker_issue` names a core
+marker parse failure. `corrupt_artifact` expects invalid domain evidence because
+the test's conformance validator checks artifact bodies against the marker
+manifest; TwinStamp's marker reader itself does not read artifacts or define
+that schema.
 
 ## Submission coordination
 
-TwinStamp now also provides a small function-first coordination seam for
-provider jobs and durable intent.  Callers build a `SubmissionSpec` from exact
-immutable canonical bytes plus their SHA-256 digest, then supply typed
-ensure/observe callables and an `IntentJournal`.
+TwinStamp provides a small function-first coordination seam for provider jobs
+and durable intent. Callers build a `SubmissionSpec` from exact immutable
+canonical bytes plus their SHA-256 digest, then supply typed ensure/observe
+callables and an `IntentJournal`.
 
-`ensure_submission()` owns the reserve/claim → provider ensure/adopt → durable
-record path. `observe_submissions()` owns one observation pass and asks the
-journal to settle only facts it can safely project. Ensure facts
+`ensure_submission()` owns the normal reserve/claim → provider ensure/adopt →
+durable record path. `ensure_claim()` completes a claim reserved by a
+caller-specific retry path. `observe_submissions()` owns one observation pass
+and asks the journal to settle only facts it can safely project. Ensure facts
 (`Created`, `AdoptedExact`, `RejectedNoEffect`, `Collision`, `Ambiguous`) are
 separate from observation facts (`ObservedExact`, `ObservedCollision`,
 `NotVisible`, `ObservationAmbiguous`). Every fact carries structural
@@ -201,26 +211,22 @@ clean, as the S3 listing study does through its SQLite journal adapter.
 
 ## Study adapter status
 
-The S3 listing study is the first client. Its existing report paths, marker
-bytes, physical-execution identity, validator, strict duplicate behavior,
-history derivation, finality behavior, GCP Batch normalization, request rendering, SQLite schema,
-canonical `job_json` encoding, and exact adoption policy remain study-owned.
-TwinStamp supplies only generic evidence, reconciliation, typed provider facts,
-and intent/job orchestration seams.  It has no imports of the study, cloud SDKs,
+The S3 listing study is the first client. Its report paths, marker bytes,
+validator, history derivation, finality behavior, GCP Batch normalization,
+request rendering, SQLite schema, canonical `job_json` encoding, and
+exact-adoption policy remain study-owned. The study chooses the physical
+execution profile and strict duplicate policy; TwinStamp supplies those
+mechanisms along with generic evidence, reconciliation, typed provider facts,
+and intent/job orchestration seams. It has no imports of the study, cloud SDKs,
 benchmarks, or subject tools.
 
-## Current limitations and roadmap
+## Current limitations
 
 Today the package does not provide:
 
-- a versioned portable storage convention or domain marker schema;
+- a standalone versioned portable specification or generic domain marker schema;
 - a production mutation adapter or portable multipart/resumable transport;
-- final-publication writer fencing or an atomic namespace snapshot;
 - cryptographic signing, authentication, or a correctness/domain-verdict
   policy;
 - a CLI, a packaged non-Python writer kit, or a second production client or
   backend.
-
-Next work includes a post-fence fresh scan for final publication. The current
-convention and API remain provisional; create-only calls do not establish
-ongoing immutability where credentials can delete and recreate names.

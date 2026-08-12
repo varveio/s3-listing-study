@@ -313,8 +313,7 @@ def _publish(
 
     The worker has already counted locally and sealed the summary in
     ``result.json``. Campaign uploads receive the manager's deterministic
-    ``run-N`` prefix and add the worker UUID leaf. Managers discover immediate child
-    prefixes with GCS delimiter listing, then fetch only each ``result.json``.
+    ``run-N`` prefix and add the worker UUID leaf.
     """
     # The execution leaf is named here because only this process knows the attempt id
     # it minted — a submitter-chosen leaf would be written twice by a task
@@ -324,12 +323,10 @@ def _publish(
         unit = PHYSICAL_EXECUTION.parse(leaf)
         if unit is None:
             raise UploadError("campaign attempt_id is not a canonical physical-execution UUIDv4")
-        leaf = PHYSICAL_EXECUTION.render(unit)
         uploaded = upload_attempt(
             attempt_dir,
-            f"{destination.rstrip('/')}/{leaf}",
-            profile=PHYSICAL_EXECUTION,
-            unit=unit,
+            destination,
+            publication_unit=(PHYSICAL_EXECUTION, unit),
         )
     except (UploadError, OSError) as exc:
         print(f"attempt-runner: upload failed: {exc}", file=sys.stderr)

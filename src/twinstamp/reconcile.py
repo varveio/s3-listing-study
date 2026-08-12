@@ -25,7 +25,7 @@ from twinstamp.stores import ObjectStoreReader
 U = TypeVar("U")
 T = TypeVar("T")
 
-LeafValidator = Callable[[CanonicalEvidenceUnit[U], Submission], LeafAssessment[U, T]]
+LeafValidator = Callable[[CanonicalEvidenceUnit[U]], LeafAssessment[U, T]]
 
 
 def reconcile(
@@ -46,16 +46,17 @@ def reconcile(
         prefix: Caller-owned object-store namespace.
         profile: Homogeneous evidence-unit grammar for the namespace.
         submission: Current deliberate provider-job generation.
-        settled: Whether the provider effect is settled.  ``False`` returns a
-            pending resolution without listing storage.
         marker: Bounded canonical marker convention observed once per
             recognized unit.
         validate: Caller-supplied domain assessment, invoked only for a
             recognized unit with a present canonical marker.
-        max_children: Hard accepted-child discovery bound.
+        settled: Whether the provider effect is settled.  ``False`` returns a
+            pending resolution without listing storage.
+        max_children: Hard retained-child discovery bound, including
+            unrecognized keys.
 
     Returns:
-        A resolution retaining all leaves and submissions plus an independent
+        A resolution retaining all leaves and submissions plus a distinct
         selection result.  Historical leaves are retained but excluded from
         current-leaf selection.
 
@@ -69,7 +70,7 @@ def reconcile(
         raise ValueError("prefix must not be empty")
 
     if not settled:
-        return SlotResolution(prefix, profile, submission, (), Selection(SelectionState.PENDING))
+        return SlotResolution(submission, (), Selection(SelectionState.PENDING))
 
     leaves: list[LeafEvidence[U, T]] = []
     for discovered in discover_units(store, prefix, profile, max_children=max_children):
@@ -98,9 +99,7 @@ def reconcile(
                 )
             )
             continue
-        assessment = validate(
-            CanonicalEvidenceUnit(discovered.key, discovered.unit, observed), submission
-        )
+        assessment = validate(CanonicalEvidenceUnit(discovered.key, discovered.unit, observed))
         if assessment.seal is not None and assessment.seal.marker_key != observed.key:
             raise ValueError("a seal must name the marker that reconciliation observed")
         owner = assessment.submission or submission
@@ -111,7 +110,7 @@ def reconcile(
 
     ordered = tuple(leaves)
     current_leaves = tuple(leaf for leaf in ordered if not leaf.historical)
-    return SlotResolution(prefix, profile, submission, ordered, _select(current_leaves))
+    return SlotResolution(submission, ordered, _select(current_leaves))
 
 
 def _select(current: tuple[LeafEvidence[U, T], ...]) -> Selection:

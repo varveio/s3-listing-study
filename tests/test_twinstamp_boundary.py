@@ -15,7 +15,7 @@ def test_twinstamp_package_readme_is_present_and_nonempty() -> None:
 def test_twinstamp_has_no_study_gcp_or_benchmark_imports() -> None:
     root = Path(__file__).parents[1] / "src" / "twinstamp"
     forbidden: list[tuple[Path, int, str]] = []
-    for path in sorted(root.glob("*.py")):
+    for path in sorted(root.glob("**/*.py")):
         tree = ast.parse(path.read_text(), filename=str(path))
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):

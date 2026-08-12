@@ -81,7 +81,15 @@ class ObjectReadBack:
 
 
 class PublicationStore(Protocol):
-    """Minimal mutation/read surface required by :func:`publish`."""
+    """Create-only mutation and exact read-back required by :func:`publish`.
+
+    ``create`` must use a no-existing-object precondition: it returns
+    :class:`ObjectConflict` only for a definite conflict and
+    :class:`ObjectCreateAmbiguous` whenever the requested bytes may have landed.
+    :class:`ObjectCreated` carries the store version observed for those bytes.
+    ``read_back`` must honor ``max_bytes``, expose the version read with the
+    bytes, and return ``None`` only when absence is definite.
+    """
 
     def create(self, key: str, payload: PublicationObject) -> ObjectCreateResult: ...
 
@@ -129,17 +137,19 @@ class PublishedObject:
     name: str
     key: str
     version: Version
-    ambiguous_create_resolved: bool = False
 
 
 @dataclass(frozen=True, slots=True)
 class PublicationReceipt:
-    publication: EvidencePublication
     objects: tuple[PublishedObject, ...]
 
 
 class PublicationRefused(RuntimeError):
-    """Publication stopped without creating any later object or marker."""
+    """Publication stopped without creating any later object or marker.
+
+    ``reason`` begins with a stable operator-facing classification used by thin
+    adapters; storage-specific detail may follow.
+    """
 
     def __init__(self, object_key: str, reason: str) -> None:
         super().__init__(f"{object_key}: {reason}")
@@ -177,26 +187,36 @@ def _preflight(publication: EvidencePublication) -> str:
     return unit_prefix
 
 
-def _resolve_ambiguous(store: PublicationStore, key: str, payload: PublicationObject) -> Version:
+def _resolve_ambiguous(
+    store: PublicationStore,
+    key: str,
+    payload: PublicationObject,
+    detail: str | None,
+) -> Version:
+    context = f" after {detail[:500]}" if detail else ""
+
+    def refused(reason: str) -> PublicationRefused:
+        return PublicationRefused(key, f"ambiguous create{context}; {reason}")
+
     try:
         observed = store.read_back(key, max_bytes=payload.size + 1)
         if observed is None:
-            raise PublicationRefused(key, "ambiguous create read-back found no object")
+            raise refused("read-back found no object")
         if not _valid_version(observed.version):
-            raise PublicationRefused(key, "ambiguous create read-back exposed no object version")
+            raise refused("read-back exposed no object version")
         digest = hashlib.sha256()
         size = 0
         for chunk in observed.chunks:
             size += len(chunk)
             if size > payload.size:
-                raise PublicationRefused(key, "ambiguous create read-back did not match")
+                raise refused("read-back did not match")
             digest.update(chunk)
     except PublicationRefused:
         raise
     except Exception as exc:
-        raise PublicationRefused(key, f"ambiguous create read-back failed: {exc}") from exc
+        raise refused(f"read-back failed: {exc}") from exc
     if (size, digest.hexdigest()) != (payload.size, payload.sha256):
-        raise PublicationRefused(key, "ambiguous create read-back did not match")
+        raise refused("read-back did not match")
     assert observed.version is not None
     return observed.version
 
@@ -212,10 +232,8 @@ def publish(publication: EvidencePublication, store: PublicationStore) -> Public
         if isinstance(outcome, ObjectConflict):
             raise PublicationRefused(key, "create conflict; evidence unit was not sealed")
         if isinstance(outcome, ObjectCreated):
-            ambiguous = False
             version = outcome.version
         else:
-            ambiguous = True
-            version = _resolve_ambiguous(store, key, payload)
-        written.append(PublishedObject(payload.name, key, version, ambiguous))
-    return PublicationReceipt(publication, tuple(written))
+            version = _resolve_ambiguous(store, key, payload, outcome.detail)
+        written.append(PublishedObject(payload.name, key, version))
+    return PublicationReceipt(tuple(written))

@@ -11,6 +11,7 @@ from typing import Any, cast
 
 import pytest
 from google.api_core.exceptions import AlreadyExists, ServiceUnavailable
+from google.cloud import batch_v1
 
 from s3_listing_study.manager.campaign import cli as campaign_cli
 from s3_listing_study.manager.campaign import control, controller, ledger, provider, report
@@ -159,10 +160,11 @@ def test_late_ensure_after_terminal_observation_returns_current_progress(tmp_pat
     claim = journal.claim_submission(selected.job_id, now=NOW)
     assert claim is not None
     resource = f"projects/study/locations/us-east1/jobs/{selected.job_id}"
-    observed = journal.record_observation(
+    journal.record_observation(
         SubmissionClaim(claim.spec, "observe"), ObservedExact(resource, "SUCCEEDED", True), now=NOW
     )
-    assert observed is not None and observed.phase == "terminal"
+    [observed] = controller.progress(ledger_path=path, campaign=CAMPAIGN)
+    assert observed.phase == "terminal"
 
     late = journal.record_ensure(claim, Created(resource, "RUNNING", False), now=NOW)
 
@@ -243,19 +245,15 @@ def test_stale_provider_observation_cannot_overwrite_retry_or_finalization(
     assert finalized.accepted_failure
 
     stale = SubmissionClaim(
-        BatchJobSpec("study", "us-east1", base_job_id, base_job_id, job(base_job_id), 9000)
-        .submission_spec(),
+        BatchJobSpec(
+            "study", "us-east1", base_job_id, base_job_id, job(base_job_id), 9000
+        ).submission_spec(),
         "observe",
     )
-    assert (
-        ledger.SQLiteIntentJournal(path, CAMPAIGN).record_observation(
-            stale,
-            ObservedExact(
-                f"projects/study/locations/us-east1/jobs/{base_job_id}", "SUCCEEDED", True
-            ),
-            now=NOW,
-        )
-        is None
+    ledger.SQLiteIntentJournal(path, CAMPAIGN).record_observation(
+        stale,
+        ObservedExact(f"projects/study/locations/us-east1/jobs/{base_job_id}", "SUCCEEDED", True),
+        now=NOW,
     )
     [current] = controller.progress(ledger_path=path, campaign=CAMPAIGN)
     assert current.current_submission == 2
@@ -290,15 +288,12 @@ def test_same_job_stale_observation_cannot_regress_terminal_or_finalized_state(
         ).submission_spec(),
         "observe",
     )
-    assert (
-        ledger.SQLiteIntentJournal(success_path, CAMPAIGN).record_observation(
-            claim,
-            ObservedExact(
-                f"projects/study/locations/us-east1/jobs/{selected.job_id}", "RUNNING", False
-            ),
-            now=NOW,
-        )
-        is None
+    ledger.SQLiteIntentJournal(success_path, CAMPAIGN).record_observation(
+        claim,
+        ObservedExact(
+            f"projects/study/locations/us-east1/jobs/{selected.job_id}", "RUNNING", False
+        ),
+        now=NOW,
     )
     [successful] = controller.progress(ledger_path=success_path, campaign=CAMPAIGN)
     assert successful.phase == "terminal"
@@ -308,19 +303,15 @@ def test_same_job_stale_observation_cannot_regress_terminal_or_finalized_state(
     base_job_id = awaiting_retry(finalized_path)
     controller.finalize(ledger_path=finalized_path, campaign=CAMPAIGN)
     claim = SubmissionClaim(
-        BatchJobSpec("study", "us-east1", base_job_id, base_job_id, job(base_job_id), 9000)
-        .submission_spec(),
+        BatchJobSpec(
+            "study", "us-east1", base_job_id, base_job_id, job(base_job_id), 9000
+        ).submission_spec(),
         "observe",
     )
-    assert (
-        ledger.SQLiteIntentJournal(finalized_path, CAMPAIGN).record_observation(
-            claim,
-            ObservedExact(
-                f"projects/study/locations/us-east1/jobs/{base_job_id}", "SUCCEEDED", True
-            ),
-            now=NOW,
-        )
-        is None
+    ledger.SQLiteIntentJournal(finalized_path, CAMPAIGN).record_observation(
+        claim,
+        ObservedExact(f"projects/study/locations/us-east1/jobs/{base_job_id}", "SUCCEEDED", True),
+        now=NOW,
     )
     [finalized] = controller.progress(ledger_path=finalized_path, campaign=CAMPAIGN)
     assert finalized.accepted_failure
@@ -724,6 +715,23 @@ def test_provider_create_errors_with_unknown_effect_are_typed_ambiguous() -> Non
 
     assert isinstance(fact, Ambiguous)
     assert fact.error_type == "ServiceUnavailable"
+
+
+def test_provider_rejects_missing_identity_before_constructing_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rendered = job("c-case-s1")
+    rendered.pop("labels")
+    selected = BatchJobSpec("study", "us-east1", "c-case-s1", "c-case-s1", rendered, 9000)
+    monkeypatch.setattr(
+        batch_v1,
+        "BatchServiceClient",
+        lambda: pytest.fail("provider client must not be constructed"),
+    )
+
+    fact = provider.ensure_batch_job(selected.submission_spec())
+
+    assert fact == Collision("BatchJobCollision", state="NOT_CREATED", settled=True)
 
 
 def test_provider_unexpected_create_identity_is_typed_ambiguous() -> None:

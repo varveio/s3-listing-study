@@ -11,6 +11,7 @@ import io
 import json
 import urllib.error
 import urllib.request
+import uuid
 from email.message import Message
 from pathlib import Path
 from typing import IO, Any, cast
@@ -19,6 +20,7 @@ import pytest
 
 from s3_listing_study.manager.upload import UploadError, parse_destination, upload_attempt
 from s3_listing_study.worker.upload import TOKEN_ENV_VAR, _upload_one, access_token
+from twinstamp.profiles import PHYSICAL_EXECUTION, PhysicalExecutionUnit
 from twinstamp.publication import (
     ObjectConflict,
     ObjectCreateAmbiguous,
@@ -167,6 +169,19 @@ def test_direct_destination_prefix_is_opaque(tmp_path: Path) -> None:
     ]
 
 
+def test_campaign_destination_binds_physical_unit_once(tmp_path: Path) -> None:
+    attempt_dir = _write_attempt(tmp_path)
+    bucket = _FakeBucket()
+    unit = PhysicalExecutionUnit(uuid.UUID("11111111-1111-4111-8111-111111111111"))
+    uploaded = upload_attempt(
+        attempt_dir,
+        "gs://my-bucket/campaign/run-1",
+        store=bucket,
+        publication_unit=(PHYSICAL_EXECUTION, unit),
+    )
+    assert uploaded[-1] == ("campaign/run-1/11111111-1111-4111-8111-111111111111/result.json")
+
+
 def test_result_only_attempt_refuses_before_upload(tmp_path: Path) -> None:
     attempt_dir = _write_attempt(tmp_path)
     (attempt_dir / "stdout.raw.gz").unlink()
@@ -278,7 +293,7 @@ def test_ambiguous_create_reads_back_exact_bytes_then_continues(tmp_path: Path) 
 def test_ambiguous_mismatch_refuses_before_result_marker(tmp_path: Path) -> None:
     attempt_dir = _write_attempt(tmp_path)
     bucket = _AmbiguousBucket(mismatch=True)
-    with pytest.raises(UploadError, match="read-back did not match"):
+    with pytest.raises(UploadError, match=r"connection reset.*read-back did not match"):
         upload_attempt(attempt_dir, "gs://my-bucket/x", store=bucket)
     assert "x/result.json" not in bucket.uploaded
 

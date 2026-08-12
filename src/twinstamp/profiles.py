@@ -40,6 +40,8 @@ class PhysicalExecutionUnit:
 
 
 class PhysicalExecutionProfile:
+    """Canonical UUIDv4 identity grammar for one physical invocation."""
+
     name = "physical-execution"
 
     def parse(self, key: str) -> PhysicalExecutionUnit | None:

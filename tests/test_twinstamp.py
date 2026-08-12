@@ -68,7 +68,6 @@ def test_invalid_profile_child_is_retained_as_an_unrecognized_unit() -> None:
         raise AssertionError("unrecognized evidence must not reach domain validation")
 
     resolved = _resolve(store, profile=PHYSICAL_EXECUTION, validate=validate)
-    assert resolved.profile is PHYSICAL_EXECUTION
     assert resolved.selection.state is SelectionState.INVALID
     unit = resolved.leaves[0].discovered.unit
     assert isinstance(unit, UnrecognizedEvidenceUnit)
@@ -95,7 +94,7 @@ def test_invalid_current_evidence_is_revalidated_against_prior_submissions() -> 
     current = Submission("submission-3")
     prior = (Submission("submission-2"), Submission("submission-1"))
 
-    def validate(candidate: Any, submission: Submission) -> LeafAssessment[Any, str]:
+    def validate(candidate: Any) -> LeafAssessment[Any, str]:
         return LeafAssessment.valid("old", marker_key=candidate.marker.key, submission=prior[1])
 
     resolved = reconcile(
@@ -120,7 +119,7 @@ def test_marker_is_read_once_and_passed_as_canonical_json() -> None:
     key = f"{PREFIX}/{PHYSICAL_KEY}/seal.json"
     store = MemoryObjectStore({key: b'{"answer":42}\n'})
 
-    def validate(candidate: Any, _submission: Submission) -> LeafAssessment[Any, str]:
+    def validate(candidate: Any) -> LeafAssessment[Any, str]:
         assert candidate.marker.state is MarkerState.PRESENT
         assert candidate.marker.document == {"answer": 42}
         return LeafAssessment.valid("ok", marker_key=candidate.marker.key)

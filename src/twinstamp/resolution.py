@@ -7,7 +7,6 @@ from enum import StrEnum
 from typing import Generic, TypeVar
 
 from twinstamp.identity import Submission
-from twinstamp.profiles import EvidenceProfile
 from twinstamp.sealcheck import MarkerObservation
 
 U = TypeVar("U")
@@ -76,7 +75,7 @@ class Seal:
 class LeafAssessment(Generic[U, T]):
     """Domain validation or core-owned state for one discovered evidence unit.
 
-    ``evidence`` and the optional outcome/verdict are opaque to the core.
+    ``evidence`` and the optional execution outcome are opaque to the core.
     ``submission`` attributes a fully validated leaf to an earlier submission;
     leaving it absent attributes the leaf to the current submission.
     Exactly ``VALID`` assessments carry a ``seal``.
@@ -89,7 +88,6 @@ class LeafAssessment(Generic[U, T]):
     evidence: T | None
     seal: Seal | None = None
     execution_outcome: object | None = None
-    domain_verdict: object | None = None
     submission: Submission | None = None
     issue: EvidenceIssue | None = None
 
@@ -112,7 +110,6 @@ class LeafAssessment(Generic[U, T]):
         marker_key: str,
         submission: Submission | None = None,
         execution_outcome: object | None = None,
-        domain_verdict: object | None = None,
     ) -> LeafAssessment[U, T]:
         """Build a valid assessment carrying its required seal witness."""
 
@@ -121,15 +118,8 @@ class LeafAssessment(Generic[U, T]):
             evidence,
             Seal(marker_key),
             execution_outcome=execution_outcome,
-            domain_verdict=domain_verdict,
             submission=submission,
         )
-
-    @classmethod
-    def unsealed(cls, evidence: T) -> LeafAssessment[U, T]:
-        """Build an incomplete, unsealed assessment."""
-
-        return cls(SealState.UNSEALED, evidence)
 
     @classmethod
     def invalid(cls, evidence: T) -> LeafAssessment[U, T]:
@@ -198,7 +188,7 @@ class SubmissionResolution(Generic[U, T]):
 
 @dataclass(frozen=True, slots=True)
 class Selection:
-    """A selection result independent from individual leaf seal states.
+    """A selection result distinct from individual leaf seal states.
 
     Only ``SELECTED`` carries ``selected_key``; every other state must leave it
     absent.
@@ -218,11 +208,9 @@ class SlotResolution(Generic[U, T]):
 
     ``leaves`` is the single source of truth. ``submissions`` is a computed
     grouping by current or historical generation, and ``selection`` is the
-    independent strict exact-one result.
+    distinct strict exact-one result.
     """
 
-    prefix: str
-    profile: EvidenceProfile[U]
     submission: Submission
     leaves: tuple[LeafEvidence[U, T], ...]
     selection: Selection
@@ -251,14 +239,6 @@ class SlotResolution(Generic[U, T]):
             return None
         return next(
             leaf for leaf in self.leaves if not leaf.historical and leaf.discovered.key == key
-        )
-
-    @property
-    def evidence(self) -> tuple[T, ...]:
-        """Return caller evidence in discovery order."""
-
-        return tuple(
-            leaf.assessment.evidence for leaf in self.leaves if leaf.assessment.evidence is not None
         )
 
     @property

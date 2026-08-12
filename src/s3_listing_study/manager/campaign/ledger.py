@@ -239,8 +239,14 @@ def _base_job_rows(
 
 
 def register_campaign(
-    connection: sqlite3.Connection, campaign: str, project: str, location: str,
-    results_bucket: str, manifest_sha256: str, cases: Sequence[Mapping[str, Any]], now: str,
+    connection: sqlite3.Connection,
+    campaign: str,
+    project: str,
+    location: str,
+    results_bucket: str,
+    manifest_sha256: str,
+    cases: Sequence[Mapping[str, Any]],
+    now: str,
 ) -> None:
     with _transaction(connection):
         existing = connection.execute(
@@ -372,9 +378,17 @@ def _progress(row: Mapping[str, Any]) -> CaseControllerProgress:
 
 
 def register_controller(
-    path: Path, *, campaign: str, project: str, location: str, results_bucket: str,
-    manifest_sha256: str, attempts: Sequence[Mapping[str, Any]], jobs: Sequence[dict[str, Any]],
-    controller_timeouts: Sequence[int], now: str,
+    path: Path,
+    *,
+    campaign: str,
+    project: str,
+    location: str,
+    results_bucket: str,
+    manifest_sha256: str,
+    attempts: Sequence[Mapping[str, Any]],
+    jobs: Sequence[dict[str, Any]],
+    controller_timeouts: Sequence[int],
+    now: str,
 ) -> None:
     cases = [
         {"base_job_id": attempt["job_id"], "job": job, "controller_timeout_s": timeout}
@@ -438,20 +452,29 @@ def claim_retry(
 def _project(
     row: Mapping[str, Any], token: str, fact: ts.EnsureFact | ts.ObservationFact
 ) -> tuple[str | None, str | None, str | None, bool] | None:
+    # Ambiguous calls and temporary invisibility cannot safely change durable
+    # provider state; a later observation may supply an exact fact.
     if isinstance(fact, ts.Ambiguous | ts.NotVisible | ts.ObservationAmbiguous):
         return None
     settlement = fact.settlement
     failure = settlement.failure_type
+    # Exact adoption is expected only when redriving an intent whose create may
+    # have landed before a crash. On a first call it means the name was occupied.
     if isinstance(fact, ts.AdoptedExact) and token == "first":
         failure = "BatchJobCollision"
+    # Once observed, an identity collision remains visible even if a later fact
+    # otherwise looks exact; clean evidence cannot establish prior ownership.
     if row["failure_type"] == "BatchJobCollision" and failure is None:
         failure = "BatchJobCollision"
     return settlement.state, failure, fact.effect.resource_name, settlement.settled
 
 
 def _record_fact(
-    connection: sqlite3.Connection, *, claim: ts.SubmissionClaim[BatchJobSpec],
-    fact: ts.EnsureFact | ts.ObservationFact, now: str,
+    connection: sqlite3.Connection,
+    *,
+    claim: ts.SubmissionClaim[BatchJobSpec],
+    fact: ts.EnsureFact | ts.ObservationFact,
+    now: str,
 ) -> bool:
     with _transaction(connection):
         row = connection.execute(
@@ -465,8 +488,10 @@ def _record_fact(
         state, failure_type, resource_name, settled = projection
         if row["phase"] != "running" or row["provider_settled"]:
             return False
-        phase = "terminal" if settled and state == "SUCCEEDED" and failure_type is None else (
-            "awaiting_retry" if settled else "running"
+        phase = (
+            "terminal"
+            if settled and state == "SUCCEEDED" and failure_type is None
+            else ("awaiting_retry" if settled else "running")
         )
         connection.execute(
             "UPDATE controller_cases SET phase = ?, provider_state = ?, failure_type = ?,"
@@ -494,8 +519,12 @@ def _record_fact(
 
 
 def _record_and_read(
-    connection: sqlite3.Connection, claim: ts.SubmissionClaim[BatchJobSpec],
-    fact: ts.EnsureFact | ts.ObservationFact, now: str, *, stale_ok: bool = False,
+    connection: sqlite3.Connection,
+    claim: ts.SubmissionClaim[BatchJobSpec],
+    fact: ts.EnsureFact | ts.ObservationFact,
+    now: str,
+    *,
+    stale_ok: bool = False,
 ) -> CaseControllerProgress | None:
     stale = not _record_fact(connection, claim=claim, fact=fact, now=now)
     row = connection.execute(
@@ -505,6 +534,14 @@ def _record_and_read(
 
 
 class SQLiteIntentJournal:
+    """SQLite implementation of TwinStamp's durable intent boundary.
+
+    Claim tokens distinguish a new effect (``first``), recovery after durable
+    intent but before a recorded provider effect (``redrive``), and polling
+    (``observe``). Transactions reserve before provider I/O; exact adoption is
+    clean only on redrive, while collisions are sticky across later facts.
+    """
+
     def __init__(self, path: Path, campaign: str) -> None:
         self.path = path
         self.campaign = campaign
@@ -518,9 +555,7 @@ class SQLiteIntentJournal:
             raise LedgerError(f"{key}: no such campaign case")
         return row, owner
 
-    def claim_submission(
-        self, key: str, *, now: str
-    ) -> ts.SubmissionClaim[BatchJobSpec] | None:
+    def claim_submission(self, key: str, *, now: str) -> ts.SubmissionClaim[BatchJobSpec] | None:
         with open_ledger(self.path) as connection, _transaction(connection):
             row, owner = self._row_and_owner(connection, key)
             if row["phase"] == "pending":
@@ -531,6 +566,8 @@ class SQLiteIntentJournal:
                 )
                 row["phase"] = "running"
                 return ts.SubmissionClaim(batch_spec(row, owner).submission_spec(), "first")
+            # This is the create crash window: intent is running but there is
+            # still no durable evidence that the deterministic effect landed.
             if (
                 row["phase"] == "running"
                 and not row["provider_settled"]
@@ -553,8 +590,7 @@ class SQLiteIntentJournal:
                 raise LedgerError(f"{claim.spec.key}: no such campaign case")
             return progress
 
-    def observation_claims(self, *, now: str) -> list[ts.SubmissionClaim[BatchJobSpec]]:
-        del now
+    def observation_claims(self) -> list[ts.SubmissionClaim[BatchJobSpec]]:
         with open_ledger(self.path) as connection:
             owner = campaign_record(connection, self.campaign)
             return [
@@ -565,9 +601,9 @@ class SQLiteIntentJournal:
 
     def record_observation(
         self, claim: ts.SubmissionClaim[BatchJobSpec], fact: ts.ObservationFact, *, now: str
-    ) -> CaseControllerProgress | None:
+    ) -> None:
         with open_ledger(self.path) as connection:
-            return _record_and_read(connection, claim, fact, now)
+            _record_fact(connection, claim=claim, fact=fact, now=now)
 
     def progress(self) -> list[CaseControllerProgress]:
         with open_ledger(self.path) as connection:

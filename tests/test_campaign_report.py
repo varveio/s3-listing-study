@@ -274,6 +274,13 @@ def test_gcs_store_classifies_generation_race_as_changed(
     assert caught.value.issue is ObjectReadIssue.CHANGED
 
 
+def test_report_download_translates_shared_bounded_read_error() -> None:
+    blob = FakeBlob(b"{}\n")
+    blob.size = -1
+    with pytest.raises(report.ReportError, match=r"campaign\.json has no valid object size"):
+        report._download(blob, label="campaign.json", max_bytes=100)
+
+
 def test_strict_result_rejects_provenance_mismatch() -> None:
     parsed, case, image = selected_case()
     bad = dict(image)

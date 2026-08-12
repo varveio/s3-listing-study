@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from google.auth.exceptions import DefaultCredentialsError
 
 from s3_listing_study.common.build_selection import load_registered_selection
 from s3_listing_study.manager.bench import plan as bench
@@ -408,6 +409,23 @@ def test_actual_cli_freezes_plan_then_manifest_before_submitting(
     assert len(calls) == 2
     assert len(started) == 1
     assert started[0]["manifest_sha256"] == hashlib.sha256(calls[1][1]).hexdigest()
+
+
+def test_missing_adc_is_reported_as_submit_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    plan, image_set = write_inputs(tmp_path)
+    monkeypatch.setattr(campaign_cli, "_run", lambda *_args, **_kwargs: completed())
+    monkeypatch.setattr(
+        campaign_cli,
+        "start_campaign",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            DefaultCredentialsError("ADC unavailable")  # type: ignore[no-untyped-call]
+        ),
+    )
+
+    assert campaign_cli.submit_campaign_main(arguments(tmp_path, plan, image_set)) == 1
+    assert capsys.readouterr().err == "submit-campaign: ADC unavailable\n"
 
 
 def test_wait_prints_only_the_final_report(

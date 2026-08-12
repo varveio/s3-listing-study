@@ -113,7 +113,7 @@ def _resolution(
     store = MemoryObjectStore(objects)
 
     def validate(
-        candidate: CanonicalEvidenceUnit[PhysicalExecutionUnit], _submission: Submission
+        candidate: CanonicalEvidenceUnit[PhysicalExecutionUnit],
     ) -> LeafAssessment[PhysicalExecutionUnit, object]:
         document = candidate.marker.document
         assert document is not None
@@ -271,3 +271,24 @@ def test_all_payloads_preflight_before_first_create() -> None:
 def test_noncanonical_contained_name_refuses_before_create() -> None:
     with pytest.raises(ValueError, match="not canonical"):
         PublicationObject("native/../escape", 0, hashlib.sha256(b"").hexdigest(), io.BytesIO)
+
+
+@pytest.mark.parametrize("failure", ["absent", "versionless", "mismatch", "read failure"])
+def test_ambiguous_read_back_refusal_keeps_create_detail(failure: str) -> None:
+    publication, _contents = _publication("marker")
+
+    class Store:
+        def create(self, _key: str, _payload: PublicationObject) -> ObjectCreateResult:
+            return ObjectCreateAmbiguous("HTTP 503")
+
+        def read_back(self, _key: str, *, max_bytes: int) -> ObjectReadBack | None:
+            if failure == "absent":
+                return None
+            if failure == "versionless":
+                return ObjectReadBack(None, ())
+            if failure == "mismatch":
+                return ObjectReadBack("generation", (b"wrong",))
+            raise OSError("read unavailable")
+
+    with pytest.raises(PublicationRefused, match=r"HTTP 503.*read-back"):
+        publish(publication, Store())

@@ -8,10 +8,10 @@ invocation safe. It is still never *part of* the engine: an upload failure must
 stay legible as an upload failure and not contaminate a listing outcome.
 
 **Standard library only, deliberately.** The obvious implementation is
-``google-cloud-storage``, but the uploader only needs one POST and one
-precondition header. All eleven current subjects use glibc; avoiding the SDK is
-still useful because it keeps a large dependency and its compiled CRC extension
-out of every pinned image.
+``google-cloud-storage``, but the uploader only needs a create-only POST and,
+when the POST outcome is ambiguous, one bounded GET. All eleven current
+subjects use glibc; avoiding the SDK is still useful because it keeps a large
+dependency and its compiled CRC extension out of every pinned image.
 
 **Do not mount the bucket instead.** The engine's atomic ``os.replace()`` of
 ``result.json`` is what makes a finalized attempt directory trustworthy;
@@ -22,7 +22,8 @@ that says "this attempt finished".
 The destination is a complete ``gs://bucket/prefix/`` the caller supplies
 outright: this module has no opinion on layout. In a campaign, the manager
 supplies the deterministic ``run-<n>`` prefix and the worker caller appends the
-attempt UUID leaf, because only that execution knows the ID it minted.
+attempt UUID leaf through TwinStamp's physical profile, because only that
+execution knows the ID it minted.
 
 ``result.json`` uploads last: its presence at the destination is what lets an
 external reader treat "this attempt's upload is complete" as legible — the same
@@ -289,6 +290,8 @@ def _upload_one(
             with urllib.request.urlopen(request, timeout=TIMEOUT_S) as response:
                 raw = response.read(64 * 1024 + 1)
         except urllib.error.HTTPError as exc:
+            # 412 is a definite precondition conflict. Retryable HTTP failures
+            # may follow a landed create; other 4xx responses are hard errors.
             if exc.code == PRECONDITION_FAILED:
                 return ObjectConflict()
             if exc.code >= 500 or exc.code in (408, 429):
@@ -296,11 +299,13 @@ def _upload_one(
             detail = exc.read().decode("utf-8", "replace")[:500]
             raise UploadError(f"uploading {object_name} failed: HTTP {exc.code} {detail}") from exc
         except (urllib.error.URLError, OSError, http.client.HTTPException) as exc:
+            # Transport failure cannot establish whether GCS committed the body.
             return ObjectCreateAmbiguous(str(exc))
     try:
         document = json.loads(raw)
         generation = document["generation"]
     except (UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError):
+        # A success without a generation cannot support a version-pinned fact.
         return ObjectCreateAmbiguous("successful response did not expose a generation")
     if not isinstance(generation, (str, int)) or isinstance(generation, bool) or generation == "":
         return ObjectCreateAmbiguous("successful response exposed an invalid generation")
@@ -335,6 +340,7 @@ def _read_back_one(
         response = urllib.request.urlopen(request, timeout=TIMEOUT_S)
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
+            # GCS has definitely answered that the object is absent.
             return None
         detail = exc.read().decode("utf-8", "replace")[:500]
         raise UploadError(f"reading back {object_name} failed: HTTP {exc.code} {detail}") from exc
@@ -342,6 +348,7 @@ def _read_back_one(
         raise UploadError(f"reading back {object_name} failed: {exc}") from exc
     generation = response.headers.get("x-goog-generation")
     if not generation:
+        # The bytes may be exact, but a versionless read cannot resolve a create.
         response.close()
         return ObjectReadBack(None, ())
     return ObjectReadBack(generation, _response_chunks(response, max_bytes))
@@ -364,10 +371,15 @@ def upload_attempt(
     destination: str,
     *,
     store: PublicationStore | None = None,
-    profile: EvidenceProfile[Any] | None = None,
-    unit: object | None = None,
+    publication_unit: tuple[EvidenceProfile[Any], object] | None = None,
 ) -> list[str]:
-    """Preflight all worker-owned evidence, then upload ``result.json`` last."""
+    """Preflight worker evidence, then create artifacts and ``result.json``.
+
+    ``destination`` is a complete opaque GCS prefix for direct uploads. With a
+    ``publication_unit`` profile/unit pair it is instead the campaign slot;
+    TwinStamp structurally validates and appends the unit exactly once. Returns
+    the exact created GCS object keys in create order, with ``result.json`` last.
+    """
     result_artifact, files = _validated_upload_files(attempt_dir)
     bucket, prefix = parse_destination(destination)
     result_path = result_artifact.path
@@ -387,7 +399,11 @@ def upload_attempt(
 
     artifacts = tuple(publication_object(artifact) for artifact in files)
     marker = publication_object(result_artifact)
-    publication = _publication(prefix, artifacts, marker, profile, unit)
+    publication = (
+        EvidencePublication(prefix, artifacts, marker)
+        if publication_unit is None
+        else EvidencePublication.for_unit(prefix, *publication_unit, artifacts, marker)
+    )
     selected_store = store if store is not None else _authenticated_store(bucket)
     try:
         receipt = publish(publication, selected_store)
@@ -407,31 +423,6 @@ def upload_attempt(
             ) from exc
         raise UploadError(str(exc)) from exc
     return [item.key for item in receipt.objects]
-
-
-def _publication(
-    prefix: str,
-    artifacts: tuple[PublicationObject, ...],
-    marker: PublicationObject,
-    profile: EvidenceProfile[Any] | None,
-    unit: object | None,
-) -> EvidencePublication:
-    """Build a direct publication or explicitly bind a campaign identity."""
-    if profile is None:
-        if unit is not None:
-            raise UploadError("an evidence unit requires a profile")
-        return EvidencePublication(prefix, artifacts, marker)
-    if unit is None:
-        raise UploadError("an evidence profile requires a unit")
-    leaf = prefix.rsplit("/", 1)[-1]
-    slot_prefix = prefix[: -(len(leaf) + 1)] if "/" in prefix else ""
-    try:
-        publication = EvidencePublication.for_unit(slot_prefix, profile, unit, artifacts, marker)
-    except ValueError as exc:
-        raise UploadError(str(exc)) from exc
-    if publication.prefix != prefix:
-        raise UploadError("destination leaf does not match the supplied evidence unit")
-    return publication
 
 
 def _authenticated_store(bucket: str) -> PublicationStore:

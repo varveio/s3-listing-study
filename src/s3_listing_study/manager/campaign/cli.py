@@ -14,6 +14,8 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from google.auth.exceptions import DefaultCredentialsError
+
 from s3_listing_study.common.argparse_utils import UniqueStoreAction
 from s3_listing_study.common.build_selection import (
     BuildSelectionError,
@@ -33,19 +35,19 @@ from s3_listing_study.manager.campaign.batch import BatchConfig, render_job
 from s3_listing_study.manager.campaign.controller import ControllerError, start_campaign
 
 IMAGE_SET_FIELDS = {
-        "adapter_bundle_sha256",
-        "derived_image",
-        "harness_revision",
-        "image_uri",
-        "selection_sha256",
-        "shared_base_digest",
-        "shared_base_source_sha256",
-        "shared_base_uri",
-        "tool_artifact",
-        "tool_build_sha256",
-        "tool_image_digest",
-        "tool_image_uri",
-        "tool_version",
+    "adapter_bundle_sha256",
+    "derived_image",
+    "harness_revision",
+    "image_uri",
+    "selection_sha256",
+    "shared_base_digest",
+    "shared_base_source_sha256",
+    "shared_base_uri",
+    "tool_artifact",
+    "tool_build_sha256",
+    "tool_image_digest",
+    "tool_image_uri",
+    "tool_version",
 }
 IMAGE_SET_SCHEMA_VERSION = 3
 
@@ -183,9 +185,10 @@ def _read_image_set(path: Path) -> ImageSet:
         _hex(tool, artifact["sha256"], "tool_artifact sha256")
         _hex(tool, value["adapter_bundle_sha256"], "adapter_bundle_sha256")
         _token(tool, value["tool_version"], "tool_version")
-        if not isinstance(value["harness_revision"], str) or re.fullmatch(
-            r"[0-9a-f]{40}", value["harness_revision"]
-        ) is None:
+        if (
+            not isinstance(value["harness_revision"], str)
+            or re.fullmatch(r"[0-9a-f]{40}", value["harness_revision"]) is None
+        ):
             raise SubmissionError(f"{tool}: harness_revision must be a full lowercase commit ID")
         validated[tool] = dict(value)
     shared_inputs = {
@@ -427,6 +430,7 @@ def submit_campaign_main(argv: Sequence[str] | None = None) -> int:
         BuildSelectionError,
         CampaignError,
         ControllerError,
+        DefaultCredentialsError,
         SubmissionError,
         bench.PlanError,
         ledger.LedgerError,

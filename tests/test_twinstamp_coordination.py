@@ -46,28 +46,24 @@ class Journal:
         self.events.append(f"existing:{key}")
         return Progress(key)
 
-    def record_ensure(
-        self, claim: SubmissionClaim[str], fact: EnsureFact, *, now: str
-    ) -> Progress:
+    def record_ensure(self, claim: SubmissionClaim[str], fact: EnsureFact, *, now: str) -> Progress:
         assert claim == self.claim
         assert now == "now"
         self.events.append(f"record:{type(fact).__name__}")
         self.recorded.append(fact)
         return Progress(claim.spec.key, fact)
 
-    def observation_claims(self, *, now: str) -> list[SubmissionClaim[str]]:
-        assert now == "now"
+    def observation_claims(self) -> list[SubmissionClaim[str]]:
         self.events.append("observe-claims")
         return [self.claim]
 
     def record_observation(
         self, claim: SubmissionClaim[str], fact: ObservationFact, *, now: str
-    ) -> Progress:
+    ) -> None:
         assert claim == self.claim
         assert now == "now"
         self.events.append(f"observe:{type(fact).__name__}")
         self.recorded.append(fact)
-        return Progress(claim.spec.key, fact)
 
     def progress(self) -> list[Progress]:
         self.events.append("progress")
@@ -138,7 +134,6 @@ def test_adopted_exact_is_only_a_fact_not_policy() -> None:
     ],
 )
 def test_fact_settlement_claims_are_structural(fact: Any) -> None:
-    assert fact.effect.kind
     if isinstance(fact, RejectedNoEffect):
         assert fact.settlement.settled
         assert fact.settlement.state == "NOT_CREATED"

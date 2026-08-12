@@ -8,6 +8,8 @@ from twinstamp.stores import ObjectReadError, ObjectReadIssue, StoredObject
 
 
 class MemoryObjectStore:
+    """In-memory reader recording listing and bounded-read calls for assertions."""
+
     def __init__(self, objects: dict[str, bytes] | None = None) -> None:
         self.objects = dict(objects or {})
         self.list_calls: list[str] = []

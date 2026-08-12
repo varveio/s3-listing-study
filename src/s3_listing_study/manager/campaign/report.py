@@ -25,7 +25,6 @@ from s3_listing_study.manager.campaign import (
     campaign_prefix,
     controller,
     ledger,
-    provider,
 )
 from s3_listing_study.manager.campaign.cli import IMAGE_SET_FIELDS, _canonical_json
 from s3_listing_study.manager.campaign.models import CaseControllerProgress
@@ -144,16 +143,33 @@ def _json_object(content: bytes, *, label: str, max_bytes: int) -> dict[str, Any
     return document
 
 
-def _download(blob: Any, *, label: str, max_bytes: int) -> bytes:
+def _read_blob(blob: Any, *, key: str, max_bytes: int) -> StoredObject:
     size = blob.size
     if isinstance(size, bool) or not isinstance(size, int) or size < 0:
-        raise ReportError(f"{label} has no valid object size")
+        raise ObjectReadError(ObjectReadIssue.INVALID_SIZE, key)
     if size > max_bytes:
-        raise ReportError(f"{label} exceeds {max_bytes} bytes")
-    content = cast(bytes, blob.download_as_bytes(if_generation_match=blob.generation))
+        raise ObjectReadError(ObjectReadIssue.TOO_LARGE, key)
+    try:
+        content = cast(bytes, blob.download_as_bytes(if_generation_match=blob.generation))
+    except PreconditionFailed as exc:
+        raise ObjectReadError(ObjectReadIssue.CHANGED, key) from exc
     if len(content) != size or len(content) > max_bytes:
-        raise ReportError(f"{label} changed or exceeded its declared size while reading")
-    return content
+        raise ObjectReadError(ObjectReadIssue.CHANGED, key)
+    return StoredObject(content)
+
+
+def _download(blob: Any, *, label: str, max_bytes: int) -> bytes:
+    try:
+        return _read_blob(blob, key=label, max_bytes=max_bytes).content
+    except ObjectReadError as exc:
+        message = {
+            ObjectReadIssue.INVALID_SIZE: f"{label} has no valid object size",
+            ObjectReadIssue.TOO_LARGE: f"{label} exceeds {max_bytes} bytes",
+            ObjectReadIssue.CHANGED: (
+                f"{label} changed or exceeded its declared size while reading"
+            ),
+        }[exc.issue]
+        raise ReportError(message) from exc
 
 
 def _required_blob(bucket: Any, name: str, *, max_bytes: int) -> bytes:
@@ -334,31 +350,26 @@ class _GcsObjectStore:
 
     def read_object(self, key: str, *, max_bytes: int) -> StoredObject | None:
         blob = self._bucket.get_blob(key)
-        if blob is None:
-            return None
-        size = blob.size
-        if isinstance(size, bool) or not isinstance(size, int) or size < 0:
-            raise ObjectReadError(ObjectReadIssue.INVALID_SIZE, key)
-        if size > max_bytes:
-            raise ObjectReadError(ObjectReadIssue.TOO_LARGE, key)
-        try:
-            content = cast(bytes, blob.download_as_bytes(if_generation_match=blob.generation))
-        except PreconditionFailed as exc:
-            raise ObjectReadError(ObjectReadIssue.CHANGED, key) from exc
-        if len(content) != size or len(content) > max_bytes:
-            raise ObjectReadError(ObjectReadIssue.CHANGED, key)
-        return StoredObject(content, blob.generation)
+        return None if blob is None else _read_blob(blob, key=key, max_bytes=max_bytes)
 
 
 def _validated_result(
     bucket: Any,
     case: ManifestCase,
     candidate: CanonicalEvidenceUnit[Any],
-    _submission: Submission,
     *,
     current_job_id: str | None = None,
     current_submission: int | None = None,
 ) -> LeafAssessment[Any, CheckedEvidence]:
+    """Validate and attribute one result marker under the current report schema.
+
+    Current evidence retains normalized execution outcome data. A marker that
+    exactly identifies an earlier submission is still fully revalidated, then
+    retained only as historical identity with no current outcome. Any failure
+    during that revalidation is reported as ``invalid_result_identity`` because
+    reconciliation permits historical attribution only for fully valid leaves.
+    """
+
     leaf = candidate.key
     result_name = f"{case.prefix}/{leaf}/result.json"
     result_uri = f"gs://{bucket.name}/{result_name}"
@@ -733,6 +744,8 @@ def _evidence(
         ) from None
     leaves = tuple(_leaf_record(bucket, case, leaf) for leaf in resolved.leaves)
     state = resolved.selection.state.value
+    # TwinStamp names the selection operation; the established report wire
+    # vocabulary names the resulting persisted evidence ``recorded``.
     state = "recorded" if state == "selected" else state
     selected = resolved.selected_evidence
     if selected is None:
@@ -743,6 +756,8 @@ def _evidence(
 def _controller_view(item: CaseControllerProgress) -> dict[str, Any]:
     return {
         "phase": item.phase,
+        # Preserve the legacy controller-view shape; the Batch controller has
+        # no child workflow, activity attempt, or heartbeat values to publish.
         "child_workflow_id": None,
         "child_run_id": None,
         "activity_attempt": None,
@@ -1067,7 +1082,6 @@ def report_campaign_main(argv: Sequence[str] | None = None) -> int:
         DefaultCredentialsError,
         GoogleAPIError,
         OSError,
-        provider.ProviderError,
         ReportError,
         ledger.LedgerError,
     ) as exc:

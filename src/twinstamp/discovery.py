@@ -1,4 +1,4 @@
-"""Immediate-child discovery with a bounded accepted-child set."""
+"""Immediate-child discovery with a bounded retained-child set."""
 
 from __future__ import annotations
 
@@ -12,11 +12,12 @@ U = TypeVar("U")
 
 
 class ChildLimitExceeded(RuntimeError):
-    """Raised when discovery accepts more immediate child units than its limit.
+    """Raised when discovery retains more immediate child prefixes than its limit.
 
-    The ``limit`` attribute is the configured maximum.  This is a hard failure,
-    rather than a truncated discovery result, so callers cannot mistake a
-    partial namespace scan for a complete slot.
+    Retained prefixes include keys unrecognized by the selected profile. The
+    ``limit`` attribute is the configured maximum. This is a hard failure,
+    rather than a truncated result, so callers cannot mistake a partial scan
+    for a complete slot.
     """
 
     def __init__(self, limit: int) -> None:
@@ -37,16 +38,18 @@ def discover_units(
         store: Reader that exposes delimiter-style child prefixes.
         prefix: Caller-owned slot prefix to inspect.
         profile: The slot's single accepted unit-key grammar.
-        max_children: Maximum accepted child prefixes before raising
+        max_children: Maximum retained immediate child prefixes, including
+            unrecognized keys, before raising
             :class:`ChildLimitExceeded`.
 
     Returns:
-        Units sorted by child key. Invalid keys are retained
-        as :class:`UnrecognizedEvidenceUnit` values for the validator to assess.
+        Units sorted by child key. Keys that do not parse under the profile are
+        retained as :class:`UnrecognizedEvidenceUnit`; reconciliation marks
+        them without calling the validator or reading a marker.
 
     Raises:
         ValueError: If ``max_children`` is less than one.
-        ChildLimitExceeded: If accepted immediate children exceed the limit.
+        ChildLimitExceeded: If retained immediate children exceed the limit.
     """
 
     if max_children < 1:
