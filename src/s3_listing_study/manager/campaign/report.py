@@ -10,7 +10,7 @@ import re
 import sys
 import time
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -29,6 +29,21 @@ from s3_listing_study.manager.campaign import (
 )
 from s3_listing_study.manager.campaign.cli import IMAGE_SET_FIELDS, _canonical_json
 from s3_listing_study.manager.campaign.models import CaseControllerProgress
+from twinstamp import (
+    PHYSICAL_EXECUTION,
+    AnyTwoCurrentChildrenAmbiguous,
+    ChildLimitExceeded,
+    HistoricalClassification,
+    LeafAssessment,
+    ResultSlot,
+    Seal,
+    SealState,
+    SelectionState,
+    StoredObject,
+    Submission,
+    resolve_slot,
+)
+from twinstamp.discovery import discover_units
 
 MANIFEST_MAX_BYTES = 8_000_000
 RESULT_MAX_BYTES = 1_000_000
@@ -303,18 +318,41 @@ def _load_manifest(bucket: Any, campaign: str) -> ManifestSnapshot:
 
 
 def _list_leaves(bucket: Any, prefix: str) -> list[str]:
-    found: set[str] = set()
-    iterator = bucket.list_blobs(prefix=f"{prefix}/", delimiter="/")
-    for page in iterator.pages:
-        for child in page.prefixes:
-            relative = child.removeprefix(f"{prefix}/").rstrip("/")
-            if relative and "/" not in relative:
-                found.add(relative)
-                if len(found) > MAX_EXECUTION_LEAVES_PER_RUN:
-                    raise ReportError(
-                        f"run prefix exceeds {MAX_EXECUTION_LEAVES_PER_RUN} execution leaves"
-                    )
-    return sorted(found)
+    try:
+        return [
+            item.key
+            for item in discover_units(
+                _LegacyGcsReader(bucket),
+                prefix,
+                PHYSICAL_EXECUTION,
+                max_children=MAX_EXECUTION_LEAVES_PER_RUN,
+            )
+        ]
+    except ChildLimitExceeded:
+        raise ReportError(
+            f"run prefix exceeds {MAX_EXECUTION_LEAVES_PER_RUN} execution leaves"
+        ) from None
+
+
+class _LegacyGcsReader:
+    """Expose the existing GCS duck type through TwinStamp's reader boundary."""
+
+    def __init__(self, bucket: Any) -> None:
+        self._bucket = bucket
+
+    def iter_child_prefixes(self, prefix: str) -> Iterable[str]:
+        iterator = self._bucket.list_blobs(prefix=f"{prefix}/", delimiter="/")
+        for page in iterator.pages:
+            yield from page.prefixes
+
+    def read_object(self, key: str, *, max_bytes: int) -> StoredObject | None:
+        blob = self._bucket.get_blob(key)
+        if blob is None:
+            return None
+        return StoredObject(
+            _download(blob, label=f"gs://{self._bucket.name}/{key}", max_bytes=max_bytes),
+            blob.generation,
+        )
 
 
 def _validated_result(
@@ -644,87 +682,140 @@ def _evidence(
     current_job_id: str | None = None,
     current_submission: int | None = None,
 ) -> EvidenceSnapshot:
-    if not terminal:
-        return EvidenceSnapshot("pending", (), None, None)
-    leaf_names = _list_leaves(bucket, case.prefix)
-    if not leaf_names:
-        return EvidenceSnapshot("missing", (), None, None)
-    checked: list[tuple[dict[str, Any], dict[str, Any] | None]] = []
-    for leaf in leaf_names:
-        validated = _validated_result(
+    submission_number = (
+        current_submission if current_submission is not None else case.record.get("submission")
+    )
+    current = Submission(f"{current_job_id or case.job_id}:s{submission_number}")
+
+    def validate(discovered: Any, _submission: Submission) -> LeafAssessment[Any, Any]:
+        checked = _validated_result(
             bucket,
             case,
-            leaf,
+            discovered.key,
             current_job_id=current_job_id,
             current_submission=current_submission,
         )
-        leaf_record, _normalized = validated
+        record, normalized = checked
+        state = {
+            "recorded": SealState.VALID,
+            "unsealed": SealState.UNSEALED,
+            "invalid": SealState.INVALID,
+        }[record["state"]]
+        seal = Seal(str(record["result_uri"])) if state is SealState.VALID else None
+        return LeafAssessment(
+            state,
+            checked,
+            seal,
+            execution_outcome=normalized["subject"] if normalized is not None else None,
+        )
+
+    def classify_historical(
+        discovered: Any, assessment: LeafAssessment[Any, Any]
+    ) -> HistoricalClassification[Any, Any] | None:
+        leaf_record, _normalized = assessment.evidence
         if (
-            current_submission is not None
-            and current_submission > 1
-            and leaf_record["reason"] == "invalid_result_identity"
+            current_submission is None
+            or current_submission <= 1
+            or leaf_record["reason"] != "invalid_result_identity"
         ):
-            result_name = f"{case.prefix}/{leaf}/result.json"
-            blob = bucket.get_blob(result_name)
-            try:
-                content = (
-                    _download(
-                        blob, label=str(leaf_record["result_uri"]), max_bytes=RESULT_MAX_BYTES
-                    )
-                    if blob is not None
-                    else b""
-                )
-                document = _json_object(
-                    content, label=str(leaf_record["result_uri"]), max_bytes=RESULT_MAX_BYTES
-                )
-                campaign = document.get("campaign")
-            except ReportError:
-                campaign = None
-            if isinstance(campaign, dict):
-                prior_submission = campaign.get("submission_number")
-                prior_job_id = campaign.get("job_id")
-                prior_number = cast(int, prior_submission)
-                current_number = current_submission
-                if _is_int(prior_submission, minimum=1) and prior_number < current_number:
-                    stem, separator, original = case.job_id.rpartition("-s")
-                    expected_prior_job = (
-                        case.job_id
-                        if prior_number == 1
-                        else f"{stem}-s{prior_number}"
-                        if separator and original == "1"
-                        else None
-                    )
-                    if isinstance(prior_job_id, str) and prior_job_id == expected_prior_job:
-                        prior_leaf, prior_normalized = _validated_result(
-                            bucket,
-                            case,
-                            leaf,
-                            current_job_id=prior_job_id,
-                            current_submission=prior_number,
-                        )
-                        if prior_leaf["state"] == "recorded" and prior_normalized is not None:
-                            prior_leaf = {
-                                **prior_leaf,
-                                "state": "historical",
-                                "submission_number": prior_number,
-                                "job_id": prior_job_id,
-                            }
-                            validated = (prior_leaf, None)
-        checked.append(validated)
-    leaves = tuple(item[0] for item in checked)
-    current = [item for item in checked if item[0]["state"] != "historical"]
-    if not current:
-        return EvidenceSnapshot("missing", leaves, None, None)
-    if len(current) > 1:
-        return EvidenceSnapshot("duplicate", leaves, None, None)
-    current_leaf, normalized = current[0]
-    state = str(current_leaf["state"])
-    return EvidenceSnapshot(
-        state,
-        leaves,
-        str(current_leaf["result_uri"]) if state == "recorded" else None,
-        normalized,
+            return None
+        result_name = f"{case.prefix}/{discovered.key}/result.json"
+        blob = bucket.get_blob(result_name)
+        try:
+            content = (
+                _download(blob, label=str(leaf_record["result_uri"]), max_bytes=RESULT_MAX_BYTES)
+                if blob is not None
+                else b""
+            )
+            document = _json_object(
+                content, label=str(leaf_record["result_uri"]), max_bytes=RESULT_MAX_BYTES
+            )
+            campaign = document.get("campaign")
+        except ReportError:
+            campaign = None
+        if not isinstance(campaign, dict):
+            return None
+        prior_submission = campaign.get("submission_number")
+        prior_job_id = campaign.get("job_id")
+        if not _is_int(prior_submission, minimum=1):
+            return None
+        prior_number = cast(int, prior_submission)
+        if prior_number >= current_submission:
+            return None
+        stem, separator, original = case.job_id.rpartition("-s")
+        expected_prior_job = (
+            case.job_id
+            if prior_number == 1
+            else f"{stem}-s{prior_number}"
+            if separator and original == "1"
+            else None
+        )
+        if not isinstance(prior_job_id, str) or prior_job_id != expected_prior_job:
+            return None
+        prior_leaf, prior_normalized = _validated_result(
+            bucket,
+            case,
+            discovered.key,
+            current_job_id=prior_job_id,
+            current_submission=prior_number,
+        )
+        if prior_leaf["state"] != "recorded" or prior_normalized is None:
+            return None
+        prior_leaf = {
+            **prior_leaf,
+            "state": "historical",
+            "submission_number": prior_number,
+            "job_id": prior_job_id,
+        }
+        return HistoricalClassification(
+            Submission(f"{prior_job_id}:s{prior_number}"),
+            LeafAssessment(
+                SealState.VALID,
+                (prior_leaf, None),
+                Seal(str(prior_leaf["result_uri"])),
+            ),
+        )
+
+    try:
+        resolved = resolve_slot(
+            store=_LegacyGcsReader(bucket),
+            slot=ResultSlot(
+                work_item=f"{case.bucket}/{case.tool}/{case.case_id}",
+                slot=f"run-{case.run_ordinal}",
+                prefix=case.prefix,
+                profile=PHYSICAL_EXECUTION,
+            ),
+            submission=current,
+            settled=terminal,
+            validate=validate,
+            classify_historical=classify_historical,
+            policy=AnyTwoCurrentChildrenAmbiguous(),
+            max_children=MAX_EXECUTION_LEAVES_PER_RUN,
+        )
+    except ChildLimitExceeded:
+        raise ReportError(
+            f"run prefix exceeds {MAX_EXECUTION_LEAVES_PER_RUN} execution leaves"
+        ) from None
+
+    leaves = tuple(leaf.assessment.evidence[0] for leaf in resolved.leaves)
+    state = {
+        SelectionState.PENDING: "pending",
+        SelectionState.MISSING: "missing",
+        SelectionState.SELECTED: "recorded",
+        SelectionState.DUPLICATE: "duplicate",
+        SelectionState.INVALID: "invalid",
+        SelectionState.UNSEALED: "unsealed",
+        SelectionState.PUBLICATION_CONFLICT: "invalid",
+    }[resolved.selection.state]
+    if resolved.selection.selected_key is None:
+        return EvidenceSnapshot(state, leaves, None, None)
+    selected = next(
+        leaf
+        for leaf in resolved.leaves
+        if not leaf.historical and leaf.discovered.key == resolved.selection.selected_key
     )
+    selected_record, normalized = selected.assessment.evidence
+    return EvidenceSnapshot(state, leaves, str(selected_record["result_uri"]), normalized)
 
 
 def _controller_view(item: CaseControllerProgress) -> dict[str, Any]:

@@ -50,7 +50,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/s3_listing_study"]
+packages = ["src/s3_listing_study", "src/twinstamp"]
 
 [tool.ruff]
 target-version = "py311"
@@ -70,7 +70,7 @@ select = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["s3_listing_study"]
+known-first-party = ["s3_listing_study", "twinstamp"]
 
 [tool.mypy]
 python_version = "3.11"

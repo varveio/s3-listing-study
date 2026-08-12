@@ -1,0 +1,32 @@
+"""Dependency-free store test double for core clients and conformance tests."""
+
+from __future__ import annotations
+
+from collections.abc import Iterable
+
+from twinstamp.stores import StoredObject
+
+
+class MemoryObjectStore:
+    def __init__(self, objects: dict[str, bytes] | None = None) -> None:
+        self.objects = dict(objects or {})
+        self.list_calls: list[str] = []
+
+    def iter_child_prefixes(self, prefix: str) -> Iterable[str]:
+        self.list_calls.append(prefix)
+        root = f"{prefix}/"
+        return sorted(
+            {
+                root + name.removeprefix(root).split("/", 1)[0] + "/"
+                for name in self.objects
+                if name.startswith(root) and "/" in name.removeprefix(root)
+            }
+        )
+
+    def read_object(self, key: str, *, max_bytes: int) -> StoredObject | None:
+        content = self.objects.get(key)
+        if content is None:
+            return None
+        if len(content) > max_bytes:
+            raise ValueError(f"object exceeds {max_bytes} bytes")
+        return StoredObject(content)
