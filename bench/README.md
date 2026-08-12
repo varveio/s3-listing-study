@@ -23,11 +23,6 @@ A campaign runs one or more plans with its image set frozen, and receipts group
 under the campaign that produced them. That is why a plan carries no campaign
 ID, no image digest, and no date.
 
-See [`../docs/operating/campaign-operations.md`](../docs/operating/campaign-operations.md)
-for the current submit, observe, retry, finalization, and report-publication
-procedure. The campaign's SQLite ledger is authoritative controller state and
-must be retained and backed up; it is not interchangeable with result evidence.
-
 The current benchmark policy is `reps: 1`: one scheduled run per case, on one
 fresh Batch VM with one task. The plan schema retains `reps` as an explicit
 schedule field, but published campaigns do not raise it without a dated

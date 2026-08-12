@@ -53,13 +53,6 @@ artifacts stay in the same attempt tree and are fetched only for correctness
 verification or a specific investigation. Its resumable contract is documented
 in [campaign operations](campaign-operations.md).
 
-Provider settlement is distinct from controller completion. The reconciler
-does not report absent evidence while a deterministic Batch effect is still
-possible: the exact job must be terminal or creation must be definitively
-recorded as `NOT_CREATED`. The operator procedure and the SQLite-ledger
-retention contract are in
-[`campaign-operations.md`](campaign-operations.md).
-
 ### Local Docker: stricter manager-host profile
 
 Local runs may share a more-privileged manager/runner host, so they retain the

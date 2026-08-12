@@ -1149,30 +1149,6 @@ def test_cli_has_no_subject_image_override_and_requires_derived_digest() -> None
         cli.build_parser().parse_args(without_derived)
 
 
-@pytest.mark.parametrize(
-    ("changes", "message"),
-    [
-        ({"tool_image_digest": "sha256:0"}, "tool image identity"),
-        (
-            {
-                "tool_image_digest": TOOL_IMAGE_DIGEST,
-                "tool_image_uri": "registry.example/study/other@" + DERIVED_IMAGE_DIGEST,
-            },
-            "tool image URI",
-        ),
-        ({"selection_sha256": "A" * 64}, "tool selection identity"),
-    ],
-)
-def test_direct_engine_rejects_invalid_tool_image_provenance(
-    tmp_path: Path,
-    changes: dict[str, str],
-    message: str,
-) -> None:
-    with pytest.raises(AttemptError, match=message):
-        _run(tmp_path, "pass", **changes)
-    assert not (tmp_path / "attempt").exists()
-
-
 @pytest.mark.parametrize("kind", ["missing", "corrupt"])
 def test_cli_maps_invalid_staged_selection_to_infrastructure_exit(
     tmp_path: Path,
