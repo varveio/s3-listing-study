@@ -1,0 +1,72 @@
+# A SKETCH standing in for .github/workflows/images.yml + images-publish.yml
+# + images-pr.yml (~780 lines combined). The real pipeline runs a planner
+# that inspects the registry and only builds/pushes images the registry is
+# missing -- eleven per-tool derived images layered on published shared
+# bases, matrixed and content-addressed by their own build digest. That is
+# the whole reason those workflows exist: to make CI cost proportional to
+# what changed, not to the size of the tool roster.
+#
+# This sketch has none of that: one image, one tag, built and pushed every
+# time this workflow runs, whether or not simple/ actually changed.
+
+name: simple-sketch-ci
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "simple/**"
+  workflow_dispatch:
+
+env:
+  IMAGE: us-docker.pkg.dev/PROJECT_ID/s3-listing-study/simple-sketch
+
+jobs:
+  # No test suite to run here (see README.md) -- this is the whole check:
+  # every module parses. The real `checks.yml` runs mypy, ruff, and pytest
+  # across ~18k lines; that's out of scope for an unrun sketch.
+  compile-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install duckdb pyyaml
+      - run: python -m py_compile simple/*.py
+
+  build-and-push:
+    needs: compile-check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute tag
+        id: tag
+        run: echo "sha=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.CI_SERVICE_ACCOUNT }}
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker us-docker.pkg.dev --quiet
+
+      - name: Build image
+        run: |
+          docker build \
+            -t "$IMAGE:${{ steps.tag.outputs.sha }}" \
+            -f simple/Dockerfile \
+            simple
+
+      - name: Push image
+        run: docker push "$IMAGE:${{ steps.tag.outputs.sha }}"
+
+      - name: Smoke-check the entrypoint parses args
+        run: |
+          docker run --rm "$IMAGE:${{ steps.tag.outputs.sha }}" --help
