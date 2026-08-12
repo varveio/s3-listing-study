@@ -42,3 +42,8 @@ status. Cross-tool findings land in
 
 For provisioning a runner, reproducing a run, or adding a tool — the machinery,
 not the findings. See [`operating/`](operating/README.md).
+
+Campaign operators should start with
+[`operating/campaign-operations.md`](operating/campaign-operations.md) for the
+submit, observe, retry, finalization, and immutable-report commands and their
+SQLite retention requirements.

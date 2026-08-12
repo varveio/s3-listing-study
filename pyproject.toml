@@ -10,6 +10,12 @@ dependencies = [
     "duckdb>=1.1",
     # AWS's buffered JSON output is counted incrementally after timing. Require
     # ijson's compiled YAJL backend so this cannot silently fall back to Python.
+    # The campaign controller and reconciler use the official manager-side
+    # clients for exact Batch protobuf comparison and bounded GCS reads. Derived
+    # subject images still copy only common/worker code, so these SDKs do not
+    # enter the measured execution images.
+    "google-cloud-batch>=0.17.36",
+    "google-cloud-storage>=2.18",
     "ijson==3.5.1",
     # s3_listing_study.repo.capsule validates tool.json/claims.json against the
     # Draft 2020-12 schemas in schemas/; the capsule gate is a real dependency
@@ -20,13 +26,6 @@ dependencies = [
     # the same way a bare `python3` does; the oracle preflight also refuses to
     # judge without it rather than reporting a missing import as a port bug.
     "pyyaml>=6.0",
-    # No GCS SDK on purpose. s3_listing_study.worker.upload ships inside every
-    # derived image, and google-cloud-storage's google-crc32c dependency
-    # publishes no musllinux wheel at any version. All current subjects run on
-    # glibc, but keeping the worker uploader standard-library-only avoids adding
-    # a large SDK and compiled dependency to every pinned image. It needs
-    # one POST and one ifGenerationMatch=0 header, so it uses urllib and the
-    # study depends on nothing for it.
 ]
 
 [project.scripts]
