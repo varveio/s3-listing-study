@@ -1,5 +1,3 @@
-"""GCP Batch create/adopt/observe operations for the local controller."""
-
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -9,20 +7,17 @@ from google.api_core import exceptions as google_exceptions
 from google.cloud import batch_v1
 from google.protobuf.json_format import MessageToDict, ParseDict  # type: ignore[import-untyped]
 
-from s3_listing_study.manager.campaign.models import BatchJobOutcome, BatchJobSpec
+import twinstamp as ts
+from s3_listing_study.manager.campaign.models import BatchJobSpec
 
-TERMINAL_STATES = frozenset(("SUCCEEDED", "FAILED"))
 PERMANENT_GOOGLE_ERRORS: tuple[type[BaseException], ...] = (
-    google_exceptions.BadRequest,
-    google_exceptions.Forbidden,
-    google_exceptions.Unauthorized,
-    google_exceptions.FailedPrecondition,
-    google_exceptions.NotFound,
+    google_exceptions.BadRequest, google_exceptions.Forbidden, google_exceptions.Unauthorized,
+    google_exceptions.FailedPrecondition, google_exceptions.NotFound,
 )
 
 
 class ProviderError(RuntimeError):
-    """The provider could not be observed without guessing about an effect."""
+    """The Batch response could not be safely interpreted."""
 
 
 def _job_from_json(document: dict[str, Any]) -> batch_v1.Job:
@@ -43,7 +38,6 @@ def _job_document(job: batch_v1.Job) -> dict[str, Any]:
 
 
 def _normalized_immutable(spec: BatchJobSpec, job: batch_v1.Job) -> dict[str, Any]:
-    """Retain only requested immutable input, removing known provider materialization."""
     actual = batch_v1.Job(job)
     protobuf = batch_v1.Job.pb(actual)
     for field in ("name", "uid", "create_time", "update_time", "status"):
@@ -67,7 +61,6 @@ def _normalized_immutable(spec: BatchJobSpec, job: batch_v1.Job) -> dict[str, An
 
 
 def validated_adoption(spec: BatchJobSpec, job: batch_v1.Job) -> bool:
-    """Whether an existing provider resource is exactly the frozen request."""
     if job.name != spec.resource_name:
         return False
     expected = _job_document(_job_from_json(spec.job))
@@ -79,66 +72,63 @@ def validated_adoption(spec: BatchJobSpec, job: batch_v1.Job) -> bool:
     return immutable == _normalized_immutable(spec, job)
 
 
+def _state(job: batch_v1.Job) -> str:
+    return batch_v1.JobStatus.State(job.status.state).name or "QUEUED"
+
+
 def ensure_batch_job(
-    spec: BatchJobSpec,
-    *,
-    collision_on_adoption: bool = True,
-    client: batch_v1.BatchServiceClient | None = None,
-) -> BatchJobOutcome:
-    """Create or exactly adopt a deterministic job; prove explicit no-effect when possible."""
+    spec: ts.SubmissionSpec[BatchJobSpec], *, client: batch_v1.BatchServiceClient | None = None
+) -> ts.EnsureFact:
+    batch = spec.payload
     owned = client is None
     selected = client or batch_v1.BatchServiceClient()
-    identity = spec.job.get("labels", {}).get("s3-study-attempt")
+    identity = batch.job.get("labels", {}).get("s3-study-attempt")
     if not isinstance(identity, str) or not identity:
-        return BatchJobOutcome(None, "NOT_CREATED", "BatchJobCollision")
+        return ts.Collision("BatchJobCollision", state="NOT_CREATED", settled=True)
     try:
         try:
             created = selected.create_job(
-                parent=f"projects/{spec.project}/locations/{spec.location}",
-                job=_job_from_json(spec.job),
-                job_id=spec.job_id,
-                retry=None,
-                timeout=20,
+                parent=f"projects/{batch.project}/locations/{batch.location}",
+                job=_job_from_json(batch.job), job_id=batch.job_id, retry=None, timeout=20,
             )
         except google_exceptions.AlreadyExists:
-            existing = selected.get_job(name=spec.resource_name, retry=None, timeout=20)
-            exact = validated_adoption(spec, existing)
-            return BatchJobOutcome(
-                spec.resource_name,
-                batch_v1.JobStatus.State(existing.status.state).name,
-                "BatchJobCollision" if collision_on_adoption or not exact else None,
-                True,
-            )
+            existing = selected.get_job(name=batch.resource_name, retry=None, timeout=20)
+            state = _state(existing)
+            settled = state in ("SUCCEEDED", "FAILED", "NOT_CREATED")
+            if validated_adoption(batch, existing):
+                return ts.AdoptedExact(batch.resource_name, state, settled)
+            return ts.Collision("BatchJobCollision", batch.resource_name, state, settled)
         except PERMANENT_GOOGLE_ERRORS:
-            return BatchJobOutcome(None, "NOT_CREATED", "PermanentGoogleError")
-        if created.name != spec.resource_name:
-            raise ProviderError("Batch created an unexpected resource name")
-        return BatchJobOutcome(
-            spec.resource_name,
-            batch_v1.JobStatus.State(created.status.state).name or "QUEUED",
-        )
+            return ts.RejectedNoEffect("PermanentGoogleError")
+        if created.name != batch.resource_name:
+            return ts.Ambiguous("Batch created an unexpected resource name", "ProviderError")
+        state = _state(created)
+        settled = state in ("SUCCEEDED", "FAILED", "NOT_CREATED")
+        return ts.Created(batch.resource_name, state, settled)
+    except google_exceptions.GoogleAPIError as exc:
+        return ts.Ambiguous(str(exc), type(exc).__name__)
     finally:
         if owned:
             cast(Callable[[], None], selected.transport.close)()
 
 
 def observe_batch_job(
-    spec: BatchJobSpec, *, client: batch_v1.BatchServiceClient | None = None
-) -> BatchJobOutcome:
-    """Read the exact provider resource and preserve collision status to settlement."""
+    spec: ts.SubmissionSpec[BatchJobSpec], *, client: batch_v1.BatchServiceClient | None = None
+) -> ts.ObservationFact:
+    batch = spec.payload
     owned = client is None
     selected = client or batch_v1.BatchServiceClient()
     try:
-        job = selected.get_job(name=spec.resource_name, retry=None, timeout=20)
-        state = batch_v1.JobStatus.State(job.status.state).name
-        return BatchJobOutcome(
-            spec.resource_name,
-            state,
-            None if validated_adoption(spec, job) else "BatchJobCollision",
-            True,
-        )
-    except google_exceptions.NotFound as exc:
-        raise ProviderError(f"Batch resource is not visible: {spec.resource_name}") from exc
+        job = selected.get_job(name=batch.resource_name, retry=None, timeout=20)
+        state = _state(job)
+        settled = state in ("SUCCEEDED", "FAILED", "NOT_CREATED")
+        if validated_adoption(batch, job):
+            return ts.ObservedExact(batch.resource_name, state, settled)
+        return ts.ObservedCollision("BatchJobCollision", batch.resource_name, state, settled)
+    except google_exceptions.NotFound:
+        return ts.NotVisible(f"Batch resource is not visible: {batch.resource_name}")
+    except google_exceptions.GoogleAPIError as exc:
+        return ts.ObservationAmbiguous(str(exc), type(exc).__name__)
     finally:
         if owned:
             cast(Callable[[], None], selected.transport.close)()

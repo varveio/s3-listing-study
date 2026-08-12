@@ -184,12 +184,34 @@ and bounded `read_object(key, max_bytes=...)`.  Its consistency, version, and
 visibility semantics remain adapter responsibilities.  The included
 `MemoryObjectStore` is a dependency-free test double, not a production adapter.
 
+## Submission coordination
+
+TwinStamp now also provides a small function-first coordination seam for
+provider jobs and durable intent.  Callers build a `SubmissionSpec` from exact
+immutable canonical bytes plus their SHA-256 digest, then supply a `JobBackend`
+and `IntentJournal`.
+
+`ensure_submission()` owns the reserve/claim → provider ensure/adopt → durable
+record path. `observe_submissions()` owns one observation pass and asks the
+journal to settle only facts it can safely project. Ensure facts
+(`Created`, `AdoptedExact`, `RejectedNoEffect`, `Collision`, `Ambiguous`) are
+separate from observation facts (`ObservedExact`, `ObservedCollision`,
+`NotVisible`, `ObservationAmbiguous`). Every fact carries structural
+provider-effect and settlement claims; `NotVisible` and ambiguity are always
+unsettled.
+
+`AdoptedExact` is deliberately only a fact.  A caller may treat unexpected exact
+adoption as a collision while treating redrive of already-durable intent as
+clean, as the S3 listing study does through its SQLite journal adapter.
+
 ## Study adapter status
 
 The S3 listing study is the first client. Its existing report paths,
 marker bytes, validator, strict duplicate behavior, history derivation, and
-finality behavior remain study-owned.  TwinStamp is only its generic evidence
-and reconciliation seam.  It has no imports of the study, cloud SDKs,
+finality behavior, GCP Batch normalization, request rendering, SQLite schema,
+canonical `job_json` encoding, and exact adoption policy remain study-owned.
+TwinStamp supplies only generic evidence, reconciliation, typed provider facts,
+and intent/job orchestration seams.  It has no imports of the study, cloud SDKs,
 benchmarks, or subject tools.
 
 ## Current limitations and roadmap
@@ -197,15 +219,15 @@ benchmarks, or subject tools.
 Today the package does not provide:
 
 - a versioned portable storage convention or domain marker schema;
-- object-store mutation, conditional-create, multipart/resumable upload, or
-  provider/job and intent-journal coordination;
+- object-store mutation, conditional-create, multipart/resumable upload, or a
+  production backend/store adapter;
 - final-publication writer fencing or an atomic namespace snapshot;
 - cryptographic signing, authentication, or a correctness/domain-verdict
   policy;
 - a CLI, non-Python writer kit, or a second production store/backend/client.
 
 Next work is to version the convention and golden trees, add a reader-side
-validator and minimal writer support, introduce typed provider/intent handling,
-add a post-fence fresh scan for final publication, and validate the abstraction
-against materially different adapters and a second client.  Those are separate
-changes so this core stays a small, behavior-preserving extraction.
+validator and minimal writer support, add a post-fence fresh scan for final
+publication, and validate the abstraction against materially different adapters
+and a second client.  Those are separate changes so this core stays a small,
+behavior-preserving extraction.
