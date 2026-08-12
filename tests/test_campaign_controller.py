@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import queue
 import sqlite3
 from multiprocessing import get_context
 from pathlib import Path
@@ -528,7 +529,14 @@ def test_concurrent_start_redrive_serializes_provider_effect_across_processes(
     second.join(2)
 
     assert not first.is_alive() and not second.is_alive()
-    assert errors.empty()
+    reported: list[str] = []
+    while True:
+        try:
+            reported.append(errors.get(timeout=0.5))
+        except queue.Empty:
+            break
+    assert reported == []
+    assert (first.exitcode, second.exitcode) == (0, 0)
     assert calls.value == 1
 
 
@@ -717,6 +725,47 @@ def test_provider_create_errors_with_unknown_effect_are_typed_ambiguous() -> Non
     assert fact.error_type == "ServiceUnavailable"
 
 
+def test_provider_client_construction_errors_are_typed_ambiguous(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    selected = BatchJobSpec("study", "us-east1", "c-case-s1", "c-case-s1", job("c-case-s1"), 9000)
+    monkeypatch.setattr(
+        batch_v1,
+        "BatchServiceClient",
+        lambda: (_ for _ in ()).throw(
+            ServiceUnavailable("client setup failed")  # type: ignore[no-untyped-call]
+        ),
+    )
+
+    fact = provider.ensure_batch_job(selected.submission_spec())
+
+    assert fact == Ambiguous("503 client setup failed", "ServiceUnavailable")
+
+
+def test_provider_client_cleanup_errors_are_typed_ambiguous(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    selected = BatchJobSpec("study", "us-east1", "c-case-s1", "c-case-s1", job("c-case-s1"), 9000)
+    created = provider._job_from_json(job("c-case-s1"))
+    created.name = selected.resource_name
+
+    class Transport:
+        def close(self) -> None:
+            raise RuntimeError("close failed")
+
+    class Client:
+        transport = Transport()
+
+        def create_job(self, **_kwargs: Any) -> Any:
+            return created
+
+    monkeypatch.setattr(batch_v1, "BatchServiceClient", Client)
+
+    fact = provider.ensure_batch_job(selected.submission_spec())
+
+    assert fact == Ambiguous("close failed", "RuntimeError")
+
+
 def test_provider_rejects_missing_identity_before_constructing_client(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -787,9 +836,19 @@ def test_non_visible_or_ambiguous_observation_stays_unsettled(
         controller_timeouts=[9000],
     )
     monkeypatch.setattr(provider, "observe_batch_job", lambda _spec: fact)
+    original_open_ledger = ledger.open_ledger
+    connections_opened = 0
+
+    def counted_open_ledger(path: Path) -> Any:
+        nonlocal connections_opened
+        connections_opened += 1
+        return original_open_ledger(path)
+
+    monkeypatch.setattr(ledger, "open_ledger", counted_open_ledger)
 
     [progress] = controller.reconcile_once(ledger_path=path, campaign=CAMPAIGN)
 
+    assert connections_opened == 1
     assert progress.phase == "running"
     assert not progress.provider_settled
     assert progress.provider_state == "QUEUED"

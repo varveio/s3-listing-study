@@ -99,11 +99,12 @@ def start_campaign(
 
 def reconcile_once(*, ledger_path: Path, campaign: str) -> list[CaseControllerProgress]:
     """Poll each active exact resource once and persist terminal settlement."""
-    return ts.observe_submissions(
-        journal=ledger.SQLiteIntentJournal(ledger_path, campaign),
-        observe=provider.observe_batch_job,
-        now=utc_now(),
-    )
+    with ledger.open_ledger(ledger_path) as connection:
+        return ts.observe_submissions(
+            journal=ledger.SQLiteIntentJournal(ledger_path, campaign, connection=connection),
+            observe=provider.observe_batch_job,
+            now=utc_now(),
+        )
 
 
 def progress(*, ledger_path: Path, campaign: str) -> list[CaseControllerProgress]:

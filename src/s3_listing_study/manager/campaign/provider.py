@@ -103,8 +103,11 @@ def ensure_batch_job(
         # Missing ownership identity is a local collision, before provider I/O.
         return ts.Collision("BatchJobCollision", state="NOT_CREATED", settled=True)
     owned = client is None
-    selected = client or batch_v1.BatchServiceClient()
+    selected = client
+    fact: ts.EnsureFact
     try:
+        if selected is None:
+            selected = batch_v1.BatchServiceClient()
         try:
             created = selected.create_job(
                 parent=f"projects/{batch.project}/locations/{batch.location}",
@@ -118,24 +121,32 @@ def ensure_batch_job(
             state = _state(existing)
             settled = state in ("SUCCEEDED", "FAILED", "NOT_CREATED")
             if validated_adoption(batch, existing):
-                return ts.AdoptedExact(batch.resource_name, state, settled)
-            return ts.Collision("BatchJobCollision", batch.resource_name, state, settled)
+                fact = ts.AdoptedExact(batch.resource_name, state, settled)
+            else:
+                fact = ts.Collision("BatchJobCollision", batch.resource_name, state, settled)
         except PERMANENT_GOOGLE_ERRORS:
             # These request failures guarantee that no provider effect landed.
-            return ts.RejectedNoEffect("PermanentGoogleError")
-        if created.name != batch.resource_name:
-            # The job may exist under an unsafe identity. ``ProviderError`` is
-            # a stable fact label, not an exception class.
-            return ts.Ambiguous("Batch created an unexpected resource name", "ProviderError")
-        state = _state(created)
-        settled = state in ("SUCCEEDED", "FAILED", "NOT_CREATED")
-        return ts.Created(batch.resource_name, state, settled)
+            fact = ts.RejectedNoEffect("PermanentGoogleError")
+        else:
+            if created.name != batch.resource_name:
+                # The job may exist under an unsafe identity. ``ProviderError`` is
+                # a stable fact label, not an exception class.
+                fact = ts.Ambiguous("Batch created an unexpected resource name", "ProviderError")
+            else:
+                state = _state(created)
+                settled = state in ("SUCCEEDED", "FAILED", "NOT_CREATED")
+                fact = ts.Created(batch.resource_name, state, settled)
     except google_exceptions.GoogleAPIError as exc:
         # The request may have succeeded before the transport/provider failed.
-        return ts.Ambiguous(str(exc), type(exc).__name__)
-    finally:
-        if owned:
+        fact = ts.Ambiguous(str(exc), type(exc).__name__)
+    if owned and selected is not None:
+        try:
             cast(Callable[[], None], selected.transport.close)()
+        except Exception as exc:
+            # Cleanup must not escape the same typed submission boundary as the
+            # client construction and provider request.
+            fact = ts.Ambiguous(str(exc) or "Batch client cleanup failed", type(exc).__name__)
+    return fact
 
 
 def observe_batch_job(

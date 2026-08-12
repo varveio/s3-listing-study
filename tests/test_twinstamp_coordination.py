@@ -20,6 +20,7 @@ from twinstamp.coordination import (
     RejectedNoEffect,
     SubmissionClaim,
     SubmissionSpec,
+    ensure_claim,
     ensure_submission,
     observe_submissions,
 )
@@ -122,6 +123,25 @@ def test_adopted_exact_is_only_a_fact_not_policy() -> None:
 
     assert result.fact is fact
     assert result.fact.settlement.failure_type is None
+
+
+@pytest.mark.parametrize("entry_point", ["submission", "claim"])
+def test_ensure_exception_records_ambiguity_before_propagating(entry_point: str) -> None:
+    claim = SubmissionClaim(spec(), "first")
+    journal = Journal(claim)
+
+    def fail(_spec: SubmissionSpec[str]) -> EnsureFact:
+        raise RuntimeError("provider disconnected")
+
+    with pytest.raises(RuntimeError, match="provider disconnected"):
+        if entry_point == "submission":
+            ensure_submission("job-1", journal=journal, ensure=fail, now="now")
+        else:
+            ensure_claim(claim, journal=journal, ensure=fail, now="now")
+
+    [fact] = journal.recorded
+    assert fact == Ambiguous("provider disconnected", "RuntimeError")
+    assert journal.events[-1] == "record:Ambiguous"
 
 
 @pytest.mark.parametrize(

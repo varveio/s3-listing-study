@@ -542,9 +542,24 @@ class SQLiteIntentJournal:
     clean only on redrive, while collisions are sticky across later facts.
     """
 
-    def __init__(self, path: Path, campaign: str) -> None:
+    def __init__(
+        self,
+        path: Path,
+        campaign: str,
+        *,
+        connection: sqlite3.Connection | None = None,
+    ) -> None:
         self.path = path
         self.campaign = campaign
+        self.connection = connection
+
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
+        if self.connection is not None:
+            yield self.connection
+            return
+        with open_ledger(self.path) as connection:
+            yield connection
 
     def _row_and_owner(
         self, connection: sqlite3.Connection, key: str
@@ -556,7 +571,7 @@ class SQLiteIntentJournal:
         return row, owner
 
     def claim_submission(self, key: str, *, now: str) -> ts.SubmissionClaim[BatchJobSpec] | None:
-        with open_ledger(self.path) as connection, _transaction(connection):
+        with self._connect() as connection, _transaction(connection):
             row, owner = self._row_and_owner(connection, key)
             if row["phase"] == "pending":
                 connection.execute(
@@ -577,21 +592,21 @@ class SQLiteIntentJournal:
             return None
 
     def existing_submission(self, key: str) -> CaseControllerProgress:
-        with open_ledger(self.path) as connection:
+        with self._connect() as connection:
             row, _owner = self._row_and_owner(connection, key)
             return _progress(row)
 
     def record_ensure(
         self, claim: ts.SubmissionClaim[BatchJobSpec], fact: ts.EnsureFact, *, now: str
     ) -> CaseControllerProgress:
-        with open_ledger(self.path) as connection:
+        with self._connect() as connection:
             progress = _record_and_read(connection, claim, fact, now, stale_ok=True)
             if progress is None:
                 raise LedgerError(f"{claim.spec.key}: no such campaign case")
             return progress
 
     def observation_claims(self) -> list[ts.SubmissionClaim[BatchJobSpec]]:
-        with open_ledger(self.path) as connection:
+        with self._connect() as connection:
             owner = campaign_record(connection, self.campaign)
             return [
                 ts.SubmissionClaim(batch_spec(row, owner).submission_spec(), "observe")
@@ -602,11 +617,11 @@ class SQLiteIntentJournal:
     def record_observation(
         self, claim: ts.SubmissionClaim[BatchJobSpec], fact: ts.ObservationFact, *, now: str
     ) -> None:
-        with open_ledger(self.path) as connection:
+        with self._connect() as connection:
             _record_fact(connection, claim=claim, fact=fact, now=now)
 
     def progress(self) -> list[CaseControllerProgress]:
-        with open_ledger(self.path) as connection:
+        with self._connect() as connection:
             return [_progress(row) for row in controller_cases(connection, self.campaign)]
 
 

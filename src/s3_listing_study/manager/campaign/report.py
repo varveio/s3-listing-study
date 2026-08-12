@@ -147,10 +147,13 @@ def _read_blob(blob: Any, *, key: str, max_bytes: int) -> StoredObject:
     size = blob.size
     if isinstance(size, bool) or not isinstance(size, int) or size < 0:
         raise ObjectReadError(ObjectReadIssue.INVALID_SIZE, key)
+    generation = blob.generation
+    if isinstance(generation, bool) or not isinstance(generation, int) or generation < 1:
+        raise ObjectReadError(ObjectReadIssue.CHANGED, key)
     if size > max_bytes:
         raise ObjectReadError(ObjectReadIssue.TOO_LARGE, key)
     try:
-        content = cast(bytes, blob.download_as_bytes(if_generation_match=blob.generation))
+        content = cast(bytes, blob.download_as_bytes(if_generation_match=generation))
     except PreconditionFailed as exc:
         raise ObjectReadError(ObjectReadIssue.CHANGED, key) from exc
     if len(content) != size or len(content) > max_bytes:

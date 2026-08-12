@@ -220,13 +220,17 @@ def ensure_submission(
     ensure: Callable[[SubmissionSpec[JobSpecT]], EnsureFact],
     now: str,
 ) -> EnsureResult[ProgressT]:
-    """Reserve/claim intent, perform one provider ensure, and durably record the fact."""
+    """Reserve intent, call ``ensure`` once, and durably record its outcome.
+
+    The callable must return an :data:`EnsureFact` or raise. A raised exception
+    is recorded as :class:`Ambiguous` before the original exception propagates,
+    because the provider effect may already have happened.
+    """
 
     claim = journal.claim_submission(key, now=now)
     if claim is None:
         return EnsureResult(journal.existing_submission(key), None)
-    fact = ensure(claim.spec)
-    return EnsureResult(journal.record_ensure(claim, fact, now=now), fact)
+    return _ensure_and_record(claim, journal=journal, ensure=ensure, now=now)
 
 
 def ensure_claim(
@@ -236,9 +240,29 @@ def ensure_claim(
     ensure: Callable[[SubmissionSpec[JobSpecT]], EnsureFact],
     now: str,
 ) -> EnsureResult[ProgressT]:
-    """Ensure a claim reserved by a caller-specific retry path, then record its fact."""
+    """Ensure a caller-reserved claim with the same exception contract as normal ensure."""
 
-    fact = ensure(claim.spec)
+    return _ensure_and_record(claim, journal=journal, ensure=ensure, now=now)
+
+
+def _ensure_and_record(
+    claim: SubmissionClaim[JobSpecT],
+    *,
+    journal: IntentJournal[JobSpecT, ProgressT],
+    ensure: Callable[[SubmissionSpec[JobSpecT]], EnsureFact],
+    now: str,
+) -> EnsureResult[ProgressT]:
+    """Call one provider ensure and project an ambiguity before propagating failure."""
+
+    try:
+        fact = ensure(claim.spec)
+    except Exception as exc:
+        journal.record_ensure(
+            claim,
+            Ambiguous(str(exc) or "provider ensure raised", type(exc).__name__),
+            now=now,
+        )
+        raise
     return EnsureResult(journal.record_ensure(claim, fact, now=now), fact)
 
 

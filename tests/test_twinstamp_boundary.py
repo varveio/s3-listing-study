@@ -16,7 +16,7 @@ def test_twinstamp_has_no_study_gcp_or_benchmark_imports() -> None:
     root = Path(__file__).parents[1] / "src" / "twinstamp"
     forbidden: list[tuple[Path, int, str]] = []
     for path in sorted(root.glob("**/*.py")):
-        tree = ast.parse(path.read_text(), filename=str(path))
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 names = [alias.name for alias in node.names]

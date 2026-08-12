@@ -27,7 +27,7 @@ class FakeBlob:
     def __init__(self, content: bytes, *, collision: bool = False) -> None:
         self.content = content
         self.size = len(content)
-        self.generation = 1
+        self.generation: int | None = 1
         self.collision = collision
         self.uploads: list[tuple[bytes, dict[str, Any]]] = []
         self.downloads: list[dict[str, Any]] = []
@@ -279,6 +279,17 @@ def test_report_download_translates_shared_bounded_read_error() -> None:
     blob.size = -1
     with pytest.raises(report.ReportError, match=r"campaign\.json has no valid object size"):
         report._download(blob, label="campaign.json", max_bytes=100)
+
+
+def test_gcs_store_rejects_versionless_read_without_downloading() -> None:
+    blob = FakeBlob(b"{}\n")
+    blob.generation = None
+
+    with pytest.raises(ObjectReadError) as caught:
+        report._read_blob(blob, key="unit/result.json", max_bytes=100)
+
+    assert caught.value.issue is ObjectReadIssue.CHANGED
+    assert blob.downloads == []
 
 
 def test_strict_result_rejects_provenance_mismatch() -> None:

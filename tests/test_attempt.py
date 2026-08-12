@@ -558,8 +558,51 @@ def test_campaign_refuses_an_injected_attempt_id(tmp_path: Path) -> None:
 def test_campaign_publication_refuses_a_nonphysical_result_leaf(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert cli._publish(tmp_path, "gs://results/run-1", {"attempt_id": "test-attempt"}, 0) == 3
+    campaign = CampaignProvenance(
+        campaign_id="2026-08-10-first",
+        job_id="c-one-r1-s1",
+        case_id="case.one",
+        case_fingerprint="a" * 64,
+        attempt_fingerprint="b" * 64,
+        run_ordinal=1,
+        submission_number=1,
+        resources=DeclaredResources("n4-highcpu-2", 2, 4, None),
+    )
+    assert (
+        cli._publish(
+            tmp_path,
+            "gs://results/run-1",
+            {"attempt_id": "test-attempt"},
+            0,
+            campaign=campaign,
+        )
+        == 3
+    )
     assert "not a canonical physical-execution UUIDv4" in capsys.readouterr().err
+
+
+def test_non_campaign_publication_uses_destination_as_complete_prefix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[tuple[Path, str, dict[str, object]]] = []
+
+    def upload(attempt_dir: Path, destination: str, **kwargs: object) -> list[str]:
+        calls.append((attempt_dir, destination, kwargs))
+        return []
+
+    monkeypatch.setattr(cli, "upload_attempt", upload)
+
+    assert (
+        cli._publish(
+            tmp_path,
+            "gs://results/direct-prefix",
+            {"attempt_id": "not-a-uuid"},
+            0,
+            campaign=None,
+        )
+        == 0
+    )
+    assert calls == [(tmp_path, "gs://results/direct-prefix", {})]
 
 
 def test_cli_campaign_provenance_is_all_or_none_before_execution(

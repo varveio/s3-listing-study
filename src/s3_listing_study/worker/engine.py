@@ -1442,7 +1442,16 @@ def run_attempt(
             "native_output": native_output,
             "native_refusal": native_refusal,
         }
-        encoded = (json.dumps(result, sort_keys=True, separators=(",", ":")) + "\n").encode()
+        encoded = (
+            json.dumps(
+                result,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=True,
+                allow_nan=False,
+            )
+            + "\n"
+        ).encode()
 
         def write_result(output: BinaryIO) -> None:
             output.write(encoded)

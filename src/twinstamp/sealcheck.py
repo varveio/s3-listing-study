@@ -72,10 +72,10 @@ def parse_canonical_json_marker(
 ) -> MarkerObservation:
     """Parse canonical UTF-8 JSON without duplicate keys or non-finite numbers.
 
-    Canonical form uses sorted keys, compact separators, and exactly one final LF.
-    Invalid UTF-8, JSON syntax, non-finite numbers, and serialization failures
-    share ``INVALID_UTF8_JSON``; duplicate keys and noncanonical bytes retain
-    their more specific issues.
+    Canonical form uses sorted keys, compact separators, ASCII escaping, and
+    exactly one final LF. Invalid UTF-8, JSON syntax, non-finite numbers, and
+    serialization failures share ``INVALID_UTF8_JSON``; duplicate keys and
+    noncanonical bytes retain their more specific issues.
     """
 
     try:
@@ -92,7 +92,11 @@ def parse_canonical_json_marker(
         return MarkerObservation(key, MarkerState.INVALID, issue=MarkerIssue.NOT_AN_OBJECT)
     try:
         canonical = json.dumps(
-            value, sort_keys=True, separators=(",", ":"), allow_nan=False
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
         ).encode()
     except (TypeError, ValueError, RecursionError):
         return MarkerObservation(key, MarkerState.INVALID, issue=MarkerIssue.INVALID_UTF8_JSON)
