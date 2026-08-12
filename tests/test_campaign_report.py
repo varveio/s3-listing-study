@@ -391,6 +391,30 @@ def test_all_historical_leaves_are_retained_but_current_is_missing() -> None:
     assert evidence.leaves[0]["submission_number"] == 1
 
 
+def test_malformed_prior_submission_leaf_remains_current_identity_failure() -> None:
+    parsed, case, image = selected_case()
+    current_job = "job-s2"
+    bad_image = dict(image)
+    bad_image["selection_sha256"] = "9" * 64
+    objects = {
+        f"{case['prefix']}/{UUIDS[0]}/result.json": result(
+            case, bad_image, UUIDS[0], job_id=case["job_id"], submission=1
+        )
+    }
+
+    evidence = report._evidence(
+        FakeBucket(objects),
+        parsed,
+        terminal=True,
+        current_job_id=current_job,
+        current_submission=2,
+    )
+
+    assert evidence.leaves[0]["state"] == "invalid"
+    assert evidence.leaves[0]["reason"] == "invalid_result_identity"
+    assert "submission_number" not in evidence.leaves[0]
+
+
 def test_settled_evidence_cache_retains_the_first_snapshot(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

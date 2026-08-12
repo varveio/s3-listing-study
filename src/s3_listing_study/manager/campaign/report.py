@@ -372,6 +372,8 @@ def _validated_result(
     result_uri = f"gs://{bucket.name}/{result_name}"
     declared_submission: tuple[str, int] | None = None
     attributed_submission: Submission | None = None
+    historical_candidate: tuple[str, int, Submission] | None = None
+    revalidating_historical = False
 
     def assessed(
         state: str, failure_reason: str | None, normalized: dict[str, Any] | None = None
@@ -397,6 +399,11 @@ def _validated_result(
             submission=attributed_submission,
             execution_outcome=None if attributed_submission else normalized["subject"],
         )
+
+    def invalid(failure_reason: str) -> LeafAssessment[Any, CheckedEvidence]:
+        if revalidating_historical:
+            failure_reason = "invalid_result_identity"
+        return assessed("invalid", failure_reason)
 
     assert candidate.marker.document is not None
     document = candidate.marker.document
@@ -428,34 +435,46 @@ def _validated_result(
             and number < current_submission
             and declared_job_id == prior_job_id
         ):
-            attributed_submission = Submission(f"{declared_job_id}:s{number}")
-        if attributed_submission is not None:
-            current_job_id, current_submission = declared_submission
-    expected_campaign = {
-        "campaign_id": case.campaign,
-        "job_id": current_job_id or case.job_id,
-        "case_id": case.case_id,
-        "case_fingerprint": case.record.get("case_fingerprint"),
-        "attempt_fingerprint": case.attempt_fingerprint,
-        "run_ordinal": case.run_ordinal,
-        "submission_number": (
-            current_submission if current_submission is not None else case.record.get("submission")
-        ),
-        "declared_resources": case.record.get("resources"),
-    }
+            historical_candidate = (
+                declared_job_id,
+                number,
+                Submission(f"{declared_job_id}:s{number}"),
+            )
+
+    def expected_campaign(job_id: str | None, submission: int | None) -> dict[str, Any]:
+        return {
+            "campaign_id": case.campaign,
+            "job_id": job_id or case.job_id,
+            "case_id": case.case_id,
+            "case_fingerprint": case.record.get("case_fingerprint"),
+            "attempt_fingerprint": case.attempt_fingerprint,
+            "run_ordinal": case.run_ordinal,
+            "submission_number": (
+                submission if submission is not None else case.record.get("submission")
+            ),
+            "declared_resources": case.record.get("resources"),
+        }
+
     expected_artifact_uri = f"gs://{bucket.name}/{case.prefix}/{leaf}"
-    if (
-        document.get("schema_version") != 3
-        or document.get("attempt_id") != leaf
-        or campaign != expected_campaign
-        or document.get("artifact_uri") != expected_artifact_uri
-        or document.get("result_uri") != result_uri
-        or tool.get("name") != case.tool
-        or tool.get("version") != case.image.get("tool_version")
-        or document.get("adapter_bundle_sha256") != case.image.get("adapter_bundle_sha256")
-        or summary.get("adapter_bundle_sha256") != case.image.get("adapter_bundle_sha256")
+    identity_common_matches = (
+        document.get("schema_version") == 3
+        and document.get("attempt_id") == leaf
+        and document.get("artifact_uri") == expected_artifact_uri
+        and document.get("result_uri") == result_uri
+        and tool.get("name") == case.tool
+        and tool.get("version") == case.image.get("tool_version")
+        and document.get("adapter_bundle_sha256") == case.image.get("adapter_bundle_sha256")
+        and summary.get("adapter_bundle_sha256") == case.image.get("adapter_bundle_sha256")
+    )
+    if not identity_common_matches or campaign != expected_campaign(
+        current_job_id, current_submission
     ):
-        return assessed("invalid", "invalid_result_identity")
+        if historical_candidate is None or not identity_common_matches:
+            return assessed("invalid", "invalid_result_identity")
+        historical_job_id, historical_submission_number, _ = historical_candidate
+        if campaign != expected_campaign(historical_job_id, historical_submission_number):
+            return assessed("invalid", "invalid_result_identity")
+        revalidating_historical = True
     expected_request = {
         "schema_version": 1,
         "operation": "list",
@@ -474,7 +493,7 @@ def _validated_result(
         "scope": "full",
     }
     if logical_request != expected_request or target != expected_target:
-        return assessed("invalid", "invalid_result_request")
+        return invalid("invalid_result_request")
     provenance = _object_values(
         images.get("tool"),
         images.get("shared_base"),
@@ -482,7 +501,7 @@ def _validated_result(
         build_inputs.get("tool"),
     )
     if provenance is None:
-        return assessed("invalid", "invalid_result_provenance")
+        return invalid("invalid_result_provenance")
     result_tool_image, result_shared_base, result_build_shared, result_build_tool = provenance
     if (
         set(images) != {"derived", "tool", "shared_base"}
@@ -498,21 +517,21 @@ def _validated_result(
         or result_build_tool.get("artifact") != case.image.get("tool_artifact")
         or document.get("harness_revision") != case.image.get("harness_revision")
     ):
-        return assessed("invalid", "invalid_result_provenance")
+        return invalid("invalid_result_provenance")
     if result_tool_image != {
         "digest": case.image.get("tool_image_digest"),
         "uri": case.image.get("tool_image_uri"),
     }:
-        return assessed("invalid", "invalid_result_provenance")
+        return invalid("invalid_result_provenance")
     if result_build_tool.get("selection_sha256") != case.image.get("selection_sha256"):
-        return assessed("invalid", "invalid_result_provenance")
+        return invalid("invalid_result_provenance")
     if set(result_build_tool) != {"build_sha256", "artifact", "selection_sha256"}:
-        return assessed("invalid", "invalid_result_provenance")
+        return invalid("invalid_result_provenance")
     if secret_scan != {
         "status": "clean",
         "streams": {"stdout": "clean", "stderr": "clean"},
     }:
-        return assessed("invalid", "invalid_result_secret_scan")
+        return invalid("invalid_result_secret_scan")
     status = outcome.get("status")
     exit_code = outcome.get("exit_code")
     subject_signal = outcome.get("signal")
@@ -526,7 +545,7 @@ def _validated_result(
         or (exit_code is None) == (subject_signal is None)
         or not isinstance(timed_out, bool)
     ):
-        return assessed("invalid", "invalid_result_outcome")
+        return invalid("invalid_result_outcome")
     assert isinstance(timed_out, bool)
     if not isinstance(cleanup, dict) or set(cleanup) != {
         "state",
@@ -535,7 +554,7 @@ def _validated_result(
         "process_group_empty",
         "escaped_descendants",
     }:
-        return assessed("invalid", "invalid_result_cleanup")
+        return invalid("invalid_result_cleanup")
     term_sent = cleanup.get("term_sent")
     kill_sent = cleanup.get("kill_sent")
     group_empty = cleanup.get("process_group_empty")
@@ -546,7 +565,7 @@ def _validated_result(
         or any(not _is_int(pid, minimum=1) for pid in escaped)
         or escaped != sorted(set(escaped))
     ):
-        return assessed("invalid", "invalid_result_cleanup")
+        return invalid("invalid_result_cleanup")
     assert isinstance(term_sent, bool)
     assert isinstance(kill_sent, bool)
     assert isinstance(group_empty, bool)
@@ -560,7 +579,7 @@ def _validated_result(
         else "not_needed"
     )
     if cleanup.get("state") != expected_cleanup_state:
-        return assessed("invalid", "invalid_result_cleanup")
+        return invalid("invalid_result_cleanup")
     expected_status = (
         "harness_error"
         if escaped
@@ -573,7 +592,7 @@ def _validated_result(
         else "failed"
     )
     if status != expected_status:
-        return assessed("invalid", "invalid_result_outcome")
+        return invalid("invalid_result_outcome")
     if not timed_out and cleanup != {
         "state": "failed" if escaped else "not_needed",
         "term_sent": False,
@@ -581,12 +600,12 @@ def _validated_result(
         "process_group_empty": True,
         "escaped_descendants": escaped,
     }:
-        return assessed("invalid", "invalid_result_cleanup")
+        return invalid("invalid_result_cleanup")
     elapsed_ns = timing.get("elapsed_ns")
     rss_kb = resources.get("rusage_children_max_child_peak_rss_kb")
     row_count = summary.get("row_count")
     if not _is_int(elapsed_ns) or not _is_int(rss_kb):
-        return assessed("invalid", "invalid_result_metrics")
+        return invalid("invalid_result_metrics")
     interpreter = summary.get("interpreter")
     duckdb_version = summary.get("duckdb_version")
     summary_status = summary.get("status")
@@ -618,7 +637,7 @@ def _validated_result(
         }
         or any(value is not None and not isinstance(value, str) for value in interpreter.values())
     ):
-        return assessed("invalid", "invalid_result_summary")
+        return invalid("invalid_result_summary")
     if status != "completed":
         valid_summary = (
             summary_status == "skipped"
@@ -647,7 +666,11 @@ def _validated_result(
     else:
         valid_summary = False
     if not valid_summary:
-        return assessed("invalid", "invalid_result_summary")
+        return invalid("invalid_result_summary")
+    if revalidating_historical:
+        assert historical_candidate is not None
+        attributed_submission = historical_candidate[2]
+        declared_submission = historical_candidate[:2]
     normalized = {
         "subject": {
             "status": status,
