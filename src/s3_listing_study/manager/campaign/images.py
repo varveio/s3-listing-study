@@ -79,6 +79,7 @@ def _revision(root: Path, tool: str) -> str:
         "src/s3_listing_study/__init__.py",
         "src/s3_listing_study/common",
         "src/s3_listing_study/worker",
+        "src/twinstamp",
         "harness/derived-image",
         "harness/shared-image",
         f"tools/{tool}/adapter",

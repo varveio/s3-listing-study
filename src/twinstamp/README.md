@@ -6,8 +6,8 @@ children, keeps recognized and anomalous evidence visible, lets the caller
 validate each leaf, and applies a caller-selected rule to choose—or decline to
 choose—a result.
 
-It is not a scheduler, object-store writer, domain-schema implementation,
-provider adapter, final-publication system, or a verdict engine. In particular,
+It is not a scheduler, production object-store adapter, domain-schema
+implementation, final-publication system, or a verdict engine. In particular,
 a valid seal means that the caller validated a complete marker-last evidence
 unit.  It does **not** mean the worker succeeded, the result is correct, the
 payload is trustworthy, or the marker is a cryptographic signature.
@@ -91,7 +91,9 @@ single bounded read and rejects invalid UTF-8/JSON, duplicate keys, non-object
 documents, and noncanonical bytes before domain validation. Missing markers are
 reported separately from malformed ones. `Seal(marker_key)` is created only
 after the caller's validator has checked the parsed document's domain schema.
-TwinStamp does not perform writes or interpret domain fields.
+TwinStamp does not interpret domain fields. Its optional Python publication
+helper applies the same profile binding and marker-last/create-only state
+machine to caller-supplied payload streams and storage operations.
 
 Create-only calls alone do not make a namespace immutable if credentials can
 delete and recreate objects.  Adapters and deployment policy must provide the
@@ -184,6 +186,29 @@ and bounded `read_object(key, max_bytes=...)`.  Its consistency, version, and
 visibility semantics remain adapter responsibilities.  The included
 `MemoryObjectStore` is a dependency-free test double, not a production adapter.
 
+## Language-neutral publication convention
+
+`EvidencePublication` binds a typed unit to one `EvidenceProfile`, a fixed
+ordered artifact manifest, and one marker. `publish()` validates every
+canonical contained relative name and streams every payload through its
+declared size and SHA-256 before the first create. It then conditionally creates
+artifacts in the caller's exact order and the marker last.
+
+Create results are distinct storage facts: `ObjectCreated` carries the observed
+version, `ObjectConflict` refuses the unit, and `ObjectCreateAmbiguous` requires
+an exact bounded size/SHA-256 read-back with an observed version before the next
+create. A missing, unreadable, versionless, or mismatching read-back refuses the
+unit and never reaches its marker. Successful, unambiguous large uploads are not
+read back.
+
+The Python helper is optional. The durable interoperability surface is the
+byte/path/order/state convention, represented by
+`golden/publication-v1.json`; workers in other languages need not import
+TwinStamp. The vectors include the canonical marker tree and bytes plus sealed,
+torn, conflict, ambiguous-exact, ambiguous-mismatch, foreign-profile, and
+noncanonical cases. Conformance means producing trees the current reader
+validates, not using a particular implementation class.
+
 ## Submission coordination
 
 TwinStamp now also provides a small function-first coordination seam for
@@ -219,15 +244,15 @@ benchmarks, or subject tools.
 Today the package does not provide:
 
 - a versioned portable storage convention or domain marker schema;
-- object-store mutation, conditional-create, multipart/resumable upload, or a
-  production backend/store adapter;
+- a production mutation adapter or portable multipart/resumable transport;
 - final-publication writer fencing or an atomic namespace snapshot;
 - cryptographic signing, authentication, or a correctness/domain-verdict
   policy;
-- a CLI, non-Python writer kit, or a second production store/backend/client.
+- a CLI, a packaged non-Python writer kit, or a second production
+  store/backend/client.
 
-Next work is to version the convention and golden trees, add a reader-side
-validator and minimal writer support, add a post-fence fresh scan for final
-publication, and validate the abstraction against materially different adapters
-and a second client.  Those are separate changes so this core stays a small,
-behavior-preserving extraction.
+Next work includes a post-fence fresh scan for final publication and validation
+against materially different adapters and a second client. Those are separate
+changes so this core stays a small, behavior-preserving extraction. The current
+convention and API remain provisional; create-only calls do not establish
+ongoing immutability where credentials can delete and recreate names.

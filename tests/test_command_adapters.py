@@ -533,6 +533,7 @@ def test_adapter_change_only_changes_execution_source_identity(tmp_path: Path) -
     shutil.copyfile(REPO / ".dockerignore", root / ".dockerignore")
     shutil.copytree(REPO / "harness/derived-image", root / "harness/derived-image")
     shutil.copytree(REPO / "src/s3_listing_study", root / "src/s3_listing_study")
+    shutil.copytree(REPO / "src/twinstamp", root / "src/twinstamp")
     shutil.copytree(REPO / "tools/aws-cli", root / "tools/aws-cli")
     metadata_path = root / "tools/aws-cli/build/image.json"
     before = load_selection(metadata_path, expected_tool="aws-cli")
@@ -784,6 +785,7 @@ def test_derived_source_identity_and_workflow_triggers_cover_every_copy_input() 
         "- src/s3_listing_study/__init__.py",
         "- src/s3_listing_study/common/**",
         "- src/s3_listing_study/worker/**",
+        "- src/twinstamp/**",
         "- tools/*/adapter/**",
         "- tools/*/build/**",
         # The worker version is read from pyproject and goes straight into the

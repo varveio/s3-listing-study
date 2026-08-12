@@ -41,20 +41,38 @@ reads the bounded task service-account token from the instance metadata server.
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import os
 import re
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from typing import Any, BinaryIO
+
+from twinstamp import (
+    EvidenceProfile,
+    EvidencePublication,
+    ObjectConflict,
+    ObjectCreateAmbiguous,
+    ObjectCreated,
+    ObjectCreateResult,
+    ObjectReadBack,
+    PublicationObject,
+    PublicationRefused,
+    PublicationStore,
+    publish,
+)
 
 BULK_FILES = ("stdout.raw.gz", "stderr.raw.gz")
 RESULT_FILE = "result.json"
 TOKEN_ENV_VAR = "S3_STUDY_GCS_TOKEN"
 
 UPLOAD_ENDPOINT = "https://storage.googleapis.com/upload/storage/v1/b"
+DOWNLOAD_ENDPOINT = "https://storage.googleapis.com/storage/v1/b"
 METADATA_TOKEN_URL = (
     "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token"
 )
@@ -63,21 +81,37 @@ TIMEOUT_S = 120.0
 
 PRECONDITION_FAILED = 412
 
-Uploader = Callable[[str, str, Path], None]
+Uploader = Callable[[str, str, Path], ObjectCreateResult | None]
+ReadBack = Callable[[str, str, int], ObjectReadBack | None]
+
+
+class _DirectDestinationProfile:
+    """Compatibility profile for caller-owned, non-campaign destination leaves."""
+
+    name = "study-direct-destination"
+
+    def parse(self, key: str) -> str | None:
+        return key if "/" not in key else None
+
+    def render(self, unit: str) -> str:
+        if self.parse(unit) != unit:
+            raise ValueError("direct destination leaf must be at most one path component")
+        return unit
+
+
+_DIRECT_DESTINATION = _DirectDestinationProfile()
 
 
 class UploadError(RuntimeError):
     """A finalized attempt directory could not be uploaded."""
 
 
-def _file_digest(path: Path) -> tuple[int, str]:
-    digest = hashlib.sha256()
-    size = 0
-    with path.open("rb") as source:
-        for chunk in iter(lambda: source.read(1024 * 1024), b""):
-            size += len(chunk)
-            digest.update(chunk)
-    return size, digest.hexdigest()
+@dataclass(frozen=True, slots=True)
+class _ValidatedArtifact:
+    path: Path
+    label: str
+    size: int
+    sha256: str
 
 
 def _declared_path(root: Path, value: object, *, label: str) -> Path:
@@ -100,23 +134,20 @@ def _declared_path(root: Path, value: object, *, label: str) -> Path:
     return path
 
 
-def _validate_digest(
-    path: Path,
+def _declared_digest(
     record: Mapping[str, object],
     *,
     label: str,
     size_field: str,
     digest_field: str,
-) -> None:
+) -> tuple[int, str]:
     size = record.get(size_field)
     digest = record.get(digest_field)
     if type(size) is not int or size < 0:
         raise UploadError(f"result.json {label} {size_field} must be a nonnegative integer")
     if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
         raise UploadError(f"result.json {label} {digest_field} must be a SHA-256 digest")
-    actual_size, actual_digest = _file_digest(path)
-    if (actual_size, actual_digest) != (size, digest):
-        raise UploadError(f"result.json {label} artifact does not match its recorded evidence")
+    return size, digest
 
 
 def _native_files(root: Path) -> set[str]:
@@ -145,7 +176,9 @@ def _native_files(root: Path) -> set[str]:
     return files
 
 
-def _validated_upload_files(attempt_dir: Path) -> tuple[Path, list[Path]]:
+def _validated_upload_files(
+    attempt_dir: Path,
+) -> tuple[_ValidatedArtifact, list[_ValidatedArtifact]]:
     """Authenticate a finalized compatible evidence set before uploading any byte."""
     try:
         root = attempt_dir.resolve(strict=True)
@@ -157,7 +190,8 @@ def _validated_upload_files(attempt_dir: Path) -> tuple[Path, list[Path]]:
     if not result_path.is_file() or result_path.is_symlink():
         raise UploadError(f"not a finalized attempt directory: {attempt_dir}")
     try:
-        result = json.loads(result_path.read_bytes())
+        result_bytes = result_path.read_bytes()
+        result = json.loads(result_bytes)
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise UploadError("result.json is not valid UTF-8 JSON") from exc
     if not isinstance(result, dict) or result.get("schema_version") not in (2, 3):
@@ -166,7 +200,7 @@ def _validated_upload_files(attempt_dir: Path) -> tuple[Path, list[Path]]:
     streams = result.get("streams")
     if not isinstance(streams, dict) or set(streams) != {"stdout", "stderr"}:
         raise UploadError("result.json streams must declare exactly stdout and stderr")
-    files: list[Path] = []
+    files: list[_ValidatedArtifact] = []
     for stream, expected_path in zip(("stdout", "stderr"), BULK_FILES, strict=True):
         record = streams[stream]
         if not isinstance(record, dict) or record.get("path") != expected_path:
@@ -174,19 +208,18 @@ def _validated_upload_files(attempt_dir: Path) -> tuple[Path, list[Path]]:
                 f"result.json {stream} path must be the worker-owned {expected_path!r}"
             )
         path = _declared_path(root, record["path"], label=stream)
-        _validate_digest(
-            path,
+        size, digest = _declared_digest(
             record,
             label=stream,
             size_field="stored_bytes",
             digest_field="stored_sha256",
         )
-        files.append(path)
+        files.append(_ValidatedArtifact(path, stream, size, digest))
 
     native_output = result.get("native_output")
     if not isinstance(native_output, list):
         raise UploadError("result.json native_output must be a list")
-    declared_native: dict[str, Path] = {}
+    declared_native: dict[str, _ValidatedArtifact] = {}
     for index, record in enumerate(native_output):
         label = f"native_output[{index}]"
         if not isinstance(record, dict):
@@ -197,14 +230,13 @@ def _validated_upload_files(attempt_dir: Path) -> tuple[Path, list[Path]]:
         if value in declared_native:
             raise UploadError(f"result.json declares native artifact twice: {value}")
         path = _declared_path(root, value, label=label)
-        _validate_digest(
-            path,
+        size, digest = _declared_digest(
             record,
             label=label,
             size_field="bytes",
             digest_field="sha256",
         )
-        declared_native[value] = path
+        declared_native[value] = _ValidatedArtifact(path, label, size, digest)
     actual_native = _native_files(root)
     if actual_native != set(declared_native):
         missing = sorted(set(declared_native) - actual_native)
@@ -214,7 +246,13 @@ def _validated_upload_files(attempt_dir: Path) -> tuple[Path, list[Path]]:
             f"(missing={missing}, undeclared={undeclared})"
         )
     files.extend(declared_native[name] for name in sorted(declared_native))
-    return result_path, files
+    result_artifact = _ValidatedArtifact(
+        result_path,
+        RESULT_FILE,
+        len(result_bytes),
+        hashlib.sha256(result_bytes).hexdigest(),
+    )
+    return result_artifact, files
 
 
 def parse_destination(destination: str) -> tuple[str, str]:
@@ -247,13 +285,14 @@ def access_token(source_env: Mapping[str, str] | None = None) -> str:
     return str(token)
 
 
-def _upload_one(bucket: str, object_name: str, local_path: Path, token: str) -> None:
+def _upload_one(
+    bucket: str, object_name: str, payload: PublicationObject, token: str
+) -> ObjectCreateResult:
     """Create one object, refusing to replace an existing one."""
     query = urllib.parse.urlencode(
         {"uploadType": "media", "name": object_name, "ifGenerationMatch": "0"}
     )
-    size = local_path.stat().st_size
-    with local_path.open("rb") as body:
+    with payload.open_payload() as body:
         request = urllib.request.Request(
             f"{UPLOAD_ENDPOINT}/{urllib.parse.quote(bucket, safe='')}/o?{query}",
             data=body,
@@ -263,22 +302,106 @@ def _upload_one(bucket: str, object_name: str, local_path: Path, token: str) -> 
                 "Content-Type": "application/octet-stream",
                 # Set explicitly: urllib would otherwise pick chunked transfer
                 # for a file object, which this endpoint does not accept.
-                "Content-Length": str(size),
+                "Content-Length": str(payload.size),
             },
         )
         try:
             with urllib.request.urlopen(request, timeout=TIMEOUT_S) as response:
-                response.read()
+                raw = response.read(64 * 1024 + 1)
         except urllib.error.HTTPError as exc:
             if exc.code == PRECONDITION_FAILED:
-                raise UploadError(
-                    f"{object_name} already exists at the destination — "
-                    "an attempt is never overwritten"
-                ) from exc
+                return ObjectConflict()
+            if exc.code >= 500 or exc.code in (408, 429):
+                return ObjectCreateAmbiguous(f"HTTP {exc.code}")
             detail = exc.read().decode("utf-8", "replace")[:500]
             raise UploadError(f"uploading {object_name} failed: HTTP {exc.code} {detail}") from exc
-        except (urllib.error.URLError, OSError) as exc:
-            raise UploadError(f"uploading {object_name} failed: {exc}") from exc
+        except (urllib.error.URLError, OSError, http.client.HTTPException) as exc:
+            return ObjectCreateAmbiguous(str(exc))
+    try:
+        document = json.loads(raw)
+        generation = document["generation"]
+    except (UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError):
+        return ObjectCreateAmbiguous("successful response did not expose a generation")
+    if not isinstance(generation, (str, int)) or isinstance(generation, bool) or generation == "":
+        return ObjectCreateAmbiguous("successful response exposed an invalid generation")
+    return ObjectCreated(generation)
+
+
+def _response_chunks(response: Any, max_bytes: int) -> Iterator[bytes]:
+    read = response.read
+    close = response.close
+    remaining = max_bytes
+    try:
+        while remaining:
+            chunk = read(min(1024 * 1024, remaining))
+            if not chunk:
+                return
+            remaining -= len(chunk)
+            yield chunk
+    finally:
+        close()
+
+
+def _read_back_one(
+    bucket: str, object_name: str, max_bytes: int, token: str
+) -> ObjectReadBack | None:
+    query = urllib.parse.urlencode({"alt": "media"})
+    request = urllib.request.Request(
+        f"{DOWNLOAD_ENDPOINT}/{urllib.parse.quote(bucket, safe='')}/o/"
+        f"{urllib.parse.quote(object_name, safe='')}?{query}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    try:
+        response = urllib.request.urlopen(request, timeout=TIMEOUT_S)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return None
+        detail = exc.read().decode("utf-8", "replace")[:500]
+        raise UploadError(f"reading back {object_name} failed: HTTP {exc.code} {detail}") from exc
+    except (urllib.error.URLError, OSError) as exc:
+        raise UploadError(f"reading back {object_name} failed: {exc}") from exc
+    generation = response.headers.get("x-goog-generation")
+    if not generation:
+        response.close()
+        return ObjectReadBack(None, ())
+    return ObjectReadBack(generation, _response_chunks(response, max_bytes))
+
+
+class _GCSStore:
+    def __init__(self, bucket: str, token: str) -> None:
+        self.bucket = bucket
+        self.token = token
+
+    def create(self, key: str, payload: PublicationObject) -> ObjectCreateResult:
+        return _upload_one(self.bucket, key, payload, self.token)
+
+    def read_back(self, key: str, *, max_bytes: int) -> ObjectReadBack | None:
+        return _read_back_one(self.bucket, key, max_bytes, self.token)
+
+
+class _CallbackStore:
+    def __init__(
+        self,
+        bucket: str,
+        paths: Mapping[str, Path],
+        uploader: Uploader,
+        reader: ReadBack | None,
+    ) -> None:
+        self.bucket = bucket
+        self.paths = paths
+        self.uploader = uploader
+        self.reader = reader
+
+    def create(self, key: str, payload: PublicationObject) -> ObjectCreateResult:
+        result = self.uploader(self.bucket, key, self.paths[payload.name])
+        # Preserve the small historical injection seam while real adapters must
+        # return the typed, versioned result.
+        return ObjectCreated("injected") if result is None else result
+
+    def read_back(self, key: str, *, max_bytes: int) -> ObjectReadBack | None:
+        if self.reader is None:
+            raise UploadError("the injected uploader supplied no ambiguous read-back adapter")
+        return self.reader(self.bucket, key, max_bytes)
 
 
 def upload_attempt(
@@ -286,31 +409,78 @@ def upload_attempt(
     destination: str,
     *,
     uploader: Uploader | None = None,
+    reader: ReadBack | None = None,
+    profile: EvidenceProfile[Any] | None = None,
+    unit: object | None = None,
 ) -> list[str]:
     """Preflight all worker-owned evidence, then upload ``result.json`` last."""
-    result_path, files = _validated_upload_files(attempt_dir)
+    result_artifact, files = _validated_upload_files(attempt_dir)
     bucket, prefix = parse_destination(destination)
-    send = uploader if uploader is not None else _authenticated_uploader()
-
-    uploaded: list[str] = []
+    result_path = result_artifact.path
     root = result_path.parent
-    for local_path in files:
-        relative = local_path.relative_to(root).as_posix()
-        object_name = f"{prefix}/{relative}" if prefix else relative
-        send(bucket, object_name, local_path)
-        uploaded.append(object_name)
+    all_artifacts = (*files, result_artifact)
+    paths = {
+        artifact.path.relative_to(root).as_posix(): artifact.path
+        for artifact in all_artifacts
+    }
+    labels = {
+        artifact.path.relative_to(root).as_posix(): artifact.label
+        for artifact in files
+    }
 
-    result_object = f"{prefix}/{RESULT_FILE}" if prefix else RESULT_FILE
-    send(bucket, result_object, result_path)
-    uploaded.append(result_object)
-    return uploaded
+    def publication_object(artifact: _ValidatedArtifact) -> PublicationObject:
+        def open_payload() -> BinaryIO:
+            return artifact.path.open("rb")
+
+        return PublicationObject(
+            artifact.path.relative_to(root).as_posix(),
+            artifact.size,
+            artifact.sha256,
+            open_payload,
+        )
+
+    artifacts = tuple(publication_object(artifact) for artifact in files)
+    marker = publication_object(result_artifact)
+    leaf = prefix.rsplit("/", 1)[-1]
+    if profile is None:
+        selected_profile: EvidenceProfile[Any] = _DIRECT_DESTINATION
+        selected_unit: object = leaf
+    else:
+        if unit is None or profile.render(unit) != leaf:
+            raise UploadError("destination leaf does not match the supplied evidence unit")
+        selected_profile = profile
+        selected_unit = unit
+    slot_prefix = prefix[: -(len(leaf) + 1)] if "/" in prefix else ""
+    publication = EvidencePublication(
+        slot_prefix, selected_profile, selected_unit, artifacts, marker
+    )
+    store: PublicationStore = (
+        _CallbackStore(bucket, paths, uploader, reader)
+        if uploader is not None
+        else _authenticated_uploader(bucket)
+    )
+    try:
+        receipt = publish(publication, store)
+    except PublicationRefused as exc:
+        if (
+            exc.reason == "payload does not match its declared size/sha256"
+            and exc.object_key in labels
+        ):
+            raise UploadError(
+                f"result.json {labels[exc.object_key]} artifact does not match "
+                "its recorded evidence"
+            ) from exc
+        if "create conflict" in exc.reason:
+            raise UploadError(
+                f"{exc.object_key} already exists at the destination — "
+                "an attempt is never overwritten"
+            ) from exc
+        raise UploadError(str(exc)) from exc
+    return [item.key for item in receipt.objects]
 
 
-def _authenticated_uploader() -> Uploader:
+def _authenticated_uploader(bucket: str) -> PublicationStore:
     """Resolve the token once, then upload every object with it."""
     token = access_token()
 
-    def send(bucket: str, object_name: str, path: Path) -> None:
-        _upload_one(bucket, object_name, path, token)
-
-    return send
+    return _GCSStore(bucket, token)

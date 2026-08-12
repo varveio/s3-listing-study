@@ -30,6 +30,7 @@ from typing import BinaryIO, Final
 from s3_listing_study.common.secret_scan import Outcome as ScanOutcome
 from s3_listing_study.common.secret_scan import scan_binary_file
 from s3_listing_study.worker.runtime_identity import interpreter_identity
+from twinstamp import PHYSICAL_EXECUTION, PhysicalExecutionUnit
 
 from .summary import summarize
 
@@ -486,7 +487,13 @@ def _validate(options: AttemptOptions) -> AttemptOptions:
         results_destination = None
     else:
         results_destination = options.results_destination
-    attempt_id = options.attempt_id or str(uuid.uuid4())
+    if options.campaign is not None and options.attempt_id:
+        raise AttemptError("campaign attempt ID must be minted inside the worker invocation")
+    attempt_id = (
+        PHYSICAL_EXECUTION.render(PhysicalExecutionUnit(uuid.uuid4()))
+        if options.campaign is not None
+        else options.attempt_id or str(uuid.uuid4())
+    )
     if not attempt_id or any(character.isspace() for character in attempt_id):
         raise AttemptError("attempt ID must be a non-empty token")
     return AttemptOptions(

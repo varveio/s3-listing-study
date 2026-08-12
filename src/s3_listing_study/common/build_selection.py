@@ -378,6 +378,7 @@ def derived_image_source_sha256(root: Path, selection: BuildSelection) -> str:
             root / "src/s3_listing_study/__init__.py",
             root / "src/s3_listing_study/common",
             root / "src/s3_listing_study/worker",
+            root / "src/twinstamp",
             selection.metadata_path,
             selection.adapter_dir / "command.py",
             selection.adapter_dir / "normalize.py",

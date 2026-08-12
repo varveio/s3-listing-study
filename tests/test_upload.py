@@ -6,16 +6,26 @@ File selection, ordering, precondition handling, and token resolution.
 from __future__ import annotations
 
 import hashlib
+import http.client
+import io
 import json
 import urllib.error
 import urllib.request
+from email.message import Message
 from pathlib import Path
-from typing import cast
+from typing import IO, Any, cast
 
 import pytest
 
 from s3_listing_study.manager.upload import UploadError, parse_destination, upload_attempt
-from s3_listing_study.worker.upload import TOKEN_ENV_VAR, access_token
+from s3_listing_study.worker.upload import TOKEN_ENV_VAR, _upload_one, access_token
+from twinstamp import (
+    ObjectCreateAmbiguous,
+    ObjectCreated,
+    ObjectCreateResult,
+    ObjectReadBack,
+    PublicationObject,
+)
 
 
 class _FakeBucket:
@@ -25,13 +35,34 @@ class _FakeBucket:
         self.uploaded: dict[str, bytes] = {}
         self.existing = existing or set()
 
-    def send(self, bucket: str, object_name: str, local_path: Path) -> None:
+    def send(self, bucket: str, object_name: str, local_path: Path) -> ObjectCreateResult | None:
         assert bucket == "my-bucket"
         if object_name in self.existing:
             raise UploadError(
                 f"{object_name} already exists at the destination — an attempt is never overwritten"
             )
         self.uploaded[object_name] = local_path.read_bytes()
+        return None
+
+
+class _AmbiguousBucket(_FakeBucket):
+    def __init__(self, *, mismatch: bool = False) -> None:
+        super().__init__()
+        self.mismatch = mismatch
+        self.reads: list[str] = []
+
+    def send(self, bucket: str, object_name: str, local_path: Path) -> ObjectCreateResult | None:
+        super().send(bucket, object_name, local_path)
+        if object_name.endswith("/stderr.raw.gz"):
+            return ObjectCreateAmbiguous("connection reset")
+        return ObjectCreated(str(len(self.uploaded)))
+
+    def read(self, bucket: str, object_name: str, max_bytes: int) -> ObjectReadBack | None:
+        assert bucket == "my-bucket"
+        self.reads.append(object_name)
+        content = b"different" if self.mismatch else self.uploaded[object_name]
+        assert len(content) <= max_bytes
+        return ObjectReadBack("read-generation", (content,))
 
 
 def _write_attempt(tmp_path: Path, *, with_native: bool = False) -> Path:
@@ -116,6 +147,13 @@ def test_native_output_directory_uploads_too(tmp_path: Path) -> None:
     assert uploaded[-1] == "x/result.json"
 
 
+def test_bucket_root_destination_preserves_root_object_names(tmp_path: Path) -> None:
+    attempt_dir = _write_attempt(tmp_path)
+    bucket = _FakeBucket()
+    uploaded = upload_attempt(attempt_dir, "gs://my-bucket", uploader=bucket.send)
+    assert uploaded == ["stdout.raw.gz", "stderr.raw.gz", "result.json"]
+
+
 def test_result_only_attempt_refuses_before_upload(tmp_path: Path) -> None:
     attempt_dir = _write_attempt(tmp_path)
     (attempt_dir / "stdout.raw.gz").unlink()
@@ -174,11 +212,140 @@ def test_tampered_declared_artifact_refuses_before_upload(tmp_path: Path) -> Non
     assert bucket.uploaded == {}
 
 
+def test_large_artifact_opens_once_for_preflight_and_once_for_create(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    attempt_dir = _write_attempt(tmp_path)
+    stdout = attempt_dir / "stdout.raw.gz"
+    content = b"large-payload" * (2 * 1024 * 1024 // len(b"large-payload"))
+    stdout.write_bytes(content)
+    result = _result(attempt_dir)
+    streams = cast(dict[str, dict[str, object]], result["streams"])
+    streams["stdout"]["stored_bytes"] = len(content)
+    streams["stdout"]["stored_sha256"] = hashlib.sha256(content).hexdigest()
+    _replace_result(attempt_dir, result)
+
+    original_open = Path.open
+    opens = 0
+
+    def counting_open(
+        path: Path,
+        mode: str = "r",
+        buffering: int = -1,
+        encoding: str | None = None,
+        errors: str | None = None,
+        newline: str | None = None,
+    ) -> IO[Any]:
+        nonlocal opens
+        if path == stdout:
+            opens += 1
+        return original_open(path, mode, buffering, encoding, errors, newline)
+
+    monkeypatch.setattr(Path, "open", counting_open)
+    bucket = _FakeBucket()
+    upload_attempt(attempt_dir, "gs://my-bucket/x", uploader=bucket.send)
+    assert opens == 2
+
+
 def test_existing_object_refuses_overwrite(tmp_path: Path) -> None:
     attempt_dir = _write_attempt(tmp_path)
     bucket = _FakeBucket(existing={"x/result.json"})
     with pytest.raises(UploadError, match="never overwritten"):
         upload_attempt(attempt_dir, "gs://my-bucket/x", uploader=bucket.send)
+
+
+def test_ambiguous_create_reads_back_exact_bytes_then_continues(tmp_path: Path) -> None:
+    attempt_dir = _write_attempt(tmp_path)
+    bucket = _AmbiguousBucket()
+    uploaded = upload_attempt(
+        attempt_dir, "gs://my-bucket/x", uploader=bucket.send, reader=bucket.read
+    )
+    assert bucket.reads == ["x/stderr.raw.gz"]
+    assert uploaded[-1] == "x/result.json"
+
+
+def test_ambiguous_mismatch_refuses_before_result_marker(tmp_path: Path) -> None:
+    attempt_dir = _write_attempt(tmp_path)
+    bucket = _AmbiguousBucket(mismatch=True)
+    with pytest.raises(UploadError, match="read-back did not match"):
+        upload_attempt(attempt_dir, "gs://my-bucket/x", uploader=bucket.send, reader=bucket.read)
+    assert "x/result.json" not in bucket.uploaded
+
+
+def test_gcs_create_keeps_create_only_precondition_and_parses_generation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Response:
+        def __enter__(self) -> Response:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self, _size: int = -1) -> bytes:
+            return b'{"generation":"42"}'
+
+    seen: list[urllib.request.Request] = []
+
+    def open_request(request: urllib.request.Request, **_kwargs: object) -> Response:
+        seen.append(request)
+        return Response()
+
+    monkeypatch.setattr(urllib.request, "urlopen", open_request)
+    content = b"payload"
+    payload = PublicationObject(
+        "artifact",
+        len(content),
+        hashlib.sha256(content).hexdigest(),
+        lambda: io.BytesIO(content),
+    )
+    assert _upload_one("bucket", "unit/artifact", payload, "token") == ObjectCreated("42")
+    assert "ifGenerationMatch=0" in seen[0].full_url
+
+
+def test_gcs_create_with_incomplete_success_body_is_ambiguous(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Response:
+        def __enter__(self) -> Response:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self, _size: int = -1) -> bytes:
+            raise http.client.IncompleteRead(b'{"generation":', 4)
+
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *_args, **_kwargs: Response())
+    content = b"payload"
+    payload = PublicationObject(
+        "artifact",
+        len(content),
+        hashlib.sha256(content).hexdigest(),
+        lambda: io.BytesIO(content),
+    )
+    result = _upload_one("bucket", "unit/artifact", payload, "token")
+    assert isinstance(result, ObjectCreateAmbiguous)
+
+
+def test_gcs_create_keeps_definitive_client_failure_nonambiguous(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail(request: urllib.request.Request, **_kwargs: object) -> object:
+        raise urllib.error.HTTPError(
+            request.full_url, 400, "bad request", Message(), io.BytesIO(b"bad")
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", fail)
+    content = b"payload"
+    payload = PublicationObject(
+        "artifact",
+        len(content),
+        hashlib.sha256(content).hexdigest(),
+        lambda: io.BytesIO(content),
+    )
+    with pytest.raises(UploadError, match="HTTP 400 bad"):
+        _upload_one("bucket", "unit/artifact", payload, "token")
 
 
 def test_missing_result_json_refuses(tmp_path: Path) -> None:

@@ -496,8 +496,10 @@ def test_failed_tool_skips_summary_without_opening_adapter(tmp_path: Path) -> No
 
 
 def test_campaign_provenance_and_batch_retry_are_recorded_but_not_forwarded(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    execution_id = uuid.UUID("11111111-1111-4111-8111-111111111111")
+    monkeypatch.setattr("s3_listing_study.worker.engine.uuid.uuid4", lambda: execution_id)
     campaign = CampaignProvenance(
         campaign_id="2026-08-10-first",
         job_id="c-one-r1-s1",
@@ -513,6 +515,7 @@ def test_campaign_provenance_and_batch_retry_are_recorded_but_not_forwarded(
         "pass",
         campaign=campaign,
         results_destination="gs://results/campaigns/2026-08-10-first/bucket/tool/case/run-1",
+        attempt_id="",
         source_env={"BATCH_TASK_RETRY_ATTEMPT": "0"},
     )
     assert runner_exit == 0
@@ -533,8 +536,30 @@ def test_campaign_provenance_and_batch_retry_are_recorded_but_not_forwarded(
     }
     assert result["scheduler"] == {"batch_task_retry_attempt": 0}
     assert "BATCH_TASK_RETRY_ATTEMPT" not in result["invocation"]["environment"]  # type: ignore[index]
-    assert str(result["artifact_uri"]).endswith("/test-attempt")
-    assert str(result["result_uri"]).endswith("/test-attempt/result.json")
+    assert str(result["artifact_uri"]).endswith(f"/{execution_id}")
+    assert str(result["result_uri"]).endswith(f"/{execution_id}/result.json")
+
+
+def test_campaign_refuses_an_injected_attempt_id(tmp_path: Path) -> None:
+    campaign = CampaignProvenance(
+        campaign_id="2026-08-10-first",
+        job_id="c-one-r1-s1",
+        case_id="case.one",
+        case_fingerprint="a" * 64,
+        attempt_fingerprint="b" * 64,
+        run_ordinal=1,
+        submission_number=1,
+        resources=DeclaredResources("n4-highcpu-2", 2, 4, None),
+    )
+    with pytest.raises(AttemptError, match="minted inside the worker"):
+        _run(tmp_path, "pass", campaign=campaign, attempt_id=str(uuid.uuid4()))
+
+
+def test_campaign_publication_refuses_a_nonphysical_result_leaf(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert cli._publish(tmp_path, "gs://results/run-1", {"attempt_id": "test-attempt"}, 0) == 3
+    assert "not a canonical physical-execution UUIDv4" in capsys.readouterr().err
 
 
 def test_cli_campaign_provenance_is_all_or_none_before_execution(

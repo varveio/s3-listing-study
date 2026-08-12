@@ -18,6 +18,7 @@ from s3_listing_study.worker.image_provenance import (
     ImageProvenanceError,
     load_image_provenance,
 )
+from twinstamp import PHYSICAL_EXECUTION
 
 from .driver import resolve_invocation
 from .engine import (
@@ -320,7 +321,16 @@ def _publish(
     # re-execution, after the run was already paid for.
     try:
         leaf = str(result["attempt_id"])
-        uploaded = upload_attempt(attempt_dir, f"{destination.rstrip('/')}/{leaf}")
+        unit = PHYSICAL_EXECUTION.parse(leaf)
+        if unit is None:
+            raise UploadError("campaign attempt_id is not a canonical physical-execution UUIDv4")
+        leaf = PHYSICAL_EXECUTION.render(unit)
+        uploaded = upload_attempt(
+            attempt_dir,
+            f"{destination.rstrip('/')}/{leaf}",
+            profile=PHYSICAL_EXECUTION,
+            unit=unit,
+        )
     except (UploadError, OSError) as exc:
         print(f"attempt-runner: upload failed: {exc}", file=sys.stderr)
         return POST_ATTEMPT_EXIT

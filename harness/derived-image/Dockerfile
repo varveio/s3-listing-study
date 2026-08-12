@@ -6,6 +6,7 @@ USER root
 COPY src/s3_listing_study/__init__.py /payload/s3_listing_study/__init__.py
 COPY src/s3_listing_study/common/ /payload/s3_listing_study/common/
 COPY src/s3_listing_study/worker/ /payload/s3_listing_study/worker/
+COPY src/twinstamp/ /payload/twinstamp/
 COPY harness/derived-image/zipapp_main.py /payload/__main__.py
 RUN find /payload -exec touch -h -d '1980-01-01 00:00:00 UTC' {} + \
     && rm -rf /opt/s3-listing-study-worker-build \
