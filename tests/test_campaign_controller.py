@@ -3,25 +3,75 @@
 from __future__ import annotations
 
 import json
+import queue
+import sqlite3
+from multiprocessing import get_context
 from pathlib import Path
 from threading import Event, Lock, Thread
 from typing import Any, cast
 
 import pytest
-from google.api_core.exceptions import AlreadyExists
+from google.api_core.exceptions import AlreadyExists, ServiceUnavailable
+from google.cloud import batch_v1
 
 from s3_listing_study.manager.campaign import cli as campaign_cli
 from s3_listing_study.manager.campaign import control, controller, ledger, provider, report
 from s3_listing_study.manager.campaign.control import finalize_parser, retry_parser
 from s3_listing_study.manager.campaign.models import (
-    BatchJobOutcome,
     BatchJobSpec,
     CaseControllerProgress,
 )
 from tests.test_campaign_batch import attempt
+from twinstamp.coordination import (
+    AdoptedExact,
+    Ambiguous,
+    Collision,
+    Created,
+    NotVisible,
+    ObservationAmbiguous,
+    ObservedCollision,
+    ObservedExact,
+    RejectedNoEffect,
+    SubmissionClaim,
+    SubmissionSpec,
+)
 
 CAMPAIGN = "2026-08-10-first"
 NOW = "2026-08-11T12:00:00Z"
+FROZEN_PRE_EXTRACTION_SCHEMA = """
+CREATE TABLE attempts (
+ job_id TEXT PRIMARY KEY, campaign TEXT NOT NULL, run_ordinal INTEGER NOT NULL,
+ submission INTEGER NOT NULL, state TEXT NOT NULL, created_at TEXT NOT NULL,
+ updated_at TEXT NOT NULL, bucket TEXT NOT NULL, region TEXT NOT NULL, tool TEXT NOT NULL,
+ case_id TEXT NOT NULL, mode TEXT NOT NULL, machine_type TEXT NOT NULL,
+ vcpus INTEGER NOT NULL, memory_gb INTEGER NOT NULL, container_memory_gb INTEGER,
+ timeout_s INTEGER NOT NULL, env_json TEXT NOT NULL, derived_image TEXT NOT NULL,
+ case_fingerprint TEXT NOT NULL, fingerprint TEXT NOT NULL, prefix TEXT NOT NULL,
+ case_json TEXT NOT NULL, UNIQUE (campaign, fingerprint, run_ordinal, submission));
+CREATE TABLE events (
+ id INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT NOT NULL, at TEXT NOT NULL,
+ event TEXT NOT NULL, detail TEXT, FOREIGN KEY (job_id) REFERENCES attempts (job_id));
+CREATE INDEX events_by_job ON events (job_id, id);
+CREATE TABLE campaigns (
+ campaign TEXT PRIMARY KEY, project TEXT NOT NULL, location TEXT NOT NULL,
+ results_bucket TEXT NOT NULL, manifest_sha256 TEXT NOT NULL, created_at TEXT NOT NULL,
+ finalized_at TEXT);
+CREATE TABLE controller_inputs (
+ base_job_id TEXT PRIMARY KEY, campaign TEXT NOT NULL, job_json TEXT NOT NULL,
+ controller_timeout_s INTEGER NOT NULL, FOREIGN KEY (campaign) REFERENCES campaigns (campaign));
+CREATE TABLE controller_cases (
+ base_job_id TEXT PRIMARY KEY, campaign TEXT NOT NULL, phase TEXT NOT NULL,
+ current_submission INTEGER NOT NULL, current_job_id TEXT NOT NULL UNIQUE,
+ job_json TEXT NOT NULL, controller_timeout_s INTEGER NOT NULL, provider_state TEXT,
+ failure_type TEXT, provider_resource_name TEXT, provider_settled INTEGER NOT NULL DEFAULT 0,
+ accepted_failure INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL,
+ FOREIGN KEY (campaign) REFERENCES campaigns (campaign));
+CREATE INDEX controller_cases_by_campaign ON controller_cases (campaign, base_job_id);
+"""
+
+
+def payload(spec: SubmissionSpec[BatchJobSpec]) -> BatchJobSpec:
+    return spec.payload
 
 
 def job(job_id: str) -> dict[str, Any]:
@@ -75,18 +125,53 @@ def awaiting_retry(path: Path) -> str:
             now=NOW,
         )
         ledger.record_intent(connection, attempt=selected.as_dict(), campaign=CAMPAIGN, now=NOW)
-        assert ledger.reserve_start(connection, base_job_id=base_job_id, now=NOW)
-        ledger.record_provider_outcome(
+    journal = ledger.SQLiteIntentJournal(path, CAMPAIGN)
+    claim = journal.claim_submission(base_job_id, now=NOW)
+    assert claim is not None
+    journal.record_ensure(
+        claim,
+        Created(f"projects/study/locations/us-east1/jobs/{base_job_id}", "FAILED", True),
+        now=NOW,
+    )
+    return base_job_id
+
+
+def test_late_ensure_after_terminal_observation_returns_current_progress(tmp_path: Path) -> None:
+    path = tmp_path / "campaign.sqlite3"
+    selected = attempt()
+    with ledger.open_ledger(path) as connection:
+        ledger.register_campaign(
             connection,
-            base_job_id=base_job_id,
-            expected_current_job_id=base_job_id,
-            state="FAILED",
-            failure_type=None,
-            resource_name=f"projects/study/locations/us-east1/jobs/{base_job_id}",
-            settled=True,
+            campaign=CAMPAIGN,
+            project="study",
+            location="us-east1",
+            results_bucket="results",
+            manifest_sha256="a" * 64,
+            cases=[
+                {
+                    "base_job_id": selected.job_id,
+                    "job": job(selected.job_id),
+                    "controller_timeout_s": 9000,
+                }
+            ],
             now=NOW,
         )
-    return base_job_id
+        ledger.record_intent(connection, attempt=selected.as_dict(), campaign=CAMPAIGN, now=NOW)
+    journal = ledger.SQLiteIntentJournal(path, CAMPAIGN)
+    claim = journal.claim_submission(selected.job_id, now=NOW)
+    assert claim is not None
+    resource = f"projects/study/locations/us-east1/jobs/{selected.job_id}"
+    journal.record_observation(
+        SubmissionClaim(claim.spec, "observe"), ObservedExact(resource, "SUCCEEDED", True), now=NOW
+    )
+    [observed] = controller.progress(ledger_path=path, campaign=CAMPAIGN)
+    assert observed.phase == "terminal"
+
+    late = journal.record_ensure(claim, Created(resource, "RUNNING", False), now=NOW)
+
+    assert late == observed
+    [current] = controller.progress(ledger_path=path, campaign=CAMPAIGN)
+    assert current == observed
 
 
 def test_definitive_no_effect_waits_for_operator_decision(
@@ -96,7 +181,7 @@ def test_definitive_no_effect_waits_for_operator_decision(
     monkeypatch.setattr(
         provider,
         "ensure_batch_job",
-        lambda _spec: BatchJobOutcome(None, "NOT_CREATED", "PermanentGoogleError"),
+        lambda _spec: RejectedNoEffect("PermanentGoogleError"),
     )
 
     statuses = controller.start_campaign(
@@ -124,13 +209,14 @@ def test_retry_reservation_excludes_concurrent_finalization(
     path = tmp_path / "campaign.sqlite3"
     base_job_id = awaiting_retry(path)
 
-    def ensure(spec: BatchJobSpec) -> BatchJobOutcome:
-        assert spec.job_id.endswith("-s2")
-        commands = spec.job["taskGroups"][0]["taskSpec"]["runnables"][0]["container"]["commands"]
-        assert commands == ["--job-id", spec.job_id, "--submission-number", "2"]
+    def ensure(spec: SubmissionSpec[BatchJobSpec]) -> Created | AdoptedExact | Ambiguous:
+        batch = payload(spec)
+        assert batch.job_id.endswith("-s2")
+        commands = batch.job["taskGroups"][0]["taskSpec"]["runnables"][0]["container"]["commands"]
+        assert commands == ["--job-id", batch.job_id, "--submission-number", "2"]
         with pytest.raises(ledger.LedgerError, match="active cases"):
             controller.finalize(ledger_path=path, campaign=CAMPAIGN)
-        return BatchJobOutcome(spec.resource_name, "SUCCEEDED")
+        return Created(batch.resource_name, "SUCCEEDED", True)
 
     monkeypatch.setattr(provider, "ensure_batch_job", ensure)
     progress = controller.retry_case(
@@ -150,7 +236,7 @@ def test_stale_provider_observation_cannot_overwrite_retry_or_finalization(
     monkeypatch.setattr(
         provider,
         "ensure_batch_job",
-        lambda spec: BatchJobOutcome(spec.resource_name, "FAILED"),
+        lambda spec: Created(payload(spec).resource_name, "FAILED", True),
     )
     retried = controller.retry_case(
         ledger_path=path, campaign=CAMPAIGN, base_job_id=base_job_id, submission=2
@@ -159,19 +245,17 @@ def test_stale_provider_observation_cannot_overwrite_retry_or_finalization(
     [finalized] = controller.finalize(ledger_path=path, campaign=CAMPAIGN)
     assert finalized.accepted_failure
 
-    with ledger.open_ledger(path) as connection:
-        recorded = ledger.record_provider_outcome(
-            connection,
-            base_job_id=base_job_id,
-            expected_current_job_id=base_job_id,
-            state="SUCCEEDED",
-            failure_type=None,
-            resource_name=f"projects/study/locations/us-east1/jobs/{base_job_id}",
-            settled=True,
-            now=NOW,
-        )
-
-    assert recorded is False
+    stale = SubmissionClaim(
+        BatchJobSpec(
+            "study", "us-east1", base_job_id, base_job_id, job(base_job_id), 9000
+        ).submission_spec(),
+        "observe",
+    )
+    ledger.SQLiteIntentJournal(path, CAMPAIGN).record_observation(
+        stale,
+        ObservedExact(f"projects/study/locations/us-east1/jobs/{base_job_id}", "SUCCEEDED", True),
+        now=NOW,
+    )
     [current] = controller.progress(ledger_path=path, campaign=CAMPAIGN)
     assert current.current_submission == 2
     assert current.provider_state == "FAILED"
@@ -186,7 +270,7 @@ def test_same_job_stale_observation_cannot_regress_terminal_or_finalized_state(
     monkeypatch.setattr(
         provider,
         "ensure_batch_job",
-        lambda spec: BatchJobOutcome(spec.resource_name, "SUCCEEDED"),
+        lambda spec: Created(payload(spec).resource_name, "SUCCEEDED", True),
     )
     controller.start_campaign(
         ledger_path=success_path,
@@ -199,17 +283,19 @@ def test_same_job_stale_observation_cannot_regress_terminal_or_finalized_state(
         jobs=[job(selected.job_id)],
         controller_timeouts=[9000],
     )
-    with ledger.open_ledger(success_path) as connection:
-        assert not ledger.record_provider_outcome(
-            connection,
-            base_job_id=selected.job_id,
-            expected_current_job_id=selected.job_id,
-            state="RUNNING",
-            failure_type=None,
-            resource_name=f"projects/study/locations/us-east1/jobs/{selected.job_id}",
-            settled=False,
-            now=NOW,
-        )
+    claim = SubmissionClaim(
+        BatchJobSpec(
+            "study", "us-east1", selected.job_id, selected.job_id, job(selected.job_id), 9000
+        ).submission_spec(),
+        "observe",
+    )
+    ledger.SQLiteIntentJournal(success_path, CAMPAIGN).record_observation(
+        claim,
+        ObservedExact(
+            f"projects/study/locations/us-east1/jobs/{selected.job_id}", "RUNNING", False
+        ),
+        now=NOW,
+    )
     [successful] = controller.progress(ledger_path=success_path, campaign=CAMPAIGN)
     assert successful.phase == "terminal"
     assert successful.provider_state == "SUCCEEDED"
@@ -217,17 +303,17 @@ def test_same_job_stale_observation_cannot_regress_terminal_or_finalized_state(
     finalized_path = tmp_path / "finalized.sqlite3"
     base_job_id = awaiting_retry(finalized_path)
     controller.finalize(ledger_path=finalized_path, campaign=CAMPAIGN)
-    with ledger.open_ledger(finalized_path) as connection:
-        assert not ledger.record_provider_outcome(
-            connection,
-            base_job_id=base_job_id,
-            expected_current_job_id=base_job_id,
-            state="SUCCEEDED",
-            failure_type=None,
-            resource_name=f"projects/study/locations/us-east1/jobs/{base_job_id}",
-            settled=True,
-            now=NOW,
-        )
+    claim = SubmissionClaim(
+        BatchJobSpec(
+            "study", "us-east1", base_job_id, base_job_id, job(base_job_id), 9000
+        ).submission_spec(),
+        "observe",
+    )
+    ledger.SQLiteIntentJournal(finalized_path, CAMPAIGN).record_observation(
+        claim,
+        ObservedExact(f"projects/study/locations/us-east1/jobs/{base_job_id}", "SUCCEEDED", True),
+        now=NOW,
+    )
     [finalized] = controller.progress(ledger_path=finalized_path, campaign=CAMPAIGN)
     assert finalized.accepted_failure
     assert finalized.provider_state == "FAILED"
@@ -260,23 +346,26 @@ def test_persisted_retry_reservation_uses_clean_redrive_adoption(
     path = tmp_path / "campaign.sqlite3"
     base_job_id = awaiting_retry(path)
 
-    def ambiguous(_spec: BatchJobSpec) -> BatchJobOutcome:
-        raise provider.ProviderError("create outcome unknown")
+    def ambiguous(_spec: SubmissionSpec[BatchJobSpec]) -> Ambiguous:
+        return Ambiguous("create outcome unknown", "ProviderError")
 
     monkeypatch.setattr(provider, "ensure_batch_job", ambiguous)
-    with pytest.raises(provider.ProviderError, match="outcome unknown"):
-        controller.retry_case(
-            ledger_path=path,
-            campaign=CAMPAIGN,
-            base_job_id=base_job_id,
-            submission=2,
-        )
+    unsettled = controller.retry_case(
+        ledger_path=path,
+        campaign=CAMPAIGN,
+        base_job_id=base_job_id,
+        submission=2,
+    )
+    assert unsettled.phase == "running"
+    assert unsettled.current_submission == 2
+    assert unsettled.provider_resource_name is None
 
-    calls: list[bool] = []
+    calls: list[str] = []
 
-    def redrive(spec: BatchJobSpec, *, collision_on_adoption: bool) -> BatchJobOutcome:
-        calls.append(collision_on_adoption)
-        return BatchJobOutcome(spec.resource_name, "QUEUED", adopted=True)
+    def redrive(spec: SubmissionSpec[BatchJobSpec]) -> AdoptedExact:
+        batch = payload(spec)
+        calls.append(batch.job_id)
+        return AdoptedExact(batch.resource_name, "QUEUED")
 
     monkeypatch.setattr(provider, "ensure_batch_job", redrive)
     progress = controller.retry_case(
@@ -286,9 +375,10 @@ def test_persisted_retry_reservation_uses_clean_redrive_adoption(
         submission=2,
     )
 
-    assert calls == [False]
+    assert calls == [progress.current_job_id]
     assert progress.phase == "running"
     assert progress.current_submission == 2
+    assert progress.failure_type is None
 
 
 def test_submission_starts_in_waves_of_eight(
@@ -311,7 +401,7 @@ def test_submission_starts_in_waves_of_eight(
     monkeypatch.setattr(
         provider,
         "ensure_batch_job",
-        lambda spec: BatchJobOutcome(spec.resource_name, "QUEUED"),
+        lambda spec: Created(payload(spec).resource_name, "QUEUED"),
     )
 
     controller.start_campaign(
@@ -340,7 +430,7 @@ def test_concurrent_start_redrive_serializes_the_provider_effect(
     guard = Lock()
     calls = 0
 
-    def ensure(spec: BatchJobSpec, **_kwargs: Any) -> BatchJobOutcome:
+    def ensure(spec: SubmissionSpec[BatchJobSpec], **_kwargs: Any) -> Created:
         nonlocal calls
         with guard:
             calls += 1
@@ -348,7 +438,7 @@ def test_concurrent_start_redrive_serializes_the_provider_effect(
                 second_provider_call.set()
         entered.set()
         assert release.wait(2)
-        return BatchJobOutcome(spec.resource_name, "QUEUED")
+        return Created(payload(spec).resource_name, "QUEUED")
 
     monkeypatch.setattr(provider, "ensure_batch_job", ensure)
     kwargs = {
@@ -385,6 +475,71 @@ def test_concurrent_start_redrive_serializes_the_provider_effect(
     assert calls == 1
 
 
+def test_concurrent_start_redrive_serializes_provider_effect_across_processes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    try:
+        context = get_context("fork")
+    except ValueError:  # pragma: no cover - fork is available on the Linux runner.
+        pytest.skip("process lock test requires fork")
+    path = tmp_path / "campaign.sqlite3"
+    selected = attempt()
+    entered = context.Event()
+    release = context.Event()
+    second_provider_call = context.Event()
+    calls = context.Value("i", 0)
+    errors = context.Queue()
+
+    def ensure(spec: SubmissionSpec[BatchJobSpec], **_kwargs: Any) -> Created:
+        with calls.get_lock():
+            calls.value += 1
+            if calls.value == 2:
+                second_provider_call.set()
+        entered.set()
+        assert release.wait(2)
+        return Created(payload(spec).resource_name, "QUEUED")
+
+    monkeypatch.setattr(provider, "ensure_batch_job", ensure)
+    kwargs = {
+        "ledger_path": path,
+        "campaign": CAMPAIGN,
+        "project": "study",
+        "location": "us-east1",
+        "results_bucket": "results",
+        "manifest_sha256": "a" * 64,
+        "attempts": [selected.as_dict()],
+        "jobs": [job(selected.job_id)],
+        "controller_timeouts": [9000],
+    }
+
+    def start() -> None:
+        try:
+            controller.start_campaign(**kwargs)  # type: ignore[arg-type]
+        except BaseException as exc:  # pragma: no cover - asserted below
+            errors.put(repr(exc))
+
+    first = context.Process(target=start)
+    second = context.Process(target=start)
+    first.start()
+    assert entered.wait(2)
+    second.start()
+    assert not second_provider_call.wait(0.2)
+    release.set()
+    first.join(2)
+    second.join(2)
+
+    assert not first.is_alive() and not second.is_alive()
+    reported: list[str] = []
+    while True:
+        try:
+            reported.append(errors.get(timeout=0.5))
+        except queue.Empty:
+            break
+    assert reported == []
+    assert (first.exitcode, second.exitcode) == (0, 0)
+    assert calls.value == 1
+
+
 def test_concurrent_retry_redrive_serializes_the_provider_effect(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -396,7 +551,7 @@ def test_concurrent_retry_redrive_serializes_the_provider_effect(
     guard = Lock()
     calls = 0
 
-    def ensure(spec: BatchJobSpec, **_kwargs: Any) -> BatchJobOutcome:
+    def ensure(spec: SubmissionSpec[BatchJobSpec], **_kwargs: Any) -> Created:
         nonlocal calls
         with guard:
             calls += 1
@@ -404,7 +559,7 @@ def test_concurrent_retry_redrive_serializes_the_provider_effect(
                 second_provider_call.set()
         entered.set()
         assert release.wait(2)
-        return BatchJobOutcome(spec.resource_name, "QUEUED")
+        return Created(payload(spec).resource_name, "QUEUED")
 
     monkeypatch.setattr(provider, "ensure_batch_job", ensure)
     errors: list[BaseException] = []
@@ -451,13 +606,16 @@ def test_transient_start_failure_does_not_stop_later_cases_and_is_redrivable(
     second["run_ordinal"] = 2
     attempts = [first, second]
     jobs = [job(str(item["job_id"])) for item in attempts]
-    calls: list[tuple[str, bool]] = []
+    calls: list[str] = []
 
-    def ensure(spec: BatchJobSpec, *, collision_on_adoption: bool = True) -> BatchJobOutcome:
-        calls.append((spec.job_id, collision_on_adoption))
+    def ensure(spec: SubmissionSpec[BatchJobSpec]) -> Created | AdoptedExact | Ambiguous:
+        batch = payload(spec)
+        calls.append(batch.job_id)
         if len(calls) == 1:
-            raise provider.ProviderError("create outcome unknown")
-        return BatchJobOutcome(spec.resource_name, "QUEUED")
+            return Ambiguous("create outcome unknown", "ProviderError")
+        if batch.job_id == first["job_id"]:
+            return AdoptedExact(batch.resource_name, "QUEUED")
+        return Created(batch.resource_name, "QUEUED")
 
     monkeypatch.setattr(provider, "ensure_batch_job", ensure)
     statuses = controller.start_campaign(
@@ -473,6 +631,7 @@ def test_transient_start_failure_does_not_stop_later_cases_and_is_redrivable(
     )
 
     assert statuses[0]["state"] == "unsettled"
+    assert statuses[0]["error_type"] == "ProviderError"
     assert statuses[1]["state"] == "QUEUED"
     progress = controller.progress(ledger_path=path, campaign=CAMPAIGN)
     assert progress[0].phase == "running" and progress[0].provider_resource_name is None
@@ -489,8 +648,10 @@ def test_transient_start_failure_does_not_stop_later_cases_and_is_redrivable(
         jobs=jobs,
         controller_timeouts=[9000, 9000],
     )
-    assert calls[-1] == (str(first["job_id"]), False)
+    assert calls[-1] == str(first["job_id"])
     assert statuses[0]["state"] == "QUEUED"
+    [redriven] = controller.progress(ledger_path=path, campaign=CAMPAIGN)[:1]
+    assert redriven.failure_type is None
 
 
 def test_provider_adoption_normalizes_only_materialized_fields() -> None:
@@ -507,7 +668,27 @@ def test_provider_adoption_normalizes_only_materialized_fields() -> None:
     assert not provider.validated_adoption(selected, actual)
 
 
-def test_first_exact_adoption_is_collision_but_persisted_redrive_is_clean() -> None:
+def test_mismatched_provider_adoption_is_collision() -> None:
+    base_job_id = "c-case-s1"
+    selected = BatchJobSpec("study", "us-east1", base_job_id, base_job_id, job(base_job_id), 9000)
+    actual = provider._job_from_json(job(base_job_id))
+    actual.name = selected.resource_name
+    actual.allocation_policy.instances[0].policy.machine_type = "n4-highcpu-4"
+
+    class ExistingClient:
+        def create_job(self, **_kwargs: Any) -> Any:
+            raise AlreadyExists("exists")  # type: ignore[no-untyped-call]
+
+        def get_job(self, **_kwargs: Any) -> Any:
+            return actual
+
+    fact = provider.ensure_batch_job(selected.submission_spec(), client=cast(Any, ExistingClient()))
+
+    assert isinstance(fact, Collision)
+    assert fact.failure_type == "BatchJobCollision"
+
+
+def test_provider_reports_exact_adoption_as_policy_free_fact() -> None:
     base_job_id = "c-case-s1"
     selected = BatchJobSpec("study", "us-east1", base_job_id, base_job_id, job(base_job_id), 9000)
     actual = provider._job_from_json(job(base_job_id))
@@ -520,13 +701,191 @@ def test_first_exact_adoption_is_collision_but_persisted_redrive_is_clean() -> N
         def get_job(self, **_kwargs: Any) -> Any:
             return actual
 
-    first = provider.ensure_batch_job(selected, client=cast(Any, ExistingClient()))
+    first = provider.ensure_batch_job(
+        selected.submission_spec(), client=cast(Any, ExistingClient())
+    )
     redrive = provider.ensure_batch_job(
-        selected, client=cast(Any, ExistingClient()), collision_on_adoption=False
+        selected.submission_spec(), client=cast(Any, ExistingClient())
     )
 
-    assert first.adopted and first.failure_type == "BatchJobCollision"
-    assert redrive.adopted and redrive.failure_type is None
+    assert isinstance(first, AdoptedExact)
+    assert isinstance(redrive, AdoptedExact)
+
+
+def test_provider_create_errors_with_unknown_effect_are_typed_ambiguous() -> None:
+    selected = BatchJobSpec("study", "us-east1", "c-case-s1", "c-case-s1", job("c-case-s1"), 9000)
+
+    class FailingClient:
+        def create_job(self, **_kwargs: Any) -> Any:
+            raise ServiceUnavailable("retryable create failure")  # type: ignore[no-untyped-call]
+
+    fact = provider.ensure_batch_job(selected.submission_spec(), client=cast(Any, FailingClient()))
+
+    assert isinstance(fact, Ambiguous)
+    assert fact.error_type == "ServiceUnavailable"
+
+
+def test_provider_client_construction_errors_are_typed_ambiguous(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    selected = BatchJobSpec("study", "us-east1", "c-case-s1", "c-case-s1", job("c-case-s1"), 9000)
+    monkeypatch.setattr(
+        batch_v1,
+        "BatchServiceClient",
+        lambda: (_ for _ in ()).throw(
+            ServiceUnavailable("client setup failed")  # type: ignore[no-untyped-call]
+        ),
+    )
+
+    fact = provider.ensure_batch_job(selected.submission_spec())
+
+    assert fact == Ambiguous("503 client setup failed", "ServiceUnavailable")
+
+
+def test_provider_client_cleanup_errors_are_typed_ambiguous(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    selected = BatchJobSpec("study", "us-east1", "c-case-s1", "c-case-s1", job("c-case-s1"), 9000)
+    created = provider._job_from_json(job("c-case-s1"))
+    created.name = selected.resource_name
+
+    class Transport:
+        def close(self) -> None:
+            raise RuntimeError("close failed")
+
+    class Client:
+        transport = Transport()
+
+        def create_job(self, **_kwargs: Any) -> Any:
+            return created
+
+    monkeypatch.setattr(batch_v1, "BatchServiceClient", Client)
+
+    fact = provider.ensure_batch_job(selected.submission_spec())
+
+    assert fact == Ambiguous("close failed", "RuntimeError")
+
+
+def test_provider_rejects_missing_identity_before_constructing_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rendered = job("c-case-s1")
+    rendered.pop("labels")
+    selected = BatchJobSpec("study", "us-east1", "c-case-s1", "c-case-s1", rendered, 9000)
+    monkeypatch.setattr(
+        batch_v1,
+        "BatchServiceClient",
+        lambda: pytest.fail("provider client must not be constructed"),
+    )
+
+    fact = provider.ensure_batch_job(selected.submission_spec())
+
+    assert fact == Collision("BatchJobCollision", state="NOT_CREATED", settled=True)
+
+
+def test_provider_unexpected_create_identity_is_typed_ambiguous() -> None:
+    selected = BatchJobSpec("study", "us-east1", "c-case-s1", "c-case-s1", job("c-case-s1"), 9000)
+    created = provider._job_from_json(job("c-case-s1"))
+    created.name = selected.resource_name + "-other"
+
+    class UnexpectedClient:
+        def create_job(self, **_kwargs: Any) -> Any:
+            return created
+
+    fact = provider.ensure_batch_job(
+        selected.submission_spec(), client=cast(Any, UnexpectedClient())
+    )
+
+    assert isinstance(fact, Ambiguous)
+    assert fact.error_type == "ProviderError"
+
+
+def test_provider_observation_errors_with_unknown_effect_are_typed_ambiguous() -> None:
+    selected = BatchJobSpec("study", "us-east1", "c-case-s1", "c-case-s1", job("c-case-s1"), 9000)
+
+    class FailingClient:
+        def get_job(self, **_kwargs: Any) -> Any:
+            raise ServiceUnavailable("retryable observe failure")  # type: ignore[no-untyped-call]
+
+    fact = provider.observe_batch_job(selected.submission_spec(), client=cast(Any, FailingClient()))
+
+    assert isinstance(fact, ObservationAmbiguous)
+    assert fact.error_type == "ServiceUnavailable"
+
+
+@pytest.mark.parametrize("fact", [NotVisible("not visible"), ObservationAmbiguous("ambiguous")])
+def test_non_visible_or_ambiguous_observation_stays_unsettled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fact: NotVisible | ObservationAmbiguous
+) -> None:
+    path = tmp_path / "campaign.sqlite3"
+    selected = attempt()
+    monkeypatch.setattr(
+        provider,
+        "ensure_batch_job",
+        lambda spec: Created(payload(spec).resource_name, "QUEUED"),
+    )
+    controller.start_campaign(
+        ledger_path=path,
+        campaign=CAMPAIGN,
+        project="study",
+        location="us-east1",
+        results_bucket="results",
+        manifest_sha256="a" * 64,
+        attempts=[selected.as_dict()],
+        jobs=[job(selected.job_id)],
+        controller_timeouts=[9000],
+    )
+    monkeypatch.setattr(provider, "observe_batch_job", lambda _spec: fact)
+    original_open_ledger = ledger.open_ledger
+    connections_opened = 0
+
+    def counted_open_ledger(path: Path) -> Any:
+        nonlocal connections_opened
+        connections_opened += 1
+        return original_open_ledger(path)
+
+    monkeypatch.setattr(ledger, "open_ledger", counted_open_ledger)
+
+    [progress] = controller.reconcile_once(ledger_path=path, campaign=CAMPAIGN)
+
+    assert connections_opened == 1
+    assert progress.phase == "running"
+    assert not progress.provider_settled
+    assert progress.provider_state == "QUEUED"
+    assert progress.provider_resource_name == (
+        f"projects/study/locations/us-east1/jobs/{selected.job_id}"
+    )
+
+
+def test_observed_collision_settles_as_retryable_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "campaign.sqlite3"
+    selected = attempt()
+    resource = f"projects/study/locations/us-east1/jobs/{selected.job_id}"
+    monkeypatch.setattr(provider, "ensure_batch_job", lambda _spec: Created(resource, "QUEUED"))
+    controller.start_campaign(
+        ledger_path=path,
+        campaign=CAMPAIGN,
+        project="study",
+        location="us-east1",
+        results_bucket="results",
+        manifest_sha256="a" * 64,
+        attempts=[selected.as_dict()],
+        jobs=[job(selected.job_id)],
+        controller_timeouts=[9000],
+    )
+    monkeypatch.setattr(
+        provider,
+        "observe_batch_job",
+        lambda _spec: ObservedCollision("BatchJobCollision", resource, "SUCCEEDED", True),
+    )
+
+    [progress] = controller.reconcile_once(ledger_path=path, campaign=CAMPAIGN)
+
+    assert progress.phase == "awaiting_retry"
+    assert progress.provider_settled
+    assert progress.failure_type == "BatchJobCollision"
 
 
 def test_persisted_running_case_uses_clean_redrive_adoption(
@@ -553,12 +912,13 @@ def test_persisted_running_case_uses_clean_redrive_adoption(
             now=NOW,
         )
         ledger.record_intent(connection, attempt=selected.as_dict(), campaign=CAMPAIGN, now=NOW)
-        assert ledger.reserve_start(connection, base_job_id=selected.job_id, now=NOW)
-    calls: list[bool] = []
+    assert ledger.SQLiteIntentJournal(path, CAMPAIGN).claim_submission(selected.job_id, now=NOW)
+    calls: list[str] = []
 
-    def ensure(_spec: BatchJobSpec, *, collision_on_adoption: bool) -> BatchJobOutcome:
-        calls.append(collision_on_adoption)
-        return BatchJobOutcome(_spec.resource_name, "QUEUED", adopted=True)
+    def ensure(spec: SubmissionSpec[BatchJobSpec]) -> AdoptedExact:
+        batch = payload(spec)
+        calls.append(batch.job_id)
+        return AdoptedExact(batch.resource_name, "QUEUED")
 
     monkeypatch.setattr(provider, "ensure_batch_job", ensure)
     controller.start_campaign(
@@ -573,7 +933,9 @@ def test_persisted_running_case_uses_clean_redrive_adoption(
         controller_timeouts=[9000],
     )
 
-    assert calls == [False]
+    assert calls == [selected.job_id]
+    [progress] = controller.progress(ledger_path=path, campaign=CAMPAIGN)
+    assert progress.failure_type is None
 
 
 def test_first_adoption_collision_survives_provider_settlement(
@@ -584,9 +946,7 @@ def test_first_adoption_collision_survives_provider_settlement(
     monkeypatch.setattr(
         provider,
         "ensure_batch_job",
-        lambda spec: BatchJobOutcome(
-            spec.resource_name, "QUEUED", "BatchJobCollision", adopted=True
-        ),
+        lambda spec: AdoptedExact(payload(spec).resource_name, "QUEUED"),
     )
     controller.start_campaign(
         ledger_path=path,
@@ -602,7 +962,7 @@ def test_first_adoption_collision_survives_provider_settlement(
     monkeypatch.setattr(
         provider,
         "observe_batch_job",
-        lambda spec: BatchJobOutcome(spec.resource_name, "SUCCEEDED"),
+        lambda spec: ObservedExact(payload(spec).resource_name, "SUCCEEDED", True),
     )
 
     [progress] = controller.reconcile_once(ledger_path=path, campaign=CAMPAIGN)
@@ -631,6 +991,92 @@ def test_controller_job_json_is_canonical(tmp_path: Path) -> None:
     )
 
 
+def test_old_controller_database_supports_progress_journal_and_redrive_reads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "old.sqlite3"
+    selected = attempt()
+    rendered = job(selected.job_id)
+    job_json = json.dumps(rendered, sort_keys=True, separators=(",", ":"))
+    case = selected.as_dict()
+    resources = case["resources"]
+    connection = sqlite3.connect(path)
+    try:
+        connection.executescript(FROZEN_PRE_EXTRACTION_SCHEMA)
+        connection.execute(
+            "INSERT INTO campaigns (campaign, project, location, results_bucket,"
+            " manifest_sha256, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (CAMPAIGN, "study", "us-east1", "results", "a" * 64, NOW),
+        )
+        connection.execute(
+            "INSERT INTO controller_inputs (base_job_id, campaign, job_json,"
+            " controller_timeout_s) VALUES (?, ?, ?, ?)",
+            (selected.job_id, CAMPAIGN, job_json, 9000),
+        )
+        connection.execute(
+            "INSERT INTO controller_cases (base_job_id, campaign, phase, current_submission,"
+            " current_job_id, job_json, controller_timeout_s, updated_at)"
+            " VALUES (?, ?, 'running', 1, ?, ?, ?, ?)",
+            (selected.job_id, CAMPAIGN, selected.job_id, job_json, 9000, NOW),
+        )
+        connection.execute(
+            "INSERT INTO attempts (job_id, campaign, run_ordinal, submission, state,"
+            " created_at, updated_at, bucket, region, tool, case_id, mode, machine_type,"
+            " vcpus, memory_gb, container_memory_gb, timeout_s, env_json, derived_image,"
+            " case_fingerprint, fingerprint, prefix, case_json)"
+            " VALUES (?, ?, ?, ?, 'submitting', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
+            " ?, ?, ?, ?)",
+            (
+                selected.job_id,
+                CAMPAIGN,
+                case["run_ordinal"],
+                case["submission"],
+                NOW,
+                NOW,
+                case["bucket"],
+                case["region"],
+                case["tool"],
+                case["case_id"],
+                case["mode"],
+                resources["machine_type"],
+                resources["vcpus"],
+                resources["memory_gb"],
+                resources["container_memory_gb"],
+                case["timeout_s"],
+                json.dumps(case["env"], sort_keys=True),
+                case["derived_image"],
+                case["case_fingerprint"],
+                case["fingerprint"],
+                case["prefix"],
+                json.dumps(case, sort_keys=True),
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    [progress] = controller.progress(ledger_path=path, campaign=CAMPAIGN)
+    assert progress.phase == "running"
+    claim = ledger.SQLiteIntentJournal(path, CAMPAIGN).claim_submission(selected.job_id, now=NOW)
+    assert claim is not None
+    assert claim.token == "redrive"
+    assert claim.spec.canonical_job_spec == job_json.encode()
+
+    monkeypatch.setattr(
+        provider,
+        "ensure_batch_job",
+        lambda spec: Created(payload(spec).resource_name, "QUEUED"),
+    )
+    redriven = controller.retry_case(
+        ledger_path=path, campaign=CAMPAIGN, base_job_id=selected.job_id, submission=1
+    )
+
+    assert redriven.provider_state == "QUEUED"
+    with ledger.open_ledger(path) as current:
+        [row] = ledger.controller_cases(current, CAMPAIGN)
+    assert row["job_json"] == job_json
+
+
 def test_reconnect_compares_original_batch_request_after_start(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -640,7 +1086,7 @@ def test_reconnect_compares_original_batch_request_after_start(
     monkeypatch.setattr(
         provider,
         "ensure_batch_job",
-        lambda spec: BatchJobOutcome(spec.resource_name, "QUEUED"),
+        lambda spec: Created(payload(spec).resource_name, "QUEUED"),
     )
 
     def start(selected_job: dict[str, Any]) -> list[dict[str, Any]]:

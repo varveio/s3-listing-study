@@ -13,7 +13,7 @@ from google.api_core.exceptions import GoogleAPIError
 from google.auth.exceptions import DefaultCredentialsError
 
 from s3_listing_study.common.argparse_utils import UniqueStoreAction
-from s3_listing_study.manager.campaign import controller, ledger, provider
+from s3_listing_study.manager.campaign import controller, ledger
 from s3_listing_study.manager.campaign.models import CaseControllerProgress
 
 
@@ -87,7 +87,6 @@ def _main(
         GoogleAPIError,
         ledger.LedgerError,
         OSError,
-        provider.ProviderError,
     ) as exc:
         print(f"{parser.prog}: {exc}", file=sys.stderr)
         return 1

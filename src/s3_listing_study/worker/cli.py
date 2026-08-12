@@ -18,6 +18,7 @@ from s3_listing_study.worker.image_provenance import (
     ImageProvenanceError,
     load_image_provenance,
 )
+from twinstamp.profiles import PHYSICAL_EXECUTION
 
 from .driver import resolve_invocation
 from .engine import (
@@ -106,8 +107,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--destination",
         action=UniqueStoreAction,
         help=(
-            "manager-assigned gs://.../case/run-N prefix; the worker appends its UUID leaf; "
-            "omit to keep the attempt local"
+            "upload prefix; campaign attempts append their worker UUID leaf, while "
+            "non-campaign attempts use the prefix as-is; omit to keep the attempt local"
         ),
     )
     return parser
@@ -293,7 +294,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     if args.destination is None:
         return runner_exit
-    return _publish(Path(args.output), args.destination, result, runner_exit)
+    return _publish(Path(args.output), args.destination, result, runner_exit, campaign=campaign)
 
 
 def _publish(
@@ -301,6 +302,8 @@ def _publish(
     destination: str,
     result: dict[str, object],
     runner_exit: int,
+    *,
+    campaign: CampaignProvenance | None,
 ) -> int:
     """Upload a finalized attempt; report an upload failure separately.
 
@@ -312,15 +315,27 @@ def _publish(
 
     The worker has already counted locally and sealed the summary in
     ``result.json``. Campaign uploads receive the manager's deterministic
-    ``run-N`` prefix and add the worker UUID leaf. Managers discover immediate child
-    prefixes with GCS delimiter listing, then fetch only each ``result.json``.
+    ``run-N`` prefix and add the worker UUID leaf. A non-campaign destination
+    remains the caller's complete opaque upload prefix.
     """
     # The execution leaf is named here because only this process knows the attempt id
     # it minted — a submitter-chosen leaf would be written twice by a task
     # re-execution, after the run was already paid for.
     try:
-        leaf = str(result["attempt_id"])
-        uploaded = upload_attempt(attempt_dir, f"{destination.rstrip('/')}/{leaf}")
+        if campaign is None:
+            uploaded = upload_attempt(attempt_dir, destination)
+        else:
+            leaf = str(result["attempt_id"])
+            unit = PHYSICAL_EXECUTION.parse(leaf)
+            if unit is None:
+                raise UploadError(
+                    "campaign attempt_id is not a canonical physical-execution UUIDv4"
+                )
+            uploaded = upload_attempt(
+                attempt_dir,
+                destination,
+                publication_unit=(PHYSICAL_EXECUTION, unit),
+            )
     except (UploadError, OSError) as exc:
         print(f"attempt-runner: upload failed: {exc}", file=sys.stderr)
         return POST_ATTEMPT_EXIT

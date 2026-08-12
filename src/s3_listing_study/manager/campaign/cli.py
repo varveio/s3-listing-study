@@ -14,7 +14,6 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from google.api_core.exceptions import GoogleAPIError
 from google.auth.exceptions import DefaultCredentialsError
 
 from s3_listing_study.common.argparse_utils import UniqueStoreAction
@@ -34,22 +33,21 @@ from s3_listing_study.manager.campaign import (
 )
 from s3_listing_study.manager.campaign.batch import BatchConfig, render_job
 from s3_listing_study.manager.campaign.controller import ControllerError, start_campaign
-from s3_listing_study.manager.campaign.provider import ProviderError
 
 IMAGE_SET_FIELDS = {
-    "derived_image",
-    "image_uri",
-    "shared_base_digest",
-    "shared_base_uri",
-    "shared_base_source_sha256",
-    "tool_build_sha256",
-    "tool_artifact",
-    "tool_version",
     "adapter_bundle_sha256",
+    "derived_image",
     "harness_revision",
+    "image_uri",
+    "selection_sha256",
+    "shared_base_digest",
+    "shared_base_source_sha256",
+    "shared_base_uri",
+    "tool_artifact",
+    "tool_build_sha256",
     "tool_image_digest",
     "tool_image_uri",
-    "selection_sha256",
+    "tool_version",
 }
 IMAGE_SET_SCHEMA_VERSION = 3
 
@@ -120,6 +118,30 @@ def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
+def _digest(tool: str, value: Any, field: str) -> str:
+    if not isinstance(value, str) or DIGEST_RE.fullmatch(value) is None:
+        raise SubmissionError(f"{tool}: {field} is not a sha256 digest")
+    return value
+
+
+def _hex(tool: str, value: Any, field: str) -> str:
+    if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+        raise SubmissionError(f"{tool}: {field} is not 64 lowercase hex digits")
+    return value
+
+
+def _token(tool: str, value: Any, field: str) -> None:
+    if not isinstance(value, str) or not value or any(character.isspace() for character in value):
+        raise SubmissionError(f"{tool}: {field} must be a non-empty token")
+
+
+def _pinned_uri(tool: str, value: Mapping[str, Any], digest_field: str, uri_field: str) -> None:
+    digest = _digest(tool, value[digest_field], digest_field)
+    if not isinstance(value[uri_field], str) or not value[uri_field].endswith(f"@{digest}"):
+        label = "derived_image" if uri_field == "image_uri" else ""
+        raise SubmissionError(f"{tool}: {uri_field} digest does not match {label}".rstrip())
+
+
 def _read_image_set(path: Path) -> ImageSet:
     try:
         raw = path.read_text(encoding="utf-8")
@@ -134,7 +156,6 @@ def _read_image_set(path: Path) -> ImageSet:
     schema_version = document.get("schema_version")
     if schema_version != IMAGE_SET_SCHEMA_VERSION or isinstance(schema_version, bool):
         raise SubmissionError("image set schema_version must be 3")
-    fields = IMAGE_SET_FIELDS
     images = document.get("images")
     if not isinstance(images, dict) or not images:
         raise SubmissionError("image set images must be a non-empty object")
@@ -143,8 +164,8 @@ def _read_image_set(path: Path) -> ImageSet:
     for tool, value in images.items():
         if not isinstance(tool, str) or not tool or not isinstance(value, dict):
             raise SubmissionError("each image must be a tool-named object")
-        missing = sorted(fields - set(value))
-        unknown = sorted(set(value) - fields)
+        missing = sorted(IMAGE_SET_FIELDS - set(value))
+        unknown = sorted(set(value) - IMAGE_SET_FIELDS)
         if missing or unknown:
             detail = []
             if missing:
@@ -152,61 +173,21 @@ def _read_image_set(path: Path) -> ImageSet:
             if unknown:
                 detail.append(f"unknown {', '.join(unknown)}")
             raise SubmissionError(f"{tool}: invalid image fields ({'; '.join(detail)})")
-        derived_image = value["derived_image"]
-        if not isinstance(derived_image, str) or DIGEST_RE.fullmatch(derived_image) is None:
-            raise SubmissionError(f"{tool}: derived_image is not a sha256 digest")
-        image_uri = value["image_uri"]
-        if not isinstance(image_uri, str) or not image_uri.endswith(f"@{derived_image}"):
-            raise SubmissionError(f"{tool}: image_uri digest does not match derived_image")
-        shared_digest = value["shared_base_digest"]
-        shared_uri = value["shared_base_uri"]
-        if not isinstance(shared_digest, str) or DIGEST_RE.fullmatch(shared_digest) is None:
-            raise SubmissionError(f"{tool}: shared_base_digest is not a sha256 digest")
-        if not isinstance(shared_uri, str) or not shared_uri.endswith(f"@{shared_digest}"):
-            raise SubmissionError(f"{tool}: shared_base_uri digest does not match")
+        _pinned_uri(tool, value, "derived_image", "image_uri")
+        _pinned_uri(tool, value, "shared_base_digest", "shared_base_uri")
         for field in ("shared_base_source_sha256", "tool_build_sha256"):
-            identity = value[field]
-            if not isinstance(identity, str) or re.fullmatch(r"[0-9a-f]{64}", identity) is None:
-                raise SubmissionError(f"{tool}: {field} is not 64 lowercase hex digits")
-        tool_digest = value["tool_image_digest"]
-        tool_uri = value["tool_image_uri"]
-        if not isinstance(tool_digest, str) or DIGEST_RE.fullmatch(tool_digest) is None:
-            raise SubmissionError(f"{tool}: tool_image_digest is not a sha256 digest")
-        if not isinstance(tool_uri, str) or not tool_uri.endswith(f"@{tool_digest}"):
-            raise SubmissionError(f"{tool}: tool_image_uri digest does not match")
-        selection_sha256 = value["selection_sha256"]
-        if (
-            not isinstance(selection_sha256, str)
-            or re.fullmatch(r"[0-9a-f]{64}", selection_sha256) is None
-        ):
-            raise SubmissionError(f"{tool}: selection_sha256 is not 64 lowercase hex digits")
+            _hex(tool, value[field], field)
+        _pinned_uri(tool, value, "tool_image_digest", "tool_image_uri")
+        _hex(tool, value["selection_sha256"], "selection_sha256")
         artifact = value["tool_artifact"]
         if not isinstance(artifact, dict) or set(artifact) != {"kind", "locator", "sha256"}:
             raise SubmissionError(f"{tool}: tool_artifact has invalid fields")
+        _hex(tool, artifact["sha256"], "tool_artifact sha256")
+        _hex(tool, value["adapter_bundle_sha256"], "adapter_bundle_sha256")
+        _token(tool, value["tool_version"], "tool_version")
         if (
-            not isinstance(artifact["sha256"], str)
-            or re.fullmatch(r"[0-9a-f]{64}", artifact["sha256"]) is None
-        ):
-            raise SubmissionError(f"{tool}: tool_artifact sha256 is invalid")
-        adapter = value["adapter_bundle_sha256"]
-        if (
-            not isinstance(adapter, str)
-            or len(adapter) != 64
-            or any(character not in "0123456789abcdef" for character in adapter)
-        ):
-            raise SubmissionError(f"{tool}: adapter_bundle_sha256 is not 64 lowercase hex digits")
-        for field in ("tool_version", "harness_revision"):
-            field_value = value[field]
-            if (
-                not isinstance(field_value, str)
-                or not field_value
-                or any(character.isspace() for character in field_value)
-            ):
-                raise SubmissionError(f"{tool}: {field} must be a non-empty token")
-        harness_revision = value["harness_revision"]
-        if (
-            not isinstance(harness_revision, str)
-            or re.fullmatch(r"[0-9a-f]{40}", harness_revision) is None
+            not isinstance(value["harness_revision"], str)
+            or re.fullmatch(r"[0-9a-f]{40}", value["harness_revision"]) is None
         ):
             raise SubmissionError(f"{tool}: harness_revision must be a full lowercase commit ID")
         validated[tool] = dict(value)
@@ -228,6 +209,7 @@ def validate_registered_images(
     skip: set[str] | None = None,
 ) -> None:
     """Refuse component claims that disagree with the public capsule registration."""
+
     base = repo_root() if root is None else root
     skipped = set() if skip is None else skip
     for tool, image in images.items():
@@ -449,12 +431,10 @@ def submit_campaign_main(argv: Sequence[str] | None = None) -> int:
         CampaignError,
         ControllerError,
         DefaultCredentialsError,
-        GoogleAPIError,
         SubmissionError,
         bench.PlanError,
         ledger.LedgerError,
         OSError,
-        ProviderError,
     ) as exc:
         print(f"submit-campaign: {exc}", file=sys.stderr)
         return 1
@@ -462,4 +442,5 @@ def submit_campaign_main(argv: Sequence[str] | None = None) -> int:
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Compatibility entry point for direct campaign CLI use."""
+
     return submit_campaign_main(argv)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -12,6 +13,7 @@ from google.api_core.exceptions import PreconditionFailed
 
 from s3_listing_study.manager.campaign import cli, controller, ledger, report
 from s3_listing_study.manager.campaign.models import CaseControllerProgress
+from twinstamp.stores import ObjectReadError, ObjectReadIssue
 
 CAMPAIGN = "2026-08-11-report"
 BUCKET = "study-results"
@@ -25,11 +27,13 @@ class FakeBlob:
     def __init__(self, content: bytes, *, collision: bool = False) -> None:
         self.content = content
         self.size = len(content)
-        self.generation = 1
+        self.generation: int | None = 1
         self.collision = collision
         self.uploads: list[tuple[bytes, dict[str, Any]]] = []
+        self.downloads: list[dict[str, Any]] = []
 
-    def download_as_bytes(self, **_kwargs: Any) -> bytes:
+    def download_as_bytes(self, **kwargs: Any) -> bytes:
+        self.downloads.append(kwargs)
         return self.content
 
     def upload_from_string(self, content: bytes, **kwargs: Any) -> None:
@@ -219,7 +223,7 @@ def result(
         },
         "secret_scan": {"status": "clean", "streams": {"stdout": "clean", "stderr": "clean"}},
     }
-    return report._worker_json(document)
+    return (json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n").encode()
 
 
 def selected_case() -> tuple[report.ManifestCase, dict[str, Any], dict[str, Any]]:
@@ -236,6 +240,58 @@ def test_nonterminal_evidence_is_pending_without_any_listing() -> None:
     assert bucket.listed == []
 
 
+@pytest.mark.parametrize(
+    ("size", "content", "issue"),
+    [
+        (-1, b"{}\n", ObjectReadIssue.INVALID_SIZE),
+        (report.RESULT_MAX_BYTES + 1, b"{}\n", ObjectReadIssue.TOO_LARGE),
+        (4, b"{}\n", ObjectReadIssue.CHANGED),
+    ],
+)
+def test_gcs_store_classifies_bounded_read_failures(
+    size: int, content: bytes, issue: ObjectReadIssue
+) -> None:
+    bucket = FakeBucket({"unit/result.json": content})
+    bucket.objects["unit/result.json"].size = size
+    with pytest.raises(ObjectReadError) as caught:
+        report._GcsObjectStore(bucket).read_object(
+            "unit/result.json", max_bytes=report.RESULT_MAX_BYTES
+        )
+    assert caught.value.issue is issue
+
+
+def test_gcs_store_classifies_generation_race_as_changed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bucket = FakeBucket({"unit/result.json": b"{}\n"})
+
+    def changed(**_kwargs: Any) -> bytes:
+        raise PreconditionFailed("generation changed")  # type: ignore[no-untyped-call]
+
+    monkeypatch.setattr(bucket.objects["unit/result.json"], "download_as_bytes", changed)
+    with pytest.raises(ObjectReadError) as caught:
+        report._GcsObjectStore(bucket).read_object("unit/result.json", max_bytes=100)
+    assert caught.value.issue is ObjectReadIssue.CHANGED
+
+
+def test_report_download_translates_shared_bounded_read_error() -> None:
+    blob = FakeBlob(b"{}\n")
+    blob.size = -1
+    with pytest.raises(report.ReportError, match=r"campaign\.json has no valid object size"):
+        report._download(blob, label="campaign.json", max_bytes=100)
+
+
+def test_gcs_store_rejects_versionless_read_without_downloading() -> None:
+    blob = FakeBlob(b"{}\n")
+    blob.generation = None
+
+    with pytest.raises(ObjectReadError) as caught:
+        report._read_blob(blob, key="unit/result.json", max_bytes=100)
+
+    assert caught.value.issue is ObjectReadIssue.CHANGED
+    assert blob.downloads == []
+
+
 def test_strict_result_rejects_provenance_mismatch() -> None:
     parsed, case, image = selected_case()
     bad = dict(image)
@@ -245,6 +301,7 @@ def test_strict_result_rejects_provenance_mismatch() -> None:
     evidence = report._evidence(bucket, parsed, terminal=True)
     assert evidence.state == "invalid"
     assert evidence.leaves[0]["reason"] == "invalid_result_provenance"
+    assert bucket.objects[name].downloads == [{"if_generation_match": 1}]
 
 
 def test_duplicate_current_results_select_no_canonical_leaf() -> None:
@@ -259,6 +316,53 @@ def test_duplicate_current_results_select_no_canonical_leaf() -> None:
     assert evidence.state == "duplicate"
     assert evidence.canonical_result_uri is None
     assert len(evidence.leaves) == 2
+
+
+def test_valid_plus_unsealed_current_children_are_duplicate() -> None:
+    parsed, case, image = selected_case()
+    objects = {
+        f"{case['prefix']}/{UUIDS[0]}/result.json": result(
+            case, image, UUIDS[0], job_id=case["job_id"], submission=1
+        ),
+        f"{case['prefix']}/{UUIDS[1]}/stdout.raw.gz": b"raw",
+    }
+    evidence = report._evidence(FakeBucket(objects), parsed, terminal=True)
+    assert evidence.state == "duplicate"
+    assert [leaf["state"] for leaf in evidence.leaves] == ["recorded", "unsealed"]
+    assert evidence.canonical_result_uri is None
+
+
+def test_valid_plus_invalid_current_children_are_duplicate() -> None:
+    parsed, case, image = selected_case()
+    invalid_leaf = "logical-task-0-retry-0-runnable-0"
+    objects = {
+        f"{case['prefix']}/{UUIDS[0]}/result.json": result(
+            case, image, UUIDS[0], job_id=case["job_id"], submission=1
+        ),
+        f"{case['prefix']}/{invalid_leaf}/result.json": b"{}\n",
+    }
+    evidence = report._evidence(FakeBucket(objects), parsed, terminal=True)
+    assert evidence.state == "duplicate"
+    assert [leaf["state"] for leaf in evidence.leaves] == ["recorded", "invalid"]
+    assert evidence.leaves[1]["reason"] == "invalid_attempt_id"
+
+
+def test_direct_object_below_run_is_not_an_execution_child() -> None:
+    parsed, case, _image = selected_case()
+    bucket = FakeBucket({f"{case['prefix']}/direct-object.json": b"{}\n"})
+    evidence = report._evidence(bucket, parsed, terminal=True)
+    assert evidence.state == "missing"
+    assert evidence.leaves == ()
+
+
+def test_257th_execution_child_is_a_hard_error() -> None:
+    parsed, case, _image = selected_case()
+    objects = {
+        f"{case['prefix']}/{index:08x}-0000-4000-8000-{index:012x}/stdout.raw.gz": b""
+        for index in range(257)
+    }
+    with pytest.raises(report.ReportError, match="exceeds 256 execution leaves"):
+        report._evidence(FakeBucket(objects), parsed, terminal=True)
 
 
 def test_prior_submission_is_historical_and_does_not_compete_with_current() -> None:
@@ -282,6 +386,123 @@ def test_prior_submission_is_historical_and_does_not_compete_with_current() -> N
     assert evidence.state == "recorded"
     assert [leaf["state"] for leaf in evidence.leaves] == ["historical", "recorded"]
     assert evidence.leaves[0]["submission_number"] == 1
+
+
+def test_all_historical_leaves_are_retained_but_current_is_missing() -> None:
+    parsed, case, image = selected_case()
+    current_job = "job-s2"
+    objects = {
+        f"{case['prefix']}/{UUIDS[0]}/result.json": result(
+            case, image, UUIDS[0], job_id=case["job_id"], submission=1
+        )
+    }
+    evidence = report._evidence(
+        FakeBucket(objects),
+        parsed,
+        terminal=True,
+        current_job_id=current_job,
+        current_submission=2,
+    )
+    assert evidence.state == "missing"
+    assert len(evidence.leaves) == 1
+    assert evidence.leaves[0]["state"] == "historical"
+    assert evidence.leaves[0]["submission_number"] == 1
+
+
+def test_malformed_prior_submission_leaf_remains_current_identity_failure() -> None:
+    parsed, case, image = selected_case()
+    current_job = "job-s2"
+    bad_image = dict(image)
+    bad_image["selection_sha256"] = "9" * 64
+    objects = {
+        f"{case['prefix']}/{UUIDS[0]}/result.json": result(
+            case, bad_image, UUIDS[0], job_id=case["job_id"], submission=1
+        )
+    }
+
+    evidence = report._evidence(
+        FakeBucket(objects),
+        parsed,
+        terminal=True,
+        current_job_id=current_job,
+        current_submission=2,
+    )
+
+    assert evidence.leaves[0]["state"] == "invalid"
+    assert evidence.leaves[0]["reason"] == "invalid_result_identity"
+    assert "submission_number" not in evidence.leaves[0]
+
+
+def test_settled_evidence_cache_retains_the_first_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    content, case, image = frozen()
+    snapshot = report.ManifestSnapshot(
+        bucket=BUCKET,
+        campaign=CAMPAIGN,
+        generation=1,
+        content=content,
+        cases=tuple(report._parse_manifest(content, campaign=CAMPAIGN, results_bucket=BUCKET)),
+        sha256=hashlib.sha256(content).hexdigest(),
+    )
+    path = tmp_path / "campaign.sqlite3"
+    with ledger.open_ledger(path) as connection:
+        ledger.register_campaign(
+            connection,
+            campaign=CAMPAIGN,
+            project="study",
+            location="us-east1",
+            results_bucket=BUCKET,
+            manifest_sha256=snapshot.sha256,
+            cases=[
+                {
+                    "base_job_id": case["job_id"],
+                    "job": {},
+                    "controller_timeout_s": 1,
+                }
+            ],
+            now="2026-08-11T12:00:00Z",
+        )
+    progress = [
+        CaseControllerProgress(
+            job_id=case["job_id"],
+            phase="terminal",
+            provider_state="SUCCEEDED",
+            failure_type=None,
+            provider_resource_name=(f"projects/study/locations/us-east1/jobs/{case['job_id']}"),
+            provider_settled=True,
+            current_job_id=case["job_id"],
+        )
+    ]
+    monkeypatch.setattr(controller, "reconcile_once", lambda **_kwargs: progress)
+    first_name = f"{case['prefix']}/{UUIDS[0]}/result.json"
+    bucket = FakeBucket(
+        {first_name: result(case, image, UUIDS[0], job_id=case["job_id"], submission=1)}
+    )
+    cache: dict[str, report.EvidenceSnapshot] = {}
+
+    first = report.observe_once(
+        bucket=bucket,
+        campaign=CAMPAIGN,
+        ledger_path=path,
+        manifest_cache=snapshot,
+        evidence_cache=cache,
+    )
+    second_name = f"{case['prefix']}/{UUIDS[1]}/result.json"
+    bucket.objects[second_name] = FakeBlob(
+        result(case, image, UUIDS[1], job_id=case["job_id"], submission=1)
+    )
+    second = report.observe_once(
+        bucket=bucket,
+        campaign=CAMPAIGN,
+        ledger_path=path,
+        manifest_cache=snapshot,
+        evidence_cache=cache,
+    )
+
+    assert first["cases"][0]["evidence"] == second["cases"][0]["evidence"]
+    assert second["cases"][0]["evidence"]["state"] == "recorded"
+    assert len(bucket.listed) == 1
 
 
 def test_publication_is_create_only_and_idempotent_only_for_identical_bytes() -> None:

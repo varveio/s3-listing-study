@@ -28,6 +28,14 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+import twinstamp.coordination as ts
+from s3_listing_study.manager.campaign.models import (
+    BatchJobSpec,
+    CaseControllerProgress,
+    canonical_job_json,
+    retry_job,
+)
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS attempts (
     job_id       TEXT PRIMARY KEY,
@@ -119,11 +127,6 @@ CREATE INDEX IF NOT EXISTS controller_cases_by_campaign
 ON controller_cases (campaign, base_job_id);
 """
 
-# `submitting` is written before the API call and `submitted` after it, so a
-# crash between the two is legible as itself rather than as an attempt that was
-# never tried.
-STATES = ("submitting", "submitted", "running", "succeeded", "failed", "abandoned")
-
 
 class LedgerError(RuntimeError):
     """The ledger refused a write that would have lost or duplicated a record."""
@@ -160,11 +163,7 @@ def _transaction(connection: sqlite3.Connection) -> Iterator[None]:
 
 
 def record_intent(
-    connection: sqlite3.Connection,
-    *,
-    attempt: Mapping[str, Any],
-    campaign: str,
-    now: str,
+    connection: sqlite3.Connection, *, attempt: Mapping[str, Any], campaign: str, now: str
 ) -> None:
     """Write the row that says we are about to submit this attempt."""
     with _transaction(connection):
@@ -172,11 +171,7 @@ def record_intent(
 
 
 def _insert_intent(
-    connection: sqlite3.Connection,
-    *,
-    attempt: Mapping[str, Any],
-    campaign: str,
-    now: str,
+    connection: sqlite3.Connection, *, attempt: Mapping[str, Any], campaign: str, now: str
 ) -> None:
     resources = attempt["resources"]
     try:
@@ -221,58 +216,6 @@ def _insert_intent(
     _event(connection, attempt["job_id"], now, "submitting", None)
 
 
-def record_state(
-    connection: sqlite3.Connection,
-    *,
-    job_id: str,
-    state: str,
-    now: str,
-    detail: Mapping[str, Any] | None = None,
-) -> None:
-    """Move an attempt's current state, keeping the transition in ``events``."""
-    if state not in STATES:
-        raise LedgerError(f"unknown state {state!r} ({'|'.join(STATES)})")
-    with _transaction(connection):
-        updated = connection.execute(
-            "UPDATE attempts SET state = ?, updated_at = ? WHERE job_id = ?", (state, now, job_id)
-        )
-        if updated.rowcount == 0:
-            raise LedgerError(f"{job_id}: no such attempt in the ledger")
-        _event(connection, job_id, now, state, detail)
-
-
-def record_state_if_current(
-    connection: sqlite3.Connection,
-    *,
-    job_id: str,
-    expected_state: str,
-    state: str,
-    now: str,
-    detail: Mapping[str, Any] | None = None,
-) -> bool:
-    """Move and record a state only if it still matches the caller's snapshot.
-
-    A false return is an ordinary lost compare-and-swap: another reconciler
-    advanced the row first. The caller must re-read rather than overwrite it.
-    """
-    if expected_state not in STATES:
-        raise LedgerError(f"unknown expected state {expected_state!r} ({'|'.join(STATES)})")
-    if state not in STATES:
-        raise LedgerError(f"unknown state {state!r} ({'|'.join(STATES)})")
-    with _transaction(connection):
-        updated = connection.execute(
-            "UPDATE attempts SET state = ?, updated_at = ? WHERE job_id = ? AND state = ?",
-            (state, now, job_id, expected_state),
-        )
-        if updated.rowcount == 1:
-            _event(connection, job_id, now, state, detail)
-            return True
-        exists = connection.execute("SELECT 1 FROM attempts WHERE job_id = ?", (job_id,)).fetchone()
-        if exists is None:
-            raise LedgerError(f"{job_id}: no such attempt in the ledger")
-        return False
-
-
 def _event(
     connection: sqlite3.Connection,
     job_id: str,
@@ -286,38 +229,17 @@ def _event(
     )
 
 
-def next_submission(
-    connection: sqlite3.Connection,
-    *,
-    campaign: str,
-    fingerprint: str,
-    run_ordinal: int = 1,
-) -> int:
-    """The submission number a re-send of this attempt would take.
-
-    Counted here rather than from Batch because a job id is never deleted and
-    never reused: the ledger is the only thing that knows how many names one
-    attempt has already spent.
-    """
-    row = connection.execute(
-        "SELECT MAX(submission) AS highest FROM attempts "
-        "WHERE campaign = ? AND fingerprint = ? AND run_ordinal = ?",
-        (campaign, fingerprint, run_ordinal),
-    ).fetchone()
-    return 1 if row is None or row["highest"] is None else int(row["highest"]) + 1
-
-
-def attempts(connection: sqlite3.Connection, *, campaign: str) -> list[dict[str, Any]]:
-    rows = connection.execute(
-        "SELECT * FROM attempts WHERE campaign = ? ORDER BY tool, case_id, run_ordinal, submission",
-        (campaign,),
-    ).fetchall()
-    return [dict(row) for row in rows]
+def _base_job_rows(
+    connection: sqlite3.Connection, campaign: str, table: str
+) -> dict[str, sqlite3.Row]:
+    return {
+        str(row["base_job_id"]): row
+        for row in connection.execute(f"SELECT * FROM {table} WHERE campaign = ?", (campaign,))
+    }
 
 
 def register_campaign(
     connection: sqlite3.Connection,
-    *,
     campaign: str,
     project: str,
     location: str,
@@ -326,7 +248,6 @@ def register_campaign(
     cases: Sequence[Mapping[str, Any]],
     now: str,
 ) -> None:
-    """Create or exactly reconnect to the frozen local campaign owner."""
     with _transaction(connection):
         existing = connection.execute(
             "SELECT * FROM campaigns WHERE campaign = ?", (campaign,)
@@ -346,25 +267,16 @@ def register_campaign(
             != identity
         ):
             raise LedgerError(f"{campaign}: ledger owner disagrees with frozen campaign")
-        known = {
-            str(row["base_job_id"]): row
-            for row in connection.execute(
-                "SELECT * FROM controller_cases WHERE campaign = ?", (campaign,)
-            )
-        }
-        if known and set(known) != {str(case["base_job_id"]) for case in cases}:
+        known = _base_job_rows(connection, campaign, "controller_cases")
+        case_ids = {str(case["base_job_id"]) for case in cases}
+        if known and set(known) != case_ids:
             raise LedgerError(f"{campaign}: ledger cases disagree with frozen campaign")
-        frozen = {
-            str(row["base_job_id"]): row
-            for row in connection.execute(
-                "SELECT * FROM controller_inputs WHERE campaign = ?", (campaign,)
-            )
-        }
-        if frozen and set(frozen) != {str(case["base_job_id"]) for case in cases}:
+        frozen = _base_job_rows(connection, campaign, "controller_inputs")
+        if frozen and set(frozen) != case_ids:
             raise LedgerError(f"{campaign}: frozen controller inputs disagree with campaign")
         for case in cases:
             base_job_id = str(case["base_job_id"])
-            encoded = json.dumps(case["job"], sort_keys=True, separators=(",", ":"))
+            encoded = canonical_job_json(dict(case["job"]))
             frozen_input = frozen.get(base_job_id)
             if frozen_input is None:
                 connection.execute(
@@ -408,114 +320,184 @@ def campaign_record(connection: sqlite3.Connection, campaign: str) -> dict[str, 
     return dict(row)
 
 
-def controller_cases(connection: sqlite3.Connection, campaign: str) -> list[dict[str, Any]]:
+def _controller_rows(
+    connection: sqlite3.Connection, campaign: str, table: str, missing: str
+) -> list[dict[str, Any]]:
     rows = connection.execute(
-        "SELECT * FROM controller_cases WHERE campaign = ? ORDER BY rowid", (campaign,)
+        f"SELECT * FROM {table} WHERE campaign = ? ORDER BY rowid", (campaign,)
     ).fetchall()
     if not rows:
-        raise LedgerError(f"campaign {campaign!r} has no controller cases")
+        raise LedgerError(f"campaign {campaign!r} has no {missing}")
     return [dict(row) for row in rows]
+
+
+def controller_cases(connection: sqlite3.Connection, campaign: str) -> list[dict[str, Any]]:
+    return _controller_rows(connection, campaign, "controller_cases", "controller cases")
 
 
 def controller_inputs(connection: sqlite3.Connection, campaign: str) -> list[dict[str, Any]]:
-    rows = connection.execute(
-        "SELECT * FROM controller_inputs WHERE campaign = ? ORDER BY rowid", (campaign,)
-    ).fetchall()
-    if not rows:
-        raise LedgerError(f"campaign {campaign!r} has no frozen controller inputs")
-    return [dict(row) for row in rows]
+    return _controller_rows(connection, campaign, "controller_inputs", "frozen controller inputs")
 
 
-def reserve_start(connection: sqlite3.Connection, *, base_job_id: str, now: str) -> bool:
-    """Atomically reserve a pending case before the provider call."""
-    with _transaction(connection):
-        updated = connection.execute(
-            "UPDATE controller_cases SET phase = 'running', updated_at = ?"
-            " WHERE base_job_id = ? AND phase = 'pending'",
-            (now, base_job_id),
-        )
-        return updated.rowcount == 1
+def case_record(
+    connection: sqlite3.Connection, *, campaign: str, base_job_id: str
+) -> dict[str, Any] | None:
+    row = connection.execute(
+        "SELECT * FROM controller_cases WHERE campaign = ? AND base_job_id = ?",
+        (campaign, base_job_id),
+    ).fetchone()
+    return None if row is None else dict(row)
 
 
-def reserve_retry(
-    connection: sqlite3.Connection,
+def batch_spec(row: Mapping[str, Any], owner: Mapping[str, Any]) -> BatchJobSpec:
+    job_json = str(row["job_json"])
+    return BatchJobSpec(
+        str(owner["project"]),
+        str(owner["location"]),
+        str(row["base_job_id"]),
+        str(row["current_job_id"]),
+        json.loads(job_json),
+        int(row["controller_timeout_s"]),
+        int(row["current_submission"]),
+        job_json,
+    )
+
+
+def _progress(row: Mapping[str, Any]) -> CaseControllerProgress:
+    return CaseControllerProgress(
+        job_id=str(row["base_job_id"]),
+        phase=str(row["phase"]),
+        provider_state=row["provider_state"],
+        failure_type=row["failure_type"],
+        provider_resource_name=row["provider_resource_name"],
+        provider_settled=bool(row["provider_settled"]),
+        current_submission=int(row["current_submission"]),
+        current_job_id=str(row["current_job_id"]),
+        accepted_failure=bool(row["accepted_failure"]),
+    )
+
+
+def register_controller(
+    path: Path,
     *,
-    base_job_id: str,
-    submission: int,
-    current_job_id: str,
-    job: Mapping[str, Any],
-    attempt: Mapping[str, Any],
+    campaign: str,
+    project: str,
+    location: str,
+    results_bucket: str,
+    manifest_sha256: str,
+    attempts: Sequence[Mapping[str, Any]],
+    jobs: Sequence[dict[str, Any]],
+    controller_timeouts: Sequence[int],
     now: str,
-) -> dict[str, Any]:
-    """Make retry active before I/O, serializing it against finalization."""
-    with _transaction(connection):
-        row = connection.execute(
-            "SELECT * FROM controller_cases WHERE base_job_id = ?", (base_job_id,)
-        ).fetchone()
-        if row is None:
-            raise LedgerError(f"{base_job_id}: no such campaign case")
-        if row["current_submission"] == submission:
-            return dict(row)
-        if row["phase"] != "awaiting_retry" or submission != row["current_submission"] + 1:
-            raise LedgerError("submission must be exactly current + 1 for an awaiting case")
-        connection.execute(
-            "UPDATE controller_cases SET phase = 'running', current_submission = ?,"
-            " current_job_id = ?, job_json = ?, provider_state = NULL, failure_type = NULL,"
-            " provider_resource_name = NULL, provider_settled = 0, accepted_failure = 0,"
-            " updated_at = ? WHERE base_job_id = ?",
-            (
-                submission,
-                current_job_id,
-                json.dumps(job, sort_keys=True, separators=(",", ":")),
-                now,
-                base_job_id,
-            ),
+) -> None:
+    cases = [
+        {"base_job_id": attempt["job_id"], "job": job, "controller_timeout_s": timeout}
+        for attempt, job, timeout in zip(attempts, jobs, controller_timeouts, strict=True)
+    ]
+    with open_ledger(path) as connection:
+        register_campaign(
+            connection, campaign, project, location, results_bucket, manifest_sha256, cases, now
         )
-        _insert_intent(connection, attempt=attempt, campaign=str(row["campaign"]), now=now)
-        _event(connection, base_job_id, now, "retry_reserved", {"submission": submission})
-        return dict(
-            connection.execute(
-                "SELECT * FROM controller_cases WHERE base_job_id = ?", (base_job_id,)
+        for attempt in attempts:
+            existing = connection.execute(
+                "SELECT case_json FROM attempts WHERE job_id = ?", (attempt["job_id"],)
             ).fetchone()
-        )
+            if existing is None:
+                record_intent(connection, attempt=attempt, campaign=campaign, now=now)
+            elif json.loads(existing["case_json"]) != dict(attempt):
+                raise LedgerError(f"{attempt['job_id']}: ledger attempt does not match")
 
 
-def record_provider_outcome(
+def claim_retry(
+    path: Path, *, campaign: str, base_job_id: str, submission: int, now: str
+) -> ts.SubmissionClaim[BatchJobSpec] | None:
+    with open_ledger(path) as connection:
+        owner = campaign_record(connection, campaign)
+        with _transaction(connection):
+            fresh = case_record(connection, campaign=campaign, base_job_id=base_job_id)
+            if fresh is None:
+                raise ValueError("--job-id is not an original frozen manifest job ID")
+            if fresh["current_submission"] == submission:
+                if (
+                    fresh["phase"] == "running"
+                    and not fresh["provider_settled"]
+                    and fresh["provider_resource_name"] is None
+                ):
+                    return ts.SubmissionClaim(batch_spec(fresh, owner).submission_spec(), "redrive")
+                return None
+            if fresh["phase"] != "awaiting_retry" or submission != fresh["current_submission"] + 1:
+                raise LedgerError("submission must be exactly current + 1 for an awaiting case")
+            retried = retry_job(batch_spec(fresh, owner), submission)
+            original = connection.execute(
+                "SELECT case_json FROM attempts WHERE job_id = ?", (base_job_id,)
+            ).fetchone()
+            if original is None:
+                raise ValueError("base attempt is absent from the ledger")
+            retry_attempt = json.loads(original["case_json"])
+            retry_attempt["job_id"] = retried.job_id
+            retry_attempt["submission"] = submission
+            encoded = retried.job_json or canonical_job_json(retried.job)
+            connection.execute(
+                "UPDATE controller_cases SET phase = 'running', current_submission = ?,"
+                " current_job_id = ?, job_json = ?, provider_state = NULL, failure_type = NULL,"
+                " provider_resource_name = NULL, provider_settled = 0, accepted_failure = 0,"
+                " updated_at = ? WHERE base_job_id = ?",
+                (submission, retried.job_id, encoded, now, base_job_id),
+            )
+            _insert_intent(connection, attempt=retry_attempt, campaign=campaign, now=now)
+            _event(connection, base_job_id, now, "retry_reserved", {"submission": submission})
+            return ts.SubmissionClaim(retried.submission_spec(), "first")
+
+
+def _project(
+    row: Mapping[str, Any], token: str, fact: ts.EnsureFact | ts.ObservationFact
+) -> tuple[str | None, str | None, str | None, bool] | None:
+    # Ambiguous calls and temporary invisibility cannot safely change durable
+    # provider state; a later observation may supply an exact fact.
+    if isinstance(fact, ts.Ambiguous | ts.NotVisible | ts.ObservationAmbiguous):
+        return None
+    settlement = fact.settlement
+    failure = settlement.failure_type
+    # Exact adoption is expected only when redriving an intent whose create may
+    # have landed before a crash. On a first call it means the name was occupied.
+    if isinstance(fact, ts.AdoptedExact) and token == "first":
+        failure = "BatchJobCollision"
+    # Once observed, an identity collision remains visible even if a later fact
+    # otherwise looks exact; clean evidence cannot establish prior ownership.
+    if row["failure_type"] == "BatchJobCollision" and failure is None:
+        failure = "BatchJobCollision"
+    return settlement.state, failure, fact.effect.resource_name, settlement.settled
+
+
+def _record_fact(
     connection: sqlite3.Connection,
     *,
-    base_job_id: str,
-    expected_current_job_id: str,
-    state: str,
-    failure_type: str | None,
-    resource_name: str | None,
-    settled: bool,
+    claim: ts.SubmissionClaim[BatchJobSpec],
+    fact: ts.EnsureFact | ts.ObservationFact,
     now: str,
 ) -> bool:
-    """Record provider observation and derive the operator-facing phase."""
-    if settled:
-        successful = state == "SUCCEEDED" and failure_type is None
-        phase = "terminal" if successful else "awaiting_retry"
-    else:
-        phase = "running"
     with _transaction(connection):
         row = connection.execute(
-            "SELECT current_job_id, phase, provider_settled FROM controller_cases"
-            " WHERE base_job_id = ?",
-            (base_job_id,),
+            "SELECT * FROM controller_cases WHERE current_job_id = ?", (claim.spec.key,)
         ).fetchone()
         if row is None:
-            raise LedgerError(f"{base_job_id}: no such campaign case")
-        if (
-            row["current_job_id"] != expected_current_job_id
-            or row["phase"] != "running"
-            or row["provider_settled"]
-        ):
             return False
+        projection = _project(row, claim.token, fact)
+        if projection is None:
+            return True
+        state, failure_type, resource_name, settled = projection
+        if row["phase"] != "running" or row["provider_settled"]:
+            return False
+        phase = (
+            "terminal"
+            if settled and state == "SUCCEEDED" and failure_type is None
+            else ("awaiting_retry" if settled else "running")
+        )
         connection.execute(
             "UPDATE controller_cases SET phase = ?, provider_state = ?, failure_type = ?,"
             " provider_resource_name = ?, provider_settled = ?, updated_at = ?"
             " WHERE base_job_id = ?",
-            (phase, state, failure_type, resource_name, int(settled), now, base_job_id),
+            (phase, state, failure_type, resource_name, int(settled), now, row["base_job_id"]),
         )
         attempt_state = (
             "succeeded"
@@ -530,25 +512,120 @@ def record_provider_outcome(
             "UPDATE attempts SET state = ?, updated_at = ? WHERE job_id = ?",
             (attempt_state, now, row["current_job_id"]),
         )
-        _event(
-            connection,
-            str(row["current_job_id"]),
-            now,
-            attempt_state,
-            {"provider_state": state, "failure_type": failure_type},
-        )
-        _event(
-            connection,
-            base_job_id,
-            now,
-            phase,
-            {"provider_state": state, "failure_type": failure_type, "settled": settled},
-        )
+        detail = {"provider_state": state, "failure_type": failure_type}
+        _event(connection, str(row["current_job_id"]), now, attempt_state, detail)
+        _event(connection, str(row["base_job_id"]), now, phase, {**detail, "settled": settled})
         return True
 
 
+def _record_and_read(
+    connection: sqlite3.Connection,
+    claim: ts.SubmissionClaim[BatchJobSpec],
+    fact: ts.EnsureFact | ts.ObservationFact,
+    now: str,
+    *,
+    stale_ok: bool = False,
+) -> CaseControllerProgress | None:
+    stale = not _record_fact(connection, claim=claim, fact=fact, now=now)
+    row = connection.execute(
+        "SELECT * FROM controller_cases WHERE current_job_id = ?", (claim.spec.key,)
+    ).fetchone()
+    return None if row is None or (stale and not stale_ok) else _progress(row)
+
+
+class SQLiteIntentJournal:
+    """SQLite implementation of TwinStamp's durable intent boundary.
+
+    Claim tokens distinguish a new effect (``first``), recovery after durable
+    intent but before a recorded provider effect (``redrive``), and polling
+    (``observe``). Transactions reserve before provider I/O; exact adoption is
+    clean only on redrive, while collisions are sticky across later facts.
+    """
+
+    def __init__(
+        self,
+        path: Path,
+        campaign: str,
+        *,
+        connection: sqlite3.Connection | None = None,
+    ) -> None:
+        self.path = path
+        self.campaign = campaign
+        self.connection = connection
+
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
+        if self.connection is not None:
+            yield self.connection
+            return
+        with open_ledger(self.path) as connection:
+            yield connection
+
+    def _row_and_owner(
+        self, connection: sqlite3.Connection, key: str
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        owner = campaign_record(connection, self.campaign)
+        row = case_record(connection, campaign=self.campaign, base_job_id=key)
+        if row is None:
+            raise LedgerError(f"{key}: no such campaign case")
+        return row, owner
+
+    def claim_submission(self, key: str, *, now: str) -> ts.SubmissionClaim[BatchJobSpec] | None:
+        with self._connect() as connection, _transaction(connection):
+            row, owner = self._row_and_owner(connection, key)
+            if row["phase"] == "pending":
+                connection.execute(
+                    "UPDATE controller_cases SET phase = 'running', updated_at = ?"
+                    " WHERE base_job_id = ? AND phase = 'pending'",
+                    (now, key),
+                )
+                row["phase"] = "running"
+                return ts.SubmissionClaim(batch_spec(row, owner).submission_spec(), "first")
+            # This is the create crash window: intent is running but there is
+            # still no durable evidence that the deterministic effect landed.
+            if (
+                row["phase"] == "running"
+                and not row["provider_settled"]
+                and row["provider_resource_name"] is None
+            ):
+                return ts.SubmissionClaim(batch_spec(row, owner).submission_spec(), "redrive")
+            return None
+
+    def existing_submission(self, key: str) -> CaseControllerProgress:
+        with self._connect() as connection:
+            row, _owner = self._row_and_owner(connection, key)
+            return _progress(row)
+
+    def record_ensure(
+        self, claim: ts.SubmissionClaim[BatchJobSpec], fact: ts.EnsureFact, *, now: str
+    ) -> CaseControllerProgress:
+        with self._connect() as connection:
+            progress = _record_and_read(connection, claim, fact, now, stale_ok=True)
+            if progress is None:
+                raise LedgerError(f"{claim.spec.key}: no such campaign case")
+            return progress
+
+    def observation_claims(self) -> list[ts.SubmissionClaim[BatchJobSpec]]:
+        with self._connect() as connection:
+            owner = campaign_record(connection, self.campaign)
+            return [
+                ts.SubmissionClaim(batch_spec(row, owner).submission_spec(), "observe")
+                for row in controller_cases(connection, self.campaign)
+                if row["phase"] == "running"
+            ]
+
+    def record_observation(
+        self, claim: ts.SubmissionClaim[BatchJobSpec], fact: ts.ObservationFact, *, now: str
+    ) -> None:
+        with self._connect() as connection:
+            _record_fact(connection, claim=claim, fact=fact, now=now)
+
+    def progress(self) -> list[CaseControllerProgress]:
+        with self._connect() as connection:
+            return [_progress(row) for row in controller_cases(connection, self.campaign)]
+
+
 def finalize_campaign(connection: sqlite3.Connection, *, campaign: str, now: str) -> None:
-    """Accept settled failures, refusing every active or unsettled provider effect."""
     with _transaction(connection):
         rows = connection.execute(
             "SELECT * FROM controller_cases WHERE campaign = ?", (campaign,)

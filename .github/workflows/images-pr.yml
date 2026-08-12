@@ -23,6 +23,7 @@ on:
       - src/s3_listing_study/ci/**
       - src/s3_listing_study/common/**
       - src/s3_listing_study/worker/**
+      - src/twinstamp/**
       - tools/*/adapter/**
       - tools/*/build/**
       - uv.lock

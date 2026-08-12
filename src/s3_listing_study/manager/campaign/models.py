@@ -1,17 +1,29 @@
-"""Engine-neutral campaign controller values."""
+"""Immutable Batch submission identity and controller progress values.
+
+A case keeps its manifest ``base_job_id`` while each curated submission uses a
+current ``job_id`` ending in ``-sN``. Provider-native retries do not change that
+submission number.
+"""
 
 from __future__ import annotations
 
+import hashlib
+import json
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
-SETTLED_PROVIDER_STATES = ("SUCCEEDED", "FAILED")
-NO_EFFECT_PROVIDER_STATE = "NOT_CREATED"
-CONTROLLER_PHASES = ("pending", "running", "awaiting_retry", "terminal")
+from twinstamp.coordination import SubmissionSpec
+
+
+def canonical_job_json(job: dict[str, Any]) -> str:
+    return json.dumps(job, sort_keys=True, separators=(",", ":"))
 
 
 @dataclass(frozen=True, slots=True)
 class BatchJobSpec:
+    """Exact Batch request for one submission of a manifest case."""
+
     project: str
     location: str
     base_job_id: str
@@ -19,22 +31,26 @@ class BatchJobSpec:
     job: dict[str, Any]
     controller_timeout_s: int
     submission: int = 1
+    job_json: str | None = None
 
     @property
     def resource_name(self) -> str:
         return f"projects/{self.project}/locations/{self.location}/jobs/{self.job_id}"
 
-
-@dataclass(frozen=True, slots=True)
-class BatchJobOutcome:
-    resource_name: str | None
-    state: str
-    failure_type: str | None = None
-    adopted: bool = False
+    def submission_spec(self) -> SubmissionSpec[BatchJobSpec]:
+        encoded = (self.job_json or canonical_job_json(self.job)).encode()
+        return SubmissionSpec(self.job_id, encoded, hashlib.sha256(encoded).hexdigest(), self)
 
 
 @dataclass(frozen=True, slots=True)
 class CaseControllerProgress:
+    """Current state for a case whose ``job_id`` is the base manifest job ID.
+
+    ``current_job_id`` names the active/recent ``-sN`` submission.
+    ``accepted_failure`` records explicit operator finalization after retries,
+    not provider success.
+    """
+
     job_id: str
     phase: str
     provider_state: str | None
@@ -46,21 +62,21 @@ class CaseControllerProgress:
     accepted_failure: bool = False
 
 
-def retry_job_id(base_job_id: str, submission: int) -> str:
-    stem, separator, original = base_job_id.rpartition("-s")
-    if not separator or original != "1" or submission < 1 or submission > 99:
-        raise ValueError("base Batch job ID is not a submission-1 identity")
-    return base_job_id if submission == 1 else f"{stem}-s{submission}"
-
-
 def retry_job(spec: BatchJobSpec, submission: int) -> BatchJobSpec:
-    """Create the exact next provider request without changing artifact identity."""
-    import copy
+    """Build exactly the next ``-sN`` submission and rewrite worker identity flags.
+
+    Submission 1 is the immutable base, retries advance by one through 99, and
+    both ``--job-id`` and ``--submission-number`` must match the current request
+    before replacement. ``batch._commands`` emits this paired flag contract.
+    """
 
     if submission != spec.submission + 1:
         raise ValueError("submission must be exactly current + 1")
-    current_job_id = retry_job_id(spec.base_job_id, submission)
-    job = copy.deepcopy(spec.job)
+    stem, separator, original = spec.base_job_id.rpartition("-s")
+    if not separator or original != "1" or submission < 1 or submission > 99:
+        raise ValueError("base Batch job ID is not a submission-1 identity")
+    current_job_id = f"{stem}-s{submission}"
+    job = deepcopy(spec.job)
     try:
         commands = job["taskGroups"][0]["taskSpec"]["runnables"][0]["container"]["commands"]
     except (KeyError, IndexError, TypeError):
@@ -86,4 +102,5 @@ def retry_job(spec: BatchJobSpec, submission: int) -> BatchJobSpec:
         job,
         spec.controller_timeout_s,
         submission,
+        canonical_job_json(job),
     )

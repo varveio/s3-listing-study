@@ -241,7 +241,7 @@ def test_dirty_payload_is_refused_before_build(
     def fake_run(argv: Sequence[str]) -> subprocess.CompletedProcess[bytes]:
         rendered = tuple(argv)
         calls.append(rendered)
-        return completed(rendered, stdout=b" M src/s3_listing_study/worker/cli.py\n")
+        return completed(rendered, stdout=b" M src/twinstamp/publication.py\n")
 
     monkeypatch.setattr(image_publish, "_run", fake_run)
     assert image_publish.publish_derived_image_main(publish_args(path)) == 1

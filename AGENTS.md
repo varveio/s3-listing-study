@@ -55,6 +55,7 @@ Read *one* index, not five guesses. Order: this table → `docs/README.md`.
 
 | If you're... | Read |
 | --- | --- |
+| Designing, using, or changing TwinStamp | `src/twinstamp/README.md` — package boundary, evidence model, publication, and coordination contracts |
 | Designing or changing how a run works | `docs/methodology.md` — especially the five decisions |
 | Provisioning a runner or executing a subject/reference container | `docs/operating/runner-security.md` — the Batch and local execution profiles and the local activation gate |
 | About to state anything about a specific tool | `tools/<tool>/README.md` — the tool page, for current observations + provenance |
