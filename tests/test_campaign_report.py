@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -12,6 +13,7 @@ from google.api_core.exceptions import PreconditionFailed
 
 from s3_listing_study.manager.campaign import cli, controller, ledger, report
 from s3_listing_study.manager.campaign.models import CaseControllerProgress
+from twinstamp import ObjectReadError, ObjectReadIssue
 
 CAMPAIGN = "2026-08-11-report"
 BUCKET = "study-results"
@@ -28,8 +30,10 @@ class FakeBlob:
         self.generation = 1
         self.collision = collision
         self.uploads: list[tuple[bytes, dict[str, Any]]] = []
+        self.downloads: list[dict[str, Any]] = []
 
-    def download_as_bytes(self, **_kwargs: Any) -> bytes:
+    def download_as_bytes(self, **kwargs: Any) -> bytes:
+        self.downloads.append(kwargs)
         return self.content
 
     def upload_from_string(self, content: bytes, **kwargs: Any) -> None:
@@ -219,7 +223,7 @@ def result(
         },
         "secret_scan": {"status": "clean", "streams": {"stdout": "clean", "stderr": "clean"}},
     }
-    return report._worker_json(document)
+    return (json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n").encode()
 
 
 def selected_case() -> tuple[report.ManifestCase, dict[str, Any], dict[str, Any]]:
@@ -236,6 +240,40 @@ def test_nonterminal_evidence_is_pending_without_any_listing() -> None:
     assert bucket.listed == []
 
 
+@pytest.mark.parametrize(
+    ("size", "content", "issue"),
+    [
+        (-1, b"{}\n", ObjectReadIssue.INVALID_SIZE),
+        (report.RESULT_MAX_BYTES + 1, b"{}\n", ObjectReadIssue.TOO_LARGE),
+        (4, b"{}\n", ObjectReadIssue.CHANGED),
+    ],
+)
+def test_gcs_store_classifies_bounded_read_failures(
+    size: int, content: bytes, issue: ObjectReadIssue
+) -> None:
+    bucket = FakeBucket({"unit/result.json": content})
+    bucket.objects["unit/result.json"].size = size
+    with pytest.raises(ObjectReadError) as caught:
+        report._GcsObjectStore(bucket).read_object(
+            "unit/result.json", max_bytes=report.RESULT_MAX_BYTES
+        )
+    assert caught.value.issue is issue
+
+
+def test_gcs_store_classifies_generation_race_as_changed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bucket = FakeBucket({"unit/result.json": b"{}\n"})
+
+    def changed(**_kwargs: Any) -> bytes:
+        raise PreconditionFailed("generation changed")  # type: ignore[no-untyped-call]
+
+    monkeypatch.setattr(bucket.objects["unit/result.json"], "download_as_bytes", changed)
+    with pytest.raises(ObjectReadError) as caught:
+        report._GcsObjectStore(bucket).read_object("unit/result.json", max_bytes=100)
+    assert caught.value.issue is ObjectReadIssue.CHANGED
+
+
 def test_strict_result_rejects_provenance_mismatch() -> None:
     parsed, case, image = selected_case()
     bad = dict(image)
@@ -245,6 +283,7 @@ def test_strict_result_rejects_provenance_mismatch() -> None:
     evidence = report._evidence(bucket, parsed, terminal=True)
     assert evidence.state == "invalid"
     assert evidence.leaves[0]["reason"] == "invalid_result_provenance"
+    assert bucket.objects[name].downloads == [{"if_generation_match": 1}]
 
 
 def test_duplicate_current_results_select_no_canonical_leaf() -> None:
@@ -388,9 +427,7 @@ def test_settled_evidence_cache_retains_the_first_snapshot(
             phase="terminal",
             provider_state="SUCCEEDED",
             failure_type=None,
-            provider_resource_name=(
-                f"projects/study/locations/us-east1/jobs/{case['job_id']}"
-            ),
+            provider_resource_name=(f"projects/study/locations/us-east1/jobs/{case['job_id']}"),
             provider_settled=True,
             current_job_id=case["job_id"],
         )

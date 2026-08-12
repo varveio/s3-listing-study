@@ -11,7 +11,12 @@ U = TypeVar("U")
 
 
 class EvidenceProfile(Protocol[U]):
-    """Parse and render the one unit-key grammar selected for a slot."""
+    """Define one evidence-unit identity grammar for a result slot.
+
+    ``parse`` returns ``None`` for a noncanonical or foreign key; ``render``
+    produces the canonical key for a valid unit.  Profiles used together should
+    have mutually non-parseable grammars so a foreign profile is observable.
+    """
 
     name: str
 
@@ -22,21 +27,37 @@ class EvidenceProfile(Protocol[U]):
 
 @dataclass(frozen=True, slots=True)
 class PhysicalExecutionUnit:
-    """One physical invocation, preserved under its invocation-unique UUID."""
+    """One physical invocation, identified by an invocation-unique UUIDv4.
+
+    Separate launches receive separate units even when they arise from one
+    submission, preserving physical duplicate evidence for reconciliation.
+    """
 
     execution_id: uuid.UUID
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.execution_id, uuid.UUID) or self.execution_id.version != 4:
+            raise ValueError("physical execution ID must be a UUIDv4")
 
 
 @dataclass(frozen=True, slots=True)
 class LogicalAttemptUnit:
-    """One backend-defined logical scheduler attempt coordinate."""
+    """One backend-defined logical scheduler coordinate.
+
+    The three non-negative coordinates distinguish documented task, retry, and
+    runnable positions.  This profile relies on the backend not assigning the
+    same complete coordinate to multiple physical invocations.
+    """
 
     task_index: int
     retry_index: int
     runnable_index: int
 
     def __post_init__(self) -> None:
-        if min(self.task_index, self.retry_index, self.runnable_index) < 0:
+        coordinates = (self.task_index, self.retry_index, self.runnable_index)
+        if any(isinstance(value, bool) or not isinstance(value, int) for value in coordinates):
+            raise TypeError("logical attempt coordinates must be integers")
+        if min(coordinates) < 0:
             raise ValueError("logical attempt coordinates must be non-negative")
 
 
@@ -53,7 +74,10 @@ class PhysicalExecutionProfile:
         return PhysicalExecutionUnit(parsed)
 
     def render(self, unit: PhysicalExecutionUnit) -> str:
-        return str(unit.execution_id)
+        key = str(unit.execution_id)
+        if self.parse(key) != unit:
+            raise ValueError("physical execution unit does not round-trip")
+        return key
 
 
 _LOGICAL_KEY = re.compile(
@@ -68,13 +92,19 @@ class LogicalAttemptProfile:
         match = _LOGICAL_KEY.fullmatch(key)
         if match is None:
             return None
-        return LogicalAttemptUnit(*(int(value) for value in match.groups()))
+        try:
+            return LogicalAttemptUnit(*(int(value) for value in match.groups()))
+        except ValueError:
+            return None
 
     def render(self, unit: LogicalAttemptUnit) -> str:
-        return (
+        key = (
             f"logical-task-{unit.task_index}-retry-{unit.retry_index}"
             f"-runnable-{unit.runnable_index}"
         )
+        if self.parse(key) != unit:
+            raise ValueError("logical attempt unit does not round-trip")
+        return key
 
 
 PHYSICAL_EXECUTION = PhysicalExecutionProfile()
@@ -82,7 +112,11 @@ LOGICAL_ATTEMPT = LogicalAttemptProfile()
 
 
 def foreign_profile_name(expected: EvidenceProfile[Any], key: str) -> str | None:
-    """Return the other built-in profile when its grammar accepts ``key``."""
+    """Return the other built-in profile whose grammar accepts ``key``, if any.
+
+    ``expected`` is excluded from the comparison.  The result helps discovery
+    retain a structurally recognizable foreign-profile child as an anomaly.
+    """
 
     for profile in (PHYSICAL_EXECUTION, LOGICAL_ATTEMPT):
         if profile.name != expected.name and profile.parse(key) is not None:

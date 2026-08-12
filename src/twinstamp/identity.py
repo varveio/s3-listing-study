@@ -17,22 +17,28 @@ def _nonempty(value: str, label: str) -> None:
 
 @dataclass(frozen=True, slots=True)
 class ResultSlot(Generic[U]):
-    """One intentionally requested answer within a caller-owned work item."""
+    """An immutable object-store scope for one requested result.
 
-    work_item: str
-    slot: str
+    ``prefix`` is the namespace to reconcile. ``profile`` fixes the only
+    evidence-unit grammar accepted beneath it. Caller workflow coordinates stay
+    outside the storage-facing core.
+    """
+
     prefix: str
     profile: EvidenceProfile[U]
 
     def __post_init__(self) -> None:
-        _nonempty(self.work_item, "work_item")
-        _nonempty(self.slot, "slot")
         _nonempty(self.prefix, "prefix")
 
 
 @dataclass(frozen=True, slots=True)
 class Submission:
-    """One deliberate provider-job generation for a result slot."""
+    """An immutable key for one deliberate provider-job generation of a slot.
+
+    A curated retry receives a new submission rather than overwriting this one;
+    provider-native automatic retries remain within the submission.  ``key``
+    must be nonempty.
+    """
 
     key: str
 

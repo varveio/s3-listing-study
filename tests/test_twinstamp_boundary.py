@@ -6,6 +6,12 @@ import ast
 from pathlib import Path
 
 
+def test_twinstamp_package_readme_is_present_and_nonempty() -> None:
+    readme = Path(__file__).parents[1] / "src" / "twinstamp" / "README.md"
+    assert readme.is_file()
+    assert readme.read_text(encoding="utf-8").strip()
+
+
 def test_twinstamp_has_no_study_gcp_or_benchmark_imports() -> None:
     root = Path(__file__).parents[1] / "src" / "twinstamp"
     forbidden: list[tuple[Path, int, str]] = []

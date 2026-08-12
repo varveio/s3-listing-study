@@ -9,11 +9,11 @@ import math
 import re
 import sys
 import time
-import uuid
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, NamedTuple, cast
 
 import google.cloud.storage as storage  # type: ignore[import-untyped]
 from google.api_core.exceptions import GoogleAPIError, PreconditionFailed
@@ -31,24 +31,25 @@ from s3_listing_study.manager.campaign.cli import IMAGE_SET_FIELDS, _canonical_j
 from s3_listing_study.manager.campaign.models import CaseControllerProgress
 from twinstamp import (
     PHYSICAL_EXECUTION,
-    AnyTwoCurrentChildrenAmbiguous,
+    CanonicalEvidenceUnit,
+    CanonicalJsonMarker,
     ChildLimitExceeded,
-    HistoricalClassification,
+    EvidenceIssue,
     LeafAssessment,
-    ResultSlot,
-    Seal,
-    SealState,
-    SelectionState,
+    LeafEvidence,
+    MarkerIssue,
+    ObjectReadError,
+    ObjectReadIssue,
     StoredObject,
     Submission,
-    resolve_slot,
+    reconcile,
 )
-from twinstamp.discovery import discover_units
 
 MANIFEST_MAX_BYTES = 8_000_000
 RESULT_MAX_BYTES = 1_000_000
 REPORT_MAX_BYTES = 8_000_000
 MAX_EXECUTION_LEAVES_PER_RUN = 256
+RESULT_MARKER = CanonicalJsonMarker("result.json", RESULT_MAX_BYTES)
 DEFAULT_POLL_INTERVAL_S = 10.0
 CONTROLLER_PHASES = ("pending", "running", "awaiting_retry", "terminal")
 CONTROLLER_AGGREGATE_PHASES = (
@@ -61,6 +62,10 @@ CONTROLLER_AGGREGATE_PHASES = (
 EVIDENCE_STATES = ("pending", "missing", "recorded", "duplicate", "invalid", "unsealed")
 SUBJECT_STATES = ("completed", "failed", "timed_out", "signaled", "harness_error", "unavailable")
 PROVIDER_STATES = ("SUCCEEDED", "FAILED", "NOT_CREATED", "unavailable")
+_RESULT_OBJECT_FIELDS = (  # noqa: SIM905
+    "campaign outcome timing resources summary tool images build_inputs "
+    "secret_scan logical_request target"
+).split()
 
 
 class ReportError(RuntimeError):
@@ -106,6 +111,11 @@ class EvidenceSnapshot:
         }
 
 
+class CheckedEvidence(NamedTuple):
+    record: dict[str, Any]
+    normalized: dict[str, Any] | None
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="s3-listing-study report-campaign", allow_abbrev=False)
     parser.add_argument(
@@ -142,10 +152,6 @@ def _json_object(content: bytes, *, label: str, max_bytes: int) -> dict[str, Any
     return document
 
 
-def _worker_json(document: Mapping[str, Any]) -> bytes:
-    return (json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n").encode()
-
-
 def _download(blob: Any, *, label: str, max_bytes: int) -> bytes:
     size = blob.size
     if isinstance(size, bool) or not isinstance(size, int) or size < 0:
@@ -175,6 +181,12 @@ def _is_hex_digest(value: Any, *, length: int = 64) -> bool:
         and len(value) == length
         and all(character in "0123456789abcdef" for character in value)
     )
+
+
+def _object_values(*values: object) -> tuple[dict[str, Any], ...] | None:
+    if not all(isinstance(value, dict) for value in values):
+        return None
+    return cast(tuple[dict[str, Any], ...], values)
 
 
 def _valid_image_registration(image: Any) -> bool:
@@ -317,25 +329,8 @@ def _load_manifest(bucket: Any, campaign: str) -> ManifestSnapshot:
     )
 
 
-def _list_leaves(bucket: Any, prefix: str) -> list[str]:
-    try:
-        return [
-            item.key
-            for item in discover_units(
-                _LegacyGcsReader(bucket),
-                prefix,
-                PHYSICAL_EXECUTION,
-                max_children=MAX_EXECUTION_LEAVES_PER_RUN,
-            )
-        ]
-    except ChildLimitExceeded:
-        raise ReportError(
-            f"run prefix exceeds {MAX_EXECUTION_LEAVES_PER_RUN} execution leaves"
-        ) from None
-
-
-class _LegacyGcsReader:
-    """Expose the existing GCS duck type through TwinStamp's reader boundary."""
+class _GcsObjectStore:
+    """Expose bounded, generation-pinned GCS reads to TwinStamp."""
 
     def __init__(self, bucket: Any) -> None:
         self._bucket = bucket
@@ -349,89 +344,93 @@ class _LegacyGcsReader:
         blob = self._bucket.get_blob(key)
         if blob is None:
             return None
-        return StoredObject(
-            _download(blob, label=f"gs://{self._bucket.name}/{key}", max_bytes=max_bytes),
-            blob.generation,
-        )
+        size = blob.size
+        if isinstance(size, bool) or not isinstance(size, int) or size < 0:
+            raise ObjectReadError(ObjectReadIssue.INVALID_SIZE, key)
+        if size > max_bytes:
+            raise ObjectReadError(ObjectReadIssue.TOO_LARGE, key)
+        try:
+            content = cast(bytes, blob.download_as_bytes(if_generation_match=blob.generation))
+        except PreconditionFailed as exc:
+            raise ObjectReadError(ObjectReadIssue.CHANGED, key) from exc
+        if len(content) != size or len(content) > max_bytes:
+            raise ObjectReadError(ObjectReadIssue.CHANGED, key)
+        return StoredObject(content, blob.generation)
 
 
 def _validated_result(
     bucket: Any,
     case: ManifestCase,
-    leaf: str,
+    candidate: CanonicalEvidenceUnit[Any],
+    _submission: Submission,
     *,
     current_job_id: str | None = None,
     current_submission: int | None = None,
-) -> tuple[dict[str, Any], dict[str, Any] | None]:
+) -> LeafAssessment[Any, CheckedEvidence]:
+    leaf = candidate.key
     result_name = f"{case.prefix}/{leaf}/result.json"
     result_uri = f"gs://{bucket.name}/{result_name}"
+    declared_submission: tuple[str, int] | None = None
+    attributed_submission: Submission | None = None
 
-    def leaf_record(state: str, reason: str | None) -> dict[str, Any]:
-        return {
+    def assessed(
+        state: str, failure_reason: str | None, normalized: dict[str, Any] | None = None
+    ) -> LeafAssessment[Any, CheckedEvidence]:
+        record: dict[str, Any] = {
             "attempt_id": leaf,
             "result_uri": result_uri,
             "state": state,
-            "reason": reason,
+            "reason": failure_reason,
         }
-
-    try:
-        parsed = uuid.UUID(leaf)
-    except ValueError:
-        return leaf_record("invalid", "invalid_attempt_id"), None
-    if str(parsed) != leaf or parsed.version != 4:
-        return leaf_record("invalid", "invalid_attempt_id"), None
-    blob = bucket.get_blob(result_name)
-    if blob is None:
-        return leaf_record("unsealed", "missing_result_commit"), None
-    try:
-        content = _download(blob, label=result_uri, max_bytes=RESULT_MAX_BYTES)
-    except ReportError:
-        return leaf_record("invalid", "invalid_result_size"), None
-    try:
-        document = _json_object(content, label=result_uri, max_bytes=RESULT_MAX_BYTES)
-        if content != _worker_json(document):
-            return leaf_record("invalid", "invalid_result_json"), None
-    except ReportError:
-        return leaf_record("invalid", "invalid_result_json"), None
-    campaign = document.get("campaign")
-    outcome = document.get("outcome")
-    timing = document.get("timing")
-    resources = document.get("resources")
-    summary = document.get("summary")
-    tool = document.get("tool")
-    images = document.get("images")
-    build_inputs = document.get("build_inputs")
-    secret_scan = document.get("secret_scan")
-    logical_request = document.get("logical_request")
-    target = document.get("target")
-    if not all(
-        isinstance(value, dict)
-        for value in (
-            campaign,
-            outcome,
-            timing,
-            resources,
-            summary,
-            tool,
-            images,
-            build_inputs,
-            secret_scan,
-            logical_request,
-            target,
+        if state == "recorded" and attributed_submission is not None:
+            assert declared_submission is not None
+            record["state"] = "historical"
+            record["submission_number"] = declared_submission[1]
+            record["job_id"] = declared_submission[0]
+        if state != "recorded":
+            evidence = CheckedEvidence(record, None)
+            return LeafAssessment.invalid(evidence)
+        assert normalized is not None
+        return LeafAssessment.valid(
+            CheckedEvidence(record, None if attributed_submission else normalized),
+            marker_key=result_name,
+            submission=attributed_submission,
+            execution_outcome=None if attributed_submission else normalized["subject"],
         )
-    ):
-        return leaf_record("invalid", "invalid_result_identity"), None
-    assert isinstance(campaign, dict)
-    assert isinstance(outcome, dict)
-    assert isinstance(timing, dict)
-    assert isinstance(resources, dict)
-    assert isinstance(summary, dict)
-    assert isinstance(tool, dict)
-    assert isinstance(images, dict)
-    assert isinstance(build_inputs, dict)
-    assert isinstance(secret_scan, dict)
-    assert isinstance(logical_request, dict)
-    assert isinstance(target, dict)
+
+    assert candidate.marker.document is not None
+    document = candidate.marker.document
+    objects = _object_values(*(document.get(field) for field in _RESULT_OBJECT_FIELDS))
+    if objects is None:
+        return assessed("invalid", "invalid_result_identity")
+    (
+        campaign,
+        outcome,
+        timing,
+        resources,
+        summary,
+        tool,
+        images,
+        build_inputs,
+        secret_scan,
+        logical_request,
+        target,
+    ) = objects
+    declared_job_id = campaign.get("job_id")
+    declared_number = campaign.get("submission_number")
+    if isinstance(declared_job_id, str) and _is_int(declared_number, minimum=1):
+        number = cast(int, declared_number)
+        declared_submission = (declared_job_id, number)
+        prior_job_id = case.job_id if number == 1 else f"{case.job_id[:-1]}{number}"
+        if (
+            current_submission
+            and case.job_id.endswith("-s1")
+            and number < current_submission
+            and declared_job_id == prior_job_id
+        ):
+            attributed_submission = Submission(f"{declared_job_id}:s{number}")
+        if attributed_submission is not None:
+            current_job_id, current_submission = declared_submission
     expected_campaign = {
         "campaign_id": case.campaign,
         "job_id": current_job_id or case.job_id,
@@ -456,7 +455,7 @@ def _validated_result(
         or document.get("adapter_bundle_sha256") != case.image.get("adapter_bundle_sha256")
         or summary.get("adapter_bundle_sha256") != case.image.get("adapter_bundle_sha256")
     ):
-        return leaf_record("invalid", "invalid_result_identity"), None
+        return assessed("invalid", "invalid_result_identity")
     expected_request = {
         "schema_version": 1,
         "operation": "list",
@@ -475,25 +474,16 @@ def _validated_result(
         "scope": "full",
     }
     if logical_request != expected_request or target != expected_target:
-        return leaf_record("invalid", "invalid_result_request"), None
-    result_tool_image = images.get("tool")
-    result_shared_base = images.get("shared_base")
-    result_build_shared = build_inputs.get("shared_base")
-    result_build_tool = build_inputs.get("tool")
-    if not all(
-        isinstance(value, dict)
-        for value in (
-            result_tool_image,
-            result_shared_base,
-            result_build_shared,
-            result_build_tool,
-        )
-    ):
-        return leaf_record("invalid", "invalid_result_provenance"), None
-    assert isinstance(result_tool_image, dict)
-    assert isinstance(result_shared_base, dict)
-    assert isinstance(result_build_shared, dict)
-    assert isinstance(result_build_tool, dict)
+        return assessed("invalid", "invalid_result_request")
+    provenance = _object_values(
+        images.get("tool"),
+        images.get("shared_base"),
+        build_inputs.get("shared_base"),
+        build_inputs.get("tool"),
+    )
+    if provenance is None:
+        return assessed("invalid", "invalid_result_provenance")
+    result_tool_image, result_shared_base, result_build_shared, result_build_tool = provenance
     if (
         set(images) != {"derived", "tool", "shared_base"}
         or images.get("derived") != case.record.get("derived_image")
@@ -508,21 +498,21 @@ def _validated_result(
         or result_build_tool.get("artifact") != case.image.get("tool_artifact")
         or document.get("harness_revision") != case.image.get("harness_revision")
     ):
-        return leaf_record("invalid", "invalid_result_provenance"), None
+        return assessed("invalid", "invalid_result_provenance")
     if result_tool_image != {
         "digest": case.image.get("tool_image_digest"),
         "uri": case.image.get("tool_image_uri"),
     }:
-        return leaf_record("invalid", "invalid_result_provenance"), None
+        return assessed("invalid", "invalid_result_provenance")
     if result_build_tool.get("selection_sha256") != case.image.get("selection_sha256"):
-        return leaf_record("invalid", "invalid_result_provenance"), None
+        return assessed("invalid", "invalid_result_provenance")
     if set(result_build_tool) != {"build_sha256", "artifact", "selection_sha256"}:
-        return leaf_record("invalid", "invalid_result_provenance"), None
+        return assessed("invalid", "invalid_result_provenance")
     if secret_scan != {
         "status": "clean",
         "streams": {"stdout": "clean", "stderr": "clean"},
     }:
-        return leaf_record("invalid", "invalid_result_secret_scan"), None
+        return assessed("invalid", "invalid_result_secret_scan")
     status = outcome.get("status")
     exit_code = outcome.get("exit_code")
     subject_signal = outcome.get("signal")
@@ -536,7 +526,7 @@ def _validated_result(
         or (exit_code is None) == (subject_signal is None)
         or not isinstance(timed_out, bool)
     ):
-        return leaf_record("invalid", "invalid_result_outcome"), None
+        return assessed("invalid", "invalid_result_outcome")
     assert isinstance(timed_out, bool)
     if not isinstance(cleanup, dict) or set(cleanup) != {
         "state",
@@ -545,7 +535,7 @@ def _validated_result(
         "process_group_empty",
         "escaped_descendants",
     }:
-        return leaf_record("invalid", "invalid_result_cleanup"), None
+        return assessed("invalid", "invalid_result_cleanup")
     term_sent = cleanup.get("term_sent")
     kill_sent = cleanup.get("kill_sent")
     group_empty = cleanup.get("process_group_empty")
@@ -556,7 +546,7 @@ def _validated_result(
         or any(not _is_int(pid, minimum=1) for pid in escaped)
         or escaped != sorted(set(escaped))
     ):
-        return leaf_record("invalid", "invalid_result_cleanup"), None
+        return assessed("invalid", "invalid_result_cleanup")
     assert isinstance(term_sent, bool)
     assert isinstance(kill_sent, bool)
     assert isinstance(group_empty, bool)
@@ -570,7 +560,7 @@ def _validated_result(
         else "not_needed"
     )
     if cleanup.get("state") != expected_cleanup_state:
-        return leaf_record("invalid", "invalid_result_cleanup"), None
+        return assessed("invalid", "invalid_result_cleanup")
     expected_status = (
         "harness_error"
         if escaped
@@ -583,7 +573,7 @@ def _validated_result(
         else "failed"
     )
     if status != expected_status:
-        return leaf_record("invalid", "invalid_result_outcome"), None
+        return assessed("invalid", "invalid_result_outcome")
     if not timed_out and cleanup != {
         "state": "failed" if escaped else "not_needed",
         "term_sent": False,
@@ -591,12 +581,12 @@ def _validated_result(
         "process_group_empty": True,
         "escaped_descendants": escaped,
     }:
-        return leaf_record("invalid", "invalid_result_cleanup"), None
+        return assessed("invalid", "invalid_result_cleanup")
     elapsed_ns = timing.get("elapsed_ns")
     rss_kb = resources.get("rusage_children_max_child_peak_rss_kb")
     row_count = summary.get("row_count")
     if not _is_int(elapsed_ns) or not _is_int(rss_kb):
-        return leaf_record("invalid", "invalid_result_metrics"), None
+        return assessed("invalid", "invalid_result_metrics")
     interpreter = summary.get("interpreter")
     duckdb_version = summary.get("duckdb_version")
     summary_status = summary.get("status")
@@ -628,7 +618,7 @@ def _validated_result(
         }
         or any(value is not None and not isinstance(value, str) for value in interpreter.values())
     ):
-        return leaf_record("invalid", "invalid_result_summary"), None
+        return assessed("invalid", "invalid_result_summary")
     if status != "completed":
         valid_summary = (
             summary_status == "skipped"
@@ -657,7 +647,7 @@ def _validated_result(
     else:
         valid_summary = False
     if not valid_summary:
-        return leaf_record("invalid", "invalid_result_summary"), None
+        return assessed("invalid", "invalid_result_summary")
     normalized = {
         "subject": {
             "status": status,
@@ -671,7 +661,28 @@ def _validated_result(
             "row_count": row_count,
         },
     }
-    return leaf_record("recorded", None), normalized
+    return assessed("recorded", None, normalized)
+
+
+def _leaf_record(
+    bucket: Any, case: ManifestCase, leaf: LeafEvidence[Any, CheckedEvidence]
+) -> dict[str, Any]:
+    if leaf.assessment.evidence is not None:
+        return leaf.assessment.evidence.record
+    key = leaf.discovered.key
+    issue = leaf.assessment.issue
+    assert issue is not None
+    if issue is EvidenceIssue.UNRECOGNIZED_UNIT:
+        state, reason = "invalid", "invalid_attempt_id"
+    elif issue is EvidenceIssue.MARKER_ABSENT:
+        state, reason = "unsealed", "missing_result_commit"
+    else:
+        assert leaf.marker is not None
+        sizes = {MarkerIssue.INVALID_SIZE, MarkerIssue.TOO_LARGE, MarkerIssue.CHANGED}
+        state = "invalid"
+        reason = "invalid_result_size" if leaf.marker.issue in sizes else "invalid_result_json"
+    result_uri = f"gs://{bucket.name}/{case.prefix}/{key}/result.json"
+    return {"attempt_id": key, "result_uri": result_uri, "state": state, "reason": reason}
 
 
 def _evidence(
@@ -682,140 +693,36 @@ def _evidence(
     current_job_id: str | None = None,
     current_submission: int | None = None,
 ) -> EvidenceSnapshot:
-    submission_number = (
-        current_submission if current_submission is not None else case.record.get("submission")
-    )
+    submission_number = current_submission or cast(int, case.record.get("submission"))
     current = Submission(f"{current_job_id or case.job_id}:s{submission_number}")
-
-    def validate(discovered: Any, _submission: Submission) -> LeafAssessment[Any, Any]:
-        checked = _validated_result(
-            bucket,
-            case,
-            discovered.key,
-            current_job_id=current_job_id,
-            current_submission=current_submission,
-        )
-        record, normalized = checked
-        state = {
-            "recorded": SealState.VALID,
-            "unsealed": SealState.UNSEALED,
-            "invalid": SealState.INVALID,
-        }[record["state"]]
-        seal = Seal(str(record["result_uri"])) if state is SealState.VALID else None
-        return LeafAssessment(
-            state,
-            checked,
-            seal,
-            execution_outcome=normalized["subject"] if normalized is not None else None,
-        )
-
-    def classify_historical(
-        discovered: Any, assessment: LeafAssessment[Any, Any]
-    ) -> HistoricalClassification[Any, Any] | None:
-        leaf_record, _normalized = assessment.evidence
-        if (
-            current_submission is None
-            or current_submission <= 1
-            or leaf_record["reason"] != "invalid_result_identity"
-        ):
-            return None
-        result_name = f"{case.prefix}/{discovered.key}/result.json"
-        blob = bucket.get_blob(result_name)
-        try:
-            content = (
-                _download(blob, label=str(leaf_record["result_uri"]), max_bytes=RESULT_MAX_BYTES)
-                if blob is not None
-                else b""
-            )
-            document = _json_object(
-                content, label=str(leaf_record["result_uri"]), max_bytes=RESULT_MAX_BYTES
-            )
-            campaign = document.get("campaign")
-        except ReportError:
-            campaign = None
-        if not isinstance(campaign, dict):
-            return None
-        prior_submission = campaign.get("submission_number")
-        prior_job_id = campaign.get("job_id")
-        if not _is_int(prior_submission, minimum=1):
-            return None
-        prior_number = cast(int, prior_submission)
-        if prior_number >= current_submission:
-            return None
-        stem, separator, original = case.job_id.rpartition("-s")
-        expected_prior_job = (
-            case.job_id
-            if prior_number == 1
-            else f"{stem}-s{prior_number}"
-            if separator and original == "1"
-            else None
-        )
-        if not isinstance(prior_job_id, str) or prior_job_id != expected_prior_job:
-            return None
-        prior_leaf, prior_normalized = _validated_result(
-            bucket,
-            case,
-            discovered.key,
-            current_job_id=prior_job_id,
-            current_submission=prior_number,
-        )
-        if prior_leaf["state"] != "recorded" or prior_normalized is None:
-            return None
-        prior_leaf = {
-            **prior_leaf,
-            "state": "historical",
-            "submission_number": prior_number,
-            "job_id": prior_job_id,
-        }
-        return HistoricalClassification(
-            Submission(f"{prior_job_id}:s{prior_number}"),
-            LeafAssessment(
-                SealState.VALID,
-                (prior_leaf, None),
-                Seal(str(prior_leaf["result_uri"])),
-            ),
-        )
-
     try:
-        resolved = resolve_slot(
-            store=_LegacyGcsReader(bucket),
-            slot=ResultSlot(
-                work_item=f"{case.bucket}/{case.tool}/{case.case_id}",
-                slot=f"run-{case.run_ordinal}",
-                prefix=case.prefix,
-                profile=PHYSICAL_EXECUTION,
+        resolved = reconcile(
+            _GcsObjectStore(bucket),
+            case.prefix,
+            PHYSICAL_EXECUTION,
+            current,
+            RESULT_MARKER,
+            partial(
+                _validated_result,
+                bucket,
+                case,
+                current_job_id=current_job_id,
+                current_submission=current_submission,
             ),
-            submission=current,
             settled=terminal,
-            validate=validate,
-            classify_historical=classify_historical,
-            policy=AnyTwoCurrentChildrenAmbiguous(),
             max_children=MAX_EXECUTION_LEAVES_PER_RUN,
         )
     except ChildLimitExceeded:
         raise ReportError(
             f"run prefix exceeds {MAX_EXECUTION_LEAVES_PER_RUN} execution leaves"
         ) from None
-
-    leaves = tuple(leaf.assessment.evidence[0] for leaf in resolved.leaves)
-    state = {
-        SelectionState.PENDING: "pending",
-        SelectionState.MISSING: "missing",
-        SelectionState.SELECTED: "recorded",
-        SelectionState.DUPLICATE: "duplicate",
-        SelectionState.INVALID: "invalid",
-        SelectionState.UNSEALED: "unsealed",
-        SelectionState.PUBLICATION_CONFLICT: "invalid",
-    }[resolved.selection.state]
-    if resolved.selection.selected_key is None:
+    leaves = tuple(_leaf_record(bucket, case, leaf) for leaf in resolved.leaves)
+    state = resolved.selection.state.value
+    state = {"selected": "recorded", "publication_conflict": "invalid"}.get(state, state)
+    selected = resolved.selected_evidence
+    if selected is None:
         return EvidenceSnapshot(state, leaves, None, None)
-    selected = next(
-        leaf
-        for leaf in resolved.leaves
-        if not leaf.historical and leaf.discovered.key == resolved.selection.selected_key
-    )
-    selected_record, normalized = selected.assessment.evidence
-    return EvidenceSnapshot(state, leaves, str(selected_record["result_uri"]), normalized)
+    return EvidenceSnapshot(state, leaves, str(selected.record["result_uri"]), selected.normalized)
 
 
 def _controller_view(item: CaseControllerProgress) -> dict[str, Any]:

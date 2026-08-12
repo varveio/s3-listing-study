@@ -1,8 +1,8 @@
-"""TwinStamp evidence reconciliation core."""
+"""TwinStamp evidence reconciliation core; see the package README for its provisional contract."""
 
 from twinstamp.discovery import ChildLimitExceeded
 from twinstamp.identity import ResultSlot, Submission
-from twinstamp.policy import AnyTwoCurrentChildrenAmbiguous, SelectionPolicy, ValidSealsOnly
+from twinstamp.policy import SelectExactlyOne, SelectionPolicy, ValidSealsOnly
 from twinstamp.profiles import (
     LOGICAL_ATTEMPT,
     PHYSICAL_EXECUTION,
@@ -10,10 +10,11 @@ from twinstamp.profiles import (
     LogicalAttemptUnit,
     PhysicalExecutionUnit,
 )
-from twinstamp.reconcile import HistoricalClassifier, LeafValidator, resolve_slot
+from twinstamp.reconcile import LeafValidator, reconcile
 from twinstamp.resolution import (
+    CanonicalEvidenceUnit,
     DiscoveredUnit,
-    HistoricalClassification,
+    EvidenceIssue,
     LeafAssessment,
     LeafEvidence,
     PublicationConflict,
@@ -25,27 +26,47 @@ from twinstamp.resolution import (
     SubmissionResolution,
     UnrecognizedEvidenceUnit,
 )
-from twinstamp.stores import ObjectStoreReader, StoredObject
+from twinstamp.sealcheck import (
+    CanonicalJsonMarker,
+    MarkerIssue,
+    MarkerObservation,
+    MarkerState,
+    parse_canonical_json_marker,
+)
+from twinstamp.stores import (
+    ChildPrefixReader,
+    ObjectReadError,
+    ObjectReadIssue,
+    ObjectStoreReader,
+    StoredObject,
+)
 
 __all__ = [
     "LOGICAL_ATTEMPT",
     "PHYSICAL_EXECUTION",
-    "AnyTwoCurrentChildrenAmbiguous",
+    "CanonicalEvidenceUnit",
+    "CanonicalJsonMarker",
     "ChildLimitExceeded",
+    "ChildPrefixReader",
     "DiscoveredUnit",
+    "EvidenceIssue",
     "EvidenceProfile",
-    "HistoricalClassification",
-    "HistoricalClassifier",
     "LeafAssessment",
     "LeafEvidence",
     "LeafValidator",
     "LogicalAttemptUnit",
+    "MarkerIssue",
+    "MarkerObservation",
+    "MarkerState",
+    "ObjectReadError",
+    "ObjectReadIssue",
     "ObjectStoreReader",
     "PhysicalExecutionUnit",
     "PublicationConflict",
     "ResultSlot",
     "Seal",
     "SealState",
+    "SelectExactlyOne",
     "Selection",
     "SelectionPolicy",
     "SelectionState",
@@ -55,5 +76,6 @@ __all__ = [
     "SubmissionResolution",
     "UnrecognizedEvidenceUnit",
     "ValidSealsOnly",
-    "resolve_slot",
+    "parse_canonical_json_marker",
+    "reconcile",
 ]

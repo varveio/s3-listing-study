@@ -11,11 +11,23 @@ T = TypeVar("T")
 
 
 class SelectionPolicy(Protocol[U, T]):
+    """Choose a slot-level selection from current, already assessed leaves.
+
+    Implementations receive no historical leaves and must return a
+    :class:`~twinstamp.resolution.Selection`; they do not validate seals or
+    inspect storage themselves.
+    """
+
     def select(self, current: tuple[LeafEvidence[U, T], ...]) -> Selection: ...
 
 
-class AnyTwoCurrentChildrenAmbiguous:
-    """The study's frozen rule: any two current children are duplicates."""
+class SelectExactlyOne:
+    """Select a result only when exactly one current evidence unit exists.
+
+    Invalid and unsealed children count because they still represent published
+    evidence. A single valid, conflict-free child is selected; otherwise the
+    state explains why no child is selected.
+    """
 
     def select(self, current: tuple[LeafEvidence[U, T], ...]) -> Selection:
         if not current:
@@ -33,7 +45,11 @@ class AnyTwoCurrentChildrenAmbiguous:
 
 
 class ValidSealsOnly:
-    """A convention default which does not let torn leaves hide one valid seal."""
+    """Select exactly one valid current seal while reporting conflicts first.
+
+    Unlike :class:`SelectExactlyOne`, invalid or unsealed siblings
+    do not hide one valid leaf.  Multiple valid leaves remain a duplicate.
+    """
 
     def select(self, current: tuple[LeafEvidence[U, T], ...]) -> Selection:
         conflicts = [leaf for leaf in current if leaf.assessment.publication_conflict is not None]
