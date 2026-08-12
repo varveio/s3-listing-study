@@ -6,11 +6,10 @@ import hashlib
 import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from typing import BinaryIO, Generic, Protocol, TypeVar
+from typing import Any, BinaryIO, Protocol
 
 from twinstamp.profiles import EvidenceProfile
 
-U = TypeVar("U")
 Version = str | int
 PayloadOpener = Callable[[], BinaryIO]
 
@@ -90,12 +89,10 @@ class PublicationStore(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
-class EvidencePublication(Generic[U]):
-    """A fixed, profile-bound artifact sequence followed by exactly one marker."""
+class EvidencePublication:
+    """A fixed artifact sequence and marker beneath one resolved unit prefix."""
 
     prefix: str
-    profile: EvidenceProfile[U]
-    unit: U
     artifacts: tuple[PublicationObject, ...]
     marker: PublicationObject
 
@@ -107,19 +104,24 @@ class EvidencePublication(Generic[U]):
         if not isinstance(self.marker, PublicationObject):
             raise TypeError("publication marker must be one publication object")
 
-    @property
-    def unit_key(self) -> str:
+    @classmethod
+    def for_unit(
+        cls,
+        prefix: str,
+        profile: EvidenceProfile[Any],
+        unit: object,
+        artifacts: tuple[PublicationObject, ...],
+        marker: PublicationObject,
+    ) -> EvidencePublication:
+        """Bind a caller-owned slot prefix to a unit validated by its profile."""
         try:
-            key = self.profile.render(self.unit)
+            key = profile.render(unit)
         except (AttributeError, TypeError, ValueError) as exc:
             raise ValueError("publication unit does not belong to its evidence profile") from exc
-        if self.profile.parse(key) != self.unit:
+        if profile.parse(key) != unit:
             raise ValueError("publication unit does not round-trip through its evidence profile")
-        return key
-
-    @property
-    def unit_prefix(self) -> str:
-        return f"{self.prefix.rstrip('/')}/{self.unit_key}" if self.prefix else self.unit_key
+        resolved_prefix = f"{prefix.rstrip('/')}/{key}" if prefix else key
+        return cls(resolved_prefix, artifacts, marker)
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,8 +133,8 @@ class PublishedObject:
 
 
 @dataclass(frozen=True, slots=True)
-class PublicationReceipt(Generic[U]):
-    publication: EvidencePublication[U]
+class PublicationReceipt:
+    publication: EvidencePublication
     objects: tuple[PublishedObject, ...]
 
 
@@ -155,10 +157,10 @@ def _digest_payload(payload: PublicationObject) -> tuple[int, str]:
     return size, digest.hexdigest()
 
 
-def _preflight(publication: EvidencePublication[U]) -> str:
-    # Resolve the typed identity and validate the complete fixed manifest before
-    # opening the create surface. Payloads are streamed and discarded.
-    unit_prefix = publication.unit_prefix
+def _preflight(publication: EvidencePublication) -> str:
+    # Validate the complete fixed manifest before opening the create surface.
+    # Payloads are streamed and discarded.
+    unit_prefix = publication.prefix
     ordered = (*publication.artifacts, publication.marker)
     names = [payload.name for payload in ordered]
     if len(names) != len(set(names)):
@@ -199,7 +201,7 @@ def _resolve_ambiguous(store: PublicationStore, key: str, payload: PublicationOb
     return observed.version
 
 
-def publish(publication: EvidencePublication[U], store: PublicationStore) -> PublicationReceipt[U]:
+def publish(publication: EvidencePublication, store: PublicationStore) -> PublicationReceipt:
     """Create a fixed evidence unit in order, resolving ambiguity and sealing last."""
 
     unit_prefix = _preflight(publication)

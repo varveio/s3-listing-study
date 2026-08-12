@@ -6,8 +6,7 @@ from collections.abc import Callable
 from typing import TypeVar
 
 from twinstamp.discovery import discover_units
-from twinstamp.identity import ResultSlot, Submission
-from twinstamp.policy import SelectExactlyOne, SelectionPolicy
+from twinstamp.identity import Submission
 from twinstamp.profiles import EvidenceProfile
 from twinstamp.resolution import (
     CanonicalEvidenceUnit,
@@ -38,7 +37,6 @@ def reconcile(
     validate: LeafValidator[U, T],
     *,
     settled: bool = True,
-    policy: SelectionPolicy[U, T] | None = None,
     max_children: int = 256,
 ) -> SlotResolution[U, T]:
     """Reconcile one settled slot without collapsing its evidence state axes.
@@ -54,7 +52,6 @@ def reconcile(
             recognized unit.
         validate: Caller-supplied domain assessment, invoked only for a
             recognized unit with a present canonical marker.
-        policy: Caller-supplied selection rule applied only to current leaves.
         max_children: Hard accepted-child discovery bound.
 
     Returns:
@@ -63,20 +60,19 @@ def reconcile(
         current-leaf selection.
 
     Raises:
-        ValueError: If a validator attributes invalid evidence to history,
-            names a different marker, or reports a publication conflict for a
-            different discovered unit.
+        ValueError: If a validator attributes invalid evidence to history or
+            names a different marker.
         ChildLimitExceeded: If discovery exceeds ``max_children``.
     """
 
-    slot = ResultSlot(prefix, profile)
-    selection_policy = policy or SelectExactlyOne()
+    if not prefix:
+        raise ValueError("prefix must not be empty")
 
     if not settled:
-        return SlotResolution(slot, submission, (), Selection(SelectionState.PENDING))
+        return SlotResolution(prefix, profile, submission, (), Selection(SelectionState.PENDING))
 
     leaves: list[LeafEvidence[U, T]] = []
-    for discovered in discover_units(store, slot.prefix, slot.profile, max_children=max_children):
+    for discovered in discover_units(store, prefix, profile, max_children=max_children):
         if isinstance(discovered.unit, UnrecognizedEvidenceUnit):
             leaves.append(
                 LeafEvidence(
@@ -86,7 +82,7 @@ def reconcile(
                 )
             )
             continue
-        observed = marker.observe(store, f"{slot.prefix}/{discovered.key}")
+        observed = marker.observe(store, f"{prefix}/{discovered.key}")
         if observed.state is not MarkerState.PRESENT:
             state, issue = (
                 (SealState.UNSEALED, EvidenceIssue.MARKER_ABSENT)
@@ -107,11 +103,6 @@ def reconcile(
         )
         if assessment.seal is not None and assessment.seal.marker_key != observed.key:
             raise ValueError("a seal must name the marker that reconciliation observed")
-        if (
-            assessment.publication_conflict is not None
-            and assessment.publication_conflict.unit != discovered.unit
-        ):
-            raise ValueError("a publication conflict must name its discovered unit")
         owner = assessment.submission or submission
         historical = owner != submission
         if historical and assessment.seal_state is not SealState.VALID:
@@ -120,4 +111,18 @@ def reconcile(
 
     ordered = tuple(leaves)
     current_leaves = tuple(leaf for leaf in ordered if not leaf.historical)
-    return SlotResolution(slot, submission, ordered, selection_policy.select(current_leaves))
+    return SlotResolution(prefix, profile, submission, ordered, _select(current_leaves))
+
+
+def _select(current: tuple[LeafEvidence[U, T], ...]) -> Selection:
+    """Apply the strict exactly-one-current-unit rule."""
+    if not current:
+        return Selection(SelectionState.MISSING)
+    if len(current) > 1:
+        return Selection(SelectionState.DUPLICATE)
+    leaf = current[0]
+    if leaf.assessment.seal_state is SealState.VALID:
+        return Selection(SelectionState.SELECTED, leaf.discovered.key)
+    if leaf.assessment.seal_state is SealState.UNSEALED:
+        return Selection(SelectionState.UNSEALED)
+    return Selection(SelectionState.INVALID)

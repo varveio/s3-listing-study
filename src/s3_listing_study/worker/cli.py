@@ -18,7 +18,7 @@ from s3_listing_study.worker.image_provenance import (
     ImageProvenanceError,
     load_image_provenance,
 )
-from twinstamp import PHYSICAL_EXECUTION
+from twinstamp.profiles import PHYSICAL_EXECUTION
 
 from .driver import resolve_invocation
 from .engine import (

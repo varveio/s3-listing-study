@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Generic, TypeVar
 
-from twinstamp.identity import ResultSlot, Submission
+from twinstamp.identity import Submission
 from twinstamp.profiles import EvidenceProfile
 from twinstamp.sealcheck import MarkerObservation
 
@@ -17,7 +17,7 @@ T = TypeVar("T")
 class SealState(StrEnum):
     """Validation state of one leaf's evidence publication.
 
-    These states say nothing about policy selection, execution success, or
+    These states say nothing about selection, execution success, or
     domain correctness.  Only ``VALID`` is accompanied by a :class:`Seal`.
     """
 
@@ -35,7 +35,7 @@ class EvidenceIssue(StrEnum):
 
 
 class SelectionState(StrEnum):
-    """A selection policy's slot-level outcome over current leaves.
+    """The slot-level outcome over current leaves.
 
     This state is distinct from :class:`SealState`: for example, duplicate
     valid leaves yield ``DUPLICATE`` and one unsealed leaf may yield
@@ -48,34 +48,13 @@ class SelectionState(StrEnum):
     DUPLICATE = "duplicate"
     INVALID = "invalid"
     UNSEALED = "unsealed"
-    PUBLICATION_CONFLICT = "publication_conflict"
 
 
 @dataclass(frozen=True, slots=True)
 class UnrecognizedEvidenceUnit:
-    """A discovered child whose key is invalid or belongs to another profile.
-
-    ``anomaly`` identifies the condition, and ``foreign_profile`` names a
-    recognized built-in profile when applicable.  Such units must never be
-    assessed as valid evidence.
-    """
+    """A discovered child whose key is invalid for the selected profile."""
 
     key: str
-    anomaly: str
-    foreign_profile: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class PublicationConflict(Generic[U]):
-    """A same-coordinate writer conflict that invalidates an evidence unit.
-
-    ``unit`` must be the discovered unit being assessed; ``object_key`` and
-    ``reason`` preserve the adapter's concrete contention observation.
-    """
-
-    unit: U
-    object_key: str
-    reason: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,13 +79,10 @@ class LeafAssessment(Generic[U, T]):
     ``evidence`` and the optional outcome/verdict are opaque to the core.
     ``submission`` attributes a fully validated leaf to an earlier submission;
     leaving it absent attributes the leaf to the current submission.
-    Exactly ``VALID`` assessments carry a ``seal``; publication conflicts are
-    always invalid and must be checked against the discovered unit by
-    :func:`twinstamp.reconcile`.
+    Exactly ``VALID`` assessments carry a ``seal``.
 
     Raises:
-        ValueError: If seal presence does not match ``seal_state``, or a
-            publication conflict is not invalid evidence.
+        ValueError: If seal presence does not match ``seal_state``.
     """
 
     seal_state: SealState
@@ -114,15 +90,12 @@ class LeafAssessment(Generic[U, T]):
     seal: Seal | None = None
     execution_outcome: object | None = None
     domain_verdict: object | None = None
-    publication_conflict: PublicationConflict[U] | None = None
     submission: Submission | None = None
     issue: EvidenceIssue | None = None
 
     def __post_init__(self) -> None:
         if (self.seal_state is SealState.VALID) != (self.seal is not None):
             raise ValueError("exactly valid evidence must carry a seal witness")
-        if self.publication_conflict is not None and self.seal_state is not SealState.INVALID:
-            raise ValueError("a publication conflict must be invalid evidence")
         if self.issue is not None:
             if self.evidence is not None or self.seal_state is SealState.VALID:
                 raise ValueError(
@@ -225,7 +198,7 @@ class SubmissionResolution(Generic[U, T]):
 
 @dataclass(frozen=True, slots=True)
 class Selection:
-    """A policy result independent from individual leaf seal states.
+    """A selection result independent from individual leaf seal states.
 
     Only ``SELECTED`` carries ``selected_key``; every other state must leave it
     absent.
@@ -245,10 +218,11 @@ class SlotResolution(Generic[U, T]):
 
     ``leaves`` is the single source of truth. ``submissions`` is a computed
     grouping by current or historical generation, and ``selection`` is the
-    policy's independent choice.
+    independent strict exact-one result.
     """
 
-    slot: ResultSlot[U]
+    prefix: str
+    profile: EvidenceProfile[U]
     submission: Submission
     leaves: tuple[LeafEvidence[U, T], ...]
     selection: Selection
@@ -267,10 +241,6 @@ class SlotResolution(Generic[U, T]):
                 for key, value in sorted(grouped.items(), key=lambda item: item[0].key)
             ),
         )
-
-    @property
-    def profile(self) -> EvidenceProfile[U]:
-        return self.slot.profile
 
     @property
     def selected(self) -> LeafEvidence[U, T] | None:

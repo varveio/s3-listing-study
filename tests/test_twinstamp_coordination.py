@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from twinstamp import (
+from twinstamp.coordination import (
     AdoptedExact,
     Ambiguous,
     Created,
@@ -107,7 +107,7 @@ def test_ensure_reserves_before_provider_and_records_fact() -> None:
     journal = Journal(claim)
     backend = Backend(ensure=Created("resource", "QUEUED"), observe=ObservedExact("r", "RUNNING"))
 
-    result = ensure_submission("job-1", journal=journal, backend=backend, now="now")
+    result = ensure_submission("job-1", journal=journal, ensure=backend.ensure, now="now")
 
     assert isinstance(result.fact, Created)
     assert result.progress.fact == result.fact
@@ -120,7 +120,7 @@ def test_adopted_exact_is_only_a_fact_not_policy() -> None:
     result = ensure_submission(
         "job-1",
         journal=Journal(SubmissionClaim(spec(), "first")),
-        backend=Backend(ensure=fact, observe=ObservedExact("r", "RUNNING")),
+        ensure=Backend(ensure=fact, observe=ObservedExact("r", "RUNNING")).ensure,
         now="now",
     )
 
@@ -154,7 +154,7 @@ def test_observe_submissions_records_observation_fact_without_absence_policy() -
         observe=ObservationAmbiguous("provider read timed out"),
     )
 
-    progress = observe_submissions(journal=journal, backend=backend, now="now")
+    progress = observe_submissions(journal=journal, observe=backend.observe, now="now")
 
     assert isinstance(progress[0].fact, ObservationAmbiguous)
     assert journal.events == ["observe-claims", "observe:ObservationAmbiguous", "progress"]

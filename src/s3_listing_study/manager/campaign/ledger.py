@@ -28,7 +28,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-import twinstamp as ts
+import twinstamp.coordination as ts
 from s3_listing_study.manager.campaign.models import (
     BatchJobSpec,
     CaseControllerProgress,

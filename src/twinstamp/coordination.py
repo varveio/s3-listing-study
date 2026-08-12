@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import Generic, Literal, Protocol, TypeAlias, TypeVar
+from typing import ClassVar, Generic, Literal, Protocol, TypeAlias, TypeVar
 
 JobSpecT = TypeVar("JobSpecT")
 ProgressT = TypeVar("ProgressT")
@@ -20,6 +20,7 @@ EffectKind: TypeAlias = Literal[
     "not_visible",
     "observation_ambiguous",
 ]
+ClaimValues: TypeAlias = tuple[EffectKind, str | None, str | None, bool, str | None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,144 +53,101 @@ class ProviderSettlementClaim:
     failure_type: str | None = None
 
 
+class _ClaimedFact:
+    def _claims(self) -> ClaimValues:
+        if isinstance(self, Created | AdoptedExact | ObservedExact):
+            return self._kind, self.resource_name, self.state, self.settled, None
+        if isinstance(self, RejectedNoEffect):
+            return "rejected_no_effect", None, self.state, True, self.failure_type
+        if isinstance(self, Collision | ObservedCollision):
+            kind: EffectKind = "collision" if isinstance(self, Collision) else "observed_collision"
+            return kind, self.resource_name, self.state, self.settled, self.failure_type
+        if isinstance(self, Ambiguous):
+            return "ambiguous", None, None, False, None
+        if isinstance(self, NotVisible):
+            return "not_visible", None, None, False, None
+        if isinstance(self, ObservationAmbiguous):
+            return "observation_ambiguous", None, None, False, None
+        raise AssertionError(f"unknown provider fact: {type(self).__name__}")
+
+    @property
+    def effect(self) -> ProviderEffectClaim:
+        kind, resource, _state, _settled, _failure = self._claims()
+        return ProviderEffectClaim(kind, resource)
+
+    @property
+    def settlement(self) -> ProviderSettlementClaim:
+        _kind, _resource, state, settled, failure = self._claims()
+        return ProviderSettlementClaim(state, settled, failure)
+
+
 @dataclass(frozen=True, slots=True)
-class Created:
+class Created(_ClaimedFact):
+    _kind: ClassVar[EffectKind] = "created"
     resource_name: str
     state: str
     settled: bool = False
 
-    @property
-    def effect(self) -> ProviderEffectClaim:
-        return ProviderEffectClaim("created", self.resource_name)
-
-    @property
-    def settlement(self) -> ProviderSettlementClaim:
-        return ProviderSettlementClaim(self.state, self.settled)
-
 
 @dataclass(frozen=True, slots=True)
-class AdoptedExact:
+class AdoptedExact(_ClaimedFact):
+    _kind: ClassVar[EffectKind] = "adopted_exact"
     resource_name: str
     state: str
     settled: bool = False
 
-    @property
-    def effect(self) -> ProviderEffectClaim:
-        return ProviderEffectClaim("adopted_exact", self.resource_name)
-
-    @property
-    def settlement(self) -> ProviderSettlementClaim:
-        return ProviderSettlementClaim(self.state, self.settled)
-
 
 @dataclass(frozen=True, slots=True)
-class RejectedNoEffect:
+class RejectedNoEffect(_ClaimedFact):
     failure_type: str
     state: str = "NOT_CREATED"
 
-    @property
-    def effect(self) -> ProviderEffectClaim:
-        return ProviderEffectClaim("rejected_no_effect")
-
-    @property
-    def settlement(self) -> ProviderSettlementClaim:
-        return ProviderSettlementClaim(self.state, True, self.failure_type)
-
 
 @dataclass(frozen=True, slots=True)
-class Collision:
+class Collision(_ClaimedFact):
     failure_type: str
     resource_name: str | None = None
     state: str | None = None
     settled: bool = False
 
-    @property
-    def effect(self) -> ProviderEffectClaim:
-        return ProviderEffectClaim("collision", self.resource_name)
-
-    @property
-    def settlement(self) -> ProviderSettlementClaim:
-        return ProviderSettlementClaim(self.state, self.settled, self.failure_type)
-
 
 @dataclass(frozen=True, slots=True)
-class Ambiguous:
+class Ambiguous(_ClaimedFact):
     reason: str
     error_type: str | None = None
-
-    @property
-    def effect(self) -> ProviderEffectClaim:
-        return ProviderEffectClaim("ambiguous")
-
-    @property
-    def settlement(self) -> ProviderSettlementClaim:
-        return ProviderSettlementClaim(None, False)
 
 
 EnsureFact: TypeAlias = Created | AdoptedExact | RejectedNoEffect | Collision | Ambiguous
 
 
 @dataclass(frozen=True, slots=True)
-class ObservedExact:
+class ObservedExact(_ClaimedFact):
+    _kind: ClassVar[EffectKind] = "observed_exact"
     resource_name: str
     state: str
     settled: bool = False
 
-    @property
-    def effect(self) -> ProviderEffectClaim:
-        return ProviderEffectClaim("observed_exact", self.resource_name)
-
-    @property
-    def settlement(self) -> ProviderSettlementClaim:
-        return ProviderSettlementClaim(self.state, self.settled)
-
 
 @dataclass(frozen=True, slots=True)
-class ObservedCollision:
+class ObservedCollision(_ClaimedFact):
     failure_type: str
     resource_name: str | None = None
     state: str | None = None
     settled: bool = False
 
-    @property
-    def effect(self) -> ProviderEffectClaim:
-        return ProviderEffectClaim("observed_collision", self.resource_name)
-
-    @property
-    def settlement(self) -> ProviderSettlementClaim:
-        return ProviderSettlementClaim(self.state, self.settled, self.failure_type)
-
 
 @dataclass(frozen=True, slots=True)
-class NotVisible:
+class NotVisible(_ClaimedFact):
     reason: str
 
-    @property
-    def effect(self) -> ProviderEffectClaim:
-        return ProviderEffectClaim("not_visible")
-
-    @property
-    def settlement(self) -> ProviderSettlementClaim:
-        return ProviderSettlementClaim(None, False)
-
 
 @dataclass(frozen=True, slots=True)
-class ObservationAmbiguous:
+class ObservationAmbiguous(_ClaimedFact):
     reason: str
     error_type: str | None = None
 
-    @property
-    def effect(self) -> ProviderEffectClaim:
-        return ProviderEffectClaim("observation_ambiguous")
 
-    @property
-    def settlement(self) -> ProviderSettlementClaim:
-        return ProviderSettlementClaim(None, False)
-
-
-ObservationFact: TypeAlias = (
-    ObservedExact | ObservedCollision | NotVisible | ObservationAmbiguous
-)
+ObservationFact: TypeAlias = ObservedExact | ObservedCollision | NotVisible | ObservationAmbiguous
 
 
 @dataclass(frozen=True, slots=True)
@@ -204,23 +162,6 @@ class SubmissionClaim(Generic[JobSpecT]):
 class EnsureResult(Generic[ProgressT]):
     progress: ProgressT
     fact: EnsureFact | None
-
-
-class JobBackend(Protocol[JobSpecT]):
-    def ensure(self, spec: SubmissionSpec[JobSpecT]) -> EnsureFact: ...
-    def observe(self, spec: SubmissionSpec[JobSpecT]) -> ObservationFact: ...
-
-
-@dataclass(frozen=True, slots=True)
-class FunctionBackend(Generic[JobSpecT]):
-    ensure_fn: Callable[[SubmissionSpec[JobSpecT]], EnsureFact]
-    observe_fn: Callable[[SubmissionSpec[JobSpecT]], ObservationFact]
-
-    def ensure(self, spec: SubmissionSpec[JobSpecT]) -> EnsureFact:
-        return self.ensure_fn(spec)
-
-    def observe(self, spec: SubmissionSpec[JobSpecT]) -> ObservationFact:
-        return self.observe_fn(spec)
 
 
 class IntentJournal(Protocol[JobSpecT, ProgressT]):
@@ -240,7 +181,7 @@ def ensure_submission(
     key: str,
     *,
     journal: IntentJournal[JobSpecT, ProgressT],
-    backend: JobBackend[JobSpecT],
+    ensure: Callable[[SubmissionSpec[JobSpecT]], EnsureFact],
     now: str,
 ) -> EnsureResult[ProgressT]:
     """Reserve/claim intent, perform one provider ensure, and durably record the fact."""
@@ -248,7 +189,7 @@ def ensure_submission(
     claim = journal.claim_submission(key, now=now)
     if claim is None:
         return EnsureResult(journal.existing_submission(key), None)
-    fact = backend.ensure(claim.spec)
+    fact = ensure(claim.spec)
     return EnsureResult(journal.record_ensure(claim, fact, now=now), fact)
 
 
@@ -256,23 +197,23 @@ def ensure_claim(
     claim: SubmissionClaim[JobSpecT],
     *,
     journal: IntentJournal[JobSpecT, ProgressT],
-    backend: JobBackend[JobSpecT],
+    ensure: Callable[[SubmissionSpec[JobSpecT]], EnsureFact],
     now: str,
 ) -> EnsureResult[ProgressT]:
     """Perform provider ensure for a pre-reserved claim and durably record the fact."""
 
-    fact = backend.ensure(claim.spec)
+    fact = ensure(claim.spec)
     return EnsureResult(journal.record_ensure(claim, fact, now=now), fact)
 
 
 def observe_submissions(
     *,
     journal: IntentJournal[JobSpecT, ProgressT],
-    backend: JobBackend[JobSpecT],
+    observe: Callable[[SubmissionSpec[JobSpecT]], ObservationFact],
     now: str,
 ) -> list[ProgressT]:
     """Observe active provider effects once and let the journal settle safe transitions."""
 
     for claim in journal.observation_claims(now=now):
-        journal.record_observation(claim, backend.observe(claim.spec), now=now)
+        journal.record_observation(claim, observe(claim.spec), now=now)
     return journal.progress()

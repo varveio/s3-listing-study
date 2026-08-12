@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TypeVar
 
-from twinstamp.profiles import EvidenceProfile, foreign_profile_name
+from twinstamp.profiles import EvidenceProfile
 from twinstamp.resolution import DiscoveredUnit, UnrecognizedEvidenceUnit
 from twinstamp.stores import ChildPrefixReader
 
@@ -41,7 +41,7 @@ def discover_units(
             :class:`ChildLimitExceeded`.
 
     Returns:
-        Units sorted by child key.  Invalid and other-profile keys are retained
+        Units sorted by child key. Invalid keys are retained
         as :class:`UnrecognizedEvidenceUnit` values for the validator to assess.
 
     Raises:
@@ -63,15 +63,10 @@ def discover_units(
     for key in sorted(found):
         unit = profile.parse(key)
         if unit is None:
-            foreign = foreign_profile_name(profile, key)
             discovered.append(
                 DiscoveredUnit(
                     key,
-                    UnrecognizedEvidenceUnit(
-                        key,
-                        "foreign_profile" if foreign is not None else "invalid_unit_key",
-                        foreign,
-                    ),
+                    UnrecognizedEvidenceUnit(key),
                 )
             )
         else:

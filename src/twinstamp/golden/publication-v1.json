@@ -3,9 +3,6 @@
   "prefix": "golden/slot",
   "profile": "physical-execution",
   "unit": "11111111-1111-4111-8111-111111111111",
-  "units": {
-    "foreign_logical": "logical-task-0-retry-0-runnable-0"
-  },
   "artifacts": [
     {
       "name": "stdout.raw.gz",
@@ -81,14 +78,6 @@
       "objects": ["stdout.raw.gz", "stderr.raw.gz"],
       "read_back": ["stderr.raw.gz"],
       "outcome": "refused-unsealed"
-    },
-    {
-      "name": "foreign-profile",
-      "action": "foreign-profile",
-      "marker": "marker",
-      "unit": "foreign_logical",
-      "foreign_profile": "logical-attempt",
-      "outcome": "unrecognized"
     },
     {
       "name": "noncanonical-marker",

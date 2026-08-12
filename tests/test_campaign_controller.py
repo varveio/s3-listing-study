@@ -20,7 +20,7 @@ from s3_listing_study.manager.campaign.models import (
     CaseControllerProgress,
 )
 from tests.test_campaign_batch import attempt
-from twinstamp import (
+from twinstamp.coordination import (
     AdoptedExact,
     Ambiguous,
     Collision,

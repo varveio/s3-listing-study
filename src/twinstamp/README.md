@@ -12,18 +12,19 @@ a valid seal means that the caller validated a complete marker-last evidence
 unit.  It does **not** mean the worker succeeded, the result is correct, the
 payload is trustworthy, or the marker is a cryptographic signature.
 
-The name, Python API, and storage convention are provisional.  The package is
-being extracted from the S3 listing study as a reusable evidence core; a second
-client, a versioned convention, and broader adapters are needed before its API
-is frozen.
+The name, Python API, and storage convention are provisional. The package is
+being extracted from the S3 listing study as a reusable evidence core and its
+API has not been frozen.
+
+The package root exposes the common reconciliation path. Publication and
+provider coordination live in `twinstamp.publication` and
+`twinstamp.coordination` so their specialist types do not inflate that surface.
 
 ## Model and identities
 
-Callers own the first two coordinates:
+Callers own the first two coordinates passed to `reconcile()`: an object-store
+prefix for one requested answer and the `EvidenceProfile` accepted beneath it.
 
-- `ResultSlot(prefix, profile)` is one requested answer at an object-store
-  prefix. A slot has exactly one
-  `EvidenceProfile`; child keys under it must not mix profiles.
 - `Submission(key)` is one deliberate provider-job generation of that slot.  A
   curated retry gets a new immutable submission; provider-native retries belong
   inside the submission.
@@ -32,16 +33,11 @@ Callers own the first two coordinates:
 
 `reconcile()` reads each recognized child's configured marker once and returns
 a `SlotResolution` that preserves leaves and groups
-them by submission.  Its `Selection` is a separate policy outcome.  Absence,
+them by submission. Its `Selection` is a separate outcome. Absence,
 seal validity, duplicate ambiguity, and selection are deliberately not folded
 into one status field.
 
-## Two non-equivalent assurance profiles
-
-TwinStamp includes two mutually non-parseable key grammars.  Choosing one is an
-assurance decision, not a formatting preference.
-
-### Physical execution
+## Physical execution identity
 
 `PHYSICAL_EXECUTION` uses a canonical UUIDv4 key for each physical invocation.
 Every invocation gets a disjoint leaf, so multiple launches for one submission
@@ -58,30 +54,8 @@ key = PHYSICAL_EXECUTION.render(unit)  # e.g. "e119..." (canonical UUIDv4)
 assert PHYSICAL_EXECUTION.parse(key) == unit
 ```
 
-The S3 listing study currently uses this profile.  That is a conservative study
+The S3 listing study uses this profile. That is a conservative study
 policy, not a claim that a specific backend normally launches duplicates.
-
-### Logical attempt
-
-`LOGICAL_ATTEMPT` uses the backend's complete scheduler coordinate:
-`logical-task-<task>-retry-<retry>-runnable-<runnable>`.  Normal retries with a
-new retry coordinate are distinct units and directly addressable.
-
-```python
-from twinstamp import LOGICAL_ATTEMPT, LogicalAttemptUnit
-
-unit = LogicalAttemptUnit(task_index=3, retry_index=1, runnable_index=0)
-key = LOGICAL_ATTEMPT.render(unit)
-assert key == "logical-task-3-retry-1-runnable-0"
-assert LOGICAL_ATTEMPT.parse(key) == unit
-```
-
-This profile trusts the backend not to run multiple physical invocations under
-the same complete coordinate.  It cannot preserve a same-coordinate duplicate
-as a separate unit: a validator reports it as `PublicationConflict`, making
-the leaf invalid.  Writers should create artifacts conditionally in fixed order,
-refuse to seal after a conflict, and resolve ambiguous creates with a
-version/generation and digest read-back.
 
 ## Immutable evidence and seals
 
@@ -107,7 +81,7 @@ Each leaf has an independent `SealState`:
 
 - `UNSEALED`: incomplete or no seal witness;
 - `VALID`: a complete marker-last witness was validated and a `Seal` is present;
-- `INVALID`: malformed, conflicting, or failed validation evidence.
+- `INVALID`: malformed or failed validation evidence.
 
 A domain `LeafAssessment` can carry opaque `evidence`, `execution_outcome`, and
 `domain_verdict`; TwinStamp never interprets them. Before domain validation,
@@ -115,31 +89,25 @@ the core itself constructs typed assessments for unrecognized units, missing
 markers, and invalid markers. An `UnrecognizedEvidenceUnit` therefore remains
 visible without invoking caller code or reading its marker.
 
-`SelectionState` is separate.  It can be `PENDING`, `MISSING`, `SELECTED`,
-`DUPLICATE`, `INVALID`, `UNSEALED`, or `PUBLICATION_CONFLICT`.  `PENDING` skips
-storage discovery until the provider effect is settled.  A policy selects from
-current leaves only; historical leaves remain visible but are not candidates.
-
-Two supplied policies intentionally differ:
-
-- `SelectExactlyOne` treats any two
-  current children—valid, invalid, or unsealed—produce `DUPLICATE`.
-- `ValidSealsOnly` selects exactly one valid, conflict-free current leaf.  Torn
-  or invalid siblings do not hide it, but multiple valid leaves are duplicates.
+`SelectionState` is separate. It can be `PENDING`, `MISSING`, `SELECTED`,
+`DUPLICATE`, `INVALID`, or `UNSEALED`. `PENDING` skips storage discovery until
+the provider effect is settled. Selection is deliberately strict: any two
+current children—valid, invalid, or unsealed—produce `DUPLICATE`. Historical
+leaves remain visible but are not candidates.
 
 ## Discovery and reconciliation
 
-Discovery reads only unique *immediate child prefixes* below `ResultSlot.prefix`.
+Discovery reads only unique *immediate child prefixes* below the supplied prefix.
 Direct objects at the prefix are not units.  Children are sorted, invalid and
-foreign-profile keys are retained as anomalies, and more than `max_children`
+unrecognized keys are retained as anomalies, and more than `max_children`
 accepted children raises `ChildLimitExceeded` instead of returning a truncated
 answer.  The limit bounds accepted children, not the underlying paginated list
 work.
 
-The caller supplies the storage adapter, marker convention, leaf validator, and
-selection policy. The validator is invoked only with a `CanonicalEvidenceUnit`:
+The caller supplies the storage adapter, marker convention, and leaf validator.
+The validator is invoked only with a `CanonicalEvidenceUnit`:
 a recognized identity plus one present, canonical, bounded marker document.
-Missing, malformed, oversized, or foreign evidence never reaches domain code
+Missing, malformed, oversized, or unrecognized evidence never reaches domain code
 and cannot become valid or historical. A fully validated assessment may
 attribute itself to an earlier submission; TwinStamp retains it as history and
 excludes it from current selection.
@@ -188,8 +156,10 @@ visibility semantics remain adapter responsibilities.  The included
 
 ## Language-neutral publication convention
 
-`EvidencePublication` binds a typed unit to one `EvidenceProfile`, a fixed
-ordered artifact manifest, and one marker. `publish()` validates every
+`EvidencePublication` binds a caller-resolved destination prefix to a fixed
+ordered artifact manifest and one marker. Campaign callers can instead use
+`EvidencePublication.for_unit()` to bind and validate a typed unit against an
+`EvidenceProfile`. `publish()` validates every
 canonical contained relative name and streams every payload through its
 declared size and SHA-256 before the first create. It then conditionally creates
 artifacts in the caller's exact order and the marker last.
@@ -205,16 +175,16 @@ The Python helper is optional. The durable interoperability surface is the
 byte/path/order/state convention, represented by
 `golden/publication-v1.json`; workers in other languages need not import
 TwinStamp. The vectors include the canonical marker tree and bytes plus sealed,
-torn, conflict, ambiguous-exact, ambiguous-mismatch, foreign-profile, and
-noncanonical cases. Conformance means producing trees the current reader
+torn, conflict, ambiguous-exact, ambiguous-mismatch, and noncanonical cases.
+Conformance means producing trees the current reader
 validates, not using a particular implementation class.
 
 ## Submission coordination
 
 TwinStamp now also provides a small function-first coordination seam for
 provider jobs and durable intent.  Callers build a `SubmissionSpec` from exact
-immutable canonical bytes plus their SHA-256 digest, then supply a `JobBackend`
-and `IntentJournal`.
+immutable canonical bytes plus their SHA-256 digest, then supply typed
+ensure/observe callables and an `IntentJournal`.
 
 `ensure_submission()` owns the reserve/claim → provider ensure/adopt → durable
 record path. `observe_submissions()` owns one observation pass and asks the
@@ -231,9 +201,9 @@ clean, as the S3 listing study does through its SQLite journal adapter.
 
 ## Study adapter status
 
-The S3 listing study is the first client. Its existing report paths,
-marker bytes, validator, strict duplicate behavior, history derivation, and
-finality behavior, GCP Batch normalization, request rendering, SQLite schema,
+The S3 listing study is the first client. Its existing report paths, marker
+bytes, physical-execution identity, validator, strict duplicate behavior,
+history derivation, finality behavior, GCP Batch normalization, request rendering, SQLite schema,
 canonical `job_json` encoding, and exact adoption policy remain study-owned.
 TwinStamp supplies only generic evidence, reconciliation, typed provider facts,
 and intent/job orchestration seams.  It has no imports of the study, cloud SDKs,
@@ -248,11 +218,9 @@ Today the package does not provide:
 - final-publication writer fencing or an atomic namespace snapshot;
 - cryptographic signing, authentication, or a correctness/domain-verdict
   policy;
-- a CLI, a packaged non-Python writer kit, or a second production
-  store/backend/client.
+- a CLI, a packaged non-Python writer kit, or a second production client or
+  backend.
 
-Next work includes a post-fence fresh scan for final publication and validation
-against materially different adapters and a second client. Those are separate
-changes so this core stays a small, behavior-preserving extraction. The current
+Next work includes a post-fence fresh scan for final publication. The current
 convention and API remain provisional; create-only calls do not establish
 ongoing immutability where credentials can delete and recreate names.

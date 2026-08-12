@@ -48,13 +48,13 @@ import re
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, BinaryIO
 
-from twinstamp import (
-    EvidenceProfile,
+from twinstamp.profiles import EvidenceProfile
+from twinstamp.publication import (
     EvidencePublication,
     ObjectConflict,
     ObjectCreateAmbiguous,
@@ -80,26 +80,6 @@ TIMEOUT_S = 120.0
 """Per-socket-operation deadline, so a stalled upload cannot hang an attempt."""
 
 PRECONDITION_FAILED = 412
-
-Uploader = Callable[[str, str, Path], ObjectCreateResult | None]
-ReadBack = Callable[[str, str, int], ObjectReadBack | None]
-
-
-class _DirectDestinationProfile:
-    """Compatibility profile for caller-owned, non-campaign destination leaves."""
-
-    name = "study-direct-destination"
-
-    def parse(self, key: str) -> str | None:
-        return key if "/" not in key else None
-
-    def render(self, unit: str) -> str:
-        if self.parse(unit) != unit:
-            raise ValueError("direct destination leaf must be at most one path component")
-        return unit
-
-
-_DIRECT_DESTINATION = _DirectDestinationProfile()
 
 
 class UploadError(RuntimeError):
@@ -379,37 +359,11 @@ class _GCSStore:
         return _read_back_one(self.bucket, key, max_bytes, self.token)
 
 
-class _CallbackStore:
-    def __init__(
-        self,
-        bucket: str,
-        paths: Mapping[str, Path],
-        uploader: Uploader,
-        reader: ReadBack | None,
-    ) -> None:
-        self.bucket = bucket
-        self.paths = paths
-        self.uploader = uploader
-        self.reader = reader
-
-    def create(self, key: str, payload: PublicationObject) -> ObjectCreateResult:
-        result = self.uploader(self.bucket, key, self.paths[payload.name])
-        # Preserve the small historical injection seam while real adapters must
-        # return the typed, versioned result.
-        return ObjectCreated("injected") if result is None else result
-
-    def read_back(self, key: str, *, max_bytes: int) -> ObjectReadBack | None:
-        if self.reader is None:
-            raise UploadError("the injected uploader supplied no ambiguous read-back adapter")
-        return self.reader(self.bucket, key, max_bytes)
-
-
 def upload_attempt(
     attempt_dir: Path,
     destination: str,
     *,
-    uploader: Uploader | None = None,
-    reader: ReadBack | None = None,
+    store: PublicationStore | None = None,
     profile: EvidenceProfile[Any] | None = None,
     unit: object | None = None,
 ) -> list[str]:
@@ -418,15 +372,7 @@ def upload_attempt(
     bucket, prefix = parse_destination(destination)
     result_path = result_artifact.path
     root = result_path.parent
-    all_artifacts = (*files, result_artifact)
-    paths = {
-        artifact.path.relative_to(root).as_posix(): artifact.path
-        for artifact in all_artifacts
-    }
-    labels = {
-        artifact.path.relative_to(root).as_posix(): artifact.label
-        for artifact in files
-    }
+    labels = {artifact.path.relative_to(root).as_posix(): artifact.label for artifact in files}
 
     def publication_object(artifact: _ValidatedArtifact) -> PublicationObject:
         def open_payload() -> BinaryIO:
@@ -441,26 +387,10 @@ def upload_attempt(
 
     artifacts = tuple(publication_object(artifact) for artifact in files)
     marker = publication_object(result_artifact)
-    leaf = prefix.rsplit("/", 1)[-1]
-    if profile is None:
-        selected_profile: EvidenceProfile[Any] = _DIRECT_DESTINATION
-        selected_unit: object = leaf
-    else:
-        if unit is None or profile.render(unit) != leaf:
-            raise UploadError("destination leaf does not match the supplied evidence unit")
-        selected_profile = profile
-        selected_unit = unit
-    slot_prefix = prefix[: -(len(leaf) + 1)] if "/" in prefix else ""
-    publication = EvidencePublication(
-        slot_prefix, selected_profile, selected_unit, artifacts, marker
-    )
-    store: PublicationStore = (
-        _CallbackStore(bucket, paths, uploader, reader)
-        if uploader is not None
-        else _authenticated_uploader(bucket)
-    )
+    publication = _publication(prefix, artifacts, marker, profile, unit)
+    selected_store = store if store is not None else _authenticated_store(bucket)
     try:
-        receipt = publish(publication, store)
+        receipt = publish(publication, selected_store)
     except PublicationRefused as exc:
         if (
             exc.reason == "payload does not match its declared size/sha256"
@@ -479,7 +409,32 @@ def upload_attempt(
     return [item.key for item in receipt.objects]
 
 
-def _authenticated_uploader(bucket: str) -> PublicationStore:
+def _publication(
+    prefix: str,
+    artifacts: tuple[PublicationObject, ...],
+    marker: PublicationObject,
+    profile: EvidenceProfile[Any] | None,
+    unit: object | None,
+) -> EvidencePublication:
+    """Build a direct publication or explicitly bind a campaign identity."""
+    if profile is None:
+        if unit is not None:
+            raise UploadError("an evidence unit requires a profile")
+        return EvidencePublication(prefix, artifacts, marker)
+    if unit is None:
+        raise UploadError("an evidence profile requires a unit")
+    leaf = prefix.rsplit("/", 1)[-1]
+    slot_prefix = prefix[: -(len(leaf) + 1)] if "/" in prefix else ""
+    try:
+        publication = EvidencePublication.for_unit(slot_prefix, profile, unit, artifacts, marker)
+    except ValueError as exc:
+        raise UploadError(str(exc)) from exc
+    if publication.prefix != prefix:
+        raise UploadError("destination leaf does not match the supplied evidence unit")
+    return publication
+
+
+def _authenticated_store(bucket: str) -> PublicationStore:
     """Resolve the token once, then upload every object with it."""
     token = access_token()
 

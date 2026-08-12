@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-import twinstamp as ts
+import twinstamp.coordination as ts
 from s3_listing_study.manager.campaign import ledger, provider
 from s3_listing_study.manager.campaign.models import CaseControllerProgress
 
@@ -65,12 +65,12 @@ def start_campaign(
         jobs=jobs, controller_timeouts=controller_timeouts, now=utc_now(),
     )
     journal = ledger.SQLiteIntentJournal(ledger_path, campaign)
-    backend = ts.FunctionBackend(provider.ensure_batch_job, provider.observe_batch_job)
-    ensure = ts.ensure_submission
     statuses: list[dict[str, Any]] = []
     for index, base_job_id in enumerate((str(item["job_id"]) for item in attempts), start=1):
         with _provider_call_lock(ledger_path, base_job_id):
-            result = ensure(base_job_id, journal=journal, backend=backend, now=utc_now())
+            result = ts.ensure_submission(
+                base_job_id, journal=journal, ensure=provider.ensure_batch_job, now=utc_now()
+            )
             statuses.append(_status(result))
         if index % START_WAVE_SIZE == 0 and index < len(attempts):
             time.sleep(START_WAVE_DELAY_S)
@@ -81,7 +81,7 @@ def reconcile_once(*, ledger_path: Path, campaign: str) -> list[CaseControllerPr
     """Poll each active exact resource once and persist terminal settlement."""
     return ts.observe_submissions(
         journal=ledger.SQLiteIntentJournal(ledger_path, campaign),
-        backend=ts.FunctionBackend(provider.ensure_batch_job, provider.observe_batch_job),
+        observe=provider.observe_batch_job,
         now=utc_now(),
     )
 
@@ -104,7 +104,7 @@ def retry_case(
         if claim is not None:
             ts.ensure_claim(
                 claim, journal=ledger.SQLiteIntentJournal(ledger_path, campaign),
-                backend=ts.FunctionBackend(provider.ensure_batch_job, provider.observe_batch_job),
+                ensure=provider.ensure_batch_job,
                 now=utc_now(),
             )
     items = progress(ledger_path=ledger_path, campaign=campaign)

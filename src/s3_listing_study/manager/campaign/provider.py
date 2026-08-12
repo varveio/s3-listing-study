@@ -7,7 +7,7 @@ from google.api_core import exceptions as google_exceptions
 from google.cloud import batch_v1
 from google.protobuf.json_format import MessageToDict, ParseDict  # type: ignore[import-untyped]
 
-import twinstamp as ts
+import twinstamp.coordination as ts
 from s3_listing_study.manager.campaign.models import BatchJobSpec
 
 PERMANENT_GOOGLE_ERRORS: tuple[type[BaseException], ...] = (

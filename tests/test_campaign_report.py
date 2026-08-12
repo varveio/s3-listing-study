@@ -13,7 +13,7 @@ from google.api_core.exceptions import PreconditionFailed
 
 from s3_listing_study.manager.campaign import cli, controller, ledger, report
 from s3_listing_study.manager.campaign.models import CaseControllerProgress
-from twinstamp import ObjectReadError, ObjectReadIssue
+from twinstamp.stores import ObjectReadError, ObjectReadIssue
 
 CAMPAIGN = "2026-08-11-report"
 BUCKET = "study-results"

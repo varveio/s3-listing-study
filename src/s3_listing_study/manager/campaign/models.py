@@ -6,7 +6,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
-from twinstamp import SubmissionSpec
+from twinstamp.coordination import SubmissionSpec
 
 
 def canonical_job_json(job: dict[str, Any]) -> str:

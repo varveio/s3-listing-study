@@ -11,30 +11,29 @@ from typing import Any, BinaryIO, cast
 
 import pytest
 
-from twinstamp import (
-    PHYSICAL_EXECUTION,
-    CanonicalEvidenceUnit,
-    CanonicalJsonMarker,
+from twinstamp.identity import Submission
+from twinstamp.profiles import PHYSICAL_EXECUTION, PhysicalExecutionUnit
+from twinstamp.publication import (
     EvidencePublication,
-    LeafAssessment,
-    MarkerIssue,
     ObjectConflict,
     ObjectCreateAmbiguous,
     ObjectCreated,
     ObjectCreateResult,
     ObjectReadBack,
-    PhysicalExecutionUnit,
     PublicationObject,
     PublicationRefused,
+    publish,
+)
+from twinstamp.reconcile import reconcile
+from twinstamp.resolution import (
+    CanonicalEvidenceUnit,
+    LeafAssessment,
     SealState,
     SelectionState,
     SlotResolution,
-    StoredObject,
-    Submission,
-    UnrecognizedEvidenceUnit,
-    publish,
-    reconcile,
 )
+from twinstamp.sealcheck import CanonicalJsonMarker, MarkerIssue
+from twinstamp.stores import StoredObject
 from twinstamp.testing import MemoryObjectStore
 
 
@@ -63,12 +62,12 @@ def _payload(record: dict[str, Any]) -> tuple[PublicationObject, bytes]:
 
 def _publication(
     marker_selector: str,
-) -> tuple[EvidencePublication[PhysicalExecutionUnit], dict[str, bytes]]:
+) -> tuple[EvidencePublication, dict[str, bytes]]:
     artifacts_and_bytes = [_payload(record) for record in VECTORS["artifacts"]]
     marker, marker_bytes = _payload(cast(dict[str, Any], VECTORS[marker_selector]))
     unit = PHYSICAL_EXECUTION.parse(VECTORS["unit"])
     assert unit is not None
-    publication = EvidencePublication(
+    publication = EvidencePublication.for_unit(
         VECTORS["prefix"],
         PHYSICAL_EXECUTION,
         unit,
@@ -172,14 +171,6 @@ _CASE_KEYS = {
         "read_back",
         "outcome",
     },
-    "foreign-profile": {
-        "name",
-        "action",
-        "marker",
-        "unit",
-        "foreign_profile",
-        "outcome",
-    },
     "reader": {"name", "action", "marker", "outcome"},
 }
 
@@ -194,11 +185,6 @@ def _assert_outcome(
     elif outcome in ("unsealed", "refused-unsealed"):
         assert resolution.selection.state is SelectionState.UNSEALED
         assert resolution.leaves[0].assessment.seal_state is SealState.UNSEALED
-    elif outcome == "unrecognized":
-        assert resolution.selection.state is SelectionState.INVALID
-        discovered = resolution.leaves[0].discovered.unit
-        assert isinstance(discovered, UnrecognizedEvidenceUnit)
-        assert discovered.foreign_profile == case["foreign_profile"]
     elif outcome == "invalid":
         assert resolution.selection.state is SelectionState.INVALID
         assert resolution.leaves[0].assessment.seal_state is SealState.INVALID
@@ -227,27 +213,16 @@ def test_publication_golden_case(case: dict[str, Any]) -> None:
         for name, content in contents.items():
             if name == publication.marker.name:
                 break
-            objects[f"{publication.unit_prefix}/{name}"] = content
+            objects[f"{publication.prefix}/{name}"] = content
             if name == case["stop_after"]:
                 stopped = True
                 break
         assert stopped
-    elif action == "foreign-profile":
-        unit_selector = cast(str, case["unit"])
-        foreign_unit = cast(dict[str, str], VECTORS["units"])[unit_selector]
-        objects = {
-            f"{VECTORS['prefix']}/{foreign_unit}/{name}": content
-            for name, content in contents.items()
-        }
-        foreign = PHYSICAL_EXECUTION.parse(foreign_unit)
-        assert foreign is None
     elif action == "reader":
-        objects = {
-            f"{publication.unit_prefix}/{name}": content for name, content in contents.items()
-        }
+        objects = {f"{publication.prefix}/{name}": content for name, content in contents.items()}
         corrupt = case.get("corrupt_artifact")
         if corrupt is not None:
-            key = f"{publication.unit_prefix}/{corrupt}"
+            key = f"{publication.prefix}/{corrupt}"
             assert key in objects
             objects[key] = b"X" + objects[key][1:]
     else:
@@ -285,8 +260,6 @@ def test_all_payloads_preflight_before_first_create() -> None:
         publish(
             EvidencePublication(
                 publication.prefix,
-                publication.profile,
-                publication.unit,
                 publication.artifacts,
                 bad_marker,
             ),

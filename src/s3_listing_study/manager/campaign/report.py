@@ -29,21 +29,13 @@ from s3_listing_study.manager.campaign import (
 )
 from s3_listing_study.manager.campaign.cli import IMAGE_SET_FIELDS, _canonical_json
 from s3_listing_study.manager.campaign.models import CaseControllerProgress
-from twinstamp import (
-    PHYSICAL_EXECUTION,
-    CanonicalEvidenceUnit,
-    CanonicalJsonMarker,
-    ChildLimitExceeded,
-    EvidenceIssue,
-    LeafAssessment,
-    LeafEvidence,
-    MarkerIssue,
-    ObjectReadError,
-    ObjectReadIssue,
-    StoredObject,
-    Submission,
-    reconcile,
-)
+from twinstamp.discovery import ChildLimitExceeded
+from twinstamp.identity import Submission
+from twinstamp.profiles import PHYSICAL_EXECUTION
+from twinstamp.reconcile import reconcile
+from twinstamp.resolution import CanonicalEvidenceUnit, EvidenceIssue, LeafAssessment, LeafEvidence
+from twinstamp.sealcheck import CanonicalJsonMarker, MarkerIssue
+from twinstamp.stores import ObjectReadError, ObjectReadIssue, StoredObject
 
 MANIFEST_MAX_BYTES = 8_000_000
 RESULT_MAX_BYTES = 1_000_000
@@ -741,7 +733,7 @@ def _evidence(
         ) from None
     leaves = tuple(_leaf_record(bucket, case, leaf) for leaf in resolved.leaves)
     state = resolved.selection.state.value
-    state = {"selected": "recorded", "publication_conflict": "invalid"}.get(state, state)
+    state = "recorded" if state == "selected" else state
     selected = resolved.selected_evidence
     if selected is None:
         return EvidenceSnapshot(state, leaves, None, None)

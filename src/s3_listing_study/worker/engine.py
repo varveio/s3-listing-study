@@ -30,7 +30,7 @@ from typing import BinaryIO, Final
 from s3_listing_study.common.secret_scan import Outcome as ScanOutcome
 from s3_listing_study.common.secret_scan import scan_binary_file
 from s3_listing_study.worker.runtime_identity import interpreter_identity
-from twinstamp import PHYSICAL_EXECUTION, PhysicalExecutionUnit
+from twinstamp.profiles import PHYSICAL_EXECUTION, PhysicalExecutionUnit
 
 from .summary import summarize
 

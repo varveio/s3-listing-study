@@ -7,32 +7,27 @@ from typing import Any
 
 import pytest
 
-from twinstamp import (
-    LOGICAL_ATTEMPT,
-    PHYSICAL_EXECUTION,
-    CanonicalJsonMarker,
+from twinstamp.identity import Submission
+from twinstamp.profiles import PHYSICAL_EXECUTION, PhysicalExecutionUnit
+from twinstamp.reconcile import reconcile
+from twinstamp.resolution import (
     EvidenceIssue,
     LeafAssessment,
-    LogicalAttemptUnit,
-    MarkerIssue,
-    MarkerState,
-    PhysicalExecutionUnit,
-    PublicationConflict,
-    ResultSlot,
     Seal,
     SealState,
-    SelectExactlyOne,
     SelectionState,
-    Submission,
     UnrecognizedEvidenceUnit,
+)
+from twinstamp.sealcheck import (
+    CanonicalJsonMarker,
+    MarkerIssue,
+    MarkerState,
     parse_canonical_json_marker,
-    reconcile,
 )
 from twinstamp.testing import MemoryObjectStore
 
 PREFIX = "answers/work/run-1"
 PHYSICAL_KEY = "11111111-1111-4111-8111-111111111111"
-LOGICAL_KEY = "logical-task-0-retry-0-runnable-0"
 MARKER = CanonicalJsonMarker("seal.json", 128)
 
 
@@ -51,114 +46,35 @@ def _resolve(
         MARKER,
         validate,
         settled=settled,
-        policy=SelectExactlyOne(),
     )
 
 
-def test_profile_key_grammars_are_canonical_and_disjoint() -> None:
+def test_physical_profile_key_grammar_is_canonical() -> None:
     physical = PHYSICAL_EXECUTION.parse(PHYSICAL_KEY)
-    logical = LOGICAL_ATTEMPT.parse(LOGICAL_KEY)
     assert physical is not None
-    assert logical == LogicalAttemptUnit(task_index=0, retry_index=0, runnable_index=0)
     assert PHYSICAL_EXECUTION.render(physical) == PHYSICAL_KEY
-    assert LOGICAL_ATTEMPT.render(logical) == LOGICAL_KEY
-    assert PHYSICAL_EXECUTION.parse(LOGICAL_KEY) is None
-    assert LOGICAL_ATTEMPT.parse(PHYSICAL_KEY) is None
-    assert LOGICAL_ATTEMPT.parse("logical-task-00-retry-0-runnable-0") is None
+    assert PHYSICAL_EXECUTION.parse("not-a-uuid") is None
 
 
-def test_profile_value_objects_reject_noncanonical_coordinates() -> None:
+def test_physical_execution_rejects_non_v4_uuid() -> None:
     with pytest.raises(ValueError, match="UUIDv4"):
         PhysicalExecutionUnit(uuid.uuid1())
-    for value in (True, 1.5, "1"):
-        with pytest.raises(TypeError, match="integers"):
-            LogicalAttemptUnit(value, 0, 0)  # type: ignore[arg-type]
-    with pytest.raises(ValueError, match="non-negative"):
-        LogicalAttemptUnit(-1, 0, 0)
 
 
-def test_profile_is_carried_structurally_by_the_generic_slot() -> None:
-    slot: ResultSlot[LogicalAttemptUnit] = ResultSlot(PREFIX, LOGICAL_ATTEMPT)
-    assert slot.profile is LOGICAL_ATTEMPT
-
-
-def test_foreign_profile_child_is_retained_as_an_invalid_anomaly() -> None:
-    store = MemoryObjectStore({f"{PREFIX}/{LOGICAL_KEY}/seal.json": b"{}"})
+def test_invalid_profile_child_is_retained_as_an_unrecognized_unit() -> None:
+    store = MemoryObjectStore({f"{PREFIX}/not-a-uuid/seal.json": b"{}"})
 
     def validate(*_args: Any) -> LeafAssessment[Any, str]:
-        raise AssertionError("foreign evidence must not reach domain validation")
+        raise AssertionError("unrecognized evidence must not reach domain validation")
 
     resolved = _resolve(store, profile=PHYSICAL_EXECUTION, validate=validate)
     assert resolved.profile is PHYSICAL_EXECUTION
     assert resolved.selection.state is SelectionState.INVALID
     unit = resolved.leaves[0].discovered.unit
     assert isinstance(unit, UnrecognizedEvidenceUnit)
-    assert unit.anomaly == "foreign_profile"
-    assert unit.foreign_profile == "logical-attempt"
+    assert unit.key == "not-a-uuid"
     assert resolved.leaves[0].assessment.issue is EvidenceIssue.UNRECOGNIZED_UNIT
     assert store.read_calls == []
-
-
-def test_logical_engine_retries_are_distinct_coordinates() -> None:
-    retry = "logical-task-0-retry-1-runnable-0"
-    store = MemoryObjectStore(
-        {
-            f"{PREFIX}/{LOGICAL_KEY}/seal.json": b"{}\n",
-            f"{PREFIX}/{retry}/seal.json": b"{}\n",
-        }
-    )
-
-    def validate(candidate: Any, _submission: Submission) -> LeafAssessment[Any, str]:
-        return LeafAssessment(SealState.VALID, candidate.key, Seal(candidate.marker.key))
-
-    resolved = _resolve(store, profile=LOGICAL_ATTEMPT, validate=validate)
-    units = [leaf.discovered.unit for leaf in resolved.leaves]
-    assert units == [
-        LogicalAttemptUnit(task_index=0, retry_index=0, runnable_index=0),
-        LogicalAttemptUnit(task_index=0, retry_index=1, runnable_index=0),
-    ]
-    assert resolved.selection.state is SelectionState.DUPLICATE
-
-
-def test_same_coordinate_logical_collision_is_a_publication_conflict() -> None:
-    store = MemoryObjectStore({f"{PREFIX}/{LOGICAL_KEY}/seal.json": b"{}\n"})
-
-    def validate(candidate: Any, _submission: Submission) -> LeafAssessment[Any, str]:
-        assert isinstance(candidate.unit, LogicalAttemptUnit)
-        conflict = PublicationConflict(
-            candidate.unit,
-            f"{PREFIX}/{LOGICAL_KEY}/artifact.bin",
-            "conditional_create_conflict",
-        )
-        return LeafAssessment(
-            SealState.INVALID,
-            "conflict",
-            publication_conflict=conflict,
-        )
-
-    resolved = _resolve(store, profile=LOGICAL_ATTEMPT, validate=validate)
-    assert len(resolved.leaves) == 1
-    assert resolved.selection.state is SelectionState.PUBLICATION_CONFLICT
-    assert resolved.leaves[0].assessment.publication_conflict is not None
-
-
-def test_publication_conflict_rejects_a_different_unit() -> None:
-    store = MemoryObjectStore({f"{PREFIX}/{LOGICAL_KEY}/seal.json": b"{}\n"})
-
-    def validate(candidate: Any, _submission: Submission) -> LeafAssessment[Any, str]:
-        conflict = PublicationConflict(
-            LogicalAttemptUnit(task_index=0, retry_index=1, runnable_index=0),
-            f"{PREFIX}/{LOGICAL_KEY}/artifact.bin",
-            "conditional_create_conflict",
-        )
-        return LeafAssessment(
-            SealState.INVALID,
-            "conflict",
-            publication_conflict=conflict,
-        )
-
-    with pytest.raises(ValueError, match="must name its discovered unit"):
-        _resolve(store, profile=LOGICAL_ATTEMPT, validate=validate)
 
 
 def test_pending_resolution_performs_no_listing() -> None:
@@ -189,7 +105,6 @@ def test_invalid_current_evidence_is_revalidated_against_prior_submissions() -> 
         current,
         MARKER,
         validate,
-        policy=SelectExactlyOne(),
     )
 
     assert resolved.selection.state is SelectionState.MISSING
