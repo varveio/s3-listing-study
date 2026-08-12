@@ -10,13 +10,24 @@ nothing here cares.
 Opens campaign.db read-only (mode=ro): report.py only ever reads the ledger,
 so a stray write here is a bug this should fail loudly on, not tolerate.
 
-Like verify.py, a job's directory under --attempts-root is a *destination
-prefix*, not the attempt itself: report.py resolves it to the one attempt
-leaf underneath (see verify.resolve_leaf) and reports AMBIGUOUS or
-INCOMPLETE rather than guessing when that resolution doesn't land cleanly.
+Like verify.py, a job's destination is a *prefix*, not the attempt itself:
+report.py resolves it to the one attempt leaf underneath (see
+verify.resolve_leaf), then reads result.json/verify.json off that leaf
+through verify.read_bytes_at -- which already dispatches on gs:// vs local,
+so --attempts-root gs://... needs no separate code path here.
+
+Three columns never share one vocabulary: job_state is Batch's own state
+(or a leaf-resolution failure, AMBIGUOUS_LEAF/INCOMPLETE_LEAF, which is a
+job-level fact, not the tool's); exit is the subject's own exit code from
+result.json; verdict is verify.json's verdict, or "-" if no verify.json
+exists yet (never the job or subject state). The summary line's average
+wall time is over verified attempts only (exit 0 and a PASS/DRIFT verdict)
+-- a crashed or unverified attempt's wall time is not a listing-speed
+number, and averaging it in would quietly make the average mean something
+else.
 
 Usage:
-    report.py --state campaign.db --attempts-root /local/attempts
+    report.py --state campaign.db --attempts-root gs://results-bucket
 """
 
 from __future__ import annotations
@@ -26,38 +37,47 @@ import json
 import sqlite3
 import sys
 from datetime import UTC, datetime
-from pathlib import Path
 
 from campaign import STATE_FILENAME, latest_submissions, open_db
-from verify import has_result_marker, resolve_leaf
+from verify import has_result_marker, read_bytes_at, resolve_leaf
 
-COLUMNS = ("tool", "mode", "wall_seconds", "max_rss_kb", "verdict")
+COLUMNS = ("tool", "mode", "job_state", "exit", "row_count", "wall_seconds", "verdict")
 
 
-def load_json(path: Path) -> dict | None:
-    if not path.exists():
+def load_json_at(leaf: str, name: str) -> dict | None:
+    try:
+        return json.loads(read_bytes_at(leaf, name))
+    except Exception:
+        # Missing is the common, expected case for verify.json (comparison
+        # not yet run); any other read failure degrades to "unavailable"
+        # the same way rather than crashing a summary over one bad leaf.
         return None
-    return json.loads(path.read_text())
 
 
-def row_for(row: sqlite3.Row, attempts_root: Path) -> dict:
-    destination = str(attempts_root / row["job_id"])
-    leaf = resolve_leaf(destination)
+def _destination_for(attempts_root: str, job_id: str) -> str:
+    if attempts_root.startswith("gs://"):
+        return attempts_root.rstrip("/") + "/" + job_id + "/"
+    return attempts_root.rstrip("/") + "/" + job_id
+
+
+def row_for(row: sqlite3.Row, attempts_root: str) -> dict:
+    base = {"tool": row["tool"], "mode": row["mode"], "exit": "-", "row_count": "-", "wall_seconds": "-", "verdict": "-"}
+    leaf = resolve_leaf(_destination_for(attempts_root, row["job_id"]))
     if leaf is None:
-        return {"tool": row["tool"], "mode": row["mode"],
-                "wall_seconds": "-", "max_rss_kb": "-", "verdict": "AMBIGUOUS"}
+        return {**base, "job_state": "AMBIGUOUS_LEAF"}
     if not has_result_marker(leaf):
-        return {"tool": row["tool"], "mode": row["mode"],
-                "wall_seconds": "-", "max_rss_kb": "-", "verdict": "INCOMPLETE"}
+        return {**base, "job_state": "INCOMPLETE_LEAF"}
 
-    result = load_json(Path(leaf) / "result.json") or {}
-    verify = load_json(Path(leaf) / "verify.json") or {}
+    result = load_json_at(leaf, "result.json") or {}
+    verify_output = load_json_at(leaf, "verify.json") or {}
     return {
         "tool": row["tool"],
         "mode": row["mode"],
+        "job_state": row["state"],
+        "exit": result.get("exit_code", "-"),
+        "row_count": result.get("row_count", "-"),
         "wall_seconds": result.get("wall_seconds", "-"),
-        "max_rss_kb": result.get("max_rss_kb", "-"),
-        "verdict": verify.get("verdict", row["state"]),
+        "verdict": verify_output.get("verdict", "-"),
     }
 
 
@@ -74,14 +94,17 @@ def render_markdown(rows: list[dict]) -> str:
 
 def summary_line(rows: list[dict]) -> str:
     verdict_counts: dict[str, int] = {}
-    wall_times = []
+    verified_wall_times = []
     for row in rows:
         verdict_counts[row["verdict"]] = verdict_counts.get(row["verdict"], 0) + 1
-        if isinstance(row["wall_seconds"], (int, float)):
-            wall_times.append(row["wall_seconds"])
+        if row["exit"] == 0 and row["verdict"] in ("PASS", "DRIFT") and isinstance(row["wall_seconds"], (int, float)):
+            verified_wall_times.append(row["wall_seconds"])
     counts = ", ".join(f"{verdict}={count}" for verdict, count in sorted(verdict_counts.items()))
-    average = f"{sum(wall_times) / len(wall_times):.1f}s" if wall_times else "-"
-    return f"**{len(rows)} attempt(s)** -- {counts} -- average wall time {average}"
+    average = f"{sum(verified_wall_times) / len(verified_wall_times):.1f}s" if verified_wall_times else "-"
+    return (
+        f"**{len(rows)} attempt(s)** -- {counts} -- "
+        f"average wall time over {len(verified_wall_times)} verified attempt(s): {average}"
+    )
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -89,18 +112,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--state", default=STATE_FILENAME, help="campaign.db path (sqlite3).")
     parser.add_argument(
         "--attempts-root", required=True,
-        help="Local directory mirroring each job's GCS destination prefix, keyed by job id.",
+        help="Local directory or gs:// bucket mirroring each job's destination prefix, keyed by job id.",
     )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    attempts_root = Path(args.attempts_root)
 
     con = open_db(args.state, readonly=True)
     try:
-        rows = [row_for(db_row, attempts_root) for db_row in latest_submissions(con)]
+        rows = [row_for(db_row, args.attempts_root) for db_row in latest_submissions(con)]
     finally:
         con.close()
 

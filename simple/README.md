@@ -1,274 +1,205 @@
-# simple/ — a happy-path sketch of this study's pipeline
+# simple/ — a happy-path sketch of this study's bench machinery
 
 This directory is **not part of the study**. It is an unrun demonstration
-that the shape of "run eleven S3 listing tools as GCP Batch jobs, upload
-their output to GCS, and check it against a reference manifest" can be built
-in a couple thousand lines of plain Python using standard means — subprocess
-calls to `gcloud`/`gsutil`, DuckDB SQL, stdlib. It exists to make the *cost*
-of this repo's ~18k lines of audit-grade Python legible: every one of those
-lines is buying a specific correctness or auditability property this sketch
-does not have.
+that the *bench-machinery* half of this pipeline -- submit, run, collect,
+compare -- can be built in plain Python using standard means (subprocess,
+sqlite3, the real cloud SDKs). Nobody should run this: no CI wires it into
+the real pipeline, no test suite exists, and every round was written to a
+closed, reviewed allowlist of scope (see the "Round N" sections below).
 
-**Nobody should run this.** There is no CI wiring it into the real pipeline,
-no test suite, and several of the tool command lines under `tools/` are
-educated guesses (marked `# approximate`) rather than checked behavior.
+## Architecture: two models, one seam
+
+Round 3 redraws the boundary the sketch stands on. **Bench machinery**
+(submit a job, run a subject, capture what happened, compare two listings,
+report) is mostly infrastructure plumbing -- generic across all eleven
+tools, replaceable by standard means without losing anything real; this is
+what `simple/` sketches. **Tool/domain model** (one capsule per tool's exact
+CLI shape, the byte-framed contract a normalizer emits into, a plan's
+case-expansion and fingerprinting rules) is *warranted complexity*: real,
+hard-won knowledge about eleven tools' sharp edges (s4cmd's fixed-width
+columns splitting multi-byte keys, s5cmd's relative-vs-absolute key
+reconstruction, swath's refusal to stream Parquet) that a generic bridge
+cannot guess its way to. Rounds 1-2 guessed it anyway (`simple/tools/`, now
+deleted) and got real tools' argv and column shapes wrong in exactly the
+ways this predicts. Round 3 binds `simple/` to the ORIGINAL repo's domain
+model instead: `adapters.py` bridges to `tools/<tool>/adapter/{command,
+normalize}.py` via `common/command_adapter.py`'s loader and each capsule's
+own `normalize.py <mode> [prefix]` CLI; `campaign.py` reads cases straight
+from `manager/bench/plan.py`'s `Plan.load()`. Nothing about a tool's shape
+is duplicated in `simple/` anymore -- see `adapters.py`'s docstring for
+exactly where the line falls.
 
 ## Mapping: real subsystem -> sketch file
 
 | Real subsystem | Real LOC | Sketch file | Sketch LOC |
 |---|---|---|---|
-| `worker/engine.py` + `worker/upload.py` (attempt execution, artifact capture, create-only GCS upload) | 1,468 + 432 = 1,900 | `measure.py` | 303 |
-| `tools/<tool>/adapter/{command,normalize}.py` x 11 (per-tool argv + native-output normalization) | ~2,653 (all 11 tools, plus docs/data/receipts) | `tools/` package (registry + one module per tool) | 473 |
-| `manager/campaign/*.py` + `manager/campaign/ledger.py` (case fingerprinting, Batch job rendering, submission, polling, retry, sqlite ledger) | 3,537 | `campaign.py` | 501 |
-| `manager/verify/*.py` (hex-staged DuckDB set math: missing/extra/duplicate/mismatch, drift taxonomy) | 2,264 | `verify.py` | 349 |
-| `manager/bench/plan.py` + `bench/tools.yaml` + `bench/buckets/*.yaml` (plan schema, case generation, inheritance) | 1,090 (plan.py alone) | `campaign.py` (`validate_plan`/`build_cases`) + `plan-example.yaml` | (included above) + 59 |
-| the reference-manifest lineage (`data/registry.toml` binds a bucket to a manifest; provenance of the manifest itself is not vendored in this repo) | not isolated; no single file | `manifest.py` | 98 |
-| report rendering (byte-identical `verify.md` templates) | not isolated; spread across `manager/verify` and `manager/reports` | `report.py` | 112 |
-| `tools/<tool>/build/Dockerfile` x 11 (pinned multi-stage builds, one per tool) | 336 (all 11) | `Dockerfile` | 27 |
-| `.github/workflows/images*.yml` (registry-aware build planner, matrix, content-addressed tags) | 785 | `ci.yml` | 72 |
-| `common/contract.py` (the TAB-framed 5-field record contract, byte-exact key handling) | 315 | shared `assert_framing_safe`/`FramingViolation` in `tools/__init__.py`; no dedicated module | 0 |
-| `common/secret_scan.py` (scans every published byte for credential material) | not isolated | `measure.py`'s `scan_for_secrets` (stdout/stderr only, bounded) | (included above) |
-| **Total (rough, comparable slices only)** | **~18,285** (whole `src/`) | **Total, this directory (see `wc -l simple/*` / file list below)** | **see file list below** |
+| `worker/engine.py` + `worker/upload.py` + `worker/summary.py` (attempt execution, artifact capture, row counting, create-only GCS upload) | 1,468 + 432 + 145 = 2,045 | `measure.py` | 340 |
+| `common/command_adapter.py` + `manager/normalizer_cli.py` (the seam, not reproduced) + `tools/<tool>/adapter/*.py` x 11 (the domain model, left in place, bound to) | 199 + 3 = 202 (seam only; 2,653 domain model, untouched) | `adapters.py` | 112 |
+| `manager/campaign/*.py` (fingerprinting, Batch job rendering, submission, polling, retry) + `manager/campaign/provider.py` (172, the real Batch SDK usage this mirrors) | 3,537 | `campaign.py` | 526 |
+| `manager/bench/plan.py` (plan schema, case generation, inheritance -- READ, not reimplemented) | 1,090 | (import only; 0 sketch lines) | 0 |
+| `manager/verify/*.py` (hex-staged DuckDB set math: missing/extra/duplicate/mismatch, drift taxonomy) | 2,264 | `verify.py` | 380 |
+| report rendering (byte-identical `verify.md` templates) | not isolated | `report.py` | 134 |
+| `common/contract.py` (byte-framed record contract -- the capsules' own concern now) + one hashing/exit-code seam | 315 | `contract.py` | 36 |
+| `manager/campaign/report.py` (1,096; google-cloud-storage usage this mirrors) | 1,096 | `gcs.py` | 62 |
+| `tools/<tool>/build/Dockerfile` x 11 | 336 (all 11) | `Dockerfile` | 31 |
+| `.github/workflows/images*.yml` (registry-aware build planner) | 785 | `ci.yml` | 74 |
+| **Total (rough, comparable slices only)** | **~18,285** (whole `src/`) | **Total, this directory** | **1,695 + this file** |
 
-The real-LOC column undercounts the true cost in several places (docs,
-receipts, and tests aren't counted; TwinStamp's evidence core is a separate
-~unknown-LOC dependency this sketch doesn't touch at all) — it is there to
-show *shape*, not to claim an exact multiplier. `campaign.py`'s state store
-mirrors the real manager's choice of a database over a flat file
-(`manager/campaign/ledger.py`) in miniature: campaign.db is one sqlite3 file
-rather than campaign-state.json, for the same reason -- see "Round 2" below.
-`tools/` (one module per tool plus a registry) deliberately mirrors the real
-repo's `tools/<tool>/adapter/` capsule boundary: the original single-file
-`tools.py` had the right *content* but the wrong *unit* -- per-tool adapter
-knowledge is a different concern, with a different owner and change cadence,
-from the runner/worker suite around it.
+The real-LOC column shows *shape*, not an exact multiplier -- docs and
+tests aren't counted, and the domain-model row (2,653 lines) is read, never
+reimplemented, so it costs `simple/` nothing while being exactly what runs.
 
 ## Example command sequence
 
-None of this has ever been run — the tool binaries, GCP project, and buckets
-below are placeholders — but this is the intended chain from plan to report:
+None of this has ever been run -- the GCP project, buckets, and image below
+are placeholders -- but this is the intended chain, run from a checkout root
+with the real `s3_listing_study` package installed (`pip install -e .`):
 
 ```sh
-# Build a reference manifest once, from a live listing.
-python simple/manifest.py --bucket noaa-ghcn-pds --prefix "" --output manifests/noaa-ghcn-pds.tsv
-
-# Build and push the one image every tool runs in.
+# Build and push the one image every tool runs in (see Dockerfile for what it does NOT stage).
 docker build -t "$IMAGE:$(git rev-parse --short HEAD)" -f simple/Dockerfile simple
 docker push "$IMAGE:$(git rev-parse --short HEAD)"
 
-# Submit every (tool, mode) case in the plan as a GCP Batch job.
-python simple/campaign.py submit --plan simple/plan-example.yaml
+# Submit every case x rep in a REAL plan as a GCP Batch job.
+python simple/campaign.py submit --project my-proj --location us-central1 \
+    --plan bench/buckets/noaa-ghcn-pds.yaml \
+    --results-bucket my-results-bucket --image "$IMAGE:abc123" \
+    --secrets secrets.yaml
 
 # Watch until every job reaches a terminal Batch state.
-python simple/campaign.py poll --plan simple/plan-example.yaml --watch
+python simple/campaign.py poll --project my-proj --location us-central1 --watch
 
-# See what happened, straight from campaign.db (sqlite3), latest submission per case.
+# See what happened, straight from campaign.db, latest submission per case.
 python simple/campaign.py status
 
-# A case that FAILED (spot preemption, a transient describe error) gets a
-# fresh, honestly-numbered submission rather than a mutated retry-in-place.
-python simple/campaign.py retry --plan simple/plan-example.yaml
+# A FAILED case gets a fresh, honestly-numbered submission.
+python simple/campaign.py retry --project my-proj --location us-central1 \
+    --plan bench/buckets/noaa-ghcn-pds.yaml \
+    --results-bucket my-results-bucket --image "$IMAGE:abc123"
 
-# Verify one attempt's listing against a reference manifest: resolves the
-# job's destination to its one attempt leaf, downloads it, and checks the
-# leaf's own result.json against the expectations below before verifying.
-python simple/verify.py --tool aws-cli --bucket noaa-ghcn-pds --mode s3api-v2-text \
-    --attempt-dir gs://my-results-bucket/noaa-ghcn-pds-aws-cli-s3api-v2-text-1/ \
-    --manifest manifests/noaa-ghcn-pds.tsv
+# Close the loop: compare every succeeded case's latest submission against
+# the aws-cli case's, in one pass, writing verify.json into each leaf.
+python simple/campaign.py verify --plan bench/buckets/noaa-ghcn-pds.yaml \
+    --reference-case s3api-v2-text
 
-# Summarize every latest-submission attempt + verdict as one Markdown table.
-python simple/report.py --attempts-root /local/attempts
+# Or run one comparison by hand.
+python simple/verify.py --tool s5cmd --mode recursive --bucket noaa-ghcn-pds \
+    --attempt-dir gs://my-results-bucket/s5cmd-recursive-1/ \
+    --reference-attempt-dir gs://my-results-bucket/aws-cli-s3api-v2-text-1/
+
+# Summarize every latest-submission attempt as one Markdown table.
+python simple/report.py --attempts-root gs://my-results-bucket
 ```
 
-`campaign.py submit --dry-run` renders each job body without submitting, for
-eyeballing what would go to `gcloud batch jobs submit`. `campaign.db` is
-inspectable directly: `sqlite3 campaign.db "SELECT * FROM submissions"`.
+`campaign.db` is inspectable directly:
+`sqlite3 campaign.db "SELECT * FROM submissions"`.
 
-## Which tools in `tools/` are checked vs. guessed
+## Round 3: binding to the real domain model, plus a soundness fix
 
-- **Checked against the real tool's documented output shape:** `aws-cli`
-  (`s3api list-objects-v2 --output json`), `s5cmd` (`--json ls`), `rclone`
-  (`lsjson`), `minio-mc` (`ls --json`) — these four are "right-ish" per the
-  brief this sketch was written to.
-- **Approximate** (marked `# approximate` in that tool's own module, guessed
-  field names or column layout rather than a checked run): `s7cmd`,
-  `s3-fast-list`, `s3kor`, `s4cmd`, `s3p`, `ps3`, `swath`. Several of these
-  tools' real adapters (see `tools/<tool>/adapter/normalize.py`) exist
-  precisely because their native output has a sharp edge — `s4cmd`'s
-  fixed-width columns splitting multi-byte keys mid-character is the one
-  `common/contract.py` calls out by name — and this sketch's guessed
-  normalizer does not attempt to reproduce that edge, correctly or otherwise.
+Round 2 asked "does this sketch reach a real number"; round 3 asks "is the
+number the real tool's number." Deleting the guesses (`tools/`,
+`manifest.py`) and binding to the real capsules/plan resolver is the whole
+answer -- these are correctness/operational-fitness gaps, not added rigor:
 
-## The minimum rigor we kept
-
-Everything else in "What this sketch deliberately does NOT handle" below
-stays out — no secret scanning, no canonical JSON, no create-only upload
-preconditions, no hex-staged byte comparison, no coordination journal. These
-four crossed back in because each is a handful of lines that stops a
-*wrong number from being reported as a right one*, not merely a property
-that makes a right number more auditable after the fact — everything left
-out only costs legibility or defense-in-depth, not correctness of the
-verdict itself:
-
-- **Disjoint attempt leaves** (`measure.py`'s `attempt_uuid`/`leaf_destination`;
-  `verify.py`'s `resolve_leaf`/`list_leaves`). Every invocation uploads to its
-  own `uuid4` leaf instead of a shared path, and a reader refuses (rather than
-  picks a winner) when a job's destination holds zero or several leaves. A
-  silent overwrite between two launches of the same case would poison the
-  number itself — a retry's wall-clock time or listing could silently replace
-  the first attempt's before anyone could compare them, with no trace either
-  run happened.
-- **`result.json` as completeness marker** (`measure.py`'s
-  `write_result_atomic`/`upload`; `verify.py`'s `has_result_marker`).
-  `result.json` is written atomically and uploaded last, so a leaf missing it
-  is legible as torn/incomplete. Without this, a truncated attempt with zero
-  extra keys reads identically to a genuinely complete PASS — the marker is
-  what tells "matches" apart from "never finished".
-- **Verify binding** (`verify.py`'s `check_binding`). A verdict is refused,
-  not computed, if the selected leaf's recorded tool/bucket/prefix/mode
-  disagree with what the caller expected. A verdict computed against the
-  wrong case isn't a wrong report about a real result — it's a convincing
-  result about nothing that happened, which is worse than no result at all.
-- **Crash-safe ledger writes** (`campaign.py`'s `submissions` table). Round 1
-  approximated this with a temp-file-plus-`os.replace()` dance around
-  campaign-state.json; round 2 replaced the whole file with one sqlite3
-  database (`campaign.db`) and deleted that dance outright -- sqlite's own
-  journal now provides the crash-safety it approximated, natively, for every
-  write instead of one whole-file swap. A corrupted ledger doesn't just lose
-  bookkeeping — it can forget which jobs were ever submitted, which is how a
-  re-run silently doubles a workload or resubmits work already in flight.
-
-## Round 2: purpose-fitness additions
-
-Round 1 asked "does a wrong number get reported as a right one"; round 2
-asks the next question -- "does this sketch actually reach a real number in
-the first place." These are functional/correctness gaps in the round-1
-sketch, not additional rigor:
-
-- **`manifest.py`.** Round 1's `verify.py` had PASS/FAIL/DRIFT machinery and
-  nothing to run it against — no reference manifest existed short of typing
-  one out by hand. A verifier that can never verify against a real snapshot
-  isn't a smaller verifier, it's an unreachable one.
-- **Framing safety** (`tools.assert_framing_safe`, wired into `manifest.py`
-  and `verify.py`'s normalize step). A key containing the TSV's own
-  delimiter or a line break, written without this check, doesn't fail loudly
-  -- it silently shifts every column after it, which reads back as a
-  plausible but wrong key/size/etag/mtime split. That is a false verdict
-  manufactured by the framing itself, not a tool finding.
-- **Curated retry** (`campaign.py retry`). Without it, a FAILED case (spot
-  preemption, a transient `describe` error -- both routine on real Batch
-  infrastructure) has no way back into the campaign except hand-deriving and
-  resubmitting the whole rendered job body outside the tool entirely.
-- **Credential wiring** (`credential_secret`, `--pass-env`). Without it,
-  none of the four tools this study's own plan comments say have no
-  unsigned request path can be pointed at a real bucket at all -- not a
-  rigor gap, an inability to run against real infrastructure for a
-  majority-relevant slice of the roster.
-- **Pre-upload secret scan** (`measure.py`'s `scan_for_secrets`). Without
-  it, a tool that crashes verbosely or dumps its own config to stderr
-  publishes whatever credential material was in that output straight to the
-  results bucket. A real accident this leak gate exists to catch, not a
-  hypothetical.
-- **File-sink native outputs** (`tools/`'s `native`/`NATIVE_FILE` module
-  attributes, wired through `swath-parquet`). Without it, any mode that
-  writes a file instead of streaming to stdout -- the roster's one such case
-  -- reads as a tool that emitted nothing: verify.py would see an empty
-  `stdout.log.gz` and report a FAIL for a tool that actually produced a
-  correct listing.
-- **sqlite ledger** (`campaign.py`'s `campaign.db`, see above). Mirrors the
-  real manager's own choice of a database over a flat file. Roughly
-  line-count-neutral versus round 1's JSON approximation; the trade-off is
-  that `campaign.db` is no longer git-diffable or eyeballable in a text
-  editor -- inspect it with `sqlite3 campaign.db "SELECT * FROM submissions"`.
+- **`adapters.py`** compiles argv through the SAME `command.py` the real
+  worker loads and normalizes through the SAME `normalize.py` CLI the real
+  study runs -- round 1/2's from-scratch guesses at eleven tools' argv and
+  column shapes are gone. A capsule's own emit boundary already refuses an
+  unframeable key and already emits canonical mtime; round 2's
+  `assert_framing_safe`/mtime machinery is deleted, not reproduced.
+- **`campaign.py` reads `Plan.load()`** instead of a hand-rolled flat plan
+  schema: case resources, `env` (heap sizing), `reps`, `timeout_s`, and
+  `fingerprint` all come from the real resolver now, against the real
+  `bench/buckets/*.yaml`. (Caught while testing against a real plan: two
+  tools can share one `case_id` -- `manager/bench/plan.py`'s IDs don't carry
+  the tool name -- so job ids and retry's case lookup are keyed off
+  `(tool, case_id)`, not `case_id` alone.)
+- **Cross-attempt comparison replaces the manifest.** `manifest.py` is
+  deleted; `verify.py --reference-attempt-dir` compares two attempts'
+  normalized listings against each other. A PASS is tool-vs-tool
+  AGREEMENT, not correctness against ground truth -- there is no blessed
+  answer anymore. The campaign's primary validity signal is `row_count`
+  (below); cross-attempt comparison is the on-demand deep diff a
+  disagreement calls for. **Named limitation:** on a mutable bucket, two
+  attempts far apart in time conflate bucket motion with real tool
+  differences -- the real study re-lists to attribute drift, which this
+  sketch does not attempt.
+- **`row_count`** (`measure.py`, mirroring `worker/summary.py`): every
+  attempt records how many rows its own listing normalized to, independent
+  of any comparison -- the number `report.py` shows for every attempt,
+  verified or not, that `verify.py`'s deep diff double-checks when it looks wrong.
+- **google-cloud-storage / google-cloud-batch replace `gsutil`/`gcloud`
+  subprocesses** (owner correction; `gcs.py`, `campaign.py`): typed
+  `list_blobs`/`blob.exists()`/`create_job`/`get_job`, no parsed CLI text
+  or tempfile `--config` dance.
+- **Verifier soundness (codex-review catch):** `compute_diff`'s anti-joins
+  used SQL `NOT IN`, NULL-blind -- one NULL key on either side silently
+  empties every discrepancy list and returns a false PASS. Fixed two ways:
+  `assert_no_null_fields` refuses (a distinct exit code) before any join
+  runs, and the anti-joins are rewritten as `NOT EXISTS`, which is
+  null-safe. A malformed row is now a refusal, never a PASS.
+- **Failed subjects can't contaminate a comparison:** `verify.py` refuses
+  (a distinct exit code) a leaf whose `result.json` shows `exit_code != 0`
+  or `timed_out` -- a crashed run is not a listing finding. `report.py`
+  never mixes vocabularies: `job_state` (Batch), `exit` (the subject), and
+  `verdict` (verify.json, or `-`) are three columns; the summary's average
+  wall time counts only `exit == 0` + PASS/DRIFT rows, and says so.
+- **Batch rendering fixes, all mirroring `manager/campaign/batch.py`:**
+  `docker_options` -> container `options` (Batch's `memoryMib` only
+  *schedules*; without this a memory-sweep case measures nothing); N4
+  machine types get a Hyperdisk boot disk (~line 199; `pd-balanced` cannot
+  provision one); `valid_job_id` reserves `-rN` headroom and forces a
+  leading letter / trailing alphanumeric, where round 2's plain truncation
+  could produce an invalid id once retried.
+- **The verify -> report loop is closed:** `verify.py` uploads `verify.json`
+  back INTO a `gs://` leaf by default; `campaign.py verify` runs every
+  succeeded case's latest submission against one reference case in-process,
+  in one pass; `report.py` reads through the same leaf-resolution helpers
+  whether `--attempts-root` is local or `gs://`.
 
 ## What this sketch deliberately does NOT handle
 
-The real pipeline earns its line count by handling all of the following;
-this sketch has none of it:
-
 - **Evidence sealing / TwinStamp.** No physical-execution profile, no
-  create-only ("never overwrite") upload precondition on individual GCS
-  objects, no tamper-evident receipt chain. `measure.py`'s two-step upload
-  order (artifacts, then `result.json`) makes torn attempts legible, but
-  nothing stops a compromised or buggy caller from overwriting an object at
-  the same URI outright — the real uploader's `ifGenerationMatch=0` closes
-  that gap and this sketch does not.
-- **Duplicate-*submission* detection.** Disjoint attempt leaves (above) make
-  duplicate *launches* harmless, but there is still no case fingerprinting
-  and no reconciliation between "jobs `campaign.py` believes it submitted"
-  and "leaves actually observed in GCS" — a job submitted twice by a human
-  mistake is still two full attempts, just two honestly-labeled ones instead
-  of one silently clobbering the other.
-- **Byte-identical report rendering.** The real verifier's output is a
-  frozen template covered by acceptance tests pinning byte-for-byte output.
-  `report.py` just prints Markdown.
-- **Non-UTF-8 keys are OUT of scope.** `common/contract.py` carries S3 keys
-  as raw `bytes`, never decoded, specifically so a key that isn't valid
-  UTF-8 survives intact, and rejects (rather than escapes) keys containing
-  TAB/NEWLINE/CR because the framing can't carry them. This sketch's DuckDB
-  comparisons throughout (`manifest.py`, `verify.py`) read everything as
-  VARCHAR (UTF-8 text) and will misbehave on a non-UTF-8 key -- framing
-  safety (round 2) catches the TAB/NEWLINE/CR half of that contract, not the
-  UTF-8 half. `common/contract.py`'s bytes-based `Record` is the real answer
-  and is not reproduced here.
+  create-only (`ifGenerationMatch=0`) upload precondition, no
+  tamper-evident receipt chain. Every GCS write here is a plain overwrite.
+- **Duplicate-*submission* detection.** Disjoint attempt leaves make
+  duplicate *launches* harmless, but there is no reconciliation between
+  "jobs `campaign.py` believes it submitted" and "leaves actually observed
+  in GCS" -- a case submitted twice by mistake is two full attempts.
+- **Byte-identical report rendering.** `report.py` just prints Markdown; no
+  frozen template, no acceptance test pinning byte-for-byte output.
+- **Non-UTF-8 keys.** Every DuckDB comparison here is VARCHAR (UTF-8 text);
+  `common/contract.py`'s bytes-based `Record` is the real answer.
 - **Exact byte-order set math.** `manager/verify/compare.py` hex-stages
-  every field so `ORDER BY`/equality in DuckDB reproduces `LC_ALL=C sort`
-  byte order for arbitrary bytes. This sketch compares plain VARCHAR values.
-- **Full secret scanning.** `measure.py`'s `scan_for_secrets` is a bounded
-  leak gate over stdout/stderr with three regexes; the real
-  `common/secret_scan.py` scans every byte an attempt could publish
-  (including file-sink native output, which this sketch's scan does not
-  touch), with a broader pattern set and no claim that three patterns catch
-  every credential shape.
-- **Race-condition / SIGTERM handling.** No term-grace period, no disk
-  sampler thread, no interpreter-identity capture.
-- **Full Batch allocation fidelity.** `campaign.py`/`tools/` carry a
-  minimal container-memory sweep, per-tool heap injection
-  (`JAVA_TOOL_OPTIONS`/`NODE_OPTIONS`, see `tools.heap_env_for`), and
-  Secret-Manager-backed credential wiring (`credential_secret`/`--pass-env`)
-  -- each cheap once its real-repo source (`bench/tools.yaml`'s `heap:`
-  block; `manager/campaign/batch.py`'s secret handling) was read for
-  fidelity. Still missing: N4 Hyperdisk boot-disk handling, network/subnet
-  pinning, and provisioning-model choice — `render_batch_job` has none of it.
+  every field so `ORDER BY`/equality reproduce `LC_ALL=C sort` byte order
+  for arbitrary bytes; this sketch compares plain VARCHAR values.
+- **Full secret scanning.** `scan_for_secrets` is a bounded leak gate over
+  stdout/stderr with three regexes; `common/secret_scan.py` scans every
+  byte an attempt could publish, with a broader pattern set.
+- **Race-condition / SIGTERM / full allocation fidelity.** No term-grace
+  period, no disk sampler thread, no interpreter-identity capture, no
+  network/subnet pinning, no provisioning-model choice (SPOT is hardcoded).
 - **A registry-aware CI build planner.** `ci.yml` builds and pushes one
-  image on every push touching `simple/`, unconditionally; the real
-  `images.yml` only builds what the registry doesn't already have,
-  content-addressed per tool.
-- **Tests.** None. Nothing here is asserted against real tool output.
+  image on every push touching `simple/`, unconditionally.
+- **Tests.** None. Nothing here is asserted against real tool output beyond
+  the ad hoc checks run while writing each round.
 
 ## Files
 
 - `README.md` — this file.
-- `measure.py` — the worker: runs one tool, captures stdout/stderr/rusage,
-  scans stdout/stderr for likely secrets before uploading anything, then
-  uploads to its own `uuid4` leaf (artifacts first, `result.json` last, both
-  written/uploaded atomically), with gzip checksums and attempt size folded
-  into the marker. `--pass-env` copies named credential env vars from its own
-  environment into the subject's, never into the published record.
-- `tools/` — a package: `__init__.py` builds the `TOOLS` registry (and
-  `heap_env_for`, `assert_framing_safe`/`FramingViolation`) from an explicit
-  import list of `tools/<name>.py`, one module per tool (argv builder,
-  normalize-SQL, `# approximate` markers where the shape is guessed).
-  `swath.py` also exposes its Parquet-sink mode as the `swath-parquet`
-  registry entry. `tools/__main__.py`: `python -m tools` previews every
-  tool's argv for a sample bucket.
-- `manifest.py` — builds a reference manifest TSV from a live aws-cli
-  listing, normalized through `tools/aws_cli.py`'s own normalizer, sorted by
-  key, with a `<output>.meta.json` sidecar (bucket, prefix, built_at,
-  key_count, manifest sha256).
-- `campaign.py` — reads and validates a plan, submits/polls/cancels/retries
-  GCP Batch jobs via `gcloud`, tracks every submission as its own row in
-  `campaign.db` (sqlite3), keyed by `(base_job_id, submission)`. Renders
-  `credential_secret` plan entries as Batch secret env vars.
-- `verify.py` — resolves a job's destination to its one attempt leaf, checks
-  for the `result.json` completeness marker and case binding, normalizes the
-  native output (stdout or a declared file-sink) and diffs it against a
-  reference manifest TSV with DuckDB, prints PASS/FAIL/DRIFT (or a distinct
-  refusal code, including a framing-violation refusal).
-- `report.py` — opens `campaign.db` read-only, walks the latest submission
-  per case, resolves each one's attempt leaf the same way `verify.py` does,
-  prints a Markdown summary table.
+- `contract.py` — the one shared seam: verify's exit-code ladder, `sha256_of`.
+- `gcs.py` — thin google-cloud-storage wrapper (`gs://` parsing, list/exists/read/write).
+- `adapters.py` — the bridge to the real tool capsules (see "Architecture").
+- `measure.py` — the worker: compiles one case's command via `adapters.py`,
+  runs it, scans stdout/stderr for secrets, counts rows, uploads to its own
+  `uuid4` leaf (artifacts, then the atomic `result.json` marker, last).
+- `campaign.py` — reads a real `Plan`, submits/polls/cancels/retries/verifies
+  Batch jobs via the SDK, tracks every submission as its own `campaign.db`
+  row keyed by `(base_job_id, submission)`.
+- `verify.py` — resolves two jobs' attempt leaves, checks
+  completeness/binding/subject success on both, normalizes both via
+  `adapters.py`, diffs with DuckDB, writes `verify.json` into the actual leaf.
+- `report.py` — opens `campaign.db` read-only, prints a Markdown summary
+  table (`job_state`/`exit`/`row_count`/`verdict` as separate columns).
 - `Dockerfile` — one image for every tool.
-- `ci.yml` — build-and-push-on-every-run GitHub Actions workflow.
-- `plan-example.yaml` — a minimal example plan for `campaign.py`, including a
-  commented-out `credential_secret` example and a two-row memory sweep.
+- `ci.yml` — build, smoke-test, then push (never the other order).

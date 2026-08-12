@@ -32,8 +32,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install duckdb pyyaml
-      - run: python -m py_compile simple/*.py
+      - run: pip install duckdb pyyaml google-cloud-storage google-cloud-batch
+      - run: find simple -name '*.py' -print0 | xargs -0 python -m py_compile
 
   build-and-push:
     needs: compile-check
@@ -64,9 +64,11 @@ jobs:
             -f simple/Dockerfile \
             simple
 
-      - name: Push image
-        run: docker push "$IMAGE:${{ steps.tag.outputs.sha }}"
-
+      # Never publish before the only check that runs against the built
+      # image itself: push comes after this, not before.
       - name: Smoke-check the entrypoint parses args
         run: |
           docker run --rm "$IMAGE:${{ steps.tag.outputs.sha }}" --help
+
+      - name: Push image
+        run: docker push "$IMAGE:${{ steps.tag.outputs.sha }}"

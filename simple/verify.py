@@ -1,34 +1,32 @@
-"""Compare one attempt's listing against a reference manifest and print a verdict.
+"""Compare two attempts' listings against each other and print an agreement verdict.
 
 This is a SKETCH standing in for manager/verify/ (~2,000 lines, including
 compare.py's careful hex-staged byte-order joins). It uses plain UTF-8 text
 comparison in DuckDB rather than hex-staging every field for exact byte
 ordering, so it will misbehave on keys that are not valid UTF-8 -- the real
-verifier exists partly to make that case correct. It does not distinguish
-"manifest is corrupt" from "adapter violated the contract"; both just show up
-as noisy diffs.
+verifier exists partly to make that case correct. Non-UTF-8 keys are OUT of
+scope here; see common/contract.py's bytes-based Record for the real answer.
 
-It does keep several cheap properties (see README.md's "The minimum rigor we
-kept" / "Round 2: purpose-fitness additions"): it refuses rather than guesses
-when a job's destination holds zero or several attempt leaves, it refuses
-rather than verifies a leaf with no result.json (an incomplete or torn
-attempt), it refuses rather than verifies a leaf whose recorded
-tool/bucket/prefix/mode don't match what the caller expected, and it refuses
-rather than silently corrupts a row whose key contains TAB/LF/CR -- each a
-distinct exit code, never folded into FAIL. Non-UTF-8 keys remain OUT of
-scope: everything here is DuckDB VARCHAR (UTF-8 text); see
-common/contract.py's bytes-based Record for the real answer.
+Round 3 repoints this from a blessed reference manifest to CROSS-ATTEMPT
+comparison: --reference-attempt-dir is another job's destination (e.g. the
+aws-cli case's), not a manifest file. A PASS here means two tools' listings
+AGREE, not that either is correct against ground truth -- there is no
+manifest.py anymore. The campaign's primary validity signal is row_count
+(see measure.py, report.py); this comparison is the on-demand deep diff a
+disagreement (or a curiosity) calls for. See README.md for the named
+limitation this implies on a mutable bucket, and for the NULL-blind
+anti-join bug this round's assert_no_null_fields closes.
 
-Contract (informal, matching src/s3_listing_study/common/contract.py in
-spirit): one record per line, TAB-separated:
+It refuses rather than guesses in several places (see README.md's "The
+minimum rigor we kept" sections), each a distinct exit code, never folded
+into FAIL: zero or several attempt leaves under a destination; a leaf with
+no result.json (incomplete/torn); a leaf whose recorded case doesn't match
+what the caller expected; a leaf whose subject failed or timed out (a
+failed attempt is not a listing finding); a capsule normalize.py that
+exited nonzero; and a row with a NULL field in either normalized TSV.
 
-    key<TAB>size<TAB>etag<TAB>mtime<TAB>storage_class
-
-with "-" meaning "this mode does not expose the field". A manifest is
-expected to already be in this shape; an attempt's native tool output is
-normalized into it by tools.py.
-
-Verdict (once a leaf is selected, complete, and bound to the right case):
+Verdict (once both leaves are selected, complete, bound, and neither
+subject failed):
     PASS  -- no missing keys, no extra keys, no duplicate keys, no field
              mismatches.
     DRIFT -- the only field mismatches are mtime (a moving target across
@@ -38,62 +36,49 @@ Verdict (once a leaf is selected, complete, and bound to the right case):
              size/etag/storage_class.
 
 Usage:
-    verify.py --tool aws-cli --bucket some-bucket --prefix "" --mode s3api-v2-text \\
-        --attempt-dir /local/or/gs://bucket/job-id/ --manifest /path/to/manifest.tsv
+    verify.py --tool s5cmd --mode recursive --bucket some-bucket \\
+        --attempt-dir gs://results/s5cmd-job/ \\
+        --reference-attempt-dir gs://results/aws-cli-job/
 """
 
 from __future__ import annotations
 
 import argparse
 import gzip
-import hashlib
 import json
-import shutil
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
 import duckdb
 
-from tools import TOOLS, FramingViolation, assert_framing_safe
+import adapters
+import gcs
+from contract import EXIT_AMBIGUOUS_LEAVES, EXIT_BINDING_MISMATCH, EXIT_FAILED_SUBJECT
+from contract import EXIT_MALFORMED_INPUT, EXIT_MISSING_MARKER, EXIT_NORMALIZE_FAILED
+from contract import VERDICT_EXIT_CODES, sha256_of
 
 _COLUMNS = "{'key':'VARCHAR','size':'VARCHAR','etag':'VARCHAR','mtime':'VARCHAR','storage_class':'VARCHAR'}"
 # Disabling quote interpretation entirely: the contract TSV has no quoting
 # dialect of its own -- a key or etag containing a literal '"' is an ordinary
 # character, never the start of a quoted field. Without this, DuckDB's
 # default CSV quoting could reinterpret such a field and misplace columns,
-# an adapter-honest row read back as something it never was. read_csv() takes
-# these as keyword args; COPY ... TO takes them as space-separated options.
+# an adapter-honest row read back as something it never was.
 _READ_CSV_OPTS = "quote='', escape=''"
-_COPY_OPTS = "QUOTE '', ESCAPE ''"
-
-EXIT_CODES = {"PASS": 0, "DRIFT": 2, "FAIL": 1}
-EXIT_AMBIGUOUS_LEAVES = 3
-EXIT_MISSING_MARKER = 4
-EXIT_BINDING_MISMATCH = 5
-EXIT_FRAMING_VIOLATION = 6
+MISMATCH_FIELDS = ("size", "etag", "mtime", "storage_class")
 SAMPLE_LIMIT = 5
 
 
-def sha256_of(path: Path) -> str:
-    digest = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+class MalformedInputError(Exception):
+    """A normalized TSV has a NULL field -- an anti-join over it would be
+    NULL-blind and silently under-report every discrepancy list.
+    """
 
 
 def list_leaves(destination: str) -> list[str]:
     """Immediate child leaves under a job's destination prefix, local or GCS."""
     if destination.startswith("gs://"):
-        result = subprocess.run(
-            ["gsutil", "ls", "-d", destination.rstrip("/") + "/*/"],
-            capture_output=True, text=True,
-        )
-        if result.returncode != 0:
-            return []
-        return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+        return gcs.list_child_prefixes(destination)
     base = Path(destination)
     if not base.is_dir():
         return []
@@ -117,24 +102,26 @@ def resolve_leaf(destination: str) -> str | None:
     return None
 
 
+def read_bytes_at(leaf: str, name: str) -> bytes:
+    if leaf.startswith("gs://"):
+        return gcs.download_bytes(leaf.rstrip("/") + "/" + name)
+    return (Path(leaf) / name).read_bytes()
+
+
 def has_result_marker(leaf: str) -> bool:
     """A leaf is only complete once result.json lands -- see measure.py's
     upload(), which writes it last.
     """
     if leaf.startswith("gs://"):
-        result = subprocess.run(
-            ["gsutil", "-q", "stat", leaf.rstrip("/") + "/result.json"], capture_output=True
-        )
-        return result.returncode == 0
+        return gcs.blob_exists(leaf.rstrip("/") + "/result.json")
     return (Path(leaf) / "result.json").exists()
 
 
-def check_binding(result: dict, args: argparse.Namespace) -> list[str]:
-    """Where the selected leaf's recorded case disagrees with what the caller
-    expected. A non-empty list means this is the wrong attempt to verify
-    against this manifest, not a tool finding.
+def check_binding(result: dict, expected: dict) -> list[str]:
+    """Where `result` disagrees with `expected` on any key `expected` states.
+    A non-empty list means this is the wrong attempt for this comparison,
+    not a tool finding.
     """
-    expected = {"tool": args.tool, "bucket": args.bucket, "prefix": args.prefix, "mode": args.mode}
     return [
         f"{field}: leaf={result.get(field)!r} expected={value!r}"
         for field, value in expected.items()
@@ -142,46 +129,21 @@ def check_binding(result: dict, args: argparse.Namespace) -> list[str]:
     ]
 
 
-def fetch_attempt_dir(leaf: str, work_dir: Path) -> Path:
-    if not leaf.startswith("gs://"):
-        return Path(leaf)
-    local_dir = work_dir / "attempt"
-    local_dir.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["gsutil", "-m", "cp", "-r", leaf.rstrip("/") + "/*", str(local_dir)], check=True)
-    return local_dir
+def check_failed_subject(result: dict) -> str | None:
+    """A message if the leaf's own subject failed or timed out, else None.
 
-
-def locate_native_output(attempt_dir: Path, tool: str, work_dir: Path) -> Path:
-    """Where `tool`'s native output lives on local disk, ready for normalize_sql.
-
-    Most tools stream to stdout, which measure.py gzips; decompress
-    stdout.log.gz. A tool declaring a file-sink "native" filename (tools.py's
-    swath-parquet, for example) wrote it directly into the attempt dir
-    uncompressed, so no decompression step applies -- it is simply there.
+    A failed or truncated run has nothing to say about listing agreement --
+    refusing here is what keeps a subject crash from reading as a diff.
     """
-    native = TOOLS[tool].get("native", "stdout")
-    if native != "stdout":
-        return attempt_dir / native
-    gz_path = attempt_dir / "stdout.log.gz"
-    suffix = Path(TOOLS[tool]["native_file"]).suffix or ".out"
-    native_path = work_dir / f"native{suffix}"
-    with gzip.open(gz_path, "rb") as src, open(native_path, "wb") as dst:
-        shutil.copyfileobj(src, dst)
-    return native_path
+    if result.get("timed_out"):
+        return "subject timed out"
+    if result.get("exit_code") != 0:
+        return f"subject exited {result.get('exit_code')}"
+    return None
 
 
-def normalize_to_tsv(tool: str, native_path: Path, out_path: Path) -> None:
-    select_sql = TOOLS[tool]["normalize_sql"](str(native_path))
-    con = duckdb.connect()
-    try:
-        assert_framing_safe(con, select_sql)
-        con.execute(f"COPY ({select_sql}) TO '{out_path}' (DELIMITER '\t', HEADER false, {_COPY_OPTS})")
-    finally:
-        con.close()
-
-
-def load_tables(con: duckdb.DuckDBPyConnection, manifest_path: Path, actual_path: Path) -> None:
-    for name, path in (("manifest", manifest_path), ("actual", actual_path)):
+def load_tables(con: duckdb.DuckDBPyConnection, reference_tsv: Path, actual_tsv: Path) -> None:
+    for name, path in (("reference", reference_tsv), ("actual", actual_tsv)):
         con.execute(
             f"CREATE TABLE {name} AS SELECT * FROM "
             f"read_csv(?, delim='\t', header=false, columns={_COLUMNS}, {_READ_CSV_OPTS})",
@@ -189,12 +151,32 @@ def load_tables(con: duckdb.DuckDBPyConnection, manifest_path: Path, actual_path
         )
 
 
+def assert_no_null_fields(con: duckdb.DuckDBPyConnection, table: str) -> None:
+    """Refuse rather than risk a NULL-blind `NOT IN`/anti-join false PASS.
+
+    A malformed row -- any of the five columns NULL -- must be a refusal,
+    never silently swallowed into an empty discrepancy list.
+    """
+    bad = con.execute(
+        f"SELECT count(*) FROM {table} WHERE key IS NULL OR size IS NULL OR etag IS NULL "
+        "OR mtime IS NULL OR storage_class IS NULL"
+    ).fetchone()[0]
+    if bad:
+        raise MalformedInputError(f"{table}: {bad} row(s) have a NULL field")
+
+
 def compute_diff(con: duckdb.DuckDBPyConnection) -> dict:
+    # NOT EXISTS, not NOT IN: NOT IN is NULL-blind (a single NULL on the
+    # right-hand side empties the whole anti-join), NOT EXISTS is not.
+    # assert_no_null_fields() already refuses a NULL field before this runs,
+    # so this is belt-and-suspenders against the same failure mode.
     missing = con.execute(
-        "SELECT key FROM manifest WHERE key NOT IN (SELECT key FROM actual) ORDER BY key"
+        "SELECT key FROM reference r WHERE NOT EXISTS "
+        "(SELECT 1 FROM actual a WHERE a.key = r.key) ORDER BY key"
     ).fetchall()
     extra = con.execute(
-        "SELECT key FROM actual WHERE key NOT IN (SELECT key FROM manifest) ORDER BY key"
+        "SELECT key FROM actual a WHERE NOT EXISTS "
+        "(SELECT 1 FROM reference r WHERE r.key = a.key) ORDER BY key"
     ).fetchall()
     duplicates = con.execute(
         "SELECT key FROM actual GROUP BY key HAVING count(*) > 1 ORDER BY key"
@@ -203,26 +185,19 @@ def compute_diff(con: duckdb.DuckDBPyConnection) -> dict:
     # Deduplicate before the join so a duplicate key does not multiply its own mismatches.
     con.execute("CREATE TABLE actual_u AS SELECT DISTINCT ON (key) * FROM actual ORDER BY key")
 
+    subqueries = []
+    for order, field in enumerate(MISMATCH_FIELDS, start=1):
+        # ETag compares case-insensitively -- it's a hex digest, and casing
+        # differs harmlessly across tools/SDKs; every other field is exact.
+        compare = f"lower(a.{field}) <> lower(r.{field})" if field == "etag" else f"a.{field} <> r.{field}"
+        subqueries.append(
+            f"SELECT a.key, {order} AS ord, '{field}' AS field, a.{field} AS tool_value, "
+            f"r.{field} AS reference_value FROM actual_u a JOIN reference r USING (key) "
+            f"WHERE a.{field} <> '-' AND {compare}"
+        )
     mismatches = con.execute(
-        """
-        SELECT key, field, tool_value, manifest_value FROM (
-          SELECT a.key, 'size' AS field, a.size AS tool_value, m.size AS manifest_value
-            FROM actual_u a JOIN manifest m USING (key)
-           WHERE a.size <> '-' AND a.size <> m.size
-          UNION ALL
-          SELECT a.key, 'etag', a.etag, m.etag
-            FROM actual_u a JOIN manifest m USING (key)
-           WHERE a.etag <> '-' AND lower(a.etag) <> lower(m.etag)
-          UNION ALL
-          SELECT a.key, 'mtime', a.mtime, m.mtime
-            FROM actual_u a JOIN manifest m USING (key)
-           WHERE a.mtime <> '-' AND a.mtime <> m.mtime
-          UNION ALL
-          SELECT a.key, 'storage_class', a.storage_class, m.storage_class
-            FROM actual_u a JOIN manifest m USING (key)
-           WHERE a.storage_class <> '-' AND a.storage_class <> m.storage_class
-        ) ORDER BY key, field
-        """
+        "SELECT key, field, tool_value, reference_value FROM ("
+        + " UNION ALL ".join(subqueries) + ") ORDER BY key, ord"
     ).fetchall()
 
     return {
@@ -230,8 +205,8 @@ def compute_diff(con: duckdb.DuckDBPyConnection) -> dict:
         "extra": [row[0] for row in extra],
         "duplicates": [row[0] for row in duplicates],
         "mismatches": [
-            {"key": key, "field": field, "tool": tool_value, "manifest": manifest_value}
-            for key, field, tool_value, manifest_value in mismatches
+            {"key": key, "field": field, "tool": tool_value, "reference": reference_value}
+            for key, field, tool_value, reference_value in mismatches
         ],
     }
 
@@ -261,88 +236,144 @@ def print_samples(diff: dict) -> None:
     if diff["mismatches"]:
         shown = diff["mismatches"][:SAMPLE_LIMIT]
         for m in shown:
-            print(f"  mismatch[{m['field']}] {m['key']}: tool={m['tool']!r} manifest={m['manifest']!r}")
+            print(f"  mismatch[{m['field']}] {m['key']}: tool={m['tool']!r} reference={m['reference']!r}")
         remaining = len(diff["mismatches"]) - len(shown)
         if remaining > 0:
             print(f"  ... (+{remaining} more mismatches)")
 
 
-def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Verify one attempt's listing against a reference manifest.")
-    parser.add_argument("--tool", required=True, choices=sorted(TOOLS))
-    parser.add_argument("--bucket", required=True, help="Expected bucket; checked against the leaf's result.json.")
-    parser.add_argument("--prefix", default="", help="Expected prefix; checked against the leaf's result.json.")
-    parser.add_argument("--mode", required=True, help="Expected mode; checked against the leaf's result.json.")
-    parser.add_argument(
-        "--attempt-dir", required=True,
-        help="Local path or gs:// prefix for the job's destination (parent of its attempt leaves).",
-    )
-    parser.add_argument("--manifest", required=True, help="Local reference manifest TSV.")
-    parser.add_argument("--verify-output", default=None, help="Where to write verify.json (default: <leaf>/verify.json).")
-    return parser.parse_args(argv)
+def write_verify_json(leaf: str, output: dict) -> None:
+    """verify.json is written back INTO the actual leaf, not dumped to CWD --
+    a repeat verification overwrites its own leaf's own record, never a
+    different case's.
+    """
+    data = json.dumps(output, indent=2).encode() + b"\n"
+    if leaf.startswith("gs://"):
+        gcs.upload_bytes(data, leaf.rstrip("/") + "/verify.json", content_type="application/json")
+    else:
+        (Path(leaf) / "verify.json").write_bytes(data)
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv)
+def verify_leaves(
+    *, tool: str, bucket: str, prefix: str, mode: str,
+    actual_destination: str, reference_destination: str, adapter_root: str,
+) -> tuple[int, dict]:
+    """Resolve, bind-check, and normalize both sides through the same path;
+    diff them; write verify.json into the actual leaf. Returns
+    (exit_code, output) -- output has "verdict"/"diff" on a completed
+    comparison, or just "error" on an earlier refusal.
+    """
+    actual_leaf = resolve_leaf(actual_destination)
+    if actual_leaf is None:
+        return EXIT_AMBIGUOUS_LEAVES, {"error": f"ambiguous actual leaves under {actual_destination}"}
+    reference_leaf = resolve_leaf(reference_destination)
+    if reference_leaf is None:
+        return EXIT_AMBIGUOUS_LEAVES, {"error": f"ambiguous reference leaves under {reference_destination}"}
 
-    leaf = resolve_leaf(args.attempt_dir)
-    if leaf is None:
-        return EXIT_AMBIGUOUS_LEAVES
+    for label, leaf in (("actual", actual_leaf), ("reference", reference_leaf)):
+        if not has_result_marker(leaf):
+            return EXIT_MISSING_MARKER, {"error": f"{label} leaf {leaf} has no result.json"}
 
-    if not has_result_marker(leaf):
-        print(f"verify: {leaf} has no result.json -- incomplete or torn attempt", file=sys.stderr)
-        return EXIT_MISSING_MARKER
+    actual_result = json.loads(read_bytes_at(actual_leaf, "result.json"))
+    reference_result = json.loads(read_bytes_at(reference_leaf, "result.json"))
 
-    is_remote = leaf.startswith("gs://")
-    # A remote leaf only exists inside the temp dir below, so pick the output
-    # path -- and write it -- before that directory is cleaned up.
-    default_output = Path.cwd() / "verify.json" if is_remote else Path(leaf) / "verify.json"
-    verify_output = Path(args.verify_output) if args.verify_output else default_output
+    mismatches = check_binding(actual_result, {"tool": tool, "bucket": bucket, "prefix": prefix, "mode": mode})
+    if mismatches:
+        return EXIT_BINDING_MISMATCH, {"error": "actual leaf does not match the expected case", "mismatches": mismatches}
+    # The reference is necessarily a different tool/mode; only the target
+    # (bucket/prefix) needs to match, or the two sides are not even
+    # attempting to list the same thing.
+    ref_mismatches = check_binding(reference_result, {"bucket": bucket, "prefix": prefix})
+    if ref_mismatches:
+        return EXIT_BINDING_MISMATCH, {"error": "reference leaf targets a different bucket/prefix", "mismatches": ref_mismatches}
 
+    for label, result in (("actual", actual_result), ("reference", reference_result)):
+        failure = check_failed_subject(result)
+        if failure:
+            return EXIT_FAILED_SUBJECT, {"error": f"{label}: {failure}"}
+
+    reference_tool, reference_mode = reference_result["tool"], reference_result["mode"]
     with tempfile.TemporaryDirectory() as tmp:
         work_dir = Path(tmp)
-        attempt_dir = fetch_attempt_dir(leaf, work_dir)
-
-        result = json.loads((attempt_dir / "result.json").read_text())
-        mismatches = check_binding(result, args)
-        if mismatches:
-            print(f"verify: {leaf} is not the attempt expected for this case:", file=sys.stderr)
-            for mismatch in mismatches:
-                print(f"  {mismatch}", file=sys.stderr)
-            return EXIT_BINDING_MISMATCH
-
-        native_path = locate_native_output(attempt_dir, args.tool, work_dir)
-        actual_tsv = work_dir / "actual.tsv"
+        actual_tsv, reference_tsv = work_dir / "actual.tsv", work_dir / "reference.tsv"
         try:
-            normalize_to_tsv(args.tool, native_path, actual_tsv)
-        except FramingViolation as exc:
-            print(f"verify: {exc}", file=sys.stderr)
-            return EXIT_FRAMING_VIOLATION
+            actual_native = gzip.decompress(read_bytes_at(actual_leaf, "stdout.log.gz"))
+            actual_tsv.write_bytes(adapters.normalize_attempt(
+                adapters.adapter_dir_for(tool, adapter_root), tool, mode, prefix, actual_native
+            ))
+            reference_native = gzip.decompress(read_bytes_at(reference_leaf, "stdout.log.gz"))
+            reference_tsv.write_bytes(adapters.normalize_attempt(
+                adapters.adapter_dir_for(reference_tool, adapter_root), reference_tool, reference_mode,
+                reference_result.get("prefix", ""), reference_native,
+            ))
+        except adapters.AdapterError as exc:
+            return EXIT_NORMALIZE_FAILED, {"error": str(exc)}
 
         con = duckdb.connect()
         try:
-            load_tables(con, Path(args.manifest), actual_tsv)
+            load_tables(con, reference_tsv, actual_tsv)
+            try:
+                assert_no_null_fields(con, "reference")
+                assert_no_null_fields(con, "actual")
+            except MalformedInputError as exc:
+                return EXIT_MALFORMED_INPUT, {"error": str(exc)}
             diff = compute_diff(con)
         finally:
             con.close()
 
         verdict = verdict_for(diff)
         output = {
-            "tool": args.tool,
-            "leaf": leaf,
+            "tool": tool, "mode": mode,
+            "reference_tool": reference_tool, "reference_mode": reference_mode,
+            "actual_leaf": actual_leaf, "reference_leaf": reference_leaf,
             "verdict": verdict,
-            "manifest_sha256": sha256_of(Path(args.manifest)),
+            "actual_tsv_sha256": sha256_of(actual_tsv),
+            "reference_tsv_sha256": sha256_of(reference_tsv),
             "diff": diff,
         }
-        verify_output.write_text(json.dumps(output, indent=2) + "\n")
+        write_verify_json(actual_leaf, output)
 
-    print(f"missing={len(diff['missing'])} extra={len(diff['extra'])} "
-          f"duplicates={len(diff['duplicates'])} mismatches={len(diff['mismatches'])}")
-    if verdict != "PASS":
-        print_samples(diff)
-    print(f"verdict={verdict}")
+    return VERDICT_EXIT_CODES[verdict], output
 
-    return EXIT_CODES[verdict]
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Compare two attempts' listings and print an agreement verdict.")
+    parser.add_argument("--tool", required=True, help="Expected tool for --attempt-dir; checked against its result.json.")
+    parser.add_argument("--bucket", required=True, help="Expected bucket; checked against both leaves' result.json.")
+    parser.add_argument("--prefix", default="", help="Expected prefix; checked against both leaves' result.json.")
+    parser.add_argument("--mode", required=True, help="Expected mode for --attempt-dir; checked against its result.json.")
+    parser.add_argument(
+        "--attempt-dir", required=True,
+        help="Local path or gs:// prefix for the job's destination (parent of its attempt leaves).",
+    )
+    parser.add_argument(
+        "--reference-attempt-dir", required=True,
+        help="Another job's destination to compare against -- not a blessed manifest.",
+    )
+    parser.add_argument(
+        "--adapter-root", default="tools",
+        help="Checkout-relative directory holding tools/<tool>/adapter capsules.",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    exit_code, output = verify_leaves(
+        tool=args.tool, bucket=args.bucket, prefix=args.prefix, mode=args.mode,
+        actual_destination=args.attempt_dir, reference_destination=args.reference_attempt_dir,
+        adapter_root=args.adapter_root,
+    )
+    if "diff" in output:
+        diff = output["diff"]
+        print(f"missing={len(diff['missing'])} extra={len(diff['extra'])} "
+              f"duplicates={len(diff['duplicates'])} mismatches={len(diff['mismatches'])}")
+        if output["verdict"] != "PASS":
+            print_samples(diff)
+        print(f"verdict={output['verdict']}")
+    else:
+        print(f"verify: {output.get('error', 'refused')}", file=sys.stderr)
+    return exit_code
 
 
 if __name__ == "__main__":
