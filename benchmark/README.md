@@ -21,6 +21,9 @@ facts under `tools/<tool>/build/`.
   pinned worker requirements.
 - `tests/` holds this component's test suite. Repository-wide gates stay in the
   top-level `tests/`.
+- `docs/running.md` is the operator runbook: prerequisites, submission, the job
+  state machine, monitoring, the recovery commands, verification, and reporting.
+  No campaign has run yet, so that procedure is `VERIFIED: no`.
 - `src/benchmark/` is the importable package — the only part of this directory
   the toolbox image contains:
   - `build_image.py` validates recipe, artifact, executable, and adapter

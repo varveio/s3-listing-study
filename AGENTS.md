@@ -58,6 +58,7 @@ Read *one* index, not five guesses. Order: this table → `docs/README.md`.
 | Designing or changing the comparative harness | `benchmark/README.md` — plans, toolbox, Batch jobs, capture, verification, and reporting |
 | Designing or changing how a run works | `docs/methodology.md` — especially the five decisions |
 | Running a benchmark toolbox smoke or cloud canary | `benchmark/README.md` |
+| Actually operating a campaign — submit, monitor, retry, cancel, verify, report | `benchmark/docs/running.md` — the operator runbook. Its procedure is `VERIFIED: no` until a real campaign exercises it |
 | About to state anything about a specific tool | `tools/<tool>/README.md` — the tool page, for current observations + provenance |
 | Changing a tool directory's structure or deciding which file owns content | `docs/operating/tool-structure.md` — the authoritative capsule and Markdown-role contract |
 | Actually writing a capsule — a new tool, or an existing one at a new upstream version | `docs/operating/capsule-authoring.md` — build order, agent topology, and the verification loop; `docs/operating/tool-onboarding.md` for where it sits in the sequence |
