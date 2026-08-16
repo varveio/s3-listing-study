@@ -58,9 +58,9 @@ exports a typed complete-argv builder and never runs the subject itself.
 
 The committed groundwork receipts are immutable wrapper-era evidence; their
 embedded invocations record the original procedure. New AWS CLI attempts use
-the shared derived-image contract in
-[`../../../harness/derived-image/README.md`](../../../harness/derived-image/README.md),
-with capsule-owned inputs in [`../build/image.json`](../build/image.json).
+the self-contained toolbox and campaign worker documented in
+[`benchmark/README.md`](../../../benchmark/README.md), with capsule-owned build
+and adapter inputs from this directory.
 
 Every receipt above was produced by the retired shared wrapper, never by running
 aws-cli directly on the host (methodology § Run records (receipts)). The receipt

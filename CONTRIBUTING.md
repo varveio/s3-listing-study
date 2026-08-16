@@ -58,14 +58,13 @@ result, we will fill in the complete run record so the update remains checkable:
 | Path | What |
 | --- | --- |
 | `docs/methodology.md` | How runs are conducted; written down before the comparisons. |
-| `docs/operating/runner-security.md` | Cooperative Batch and stricter local-Docker execution profiles. |
+| `benchmark/README.md` | Comparative plans, toolbox construction, cloud canaries, execution, verification, and reports. |
 | `docs/open-questions.md` | Questions and observations spanning several tools. |
 | `docs/operating/tool-structure.md` | Authoritative directory and document-role contract for runnable tools. |
 | `docs/operating/tool-onboarding.md` | The sequence for adding a new subject; pointer-based, owns the seams only. |
 | `tools/README.md` | Every tool in scope and its current status. |
 | `tools/<tool>/README.md` | That tool's current entry point; it routes to explanation, canonical claims, research, and evidence. |
-| `harness/` | The shared run harness: how a run is staged, executed, scanned for secrets, and checked. Read this if you're checking our setup. |
-| `harness/README.md` | What each harness script does and the run contract. |
+| `benchmark/` | The sole comparative harness; tool capsules remain study evidence and declarations. |
 
 Anything about one tool goes in that tool's directory. Read
 [`docs/operating/tool-structure.md`](docs/operating/tool-structure.md) before changing that
@@ -73,13 +72,12 @@ directory's layout or deciding which document owns content.
 
 ## Running the checks
 
-The repo's own regression and secret-scan suites need no Docker, bucket, or
-network:
+The repository checks need no Docker, bucket, or network:
 
 ```sh
-harness/tests/run-regressions.sh     # adapter + verifier regressions, plus the shellcheck lint gate
-uv run pytest -q tests/test_receipt_scan.py tests/test_receipt_pipeline.py
-                                      # scanner fixtures and full receipt scan/publish behavior
+uv run pytest
+uv run ruff check
+uv run mypy
 ```
 
 The two repository-structure gates are subcommands of the packaged CLI, so they
@@ -90,9 +88,8 @@ uv run s3-listing-study validate-capsule --tool <tool>   # one capsule against t
 uv run s3-listing-study check-links                      # relative Markdown links on current-state pages
 ```
 
-Note `harness/tests/run.sh` is **not** the test runner — it's a fixture
-stand-in tool. The commands above are the relevant entry points. The lint gate skips
-(loudly) if `shellcheck` isn't installed, so install it to get real coverage.
+Toolbox construction and its eleven-executable smoke are defined in
+`.github/workflows/benchmark-toolbox.yml`; they run from a clean revision.
 
 ## Commits
 

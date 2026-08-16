@@ -1,10 +1,10 @@
 # `gcp/s3-listing-study`
 
 The GCP infrastructure for running this study's benchmark campaigns: a results
-bucket, an Artifact Registry repository for the derived attempt images, the
+bucket, an Artifact Registry repository for the single benchmark toolbox, the
 least-privilege identity each Cloud Batch task runs as, the privilege bundle an
-orchestrator needs, and a runner VM provisioned to build and push images and to
-host campaign submission and the required summary-only reconciler.
+orchestrator needs, and a runner VM provisioned for toolbox construction,
+optional authorized publication, campaign management, verification, and reports.
 
 It creates **no Batch jobs**. Batch is serverless; a campaign's jobs are rendered
 and submitted at runtime, one per scheduled run, each with a deterministic job ID so
@@ -13,11 +13,11 @@ recovered.
 
 | File | What it owns |
 | --- | --- |
-| `results-bucket.tf` | where campaign plans, compact results, and raw audit artifacts land |
-| `image-registry.tf` | Artifact Registry for the derived attempt images |
+| `results-bucket.tf` | where attempt result markers and raw evidence land |
+| `image-registry.tf` | Artifact Registry storage for the benchmark toolbox |
 | `worker.tf` | the identity each Batch attempt task runs as |
 | `orchestrator.tf` | the privilege bundle for driving a campaign |
-| `runner.tf` | the VM for builds, submission, and the required summary reconciler |
+| `runner.tf` | the VM for toolbox builds, campaign management, verification, and reports |
 | `network.tf` | optional VPC, for estates without a default network |
 
 ## Why this is a module and not an environment
@@ -87,25 +87,21 @@ all either needs. SSH ingress is restricted to IAP's forwarding range regardless
 port 22 to the internet, and an estate that wants IAP-only SSH must delete that
 rule itself. This module will not touch a shared network's pre-existing rules.
 
-**The primary anonymous worker currently gets bucket-level `objectAdmin`.** The
-worker implementation reads and manages objects in its own attempt tree as well
-as creating them, so `objectCreator` is insufficient. The grant is not scoped to
-an attempt prefix: IAM therefore also permits this cooperative worker to read or
-manage other result objects in the bucket. Cross-attempt isolation is not a
-property of this role. The uploader still uses create-only preconditions for
-committed attempt artifacts, and bucket versioning makes accidental replacement
-recoverable, but those are application and recovery controls rather than a
-least-privilege IAM boundary.
+**Both workers get bucket-level `objectCreator`.** `benchmark/src/benchmark/measure.py` uploads
+new artifacts into a fresh UUID attempt leaf and never reads, overwrites, or
+deletes GCS objects. It uploads `result.json` last as the completion marker. The
+SDK calls do not set a create-only generation precondition; IAM is the actual
+overwrite boundary here. Campaign verification and reporting use the separate
+orchestrator identity, which retains the read/manage access those operations
+need.
 
 **Batch metadata access is intentional.** The in-worker uploader obtains its
 OAuth token from the VM metadata server. The subjects are cooperative software,
-not treated as hostile; the primary anonymous identity can manage the results
-bucket and is otherwise limited to Artifact Registry reads and Batch/log
-reporting. Each
+not treated as hostile; the primary anonymous identity can create result objects
+and is otherwise limited to Artifact Registry reads and Batch/log reporting. Each
 attempt has a fresh VM with one task in an otherwise disposable benchmark
-project. The strict metadata-denial bridge remains a local-Docker profile for
-direct runs on the more-privileged runner and is not a Batch prerequisite. The
-runtime job renderer sets `maxRetryCount: 0`; duplicate execution is
+project. This module does not claim a local metadata-denial sandbox. The runtime
+job renderer sets `maxRetryCount: 0`; duplicate execution is
 still detected through multiple worker UUIDs beneath one `run-<n>` prefix.
 
 **The anonymous worker holds no credentials for the object stores under test.**
@@ -124,31 +120,30 @@ labelled anonymous. The submitter chooses by setting the job's
 `allocationPolicy.serviceAccount` to `worker_sa_email` or
 `authenticated_worker_sa_email`.
 
-The IAM policy that credential should carry — scoped to list other people's
-buckets, denied everything of the operator's own, and with no account or
-organization ID hardcoded — is in
-[`docs/operating/runner-security.md`](../../../../../docs/operating/runner-security.md)
-§ *The authenticated stratum's AWS credential*.
+Credential transport, Batch job construction, and the distinction between
+anonymous and authenticated cases are documented in
+[`benchmark/README.md`](../../../../../benchmark/README.md). The AWS-side policy
+remains an operator-owned control outside this GCP module.
 
 **The runner is not a measurement host.** Nothing timed runs on it. Subjects run
 in Batch tasks, one task per fresh VM, so the runner's size and noise cannot reach
 any published number — which is why it is sized for Docker builds and why its
 `machine_type` is in `ignore_changes`.
 
-**Required routine collection is summary-only.** Each worker execution
+**Result collection follows the benchmark evidence model.** Each worker execution
 publishes one authoritative tree under
-`campaigns/<campaign>/<bucket>/<tool>/<case>/run-<n>/<attempt-uuid>/`, with raw
-artifacts first and `result.json` last. The campaign model owns the run ordinal;
+`campaigns/<campaign>/results/<bucket>/<tool>/<case>/run-<n>/submission-<n>/<attempt-uuid>/`,
+with raw artifacts such as `stdout.log.gz`, `stderr.log.gz`, and `native/**`
+first, then `<attempt-uuid>/result.json` last. The campaign model owns the run ordinal;
 the current `reps: 1` policy yields `run-1`, while higher ordinals are reserved
 for separately scheduled runs rather than an implemented append-later command.
-For every manifest-known run prefix the required manager reconciler must use a
-delimiter listing to discover only immediate UUID children, then GET each exact
-`result.json`. It must read raw listings only for requested correctness
-verification or investigation. More than one UUID child under one run must be
-surfaced as duplicate execution and none may be silently selected.
+`benchmark/src/benchmark/report.py` and `benchmark/src/benchmark/verify.py` resolve the UUID leaf, bind the
+result to recorded campaign intent, and refuse zero or multiple completed leaves.
+Raw listings are read for requested correctness verification or investigation;
+no Terraform resource performs that collection.
 
 **Grants are additive (`google_*_iam_member`), never authoritative.** An
-authoritative binding on the bucket would clobber the worker's `objectAdmin` on
+authoritative binding on the bucket would clobber the workers' `objectCreator` on
 the same resource.
 
 ## Inputs and outputs
@@ -157,5 +152,10 @@ See [`variables.tf`](variables.tf) and [`outputs.tf`](outputs.tf); every variabl
 and output carries its own description.
 
 The four an orchestrator needs are `results_bucket_url` (artifact destination),
-`image_repo_url` (push target), `worker_sa_email` (the job's `allocationPolicy`
+`image_repo_url` (repository root for an explicitly authorized toolbox publication), `worker_sa_email` (the job's `allocationPolicy`
 service account), and `runner_ssh` (how to get onto the runner).
+
+The module does not build or publish the toolbox. Follow
+[`benchmark/README.md`](../../../../../benchmark/README.md) and
+`.github/workflows/benchmark-toolbox.yml` for the clean-revision build and smoke;
+campaigns consume only the resulting digest-pinned toolbox URI.

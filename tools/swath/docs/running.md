@@ -76,8 +76,12 @@ exit 0, passed the secret scan, and counted 2,549 rows. It carries no verifier
 verdict or completeness result, so it is not a benchmark result and cannot
 confirm any canonical v0.2.0 claim. Earlier attempt receipts remain historical.
 No claim on this subject is `confirmed`; promotion still requires the required
-execution profile plus the reference/verifier path described in
-[`../../../harness/README.md`](../../../harness/README.md).
+committed run evidence specified by
+[`Run records (receipts)`](../../../docs/methodology.md#run-records-receipts),
+produced and bound through the current execution, verification, and reporting
+path in [`benchmark/README.md`](../../../benchmark/README.md). A verifier `PASS`
+establishes cross-attempt agreement, not independent ground truth, as documented
+under [`Agreement is not ground truth`](../../../benchmark/README.md#agreement-is-not-ground-truth).
 
 ## What the verifier could not check
 
@@ -85,7 +89,7 @@ execution profile plus the reference/verifier path described in
 compound.
 
 First, the reference manifest artifact is absent from this box, so
-`harness/verify-listing.sh` could not be run at all. **No completeness check was
+the retired `harness/verify-listing.sh` could not be run at all. **No completeness check was
 performed**; the only cross-check is count-and-uniqueness against the registry's
 recorded figures in
 [`../../../docs/smoke-bucket.md`](../../../docs/smoke-bucket.md). That does not
@@ -223,22 +227,19 @@ but its exact expanded commands and raw normalized outputs were not retained.
 The summary is therefore not independently auditable and supports no canonical
 runtime or cross-mode-agreement claim. Of those modes, only `recursive-tsv` now
 has later diagnostic-attempt runtime coverage; the others still need registered
-derived-image attempts.
+benchmark attempts.
 
-**What the current attempt path can publish.** The text modes flow through the
-captured raw streams. `command.py` directs both Parquet probes to `/tmp/swout`,
-while the current minimal attempt contract publishes only `result.json` and the
-two raw streams; it has no native-output collection stage. Parquet also refuses
-stdout outright — claim `file-sinks-not-harness-capturable`. This is a current
-driver/publication limitation, not a tool limitation or a claim that file sinks
-are permanently uncapturable. Note the cost of leaving it open: Parquet is Swath's only
-byte-exact output path (claim `parquet-key-column-is-byte-exact`), so excluding
-it means the study never exercises that path.
+**What the current benchmark can publish.** Text modes flow through captured raw
+streams. For both Parquet modes, `command.py` directs the dataset into the
+benchmark worker's native sink directory; the worker recursively retains,
+hashes, secret-scans, and uploads that tree. The retired wrapper's
+`file-sinks-not-harness-capturable` limitation therefore describes historical
+smoke evidence, not the current benchmark. No comparative Parquet attempt has
+yet established that the new path works end to end.
 
-The same limitation applies to `--report`, which writes to a container-local
-path. The clean scrape target under this harness is the `list_run_summary` line
-on stderr at `-v`, which is where every counter above came from — claim
-`api-calls-counter-is-trustworthy`.
+The current adapter does not declare a `--report` mode. In the historical runs,
+the clean scrape target was the `list_run_summary` line on stderr at `-v`, which
+is where every counter above came from — claim `api-calls-counter-is-trustworthy`.
 
 ## Mode-by-mode coverage
 
@@ -256,8 +257,8 @@ claim `mode-inventory-v020`.
 | `--format table` | Unverified | Present only in an unauditable historical adapter summary; re-run required |
 | `--tune seed.mode=none` | Unverified | Present only in an unauditable historical adapter summary; the seed-cost arms remain uncompared — claim `seed-cost-direction-at-smoke` |
 | `--tune seed.mode=hints` | Unexercised | Declared but unreachable: it throws at seed time, after the checkpoint database is opened and the S3 client is built — claim `seed-hints-unimplemented`. Worth one capability probe of the exit-2 failure |
-| `--format parquet` probes | Not published by current attempt path | Driver writes `/tmp/swout`; minimal artifacts omit native outputs — claim `file-sinks-not-harness-capturable` |
-| `--sort` | Not published by current attempt path | Parquet-only by construction; driver writes `/tmp/swout` |
+| `--format parquet` probes | Declared; benchmark run pending | Current adapter writes into the retained native sink; no comparative result exists yet |
+| `--sort` | Declared; benchmark run pending | Parquet-only by construction; current adapter writes into the retained native sink |
 | `swath resume <dir>` | Unexercised | Needs a durable checkpoint and is not a declared current driver mode — claim `only-parquet-directory-is-resumable` |
 | `--fetch-owner` | Unexercised | Request-shape variant rather than a mode; one representative run recommended |
 
@@ -287,11 +288,12 @@ docker run --rm --pull=never --cap-drop ALL --security-opt no-new-privileges:tru
 The full-bucket run is the same invocation with `s3://noaa-normals-pds/`. The
 image must be pulled by digest first; the tag, if you use one, is `0.2.0`.
 
-**A claim-confirming re-run is a different procedure.** The Swath derived image
-and adapter are implemented; what remains is execution under the required
-profile with the reference/verifier path available so the run can produce a
-verdict. The other text modes and `seed.mode=none` still need current attempts,
-and `seed.mode=hints` remains a capability probe.
+**A claim-confirming re-run is a different procedure.** The capsule records the
+Swath build and adapter declarations used by the unified benchmark toolbox.
+Comparative execution and verdicts belong to `benchmark/`; a capsule research
+smoke remains study evidence, not a benchmark result. The other text modes and
+`seed.mode=none` still need current attempts, and `seed.mode=hints` remains a
+capability probe.
 
 [`../receipts/observations-v0.2.0/`](../receipts/observations-v0.2.0/) preserves
 the canonical v0.2.0 observations. [`../receipts/smoke/`](../receipts/smoke/)
@@ -307,8 +309,9 @@ Each of these stays `unverified`, with its own reason:
   run gets an in-process memory-backed checkpoint (claims `crash-resume-works`,
   `exactly-once-under-crash`).
 - **Parquet and sorted-Parquet execution and fidelity** — no such run was made at
-  v0.2.0, and none is capturable under a harness that mounts nothing (claims
-  `parquet-modes-execute`, `parquet-output-byte-exact`).
+  v0.2.0; the benchmark adapter and native sink now declare a capturable route,
+  but it has not produced comparative evidence (claims `parquet-modes-execute`,
+  `parquet-output-byte-exact`).
 - **Bounded memory at scale** — the observed peak RSS figures are
   JVM-baseline-dominated at this scale and probe no cliff (claim
   `bounded-memory-at-scale`).

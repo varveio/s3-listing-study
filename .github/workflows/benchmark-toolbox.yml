@@ -1,0 +1,85 @@
+name: benchmark toolbox
+
+on:
+  pull_request:
+    paths:
+      - benchmark/**
+      - tools/*/adapter/**
+      - tools/*/build/**
+      - .github/workflows/benchmark-toolbox.yml
+  workflow_dispatch:
+    inputs:
+      harness-revision:
+        description: Full lowercase commit to build and attest
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - name: Build the self-contained toolbox
+        env:
+          REQUESTED_REVISION: ${{ inputs.harness-revision }}
+        run: |
+          set -euo pipefail
+          revision="${REQUESTED_REVISION:-$(git rev-parse HEAD)}"
+          test "$revision" = "$(git rev-parse HEAD)"
+          uv run python benchmark/src/benchmark/build_image.py \
+            --harness-revision "$revision" \
+            --tag benchmark-toolbox:smoke
+      - name: Smoke every subject and the worker
+        run: |
+          set -euo pipefail
+          test "$(docker run --rm --entrypoint id benchmark-toolbox:smoke -u)" = 10001
+          docker run --rm benchmark-toolbox:smoke --help
+          docker run --rm -i --entrypoint /usr/bin/python3 benchmark-toolbox:smoke - <<'PY'
+          import json
+          import os
+          import subprocess
+          from pathlib import Path
+
+          with open('/opt/benchmark/image-metadata.json', encoding='utf-8') as source:
+              metadata = json.load(source)
+          expected_tools = {
+              'aws-cli', 'minio-mc', 'ps3', 'rclone', 's3-fast-list', 's3kor',
+              's3p', 's4cmd', 's5cmd', 's7cmd', 'swath',
+          }
+          tools = metadata['tools']
+          if metadata['schema_version'] != 4 or set(tools) != expected_tools:
+              raise SystemExit('toolbox metadata roster/schema mismatch')
+          for tool, metadata in sorted(tools.items()):
+              workdir = Path(metadata['subject_workdir'])
+              executable = metadata['executable']
+              if not workdir.is_absolute() or not workdir.is_dir():
+                  raise SystemExit(f'{tool}: subject workdir is absent')
+              command = Path(executable[0])
+              if not command.is_absolute() or not command.is_file() or not os.access(command, os.X_OK):
+                  raise SystemExit(f'{tool}: executable is absent or not executable')
+              for token in executable[1:]:
+                  if token.startswith('/') and not Path(token).exists():
+                      raise SystemExit(f'{tool}: executable argument is absent: {token}')
+              result = subprocess.run(
+                  [*executable, '--help'],
+                  stdin=subprocess.DEVNULL,
+                  stdout=subprocess.PIPE,
+                  stderr=subprocess.STDOUT,
+                  timeout=30,
+                  check=False,
+                  text=True,
+              )
+              expected = 252 if tool == 'aws-cli' else 0
+              if result.returncode != expected or not result.stdout.strip():
+                  raise SystemExit(f'{tool}: help smoke failed with {result.returncode}')
+          PY

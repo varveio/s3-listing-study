@@ -40,8 +40,7 @@ preamble everyone agrees with and then ignores.
 
 ## Deriving with agents
 
-The [research brief](tool-research-brief.md) describes one researcher taking a
-tool through every stage. That works for a small subject. For a large one —
+One researcher can take a small tool through every stage. For a large one —
 a multi-module codebase where a single context cannot hold the engine, the
 store layer, the CLI and the output paths at once — the shape that worked was:
 
@@ -83,10 +82,10 @@ means while authoring:
   development output until the benchmark methodology/security amendment and a
   correctness path land. Do not promote a claim to `confirmed` from such an
   attempt, and do not invent a replacement evidentiary path in a capsule.
-- **Never initiate subject execution outside a documented execution profile.**
-  Use the cooperative GCP Batch profile or the strict local Docker profile in
-  [`runner-security.md`](runner-security.md). Failure to provision the selected profile is a stop condition, not an
-  alternate observation path. If pre-existing output from an external or
+- **Keep capsule smoke separate from comparative measurement.** Historical
+  capsule receipts remain evidence exactly as recorded. New harness smoke,
+  canaries, and comparative runs use [`../../benchmark/`](../../benchmark/)
+  and do not write capsule receipts. If pre-existing output from an external or
   earlier out-of-boundary execution must be preserved, label it `[OBS <how>]`
   in prose and `kind: "observation"` in the ledger, state exactly how it was
   produced, and keep it explicitly non-receipt. Such an observation may retain
@@ -115,10 +114,9 @@ Run all of it before calling a capsule done. The validator alone is not
 sufficient — it checks structure, not truthfulness.
 
 ```sh
-# structure, links, secrets
+# structure and links
 uv run s3-listing-study validate-capsule --tool <slug>
 uv run s3-listing-study check-links
-uv run s3-listing-study receipt scan-tree .
 
 # every source anchor resolves at the commit the evidence cites
 uv run s3-listing-study check-source-anchors --tool <slug> --require-checked \
@@ -131,15 +129,10 @@ uv run s3-listing-study check-source-anchors --tool <slug> --markdown tools/<slu
 Any skipped anchors mean the verification is incomplete.
 
 # Python command and normalization adapters match their shared contracts
-uv run pytest -q tests/test_command_adapters.py tests/test_adapters.py
+uv run pytest -q benchmark/tests/test_command_adapters.py benchmark/tests/test_adapters.py
 
-# Final-image integration uses the already-published common base by digest
-uv run s3-listing-study build-tool-image --tool <slug> \
-  --shared-base-image REGISTRY/...@sha256:<digest> \
-  --tag study/tool-<slug>:candidate
-# Resolve that tool image by digest, then add the worker layer.
-uv run s3-listing-study build-derived-image --tool <slug> \
-  --tool-image REGISTRY/...@sha256:<digest>
+# The benchmark build validates every capsule recipe and adapter together.
+uv run python benchmark/src/benchmark/build_image.py --help
 ```
 
 Then the checks no script performs:

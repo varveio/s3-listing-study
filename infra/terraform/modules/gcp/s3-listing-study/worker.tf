@@ -35,11 +35,11 @@ resource "google_artifact_registry_repository_iam_member" "worker_pull" {
   member     = "serviceAccount:${google_service_account.worker.email}"
 }
 
-# objectAdmin: the orchestration change on the other branch has the worker
-# read and manage its own attempt's objects (not just create them), so the
-# narrower objectCreator grant no longer covers what the worker does.
+# The measurement worker only creates objects in its fresh UUID attempt leaf.
+# Campaign management, verification, and reporting read through the separate
+# orchestrator identity; neither worker needs read, overwrite, or delete access.
 resource "google_storage_bucket_iam_member" "worker_write" {
   bucket = google_storage_bucket.results.name
-  role   = "roles/storage.objectAdmin"
+  role   = "roles/storage.objectCreator"
   member = "serviceAccount:${google_service_account.worker.email}"
 }

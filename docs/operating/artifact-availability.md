@@ -16,7 +16,7 @@ but the complete public evidence package is not yet available.**
 > Every count on this page is stated after that removal, and the figures below
 > therefore differ from the 2026-07-20 wave totals. Swath's current evidence is
 > observation rather than receipt: its runs were made outside the retired
-> wrapper-era evidence path, because the runner-security profile was not
+> wrapper-era evidence path, because the retired runner-security profile was not
 > provisioned. Historical
 receipts remain immutable while their subject stands: they are never edited,
 and are removed only when the whole subject is retired under
@@ -75,10 +75,10 @@ off as the old artifact.
   are unaffected. The current renderer is fixed; immutable historical receipt
   bytes are not edited.
 - Three capability receipts use tool-root-relative payload paths without
-  declaring the base, as described above. Future wrapper records declare
-  `payload_path_base=run-meta-directory` and write inline stream paths relative
-  to the sibling `run.meta`. The verifier retains legacy behavior only for old
-  records without that field.
+  declaring the base, as described above. Later wrapper-era records declared
+  `payload_path_base=run-meta-directory` and wrote inline stream paths relative
+  to the sibling `run.meta`. That format and compatibility verifier are retired;
+  new comparative evidence uses the benchmark result schema instead.
 
 ## Container-image availability
 
@@ -106,8 +106,8 @@ reader can retrieve that image or regenerate it from current package indexes.
 ## Images prepared for comparative runs (2026-08-10)
 
 The table above remains the availability record for historical groundwork
-receipts. New comparative images follow the shared-base and per-tool payload
-contract in [`tool-structure.md`](tool-structure.md) and prefer checksum-pinned
+receipts. New comparative runs use the self-contained toolbox contract in
+[`../../benchmark/`](../../benchmark/) and prefer checksum-pinned
 official distributions. `s3-fast-list` is the sole native source-build
 exception because its selected fork has no matching release binary. These new
 images have not produced benchmark evidence yet.
@@ -121,8 +121,8 @@ the binary in the historical upstream image despite reporting the same release:
 | s5cmd | `6a645f4f53ffe03911e531586c167b35e36e2d33e0f10a9404cb1f665eeaaa98` | `672299fea8941281702bd52a4e51c330a4e39c1540f4bdfc3b4e737823ac2878` |
 
 Image identity, registry availability, and rebuildability remain separate.
-Publication must record the final and shared-base OCI digests alongside their
-source, tool-artifact, adapter, and harness identities. Historical receipts
+Publication must record the final toolbox OCI digest alongside its tool-artifact,
+recipe, adapter, and harness identities. Historical receipts
 continue to describe the older images and binaries they actually observed.
 
 ## Public evidence gate

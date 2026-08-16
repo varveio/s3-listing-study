@@ -1,9 +1,9 @@
 # ── Results bucket ────────────────────────────────────────────────────────────
 #
-# Landing zone for everything a campaign produces under campaigns/<campaign>/:
-# frozen plan/manifest objects and authoritative
-# <bucket>/<tool>/<case>/run-<n>/<attempt-uuid>/** trees containing result
-# summaries and raw audit evidence.
+# Landing zone for attempt evidence under
+# campaigns/<campaign>/results/<bucket>/<tool>/<case>/run-<n>/submission-<n>/
+# <attempt-uuid>/**. Each leaf contains raw artifacts and a result.json marker
+# written last.
 #
 # Versioning is on because the study's rule is that an attempt is never
 # overwritten and a retry is always a new attempt. Versioning does not enforce

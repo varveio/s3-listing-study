@@ -168,15 +168,14 @@ anything in this tool page.
 
 ## Reproduction
 
-The committed receipts are immutable wrapper-era evidence. New attempts use the single
-derived-image contract in
-[`../../../harness/README.md`](../../../harness/README.md), and an s3p image has
-not been implemented yet.
+The committed receipts are immutable wrapper-era evidence. New comparative
+attempts use the self-contained toolbox and campaign worker documented in
+[`benchmark/README.md`](../../../benchmark/README.md).
 
 Every receipt above was produced by the retired shared wrapper, never a bare
 `docker run`. The current `command.py` is a typed compiler with no shell or NUL
-transport; execution, capture, timeout, and measurement belong to the attempt
-engine. Each immutable receipt retains its exact original invocation. The v3.6.0
+transport; execution, capture, timeout, and measurement belong to the benchmark
+worker. Each immutable receipt retains its exact original invocation. The v3.6.0
 `colors` unstartable finding was a direct `docker run` of an `s3p@3.6.0` image,
 documented in `../receipts/smoke/_build/build-notes.md` — an `[OBS]` build note,
 **not** a standard wrapper-era receipt (claim `v3-6-0-cannot-start`).

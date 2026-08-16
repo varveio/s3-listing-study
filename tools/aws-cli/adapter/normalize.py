@@ -43,8 +43,8 @@ import re
 import sys
 from typing import IO, Any
 
-from s3_listing_study.manager.contract import UNEXPOSED, emit
-from s3_listing_study.manager.duckdb_adapter import (
+from benchmark.runtime.contract import UNEXPOSED, emit
+from benchmark.runtime.duckdb_adapter import (
     connect,
     count_lf_lines,
     count_query,
@@ -53,7 +53,7 @@ from s3_listing_study.manager.duckdb_adapter import (
     iter_lf_lines,
     staged,
 )
-from s3_listing_study.manager.normalizer_cli import normalizer_main
+from benchmark.runtime.normalizer_cli import normalizer_main
 
 UNKNOWN_MODE_EXIT = 2
 

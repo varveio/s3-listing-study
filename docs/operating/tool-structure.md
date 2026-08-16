@@ -280,75 +280,35 @@ always linking back to the source record.
 
 ## Executable integration and builds
 
-`adapter/command.py` implements the shared typed command contract. It exports
-`build_command(CommandRequest) -> tuple[str, ...]`, returning the complete
-subject argv including the executable. The final image assembly bundles exactly
-one selected adapter; the in-image driver loads it and compiles argv from the
-scheduler's typed logical request. The adapter
-never runs Docker or the tool; the attempt engine owns execution, credentials,
-timeouts, and measurement. Its argparse boundary prints JSON only for operator
-inspection and normal `--help`, not as a scheduler transport.
-Optional concurrency is a typed logical field, never an environment lookup.
-Adapters reject it unless they explicitly declare a supported range.
+`adapter/command.py` and `adapter/normalize.py` are tool-specific declarations
+owned by the capsule. They import their typed command, normalization, DuckDB,
+and record contracts from `benchmark.runtime`; no runner implementation lives
+under `tools/`. The command adapter returns the complete subject argv and its
+fixed prefix must equal `build/image.json`'s `executable`. The normalizer owns
+native row selection, bounded counting, and conversion to the five-field
+comparison stream.
 
-`adapter/normalize.py` owns both native row selection and explicit verifier
-conversion. Its `count_rows(data, mode, prefix="", native_root="") -> int`
-library function counts the selected native rows without constructing the
-historical five-field records; this is the only path routine worker attempts
-invoke. Its separate `normalize` library function converts the same selected
-rows into the verifier's normalized stream and uses the shared argparse boundary
-in `s3_listing_study.manager.normalizer_cli`. Normalization is explicit
-manager-side verification work, not part of a routine attempt, and its stream
-is an executable compatibility boundary rather than a stored canonical result.
-
-`adapter/fixtures/` is allowed only for synthetic adapter QA that already
-exists. Observed captures remain receipts. The current classified exceptions
-are documented in the migration playbook.
-
-Every runnable capsule has a `build/Dockerfile` whose final stage inherits the
-immutable shared runtime and installs exactly one tool plus the runtime files
-it needs, with no study worker. Recipes prefer the selected release's checksum-pinned official
-binary, archive, or package. `s3-fast-list` is the sole native source-build
-exception because its selected fork publishes no matching binary. Discarded,
-digest-pinned builder or runtime stages are allowed; upstream tool images are
-not execution bases or artifact donors.
-
-The stable base in `harness/shared-image/` contains the pinned Debian/glibc
-userspace, CA trust, Debian Python, DuckDB, and the pinned compiled ijson
-runtime, but no tool or worker. The common recipe in `harness/derived-image/`
-starts from the immutable tool image and adds current `worker/`,
-worker-reachable `common/`, one adapter, and `image.json` as `selection.json`.
-Tool capsules do not copy either shared recipe. The base standardizes shared
-filesystem inputs; bundled or
-static Node, Python, JRE, resolver, TLS, and allocator behavior remains part of
-the tool payload.
-
-The target boundary defines invalidation:
-
-| Changed input | Invalidated target |
-| --- | --- |
-| manager or benchmark plan | none |
-| worker or adapter | affected execution image(s) |
-| tool recipe or artifact | that tool image and execution image |
-| shared runtime | base, every tool image, and every execution image |
-
-Because each child consumes its parent by OCI digest, worker-only builds reuse a
-published tool image without depending on retained BuildKit state.
+Every runnable capsule keeps a `build/Dockerfile` and `build/image.json` as
+auditable build facts. The Dockerfile records the selected checksum-pinned
+artifact or source recipe. It is not built or published as a standalone parent
+image. [`../../benchmark/build/Dockerfile`](../../benchmark/build/Dockerfile) assembles all
+eleven subjects directly in isolated build stages and copies their runtime
+closures into one toolbox.
 
 `build/image.json` has an exact field set: `tool`, `tool_version`,
-`shared_base_source_sha256`, `tool_build_sha256`, structured `tool_artifact`,
-`subject_workdir`, `executable`, `command`, `normalizer`, and
-`adapter_bundle_sha256`. The tool-build hash covers the tool recipe, supporting
-build bytes, and declared artifact; it deliberately excludes the separately
-hashed adapter bundle. `executable` must equal the adapter's
-`fixed_command_prefix`.
+`tool_build_sha256`, structured `tool_artifact`, `subject_workdir`, `executable`,
+`command`, `normalizer`, and `adapter_bundle_sha256`. The tool-build hash covers
+the recipe and supporting build bytes plus the declared artifact; the adapter
+has its own digest. Embedded benchmark metadata additionally records the capsule
+and consolidated build-input digests, executed toolbox-Dockerfile digest,
+harness revision, and aggregate toolbox digest; the campaign image set
+binds those facts to the final digest-pinned OCI URI. Neither records a per-tool
+parent image or retired shared-base identity.
 
-The build command accepts only a tool slug and an immutable shared-base URI;
-operator commands are in
-[`../../harness/derived-image/README.md`](../../harness/derived-image/README.md).
-Readable tags are labels, not identities. Publication and results record the
-final digest, shared-base URI/digest/source identity, tool build/artifact,
-adapter bundle, and harness revision. One image set cannot mix shared bases.
+Changing a plan does not rebuild the toolbox. Changing an adapter, tool recipe,
+artifact, benchmark runtime, or worker does. Toolbox construction, harness smoke,
+cloud canaries, execution, verification, and reports are all owned by
+[`../../benchmark/`](../../benchmark/).
 
 ## Receipts and raw formats
 
@@ -362,13 +322,10 @@ format actually produced: Markdown receipts, JSON metadata, logs, Parquet,
 stdout, stderr, hashes, or other native artifacts. Converting or deduplicating
 those files would change the evidence rather than improve its organization.
 
-One mode directory may therefore hold records of two different shapes at once:
-wrapper-era `receipt.md` / `run.meta` / `verify.md` / `stderr.txt` files, and
-`attempt-N/` directories written by the attempt engine. They are separate runs
-and neither supersedes the other; a rerun takes the next free `attempt-N` and
-removes nothing. See [`harness/README.md`](../../harness/README.md) § Historical
-receipts and verification for what distinguishes them and why the older files
-still name a wrapper that no longer exists.
+Historical directories may still name wrappers and verifier commands that no
+longer exist. Those invocations are immutable facts about the recorded run, not
+current reproduction instructions. New comparative artifacts are produced only
+by `benchmark/` and never written into capsule receipt directories.
 
 ## Duplication boundary
 

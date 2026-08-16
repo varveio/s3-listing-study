@@ -2,7 +2,7 @@
 #
 # The complete privilege set for driving a campaign: submit and monitor Batch
 # jobs, actAs the worker service account, read and write the results bucket, and
-# push derived images.
+# optionally publish the single benchmark toolbox.
 #
 # Which roles make up the bundle is intrinsic to this concern and lives here; WHO
 # holds it is a deployment choice, so members arrive through var.manager_members.

@@ -1,7 +1,4 @@
-# Static and fake-host gates only. Nothing here touches Docker, the network
-# path to any bucket, or host firewall state: the live activation sequence is
-# owner-run on a disposable runner (docs/operating/runner-security.md) and must never
-# ride on pull-request CI.
+# Repository-study and Python gates. Toolbox construction has its own workflow.
 name: checks
 
 on:
@@ -52,36 +49,13 @@ jobs:
           install -m 0755 /tmp/actionlint "$HOME/.local/bin/actionlint"
           actionlint
 
-      - name: Mask docker for the static gates
-        # The suites are designed to run without Docker, but one regression
-        # path issues a read-only `docker image inspect` that would reach the
-        # hosted runner's daemon. A failing PATH shim keeps every step below
-        # provably daemon-free.
-        run: |
-          set -euo pipefail
-          mkdir -p /tmp/no-docker
-          printf '#!/bin/sh\necho "docker is masked in pull-request CI (static gates only)" >&2\nexit 1\n' > /tmp/no-docker/docker
-          chmod +x /tmp/no-docker/docker
-          echo "/tmp/no-docker" >> "$GITHUB_PATH"
-
-      - name: Full-tree secret scan
-        # Before `uv sync`: the scan reads every file under the tree, and a
-        # populated `.venv/` puts third-party binaries in front of it.
-        run: PYTHONPATH=src python3 -P -m s3_listing_study.manager.receipt scan-tree .
-
       - name: Install uv
-        # The harness suite drives the packaged verifier, whose field comparison
-        # runs on DuckDB. It gets the locked project environment rather than
-        # whatever the runner's python3 happens to import.
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           enable-cache: true
 
       - name: Sync (locked)
         run: uv sync --locked
-
-      - name: Harness regression suite (includes the harness shellcheck gate)
-        run: harness/tests/run-regressions.sh
 
       - name: Tool adapter fixture shellcheck
         run: shellcheck -S warning tools/*/adapter/fixtures/*.sh
@@ -147,14 +121,10 @@ jobs:
         run: uv run ruff check
 
       - name: ruff format --check
-        run: uv run ruff format --check src tests
+        run: uv run ruff format --check benchmark/src benchmark/tests src tests
 
       - name: mypy
         run: uv run mypy
 
       - name: pytest
-        # Deselect the oracle-backed gates: the reference data they read is
-        # deliberately not in the repo, so CI cannot judge them. Deselecting
-        # here states that where it is configured, rather than letting a test
-        # self-skip and read as a pass. Run them locally with `-m oracle`.
-        run: uv run pytest -m "not oracle"
+        run: uv run pytest

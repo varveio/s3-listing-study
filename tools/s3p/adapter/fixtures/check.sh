@@ -25,7 +25,7 @@ fi
 # A missing dependency stops here, loudly: unresolvable is not the same as a
 # mode that normalized wrongly, and five FAIL lines would read as the adapter
 # being broken.
-if ! PYTHONPATH="$REPO_ROOT/src" "$PYTHON" -P -c 'import s3_listing_study.manager.duckdb_adapter, duckdb' 2>/dev/null; then
+if ! PYTHONPATH="$REPO_ROOT/benchmark/src" "$PYTHON" -P -c 'import benchmark.runtime.duckdb_adapter, duckdb' 2>/dev/null; then
   printf 'FIXTURE QA CANNOT RUN: %s cannot import the adapter and duckdb.\n' "$PYTHON" >&2
   printf '  Run `uv sync` in the repo root, or point S3STUDY_PYTHON at an interpreter that has them.\n' >&2
   exit 2
@@ -33,7 +33,7 @@ fi
 
 fail=0
 run() { # <mode> <fixture> <expected>
-  local got; got="$(PYTHONPATH="$REPO_ROOT/src" "$PYTHON" -P "$N" "$1" < "$2")"
+  local got; got="$(PYTHONPATH="$REPO_ROOT/benchmark/src" "$PYTHON" -P "$N" "$1" < "$2")"
   if [ "$got" = "$(cat "$3")" ]; then echo "PASS $1"; else echo "FAIL $1"; fail=1; fi
 }
 run ls-raw    ls-raw.fixture.jsonl  ls-raw.expected.tsv

@@ -1,31 +1,32 @@
 # Smoke-bucket registry
 
-The binding source for every executable artifact in the smoke campaign:
-harness code, per-tool `command.py`, subject cards, and receipts take buckets
-as parameters resolved from this file — a bucket name hardcoded anywhere
-executable is a defect. The historical smoke protocol this registry serves is
-[`tool-research-brief.md`](operating/tool-research-brief.md).
+The historical bucket registry for capsule-groundwork smoke receipts. It records
+the bucket and manifest identities those immutable receipts used; it is not a
+current benchmark plan. Current comparative inputs live under
+[`../benchmark/plans/`](../benchmark/plans/).
 
-**The machine-read source is [`data/registry.toml`](../data/registry.toml).**
-Code resolves bucket facts from there, not from the tables below; the tables
-state the same values for a human reader, and `tests/test_registry.py` fails if
-the two ever disagree. Change both, or change the TOML and let the guard tell
-you what is stale.
+[`data/registry.toml`](../data/registry.toml) was the machine-readable source for
+the retired groundwork harness. It is retained with these tables as historical
+capsule evidence; no current benchmark component resolves bucket facts from it.
+Current target declarations live under
+[`benchmark/plans/`](../benchmark/plans/), and current execution and comparison
+behavior is documented in [`benchmark/README.md`](../benchmark/README.md).
 
-Snapshots are taken with the pinned harness client, **anonymously**, and the
-manifest is the reference listing every smoke run is verified against. A
-drifted bucket (pre-flight or mid-campaign reference re-list disagreeing with
-the manifest) stops the campaign; only the orchestrator re-baselines, and
-every receipt cites the manifest sha256 it was checked against.
+The deleted harness was designed to take anonymous snapshots with the pinned
+client, compare smoke output with the recorded manifest, and stop on detected
+drift. Historical engine attempts did not produce verifier verdicts, so those
+intended controls must not be read as proof that every recorded attempt was
+verified. The current benchmark neither consumes this manifest nor implements
+that pre-flight/mid-campaign drift gate; its verifier compares completed
+attempts and explicitly treats agreement as different from ground truth.
 
-## Harness client
+## Historical harness client
 
 | | |
 | --- | --- |
 | Image | `amazon/aws-cli@sha256:eb85b2c72442c9eab0bdbe608095b9b909bc2a7136924124d63fe0c03b2ec334` |
 
-Invocation shape, run only after the mandatory
-[`runner-security`](operating/runner-security.md) preflight:
+Historical invocation shape (evidence, not current instructions):
 
 ```sh
 docker run --rm --network s3-listing-study-subjects \
@@ -37,14 +38,14 @@ docker run --rm --network s3-listing-study-subjects \
   --output text
 ```
 
-**Canonicalization.** The API returns ETags wrapped in literal quotes; the
-pipeline strips them before writing TSV. `LastModified` comes back as
+**Historical canonicalization design.** The API returns ETags wrapped in literal
+quotes; the deleted pipeline stripped them before writing TSV. `LastModified` came back as
 `YYYY-MM-DDTHH:MM:SS+00:00` (the container runs `TZ=UTC`, so it is genuinely
-UTC); the pipeline rewrites the trailing `+00:00` to `Z`, giving the
+UTC); the pipeline rewrote the trailing `+00:00` to `Z`, giving the
 contract-v2 canonical `YYYY-MM-DDTHH:MM:SSZ`. Snapshot, pre-flight, and
-mismatch re-list all use this exact pipeline — same image, same query, same
-canonicalization. The mismatch re-list captures the full five-field record
-(see `s3_listing_study.manager.verify`).
+mismatch re-list were designed to use this exact pipeline — same image, same
+query, same canonicalization. The retired mismatch re-list was intended to
+capture the full five-field record.
 
 ## Primary: `noaa-normals-pds`
 
@@ -52,11 +53,11 @@ canonicalization. The mismatch re-list captures the full five-field record
 | --- | --- |
 | Bucket | `noaa-normals-pds` (AWS Open Data — NOAA U.S. Climate Normals; sponsor-paid requests) |
 | Region | `us-east-1` |
-| Access | Anonymous (`--no-sign-request`); last verified during the recorded 2026-07-17 smoke. Future checks require the runner-security activation gate and preflight. |
+| Access | Anonymous (`--no-sign-request`) in the recorded 2026-07-17 capsule smoke; no current verifier verdict is implied. |
 | Manifest | `<data>/manifests/noaa-normals-pds.2026-07-17.tsv.gz` — `key<TAB>size<TAB>etag<TAB>mtime<TAB>storage_class` (contract v2), ETag unquoted, mtime `YYYY-MM-DDTHH:MM:SSZ` UTC. |
 | Manifest sha256 | `c78a82737dd1982a999912afa89f870c013cb22e01e50b8c4835ddb725992adb` |
 | Snapshot date | 2026-07-17 (UTC) |
-| Keys | 148,917 — returned in strict byte order (verified against the snapshot) |
+| Keys | 148,917 — the historical snapshot's recorded strict-byte-order count |
 
 **Data artifacts never enter the repo.** The manifest sha256 in the table is
 the binding, and the artifact is published as an immutable release asset when
@@ -78,19 +79,17 @@ the repo goes public.
 > **129,227 of 148,917 objects (87%) now report a `last_modified` later than
 > the snapshot date**, the newest `2026-07-22T13:20:38Z`. So the
 > key/size/etag columns appear stable while the `mtime` column is stale for
-> most of the bucket: the identical-byte-overwrite case the verifier's `DRIFT`
-> verdict exists for ([`../harness/README.md`](../harness/README.md)
-> § Verdicts). **Consequence:** a contract-v2 5-field verification against the
+> most of the bucket: the identical-byte-overwrite case the retired verifier's
+> `DRIFT` verdict covered. **Consequence:** a contract-v2 5-field verification against the
 > current manifest would report mass `mtime` mismatches that belong to the
 > bucket, not to any tool. The snapshot figures above are deliberately **not**
 > edited — this note is an observation about them. **Re-baselining has not
-> been done and is the orchestrator's/owner's call** (§ Changing the smoke
-> bucket in [`../harness/README.md`](../harness/README.md)).
+> been done and remains the owner's call**.
 >
 > Recorded at the same time: **the manifest artifact is not present on a fresh
 > machine.** It lives outside the repo by the no-data-in-repo rule above, so a
 > clone alone can verify nothing until the artifact is fetched — a distinct
-> prerequisite from the runner-security gate, and one that cost this run real
+> prerequisite distinct from subject execution, and one that cost this run real
 > time before it was understood. See
 > [`operating/artifact-availability.md`](operating/artifact-availability.md).
 

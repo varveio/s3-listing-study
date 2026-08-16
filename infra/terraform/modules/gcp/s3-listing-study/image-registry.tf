@@ -1,21 +1,18 @@
-# ── Derived-image registry ────────────────────────────────────────────────────
+# ── Benchmark toolbox registry ────────────────────────────────────────────────
 #
-# Holds one derived attempt image per registered tool: the subject image with the
-# study's pinned interpreter and attempt engine layered in.
+# Holds the single self-contained benchmark toolbox built from the repository's
+# eleven capsule recipes. This module creates storage and grants; it does not
+# build or publish an image.
 #
-# Images arrive under the name the build derives from each tool's registration —
-# <tool>:<subject version>-h<harness version>-<subject digest prefix> — so a tag
-# states both versions it combines and cannot be mistaken for the upstream image
-# it wraps.
-#
-# No cleanup policy. A campaign's results reference the exact derived digest they
-# ran, and deleting those images would break the ability to re-run or audit a
-# published number. Prune deliberately, once a campaign is retired.
+# A separately authorized publication should use a repository path such as
+# <image_repo_url>/benchmark-toolbox and campaigns consume only its immutable
+# @sha256 URI. No cleanup policy: prune deliberately after dependent campaigns
+# have been retired.
 
 resource "google_artifact_registry_repository" "images" {
   project       = var.project
   location      = var.region
   repository_id = local.name
   format        = "DOCKER"
-  description   = "Derived attempt images: each subject tool plus the study's pinned attempt engine"
+  description   = "Immutable self-contained benchmark toolbox images"
 }

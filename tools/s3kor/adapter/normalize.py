@@ -39,7 +39,7 @@ anything else. s3kor's only committed receipts are capability probes that failed
 to authenticate, so the stream the corpus selects for them is a Go stack trace —
 whose lines are TAB-indented. Emitting those would produce records whose key
 contains a TAB, i.e. rows a field split reads as six columns and
-:func:`~s3_listing_study.manager.contract.parse_line` rejects. This adapter refuses the
+:func:`~benchmark.runtime.contract.parse_line` rejects. This adapter refuses the
 payload instead (non-zero exit, which the verifier reports as ERROR), the same
 refusal ``contract`` documents as the reason keys are bytes and TAB is reserved.
 It is the deviation, taken on purpose: ERROR says "no verdict was formed", which
@@ -59,13 +59,13 @@ from __future__ import annotations
 import sys
 from typing import IO
 
-from s3_listing_study.manager.duckdb_adapter import (
+from benchmark.runtime.duckdb_adapter import (
     connect,
     count_lf_lines,
     emit_result,
     staged,
 )
-from s3_listing_study.manager.normalizer_cli import normalizer_main
+from benchmark.runtime.normalizer_cli import normalizer_main
 
 UNKNOWN_MODE_EXIT = 2
 

@@ -37,18 +37,19 @@ Routine attempts do not normalize or convert listing output. After the timed
 subject exits successfully, the selected adapter's `count_rows` path applies
 the same mode-specific row selection as its verifier normalizer but computes
 only a count. The worker retains and uploads the original stdout, stderr, and
-native directory output. Five-field normalization is manager-side work invoked
-only for explicit correctness verification.
+native directory output. Five-field normalization is benchmark-verifier work
+invoked only for explicit correctness verification.
 
 Routine campaign reporting is summary-only. The campaign model owns a
 `run-<n>` ordinal for each scheduled run (`run-1` under the current policy),
 while every worker-container execution mints its own attempt UUID below that
-prefix. The manager reconciler discovers only immediate UUID children with a
-delimiter listing and reads their exact sealed `result.json` summaries. Raw
-listings remain in the same GCS attempt trees and are fetched only for
+prefix. The benchmark controller discovers only immediate UUID children with a
+delimiter listing and reads their exact `result.json` summaries, which the
+worker uploads last as completion markers. Raw listings remain in the same GCS
+attempt trees and are fetched only for
 correctness verification or investigation. Multiple current-submission UUID
-children under one run are duplicate executions; the reconciler surfaces all
-and selects none as canonical. Historical retry leaves remain visible without
+children under one run are duplicate executions; reporting surfaces all and
+selects none as canonical. Historical retry leaves remain visible without
 competing with current-submission evidence.
 
 **Material reporting-safety change — 2026-08-11.** Controller completion is
@@ -220,12 +221,17 @@ must be stated as a limitation or controlled by running in-region.
 **Settled: no tool is run directly on the host.** Each gets a pinned image, and
 every receipt records the image digest.
 
-**Material methodology change — 2026-08-10.** Every comparative image now uses
-the same published shared-base digest and a separately pinned tool payload.
-Final assembly adds the current worker and exactly one adapter, producing one
-execution image and digest per tool. We prefer the selected release's official
-binary, archive, or package; `s3-fast-list` is the only native source-build
-exception because its selected fork publishes no matching binary.
+**Material methodology change — 2026-08-10, superseded 2026-08-16.** The first
+container plan used one shared base, separately published tool payloads, and one
+execution image per tool. No comparative run used that design.
+
+**Material methodology change — 2026-08-16.** The production benchmark now
+builds one self-contained toolbox directly from all eleven checked-in capsule
+recipes. Compiler and package-manager work remains isolated in build stages;
+the final runtime contains every subject but each Batch task selects and runs
+exactly one. There are no separately published parent images or legacy image
+jobs. We still prefer checksum-pinned official distributions; `s3-fast-list`
+remains the native source-build exception.
 
 This replaces the earlier preference for upstream tool containers. It holds the
 base filesystem, CA input, and shared libraries constant where tools consume
@@ -233,9 +239,10 @@ them while keeping upstream provenance at the tool-artifact boundary. It does
 not make bundled or static runtimes identical: Node, Python, JRE, resolver, TLS,
 and allocator behavior carried by a tool payload remain part of that subject.
 
-The final OCI digest is the execution identity. Image sets and results also
-record the base digest and source identity, tool artifact and build identities,
-adapter bundle, and harness revision. Historical receipts continue to describe
+The final toolbox OCI digest is the execution identity. Image sets and results
+also record the executed toolbox-recipe digest, each tool artifact/build/recipe
+and consolidated build-input identity, adapter bundle, and harness revision.
+Historical receipts continue to describe
 the older images they name. The exact build and registration contract lives in
 [`tool-structure.md`](operating/tool-structure.md) § Executable integration and
 builds; availability remains a separate question in
@@ -245,24 +252,18 @@ Rebuild scope follows the changed component:
 
 | Change | Required image work |
 | --- | --- |
-| manager or benchmark plan | none |
-| worker or one adapter | reassemble affected final image(s) |
-| one tool version or recipe | rebuild that tool payload and final image |
-| shared runtime | rebuild the base and every final image |
+| benchmark plan | none |
+| worker, runtime, or one adapter | rebuild the toolbox |
+| one tool version or recipe | rebuild the toolbox |
 
-Avoiding tool recompilation during final reassembly requires retained BuildKit
-cache. A fresh builder needs registry-backed cache, which is not implemented
-yet. Container resource limits remain the mechanism used for limits testing.
+BuildKit caches the isolated build stages where available. Container resource
+limits remain the mechanism used for limits testing.
 
 Two details to handle up front:
 
-- **Use the execution profile for the scheduler.** Production comparisons use
-  the cooperative GCP Batch profile in
-  [`runner-security.md`](operating/runner-security.md): one task on one fresh VM,
-  a least-privilege task identity, and metadata access so the worker can obtain
-  the token that uploads to GCS. The firewall-backed bridge and metadata-denial
-  gate are retained for local Docker runs on the more-privileged manager/runner
-  host; they are not a Batch prerequisite or provider adapter.
+- **Use one fresh Batch VM and least-privilege task identity per scheduled run.**
+  The worker uses that identity only to upload its own result prefix. Current
+  commands and controller state are owned by [`../benchmark/`](../benchmark/).
 - **The JVM sees cgroup limits and reacts.** Under `--memory`, a modern JVM sizes
   its heap from the container limit. Swath is the only JVM entrant, so
   memory-capped runs are not a neutral environment for it — its behaviour under a
@@ -383,7 +384,8 @@ what they need to rebuild the run.
 
 ## Execution order
 
-1. Build and validate the shared run wrapper and correctness verifier once.
+1. Build and validate the benchmark toolbox, measurement worker, and correctness
+   verifier once.
 2. At smoke scale, work per tool: read its docs and source, select or build its
    pinned image, then execute every supported listing mode. Reading and smoke
    necessarily interleave within a tool because its invocation cannot be

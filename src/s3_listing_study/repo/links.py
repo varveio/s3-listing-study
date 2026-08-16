@@ -1,6 +1,6 @@
 """Check relative Markdown links on the repo's current-state surfaces.
 
-Scope: root-level Markdown, docs/, harness/README.md, tools/README.md, and the
+Scope: root-level Markdown, docs/, benchmark/, tools/README.md, and the
 README-only contextual tool directories (those with no data/ capsule, e.g.
 pure-storage and s3-inventory) — the pages a reader navigates today.
 Capsule-internal pages are already covered by :mod:`s3_listing_study.repo.capsule`,
@@ -28,8 +28,8 @@ REPO = Path(__file__).resolve().parents[3]
 
 SURFACE_GLOBS = [
     "*.md",
-    "docs/*.md",
-    "harness/README.md",
+    "docs/**/*.md",
+    "benchmark/**/*.md",
     "tools/README.md",
 ]
 

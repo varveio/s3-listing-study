@@ -1,0 +1,44 @@
+# The box each (vcpus, memory_gb) pair resolves to.
+#
+# A plan asks for two vCPUs and eight gigabytes; which machine type that is, is
+# a fact about the cloud and not about the benchmark. Keeping it here means a
+# plan states the shape it needs rather than a provider's product name, and a
+# new machine generation is one edit rather than one per case.
+#
+# vCPU is held constant across a memory sweep by construction: within a
+# generation, highcpu/standard/highmem at the same vCPU count differ only in
+# memory, so 2 vCPU at 4 vs 8 GB is one variable and not two. Sweeping the
+# container ceiling is usually the better instrument (see benchmark/plans/README.md), but
+# where a case does move the box, this is what keeps it to one variable.
+#
+# N4 is Intel Emerald Rapids (5th-gen Xeon). E2 is deliberately absent, and the
+# documented reason is sharper than "shared core" — only e2-micro/small/medium
+# time-share a physical core. E2 offers both Intel and AMD processors and "the
+# processor is selected for you at the time of VM creation", with no minimum CPU
+# platform settable. You cannot know which chip you timed on. N4 names one.
+#
+# Machine types and ratios are verified against Compute Engine's published
+# tables (N4 highcpu 2 GB/vCPU, standard 4, highmem 8) rather than the live API,
+# which this account cannot list (no compute.machineTypes.list).
+#
+# BOOT DISK — a Batch job on these fails at instance creation without it. N4
+# supports no Persistent Disk type at all, only Hyperdisk ("N4 doesn't support
+# Persistent Disk or Local SSD"), while Batch defaults a boot disk to
+# pd-balanced. Set it to `hyperdisk-balanced` explicitly. Not pd-ssd — N4 does
+# not take that either, and Batch's own disk-type field does not list a
+# Hyperdisk value, so this needs checking against the API it actually accepts.
+
+spec_version: 2
+
+instances:
+  - { vcpus: 2, memory_gb: 4, machine_type: n4-highcpu-2 }
+  - { vcpus: 2, memory_gb: 8, machine_type: n4-standard-2 }
+  - { vcpus: 2, memory_gb: 16, machine_type: n4-highmem-2 }
+
+  - { vcpus: 4, memory_gb: 8, machine_type: n4-highcpu-4 }
+  - { vcpus: 4, memory_gb: 16, machine_type: n4-standard-4 }
+  - { vcpus: 4, memory_gb: 32, machine_type: n4-highmem-4 }
+
+  - { vcpus: 8, memory_gb: 16, machine_type: n4-highcpu-8 }
+  - { vcpus: 8, memory_gb: 32, machine_type: n4-standard-8 }
+  - { vcpus: 8, memory_gb: 64, machine_type: n4-highmem-8 }

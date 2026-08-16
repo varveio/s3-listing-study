@@ -167,9 +167,9 @@ benchmark".
 ## Historical reproduction command (runner retired)
 
 The command below records how the committed receipts were produced, but it is
-not runnable in the current checkout. New attempts use the single derived-image
-contract described in [`../../../harness/README.md`](../../../harness/README.md);
-the shared derived-image recipe exists, but this subject has not passed its compatibility gate.
+not runnable in the current checkout. New comparative attempts use the
+self-contained toolbox and campaign worker documented in
+[`benchmark/README.md`](../../../benchmark/README.md).
 
 Every capability receipt was produced by the retired shared wrapper, never a
 bare `docker run`, and retains its exact original invocation.
