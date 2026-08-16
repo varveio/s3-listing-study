@@ -129,11 +129,16 @@ def result_binding_errors(row: sqlite3.Row, result: dict[str, object]) -> list[s
         "run_ordinal": row["rep"],
         "submission_number": row["submission"],
         "tool_parent_image": options["--tool-parent-image"],
+        "shared_base_uri": options["--shared-base-uri"],
+        "shared_base_digest": options["--shared-base-digest"],
+        "shared_base_source_sha256": options["--shared-base-source-sha256"],
+        "toolbox_manifest_sha256": options["--toolbox-manifest-sha256"],
         "tool_version": options["--tool-version"],
         "tool_build_sha256": options["--tool-build-sha256"],
         "adapter_bundle_sha256": options["--adapter-bundle-sha256"],
         "harness_revision": options["--harness-revision"],
         "subject_workdir": options["--subject-workdir"],
+        "applied_subject_workdir": options["--subject-workdir"],
         "declared_resources": resources,
     }
     errors = [name for name, value in expected.items() if result.get(name) != value]

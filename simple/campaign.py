@@ -18,7 +18,7 @@ from typing import Any
 
 import verify
 import yaml
-from contract import EXIT_DRIFT, EXIT_FAIL, EXIT_PASS
+from contract import EXIT_DRIFT, EXIT_FAIL, EXIT_PASS, TOOLBOX_TOOLS
 from google.api_core.exceptions import (
     AlreadyExists,
     BadRequest,
@@ -51,13 +51,11 @@ SECRET_RE = re.compile(r"\Aprojects/[^/]+/secrets/[^/]+/versions/[^/]+\Z")
 HEX64_RE = re.compile(r"\A[0-9a-f]{64}\Z")
 REVISION_RE = re.compile(r"\A[0-9a-f]{40}\Z")
 CAMPAIGN_RE = re.compile(r"\A\d{4}-\d{2}-\d{2}-[a-z][a-z0-9-]*\Z")
-IMAGE_FIELDS = {
-    "image_uri",
+TOOL_IMAGE_FIELDS = {
     "tool_parent_image",
     "tool_version",
     "tool_build_sha256",
     "adapter_bundle_sha256",
-    "harness_revision",
     "subject_workdir",
 }
 AWS_CREDENTIAL_ENV_KEYS = frozenset(
@@ -102,8 +100,25 @@ class JobCollisionError(CampaignError):
 
 @dataclass(frozen=True)
 class ImageSet:
-    images: dict[str, dict[str, str]]
+    image_uri: str
+    shared_base_uri: str
+    shared_base_digest: str
+    shared_base_source_sha256: str
+    toolbox_manifest_sha256: str
+    harness_revision: str
+    tools: dict[str, dict[str, str]]
     sha256: str
+
+    def image_for(self, tool: str) -> dict[str, str]:
+        return {
+            "image_uri": self.image_uri,
+            "shared_base_uri": self.shared_base_uri,
+            "shared_base_digest": self.shared_base_digest,
+            "shared_base_source_sha256": self.shared_base_source_sha256,
+            "toolbox_manifest_sha256": self.toolbox_manifest_sha256,
+            "harness_revision": self.harness_revision,
+            **self.tools[tool],
+        }
 
 
 @dataclass(frozen=True)
@@ -140,24 +155,66 @@ def load_image_set(path: str | Path, required_tools: set[str]) -> ImageSet:
         document = json.loads(source)
     except json.JSONDecodeError as exc:
         raise CampaignError(f"image set is not valid JSON: {exc}") from None
-    if not isinstance(document, dict) or set(document) != {"schema_version", "images"}:
-        raise CampaignError("image set must contain exactly schema_version and images")
-    if document["schema_version"] != 1 or not isinstance(document["images"], dict):
-        raise CampaignError("image set schema_version must be 1 and images must be an object")
-    images: dict[str, dict[str, str]] = {}
-    for tool, value in document["images"].items():
-        if not isinstance(tool, str) or not isinstance(value, dict) or set(value) != IMAGE_FIELDS:
-            raise CampaignError(f"{tool}: image entry must contain {sorted(IMAGE_FIELDS)}")
-        image = {name: str(value[name]) for name in IMAGE_FIELDS}
-        if PINNED_IMAGE_RE.fullmatch(image["image_uri"]) is None:
-            raise CampaignError(f"{tool}: image_uri must be pinned by @sha256 digest")
+    fields = {
+        "schema_version",
+        "image_uri",
+        "shared_base_uri",
+        "shared_base_digest",
+        "shared_base_source_sha256",
+        "toolbox_manifest_sha256",
+        "harness_revision",
+        "tools",
+    }
+    if not isinstance(document, dict) or set(document) != fields:
+        raise CampaignError(f"image set must contain exactly {sorted(fields)}")
+    if document["schema_version"] != 2 or not isinstance(document["tools"], dict):
+        raise CampaignError("image set schema_version must be 2 and tools must be an object")
+    image_uri = document["image_uri"]
+    shared_base_uri = document["shared_base_uri"]
+    shared_base_digest = document["shared_base_digest"]
+    shared_base_source_sha256 = document["shared_base_source_sha256"]
+    toolbox_sha256 = document["toolbox_manifest_sha256"]
+    harness_revision = document["harness_revision"]
+    if not isinstance(image_uri, str) or PINNED_IMAGE_RE.fullmatch(image_uri) is None:
+        raise CampaignError("image_uri must be pinned by @sha256 digest")
+    if (
+        not isinstance(shared_base_uri, str)
+        or PINNED_IMAGE_RE.fullmatch(shared_base_uri) is None
+    ):
+        raise CampaignError("shared_base_uri must be pinned by @sha256 digest")
+    if (
+        not isinstance(shared_base_digest, str)
+        or not shared_base_uri.endswith(f"@{shared_base_digest}")
+    ):
+        raise CampaignError("shared_base_digest must match shared_base_uri")
+    if (
+        not isinstance(shared_base_source_sha256, str)
+        or HEX64_RE.fullmatch(shared_base_source_sha256) is None
+    ):
+        raise CampaignError("shared_base_source_sha256 must be 64 lowercase hex digits")
+    if not isinstance(toolbox_sha256, str) or HEX64_RE.fullmatch(toolbox_sha256) is None:
+        raise CampaignError("toolbox_manifest_sha256 must be 64 lowercase hex digits")
+    if not isinstance(harness_revision, str) or REVISION_RE.fullmatch(harness_revision) is None:
+        raise CampaignError("harness_revision must be a full lowercase commit ID")
+    if set(document["tools"]) != TOOLBOX_TOOLS:
+        missing = sorted(TOOLBOX_TOOLS - set(document["tools"]))
+        extra = sorted(set(document["tools"]) - TOOLBOX_TOOLS)
+        raise CampaignError(f"image set toolbox roster mismatch (missing={missing}, extra={extra})")
+    tools: dict[str, dict[str, str]] = {}
+    for tool, value in document["tools"].items():
+        if (
+            not isinstance(tool, str)
+            or not isinstance(value, dict)
+            or set(value) != TOOL_IMAGE_FIELDS
+            or any(not isinstance(value[name], str) for name in TOOL_IMAGE_FIELDS)
+        ):
+            raise CampaignError(f"{tool}: tool entry must contain {sorted(TOOL_IMAGE_FIELDS)}")
+        image = {name: value[name] for name in TOOL_IMAGE_FIELDS}
         if PINNED_IMAGE_RE.fullmatch(image["tool_parent_image"]) is None:
             raise CampaignError(f"{tool}: tool_parent_image must be pinned by @sha256 digest")
         for field in ("tool_build_sha256", "adapter_bundle_sha256"):
             if HEX64_RE.fullmatch(image[field]) is None:
                 raise CampaignError(f"{tool}: {field} must be 64 lowercase hex digits")
-        if REVISION_RE.fullmatch(image["harness_revision"]) is None:
-            raise CampaignError(f"{tool}: harness_revision must be a full lowercase commit ID")
         if not image["tool_version"] or any(c.isspace() for c in image["tool_version"]):
             raise CampaignError(f"{tool}: tool_version must be a non-empty token")
         workdir = Path(image["subject_workdir"])
@@ -167,12 +224,21 @@ def load_image_set(path: str | Path, required_tools: set[str]) -> ImageSet:
             or workdir.as_posix() != image["subject_workdir"]
         ):
             raise CampaignError(f"{tool}: subject_workdir must be a canonical absolute path")
-        images[tool] = image
-    missing = sorted(required_tools - set(images))
+        tools[tool] = image
+    missing = sorted(required_tools - set(tools))
     if missing:
         raise CampaignError(f"image set is missing plan tool(s): {', '.join(missing)}")
     canonical = json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
-    return ImageSet(images, hashlib.sha256(canonical).hexdigest())
+    return ImageSet(
+        image_uri,
+        shared_base_uri,
+        shared_base_digest,
+        shared_base_source_sha256,
+        toolbox_sha256,
+        harness_revision,
+        tools,
+        hashlib.sha256(canonical).hexdigest(),
+    )
 
 
 def validate_campaign_id(value: str) -> str:
@@ -207,7 +273,7 @@ def planned_job_ids(plan: Plan, campaign_id: str, image_set: ImageSet) -> list[s
             campaign_id=campaign_id,
             bucket=plan.bucket,
             region=plan.region,
-            image_uri=image_set.images[case.tool]["image_uri"],
+            image_uri=image_set.image_uri,
         )
         for case in plan.cases
         for rep in range(1, case.reps + 1)
@@ -304,6 +370,10 @@ def render_batch_job(
         ("--timeout", str(case.timeout_s)),
         ("--term-grace", str(options.term_grace)),
         ("--image", image["image_uri"]),
+        ("--shared-base-uri", image["shared_base_uri"]),
+        ("--shared-base-digest", image["shared_base_digest"]),
+        ("--shared-base-source-sha256", image["shared_base_source_sha256"]),
+        ("--toolbox-manifest-sha256", image["toolbox_manifest_sha256"]),
         ("--tool-parent-image", image["tool_parent_image"]),
         ("--tool-version", image["tool_version"]),
         ("--tool-build-sha256", image["tool_build_sha256"]),
@@ -631,7 +701,7 @@ def _submit_one(
         f"gs://{args.results_bucket}/campaigns/{args.campaign_id}/results/{plan.bucket}/"
         f"{case.tool}/{case.case_id}/run-{rep}/submission-{submission}/"
     )
-    image = image_set.images[case.tool]
+    image = image_set.image_for(case.tool)
     job_dict = render_batch_job(
         case,
         destination,
@@ -693,7 +763,7 @@ def cmd_submit(args: argparse.Namespace) -> int:
         options = _options(args)
         for case in plan.cases:
             for rep in range(1, case.reps + 1):
-                image = image_set.images[case.tool]
+                image = image_set.image_for(case.tool)
                 base = job_id_for(
                     case,
                     rep,
@@ -732,7 +802,7 @@ def cmd_submit(args: argparse.Namespace) -> int:
                     campaign_id=args.campaign_id,
                     bucket=plan.bucket,
                     region=plan.region,
-                    image_uri=image_set.images[case.tool]["image_uri"],
+                    image_uri=image_set.image_uri,
                 )
                 existing = con.execute(
                     "SELECT * FROM submissions WHERE job_id=?", (base,)
@@ -845,7 +915,7 @@ def cmd_retry(args: argparse.Namespace) -> int:
                 raise CampaignError("retry plan case or target does not match recorded intent")
             if (
                 row["image_set_sha256"] != image_set.sha256
-                or row["image_uri"] != image_set.images[case.tool]["image_uri"]
+                or row["image_uri"] != image_set.image_uri
             ):
                 raise CampaignError("retry image set does not match the frozen campaign")
             if row["project"] != args.project or row["location"] != args.location:

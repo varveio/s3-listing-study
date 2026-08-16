@@ -17,6 +17,7 @@ import argparse
 import contextlib
 import ctypes
 import gzip
+import hashlib
 import json
 import os
 import platform
@@ -32,7 +33,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import gcs
-from contract import sha256_of
+from contract import TOOLBOX_TOOLS, sha256_of
 
 import adapters
 
@@ -162,9 +163,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--prefix", default="")
     parser.add_argument("--auth", default="anonymous", choices=("anonymous", "authenticated"))
     parser.add_argument(
-        "--adapter-dir",
-        default=adapters.DEFAULT_ADAPTER_DIR,
-        help="Directory holding this tool's command.py/normalize.py (one per derived image).",
+        "--adapter-root",
+        default=adapters.DEFAULT_ADAPTER_ROOT,
+        help="Root containing one bundled <tool>/adapter directory per registered tool.",
     )
     parser.add_argument("--output", required=True, help="Local attempt directory to write into.")
     parser.add_argument(
@@ -192,6 +193,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "(e.g. a Batch secretVariable). Repeatable. Never recorded in result.json.",
     )
     parser.add_argument("--image", required=True)
+    parser.add_argument("--shared-base-uri", required=True)
+    parser.add_argument("--shared-base-digest", required=True)
+    parser.add_argument("--shared-base-source-sha256", required=True)
+    parser.add_argument("--toolbox-manifest-sha256", required=True)
     parser.add_argument("--tool-parent-image", required=True)
     parser.add_argument("--tool-version", required=True)
     parser.add_argument("--tool-build-sha256", required=True)
@@ -219,22 +224,87 @@ def validate_image_metadata(args: argparse.Namespace) -> str | None:
         metadata = json.loads(Path(args.image_metadata).read_text())
     except (OSError, json.JSONDecodeError) as exc:
         return f"image metadata is unreadable: {exc}"
-    expected = {
+    metadata_fields = {
+        "schema_version",
+        "shared_base_uri",
+        "shared_base_digest",
+        "shared_base_source_sha256",
+        "tools",
+        "toolbox_manifest_sha256",
+        "harness_revision",
+    }
+    if not isinstance(metadata, dict) or set(metadata) != metadata_fields:
+        return "image metadata schema is not supported"
+    tools = metadata.get("tools")
+    tool_fields = {
+        "tool_parent_image",
+        "tool_version",
+        "tool_build_sha256",
+        "adapter_bundle_sha256",
+        "subject_workdir",
+        "executable",
+    }
+    if (
+        metadata.get("schema_version") != 2
+        or not isinstance(tools, dict)
+        or set(tools) != TOOLBOX_TOOLS
+        or any(not isinstance(value, dict) or set(value) != tool_fields for value in tools.values())
+    ):
+        return "image metadata schema is not supported"
+    toolbox_projection = {
         "schema_version": 1,
-        "tool": args.tool,
+        "shared_base_uri": metadata["shared_base_uri"],
+        "shared_base_digest": metadata["shared_base_digest"],
+        "shared_base_source_sha256": metadata["shared_base_source_sha256"],
+        "tools": {
+            tool: {
+                name: value
+                for name, value in selected_tool.items()
+                if name != "adapter_bundle_sha256"
+            }
+            for tool, selected_tool in tools.items()
+        },
+    }
+    canonical = json.dumps(toolbox_projection, sort_keys=True, separators=(",", ":")).encode()
+    computed_toolbox_sha256 = hashlib.sha256(canonical).hexdigest()
+    if metadata.get("toolbox_manifest_sha256") != computed_toolbox_sha256:
+        return "immutable image metadata has an invalid toolbox manifest hash"
+    selected = tools.get(args.tool) if isinstance(tools, dict) else None
+    if not isinstance(selected, dict):
+        return "selected tool is not present in immutable image metadata"
+    expected_selected = {
         "tool_version": args.tool_version,
         "tool_build_sha256": args.tool_build_sha256,
         "adapter_bundle_sha256": args.adapter_bundle_sha256,
-        "harness_revision": args.harness_revision,
         "tool_parent_image": args.tool_parent_image,
         "subject_workdir": args.subject_workdir,
     }
-    if metadata != expected:
+    if any(selected.get(name) != value for name, value in expected_selected.items()):
         return "campaign provenance does not match immutable image metadata"
+    if metadata.get("harness_revision") != args.harness_revision:
+        return "campaign provenance does not match immutable image metadata"
+    if metadata.get("toolbox_manifest_sha256") != args.toolbox_manifest_sha256:
+        return "campaign provenance does not match immutable image metadata"
+    expected_base = {
+        "shared_base_uri": args.shared_base_uri,
+        "shared_base_digest": args.shared_base_digest,
+        "shared_base_source_sha256": args.shared_base_source_sha256,
+    }
+    if any(metadata.get(name) != value for name, value in expected_base.items()):
+        return "campaign provenance does not match immutable image metadata"
+    if (
+        PINNED_IMAGE_RE.fullmatch(args.shared_base_uri) is None
+        or not args.shared_base_uri.endswith(f"@{args.shared_base_digest}")
+        or re.fullmatch(r"[0-9a-f]{64}", args.shared_base_source_sha256) is None
+    ):
+        return "shared base provenance is malformed"
     if PINNED_IMAGE_RE.fullmatch(args.image) is None:
         return "executing image URI is not digest-pinned"
-    if os.getcwd() != args.subject_workdir:
-        return "worker working directory does not match immutable image metadata"
+    workdir = Path(args.subject_workdir)
+    if not workdir.is_absolute() or workdir.as_posix() != args.subject_workdir:
+        return "registered subject working directory is not canonical"
+    if not workdir.is_dir():
+        return "registered subject working directory is unavailable"
     return None
 
 
@@ -253,7 +323,13 @@ def preflight(argv: tuple[str, ...]) -> bool:
 
 
 def run_tool(
-    argv: tuple[str, ...], attempt_dir: Path, timeout: int, term_grace: float, env: dict[str, str]
+    argv: tuple[str, ...],
+    attempt_dir: Path,
+    timeout: int,
+    term_grace: float,
+    env: dict[str, str],
+    *,
+    cwd: str | None = None,
 ) -> dict[str, object]:
     """Run argv, capture stdout/stderr to files, return
     (exit_code, wall_s, max_rss_kb, timed_out).
@@ -279,6 +355,7 @@ def run_tool(
             stdout=stdout_f,
             stderr=stderr_f,
             env=env,
+            cwd=cwd,
             start_new_session=True,
         )
         tracked_pids.add(proc.pid)
@@ -610,7 +687,9 @@ def upload(attempt_dir: Path, destination: str) -> bool:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
 
-    attempt_dir = Path(args.output)
+    # Resolve all harness-owned paths before selecting the subject's cwd. This
+    # keeps captures and dataset sinks anchored even when a capsule runs in /.
+    attempt_dir = Path(args.output).resolve()
     attempt_dir.mkdir(parents=True, exist_ok=True)
 
     missing_pass_env = [name for name in args.pass_env if name not in os.environ]
@@ -626,11 +705,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"measure: {metadata_error}; refusing to execute", file=sys.stderr)
         return EXIT_IMAGE_MISMATCH
 
-    native_root = attempt_dir / "native"
+    native_root = (attempt_dir / "native").resolve()
     native_root.mkdir(exist_ok=True)
+    adapter_dir = adapters.adapter_dir_for(args.tool, args.adapter_root).resolve()
     try:
         command, functional_env = adapters.compile_command(
-            args.adapter_dir,
+            adapter_dir,
             args.tool,
             mode=args.mode,
             bucket=args.bucket,
@@ -678,7 +758,14 @@ def main(argv: list[str] | None = None) -> int:
     leaf_destination = args.destination.rstrip("/") + "/" + attempt_uuid + "/"
 
     started_at = datetime.now(UTC).isoformat()
-    execution = run_tool(command, attempt_dir, args.timeout, args.term_grace, env)
+    execution = run_tool(
+        command,
+        attempt_dir,
+        args.timeout,
+        args.term_grace,
+        env,
+        cwd=args.subject_workdir,
+    )
     exit_code = int(execution["exit_code"])
     timed_out = bool(execution["timed_out"])
     finished_at = datetime.now(UTC).isoformat()
@@ -705,7 +792,7 @@ def main(argv: list[str] | None = None) -> int:
     row_count = row_count_error = None
     if exit_code == 0 and not timed_out:
         row_count, row_count_error = row_count_for(
-            args.adapter_dir, args.tool, args.mode, args.prefix, stdout_path, native_root
+            str(adapter_dir), args.tool, args.mode, args.prefix, stdout_path, native_root
         )
 
     stdout_gz = gzip_file(stdout_path) if stdout_path.exists() else None
@@ -744,13 +831,18 @@ def main(argv: list[str] | None = None) -> int:
         "native_manifest": native_files,
         "artifacts_size_bytes": artifacts_size_bytes,
         "image": args.image,
+        "shared_base_uri": args.shared_base_uri,
+        "shared_base_digest": args.shared_base_digest,
+        "shared_base_source_sha256": args.shared_base_source_sha256,
+        "toolbox_manifest_sha256": args.toolbox_manifest_sha256,
         "tool_parent_image": args.tool_parent_image,
         "tool_version": args.tool_version,
         "tool_build_sha256": args.tool_build_sha256,
         "adapter_bundle_sha256": args.adapter_bundle_sha256,
         "harness_revision": args.harness_revision,
         "subject_workdir": args.subject_workdir,
-        "observed_workdir": os.getcwd(),
+        "applied_subject_workdir": args.subject_workdir,
+        "worker_workdir": os.getcwd(),
         "image_set_sha256": args.image_set_sha256,
         "campaign_id": args.campaign_id,
         "job_id": args.job_id,

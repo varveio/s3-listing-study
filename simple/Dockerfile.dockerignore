@@ -15,7 +15,5 @@
 !tools/*
 !tools/*/adapter
 !tools/*/adapter/*.py
-!tools/*/build
-!tools/*/build/image.json
 **/__pycache__
 **/*.pyc

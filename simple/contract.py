@@ -27,6 +27,22 @@ EXIT_MALFORMED_INPUT = 8
 
 VERDICT_EXIT_CODES = {"PASS": EXIT_PASS, "DRIFT": EXIT_DRIFT, "FAIL": EXIT_FAIL}
 
+TOOLBOX_TOOLS = frozenset(
+    {
+        "aws-cli",
+        "minio-mc",
+        "ps3",
+        "rclone",
+        "s3-fast-list",
+        "s3kor",
+        "s3p",
+        "s4cmd",
+        "s5cmd",
+        "s7cmd",
+        "swath",
+    }
+)
+
 
 def sha256_of(path: Path) -> str:
     digest = hashlib.sha256()

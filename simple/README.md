@@ -11,52 +11,88 @@ the machinery that produced a study result.
 
 ## Inputs and image shape
 
-A campaign requires a dated campaign ID and an image-set JSON file. Schema 1 is:
+A campaign requires a dated campaign ID and an image-set JSON file. Schema 2
+names one runtime image for the whole toolbox:
 
 ```json
 {
-  "schema_version": 1,
-  "images": {
+  "schema_version": 2,
+  "image_uri": "us-docker.pkg.dev/p/r/toolbox@sha256:<64 hex>",
+  "shared_base_uri": "us-docker.pkg.dev/p/r/shared-base@sha256:<64 hex>",
+  "shared_base_digest": "sha256:<64 hex>",
+  "shared_base_source_sha256": "<64 hex>",
+  "toolbox_manifest_sha256": "<64 hex>",
+  "harness_revision": "<40 hex git commit>",
+  "tools": {
     "aws-cli": {
-      "image_uri": "us-docker.pkg.dev/p/r/aws-cli@sha256:<64 hex>",
       "tool_parent_image": "us-docker.pkg.dev/p/r/aws-cli-parent@sha256:<64 hex>",
       "tool_version": "2.36.1",
       "tool_build_sha256": "<64 hex>",
       "adapter_bundle_sha256": "<64 hex>",
-      "harness_revision": "<40 hex git commit>",
       "subject_workdir": "/aws"
     }
   }
 }
 ```
 
-Every plan tool needs an entry and every URI must be digest-pinned. The image
-set digest, tool/build/adapter/harness identity, case fingerprint, resources,
+Only the `aws-cli` entry is shown above for readability; a real file's tools
+object must contain the exact eleven-tool roster and every URI must
+be digest-pinned. The image-set digest, toolbox/tool/build/adapter/harness
+identity, case fingerprint, resources,
 exact subject argv, target, campaign/job/run/submission, outcome, monotonic
 timing, rusage, and cgroup OOM deltas are bound into the ledger, Batch request,
 and worker result where that layer can observe them.
 
-`Dockerfile` builds one worker layer over one immutable tool parent. Use the
-repository root as context so it can stage the selected capsule and the stable
-`s3_listing_study.common` package:
+`Dockerfile` builds one image in two logical parts. Stable lower layers assemble
+all eleven runtime closures from their independently registered immutable
+parents. Upper layers install the worker dependencies and copy the harness plus
+all adapters. A harness-only change therefore does not reinstall or recopy the
+tool payloads. Put the exact parent roster in a file outside the checkout:
+
+```json
+{
+  "schema_version": 1,
+  "shared_base_image": "registry/study-shared@sha256:<digest>",
+  "parents": {
+    "aws-cli": "registry/study@sha256:<digest>",
+    "minio-mc": "registry/study@sha256:<digest>",
+    "ps3": "registry/study@sha256:<digest>",
+    "rclone": "registry/study@sha256:<digest>",
+    "s3-fast-list": "registry/study@sha256:<digest>",
+    "s3kor": "registry/study@sha256:<digest>",
+    "s3p": "registry/study@sha256:<digest>",
+    "s4cmd": "registry/study@sha256:<digest>",
+    "s5cmd": "registry/study@sha256:<digest>",
+    "s7cmd": "registry/study@sha256:<digest>",
+    "swath": "registry/study@sha256:<digest>"
+  }
+}
+```
+
+Use the repository root as context through the supported wrapper:
 
 ```sh
 uv run python simple/build_image.py \
-  --tool aws-cli \
-  --tool-parent "$TOOL_PARENT_AT_SHA256" \
+  --build-inputs /secure/toolbox-build-inputs.json \
   --harness-revision "$(git rev-parse HEAD)" \
-  --tag "$DERIVED_IMAGE"
-docker run --rm "$DERIVED_IMAGE" --help
+  --tag "$TOOLBOX_IMAGE"
+docker run --rm "$TOOLBOX_IMAGE" --help
 ```
 
-The container runs as uid/gid 10001 and contains only the selected tool, its
-capsule, common contract code, and the small worker. The build writes immutable
-tool/build/adapter/harness/parent/workdir metadata which the worker checks before
-exec. The build wrapper refuses a dirty checkout, validates the selected
-capsule, and checks that the immutable parent's tool-build label and working
-directory equal its registration; the Docker build also checks the registered
-subject executable exists. `.github/workflows/simple-images.yml` exposes that
-same build-and-smoke path.
+The container runs as uid/gid 10001 and each case still launches exactly one
+selected tool. The explicit shared-base URI, digest, and source identity are
+recorded in the image set, toolbox manifest, Batch request, result, and report
+binding. The build writes an aggregate toolbox identity plus immutable
+per-tool build/parent/workdir/executable metadata. Adapter hashes and the
+harness revision live in the upper image metadata and do not change the toolbox
+identity. Before exec, the worker recomputes that identity, selects
+`/opt/simple/tools/<tool>/adapter`, and launches the subject in its registered
+working directory while keeping attempt paths absolute. The build wrapper
+refuses a dirty checkout, validates every capsule, and checks every parent's
+linux/amd64 platform, tool-build label, shared-base label, and working directory.
+The Docker build then checks every registered executable exists.
+`.github/workflows/simple-images.yml` exposes that same one-image build and
+launches every executable in its smoke job.
 It does not authenticate to a registry and cannot publish.
 
 ## Campaign example

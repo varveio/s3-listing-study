@@ -6,6 +6,7 @@ import sys
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 from google.api_core.exceptions import AlreadyExists, BadRequest
@@ -18,6 +19,8 @@ from s3_listing_study.manager.bench.plan import Plan
 
 ROOT = Path(__file__).parents[1]
 DIGEST = "a" * 64
+SHARED_BASE_DIGEST = "sha256:" + "8" * 64
+SHARED_BASE_URI = "registry/shared-base@" + SHARED_BASE_DIGEST
 AUTH_SECRETS = {
     "authenticated": {
         "AWS_ACCESS_KEY_ID": "projects/p/secrets/access-key/versions/1",
@@ -26,24 +29,52 @@ AUTH_SECRETS = {
 }
 
 
-def image(tool: str) -> dict[str, str]:
+def tool_image(tool: str) -> dict[str, str]:
     return {
-        "image_uri": f"registry/{tool}@sha256:{DIGEST}",
         "tool_parent_image": f"registry/{tool}-parent@sha256:{'f' * 64}",
         "tool_version": "1.0",
         "tool_build_sha256": "b" * 64,
         "adapter_bundle_sha256": "c" * 64,
-        "harness_revision": "d" * 40,
         "subject_workdir": "/",
+    }
+
+
+def image_set() -> campaign.ImageSet:
+    return campaign.ImageSet(
+        f"registry/toolbox@sha256:{DIGEST}",
+        SHARED_BASE_URI,
+        SHARED_BASE_DIGEST,
+        "7" * 64,
+        "9" * 64,
+        "d" * 40,
+        {tool: tool_image(tool) for tool in campaign.TOOLBOX_TOOLS},
+        "e" * 64,
+    )
+
+
+def image(tool: str) -> dict[str, str]:
+    return cast(dict[str, str], image_set().image_for(tool))
+
+
+def image_set_document() -> dict[str, object]:
+    selected = image_set()
+    return {
+        "schema_version": 2,
+        "image_uri": selected.image_uri,
+        "shared_base_uri": selected.shared_base_uri,
+        "shared_base_digest": selected.shared_base_digest,
+        "shared_base_source_sha256": selected.shared_base_source_sha256,
+        "toolbox_manifest_sha256": selected.toolbox_manifest_sha256,
+        "harness_revision": selected.harness_revision,
+        "tools": selected.tools,
     }
 
 
 def test_all_current_plan_job_ids_are_unique_and_bound() -> None:
     for path in (ROOT / "bench/buckets").glob("*.yaml"):
         plan = Plan.load(path)
-        images = {case.tool: image(case.tool) for case in plan.cases}
-        image_set = campaign.ImageSet(images, "e" * 64)
-        ids = campaign.planned_job_ids(plan, "2026-08-16-candidate", image_set)
+        selected_image_set = image_set()
+        ids = campaign.planned_job_ids(plan, "2026-08-16-candidate", selected_image_set)
         assert len(ids) == len(set(ids)) == sum(case.reps for case in plan.cases)
         assert all(len(job_id) <= 63 for job_id in ids)
         changed = campaign.job_id_for(
@@ -52,9 +83,16 @@ def test_all_current_plan_job_ids_are_unique_and_bound() -> None:
             campaign_id="2026-08-16-candidate",
             bucket=plan.bucket + "-other",
             region=plan.region,
-            image_uri=images[plan.cases[0].tool]["image_uri"],
+            image_uri=selected_image_set.image_uri,
         )
         assert changed != ids[0]
+
+
+def test_every_tool_uses_the_same_runtime_image() -> None:
+    selected = image_set()
+    assert {selected.image_for(tool)["image_uri"] for tool in selected.tools} == {
+        selected.image_uri
+    }
 
 
 def test_retry_ids_retain_collision_safe_identity_at_large_ordinals() -> None:
@@ -72,12 +110,12 @@ def test_retry_ids_retain_collision_safe_identity_at_large_ordinals() -> None:
 
 def test_image_set_requires_pinned_complete_provenance(tmp_path: Path) -> None:
     path = tmp_path / "images.json"
-    path.write_text(json.dumps({"schema_version": 1, "images": {"aws-cli": image("aws-cli")}}))
+    path.write_text(json.dumps(image_set_document()))
     loaded = campaign.load_image_set(path, {"aws-cli"})
-    assert loaded.images["aws-cli"]["tool_version"] == "1.0"
-    mutable = image("aws-cli")
-    mutable["image_uri"] = "registry/aws-cli:latest"
-    path.write_text(json.dumps({"schema_version": 1, "images": {"aws-cli": mutable}}))
+    assert loaded.tools["aws-cli"]["tool_version"] == "1.0"
+    mutable = image_set_document()
+    mutable["image_uri"] = "registry/toolbox:latest"
+    path.write_text(json.dumps(mutable))
     with pytest.raises(campaign.CampaignError, match="pinned"):
         campaign.load_image_set(path, {"aws-cli"})
 
@@ -113,6 +151,10 @@ def test_batch_render_passes_identity_resources_and_auth_policy() -> None:
         "--campaign-id",
         "--case-fingerprint",
         "--image-set-sha256",
+        "--shared-base-uri",
+        "--shared-base-digest",
+        "--shared-base-source-sha256",
+        "--toolbox-manifest-sha256",
         "--vcpus",
         "--memory-gb",
         "--subject-workdir",
@@ -176,7 +218,7 @@ def test_intent_is_durable_before_create(tmp_path: Path, monkeypatch: pytest.Mon
         args,
         plan,
         case,
-        campaign.ImageSet({case.tool: image(case.tool)}, "e" * 64),
+        image_set(),
         AUTH_SECRETS,
         1,
         1,
@@ -355,14 +397,7 @@ def test_dry_run_renders_every_case_without_sqlite_or_batch(
     plan_path = ROOT / "bench/buckets/noaa-ghcn-pds.yaml"
     plan = Plan.load(plan_path)
     image_path = tmp_path / "images.json"
-    image_path.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "images": {case.tool: image(case.tool) for case in plan.cases},
-            }
-        )
-    )
+    image_path.write_text(json.dumps(image_set_document()))
     secrets = tmp_path / "secrets.yaml"
     secrets.write_text(
         "authenticated:\n"

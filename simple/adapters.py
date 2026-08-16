@@ -16,13 +16,10 @@ already did it" is the whole answer; this module checks only the normalize
 subprocess's own exit code, plus one free structural sanity pass
 (_belt_check) that costs no extra I/O since the bytes are already in hand.
 
-Two different adapter-directory conventions apply, because the worker and
-the manager sit in different places relative to a checkout:
-  - measure.py (worker; one derived image bundles exactly one tool) passes
-    --adapter-dir pointing directly at a directory holding
-    command.py/normalize.py -- default DEFAULT_ADAPTER_DIR, mirroring
-    worker/driver.py's BUNDLED_ADAPTER. The per-tool derived image stages
-    exactly that selected capsule at the default path.
+Two adapter-root conventions apply, because the worker and the manager sit in
+different places relative to a checkout:
+  - measure.py uses the bundled root /opt/simple/tools and selects
+    <root>/<tool>/adapter after validating the tool against image metadata.
   - verify.py/campaign.py (manager; full checkout, any of the 11 tools) call
     adapter_dir_for(tool, adapter_root), default adapter_root="tools",
     mirroring worker/cli.py's local-checkout fallback
@@ -46,7 +43,7 @@ from typing import Any
 
 from s3_listing_study.common.command_adapter import CommandRequest, load_command_adapter
 
-DEFAULT_ADAPTER_DIR = "/opt/s3-listing-study/tool"
+DEFAULT_ADAPTER_ROOT = "/opt/simple/tools"
 
 
 class AdapterError(Exception):

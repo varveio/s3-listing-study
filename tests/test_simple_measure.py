@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import signal
@@ -15,6 +16,45 @@ import measure  # type: ignore[import-not-found]
 import adapters  # type: ignore[import-not-found]
 
 ROOT = Path(__file__).parents[1]
+SHARED_BASE_DIGEST = "sha256:" + "8" * 64
+SHARED_BASE_URI = "registry/shared-base@" + SHARED_BASE_DIGEST
+
+
+def image_metadata(workdir: str | None = None) -> dict[str, object]:
+    selected_workdir = workdir or os.getcwd()
+    tools = {
+        tool: {
+            "tool_parent_image": f"registry/{tool}@sha256:{'e' * 64}",
+            "tool_version": "1",
+            "tool_build_sha256": "b" * 64,
+            "adapter_bundle_sha256": "c" * 64,
+            "subject_workdir": selected_workdir,
+            "executable": [sys.executable],
+        }
+        for tool in measure.TOOLBOX_TOOLS
+    }
+    projection = {
+        "schema_version": 1,
+        "shared_base_uri": SHARED_BASE_URI,
+        "shared_base_digest": SHARED_BASE_DIGEST,
+        "shared_base_source_sha256": "9" * 64,
+        "tools": {
+            tool: {
+                name: value for name, value in registered.items() if name != "adapter_bundle_sha256"
+            }
+            for tool, registered in tools.items()
+        },
+    }
+    digest = hashlib.sha256(
+        json.dumps(projection, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    return {
+        **projection,
+        "schema_version": 2,
+        "tools": tools,
+        "toolbox_manifest_sha256": digest,
+        "harness_revision": "d" * 40,
+    }
 
 
 def test_worker_requirement_versions_match_repository_lock() -> None:
@@ -130,16 +170,11 @@ def test_environment_boundary_rejects_unknown_credentials_and_collisions() -> No
 
 
 def test_image_metadata_claim_mismatch_refuses(tmp_path: Path) -> None:
-    metadata = {
-        "schema_version": 1,
-        "tool": "aws-cli",
-        "tool_version": "1",
-        "tool_build_sha256": "b" * 64,
-        "adapter_bundle_sha256": "c" * 64,
-        "harness_revision": "d" * 40,
-        "tool_parent_image": "registry/parent@sha256:" + "e" * 64,
-        "subject_workdir": os.getcwd(),
-    }
+    metadata = image_metadata()
+    tools = metadata["tools"]
+    assert isinstance(tools, dict)
+    selected = tools["aws-cli"]
+    assert isinstance(selected, dict)
     metadata_path = tmp_path / "image-metadata.json"
     metadata_path.write_text(json.dumps(metadata))
     args = type(
@@ -152,12 +187,37 @@ def test_image_metadata_claim_mismatch_refuses(tmp_path: Path) -> None:
             "tool_build_sha256": "b" * 64,
             "adapter_bundle_sha256": "c" * 64,
             "harness_revision": "d" * 40,
-            "tool_parent_image": "registry/parent@sha256:" + "e" * 64,
+            "tool_parent_image": selected["tool_parent_image"],
             "image": "registry/derived@sha256:" + "f" * 64,
+            "shared_base_uri": metadata["shared_base_uri"],
+            "shared_base_digest": metadata["shared_base_digest"],
+            "shared_base_source_sha256": metadata["shared_base_source_sha256"],
             "subject_workdir": os.getcwd(),
+            "toolbox_manifest_sha256": metadata["toolbox_manifest_sha256"],
         },
     )()
     assert "does not match" in (measure.validate_image_metadata(args) or "")
+
+    selected["executable"] = ["/tampered"]
+    metadata_path.write_text(json.dumps(metadata))
+    assert "invalid toolbox manifest hash" in (measure.validate_image_metadata(args) or "")
+
+
+def test_subject_runs_in_registered_cwd_without_moving_attempt_paths(tmp_path: Path) -> None:
+    subject_workdir = tmp_path / "subject"
+    subject_workdir.mkdir()
+    attempt = (tmp_path / "attempt").resolve()
+    attempt.mkdir()
+    execution = measure.run_tool(
+        (sys.executable, "-c", "import os; print(os.getcwd())"),
+        attempt,
+        timeout=5,
+        term_grace=0.1,
+        env=dict(os.environ),
+        cwd=str(subject_workdir),
+    )
+    assert execution["exit_code"] == 0
+    assert (attempt / "stdout.log").read_text().strip() == str(subject_workdir)
 
 
 def test_count_failure_is_distinct_postprocessing_failure() -> None:
@@ -196,16 +256,11 @@ def test_setsid_descendant_is_killed_and_marks_process_tree_unclean(tmp_path: Pa
 def test_count_failure_uploads_result_marker_before_exit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    metadata = {
-        "schema_version": 1,
-        "tool": "fixture",
-        "tool_version": "1",
-        "tool_build_sha256": "b" * 64,
-        "adapter_bundle_sha256": "c" * 64,
-        "harness_revision": "d" * 40,
-        "tool_parent_image": "registry/parent@sha256:" + "e" * 64,
-        "subject_workdir": os.getcwd(),
-    }
+    metadata = image_metadata()
+    tools = metadata["tools"]
+    assert isinstance(tools, dict)
+    selected = tools["aws-cli"]
+    assert isinstance(selected, dict)
     metadata_path = tmp_path / "image-metadata.json"
     metadata_path.write_text(json.dumps(metadata))
     attempt = tmp_path / "attempt"
@@ -224,7 +279,7 @@ def test_count_failure_uploads_result_marker_before_exit(
     code = measure.main(
         [
             "--tool",
-            "fixture",
+            "aws-cli",
             "--mode",
             "recursive",
             "--bucket",
@@ -237,18 +292,26 @@ def test_count_failure_uploads_result_marker_before_exit(
             "gs://results/job/",
             "--image",
             "registry/derived@sha256:" + "a" * 64,
+            "--shared-base-uri",
+            str(metadata["shared_base_uri"]),
+            "--shared-base-digest",
+            str(metadata["shared_base_digest"]),
+            "--shared-base-source-sha256",
+            str(metadata["shared_base_source_sha256"]),
+            "--toolbox-manifest-sha256",
+            str(metadata["toolbox_manifest_sha256"]),
             "--tool-parent-image",
-            str(metadata["tool_parent_image"]),
+            str(selected["tool_parent_image"]),
             "--tool-version",
-            str(metadata["tool_version"]),
+            str(selected["tool_version"]),
             "--tool-build-sha256",
-            str(metadata["tool_build_sha256"]),
+            str(selected["tool_build_sha256"]),
             "--adapter-bundle-sha256",
-            str(metadata["adapter_bundle_sha256"]),
+            str(selected["adapter_bundle_sha256"]),
             "--harness-revision",
             str(metadata["harness_revision"]),
             "--subject-workdir",
-            str(metadata["subject_workdir"]),
+            str(selected["subject_workdir"]),
             "--campaign-id",
             "2026-08-16-candidate",
             "--job-id",
@@ -281,7 +344,12 @@ def test_count_failure_uploads_result_marker_before_exit(
     assert result["exit_code"] == 0
     assert result["row_count"] is None
     assert result["row_count_error"] == "count failed"
-    assert result["tool_parent_image"] == metadata["tool_parent_image"]
+    assert result["tool_parent_image"] == selected["tool_parent_image"]
+    assert result["shared_base_uri"] == metadata["shared_base_uri"]
+    assert result["shared_base_digest"] == metadata["shared_base_digest"]
+    assert result["shared_base_source_sha256"] == metadata["shared_base_source_sha256"]
+    assert result["toolbox_manifest_sha256"] == metadata["toolbox_manifest_sha256"]
+    assert result["applied_subject_workdir"] == selected["subject_workdir"]
 
 
 def test_missing_pass_env_fails_before_adapter_or_subject(
@@ -312,6 +380,14 @@ def test_missing_pass_env_fails_before_adapter_or_subject(
         "ABSENT_CREDENTIAL",
         "--image",
         "x@sha256:" + "a" * 64,
+        "--shared-base-uri",
+        SHARED_BASE_URI,
+        "--shared-base-digest",
+        SHARED_BASE_DIGEST,
+        "--shared-base-source-sha256",
+        "9" * 64,
+        "--toolbox-manifest-sha256",
+        "9" * 64,
         "--tool-parent-image",
         "parent@sha256:" + "a" * 64,
         "--tool-version",
