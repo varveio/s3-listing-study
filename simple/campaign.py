@@ -1,93 +1,89 @@
-"""The orchestrator: read the REAL plan resolver, submit one GCP Batch job
-per case repetition, poll them, verify latest submissions, and track state
-in campaign.db.
-
-This is a SKETCH standing in for manager/campaign/*.py (~3,500 lines). It
-trusts Batch's reported job state completely -- no fingerprinting beyond
-recording Case.fingerprint for reference, no attempt-directory
-reconciliation. Round 3 deletes round 1/2's flat, hand-rolled plan schema
-outright: `from s3_listing_study.manager.bench.plan import Plan` reads the
-SAME bench/buckets/<bucket>.yaml + bench/tools.yaml + bench/instances.yaml
-the real study runs from (Plan.load() falls back to the repo's own bench/
-when a table isn't beside the plan file). A case's tool/mode/resources/env/
-reps/timeout_s/fingerprint all come from Plan.load(); this module renders
-them into a Batch job body and nothing else.
-
-State lives in one sqlite3 database, mirroring the real manager's choice of
-a database over a flat file -- round 1's JSON + temp-file/os.replace() dance
-is gone; sqlite's own journal provides the crash-safety it approximated.
-Inspect with `sqlite3 campaign.db "SELECT * FROM submissions"`.
-
-Batch and GCS are both the real SDKs now (owner correction):
-google-cloud-batch's BatchServiceClient.create_job/get_job/delete_job, not
-`gcloud batch jobs ...` subprocesses -- no tempfile --config dance, a typed
-JobStatus.State instead of parsed JSON. A rendered job body is still a
-plain dict (mirroring manager/campaign/batch.py's render_job() shape);
-ParseDict feeds it straight into a batch_v1.Job, the same conversion
-manager/campaign/provider.py uses for adoption comparison.
-
-Subcommands: submit, poll, status, cancel, retry, verify.
-
-A job id here identifies a *submission*; verify.py's one-leaf-per-destination
-rule only ever disambiguates *physical executions* Batch ran under one
-submission (e.g. a silent Batch retry) -- it says nothing about, and does
-not dedupe, an operator resubmitting a case on purpose. `retry` is for
-exactly that: every resubmission gets its own row, keyed by
-(base_job_id, submission), so a retried case's history is several
-honestly-numbered submissions, never a mutated original. The real study
-keeps the same split at a different layer -- Case.fingerprint identifies
-the submission, TwinStamp's execution unit the physical run underneath it.
-
-Credential wiring drives off Case.auth ("anonymous"/"authenticated"; the
-plan never carries a secret) plus a --secrets YAML mapping auth stratum ->
-{ENV_NAME: Secret Manager version}, e.g.:
-
-    authenticated:
-      AWS_ACCESS_KEY_ID: projects/p/secrets/s3-study-aws-key-id/versions/1
-"""
+"""Small, plan-driven GCP Batch campaign controller with durable submission intent."""
 
 from __future__ import annotations
 
 import argparse
+import copy
+import hashlib
+import json
 import re
 import shlex
 import sqlite3
 import sys
 import time
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-
-import yaml
-from google.api_core.exceptions import GoogleAPIError
-from google.cloud import batch_v1
-from google.protobuf.json_format import ParseDict
+from typing import Any
 
 import verify
+import yaml
+from contract import EXIT_DRIFT, EXIT_FAIL, EXIT_PASS
+from google.api_core.exceptions import (
+    AlreadyExists,
+    BadRequest,
+    FailedPrecondition,
+    Forbidden,
+    GoogleAPIError,
+    NotFound,
+    Unauthorized,
+)
+from google.auth.exceptions import DefaultCredentialsError
+from google.cloud import batch_v1
+from google.protobuf.json_format import MessageToDict, ParseDict
+
 from s3_listing_study.manager.bench.plan import Case, Plan
 
 STATE_FILENAME = "campaign.db"
-TERMINAL_STATES = {"SUCCEEDED", "FAILED", "CANCELLED"}
-
-JOB_ID_MAX = 63
-SUFFIX_HEADROOM = 5  # room for a later "-rN" retry suffix
-
-# N4 supports Hyperdisk only; Batch otherwise defaults a boot disk to
-# pd-balanced, which cannot provision an N4 VM. Mirrors
-# manager/campaign/batch.py's N4_BOOT_DISK (~line 199); the short image name
-# is a Batch-supported Container-Optimized OS image.
+RETRYABLE_STATES = {"FAILED", "NOT_CREATED", "COLLISION"}
+ACCEPTED_FAILURE_STATES = {f"ACCEPTED_{state}" for state in RETRYABLE_STATES}
+TERMINAL_STATES = {
+    "SUCCEEDED",
+    "FAILED",
+    "CANCELLED",
+    "NOT_CREATED",
+    "COLLISION",
+    *ACCEPTED_FAILURE_STATES,
+}
 N4_BOOT_DISK = {"type": "hyperdisk-balanced", "image": "batch-cos"}
+PINNED_IMAGE_RE = re.compile(r"\A[^\s@]+@sha256:([0-9a-f]{64})\Z")
+SECRET_RE = re.compile(r"\Aprojects/[^/]+/secrets/[^/]+/versions/[^/]+\Z")
+HEX64_RE = re.compile(r"\A[0-9a-f]{64}\Z")
+REVISION_RE = re.compile(r"\A[0-9a-f]{40}\Z")
+CAMPAIGN_RE = re.compile(r"\A\d{4}-\d{2}-\d{2}-[a-z][a-z0-9-]*\Z")
+IMAGE_FIELDS = {
+    "image_uri",
+    "tool_parent_image",
+    "tool_version",
+    "tool_build_sha256",
+    "adapter_bundle_sha256",
+    "harness_revision",
+    "subject_workdir",
+}
+AWS_CREDENTIAL_ENV_KEYS = frozenset(
+    {"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"}
+)
+AWS_CREDENTIAL_REQUIRED_ENV_KEYS = frozenset({"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"})
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS submissions (
     base_job_id TEXT NOT NULL,
     submission INTEGER NOT NULL,
-    job_id TEXT NOT NULL,
+    job_id TEXT NOT NULL UNIQUE,
+    campaign_id TEXT NOT NULL,
+    project TEXT NOT NULL,
+    location TEXT NOT NULL,
     tool TEXT NOT NULL,
     mode TEXT NOT NULL,
     case_id TEXT NOT NULL,
     fingerprint TEXT NOT NULL,
     rep INTEGER NOT NULL,
+    bucket TEXT NOT NULL,
+    region TEXT NOT NULL,
+    image_uri TEXT NOT NULL,
+    image_set_sha256 TEXT NOT NULL,
     destination TEXT NOT NULL,
+    job_json TEXT NOT NULL,
     state TEXT NOT NULL,
     submitted_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
@@ -96,178 +92,475 @@ CREATE TABLE IF NOT EXISTS submissions (
 """
 
 
-def load_secrets(path: str | None) -> dict[str, dict[str, str]]:
-    if not path:
-        return {}
-    with open(path) as f:
-        return yaml.safe_load(f) or {}
+class CampaignError(RuntimeError):
+    """Campaign input or provider state cannot be used safely."""
+
+
+class JobCollisionError(CampaignError):
+    """The requested provider name belongs to a different immutable job."""
+
+
+@dataclass(frozen=True)
+class ImageSet:
+    images: dict[str, dict[str, str]]
+    sha256: str
+
+
+@dataclass(frozen=True)
+class BatchOptions:
+    anonymous_worker_sa: str
+    authenticated_worker_sa: str | None
+    network: str | None
+    subnetwork: str | None
+    zone: str | None
+    provisioning: str
+    term_grace: float = 5.0
+
+
+def _now() -> str:
+    return datetime.now(UTC).isoformat()
 
 
 def _slug(value: str) -> str:
     return re.sub(r"[^a-z0-9-]+", "-", value.lower()).strip("-")
 
 
-def valid_job_id(raw: str, *, reserve: int = 0) -> str:
-    """A Batch-legal job id: starts with a letter, ends alphanumeric, <=63 chars.
-
-    `reserve` leaves headroom for a suffix the caller will append later (a
-    retry's "-rN") so a later valid_job_id() on the combined string never
-    has to truncate mid-suffix.
-    """
-    slug = _slug(raw)[: JOB_ID_MAX - reserve].rstrip("-") or "c"
-    if not slug[0].isalpha():
-        slug = ("c-" + slug)[: JOB_ID_MAX - reserve].rstrip("-")
-    return slug
+def load_secrets(path: str | None) -> dict[str, dict[str, str]]:
+    if not path:
+        return {}
+    document = yaml.safe_load(Path(path).read_text()) or {}
+    if not isinstance(document, dict):
+        raise CampaignError("secrets file must be a mapping")
+    return document
 
 
-def job_id_for(case: Case, rep: int) -> str:
-    # case_id alone is not unique across a plan: it is derived from mode plus
-    # axes WITHOUT the tool name (manager/bench/plan.py's derive_case_id), so
-    # e.g. s5cmd, minio-mc and s4cmd can all resolve to case_id "recursive"
-    # on one plan. tool is prepended so their job ids never collide.
-    return valid_job_id(f"{case.tool}-{case.case_id}-{rep}", reserve=SUFFIX_HEADROOM)
+def load_image_set(path: str | Path, required_tools: set[str]) -> ImageSet:
+    source = Path(path).read_bytes()
+    try:
+        document = json.loads(source)
+    except json.JSONDecodeError as exc:
+        raise CampaignError(f"image set is not valid JSON: {exc}") from None
+    if not isinstance(document, dict) or set(document) != {"schema_version", "images"}:
+        raise CampaignError("image set must contain exactly schema_version and images")
+    if document["schema_version"] != 1 or not isinstance(document["images"], dict):
+        raise CampaignError("image set schema_version must be 1 and images must be an object")
+    images: dict[str, dict[str, str]] = {}
+    for tool, value in document["images"].items():
+        if not isinstance(tool, str) or not isinstance(value, dict) or set(value) != IMAGE_FIELDS:
+            raise CampaignError(f"{tool}: image entry must contain {sorted(IMAGE_FIELDS)}")
+        image = {name: str(value[name]) for name in IMAGE_FIELDS}
+        if PINNED_IMAGE_RE.fullmatch(image["image_uri"]) is None:
+            raise CampaignError(f"{tool}: image_uri must be pinned by @sha256 digest")
+        if PINNED_IMAGE_RE.fullmatch(image["tool_parent_image"]) is None:
+            raise CampaignError(f"{tool}: tool_parent_image must be pinned by @sha256 digest")
+        for field in ("tool_build_sha256", "adapter_bundle_sha256"):
+            if HEX64_RE.fullmatch(image[field]) is None:
+                raise CampaignError(f"{tool}: {field} must be 64 lowercase hex digits")
+        if REVISION_RE.fullmatch(image["harness_revision"]) is None:
+            raise CampaignError(f"{tool}: harness_revision must be a full lowercase commit ID")
+        if not image["tool_version"] or any(c.isspace() for c in image["tool_version"]):
+            raise CampaignError(f"{tool}: tool_version must be a non-empty token")
+        workdir = Path(image["subject_workdir"])
+        if (
+            not image["subject_workdir"].startswith("/")
+            or "\x00" in image["subject_workdir"]
+            or workdir.as_posix() != image["subject_workdir"]
+        ):
+            raise CampaignError(f"{tool}: subject_workdir must be a canonical absolute path")
+        images[tool] = image
+    missing = sorted(required_tools - set(images))
+    if missing:
+        raise CampaignError(f"image set is missing plan tool(s): {', '.join(missing)}")
+    canonical = json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
+    return ImageSet(images, hashlib.sha256(canonical).hexdigest())
+
+
+def validate_campaign_id(value: str) -> str:
+    if CAMPAIGN_RE.fullmatch(value) is None:
+        raise CampaignError("campaign id must look like YYYY-MM-DD-name")
+    return value
+
+
+def job_id_for(
+    case: Case,
+    rep: int,
+    *,
+    campaign_id: str,
+    bucket: str,
+    region: str,
+    image_uri: str,
+) -> str:
+    identity = json.dumps(
+        [campaign_id, bucket, region, case.tool, case.fingerprint, image_uri, rep],
+        separators=(",", ":"),
+    )
+    digest = hashlib.sha256(identity.encode()).hexdigest()[:12]
+    readable = _slug(f"{campaign_id}-{case.tool}-{case.case_id}")[:43].rstrip("-")
+    return f"c-{readable}-{digest}"[:63].rstrip("-")
+
+
+def planned_job_ids(plan: Plan, campaign_id: str, image_set: ImageSet) -> list[str]:
+    ids = [
+        job_id_for(
+            case,
+            rep,
+            campaign_id=campaign_id,
+            bucket=plan.bucket,
+            region=plan.region,
+            image_uri=image_set.images[case.tool]["image_uri"],
+        )
+        for case in plan.cases
+        for rep in range(1, case.reps + 1)
+    ]
+    if len(ids) != len(set(ids)):
+        raise CampaignError("generated Batch job IDs collide")
+    return ids
+
+
+def submission_job_id(base_job_id: str, submission: int) -> str:
+    if submission < 1:
+        raise CampaignError("submission number must be positive")
+    if submission == 1:
+        return base_job_id
+    digest = hashlib.sha256(f"{base_job_id}:{submission}".encode()).hexdigest()[:12]
+    suffix = f"-r{submission}-{digest}"
+    readable = base_job_id[: 63 - len(suffix)].rstrip("-")
+    return f"{readable}{suffix}"
+
+
+def _validate_batch_options(options: BatchOptions) -> None:
+    if not options.anonymous_worker_sa or any(c.isspace() for c in options.anonymous_worker_sa):
+        raise CampaignError("anonymous worker service account is required")
+    if (options.network is None) != (options.subnetwork is None):
+        raise CampaignError("network and subnetwork must be supplied together")
+    if options.provisioning not in {"SPOT", "STANDARD"}:
+        raise CampaignError("provisioning must be SPOT or STANDARD")
+    if (
+        options.authenticated_worker_sa
+        and options.authenticated_worker_sa == options.anonymous_worker_sa
+    ):
+        raise CampaignError("authenticated and anonymous service accounts must differ")
 
 
 def render_batch_job(
-    case: Case, destination: str, image: str, secrets_map: dict[str, dict[str, str]]
-) -> dict:
-    """Minimal Batch v1 job body: one task running measure.py in a container.
+    case: Case,
+    destination: str,
+    image: dict[str, str],
+    image_set_sha256: str,
+    secrets_map: dict[str, dict[str, str]],
+    *,
+    campaign_id: str,
+    job_id: str,
+    rep: int,
+    submission: int,
+    bucket: str,
+    region: str,
+    options: BatchOptions,
+) -> dict[str, Any]:
+    _validate_batch_options(options)
+    secret_variables: dict[str, str] = {}
+    if case.auth == "authenticated":
+        if not options.authenticated_worker_sa:
+            raise CampaignError(
+                "authenticated case requires an authenticated worker service account"
+            )
+        secret_variables = secrets_map.get("authenticated", {})
+        if not isinstance(secret_variables, dict) or not secret_variables:
+            raise CampaignError("authenticated case requires configured secret variables")
+        if any(
+            not isinstance(name, str)
+            or not name
+            or not isinstance(resource, str)
+            or SECRET_RE.fullmatch(resource) is None
+            for name, resource in secret_variables.items()
+        ):
+            raise CampaignError("authenticated secrets must name Secret Manager versions")
+        unknown = sorted(set(secret_variables) - AWS_CREDENTIAL_ENV_KEYS)
+        missing = sorted(AWS_CREDENTIAL_REQUIRED_ENV_KEYS - set(secret_variables))
+        if unknown:
+            raise CampaignError(
+                f"authenticated secrets contain unsupported key(s): {', '.join(unknown)}"
+            )
+        if missing:
+            raise CampaignError(
+                f"authenticated secrets are missing required key(s): {', '.join(missing)}"
+            )
+        service_account = options.authenticated_worker_sa
+    elif case.auth == "anonymous":
+        service_account = options.anonymous_worker_sa
+    else:
+        raise CampaignError(f"unknown authentication stratum: {case.auth}")
 
-    Compare manager/campaign/batch.py's render_job(), which additionally
-    handles network/subnet pinning, provisioning model choice, and validates
-    every field before rendering.
-    """
-    commands = [
-        "--tool", case.tool,
-        "--mode", case.mode,
-        "--auth", case.auth,
-        "--prefix", "",
-        "--output", "/tmp/attempt",
-        "--destination", destination,
-        "--timeout", str(case.timeout_s),
-        "--image", image,
-        "--machine-type", case.resources.machine_type,
-    ]
+    container_memory = case.resources.container_memory_gb
+    pairs = (
+        ("--tool", case.tool),
+        ("--mode", case.mode),
+        ("--bucket", bucket),
+        ("--region", region),
+        ("--auth", case.auth),
+        ("--prefix", ""),
+        ("--output", "/tmp/attempt"),
+        ("--destination", destination),
+        ("--timeout", str(case.timeout_s)),
+        ("--term-grace", str(options.term_grace)),
+        ("--image", image["image_uri"]),
+        ("--tool-parent-image", image["tool_parent_image"]),
+        ("--tool-version", image["tool_version"]),
+        ("--tool-build-sha256", image["tool_build_sha256"]),
+        ("--adapter-bundle-sha256", image["adapter_bundle_sha256"]),
+        ("--harness-revision", image["harness_revision"]),
+        ("--subject-workdir", image["subject_workdir"]),
+        ("--image-set-sha256", image_set_sha256),
+        ("--campaign-id", campaign_id),
+        ("--job-id", job_id),
+        ("--case-id", case.case_id),
+        ("--case-fingerprint", case.fingerprint),
+        ("--run-ordinal", str(rep)),
+        ("--submission-number", str(submission)),
+        ("--machine-type", case.resources.machine_type),
+        ("--vcpus", str(case.resources.vcpus)),
+        ("--memory-gb", str(case.resources.memory_gb)),
+        ("--container-memory-gb", "none" if container_memory is None else str(container_memory)),
+    )
+    commands = [item for pair in pairs for item in pair]
     for name, value in case.env:
         commands.extend(("--case-env", f"{name}={value}"))
-
-    # Batch injects each secret as an ordinary env var on the task;
-    # --pass-env tells measure.py which of ITS OWN env vars to copy into the
-    # subject's env. Naming them here, not baking them into --case-env,
-    # keeps the credential values themselves out of this rendered job body.
-    credential_secret = secrets_map.get(case.auth) if case.auth != "anonymous" else None
-    if credential_secret:
-        for env_name in credential_secret:
-            commands.extend(("--pass-env", env_name))
-
-    container = {"imageUri": image, "commands": commands}
+    for name in secret_variables:
+        commands.extend(("--pass-env", name))
+    container: dict[str, Any] = {"imageUri": image["image_uri"], "commands": commands}
     if case.resources.docker_options:
-        # Batch's memoryMib only schedules the task; nothing enforces it
-        # without this. Mirrors manager/campaign/batch.py's container
-        # "options" -- without it a memory-sweep case measures nothing.
         container["options"] = shlex.join(case.resources.docker_options)
-
-    task_spec = {
+    task_spec: dict[str, Any] = {
         "runnables": [{"container": container}],
         "computeResource": {
             "cpuMilli": str(case.resources.cpu_milli),
             "memoryMib": str(case.resources.memory_mib),
         },
         "maxRetryCount": 0,
-        "maxRunDuration": f"{case.timeout_s + 300}s",
+        "maxRunDuration": f"{case.timeout_s + int(options.term_grace) + 300}s",
     }
-    if credential_secret:
-        task_spec["environment"] = {"secretVariables": credential_secret}
-
-    instance_policy = {"machineType": case.resources.machine_type, "provisioningModel": "SPOT"}
+    if secret_variables:
+        task_spec["environment"] = {"secretVariables": secret_variables}
+    policy: dict[str, Any] = {
+        "machineType": case.resources.machine_type,
+        "provisioningModel": options.provisioning,
+    }
     if case.resources.machine_type.startswith("n4-"):
-        instance_policy["bootDisk"] = dict(N4_BOOT_DISK)
-
+        policy["bootDisk"] = dict(N4_BOOT_DISK)
+    allocation: dict[str, Any] = {
+        "instances": [{"policy": policy}],
+        "serviceAccount": {"email": service_account},
+    }
+    if options.zone:
+        allocation["location"] = {
+            "allowedLocations": [f"zones/{options.zone.removeprefix('zones/')}"]
+        }
+    if options.network and options.subnetwork:
+        allocation["network"] = {
+            "networkInterfaces": [{"network": options.network, "subnetwork": options.subnetwork}]
+        }
     return {
-        "taskGroups": [{"taskCount": "1", "taskSpec": task_spec}],
-        "allocationPolicy": {"instances": [{"policy": instance_policy}]},
+        "labels": {"s3-study-intent": hashlib.sha256(job_id.encode()).hexdigest()[:32]},
+        "taskGroups": [{"taskCount": "1", "parallelism": "1", "taskSpec": task_spec}],
+        "allocationPolicy": allocation,
         "logsPolicy": {"destination": "CLOUD_LOGGING"},
     }
 
 
-def submit_job(project: str, location: str, job_id: str, job_dict: dict) -> None:
+def _job_from_dict(document: dict[str, Any]) -> batch_v1.Job:
     protobuf = batch_v1.Job.pb(batch_v1.Job())
-    ParseDict(job_dict, protobuf)
-    batch_v1.BatchServiceClient().create_job(
-        parent=f"projects/{project}/locations/{location}",
-        job=batch_v1.Job.wrap(protobuf),
-        job_id=job_id,
-        timeout=20,
-    )
+    ParseDict(document, protobuf)
+    return batch_v1.Job.wrap(protobuf)
 
 
-def describe_job(project: str, location: str, job_id: str) -> str:
-    job = batch_v1.BatchServiceClient().get_job(
-        name=f"projects/{project}/locations/{location}/jobs/{job_id}", timeout=20
+def _job_document(job: batch_v1.Job) -> dict[str, Any]:
+    value = MessageToDict(batch_v1.Job.pb(job), preserving_proto_field_name=False)
+    return {
+        key: value[key]
+        for key in ("labels", "taskGroups", "allocationPolicy", "logsPolicy")
+        if key in value
+    }
+
+
+def _adoption_exact(
+    job: batch_v1.Job, resource_name: str, expected: dict[str, Any], location: str
+) -> bool:
+    if job.name != resource_name:
+        return False
+    actual = batch_v1.Job(job)
+    for group in actual.task_groups:
+        group.name = ""
+    actual.allocation_policy.labels.pop("batch-job-id", None)
+    requested = expected.get("allocationPolicy", {}).get("location", {}).get("allowedLocations", [])
+    provider_region = f"regions/{location}"
+    actual_locations = actual.allocation_policy.location.allowed_locations
+    if provider_region not in requested and provider_region in actual_locations:
+        actual_locations.remove(provider_region)
+    if not requested and not actual_locations:
+        actual.allocation_policy.location = None
+    return _job_document(_job_from_dict(expected)) == _job_document(actual)
+
+
+def _close_batch_client(client: batch_v1.BatchServiceClient) -> None:
+    try:
+        client.transport.close()
+    except Exception as exc:
+        raise CampaignError(f"could not close Batch client: {exc}") from exc
+
+
+def ensure_job(
+    project: str,
+    location: str,
+    job_id: str,
+    job_dict: dict[str, Any],
+    *,
+    client: batch_v1.BatchServiceClient | None = None,
+) -> str:
+    owned = client is None
+    selected = client or batch_v1.BatchServiceClient()
+    parent = f"projects/{project}/locations/{location}"
+    resource_name = f"{parent}/jobs/{job_id}"
+    try:
+        try:
+            created = selected.create_job(
+                parent=parent,
+                job=_job_from_dict(job_dict),
+                job_id=job_id,
+                retry=None,
+                timeout=20,
+            )
+            if not _adoption_exact(created, resource_name, job_dict, location):
+                raise CampaignError(f"{job_id}: provider created a job that does not match intent")
+            return "SUBMITTED"
+        except AlreadyExists:
+            existing = selected.get_job(name=resource_name, retry=None, timeout=20)
+            if not _adoption_exact(existing, resource_name, job_dict, location):
+                raise JobCollisionError(
+                    f"{job_id}: existing Batch job collides with recorded intent"
+                ) from None
+            return "ADOPTED"
+        except (BadRequest, Forbidden, Unauthorized, FailedPrecondition, NotFound):
+            return "NOT_CREATED"
+        except GoogleAPIError as exc:
+            try:
+                existing = selected.get_job(name=resource_name, retry=None, timeout=20)
+            except (NotFound, GoogleAPIError):
+                raise CampaignError(f"{job_id}: create outcome is ambiguous: {exc}") from exc
+            if not _adoption_exact(existing, resource_name, job_dict, location):
+                raise CampaignError(f"{job_id}: ambiguous create found a colliding job") from exc
+            return "ADOPTED"
+    finally:
+        if owned:
+            _close_batch_client(selected)
+
+
+def describe_job(
+    project: str,
+    location: str,
+    job_id: str,
+    *,
+    client: batch_v1.BatchServiceClient,
+) -> str:
+    job = client.get_job(
+        name=f"projects/{project}/locations/{location}/jobs/{job_id}", retry=None, timeout=20
     )
     return batch_v1.JobStatus.State(job.status.state).name
 
 
-def cancel_job(project: str, location: str, job_id: str) -> None:
-    # A cancel is a delete; the returned long-running operation is not
-    # awaited here -- the next poll observes the job settling out of Batch.
-    batch_v1.BatchServiceClient().delete_job(
-        name=f"projects/{project}/locations/{location}/jobs/{job_id}", timeout=20
+def cancel_job(
+    project: str,
+    location: str,
+    job_id: str,
+    *,
+    client: batch_v1.BatchServiceClient,
+) -> None:
+    operation = client.delete_job(
+        name=f"projects/{project}/locations/{location}/jobs/{job_id}", retry=None, timeout=20
     )
+    operation.result(timeout=60)
 
 
 def open_db(path: str, *, readonly: bool = False) -> sqlite3.Connection:
-    """Open campaign.db. A writer creates the table if absent (no migration
-    machinery beyond that); report.py's read-only callers use a `mode=ro`
-    URI so an accidental write there fails loudly instead of silently
-    succeeding against a file it has no business mutating.
-    """
-    if readonly:
-        con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
-    else:
-        con = sqlite3.connect(path)
+    con = sqlite3.connect(f"file:{path}?mode=ro" if readonly else path, uri=readonly)
+    if not readonly:
+        con.execute("PRAGMA journal_mode=WAL")
         con.execute(SCHEMA)
+        columns = {row[1] for row in con.execute("PRAGMA table_info(submissions)")}
+        for name in ("project", "location"):
+            if name not in columns:
+                con.execute(f"ALTER TABLE submissions ADD COLUMN {name} TEXT NOT NULL DEFAULT ''")
         con.commit()
     con.row_factory = sqlite3.Row
     return con
 
 
-def record_submission(
-    con: sqlite3.Connection, *, base_job_id: str, submission: int, job_id: str,
-    case: Case, rep: int, destination: str, state: str,
+def record_intent(
+    con: sqlite3.Connection,
+    *,
+    base_job_id: str,
+    submission: int,
+    job_id: str,
+    campaign_id: str,
+    project: str,
+    location: str,
+    case: Case,
+    rep: int,
+    bucket: str,
+    region: str,
+    image_uri: str,
+    image_set_sha256: str,
+    destination: str,
+    job_dict: dict[str, Any],
 ) -> None:
-    """The one insert both cmd_submit and cmd_retry use, so the row shape
-    exists in exactly one place.
-    """
-    now = datetime.now(UTC).isoformat()
+    now = _now()
+    try:
+        con.execute(
+            """
+            INSERT INTO submissions (
+                base_job_id, submission, job_id, campaign_id, project, location,
+                tool, mode, case_id, fingerprint, rep, bucket, region,
+                image_uri, image_set_sha256, destination, job_json, state,
+                submitted_at, updated_at
+            ) VALUES (
+                :base_job_id, :submission, :job_id, :campaign_id, :project, :location,
+                :tool, :mode, :case_id, :fingerprint, :rep, :bucket, :region,
+                :image_uri, :image_set_sha256, :destination, :job_json, :state,
+                :submitted_at, :updated_at
+            )
+            """,
+            {
+                "base_job_id": base_job_id,
+                "submission": submission,
+                "job_id": job_id,
+                "campaign_id": campaign_id,
+                "project": project,
+                "location": location,
+                "tool": case.tool,
+                "mode": case.mode,
+                "case_id": case.case_id,
+                "fingerprint": case.fingerprint,
+                "rep": rep,
+                "bucket": bucket,
+                "region": region,
+                "image_uri": image_uri,
+                "image_set_sha256": image_set_sha256,
+                "destination": destination,
+                "job_json": json.dumps(job_dict, sort_keys=True),
+                "state": "SUBMITTING",
+                "submitted_at": now,
+                "updated_at": now,
+            },
+        )
+        con.commit()
+    except sqlite3.IntegrityError as exc:
+        raise CampaignError(f"{job_id}: submission intent already exists") from exc
+
+
+def update_submission_state(con: sqlite3.Connection, job_id: str, state: str) -> None:
     con.execute(
-        """
-        INSERT INTO submissions
-            (base_job_id, submission, job_id, tool, mode, case_id, fingerprint,
-             rep, destination, state, submitted_at, updated_at)
-        VALUES (:base_job_id, :submission, :job_id, :tool, :mode, :case_id, :fingerprint,
-                :rep, :destination, :state, :submitted_at, :updated_at)
-        """,
-        {
-            "base_job_id": base_job_id, "submission": submission, "job_id": job_id,
-            "tool": case.tool, "mode": case.mode, "case_id": case.case_id,
-            "fingerprint": case.fingerprint, "rep": rep, "destination": destination,
-            "state": state, "submitted_at": now, "updated_at": now,
-        },
+        "UPDATE submissions SET state=?, updated_at=? WHERE job_id=?", (state, _now(), job_id)
     )
     con.commit()
-
-
-def update_submission_state(con: sqlite3.Connection, base_job_id: str, submission: int, state: str) -> None:
-    con.execute(
-        "UPDATE submissions SET state = ?, updated_at = ? WHERE base_job_id = ? AND submission = ?",
-        (state, datetime.now(UTC).isoformat(), base_job_id, submission),
-    )
-    con.commit()
-
-
-def get_submission(con: sqlite3.Connection, job_id: str) -> sqlite3.Row | None:
-    return con.execute("SELECT * FROM submissions WHERE job_id = ?", (job_id,)).fetchone()
 
 
 def all_submissions(con: sqlite3.Connection) -> list[sqlite3.Row]:
@@ -275,98 +568,244 @@ def all_submissions(con: sqlite3.Connection) -> list[sqlite3.Row]:
 
 
 def latest_submissions(con: sqlite3.Connection) -> list[sqlite3.Row]:
-    """One row per base_job_id (case): the one with the highest submission."""
     return con.execute(
-        """
-        SELECT s.* FROM submissions s
-        JOIN (SELECT base_job_id, MAX(submission) AS submission FROM submissions GROUP BY base_job_id) latest
-          ON s.base_job_id = latest.base_job_id AND s.submission = latest.submission
-        ORDER BY s.base_job_id
-        """
+        "SELECT s.* FROM submissions s JOIN "
+        "(SELECT base_job_id, max(submission) submission FROM submissions GROUP BY base_job_id) x "
+        "ON s.base_job_id=x.base_job_id AND s.submission=x.submission ORDER BY s.base_job_id"
     ).fetchall()
+
+
+def retry_job_document(
+    previous: dict[str, Any], *, job_id: str, destination: str, submission: int
+) -> dict[str, Any]:
+    """Rewrite only the three retry identities in a frozen Batch request."""
+    document = copy.deepcopy(previous)
+    try:
+        commands = document["taskGroups"][0]["taskSpec"]["runnables"][0]["container"]["commands"]
+        if not isinstance(commands, list):
+            raise TypeError
+        replacements = {
+            "--job-id": job_id,
+            "--destination": destination,
+            "--submission-number": str(submission),
+        }
+        seen: set[str] = set()
+        for index in range(0, len(commands), 2):
+            name = commands[index]
+            if name in replacements:
+                commands[index + 1] = replacements[name]
+                seen.add(name)
+        if seen != set(replacements):
+            raise ValueError
+        document["labels"]["s3-study-intent"] = hashlib.sha256(job_id.encode()).hexdigest()[:32]
+    except (IndexError, KeyError, TypeError, ValueError):
+        raise CampaignError("recorded Batch request is not safely retryable") from None
+    return document
+
+
+def _options(args: argparse.Namespace) -> BatchOptions:
+    return BatchOptions(
+        args.anonymous_worker_sa,
+        args.authenticated_worker_sa,
+        args.network,
+        args.subnetwork,
+        args.zone,
+        args.provisioning,
+    )
+
+
+def _submit_one(
+    con: sqlite3.Connection,
+    args: argparse.Namespace,
+    plan: Plan,
+    case: Case,
+    image_set: ImageSet,
+    secrets: dict[str, dict[str, str]],
+    rep: int,
+    submission: int,
+    base: str,
+    previous_job_json: dict[str, Any] | None = None,
+) -> None:
+    job_id = submission_job_id(base, submission)
+    destination = (
+        f"gs://{args.results_bucket}/campaigns/{args.campaign_id}/results/{plan.bucket}/"
+        f"{case.tool}/{case.case_id}/run-{rep}/submission-{submission}/"
+    )
+    image = image_set.images[case.tool]
+    job_dict = render_batch_job(
+        case,
+        destination,
+        image,
+        image_set.sha256,
+        secrets,
+        campaign_id=args.campaign_id,
+        job_id=job_id,
+        rep=rep,
+        submission=submission,
+        bucket=plan.bucket,
+        region=plan.region,
+        options=_options(args),
+    )
+    if previous_job_json is not None:
+        expected_retry = retry_job_document(
+            previous_job_json,
+            job_id=job_id,
+            destination=destination,
+            submission=submission,
+        )
+        if job_dict != expected_retry:
+            raise CampaignError("retry changes the recorded immutable Batch request policy")
+    record_intent(
+        con,
+        base_job_id=base,
+        submission=submission,
+        job_id=job_id,
+        campaign_id=args.campaign_id,
+        project=args.project,
+        location=args.location,
+        case=case,
+        rep=rep,
+        bucket=plan.bucket,
+        region=plan.region,
+        image_uri=image["image_uri"],
+        image_set_sha256=image_set.sha256,
+        destination=destination,
+        job_dict=job_dict,
+    )
+    try:
+        state = ensure_job(args.project, args.location, job_id, job_dict)
+    except JobCollisionError:
+        update_submission_state(con, job_id, "COLLISION")
+        raise
+    except CampaignError:
+        update_submission_state(con, job_id, "AMBIGUOUS")
+        raise
+    update_submission_state(con, job_id, state)
 
 
 def cmd_submit(args: argparse.Namespace) -> int:
     plan = Plan.load(Path(args.plan))
-    secrets_map = load_secrets(args.secrets)
+    validate_campaign_id(args.campaign_id)
+    image_set = load_image_set(args.image_set, {case.tool for case in plan.cases})
+    planned_job_ids(plan, args.campaign_id, image_set)
+    secrets = load_secrets(args.secrets)
+    if args.dry_run:
+        options = _options(args)
+        for case in plan.cases:
+            for rep in range(1, case.reps + 1):
+                image = image_set.images[case.tool]
+                base = job_id_for(
+                    case,
+                    rep,
+                    campaign_id=args.campaign_id,
+                    bucket=plan.bucket,
+                    region=plan.region,
+                    image_uri=image["image_uri"],
+                )
+                destination = (
+                    f"gs://{args.results_bucket}/campaigns/{args.campaign_id}/results/"
+                    f"{plan.bucket}/{case.tool}/{case.case_id}/run-{rep}/submission-1/"
+                )
+                rendered = render_batch_job(
+                    case,
+                    destination,
+                    image,
+                    image_set.sha256,
+                    secrets,
+                    campaign_id=args.campaign_id,
+                    job_id=base,
+                    rep=rep,
+                    submission=1,
+                    bucket=plan.bucket,
+                    region=plan.region,
+                    options=options,
+                )
+                print(f"{base} {json.dumps(rendered, sort_keys=True, separators=(',', ':'))}")
+        return 0
     con = open_db(args.state)
     try:
         for case in plan.cases:
             for rep in range(1, case.reps + 1):
-                base = job_id_for(case, rep)
-                if get_submission(con, base) is not None:
-                    print(f"campaign: skipping already-tracked job {base}")
-                    continue
-                destination = f"gs://{args.results_bucket}/{base}/"
-                job_dict = render_batch_job(case, destination, args.image, secrets_map)
-                if args.dry_run:
-                    print(f"campaign: [dry-run] would submit {base}")
-                    print(job_dict)
-                    continue
-                print(f"campaign: submitting {base}")
-                submit_job(args.project, args.location, base, job_dict)
-                record_submission(
-                    con, base_job_id=base, submission=1, job_id=base,
-                    case=case, rep=rep, destination=destination, state="SUBMITTED",
+                base = job_id_for(
+                    case,
+                    rep,
+                    campaign_id=args.campaign_id,
+                    bucket=plan.bucket,
+                    region=plan.region,
+                    image_uri=image_set.images[case.tool]["image_uri"],
                 )
+                existing = con.execute(
+                    "SELECT * FROM submissions WHERE job_id=?", (base,)
+                ).fetchone()
+                if existing:
+                    if existing["state"] not in {"SUBMITTING", "AMBIGUOUS"}:
+                        print(f"campaign: skipping already-tracked job {base}")
+                        continue
+                    if existing["project"] != args.project or existing["location"] != args.location:
+                        raise CampaignError(
+                            "recorded submission belongs to a different provider parent"
+                        )
+                    state = ensure_job(
+                        args.project, args.location, base, json.loads(existing["job_json"])
+                    )
+                    update_submission_state(con, base, state)
+                    continue
+                _submit_one(con, args, plan, case, image_set, secrets, rep, 1, base)
     finally:
         con.close()
     return 0
 
 
-def poll_once(project: str, location: str, con: sqlite3.Connection, rows: list[sqlite3.Row]) -> bool:
-    """One describe-and-record pass over `rows`. Returns True once every row
-    in it is terminal.
-    """
+def poll_once(
+    project: str,
+    location: str,
+    con: sqlite3.Connection,
+    rows: list[sqlite3.Row],
+    *,
+    client: batch_v1.BatchServiceClient,
+) -> bool:
     all_terminal = True
     for row in rows:
         if row["state"] in TERMINAL_STATES:
             continue
         try:
-            new_state = describe_job(project, location, row["job_id"])
+            state = describe_job(project, location, row["job_id"], client=client)
         except GoogleAPIError as exc:
             print(f"campaign: describe failed for {row['job_id']}: {exc}", file=sys.stderr)
             all_terminal = False
             continue
-        if new_state != row["state"]:
-            print(f"campaign: {row['job_id']} {row['state']} -> {new_state}")
-        update_submission_state(con, row["base_job_id"], row["submission"], new_state)
-        if new_state not in TERMINAL_STATES:
-            all_terminal = False
+        update_submission_state(con, row["job_id"], state)
+        all_terminal &= state in TERMINAL_STATES
     return all_terminal
 
 
 def cmd_poll(args: argparse.Namespace) -> int:
     con = open_db(args.state)
+    client: batch_v1.BatchServiceClient | None = None
     try:
-        # Default: only the latest submission per case. --all also polls
-        # superseded submissions (earlier retries) still sitting in flight.
+        client = batch_v1.BatchServiceClient()
         rows_for = all_submissions if args.all else latest_submissions
+        rows = rows_for(con)
+        validate_provider_parent(rows, args.project, args.location)
         if not args.watch:
-            poll_once(args.project, args.location, con, rows_for(con))
+            poll_once(args.project, args.location, con, rows, client=client)
             return 0
-        # --watch trusts Batch's reported state completely and just loops
-        # describing everything non-terminal until nothing is left to
-        # describe; no exponential backoff, no jitter, no wall-time cap.
-        while not poll_once(args.project, args.location, con, rows_for(con)):
+        while not poll_once(args.project, args.location, con, rows_for(con), client=client):
             time.sleep(args.interval)
         return 0
     finally:
-        con.close()
+        try:
+            if client is not None:
+                _close_batch_client(client)
+        finally:
+            con.close()
 
 
 def cmd_status(args: argparse.Namespace) -> int:
     con = open_db(args.state, readonly=True)
     try:
-        rows = latest_submissions(con)
-        counts: dict[str, int] = {}
-        for row in rows:
-            print(f"{row['job_id']:<40} {row['state']:<12} {row['tool']:<12} "
-                  f"rep={row['rep']} submission={row['submission']}")
-            counts[row["state"]] = counts.get(row["state"], 0) + 1
-        total = con.execute("SELECT count(*) FROM submissions").fetchone()[0]
-        summary = " ".join(f"{state_name}={count}" for state_name, count in sorted(counts.items()))
-        print(f"-- {len(rows)} case(s), {total} total submission(s): {summary}")
+        for row in latest_submissions(con):
+            print(f"{row['job_id']:<63} {row['state']:<12} {row['tool']}")
     finally:
         con.close()
     return 0
@@ -374,33 +813,59 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 def cmd_retry(args: argparse.Namespace) -> int:
     plan = Plan.load(Path(args.plan))
-    secrets_map = load_secrets(args.secrets)
-    # Keyed by (tool, case_id), not case_id alone: case_id is derived from
-    # mode plus axes WITHOUT the tool name (see job_id_for), so two tools can
-    # share one case_id on the same plan.
-    cases_by_key = {(case.tool, case.case_id): case for case in plan.cases}
+    validate_campaign_id(args.campaign_id)
+    image_set = load_image_set(args.image_set, {case.tool for case in plan.cases})
+    secrets = load_secrets(args.secrets)
+    cases = {(case.tool, case.case_id): case for case in plan.cases}
     con = open_db(args.state)
     try:
         for row in latest_submissions(con):
-            if args.job_id:
-                if row["job_id"] != args.job_id:
-                    continue
-            elif row["state"] != "FAILED":
+            if args.job_id and row["job_id"] != args.job_id:
                 continue
-            case = cases_by_key.get((row["tool"], row["case_id"]))
-            if case is None:
-                print(f"campaign: {row['case_id']!r} is no longer in {args.plan}; skipping retry", file=sys.stderr)
+            if row["state"] not in RETRYABLE_STATES:
+                if args.job_id:
+                    raise CampaignError("only a settled failed submission is retryable")
                 continue
-
-            next_submission = row["submission"] + 1
-            retry_job_id = valid_job_id(f"{row['base_job_id']}-r{next_submission}")
-            destination = f"gs://{args.results_bucket}/{retry_job_id}/"
-            job_dict = render_batch_job(case, destination, args.image, secrets_map)
-            print(f"campaign: retrying {row['job_id']} (submission {row['submission']}) as {retry_job_id}")
-            submit_job(args.project, args.location, retry_job_id, job_dict)
-            record_submission(
-                con, base_job_id=row["base_job_id"], submission=next_submission, job_id=retry_job_id,
-                case=case, rep=row["rep"], destination=destination, state="SUBMITTED",
+            evidence_state = retry_evidence_state(row["destination"])
+            if evidence_state == "COMPLETE":
+                if args.job_id:
+                    raise CampaignError("submission already has a complete recorded outcome")
+                print(f"campaign: not retrying recorded outcome {row['job_id']}")
+                continue
+            if evidence_state == "AMBIGUOUS":
+                raise CampaignError("submission attempt leaves are ambiguous; refusing retry")
+            case = cases.get((row["tool"], row["case_id"]))
+            if case is None or row["campaign_id"] != args.campaign_id:
+                raise CampaignError("retry plan/campaign does not match recorded intent")
+            if (
+                row["fingerprint"] != case.fingerprint
+                or row["bucket"] != plan.bucket
+                or row["region"] != plan.region
+            ):
+                raise CampaignError("retry plan case or target does not match recorded intent")
+            if (
+                row["image_set_sha256"] != image_set.sha256
+                or row["image_uri"] != image_set.images[case.tool]["image_uri"]
+            ):
+                raise CampaignError("retry image set does not match the frozen campaign")
+            if row["project"] != args.project or row["location"] != args.location:
+                raise CampaignError("retry provider parent does not match the frozen campaign")
+            expected_destination_root = (
+                f"gs://{args.results_bucket}/campaigns/{args.campaign_id}/results/{plan.bucket}/"
+            )
+            if not row["destination"].startswith(expected_destination_root):
+                raise CampaignError("retry results bucket does not match the frozen campaign")
+            _submit_one(
+                con,
+                args,
+                plan,
+                case,
+                image_set,
+                secrets,
+                row["rep"],
+                row["submission"] + 1,
+                row["base_job_id"],
+                previous_job_json=json.loads(row["job_json"]),
             )
     finally:
         con.close()
@@ -409,117 +874,213 @@ def cmd_retry(args: argparse.Namespace) -> int:
 
 def cmd_cancel(args: argparse.Namespace) -> int:
     con = open_db(args.state)
+    client: batch_v1.BatchServiceClient | None = None
     try:
-        for row in all_submissions(con):
-            if row["state"] in TERMINAL_STATES:
-                continue
-            print(f"campaign: cancelling {row['job_id']}")
-            try:
-                cancel_job(args.project, args.location, row["job_id"])
-            except GoogleAPIError as exc:
-                print(f"campaign: cancel failed for {row['job_id']}: {exc}", file=sys.stderr)
-                continue
-            update_submission_state(con, row["base_job_id"], row["submission"], "CANCELLED")
+        client = batch_v1.BatchServiceClient()
+        rows = all_submissions(con)
+        validate_provider_parent(rows, args.project, args.location)
+        for row in rows:
+            if row["state"] not in TERMINAL_STATES:
+                cancel_job(args.project, args.location, row["job_id"], client=client)
+                update_submission_state(con, row["job_id"], "CANCELLED")
+    finally:
+        try:
+            if client is not None:
+                _close_batch_client(client)
+        finally:
+            con.close()
+    return 0
+
+
+def cmd_accept_failure(args: argparse.Namespace) -> int:
+    con = open_db(args.state)
+    try:
+        matches = [row for row in latest_submissions(con) if row["job_id"] == args.job_id]
+        if len(matches) != 1 or matches[0]["state"] not in RETRYABLE_STATES:
+            raise CampaignError("accept-failure requires one latest settled failed submission")
+        state = f"ACCEPTED_{matches[0]['state']}"
+        update_submission_state(con, args.job_id, state)
+        print(f"campaign: {args.job_id} marked {state}")
     finally:
         con.close()
     return 0
 
 
+def validate_provider_parent(rows: list[sqlite3.Row], project: str, location: str) -> None:
+    if any(row["project"] != project or row["location"] != location for row in rows):
+        raise CampaignError("CLI provider parent does not match the recorded campaign")
+
+
+def aggregate_verify_exit(exit_codes: list[int]) -> int:
+    """FAIL/refusal dominates DRIFT, which deliberately remains nonzero."""
+    if not exit_codes:
+        return EXIT_FAIL
+    if any(code not in {EXIT_PASS, EXIT_DRIFT} for code in exit_codes):
+        return EXIT_FAIL
+    if EXIT_DRIFT in exit_codes:
+        return EXIT_DRIFT
+    return EXIT_PASS
+
+
+def plan_binding_errors(plan: Plan, rows: list[sqlite3.Row]) -> list[str]:
+    """Bind the current latest-submission roster back to the supplied plan."""
+    expected = {
+        (case.tool, case.case_id, rep): case
+        for case in plan.cases
+        for rep in range(1, case.reps + 1)
+    }
+    actual = {(row["tool"], row["case_id"], row["rep"]): row for row in rows}
+    errors = []
+    if len(actual) != len(rows):
+        errors.append("duplicate ledger rows name the same plan case/run")
+    for field in ("campaign_id", "image_set_sha256", "project", "location"):
+        if rows and field not in tuple(rows[0].keys()):
+            errors.append(f"ledger schema omits {field}")
+        elif len({row[field] for row in rows}) > 1:
+            errors.append(f"ledger rows disagree on {field}")
+    for key in sorted(expected.keys() - actual.keys()):
+        errors.append(f"missing ledger case {key}")
+    for key in sorted(actual.keys() - expected.keys()):
+        errors.append(f"unexpected ledger case {key}")
+    for key in sorted(expected.keys() & actual.keys()):
+        case, row = expected[key], actual[key]
+        if row["fingerprint"] != case.fingerprint or row["mode"] != case.mode:
+            errors.append(f"changed plan case {key}")
+        if row["bucket"] != plan.bucket or row["region"] != plan.region:
+            errors.append(f"changed plan target {key}")
+    return errors
+
+
+def retry_evidence_state(destination: str) -> str:
+    leaves = verify.list_leaves(destination)
+    if not leaves:
+        return "ABSENT"
+    completed = [leaf for leaf in leaves if verify.has_result_marker(leaf)]
+    if len(leaves) == 1 and not completed:
+        return "INCOMPLETE"
+    if len(leaves) == 1 and len(completed) == 1:
+        return "COMPLETE"
+    return "AMBIGUOUS"
+
+
 def cmd_verify(args: argparse.Namespace) -> int:
-    """For each latest submission with a SUCCEEDED job, compare it against
-    --reference-case's latest submission in-process, writing verify.json
-    into each compared attempt's own leaf. Closes the loop that otherwise
-    demanded one manual verify.py invocation per case.
-    """
     plan = Plan.load(Path(args.plan))
     con = open_db(args.state, readonly=True)
     try:
         rows = latest_submissions(con)
     finally:
         con.close()
-
-    matches = [row for row in rows if row["case_id"] == args.reference_case]
-    if not matches:
-        print(f"campaign: no submission for case_id {args.reference_case!r}", file=sys.stderr)
-        return 1
-    if len(matches) > 1:
-        tools = [row["tool"] for row in matches]
-        print(f"campaign: case_id {args.reference_case!r} is ambiguous across tools {tools}; "
-              "refusing to guess which is the reference", file=sys.stderr)
-        return 1
-    reference_row = matches[0]
-
-    for row in rows:
-        if row["case_id"] == args.reference_case or row["state"] != "SUCCEEDED":
-            continue
-        exit_code, output = verify.verify_leaves(
-            tool=row["tool"], bucket=plan.bucket, prefix="", mode=row["mode"],
-            actual_destination=row["destination"], reference_destination=reference_row["destination"],
-            adapter_root=args.adapter_root,
+    binding_errors = plan_binding_errors(plan, rows)
+    if binding_errors:
+        print(
+            "campaign: ledger does not match supplied plan: " + "; ".join(binding_errors),
+            file=sys.stderr,
         )
-        if "verdict" in output:
-            print(f"{row['job_id']}: verdict={output['verdict']} (exit {exit_code})")
-        else:
-            print(f"{row['job_id']}: refused -- {output.get('error')} (exit {exit_code})", file=sys.stderr)
-    return 0
+        return EXIT_FAIL
+    matches = [row for row in rows if row["case_id"] == args.reference_case]
+    if len(matches) != 1 or matches[0]["state"] != "SUCCEEDED":
+        print("campaign: reference case is missing, ambiguous, or unsuccessful", file=sys.stderr)
+        return EXIT_FAIL
+    reference = matches[0]
+    exits: list[int] = []
+    for row in rows:
+        if row["job_id"] == reference["job_id"]:
+            continue
+        if row["state"] != "SUCCEEDED":
+            exits.append(EXIT_FAIL)
+            print(f"{row['job_id']}: refused -- Batch state is {row['state']}", file=sys.stderr)
+            continue
+        code, output = verify.verify_leaves(
+            tool=row["tool"],
+            bucket=plan.bucket,
+            prefix="",
+            mode=row["mode"],
+            actual_destination=row["destination"],
+            reference_destination=reference["destination"],
+            adapter_root=args.adapter_root,
+            expected_actual={
+                "campaign_id": row["campaign_id"],
+                "job_id": row["job_id"],
+                "case_id": row["case_id"],
+                "case_fingerprint": row["fingerprint"],
+                "image": row["image_uri"],
+                "image_set_sha256": row["image_set_sha256"],
+            },
+            expected_reference={
+                "campaign_id": reference["campaign_id"],
+                "job_id": reference["job_id"],
+                "case_id": reference["case_id"],
+                "case_fingerprint": reference["fingerprint"],
+                "image": reference["image_uri"],
+                "image_set_sha256": reference["image_set_sha256"],
+            },
+        )
+        exits.append(code)
+        print(f"{row['job_id']}: {output.get('verdict', 'REFUSED')} (exit {code})")
+    return aggregate_verify_exit(exits)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Submit, poll, verify, and report on a benchmark campaign.")
-    parser.add_argument("--state", default=STATE_FILENAME, help="campaign.db path (sqlite3).")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--state", default=STATE_FILENAME)
     sub = parser.add_subparsers(dest="command", required=True)
 
-    def _batch_target(p: argparse.ArgumentParser) -> None:
-        p.add_argument("--project", required=True, help="GCP project Batch jobs run in.")
-        p.add_argument("--location", required=True, help="GCP Batch location, e.g. us-central1.")
+    def batch_target(p: argparse.ArgumentParser) -> None:
+        p.add_argument("--project", required=True)
+        p.add_argument("--location", required=True)
 
-    def _plan_and_submission(p: argparse.ArgumentParser) -> None:
-        p.add_argument("--plan", required=True, help="bench/buckets/<bucket>.yaml path.")
-        p.add_argument("--results-bucket", required=True, help="gs:// bucket (name only) attempts upload to.")
-        p.add_argument("--image", required=True, help="Container image URI measure.py runs in.")
-        p.add_argument("--secrets", default=None, help="YAML: auth stratum -> {ENV_NAME: secret version}.")
+    def submission(p: argparse.ArgumentParser) -> None:
+        p.add_argument("--plan", required=True)
+        p.add_argument("--campaign-id", required=True)
+        p.add_argument("--results-bucket", required=True)
+        p.add_argument("--image-set", required=True)
+        p.add_argument("--secrets")
+        p.add_argument("--anonymous-worker-sa", required=True)
+        p.add_argument("--authenticated-worker-sa")
+        p.add_argument("--network")
+        p.add_argument("--subnetwork")
+        p.add_argument("--zone")
+        p.add_argument("--provisioning", choices=("SPOT", "STANDARD"), default="SPOT")
 
-    submit_p = sub.add_parser("submit")
-    _batch_target(submit_p)
-    _plan_and_submission(submit_p)
-    submit_p.add_argument("--dry-run", action="store_true", help="Render job bodies without submitting.")
-    submit_p.set_defaults(func=cmd_submit)
-
-    poll_p = sub.add_parser("poll")
-    _batch_target(poll_p)
-    poll_p.add_argument("--watch", action="store_true", help="Loop until every polled row reaches a terminal state.")
-    poll_p.add_argument("--interval", type=int, default=30, help="Seconds between --watch polls.")
-    poll_p.add_argument("--all", action="store_true", help="Poll every submission, not just each case's latest.")
-    poll_p.set_defaults(func=cmd_poll)
-
-    status_p = sub.add_parser("status")
-    status_p.set_defaults(func=cmd_status)
-
-    cancel_p = sub.add_parser("cancel")
-    _batch_target(cancel_p)
-    cancel_p.set_defaults(func=cmd_cancel)
-
-    retry_p = sub.add_parser("retry")
-    _batch_target(retry_p)
-    _plan_and_submission(retry_p)
-    retry_p.add_argument(
-        "--job-id", default=None,
-        help="Retry only this one job id, regardless of its state. Default: every FAILED case's latest submission.",
-    )
-    retry_p.set_defaults(func=cmd_retry)
-
-    verify_p = sub.add_parser("verify")
-    verify_p.add_argument("--plan", required=True, help="bench/buckets/<bucket>.yaml path.")
-    verify_p.add_argument("--reference-case", required=True, help="case_id to compare every other latest submission against.")
-    verify_p.add_argument("--adapter-root", default="tools", help="Checkout-relative tools/<tool>/adapter directory.")
-    verify_p.set_defaults(func=cmd_verify)
-
+    submit = sub.add_parser("submit")
+    batch_target(submit)
+    submission(submit)
+    submit.add_argument("--dry-run", action="store_true")
+    submit.set_defaults(func=cmd_submit)
+    retry = sub.add_parser("retry")
+    batch_target(retry)
+    submission(retry)
+    retry.add_argument("--job-id")
+    retry.set_defaults(func=cmd_retry)
+    poll = sub.add_parser("poll")
+    batch_target(poll)
+    poll.add_argument("--watch", action="store_true")
+    poll.add_argument("--all", action="store_true")
+    poll.add_argument("--interval", type=int, default=30)
+    poll.set_defaults(func=cmd_poll)
+    cancel = sub.add_parser("cancel")
+    batch_target(cancel)
+    cancel.set_defaults(func=cmd_cancel)
+    accept_failure = sub.add_parser("accept-failure")
+    accept_failure.add_argument("--job-id", required=True)
+    accept_failure.set_defaults(func=cmd_accept_failure)
+    status = sub.add_parser("status")
+    status.set_defaults(func=cmd_status)
+    verify_parser = sub.add_parser("verify")
+    verify_parser.add_argument("--plan", required=True)
+    verify_parser.add_argument("--reference-case", required=True)
+    verify_parser.add_argument("--adapter-root", default="tools")
+    verify_parser.set_defaults(func=cmd_verify)
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv)
-    return args.func(args)
+    try:
+        args = parse_args(argv)
+        return int(args.func(args))
+    except (CampaignError, DefaultCredentialsError, GoogleAPIError, OSError, ValueError) as exc:
+        print(f"campaign: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

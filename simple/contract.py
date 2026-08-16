@@ -2,7 +2,7 @@
 
 Named to echo common/contract.py's role in the real repo, but much smaller:
 the real module owns the byte-framed TAB record contract itself. That
-contract now lives entirely in the capsule normalizers this sketch calls
+contract now lives entirely in the capsule normalizers this candidate calls
 into (see adapters.py) -- this module is only "one place every script here
 agrees with" for the handful of things genuinely shared across files.
 """

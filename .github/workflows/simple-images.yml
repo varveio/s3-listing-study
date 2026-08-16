@@ -1,0 +1,64 @@
+name: simple image smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      tool:
+        description: Tool capsule to layer
+        required: true
+        type: string
+      tool-parent:
+        description: Immutable tool parent URI ending in @sha256:<digest>
+        required: true
+        type: string
+      harness-revision:
+        description: Full lowercase 40-character harness commit
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+
+      - run: uv sync --locked
+
+      - name: Validate immutable inputs
+        env:
+          TOOL_PARENT: ${{ inputs['tool-parent'] }}
+          HARNESS_REVISION: ${{ inputs['harness-revision'] }}
+        run: |
+          set -euo pipefail
+          [[ "$TOOL_PARENT" =~ @sha256:[0-9a-f]{64}$ ]]
+          [[ "$HARNESS_REVISION" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$HARNESS_REVISION"
+
+      - name: Build selected tool layer without publishing
+        env:
+          TOOL: ${{ inputs.tool }}
+          TOOL_PARENT: ${{ inputs['tool-parent'] }}
+          HARNESS_REVISION: ${{ inputs['harness-revision'] }}
+        run: |
+          set -euo pipefail
+          uv run python simple/build_image.py \
+            --tool "$TOOL" \
+            --tool-parent "$TOOL_PARENT" \
+            --harness-revision "$HARNESS_REVISION" \
+            --tag simple-candidate:smoke
+
+      - name: Smoke non-root entrypoint
+        run: |
+          set -euo pipefail
+          test "$(docker run --rm --entrypoint id simple-candidate:smoke -u)" = 10001
+          docker run --rm simple-candidate:smoke --help

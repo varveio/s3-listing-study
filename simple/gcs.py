@@ -10,6 +10,8 @@ scope (see README.md).
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import google.cloud.storage as storage
 
 _client: storage.Client | None = None
@@ -55,6 +57,28 @@ def download_bytes(uri: str) -> bytes:
 def upload_file(local_path, uri: str) -> None:
     bucket_name, name = parse_gs_uri(uri)
     client().bucket(bucket_name).blob(name).upload_from_filename(str(local_path))
+
+
+def upload_tree(local_root: Path, uri: str) -> None:
+    """Recursively upload files below ``local_root``, preserving relative paths."""
+    for path in sorted(local_root.rglob("*")):
+        if path.is_file():
+            relative = path.relative_to(local_root).as_posix()
+            upload_file(path, uri.rstrip("/") + "/" + relative)
+
+
+def download_tree(uri: str, local_root: Path) -> None:
+    """Download every object below a prefix, preserving relative paths."""
+    bucket_name, prefix = parse_gs_uri(uri)
+    if not prefix.endswith("/"):
+        prefix += "/"
+    for blob in client().bucket(bucket_name).list_blobs(prefix=prefix):
+        relative = blob.name.removeprefix(prefix)
+        if not relative:
+            continue
+        target = local_root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        blob.download_to_filename(str(target))
 
 
 def upload_bytes(data: bytes, uri: str, *, content_type: str = "application/octet-stream") -> None:
