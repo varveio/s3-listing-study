@@ -13,7 +13,7 @@ import pytest
 from benchmark import adapters, gcs, measure
 from benchmark.contract import TOOLBOX_TOOLS
 
-ROOT = Path(__file__).parents[1]
+ROOT = Path(__file__).parents[2]
 
 
 def image_metadata(workdir: str | None = None) -> dict[str, object]:
@@ -61,7 +61,7 @@ def test_worker_requirement_versions_match_repository_lock() -> None:
         package["name"].lower(): package["version"]
         for package in tomllib.loads((ROOT / "uv.lock").read_text())["package"]
     }
-    for line in (ROOT / "benchmark/requirements-worker.txt").read_text().splitlines():
+    for line in (ROOT / "benchmark/build/requirements-worker.txt").read_text().splitlines():
         name, version = line.split("==", 1)
         assert locked[name.lower()] == version
 

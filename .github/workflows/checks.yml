@@ -121,7 +121,7 @@ jobs:
         run: uv run ruff check
 
       - name: ruff format --check
-        run: uv run ruff format --check benchmark src tests
+        run: uv run ruff format --check benchmark/src benchmark/tests src tests
 
       - name: mypy
         run: uv run mypy

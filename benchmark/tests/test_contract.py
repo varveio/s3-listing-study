@@ -25,7 +25,7 @@ from benchmark.runtime.contract import (
     read_records,
 )
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 CANON_MT_AWK = (
     r'function canon_mt(s){ sub(/(Z|\+00:00|\+0000)$/,"",s); '

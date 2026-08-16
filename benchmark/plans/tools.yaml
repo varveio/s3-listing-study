@@ -8,7 +8,7 @@
 # for building the toolbox, and which mode a benchmark samples is not a
 # property of the build.
 #
-# tests/test_bench_plan.py checks every mode here against the adapter that would
+# benchmark/tests/test_plan.py checks every mode here against the adapter that would
 # have to implement it, so a rename in an adapter cannot leave this stale.
 
 spec_version: 2

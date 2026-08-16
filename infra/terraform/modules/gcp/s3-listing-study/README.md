@@ -87,7 +87,7 @@ all either needs. SSH ingress is restricted to IAP's forwarding range regardless
 port 22 to the internet, and an estate that wants IAP-only SSH must delete that
 rule itself. This module will not touch a shared network's pre-existing rules.
 
-**Both workers get bucket-level `objectCreator`.** `benchmark/measure.py` uploads
+**Both workers get bucket-level `objectCreator`.** `benchmark/src/benchmark/measure.py` uploads
 new artifacts into a fresh UUID attempt leaf and never reads, overwrites, or
 deletes GCS objects. It uploads `result.json` last as the completion marker. The
 SDK calls do not set a create-only generation precondition; IAM is the actual
@@ -137,7 +137,7 @@ with raw artifacts such as `stdout.log.gz`, `stderr.log.gz`, and `native/**`
 first, then `<attempt-uuid>/result.json` last. The campaign model owns the run ordinal;
 the current `reps: 1` policy yields `run-1`, while higher ordinals are reserved
 for separately scheduled runs rather than an implemented append-later command.
-`benchmark/report.py` and `benchmark/verify.py` resolve the UUID leaf, bind the
+`benchmark/src/benchmark/report.py` and `benchmark/src/benchmark/verify.py` resolve the UUID leaf, bind the
 result to recorded campaign intent, and refuse zero or multiple completed leaves.
 Raw listings are read for requested correctness verification or investigation;
 no Terraform resource performs that collection.

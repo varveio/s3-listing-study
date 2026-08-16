@@ -175,7 +175,7 @@ dry runs:
 ```sh
 uv sync                     # or: python3 -m venv .venv && .venv/bin/pip install -e .
 uv run pytest               # offline: no bucket, no network, no data directory
-uv run pytest tests/test_adapters.py          # focused adapter contract and corpus coverage
+uv run pytest benchmark/tests/test_adapters.py  # focused adapter contract and corpus coverage
 ```
 
 The pytest suites use committed synthetic fixtures and need no bucket or cloud

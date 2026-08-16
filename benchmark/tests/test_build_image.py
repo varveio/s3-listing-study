@@ -9,7 +9,7 @@ import pytest
 from benchmark import build_image
 from benchmark.contract import TOOLBOX_TOOLS
 
-ROOT = Path(__file__).parents[1]
+ROOT = Path(__file__).parents[2]
 
 
 def built_document(*, toolbox_digest: str = "d" * 64) -> list[dict[str, object]]:
@@ -39,7 +39,7 @@ def test_registered_recipes_form_the_exact_toolbox() -> None:
     assert manifest["schema_version"] == 2
     assert (
         manifest["toolbox_recipe_sha256"]
-        == hashlib.sha256((ROOT / "benchmark/Dockerfile").read_bytes()).hexdigest()
+        == hashlib.sha256((ROOT / "benchmark/build/Dockerfile").read_bytes()).hexdigest()
     )
     tools = manifest["tools"]
     assert isinstance(tools, dict)
@@ -58,7 +58,7 @@ def test_built_config_binds_runtime_and_aggregate_identity() -> None:
 
 
 def test_dockerfile_is_self_contained_and_checksum_pinned() -> None:
-    source = (ROOT / "benchmark/Dockerfile").read_text()
+    source = (ROOT / "benchmark/build/Dockerfile").read_text()
     assert "_PARENT" not in source
     assert "SHARED_BASE" not in source
     assert source.count("ADD --checksum=sha256:") == 11
@@ -81,11 +81,14 @@ def test_dockerfile_is_self_contained_and_checksum_pinned() -> None:
 
 
 def test_toolbox_context_contains_only_runtime_adapters_and_exact_build_inputs() -> None:
-    policy = (ROOT / "benchmark/Dockerfile.dockerignore").read_text().splitlines()
+    policy = (ROOT / "benchmark/build/Dockerfile.dockerignore").read_text().splitlines()
     assert policy == [
         "*",
-        "!benchmark/",
-        "!benchmark/**",
+        # Only the importable package and the one build input the image needs;
+        # plans/, tests/, and the README stay out of the worker image.
+        "!benchmark/src/benchmark/",
+        "!benchmark/src/benchmark/**",
+        "!benchmark/build/requirements-worker.txt",
         "!tools/",
         "!tools/*/",
         "!tools/*/adapter/",
@@ -111,7 +114,7 @@ def test_toolbox_context_contains_only_runtime_adapters_and_exact_build_inputs()
 
 
 def test_final_stage_validates_metadata_roster_paths_and_manifest() -> None:
-    source = (ROOT / "benchmark/Dockerfile").read_text()
+    source = (ROOT / "benchmark/build/Dockerfile").read_text()
     final_stage = source[source.index("FROM runtime_base AS toolbox") :]
     for marker in (
         'metadata["schema_version"] != 4',
@@ -149,7 +152,7 @@ def test_consolidated_recipe_and_s3p_lock_are_manifest_inputs(tmp_path: Path) ->
     manifest, _ = build_image.toolbox_manifest(selections, ROOT)
     assert (
         manifest["toolbox_recipe_sha256"]
-        == hashlib.sha256((ROOT / "benchmark/Dockerfile").read_bytes()).hexdigest()
+        == hashlib.sha256((ROOT / "benchmark/build/Dockerfile").read_bytes()).hexdigest()
     )
 
     copied: list[Path] = []
@@ -172,7 +175,7 @@ def test_consolidated_recipe_and_s3p_lock_are_manifest_inputs(tmp_path: Path) ->
 
 def test_declared_artifact_must_appear_in_executed_stage() -> None:
     selections = build_image.registered_selections(ROOT)
-    source = (ROOT / "benchmark/Dockerfile").read_text()
+    source = (ROOT / "benchmark/build/Dockerfile").read_text()
     broken = source.replace(selections["aws-cli"].tool_artifact_locator, "https://invalid.test/aws")
     with pytest.raises(build_image.BuildError, match="aws-cli"):
         build_image.validate_executed_sources(selections, ROOT, broken)

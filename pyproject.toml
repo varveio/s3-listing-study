@@ -49,12 +49,12 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/s3_listing_study", "benchmark"]
+packages = ["src/s3_listing_study", "benchmark/src/benchmark"]
 
 [tool.ruff]
 target-version = "py311"
 line-length = 100
-src = ["benchmark", "src", "tests"]
+src = ["benchmark/src", "src", "benchmark/tests", "tests"]
 
 [tool.ruff.lint]
 select = [
@@ -74,7 +74,7 @@ known-first-party = ["benchmark", "s3_listing_study"]
 [tool.mypy]
 python_version = "3.11"
 strict = true
-files = ["benchmark", "src", "tests"]
+files = ["benchmark/src", "benchmark/tests", "src", "tests"]
 warn_unreachable = true
 
 [[tool.mypy.overrides]]
@@ -90,5 +90,5 @@ module = ["google.cloud.*", "google.protobuf.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["benchmark/tests", "tests"]
 addopts = "-ra"

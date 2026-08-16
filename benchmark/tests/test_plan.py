@@ -96,7 +96,7 @@ def test_the_committed_plan_loads() -> None:
 
 def test_the_committed_plan_matches_the_registered_tools() -> None:
     """The roster rule only means anything if the shipped plan actually obeys it."""
-    root = Path(__file__).resolve().parents[1]
+    root = Path(__file__).resolve().parents[2]
     registered = {p.parents[1].name for p in root.glob("tools/*/build/image.json")}
     bench.check_roster(bench.Plan.load(bench.default_path("noaa-ghcn-pds")), registered)
 
@@ -107,7 +107,7 @@ def test_every_default_mode_is_one_its_adapter_implements() -> None:
     A mode renamed in an adapter would otherwise leave a default that only fails
     once a campaign is already submitting work.
     """
-    root = Path(__file__).resolve().parents[1]
+    root = Path(__file__).resolve().parents[2]
     defaults = bench.load_default_modes(bench.bench_dir() / "tools.yaml")
     for tool, mode in defaults.items():
         source = (root / "tools" / tool / "adapter" / "command.py").read_text(encoding="utf-8")

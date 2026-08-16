@@ -87,7 +87,8 @@ UNFRAMEABLE_BYTES = b"\t\n\r"
 MTIME_RE = re.compile(
     r"\A[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(Z|\+00:00|\+0000)\Z"
 )
-"""The mtime shape gate, mirroring the frozen ``MTIME_RE_AWK`` in ``tests/test_contract.py``.
+"""The mtime shape gate, mirroring the frozen ``MTIME_RE_AWK`` in
+``benchmark/tests/test_contract.py``.
 
 Asserted BEFORE :func:`canon_mtime`, because canonicalisation keeps digits only
 and therefore also equates garbage that happens to share those digits.
@@ -129,7 +130,7 @@ def canon_mtime(value: str) -> str:
     """Canonical comparison form of a contract-v2 mtime: the digits of the instant.
 
     Semantics are exactly the awk ``canon_mt`` the committed verdicts were
-    issued under, frozen as ``CANON_MT_AWK`` in ``tests/test_contract.py``::
+    issued under, frozen as ``CANON_MT_AWK`` in ``benchmark/tests/test_contract.py``::
 
         function canon_mt(s){ sub(/(Z|\\+00:00|\\+0000)$/,"",s); gsub(/[^0-9]/,"",s); return s }
 

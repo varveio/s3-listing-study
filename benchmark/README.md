@@ -9,17 +9,30 @@ results.
 
 ## Layout
 
+This directory is a self-contained component: source, tests, build inputs, and
+plans each have their own place, mirroring how every capsule keeps its build
+facts under `tools/<tool>/build/`.
+
 - `plans/` contains the precommitted per-bucket plans and shared allocation/tool
   tables.
-- `Dockerfile` builds one linux/amd64 toolbox directly from the eleven checked-in
-  capsule recipes. It does not consume parent images or any retired image job.
-- `build_image.py` validates recipe, artifact, executable, and adapter identities
-  before building the toolbox.
-- `campaign.py` creates and manages benchmark-owned Batch jobs in `campaign.db`.
-- `measure.py` runs exactly one selected subject and captures its raw outputs and
-  metrics.
-- `verify.py` compares normalized outputs; `report.py` binds results to controller
-  state and renders analysis.
+- `build/` holds the toolbox build inputs: `Dockerfile` builds one linux/amd64
+  toolbox directly from the eleven checked-in capsule recipes (it consumes no
+  parent image or retired image job), alongside its context policy and the
+  pinned worker requirements.
+- `tests/` holds this component's test suite. Repository-wide gates stay in the
+  top-level `tests/`.
+- `src/benchmark/` is the importable package — the only part of this directory
+  the toolbox image contains:
+  - `build_image.py` validates recipe, artifact, executable, and adapter
+    identities before building the toolbox.
+  - `campaign.py` creates and manages benchmark-owned Batch jobs in `campaign.db`.
+  - `measure.py` runs exactly one selected subject and captures its raw outputs
+    and metrics. It is the image entrypoint.
+  - `verify.py` compares normalized outputs; `report.py` binds results to
+    controller state and renders analysis.
+  - `runtime/` is the contract layer the eleven capsule adapters import
+    (`benchmark.runtime.*`); it runs both inside the image and orchestrator-side
+    during verification.
 
 ## Toolbox and provenance
 
@@ -35,7 +48,7 @@ per-tool parent-image or legacy shared-base identities.
 Build a clean revision from the repository root:
 
 ```sh
-uv run python benchmark/build_image.py \
+uv run python benchmark/src/benchmark/build_image.py \
   --harness-revision "$(git rev-parse HEAD)" \
   --tag benchmark-toolbox:local
 docker run --rm benchmark-toolbox:local --help
@@ -78,7 +91,7 @@ The real document contains the exact eleven-tool roster. Submit only after the
 toolbox smoke has passed:
 
 ```sh
-python benchmark/campaign.py submit \
+python benchmark/src/benchmark/campaign.py submit \
   --project my-project --location us-central1 \
   --campaign-id 2026-08-16-canary \
   --plan benchmark/plans/buckets/noaa-ghcn-pds.yaml \
@@ -87,10 +100,10 @@ python benchmark/campaign.py submit \
   --authenticated-worker-sa auth-worker@my-project.iam.gserviceaccount.com \
   --secrets /secure/secrets.yaml
 
-python benchmark/campaign.py poll --project my-project --location us-central1 --watch
-python benchmark/campaign.py verify \
+python benchmark/src/benchmark/campaign.py poll --project my-project --location us-central1 --watch
+python benchmark/src/benchmark/campaign.py verify \
   --plan benchmark/plans/buckets/noaa-ghcn-pds.yaml --reference-case s3api-v2-text
-python benchmark/report.py --state campaign.db
+python benchmark/src/benchmark/report.py --state campaign.db
 ```
 
 The controller records intent before creating a job. Retries receive new

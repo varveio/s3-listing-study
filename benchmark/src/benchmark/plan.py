@@ -266,8 +266,13 @@ class Plan:
 
 
 def bench_dir() -> Path:
-    """The declarative plan directory inside the benchmark boundary."""
-    return Path(__file__).resolve().parent / "plans"
+    """The declarative plan directory inside the benchmark boundary.
+
+    The package lives at ``benchmark/src/benchmark/``; the plans it reads sit
+    beside that source root at ``benchmark/plans/``, so this climbs out of
+    ``src/`` rather than looking inside the package.
+    """
+    return Path(__file__).resolve().parents[2] / "plans"
 
 
 def buckets_dir() -> Path:

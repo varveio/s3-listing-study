@@ -21,7 +21,7 @@ from benchmark.runtime.command_adapter import (
     load_command_adapter,
 )
 
-ROOT = Path(__file__).parents[1]
+ROOT = Path(__file__).parents[2]
 TOOLS = (
     "aws-cli",
     "minio-mc",

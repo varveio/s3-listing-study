@@ -129,10 +129,10 @@ uv run s3-listing-study check-source-anchors --tool <slug> --markdown tools/<slu
 Any skipped anchors mean the verification is incomplete.
 
 # Python command and normalization adapters match their shared contracts
-uv run pytest -q tests/test_command_adapters.py tests/test_adapters.py
+uv run pytest -q benchmark/tests/test_command_adapters.py benchmark/tests/test_adapters.py
 
 # The benchmark build validates every capsule recipe and adapter together.
-uv run python benchmark/build_image.py --help
+uv run python benchmark/src/benchmark/build_image.py --help
 ```
 
 Then the checks no script performs:

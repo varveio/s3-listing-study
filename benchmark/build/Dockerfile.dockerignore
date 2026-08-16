@@ -1,6 +1,7 @@
 *
-!benchmark/
-!benchmark/**
+!benchmark/src/benchmark/
+!benchmark/src/benchmark/**
+!benchmark/build/requirements-worker.txt
 !tools/
 !tools/*/
 !tools/*/adapter/

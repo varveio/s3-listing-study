@@ -36,7 +36,7 @@ jobs:
           set -euo pipefail
           revision="${REQUESTED_REVISION:-$(git rev-parse HEAD)}"
           test "$revision" = "$(git rev-parse HEAD)"
-          uv run python benchmark/build_image.py \
+          uv run python benchmark/src/benchmark/build_image.py \
             --harness-revision "$revision" \
             --tag benchmark-toolbox:smoke
       - name: Smoke every subject and the worker

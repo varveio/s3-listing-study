@@ -124,12 +124,14 @@ RUN ln -s /opt/aws-cli/v2/current/bin/aws /usr/local/bin/aws \
     && chmod 0755 /usr/local/bin/s3p \
     && install -d -o 10001 -g 10001 /aws /data /home/s7cmd /home/s3study
 
-COPY benchmark/requirements-worker.txt /tmp/requirements-worker.txt
+COPY benchmark/build/requirements-worker.txt /tmp/requirements-worker.txt
 RUN /usr/bin/python3 -m pip install --break-system-packages --no-cache-dir -r /tmp/requirements-worker.txt \
     && /usr/bin/python3 -m pip check \
     && /usr/bin/python3 -c 'import duckdb, ijson, google.cloud.storage'
 
-COPY benchmark/ /opt/benchmark/benchmark/
+# Only the importable package. Plans, tests, build inputs, and the README sit
+# outside src/, so the worker image cannot pick up orchestrator-side code.
+COPY benchmark/src/benchmark/ /opt/benchmark/benchmark/
 COPY tools/ /opt/benchmark/tools/
 ARG IMAGE_METADATA_B64
 ARG TOOLBOX_MANIFEST_SHA256

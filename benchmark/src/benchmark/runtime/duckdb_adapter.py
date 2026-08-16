@@ -62,7 +62,7 @@ def connect() -> Any:
     anyway, pinned against a future release changing that default: row order IS
     the adapter's output and the verifier compares bytes, so a parallel scan
     that finished out of order would be a different ``verify.md`` for the same
-    listing. ``tests/test_adapters.py`` asserts the order offline, over a payload
+    listing. ``benchmark/tests/test_adapters.py`` asserts the order offline, over a payload
     big enough for the readers to parallelise.
     """
     import duckdb

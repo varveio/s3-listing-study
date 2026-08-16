@@ -120,7 +120,7 @@ def validate_executed_sources(
 def toolbox_manifest(
     selections: Mapping[str, BuildSelection], root: Path
 ) -> tuple[dict[str, object], str]:
-    toolbox_recipe = root / "benchmark/Dockerfile"
+    toolbox_recipe = root / "benchmark/build/Dockerfile"
     toolbox_recipe_bytes = toolbox_recipe.read_bytes()
     validate_executed_sources(selections, root, toolbox_recipe_bytes.decode("utf-8"))
     tools: dict[str, object] = {}
@@ -211,7 +211,7 @@ def build_image(root: Path, revision: str, tag: str) -> str:
         "--pull",
         "--platform=linux/amd64",
         "-f",
-        "benchmark/Dockerfile",
+        "benchmark/build/Dockerfile",
         ".",
         "--build-arg",
         f"IMAGE_METADATA_B64={encoded}",
@@ -242,7 +242,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    root = Path(__file__).parents[1].resolve()
+    # benchmark/src/benchmark/build_image.py -> repository root.
+    root = Path(__file__).parents[3].resolve()
     try:
         digest = build_image(root, args.harness_revision, args.tag)
     except (BuildError, BuildSelectionError, subprocess.CalledProcessError) as exc:

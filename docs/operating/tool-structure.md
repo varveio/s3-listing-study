@@ -291,7 +291,7 @@ comparison stream.
 Every runnable capsule keeps a `build/Dockerfile` and `build/image.json` as
 auditable build facts. The Dockerfile records the selected checksum-pinned
 artifact or source recipe. It is not built or published as a standalone parent
-image. [`../../benchmark/Dockerfile`](../../benchmark/Dockerfile) assembles all
+image. [`../../benchmark/build/Dockerfile`](../../benchmark/build/Dockerfile) assembles all
 eleven subjects directly in isolated build stages and copies their runtime
 closures into one toolbox.
 

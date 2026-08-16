@@ -13,7 +13,7 @@ from benchmark.runtime.build_selection import (
     load_selection,
 )
 
-ROOT = Path(__file__).parents[1]
+ROOT = Path(__file__).parents[2]
 
 
 def registered_fixture(tmp_path: Path) -> tuple[Path, Path, dict[str, object]]:

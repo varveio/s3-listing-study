@@ -16,7 +16,7 @@ from benchmark import campaign
 from benchmark.contract import TOOLBOX_TOOLS
 from benchmark.plan import Plan
 
-ROOT = Path(__file__).parents[1]
+ROOT = Path(__file__).parents[2]
 DIGEST = "a" * 64
 AUTH_SECRETS = {
     "authenticated": {

@@ -107,7 +107,7 @@ class AdapterCase:
 
 
 def repo_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+    return Path(__file__).resolve().parents[3]
 
 
 def discover_cases(repo: Path, tool: str) -> list[AdapterCase]:
@@ -145,7 +145,7 @@ def corpus_shortfall(repo: Path, tool: str) -> str:
             f"{tool}: expected {expected} committed payload(s), discovered {found} — "
             "the corpus is not the one this gate is pinned to, so byte-identical over "
             "what survives proves nothing; if the change is deliberate, update "
-            "EXPECTED_PAYLOADS in tests/adapters/equivalence.py in the same commit"
+            "EXPECTED_PAYLOADS in benchmark/tests/adapters/equivalence.py in the same commit"
         )
     return ""
 

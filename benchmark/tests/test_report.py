@@ -12,7 +12,7 @@ from benchmark import campaign, report, verify
 from benchmark.contract import sha256_of
 from benchmark.plan import Plan
 
-ROOT = Path(__file__).parents[1]
+ROOT = Path(__file__).parents[2]
 WORKER_VALUES = {
     "--machine-type": "n4-standard-2",
     "--vcpus": "2",
