@@ -45,7 +45,7 @@ result exists in this repository yet.**
 Every subject has completed the groundwork pipeline: a pinned build or source
 checkout, a source-anchored mechanism report, claim-by-claim reconciliation,
 and smoke receipts where the tool could list the registered public bucket.
-Smoke timings are harness diagnostics and facts about individual runs, not
+Smoke timings are capsule diagnostics and facts about individual runs, not
 comparative performance results.
 
 Groundwork split the roster into two cohorts:
@@ -63,8 +63,7 @@ Groundwork split the roster into two cohorts:
 See [`tools/README.md`](tools/README.md) for the per-tool status,
 [`docs/methodology.md`](docs/methodology.md) for the measurement plan we wrote
 down before running the comparisons, and
-[`docs/operating/runner-security.md`](docs/operating/runner-security.md) for the
-cooperative GCP Batch profile and the stricter local-Docker boundary.
+[`benchmark/README.md`](benchmark/README.md) for the production benchmark boundary.
 
 ## What we do
 
@@ -144,7 +143,7 @@ Only after that report existed were the two compared item by item.
 
 Every runnable subject uses the same capsule layout: a concise `README.md`
 that routes to machine-readable identity and claims (`data/`), the current
-explanation (`docs/`), harness integration (`adapter/`), the frozen research
+explanation (`docs/`), tool-specific benchmark declarations (`adapter/`), the frozen research
 trail (`research/`), and committed run evidence (`receipts/`). The layout and
 the responsibilities of every layer are described in
 [`tools/README.md`](tools/README.md) and defined in
@@ -169,37 +168,25 @@ reports observations; it does not decide correctness by itself.
 
 ## Running the checks in this repo
 
-The data-shaped core is Python: registry and receipt handling, listing adapters,
-the in-worker subject lifecycle and timing, and the DuckDB-backed verifier,
-including its reference re-list Docker execution through `SecurityBoundary`.
-Bash schedules the local smoke containers and owns the live local runner-security gate. **Install the project before
-using either layer**, because the shell wrapper invokes the package and the
-adapters import `s3_listing_study`:
+Repository-study validation and the production benchmark harness are Python.
+Install the project before running capsule checks, adapter tests, or benchmark
+dry runs:
 
 ```sh
 uv sync                     # or: python3 -m venv .venv && .venv/bin/pip install -e .
 uv run pytest               # offline: no bucket, no network, no data directory
-uv run python -m tests.differential          # replays every committed verdict (exit 0/1/42)
 uv run pytest tests/test_adapters.py          # focused adapter contract and corpus coverage
 ```
 
-Without that install, a Python adapter invoked as `--normalize` fails with
-`ModuleNotFoundError` and the verifier reports it as a finding about the *tool*,
-which it is not. The differential replay uses exit `0` for green, `1` for a real
-mismatch, and `42` for ORACLE_UNAVAILABLE — the external inputs could not be
-read, so nothing was verified. `42` is never a pass. The focused adapter suite
-is ordinary offline pytest over committed synthetic fixtures and corpus
-coverage.
+The pytest suites use committed synthetic fixtures and need no bucket or cloud
+credentials. Toolbox smoke and cloud canaries are separate benchmark operations;
+historical smoke receipts under `tools/` remain immutable capsule evidence.
 
-The differential replay needs the external data directory (`$S3_STUDY_DATA`,
-holding `manifests/` and `receipts/`); see
-[`tests/differential/README.md`](tests/differential/README.md). The pytest suites
-need none of it — their fixtures are synthetic and committed.
-
-A tool's adapter is `adapter/normalize.py`. The `normalize.sh` adapters the
-committed receipts were originally verified with have been removed; the ported
-adapters reproduce every committed `verify.md` byte for byte, which is what the
-differential replay checks on every change.
+A tool's adapter is `adapter/normalize.py`. The retired shell adapters and their
+byte-for-byte replay gate supplied historical evidence for the Python port; they
+are not a current test path. Current checks exercise every declared mode with
+synthetic fixtures and independently pin the committed-payload denominator and
+unexercised modes through `EXPECTED_PAYLOADS` and `unexercised_modes`.
 
 ## Results
 

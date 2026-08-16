@@ -20,7 +20,7 @@ source-anchored reports, reconciliation, and critical cross-checks) and carries
 committed receipts. Smoke is not measurement — no benchmark or comparative
 performance result exists in this repo (receipts carry a wall-clock/RSS figure,
 but only as a fact about that one run). All eleven have now run at smoke on
-amd64 through the attempt engine — `aws-cli`, `s5cmd`, `s7cmd`, `rclone`,
+amd64 through the now-retired groundwork attempt engine — `aws-cli`, `s5cmd`, `s7cmd`, `rclone`,
 `minio-mc`, `s3-fast-list` and Swath anonymously, and `s3p`, `s3kor`, `s4cmd`
 and `ps3` with a credential, which previously blocked them. Running is not
 verifying: those engine attempts carry no verdict, because auditing one against
@@ -55,9 +55,9 @@ Read *one* index, not five guesses. Order: this table → `docs/README.md`.
 
 | If you're... | Read |
 | --- | --- |
-| Designing, using, or changing TwinStamp | `src/twinstamp/README.md` — package boundary, evidence model, publication, and coordination contracts |
+| Designing or changing the comparative harness | `benchmark/README.md` — plans, toolbox, Batch jobs, capture, verification, and reporting |
 | Designing or changing how a run works | `docs/methodology.md` — especially the five decisions |
-| Provisioning a runner or executing a subject/reference container | `docs/operating/runner-security.md` — the Batch and local execution profiles and the local activation gate |
+| Running a benchmark toolbox smoke or cloud canary | `benchmark/README.md` |
 | About to state anything about a specific tool | `tools/<tool>/README.md` — the tool page, for current observations + provenance |
 | Changing a tool directory's structure or deciding which file owns content | `docs/operating/tool-structure.md` — the authoritative capsule and Markdown-role contract |
 | Actually writing a capsule — a new tool, or an existing one at a new upstream version | `docs/operating/capsule-authoring.md` — build order, agent topology, and the verification loop; `docs/operating/tool-onboarding.md` for where it sits in the sequence |
@@ -65,7 +65,7 @@ Read *one* index, not five guesses. Order: this table → `docs/README.md`.
 | Working on the documented S3 API contract (ordering, delimiter, pagination, encoding) | `docs/s3-reference.md` |
 | Working on an open cross-tool question (language bottleneck, resume, throttling) | `docs/open-questions.md` |
 | Promoting a claim out of `VERIFIED: no` | `docs/methodology.md` § Run records — then commit the receipt into `tools/<tool>/` |
-| Changing what a benchmark runs against a bucket | `bench/README.md` — the plan schema: layers, case rows, and case identity |
+| Changing what a benchmark runs against a bucket | `benchmark/plans/README.md` — the plan schema: layers, case rows, and case identity |
 | Looking for settled reference | `docs/README.md` |
 
 Each tool owns a directory under `tools/`; runnable-tool directory roles are
@@ -88,7 +88,7 @@ which go in `docs/open-questions.md`.
   squash keeps `main` linear, and the stage-by-stage history stays reachable
   through the PR itself — GitHub retains each PR's commit list and head ref
   after the branch is gone. Orchestrator-side changes outside `tools/`
-  (harness, docs, notes) may land directly on main.
+(benchmark, docs, notes) may land directly on main.
 
 ### Run records
 

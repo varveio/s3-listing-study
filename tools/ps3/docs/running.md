@@ -164,14 +164,13 @@ of:
 
 ## Reproduction
 
-The committed receipt is immutable wrapper-era evidence. New attempts use the single
-derived-image contract in
-[`../../../harness/README.md`](../../../harness/README.md), and a pS3 image has
-not been implemented yet.
+The committed receipt is immutable wrapper-era evidence. New comparative
+attempts use the self-contained toolbox and campaign worker documented in
+[`benchmark/README.md`](../../../benchmark/README.md).
 
 The `list-anon` receipt was produced by the shared wrapper, never a bare `docker
 run`, and retains its exact original invocation. The current `command.py` is a
-typed command compiler with no shell or NUL transport. The attempt engine owns
+typed command compiler with no shell or NUL transport. The benchmark worker owns
 execution, capture, timeout, and measurement.
 
 `command.py` maps `list` → `list-objects-v2`, `list-versions` →

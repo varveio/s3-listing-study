@@ -137,11 +137,10 @@ resource "google_service_account_iam_member" "runner_actas_authenticated" {
   depends_on = [google_service_account.runner]
 }
 
-# The runner may read the credential, so that a credentialed case can be
-# exercised directly rather than only submitted. Direct subject execution uses
-# the strict local Docker profile, whose bridge cannot reach host/cloud metadata;
-# the selected AWS credential is passed explicitly only to an authenticated
-# attempt. Batch instead uses the separate authenticated identity above.
+# The runner may read the credential for an explicitly authorized local
+# diagnostic. This grant does not provide a metadata-denial sandbox; the
+# operator is responsible for the local execution boundary. Comparative runs
+# use the separate authenticated Batch identity above.
 #
 # Off by default: a deployment that only ever submits jobs has no reason to widen
 # the runner, and the authenticated worker above remains the identity that reads

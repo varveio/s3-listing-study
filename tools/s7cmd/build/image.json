@@ -1,7 +1,6 @@
 {
   "tool": "s7cmd",
   "tool_version": "1.5.0",
-  "shared_base_source_sha256": "ae5505fcb29858ed27b385a05b5057bd9d71de2a04f85dff8b769306ed80dbb8",
   "tool_build_sha256": "ec001c1dae71537eb8bc99359334b3be91c1bcaed1e7cca2271dede602f43d60",
   "tool_artifact": {"kind":"release-archive","locator":"https://github.com/nidor1998/s7cmd/releases/download/v1.5.0/s7cmd-1.5.0-linux-glibc2.28-x86_64.tar.gz","sha256":"34ecf3a725e835e88ad115a73d6e7b3a324c95677439c43f5baec536d8a6b3ad"},
   "subject_workdir": "/home/s7cmd",
@@ -10,5 +9,5 @@
   ],
   "command": "adapter/command.py",
   "normalizer": "adapter/normalize.py",
-  "adapter_bundle_sha256": "4390dd7523a98c0d62b320c4e1d4153c046b4dcc05829600512d2f5f7bcb5aae"
+  "adapter_bundle_sha256": "bafe02b61fc4b3e1bf0d24e325ca9096f277cfc2d58dcf1f5c0e9abffee7692b"
 }

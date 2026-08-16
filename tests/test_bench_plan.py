@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from s3_listing_study.manager.bench import cli as bench_cli
-from s3_listing_study.manager.bench import plan as bench
+from benchmark import plan as bench
+from benchmark import plan_cli as bench_cli
 
 MINIMAL = """
 spec_version: 2
@@ -41,7 +41,7 @@ aws-cli:
 """
 
 # Enough of a catalogue to resolve every shape these plans ask for. Passed in
-# rather than read from bench/, so a fixture plan does not need a tree beside it.
+# rather than read from benchmark/plans/, so a fixture plan needs no adjacent tree.
 INSTANCES = {
     (2, 2): "n4-custom-2-2048",
     (2, 4): "n4-highcpu-2",
@@ -102,7 +102,7 @@ def test_the_committed_plan_matches_the_registered_tools() -> None:
 
 
 def test_every_default_mode_is_one_its_adapter_implements() -> None:
-    """The drift guard for bench/tools.yaml, read from the adapters themselves.
+    """The drift guard for benchmark/plans/tools.yaml, read from the adapters themselves.
 
     A mode renamed in an adapter would otherwise leave a default that only fails
     once a campaign is already submitting work.
@@ -174,7 +174,7 @@ def test_a_draft_outside_the_tree_resolves_against_the_repo_tables(tmp_path: Pat
     """
     path = write(tmp_path, "s5cmd:\n", bucket="noaa-ghcn-pds")
     case = bench.Plan.load(path).cases[0]
-    assert case.mode == "recursive"  # from the repository's bench/tools.yaml
+    assert case.mode == "recursive"  # from the repository's benchmark/plans/tools.yaml
     assert case.resources.machine_type == "n4-standard-2"  # from its instances.yaml
 
 
@@ -1169,6 +1169,10 @@ def test_a_mode_the_adapter_lacks_is_refused(tmp_path: Path) -> None:
 
 
 # ── the resolve-plan dry run ─────────────────────────────────────────────────
+
+
+def test_resolve_plan_advertises_its_supported_module_invocation() -> None:
+    assert bench_cli.build_parser().prog == "python -m benchmark.plan_cli"
 
 
 def test_resolve_plan_expands_the_committed_plan(capsys: pytest.CaptureFixture[str]) -> None:

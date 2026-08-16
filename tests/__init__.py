@@ -1,1 +1,1 @@
-"""Test package root. Makes `tests.differential` importable as a package."""
+"""Test package root for shared current test helpers."""

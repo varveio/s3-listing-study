@@ -1543,7 +1543,7 @@
         },
         {
           "kind": "documentation",
-          "path": "../../../harness/README.md"
+          "path": "../../../benchmark/README.md"
         }
       ]
     },

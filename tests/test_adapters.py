@@ -6,10 +6,11 @@
 * **Coverage** — which committed payloads exist per tool, and which declared modes
   no payload reaches. Answered by :mod:`tests.adapters.equivalence`.
 
-The bytes these adapters produce over the committed payloads are judged by the
-differential replay, which re-issues all 57 committed verdicts through them and
-requires ``verify.md`` back unchanged. The shell adapters that used to provide a
-second opinion are gone; the committed artifacts are the oracle now.
+Current assurance has two independent parts: synthetic fixtures exercise every
+declared mode against contract v2, while ``EXPECTED_PAYLOADS`` and
+``unexercised_modes`` pin the historical corpus denominator and its reachability.
+A retired predecessor additionally replayed committed verdicts byte for byte;
+that is historical port evidence, not a current test path.
 """
 
 from __future__ import annotations
@@ -24,10 +25,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from s3_listing_study.common import duckdb_adapter
-from s3_listing_study.manager.contract import FIELD_COUNT, MTIME_RE, ContractViolation, read_records
-from s3_listing_study.manager.duckdb_adapter import emit_result, existing_input_path
-from s3_listing_study.manager.normalizer_cli import mapped_input
+from benchmark.runtime import duckdb_adapter
+from benchmark.runtime.contract import FIELD_COUNT, MTIME_RE, ContractViolation, read_records
+from benchmark.runtime.duckdb_adapter import emit_result, existing_input_path
+from benchmark.runtime.normalizer_cli import mapped_input
 from tests.adapters.equivalence import (
     corpus_shortfall,
     load_adapter,
@@ -1086,11 +1087,11 @@ def test_s3kor_list_refuses_a_panic_whose_frames_are_tab_indented() -> None:
 def test_the_modes_no_committed_payload_reaches_are_the_known_ones(tool: str) -> None:
     """Pins today's coverage, per tool — see ``UNEXERCISED``.
 
-    Seven adapters have a payload for every mode they declare. Nine modes across
-    four other tools have none: five legacy modes plus Swath's four v0.2.0 modes,
-    whose capsule is observation-only and has no replayable committed payload
-    yet. For these modes the differential replay says nothing however green it
-    is: their port rests on the fixture alone. If this fails,
-    either coverage arrived or the corpus stopped reaching a mode it used to.
+    Some declared modes have no replayable committed payload, including every
+    current Swath mode because that capsule has observations only. The synthetic
+    fixture matrix still checks their adapter behavior, while the pinned corpus
+    gate explicitly records that historical payload coverage says nothing about
+    them. If this fails, either coverage arrived or the corpus stopped reaching
+    a mode it used to.
     """
     assert unexercised_modes(REPO, tool) == UNEXERCISED.get(tool, set())

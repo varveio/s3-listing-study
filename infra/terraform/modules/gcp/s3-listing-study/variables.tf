@@ -9,7 +9,7 @@ variable "project" {
 }
 
 variable "region" {
-  description = "Region for the results bucket, Artifact Registry repository, and any created subnet (e.g. us-east1). Keep the runner, bucket, and Batch jobs in one region; required routine reporting must read compact results only, while requested verification may fetch large artifacts."
+  description = "Region for the results bucket, Artifact Registry repository, and any created subnet (e.g. us-east1). Keeping the runner, bucket, and Batch jobs together avoids cross-region reads during verification."
   type        = string
 }
 
@@ -25,7 +25,7 @@ variable "name_prefix" {
 }
 
 variable "manager_members" {
-  description = "IAM principals (full member strings, e.g. serviceAccount:ci@proj.iam.gserviceaccount.com) granted the complete orchestrator bundle: submit and monitor Batch jobs, actAs the worker SA, read and write the results bucket, and push images. The runner VM gets this bundle automatically and does not belong here. Cross-project principals are fine, but each must already exist before apply."
+  description = "IAM principals (full member strings, e.g. serviceAccount:ci@proj.iam.gserviceaccount.com) granted the complete orchestrator bundle: manage Batch jobs, actAs worker identities, read/manage results, and optionally publish the toolbox. The runner VM gets this bundle automatically and does not belong here."
   type        = set(string)
   default     = []
 
@@ -66,7 +66,7 @@ variable "create_runner" {
 }
 
 variable "runner_reads_aws_credentials" {
-  description = "Grant the runner read access to the AWS credential secret, so a credentialed case can be run directly instead of only submitted as a job. Direct execution must use the strict local Docker profile and pass the credential only to an authenticated attempt."
+  description = "Grant the runner read access to the AWS credential secret for an explicitly authorized local diagnostic. Comparative authenticated runs use the separate authenticated Batch worker; leave this false when the runner only manages campaigns."
   type        = bool
   default     = false
 }
@@ -77,19 +77,19 @@ variable "runner_zone" {
 }
 
 variable "runner_machine_type" {
-  description = "Runner machine type. Sized for Docker builds, not for measurement — nothing timed runs on this machine. The default is deliberately modest; raise it if building all registered images serially is the slow step."
+  description = "Runner machine type. Sized for the multi-stage benchmark toolbox build, not for measurement — nothing timed runs on this machine."
   type        = string
   default     = "e2-standard-2"
 }
 
 variable "runner_image" {
-  description = "Boot image for the runner. Must be x86_64: the derived-image build is native, and the images have to match what Batch runs."
+  description = "Boot image for the runner. x86_64 avoids emulation while the toolbox wrapper builds its explicit linux/amd64 target for Batch."
   type        = string
   default     = "projects/ubuntu-os-cloud/global/images/family/ubuntu-2404-lts-amd64"
 }
 
 variable "runner_disk_gb" {
-  description = "Runner boot disk size. Every derived image is its subject plus a ~250 MB pinned interpreter, and one machine builds all of them, so this is mostly Docker layer storage."
+  description = "Runner boot disk size for the multi-stage toolbox, downloaded tool closures, and Docker build cache."
   type        = number
   default     = 100
 }

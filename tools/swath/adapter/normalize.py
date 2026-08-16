@@ -45,15 +45,15 @@ import sys
 from pathlib import Path
 from typing import IO
 
-from s3_listing_study.manager.contract import ContractViolation
-from s3_listing_study.manager.duckdb_adapter import (
+from benchmark.runtime.contract import ContractViolation
+from benchmark.runtime.duckdb_adapter import (
     connect,
     count_query,
     emit_result,
     iter_lf_lines,
     staged,
 )
-from s3_listing_study.manager.normalizer_cli import normalizer_main
+from benchmark.runtime.normalizer_cli import normalizer_main
 
 UNKNOWN_MODE_EXIT = 2
 UNREADABLE_EXIT = 1

@@ -13,11 +13,12 @@ from __future__ import annotations
 
 import ast
 import json
+import re
 from pathlib import Path
 
 import pytest
 
-from s3_listing_study.manager import cli
+from s3_listing_study import cli
 from s3_listing_study.repo import capsule, links, source_anchors
 
 REPO = Path(__file__).resolve().parents[1]
@@ -27,12 +28,9 @@ def test_root_and_forwarded_command_help_are_normal(capsys: pytest.CaptureFixtur
     with pytest.raises(SystemExit) as root_help:
         cli.main(["--help"])
     assert root_help.value.code == 0
-    assert "validate-capsule" in capsys.readouterr().out
-
-    with pytest.raises(SystemExit) as verify_help:
-        cli.main(["verify", "--help"])
-    assert verify_help.value.code == 0
-    assert "s3-listing-study verify" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "validate-capsule" in output
+    assert "check-source-anchors" in output
 
 
 def test_capsule_and_links_agree_on_heading_slugs() -> None:
@@ -155,3 +153,31 @@ def test_deleted_runner_paths_remain_only_in_frozen_evidence() -> None:
         ):
             offenders.append(str(relative))
     assert offenders == []
+
+
+def test_gcp_module_matches_single_toolbox_and_upload_only_workers() -> None:
+    module = REPO / "infra/terraform/modules/gcp/s3-listing-study"
+    worker = (module / "worker.tf").read_text()
+    authenticated = (module / "aws-credentials.tf").read_text()
+    registry = (module / "image-registry.tf").read_text()
+    readme = (module / "README.md").read_text()
+
+    worker_roles = re.findall(r'\brole\s*=\s*"([^"]+)"', worker)
+    authenticated_roles = re.findall(r'\brole\s*=\s*"([^"]+)"', authenticated)
+    assert "roles/storage.objectCreator" in worker_roles
+    assert "roles/storage.objectAdmin" not in worker_roles
+    assert "roles/storage.objectCreator" in authenticated_roles
+    assert "roles/storage.objectAdmin" not in authenticated_roles
+    # Also scan raw HCL so objectAdmin cannot hide in a project-level toset or
+    # another expression that is later assigned through ``role = each.value``.
+    assert "roles/storage.objectAdmin" not in worker
+    assert "roles/storage.objectAdmin" not in authenticated
+    assert "single self-contained benchmark toolbox" in registry
+    assert "this module does not publish it" in (module / "outputs.tf").read_text()
+    for retired in (
+        "derived attempt images",
+        "docs/operating/runner-security.md",
+        "strict local Docker profile",
+        "required manager reconciler",
+    ):
+        assert retired not in readme

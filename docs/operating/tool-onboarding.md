@@ -14,15 +14,12 @@ map, no legacy origins.
 ## Sequence
 
 1. **Scope (owner decision).** The owner decides the tool is in scope and its
-   cohort, and adds its row to [`../tools/README.md`](../tools/README.md). Study
+   cohort, and adds its row to [`tools/README.md`](../../tools/README.md). Study
    scope and tiers are catalog concerns; nothing else starts before this.
-2. **Groundwork research.** Follow the *method* in
-   [`tool-research-brief.md`](tool-research-brief.md) — pinned subject, smoke
-   runs under the shared harness, source-anchored report, critical
-   cross-check. That document is frozen as the committed protocol record, so
-   its *file layout* references are historical; every output lands in the
-   capsule layout of step 3 instead. Runner provisioning and execution follow
-   [`runner-security.md`](runner-security.md) unchanged.
+2. **Groundwork research.** Pin the subject, read public documentation and
+   source, preserve any explicitly authorized capsule smoke as a receipt, write
+   a source-anchored report, and obtain a critical cross-check. Capsule smoke is
+   research evidence; it is not benchmark harness smoke or a comparative run.
 3. **Build the capsule directly.** The target shape, every directory's
    purpose, the Markdown content contracts, the canonical-data rules, and the
    lifecycle table are all owned by [`tool-structure.md`](tool-structure.md);
@@ -41,7 +38,7 @@ map, no legacy origins.
    validator now rejects the flag on a capsule with no migration stratum.
    Independent review (a different-model reviewer plus the standard one) and
    the owner-reviewed `tools/` PR apply exactly as for every `tools/` change
-   ([`../AGENTS.md`](../AGENTS.md) § Working conventions).
+   ([`AGENTS.md`](../../AGENTS.md) § Working conventions).
 
 ## The migration stratum is optional (machinery, 2026-08-02)
 
@@ -54,7 +51,7 @@ step 4 needs no exception:
   them, so a document with a ledger carries `legacy_origins` on *every* claim
   and one without a ledger carries it on none. Present, they validate exactly
   as before.
-- `src/s3_listing_study/manager/capsule.py` — `research/tool-page.md` and
+- `src/s3_listing_study/repo/capsule.py` — `research/tool-page.md` and
   `research/claims-migration.md` moved out of `REQUIRED_FILES` into
   `MIGRATION_FILES`, required only for a capsule with a migration stratum. The README checks follow the same condition: navigation
   names the two files, and Provenance names `Mixed provenance`,
@@ -95,9 +92,7 @@ than patched. Only the seams that differ from the sequence above:
    moved twice mid-run on the swath re-derivation and shifted one reader's
    line numbers underneath it.
 2. **Re-derive blind.** The researcher must not read the existing capsule
-   pages first, for the same reason original groundwork is blind — the method
-   in [`tool-research-brief.md`](tool-research-brief.md) still governs, and its
-   file layout is still historical. The new derivation is its own record under
+   pages first, for the same reason original groundwork is blind. The new derivation is its own record under
    `research/`, never an edit of the old one: a version-named subdirectory
    while both eras coexist, flat only once the superseded era has been
    deliberately retired. Either way `research/README.md` must say which

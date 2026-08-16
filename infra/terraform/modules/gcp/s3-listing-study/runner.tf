@@ -1,20 +1,18 @@
 # ── Campaign runner VM ────────────────────────────────────────────────────────
 #
-# One long-lived machine provisioned for everything outside a Batch task: image
-# builds and pushes, campaign submission/polling, and the required compact-result
-# reconciler. Bulk artifacts stay in GCS unless a correctness check or
-# investigation requests them.
+# One long-lived machine provisioned for everything outside a Batch task:
+# toolbox builds and an explicitly authorized push, campaign management,
+# verification, and reporting. Bulk artifacts stay in GCS unless verification
+# or investigation requests them.
 #
 # It earns its place for three reasons beyond convenience:
 #
-#   * Architecture. Batch runs x86_64, and the derived-image build is native by
-#     construction — it binds the pinned interpreter for the build host's own
-#     architecture and passes no --platform. An amd64 runner builds the images
-#     Batch will actually run, with no emulation anywhere in the path.
-#   * Duration. A campaign outlives a laptop session. The required reconciler
-#     must be restartable, but it still needs a long-lived home.
-#   * Egress. Required routine reconciliation reads only compact summaries,
-#     while a correctness check may fetch large raw artifacts. Keeping the
+#   * Architecture. Batch runs x86_64 and the toolbox wrapper explicitly builds
+#     linux/amd64. An amd64 runner avoids emulation in that build path.
+#   * Duration. A campaign outlives a laptop session. Its durable SQLite state,
+#     polling, verification, and reporting benefit from a long-lived home.
+#   * Egress. Routine reporting reads compact results, while a correctness check
+#     may fetch large raw artifacts. Keeping the
 #     runner in the bucket's region avoids billing for those requested reads.
 #
 # It is NOT a measurement host. Nothing timed ever runs here — subjects run in
@@ -59,7 +57,7 @@ resource "google_service_account" "runner" {
   project      = var.project
   account_id   = "${local.name}-runner"
   display_name = "s3-listing-study campaign runner"
-  description  = "Identity for runner-side builds, pushes, campaign submission, and required compact-result reconciliation"
+  description  = "Identity for toolbox builds/publication, benchmark campaign management, verification, and reporting"
 }
 
 resource "google_project_iam_member" "runner" {
@@ -180,8 +178,8 @@ resource "google_compute_instance" "runner" {
     auto_delete = true
     initialize_params {
       image = local.runner.image
-      # Sized for Docker: every derived image is its subject plus a ~250 MB
-      # pinned interpreter, and one machine builds all of them.
+      # Sized for the multi-stage toolbox build, downloaded tool closures, and
+      # reusable Docker build cache.
       size = local.runner.disk_gb
       type = local.runner.disk_type
     }

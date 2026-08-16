@@ -61,7 +61,7 @@ All 10 smoke runs below (across seven distinct mode names — `recursive-json`
 appears at four scopes) ran **anonymous**, native arm64, via the retired shared
 receipt wrapper, against
 `noaa-normals-pds` (us-east-1) at its 2026-07-17 snapshot (148,917 keys, manifest
-sha256 `c78a827…2adb`). All verdicts via `harness/verify-listing.sh`. `CREDS=none`
+sha256 `c78a827…2adb`). All verdicts via the retired `harness/verify-listing.sh`. `CREDS=none`
 (no credentialed pass) and `EDGE_BUCKET=none` (unicode/weird-key/multipart-ETag
 fidelity deferred). Invocation column is the argv appended to the `["mc"]`
 entrypoint.
@@ -154,14 +154,14 @@ what the study's replay-server phase can key off.
 ## Historical reproduction command (runner retired)
 
 The command below records how the committed receipts were produced, but it is
-not runnable in the current checkout. New attempts use the single derived-image
-contract described in [`../../../harness/README.md`](../../../harness/README.md);
-the shared derived-image recipe exists, but this subject has not passed its compatibility gate.
+not runnable in the current checkout. New comparative attempts use the
+self-contained toolbox and campaign worker documented in
+[`benchmark/README.md`](../../../benchmark/README.md).
 
 Every receipt above was produced by the shared wrapper, never a bare `docker run`.
 The current `../adapter/command.py` is a typed command compiler with no shell or
-NUL transport. Subject execution, capture, timeout, and measurement remain the
-attempt engine's responsibility. The immutable receipts retain their original
+NUL transport. Subject execution, capture, timeout, and measurement belong to
+the benchmark worker. The immutable receipts retain their original
 image digest, logical fields, and exact invocation for audit.
 
 `<mode>` is one of `recursive`, `recursive-json`, `shallow`, `shallow-json`,

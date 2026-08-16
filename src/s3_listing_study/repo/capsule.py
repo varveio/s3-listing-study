@@ -24,7 +24,7 @@ except ImportError:
     raise SystemExit(2) from None
 
 
-from ..common.build_selection import BuildSelectionError, load_registered_selection
+from benchmark.runtime.build_selection import BuildSelectionError, load_registered_selection
 
 REQUIRED_DIRS = {"data", "docs", "adapter", "research", "receipts"}
 ALLOWED_ROOT = REQUIRED_DIRS | {"README.md", "build"}

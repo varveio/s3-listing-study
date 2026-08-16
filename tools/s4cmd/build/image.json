@@ -1,7 +1,6 @@
 {
   "tool": "s4cmd",
   "tool_version": "2.1.0",
-  "shared_base_source_sha256": "ae5505fcb29858ed27b385a05b5057bd9d71de2a04f85dff8b769306ed80dbb8",
   "tool_build_sha256": "cd31a514bb9421f303c26adc5b5b992787615a89f6614052ee4b45cb644123bb",
   "tool_artifact": {"kind":"source-archive","locator":"https://files.pythonhosted.org/packages/42/b4/0061f4930958cd790098738659c1c39f8feaf688e698142435eedaa4ae34/s4cmd-2.1.0.tar.gz","sha256":"42566058a74d3e1e553351966efaaffa08e4b6ac28a19e72a51be21151ea9534"},
   "subject_workdir": "/",
@@ -10,5 +9,5 @@
   ],
   "command": "adapter/command.py",
   "normalizer": "adapter/normalize.py",
-  "adapter_bundle_sha256": "d124a26430424f5970401d01506e9b2e088b8d62a2f2ae231cc00fb0209fd7cf"
+  "adapter_bundle_sha256": "0853744d27af2809b85fbcb79455442c5aa78d09456565133614a9ca0dbe8435"
 }

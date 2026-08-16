@@ -161,14 +161,14 @@ Routing this decision to the owner is carried in [`../README.md`](../README.md)
 ## Historical reproduction command (runner retired)
 
 The command below records how the committed receipts were produced, but it is
-not runnable in the current checkout. New attempts use the single derived-image
-contract described in [`../../../harness/README.md`](../../../harness/README.md);
-the shared derived-image recipe exists, but this subject has not passed its compatibility gate.
+not runnable in the current checkout. New comparative attempts use the
+self-contained toolbox and campaign worker documented in
+[`benchmark/README.md`](../../../benchmark/README.md).
 
 Both receipts were produced by the retired shared wrapper, never a bare
 `docker run`. The current `command.py` is a typed compiler with no shell or NUL
-transport; execution, capture, timeout, and measurement belong to the attempt
-engine. Each immutable receipt retains its exact original invocation.
+transport; execution, capture, timeout, and measurement belong to the benchmark
+worker. Each immutable receipt retains its exact original invocation.
 
 Swap `--mode list-versions` (and `--out …/list-versions`) for the other
 receipt. Rebuilding the image first requires the pinned checkout at

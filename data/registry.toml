@@ -2,13 +2,14 @@
 #
 # Canonical source for every value an executable resolves about a bucket.
 # `docs/smoke-bucket.md` keeps the prose that explains these facts to a human;
-# where the two state the same value they must agree, and `tests/test_registry.py`
-# fails the build if they drift.
+# where the two state the same value they must agree. This registry is retained
+# as historical capsule evidence; benchmark targets live in `benchmark/plans/`.
 #
 # Nothing executable in this repo embeds a bucket name (owner's rule): callers
-# pass the bucket as a parameter and resolve its facts through
-# `s3_listing_study.manager.registry`, so a receipt cites what the registry says rather
-# than what somebody retyped.
+# must select a registry entry or a benchmark plan explicitly. Historical
+# receipts resolved these values through the retired groundwork
+# runner. Current capsule checks use `s3-listing-study validate-capsule`; current
+# comparative cases resolve bucket facts from `benchmark/plans/`.
 #
 # Data artifacts (manifests, payloads) never enter the repo — see
 # docs/smoke-bucket.md. This file is metadata: the `manifest_sha256` below is the

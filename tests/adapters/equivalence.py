@@ -10,11 +10,12 @@ Cases are discovered from ``run.meta``, never from directory layout — the
 so a case here names exactly what the verifier would normalise. That includes the
 capability probes, whose mode no adapter implements.
 
-The bytes each adapter produces over these payloads are still checked, by the
-differential replay (``tests/differential/``): every committed ``verify.md`` is
-re-issued through the real adapter and required back unchanged, so an adapter
-that emits different records fails there. This module supplies the denominator —
-the corpus pin that stops a shrinking payload set from reading as a clean sweep.
+A retired differential predecessor re-issued committed verdicts through the
+ported adapters. That historical gate supplied the reason for the invariant
+preserved here: the discovered corpus needs an independent pinned denominator,
+or a shrinking payload set can look like a clean sweep. Current adapter byte
+conformance is exercised with synthetic fixtures; this module covers historical
+payload discovery and mode reachability only.
 """
 
 from __future__ import annotations
@@ -26,14 +27,47 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 
-from tests.differential.corpus import read_meta, select_stream
+# SHA-256 of zero bytes, recorded by run.meta for an empty captured stream.
+EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
+
+def read_meta(path: Path) -> dict[str, str]:
+    """Parse historical ``run.meta`` with first occurrence winning."""
+    meta: dict[str, str] = {}
+    for line in path.read_text().splitlines():
+        key, separator, value = line.partition("=")
+        if separator and key not in meta:
+            meta[key] = value
+    return meta
+
+
+def select_stream(meta: dict[str, str], receipt: Path) -> tuple[str, str]:
+    """Choose the first non-empty historical stream; stdout wins non-empty ties.
+
+    Candidate order is deliberate. Most listings belong on stdout, while some
+    historical adapters emitted their payload on stderr. ``EMPTY_SHA256`` lets
+    the recorded digest distinguish an empty file from an absent stream without
+    reading the payload during discovery.
+    """
+    candidates = [
+        (stream, meta.get(f"{stream}_path", ""), meta.get(f"{stream}_sha256", ""))
+        for stream in ("stdout", "stderr")
+        if meta.get(f"{stream}_path") and meta.get(f"{stream}_sha256")
+    ]
+    for stream, path, digest in candidates:
+        if digest != EMPTY_SHA256:
+            return stream, path
+    if candidates:
+        return candidates[0][0], candidates[0][1]
+    raise ValueError(f"run.meta in {receipt} records no stdout/stderr payload")
+
 
 # The corpus this gate is pinned to, per tool. Discovery alone cannot police it:
 # if a receipt stops being discovered — a restructure moves it, a merge drops it,
 # a glob stops matching — the denominator shrinks with the numerator and the run
-# reports byte-identical over whatever survived. `tests/differential/__main__.py`
-# pins EXPECTED_SINGLES for exactly this reason; this harness would otherwise
-# have inherited the bug that pin was added to fix.
+# reports success over whatever survived. The retired differential predecessor
+# independently pinned its case count for exactly this reason; this gate keeps
+# that mutation-resistant denominator without depending on the deleted suite.
 #
 # Changing a number here is a DECISION, not a formality: it asserts that the set
 # of committed payloads for that tool genuinely changed, and it belongs in the

@@ -1,15 +1,15 @@
 output "results_bucket" {
-  description = "Results bucket name. Campaign data lands under campaigns/<campaign>/: frozen plan/manifest objects and authoritative <bucket>/<tool>/<case>/run-<n>/<attempt-uuid>/** trees."
+  description = "Results bucket name. Attempt evidence lands below campaigns/<campaign>/results/<bucket>/<tool>/<case>/run-<n>/submission-<n>/<attempt-uuid>/."
   value       = google_storage_bucket.results.name
 }
 
 output "results_bucket_url" {
-  description = "Results bucket gs:// URL — workers publish one tree per execution; required routine reporting discovers UUID children with delimiter listings and reads only result.json."
+  description = "Results bucket gs:// URL — workers create one UUID leaf per execution; benchmark verification and reporting resolve and bind those leaves."
   value       = "gs://${google_storage_bucket.results.name}"
 }
 
 output "image_repo_url" {
-  description = "Docker registry path for derived attempt images. Push as <image_repo_url>/<tool>:<tag>, using the tag the build derives from each registration."
+  description = "Docker repository root available for an explicitly authorized benchmark-toolbox publication. Campaign image sets use a final <image_repo_url>/benchmark-toolbox@sha256:<digest> URI; this module does not publish it."
   value       = "${var.region}-docker.pkg.dev/${var.project}/${google_artifact_registry_repository.images.repository_id}"
 }
 

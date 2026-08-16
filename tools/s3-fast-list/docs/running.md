@@ -146,24 +146,24 @@ newline would break the five-column / one-record contract. The NOAA keys have
 neither byte, so no run was affected; the deferred edge-key bucket cannot be
 verified through this adapter until it gains binary-safe framing.
 
-## Harness carry-forwards (before the benchmark phase)
+## Benchmark carry-forward
 
-Both are prerequisites for benchmarking the parallel mode and are routed to the
-orchestrator (harness gaps, not tool findings):
+The retired wrapper could not capture binary Parquet safely and could not mount
+a hints file. The benchmark worker now captures stdout as bytes and retains
+native sink trees, so binary output is no longer a harness blocker. The current
+representative adapter declares only `list`; adding a hints-file case would
+require an explicit adapter and plan change rather than reuse of the historical
+wrapper command.
 
-1. **A binary-safe output capture** (bind-mount / `docker cp` / `docker attach`
-   instead of `docker logs`) so Parquet survives capture and the standard
-   verifier can issue a real verdict.
-2. **An input-file mount** so a `-k` hints file can reach the container — without
-   it the tool's whole parallel value proposition cannot be exercised.
-
-Detail: `../receipts/smoke/_capability/HARNESS-INCOMPATIBILITY.txt`.
+The original limitation remains documented in
+`../receipts/smoke/_capability/HARNESS-INCOMPATIBILITY.txt`; it describes the
+committed smoke evidence, not the current benchmark architecture.
 
 ## Reproduction
 
 Every standard wrapper-era receipt (the four `list/` rows above) was produced by the
 retired shared harness. The current `../adapter/command.py` is a typed command
-compiler with no shell or NUL transport; the attempt engine owns execution,
+compiler with no shell or NUL transport; the benchmark worker owns execution,
 capture, timeout, and measurement. The `_build/` receipts (the `docker
 build` above) and the `_capability/` direct captures were produced **out of band**
 — outside the smoke harness — and are labelled as such. Rebuilding the image
