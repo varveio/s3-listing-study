@@ -587,6 +587,26 @@ def hinted_plan(tmp_path: Path, body: str = HINTED) -> Plan:
     )
 
 
+def test_the_suite_filter_quotes_its_value() -> None:
+    """The real API 400s an unquoted hyphenated label value — the first live
+    polling pass proved it — so the filter must always quote the suite."""
+
+    class Client:
+        def list_jobs(self, *, request: dict[str, str], **_kwargs: object) -> list[batch_v1.Job]:
+            assert request["filter"] == 'labels.suite="c-2026-08-17-x"'
+            return []
+
+    assert (
+        campaign.list_job_states(
+            "p",
+            "us-east1",
+            "c-2026-08-17-x",
+            client=Client(),  # type: ignore[arg-type]
+        )
+        == {}
+    )
+
+
 class Evidence:
     """The results bucket, as much of it as a settling preparation is read from."""
 

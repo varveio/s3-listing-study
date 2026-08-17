@@ -849,9 +849,12 @@ def list_job_states(
     carries the suite the filter is exact rather than a narrowing over anything
     benchmark-shaped. Rows are still matched by job name afterwards.
     """
+    # Quoted because the value is opaque text to the filter grammar: an unquoted
+    # suite with hyphens is a 400 from the real API, which is exactly what the
+    # first live polling pass got.
     request = {
         "parent": f"projects/{project}/locations/{location}",
-        "filter": f"labels.suite={suite}",
+        "filter": f'labels.suite="{suite}"',
     }
     return {
         job.name.rsplit("/", 1)[-1]: str(batch_v1.JobStatus.State(job.status.state).name)
