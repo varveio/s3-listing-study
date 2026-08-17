@@ -33,7 +33,7 @@ Three groups of inputs go into the hash:
 
 | Group | What it covers |
 | --- | --- |
-| **Environment** | The values the harness acts on: executor, auth role, mode, target bucket/region/prefix, location, machine type, vCPUs, memory, container ceiling, timeout |
+| **Environment** | The values the harness acts on: executor, auth role, target bucket/region/prefix, location, machine type, vCPUs, memory, container ceiling, timeout |
 | **Config** | The capsule's own keys, `{}` when empty |
 | **What ran it** | The tool slice and the platform slice |
 
@@ -101,21 +101,22 @@ something different because of it?**
 | --- | --- | --- |
 | `auth_role` | Resolves to a service account and a credential secret; null runs unsigned | harness |
 | `executor` | Selects which execution environment renders and submits the job | harness |
-| `mode` | Selects the capsule normalizer that verification runs | harness |
 | `location` | Chooses the region the machine runs in — the network distance to the target | harness |
 | `machine_type` | The shape resolved from vCPUs and memory; what the executor allocates | harness |
 | `vcpus`, `memory_gb` | The declared pair a shape is resolved from | harness |
 | `container_memory_gb` | Sets the container's cgroup ceiling | harness |
 | `timeout_s` | The worker's kill deadline, and the basis of the provider's run duration | harness |
 | `target_bucket`, `target_region`, `target_prefix` | Names the target; region reaches the subject's environment | harness |
-| concurrency, page size, output flags | Nothing — passed through | capsule |
+| mode, concurrency, page size, output flags | Nothing — forwarded, never read | capsule |
 | managed-runtime heap flags | Nothing — derived from the ceiling the capsule is told about | capsule |
 
-`mode` is on the harness side despite being tool vocabulary, because the harness
-acts on it: `verify` selects a capsule's normalizer by mode
-(`campaign.py:1075`), orchestrator-side, without running the tool. Burying it in
-an opaque blob would force the harness to reach into a structure this model says
-it never interprets.
+`mode` looks like an exception and is not one. Verification does need it —
+`verify` normalizes both sides through a capsule's `normalize.py`
+(`verify.py:468`) — but it arrives there as a **pass-through**:
+`adapters.normalize_to_path(adapter_dir, tool, mode, …)` hands the value on
+without the harness ever branching on it. Forward the whole config blob to both
+capsule entry points, `command.py` and `normalize.py`, and the harness needs to
+read nothing at all.
 
 ### auth_role, and the part the capsule still needs
 
@@ -142,8 +143,20 @@ derived, so it is not a separate hash input.
 
 ### Configuration
 
-Everything on the capsule side travels as one opaque, canonical JSON `config`
-blob. The harness never interprets it.
+Everything on the capsule side travels as one canonical JSON `config` blob, and
+the harness treats it as **opaque bytes**: it hashes them for identity, stores
+them, and forwards them to the capsule's entry points. Nothing else needs the
+contents — a value that changes what the *subject* does is the tool's business,
+and the harness's interest ends at "these bytes differ, so this is a different
+case".
+
+**Remove `concurrency` from the shared request contract.** `CommandRequest`
+carries a typed `concurrency` field and `command_adapter.py` a shared
+`validate_concurrency` helper, both left over from when concurrency looked like
+a universal dimension. Neither earns its place: the harness does nothing with
+the value, and the guarantee the helper provides — an explicit knob a capsule
+never declared is refused — is exactly what per-capsule key declaration
+provides, stated once per capsule instead of in shared runtime code.
 
 **The capsule declares the keys it accepts, and an undeclared key is refused.**
 This pattern already exists rather than needing invention: `s4cmd` declares
@@ -159,11 +172,12 @@ The declaration must live **inside `command.py`**, beside `MODES` and
 `ADAPTER_FILES = ("command.py", "normalize.py")` (`build_selection.py:18`) — so
 a declaration in a new file under `adapter/` would change no identity at all.
 
-Concurrency stays config. Its purpose is to make "every tool at logical
-concurrency 8" expressible, and no schema can make two capsules mean the same
-thing by the number: the translations are `-c`, `--checkers`,
+Concurrency is the case in point for what that costs. "Every tool at logical
+concurrency 8" is only meaningful if every capsule means the same thing by the
+number, and no schema can make them: the translations are `-c`, `--checkers`,
 `--list-concurrency`, `--concurrency`. That comparability rests on convention
-plus each capsule's declared range — which is where it rests today.
+plus each capsule's declaration — which is where it rests today, since the
+shared field enforces a range but never a meaning.
 
 *Today:* the harness holds per-tool knowledge it should not. `plans/tools.yaml`
 carries a `heap:` table stating that swath is a JVM wanting
@@ -341,7 +355,6 @@ CREATE TABLE attempts (
 
     -- environment: the harness reads these and acts
     auth_role           TEXT,               -- logical role name; null runs unsigned
-    mode                TEXT NOT NULL,      -- selects the capsule normalizer
     executor            TEXT NOT NULL,      -- which execution environment ran it
     location            TEXT NOT NULL,      -- region: the network distance to the target
     machine_type        TEXT NOT NULL,      -- resolved shape; what the executor allocated
@@ -353,8 +366,8 @@ CREATE TABLE attempts (
     target_region       TEXT NOT NULL,
     target_prefix       TEXT NOT NULL,
 
-    -- configuration: carried to the capsule, never interpreted here
-    config              TEXT NOT NULL,      -- canonical JSON; {} when empty
+    -- configuration: forwarded to the capsule, opaque here
+    config              TEXT NOT NULL,      -- canonical JSON; holds mode and every tool knob
 
     -- what ran it
     tool_slice_sha256   TEXT NOT NULL,
@@ -394,10 +407,14 @@ the columns make them readable. A config key worth querying can be projected and
 indexed without leaving the blob:
 
 ```sql
-ALTER TABLE attempts ADD COLUMN concurrency INTEGER
-    GENERATED ALWAYS AS (json_extract(config, '$.concurrency')) VIRTUAL;
-CREATE INDEX attempts_by_concurrency ON attempts (concurrency);
+ALTER TABLE attempts ADD COLUMN mode TEXT
+    GENERATED ALWAYS AS (json_extract(config, '$.mode')) VIRTUAL;
+CREATE INDEX attempts_by_mode ON attempts (mode);
 ```
+
+That is a read-side projection for display and querying, not the harness
+interpreting a run-time input: the value it reaches for is one a report prints,
+never one that decides what the harness does.
 
 ### What is stored, and what is not
 
