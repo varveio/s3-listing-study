@@ -421,6 +421,7 @@ def run_tool(
     env: dict[str, str],
     *,
     cwd: str | None = None,
+    reset_peak: bool = False,
 ) -> dict[str, object]:
     """Run argv, capture stdout/stderr to files, return
     (exit_code, wall_s, max_rss_kb, timed_out).
@@ -431,13 +432,14 @@ def run_tool(
     enable_child_subreaper()
     baseline_descendants = descendant_pids(os.getpid())
     cgroup = cgroup_v2_directory()
+    peak_reset = reset_memory_peak(cgroup) if reset_peak else False
     cgroup_before = cgroup_snapshot(cgroup)
-    usage_before = resource.getrusage(resource.RUSAGE_CHILDREN)
     start_ns = time.monotonic_ns()
     timed_out = False
     term_sent = False
     kill_sent = False
     process_tree_clean = True
+    subject_usage: resource.struct_rusage | None = None
     tracked_pids: set[int] = set()
     with open(stdout_path, "wb") as stdout_f, open(stderr_path, "wb") as stderr_f:
         proc = subprocess.Popen(
@@ -449,10 +451,40 @@ def run_tool(
             cwd=cwd,
             start_new_session=True,
         )
+
+        def reap_subject(timeout: float | None) -> bool:
+            """Wait the subject with ``os.wait4``, and let nothing wait it first.
+
+            ``Popen.poll``/``wait`` reap the child themselves, which folds its
+            rusage into this worker's process-lifetime ``RUSAGE_CHILDREN``
+            high-water mark — and with two execs per attempt, that mark reports
+            the fatter phase for both. So the first successful wait on this pid
+            is this one, and the status goes back onto the Popen object so
+            nothing re-waits it. ``None`` waits without a deadline.
+            """
+            nonlocal subject_usage
+            wait_until = None if timeout is None else time.monotonic() + timeout
+            while proc.returncode is None:
+                try:
+                    reaped, status, usage = os.wait4(proc.pid, os.WNOHANG)
+                except ChildProcessError:
+                    # The status is unobtainable and the child is gone either
+                    # way, which is what subprocess itself records here.
+                    proc.returncode = 0
+                    break
+                if reaped != 0:
+                    subject_usage = usage
+                    proc.returncode = os.waitstatus_to_exitcode(status)
+                    break
+                if wait_until is not None and time.monotonic() >= wait_until:
+                    return False
+                time.sleep(0.01)
+            return True
+
         tracked_pids.add(proc.pid)
         deadline = time.monotonic() + timeout
         while True:
-            proc.poll()
+            reap_subject(0)
             tracked_pids.update(subject_processes(proc.pid, tracked_pids, baseline_descendants))
             if proc.returncode is not None:
                 exit_code = proc.returncode
@@ -479,7 +511,7 @@ def run_tool(
             term_sent = term_sent or bool(residual)
             grace_deadline = time.monotonic() + term_grace
             while time.monotonic() < grace_deadline:
-                proc.poll()
+                reap_subject(0)
                 tracked_pids.update(subject_processes(proc.pid, tracked_pids, baseline_descendants))
                 residual = live_pids(tracked_pids - {proc.pid})
                 if not process_group_exists(proc.pid) and not residual:
@@ -494,14 +526,12 @@ def run_tool(
                     pass
                 signal_pids(residual, signal.SIGKILL)
                 kill_sent = kill_sent or bool(residual)
-            try:
-                proc.wait(timeout=max(term_grace, 1.0))
-            except subprocess.TimeoutExpired:
+            if not reap_subject(max(term_grace, 1.0)):
                 with contextlib.suppress(ProcessLookupError):
                     os.killpg(proc.pid, signal.SIGKILL)
-                proc.wait()
+                reap_subject(None)
         else:
-            proc.wait()
+            reap_subject(None)
     elapsed_ns = time.monotonic_ns() - start_ns
     group_empty = not process_group_exists(proc.pid)
     if not group_empty:
@@ -525,7 +555,6 @@ def run_tool(
     group_empty = not process_group_exists(proc.pid)
     reap_children(tracked_pids - {proc.pid})
 
-    usage_after = resource.getrusage(resource.RUSAGE_CHILDREN)
     cgroup_after = cgroup_snapshot(cgroup)
     before_events = cgroup_before.get("memory_events")
     after_events = cgroup_after.get("memory_events")
@@ -533,9 +562,9 @@ def run_tool(
         "exit_code": exit_code,
         "elapsed_ns": elapsed_ns,
         "wall_seconds": round(elapsed_ns / 1_000_000_000, 6),
-        "max_rss_kb": usage_after.ru_maxrss,
-        "user_cpu_seconds": usage_after.ru_utime - usage_before.ru_utime,
-        "system_cpu_seconds": usage_after.ru_stime - usage_before.ru_stime,
+        "max_rss_kb": subject_usage.ru_maxrss if subject_usage is not None else 0,
+        "user_cpu_seconds": subject_usage.ru_utime if subject_usage is not None else 0.0,
+        "system_cpu_seconds": subject_usage.ru_stime if subject_usage is not None else 0.0,
         "timed_out": timed_out,
         "term_sent": term_sent,
         "kill_sent": kill_sent,
@@ -545,6 +574,7 @@ def run_tool(
         "subreaper_enabled": True,
         "cgroup": {
             "location": str(cgroup) if cgroup else None,
+            "memory_peak_reset": peak_reset,
             "before": cgroup_before,
             "after": cgroup_after,
             "oom_delta": _event_delta(before_events, after_events, "oom"),
@@ -662,6 +692,23 @@ def cgroup_v2_directory() -> Path | None:
         return Path("/sys/fs/cgroup") / relative
     except (OSError, IndexError):
         return None
+
+
+def reset_memory_peak(directory: Path | None) -> bool:
+    """Try to clear the container's memory high-water mark, and say whether it took.
+
+    ``memory.peak`` is per container and accepts a reset write only on Linux
+    6.12 and later, so an attempt that ran an untimed setup exec first may be
+    stuck publishing the larger of the two phases. Recorded either way, because a
+    reader cannot otherwise tell which of the two the number describes.
+    """
+    if directory is None:
+        return False
+    try:
+        (directory / "memory.peak").write_text("reset")
+    except OSError:
+        return False
+    return True
 
 
 def cgroup_snapshot(directory: Path | None) -> dict[str, object]:
@@ -1044,6 +1091,9 @@ def main(argv: list[str] | None = None) -> int:
         args.term_grace,
         env,
         cwd=args.subject_workdir,
+        # The container's peak is not per exec: only an attempt whose setup exec
+        # already ran has something to clear out of it.
+        reset_peak=setup is not None,
     )
     exit_value = execution["exit_code"]
     if isinstance(exit_value, bool) or not isinstance(exit_value, int):

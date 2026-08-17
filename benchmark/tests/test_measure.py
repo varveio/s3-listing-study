@@ -155,6 +155,79 @@ def test_timeout_kills_process_group_and_records_cgroup_oom(tmp_path: Path) -> N
     assert cgroup_result["oom_kill_delta"] == 1
 
 
+def test_each_exec_reports_its_own_peak_rss(tmp_path: Path) -> None:
+    """Two execs share one worker, and RSS must not travel between them.
+
+    ``RUSAGE_CHILDREN`` is a process-lifetime high-water mark: with an untimed
+    setup exec ahead of the subject, a fat setup would publish its own peak as
+    the subject's measurement. Per-invocation ``os.wait4`` rusage is what
+    separates them (Linux semantics; this suite is Linux-only).
+
+    Every figure here is read against the lean baseline rather than an absolute
+    bound: a forked child inherits its parent's high-water mark on Linux, so the
+    baseline is whatever process ran this suite, and the fat child is sized to
+    clear it.
+    """
+
+    def peak(name: str, script: str) -> int:
+        directory = tmp_path / name
+        directory.mkdir()
+        execution = measure.run_tool(
+            (sys.executable, "-c", script),
+            directory,
+            timeout=60,
+            term_grace=0.1,
+            env=dict(os.environ),
+        )
+        value = execution["max_rss_kb"]
+        assert isinstance(value, int)
+        return value
+
+    before = peak("before", "pass")
+    # Written to, not merely allocated: a calloc this size is untouched zero
+    # pages that never become resident.
+    fatten = f"b = bytearray({before + 300_000} * 1024); b[::4096] = b'x' * (len(b) // 4096)"
+    fat = peak("fat", fatten)
+    after = peak("after", "pass")
+    assert fat > before + 200_000
+    # The claim: the fat exec's peak did not follow the lean one that came next.
+    assert after < before + 20_000
+
+
+def test_the_container_peak_records_whether_it_could_be_reset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The cgroup peak is per container, so it is the setup exec's too.
+
+    A kernel that takes the reset write leaves the subject a fresh high-water
+    mark; one that refuses leaves the larger of the two phases, and the flag is
+    what tells a reader which of the two the number is.
+    """
+    cgroup = tmp_path / "cgroup"
+    cgroup.mkdir()
+    (cgroup / "memory.current").write_text("10")
+    (cgroup / "memory.peak").write_text("2048")
+    (cgroup / "memory.events").write_text("oom 0\noom_kill 0\n")
+    monkeypatch.setenv("BENCHMARK_CGROUP_DIR", str(cgroup))
+    attempt = tmp_path / "attempt"
+    attempt.mkdir()
+    execution = measure.run_tool(
+        (sys.executable, "-c", "pass"),
+        attempt,
+        timeout=30,
+        term_grace=0.1,
+        env=dict(os.environ),
+        reset_peak=True,
+    )
+    cgroup_result = execution["cgroup"]
+    assert isinstance(cgroup_result, dict)
+    assert cgroup_result["memory_peak_reset"] is True
+    assert (cgroup / "memory.peak").read_text() == "reset"
+
+    assert measure.reset_memory_peak(tmp_path / "absent") is False
+    assert measure.reset_memory_peak(None) is False
+
+
 def test_unknown_cgroup_events_produce_unknown_oom_deltas(tmp_path: Path) -> None:
     cgroup = tmp_path / "cgroup"
     cgroup.mkdir()
