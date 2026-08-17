@@ -170,8 +170,6 @@ CREATE TABLE attempts (
 
     -- configuration: forwarded to the capsule, opaque here
     config              TEXT NOT NULL,      -- canonical JSON; holds mode and every tool knob
-    product             TEXT NOT NULL,      -- output artifact: text | parquet | parquet-sorted
-    fields_emitted      TEXT NOT NULL,      -- canonical JSON array; which columns this mode populates
     -- ...except its reserved axis names, projected out for querying
     mode                TEXT    GENERATED ALWAYS AS (json_extract(config, '$.mode')) VIRTUAL,
     concurrency         INTEGER GENERATED ALWAYS AS (json_extract(config, '$.concurrency')) VIRTUAL,
@@ -296,11 +294,11 @@ change: history outlives the code that wrote it.
   cannot claim one job.
 - `result_prefix` is stored, though derivable. A row states where its evidence
   actually went, rather than where today's rule says it should be.
-- `product` and `fields_emitted` are stored although the capsule declares them,
-  because a capsule edit can change what a mode emits and an old row must keep
-  the answer that was true when it ran. They are the two facts a report needs to
-  know which attempts may sit in one table — a text stratum, a Parquet stratum,
-  and never a key-only row ranked against a four-column one.
+- A mode's **product and emitted fields are not stored.** They are a pure
+  function of `(tool, mode)` at the capsule revision the row already pins
+  through `tool_slice_sha256`, so `report` resolves them from the capsule the
+  way it already resolves `normalize.py`. Storing them would be a second answer
+  to a settled question, and the two could disagree.
 - `case_inputs` is stored although `case_id` is a pure function of it, because
   the function is one-way. It is what makes a hash collision loud: an insert
   naming an existing `case_id` compares the two documents and refuses a
