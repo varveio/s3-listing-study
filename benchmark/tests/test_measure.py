@@ -160,7 +160,7 @@ def test_environment_boundary_rejects_reserved_collisions() -> None:
 
 def test_credential_payload_parses_and_refuses_the_wrong_stratum() -> None:
     parsed = measure.resolve_credential_env(
-        "public_auth_list",
+        "public-read",
         {
             CREDENTIAL_ENV_VAR: (
                 "AWS_ACCESS_KEY_ID=AKIAEXAMPLE\nAWS_SECRET_ACCESS_KEY=secret/value+with=padding\n\n"
@@ -175,12 +175,12 @@ def test_credential_payload_parses_and_refuses_the_wrong_stratum() -> None:
     assert measure.resolve_credential_env(None, {}) == {}
     with pytest.raises(ValueError, match="missing required key"):
         measure.resolve_credential_env(
-            "public_auth_list", {CREDENTIAL_ENV_VAR: "AWS_ACCESS_KEY_ID=AKIAEXAMPLE"}
+            "public-read", {CREDENTIAL_ENV_VAR: "AWS_ACCESS_KEY_ID=AKIAEXAMPLE"}
         )
     with pytest.raises(ValueError, match="unsupported key"):
         measure.resolve_credential_env("authenticated", {CREDENTIAL_ENV_VAR: "GOOGLE_TOKEN=nope"})
     with pytest.raises(ValueError, match="requires"):
-        measure.resolve_credential_env("public_auth_list", {})
+        measure.resolve_credential_env("public-read", {})
     with pytest.raises(ValueError, match="no auth role"):
         measure.resolve_credential_env(None, {CREDENTIAL_ENV_VAR: "AWS_ACCESS_KEY_ID=AKIAEXAMPLE"})
 
@@ -419,7 +419,7 @@ def test_missing_credential_fails_before_adapter_or_subject(
         "--region",
         "r",
         "--auth-role",
-        "public_auth_list",
+        "public-read",
         "--output",
         str(tmp_path),
         "--destination",

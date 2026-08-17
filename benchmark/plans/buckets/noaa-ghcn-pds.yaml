@@ -23,7 +23,7 @@ region: us-east-1
 # anonymously, because signing adds a signature to every one of ~1,000 requests
 # and that is a different measurement. Each capsule declares which it can issue,
 # so the split is a fact about the tools rather than a choice restated here.
-auth_role: public_auth_list
+auth_role: public-read
 
 defaults:
   # One attempt per case for now. Raising this is cheap on Batch, where reps are

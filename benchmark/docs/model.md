@@ -124,7 +124,7 @@ read nothing at all.
 `auth_role` is a **logical role name, nullable**, not a two-valued stratum. Null
 means unsigned: the anonymous worker service account, no secret attached. A name
 resolves through the deployment's role table to a service account and a secret
-version. Today's single credential becomes the role `public_auth_list`; a future
+version. Today's single credential becomes the role `public-read`; a future
 role reading a private corpus or a different AWS account is a new name rather
 than a new flag. *Today:* `auth` is `anonymous` or `authenticated`, which works
 only while there is exactly one credential.
