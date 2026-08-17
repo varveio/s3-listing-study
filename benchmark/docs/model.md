@@ -25,24 +25,28 @@ cases added over time, several launches in flight at once.
 
 | Concept | Name | Identifies | Lives in |
 | --- | --- | --- | --- |
-| The namespace | `suite` | This benchmark, as distinct from any other workload sharing the project or bucket | Object prefix, Batch job label, job-name prefix, column |
+| The namespace | `suite` | This benchmark, as distinct from any other workload sharing the project or bucket | Object prefix, Batch job label, job-name prefix, `meta` |
 | What was measured | `case_id` | Tool, mode, knobs, revision — the comparable unit | Object path, column |
-| One try of it | `submission_id` | `<case_id>.s<n>`, one physical execution | Object prefix leaf, primary key |
+| One try of it | `case_id` + `submission` | One physical execution; composed as `<case_id>.s<n>` | Object prefix leaf, primary key |
 | What went out together | `group_id` | A launch: the cases submitted in one go on one frozen toolbox | Column only |
 
 **`suite`** earns one value doing three jobs: the object namespace, the Batch
 label a polling pass filters on (`labels.suite=<value>`, server-side), and the
 job-name prefix that keeps this study's jobs disjoint from anything else in the
-project. *Today:* all three are the hardcoded string `benchmark`, and polling
-filters `labels.benchmark-intent:*`.
+project. It is constant for the life of a file, so it lives in `meta` rather
+than repeating identically on every row. *Today:* all three are the hardcoded
+string `benchmark`, and polling filters `labels.benchmark-intent:*`.
 
 **`case_id`** is tool-qualified, so two tools running a mode of the same name
 cannot share a directory. *Today:* the tool is a separate path level and case IDs
 deliberately repeat across tools — `s5cmd` and `s3kor` both produce case `list`,
 distinguished only by fingerprint.
 
-**`rev`** is part of `case_id` and bumps when *anything that makes this a
-different measurement* changes: the case fingerprint or the toolbox it runs on.
+**`rev`** is part of `case_id`, and its rule is exact: it is an allocation over
+the pair `(case_fingerprint, image_set_sha256)`. The fingerprint covers the
+resolved case; it does not cover the toolbox. So "is this a different
+measurement?" is precisely "did either of those two change?", and if so the
+manager allocates the next revision. Both inputs are already recorded per row.
 Without it, re-running a case against a rebuilt toolbox lands in the directory
 its predecessor already occupies. *Today:* there is no revision; the run
 identifier in the object prefix separates them implicitly, because a run freezes
@@ -78,19 +82,46 @@ attempt wrote and the second did not. An `ifGenerationMatch=0` precondition
 turns that into a loud failure, which is the only thing that makes "never
 overwritten" a guarantee rather than an expectation.
 
-## The table
+## The tables
 
-One table. A submission is a row; nothing else is stored.
+Two: one row of file-level facts, and one row per submission.
+
+```sql
+CREATE TABLE meta (
+    id             INTEGER PRIMARY KEY CHECK (id = 1),
+    suite          TEXT NOT NULL,        -- the namespace every prefix, label, and job name carries
+    schema_version INTEGER NOT NULL,     -- what shape this file is, for migrations to coordinate on
+    created_at     TEXT NOT NULL
+);
+```
+
+`suite` and the schema version are constant for the life of the file, so they
+are stated once rather than repeated on every row. Typed columns rather than a
+key/value table: the key set is small, closed, and load-bearing — `suite`
+decides where every object is written, so a missing or misspelled value should
+fail at open time as a schema error, not surface as a `None` at some call site
+far from the problem. `CHECK (id = 1)` makes single-rowness an invariant of the
+database rather than a convention, so a second suite cannot be inserted into a
+file meant to hold one.
+
+Adding a field here costs an `ALTER TABLE` — which is a migration, and
+coordinating those is exactly what `schema_version` is for. *Today:* there is no
+version marker at all; `open_db` adds missing columns with a bare `ALTER TABLE`
+and nothing records which shape a file already has.
+
+(SQLite's `PRAGMA user_version` is the other idiomatic home for a schema
+version. It holds an integer in the file header and needs no table, but `suite`
+still needs somewhere to live, and a pragma is invisible to anyone opening the
+file with `sqlite3`.)
 
 ```sql
 CREATE TABLE submissions (
     -- identity
-    submission_id     TEXT PRIMARY KEY,     -- <case_id>.s<n>; equals the object prefix leaf
     case_id           TEXT NOT NULL,        -- <tool>.<mode>[.<knob>-<value>...].r<rev>
     submission        INTEGER NOT NULL,     -- try ordinal, 1-based
+    submission_id     TEXT GENERATED ALWAYS AS (case_id || '.s' || submission) VIRTUAL,
     rev               INTEGER NOT NULL,     -- measurement revision, also inside case_id
     group_id          TEXT NOT NULL,        -- the launch this went out with
-    suite             TEXT NOT NULL,        -- namespace; one distinct value per file
 
     -- what was measured
     tool              TEXT NOT NULL,
@@ -119,10 +150,11 @@ CREATE TABLE submissions (
     state_detail      TEXT,                 -- the provider's message, when it failed
     recorded_at       TEXT NOT NULL,        -- intent journaled, before the provider was called
     updated_at        TEXT NOT NULL,
-    settled_at        TEXT                  -- first entry into a terminal state
+    settled_at        TEXT,                 -- first entry into a terminal state
+
+    PRIMARY KEY (case_id, submission)
 );
 
-CREATE INDEX submissions_by_case  ON submissions (case_id, submission);
 CREATE INDEX submissions_by_group ON submissions (group_id);
 CREATE INDEX submissions_by_state ON submissions (state);
 ```
@@ -144,11 +176,61 @@ change to the derivation would otherwise orphan the jobs already out there.
 
 You grep `submission_id`; you paste `job_name` into `gcloud batch jobs describe`.
 
+### What is stored, and what is not
+
+The rule: **store what this row cannot regenerate on its own, plus anything
+whose derivation rule may change** — history outlives the code that wrote it.
+
+- `case_id` is stored because it is *not* a function of the resolved values.
+  `derive_case_id` renders the union of the keys the rows **stated**, so the ID
+  depends on how the plan was authored; two plans resolving to identical values
+  render different IDs. Nothing in the row can recompute it.
+- `submission_id` is **not stored**. It is a generated column over `case_id` and
+  `submission` — greppable and indexable, with one source of truth and no way to
+  drift from its parts.
+- `job_name` is stored because its derivation is a sanitize-and-hash function
+  that may change; recomputing it later would orphan jobs already out there.
+- `evidence_prefix` is stored for the same reason applied to the object layout:
+  rows written under an earlier layout must stay resolvable after it changes.
+
+### The provider's ID cannot be the key
+
+It is unique, so it is tempting. It cannot be the primary identity for one
+structural reason: **a row exists before its job does.** Intent is journaled
+first, and `NOT_CREATED` means no job ever came into being — so a table keyed on
+the remote name has no key for exactly the rows that record a failure to create
+one. It is also opaque (truncated and hashed), provider-scoped, and outlived by
+the evidence: a Batch job can be deleted while its measurement stands forever.
+
+So the remote ID is what it says it is — a handle for talking to the provider —
+and the local key is allocated before anyone is called.
+
+### The readable ID and the fingerprint are both kept
+
+`submission_id` serializes tool, mode, the row keys that differ from the layer
+defaults, the revision, and the try. It deliberately omits `timeout_s` and
+`reps`, and the target bucket sits above it as a path level — so it is a
+*readable* identity, not a complete one. `case_fingerprint` is the complete one:
+a sha256 over the whole resolved case, unreadable and exact.
+
+Neither replaces the other. The ID is what a path, a grep, and an operator use;
+the fingerprint is what identity comparisons use. The gap between them is
+load-bearing, and the plan schema already enforces the rule that governs it:
+**every key a row may state must move both the ID and the fingerprint.** A key
+visible to one but not the other renders one ID for two fingerprints — two
+non-comparable runs filed into one directory. That is why `timeout_s` may not
+appear on a row at all: it is in the fingerprint and not the ID.
+
+`case_id` leads the primary key, so every question actually asked — every try of
+this case, has this case run, what is the next submission number — is an
+equality on the key's first column rather than string surgery on a composed
+identifier.
+
 ### Renames from the shipped table
 
 | Shipped | Model | Why |
 | --- | --- | --- |
-| `base_job_id` + `submission` (composite key) | `submission_id` (single key) | `base_job_id` named the job, not the case. One string now ties row, prefix, and job together. |
+| `base_job_id` + `submission` (composite key) | `case_id` + `submission` (composite key) | The key is unchanged in shape; `base_job_id` named the job when what it identified was the case. The composed `<case_id>.s<n>` is a generated column, not a third stored name. |
 | `job_id` | `job_name` | It is the provider's resource name, not our identity. |
 | `campaign_id` | `group_id` | It identifies a launch, not a campaign. |
 | `bucket`, `region` | `target_bucket`, `target_region` | Ambiguous against the results bucket and the GCP location. |
@@ -156,7 +238,7 @@ You grep `submission_id`; you paste `job_name` into `gcloud batch jobs describe`
 | `destination` | `evidence_prefix` | Says what is there. |
 | `job_json` | `request_json` | It is the frozen request. |
 | `submitted_at` | `recorded_at` | It is when intent was journaled — before submission. |
-| *(absent)* | `suite`, `rev`, `auth`, `harness_revision`, `state_detail`, `settled_at` | See below. |
+| *(absent)* | `rev`, `auth`, `harness_revision`, `state_detail`, `settled_at`, and the `meta` table | See below. |
 
 `auth` matters because the stratum is part of what was measured, and the shipped
 ledger cannot answer "was this request signed?" without parsing the frozen job
@@ -209,7 +291,7 @@ No results, metrics, or verdicts. Those live in the evidence objects and are
 recomputed by `verify` and `report` on demand — a cached verdict in the ledger
 is a second answer to a settled question, and the two can disagree.
 
-A `groups` table normalizing the launch-level constants (`suite`, `image_uri`,
+A `groups` table normalizing the launch-level constants (`image_uri`,
 `image_set_sha256`, `harness_revision`, `project`, `location`) is the obvious
 alternative. It is cleaner normalization and makes "what did this launch freeze"
 a single row, at the cost of a join in every query and a second write path, for
