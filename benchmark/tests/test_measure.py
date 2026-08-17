@@ -701,10 +701,15 @@ def run_inline_worker(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     *,
+    mode: str = "hinted",
     split: str = INLINE_SPLIT,
     uploaded: list[tuple[str, bytes]] | None = None,
 ) -> int:
-    """Run one attempt of the fixture capsule's hinted mode against a staged `.ks`."""
+    """Run one attempt of the fixture capsule against a staged `.ks`.
+
+    ``row_count_for`` is stubbed only for the measurement: a preparation must not
+    reach it at all, and this capsule ships no normalizer for it to reach.
+    """
     metadata = image_metadata()
     tools = metadata["tools"]
     assert isinstance(tools, dict)
@@ -714,7 +719,8 @@ def run_inline_worker(
     metadata_path.write_text(json.dumps(metadata))
     keyspace = b"a/\nb/\n"
     monkeypatch.setattr(gcs, "download_bytes", lambda _uri: keyspace)
-    monkeypatch.setattr(measure, "row_count_for", lambda *_args: (2, None))
+    if mode != "split":
+        monkeypatch.setattr(measure, "row_count_for", lambda *_args: (2, None))
     monkeypatch.setattr(
         gcs,
         "upload_file",
@@ -728,7 +734,7 @@ def run_inline_worker(
             "--tool",
             "s3-fast-list",
             "--mode",
-            "hinted",
+            mode,
             "--bucket",
             "bucket",
             "--region",
@@ -776,7 +782,7 @@ def run_inline_worker(
             "--container-memory-gb",
             "none",
             "--config",
-            '{"mode": "hinted", "segments": 2}',
+            json.dumps({"mode": mode, "segments": 2}),
             "--input-artifact",
             "gs://results/prep/native/keyspace.ks",
             "--input-artifact-sha256",
@@ -822,6 +828,21 @@ def test_an_inline_setup_runs_untimed_before_the_subject_it_feeds(
     }
     assert (tmp_path / "attempt/inline/stdout.log").exists()
     assert uploaded[-1][0].endswith("/result.json")
+
+
+def test_a_preparation_is_not_asked_for_a_row_count_it_has_no_answer_to(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The canary's finding: a mode capped at `preparation` publishes cut points,
+    not a listing, so its normalizer rightly refuses the mode — and counting it
+    anyway turned a perfect preparation into a failed task."""
+    assert run_inline_worker(tmp_path, monkeypatch, mode="split") == 0
+    result = json.loads((tmp_path / "attempt/result.json").read_bytes())
+    assert result["exit_code"] == 0
+    assert result["row_count"] is None
+    assert result["row_count_error"] is None
+    # The artifact is still evidence, digested like any other native output.
+    assert set(result["native_manifest"]) == {"hints.input"}
 
 
 def test_an_inline_setup_that_fails_fails_the_whole_attempt(

@@ -104,7 +104,7 @@ write a directory sink while its TSV mode streams to stdout.
 | `product` | The output artifact — `text`, `parquet`, `parquet-sorted`. **Shared vocabulary**: "text" means the same for aws-cli and swath, so a report can group a text stratum and keep a Parquet number out of it. |
 | `fields` | Which contract columns this mode populates. A mode emitting key-only must not be ranked against one emitting four columns — otherwise a tool wins by emitting less. |
 | `axes` | Per reserved name: `Fixed(v)`, `Default(v, provenance)`, `Ceiling(v, provenance)`, `Stated()`, `Inert`, or absent. |
-| `purpose_ceiling` | The most a plan may claim this mode is. A plan may demote a run to `canary`; it may never promote `summarize` to `measurement`. |
+| `purpose_ceiling` | The most a plan may claim this mode is. A plan may demote a run to `canary`; it may never promote `summarize` to `measurement`. A mode capped at `preparation` is also never row-counted: what it publishes is not a listing, and the worker records a null count rather than asking a normalizer a question about a mode it does not have. |
 | `inline` | Another mode of this capsule the worker runs untimed, in the same container, immediately before the timed subject — see *A setup exec is not a chain link*. |
 
 **`product` and `fields` translate across tools; `axes` does not.** The first two

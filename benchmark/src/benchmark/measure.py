@@ -983,7 +983,8 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_ADAPTER_ERROR
     # A mode the capsule does not have declares nothing; compiling it below is
     # what says so, in the one place that already refuses it.
-    inline_mode = adapter.modes[args.mode].inline if args.mode in adapter.modes else ""
+    manifest = adapter.modes.get(args.mode)
+    inline_mode = manifest.inline if manifest is not None else ""
     if inline_mode:
         try:
             artifact_path, setup = run_inline_setup(
@@ -1085,8 +1086,15 @@ def main(argv: list[str] | None = None) -> int:
     # Tool failures and partial runs are deliberately not counted: their raw
     # output remains evidence, but its row
     # count is not the target's completed logical object count.
+    #
+    # Neither is a preparation's. A mode its capsule caps at `preparation` can
+    # never enter a completeness comparison, and what it publishes is not a
+    # listing — s3-fast-list's cut points are key *prefixes* — so a row count is
+    # a question that does not apply to it. Asking it anyway failed a perfect
+    # preparation on a normalizer that rightly refused the mode.
+    counts_a_listing = manifest is None or manifest.purpose_ceiling != "preparation"
     row_count = row_count_error = None
-    if exit_code == 0 and not timed_out:
+    if exit_code == 0 and not timed_out and counts_a_listing:
         row_count, row_count_error = row_count_for(
             str(adapter_dir), args.tool, args.mode, args.prefix, stdout_path, native_root
         )
