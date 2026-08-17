@@ -53,8 +53,12 @@ tool enforces for you; a missing item surfaces as a provider error mid-campaign.
 4. **Image-set JSON written** — schema 4, the exact eleven-tool roster, matching
    the built toolbox's manifest and recipe digests. Shape is in
    [`../README.md`](../README.md) § *Campaign image set*.
-5. **Secrets file**, if any case is `authenticated`. Each entry must be a full
-   `projects/<p>/secrets/<s>/versions/<v>` resource path.
+5. **Credential secret**, if any case is `authenticated`: one
+   `projects/<p>/secrets/<s>/versions/<v>` resource whose payload is the
+   `KEY=VALUE` lines described in
+   [`../../infra/terraform/modules/gcp/s3-listing-study/aws-credentials.tf`](../../infra/terraform/modules/gcp/s3-listing-study/aws-credentials.tf).
+   Only an authenticated case's job carries it, and only the authenticated
+   worker identity can read it.
 6. **A campaign ID you have not used before.** Job IDs are derived from it; a
    reused ID against a changed plan is what `COLLISION` exists to catch.
 
@@ -73,7 +77,7 @@ python benchmark/src/benchmark/campaign.py submit \
   --results-bucket my-results --image-set /secure/images.json \
   --anonymous-worker-sa anonymous-worker@my-project.iam.gserviceaccount.com \
   --authenticated-worker-sa auth-worker@my-project.iam.gserviceaccount.com \
-  --secrets /secure/secrets.yaml
+  --secret-resource projects/varve-oss/secrets/s3-listing-study-aws-credentials/versions/latest
 ```
 
 `--dry-run` renders and records nothing at the provider — use it first.

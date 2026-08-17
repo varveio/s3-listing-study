@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from benchmark import adapters, gcs, measure
-from benchmark.contract import TOOLBOX_TOOLS
+from benchmark.contract import CREDENTIAL_ENV_VAR, TOOLBOX_TOOLS
 
 ROOT = Path(__file__).parents[2]
 
@@ -153,21 +153,42 @@ def test_subject_home_matches_non_root_image() -> None:
     assert measure.SUBJECT_ENV["HOME"] == "/home/s3study"
 
 
-def test_environment_boundary_rejects_unknown_credentials_and_collisions() -> None:
-    assert "unsupported" in (
-        measure.validate_environment_inputs(
-            "authenticated",
-            ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "GOOGLE_TOKEN"],
-            {},
-            {},
-        )
-        or ""
-    )
+def test_environment_boundary_rejects_reserved_collisions() -> None:
+    assert "reserved" in (measure.validate_environment_inputs({"HOME": "/tmp"}, {}) or "")
     assert "reserved" in (
-        measure.validate_environment_inputs("anonymous", [], {"HOME": "/tmp"}, {}) or ""
+        measure.validate_environment_inputs({}, {"AWS_ACCESS_KEY_ID": "leaked"}) or ""
     )
     with pytest.raises(ValueError, match="unsupported"):
         measure.parse_case_env(["AWS_ACCESS_KEY_ID=not-allowed"])
+
+
+def test_credential_payload_parses_and_refuses_the_wrong_stratum() -> None:
+    parsed = measure.resolve_credential_env(
+        "authenticated",
+        {
+            CREDENTIAL_ENV_VAR: (
+                "AWS_ACCESS_KEY_ID=AKIAEXAMPLE\nAWS_SECRET_ACCESS_KEY=secret/value+with=padding\n\n"
+            )
+        },
+    )
+    # A secret access key may itself contain '=', so only the first one splits.
+    assert parsed == {
+        "AWS_ACCESS_KEY_ID": "AKIAEXAMPLE",
+        "AWS_SECRET_ACCESS_KEY": "secret/value+with=padding",
+    }
+    assert measure.resolve_credential_env("anonymous", {}) == {}
+    with pytest.raises(ValueError, match="missing required key"):
+        measure.resolve_credential_env(
+            "authenticated", {CREDENTIAL_ENV_VAR: "AWS_ACCESS_KEY_ID=AKIAEXAMPLE"}
+        )
+    with pytest.raises(ValueError, match="unsupported key"):
+        measure.resolve_credential_env("authenticated", {CREDENTIAL_ENV_VAR: "GOOGLE_TOKEN=nope"})
+    with pytest.raises(ValueError, match="requires"):
+        measure.resolve_credential_env("authenticated", {})
+    with pytest.raises(ValueError, match="anonymous"):
+        measure.resolve_credential_env(
+            "anonymous", {CREDENTIAL_ENV_VAR: "AWS_ACCESS_KEY_ID=AKIAEXAMPLE"}
+        )
 
 
 @pytest.mark.parametrize(
@@ -385,10 +406,10 @@ def test_count_failure_uploads_result_marker_before_exit(
     assert result["applied_subject_workdir"] == selected["subject_workdir"]
 
 
-def test_missing_pass_env_fails_before_adapter_or_subject(
+def test_missing_credential_fails_before_adapter_or_subject(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.delenv("ABSENT_CREDENTIAL", raising=False)
+    monkeypatch.delenv(CREDENTIAL_ENV_VAR, raising=False)
     monkeypatch.setattr(
         adapters,
         "compile_command",
@@ -409,8 +430,6 @@ def test_missing_pass_env_fails_before_adapter_or_subject(
         str(tmp_path),
         "--destination",
         "gs://x/",
-        "--pass-env",
-        "ABSENT_CREDENTIAL",
         "--image",
         "x@sha256:" + "a" * 64,
         "--toolbox-manifest-sha256",

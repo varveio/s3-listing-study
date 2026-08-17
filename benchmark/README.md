@@ -101,7 +101,7 @@ python benchmark/src/benchmark/campaign.py submit \
   --results-bucket my-results --image-set /secure/images.json \
   --anonymous-worker-sa anonymous-worker@my-project.iam.gserviceaccount.com \
   --authenticated-worker-sa auth-worker@my-project.iam.gserviceaccount.com \
-  --secrets /secure/secrets.yaml
+  --secret-resource projects/varve-oss/secrets/s3-listing-study-aws-credentials/versions/latest
 
 python benchmark/src/benchmark/campaign.py poll --project my-project --location us-central1 --watch
 python benchmark/src/benchmark/campaign.py verify \

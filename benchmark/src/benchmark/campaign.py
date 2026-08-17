@@ -16,7 +16,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
-import yaml
 from google.api_core.exceptions import (
     AlreadyExists,
     BadRequest,
@@ -31,7 +30,13 @@ from google.cloud import batch_v1
 from google.protobuf.json_format import MessageToDict, ParseDict
 
 from benchmark import verify
-from benchmark.contract import EXIT_DRIFT, EXIT_FAIL, EXIT_PASS, TOOLBOX_TOOLS
+from benchmark.contract import (
+    CREDENTIAL_ENV_VAR,
+    EXIT_DRIFT,
+    EXIT_FAIL,
+    EXIT_PASS,
+    TOOLBOX_TOOLS,
+)
 from benchmark.plan import Case, Plan
 
 STATE_FILENAME = "campaign.db"
@@ -62,10 +67,6 @@ TOOL_IMAGE_FIELDS = {
     "adapter_bundle_sha256",
     "subject_workdir",
 }
-AWS_CREDENTIAL_ENV_KEYS = frozenset(
-    {"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"}
-)
-AWS_CREDENTIAL_REQUIRED_ENV_KEYS = frozenset({"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"})
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS submissions (
@@ -129,6 +130,10 @@ class BatchOptions:
     subnetwork: str | None
     zone: str | None
     provisioning: str
+    # The Secret Manager version holding the authenticated stratum's credential
+    # payload. Only an authenticated case's job carries it, and only the
+    # authenticated worker identity can read it.
+    aws_credential_secret: str | None = None
     term_grace: float = 5.0
 
 
@@ -138,15 +143,6 @@ def _now() -> str:
 
 def _slug(value: str) -> str:
     return re.sub(r"[^a-z0-9-]+", "-", value.lower()).strip("-")
-
-
-def load_secrets(path: str | None) -> dict[str, dict[str, str]]:
-    if not path:
-        return {}
-    document = yaml.safe_load(Path(path).read_text()) or {}
-    if not isinstance(document, dict):
-        raise CampaignError("secrets file must be a mapping")
-    return document
 
 
 def load_image_set(path: str | Path, required_tools: set[str]) -> ImageSet:
@@ -304,7 +300,6 @@ def render_batch_job(
     destination: str,
     image: dict[str, str],
     image_set_sha256: str,
-    secrets_map: dict[str, dict[str, str]],
     *,
     campaign_id: str,
     job_id: str,
@@ -321,27 +316,13 @@ def render_batch_job(
             raise CampaignError(
                 "authenticated case requires an authenticated worker service account"
             )
-        secret_variables = secrets_map.get("authenticated", {})
-        if not isinstance(secret_variables, dict) or not secret_variables:
-            raise CampaignError("authenticated case requires configured secret variables")
-        if any(
-            not isinstance(name, str)
-            or not name
-            or not isinstance(resource, str)
-            or SECRET_RE.fullmatch(resource) is None
-            for name, resource in secret_variables.items()
-        ):
-            raise CampaignError("authenticated secrets must name Secret Manager versions")
-        unknown = sorted(set(secret_variables) - AWS_CREDENTIAL_ENV_KEYS)
-        missing = sorted(AWS_CREDENTIAL_REQUIRED_ENV_KEYS - set(secret_variables))
-        if unknown:
-            raise CampaignError(
-                f"authenticated secrets contain unsupported key(s): {', '.join(unknown)}"
-            )
-        if missing:
-            raise CampaignError(
-                f"authenticated secrets are missing required key(s): {', '.join(missing)}"
-            )
+        secret = options.aws_credential_secret
+        if not secret or SECRET_RE.fullmatch(secret) is None:
+            raise CampaignError("authenticated case requires a Secret Manager version resource")
+        # One variable, whose payload the worker parses. An anonymous case's
+        # job has no environment block at all, so the stratum a case was
+        # submitted in decides whether a credential is present.
+        secret_variables = {CREDENTIAL_ENV_VAR: secret}
         service_account = options.authenticated_worker_sa
     elif case.auth == "anonymous":
         service_account = options.anonymous_worker_sa
@@ -385,8 +366,6 @@ def render_batch_job(
     commands = [item for pair in pairs for item in pair]
     for name, value in case.env:
         commands.extend(("--case-env", f"{name}={value}"))
-    for name in secret_variables:
-        commands.extend(("--pass-env", name))
     container: dict[str, Any] = {"imageUri": image["image_uri"], "commands": commands}
     if case.resources.docker_options:
         container["options"] = shlex.join(case.resources.docker_options)
@@ -671,6 +650,7 @@ def _options(args: argparse.Namespace) -> BatchOptions:
         args.subnetwork,
         args.zone,
         args.provisioning,
+        args.secret_resource,
     )
 
 
@@ -680,7 +660,6 @@ def _submit_one(
     plan: Plan,
     case: Case,
     image_set: ImageSet,
-    secrets: dict[str, dict[str, str]],
     rep: int,
     submission: int,
     base: str,
@@ -697,7 +676,6 @@ def _submit_one(
         destination,
         image,
         image_set.sha256,
-        secrets,
         campaign_id=args.campaign_id,
         job_id=job_id,
         rep=rep,
@@ -748,7 +726,6 @@ def cmd_submit(args: argparse.Namespace) -> int:
     validate_campaign_id(args.campaign_id)
     image_set = load_image_set(args.image_set, {case.tool for case in plan.cases})
     planned_job_ids(plan, args.campaign_id, image_set)
-    secrets = load_secrets(args.secrets)
     if args.dry_run:
         options = _options(args)
         for case in plan.cases:
@@ -771,7 +748,6 @@ def cmd_submit(args: argparse.Namespace) -> int:
                     destination,
                     image,
                     image_set.sha256,
-                    secrets,
                     campaign_id=args.campaign_id,
                     job_id=base,
                     rep=rep,
@@ -810,7 +786,7 @@ def cmd_submit(args: argparse.Namespace) -> int:
                     )
                     update_submission_state(con, base, state)
                     continue
-                _submit_one(con, args, plan, case, image_set, secrets, rep, 1, base)
+                _submit_one(con, args, plan, case, image_set, rep, 1, base)
     finally:
         con.close()
     return 0
@@ -875,7 +851,6 @@ def cmd_retry(args: argparse.Namespace) -> int:
     plan = Plan.load(Path(args.plan))
     validate_campaign_id(args.campaign_id)
     image_set = load_image_set(args.image_set, {case.tool for case in plan.cases})
-    secrets = load_secrets(args.secrets)
     cases = {(case.tool, case.case_id): case for case in plan.cases}
     con = open_db(args.state)
     try:
@@ -921,7 +896,6 @@ def cmd_retry(args: argparse.Namespace) -> int:
                 plan,
                 case,
                 image_set,
-                secrets,
                 row["rep"],
                 row["submission"] + 1,
                 row["base_job_id"],
@@ -1094,7 +1068,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         p.add_argument("--campaign-id", required=True)
         p.add_argument("--results-bucket", required=True)
         p.add_argument("--image-set", required=True)
-        p.add_argument("--secrets")
+        p.add_argument(
+            "--secret-resource",
+            metavar="projects/P/secrets/S/versions/V",
+            help="Secret Manager version holding the authenticated stratum's "
+            "KEY=VALUE credential payload. Required only when the plan has an "
+            "authenticated case; anonymous cases never receive it.",
+        )
         p.add_argument("--anonymous-worker-sa", required=True)
         p.add_argument("--authenticated-worker-sa")
         p.add_argument("--network")

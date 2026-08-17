@@ -42,6 +42,19 @@ TOOLBOX_TOOLS = frozenset(
 )
 
 
+# The authenticated stratum's credential travels as ONE Batch secretVariable
+# holding the KEY=VALUE payload documented in
+# infra/terraform/modules/gcp/s3-listing-study/aws-credentials.tf: one secret,
+# one grant, one rotation, and an optional session token that a per-variable
+# mapping would have to model as a separate secret. The controller names the
+# secret version; the worker parses the payload and never records its values.
+CREDENTIAL_ENV_VAR = "S3_STUDY_AWS_CREDENTIAL"
+AWS_CREDENTIAL_ENV_KEYS = frozenset(
+    {"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"}
+)
+AWS_CREDENTIAL_REQUIRED_ENV_KEYS = frozenset({"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"})
+
+
 def sha256_of(path: Path) -> str:
     digest = hashlib.sha256()
     with open(path, "rb") as f:

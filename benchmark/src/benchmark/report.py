@@ -96,7 +96,7 @@ def recorded_worker_options(row: sqlite3.Row) -> dict[str, str]:
         if not name.startswith("--") or index + 1 >= len(commands):
             raise ValueError("recorded worker commands are not flag/value pairs")
         value = commands[index + 1]
-        if name in options and name not in {"--case-env", "--pass-env"}:
+        if name in options and name != "--case-env":
             raise ValueError(f"recorded worker commands repeat {name}")
         options[name] = value
         index += 2

@@ -13,17 +13,12 @@ from google.api_core.exceptions import AlreadyExists, BadRequest
 from google.cloud import batch_v1
 
 from benchmark import campaign
-from benchmark.contract import TOOLBOX_TOOLS
+from benchmark.contract import CREDENTIAL_ENV_VAR, TOOLBOX_TOOLS
 from benchmark.plan import Plan
 
 ROOT = Path(__file__).parents[2]
 DIGEST = "a" * 64
-AUTH_SECRETS = {
-    "authenticated": {
-        "AWS_ACCESS_KEY_ID": "projects/p/secrets/access-key/versions/1",
-        "AWS_SECRET_ACCESS_KEY": "projects/p/secrets/secret-key/versions/1",
-    }
-}
+AUTH_SECRET = "projects/p/secrets/aws-credentials/versions/1"
 
 
 def tool_image(tool: str) -> dict[str, str]:
@@ -126,13 +121,13 @@ def test_batch_render_passes_identity_resources_and_auth_policy() -> None:
         "projects/p/regions/r/subnetworks/s",
         "us-east1-b",
         "STANDARD",
+        AUTH_SECRET,
     )
     job = campaign.render_batch_job(
         case,
         "gs://results/leaf/",
         image(case.tool),
         "e" * 64,
-        AUTH_SECRETS,
         campaign_id="2026-08-16-candidate",
         job_id="c-one",
         rep=1,
@@ -157,7 +152,9 @@ def test_batch_render_passes_identity_resources_and_auth_policy() -> None:
         assert flag in commands
     allocation = job["allocationPolicy"]
     assert allocation["serviceAccount"]["email"] == "authenticated@example.test"
-    assert "--pass-env" in commands
+    environment = job["taskGroups"][0]["taskSpec"]["environment"]
+    assert environment["secretVariables"] == {CREDENTIAL_ENV_VAR: AUTH_SECRET}
+    assert not any(command.startswith("projects/") for command in commands)
     assert allocation["instances"][0]["policy"]["provisioningModel"] == "STANDARD"
     assert allocation["network"]["networkInterfaces"][0]["network"].endswith("/n")
     assert allocation["location"]["allowedLocations"] == ["zones/us-east1-b"]
@@ -173,7 +170,6 @@ def test_authenticated_render_fails_closed_without_sa_and_secret() -> None:
             "gs://results/leaf/",
             image(case.tool),
             "e" * 64,
-            {},
             campaign_id="2026-08-16-candidate",
             job_id="c-one",
             rep=1,
@@ -182,6 +178,39 @@ def test_authenticated_render_fails_closed_without_sa_and_secret() -> None:
             region=plan.region,
             options=options,
         )
+
+
+def test_anonymous_case_carries_no_credential_even_when_one_is_configured() -> None:
+    """The stratum decides: a configured secret reaches authenticated cases only."""
+    case = replace(
+        Plan.load(ROOT / "benchmark/plans/buckets/noaa-ghcn-pds.yaml").cases[0], auth="anonymous"
+    )
+    options = campaign.BatchOptions(
+        "anon@example.test",
+        "auth@example.test",
+        None,
+        None,
+        None,
+        "SPOT",
+        AUTH_SECRET,
+    )
+    job = campaign.render_batch_job(
+        case,
+        "gs://results/leaf/",
+        image(case.tool),
+        "e" * 64,
+        campaign_id="2026-08-16-candidate",
+        job_id="c-one",
+        rep=1,
+        submission=1,
+        bucket="bucket",
+        region="us-east-1",
+        options=options,
+    )
+    task_spec = job["taskGroups"][0]["taskSpec"]
+    assert "environment" not in task_spec
+    assert job["allocationPolicy"]["serviceAccount"]["email"] == "anon@example.test"
+    assert AUTH_SECRET not in json.dumps(job)
 
 
 def test_intent_is_durable_before_create(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -197,6 +226,7 @@ def test_intent_is_durable_before_create(tmp_path: Path, monkeypatch: pytest.Mon
         subnetwork=None,
         zone=None,
         provisioning="SPOT",
+        secret_resource=AUTH_SECRET,
         project="p",
         location="l",
     )
@@ -214,7 +244,6 @@ def test_intent_is_durable_before_create(tmp_path: Path, monkeypatch: pytest.Mon
         plan,
         case,
         image_set(),
-        AUTH_SECRETS,
         1,
         1,
         "c-test",
@@ -243,7 +272,6 @@ def test_already_exists_adopts_only_exact_job() -> None:
         "gs://results/leaf/",
         image(case.tool),
         "e" * 64,
-        {},
         campaign_id="2026-08-16-candidate",
         job_id="c-one",
         rep=1,
@@ -301,7 +329,6 @@ def test_retry_rewrites_only_retry_identity() -> None:
         "gs://results/submission-1/",
         image(case.tool),
         "e" * 64,
-        {},
         campaign_id="2026-08-16-candidate",
         job_id="c-one",
         rep=1,
@@ -321,7 +348,6 @@ def test_retry_rewrites_only_retry_identity() -> None:
         "gs://results/submission-2/",
         image(case.tool),
         "e" * 64,
-        {},
         campaign_id="2026-08-16-candidate",
         job_id="c-two",
         rep=1,
@@ -420,12 +446,6 @@ def test_dry_run_renders_every_case_without_sqlite_or_batch(
     plan = Plan.load(plan_path)
     image_path = tmp_path / "images.json"
     image_path.write_text(json.dumps(image_set_document()))
-    secrets = tmp_path / "secrets.yaml"
-    secrets.write_text(
-        "authenticated:\n"
-        "  AWS_ACCESS_KEY_ID: projects/p/secrets/access-key/versions/1\n"
-        "  AWS_SECRET_ACCESS_KEY: projects/p/secrets/secret-key/versions/1\n"
-    )
     monkeypatch.setattr(
         campaign,
         "ensure_job",
@@ -449,8 +469,8 @@ def test_dry_run_renders_every_case_without_sqlite_or_batch(
             "results",
             "--image-set",
             str(image_path),
-            "--secrets",
-            str(secrets),
+            "--secret-resource",
+            AUTH_SECRET,
             "--anonymous-worker-sa",
             "anon@example.test",
             "--authenticated-worker-sa",

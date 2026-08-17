@@ -30,12 +30,18 @@ import subprocess
 import sys
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 
 from benchmark import adapters, gcs
-from benchmark.contract import TOOLBOX_TOOLS, sha256_of
+from benchmark.contract import (
+    AWS_CREDENTIAL_ENV_KEYS,
+    AWS_CREDENTIAL_REQUIRED_ENV_KEYS,
+    CREDENTIAL_ENV_VAR,
+    TOOLBOX_TOOLS,
+    sha256_of,
+)
 
 EXIT_ADAPTER_ERROR = 3
 EXIT_SECRET_DETECTED = 9
@@ -43,10 +49,6 @@ EXIT_IMAGE_MISMATCH = 10
 EXIT_POSTPROCESSING_FAILED = 11
 PINNED_IMAGE_RE = re.compile(r"\A[^\s@]+@sha256:[0-9a-f]{64}\Z")
 CASE_ENV_KEYS = frozenset({"JAVA_TOOL_OPTIONS", "NODE_OPTIONS"})
-AWS_CREDENTIAL_ENV_KEYS = frozenset(
-    {"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"}
-)
-AWS_CREDENTIAL_REQUIRED_ENV_KEYS = frozenset({"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"})
 
 SECRET_PATTERNS = {
     "credential-shaped value": re.compile(
@@ -93,30 +95,67 @@ def parse_case_env(pairs: list[str]) -> dict[str, str]:
     return env
 
 
+def parse_credential_env(blob: str) -> dict[str, str]:
+    """Parse ``KEY=VALUE`` lines into a validated AWS credential mapping.
+
+    Matches the Secret Manager payload format in
+    ``infra/terraform/modules/gcp/s3-listing-study/aws-credentials.tf``: one
+    ``KEY=VALUE`` per line, ``AWS_SESSION_TOKEN`` optional.
+    """
+    result: dict[str, str] = {}
+    for line_number, raw_line in enumerate(blob.splitlines(), start=1):
+        line = raw_line.strip()
+        if not line:
+            continue
+        key, separator, value = line.partition("=")
+        if not separator:
+            raise ValueError(f"credential line {line_number} is not KEY=VALUE")
+        key = key.strip()
+        value = value.strip()
+        if key not in AWS_CREDENTIAL_ENV_KEYS:
+            raise ValueError(f"credential line {line_number} names an unsupported key: {key}")
+        if key in result:
+            raise ValueError(f"credential line {line_number} duplicates key: {key}")
+        if not value:
+            raise ValueError(f"credential line {line_number} has an empty value")
+        result[key] = value
+    missing = sorted(AWS_CREDENTIAL_REQUIRED_ENV_KEYS - set(result))
+    if missing:
+        raise ValueError(f"credential payload is missing required key(s): {', '.join(missing)}")
+    return result
+
+
+def resolve_credential_env(auth: str, environ: Mapping[str, str]) -> dict[str, str]:
+    """Return the subject's credential variables for this case's stratum.
+
+    The credential arrives as the single Batch secretVariable the controller
+    attaches to an authenticated case's job and nothing else. An anonymous case
+    whose environment carries one was submitted in the wrong stratum, which is a
+    refusal rather than something to drop silently.
+    """
+    blob = environ.get(CREDENTIAL_ENV_VAR)
+    if auth == "authenticated":
+        if not blob:
+            raise ValueError(f"authenticated case requires {CREDENTIAL_ENV_VAR}")
+        return parse_credential_env(blob)
+    if blob:
+        raise ValueError(f"{CREDENTIAL_ENV_VAR} is set but --auth is anonymous")
+    return {}
+
+
 def validate_environment_inputs(
-    auth: str,
-    pass_env: list[str],
     functional_env: dict[str, str],
     case_env: dict[str, str],
 ) -> str | None:
     """Refuse environment names that could widen or shadow the auth boundary."""
-    passed = set(pass_env)
-    if len(passed) != len(pass_env):
-        return "--pass-env repeats a variable"
-    if auth == "anonymous" and passed:
-        return "anonymous cases must not carry credential variables"
-    if auth == "authenticated":
-        unknown = sorted(passed - AWS_CREDENTIAL_ENV_KEYS)
-        missing = sorted(AWS_CREDENTIAL_REQUIRED_ENV_KEYS - passed)
-        if unknown:
-            return f"authenticated case has unsupported credential key(s): {', '.join(unknown)}"
-        if missing:
-            return f"authenticated case is missing credential key(s): {', '.join(missing)}"
     reserved = set(SUBJECT_ENV) | AWS_CREDENTIAL_ENV_KEYS | {"AWS_REGION", "AWS_DEFAULT_REGION"}
     collisions = sorted(set(functional_env) & reserved)
     if collisions:
         return f"capsule environment collides with reserved key(s): {', '.join(collisions)}"
-    overlap = sorted((set(functional_env) & set(case_env)) | (set(case_env) & passed))
+    case_collisions = sorted(set(case_env) & reserved)
+    if case_collisions:
+        return f"case environment collides with reserved key(s): {', '.join(case_collisions)}"
+    overlap = sorted(set(functional_env) & set(case_env))
     if overlap:
         return f"environment sources collide on key(s): {', '.join(overlap)}"
     return None
@@ -226,14 +265,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=[],
         metavar="NAME=VALUE",
         help="Extra environment for the subject, e.g. JAVA_TOOL_OPTIONS for swath. Repeatable.",
-    )
-    parser.add_argument(
-        "--pass-env",
-        action="append",
-        default=[],
-        metavar="NAME",
-        help="Copy NAME from this process's own environment into the subject's env "
-        "(e.g. a Batch secretVariable). Repeatable. Never recorded in result.json.",
     )
     parser.add_argument("--image", required=True)
     parser.add_argument("--toolbox-manifest-sha256", required=True)
@@ -723,12 +754,10 @@ def main(argv: list[str] | None = None) -> int:
     attempt_dir = Path(args.output).resolve()
     attempt_dir.mkdir(parents=True, exist_ok=True)
 
-    missing_pass_env = [name for name in args.pass_env if name not in os.environ]
-    if missing_pass_env:
-        print(
-            f"measure: --pass-env variable(s) not set in this environment: {missing_pass_env}",
-            file=sys.stderr,
-        )
+    try:
+        credential_env = resolve_credential_env(args.auth, os.environ)
+    except ValueError as exc:
+        print(f"measure: {exc}", file=sys.stderr)
         return 2
 
     metadata_error = validate_image_metadata(args)
@@ -762,24 +791,21 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as exc:
         print(f"measure: {exc}", file=sys.stderr)
         return 2
-    environment_error = validate_environment_inputs(
-        args.auth, args.pass_env, functional_env, case_env
-    )
+    environment_error = validate_environment_inputs(functional_env, case_env)
     if environment_error:
         print(f"measure: {environment_error}", file=sys.stderr)
         return 2
-    # --pass-env is deliberately kept out of case_env: case_env is recorded
-    # in result.json (a published artifact), and a value copied in here is a
-    # credential -- e.g. Batch's secretVariables land in os.environ, and this
-    # is how they reach the subject without ever being written down.
-    passthrough_env = {name: os.environ[name] for name in args.pass_env}
+    # The credential is deliberately kept out of case_env: case_env is recorded
+    # in result.json (a published artifact), while these values are secret
+    # material. Batch's secretVariable lands in os.environ, and this is how it
+    # reaches the subject without ever being written down.
     env = {
         **SUBJECT_ENV,
         "AWS_REGION": args.region,
         "AWS_DEFAULT_REGION": args.region,
         **functional_env,
         **case_env,
-        **passthrough_env,
+        **credential_env,
     }
 
     # Every invocation gets its own leaf: two launches of the same case
