@@ -269,7 +269,7 @@ one of its inputs is an artifact a preparation has not produced. It cannot be an
 `attempts` row: that table is keyed by identity and this case has none yet.
 
 `ABANDONED` is what a slot becomes when its preparation settles unsuccessfully
-and the failure is accepted — the same declaration `ACCEPTED_FAILED` makes about
+and the failure is accepted — the same declaration `ACCEPTED` makes about
 an attempt, applied to a measurement that never got to exist. An absent
 measurement, recorded as absent.
 
@@ -417,9 +417,9 @@ One file accumulates every group, and several groups may be in flight at once.
 
 **The group, through the recorded rows — not a re-resolved plan.**
 
-`case_id` folds in the tool and platform slices, the executor, and the machine
-type, so reproducing one from a plan would mean re-resolving that plan *and*
-holding the exact image set and executor configuration the launch used.
+`case_id` folds in the tool and platform slices and the machine type, so
+reproducing one from a plan would mean re-resolving that plan *and* holding the
+exact image set the launch used.
 Rebuilding an identity in order to check it is the wrong direction anyway — it
 re-derives from a file that may have been edited since, to confirm something the
 ledger already recorded.

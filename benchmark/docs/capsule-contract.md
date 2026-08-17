@@ -276,8 +276,20 @@ whole box when there is none — and `heap_percent`. A capsule turns them into
 whatever its runtime needs. Because heap flags arrive as environment rather than
 argv, a capsule exports `build_env(request)`; the loader defaults it to
 returning `FUNCTIONAL_ENV`, so the nine capsules with no managed runtime declare
-nothing. The result is derived from values already hashed, so like `signed` it
-is recorded and never a hash input.
+nothing.
+
+Identity follows the same split. The share is not a global hash input — nine
+subjects cannot feel it, and re-identifying their cases over a number they
+ignore would be over-invalidation with no measurement behind it. But for the two
+subjects that *can* feel it, changing the share changes the measurement, so it
+must change their identity. The mechanism is the axis machinery that already
+exists: a managed-runtime capsule declares `heap_percent` as a `Fixed` axis
+carrying the constant, and the loader merges it into that capsule's `config`
+before hashing, exactly as it merges a declared default. The loader refuses a
+capsule declaring any other number than the harness's — which is what keeps the
+share a single methodology decision rather than eleven drifting ones. The
+rendered heap flags are then derived from values already hashed, so like
+`signed` they are recorded and never a hash input of their own.
 
 ## Declaring a prerequisite
 

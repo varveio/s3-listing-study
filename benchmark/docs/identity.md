@@ -137,7 +137,7 @@ Two things follow:
 | `image_uri`, `image_set_sha256` | You need to know exactly what ran and be able to reproduce it, but the slices identify it. Two attempts of one case may have run on different images, and the row says which. |
 | `produced_by` | Which attempt made the artifact a case consumed. The artifact's content digest is what identifies it; *which run* produced those bytes is a debugging question. |
 | `signed`, `visible_memory_gb` | Derived from `auth_role` and the ceiling, both already hashed. A derived value is not a second input. |
-| `heap_percent` | A methodology constant nine of eleven subjects cannot feel. Hashing it would re-identify every Go, Rust and Python case when a share they ignore is changed, which is the law — *a field either changes the identity or it is not an input* — read backwards. It reaches the two managed runtimes as a declared axis of their capsules instead. |
+| `heap_percent` | A methodology constant nine of eleven subjects cannot feel. Hashing it globally would re-identify every Go, Rust and Python case when a share they ignore is changed, which is the law — *a field either changes the identity or it is not an input* — read backwards. It enters identity exactly where it changes the measurement: a managed-runtime capsule declares `heap_percent` as a `Fixed` axis carrying the constant, and the loader merges it into that capsule's `config` before hashing, like any declared value. See [`capsule-contract.md`](capsule-contract.md) § *The ceiling, and the share of it*. |
 | `executor` | One executor exists. Recorded so a second one is distinguishable when it arrives; hashed then, not before. |
 
 `network` and `subnetwork` are arguable — an egress path could matter — but they
@@ -291,8 +291,10 @@ slice closes that.
 ## Open questions
 
 - **The `executor` vocabulary.** What names exist, and how a name resolves to
-  the code that renders and submits a job. `executor` is a hash input, so the
-  vocabulary is an identity question rather than a naming one.
+  the code that renders and submits a job. The column is recorded, not hashed,
+  while one executor exists — but it becomes a hash input the day a second one
+  arrives, so the vocabulary is an identity question to settle before that day
+  rather than after.
 - **Where the role table lives.** `auth_role` → service account + secret version
   is deployment configuration, not plan content. It needs a file, a schema, and
   a validation point.
