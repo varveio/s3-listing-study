@@ -47,6 +47,7 @@ EXIT_ADAPTER_ERROR = 3
 EXIT_SECRET_DETECTED = 9
 EXIT_IMAGE_MISMATCH = 10
 EXIT_POSTPROCESSING_FAILED = 11
+EXIT_ARTIFACT_UNUSABLE = 12
 PINNED_IMAGE_RE = re.compile(r"\A[^\s@]+@sha256:[0-9a-f]{64}\Z")
 CASE_ENV_KEYS = frozenset({"JAVA_TOOL_OPTIONS", "NODE_OPTIONS"})
 
@@ -296,8 +297,42 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         metavar="JSON",
         help="The case's effective capsule config blob (LoadedCommandAdapter.effective_config).",
     )
+    parser.add_argument(
+        "--input-artifact",
+        default="",
+        metavar="gs://...",
+        help="The object holding the artifact this case consumes, staged locally "
+        "before the subject runs. Empty for the many modes that consume nothing.",
+    )
+    parser.add_argument(
+        "--input-artifact-sha256",
+        default="",
+        help="The content digest this case hashed. The staged bytes are verified "
+        "against it, and a mismatch refuses the attempt.",
+    )
     parser.add_argument("--image-metadata", default="/opt/benchmark/image-metadata.json")
     return parser.parse_args(argv)
+
+
+def stage_artifact(uri: str, expected_sha256: str, into: Path) -> Path:
+    """Download the artifact this case consumes and refuse bytes that moved.
+
+    Verified before the subject ever sees it: the case hashed this digest, so
+    content that does not match it is a different case wearing this one's
+    identity. Staged outside the attempt directory, because what lands there is
+    this attempt's own evidence and a consumed artifact is somebody else's.
+    """
+    if not expected_sha256:
+        raise ValueError(f"--input-artifact {uri} carries no digest to verify it against")
+    into.mkdir(parents=True, exist_ok=True)
+    target = into / uri.rstrip("/").rsplit("/", 1)[-1]
+    target.write_bytes(gcs.download_bytes(uri))
+    staged = sha256_of(target)
+    if staged != expected_sha256:
+        raise ValueError(
+            f"staged artifact {uri} digests {staged}, not the {expected_sha256} this case consumes"
+        )
+    return target
 
 
 def validate_image_metadata(args: argparse.Namespace) -> str | None:
@@ -327,16 +362,18 @@ def validate_image_metadata(args: argparse.Namespace) -> str | None:
         "adapter_bundle_sha256",
         "subject_workdir",
         "executable",
+        "tool_slice_sha256",
+        "platform_sha256",
     }
     if (
-        metadata.get("schema_version") != 4
+        metadata.get("schema_version") != 5
         or not isinstance(tools, dict)
         or set(tools) != TOOLBOX_TOOLS
         or any(not isinstance(value, dict) or set(value) != tool_fields for value in tools.values())
     ):
         return "image metadata schema is not supported"
     toolbox_projection = {
-        "schema_version": 2,
+        "schema_version": 3,
         "toolbox_recipe_sha256": metadata.get("toolbox_recipe_sha256"),
         "tools": {
             tool: {
@@ -793,6 +830,20 @@ def main(argv: list[str] | None = None) -> int:
     visible_memory_gb = float(
         args.container_memory_gb if args.container_memory_gb is not None else args.memory_gb
     )
+    artifact_path = ""
+    if args.input_artifact:
+        try:
+            artifact_path = str(
+                stage_artifact(
+                    args.input_artifact,
+                    args.input_artifact_sha256,
+                    attempt_dir.parent / f"{attempt_dir.name}-inbound",
+                )
+            )
+        except Exception as exc:
+            print(f"measure: {exc}", file=sys.stderr)
+            return EXIT_ARTIFACT_UNUSABLE
+
     try:
         command, functional_env = adapters.compile_command(
             adapter_dir,
@@ -804,6 +855,7 @@ def main(argv: list[str] | None = None) -> int:
             signed=args.auth_role is not None,
             config=config,
             sink_dir=str(native_root),
+            artifact_path=artifact_path,
             visible_memory_gb=visible_memory_gb,
             heap_percent=HEAP_PERCENT,
         )
@@ -912,6 +964,10 @@ def main(argv: list[str] | None = None) -> int:
         "argv": list(command),
         "case_env": case_env,
         "config": config,
+        # Lineage, beside the timing: which bytes this case consumed, and where
+        # the harness staged them from.
+        "input_artifact": args.input_artifact or None,
+        "input_artifact_sha256": args.input_artifact_sha256 or None,
         "exit_code": exit_code,
         "timed_out": timed_out,
         "execution": execution,

@@ -9,8 +9,10 @@ rather than the shape of any particular row.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sqlite3
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -19,7 +21,8 @@ import pytest
 from google.api_core.exceptions import AlreadyExists, BadRequest
 from google.cloud import batch_v1
 
-from benchmark import campaign, identity
+from benchmark import campaign, gcs, identity
+from benchmark import plan as bench
 from benchmark.contract import CREDENTIAL_ENV_VAR, TOOLBOX_TOOLS
 from benchmark.plan import Case, Plan
 
@@ -91,6 +94,25 @@ def any_case(plan: Plan, *, signed: bool = False) -> Case:
     return next(case for case in plan.cases if (case.auth_role is not None) is signed)
 
 
+def context(
+    plan: Plan,
+    case: Case,
+    images: campaign.ImageSet,
+    *,
+    group_id: str = "g20260817-000000",
+    **overrides: Any,
+) -> campaign.LaunchContext:
+    return campaign.LaunchContext.for_tool(
+        case.tool,
+        suite=SUITE,
+        group_id=group_id,
+        plan=plan,
+        image_set=images,
+        results_bucket="results",
+        options=options(**overrides),
+    )
+
+
 def submit(
     con: sqlite3.Connection,
     plan: Plan,
@@ -101,15 +123,7 @@ def submit(
     repeat: bool = False,
 ) -> campaign.Attempt:
     return campaign.submit_case(
-        con,
-        case,
-        suite=SUITE,
-        group_id=group_id,
-        plan=plan,
-        image_set=images,
-        results_bucket="results",
-        options=options(),
-        repeat=repeat,
+        con, case, context(plan, case, images, group_id=group_id), repeat=repeat
     )
 
 
@@ -257,21 +271,11 @@ class ExistingClient:
         return self.job
 
 
-def rendered_request(
-    tmp_path: Path, **overrides: object
-) -> tuple[campaign.Attempt, dict[str, Any]]:
+def rendered_request(tmp_path: Path, **overrides: Any) -> tuple[campaign.Attempt, dict[str, Any]]:
     plan = loaded_plan()
     case = any_case(plan, signed=bool(overrides.pop("signed", False)))
     images = image_set(tmp_path)
-    _, _, build = campaign.planned_attempt(
-        case,
-        suite=SUITE,
-        group_id="g20260817-000000",
-        plan=plan,
-        image_set=images,
-        results_bucket="results",
-        options=options(**overrides),
-    )
+    _, _, build = campaign.planned_attempt(case, context(plan, case, images, **overrides))
     attempt, request = build(1)
     return attempt, cast(dict[str, Any], json.loads(request))
 
@@ -312,7 +316,11 @@ def test_a_dry_run_renders_every_planned_attempt_and_writes_nothing(
         == 0
     )
     rendered = capsys.readouterr().out.splitlines()
-    assert len(rendered) == len(loaded_plan().cases)
+    cases = len(loaded_plan().cases)
+    assert (
+        rendered[-1] == f"campaign: {cases} plan row(s) expand to {cases} attempt(s) and 0 slot(s)"
+    )
+    assert len(rendered[:-1]) == cases
     assert not state.exists()
 
 
@@ -526,3 +534,247 @@ def test_an_image_set_without_slices_cannot_identify_a_case(tmp_path: Path) -> N
     tools["aws-cli"]["platform_sha256"] = "1" * 64
     with pytest.raises(campaign.CampaignError, match="disagree on platform_sha256"):
         image_set(tmp_path / "other", disagreeing)
+
+
+HINTED = """
+spec_version: 2
+bucket: b
+region: us-east-1
+defaults:
+  reps: 1
+  timeout_s: 3600
+  vcpus: 2
+  memory_gb: 8
+tools:
+  s3-fast-list:
+    cases:
+      - {mode: list-hinted, concurrency: 8}
+"""
+
+
+def hinted_plan(tmp_path: Path, body: str = HINTED) -> Plan:
+    """A plan asking for the one shipped mode with a declared prerequisite chain.
+
+    Loaded against the real capsules, so the arithmetic below is a drift guard on
+    `s3-fast-list`'s own `REQUIRES` rather than on a fixture repeating it.
+    """
+    path = tmp_path / "b.yaml"
+    path.write_text(body, encoding="utf-8")
+    return Plan.load(
+        path,
+        default_modes={},
+        instances={(2, 8): "n4-standard-2"},
+        heap=bench.HeapConfig(percent=75, policies={}),
+    )
+
+
+class Evidence:
+    """The results bucket, as much of it as a settling preparation is read from."""
+
+    def __init__(self) -> None:
+        self.objects: dict[str, bytes] = {}
+
+    def publish(self, result_prefix: str, name: str, content: bytes) -> str:
+        digest = hashlib.sha256(content).hexdigest()
+        self.objects[f"{result_prefix}result.json"] = json.dumps(
+            {"native_manifest": {name: digest}}
+        ).encode()
+        self.objects[f"{result_prefix}native/{name}"] = content
+        return digest
+
+    def download(self, uri: str) -> bytes:
+        return self.objects[uri]
+
+
+def hinted_launch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> sqlite3.Connection:
+    monkeypatch.setattr(campaign, "ensure_job", lambda *a, **k: ("SUBMITTED", None))
+    plan = hinted_plan(tmp_path)
+    con = campaign.open_ledger(str(tmp_path / "campaign.db"), suite=SUITE)
+    launch = campaign.Launch(
+        con, SUITE, "g20260817-000000", plan, image_set(tmp_path), "results", options()
+    )
+    launch.run(campaign.expand_launch(plan.cases, plan.adapters))
+    return con
+
+
+def test_a_declared_chain_expands_into_one_preparation_and_two_slots(tmp_path: Path) -> None:
+    """`list-hinted` requires `list` then `ks-split`: only the first is identifiable."""
+    plan = hinted_plan(tmp_path)
+    steps = campaign.expand_launch(plan.cases, plan.adapters)
+
+    assert [(step.case.mode, step.case.purpose, step.waits_for) for step in steps] == [
+        ("list", "preparation", None),
+        ("ks-split", "preparation", 0),
+        ("list-hinted", "measurement", 1),
+    ]
+    rendered = campaign.render_launch(
+        steps,
+        suite=SUITE,
+        group_id="dry-run",
+        plan=plan,
+        image_set=image_set(tmp_path),
+        results_bucket="results",
+        options=options(),
+    )
+    assert len(rendered) == 3
+    assert rendered[1].startswith("slot dry-run/1 s3-fast-list ks-split preparation awaiting ")
+    assert rendered[2].startswith("slot dry-run/2 s3-fast-list list-hinted measurement awaiting ")
+
+
+def test_a_preparation_is_identified_by_content_and_not_by_the_consumer(tmp_path: Path) -> None:
+    """It answers "do we already have this artifact?", so the box and the role stay out."""
+    plan = hinted_plan(tmp_path)
+    (preparation, _, _) = campaign.expand_launch(plan.cases, plan.adapters)
+    images = image_set(tmp_path)
+    minted, inputs = campaign.case_identity(
+        preparation.case,
+        auth_role=None,
+        target_bucket=plan.bucket,
+        target_region=plan.region,
+        location="us-east1",
+        tool_slice=images.image_for("s3-fast-list")["tool_slice_sha256"],
+        platform=PLATFORM,
+    )
+
+    environment = json.loads(inputs)["environment"]
+    assert set(environment) == {"target_bucket", "target_region", "target_prefix"}
+    # The prerequisite runs the capsule's own mode at the capsule's own config:
+    # the consumer's concurrency 8 is an axis of the hinted listing, not of this.
+    assert json.loads(inputs)["config"] == {"mode": "list"}
+    # A bigger box produces the same hints, so it is the same preparation.
+    on_a_bigger_box = replace(
+        preparation.case, resources=replace(preparation.case.resources, vcpus=4, memory_gb=16)
+    )
+    assert (
+        campaign.case_identity(
+            on_a_bigger_box,
+            auth_role="fixture-role",
+            target_bucket=plan.bucket,
+            target_region=plan.region,
+            location="europe-west1",
+            tool_slice=images.image_for("s3-fast-list")["tool_slice_sha256"],
+            platform=PLATFORM,
+        )[0]
+        == minted
+    )
+
+
+def test_a_settled_preparation_resolves_its_chain_link_by_link(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Digest the artifact, mint the identity that was waiting on it, submit, repeat."""
+    con = hinted_launch(tmp_path, monkeypatch)
+    evidence = Evidence()
+    monkeypatch.setattr(gcs, "download_bytes", evidence.download)
+    listing = campaign.Attempt.from_row(attempt_row(con, "list"))
+    assert [row["state"] for row in campaign.pending_rows(con)] == ["BLOCKED", "BLOCKED"]
+
+    keyspace = evidence.publish(listing.result_prefix, "keyspace.ks", b"a/\nb/\n")
+    campaign.set_state(con, listing.attempt_id, "SUCCEEDED")
+    campaign.settle_dependents(con, listing, "SUCCEEDED", suite=SUITE)
+
+    split = campaign.Attempt.from_row(attempt_row(con, "ks-split"))
+    slots = campaign.pending_rows(con)
+    assert (slots[0]["state"], slots[0]["became"]) == ("RESOLVED", split.attempt_id)
+    # The second link could not be identified until the first settled, and now
+    # waits on the attempt the slot became rather than on the slot.
+    assert (slots[1]["state"], slots[1]["awaiting"]) == ("BLOCKED", split.attempt_id)
+    assert (split.input_artifact_sha256, split.produced_by) == (keyspace, listing.attempt_id)
+
+    hints = evidence.publish(split.result_prefix, "hints.input", b"m/\nz/\n")
+    campaign.set_state(con, split.attempt_id, "SUCCEEDED")
+    campaign.settle_dependents(con, split, "SUCCEEDED", suite=SUITE)
+
+    hinted = campaign.Attempt.from_row(attempt_row(con, "list-hinted"))
+    assert campaign.pending_rows(con)[1]["became"] == hinted.attempt_id
+    assert (hinted.input_artifact_sha256, hinted.produced_by) == (hints, split.attempt_id)
+    # What the worker is told to stage, and what it must digest to before use.
+    request = json.loads(
+        con.execute(
+            "SELECT request_json FROM attempts WHERE attempt_id=?", (hinted.attempt_id,)
+        ).fetchone()["request_json"]
+    )
+    assert campaign.request_argument(request, "--input-artifact") == (
+        f"{split.result_prefix}native/hints.input"
+    )
+    assert campaign.request_argument(request, "--input-artifact-sha256") == hints
+
+
+def test_an_unusable_artifact_fails_the_preparation_and_abandons_what_awaited_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A hints file that digests cleanly and means nothing must not reach a measurement."""
+    con = hinted_launch(tmp_path, monkeypatch)
+    evidence = Evidence()
+    monkeypatch.setattr(gcs, "download_bytes", evidence.download)
+    listing = campaign.Attempt.from_row(attempt_row(con, "list"))
+    evidence.publish(listing.result_prefix, "keyspace.ks", b"a/\n")
+    campaign.set_state(con, listing.attempt_id, "SUCCEEDED")
+    campaign.settle_dependents(con, listing, "SUCCEEDED", suite=SUITE)
+    split = campaign.Attempt.from_row(attempt_row(con, "ks-split"))
+
+    # An empty first cut point: a full-range serial scan beside every segment.
+    digest = evidence.publish(split.result_prefix, "hints.input", b"\nz/\n")
+    campaign.set_state(con, split.attempt_id, "SUCCEEDED")
+    campaign.settle_dependents(con, split, "SUCCEEDED", suite=SUITE)
+
+    row = con.execute(
+        "SELECT state, state_detail, artifact_sha256 FROM attempts WHERE attempt_id=?",
+        (split.attempt_id,),
+    ).fetchone()
+    assert row["state"] == "FAILED" and "first cut point is empty" in row["state_detail"]
+    # The digest is a fact about what it produced; the verdict is that it is not usable.
+    assert row["artifact_sha256"] == digest
+    assert campaign.pending_rows(con)[1]["state"] == "BLOCKED"
+
+    campaign.set_state(con, split.attempt_id, "ACCEPTED", "accepted FAILED")
+    campaign.settle_dependents(con, split, "ACCEPTED", suite=SUITE)
+    assert campaign.pending_rows(con)[1]["state"] == "ABANDONED"
+
+
+def test_a_preparation_another_launch_made_is_bound_only_when_asked_for(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Reuse is free within a launch and a decision across them: the corpus moves."""
+    con = hinted_launch(tmp_path, monkeypatch)
+    evidence = Evidence()
+    monkeypatch.setattr(gcs, "download_bytes", evidence.download)
+    listing = campaign.Attempt.from_row(attempt_row(con, "list"))
+    keyspace = evidence.publish(listing.result_prefix, "keyspace.ks", b"a/\nb/\n")
+    campaign.set_state(con, listing.attempt_id, "SUCCEEDED")
+
+    plan = hinted_plan(tmp_path)
+    steps = campaign.expand_launch(plan.cases, plan.adapters)
+    again = campaign.Launch(
+        con, SUITE, "g20260817-000001", plan, image_set(tmp_path), "results", options()
+    )
+    with pytest.raises(campaign.CampaignError, match="reusing a preparation across launches"):
+        again.run(steps)
+
+    reusing = campaign.Launch(
+        con,
+        SUITE,
+        "g20260817-000002",
+        plan,
+        image_set(tmp_path),
+        "results",
+        options(),
+        reuse_preparations=True,
+    )
+    reusing.run(steps)
+    # No second listing was submitted, and the split it unblocks is an attempt
+    # rather than a slot: its identity is complete the moment the digest is known.
+    assert len(campaign.attempt_rows(con, case_id=listing.case_id)) == 1
+    split = campaign.Attempt.from_row(attempt_row(con, "ks-split", group_id="g20260817-000002"))
+    assert (split.input_artifact_sha256, split.produced_by) == (keyspace, listing.attempt_id)
+
+
+def attempt_row(
+    con: sqlite3.Connection, mode: str, *, group_id: str = "g20260817-000000"
+) -> sqlite3.Row:
+    row = con.execute(
+        "SELECT * FROM attempts WHERE mode=? AND group_id=? ORDER BY attempt DESC LIMIT 1",
+        (mode, group_id),
+    ).fetchone()
+    assert row is not None, f"no {mode} attempt in {group_id}"
+    return cast(sqlite3.Row, row)

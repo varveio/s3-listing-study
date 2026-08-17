@@ -63,7 +63,7 @@ import hashlib
 import itertools
 import re
 from collections.abc import Collection, Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -266,6 +266,11 @@ class Plan:
     region: str
     cases: tuple[Case, ...]
     exclusions: tuple[Exclusion, ...]
+    # The capsules this plan resolved against. Carried because a launch expands
+    # each row's declared prerequisites (:func:`expand_requirements`) from the
+    # same loaded capsule the case was resolved with, rather than reloading one
+    # that may have moved since.
+    adapters: Mapping[str, LoadedCommandAdapter]
 
     @classmethod
     def load(
@@ -533,6 +538,7 @@ def _load(
             ),
         ),
         exclusions=_exclusions(doc, path),
+        adapters=resolved_adapters,
     )
     _reject_overlap(plan, path)
     return plan
@@ -621,31 +627,96 @@ def _auth_role(doc: Mapping[str, Any], path: Path) -> str | None:
     return value
 
 
+def capsules_dir() -> Path:
+    """``tools/`` at the repo root, where every capsule's ``command.py`` lives."""
+    return Path(__file__).resolve().parents[3] / "tools"
+
+
+def capsule_path(tool: str) -> Path:
+    """Imported lazily throughout: the adapter loader pulls in the runtime
+    contract, and most callers of this module never touch a capsule at all.
+    """
+    from benchmark.adapters import adapter_dir_for
+
+    return adapter_dir_for(tool, str(capsules_dir())) / "command.py"
+
+
+def load_capsule(tool: str) -> LoadedCommandAdapter:
+    """One tool's loaded ``command.py``, by name.
+
+    Reached from outside plan resolution when a settled preparation has to be
+    validated against the capsule that declared the artifact — the capsule owns
+    what its own bytes must look like, and no controller-side copy of that
+    knowledge would stay in step.
+    """
+    from benchmark.runtime.command_adapter import load_command_adapter
+
+    path = capsule_path(tool)
+    try:
+        return load_command_adapter(path, expected_tool=tool)
+    except Exception as exc:
+        raise PlanError(f"{tool}: {exc}") from exc
+
+
 def load_adapters(doc: Mapping[str, Any], path: Path) -> dict[str, LoadedCommandAdapter]:
     """Load each rostered tool's ``command.py``: its declared request strata and
     config surface both come from here, so a case resolves signing and its
     ``config`` blob against the one loaded capsule rather than two.
-
-    Imported lazily: a plan is resolved against the capsules it names, but the
-    adapter loader pulls in the runtime contract, and most callers of this module
-    never touch a capsule at all.
     """
-    from benchmark.adapters import adapter_dir_for
-    from benchmark.runtime.command_adapter import load_command_adapter
-
-    root = Path(__file__).resolve().parents[3] / "tools"
     tools = doc.get("tools")
     names = sorted(tools) if isinstance(tools, Mapping) else []
     loaded: dict[str, LoadedCommandAdapter] = {}
     for tool in names:
-        adapter = adapter_dir_for(str(tool), str(root)) / "command.py"
-        if not adapter.is_file():
+        if not capsule_path(str(tool)).is_file():
             continue
         try:
-            loaded[str(tool)] = load_command_adapter(adapter, expected_tool=str(tool))
-        except Exception as exc:  # a capsule that will not load is a plan error
+            loaded[str(tool)] = load_capsule(str(tool))
+        except PlanError as exc:  # a capsule that will not load is a plan error
             raise PlanError(f"'tools.{tool}' in {path}: {exc}") from exc
     return loaded
+
+
+def expand_requirements(case: Case, adapter: LoadedCommandAdapter) -> tuple[Case, ...]:
+    """The chain one row comes to: its prerequisites in order, then the row itself.
+
+    The capsule declares the chain and the plan says nothing, so the whole shape
+    is readable before anything is submitted — which is what keeps this a bounded
+    expansion rather than a graph discovered at run time
+    (`architecture.md` § *Dependencies*).
+
+    A prerequisite takes whatever config the capsule says its own mode takes and
+    never the consumer's, which is what collapses a sweep over any measurement
+    axis to one preparation (`identity.md` § *Two identities, two questions*).
+    Everything the harness acts on — the box, the role, the deadline — it does
+    inherit: those are recorded on a preparation's row and stay out of its hash.
+    """
+    links: list[Case] = []
+    for mode in adapter.requires.get(case.mode, ()):
+        manifest = adapter.modes.get(mode)
+        if manifest is not None and not manifest.permits_purpose("preparation"):
+            raise PlanError(
+                f"{case.tool}: mode {case.mode!r} requires {mode!r}, whose capsule caps it at "
+                f"{manifest.purpose_ceiling!r} — a prerequisite runs as a preparation"
+            )
+        try:
+            config = adapter.effective_config(mode, {})
+        except Exception as exc:
+            raise PlanError(f"{case.tool}: prerequisite {mode!r} of {case.mode!r}: {exc}") from exc
+        axes: tuple[tuple[str, str | int | None], ...] = (("mode", mode),)
+        links.append(
+            replace(
+                case,
+                mode=mode,
+                purpose="preparation",
+                statistic=STATISTICS[0],
+                # One preparation serves every repeat of the row that needs it.
+                reps=1,
+                label=case_label(axes),
+                axes=axes,
+                config=tuple(config.items()),
+            )
+        )
+    return (*links, case)
 
 
 def _signed(table: Mapping[str, Any], where: str, path: Path, *, complete: bool) -> dict[str, bool]:

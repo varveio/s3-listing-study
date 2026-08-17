@@ -31,11 +31,13 @@ def image_metadata(workdir: str | None = None) -> dict[str, object]:
             "adapter_bundle_sha256": "c" * 64,
             "subject_workdir": selected_workdir,
             "executable": [sys.executable],
+            "tool_slice_sha256": "1" * 64,
+            "platform_sha256": "2" * 64,
         }
         for tool in TOOLBOX_TOOLS
     }
     projection = {
-        "schema_version": 2,
+        "schema_version": 3,
         "toolbox_recipe_sha256": "9" * 64,
         "tools": {
             tool: {
@@ -49,7 +51,7 @@ def image_metadata(workdir: str | None = None) -> dict[str, object]:
     ).hexdigest()
     return {
         **projection,
-        "schema_version": 4,
+        "schema_version": 5,
         "tools": tools,
         "toolbox_manifest_sha256": digest,
         "toolbox_recipe_sha256": "9" * 64,
@@ -590,3 +592,21 @@ def test_recursive_upload_preserves_native_paths(
     # Create-only, and the marker last: a deterministic prefix plus overwrite
     # semantics would let a second execution merge into the first.
     assert uploaded[-1] == ("gs://bucket/leaf/result.json", True)
+
+
+def test_a_staged_artifact_whose_digest_moved_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The case hashed this content, so other bytes are a different case in its clothes."""
+    monkeypatch.setattr(gcs, "download_bytes", lambda _uri: b"cut/\npoints/\n")
+    staged = measure.stage_artifact(
+        "gs://results/suite/b/tool.abc.s1/native/hints.input",
+        hashlib.sha256(b"cut/\npoints/\n").hexdigest(),
+        tmp_path / "inbound",
+    )
+    assert staged.read_bytes() == b"cut/\npoints/\n"
+
+    with pytest.raises(ValueError, match=r"not the \S+ this case consumes"):
+        measure.stage_artifact(
+            "gs://results/suite/b/tool.abc.s1/native/hints.input", "0" * 64, tmp_path / "inbound"
+        )

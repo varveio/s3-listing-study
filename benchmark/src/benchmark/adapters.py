@@ -34,7 +34,12 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-from benchmark.runtime.command_adapter import HEAP_PERCENT, CommandRequest, load_command_adapter
+from benchmark.runtime.command_adapter import (
+    HEAP_PERCENT,
+    CommandRequest,
+    Mode,
+    load_command_adapter,
+)
 
 DEFAULT_ADAPTER_ROOT = "/opt/benchmark/tools"
 
@@ -48,6 +53,20 @@ def adapter_dir_for(tool: str, adapter_root: str) -> Path:
     return Path(adapter_root) / tool / "adapter"
 
 
+def mode_manifest(adapter_dir: Path | str, tool: str, mode: str) -> Mode:
+    """The capsule's manifest for one mode: what it produces and which fields.
+
+    Resolved from the capsule rather than read off a column, because product and
+    fields are a pure function of ``(tool, mode)`` at the revision the row
+    already pins -- a stored copy would be a second answer that can disagree.
+    """
+    try:
+        adapter = load_command_adapter(Path(adapter_dir) / "command.py", expected_tool=tool)
+        return adapter.modes[mode]
+    except Exception as exc:
+        raise AdapterError(f"{tool}: no mode manifest for {mode!r}: {exc}") from exc
+
+
 def compile_command(
     adapter_dir: Path | str,
     tool: str,
@@ -59,6 +78,7 @@ def compile_command(
     signed: bool = False,
     config: Mapping[str, object] | None = None,
     sink_dir: str = "",
+    artifact_path: str = "",
     visible_memory_gb: float | None = None,
     heap_percent: int = HEAP_PERCENT,
 ) -> tuple[tuple[str, ...], dict[str, str]]:
@@ -80,6 +100,7 @@ def compile_command(
             signed=signed,
             config=config or {},
             sink_dir=sink_dir,
+            artifact_path=artifact_path,
             visible_memory_gb=visible_memory_gb,
             heap_percent=heap_percent,
         )

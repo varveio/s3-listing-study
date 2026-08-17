@@ -1,12 +1,359 @@
 from __future__ import annotations
 
+import gzip
+import hashlib
+import json
+import sqlite3
 from pathlib import Path
 
 import duckdb
 import pytest
 
-from benchmark import adapters, verify
+from benchmark import adapters, campaign, verify
 from benchmark.contract import sha256_of
+
+COMMAND_PY = """
+from benchmark.runtime.command_adapter import Executable, Mode
+
+TOOL = "{tool}"
+EXECUTABLES = (Executable("{tool}", ("/usr/bin/{tool}",)),)
+MODES = {{
+    "text-full": Mode(product="text", fields=("key", "size", "etag", "mtime", "storage_class")),
+    "text-keys": Mode(product="text", fields=("key",)),
+    "parquet-full": Mode(
+        product="parquet", fields=("key", "size", "etag", "mtime", "storage_class")
+    ),
+}}
+SUPPORTS_UNSIGNED = True
+
+
+def build_command(request):
+    return ("/usr/bin/{tool}", request.mode)
+"""
+
+# Refuses unless the recorded config blob reaches it, which is the capsule
+# contract's requirement that config reach BOTH entry points -- so a normalizer
+# handed a default empty blob fails here rather than parsing its own output wrong.
+NORMALIZE_PY = """
+import argparse
+import json
+import sys
+from pathlib import Path
+
+parser = argparse.ArgumentParser()
+parser.add_argument("mode")
+parser.add_argument("prefix")
+parser.add_argument("--input")
+parser.add_argument("--dataset")
+parser.add_argument("--config", default="{}")
+args = parser.parse_args()
+
+config = json.loads(args.config)
+if config.get("mode") != args.mode:
+    sys.exit(f"config blob did not reach normalize.py: {config!r}")
+source = Path(args.input) if args.input else sorted(Path(args.dataset).rglob("*.txt"))[0]
+for line in source.read_text().splitlines():
+    if not line:
+        continue
+    key, size = line.split(" ")
+    print("\\t".join((key, size, "e" + size, "2026-01-01T00:00:00Z", "STANDARD")))
+"""
+
+LISTING = ("a/one 1", "a/two 2")
+
+
+def adapter_root(tmp_path: Path, *tools: str) -> str:
+    root = tmp_path / "tools"
+    for tool in tools:
+        adapter = root / tool / "adapter"
+        adapter.mkdir(parents=True, exist_ok=True)
+        (adapter / "command.py").write_text(COMMAND_PY.format(tool=tool))
+        (adapter / "normalize.py").write_text(NORMALIZE_PY)
+    return str(root)
+
+
+def ledger(tmp_path: Path) -> sqlite3.Connection:
+    return campaign.open_ledger(str(tmp_path / "campaign.db"), suite="fixture")
+
+
+def record(
+    con: sqlite3.Connection,
+    tmp_path: Path,
+    *,
+    tool: str,
+    digest: str,
+    mode: str = "text-full",
+    bucket: str = "bucket-one",
+    purpose: str = "measurement",
+    statistic: str = "timing",
+    state: str = "SUCCEEDED",
+    group_id: str = "g1",
+) -> campaign.Attempt:
+    """Journal one attempt through the ledger's own writer, then settle it."""
+    case_id = f"{tool}.{digest}"
+    config = json.dumps({"mode": mode}, sort_keys=True, separators=(",", ":"))
+
+    def build(ordinal: int) -> tuple[campaign.Attempt, str]:
+        attempt_id = f"{case_id}.s{ordinal}"
+        return (
+            campaign.Attempt(
+                case_id=case_id,
+                attempt=ordinal,
+                case_inputs=json.dumps({"case": case_id}),
+                group_id=group_id,
+                tool=tool,
+                auth_role=None,
+                executor=campaign.EXECUTOR,
+                location="us-east1",
+                machine_type="n4-standard-2",
+                vcpus=2,
+                memory_gb=8,
+                container_memory_gb=None,
+                heap_percent=75,
+                timeout_s=600,
+                target_bucket=bucket,
+                target_region="us-east-1",
+                target_prefix="",
+                config=config,
+                input_artifact_sha256=None,
+                produced_by=None,
+                tool_slice_sha256="a" * 64,
+                platform_sha256="b" * 64,
+                image_uri="registry/toolbox@sha256:" + "c" * 64,
+                image_set_sha256="d" * 64,
+                executor_env="{}",
+                service_account="worker@example.iam.gserviceaccount.com",
+                secret_resource=None,
+                job_name=f"fixture-{tool}-{digest}-s{ordinal}".replace(".", "-"),
+                result_prefix=str(tmp_path / "evidence" / bucket / attempt_id),
+                purpose=purpose,
+                statistic=statistic,
+                origin="planned",
+            ),
+            "{}",
+        )
+
+    attempt, _request = campaign.journal_intent(
+        con, case_id=case_id, case_inputs=json.dumps({"case": case_id}), build=build, repeat=True
+    )
+    campaign.set_state(con, attempt.attempt_id, state)
+    return attempt
+
+
+def write_evidence(
+    attempt: campaign.Attempt, *, listing: tuple[str, ...] = LISTING, **overrides: object
+) -> Path:
+    prefix = Path(attempt.result_prefix)
+    prefix.mkdir(parents=True, exist_ok=True)
+    stdout_gz = prefix / "stdout.log.gz"
+    stderr_gz = prefix / "stderr.log.gz"
+    stdout_gz.write_bytes(gzip.compress(("\n".join(listing) + "\n").encode()))
+    stderr_gz.write_bytes(gzip.compress(b""))
+    result: dict[str, object] = {
+        "attempt_id": attempt.attempt_id,
+        "case_id": attempt.case_id,
+        "tool": attempt.tool,
+        "mode": json.loads(attempt.config)["mode"],
+        "exit_code": 0,
+        "timed_out": False,
+        "wall_seconds": 1.5,
+        "max_rss_kb": 1024,
+        "row_count": len(listing),
+        "execution": {
+            "timed_out": False,
+            "subreaper_enabled": True,
+            "process_tree_clean": True,
+            "process_group_empty": True,
+            "descendants_empty": True,
+            "max_rss_kb": 1024,
+            "elapsed_ns": 1_500_000_000,
+            "cgroup": {"oom_delta": 0, "oom_kill_delta": 0},
+        },
+        "stdout_gz": stdout_gz.name,
+        "stdout_gz_sha256": sha256_of(stdout_gz),
+        "stderr_gz": stderr_gz.name,
+        "stderr_gz_sha256": sha256_of(stderr_gz),
+        "native_manifest": {},
+        **overrides,
+    }
+    (prefix / "result.json").write_text(json.dumps(result))
+    return prefix
+
+
+def add_slot(con: sqlite3.Connection, *, state: str, group_id: str = "g1", slot: int = 1) -> None:
+    con.execute(
+        "INSERT INTO pending (group_id, slot, tool, purpose, known_inputs, awaiting, state, "
+        "recorded_at) VALUES (?, ?, 'beta', 'measurement', '{}', 'alpha.aaaa.s1', ?, 'now')",
+        (group_id, slot, state),
+    )
+
+
+def agreeing_group(tmp_path: Path) -> tuple[sqlite3.Connection, str]:
+    """One bucket, two tools, identical listings: the shape a comparison wants."""
+    con = ledger(tmp_path)
+    for tool, digest in (("alpha", "aaaa"), ("beta", "bbbb")):
+        write_evidence(record(con, tmp_path, tool=tool, digest=digest))
+    return con, adapter_root(tmp_path, "alpha", "beta")
+
+
+def test_agreement_within_one_bucket_passes(tmp_path: Path) -> None:
+    con, root = agreeing_group(tmp_path)
+    code, report = verify.verify_group(con, "g1", adapter_root=root, write_record=False)
+    assert (report["verdict"], report["complete"], code) == ("PASS", True, 0)
+    assert [stratum["verdict"] for stratum in report["buckets"][0]["strata"]] == ["PASS"]
+
+
+def test_each_target_bucket_is_its_own_comparison(tmp_path: Path) -> None:
+    con = ledger(tmp_path)
+    for bucket, listing in (("bucket-one", LISTING), ("bucket-two", ("b/other 9",))):
+        for tool, digest in (("alpha", f"a{bucket[-3:]}"), ("beta", f"b{bucket[-3:]}")):
+            write_evidence(
+                record(con, tmp_path, tool=tool, digest=digest, bucket=bucket), listing=listing
+            )
+    root = adapter_root(tmp_path, "alpha", "beta")
+    _code, report = verify.verify_group(con, "g1", adapter_root=root, write_record=False)
+    assert [bucket["target_bucket"] for bucket in report["buckets"]] == [
+        "bucket-one",
+        "bucket-two",
+    ]
+    assert [bucket["verdict"] for bucket in report["buckets"]] == ["PASS", "PASS"]
+
+
+def test_a_blocked_slot_makes_the_group_incomplete(tmp_path: Path) -> None:
+    con, root = agreeing_group(tmp_path)
+    add_slot(con, state="BLOCKED")
+    code, report = verify.verify_group(con, "g1", adapter_root=root, write_record=False)
+    assert (report["verdict"], report["complete"]) == ("INCOMPLETE", False)
+    assert len(report["blocked"]) == 1
+    assert code == verify.EXIT_INCOMPLETE_GROUP
+
+
+def test_an_abandoned_slot_is_an_absent_subject(tmp_path: Path) -> None:
+    con, root = agreeing_group(tmp_path)
+    add_slot(con, state="ABANDONED")
+    _code, report = verify.verify_group(con, "g1", adapter_root=root, write_record=False)
+    assert (report["verdict"], report["abandoned"]) == (
+        "INCOMPLETE",
+        ["slot 1 (beta) awaiting alpha.aaaa.s1"],
+    )
+
+
+def test_an_accepted_attempt_is_absent_not_a_smaller_comparison(tmp_path: Path) -> None:
+    con = ledger(tmp_path)
+    write_evidence(record(con, tmp_path, tool="alpha", digest="aaaa"))
+    record(con, tmp_path, tool="beta", digest="bbbb", state="ACCEPTED")
+    root = adapter_root(tmp_path, "alpha", "beta")
+    _code, report = verify.verify_group(con, "g1", adapter_root=root, write_record=False)
+    gaps = report["buckets"][0]["gaps"]
+    assert [gap["reason"] for gap in gaps] == ["absent"]
+    assert report["verdict"] == "INCOMPLETE"
+
+
+def test_evidence_naming_another_attempt_is_refused(tmp_path: Path) -> None:
+    con = ledger(tmp_path)
+    write_evidence(record(con, tmp_path, tool="alpha", digest="aaaa"))
+    stray = record(con, tmp_path, tool="beta", digest="bbbb")
+    write_evidence(stray, attempt_id="beta.cccc.s1")
+    root = adapter_root(tmp_path, "alpha", "beta")
+    _code, report = verify.verify_group(con, "g1", adapter_root=root, write_record=False)
+    assert [gap["reason"] for gap in report["buckets"][0]["gaps"]] == ["identity"]
+
+
+def test_identity_binds_evidence_to_its_prefix_and_its_row() -> None:
+    result = {"attempt_id": "alpha.aaaa.s1", "case_id": "alpha.aaaa"}
+    assert (
+        verify.identity_errors(
+            result,
+            attempt_id="alpha.aaaa.s1",
+            case_id="alpha.aaaa",
+            result_prefix="gs://results/suite/bucket/alpha.aaaa.s1/",
+        )
+        == []
+    )
+    assert (
+        len(
+            verify.identity_errors(
+                result,
+                attempt_id="alpha.aaaa.s1",
+                case_id="alpha.aaaa",
+                result_prefix="gs://results/suite/bucket/alpha.aaaa.s2/",
+            )
+        )
+        == 1
+    )
+
+
+def test_a_canary_is_not_in_the_population(tmp_path: Path) -> None:
+    con, root = agreeing_group(tmp_path)
+    record(con, tmp_path, tool="alpha", digest="cccc", purpose="canary", state="FAILED")
+    _code, report = verify.verify_group(con, "g1", adapter_root=root, write_record=False)
+    assert (report["verdict"], report["subjects"]) == ("PASS", 2)
+
+
+def test_rate_case_failures_are_data_points(tmp_path: Path) -> None:
+    con = ledger(tmp_path)
+    write_evidence(record(con, tmp_path, tool="alpha", digest="aaaa", statistic="rate"))
+    record(con, tmp_path, tool="alpha", digest="aaaa", statistic="rate", state="FAILED")
+    root = adapter_root(tmp_path, "alpha")
+    _code, report = verify.verify_group(con, "g1", adapter_root=root, write_record=False)
+    bucket = report["buckets"][0]
+    assert bucket["gaps"] == []
+    assert bucket["rates"] == [
+        {
+            "case_id": "alpha.aaaa",
+            "tool": "alpha",
+            "mode": "text-full",
+            "attempts": 2,
+            "successes": 1,
+            "rate": 0.5,
+        }
+    ]
+    assert report["complete"] is True
+
+
+def test_a_mode_is_only_compared_within_its_product_and_field_set(tmp_path: Path) -> None:
+    con = ledger(tmp_path)
+    for tool, digest, mode in (
+        ("alpha", "aaaa", "text-full"),
+        ("beta", "bbbb", "text-keys"),
+        ("beta", "cccc", "parquet-full"),
+    ):
+        write_evidence(record(con, tmp_path, tool=tool, digest=digest, mode=mode))
+    root = adapter_root(tmp_path, "alpha", "beta")
+    _code, report = verify.verify_group(con, "g1", adapter_root=root, write_record=False)
+    strata = report["buckets"][0]["strata"]
+    assert [(s["product"], s["fields"], s["verdict"]) for s in strata] == [
+        ("parquet", ["key", "size", "etag", "mtime", "storage_class"], "UNCOMPARED"),
+        ("text", ["key"], "UNCOMPARED"),
+        ("text", ["key", "size", "etag", "mtime", "storage_class"], "UNCOMPARED"),
+    ]
+
+
+def test_normalize_is_given_the_rows_recorded_config(tmp_path: Path) -> None:
+    con = ledger(tmp_path)
+    attempt = record(con, tmp_path, tool="alpha", digest="aaaa")
+    prefix = write_evidence(attempt)
+    root = adapter_root(tmp_path, "alpha")
+    subject = verify.Subject.from_row(campaign.attempt_rows(con)[0])
+    adapter_dir = adapters.adapter_dir_for("alpha", root)
+    result = json.loads((prefix / "result.json").read_text())
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    output = tmp_path / "out.tsv"
+    verify.normalize_evidence(prefix, result, adapter_dir, subject, output, staging)
+    assert output.read_text().splitlines()[0].split("\t")[0] == "a/one"
+
+    stripped = tmp_path / "stripped.tsv"
+    (tmp_path / "staging-two").mkdir()
+    with pytest.raises(adapters.AdapterError):
+        verify.normalize_evidence(
+            prefix,
+            result,
+            adapter_dir,
+            verify.Subject(**{**vars(subject), "config": {}}),
+            stripped,
+            tmp_path / "staging-two",
+        )
 
 
 def test_reference_duplicates_can_never_pass(tmp_path: Path) -> None:
@@ -68,81 +415,43 @@ def test_field_is_compared_only_when_both_attempts_expose_it(
     assert verify.verdict_for(diff) == "PASS"
 
 
-def test_provenance_binding_checks_every_expected_field() -> None:
-    result = {
-        "campaign_id": "2026-08-16-one",
-        "job_id": "c-one",
-        "case_fingerprint": "a" * 64,
-        "image": "registry/tool@sha256:" + "b" * 64,
-    }
-    assert verify.check_binding(result, dict(result)) == []
-    expected = dict(result)
-    expected["image"] = "registry/tool@sha256:" + "c" * 64
-    assert verify.check_binding(result, expected) == [
-        f"image: leaf={result['image']!r} expected={expected['image']!r}"
-    ]
+CLEAN_EXECUTION: dict[str, object] = {
+    "timed_out": False,
+    "subreaper_enabled": True,
+    "process_tree_clean": True,
+    "process_group_empty": True,
+    "descendants_empty": True,
+    "cgroup": {"oom_kill_delta": 0},
+}
 
 
-def test_oom_kill_evidence_refuses_a_zero_exit_subject() -> None:
-    result = {
-        "exit_code": 0,
-        "timed_out": False,
-        "execution": {
-            "timed_out": False,
-            "subreaper_enabled": True,
-            "process_tree_clean": True,
-            "process_group_empty": True,
-            "descendants_empty": True,
-            "cgroup": {"oom_kill_delta": 1},
-        },
-    }
-    assert "OOM kill" in (verify.check_failed_subject(result) or "")
-
-
-def test_dirty_descendant_tree_refuses_a_zero_exit_subject() -> None:
-    result = {
-        "exit_code": 0,
-        "timed_out": False,
-        "execution": {
-            "timed_out": False,
-            "subreaper_enabled": True,
-            "process_tree_clean": False,
-            "process_group_empty": True,
-            "descendants_empty": True,
-            "cgroup": {"oom_kill_delta": 0},
-        },
-    }
-    assert "live descendant" in (verify.check_failed_subject(result) or "")
-
-
-def test_missing_execution_evidence_refuses_a_zero_exit_subject() -> None:
-    assert "execution evidence" in (
-        verify.check_failed_subject({"exit_code": 0, "timed_out": False}) or ""
-    )
-
-
-def test_negative_oom_delta_refuses_a_zero_exit_subject() -> None:
-    result = {
-        "exit_code": 0,
-        "timed_out": False,
-        "execution": {
-            "timed_out": False,
-            "subreaper_enabled": True,
-            "process_tree_clean": True,
-            "process_group_empty": True,
-            "descendants_empty": True,
-            "cgroup": {"oom_kill_delta": -1},
-        },
-    }
-    assert "invalid" in (verify.check_failed_subject(result) or "")
+@pytest.mark.parametrize(
+    "execution",
+    [
+        pytest.param(None, id="no-execution-evidence"),
+        pytest.param({**CLEAN_EXECUTION, "process_tree_clean": False}, id="live-descendant"),
+        pytest.param({**CLEAN_EXECUTION, "cgroup": {"oom_kill_delta": 1}}, id="oom-killed"),
+        pytest.param(
+            {**CLEAN_EXECUTION, "cgroup": {"oom_kill_delta": -1}}, id="invalid-oom-evidence"
+        ),
+    ],
+)
+def test_a_zero_exit_subject_is_still_refused_on_dirty_evidence(
+    execution: dict[str, object] | None,
+) -> None:
+    result: dict[str, object] = {"exit_code": 0, "timed_out": False}
+    if execution is not None:
+        result["execution"] = execution
+    assert verify.check_failed_subject(result) is not None
+    assert verify.check_failed_subject({**result, "execution": CLEAN_EXECUTION}) is None
 
 
 def test_artifact_hashes_bind_stream_and_native_bytes(tmp_path: Path) -> None:
-    leaf = tmp_path / "leaf"
-    native = leaf / "native/data"
+    prefix = tmp_path / "evidence"
+    native = prefix / "native/data"
     native.mkdir(parents=True)
-    stdout = leaf / "stdout.log.gz"
-    stderr = leaf / "stderr.log.gz"
+    stdout = prefix / "stdout.log.gz"
+    stderr = prefix / "stderr.log.gz"
     part = native / "part.parquet"
     stdout.write_bytes(b"stdout")
     stderr.write_bytes(b"stderr")
@@ -154,7 +463,23 @@ def test_artifact_hashes_bind_stream_and_native_bytes(tmp_path: Path) -> None:
         "stderr_gz_sha256": sha256_of(stderr),
         "native_manifest": {"data/part.parquet": sha256_of(part)},
     }
-    verify.validate_captured_artifacts(leaf, result)
+    verify.validate_captured_artifacts(prefix, result)
     part.write_bytes(b"mutated")
     with pytest.raises(adapters.AdapterError, match="native"):
-        verify.validate_captured_artifacts(leaf, result)
+        verify.validate_captured_artifacts(prefix, result)
+
+
+def test_verify_json_binds_the_comparison_it_recorded(tmp_path: Path) -> None:
+    con, root = agreeing_group(tmp_path)
+    _code, report = verify.verify_group(con, "g1", adapter_root=root, write_record=True)
+    comparison = report["buckets"][0]["strata"][0]["comparisons"][0]
+    written = json.loads(
+        (
+            Path(tmp_path / "evidence" / "bucket-one" / comparison["attempt_id"]) / "verify.json"
+        ).read_text()
+    )
+    result_raw = (
+        Path(tmp_path / "evidence" / "bucket-one" / comparison["attempt_id"]) / "result.json"
+    ).read_bytes()
+    assert written["actual_result_sha256"] == hashlib.sha256(result_raw).hexdigest()
+    assert written["verdict"] == verify.verdict_for(written["diff"])

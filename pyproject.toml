@@ -81,12 +81,6 @@ warn_unreachable = true
 module = "duckdb.*"
 ignore_missing_imports = true
 
-# TODO(verify-report-unit): stale suite for the old campaign schema, skipped in
-# pytest for the same reason; the verify/report unit rewrites it and drops this.
-[[tool.mypy.overrides]]
-module = ["test_report", "tests.test_report", "benchmark.tests.test_report"]
-ignore_errors = true
-
 [[tool.mypy.overrides]]
 module = "ijson.*"
 ignore_missing_imports = true

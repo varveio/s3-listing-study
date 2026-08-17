@@ -1,39 +1,52 @@
-"""Compare two bound attempt listings and print an agreement verdict.
+"""Verify one group of a campaign: bind its evidence to the ledger, then compare.
+
+The roster is the group, read from the recorded rows -- never a re-resolved
+plan. Every attempt that went out is a row carrying its `case_id`,
+`result_prefix` and settled `state`, which is what completeness needs; a
+`BLOCKED` slot is a measurement the launch intended and has not got, and an
+`ABANDONED` slot is an absent subject someone declared final. Either one makes
+the group incomplete, so a comparison is never reported as passing with one
+fewer tool in it (`docs/model.md` § *What verify binds against*).
+
+A comparison is scoped to one target bucket -- comparing listings of different
+corpora is not a comparison -- and within a bucket to one stratum, `(product,
+fields)` resolved from the capsule's own mode manifest. A text listing is not
+compared against a Parquet dataset, and a key-only mode is not ranked against
+one emitting five fields, or a tool wins by emitting less.
+
+A PASS means the subjects of a stratum AGREE, not that any of them is correct:
+there is no manifest, and agreement is what stands in for control over a corpus
+that grows underneath the study (`docs/identity.md` § *What identity cannot
+cover*).
+
+Two decisions this module makes where the docs are silent:
+
+- A `statistic: rate` case is summarized as successes over attempts and takes no
+  part in cross-tool agreement. Its finding is the rate; feeding twenty repeats
+  of one case into a comparison would be resampling, and a mean over the
+  survivors is the survivorship result `report` is forbidden to print.
+- A stratum's reference is its lowest `attempt_id`. Agreement is symmetric, so
+  the choice only fixes which side a diff is written from.
 
 Comparison uses plain UTF-8 text in DuckDB. Non-UTF-8 keys are outside this
 benchmark's declared corpus and verifier scope; capsule framing itself remains
 byte-based in :mod:`benchmark.runtime.contract`.
 
-``--reference-attempt-dir`` is another job's destination (e.g. the
-aws-cli case's), not a manifest file. A PASS here means two tools' listings
-AGREE, not that either is correct against ground truth -- there is no
-manifest.py anymore. The campaign's primary validity signal is row_count
-(see measure.py, report.py); this comparison is the on-demand deep diff a
-disagreement (or a curiosity) calls for. See README.md, "Agreement is not
-ground truth", for the limitation this implies on a mutable bucket and
-"Malformed or partial evidence is refused" for the NULL-field refusal.
+It refuses rather than guesses, and a refusal is a gap in the group rather than
+a verdict: evidence with no `result.json`; evidence whose recorded identity
+disagrees with the prefix it was found under; a subject that failed or timed out
+(a failed attempt is not a listing finding); a capsule `normalize.py` that
+exited nonzero; and a row with a NULL field in a normalized TSV.
 
-It refuses rather than guesses in several places (see README.md's "Minimum
-rigor and deliberate limitations" section), each a distinct exit code, never folded
-into FAIL: zero or several attempt leaves under a destination; a leaf with
-no result.json (incomplete/torn); a leaf whose recorded case doesn't match
-what the caller expected; a leaf whose subject failed or timed out (a
-failed attempt is not a listing finding); a capsule normalize.py that
-exited nonzero; and a row with a NULL field in either normalized TSV.
-
-Verdict (once both leaves are selected, complete, bound, and neither
-subject failed):
-    PASS  -- no missing keys, no extra keys, no duplicate keys, no field
-             mismatches.
-    DRIFT -- the only field mismatches are mtime (a moving target across
-             re-runs of most tools).
-    FAIL  -- anything else: missing/extra keys, duplicates, or a mismatch on
-             size/etag/storage_class.
+Verdict, per stratum and worst-wins for the group:
+    PASS       -- no missing keys, no extra keys, no duplicates, no mismatches.
+    DRIFT      -- the only field mismatches are mtime (a moving target).
+    FAIL       -- anything else.
+    UNCOMPARED -- one subject in the stratum; nothing to agree with.
+    INCOMPLETE -- the roster owes a subject, or evidence was refused.
 
 Usage:
-    verify.py --tool s5cmd --mode recursive --bucket some-bucket \\
-        --attempt-dir gs://results/s5cmd-job/ \\
-        --reference-attempt-dir gs://results/aws-cli-job/
+    verify.py --state campaign.db --group g20260817-120000
 """
 
 from __future__ import annotations
@@ -42,23 +55,33 @@ import argparse
 import gzip
 import hashlib
 import json
+import sqlite3
 import sys
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import duckdb
 
 from benchmark import adapters, gcs
+from benchmark.campaign import (
+    STATE_FILENAME,
+    TERMINAL_STATES,
+    attempt_rows,
+    open_ledger,
+    pending_rows,
+)
 from benchmark.contract import (
-    EXIT_AMBIGUOUS_LEAVES,
     EXIT_BINDING_MISMATCH,
+    EXIT_DRIFT,
+    EXIT_FAIL,
     EXIT_FAILED_SUBJECT,
     EXIT_MALFORMED_INPUT,
     EXIT_MISSING_MARKER,
     EXIT_NORMALIZE_FAILED,
-    VERDICT_EXIT_CODES,
+    EXIT_PASS,
     sha256_of,
 )
 
@@ -75,6 +98,28 @@ _READ_CSV_OPTS = "quote='', escape=''"
 MISMATCH_FIELDS = ("size", "etag", "mtime", "storage_class")
 SAMPLE_LIMIT = 5
 
+# Group-level rungs on contract.py's refusal ladder, which is per comparison.
+EXIT_INCOMPLETE_GROUP = 9
+VERDICT_ORDER = ("UNCOMPARED", "PASS", "DRIFT", "FAIL")
+GROUP_EXIT_CODES = {
+    "UNCOMPARED": EXIT_PASS,
+    "PASS": EXIT_PASS,
+    "DRIFT": EXIT_DRIFT,
+    "FAIL": EXIT_FAIL,
+    "INCOMPLETE": EXIT_INCOMPLETE_GROUP,
+}
+# Which refusal each gap reports as, so a caller can act on the reason without
+# parsing the message.
+GAP_EXIT_CODES = {
+    "unsettled": EXIT_INCOMPLETE_GROUP,
+    "absent": EXIT_INCOMPLETE_GROUP,
+    "missing-evidence": EXIT_MISSING_MARKER,
+    "identity": EXIT_BINDING_MISMATCH,
+    "failed-subject": EXIT_FAILED_SUBJECT,
+    "normalize": EXIT_NORMALIZE_FAILED,
+    "malformed": EXIT_MALFORMED_INPUT,
+}
+
 
 class MalformedInputError(Exception):
     """A normalized TSV has a NULL field -- an anti-join over it would be
@@ -82,62 +127,118 @@ class MalformedInputError(Exception):
     """
 
 
-def list_leaves(destination: str) -> list[str]:
-    """Immediate child leaves under a job's destination prefix, local or GCS."""
-    if destination.startswith("gs://"):
-        return gcs.list_child_prefixes(destination)
-    base = Path(destination)
-    if not base.is_dir():
-        return []
-    return [str(p) + "/" for p in sorted(base.iterdir()) if p.is_dir()]
+@dataclass(frozen=True)
+class Subject:
+    """One measurement attempt of the roster, as the ledger recorded it."""
+
+    attempt_id: str
+    case_id: str
+    tool: str
+    mode: str
+    statistic: str
+    state: str
+    target_bucket: str
+    target_prefix: str
+    result_prefix: str
+    config: dict[str, object]
+
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> Subject:
+        return cls(
+            attempt_id=row["attempt_id"],
+            case_id=row["case_id"],
+            tool=row["tool"],
+            mode=row["mode"],
+            statistic=row["statistic"],
+            state=row["state"],
+            target_bucket=row["target_bucket"],
+            target_prefix=row["target_prefix"],
+            result_prefix=row["result_prefix"],
+            config=json.loads(row["config"]),
+        )
 
 
-def resolve_leaf(destination: str) -> str | None:
-    """Exactly one child leaf under destination: return it.
+@dataclass(frozen=True)
+class Roster:
+    """A group's measurement attempts plus the slots it still owes."""
 
-    Zero or 2+ leaves means two launches raced (or none ran) -- ambiguity is
-    refused here, never resolved by picking the newest or the first.
+    subjects: tuple[Subject, ...]
+    blocked: tuple[str, ...]
+    abandoned: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class Prepared:
+    """A subject whose evidence is bound, normalized, and ready to compare."""
+
+    subject: Subject
+    result_sha256: str
+    tsv: Path
+    product: str
+    fields: tuple[str, ...]
+
+
+def roster_for(con: sqlite3.Connection, group_id: str) -> Roster:
+    """The group's measurement attempts and its unresolved slots.
+
+    `purpose` other than `measurement` is not in the population at all: a canary
+    is not a stray row for completeness to complain about, and a preparation is
+    measured without being compared.
     """
-    leaves = list_leaves(destination)
-    if len(leaves) == 1:
-        return leaves[0]
-    print(
-        f"verify: expected exactly one attempt leaf under {destination}, found "
-        f"{len(leaves)}: {leaves}",
-        file=sys.stderr,
+    subjects = tuple(
+        Subject.from_row(row)
+        for row in attempt_rows(con, group_id=group_id)
+        if row["purpose"] == "measurement"
     )
-    return None
+    slots = pending_rows(con, group_id=group_id)
+    return Roster(
+        subjects=subjects,
+        blocked=tuple(_slot_label(row) for row in slots if row["state"] == "BLOCKED"),
+        abandoned=tuple(_slot_label(row) for row in slots if row["state"] == "ABANDONED"),
+    )
 
 
-def read_bytes_at(leaf: str, name: str) -> bytes:
-    if leaf.startswith("gs://"):
-        return gcs.download_bytes(leaf.rstrip("/") + "/" + name)
-    return (Path(leaf) / name).read_bytes()
+def _slot_label(row: sqlite3.Row) -> str:
+    return f"slot {row['slot']} ({row['tool']}) awaiting {row['awaiting']}"
 
 
-def has_result_marker(leaf: str) -> bool:
-    """A leaf is only complete once result.json lands -- see measure.py's
+def read_bytes_at(prefix: str, name: str) -> bytes:
+    if prefix.startswith("gs://"):
+        return gcs.download_bytes(prefix.rstrip("/") + "/" + name)
+    return (Path(prefix) / name).read_bytes()
+
+
+def has_result_marker(prefix: str) -> bool:
+    """Evidence is only complete once result.json lands -- see measure.py's
     upload(), which writes it last.
     """
-    if leaf.startswith("gs://"):
-        return gcs.blob_exists(leaf.rstrip("/") + "/result.json")
-    return (Path(leaf) / "result.json").exists()
+    if prefix.startswith("gs://"):
+        return gcs.blob_exists(prefix.rstrip("/") + "/result.json")
+    return (Path(prefix) / "result.json").exists()
 
 
-def check_binding(result: Mapping[str, object], expected: Mapping[str, object]) -> list[str]:
-    """Where `result` disagrees with `expected` on any key `expected` states.
-    A non-empty list means this is the wrong attempt for this comparison,
-    not a tool finding.
+def identity_errors(
+    result: Mapping[str, object], *, attempt_id: str, case_id: str, result_prefix: str
+) -> list[str]:
+    """Where evidence's recorded identity disagrees with the row or its prefix.
+
+    The prefix is deterministic and its last segment is the attempt_id, so
+    evidence found somewhere else -- or naming another case -- is the wrong
+    evidence for this row, not a tool finding.
     """
-    return [
-        f"{field}: leaf={result.get(field)!r} expected={value!r}"
-        for field, value in expected.items()
+    leaf = result_prefix.rstrip("/").rsplit("/", 1)[-1]
+    errors = [
+        f"{field}: evidence={result.get(field)!r} row={value!r}"
+        for field, value in (("attempt_id", attempt_id), ("case_id", case_id))
         if result.get(field) != value
     ]
+    if leaf != attempt_id:
+        errors.append(f"prefix: {result_prefix} is not the prefix of {attempt_id}")
+    return errors
 
 
-def check_failed_subject(result: dict[str, object]) -> str | None:
-    """A message if the leaf's own subject failed or timed out, else None.
+def check_failed_subject(result: Mapping[str, object]) -> str | None:
+    """A message if the evidence's own subject failed or timed out, else None.
 
     A failed or truncated run has nothing to say about listing agreement --
     refusing here is what keeps a subject crash from reading as a diff.
@@ -261,7 +362,7 @@ def compute_diff(con: duckdb.DuckDBPyConnection) -> dict[str, Any]:
     }
 
 
-def verdict_for(diff: dict[str, Any]) -> str:
+def verdict_for(diff: Mapping[str, Any]) -> str:
     if diff["missing"] or diff["extra"] or diff["duplicates"] or diff["reference_duplicates"]:
         return "FAIL"
     other_fields = {m["field"] for m in diff["mismatches"] if m["field"] != "mtime"}
@@ -272,200 +373,60 @@ def verdict_for(diff: dict[str, Any]) -> str:
     return "PASS"
 
 
-def print_samples(diff: dict[str, Any]) -> None:
-    """Print up to SAMPLE_LIMIT examples of each discrepancy kind, so a
-    non-PASS verdict is legible from the console without opening verify.json.
-    """
-    for label in ("missing", "extra", "duplicates", "reference_duplicates"):
-        keys = diff[label]
-        if not keys:
-            continue
-        shown = ", ".join(keys[:SAMPLE_LIMIT])
-        more = f" (+{len(keys) - SAMPLE_LIMIT} more)" if len(keys) > SAMPLE_LIMIT else ""
-        print(f"  {label}: {shown}{more}")
-    if diff["mismatches"]:
-        shown = diff["mismatches"][:SAMPLE_LIMIT]
-        for m in shown:
-            print(
-                f"  mismatch[{m['field']}] {m['key']}: "
-                f"tool={m['tool']!r} reference={m['reference']!r}"
-            )
-        remaining = len(diff["mismatches"]) - len(shown)
-        if remaining > 0:
-            print(f"  ... (+{remaining} more mismatches)")
+def worst_verdict(verdicts: Iterable[str]) -> str:
+    return max(verdicts, key=VERDICT_ORDER.index, default="UNCOMPARED")
 
 
-def write_verify_json(leaf: str, output: dict[str, Any]) -> None:
-    """verify.json is written back INTO the actual leaf, not dumped to CWD --
-    a repeat verification overwrites its own leaf's own record, never a
-    different case's.
-    """
-    data = json.dumps(output, indent=2).encode() + b"\n"
-    if leaf.startswith("gs://"):
-        gcs.upload_bytes(data, leaf.rstrip("/") + "/verify.json", content_type="application/json")
-    else:
-        (Path(leaf) / "verify.json").write_bytes(data)
+def stage_evidence(result_prefix: str, staging: Path) -> Path:
+    """A local directory holding this attempt's evidence, downloading if remote."""
+    staging.mkdir(parents=True)
+    if result_prefix.startswith("gs://"):
+        gcs.download_tree(result_prefix, staging)
+        return staging
+    return Path(result_prefix)
 
 
-def verify_leaves(
-    *,
-    tool: str,
-    bucket: str,
-    prefix: str,
-    mode: str,
-    actual_destination: str,
-    reference_destination: str,
-    adapter_root: str,
-    expected_actual: dict[str, object] | None = None,
-    expected_reference: dict[str, object] | None = None,
-    write_record: bool = True,
-) -> tuple[int, dict[str, Any]]:
-    """Resolve, bind-check, and normalize both sides through the same path;
-    diff them; write verify.json into the actual leaf. Returns
-    (exit_code, output) -- output has "verdict"/"diff" on a completed
-    comparison, or just "error" on an earlier refusal.
-    """
-    actual_leaf = resolve_leaf(actual_destination)
-    if actual_leaf is None:
-        return EXIT_AMBIGUOUS_LEAVES, {
-            "error": f"ambiguous actual leaves under {actual_destination}"
-        }
-    reference_leaf = resolve_leaf(reference_destination)
-    if reference_leaf is None:
-        return EXIT_AMBIGUOUS_LEAVES, {
-            "error": f"ambiguous reference leaves under {reference_destination}"
-        }
-
-    for label, leaf in (("actual", actual_leaf), ("reference", reference_leaf)):
-        if not has_result_marker(leaf):
-            return EXIT_MISSING_MARKER, {"error": f"{label} leaf {leaf} has no result.json"}
-
-    actual_result_bytes = read_bytes_at(actual_leaf, "result.json")
-    reference_result_bytes = read_bytes_at(reference_leaf, "result.json")
-    actual_result = json.loads(actual_result_bytes)
-    reference_result = json.loads(reference_result_bytes)
-
-    actual_expected: dict[str, object] = {
-        "tool": tool,
-        "bucket": bucket,
-        "prefix": prefix,
-        "mode": mode,
-    }
-    actual_expected.update(expected_actual or {})
-    mismatches = check_binding(actual_result, actual_expected)
-    if mismatches:
-        return EXIT_BINDING_MISMATCH, {
-            "error": "actual leaf does not match the expected case",
-            "mismatches": mismatches,
-        }
-    # The reference is necessarily a different tool/mode; only the target
-    # (bucket/prefix) needs to match, or the two sides are not even
-    # attempting to list the same thing.
-    reference_expected: dict[str, object] = {"bucket": bucket, "prefix": prefix}
-    reference_expected.update(expected_reference or {})
-    ref_mismatches = check_binding(reference_result, reference_expected)
-    if ref_mismatches:
-        return EXIT_BINDING_MISMATCH, {
-            "error": "reference leaf targets a different bucket/prefix",
-            "mismatches": ref_mismatches,
-        }
-
-    for label, result in (("actual", actual_result), ("reference", reference_result)):
-        failure = check_failed_subject(result)
-        if failure:
-            return EXIT_FAILED_SUBJECT, {"error": f"{label}: {failure}"}
-
-    reference_tool, reference_mode = reference_result["tool"], reference_result["mode"]
-    with tempfile.TemporaryDirectory() as tmp:
-        work_dir = Path(tmp)
-        actual_tsv, reference_tsv = work_dir / "actual.tsv", work_dir / "reference.tsv"
-        try:
-            normalize_leaf(
-                actual_leaf,
-                actual_result,
-                adapters.adapter_dir_for(tool, adapter_root),
-                tool,
-                mode,
-                prefix,
-                actual_tsv,
-                work_dir / "actual",
-            )
-            normalize_leaf(
-                reference_leaf,
-                reference_result,
-                adapters.adapter_dir_for(reference_tool, adapter_root),
-                reference_tool,
-                reference_mode,
-                reference_result.get("prefix", ""),
-                reference_tsv,
-                work_dir / "reference",
-            )
-        except adapters.AdapterError as exc:
-            return EXIT_NORMALIZE_FAILED, {"error": str(exc)}
-
-        con = duckdb.connect()
-        try:
-            load_tables(con, reference_tsv, actual_tsv)
-            try:
-                assert_no_null_fields(con, "reference")
-                assert_no_null_fields(con, "actual")
-            except MalformedInputError as exc:
-                return EXIT_MALFORMED_INPUT, {"error": str(exc)}
-            diff = compute_diff(con)
-        finally:
-            con.close()
-
-        verdict = verdict_for(diff)
-        output = {
-            "tool": tool,
-            "mode": mode,
-            "reference_tool": reference_tool,
-            "reference_mode": reference_mode,
-            "actual_leaf": actual_leaf,
-            "reference_leaf": reference_leaf,
-            "actual_result_sha256": hashlib.sha256(actual_result_bytes).hexdigest(),
-            "reference_result_sha256": hashlib.sha256(reference_result_bytes).hexdigest(),
-            "verdict": verdict,
-            "actual_tsv_sha256": sha256_of(actual_tsv),
-            "reference_tsv_sha256": sha256_of(reference_tsv),
-            "diff": diff,
-        }
-        if write_record:
-            write_verify_json(actual_leaf, output)
-
-    return VERDICT_EXIT_CODES[verdict], output
-
-
-def normalize_leaf(
-    leaf: str,
-    result: dict[str, object],
+def normalize_evidence(
+    local_prefix: Path,
+    result: Mapping[str, object],
     adapter_dir: Path,
-    tool: str,
-    mode: str,
-    prefix: str,
+    subject: Subject,
     output_path: Path,
     staging: Path,
 ) -> None:
-    """Normalize a stream or recursively captured native dataset from one leaf."""
-    staging.mkdir(parents=True)
-    if leaf.startswith("gs://"):
-        gcs.download_tree(leaf, staging)
-        local_leaf = staging
-    else:
-        local_leaf = Path(leaf)
-    validate_captured_artifacts(local_leaf, result)
-    native_root = local_leaf / "native"
+    """Normalize a stream or natively captured dataset through the capsule.
+
+    The row's recorded `config` blob is forwarded, not reconstructed: a capsule
+    whose output shape depends on a config key has to parse its own output with
+    the same blob `command.py` compiled argv from.
+    """
+    validate_captured_artifacts(local_prefix, result)
+    native_root = local_prefix / "native"
     if native_root.is_dir() and any(path.is_file() for path in native_root.rglob("*")):
         adapters.normalize_to_path(
-            adapter_dir, tool, mode, prefix, output_path, dataset=native_root
+            adapter_dir,
+            subject.tool,
+            subject.mode,
+            subject.target_prefix,
+            output_path,
+            dataset=native_root,
+            config=subject.config,
         )
         return
-    stdout_gz = local_leaf / "stdout.log.gz"
+    stdout_gz = local_prefix / "stdout.log.gz"
     input_path = staging / "stdout.log"
     with gzip.open(stdout_gz, "rb") as source, input_path.open("wb") as output:
         while chunk := source.read(1024 * 1024):
             output.write(chunk)
-    adapters.normalize_to_path(adapter_dir, tool, mode, prefix, output_path, input_path=input_path)
+    adapters.normalize_to_path(
+        adapter_dir,
+        subject.tool,
+        subject.mode,
+        subject.target_prefix,
+        output_path,
+        input_path=input_path,
+        config=subject.config,
+    )
 
 
 def _manifest(root: Path) -> dict[str, str]:
@@ -476,14 +437,14 @@ def _manifest(root: Path) -> dict[str, str]:
     }
 
 
-def validate_captured_artifacts(local_leaf: Path, result: dict[str, object]) -> None:
+def validate_captured_artifacts(local_prefix: Path, result: Mapping[str, object]) -> None:
     """Bind normalized bytes to hashes in the result marker uploaded after the artifacts."""
     for stem in ("stdout", "stderr"):
         name = result.get(f"{stem}_gz")
         expected = result.get(f"{stem}_gz_sha256")
         if not isinstance(name, str) or Path(name).name != name or not isinstance(expected, str):
             raise adapters.AdapterError(f"{stem}: result.json has invalid artifact identity")
-        path = local_leaf / name
+        path = local_prefix / name
         if not path.is_file() or sha256_of(path) != expected:
             raise adapters.AdapterError(f"{stem}: captured artifact does not match result.json")
 
@@ -493,74 +454,336 @@ def validate_captured_artifacts(local_leaf: Path, result: dict[str, object]) -> 
         for name, digest in expected_native.items()
     ):
         raise adapters.AdapterError("native: result.json has invalid artifact manifest")
-    native_root = local_leaf / "native"
+    native_root = local_prefix / "native"
     actual_native = _manifest(native_root) if native_root.is_dir() else {}
     if actual_native != expected_native:
         raise adapters.AdapterError("native: captured artifacts do not match result.json")
 
 
+def _gap(subject: Subject, reason: str, detail: str) -> dict[str, object]:
+    return {
+        "attempt_id": subject.attempt_id,
+        "tool": subject.tool,
+        "reason": reason,
+        "detail": detail,
+        "exit_code": GAP_EXIT_CODES[reason],
+    }
+
+
+def rate_summary(subjects: Sequence[Subject]) -> dict[str, object]:
+    """Successes over settled attempts of one rate case.
+
+    A settled failure is a data point here rather than an omission: for these
+    cases the hangs and the panics ARE the measurement.
+    """
+    settled = [s for s in subjects if s.state in TERMINAL_STATES]
+    successes = sum(1 for s in settled if s.state == "SUCCEEDED")
+    first = subjects[0]
+    return {
+        "case_id": first.case_id,
+        "tool": first.tool,
+        "mode": first.mode,
+        "attempts": len(settled),
+        "successes": successes,
+        "rate": round(successes / len(settled), 4) if settled else None,
+    }
+
+
+def prepare_subject(
+    subject: Subject, *, adapter_root: str, work_dir: Path
+) -> tuple[Prepared | None, dict[str, object] | None]:
+    """Bind one subject's evidence and normalize it, or report why it cannot be."""
+    if not has_result_marker(subject.result_prefix):
+        detail = f"no result.json under {subject.result_prefix}"
+        return None, _gap(subject, "missing-evidence", detail)
+    raw = read_bytes_at(subject.result_prefix, "result.json")
+    result = json.loads(raw)
+    if not isinstance(result, dict):
+        return None, _gap(subject, "missing-evidence", "result.json is not an object")
+    errors = identity_errors(
+        result,
+        attempt_id=subject.attempt_id,
+        case_id=subject.case_id,
+        result_prefix=subject.result_prefix,
+    )
+    if errors:
+        return None, _gap(subject, "identity", "; ".join(errors))
+    failure = check_failed_subject(result)
+    if failure:
+        return None, _gap(subject, "failed-subject", failure)
+    staging = work_dir / subject.attempt_id
+    tsv = work_dir / f"{subject.attempt_id}.tsv"
+    try:
+        manifest = adapters.mode_manifest(
+            adapters.adapter_dir_for(subject.tool, adapter_root), subject.tool, subject.mode
+        )
+        local_prefix = stage_evidence(subject.result_prefix, staging)
+        normalize_evidence(
+            local_prefix,
+            result,
+            adapters.adapter_dir_for(subject.tool, adapter_root),
+            subject,
+            tsv,
+            staging,
+        )
+    except adapters.AdapterError as exc:
+        return None, _gap(subject, "normalize", str(exc))
+    return (
+        Prepared(
+            subject=subject,
+            result_sha256=hashlib.sha256(raw).hexdigest(),
+            tsv=tsv,
+            product=manifest.product,
+            fields=manifest.fields,
+        ),
+        None,
+    )
+
+
+def compare(reference: Prepared, actual: Prepared) -> dict[str, Any]:
+    con = duckdb.connect()
+    try:
+        load_tables(con, reference.tsv, actual.tsv)
+        assert_no_null_fields(con, "reference")
+        assert_no_null_fields(con, "actual")
+        return compute_diff(con)
+    finally:
+        con.close()
+
+
+def verify_bucket(
+    subjects: Sequence[Subject],
+    *,
+    adapter_root: str,
+    work_dir: Path,
+    write_record: bool,
+) -> dict[str, Any]:
+    """One target bucket's strata, rate cases, and the gaps in between."""
+    gaps: list[dict[str, object]] = []
+    rates: list[dict[str, object]] = []
+    prepared: list[Prepared] = []
+
+    rate_cases: dict[str, list[Subject]] = {}
+    for subject in subjects:
+        if subject.statistic == "rate":
+            rate_cases.setdefault(subject.case_id, []).append(subject)
+            continue
+        if subject.state not in TERMINAL_STATES:
+            gaps.append(_gap(subject, "unsettled", f"state {subject.state}"))
+            continue
+        if subject.state != "SUCCEEDED":
+            gaps.append(_gap(subject, "absent", f"state {subject.state}"))
+            continue
+        ready, gap = prepare_subject(subject, adapter_root=adapter_root, work_dir=work_dir)
+        if gap is not None:
+            gaps.append(gap)
+        if ready is not None:
+            prepared.append(ready)
+
+    for case_subjects in rate_cases.values():
+        rates.append(rate_summary(case_subjects))
+        gaps.extend(
+            _gap(subject, "unsettled", f"state {subject.state}")
+            for subject in case_subjects
+            if subject.state not in TERMINAL_STATES
+        )
+
+    strata: list[dict[str, Any]] = []
+    for key in sorted({(p.product, p.fields) for p in prepared}):
+        product, fields = key
+        members = sorted(
+            (p for p in prepared if (p.product, p.fields) == key),
+            key=lambda p: p.subject.attempt_id,
+        )
+        reference, others = members[0], members[1:]
+        comparisons: list[dict[str, Any]] = []
+        for actual in others:
+            try:
+                diff = compare(reference, actual)
+            except MalformedInputError as exc:
+                gaps.append(_gap(actual.subject, "malformed", str(exc)))
+                continue
+            record = {
+                "attempt_id": actual.subject.attempt_id,
+                "tool": actual.subject.tool,
+                "mode": actual.subject.mode,
+                "reference_attempt_id": reference.subject.attempt_id,
+                "reference_tool": reference.subject.tool,
+                "reference_mode": reference.subject.mode,
+                "product": product,
+                "fields": list(fields),
+                "actual_result_sha256": actual.result_sha256,
+                "reference_result_sha256": reference.result_sha256,
+                "actual_tsv_sha256": sha256_of(actual.tsv),
+                "reference_tsv_sha256": sha256_of(reference.tsv),
+                "verdict": verdict_for(diff),
+                "diff": diff,
+            }
+            if write_record:
+                write_verify_json(actual.subject.result_prefix, record)
+            comparisons.append(record)
+        strata.append(
+            {
+                "product": product,
+                "fields": list(fields),
+                "reference": reference.subject.attempt_id,
+                "subjects": [p.subject.attempt_id for p in members],
+                "comparisons": comparisons,
+                "verdict": worst_verdict(c["verdict"] for c in comparisons),
+            }
+        )
+
+    complete = not gaps
+    verdict = worst_verdict(s["verdict"] for s in strata)
+    return {
+        "target_bucket": subjects[0].target_bucket,
+        "complete": complete,
+        "verdict": verdict if complete else "INCOMPLETE",
+        "strata": strata,
+        "rates": rates,
+        "gaps": gaps,
+    }
+
+
+def write_verify_json(result_prefix: str, record: Mapping[str, Any]) -> None:
+    """verify.json is written back under the compared attempt's own prefix, so a
+    repeat verification overwrites its own record and never a different case's.
+    """
+    data = json.dumps(record, indent=2).encode() + b"\n"
+    if result_prefix.startswith("gs://"):
+        gcs.upload_bytes(
+            data, result_prefix.rstrip("/") + "/verify.json", content_type="application/json"
+        )
+    else:
+        (Path(result_prefix) / "verify.json").write_bytes(data)
+
+
+def verify_group(
+    con: sqlite3.Connection,
+    group_id: str,
+    *,
+    adapter_root: str,
+    write_record: bool = True,
+) -> tuple[int, dict[str, Any]]:
+    """Verify one group against its recorded roster. Returns (exit_code, report)."""
+    roster = roster_for(con, group_id)
+    buckets: list[dict[str, Any]] = []
+    with tempfile.TemporaryDirectory() as tmp:
+        work_dir = Path(tmp)
+        for bucket in sorted({s.target_bucket for s in roster.subjects}):
+            buckets.append(
+                verify_bucket(
+                    [s for s in roster.subjects if s.target_bucket == bucket],
+                    adapter_root=adapter_root,
+                    work_dir=work_dir,
+                    write_record=write_record,
+                )
+            )
+        complete = (
+            bool(roster.subjects)
+            and not roster.blocked
+            and not roster.abandoned
+            and all(b["complete"] for b in buckets)
+        )
+        verdict = "INCOMPLETE" if not complete else worst_verdict(b["verdict"] for b in buckets)
+        report = {
+            "group_id": group_id,
+            "complete": complete,
+            "verdict": verdict,
+            "blocked": list(roster.blocked),
+            "abandoned": list(roster.abandoned),
+            "subjects": len(roster.subjects),
+            "buckets": buckets,
+        }
+    return GROUP_EXIT_CODES[verdict], report
+
+
+def print_samples(diff: Mapping[str, Any]) -> None:
+    """Print up to SAMPLE_LIMIT examples of each discrepancy kind, so a
+    non-PASS verdict is legible from the console without opening verify.json.
+    """
+    for label in ("missing", "extra", "duplicates", "reference_duplicates"):
+        keys = diff[label]
+        if not keys:
+            continue
+        shown = ", ".join(keys[:SAMPLE_LIMIT])
+        more = f" (+{len(keys) - SAMPLE_LIMIT} more)" if len(keys) > SAMPLE_LIMIT else ""
+        print(f"      {label}: {shown}{more}")
+    for m in diff["mismatches"][:SAMPLE_LIMIT]:
+        print(
+            f"      mismatch[{m['field']}] {m['key']}: "
+            f"tool={m['tool']!r} reference={m['reference']!r}"
+        )
+    remaining = len(diff["mismatches"]) - SAMPLE_LIMIT
+    if remaining > 0:
+        print(f"      ... (+{remaining} more mismatches)")
+
+
+def print_report(report: Mapping[str, Any]) -> None:
+    print(f"group {report['group_id']}: {report['subjects']} measurement attempt(s)")
+    for label in ("blocked", "abandoned"):
+        for slot in report[label]:
+            print(f"  {label}: {slot}")
+    for bucket in report["buckets"]:
+        print(f"  {bucket['target_bucket']}: {bucket['verdict']}")
+        for stratum in bucket["strata"]:
+            fields = ",".join(stratum["fields"])
+            print(
+                f"    {stratum['product']} [{fields}] {stratum['verdict']} "
+                f"({len(stratum['subjects'])} subject(s), reference {stratum['reference']})"
+            )
+            for comparison in stratum["comparisons"]:
+                if comparison["verdict"] != "PASS":
+                    print(f"    {comparison['attempt_id']}: {comparison['verdict']}")
+                    print_samples(comparison["diff"])
+        for rate in bucket["rates"]:
+            print(
+                f"    rate {rate['case_id']}: {rate['successes']}/{rate['attempts']} "
+                f"= {rate['rate']}"
+            )
+        for gap in bucket["gaps"]:
+            print(f"    gap {gap['attempt_id']} [{gap['reason']}]: {gap['detail']}")
+    print(f"verdict={report['verdict']}")
+
+
+# Anchored to the repository, not the working directory: a relative default
+# resolves against wherever the operator happened to stand, and a missing
+# adapter directory then refuses every subject as unnormalizable.
+DEFAULT_ADAPTER_ROOT = str(Path(__file__).resolve().parents[3] / "tools")
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Compare two attempts' listings and print an agreement verdict."
+        description="Verify one group's evidence against its recorded roster."
     )
+    parser.add_argument("--state", default=STATE_FILENAME, help="campaign.db path (sqlite3).")
+    parser.add_argument("--group", required=True, help="The group to verify; verify is one group.")
+    parser.add_argument("--adapter-root", default=DEFAULT_ADAPTER_ROOT)
     parser.add_argument(
-        "--tool",
-        required=True,
-        help="Expected tool for --attempt-dir; checked against its result.json.",
-    )
-    parser.add_argument(
-        "--bucket", required=True, help="Expected bucket; checked against both leaves' result.json."
-    )
-    parser.add_argument(
-        "--prefix", default="", help="Expected prefix; checked against both leaves' result.json."
-    )
-    parser.add_argument(
-        "--mode",
-        required=True,
-        help="Expected mode for --attempt-dir; checked against its result.json.",
-    )
-    parser.add_argument(
-        "--attempt-dir",
-        required=True,
-        help="Local path or gs:// prefix for the job's destination (parent of its attempt leaves).",
-    )
-    parser.add_argument(
-        "--reference-attempt-dir",
-        required=True,
-        help="Another job's destination to compare against -- not a blessed manifest.",
-    )
-    parser.add_argument(
-        "--adapter-root",
-        default="tools",
-        help="Checkout-relative directory holding tools/<tool>/adapter capsules.",
+        "--no-write",
+        action="store_true",
+        help="Compare without writing verify.json back under each attempt's prefix.",
     )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    exit_code, output = verify_leaves(
-        tool=args.tool,
-        bucket=args.bucket,
-        prefix=args.prefix,
-        mode=args.mode,
-        actual_destination=args.attempt_dir,
-        reference_destination=args.reference_attempt_dir,
-        adapter_root=args.adapter_root,
-    )
-    if "diff" in output:
-        diff = output["diff"]
+    if not Path(args.adapter_root).is_dir():
         print(
-            f"missing={len(diff['missing'])} extra={len(diff['extra'])} "
-            f"duplicates={len(diff['duplicates'])} "
-            f"reference_duplicates={len(diff['reference_duplicates'])} "
-            f"mismatches={len(diff['mismatches'])}"
+            f"verify: adapter root {args.adapter_root} is not a directory; refusing to "
+            "report every subject as unnormalizable",
+            file=sys.stderr,
         )
-        if output["verdict"] != "PASS":
-            print_samples(diff)
-        print(f"verdict={output['verdict']}")
-    else:
-        print(f"verify: {output.get('error', 'refused')}", file=sys.stderr)
+        return EXIT_NORMALIZE_FAILED
+    con = open_ledger(args.state, readonly=True)
+    try:
+        exit_code, report = verify_group(
+            con, args.group, adapter_root=args.adapter_root, write_record=not args.no_write
+        )
+    finally:
+        con.close()
+    print_report(report)
     return exit_code
 
 

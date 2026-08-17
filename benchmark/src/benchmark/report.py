@@ -1,29 +1,37 @@
-"""Walk campaign.db plus each latest-submission attempt's result.json/verify.json
-and print one Markdown summary table.
+"""Walk the attempts ledger plus each attempt's evidence and print one Markdown report.
 
-The report is human-readable Markdown derived from bound attempt evidence.
+Opens campaign.db read-only (mode=ro): report.py only ever reads the ledger, so
+a stray write here is a bug this should fail loudly on, not tolerate.
 
-Opens campaign.db read-only (mode=ro): report.py only ever reads the ledger,
-so a stray write here is a bug this should fail loudly on, not tolerate.
+Evidence lands directly under an attempt's `result_prefix` -- there is no leaf
+to resolve -- and a row's evidence is refused unless the identity recorded in
+`result.json` agrees with the row and with the prefix it was found under
+(`verify.identity_errors`).
 
-Like verify.py, a job's destination is a *prefix*, not the attempt itself:
-report.py resolves it to the one attempt leaf underneath (see
-verify.resolve_leaf), then reads result.json/verify.json off that leaf
-through verify.read_bytes_at -- which already dispatches on gs:// vs local,
-so --attempts-root gs://... needs no separate code path here.
+Three columns never share one vocabulary: `state` is the ledger's own attempt
+state; `exit` is the subject's exit code from result.json; `verdict` is
+verify.json's, or "-" where no comparison has been run. What report does NOT do
+is re-normalize an attempt to re-derive a verdict: it binds verify.json's hashes
+to the evidence it read and recomputes the verdict from the recorded diff, which
+catches an edited record without re-running eleven capsules per report.
 
-Three columns never share one vocabulary: job_state is Batch's own state
-(or a leaf-resolution failure, AMBIGUOUS_LEAF/INCOMPLETE_LEAF, which is a
-job-level fact, not the tool's); exit is the subject's own exit code from
-result.json; verdict is verify.json's verdict, or "-" if no verify.json
-exists yet (never the job or subject state). The summary line's average
-wall time is over verified attempts only (exit 0 and a PASS/DRIFT verdict)
--- a crashed or unverified attempt's wall time is not a listing-speed
-number, and averaging it in would quietly make the average mean something
-else.
+What a comparison is scoped to, and what it is not:
+
+- **Per target bucket.** Listings of different corpora are not comparable, so
+  attempts are sectioned by bucket and never pooled.
+- **Per stratum**, `(product, fields)` resolved from the capsule's mode
+  manifest, so a text listing is not ranked against a Parquet dataset and a
+  key-only mode is not ranked against one emitting five fields.
+- **`purpose = 'measurement'` only.** A preparation, canary or diagnostic is not
+  in the population -- but a preparation's duration IS recorded, and every
+  measurement it stands behind carries that cost, because publishing a 60-second
+  listing that needed 40 seconds of hinting states something false.
+- **A `statistic: rate` case renders as a rate over its attempts and a sample
+  size**, never a mean duration over the survivors, which would be a
+  survivorship result dressed as a timing.
 
 Usage:
-    report.py --state campaign.db
+    report.py --state campaign.db [--group g20260817-120000]
 """
 
 from __future__ import annotations
@@ -36,109 +44,86 @@ import sqlite3
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
-from benchmark import verify
+from benchmark import adapters
 from benchmark.campaign import (
     STATE_FILENAME,
     TERMINAL_STATES,
     attempt_rows,
     open_ledger,
+    pending_rows,
 )
-from benchmark.contract import VERDICT_EXIT_CODES
-from benchmark.verify import has_result_marker, read_bytes_at, resolve_leaf, verdict_for
+from benchmark.verify import (
+    has_result_marker,
+    identity_errors,
+    read_bytes_at,
+    verdict_for,
+)
 
 COLUMNS = (
     "tool",
     "mode",
+    "product",
+    "fields",
+    "concurrency",
     "case_id",
-    "run_ordinal",
-    "bucket",
-    "region",
+    "attempt",
     "machine_type",
     "vcpus",
     "memory_gb",
     "container_memory_gb",
-    "image",
-    "job_state",
+    "purpose",
+    "statistic",
+    "state",
     "evidence_state",
     "exit",
     "row_count",
     "wall_seconds",
+    "prep_seconds",
     "max_rss_kb",
     "verdict",
 )
 FINAL_REPORT_STATES = {"SUCCEEDED", "CANCELLED", "ACCEPTED"}
+BOUND_EVIDENCE_STATES = {"VERIFY_UNAVAILABLE", "VERIFIED"}
+HEX64 = set("0123456789abcdef")
 
 
-def load_json_at(leaf: str, name: str) -> tuple[dict[str, object], bytes] | None:
+def load_json_at(result_prefix: str, name: str) -> tuple[dict[str, object], bytes] | None:
     try:
-        raw = read_bytes_at(leaf, name)
+        raw = read_bytes_at(result_prefix, name)
         value = json.loads(raw)
         return (value, raw) if isinstance(value, dict) else None
     except Exception:
-        # Missing is the common, expected case for verify.json (comparison
-        # not yet run); any other read failure degrades to "unavailable"
-        # the same way rather than crashing a summary over one bad leaf.
+        # Missing is the common, expected case for verify.json (comparison not
+        # yet run); any other read failure degrades to "unavailable" the same
+        # way rather than crashing a summary over one bad prefix.
         return None
 
 
-def recorded_worker_options(row: sqlite3.Row) -> dict[str, str]:
-    """Extract the immutable worker CLI options from the recorded Batch request."""
-    document = json.loads(row["job_json"])
-    commands = document["taskGroups"][0]["taskSpec"]["runnables"][0]["container"]["commands"]
-    if not isinstance(commands, list) or not all(isinstance(value, str) for value in commands):
-        raise ValueError("recorded worker commands are malformed")
-    options: dict[str, str] = {}
-    index = 0
-    while index < len(commands):
-        name = commands[index]
-        if not name.startswith("--") or index + 1 >= len(commands):
-            raise ValueError("recorded worker commands are not flag/value pairs")
-        value = commands[index + 1]
-        if name in options and name != "--case-env":
-            raise ValueError(f"recorded worker commands repeat {name}")
-        options[name] = value
-        index += 2
-    return options
-
-
 def result_binding_errors(row: sqlite3.Row, result: dict[str, object]) -> list[str]:
-    try:
-        options = recorded_worker_options(row)
-        container_memory = options["--container-memory-gb"]
-        resources: dict[str, object] = {
-            "machine_type": options["--machine-type"],
-            "vcpus": int(options["--vcpus"]),
-            "memory_gb": int(options["--memory-gb"]),
-            "container_memory_gb": None if container_memory == "none" else int(container_memory),
-        }
-        expected = {
-            "campaign_id": row["campaign_id"],
-            "job_id": row["job_id"],
-            "case_id": row["case_id"],
-            "case_fingerprint": row["fingerprint"],
-            "image": row["image_uri"],
-            "image_set_sha256": row["image_set_sha256"],
-            "tool": row["tool"],
-            "mode": row["mode"],
-            "bucket": row["bucket"],
-            "region": row["region"],
-            "run_ordinal": row["rep"],
-            "submission_number": row["submission"],
-            "tool_recipe_sha256": options["--tool-recipe-sha256"],
-            "tool_build_inputs_sha256": options["--tool-build-inputs-sha256"],
-            "toolbox_manifest_sha256": options["--toolbox-manifest-sha256"],
-            "toolbox_recipe_sha256": options["--toolbox-recipe-sha256"],
-            "tool_version": options["--tool-version"],
-            "tool_build_sha256": options["--tool-build-sha256"],
-            "adapter_bundle_sha256": options["--adapter-bundle-sha256"],
-            "harness_revision": options["--harness-revision"],
-            "subject_workdir": options["--subject-workdir"],
-            "applied_subject_workdir": options["--subject-workdir"],
-            "declared_resources": resources,
-        }
-    except (IndexError, KeyError, TypeError, ValueError, json.JSONDecodeError):
-        return ["job_json"]
+    """Where evidence disagrees with the row that launched it."""
+    expected: dict[str, object] = {
+        "group_id": row["group_id"],
+        "job_name": row["job_name"],
+        "case_id": row["case_id"],
+        "attempt_id": row["attempt_id"],
+        "tool": row["tool"],
+        "mode": row["mode"],
+        "bucket": row["target_bucket"],
+        "region": row["target_region"],
+        "prefix": row["target_prefix"],
+        "auth_role": row["auth_role"],
+        "image": row["image_uri"],
+        "image_set_sha256": row["image_set_sha256"],
+        "config": json.loads(row["config"]),
+        "declared_resources": {
+            "machine_type": row["machine_type"],
+            "vcpus": row["vcpus"],
+            "memory_gb": row["memory_gb"],
+            "container_memory_gb": row["container_memory_gb"],
+        },
+    }
     errors = [name for name, value in expected.items() if result.get(name) != value]
     errors.extend(result_semantic_errors(result))
     return errors
@@ -217,52 +202,28 @@ def result_semantic_errors(result: dict[str, object]) -> list[str]:
 
 
 def verify_binding_errors(
-    verification: dict[str, object],
-    result: dict[str, object],
-    result_raw: bytes,
-    leaf: str,
+    verification: dict[str, object], row: sqlite3.Row, result_raw: bytes
 ) -> list[str]:
+    """Where verify.json fails to bind to the attempt whose prefix it sits under."""
     expected = {
-        "actual_leaf": leaf,
+        "attempt_id": row["attempt_id"],
+        "tool": row["tool"],
+        "mode": row["mode"],
         "actual_result_sha256": hashlib.sha256(result_raw).hexdigest(),
-        "tool": result["tool"],
-        "mode": result["mode"],
     }
     errors = [name for name, value in expected.items() if verification.get(name) != value]
     if verification.get("verdict") not in {"PASS", "DRIFT", "FAIL"}:
         errors.append("verdict")
     for name in ("actual_tsv_sha256", "reference_tsv_sha256", "reference_result_sha256"):
         value = verification.get(name)
-        if (
-            not isinstance(value, str)
-            or len(value) != 64
-            or any(c not in "0123456789abcdef" for c in value)
-        ):
+        if not isinstance(value, str) or len(value) != 64 or set(value) - HEX64:
             errors.append(name)
-    for name in ("reference_leaf", "reference_tool", "reference_mode"):
+    for name in ("reference_attempt_id", "reference_tool", "reference_mode", "product"):
         if not isinstance(verification.get(name), str) or not verification[name]:
             errors.append(name)
-    reference_leaf = verification.get("reference_leaf")
-    if isinstance(reference_leaf, str):
-        try:
-            reference_raw = read_bytes_at(reference_leaf, "result.json")
-            reference_result = json.loads(reference_raw)
-        except Exception:
-            errors.append("reference_result")
-        else:
-            if hashlib.sha256(reference_raw).hexdigest() != verification.get(
-                "reference_result_sha256"
-            ):
-                errors.append("reference_result_sha256")
-            if not isinstance(reference_result, dict):
-                errors.append("reference_result")
-            else:
-                for name in ("tool", "mode"):
-                    if verification.get(f"reference_{name}") != reference_result.get(name):
-                        errors.append(f"reference_{name}")
-                for name in ("bucket", "region", "prefix"):
-                    if reference_result.get(name) != result.get(name):
-                        errors.append(f"reference_{name}")
+    fields = verification.get("fields")
+    if not isinstance(fields, list) or not all(isinstance(name, str) for name in fields):
+        errors.append("fields")
     diff = verification.get("diff")
     required_lists = ("missing", "extra", "duplicates", "reference_duplicates", "mismatches")
     if (
@@ -280,91 +241,67 @@ def verify_binding_errors(
     return errors
 
 
-def parent_destination(leaf: str) -> str:
-    return leaf.rstrip("/").rsplit("/", 1)[0] + "/"
+def stratum_for(row: sqlite3.Row, adapter_root: str) -> tuple[str, str]:
+    """`(product, fields)` from the capsule, which is where they are defined.
 
-
-def recompute_verification(
-    verification: dict[str, object], result: dict[str, object], leaf: str, adapter_root: str
-) -> bool:
-    reference_leaf = verification.get("reference_leaf")
-    if not isinstance(reference_leaf, str):
-        return False
-    code, recomputed = verify.verify_leaves(
-        tool=str(result["tool"]),
-        bucket=str(result["bucket"]),
-        prefix=str(result["prefix"]),
-        mode=str(result["mode"]),
-        actual_destination=parent_destination(leaf),
-        reference_destination=parent_destination(reference_leaf),
-        adapter_root=adapter_root,
-        expected_actual={
-            "campaign_id": result["campaign_id"],
-            "job_id": result["job_id"],
-            "case_id": result["case_id"],
-            "case_fingerprint": result["case_fingerprint"],
-            "image": result["image"],
-            "image_set_sha256": result["image_set_sha256"],
-        },
-        expected_reference={
-            "tool": verification["reference_tool"],
-            "mode": verification["reference_mode"],
-        },
-        write_record=False,
-    )
-    return code in VERDICT_EXIT_CODES.values() and recomputed == verification
-
-
-def row_for(row: sqlite3.Row, *, adapter_root: str = "tools") -> dict[str, object]:
+    Unresolvable -- a capsule that no longer declares the mode -- renders as "-"
+    and drops the attempt out of every stratum: what cannot be classified must
+    not be ranked.
+    """
     try:
-        options = recorded_worker_options(row)
-        recorded_resources: dict[str, object] = {
-            "machine_type": options["--machine-type"],
-            "vcpus": int(options["--vcpus"]),
-            "memory_gb": int(options["--memory-gb"]),
-            "container_memory_gb": (
-                "-"
-                if options["--container-memory-gb"] == "none"
-                else int(options["--container-memory-gb"])
-            ),
-        }
-    except (IndexError, KeyError, TypeError, ValueError, json.JSONDecodeError):
-        recorded_resources = {
-            "machine_type": "-",
-            "vcpus": "-",
-            "memory_gb": "-",
-            "container_memory_gb": "-",
-        }
-    base = {
+        manifest = adapters.mode_manifest(
+            adapters.adapter_dir_for(row["tool"], adapter_root), row["tool"], row["mode"]
+        )
+    except adapters.AdapterError:
+        return "-", "-"
+    return manifest.product, ",".join(manifest.fields)
+
+
+def row_for(row: sqlite3.Row, *, adapter_root: str) -> dict[str, Any]:
+    product, fields = stratum_for(row, adapter_root)
+    base: dict[str, Any] = {
         "tool": row["tool"],
         "mode": row["mode"],
+        "product": product,
+        "fields": fields,
+        "concurrency": "-" if row["concurrency"] is None else row["concurrency"],
         "case_id": row["case_id"],
-        "run_ordinal": row["rep"],
-        "bucket": row["bucket"],
-        "region": row["region"],
-        **recorded_resources,
-        "image": row["image_uri"],
-        "job_state": row["state"],
+        "attempt": row["attempt"],
+        "attempt_id": row["attempt_id"],
+        "bucket": row["target_bucket"],
+        "machine_type": row["machine_type"],
+        "vcpus": row["vcpus"],
+        "memory_gb": row["memory_gb"],
+        "container_memory_gb": (
+            "-" if row["container_memory_gb"] is None else row["container_memory_gb"]
+        ),
+        "purpose": row["purpose"],
+        "statistic": row["statistic"],
+        "produced_by": row["produced_by"],
+        "state": row["state"],
         "evidence_state": "UNAVAILABLE",
         "exit": "-",
         "row_count": "-",
         "wall_seconds": "-",
+        "prep_seconds": "-",
         "max_rss_kb": "-",
         "verdict": "-",
     }
-    leaf = resolve_leaf(row["destination"])
-    if leaf is None:
-        return {**base, "evidence_state": "AMBIGUOUS_LEAF"}
-    if not has_result_marker(leaf):
-        return {**base, "evidence_state": "INCOMPLETE_LEAF"}
-
-    loaded_result = load_json_at(leaf, "result.json")
+    if not has_result_marker(row["result_prefix"]):
+        return {**base, "evidence_state": "MISSING_EVIDENCE"}
+    loaded_result = load_json_at(row["result_prefix"], "result.json")
     if loaded_result is None:
         return {**base, "evidence_state": "RESULT_UNAVAILABLE"}
     result, result_raw = loaded_result
+    if identity_errors(
+        result,
+        attempt_id=row["attempt_id"],
+        case_id=row["case_id"],
+        result_prefix=row["result_prefix"],
+    ):
+        return {**base, "evidence_state": "IDENTITY_MISMATCH"}
     if result_binding_errors(row, result):
         return {**base, "evidence_state": "RESULT_MISMATCH"}
-    loaded_verify = load_json_at(leaf, "verify.json")
     measured = {
         **base,
         "exit": result.get("exit_code", "-"),
@@ -372,49 +309,135 @@ def row_for(row: sqlite3.Row, *, adapter_root: str = "tools") -> dict[str, objec
         "wall_seconds": result.get("wall_seconds", "-"),
         "max_rss_kb": result.get("max_rss_kb", "-"),
     }
-    resources = result.get("declared_resources")
-    if isinstance(resources, dict):
-        measured.update(
-            {
-                "machine_type": resources.get("machine_type", "-"),
-                "vcpus": resources.get("vcpus", "-"),
-                "memory_gb": resources.get("memory_gb", "-"),
-                "container_memory_gb": resources.get("container_memory_gb", "-"),
-            }
-        )
+    loaded_verify = load_json_at(row["result_prefix"], "verify.json")
     if loaded_verify is None:
         return {**measured, "evidence_state": "VERIFY_UNAVAILABLE"}
-    verify_output, _verify_raw = loaded_verify
-    if verify_binding_errors(verify_output, result, result_raw, leaf):
-        return {**measured, "evidence_state": "VERIFY_MISMATCH"}
-    if not recompute_verification(verify_output, result, leaf, adapter_root):
+    verification, _raw = loaded_verify
+    if verify_binding_errors(verification, row, result_raw):
         return {**measured, "evidence_state": "VERIFY_MISMATCH"}
     return {
         **measured,
         "evidence_state": "VERIFIED",
-        "verdict": verify_output.get("verdict", "-"),
+        "verdict": verification.get("verdict", "-"),
     }
 
 
-def render_markdown(rows: list[dict[str, object]]) -> str:
+def attach_preparations(rows: list[dict[str, Any]]) -> None:
+    """Fill `prep_seconds` with the cost of the chain behind each attempt.
+
+    A preparation is measured though never compared, so the total cost of a path
+    that needs one is recoverable -- and the report says which attempts had one.
+    """
+    by_attempt = {row["attempt_id"]: row for row in rows}
+    for row in rows:
+        chain, current = [], row["produced_by"]
+        while current is not None and current in by_attempt and current not in chain:
+            chain.append(current)
+            current = by_attempt[current]["produced_by"]
+        if not chain:
+            continue
+        durations = [by_attempt[a]["wall_seconds"] for a in chain]
+        row["preparations"] = chain
+        row["prep_seconds"] = (
+            round(sum(durations), 6)
+            if all(isinstance(d, (int, float)) and not isinstance(d, bool) for d in durations)
+            else "-"
+        )
+
+
+def report_rows(db_rows: list[sqlite3.Row], *, adapter_root: str) -> list[dict[str, Any]]:
+    rows = [row_for(db_row, adapter_root=adapter_root) for db_row in db_rows]
+    attach_preparations(rows)
+    return rows
+
+
+def is_timing(row: dict[str, Any]) -> bool:
+    return bool(row["purpose"] == "measurement" and row["statistic"] == "timing")
+
+
+def rate_lines(rows: list[dict[str, Any]]) -> list[str]:
+    """One line per rate case: successes over settled attempts, and the size.
+
+    Never a mean duration over the survivors -- for these cases the failures are
+    the measurement, so a mean over what happened to succeed would be a
+    survivorship result dressed as a timing.
+    """
+    cases: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        if row["purpose"] == "measurement" and row["statistic"] == "rate":
+            cases.setdefault(row["case_id"], []).append(row)
+    lines = []
+    for case_id, attempts in sorted(cases.items()):
+        settled = [a for a in attempts if a["state"] in TERMINAL_STATES]
+        successes = sum(1 for a in settled if a["state"] == "SUCCEEDED")
+        rate = f"{successes / len(settled):.4f}" if settled else "-"
+        first = attempts[0]
+        lines.append(
+            f"- `{case_id}` ({first['tool']} {first['mode']}): {successes}/{len(settled)} "
+            f"succeeded, rate {rate} over {len(attempts)} attempt(s)"
+        )
+    return lines
+
+
+def stratum_lines(rows: list[dict[str, Any]]) -> list[str]:
+    """The comparison scopes within one bucket, and what each holds."""
+    strata: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for row in rows:
+        if is_timing(row) and row["product"] != "-":
+            strata.setdefault((row["product"], row["fields"]), []).append(row)
+    lines = []
+    for (product, fields), members in sorted(strata.items()):
+        subjects = ", ".join(sorted(f"{m['tool']}/{m['mode']}" for m in members))
+        verdicts = sorted({str(m["verdict"]) for m in members})
+        lines.append(
+            f"- **{product}** [{fields}]: {len(members)} attempt(s) -- {subjects} "
+            f"-- verdicts {', '.join(verdicts)}"
+        )
+    return lines
+
+
+def preparation_lines(rows: list[dict[str, Any]]) -> list[str]:
+    return [
+        f"- `{row['attempt_id']}` ran behind {', '.join(row['preparations'])} "
+        f"({row['prep_seconds']}s of preparation)"
+        for row in rows
+        if row.get("preparations")
+    ]
+
+
+def render_markdown(rows: list[dict[str, Any]], *, blocked: list[str]) -> str:
     header = "| " + " | ".join(COLUMNS) + " |"
     separator = "| " + " | ".join("---" for _ in COLUMNS) + " |"
-    lines = [f"# Campaign report ({datetime.now(UTC).isoformat()})", "", header, separator]
-    for row in rows:
-        lines.append("| " + " | ".join(str(row[c]) for c in COLUMNS) + " |")
-    lines.append("")
+    lines = [f"# Campaign report ({datetime.now(UTC).isoformat()})", ""]
+    for slot in blocked:
+        lines.append(f"> **Blocked slot**: {slot} -- this group is incomplete.")
+    if blocked:
+        lines.append("")
+    for bucket in sorted({str(row["bucket"]) for row in rows}):
+        members = [row for row in rows if row["bucket"] == bucket]
+        lines.extend([f"## {bucket}", "", header, separator])
+        lines.extend("| " + " | ".join(str(row[c]) for c in COLUMNS) + " |" for row in members)
+        for title, section in (
+            ("Comparison strata", stratum_lines(members)),
+            ("Rate cases", rate_lines(members)),
+            ("Preparations", preparation_lines(members)),
+        ):
+            if section:
+                lines.extend(["", f"### {title}", "", *section])
+        lines.append("")
     lines.append(summary_line(rows))
     return "\n".join(lines)
 
 
-def summary_line(rows: list[dict[str, object]]) -> str:
+def summary_line(rows: list[dict[str, Any]]) -> str:
     verdict_counts: dict[str, int] = {}
     verified_timings = 0
     for row in rows:
         verdict = str(row["verdict"])
         verdict_counts[verdict] = verdict_counts.get(verdict, 0) + 1
         if (
-            row["exit"] == 0
+            is_timing(row)
+            and row["exit"] == 0
             and row["verdict"] in ("PASS", "DRIFT")
             and not isinstance(row["wall_seconds"], bool)
             and isinstance(row["wall_seconds"], (int, float))
@@ -428,22 +451,16 @@ def summary_line(rows: list[dict[str, object]]) -> str:
     )
 
 
-def report_exit_code(
-    rows: list[dict[str, object]], *, all_job_states: list[str] | None = None
-) -> int:
+def report_exit_code(rows: list[dict[str, Any]], *, blocked: list[str]) -> int:
     """Gate finality separately from the operational outcomes being reported."""
-    if not rows:
+    if not rows or blocked:
         return 1
-    states = (
-        all_job_states if all_job_states is not None else [str(row["job_state"]) for row in rows]
-    )
-    if any(state not in TERMINAL_STATES for state in states):
+    if any(row["state"] not in TERMINAL_STATES for row in rows):
         return 1
-    if any(row["job_state"] not in FINAL_REPORT_STATES for row in rows):
+    if any(row["state"] not in FINAL_REPORT_STATES for row in rows):
         return 1
-    bound_result_states = {"VERIFY_UNAVAILABLE", "VERIFY_MISMATCH", "VERIFIED"}
     if any(
-        row["job_state"] == "SUCCEEDED" and row.get("evidence_state") not in bound_result_states
+        row["state"] == "SUCCEEDED" and row["evidence_state"] not in BOUND_EVIDENCE_STATES
         for row in rows
     ):
         return 1
@@ -452,17 +469,17 @@ def report_exit_code(
 
 # Anchored to the repository, not the working directory. A relative default
 # resolves against wherever the operator happened to stand, and a missing
-# adapter directory then fails every recompute -- reporting a verified campaign
-# as VERIFY_MISMATCH, which is indistinguishable from evidence that genuinely
-# disagreed with its verdict.
+# adapter directory then leaves every attempt unclassified -- which is
+# indistinguishable from a capsule that dropped the mode.
 DEFAULT_ADAPTER_ROOT = str(Path(__file__).resolve().parents[3] / "tools")
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Print a Markdown summary of a campaign's results."
+        description="Print a Markdown summary of a campaign's attempts."
     )
     parser.add_argument("--state", default=STATE_FILENAME, help="campaign.db path (sqlite3).")
+    parser.add_argument("--group", help="Report one group; omitted reports the whole file.")
     parser.add_argument("--adapter-root", default=DEFAULT_ADAPTER_ROOT)
     return parser.parse_args(argv)
 
@@ -472,20 +489,24 @@ def main(argv: list[str] | None = None) -> int:
     if not Path(args.adapter_root).is_dir():
         print(
             f"report: adapter root {args.adapter_root} is not a directory; refusing to "
-            "report every attempt as a verification mismatch",
+            "report every attempt as unclassified",
             file=sys.stderr,
         )
         return 1
 
     con = open_ledger(args.state, readonly=True)
     try:
-        all_rows = attempt_rows(con)
-        rows = [row_for(db_row, adapter_root=args.adapter_root) for db_row in all_rows]
+        rows = report_rows(attempt_rows(con, group_id=args.group), adapter_root=args.adapter_root)
+        blocked = [
+            f"slot {slot['slot']} ({slot['tool']}) awaiting {slot['awaiting']}"
+            for slot in pending_rows(con, group_id=args.group)
+            if slot["state"] == "BLOCKED"
+        ]
     finally:
         con.close()
 
-    print(render_markdown(rows))
-    return report_exit_code(rows, all_job_states=[row["state"] for row in all_rows])
+    print(render_markdown(rows, blocked=blocked))
+    return report_exit_code(rows, blocked=blocked)
 
 
 if __name__ == "__main__":
