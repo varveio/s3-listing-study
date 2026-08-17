@@ -224,7 +224,7 @@ class Mode:
     columns, or a tool wins by emitting less.
     """
 
-    axes: Mapping[str, Axis] = MappingProxyType({})
+    axes: Mapping[str, Axis] = field(default_factory=lambda: MappingProxyType({}))
     """Per reserved name: what the knob is on this mode. An axis name identifies
     the axis and explicitly not its semantics."""
 
@@ -297,7 +297,7 @@ class CommandRequest:
     signs is the harness's business and never the subject's.
     """
 
-    config: Mapping[str, object] = MappingProxyType({})
+    config: Mapping[str, object] = field(default_factory=lambda: MappingProxyType({}))
     """The capsule's own knobs, forwarded verbatim and never read by the harness.
 
     A capsule declares the keys it accepts in ``CONFIG_KEYS``; anything else is
@@ -423,7 +423,7 @@ class LoadedCommandAdapter:
     executables: tuple[Executable, ...] = ()
     """The subject's executables; the first is the one ``build/image.json`` registers."""
 
-    requires: Mapping[str, tuple[str, ...]] = MappingProxyType({})
+    requires: Mapping[str, tuple[str, ...]] = field(default_factory=lambda: MappingProxyType({}))
     """Per mode, the ordered chain of this capsule's own modes that must run first."""
 
     build_env: EnvBuilder = field(default_factory=lambda: _static_env({}))
