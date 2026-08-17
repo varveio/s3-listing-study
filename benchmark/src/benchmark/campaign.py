@@ -51,6 +51,9 @@ TERMINAL_STATES = {
     *ACCEPTED_FAILURE_STATES,
 }
 N4_BOOT_DISK = {"type": "hyperdisk-balanced", "image": "batch-cos"}
+# Every rendered job carries a benchmark-intent label, so one server-side
+# filtered listing covers a polling pass for a project this study shares.
+BENCHMARK_JOB_FILTER = "labels.benchmark-intent:*"
 PINNED_IMAGE_RE = re.compile(r"\A[^\s@]+@sha256:([0-9a-f]{64})\Z")
 SECRET_RE = re.compile(r"\Aprojects/[^/]+/secrets/[^/]+/versions/[^/]+\Z")
 HEX64_RE = re.compile(r"\A[0-9a-f]{64}\Z")
@@ -512,6 +515,27 @@ def describe_job(
     return str(batch_v1.JobStatus.State(job.status.state).name)
 
 
+def list_job_states(
+    project: str,
+    location: str,
+    *,
+    client: batch_v1.BatchServiceClient,
+) -> dict[str, str]:
+    """Return job ID -> provider state for benchmark-owned jobs under the parent.
+
+    One paginated call answers a whole polling pass, so a campaign's cost is a
+    request per pass rather than a request per submission. The label every
+    rendered job carries is what keeps a shared project's unrelated Batch work
+    out of the response; rows are still matched by exact job ID afterwards, so
+    the filter is a narrowing, never the identity.
+    """
+    request = {"parent": f"projects/{project}/locations/{location}", "filter": BENCHMARK_JOB_FILTER}
+    return {
+        job.name.rsplit("/", 1)[-1]: str(batch_v1.JobStatus.State(job.status.state).name)
+        for job in client.list_jobs(request=request, retry=None, timeout=60)
+    }
+
+
 def cancel_job(
     project: str,
     location: str,
@@ -806,16 +830,29 @@ def poll_once(
     *,
     client: batch_v1.BatchServiceClient,
 ) -> bool:
+    pending = [row for row in rows if row["state"] not in TERMINAL_STATES]
+    if not pending:
+        return True
+    try:
+        listed = list_job_states(project, location, client=client)
+    except GoogleAPIError as exc:
+        # A listing that fails costs the pass nothing: every row below simply
+        # falls back to the point read it would have done anyway.
+        print(f"campaign: job listing failed, describing each submission: {exc}", file=sys.stderr)
+        listed = {}
     all_terminal = True
-    for row in rows:
-        if row["state"] in TERMINAL_STATES:
-            continue
-        try:
-            state = describe_job(project, location, row["job_id"], client=client)
-        except GoogleAPIError as exc:
-            print(f"campaign: describe failed for {row['job_id']}: {exc}", file=sys.stderr)
-            all_terminal = False
-            continue
+    for row in pending:
+        state = listed.get(row["job_id"])
+        if state is None:
+            # The listing did not account for this submission. Ask for it by
+            # name so a job the provider does not have is a reported error
+            # rather than an absence indistinguishable from a narrowed filter.
+            try:
+                state = describe_job(project, location, row["job_id"], client=client)
+            except GoogleAPIError as exc:
+                print(f"campaign: describe failed for {row['job_id']}: {exc}", file=sys.stderr)
+                all_terminal = False
+                continue
         update_submission_state(con, row["job_id"], state)
         all_terminal &= state in TERMINAL_STATES
     return all_terminal

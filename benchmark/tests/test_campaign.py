@@ -3,13 +3,14 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import sqlite3
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 
 import pytest
-from google.api_core.exceptions import AlreadyExists, BadRequest
+from google.api_core.exceptions import AlreadyExists, BadRequest, Forbidden, NotFound
 from google.cloud import batch_v1
 
 from benchmark import campaign
@@ -468,6 +469,97 @@ def test_plan_binding_and_retry_evidence_are_fail_closed(tmp_path: Path) -> None
 )
 def test_verify_aggregate_semantics(codes: list[int], expected: int) -> None:
     assert campaign.aggregate_verify_exit(codes) == expected
+
+
+def _tracked_submission(con: sqlite3.Connection, job_id: str, state: str) -> None:
+    now = "2026-08-17T00:00:00+00:00"
+    con.execute(
+        "INSERT INTO submissions (base_job_id, submission, job_id, campaign_id, project, "
+        "location, tool, mode, case_id, fingerprint, rep, bucket, region, image_uri, "
+        "image_set_sha256, destination, job_json, state, submitted_at, updated_at) "
+        "VALUES (?,1,?,'2026-08-17-c','p','l','aws-cli','m','c','f',1,'b','r','i','s','d','{}',"
+        "?,?,?)",
+        (job_id, job_id, state, now, now),
+    )
+    con.commit()
+
+
+def _listed_job(job_id: str, state: str) -> batch_v1.Job:
+    job = batch_v1.Job()
+    job.name = f"projects/p/locations/l/jobs/{job_id}"
+    job.status.state = getattr(batch_v1.JobStatus.State, state)
+    return job
+
+
+def test_poll_reads_every_submission_in_one_listing(tmp_path: Path) -> None:
+    con = campaign.open_db(str(tmp_path / "campaign.db"))
+    _tracked_submission(con, "job-one", "SUBMITTED")
+    _tracked_submission(con, "job-two", "SUBMITTED")
+    _tracked_submission(con, "job-settled", "SUCCEEDED")
+    calls: list[str] = []
+
+    class Client:
+        def list_jobs(self, **kwargs: object) -> list[batch_v1.Job]:
+            calls.append("list")
+            request = cast(dict[str, str], kwargs["request"])
+            assert request["filter"] == campaign.BENCHMARK_JOB_FILTER
+            assert request["parent"] == "projects/p/locations/l"
+            return [_listed_job("job-one", "RUNNING"), _listed_job("job-two", "FAILED")]
+
+        def get_job(self, **_kwargs: object) -> batch_v1.Job:
+            pytest.fail("a listed submission must not be described individually")
+
+    rows = campaign.latest_submissions(con)
+    terminal = campaign.poll_once(
+        "p", "l", con, rows, client=cast(batch_v1.BatchServiceClient, Client())
+    )
+    assert calls == ["list"]  # one request for the whole pass, not one per job
+    assert not terminal
+    states = {row["job_id"]: row["state"] for row in campaign.latest_submissions(con)}
+    assert states == {"job-one": "RUNNING", "job-two": "FAILED", "job-settled": "SUCCEEDED"}
+
+
+def test_poll_describes_only_what_the_listing_left_out(tmp_path: Path) -> None:
+    con = campaign.open_db(str(tmp_path / "campaign.db"))
+    _tracked_submission(con, "job-listed", "SUBMITTED")
+    _tracked_submission(con, "job-absent", "SUBMITTED")
+    described: list[str] = []
+
+    class Client:
+        def list_jobs(self, **_kwargs: object) -> list[batch_v1.Job]:
+            return [_listed_job("job-listed", "SUCCEEDED")]
+
+        def get_job(self, **kwargs: object) -> batch_v1.Job:
+            name = cast(str, kwargs["name"])
+            described.append(name)
+            raise NotFound("no such job")  # type: ignore[no-untyped-call]
+
+    rows = campaign.latest_submissions(con)
+    terminal = campaign.poll_once(
+        "p", "l", con, rows, client=cast(batch_v1.BatchServiceClient, Client())
+    )
+    assert described == ["projects/p/locations/l/jobs/job-absent"]
+    assert not terminal
+    states = {row["job_id"]: row["state"] for row in campaign.latest_submissions(con)}
+    assert states == {"job-listed": "SUCCEEDED", "job-absent": "SUBMITTED"}
+
+
+def test_poll_falls_back_to_describes_when_the_listing_fails(tmp_path: Path) -> None:
+    con = campaign.open_db(str(tmp_path / "campaign.db"))
+    _tracked_submission(con, "job-one", "SUBMITTED")
+
+    class Client:
+        def list_jobs(self, **_kwargs: object) -> list[batch_v1.Job]:
+            raise Forbidden("listing denied")  # type: ignore[no-untyped-call]
+
+        def get_job(self, **_kwargs: object) -> batch_v1.Job:
+            return _listed_job("job-one", "SUCCEEDED")
+
+    rows = campaign.latest_submissions(con)
+    assert campaign.poll_once(
+        "p", "l", con, rows, client=cast(batch_v1.BatchServiceClient, Client())
+    )
+    assert campaign.latest_submissions(con)[0]["state"] == "SUCCEEDED"
 
 
 def test_cancel_waits_for_delete_settlement(monkeypatch: pytest.MonkeyPatch) -> None:
