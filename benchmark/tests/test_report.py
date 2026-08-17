@@ -5,7 +5,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-from benchmark import campaign, report, verify
+from benchmark import campaign, measure, report, verify
 from benchmark.contract import sha256_of
 
 COMMAND_PY = """
@@ -320,6 +320,46 @@ def test_evidence_that_ran_another_config_is_refused(tmp_path: Path) -> None:
     )
     rows = rows_of(con, adapter_root(tmp_path, "alpha"))
     assert rows[0]["evidence_state"] == "RESULT_MISMATCH"
+
+
+def test_a_setup_failure_reads_as_evidence_rather_than_a_broken_result(tmp_path: Path) -> None:
+    """An attempt whose inline setup exec failed publishes a marker with no
+    execution in it, and both readers must take it for what it is.
+
+    verify refuses on the subject's own exit code before it ever reaches the
+    execution block; report reads that block for every attempt with a marker, so
+    the null has to mean "the subject never ran" rather than "malformed".
+    """
+    con = ledger(tmp_path)
+    prefix = write_evidence(
+        record(con, tmp_path, tool="alpha", digest="aaaa", state="FAILED"),
+        exit_code=measure.EXIT_SETUP_FAILED,
+        execution=None,
+        max_rss_kb=None,
+        row_count=None,
+        native_manifest={},
+        setup={
+            "mode": "prep",
+            "command": ["/usr/bin/alpha", "prep"],
+            "exit_code": 3,
+            "wall_s": 0.2,
+            "output": {},
+            "validated": False,
+        },
+    )
+    document = json.loads((prefix / "result.json").read_text())
+    # `write_evidence` derives the timing from a duration; a setup failure has
+    # none to derive it from.
+    document["wall_seconds"] = None
+    (prefix / "result.json").write_text(json.dumps(document))
+
+    assert report.result_semantic_errors(document) == []
+    assert verify.check_failed_subject(document) == f"subject exited {measure.EXIT_SETUP_FAILED}"
+    rows = rows_of(con, adapter_root(tmp_path, "alpha"))
+    assert rows[0]["evidence_state"] == "VERIFY_UNAVAILABLE"
+    # And the null is still load-bearing: a zero exit beside no execution is a
+    # result that contradicts itself.
+    assert report.result_semantic_errors({**document, "exit_code": 0}) == ["exit_code"]
 
 
 def test_a_verify_record_that_disagrees_with_its_own_diff_is_not_a_verdict(

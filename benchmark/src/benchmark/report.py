@@ -146,6 +146,20 @@ def result_semantic_errors(result: dict[str, object]) -> list[str]:
         errors.append("row_count")
     if row_count_error is not None and not isinstance(row_count_error, str):
         errors.append("row_count_error")
+    if execution is None:
+        # The subject never ran: an inline setup exec failed ahead of it, and
+        # the setup block is the account of why. Nothing here to check, and
+        # every measured field must be absent rather than a zero.
+        if not isinstance(result.get("setup"), dict):
+            errors.append("setup")
+        if exit_code == 0:
+            errors.append("exit_code")
+        errors.extend(
+            name
+            for name in ("wall_seconds", "max_rss_kb", "row_count", "row_count_error")
+            if result.get(name) is not None
+        )
+        return errors
     if not isinstance(execution, dict):
         return [*errors, "execution"]
     max_rss_kb = result.get("max_rss_kb")

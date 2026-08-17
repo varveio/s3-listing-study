@@ -983,16 +983,33 @@ def test_a_preparation_is_not_asked_for_a_row_count_it_has_no_answer_to(
 def test_an_inline_setup_that_fails_fails_the_whole_attempt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A subject run on hints that were never made measures something else."""
+    """A subject run on hints that were never made measures something else.
+
+    The attempt still publishes: what the setup captured is the only account of
+    why there is no measurement, and the worker's own rule is that captured
+    output stays evidence. The subject's fields are null rather than absent, so
+    a reader sees an attempt that ran nothing rather than a shape it must guess
+    at.
+    """
     uploaded: list[tuple[str, bytes]] = []
-    code = run_inline_worker(
-        tmp_path,
-        monkeypatch,
-        split="import sys\n\nsys.exit(3)\n",
-        uploaded=uploaded,
-    )
+    failing = "import sys\n\nprint('no keyspace here', file=sys.stderr)\nsys.exit(3)\n"
+    code = run_inline_worker(tmp_path, monkeypatch, split=failing, uploaded=uploaded)
     assert code == measure.EXIT_SETUP_FAILED
-    assert uploaded == []
+    assert uploaded[-1][0] == "gs://results/job/result.json"
+
+    result = json.loads((tmp_path / "attempt/result.json").read_bytes())
+    assert result["attempt_id"] == "s3-fast-list.9f300cc4d2b1.s1"
+    assert result["exit_code"] == measure.EXIT_SETUP_FAILED
+    assert result["execution"] is None
+    assert result["timed_out"] is False
+    assert (result["argv"], result["wall_seconds"], result["max_rss_kb"]) == (None, None, None)
+    assert (result["row_count"], result["row_count_error"]) == (None, None)
+    assert result["native_manifest"] == {}
+    setup = result["setup"]
+    assert (setup["mode"], setup["exit_code"], setup["validated"]) == ("split", 3, False)
+    assert setup["output"] == {}
+    assert isinstance(setup["wall_s"], float)
+    assert (tmp_path / "attempt/inline/stderr.log").read_text() == "no keyspace here\n"
 
 
 def test_an_inline_setup_publishing_more_than_one_file_is_refused(

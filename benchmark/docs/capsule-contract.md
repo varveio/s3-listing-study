@@ -391,6 +391,13 @@ out, leaving a process behind, or publishing anything other than exactly one fil
 — fails the whole attempt (`EXIT_SETUP_FAILED`), because a subject run on hints
 that were never made measures something else.
 
+Failing does not mean vanishing. The attempt still publishes: `result.json` in
+the usual shape with every subject field null (`execution`, `wall_seconds`,
+`max_rss_kb`, `row_count`), the `setup` block saying what the exec did and how
+long it took, and its captured stdout/stderr under `inline/`. That capture is
+the only account of *why* the attempt has no measurement in it, and it is held
+to the same secret scan as the subject's own.
+
 ### An artifact is validated before anything consumes it
 
 A digest proves an artifact is *unchanged*, not that it is *usable*. s3-fast-list

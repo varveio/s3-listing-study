@@ -765,11 +765,16 @@ def final_exit_code(
 
 
 class SetupFailed(RuntimeError):
-    """The untimed setup exec left the timed subject nothing it could run on."""
+    """The untimed setup exec left the timed subject nothing it could run on.
 
-    def __init__(self, message: str, code: int) -> None:
+    Carries the setup block as far as it got, because what the failed exec
+    captured is the evidence for why the attempt has no measurement in it.
+    """
+
+    def __init__(self, message: str, code: int, setup: Mapping[str, object]) -> None:
         super().__init__(message)
         self.code = code
+        self.setup = dict(setup)
 
 
 def subject_env(
@@ -824,6 +829,20 @@ def run_inline_setup(
     setup_dir = attempt_dir / "inline"
     sink = setup_dir / "sink"
     sink.mkdir(parents=True, exist_ok=True)
+    # Filled in as the phase gets through it, so a refusal at any point still
+    # says what happened rather than only that something did.
+    setup: dict[str, object] = {
+        "mode": mode,
+        "command": [],
+        "exit_code": None,
+        "wall_s": None,
+        "output": {},
+        "validated": False,
+    }
+
+    def failed(message: str, code: int) -> SetupFailed:
+        return SetupFailed(message, code, setup)
+
     try:
         request = CommandRequest(
             mode=mode,
@@ -841,13 +860,14 @@ def run_inline_setup(
         command = adapter.compile(request)
         functional_env = adapter.build_env(request)
     except Exception as exc:
-        raise SetupFailed(f"{args.tool} setup {mode!r}: {exc}", EXIT_ADAPTER_ERROR) from None
+        raise failed(f"{args.tool} setup {mode!r}: {exc}", EXIT_ADAPTER_ERROR) from None
+    setup["command"] = list(command)
 
     environment_error = validate_environment_inputs(functional_env)
     if environment_error:
-        raise SetupFailed(f"setup {mode!r}: {environment_error}", 2)
+        raise failed(f"setup {mode!r}: {environment_error}", 2)
     if not preflight(command):
-        raise SetupFailed(f"setup {mode!r} has no executable to run", EXIT_SETUP_FAILED)
+        raise failed(f"setup {mode!r} has no executable to run", EXIT_SETUP_FAILED)
 
     execution = run_tool(
         command,
@@ -857,12 +877,14 @@ def run_inline_setup(
         subject_env(args.region, functional_env, {}),
         cwd=args.subject_workdir,
     )
+    setup["exit_code"] = execution["exit_code"]
+    setup["wall_s"] = execution["wall_seconds"]
     settled = all(
         execution.get(field) is True
         for field in ("process_group_empty", "descendants_empty", "process_tree_clean")
     )
     if execution["exit_code"] != 0 or execution["timed_out"] or not settled:
-        raise SetupFailed(
+        raise failed(
             f"setup {mode!r} exited {execution['exit_code']} "
             f"(timed_out={execution['timed_out']}, settled={settled})",
             EXIT_SETUP_FAILED,
@@ -870,11 +892,12 @@ def run_inline_setup(
     try:
         produced = sorted(retained_files(sink))
     except ArtifactSafetyError as exc:
-        raise SetupFailed(
+        raise failed(
             f"setup {mode!r} published unusable output: {exc}", EXIT_SETUP_FAILED
         ) from None
+    setup["output"] = {path.name: sha256_of(path) for path in produced}
     if len(produced) != 1:
-        raise SetupFailed(
+        raise failed(
             f"setup {mode!r} publishes exactly one artifact into its sink, and this one "
             f"published {len(produced)}",
             EXIT_SETUP_FAILED,
@@ -885,17 +908,10 @@ def run_inline_setup(
         try:
             validator(output)
         except Exception as exc:
-            raise SetupFailed(
+            raise failed(
                 f"setup {mode!r} produced no usable artifact: {exc}", EXIT_ARTIFACT_UNUSABLE
             ) from None
-    setup = {
-        "mode": mode,
-        "command": list(command),
-        "exit_code": execution["exit_code"],
-        "wall_s": execution["wall_seconds"],
-        "output": {output.name: sha256_of(output)},
-        "validated": validator is not None,
-    }
+    setup["validated"] = validator is not None
     return str(output), setup
 
 
@@ -965,6 +981,109 @@ def upload(attempt_dir: Path, destination: str) -> bool:
     return True
 
 
+def attempt_identity(
+    args: argparse.Namespace, config: Mapping[str, object], destination: str
+) -> dict[str, object]:
+    """What result.json says about *which* attempt this is, whatever became of it.
+
+    Written by both markers a worker can publish — a measurement, and a setup
+    exec that failed before the subject was ever compiled — so the second is
+    this same document with its execution fields empty rather than a shape of
+    its own that every reader would have to learn.
+    """
+    return {
+        "tool": args.tool,
+        "mode": args.mode,
+        "bucket": args.bucket,
+        "region": args.region,
+        "prefix": args.prefix,
+        "auth_role": args.auth_role,
+        "destination": destination,
+        "config": config,
+        # Lineage, beside the timing: which bytes this case consumed, and where
+        # the harness staged them from.
+        "input_artifact": args.input_artifact or None,
+        "input_artifact_sha256": args.input_artifact_sha256 or None,
+        "image": args.image,
+        "toolbox_manifest_sha256": args.toolbox_manifest_sha256,
+        "toolbox_recipe_sha256": args.toolbox_recipe_sha256,
+        "tool_recipe_sha256": args.tool_recipe_sha256,
+        "tool_build_inputs_sha256": args.tool_build_inputs_sha256,
+        "tool_version": args.tool_version,
+        "tool_build_sha256": args.tool_build_sha256,
+        "adapter_bundle_sha256": args.adapter_bundle_sha256,
+        "harness_revision": args.harness_revision,
+        "subject_workdir": args.subject_workdir,
+        "applied_subject_workdir": args.subject_workdir,
+        "worker_workdir": os.getcwd(),
+        "image_set_sha256": args.image_set_sha256,
+        "group_id": args.group_id,
+        "job_name": args.job_name,
+        "case_id": args.case_id,
+        "attempt_id": args.attempt_id,
+        "declared_resources": {
+            "machine_type": args.machine_type,
+            "vcpus": args.vcpus,
+            "memory_gb": args.memory_gb,
+            "container_memory_gb": args.container_memory_gb,
+        },
+        "observed_architecture": platform.machine(),
+        "batch_job_uid": os.environ.get("BATCH_JOB_UID"),
+    }
+
+
+def publish_setup_failure(
+    args: argparse.Namespace,
+    *,
+    config: Mapping[str, object],
+    attempt_dir: Path,
+    destination: str,
+    setup: Mapping[str, object],
+    exit_code: int,
+    started_at: str,
+) -> int:
+    """Upload what the failed setup exec left behind, and return its ladder code.
+
+    The exec ran, captured output, and that capture is the only account of why
+    this attempt has no measurement in it — the same rule the subject's own
+    failures are held to. The subject never ran, so its fields are explicitly
+    null rather than zeros a reader could mistake for a measurement.
+    """
+    secret_hit = scan_for_secrets([attempt_dir / "inline"])
+    if secret_hit:
+        print(
+            f"measure: possible secret in {secret_hit}; refusing to upload this attempt",
+            file=sys.stderr,
+        )
+        return EXIT_SECRET_DETECTED
+    result = {
+        **attempt_identity(args, config, destination),
+        "argv": None,
+        "setup": dict(setup),
+        "exit_code": exit_code,
+        "timed_out": False,
+        "execution": None,
+        "wall_seconds": None,
+        "max_rss_kb": None,
+        "row_count": None,
+        "row_count_error": None,
+        "started_at": started_at,
+        "finished_at": datetime.now(UTC).isoformat(),
+        "stdout_size": 0,
+        "stderr_size": 0,
+        "stdout_gz": None,
+        "stdout_gz_sha256": None,
+        "stderr_gz": None,
+        "stderr_gz_sha256": None,
+        "native_manifest": {},
+        "artifacts_size_bytes": sum(
+            p.stat().st_size for p in attempt_dir.rglob("*") if p.is_file()
+        ),
+    }
+    write_result_atomic(attempt_dir / "result.json", result)
+    return exit_code if upload(attempt_dir, destination) else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
 
@@ -1026,6 +1145,13 @@ def main(argv: list[str] | None = None) -> int:
             print(f"measure: {exc}", file=sys.stderr)
             return EXIT_ARTIFACT_UNUSABLE
 
+    # The attempt's own prefix, and no leaf below it: the ledger row already
+    # names one attempt, so "is this attempt complete" is one existence test on
+    # a known prefix rather than a listing that resolves which leaf is
+    # authoritative. Create-only writes are what keep a second execution of this
+    # attempt from merging into the first.
+    attempt_destination = args.destination.rstrip("/") + "/"
+
     # An untimed pre-phase, before the subject argv exists: what it publishes is
     # what the subject consumes, so it runs here rather than as its own attempt.
     setup: dict[str, object] | None = None
@@ -1039,6 +1165,7 @@ def main(argv: list[str] | None = None) -> int:
     manifest = adapter.modes.get(args.mode)
     inline_mode = manifest.inline if manifest is not None else ""
     if inline_mode:
+        setup_started_at = datetime.now(UTC).isoformat()
         try:
             artifact_path, setup = run_inline_setup(
                 adapter,
@@ -1051,7 +1178,15 @@ def main(argv: list[str] | None = None) -> int:
             )
         except SetupFailed as exc:
             print(f"measure: {exc}", file=sys.stderr)
-            return exc.code
+            return publish_setup_failure(
+                args,
+                config=config,
+                attempt_dir=attempt_dir,
+                destination=attempt_destination,
+                setup=exc.setup,
+                exit_code=exc.code,
+                started_at=setup_started_at,
+            )
 
     try:
         command, functional_env = adapters.compile_command(
@@ -1080,13 +1215,6 @@ def main(argv: list[str] | None = None) -> int:
         print(f"measure: {environment_error}", file=sys.stderr)
         return 2
     env = subject_env(args.region, functional_env, credential_env)
-
-    # The attempt's own prefix, and no leaf below it: the ledger row already
-    # names one attempt, so "is this attempt complete" is one existence test on
-    # a known prefix rather than a listing that resolves which leaf is
-    # authoritative. Create-only writes are what keep a second execution of this
-    # attempt from merging into the first.
-    attempt_destination = args.destination.rstrip("/") + "/"
 
     started_at = datetime.now(UTC).isoformat()
     execution = run_tool(
@@ -1162,19 +1290,8 @@ def main(argv: list[str] | None = None) -> int:
     artifacts_size_bytes = sum(p.stat().st_size for p in attempt_dir.rglob("*") if p.is_file())
 
     result = {
-        "tool": args.tool,
-        "mode": args.mode,
-        "bucket": args.bucket,
-        "region": args.region,
-        "prefix": args.prefix,
-        "auth_role": args.auth_role,
-        "destination": attempt_destination,
+        **attempt_identity(args, config, attempt_destination),
         "argv": list(command),
-        "config": config,
-        # Lineage, beside the timing: which bytes this case consumed, and where
-        # the harness staged them from.
-        "input_artifact": args.input_artifact or None,
-        "input_artifact_sha256": args.input_artifact_sha256 or None,
         # The untimed pre-phase, when this mode declared one: what it ran, what
         # it made, and how long it took — beside the timing and never inside it.
         "setup": setup,
@@ -1195,31 +1312,6 @@ def main(argv: list[str] | None = None) -> int:
         "stderr_gz_sha256": sha256_of(stderr_gz) if stderr_gz else None,
         "native_manifest": native_files,
         "artifacts_size_bytes": artifacts_size_bytes,
-        "image": args.image,
-        "toolbox_manifest_sha256": args.toolbox_manifest_sha256,
-        "toolbox_recipe_sha256": args.toolbox_recipe_sha256,
-        "tool_recipe_sha256": args.tool_recipe_sha256,
-        "tool_build_inputs_sha256": args.tool_build_inputs_sha256,
-        "tool_version": args.tool_version,
-        "tool_build_sha256": args.tool_build_sha256,
-        "adapter_bundle_sha256": args.adapter_bundle_sha256,
-        "harness_revision": args.harness_revision,
-        "subject_workdir": args.subject_workdir,
-        "applied_subject_workdir": args.subject_workdir,
-        "worker_workdir": os.getcwd(),
-        "image_set_sha256": args.image_set_sha256,
-        "group_id": args.group_id,
-        "job_name": args.job_name,
-        "case_id": args.case_id,
-        "attempt_id": args.attempt_id,
-        "declared_resources": {
-            "machine_type": args.machine_type,
-            "vcpus": args.vcpus,
-            "memory_gb": args.memory_gb,
-            "container_memory_gb": args.container_memory_gb,
-        },
-        "observed_architecture": platform.machine(),
-        "batch_job_uid": os.environ.get("BATCH_JOB_UID"),
     }
     write_result_atomic(attempt_dir / "result.json", result)
 
