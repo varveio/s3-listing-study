@@ -21,8 +21,13 @@ from benchmark.runtime.command_adapter import (
     CommandAdapterError,
     CommandRequest,
     Default,
+    Fixed,
+    Inert,
     LoadedCommandAdapter,
+    Mode,
+    Stated,
     load_command_adapter,
+    shared_axis_values,
 )
 
 ROOT = Path(__file__).parents[2]
@@ -591,6 +596,31 @@ def test_swath_declares_what_each_mode_produces_and_what_it_asked_for() -> None:
     assert adapter.build_env(request) == {
         "JAVA_TOOL_OPTIONS": f"-XX:MaxRAMPercentage={HEAP_PERCENT}"
     }
+
+
+def test_one_rule_decides_what_a_producing_mode_inherits() -> None:
+    """A chain link and an inline setup exec inherit by the same rule.
+
+    The resolver expands the one and the worker runs the other, and two copies
+    of this filter are two chances to disagree about what a sweep varied.
+    """
+    consumer = {"mode": "hinted", "concurrency": 8, "segments": 16, "heap_percent": HEAP_PERCENT}
+    settable = Mode(
+        product="text",
+        fields=("key",),
+        axes={
+            "concurrency": Ceiling(64, "unverified"),
+            "segments": Stated(),
+            # The harness's own share, which no row and no producer may restate.
+            "heap_percent": Fixed(HEAP_PERCENT),
+        },
+    )
+    assert shared_axis_values(settable, consumer) == {"concurrency": 8, "segments": 16}
+    # A knob that does nothing here would split shared preparations over nothing.
+    inert = Mode(product="text", fields=("key",), axes={"concurrency": Inert()})
+    assert shared_axis_values(inert, consumer) == {}
+    # An axis the producer never declares is not its business at all.
+    assert shared_axis_values(Mode(product="text", fields=("key",)), consumer) == {}
 
 
 def test_commands_compile_exact_subject_argv() -> None:

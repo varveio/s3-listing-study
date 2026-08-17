@@ -170,6 +170,10 @@ class Inert:
 
 Axis = Fixed | Default | Ceiling | Stated | Inert
 
+SettableAxis = Default | Ceiling | Stated
+"""The axis states a plan may set a value on. ``Fixed`` refuses one, and
+``Inert`` would accept a value that changes nothing."""
+
 
 @dataclass(frozen=True, slots=True)
 class Executable:
@@ -292,6 +296,23 @@ class Mode:
         if purpose not in PURPOSES:
             raise CommandAdapterError(f"unknown purpose: {purpose!r}")
         return PURPOSES.index(purpose) <= PURPOSES.index(self.purpose_ceiling)
+
+
+def shared_axis_values(manifest: Mode, consumer: Mapping[str, object]) -> dict[str, object]:
+    """The consumer's value for every axis ``manifest`` declares settable itself.
+
+    One rule for both ways a producing mode inherits from the row it serves — a
+    chain link the resolver expands, and an inline setup exec the worker runs —
+    because two copies of it are two chances to disagree about what a sweep
+    varied. An axis the producer does not declare never flows into it, and a
+    value on an ``Inert`` one would split shared preparations over a knob that
+    does nothing.
+    """
+    return {
+        name: consumer[name]
+        for name, axis in manifest.axes.items()
+        if name in consumer and isinstance(axis, SettableAxis)
+    }
 
 
 @dataclass(frozen=True, slots=True)

@@ -43,11 +43,9 @@ from benchmark.contract import (
 )
 from benchmark.runtime.command_adapter import (
     HEAP_PERCENT,
-    Ceiling,
     CommandRequest,
-    Default,
     LoadedCommandAdapter,
-    Stated,
+    shared_axis_values,
 )
 
 EXIT_ADAPTER_ERROR = 3
@@ -807,14 +805,8 @@ def run_inline_setup(
     as listed rows. Exactly one file, the same contract a consumed preparation
     holds to: the harness has no way to choose between two.
     """
-    manifest = adapter.modes[mode]
-    # The same inheritance a chain link gets: the consumer's value for an axis
-    # this mode declares settable itself, and nothing it does not declare.
-    shared = {
-        name: consumer_config[name]
-        for name, axis in manifest.axes.items()
-        if name in consumer_config and isinstance(axis, Default | Ceiling | Stated)
-    }
+    # The same inheritance a chain link gets, from the same rule.
+    shared = shared_axis_values(adapter.modes[mode], consumer_config)
     setup_dir = attempt_dir / "inline"
     sink = setup_dir / "sink"
     sink.mkdir(parents=True, exist_ok=True)

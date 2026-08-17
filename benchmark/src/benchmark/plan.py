@@ -73,7 +73,7 @@ import yaml
 if TYPE_CHECKING:
     # Not imported at runtime: most callers of this module never touch a
     # capsule at all, and the adapter loader pulls in the runtime contract.
-    from benchmark.runtime.command_adapter import LoadedCommandAdapter, Mode
+    from benchmark.runtime.command_adapter import LoadedCommandAdapter
 
 # Bumped only when a file written for an older reader would be misread by this
 # one. Unknown versions are refused rather than best-effort parsed. One number
@@ -673,6 +673,8 @@ def expand_requirements(case: Case, adapter: LoadedCommandAdapter) -> tuple[Case
     A mode's inline setup exec is not expanded here: it is not a case, it runs
     inside the consuming attempt, and resolution has already compiled it.
     """
+    from benchmark.runtime.command_adapter import shared_axis_values
+
     links: list[Case] = []
     consumer = dict(case.config)
     for mode in adapter.requires.get(case.mode, ()):
@@ -683,7 +685,7 @@ def expand_requirements(case: Case, adapter: LoadedCommandAdapter) -> tuple[Case
                 f"{manifest.purpose_ceiling!r} — a prerequisite runs as a preparation"
             )
         try:
-            config = adapter.effective_config(mode, _shared_axes(manifest, consumer))
+            config = adapter.effective_config(mode, shared_axis_values(manifest, consumer))
         except Exception as exc:
             raise PlanError(f"{case.tool}: prerequisite {mode!r} of {case.mode!r}: {exc}") from exc
         _compile_prerequisite(case, adapter, mode, config)
@@ -702,22 +704,6 @@ def expand_requirements(case: Case, adapter: LoadedCommandAdapter) -> tuple[Case
             )
         )
     return (*links, case)
-
-
-def _shared_axes(manifest: Mode, consumer: Mapping[str, object]) -> dict[str, object]:
-    """The consumer's value for every axis this mode declares settable itself.
-
-    Only a settable axis inherits: a ``Fixed`` one refuses any set value, and a
-    value on an ``Inert`` one would split shared preparations over a knob that
-    does nothing.
-    """
-    from benchmark.runtime.command_adapter import Ceiling, Default, Stated
-
-    return {
-        name: consumer[name]
-        for name, axis in manifest.axes.items()
-        if name in consumer and isinstance(axis, Default | Ceiling | Stated)
-    }
 
 
 def _compile_offline(
@@ -772,12 +758,14 @@ def _compile_inline(case: Case, adapter: LoadedCommandAdapter, path: Path) -> No
     it before an allocated VM did — and a hinted row whose split cannot be built
     is a plan error, not a measurement that dies in its own container.
     """
+    from benchmark.runtime.command_adapter import shared_axis_values
+
     mode = adapter.modes[case.mode].inline
     if not mode:
         return
     try:
         config = adapter.effective_config(
-            mode, _shared_axes(adapter.modes[mode], dict(case.config))
+            mode, shared_axis_values(adapter.modes[mode], dict(case.config))
         )
         _compile_offline(adapter, case, mode, config)
     except Exception as exc:
