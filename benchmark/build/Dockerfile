@@ -118,11 +118,18 @@ COPY --from=s5cmd_install /s5cmd /s5cmd
 COPY --from=s7cmd_install /usr/local/bin/s7cmd /usr/local/bin/s7cmd
 COPY --from=swath_install /opt/java/openjdk/ /opt/java/openjdk/
 COPY --from=swath_install /opt/swath/ /opt/swath/
+# Per-tool work stays in its own instruction so a `# slice:` marker can attribute
+# it; an unmarked line is platform, which over-invalidates rather than hides.
+# slice: aws-cli
 RUN ln -s /opt/aws-cli/v2/current/bin/aws /usr/local/bin/aws \
-    && ln -s /opt/aws-cli/v2/current/bin/aws_completer /usr/local/bin/aws_completer \
-    && printf '#!/bin/sh\nexec /usr/local/bin/node /opt/s3p/node_modules/s3p/bin/s3p "$@"\n' > /usr/local/bin/s3p \
-    && chmod 0755 /usr/local/bin/s3p \
-    && install -d -o 10001 -g 10001 /aws /data /home/s7cmd /home/s3study
+    && ln -s /opt/aws-cli/v2/current/bin/aws_completer /usr/local/bin/aws_completer
+# slice: s3p
+RUN printf '#!/bin/sh\nexec /usr/local/bin/node /opt/s3p/node_modules/s3p/bin/s3p "$@"\n' > /usr/local/bin/s3p \
+    && chmod 0755 /usr/local/bin/s3p
+# slice: s7cmd
+RUN install -d -o 10001 -g 10001 /home/s7cmd
+# /aws is subject_workdir for both aws-cli and s5cmd, so it is platform.
+RUN install -d -o 10001 -g 10001 /aws /data /home/s3study
 
 COPY benchmark/build/requirements-worker.txt /tmp/requirements-worker.txt
 RUN /usr/bin/python3 -m pip install --break-system-packages --no-cache-dir -r /tmp/requirements-worker.txt \
@@ -161,8 +168,8 @@ if set(metadata) != {
     "harness_revision", "tools",
 }:
     raise SystemExit("toolbox metadata has unexpected top-level fields")
-if metadata["schema_version"] != 4:
-    raise SystemExit("toolbox metadata schema is not 4")
+if metadata["schema_version"] != 5:
+    raise SystemExit("toolbox metadata schema is not 5")
 if metadata["toolbox_recipe_sha256"] != os.environ["TOOLBOX_RECIPE_SHA256"]:
     raise SystemExit("toolbox recipe does not match the build argument")
 if metadata["harness_revision"] != os.environ["HARNESS_REVISION"]:
@@ -199,7 +206,7 @@ for tool, facts in tools.items():
         key: value for key, value in facts.items() if key != "adapter_bundle_sha256"
     }
 manifest = {
-    "schema_version": 2,
+    "schema_version": 3,
     "toolbox_recipe_sha256": metadata["toolbox_recipe_sha256"],
     "tools": manifest_tools,
 }

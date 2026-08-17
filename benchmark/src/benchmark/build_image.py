@@ -10,6 +10,7 @@ import re
 import subprocess
 import sys
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -41,10 +42,220 @@ TOOL_STAGES = {
     "s7cmd": "s7cmd_install",
     "swath": "swath_install",
 }
+SLICE_DOMAIN = b"s3-listing-study-image-slice-v1\0"
+TOOL_SLICE_FACTS = (
+    "tool_version",
+    "tool_build_sha256",
+    "tool_artifact_kind",
+    "tool_artifact_locator",
+    "tool_artifact_sha256",
+    "recipe_sha256",
+    "build_inputs_sha256",
+    "adapter_bundle_sha256",
+)
+WORKER_REQUIREMENTS = "benchmark/build/requirements-worker.txt"
+FROM_RE = re.compile(r"\AFROM\s+(?P<base>\S+)(?:\s+AS\s+(?P<name>\S+))?\s*\Z")
+COPY_FROM_RE = re.compile(r"\ACOPY\s+--from=(?P<stage>\S+)\s")
+SLICE_MARKER_RE = re.compile(r"\A#\s*slice:\s*(?P<tool>\S+)\s*\Z")
+HEREDOC_RE = re.compile(r"""<<-?\s*(?P<quote>['"]?)(?P<tag>[A-Za-z_][A-Za-z0-9_]*)(?P=quote)""")
 
 
 class BuildError(RuntimeError):
     """The requested image cannot be bound to the checked-in recipes."""
+
+
+@dataclass(frozen=True, slots=True)
+class Instruction:
+    """One logical recipe line, with the `# slice:` marker written above it."""
+
+    text: str
+    marker: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class Stage:
+    name: str
+    base: str
+    instructions: tuple[Instruction, ...]
+
+    @property
+    def text(self) -> str:
+        return "\n".join(instruction.text for instruction in self.instructions)
+
+
+@dataclass(frozen=True, slots=True)
+class RecipeSlices:
+    """The recipe partitioned into what belongs to one tool and what to all."""
+
+    tool_stages: dict[str, dict[str, str]]
+    tool_lines: dict[str, tuple[str, ...]]
+    platform_stages: dict[str, str]
+    platform_lines: tuple[str, ...]
+
+
+def parse_recipe(source: str) -> tuple[Stage, ...]:
+    """Physical lines to stages, keeping each instruction's exact source text.
+
+    Continuations and heredoc bodies belong to the instruction that opened them;
+    splitting on newlines alone would read a heredoc body as instructions.
+    """
+    lines = source.splitlines()
+    stages: list[Stage] = []
+    current: list[Instruction] | None = None
+    name = base = ""
+    marker: str | None = None
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        index += 1
+        if not line.strip():
+            marker = None
+            continue
+        if line.lstrip().startswith("#"):
+            match = SLICE_MARKER_RE.match(line.strip())
+            marker = None if match is None else match.group("tool")
+            continue
+        collected = [line]
+        while collected[-1].rstrip().endswith("\\") and index < len(lines):
+            collected.append(lines[index])
+            index += 1
+        for heredoc in HEREDOC_RE.finditer("\n".join(collected)):
+            tag = heredoc.group("tag")
+            while index < len(lines):
+                collected.append(lines[index])
+                index += 1
+                if collected[-1].strip() == tag:
+                    break
+        instruction = Instruction("\n".join(collected), marker)
+        marker = None
+        opening = FROM_RE.match(instruction.text)
+        if opening is not None:
+            if opening.group("name") is None:
+                raise BuildError("every toolbox recipe stage must be named with AS")
+            if current is not None:
+                stages.append(Stage(name, base, tuple(current)))
+            name, base, current = opening.group("name"), opening.group("base"), [instruction]
+            continue
+        if current is None:
+            raise BuildError("toolbox recipe has an instruction before its first stage")
+        current.append(instruction)
+    if current is None:
+        raise BuildError("toolbox recipe declares no stage")
+    stages.append(Stage(name, base, tuple(current)))
+    return tuple(stages)
+
+
+def _closure(stages: Mapping[str, Stage], start: str) -> set[str]:
+    reached: set[str] = set()
+    pending = [start]
+    while pending:
+        name = pending.pop()
+        if name in reached:
+            continue
+        reached.add(name)
+        base = stages[name].base
+        if base in stages:
+            pending.append(base)
+    return reached
+
+
+def attribute_recipe(source: str) -> RecipeSlices:
+    """Partition the recipe by the three rules in `docs/identity.md`.
+
+    Refusing an unpartitionable file is the point: a dropped line is a slice that
+    silently under-invalidates.
+    """
+    stages = parse_recipe(source)
+    by_name = {stage.name: stage for stage in stages}
+    final = stages[-1]
+    build_stages = {name: stage for name, stage in by_name.items() if name != final.name}
+    owners: dict[str, set[str]] = {name: set() for name in build_stages}
+    for tool, stage_name in sorted(TOOL_STAGES.items()):
+        if stage_name not in build_stages:
+            raise BuildError(f"{tool}: build stage {stage_name!r} is unreachable")
+        for reached in _closure(by_name, stage_name):
+            owners[reached].add(tool)
+    # Reached by more than one tool, or by none, is platform: a change there can
+    # move every subject, and erring coarse costs re-runs rather than evidence.
+    owner_of = {
+        name: next(iter(tools)) if len(tools) == 1 else None for name, tools in owners.items()
+    }
+    tool_lines: dict[str, list[str]] = {tool: [] for tool in TOOL_STAGES}
+    platform_lines: list[str] = []
+    for instruction in final.instructions:
+        marker = instruction.marker
+        if marker is not None and marker not in TOOL_STAGES:
+            raise BuildError(f"final stage marks a line for unregistered tool {marker!r}")
+        copied = COPY_FROM_RE.match(instruction.text)
+        if copied is None:
+            owner = marker
+        else:
+            stage_name = copied.group("stage")
+            if stage_name not in build_stages:
+                raise BuildError(f"final stage copies from unknown stage {stage_name!r}")
+            if marker is not None:
+                raise BuildError(f"COPY --from={stage_name} attributes itself; drop its marker")
+            owner = owner_of[stage_name]
+        if owner is None:
+            platform_lines.append(instruction.text)
+        else:
+            tool_lines[owner].append(instruction.text)
+    return RecipeSlices(
+        tool_stages={
+            tool: {
+                name: by_name[name].text
+                for name in sorted(_closure(by_name, stage))
+                if owner_of[name] == tool
+            }
+            for tool, stage in TOOL_STAGES.items()
+        },
+        tool_lines={tool: tuple(lines) for tool, lines in tool_lines.items()},
+        platform_stages={
+            name: stage.text
+            for name, stage in sorted(build_stages.items())
+            if owner_of[name] is None
+        },
+        platform_lines=tuple(platform_lines),
+    )
+
+
+def _slice_digest(kind: str, document: Mapping[str, object]) -> str:
+    canonical = json.dumps(
+        document, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False
+    ).encode()
+    return hashlib.sha256(SLICE_DOMAIN + kind.encode() + b"\0" + canonical).hexdigest()
+
+
+def slice_digests(
+    recipe: RecipeSlices,
+    facts: Mapping[str, Mapping[str, str]],
+    worker_requirements_sha256: str,
+    revision: str,
+) -> tuple[dict[str, str], str]:
+    """The per-tool slices and the one platform slice they all share."""
+    platform = _slice_digest(
+        "platform",
+        {
+            "harness_revision": revision,
+            "worker_requirements_sha256": worker_requirements_sha256,
+            "stages": recipe.platform_stages,
+            "final_stage_lines": list(recipe.platform_lines),
+        },
+    )
+    tools: dict[str, str] = {}
+    for tool in sorted(facts):
+        if set(facts[tool]) != set(TOOL_SLICE_FACTS):
+            raise BuildError(f"{tool}: slice inputs must be exactly {sorted(TOOL_SLICE_FACTS)}")
+        tools[tool] = _slice_digest(
+            "tool",
+            {
+                "tool": tool,
+                **{name: facts[tool][name] for name in TOOL_SLICE_FACTS},
+                "stages": recipe.tool_stages[tool],
+                "final_stage_lines": list(recipe.tool_lines[tool]),
+            },
+        )
+    return tools, platform
 
 
 def command_output(argv: list[str], *, cwd: Path) -> str:
@@ -118,17 +329,19 @@ def validate_executed_sources(
 
 
 def toolbox_manifest(
-    selections: Mapping[str, BuildSelection], root: Path
+    selections: Mapping[str, BuildSelection], root: Path, revision: str
 ) -> tuple[dict[str, object], str]:
     toolbox_recipe = root / "benchmark/build/Dockerfile"
     toolbox_recipe_bytes = toolbox_recipe.read_bytes()
-    validate_executed_sources(selections, root, toolbox_recipe_bytes.decode("utf-8"))
+    source = toolbox_recipe_bytes.decode("utf-8")
+    validate_executed_sources(selections, root, source)
+    facts: dict[str, dict[str, str]] = {}
     tools: dict[str, object] = {}
     for tool, selection in sorted(selections.items()):
         recipe = selection.metadata_path.parent / "Dockerfile"
         inputs = [selection.metadata_path, recipe]
         inputs.extend(root / path for path in SUPPORT_INPUTS.get(tool, ()))
-        tools[tool] = {
+        facts[tool] = {
             "tool_version": selection.tool_version,
             "tool_build_sha256": selection.tool_build_sha256,
             "tool_artifact_kind": selection.tool_artifact_kind,
@@ -136,11 +349,26 @@ def toolbox_manifest(
             "tool_artifact_sha256": selection.tool_artifact_sha256,
             "recipe_sha256": hashlib.sha256(recipe.read_bytes()).hexdigest(),
             "build_inputs_sha256": _input_digest(root, inputs),
+            "adapter_bundle_sha256": selection.adapter_bundle_sha256,
+        }
+    # The slices are manifest keys so the image's own recomputation covers them:
+    # a digest the controller never checks cannot bind evidence to what ran.
+    tool_slices, platform = slice_digests(
+        attribute_recipe(source),
+        facts,
+        hashlib.sha256((root / WORKER_REQUIREMENTS).read_bytes()).hexdigest(),
+        revision,
+    )
+    for tool, selection in sorted(selections.items()):
+        tools[tool] = {
+            **{name: facts[tool][name] for name in facts[tool] if name != "adapter_bundle_sha256"},
             "subject_workdir": selection.subject_workdir,
             "executable": list(selection.executable),
+            "tool_slice_sha256": tool_slices[tool],
+            "platform_sha256": platform,
         }
     manifest: dict[str, object] = {
-        "schema_version": 2,
+        "schema_version": 3,
         "toolbox_recipe_sha256": hashlib.sha256(toolbox_recipe_bytes).hexdigest(),
         "tools": tools,
     }
@@ -163,7 +391,7 @@ def final_image_metadata(
         if isinstance(tool, str) and isinstance(value, dict)
     }
     return {
-        "schema_version": 4,
+        "schema_version": 5,
         "toolbox_manifest_sha256": manifest_sha256,
         "toolbox_recipe_sha256": manifest["toolbox_recipe_sha256"],
         "harness_revision": revision,
@@ -199,7 +427,7 @@ def build_image(root: Path, revision: str, tag: str) -> str:
         raise BuildError("output tag must be one non-empty token")
     assert_clean_revision(root, revision)
     selections = registered_selections(root)
-    manifest, manifest_sha256 = toolbox_manifest(selections, root)
+    manifest, manifest_sha256 = toolbox_manifest(selections, root, revision)
     recipe_sha256 = str(manifest["toolbox_recipe_sha256"])
     metadata = final_image_metadata(manifest, selections, manifest_sha256, revision)
     encoded = base64.b64encode(
