@@ -73,7 +73,7 @@ import yaml
 if TYPE_CHECKING:
     # Not imported at runtime: most callers of this module never touch a
     # capsule at all, and the adapter loader pulls in the runtime contract.
-    from benchmark.runtime.command_adapter import LoadedCommandAdapter
+    from benchmark.runtime.command_adapter import LoadedCommandAdapter, Mode
 
 # Bumped only when a file written for an older reader would be misread by this
 # one. Unknown versions are refused rather than best-effort parsed. One number
@@ -660,17 +660,19 @@ def expand_requirements(case: Case, adapter: LoadedCommandAdapter) -> tuple[Case
     (`architecture.md` § *Dependencies*).
 
     A prerequisite takes the config the capsule says its own mode takes, plus
-    the consumer's value for any axis the prerequisite mode *itself declares* —
-    s3-fast-list's `ks-split` declares `segments`, so the row's segment count
-    reaches the split that cuts at it. Axes the prerequisite does not declare
-    never flow, which is what collapses a sweep over a measurement-only axis to
-    one preparation (`identity.md` § *Two identities, two questions*); a sweep
-    over a shared axis correctly builds one preparation per value. Everything
-    the harness acts on — the box, the role, the deadline — it does inherit:
-    those are recorded on a preparation's row and stay out of its hash.
-    """
-    from benchmark.runtime.command_adapter import Ceiling, Default, Stated
+    the consumer's value for any axis the prerequisite mode *itself declares*.
+    Axes the prerequisite does not declare never flow, which is what collapses a
+    sweep over a measurement-only axis to one preparation (`identity.md` § *Two
+    identities, two questions*) — s3-fast-list's bootstrap `list` declares
+    neither `concurrency` nor `segments`, so a sweep of either names one
+    listing; a sweep over an axis a prerequisite does declare correctly builds
+    one preparation per value. Everything the harness acts on — the box, the
+    role, the deadline — it does inherit: those are recorded on a preparation's
+    row and stay out of its hash.
 
+    A mode's inline setup exec is not expanded here: it is not a case, it runs
+    inside the consuming attempt, and resolution has already compiled it.
+    """
     links: list[Case] = []
     consumer = dict(case.config)
     for mode in adapter.requires.get(case.mode, ()):
@@ -680,16 +682,8 @@ def expand_requirements(case: Case, adapter: LoadedCommandAdapter) -> tuple[Case
                 f"{case.tool}: mode {case.mode!r} requires {mode!r}, whose capsule caps it at "
                 f"{manifest.purpose_ceiling!r} — a prerequisite runs as a preparation"
             )
-        # Only a settable axis inherits: a `Fixed` one refuses any set value,
-        # and a value on an `Inert` one would split shared preparations over a
-        # knob that does nothing.
-        shared = {
-            name: consumer[name]
-            for name, axis in manifest.axes.items()
-            if name in consumer and isinstance(axis, Default | Ceiling | Stated)
-        }
         try:
-            config = adapter.effective_config(mode, shared)
+            config = adapter.effective_config(mode, _shared_axes(manifest, consumer))
         except Exception as exc:
             raise PlanError(f"{case.tool}: prerequisite {mode!r} of {case.mode!r}: {exc}") from exc
         _compile_prerequisite(case, adapter, mode, config)
@@ -710,38 +704,86 @@ def expand_requirements(case: Case, adapter: LoadedCommandAdapter) -> tuple[Case
     return (*links, case)
 
 
-def _compile_prerequisite(
-    case: Case, adapter: LoadedCommandAdapter, mode: str, config: Mapping[str, object]
+def _shared_axes(manifest: Mode, consumer: Mapping[str, object]) -> dict[str, object]:
+    """The consumer's value for every axis this mode declares settable itself.
+
+    Only a settable axis inherits: a ``Fixed`` one refuses any set value, and a
+    value on an ``Inert`` one would split shared preparations over a knob that
+    does nothing.
+    """
+    from benchmark.runtime.command_adapter import Ceiling, Default, Stated
+
+    return {
+        name: consumer[name]
+        for name, axis in manifest.axes.items()
+        if name in consumer and isinstance(axis, Default | Ceiling | Stated)
+    }
+
+
+def _compile_offline(
+    adapter: LoadedCommandAdapter,
+    case: Case,
+    mode: str,
+    config: Mapping[str, object],
 ) -> None:
-    """Build the prerequisite's argv here, so a chain it cannot state fails offline.
+    """Compile one of a row's other modes here, so what it cannot state fails at load.
 
     ``config`` arrives already merged — the capsule's own values plus the
-    consumer's for any axis this link declares — so what compiles here is
-    exactly what a worker would be handed. A knob the chain still leaves unset
-    is a refusal on an allocated VM unless it is one here. The staging paths are
-    placeholders: what the engine will pass, not what it will pass *here*.
+    consumer's for any axis this mode declares — so what compiles here is exactly
+    what a worker would be handed. A knob still left unset is a refusal on an
+    allocated VM unless it is one here. The staging paths are placeholders: what
+    the engine will pass, not what it will pass *here*.
     """
     from benchmark.runtime.command_adapter import CommandRequest
 
-    try:
-        adapter.compile(
-            CommandRequest(
-                mode=mode,
-                bucket="placeholder-bucket",
-                region="placeholder-region",
-                tool=case.tool,
-                signed=case.auth_role is not None,
-                config=config,
-                sink_dir="/sink",
-                artifact_path="/staged/placeholder",
-                visible_memory_gb=float(case.resources.visible_memory_gb),
-                heap_percent=case.heap_percent,
-            )
+    adapter.compile(
+        CommandRequest(
+            mode=mode,
+            bucket="placeholder-bucket",
+            region="placeholder-region",
+            tool=case.tool,
+            signed=case.auth_role is not None,
+            config=config,
+            sink_dir="/sink",
+            artifact_path="/staged/placeholder",
+            visible_memory_gb=float(case.resources.visible_memory_gb),
+            heap_percent=case.heap_percent,
         )
+    )
+
+
+def _compile_prerequisite(
+    case: Case, adapter: LoadedCommandAdapter, mode: str, config: Mapping[str, object]
+) -> None:
+    """Build the prerequisite's argv offline, so a chain it cannot state fails at load."""
+    try:
+        _compile_offline(adapter, case, mode, config)
     except Exception as exc:
         raise PlanError(
             f"{case.tool}: mode {case.mode!r} requires {mode!r}, which its capsule cannot "
             f"build: {exc}"
+        ) from exc
+
+
+def _compile_inline(case: Case, adapter: LoadedCommandAdapter, path: Path) -> None:
+    """Build the row's inline setup exec offline, for the reason a chain link is built.
+
+    The inline exec never becomes a case of its own, so nothing else would compile
+    it before an allocated VM did — and a hinted row whose split cannot be built
+    is a plan error, not a measurement that dies in its own container.
+    """
+    mode = adapter.modes[case.mode].inline
+    if not mode:
+        return
+    try:
+        config = adapter.effective_config(
+            mode, _shared_axes(adapter.modes[mode], dict(case.config))
+        )
+        _compile_offline(adapter, case, mode, config)
+    except Exception as exc:
+        raise PlanError(
+            f"'tools.{case.tool}' in {path}: mode {case.mode!r} runs {mode!r} as inline setup, "
+            f"which its capsule cannot build: {exc}"
         ) from exc
 
 
@@ -1248,7 +1290,7 @@ def _case(
             f"'tools.{tool}' in {path} generates the unusable case label {label!r} "
             "(axis values must be lowercase, digits, '.', '_' or '-')"
         )
-    return Case(
+    case = Case(
         tool=tool,
         label=label,
         mode=mode,
@@ -1262,6 +1304,8 @@ def _case(
         axes=chosen,
         config=tuple(config.items()),
     )
+    _compile_inline(case, adapter, path)
+    return case
 
 
 def _purpose(

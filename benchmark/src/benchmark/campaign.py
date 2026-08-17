@@ -1352,23 +1352,25 @@ def produced_artifact(result_prefix: str) -> tuple[str, str]:
     return f"{result_prefix.rstrip('/')}/native/{name}", digest
 
 
-def validate_artifact(tool: str, uri: str) -> None:
-    """Run the capsule's own structural check over the bytes it just produced.
+def validate_artifact(tool: str, mode: str, uri: str) -> None:
+    """Run the capsule's own structural check over the bytes this mode just produced.
 
     A digest proves an artifact is unchanged, not that it is usable
     (`capsule-contract.md` § *An artifact is validated*): s3-fast-list's empty
     first cut point hashes cleanly and turns a hinted listing into a full-range
     serial scan. A refusal fails the preparation, never the case that would have
-    consumed it.
+    consumed it. The validator is looked up by producing mode, because a capsule
+    with two producers has two structures and neither check reads the other's file;
+    a mode with no entry produces bytes nothing structural can be said about.
     """
-    adapter = bench.load_capsule(tool)
-    if adapter.validate_artifact is None:
+    validator = bench.load_capsule(tool).validate_artifact.get(mode)
+    if validator is None:
         return
     with tempfile.TemporaryDirectory() as staging:
         path = Path(staging) / uri.rsplit("/", 1)[-1]
         path.write_bytes(gcs.download_bytes(uri))
         try:
-            adapter.validate_artifact(path)
+            validator(path)
         except Exception as exc:
             raise CampaignError(f"{tool}: {uri} is not a usable artifact: {exc}") from None
 
@@ -1553,7 +1555,7 @@ def settle_dependents(con: sqlite3.Connection, attempt: Attempt, state: str, *, 
         (digest, _now(), attempt.attempt_id),
     )
     try:
-        validate_artifact(attempt.tool, uri)
+        validate_artifact(attempt.tool, str(json.loads(attempt.config)["mode"]), uri)
     except CampaignError as exc:
         set_state(con, attempt.attempt_id, "FAILED", str(exc)[:500])
         print(f"campaign: {attempt.attempt_id} failed artifact validation: {exc}", file=sys.stderr)

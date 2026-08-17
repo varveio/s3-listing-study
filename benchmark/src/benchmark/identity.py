@@ -135,8 +135,8 @@ def preparation_environment(
     hash them by accident.
 
     `input_artifact_sha256` is present because a mid-chain preparation consumes
-    the previous link's artifact — `ks-tool split` over different listing bytes
-    is a different artifact, so the digest is part of "do we already have this?".
+    the previous link's artifact, and a transform over different upstream bytes
+    is a different artifact — so the digest is part of "do we already have this?".
     `None` means the key is omitted: this preparation consumes nothing.
     """
     document: dict[str, Any] = {

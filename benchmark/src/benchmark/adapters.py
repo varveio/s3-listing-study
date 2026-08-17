@@ -37,6 +37,7 @@ from typing import Any
 from benchmark.runtime.command_adapter import (
     HEAP_PERCENT,
     CommandRequest,
+    LoadedCommandAdapter,
     Mode,
     load_command_adapter,
 )
@@ -53,6 +54,19 @@ def adapter_dir_for(tool: str, adapter_root: str) -> Path:
     return Path(adapter_root) / tool / "adapter"
 
 
+def load_adapter(adapter_dir: Path | str, tool: str) -> LoadedCommandAdapter:
+    """One bundled capsule's loaded ``command.py``, with its refusals as AdapterError.
+
+    Reached where a caller needs the declaration itself rather than one compiled
+    argv -- an inline setup exec's mode, its config, its validator -- so the
+    capsule stays the one answer to what it declares.
+    """
+    try:
+        return load_command_adapter(Path(adapter_dir) / "command.py", expected_tool=tool)
+    except Exception as exc:
+        raise AdapterError(f"{tool}: could not load command adapter: {exc}") from exc
+
+
 def mode_manifest(adapter_dir: Path | str, tool: str, mode: str) -> Mode:
     """The capsule's manifest for one mode: what it produces and which fields.
 
@@ -61,8 +75,7 @@ def mode_manifest(adapter_dir: Path | str, tool: str, mode: str) -> Mode:
     already pins -- a stored copy would be a second answer that can disagree.
     """
     try:
-        adapter = load_command_adapter(Path(adapter_dir) / "command.py", expected_tool=tool)
-        return adapter.modes[mode]
+        return load_adapter(adapter_dir, tool).modes[mode]
     except Exception as exc:
         raise AdapterError(f"{tool}: no mode manifest for {mode!r}: {exc}") from exc
 

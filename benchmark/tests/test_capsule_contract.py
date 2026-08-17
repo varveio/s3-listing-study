@@ -380,7 +380,14 @@ def test_build_env_renders_the_share_of_the_ceiling_the_request_carries(tmp_path
 
 @pytest.mark.parametrize(
     "declaration",
-    ["VALIDATE_ARTIFACT = 3", "VALIDATE_ARTIFACT = lambda: None", "def build_env(): return {}"],
+    [
+        "VALIDATE_ARTIFACT = 3",
+        "VALIDATE_ARTIFACT = lambda: None",
+        'VALIDATE_ARTIFACT = {"list": lambda: None}',
+        'VALIDATE_ARTIFACT = {"split": lambda path: None}',
+        "VALIDATE_ARTIFACT = {}",
+        "def build_env(): return {}",
+    ],
 )
 def test_a_capsule_hook_the_harness_could_not_call_is_refused(
     tmp_path: Path, declaration: str
@@ -389,16 +396,68 @@ def test_a_capsule_hook_the_harness_could_not_call_is_refused(
         load(tmp_path, f"\n{declaration}\n")
 
 
-def test_a_declared_artifact_validator_is_exposed_to_the_harness(tmp_path: Path) -> None:
+def test_a_declared_artifact_validator_is_exposed_per_producing_mode(tmp_path: Path) -> None:
     adapter = load(
         tmp_path,
         "\nfrom pathlib import Path\n\n\n"
-        "def VALIDATE_ARTIFACT(path: Path) -> None:\n"
+        "def _cut_points(path: Path) -> None:\n"
         "    if not path.read_text().strip():\n"
-        '        raise ValueError("empty cut point")\n',
+        '        raise ValueError("empty cut point")\n\n\n'
+        'VALIDATE_ARTIFACT = {"list": _cut_points}\n',
     )
-    assert adapter.validate_artifact is not None
     artifact = tmp_path / "hints"
     artifact.write_text("\n")
     with pytest.raises(ValueError, match="empty cut point"):
-        adapter.validate_artifact(artifact)
+        adapter.validate_artifact["list"](artifact)
+    # A mode with no entry produces bytes nothing structural can be said about.
+    assert adapter.validate_artifact.get("absent") is None
+
+
+def test_an_inline_setup_exec_names_one_preparation_mode_of_this_capsule(tmp_path: Path) -> None:
+    adapter = load(
+        tmp_path,
+        "\nMODES = {\n"
+        '    "split": Mode(product="text", fields=("key",), purpose_ceiling="preparation"),\n'
+        '    "hinted": Mode(product="text", fields=("key",), inline="split"),\n'
+        "}\n",
+    )
+    assert adapter.modes["hinted"].inline == "split"
+    assert adapter.modes["split"].inline == ""
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        # An inline mode this capsule does not have.
+        '\nMODES = {"list": Mode(product="text", fields=("key",), inline="split")}\n',
+        # A mode running itself as its own setup.
+        '\nMODES = {"list": Mode(product="text", fields=("key",), inline="list")}\n',
+        # A setup exec that is allowed to claim it measured something.
+        "\nMODES = {\n"
+        '    "split": Mode(product="text", fields=("key",)),\n'
+        '    "hinted": Mode(product="text", fields=("key",), inline="split"),\n'
+        "}\n",
+        # A setup exec with a setup exec of its own.
+        "\nMODES = {\n"
+        '    "seed": Mode(product="text", fields=("key",), purpose_ceiling="preparation"),\n'
+        '    "split": Mode(\n'
+        '        product="text", fields=("key",), purpose_ceiling="preparation", inline="seed"\n'
+        "    ),\n"
+        '    "hinted": Mode(product="text", fields=("key",), inline="split"),\n'
+        "}\n",
+        # A setup exec that is also a chain link: it needs a step of its own.
+        "\nMODES = {\n"
+        '    "list": Mode(product="text", fields=("key",)),\n'
+        '    "split": Mode(product="text", fields=("key",), purpose_ceiling="preparation"),\n'
+        '    "hinted": Mode(product="text", fields=("key",), inline="split"),\n'
+        "}\n"
+        'REQUIRES = {"split": ("list",)}\n',
+    ],
+)
+def test_an_inline_setup_the_planner_could_not_read_offline_is_refused(
+    tmp_path: Path, body: str
+) -> None:
+    """One flat step, inside one attempt: a nested inline or a chain under it
+    would put a graph back where no reviewer and no slot can see it."""
+    with pytest.raises(CommandAdapterError):
+        load(tmp_path, body)

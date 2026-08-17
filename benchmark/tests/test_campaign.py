@@ -318,16 +318,17 @@ def test_a_dry_run_renders_every_planned_attempt_and_writes_nothing(
     )
     rendered = capsys.readouterr().out.splitlines()
     cases = len(loaded_plan().cases)
-    # The hinted s3-fast-list row expands to a chain: its bootstrap `list`
-    # preparation submits immediately (one attempt, replacing the hinted
-    # measurement in the count), while `ks-split` and `list-hinted` wait on
-    # their inputs and are booked as the two slots.
+    # The hinted s3-fast-list row expands to a two-link chain: its bootstrap
+    # `list` preparation submits immediately (one attempt, replacing the hinted
+    # measurement in the count), while `list-hinted` waits on the artifact and is
+    # booked as the one slot. Its `ks-split` runs inside that attempt and books
+    # nothing.
     assert (
-        rendered[-1] == f"campaign: {cases} plan row(s) expand to {cases} attempt(s) and 2 slot(s)"
+        rendered[-1] == f"campaign: {cases} plan row(s) expand to {cases} attempt(s) and 1 slot(s)"
     )
-    # One rendered line per expanded step: the chain's two waiting links print
+    # One rendered line per expanded step: the chain's one waiting link prints
     # alongside the immediate attempts.
-    assert len(rendered[:-1]) == cases + 2
+    assert len(rendered[:-1]) == cases + 1
     assert not state.exists()
 
 
@@ -562,10 +563,10 @@ tools:
 def hinted_capsule() -> Any:
     """The real s3-fast-list capsule, untouched.
 
-    The row states `segments` and chain expansion hands it to the `ks-split`
-    link — the axis the capsule declares `Stated`. The chain, the modes and the
-    artifact validator all stay the capsule's, so these tests still fail when
-    its `REQUIRES` moves.
+    The row states `segments`, the axis the capsule declares `Stated`, and the
+    hinted mode carries it into the `ks-split` its own attempt runs inline. The
+    chain, the modes and the artifact validators all stay the capsule's, so these
+    tests still fail when its `REQUIRES` moves.
     """
     return bench.load_capsule("s3-fast-list")
 
@@ -636,15 +637,15 @@ def hinted_launch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> sqlite3.Co
     return con
 
 
-def test_a_declared_chain_expands_into_one_preparation_and_two_slots(tmp_path: Path) -> None:
-    """`list-hinted` requires `list` then `ks-split`: only the first is identifiable."""
+def test_a_declared_chain_expands_into_one_preparation_and_one_slot(tmp_path: Path) -> None:
+    """`list-hinted` requires `list`, and the split it also needs books nothing:
+    an inline setup exec runs inside the measurement's own attempt."""
     plan = hinted_plan(tmp_path)
     steps = campaign.expand_launch(plan.cases, plan.adapters)
 
     assert [(step.case.mode, step.case.purpose, step.waits_for) for step in steps] == [
         ("list", "preparation", None),
-        ("ks-split", "preparation", 0),
-        ("list-hinted", "measurement", 1),
+        ("list-hinted", "measurement", 0),
     ]
     rendered = campaign.render_launch(
         steps,
@@ -655,15 +656,14 @@ def test_a_declared_chain_expands_into_one_preparation_and_two_slots(tmp_path: P
         results_bucket="results",
         options=options(),
     )
-    assert len(rendered) == 3
-    assert rendered[1].startswith("slot dry-run/1 s3-fast-list ks-split preparation awaiting ")
-    assert rendered[2].startswith("slot dry-run/2 s3-fast-list list-hinted measurement awaiting ")
+    assert len(rendered) == 2
+    assert rendered[1].startswith("slot dry-run/1 s3-fast-list list-hinted measurement awaiting ")
 
 
 def test_a_preparation_is_identified_by_content_and_not_by_the_consumer(tmp_path: Path) -> None:
     """It answers "do we already have this artifact?", so the box and the role stay out."""
     plan = hinted_plan(tmp_path)
-    (preparation, _, _) = campaign.expand_launch(plan.cases, plan.adapters)
+    (preparation, _) = campaign.expand_launch(plan.cases, plan.adapters)
     images = image_set(tmp_path)
     minted, inputs = campaign.case_identity(
         preparation.case,
@@ -698,35 +698,27 @@ def test_a_preparation_is_identified_by_content_and_not_by_the_consumer(tmp_path
     )
 
 
-def test_a_settled_preparation_resolves_its_chain_link_by_link(
+def test_a_settled_preparation_resolves_the_measurement_that_waited_on_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Digest the artifact, mint the identity that was waiting on it, submit, repeat."""
+    """Digest the artifact, mint the identity that was waiting on it, submit."""
     con = hinted_launch(tmp_path, monkeypatch)
     evidence = Evidence()
     monkeypatch.setattr(gcs, "download_bytes", evidence.download)
     listing = campaign.Attempt.from_row(attempt_row(con, "list"))
-    assert [row["state"] for row in campaign.pending_rows(con)] == ["BLOCKED", "BLOCKED"]
+    assert [row["state"] for row in campaign.pending_rows(con)] == ["BLOCKED"]
 
     keyspace = evidence.publish(listing.result_prefix, "keyspace.ks", b"a/\nb/\n")
     campaign.set_state(con, listing.attempt_id, "SUCCEEDED")
     campaign.settle_dependents(con, listing, "SUCCEEDED", suite=SUITE)
 
-    split = campaign.Attempt.from_row(attempt_row(con, "ks-split"))
-    slots = campaign.pending_rows(con)
-    assert (slots[0]["state"], slots[0]["became"]) == ("RESOLVED", split.attempt_id)
-    # The second link could not be identified until the first settled, and now
-    # waits on the attempt the slot became rather than on the slot.
-    assert (slots[1]["state"], slots[1]["awaiting"]) == ("BLOCKED", split.attempt_id)
-    assert (split.input_artifact_sha256, split.produced_by) == (keyspace, listing.attempt_id)
-
-    hints = evidence.publish(split.result_prefix, "hints.input", b"m/\nz/\n")
-    campaign.set_state(con, split.attempt_id, "SUCCEEDED")
-    campaign.settle_dependents(con, split, "SUCCEEDED", suite=SUITE)
-
     hinted = campaign.Attempt.from_row(attempt_row(con, "list-hinted"))
-    assert campaign.pending_rows(con)[1]["became"] == hinted.attempt_id
-    assert (hinted.input_artifact_sha256, hinted.produced_by) == (hints, split.attempt_id)
+    slot = campaign.pending_rows(con)[0]
+    assert (slot["state"], slot["became"]) == ("RESOLVED", hinted.attempt_id)
+    # The measurement consumes the key distribution directly: the cut points it
+    # lists under are made by its own inline setup exec, so no second attempt
+    # stands between the listing and the hinted run.
+    assert (hinted.input_artifact_sha256, hinted.produced_by) == (keyspace, listing.attempt_id)
     # What the worker is told to stage, and what it must digest to before use.
     request = json.loads(
         con.execute(
@@ -734,41 +726,55 @@ def test_a_settled_preparation_resolves_its_chain_link_by_link(
         ).fetchone()["request_json"]
     )
     assert campaign.request_argument(request, "--input-artifact") == (
-        f"{split.result_prefix}native/hints.input"
+        f"{listing.result_prefix}native/keyspace.ks"
     )
-    assert campaign.request_argument(request, "--input-artifact-sha256") == hints
+    assert campaign.request_argument(request, "--input-artifact-sha256") == keyspace
 
 
-def test_an_unusable_artifact_fails_the_preparation_and_abandons_what_awaited_it(
+def test_an_artifact_is_validated_against_the_mode_that_produced_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A capsule with two producers has two structures, and neither check reads
+    the other's file: the validator is looked up by producing mode, and a mode
+    with no entry has nothing structural to say."""
+    evidence = Evidence()
+    # An empty first cut point: a full-range serial scan beside every segment.
+    evidence.publish("gs://results/prep/", "hints.input", b"\nz/\n")
+    monkeypatch.setattr(gcs, "download_bytes", evidence.download)
+    uri = "gs://results/prep/native/hints.input"
+    with pytest.raises(campaign.CampaignError, match="first cut point is empty"):
+        campaign.validate_artifact("s3-fast-list", "ks-split", uri)
+    # The same bytes under the mode that publishes a key distribution: the capsule
+    # declares no check for it, so there is nothing to refuse.
+    campaign.validate_artifact("s3-fast-list", "list", uri)
+
+
+def test_a_preparation_with_no_consumable_artifact_fails_and_abandons_what_awaited_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A hints file that digests cleanly and means nothing must not reach a measurement."""
+    """A preparation the harness cannot read one artifact out of must not resolve
+    the measurement waiting on it — and the slot survives the failure, because a
+    retry may still pay it."""
     con = hinted_launch(tmp_path, monkeypatch)
     evidence = Evidence()
     monkeypatch.setattr(gcs, "download_bytes", evidence.download)
     listing = campaign.Attempt.from_row(attempt_row(con, "list"))
-    evidence.publish(listing.result_prefix, "keyspace.ks", b"a/\n")
+    # Two files in the sink: the harness has no way to choose between them.
+    evidence.objects[f"{listing.result_prefix}result.json"] = json.dumps(
+        {"native_manifest": {"keyspace.ks": "a" * 64, "extra.ks": "b" * 64}}
+    ).encode()
     campaign.set_state(con, listing.attempt_id, "SUCCEEDED")
     campaign.settle_dependents(con, listing, "SUCCEEDED", suite=SUITE)
-    split = campaign.Attempt.from_row(attempt_row(con, "ks-split"))
-
-    # An empty first cut point: a full-range serial scan beside every segment.
-    digest = evidence.publish(split.result_prefix, "hints.input", b"\nz/\n")
-    campaign.set_state(con, split.attempt_id, "SUCCEEDED")
-    campaign.settle_dependents(con, split, "SUCCEEDED", suite=SUITE)
 
     row = con.execute(
-        "SELECT state, state_detail, artifact_sha256 FROM attempts WHERE attempt_id=?",
-        (split.attempt_id,),
+        "SELECT state, state_detail FROM attempts WHERE attempt_id=?", (listing.attempt_id,)
     ).fetchone()
-    assert row["state"] == "FAILED" and "first cut point is empty" in row["state_detail"]
-    # The digest is a fact about what it produced; the verdict is that it is not usable.
-    assert row["artifact_sha256"] == digest
-    assert campaign.pending_rows(con)[1]["state"] == "BLOCKED"
+    assert row["state"] == "FAILED" and "exactly one artifact" in row["state_detail"]
+    assert campaign.pending_rows(con)[0]["state"] == "BLOCKED"
 
-    campaign.set_state(con, split.attempt_id, "ACCEPTED", "accepted FAILED")
-    campaign.settle_dependents(con, split, "ACCEPTED", suite=SUITE)
-    assert campaign.pending_rows(con)[1]["state"] == "ABANDONED"
+    campaign.set_state(con, listing.attempt_id, "ACCEPTED", "accepted FAILED")
+    campaign.settle_dependents(con, listing, "ACCEPTED", suite=SUITE)
+    assert campaign.pending_rows(con)[0]["state"] == "ABANDONED"
 
 
 def test_a_preparation_another_launch_made_is_bound_only_when_asked_for(
@@ -801,11 +807,12 @@ def test_a_preparation_another_launch_made_is_bound_only_when_asked_for(
         reuse_preparations=True,
     )
     reusing.run(steps)
-    # No second listing was submitted, and the split it unblocks is an attempt
-    # rather than a slot: its identity is complete the moment the digest is known.
+    # No second listing was submitted, and the measurement it unblocks is an
+    # attempt rather than a slot: its identity is complete the moment the digest
+    # is known.
     assert len(campaign.attempt_rows(con, case_id=listing.case_id)) == 1
-    split = campaign.Attempt.from_row(attempt_row(con, "ks-split", group_id="g20260817-000002"))
-    assert (split.input_artifact_sha256, split.produced_by) == (keyspace, listing.attempt_id)
+    hinted = campaign.Attempt.from_row(attempt_row(con, "list-hinted", group_id="g20260817-000002"))
+    assert (hinted.input_artifact_sha256, hinted.produced_by) == (keyspace, listing.attempt_id)
 
 
 def test_a_swath_job_names_its_heap_variable_once_and_the_worker_takes_it(
@@ -865,17 +872,17 @@ def test_a_slot_resolves_once_however_many_passes_see_it(
 
     campaign.set_state(con, listing.attempt_id, "SUCCEEDED")
     campaign.settle_dependents(con, listing, "SUCCEEDED", suite=SUITE)
-    split = campaign.Attempt.from_row(attempt_row(con, "ks-split"))
+    hinted = campaign.Attempt.from_row(attempt_row(con, "list-hinted"))
 
     # The row a concurrent pass read before this one claimed the slot.
     inbound = campaign.Inbound(
-        artifact_sha256=split.input_artifact_sha256,
+        artifact_sha256=hinted.input_artifact_sha256,
         produced_by=listing.attempt_id,
         artifact_uri=f"{listing.result_prefix}native/keyspace.ks",
     )
     assert campaign.resolve_slot(con, stale, inbound, suite=SUITE) is None
-    assert [row["attempt_id"] for row in campaign.attempt_rows(con, case_id=split.case_id)] == [
-        split.attempt_id
+    assert [row["attempt_id"] for row in campaign.attempt_rows(con, case_id=hinted.case_id)] == [
+        hinted.attempt_id
     ]
 
 
@@ -891,10 +898,8 @@ def test_a_slot_whose_case_was_already_prepared_binds_it_rather_than_deadlocking
     evidence.publish(listing.result_prefix, "keyspace.ks", b"a/\nb/\n")
     campaign.set_state(con, listing.attempt_id, "SUCCEEDED")
     campaign.settle_dependents(con, listing, "SUCCEEDED", suite=SUITE)
-    split = campaign.Attempt.from_row(attempt_row(con, "ks-split"))
-    evidence.publish(split.result_prefix, "hints.input", b"m/\nz/\n")
-    campaign.set_state(con, split.attempt_id, "SUCCEEDED")
-    campaign.settle_dependents(con, split, "SUCCEEDED", suite=SUITE)
+    hinted = campaign.Attempt.from_row(attempt_row(con, "list-hinted"))
+    campaign.set_state(con, hinted.attempt_id, "SUCCEEDED")
 
     plan = hinted_plan(tmp_path)
     again = campaign.Launch(
@@ -914,11 +919,10 @@ def test_a_slot_whose_case_was_already_prepared_binds_it_rather_than_deadlocking
     campaign.settle_dependents(con, repeated, "SUCCEEDED", suite=SUITE)
 
     slot = campaign.pending_rows(con, group_id="g20260817-000001")[0]
-    assert (slot["state"], slot["became"]) == ("RESOLVED", split.attempt_id)
-    # No second attempt of a case that has already succeeded, and the link behind
-    # it did not stay blocked on an attempt that will never settle again.
-    assert len(campaign.attempt_rows(con, case_id=split.case_id)) == 1
-    assert campaign.pending_rows(con, group_id="g20260817-000001")[1]["state"] == "RESOLVED"
+    assert (slot["state"], slot["became"]) == ("RESOLVED", hinted.attempt_id)
+    # No second attempt of a case that has already succeeded: the slot bound the
+    # one that exists rather than asking the ledger for a run it refuses.
+    assert len(campaign.attempt_rows(con, case_id=hinted.case_id)) == 1
 
 
 def attempt_row(

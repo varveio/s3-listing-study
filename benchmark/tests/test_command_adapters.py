@@ -456,15 +456,18 @@ def test_every_mode_matches_the_frozen_subject_argv_contract(tool: str) -> None:
 
 
 def consuming_modes(adapter: LoadedCommandAdapter) -> frozenset[str]:
-    """Modes fed an artifact one of this capsule's own prerequisites produced.
+    """Modes fed an artifact one of this capsule's own steps produced.
 
     A mode declaring a chain consumes what the chain's last link published, and
-    every link after the first consumes the link before it — so the whole set
-    falls out of ``REQUIRES`` and no roster has to restate it.
+    every link after the first consumes the link before it. An inline setup exec
+    consumes what its consumer's chain staged, and hands the subject what it
+    published — so the whole set falls out of the declarations and no roster has
+    to restate it.
     """
     modes = set(adapter.requires)
     for chain in adapter.requires.values():
         modes.update(chain[1:])
+    modes.update(manifest.inline for manifest in adapter.modes.values() if manifest.inline)
     return frozenset(modes)
 
 

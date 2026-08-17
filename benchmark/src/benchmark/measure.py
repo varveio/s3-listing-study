@@ -41,13 +41,28 @@ from benchmark.contract import (
     TOOLBOX_TOOLS,
     sha256_of,
 )
-from benchmark.runtime.command_adapter import HEAP_PERCENT
+from benchmark.runtime.command_adapter import (
+    HEAP_PERCENT,
+    Ceiling,
+    CommandRequest,
+    Default,
+    LoadedCommandAdapter,
+    Stated,
+)
 
 EXIT_ADAPTER_ERROR = 3
 EXIT_SECRET_DETECTED = 9
 EXIT_IMAGE_MISMATCH = 10
 EXIT_POSTPROCESSING_FAILED = 11
 EXIT_ARTIFACT_UNUSABLE = 12
+EXIT_SETUP_FAILED = 13
+"""The untimed inline setup exec did not leave the subject something to run on.
+
+Distinct from EXIT_ARTIFACT_UNUSABLE, which stays the verdict on *bytes* that
+exist and are not usable, wherever they came from: this one says the setup exec
+itself failed — nonzero, timed out, left a process behind, or published anything
+other than exactly one file.
+"""
 PINNED_IMAGE_RE = re.compile(r"\A[^\s@]+@sha256:[0-9a-f]{64}\Z")
 
 SECRET_PATTERNS = {
@@ -695,6 +710,142 @@ def final_exit_code(
     return 0
 
 
+class SetupFailed(RuntimeError):
+    """The untimed setup exec left the timed subject nothing it could run on."""
+
+    def __init__(self, message: str, code: int) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+def subject_env(
+    region: str, functional_env: Mapping[str, str], credential_env: Mapping[str, str]
+) -> dict[str, str]:
+    """The environment an exec of this attempt gets: harness base, capsule, credential.
+
+    The credential is deliberately kept out of the capsule's environment, which is
+    recorded in result.json (a published artifact) through the argv it compiled;
+    these values are secret material. Batch's secretVariable lands in os.environ,
+    and this is how it reaches the subject without being written down.
+    """
+    return {
+        **SUBJECT_ENV,
+        "AWS_REGION": region,
+        "AWS_DEFAULT_REGION": region,
+        **functional_env,
+        **credential_env,
+    }
+
+
+def run_inline_setup(
+    adapter: LoadedCommandAdapter,
+    mode: str,
+    args: argparse.Namespace,
+    *,
+    consumer_config: Mapping[str, object],
+    artifact_path: str,
+    attempt_dir: Path,
+    credential_env: Mapping[str, str],
+    visible_memory_gb: float,
+) -> tuple[str, dict[str, object]]:
+    """Run one mode's declared setup exec untimed, and return what the subject reads.
+
+    Same container, same process hygiene, same deadline as the subject, and
+    explicitly not the same clock: the returned block records the setup's wall
+    time as evidence, and nothing merges it into the measurement's timing.
+
+    Its sink is under the attempt directory rather than the native root, because
+    what it publishes is setup evidence and never the subject's product — a
+    consumer that found it in ``native/`` would count the harness's own scaffolding
+    as listed rows. Exactly one file, the same contract a consumed preparation
+    holds to: the harness has no way to choose between two.
+    """
+    manifest = adapter.modes[mode]
+    # The same inheritance a chain link gets: the consumer's value for an axis
+    # this mode declares settable itself, and nothing it does not declare.
+    shared = {
+        name: consumer_config[name]
+        for name, axis in manifest.axes.items()
+        if name in consumer_config and isinstance(axis, Default | Ceiling | Stated)
+    }
+    setup_dir = attempt_dir / "inline"
+    sink = setup_dir / "sink"
+    sink.mkdir(parents=True, exist_ok=True)
+    try:
+        request = CommandRequest(
+            mode=mode,
+            bucket=args.bucket,
+            region=args.region,
+            prefix=args.prefix,
+            tool=args.tool,
+            signed=args.auth_role is not None,
+            config=adapter.effective_config(mode, shared),
+            sink_dir=str(sink),
+            artifact_path=artifact_path,
+            visible_memory_gb=visible_memory_gb,
+            heap_percent=HEAP_PERCENT,
+        )
+        command = adapter.compile(request)
+        functional_env = adapter.build_env(request)
+    except Exception as exc:
+        raise SetupFailed(f"{args.tool} setup {mode!r}: {exc}", EXIT_ADAPTER_ERROR) from None
+
+    environment_error = validate_environment_inputs(functional_env)
+    if environment_error:
+        raise SetupFailed(f"setup {mode!r}: {environment_error}", 2)
+    if not preflight(command):
+        raise SetupFailed(f"setup {mode!r} has no executable to run", EXIT_SETUP_FAILED)
+
+    execution = run_tool(
+        command,
+        setup_dir,
+        args.timeout,
+        args.term_grace,
+        subject_env(args.region, functional_env, credential_env),
+        cwd=args.subject_workdir,
+    )
+    settled = all(
+        execution.get(field) is True
+        for field in ("process_group_empty", "descendants_empty", "process_tree_clean")
+    )
+    if execution["exit_code"] != 0 or execution["timed_out"] or not settled:
+        raise SetupFailed(
+            f"setup {mode!r} exited {execution['exit_code']} "
+            f"(timed_out={execution['timed_out']}, settled={settled})",
+            EXIT_SETUP_FAILED,
+        )
+    try:
+        produced = sorted(retained_files(sink))
+    except ArtifactSafetyError as exc:
+        raise SetupFailed(
+            f"setup {mode!r} published unusable output: {exc}", EXIT_SETUP_FAILED
+        ) from None
+    if len(produced) != 1:
+        raise SetupFailed(
+            f"setup {mode!r} publishes exactly one artifact into its sink, and this one "
+            f"published {len(produced)}",
+            EXIT_SETUP_FAILED,
+        )
+    output = produced[0]
+    validator = adapter.validate_artifact.get(mode)
+    if validator is not None:
+        try:
+            validator(output)
+        except Exception as exc:
+            raise SetupFailed(
+                f"setup {mode!r} produced no usable artifact: {exc}", EXIT_ARTIFACT_UNUSABLE
+            ) from None
+    setup = {
+        "mode": mode,
+        "command": list(command),
+        "exit_code": execution["exit_code"],
+        "wall_s": execution["wall_seconds"],
+        "output": {output.name: sha256_of(output)},
+        "validated": validator is not None,
+    }
+    return str(output), setup
+
+
 def gzip_file(path: Path) -> Path:
     gz_path = path.with_suffix(path.suffix + ".gz")
     with open(path, "rb") as src, gzip.open(gz_path, "wb") as dst:
@@ -822,6 +973,33 @@ def main(argv: list[str] | None = None) -> int:
             print(f"measure: {exc}", file=sys.stderr)
             return EXIT_ARTIFACT_UNUSABLE
 
+    # An untimed pre-phase, before the subject argv exists: what it publishes is
+    # what the subject consumes, so it runs here rather than as its own attempt.
+    setup: dict[str, object] | None = None
+    try:
+        adapter = adapters.load_adapter(adapter_dir, args.tool)
+    except adapters.AdapterError as exc:
+        print(f"measure: {exc}", file=sys.stderr)
+        return EXIT_ADAPTER_ERROR
+    # A mode the capsule does not have declares nothing; compiling it below is
+    # what says so, in the one place that already refuses it.
+    inline_mode = adapter.modes[args.mode].inline if args.mode in adapter.modes else ""
+    if inline_mode:
+        try:
+            artifact_path, setup = run_inline_setup(
+                adapter,
+                inline_mode,
+                args,
+                consumer_config=config,
+                artifact_path=artifact_path,
+                attempt_dir=attempt_dir,
+                credential_env=credential_env,
+                visible_memory_gb=visible_memory_gb,
+            )
+        except SetupFailed as exc:
+            print(f"measure: {exc}", file=sys.stderr)
+            return exc.code
+
     try:
         command, functional_env = adapters.compile_command(
             adapter_dir,
@@ -848,18 +1026,7 @@ def main(argv: list[str] | None = None) -> int:
     if environment_error:
         print(f"measure: {environment_error}", file=sys.stderr)
         return 2
-    # The credential is deliberately kept out of the capsule's environment, which
-    # is recorded in result.json (a published artifact) through the argv it
-    # compiled; these values are secret material. Batch's secretVariable lands in
-    # os.environ, and this is how it reaches the subject without being written
-    # down.
-    env = {
-        **SUBJECT_ENV,
-        "AWS_REGION": args.region,
-        "AWS_DEFAULT_REGION": args.region,
-        **functional_env,
-        **credential_env,
-    }
+    env = subject_env(args.region, functional_env, credential_env)
 
     # The attempt's own prefix, and no leaf below it: the ledger row already
     # names one attempt, so "is this attempt complete" is one existence test on
@@ -902,7 +1069,12 @@ def main(argv: list[str] | None = None) -> int:
     # Scanned uncompressed, before anything is uploaded: a hit here refuses
     # the whole leaf outright rather than uploading the captured output and
     # hoping something downstream notices.
-    secret_hit = scan_for_secrets([stdout_path, stderr_path, native_root])
+    scanned = [stdout_path, stderr_path, native_root]
+    if setup is not None:
+        # The setup exec's own captures and sink upload with the attempt, so they
+        # are held to the same gate as the subject's.
+        scanned.append(attempt_dir / "inline")
+    secret_hit = scan_for_secrets(scanned)
     if secret_hit:
         print(
             f"measure: possible secret in {secret_hit}; refusing to upload this attempt",
@@ -940,6 +1112,9 @@ def main(argv: list[str] | None = None) -> int:
         # the harness staged them from.
         "input_artifact": args.input_artifact or None,
         "input_artifact_sha256": args.input_artifact_sha256 or None,
+        # The untimed pre-phase, when this mode declared one: what it ran, what
+        # it made, and how long it took — beside the timing and never inside it.
+        "setup": setup,
         "exit_code": exit_code,
         "timed_out": timed_out,
         "execution": execution,

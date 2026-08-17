@@ -175,9 +175,9 @@ Axis = Fixed | Default | Ceiling | Stated | Inert
 class Executable:
     """One of the subject's executables, as the exact argv tokens that invoke it.
 
-    Named because a mode says which one it runs: s3-fast-list's hinted path runs
-    ``ks-tool`` between two listings, and an index into a tuple would say that
-    unreadably.
+    Named because a mode says which one it runs: s3-fast-list's hinted listing
+    runs ``ks-tool`` as its inline setup and the lister as its subject, and an
+    index into a tuple would say that unreadably.
     """
 
     name: str
@@ -234,6 +234,20 @@ class Mode:
     executable: str = ""
     """Which declared executable this mode runs; empty names the capsule's first."""
 
+    inline: str = ""
+    """Another mode of this capsule the engine runs untimed, in this container,
+    immediately before the timed subject.
+
+    The alternative to a chain link, for a step whose entire product is consumed
+    by the very next exec on the same machine: s3-fast-list's ``ks-tool split``
+    turns the staged key distribution into hints in under a second, and making
+    that its own attempt buys a slot, a job, a VM and an identity for a file the
+    measurement is the only reader of. A chain link is what a *shared* artifact
+    is for — one preparation serving a sweep — and the split serves exactly one
+    consumer. Its wall clock is recorded as setup evidence and never merged into
+    the measurement.
+    """
+
     def __post_init__(self) -> None:
         if self.product not in PRODUCTS:
             raise CommandAdapterError(f"mode product must be one of {PRODUCTS}: {self.product!r}")
@@ -250,6 +264,8 @@ class Mode:
             )
         if not isinstance(self.executable, str):
             raise CommandAdapterError("mode executable must name a declared executable")
+        if not isinstance(self.inline, str):
+            raise CommandAdapterError("mode inline must name a declared mode of this capsule")
         axes = dict(self.axes)
         unreserved = sorted(set(axes) - set(RESERVED_AXES))
         if unreserved:
@@ -359,12 +375,16 @@ class EnvBuilder(Protocol):
 
 
 class ArtifactValidator(Protocol):
-    """A capsule's optional structural check on an artifact it just produced.
+    """A capsule's optional structural check on an artifact one of its modes produced.
 
     A digest proves an artifact is unchanged, not that it is usable: s3-fast-list's
     ``ks-tool split`` can emit an empty cut point that digests cleanly and turns
-    the hinted run into a full-range serial scan. Raising refuses the
-    preparation, before any consumer is minted.
+    the hinted run into a full-range serial scan. Raising refuses the producer,
+    before anything consumes what it made.
+
+    Declared per producing mode in ``VALIDATE_ARTIFACT``, because a capsule with
+    two producers has two different structures to hold them to, and a validator
+    handed the wrong file would either pass it or refuse it for the wrong reason.
     """
 
     def __call__(self, path: Path) -> None: ...
@@ -429,7 +449,11 @@ class LoadedCommandAdapter:
     build_env: EnvBuilder = field(default_factory=lambda: _static_env({}))
     """The request-derived environment; defaults to returning ``FUNCTIONAL_ENV``."""
 
-    validate_artifact: ArtifactValidator | None = None
+    validate_artifact: Mapping[str, ArtifactValidator] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
+    """Per producing mode, the structural check its artifact must pass. A mode
+    with no entry produces bytes nothing structural can be said about."""
 
     accepted_config_keys: frozenset[str] = frozenset()
     """Derived, never declared: see the class docstring. Any value passed in is
@@ -593,15 +617,56 @@ def _load_build_env(
     return cast(EnvBuilder, raw)
 
 
-def _load_validate_artifact(module: ModuleType, path: Path) -> ArtifactValidator | None:
+def _load_validate_artifact(
+    module: ModuleType, path: Path, modes: Mapping[str, Mode]
+) -> Mapping[str, ArtifactValidator]:
     raw = getattr(module, "VALIDATE_ARTIFACT", None)
     if raw is None:
-        return None
-    if not callable(raw) or not _accepts_one_argument(raw):
+        return MappingProxyType({})
+    if not isinstance(raw, Mapping) or not raw:
         raise CommandAdapterError(
-            f"{path} VALIDATE_ARTIFACT must be callable as VALIDATE_ARTIFACT(path)"
+            f"{path} VALIDATE_ARTIFACT must map a producing mode to its validator"
         )
-    return cast(ArtifactValidator, raw)
+    validators: dict[str, ArtifactValidator] = {}
+    for mode, validator in raw.items():
+        if mode not in modes:
+            raise CommandAdapterError(f"{path} VALIDATE_ARTIFACT names unknown mode {mode!r}")
+        if not callable(validator) or not _accepts_one_argument(validator):
+            raise CommandAdapterError(
+                f"{path} VALIDATE_ARTIFACT[{mode!r}] must be callable as validator(path)"
+            )
+        validators[mode] = cast(ArtifactValidator, validator)
+    return MappingProxyType(validators)
+
+
+def _check_inline(
+    modes: Mapping[str, Mode], requires: Mapping[str, tuple[str, ...]], path: Path
+) -> None:
+    """Hold an inline setup exec to one flat, offline-readable step.
+
+    An inline mode that itself declared an inline or a chain would put a graph
+    back inside one attempt, where no reviewer can see it and no slot records
+    what it owes — the whole reason the chain is declared statically.
+    """
+    for mode, manifest in modes.items():
+        inline = manifest.inline
+        if not inline:
+            continue
+        if inline == mode:
+            raise CommandAdapterError(f"{path} mode {mode!r} names itself as its inline setup")
+        setup = modes.get(inline)
+        if setup is None:
+            raise CommandAdapterError(f"{path} mode {mode!r} names unknown inline mode {inline!r}")
+        if setup.purpose_ceiling != "preparation":
+            raise CommandAdapterError(
+                f"{path} mode {mode!r} runs {inline!r} as setup, whose capsule caps it at "
+                f"{setup.purpose_ceiling!r} — an inline exec produces, it does not measure"
+            )
+        if setup.inline or inline in requires:
+            raise CommandAdapterError(
+                f"{path} inline mode {inline!r} needs a step of its own; an inline setup exec "
+                f"is one command, not a chain"
+            )
 
 
 def _accepts_one_argument(value: Callable[..., object]) -> bool:
@@ -675,6 +740,8 @@ def load_command_adapter(
 
     executables = _load_executables(module, path)
     modes = _load_modes(module, path, executables)
+    requires = _load_requires(module, path, modes)
+    _check_inline(modes, requires, path)
     _check_registered_executable(path, executables[0])
 
     return LoadedCommandAdapter(
@@ -687,9 +754,9 @@ def load_command_adapter(
         cast(dict[str, str], functional_env),
         modes,
         executables,
-        _load_requires(module, path, modes),
+        requires,
         _load_build_env(module, path, functional_env),
-        _load_validate_artifact(module, path),
+        _load_validate_artifact(module, path, modes),
     )
 
 

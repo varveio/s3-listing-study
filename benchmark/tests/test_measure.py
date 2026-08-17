@@ -394,6 +394,8 @@ def test_count_failure_uploads_result_marker_before_exit(
             "none",
             "--config",
             '{"mode": "recursive"}',
+            "--adapter-root",
+            str(ROOT / "tools"),
             "--image-metadata",
             str(metadata_path),
         ]
@@ -490,6 +492,8 @@ def test_the_cases_config_and_heap_share_reach_the_capsule(
         "2",
         "--config",
         '{"mode": "recursive", "concurrency": 8}',
+        "--adapter-root",
+        str(ROOT / "tools"),
         "--image-metadata",
         str(metadata_path),
     ]
@@ -610,3 +614,251 @@ def test_a_staged_artifact_whose_digest_moved_is_refused(
         measure.stage_artifact(
             "gs://results/suite/b/tool.abc.s1/native/hints.input", "0" * 64, tmp_path / "inbound"
         )
+
+
+INLINE_CAPSULE = '''\
+"""A fixture capsule whose measurement runs a setup exec before the timed subject."""
+
+import sys
+from pathlib import Path
+
+from benchmark.runtime.command_adapter import (
+    CommandAdapterError,
+    CommandRequest,
+    Executable,
+    Mode,
+    Stated,
+)
+
+TOOL = "s3-fast-list"
+EXECUTABLES = (Executable("fixture", (sys.executable,)),)
+SUPPORTS_UNSIGNED = True
+MODES = {
+    "split": Mode(
+        product="text",
+        fields=("key",),
+        axes={"segments": Stated()},
+        purpose_ceiling="preparation",
+    ),
+    "hinted": Mode(product="text", fields=("key",), axes={"segments": Stated()}, inline="split"),
+}
+
+
+def build_command(request: CommandRequest) -> tuple[str, ...]:
+    here = Path(__file__).parent
+    if request.mode == "split":
+        return (
+            sys.executable,
+            str(here / "split.py"),
+            request.artifact_path,
+            request.sink_dir,
+            str(request.config["segments"]),
+        )
+    return (sys.executable, str(here / "subject.py"), request.artifact_path, request.sink_dir)
+
+
+def _cut_points(path: Path) -> None:
+    if not path.read_text().strip():
+        raise CommandAdapterError("hints file holds no cut point at all")
+
+
+VALIDATE_ARTIFACT = {"split": _cut_points}
+'''
+
+INLINE_SUBJECT = """\
+import sys
+from pathlib import Path
+
+# The subject lists under whatever the setup exec published, and publishes into
+# its own native sink -- which is not where the setup wrote.
+hints = Path(sys.argv[1]).read_text()
+Path(sys.argv[2], "listing.txt").write_text(hints)
+print(hints, end="")
+"""
+
+INLINE_SPLIT = """\
+import sys
+import time
+from pathlib import Path
+
+time.sleep(0.2)
+keyspace = Path(sys.argv[1]).read_text()
+Path(sys.argv[2], "hints.input").write_text(keyspace)
+"""
+
+
+def inline_capsule(tmp_path: Path, split: str = INLINE_SPLIT) -> Path:
+    """A capsule root whose `hinted` mode declares `split` as its inline setup."""
+    adapter = tmp_path / "tools" / "s3-fast-list" / "adapter"
+    adapter.mkdir(parents=True)
+    (adapter / "command.py").write_text(INLINE_CAPSULE, encoding="utf-8")
+    (adapter / "subject.py").write_text(INLINE_SUBJECT, encoding="utf-8")
+    (adapter / "split.py").write_text(split, encoding="utf-8")
+    return tmp_path / "tools"
+
+
+def run_inline_worker(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    split: str = INLINE_SPLIT,
+    uploaded: list[tuple[str, bytes]] | None = None,
+) -> int:
+    """Run one attempt of the fixture capsule's hinted mode against a staged `.ks`."""
+    metadata = image_metadata()
+    tools = metadata["tools"]
+    assert isinstance(tools, dict)
+    selected = tools["s3-fast-list"]
+    assert isinstance(selected, dict)
+    metadata_path = tmp_path / "image-metadata.json"
+    metadata_path.write_text(json.dumps(metadata))
+    keyspace = b"a/\nb/\n"
+    monkeypatch.setattr(gcs, "download_bytes", lambda _uri: keyspace)
+    monkeypatch.setattr(measure, "row_count_for", lambda *_args: (2, None))
+    monkeypatch.setattr(
+        gcs,
+        "upload_file",
+        lambda path, uri, **_kwargs: (uploaded if uploaded is not None else []).append(
+            (uri, Path(path).read_bytes())
+        ),
+    )
+    monkeypatch.setattr(gcs, "upload_tree", lambda *_args, **_kwargs: None)
+    return measure.main(
+        [
+            "--tool",
+            "s3-fast-list",
+            "--mode",
+            "hinted",
+            "--bucket",
+            "bucket",
+            "--region",
+            "region",
+            "--output",
+            str(tmp_path / "attempt"),
+            "--destination",
+            "gs://results/job/",
+            "--image",
+            "registry/derived@sha256:" + "a" * 64,
+            "--toolbox-manifest-sha256",
+            str(metadata["toolbox_manifest_sha256"]),
+            "--toolbox-recipe-sha256",
+            str(metadata["toolbox_recipe_sha256"]),
+            "--tool-recipe-sha256",
+            str(selected["recipe_sha256"]),
+            "--tool-build-inputs-sha256",
+            str(selected["build_inputs_sha256"]),
+            "--tool-version",
+            str(selected["tool_version"]),
+            "--tool-build-sha256",
+            str(selected["tool_build_sha256"]),
+            "--adapter-bundle-sha256",
+            str(selected["adapter_bundle_sha256"]),
+            "--harness-revision",
+            str(metadata["harness_revision"]),
+            "--subject-workdir",
+            str(selected["subject_workdir"]),
+            "--group-id",
+            "g20260816-000000",
+            "--job-name",
+            "suite-s3-fast-list-9f300cc4d2b1-s1",
+            "--case-id",
+            "s3-fast-list.9f300cc4d2b1",
+            "--attempt-id",
+            "s3-fast-list.9f300cc4d2b1.s1",
+            "--image-set-sha256",
+            "1" * 64,
+            "--machine-type",
+            "machine",
+            "--vcpus",
+            "2",
+            "--memory-gb",
+            "4",
+            "--container-memory-gb",
+            "none",
+            "--config",
+            '{"mode": "hinted", "segments": 2}',
+            "--input-artifact",
+            "gs://results/prep/native/keyspace.ks",
+            "--input-artifact-sha256",
+            hashlib.sha256(keyspace).hexdigest(),
+            "--adapter-root",
+            str(inline_capsule(tmp_path, split)),
+            "--image-metadata",
+            str(metadata_path),
+        ]
+    )
+
+
+def test_an_inline_setup_runs_untimed_before_the_subject_it_feeds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The whole point of folding the split in: one attempt, two execs, one clock.
+
+    The subject lists under what the setup published, the setup's own duration is
+    recorded beside the measurement rather than inside it, and what it wrote is
+    setup evidence rather than a listing the counter would read.
+    """
+    uploaded: list[tuple[str, bytes]] = []
+    assert run_inline_worker(tmp_path, monkeypatch, uploaded=uploaded) == 0
+    result = json.loads((tmp_path / "attempt/result.json").read_bytes())
+
+    setup = result["setup"]
+    hints = tmp_path / "attempt/inline/sink/hints.input"
+    assert setup["mode"] == "split"
+    assert setup["exit_code"] == 0
+    assert setup["output"] == {"hints.input": hashlib.sha256(hints.read_bytes()).hexdigest()}
+    assert setup["validated"] is True
+    # The setup exec's argv carries the segment count the consumer stated, and
+    # the subject's carries what the setup published.
+    assert setup["command"][-1] == "2"
+    assert result["argv"][2] == str(hints)
+    # Untimed with respect to the measurement: the setup slept longer than the
+    # subject ran, and the recorded timing is the subject's alone.
+    assert setup["wall_s"] > result["wall_seconds"]
+    # Setup evidence is not the subject's product: the native manifest is what
+    # the counter reads, and the inline sink is not in it.
+    assert result["native_manifest"] == {
+        "listing.txt": hashlib.sha256(b"a/\nb/\n").hexdigest(),
+    }
+    assert (tmp_path / "attempt/inline/stdout.log").exists()
+    assert uploaded[-1][0].endswith("/result.json")
+
+
+def test_an_inline_setup_that_fails_fails_the_whole_attempt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A subject run on hints that were never made measures something else."""
+    uploaded: list[tuple[str, bytes]] = []
+    code = run_inline_worker(
+        tmp_path,
+        monkeypatch,
+        split="import sys\n\nsys.exit(3)\n",
+        uploaded=uploaded,
+    )
+    assert code == measure.EXIT_SETUP_FAILED
+    assert uploaded == []
+
+
+def test_an_inline_setup_publishing_more_than_one_file_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The one-artifact contract a consumed preparation holds to: the harness has
+    no way to choose between two, and choosing wrong runs the wrong measurement."""
+    two_files = (
+        "import sys\nfrom pathlib import Path\n\n"
+        'Path(sys.argv[2], "hints.input").write_text("a/\\n")\n'
+        'Path(sys.argv[2], "hints.extra").write_text("b/\\n")\n'
+    )
+    assert run_inline_worker(tmp_path, monkeypatch, split=two_files) == measure.EXIT_SETUP_FAILED
+
+
+def test_an_inline_artifact_the_capsule_refuses_is_unusable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Same claim as a preparation's, one location over: the bytes exist, digest
+    cleanly, and mean nothing."""
+    empty = (
+        "import sys\nfrom pathlib import Path\n\n"
+        'Path(sys.argv[2], "hints.input").write_text("\\n")\n'
+    )
+    assert run_inline_worker(tmp_path, monkeypatch, split=empty) == measure.EXIT_ARTIFACT_UNUSABLE

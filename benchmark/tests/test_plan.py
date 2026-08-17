@@ -773,21 +773,55 @@ def test_a_hinted_row_without_segments_is_refused_at_resolution(tmp_path: Path) 
         load(path, adapters={**CAPSULES, "s3-fast-list": adapter})
 
 
-def test_a_hinted_rows_segments_reaches_its_ks_split_link(tmp_path: Path) -> None:
-    """Chain expansion hands the consumer's value to an axis the prerequisite
-    itself declares — the split cuts at the count the hinted row stated — while
-    `concurrency`, which `ks-split` never declares, stays out of the link."""
+def test_a_hinted_row_expands_to_the_listing_it_needs_and_nothing_else(tmp_path: Path) -> None:
+    """The split the hinted mode also needs is its own attempt's inline setup, so
+    the chain is the one link that produces a *shared* artifact — and the stated
+    `segments` stays in the measurement's identity, which is where the cut count
+    the run listed under belongs."""
     adapter = bench.load_capsule("s3-fast-list")
-    path = write(
-        tmp_path, "s3-fast-list:\n  cases:\n    - {mode: list-hinted, segments: 16}\n"
-    )
+    path = write(tmp_path, "s3-fast-list:\n  cases:\n    - {mode: list-hinted, segments: 16}\n")
     case = load(path, adapters={**CAPSULES, "s3-fast-list": adapter}).cases[0]
     links = bench.expand_requirements(case, adapter)
-    assert [link.mode for link in links] == ["list", "ks-split", "list-hinted"]
-    split = dict(links[1].config)
-    assert split["segments"] == 16
-    assert "concurrency" not in split
+    assert [link.mode for link in links] == ["list", "list-hinted"]
+    # The bootstrap listing takes the capsule's own config: `segments` cuts the
+    # artifact it produces, not the listing that produces it.
+    assert dict(links[0].config) == {"mode": "list"}
     assert dict(case.config)["segments"] == 16
+
+
+def test_an_inline_setup_the_capsule_cannot_build_is_refused_at_resolution(
+    tmp_path: Path,
+) -> None:
+    """The inline exec never becomes a case of its own, so nothing else would
+    compile it before an allocated VM did."""
+    modes = {
+        "split": capsule.Mode(
+            product="text",
+            fields=("key",),
+            axes={"segments": capsule.Stated()},
+            purpose_ceiling="preparation",
+        ),
+        "hinted": capsule.Mode(product="text", fields=("key",), inline="split"),
+    }
+
+    def refuse_split(request: capsule.CommandRequest) -> tuple[str, ...]:
+        if request.mode == "split":
+            raise capsule.CommandAdapterError("ks-tool split takes no such count")
+        return ()
+
+    adapter = capsule.LoadedCommandAdapter(
+        build=refuse_split,
+        fixed_command_prefix=("/bin/true",),
+        config_keys=frozenset(),
+        supports_unsigned=True,
+        supports_signed=True,
+        tool="s3-fast-list",
+        functional_env={},
+        modes=modes,
+    )
+    path = write(tmp_path, "s3-fast-list:\n  cases:\n    - {mode: hinted, segments: 16}\n")
+    with pytest.raises(bench.PlanError, match="inline setup"):
+        load(path, adapters={**CAPSULES, "s3-fast-list": adapter})
 
 
 # ── what a row resolves to ───────────────────────────────────────────────────

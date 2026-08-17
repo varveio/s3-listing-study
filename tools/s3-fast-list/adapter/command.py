@@ -80,30 +80,39 @@ MODES = {
     ),
     # `segments` is declared here too, though this argv never carries it: the
     # cut count is what the run listed under, so it belongs in the measurement
-    # identity — and chain expansion hands the stated value to the `ks-split`
-    # link, which is the argv that does carry it.
+    # identity — and the inline `ks-split` exec inherits the stated value, which
+    # is the argv that does carry it.
     "list-hinted": Mode(
         product="parquet",
         fields=FIELDS,
         axes={"concurrency": CONCURRENCY, "segments": SEGMENTS},
         executable=S3_FAST_LIST.name,
+        inline="ks-split",
     ),
 }
 
-REQUIRES = {"list-hinted": ("list", "ks-split")}
-"""The hinted path is a three-link chain, not a two-link one: a full listing
-emits the `.ks` key distribution, `ks-tool split` turns it into cut points, and
-only then can `list -k` run. The bootstrap listing is not overhead — it *is* the
-unhinted arm, which is why it keeps a `measurement` ceiling and only the split
-carries `preparation`."""
+REQUIRES = {"list-hinted": ("list",)}
+"""The hinted path needs a full listing first: only a `list` emits the `.ks` key
+distribution the cut points are computed from. That bootstrap listing is not
+overhead — it *is* the unhinted arm, which is why it keeps a `measurement`
+ceiling and only the split carries `preparation`.
+
+`ks-split` is not a link here. Cutting an existing `.ks` into ranges is a
+sub-second local transform whose output one measurement consumes and nothing
+else, so it runs as that measurement's inline setup exec (`MODES`, `inline`)
+rather than buying a slot, a job and a VM of its own. It stays a declared mode:
+it is what the inline exec runs, and a plan may still name it directly."""
 
 KS_NAME = "keyspace.ks"
 """The key distribution a listing drops into the engine's sink, and the artifact
-`ks-split` consumes. Written only when the engine offers a sink: a listing with
-nowhere to publish it discards it, as every committed receipt did."""
+the hinted measurement's inline `ks-split` consumes. Written only when the engine
+offers a sink: a listing with nowhere to publish it discards it, as every
+committed receipt did."""
 
 HINTS_NAME = "hints.input"
-"""The cut points `ks-split` publishes into the engine's sink."""
+"""The cut points `ks-split` publishes into the sink it is given — the attempt's
+own setup directory when it runs inline, an ordinary preparation sink when a plan
+names the mode directly."""
 
 
 def _sink_path(request: CommandRequest, name: str) -> str:
@@ -229,7 +238,7 @@ def _validate_hints(path: Path) -> None:
         )
 
 
-VALIDATE_ARTIFACT = _validate_hints
+VALIDATE_ARTIFACT = {"ks-split": _validate_hints}
 
 
 if __name__ == "__main__":
