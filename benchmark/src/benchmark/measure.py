@@ -61,6 +61,15 @@ exist and are not usable, wherever they came from: this one says the setup exec
 itself failed — nonzero, timed out, left a process behind, or published anything
 other than exactly one file.
 """
+SETUP_TIMEOUT_S = 300
+"""The most an untimed setup exec gets, whatever the subject's deadline is.
+
+Both phases run inside one provider deadline that covers the container, not a
+phase: a setup allowed the subject's full timeout could push the measurement
+past it and have the whole attempt hard-killed, evidence and all. A setup exec
+is by contract a cheap local transform of what the chain already staged, so a
+bound this far below any subject's deadline costs a legitimate one nothing.
+"""
 PINNED_IMAGE_RE = re.compile(r"\A[^\s@]+@sha256:[0-9a-f]{64}\Z")
 
 SECRET_PATTERNS = {
@@ -794,9 +803,11 @@ def run_inline_setup(
 ) -> tuple[str, dict[str, object]]:
     """Run one mode's declared setup exec untimed, and return what the subject reads.
 
-    Same container, same process hygiene, same deadline as the subject, and
-    explicitly not the same clock: the returned block records the setup's wall
-    time as evidence, and nothing merges it into the measurement's timing.
+    Same container and same process hygiene as the subject, and explicitly not
+    the same clock: the returned block records the setup's wall time as
+    evidence, and nothing merges it into the measurement's timing. Its deadline
+    is its own too — :data:`SETUP_TIMEOUT_S`, so the two phases together stay
+    inside the one deadline the provider gives the container.
 
     Its sink is under the attempt directory rather than the native root, because
     what it publishes is setup evidence and never the subject's product — a
@@ -841,7 +852,7 @@ def run_inline_setup(
     execution = run_tool(
         command,
         setup_dir,
-        args.timeout,
+        min(args.timeout, SETUP_TIMEOUT_S),
         args.term_grace,
         subject_env(args.region, functional_env, {}),
         cwd=args.subject_workdir,

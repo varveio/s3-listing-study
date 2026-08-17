@@ -8,6 +8,7 @@ import signal
 import sys
 import tomllib
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -919,6 +920,26 @@ def test_an_inline_setup_runs_untimed_before_the_subject_it_feeds(
     }
     assert (tmp_path / "attempt/inline/stdout.log").exists()
     assert uploaded[-1][0].endswith("/result.json")
+
+
+def test_the_setup_exec_is_bounded_well_inside_the_containers_deadline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two phases, one provider deadline over the container: a setup exec given
+    the subject's whole timeout could get the measurement hard-killed."""
+    deadlines: list[int] = []
+    run_tool = measure.run_tool
+
+    def recording(
+        argv: tuple[str, ...], attempt_dir: Path, timeout: int, *rest: Any, **kwargs: Any
+    ) -> object:
+        deadlines.append(timeout)
+        return run_tool(argv, attempt_dir, timeout, *rest, **kwargs)
+
+    monkeypatch.setattr(measure, "run_tool", recording)
+    assert run_inline_worker(tmp_path, monkeypatch) == 0
+    # The subject keeps `--timeout`, which this attempt leaves at its default.
+    assert deadlines == [measure.SETUP_TIMEOUT_S, 3600]
 
 
 def test_the_credential_reaches_the_subject_and_not_the_setup_exec(

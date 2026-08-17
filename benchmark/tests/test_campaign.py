@@ -541,6 +541,38 @@ def test_a_retry_that_would_change_the_frozen_request_is_refused(
         )
 
 
+def test_a_retry_replays_the_deadline_its_ledger_was_frozen_under(
+    submitted: tuple[sqlite3.Connection, Plan, Case, campaign.ImageSet],
+) -> None:
+    """The provider deadline is a safety net, and widening it is not a new campaign.
+
+    A fresh launch gets the current flat slack; an in-flight ledger's frozen
+    request keeps the figure it was launched with, or every attempt frozen
+    before the change would be refused as "a new campaign".
+    """
+    con, plan, case, images = submitted
+    attempt = submit(con, plan, case, images)
+    campaign.set_state(con, attempt.attempt_id, "FAILED", "settled failure")
+    stored = "SELECT request_json FROM attempts WHERE attempt_id=?"
+    frozen = json.loads(con.execute(stored, (attempt.attempt_id,)).fetchone()[0])
+    assert campaign.request_max_run_duration(frozen) == (
+        f"{attempt.timeout_s + int(options().term_grace) + campaign.DEADLINE_SLACK_S}s"
+    )
+
+    # The same row as an older, narrower slack would have frozen it.
+    frozen["taskGroups"][0]["taskSpec"]["maxRunDuration"] = "999s"
+    con.execute(
+        "UPDATE attempts SET request_json=? WHERE attempt_id=?",
+        (json.dumps(frozen), attempt.attempt_id),
+    )
+    row = con.execute("SELECT * FROM attempts WHERE attempt_id=?", (attempt.attempt_id,)).fetchone()
+    retried = campaign.retry_attempt(
+        con, row, suite=SUITE, image_set=images, results_bucket="results", options=options()
+    )
+    replayed = json.loads(con.execute(stored, (retried.attempt_id,)).fetchone()[0])
+    assert campaign.request_max_run_duration(replayed) == "999s"
+
+
 def test_accept_failure_records_which_failure_was_accepted(
     submitted: tuple[sqlite3.Connection, Plan, Case, campaign.ImageSet], tmp_path: Path
 ) -> None:

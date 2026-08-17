@@ -72,6 +72,16 @@ TERMINAL_STATES = {"SUCCEEDED", "FAILED", "NOT_CREATED", "CANCELLED", "ACCEPTED"
 # measurement behind it.
 UNSUCCESSFUL_STATES = TERMINAL_STATES - {"SUCCEEDED"}
 
+DEADLINE_SLACK_S = 600
+"""What the provider deadline adds over the worker's own, for every attempt.
+
+The worker may run an untimed setup exec ahead of the timed subject, each with
+its own deadline, and a provider hard-kill takes the container down with all of
+its evidence — so this outer bound must never be the one that fires. It is a
+safety net rather than a measurement, which is why it is one flat figure and not
+a per-mode sum.
+"""
+
 N4_BOOT_DISK = {"type": "hyperdisk-balanced", "image": "batch-cos"}
 PINNED_IMAGE_RE = re.compile(r"\A[^\s@]+@sha256:([0-9a-f]{64})\Z")
 SECRET_RE = re.compile(r"\Aprojects/[^/]+/secrets/[^/]+/versions/[^/]+\Z")
@@ -615,6 +625,14 @@ def request_argument(document: Mapping[str, Any], name: str) -> str:
     return str(pairs.get(name, ""))
 
 
+def request_max_run_duration(document: Mapping[str, Any]) -> str:
+    """The provider deadline a frozen request was launched under."""
+    try:
+        return str(document["taskGroups"][0]["taskSpec"]["maxRunDuration"])
+    except (IndexError, KeyError, TypeError):
+        raise CampaignError("recorded provider request cannot be read back") from None
+
+
 def render_batch_job(
     attempt: Attempt,
     image: Mapping[str, str],
@@ -622,6 +640,7 @@ def render_batch_job(
     suite: str,
     options: BatchOptions,
     artifact_uri: str = "",
+    max_run_duration: str = "",
 ) -> dict[str, Any]:
     """The provider request an attempt freezes, rendered from the row alone."""
     _validate_batch_options(options)
@@ -672,7 +691,8 @@ def render_batch_job(
             "memoryMib": str(attempt.memory_gb * 1024),
         },
         "maxRetryCount": 0,
-        "maxRunDuration": f"{attempt.timeout_s + int(options.term_grace) + 300}s",
+        "maxRunDuration": max_run_duration
+        or f"{attempt.timeout_s + int(options.term_grace) + DEADLINE_SLACK_S}s",
     }
     if attempt.secret_resource is not None:
         # One variable, whose payload the worker parses. A case that lists
@@ -1199,8 +1219,11 @@ def retry_attempt(
             suite=suite,
             options=options,
             # Read back rather than re-resolved: a retry re-runs the attempt that
-            # was recorded, over the same bytes it consumed.
+            # was recorded, over the same bytes it consumed — and under the
+            # deadline it was launched with, so widening the slack does not turn
+            # every ledger frozen before it into "a new campaign".
             artifact_uri=request_argument(frozen, "--input-artifact"),
+            max_run_duration=request_max_run_duration(frozen),
         )
         expected = retry_request_document(
             frozen,

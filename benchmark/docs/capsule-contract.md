@@ -371,6 +371,13 @@ the refusals are:
   `REQUIRES`. One flat step inside one attempt: anything deeper puts a graph back
   where no reviewer and no slot can see it.
 
+**A setup exec gets 300 seconds, whatever the row's timeout is.** The provider
+deadline bounds the *container*, not a phase, so a setup allowed the subject's
+full timeout could push the measurement past it and lose the whole attempt to a
+hard kill. A setup exec is a cheap local transform of bytes the chain already
+staged — the worked example runs in under a second — so a step that needs longer
+is a preparation, and its own attempt.
+
 **The credential reaches only the timed subject.** A setup exec is by contract a
 local transform of bytes the chain already staged, so it gets the harness base
 environment, the region, and its capsule's functional environment — and not the
