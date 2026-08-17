@@ -303,6 +303,53 @@ def test_already_exists_adopts_only_exact_job() -> None:
         )
 
 
+def test_provider_resolved_locations_do_not_read_as_a_different_job() -> None:
+    """Batch expands an unrestricted request into the region and its zones."""
+    plan = Plan.load(ROOT / "benchmark/plans/buckets/noaa-ghcn-pds.yaml")
+    case = replace(plan.cases[0], auth="anonymous")
+    unrestricted = campaign.BatchOptions("anon@example.test", None, None, None, None, "SPOT")
+    document = campaign.render_batch_job(
+        case,
+        "gs://results/leaf/",
+        image(case.tool),
+        "e" * 64,
+        campaign_id="2026-08-16-candidate",
+        job_id="c-one",
+        rep=1,
+        submission=1,
+        bucket="bucket",
+        region="region",
+        options=unrestricted,
+    )
+    name = "projects/p/locations/us-east1/jobs/c-one"
+    resolved = campaign._job_from_dict(document)
+    resolved.name = name
+    resolved.allocation_policy.location.allowed_locations.extend(
+        ["regions/us-east1", "zones/us-east1-b", "zones/us-east1-c"]
+    )
+    assert campaign._adoption_exact(resolved, name, document, "us-east1")
+
+    zoned = replace(unrestricted, zone="us-east1-b")
+    pinned_document = campaign.render_batch_job(
+        case,
+        "gs://results/leaf/",
+        image(case.tool),
+        "e" * 64,
+        campaign_id="2026-08-16-candidate",
+        job_id="c-one",
+        rep=1,
+        submission=1,
+        bucket="bucket",
+        region="region",
+        options=zoned,
+    )
+    elsewhere = campaign._job_from_dict(pinned_document)
+    elsewhere.name = name
+    del elsewhere.allocation_policy.location.allowed_locations[:]
+    elsewhere.allocation_policy.location.allowed_locations.append("zones/us-east1-c")
+    assert not campaign._adoption_exact(elsewhere, name, pinned_document, "us-east1")
+
+
 def test_permanent_create_rejection_is_definitively_not_created() -> None:
     class Client:
         def create_job(self, **_kwargs: object) -> batch_v1.Job:

@@ -430,14 +430,20 @@ def _adoption_exact(
     for group in actual.task_groups:
         group.name = ""
     actual.allocation_policy.labels.pop("batch-job-id", None)
+    # Batch resolves allowedLocations for itself: it echoes the enclosing region
+    # back, and expands an unrestricted request into that region's zones. Neither
+    # is a different job, so the check is that every location this campaign asked
+    # for survived, and the provider's own expansion is then left out of the
+    # byte comparison on both sides.
+    del location
     requested = expected.get("allocationPolicy", {}).get("location", {}).get("allowedLocations", [])
-    provider_region = f"regions/{location}"
-    actual_locations = actual.allocation_policy.location.allowed_locations
-    if provider_region not in requested and provider_region in actual_locations:
-        actual_locations.remove(provider_region)
-    if not requested and not actual_locations:
-        batch_v1.AllocationPolicy.pb(actual.allocation_policy).ClearField("location")
-    return _job_document(_job_from_dict(expected)) == _job_document(actual)
+    actual_locations = list(actual.allocation_policy.location.allowed_locations)
+    if not set(requested) <= set(actual_locations):
+        return False
+    batch_v1.AllocationPolicy.pb(actual.allocation_policy).ClearField("location")
+    intended = _job_from_dict(expected)
+    batch_v1.AllocationPolicy.pb(intended.allocation_policy).ClearField("location")
+    return _job_document(intended) == _job_document(actual)
 
 
 def _close_batch_client(client: batch_v1.BatchServiceClient) -> None:
