@@ -54,19 +54,23 @@ prefixes. Treat the input list as a contract.
 ### Attempts
 
 Two runs of one case have identical inputs and therefore the identical hash.
-They are told apart by an ordinal — and only when there is more than one:
+They are told apart by an ordinal, always present:
 
 ```
-<tool>.<hash>          first attempt
-<tool>.<hash>.2        it failed; this is the retry
-<tool>.<hash>.3
+<tool>.<hash>.s1       first attempt
+<tool>.<hash>.s2       it failed; this is the retry
+<tool>.<hash>.s3
 ```
 
-So the suffix appears only when something went wrong, and the ordinary case
-stays a bare `<tool>.<hash>`. The manager allocates the next ordinal as
-`max(attempt) + 1`; the ledger already says which kind each was, because a row
-whose predecessor settled in a failure state is a retry and one whose
-predecessor succeeded is a repeat. Nothing needs to record that separately.
+`.s1` is written out rather than implied. A suffix that appears only on retries
+would make every consumer — the path builder, the parser, a glob, a person
+reading a listing — carry the same special case, and a prefix could no longer be
+read by shape.
+
+The manager allocates the next ordinal as `max(attempt) + 1`. The ledger already
+says which kind each was: a row whose predecessor settled in a failure state is a
+retry, one whose predecessor succeeded is a repeat. Nothing needs to record that
+separately.
 
 Failed attempts can be pruned later — their prefixes deleted, keeping only the
 evidence that settled successfully. The ledger row stays regardless, so "this
@@ -87,7 +91,7 @@ case hash.
 ## Object layout
 
 ```
-gs://<results-bucket>/<suite>/<target-bucket>/<tool>.<hash>[.<attempt>]/
+gs://<results-bucket>/<suite>/<target-bucket>/<tool>.<hash>.s<attempt>/
 ```
 
 Deterministic, so evidence is computed from a row rather than discovered by
@@ -130,9 +134,7 @@ CREATE TABLE attempts (
     -- identity
     case_id             TEXT NOT NULL,      -- <tool>.<hash>
     attempt             INTEGER NOT NULL,   -- ordinal, 1-based
-    attempt_id          TEXT GENERATED ALWAYS AS (
-                            CASE attempt WHEN 1 THEN case_id
-                            ELSE case_id || '.' || attempt END) VIRTUAL,
+    attempt_id          TEXT GENERATED ALWAYS AS (case_id || '.s' || attempt) VIRTUAL,
     group_id            TEXT NOT NULL,      -- the launch this went out with
 
     -- the hashed inputs, kept legible
