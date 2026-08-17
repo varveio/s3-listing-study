@@ -290,11 +290,12 @@ slice closes that.
 
 ## Open questions
 
-- **The `executor` vocabulary.** What names exist, and how a name resolves to
-  the code that renders and submits a job. The column is recorded, not hashed,
-  while one executor exists — but it becomes a hash input the day a second one
-  arrives, so the vocabulary is an identity question to settle before that day
-  rather than after.
+- **The `executor` vocabulary.** One executor exists, recorded on every row as
+  `gcp-batch`. What names exist beyond it, and how a name resolves to the code
+  that renders and submits a job, becomes an identity question — the column is
+  hashed then, not before — the day a second one arrives.
 - **Where the role table lives.** `auth_role` → service account + secret version
-  is deployment configuration, not plan content. It needs a file, a schema, and
-  a validation point.
+  is deployment configuration, not plan content. It is currently
+  `--anonymous-worker-sa`, `--authenticated-worker-sa`, and `--secret-resource`
+  flags to `campaign.py submit`/`retry`, an interim that needs a file, a
+  schema, and a validation point.

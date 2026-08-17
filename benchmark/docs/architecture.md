@@ -74,7 +74,9 @@ Two properties matter:
 - **The evidence names itself.** The row says where the evidence is; the
   evidence says which row it belongs to. Either direction alone fails quietly —
   a misfiled object under a correct-looking prefix reads as a valid measurement
-  of the wrong thing.
+  of the wrong thing. Derived verification records are the one carve-out:
+  `verify.json` recomputes and overwrites by design, because it is a conclusion
+  about evidence rather than evidence.
 
 The layout and the reasoning are in [`model.md`](model.md).
 

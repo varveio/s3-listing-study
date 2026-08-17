@@ -84,7 +84,9 @@ hangs are the finding. The same inversion applies to a diagnostic that
 successfully reproduces its own failure: s4cmd exiting 124 at a 300-second
 deadline is the intended outcome, not a hole to be retried.
 
-So a case may declare that its statistic is a **rate**, and for those:
+That declaration has a home: the `statistic` column, `timing` or `rate`,
+stated per row in a plan and carried onto every attempt the row books. So a
+case may declare that its statistic is a **rate**, and for those:
 
 - failed attempts are data points, not omissions — `verify` counts them rather
   than reporting the group incomplete;
@@ -220,6 +222,7 @@ CREATE TABLE attempts (
     request_json        TEXT NOT NULL,      -- frozen provider request; a retry is diffed against it
     purpose             TEXT NOT NULL
         CHECK (purpose IN ('measurement', 'preparation', 'canary', 'diagnostic')),
+    statistic           TEXT NOT NULL CHECK (statistic IN ('timing', 'rate')),
     origin              TEXT NOT NULL CHECK (origin IN ('planned', 'retry')),
     state               TEXT NOT NULL,      -- open vocabulary; see "The state column"
     state_detail        TEXT,               -- the provider's message, when it failed
@@ -368,6 +371,19 @@ also truncated and hashed, provider-scoped, and outlived by the evidence.
 characters of lowercase alphanumerics and hyphens, no dots. You grep
 `attempt_id`; you paste `job_name` into `gcloud batch jobs describe`.
 
+**`job_name` is `<suite>-<tool>-<hash12>-s<attempt>`**, lowercased with dots
+turned to hyphens, derived from the identity rather than typed — two rows
+cannot claim one job because they cannot derive the same name. A name that
+would not fit or would not satisfy Batch's character rule is refused rather
+than truncated, since a truncated name is a name two attempts could collide
+on.
+
+**`group_id` is `gYYYYMMDD-HHMMSS`**, minted locally at submit time — no round
+trip to the provider, so it is ready before the first job is created — or the
+operator's own name, when `submit --group` states one. Either way it must be
+unique within the file; two launches minted in the same second are
+suffixed rather than merged, because a group is what was launched together.
+
 ## The state column
 
 Two vocabularies share it: the controller writes its own relationship with the
@@ -451,16 +467,6 @@ Two consequences fall out. A group **may** span several plans and target
 buckets, because nothing in the roster needs them to agree. But a **comparison**
 is scoped to one target bucket, since comparing listings of different corpora is
 not a comparison — so `verify` reports per bucket within the group it was given.
-
-## Open questions
-
-- **The `job_name` derivation.** It must be collision-free across an
-  accumulating file and fit Batch's 63 characters of lowercase alphanumerics
-  and hyphens.
-- **How `group_id` is minted.** It has to be unique within an accumulating file,
-  meaningful enough to type at a prompt, and assigned without a round trip —
-  `retry`, `cancel` and `prune` all take it as their scope, so it is the handle
-  an operator uses under pressure.
 
 ## What is deliberately absent
 

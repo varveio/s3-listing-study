@@ -187,6 +187,13 @@ named row field, because that is how a human sweeps one and how
 into `config`. That is the relationship the plan already has with `signed`,
 which a row states and the resolver turns into `auth_role`.
 
+A row may also state any capsule-declared key with no row field of its own
+directly under `config:` — s3-fast-list's `segments`, which its `ks-split`
+mode requires and no other subject has. Those keys are folded into the blob
+before the capsule sees it, so its own refusals still decide what is legal
+there: an undeclared key, or one its mode declares `Fixed`, is refused exactly
+as it would be if `build_command` read it directly.
+
 **An undeclared key is refused.** `LoadedCommandAdapter.compile` rejects
 anything outside `CONFIG_KEYS` before `build_command` runs. Without that,
 `concurency: 8` would be silently ignored and a sweep would produce cells that

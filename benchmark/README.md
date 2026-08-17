@@ -109,25 +109,25 @@ The real document contains the exact eleven-tool roster. Submit only after the
 toolbox smoke has passed:
 
 ```sh
-python benchmark/src/benchmark/campaign.py submit \
+uv run python benchmark/src/benchmark/campaign.py submit \
+  --suite s3-listing-study --plan benchmark/plans/buckets/noaa-ghcn-pds.yaml \
   --project my-project --location us-central1 \
-  --campaign-id 2026-08-16-canary \
-  --plan benchmark/plans/buckets/noaa-ghcn-pds.yaml \
   --results-bucket my-results --image-set /secure/images.json \
   --anonymous-worker-sa anonymous-worker@my-project.iam.gserviceaccount.com \
   --authenticated-worker-sa auth-worker@my-project.iam.gserviceaccount.com \
   --secret-resource projects/varve-oss/secrets/s3-listing-study-aws-credentials/versions/latest
 
-python benchmark/src/benchmark/campaign.py poll --project my-project --location us-central1 --watch
-python benchmark/src/benchmark/campaign.py verify \
-  --plan benchmark/plans/buckets/noaa-ghcn-pds.yaml --reference-case s3api-v2-text
-python benchmark/src/benchmark/report.py --state campaign.db
+uv run python benchmark/src/benchmark/campaign.py poll --watch
+uv run python benchmark/src/benchmark/verify.py --state campaign.db --group g20260816-000000
+uv run python benchmark/src/benchmark/report.py --state campaign.db --group g20260816-000000
 ```
 
-The controller records intent before creating a job. Retries receive new
-benchmark-owned job IDs and artifact prefixes; no code adopts jobs or images from
-the retired implementation. A result marker is uploaded last, and reports refuse
-unbound or inconsistent results.
+The controller records intent before creating a job. A retry receives a fresh
+ordinal, job name, and result prefix; no code adopts a job or image from a
+different launch. A result marker is uploaded last, and `verify`/`report`
+refuse unbound or inconsistent results. The full operator runbook — submit,
+poll, retry, cancel, verify, report — is
+[`docs/running.md`](docs/running.md).
 
 ## Minimum rigor and deliberate limitations
 

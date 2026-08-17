@@ -241,58 +241,44 @@ Every tool with a `build/image.json` must appear under `tools` or `exclude`
 with a reason. A tool that is simply absent is a validation error — registering
 a subject and forgetting a bucket should not look like a decision to skip it.
 
-## Case IDs are paths, not identities
+## A row has a label; identity is minted at submit
 
-An ID is derived (`recursive-parquet-sorted.container_memory_gb-2`) from the
-*union* of the keys a tool's rows state, so a ragged row set still gives that
-tool IDs of one shape: a row that omitted a key renders the value it inherited,
-and `container_memory_gb-none` is the ceiling nobody set.
+A row's derived label (`recursive-parquet-sorted.container_memory_gb-2`) is a
+reviewer's handle: it is built from the *union* of the keys a tool's rows
+state, so a ragged row set still labels one tool in one shape — a row that
+omitted a key renders the value it inherited, and `container_memory_gb-none`
+is the ceiling nobody set. The label is also what refuses two rows that
+resolve to the same thing.
 
-Because the union is what renders, adding a key to one row changes every ID that
-tool generates. Identity is therefore carried by `fingerprint`, a digest over
-the resolved case. It survives an ID scheme change, and it refuses the reverse
-mistake: editing a row's value while the derived ID lands the same would
-otherwise append non-comparable runs into one case directory.
+The label is not the identity. What a case *is* — the `case_id` a ledger row
+and an evidence prefix carry — is a hash over everything that can change the
+measurement, minted at submit when the tool and platform slices are known.
+A plan never states or predicts it; `--dry-run` prints it. What goes into
+that hash, and what deliberately stays out, is
+[`../docs/identity.md`](../docs/identity.md); where it is recorded is
+[`../docs/model.md`](../docs/model.md).
 
-`reps` is excluded from the fingerprint — how many times we ran something is
-not part of what we ran. `timeout_s` is included, because it can truncate a run
-and change the result.
+`reps` allocates attempts of one case — how many times we ran something is
+not part of what we ran. `timeout_s` is a hash input, because it can truncate
+a run and change the result.
 
-## Scheduled jobs and execution UUIDs are separate identities
+## Where the evidence goes
 
-The campaign model gives each scheduled run a stable job ID and a `run-<n>`
-ordinal. That ordinal is separate from the worker's attempt UUID: current
-`reps: 1` produces `run-1`; higher ordinals are reserved for separately
-scheduled runs, not an implemented append-later rerun command. Every actual
-worker-container execution independently mints an attempt UUID; `attempt_uuid` is
-therefore per execution, never the scheduled run identity. Every execution owns
-one authoritative tree:
+One attempt owns one authoritative prefix, computed from its row rather than
+discovered by listing:
 
 ```text
-campaigns/<campaign>/results/<bucket>/<tool>/<case>/run-<n>/submission-<n>/<attempt-uuid>/
+gs://<results-bucket>/<suite>/<target-bucket>/<tool>.<hash>.s<attempt>/
   result.json
   stdout.log.gz
   stderr.log.gz
   native/...
 ```
 
-Neither the campaign run ordinal, submission number, nor execution UUID is
-folded into the case or attempt fingerprint; those hashes remain content-derived
-descriptions of what ran, while the path components say which scheduled run,
-submission, and execution produced the evidence.
-
-Raw artifacts upload first and `result.json` uploads last. Uploads are ordinary
-object writes, not create-only writes. Fresh UUID attempt prefixes and numbered
-submission prefixes reduce accidental collisions, but they do not seal evidence
-against replacement by credentials with broader permissions. See
-[`Evidence publication is not sealed`](../README.md#evidence-publication-is-not-sealed)
-for the exact limitation. Job-name idempotence and resubmission numbering are
-campaign-controller concerns.
-
-The campaign sets automatic Batch retries to 0. Even so, its trust model does
-not assume a scheduled job and a worker execution are one-to-one. For each
-campaign-known submission prefix, the benchmark controller uses a GCS
-delimiter listing to discover only its immediate UUID children, without
-descending into or downloading raw artifacts, then GET the exact `result.json`
-from each child. More than one child under one submission is a duplicate-execution
-anomaly; reporting surfaces every result and selects none as canonical.
+Writes are create-only, `result.json` uploads last and is what makes an
+attempt complete, and the evidence names the row it belongs to — the binding
+rules and their reasons are [`../docs/model.md`](../docs/model.md)
+§ *Object layout*. Create-only writes refuse a second execution merging into
+a first; they do not seal evidence against replacement by credentials with
+broader permissions — see
+[`Evidence publication is not sealed`](../README.md#evidence-publication-is-not-sealed).
