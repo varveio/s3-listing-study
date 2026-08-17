@@ -1889,14 +1889,22 @@ def cmd_retry(args: argparse.Namespace) -> int:
             if row["statistic"] == "rate":
                 print(f"campaign: {row['attempt_id']} is a rate case; its failure is data")
                 continue
-            attempt = retry_attempt(
-                con,
-                row,
-                suite=suite,
-                image_set=image_set,
-                results_bucket=args.results_bucket,
-                options=options,
-            )
+            # One row's refusal must not abort the sweep: a case whose later
+            # ordinal already succeeded raises here (its failure is answered,
+            # not retryable), and the first live sweep died on exactly that,
+            # leaving a preempted sibling behind it unretried.
+            try:
+                attempt = retry_attempt(
+                    con,
+                    row,
+                    suite=suite,
+                    image_set=image_set,
+                    results_bucket=args.results_bucket,
+                    options=options,
+                )
+            except CampaignError as exc:
+                print(f"campaign: {row['attempt_id']} not retried: {exc}")
+                continue
             print(f"campaign: {row['attempt_id']} -> {attempt.attempt_id}")
     finally:
         con.close()

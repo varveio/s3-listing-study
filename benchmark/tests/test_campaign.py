@@ -466,6 +466,44 @@ def test_retry_leaves_other_groups_and_rate_cases_alone(
     assert retried == [mine.attempt_id]
 
 
+def test_one_rows_retry_refusal_does_not_abort_the_sweep(
+    submitted: tuple[sqlite3.Connection, Plan, Case, campaign.ImageSet],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The first live sweep died on a case whose later ordinal had succeeded,
+    leaving a preempted sibling behind it unretried — a refusal answers one
+    row, never the rows after it."""
+    con, plan, case, images = submitted
+    answered = submit(con, plan, case, images, group_id="mine")
+    preempted = submit(con, plan, plan.cases[1], images, group_id="mine")
+    for attempt in (answered, preempted):
+        campaign.set_state(con, attempt.attempt_id, "FAILED", "spot reclaimed the machine")
+    retried: list[str] = []
+
+    def observe(con: sqlite3.Connection, row: sqlite3.Row, **kwargs: object) -> campaign.Attempt:
+        if row["attempt_id"] == answered.attempt_id:
+            raise campaign.CampaignError("already has a successful attempt")
+        retried.append(row["attempt_id"])
+        return preempted
+
+    monkeypatch.setattr(campaign, "retry_attempt", observe)
+    monkeypatch.setattr(campaign, "load_image_set", lambda *a, **k: images)
+    campaign.cmd_retry(
+        cast(
+            argparse.Namespace,
+            SimpleNamespace(
+                state=str(tmp_path / "campaign.db"),
+                group="mine",
+                results_bucket="results",
+                image_set="unused",
+                **vars(_provider_namespace()),
+            ),
+        )
+    )
+    assert retried == [preempted.attempt_id]
+
+
 def _provider_namespace() -> SimpleNamespace:
     return SimpleNamespace(
         project="p",
