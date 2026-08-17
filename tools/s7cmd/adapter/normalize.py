@@ -42,6 +42,7 @@ corpus and is NOT de-escaped here.
 from __future__ import annotations
 
 import sys
+from collections.abc import Mapping
 from typing import IO
 
 from benchmark.runtime.duckdb_adapter import (
@@ -150,7 +151,13 @@ def count_rows(data: bytes, mode: str, prefix: str = "", native_root: str = "") 
         return count_query(connect(), QUERIES["recursive-json"], {"path": path})
 
 
-def normalize(out: IO[bytes], data: bytes, mode: str, prefix: str = "") -> int:
+def normalize(
+    out: IO[bytes],
+    data: bytes,
+    mode: str,
+    prefix: str = "",
+    config: Mapping[str, object] | None = None,
+) -> int:
     if mode in TSV_MODES:
         sql = QUERIES["tsv"]
     elif mode in QUERIES:

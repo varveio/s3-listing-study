@@ -57,6 +57,7 @@ same six records.
 from __future__ import annotations
 
 import sys
+from collections.abc import Mapping
 from typing import IO
 
 from benchmark.runtime.duckdb_adapter import (
@@ -94,7 +95,13 @@ def count_rows(data: bytes, mode: str, prefix: str = "", native_root: str = "") 
     return count_lf_lines(data, lambda line: b" " in line)
 
 
-def normalize(out: IO[bytes], data: bytes, mode: str, prefix: str = "") -> int:
+def normalize(
+    out: IO[bytes],
+    data: bytes,
+    mode: str,
+    prefix: str = "",
+    config: Mapping[str, object] | None = None,
+) -> int:
     if mode not in QUERIES:
         print(f"normalize.py: unknown mode: {mode}", file=sys.stderr)
         return UNKNOWN_MODE_EXIT

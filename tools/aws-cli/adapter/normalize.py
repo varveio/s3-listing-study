@@ -41,6 +41,7 @@ from __future__ import annotations
 import datetime
 import re
 import sys
+from collections.abc import Mapping
 from typing import IO, Any
 
 from benchmark.runtime.contract import UNEXPOSED, emit
@@ -261,7 +262,9 @@ def count_rows(data: bytes, mode: str, prefix: str = "", native_root: str = "") 
     raise ValueError(f"unknown mode: {mode}")
 
 
-def normalize(out: IO[bytes], data: bytes, mode: str, prefix: str) -> int:
+def normalize(
+    out: IO[bytes], data: bytes, mode: str, prefix: str, config: Mapping[str, object] | None = None
+) -> int:
     if mode == "s3api-v2-yamlstream":
         emit_yamlstream(out, data)
         return 0

@@ -738,6 +738,31 @@ def test_normalizer_can_read_an_existing_raw_path_without_stdin(tool: str, tmp_p
     assert by_path.stdout == by_stdin.stdout
 
 
+@pytest.mark.parametrize("tool", PORTED)
+def test_the_config_blob_reaches_the_normalizer(
+    tool: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same blob ``command.py`` compiled argv from reaches ``normalize.py`` too.
+
+    Unused by every adapter today, but genuinely threaded through the CLI
+    boundary rather than defaulted away, so a capsule whose output shape
+    depends on a config key can parse its own output later.
+    """
+    adapter = load_adapter(REPO, tool)
+    mode = next(mode for fixture_tool, mode in FIXTURES if fixture_tool == tool)
+    captured: list[object] = []
+
+    def capture(*_args: object, config: object = None, **_kwargs: object) -> int:
+        captured.append(config)
+        return 0
+
+    monkeypatch.setattr(adapter, "normalize", capture)
+    monkeypatch.setattr(adapter.sys, "stdin", SimpleNamespace(buffer=io.BytesIO(b"")))
+    monkeypatch.setattr(adapter.sys, "stdout", SimpleNamespace(buffer=io.BytesIO()))
+    assert adapter.main([mode, "", "--config", '{"mode": "x", "concurrency": 4}']) == 0
+    assert captured == [{"mode": "x", "concurrency": 4}]
+
+
 @pytest.mark.parametrize(
     ("tool", "mode"),
     sorted(set(FIXTURES) - DATASET_MODES),
@@ -792,7 +817,7 @@ def test_swath_treats_a_closed_downstream_as_success(
 ) -> None:
     adapter = load_adapter(REPO, "swath")
 
-    def broken_pipe(*_args: object) -> int:
+    def broken_pipe(*_args: object, **_kwargs: object) -> int:
         raise BrokenPipeError
 
     monkeypatch.setattr(adapter, "normalize", broken_pipe)

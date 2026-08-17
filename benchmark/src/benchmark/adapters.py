@@ -25,6 +25,7 @@ for stream-shaped inputs.
 from __future__ import annotations
 
 import importlib.util
+import json
 import subprocess
 import sys
 import uuid
@@ -33,7 +34,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-from benchmark.runtime.command_adapter import CommandRequest, load_command_adapter
+from benchmark.runtime.command_adapter import HEAP_PERCENT, CommandRequest, load_command_adapter
 
 DEFAULT_ADAPTER_ROOT = "/opt/benchmark/tools"
 
@@ -58,11 +59,14 @@ def compile_command(
     signed: bool = False,
     config: Mapping[str, object] | None = None,
     sink_dir: str = "",
+    visible_memory_gb: float | None = None,
+    heap_percent: int = HEAP_PERCENT,
 ) -> tuple[tuple[str, ...], dict[str, str]]:
     """Load ``<adapter_dir>/command.py`` and compile this case's exact subject argv.
 
-    Returns ``(argv, functional_env)``: functional_env is the capsule's own
-    non-secret, tool-specific environment (LoadedCommandAdapter.functional_env),
+    Returns ``(argv, env)``: env is the capsule's request-derived environment
+    (``LoadedCommandAdapter.build_env(request)``, which defaults to its static
+    ``FUNCTIONAL_ENV`` for a capsule that declares nothing request-derived),
     which the caller merges into the subject's env alongside its own base env.
     """
     try:
@@ -76,8 +80,10 @@ def compile_command(
             signed=signed,
             config=config or {},
             sink_dir=sink_dir,
+            visible_memory_gb=visible_memory_gb,
+            heap_percent=heap_percent,
         )
-        return adapter.compile(request), adapter.functional_env
+        return adapter.compile(request), adapter.build_env(request)
     except Exception as exc:
         raise AdapterError(f"{tool}: could not compile command: {exc}") from exc
 
@@ -108,6 +114,7 @@ def _normalizer_command(
     adapter_dir: Path | str,
     mode: str,
     prefix: str,
+    config: Mapping[str, object],
     *,
     input_path: Path | None = None,
     dataset: Path | None = None,
@@ -118,6 +125,10 @@ def _normalizer_command(
         command.extend(("--input", str(input_path)))
     if dataset is not None:
         command.extend(("--dataset", str(dataset)))
+    # Always present, never left to the CLI's own default: the same blob
+    # command.py compiled argv from, so a capsule whose output shape depends
+    # on a config key can parse its own output.
+    command.extend(("--config", json.dumps(dict(config), sort_keys=True, separators=(",", ":"))))
     return command
 
 
@@ -130,13 +141,16 @@ def normalize_to_path(
     *,
     input_path: Path | None = None,
     dataset: Path | None = None,
+    config: Mapping[str, object] | None = None,
 ) -> None:
     """Normalize a file or native dataset without materializing it in memory."""
     if (input_path is None) == (dataset is None):
         raise AdapterError("normalization requires exactly one of input_path or dataset")
     with output_path.open("wb") as output:
         result = subprocess.run(
-            _normalizer_command(adapter_dir, mode, prefix, input_path=input_path, dataset=dataset),
+            _normalizer_command(
+                adapter_dir, mode, prefix, config or {}, input_path=input_path, dataset=dataset
+            ),
             stdout=output,
             stderr=subprocess.PIPE,
             check=False,
@@ -150,13 +164,19 @@ def normalize_to_path(
 
 
 def normalize_attempt(
-    adapter_dir: Path | str, tool: str, mode: str, prefix: str, native: bytes
+    adapter_dir: Path | str,
+    tool: str,
+    mode: str,
+    prefix: str,
+    native: bytes,
+    *,
+    config: Mapping[str, object] | None = None,
 ) -> bytes:
     """Compatibility helper for small, stream-shaped fixtures."""
     normalize_path = Path(adapter_dir) / "normalize.py"
-    result = subprocess.run(
-        [sys.executable, str(normalize_path), mode, prefix], input=native, capture_output=True
-    )
+    blob = json.dumps(dict(config or {}), sort_keys=True, separators=(",", ":"))
+    command = [sys.executable, str(normalize_path), mode, prefix, "--config", blob]
+    result = subprocess.run(command, input=native, capture_output=True)
     if result.returncode != 0:
         raise AdapterError(
             f"{tool} normalize.py ({mode}) exited {result.returncode}: "

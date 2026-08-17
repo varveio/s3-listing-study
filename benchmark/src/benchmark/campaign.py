@@ -370,6 +370,7 @@ def render_batch_job(
         ("--vcpus", str(case.resources.vcpus)),
         ("--memory-gb", str(case.resources.memory_gb)),
         ("--container-memory-gb", "none" if container_memory is None else str(container_memory)),
+        ("--config", json.dumps(dict(case.config), sort_keys=True, separators=(",", ":"))),
     )
     commands = [item for pair in pairs for item in pair]
     for name, value in case.env:

@@ -67,9 +67,15 @@ import re
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from types import MappingProxyType
+from typing import TYPE_CHECKING, Any
 
 import yaml
+
+if TYPE_CHECKING:
+    # Not imported at runtime: most callers of this module never touch a
+    # capsule at all, and the adapter loader pulls in the runtime contract.
+    from benchmark.runtime.command_adapter import LoadedCommandAdapter
 
 # Bumped only when a file written for an older reader would be misread by this
 # one. Unknown versions are refused rather than best-effort parsed. One number
@@ -134,7 +140,14 @@ SCHEDULE_FIELDS = ("reps", "timeout_s")
 # What a row may state: what one case *is*. `mode` first so it leads every
 # derived ID; the rest follow in this order, so an ID is a function of the key
 # set and not of the order someone typed them in.
-ROW_FIELDS = ("mode", "signed", *RESOURCE_FIELDS)
+#
+# `concurrency` is the one reserved axis a row may set today (see
+# `benchmark/docs/capsule-contract.md` "Configuration is opaque, and its key
+# names are not"). It is not resource allocation and not a layer default: a
+# capsule declares the knob per mode, so the row that names the mode is where
+# a value for it belongs. Resolution refuses it for a capsule that declares no
+# such axis, and folds it into `Case.config` rather than into argv directly.
+ROW_FIELDS = ("mode", "signed", "concurrency", *RESOURCE_FIELDS)
 
 # What a layer may state: what every case under it inherits. No `mode` — eleven
 # tools have eleven mode vocabularies, so nothing above a row has one to state.
@@ -221,6 +234,12 @@ class Case:
     # What the runtime must be told about its own memory, if it is the kind that
     # needs telling. Empty for a tool with no managed heap.
     env: tuple[tuple[str, str], ...]
+    # The capsule's own knobs -- the harness reads none of these, only forwards
+    # them. Produced by the capsule's ``effective_config(mode, ...)`` at
+    # resolution: the row's ``mode`` and any reserved axis it stated (today just
+    # ``concurrency``), plus whatever declared default the capsule fills in when
+    # a row leaves an axis silent. Key-sorted, matching what was hashed.
+    config: tuple[tuple[str, object], ...]
     fingerprint: str
 
 
@@ -251,10 +270,16 @@ class Plan:
         default_modes: Mapping[str, str] | None = None,
         instances: Mapping[tuple[int, int], str] | None = None,
         heap: HeapConfig | None = None,
-        signing: Mapping[str, tuple[bool, bool]] | None = None,
+        adapters: Mapping[str, LoadedCommandAdapter] | None = None,
     ) -> Plan:
-        """Read a plan; tables default to files under ``benchmark/plans/``."""
-        return _load(path, default_modes, instances, heap, signing)
+        """Read a plan; tables default to files under ``benchmark/plans/``.
+
+        ``adapters`` is each rostered tool's loaded ``command.py`` -- signing
+        capability and config surface both come from it. Defaults to loading
+        the real capsules under ``tools/``; a caller with no bucket to run
+        against a real tree supplies fixtures instead.
+        """
+        return _load(path, default_modes, instances, heap, adapters)
 
     def tools(self) -> list[str]:
         """Every tool with at least one case, in plan order."""
@@ -446,7 +471,7 @@ def _load(
     default_modes: Mapping[str, str] | None,
     instances: Mapping[tuple[int, int], str] | None,
     heap: HeapConfig | None,
-    signing: Mapping[str, tuple[bool, bool]] | None,
+    adapters: Mapping[str, LoadedCommandAdapter] | None,
 ) -> Plan:
     raw, doc = _read_yaml_mapping(path, "plan")
 
@@ -479,7 +504,7 @@ def _load(
     modes = default_modes if default_modes is not None else _sibling_default_modes(doc, path)
     catalogue = instances if instances is not None else load_instances(_sibling(path, "instances"))
     heap_config = heap if heap is not None else load_heap_config(_sibling(path, "tools"))
-    capability = signing if signing is not None else load_signing(doc, path)
+    resolved_adapters = adapters if adapters is not None else load_adapters(doc, path)
     auth_role = _auth_role(doc, path)
 
     plan = Plan(
@@ -497,7 +522,7 @@ def _load(
                 region=region,
                 instances=catalogue,
                 heap=heap_config,
-                signing=capability,
+                adapters=resolved_adapters,
                 auth_role=auth_role,
                 path=path,
             ),
@@ -591,8 +616,10 @@ def _auth_role(doc: Mapping[str, Any], path: Path) -> str | None:
     return value
 
 
-def load_signing(doc: Mapping[str, Any], path: Path) -> dict[str, tuple[bool, bool]]:
-    """Read each rostered capsule's declared request strata.
+def load_adapters(doc: Mapping[str, Any], path: Path) -> dict[str, LoadedCommandAdapter]:
+    """Load each rostered tool's ``command.py``: its declared request strata and
+    config surface both come from here, so a case resolves signing and its
+    ``config`` blob against the one loaded capsule rather than two.
 
     Imported lazily: a plan is resolved against the capsules it names, but the
     adapter loader pulls in the runtime contract, and most callers of this module
@@ -604,17 +631,16 @@ def load_signing(doc: Mapping[str, Any], path: Path) -> dict[str, tuple[bool, bo
     root = Path(__file__).resolve().parents[3] / "tools"
     tools = doc.get("tools")
     names = sorted(tools) if isinstance(tools, Mapping) else []
-    capability: dict[str, tuple[bool, bool]] = {}
+    loaded: dict[str, LoadedCommandAdapter] = {}
     for tool in names:
         adapter = adapter_dir_for(str(tool), str(root)) / "command.py"
         if not adapter.is_file():
             continue
         try:
-            loaded = load_command_adapter(adapter, expected_tool=str(tool))
-            capability[str(tool)] = (loaded.supports_unsigned, loaded.supports_signed)
+            loaded[str(tool)] = load_command_adapter(adapter, expected_tool=str(tool))
         except Exception as exc:  # a capsule that will not load is a plan error
             raise PlanError(f"'tools.{tool}' in {path}: {exc}") from exc
-    return capability
+    return loaded
 
 
 def _signed(table: Mapping[str, Any], where: str, path: Path, *, complete: bool) -> dict[str, bool]:
@@ -718,7 +744,7 @@ class _Context:
     region: str
     instances: Mapping[tuple[int, int], str]
     heap: HeapConfig
-    signing: Mapping[str, tuple[bool, bool]]
+    adapters: Mapping[str, LoadedCommandAdapter]
     auth_role: str | None
     path: Path
 
@@ -968,7 +994,9 @@ def _zip_choices(value: Any, label: str, path: Path) -> list[dict[str, str | int
     return choices
 
 
-def _resolve_auth_role(tool: str, override: object, context: _Context) -> str | None:
+def _resolve_auth_role(
+    tool: str, override: object, adapter: LoadedCommandAdapter, context: _Context
+) -> str | None:
     """Decide whether this case signs, and with which role.
 
     The capsule's declared SIGNING is the authority: a subject with no unsigned
@@ -977,15 +1005,9 @@ def _resolve_auth_role(tool: str, override: object, context: _Context) -> str | 
     than quietly ignored. Only a capsule that can issue both leaves the choice
     open, and it lists unsigned unless a row says otherwise.
     """
-    capability = context.signing.get(tool)
-    if capability is None:
-        raise PlanError(
-            f"'tools.{tool}' in {context.path} declares no SIGNING capability; a case cannot "
-            "be resolved without knowing which request strata the subject can issue"
-        )
     if override is not None and not isinstance(override, bool):
         raise PlanError(f"'tools.{tool}' in {context.path} has a non-boolean 'signed'")
-    supports_unsigned, supports_signed = capability
+    supports_unsigned, supports_signed = adapter.supports_unsigned, adapter.supports_signed
     if not supports_unsigned:
         signed = True
     elif not supports_signed:
@@ -1017,7 +1039,20 @@ def _case(
 ) -> Case:
     path = context.path
     mode = str(resolved["mode"])
-    auth_role = _resolve_auth_role(tool, resolved.get("signed"), context)
+    adapter = context.adapters.get(tool)
+    if adapter is None:
+        raise PlanError(
+            f"'tools.{tool}' in {path} declares no capsule; a case cannot be resolved "
+            "without loading its command adapter"
+        )
+    auth_role = _resolve_auth_role(tool, resolved.get("signed"), adapter, context)
+    # `concurrency` is the one reserved axis a row may state today; resolution
+    # folds it into the config blob rather than passing it straight to argv.
+    row_config = {"concurrency": resolved["concurrency"]} if "concurrency" in resolved else {}
+    try:
+        config = adapter.effective_config(mode, row_config)
+    except Exception as exc:  # a capsule refusing this config is a plan error
+        raise PlanError(f"'tools.{tool}' in {path}: {exc}") from exc
     resources = resolved
     shape = (int(resources["vcpus"]), int(resources["memory_gb"]))
     machine_type = context.instances.get(shape)
@@ -1066,6 +1101,7 @@ def _case(
         timeout_s=schedule["timeout_s"],
         axes=chosen,
         env=env,
+        config=tuple(config.items()),
         fingerprint=fingerprint(
             bucket=context.bucket,
             region=context.region,
@@ -1075,6 +1111,7 @@ def _case(
             resources=resolved_resources,
             timeout_s=schedule["timeout_s"],
             env=env,
+            config=config,
         ),
     )
 
@@ -1109,8 +1146,15 @@ def fingerprint(
     resources: Resources,
     timeout_s: int,
     env: Sequence[tuple[str, str]] = (),
+    config: Mapping[str, object] = MappingProxyType({}),
 ) -> str:
-    """A digest over the resolved case — what makes two attempts comparable."""
+    """A digest over the resolved case — what makes two attempts comparable.
+
+    ``config`` is the capsule's own effective blob: a value in it changes what
+    the *subject* does, by the same rule that makes ``timeout_s`` part of this
+    and ``reps`` not, so two rows differing only in a config key are two
+    non-comparable measurements and must render two fingerprints.
+    """
     payload = {
         "fingerprint_version": FINGERPRINT_VERSION,
         "bucket": bucket,
@@ -1121,6 +1165,7 @@ def fingerprint(
         "resources": resources.as_dict(),
         "timeout_s": timeout_s,
         "env": [list(pair) for pair in env],
+        "config": dict(config),
     }
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()

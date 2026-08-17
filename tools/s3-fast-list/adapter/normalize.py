@@ -42,6 +42,7 @@ refuse all four identically.
 from __future__ import annotations
 
 import sys
+from collections.abc import Mapping
 from typing import IO
 
 from benchmark.runtime.duckdb_adapter import (
@@ -85,7 +86,13 @@ def count_rows(data: bytes, mode: str, prefix: str = "", native_root: str = "") 
             raise ValueError(f"input is not readable parquet: {exc}") from exc
 
 
-def normalize(out: IO[bytes], data: bytes, mode: str, prefix: str = "") -> int:
+def normalize(
+    out: IO[bytes],
+    data: bytes,
+    mode: str,
+    prefix: str = "",
+    config: Mapping[str, object] | None = None,
+) -> int:
     import duckdb
 
     if mode not in MODES:

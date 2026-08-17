@@ -42,6 +42,7 @@ from benchmark.contract import (
     TOOLBOX_TOOLS,
     sha256_of,
 )
+from benchmark.runtime.command_adapter import HEAP_PERCENT
 
 EXIT_ADAPTER_ERROR = 3
 EXIT_SECRET_DETECTED = 9
@@ -291,6 +292,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--vcpus", required=True, type=int)
     parser.add_argument("--memory-gb", required=True, type=int)
     parser.add_argument("--container-memory-gb", required=True, type=parse_optional_gb)
+    parser.add_argument(
+        "--config",
+        required=True,
+        metavar="JSON",
+        help="The case's effective capsule config blob (LoadedCommandAdapter.effective_config).",
+    )
     parser.add_argument("--image-metadata", default="/opt/benchmark/image-metadata.json")
     return parser.parse_args(argv)
 
@@ -764,6 +771,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"measure: {exc}", file=sys.stderr)
         return 2
 
+    try:
+        config = json.loads(args.config)
+        if not isinstance(config, dict):
+            raise ValueError("--config must be a JSON object")
+    except (json.JSONDecodeError, ValueError) as exc:
+        print(f"measure: --config is not valid JSON: {exc}", file=sys.stderr)
+        return 2
+
     metadata_error = validate_image_metadata(args)
     if metadata_error:
         print(f"measure: {metadata_error}; refusing to execute", file=sys.stderr)
@@ -772,6 +787,12 @@ def main(argv: list[str] | None = None) -> int:
     native_root = (attempt_dir / "native").resolve()
     native_root.mkdir(exist_ok=True)
     adapter_dir = adapters.adapter_dir_for(args.tool, args.adapter_root).resolve()
+    # What the subject can see: the container's cgroup ceiling, or the whole
+    # box when the case set none. A managed runtime's share of it is fixed at
+    # the harness's one methodology constant, never a per-case choice.
+    visible_memory_gb = float(
+        args.container_memory_gb if args.container_memory_gb is not None else args.memory_gb
+    )
     try:
         command, functional_env = adapters.compile_command(
             adapter_dir,
@@ -781,7 +802,10 @@ def main(argv: list[str] | None = None) -> int:
             region=args.region,
             prefix=args.prefix,
             signed=args.auth_role is not None,
+            config=config,
             sink_dir=str(native_root),
+            visible_memory_gb=visible_memory_gb,
+            heap_percent=HEAP_PERCENT,
         )
     except adapters.AdapterError as exc:
         print(f"measure: {exc}", file=sys.stderr)
@@ -887,6 +911,7 @@ def main(argv: list[str] | None = None) -> int:
         "destination": leaf_destination,
         "argv": list(command),
         "case_env": case_env,
+        "config": config,
         "exit_code": exit_code,
         "timed_out": timed_out,
         "execution": execution,

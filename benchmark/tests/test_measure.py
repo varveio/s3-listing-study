@@ -12,6 +12,7 @@ import pytest
 
 from benchmark import adapters, gcs, measure
 from benchmark.contract import CREDENTIAL_ENV_VAR, TOOLBOX_TOOLS
+from benchmark.runtime.command_adapter import HEAP_PERCENT
 
 ROOT = Path(__file__).parents[2]
 
@@ -64,6 +65,18 @@ def test_worker_requirement_versions_match_repository_lock() -> None:
     for line in (ROOT / "benchmark/build/requirements-worker.txt").read_text().splitlines():
         name, version = line.split("==", 1)
         assert locked[name.lower()] == version
+
+
+def test_normalize_to_path_always_forwards_the_config_blob() -> None:
+    """The subprocess boundary carries ``--config`` unconditionally, never a
+    Python-level default silently swallowed before the flag reaches argv."""
+    command = adapters._normalizer_command(
+        "adapter", "recursive", "prefix/", {"mode": "recursive", "concurrency": 4}
+    )
+    assert command[-2:] == ["--config", '{"concurrency":4,"mode":"recursive"}']
+
+    empty = adapters._normalizer_command("adapter", "recursive", "prefix/", {})
+    assert empty[-2:] == ["--config", "{}"]
 
 
 def test_native_parquet_count_and_normalize_are_file_backed(tmp_path: Path) -> None:
@@ -385,6 +398,8 @@ def test_count_failure_uploads_result_marker_before_exit(
             "4",
             "--container-memory-gb",
             "none",
+            "--config",
+            '{"mode": "recursive"}',
             "--image-metadata",
             str(metadata_path),
         ]
@@ -398,6 +413,103 @@ def test_count_failure_uploads_result_marker_before_exit(
     assert result["tool_recipe_sha256"] == selected["recipe_sha256"]
     assert result["toolbox_manifest_sha256"] == metadata["toolbox_manifest_sha256"]
     assert result["applied_subject_workdir"] == selected["subject_workdir"]
+
+
+def test_the_cases_config_and_heap_share_reach_the_capsule(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The case's ``config`` blob and the visible ceiling reach the compiled request.
+
+    ``visible_memory_gb`` is the container ceiling when the case set one, else
+    the whole box; ``heap_percent`` is the harness's one methodology constant,
+    never a per-case choice.
+    """
+    metadata = image_metadata()
+    tools = metadata["tools"]
+    assert isinstance(tools, dict)
+    selected = tools["aws-cli"]
+    assert isinstance(selected, dict)
+    metadata_path = tmp_path / "image-metadata.json"
+    metadata_path.write_text(json.dumps(metadata))
+    attempt = tmp_path / "attempt"
+
+    calls: list[dict[str, object]] = []
+
+    def record_call(*_args: object, **kwargs: object) -> tuple[tuple[str, ...], dict[str, str]]:
+        calls.append(kwargs)
+        return (sys.executable, "-c", "print('one')"), {}
+
+    monkeypatch.setattr(adapters, "compile_command", record_call)
+    monkeypatch.setattr(measure, "row_count_for", lambda *_args: (0, None))
+    monkeypatch.setattr(gcs, "upload_file", lambda *_args, **_kwargs: None)
+
+    code = measure.main(
+        [
+            "--tool",
+            "aws-cli",
+            "--mode",
+            "recursive",
+            "--bucket",
+            "bucket",
+            "--region",
+            "region",
+            "--output",
+            str(attempt),
+            "--destination",
+            "gs://results/job/",
+            "--image",
+            "registry/derived@sha256:" + "a" * 64,
+            "--toolbox-manifest-sha256",
+            str(metadata["toolbox_manifest_sha256"]),
+            "--toolbox-recipe-sha256",
+            str(metadata["toolbox_recipe_sha256"]),
+            "--tool-recipe-sha256",
+            str(selected["recipe_sha256"]),
+            "--tool-build-inputs-sha256",
+            str(selected["build_inputs_sha256"]),
+            "--tool-version",
+            str(selected["tool_version"]),
+            "--tool-build-sha256",
+            str(selected["tool_build_sha256"]),
+            "--adapter-bundle-sha256",
+            str(selected["adapter_bundle_sha256"]),
+            "--harness-revision",
+            str(metadata["harness_revision"]),
+            "--subject-workdir",
+            str(selected["subject_workdir"]),
+            "--campaign-id",
+            "2026-08-16-candidate",
+            "--job-id",
+            "job",
+            "--case-id",
+            "case",
+            "--case-fingerprint",
+            "f" * 64,
+            "--image-set-sha256",
+            "1" * 64,
+            "--run-ordinal",
+            "1",
+            "--submission-number",
+            "1",
+            "--machine-type",
+            "machine",
+            "--vcpus",
+            "2",
+            "--memory-gb",
+            "4",
+            "--container-memory-gb",
+            "2",
+            "--config",
+            '{"mode": "recursive", "concurrency": 8}',
+            "--image-metadata",
+            str(metadata_path),
+        ]
+    )
+    assert code == 0
+    assert len(calls) == 1
+    assert calls[0]["config"] == {"mode": "recursive", "concurrency": 8}
+    assert calls[0]["visible_memory_gb"] == 2.0  # the container ceiling, not the 4 GB box
+    assert calls[0]["heap_percent"] == HEAP_PERCENT
 
 
 def test_missing_credential_fails_before_adapter_or_subject(
@@ -466,6 +578,8 @@ def test_missing_credential_fails_before_adapter_or_subject(
         "4",
         "--container-memory-gb",
         "none",
+        "--config",
+        "{}",
     ]
     assert measure.main(required) == 2
 

@@ -5,12 +5,15 @@ from __future__ import annotations
 import ast
 import json
 import textwrap
+from collections.abc import Mapping
 from pathlib import Path
+from types import MappingProxyType
 
 import pytest
 
 from benchmark import plan as bench
 from benchmark import plan_cli as bench_cli
+from benchmark.runtime import command_adapter as capsule
 
 MINIMAL = """
 spec_version: 2
@@ -85,11 +88,60 @@ SIGNING = {
 """(supports_unsigned, supports_signed) per capsule, as the real ones declare."""
 
 
+class _AnyMode(frozenset[str]):
+    """A fixture capsule's mode vocabulary, when the test does not name one.
+
+    These fixtures exist to exercise plan resolution -- cascade, IDs, signing --
+    never one tool's real mode vocabulary, which `check_modes` and the AST
+    reader already hold to the real capsules. Membership here is deliberately
+    unchecked so a test can spell any mode name it likes.
+    """
+
+    def __contains__(self, item: object) -> bool:
+        return True
+
+
+_ANY_MODE = _AnyMode()
+
+
+def fixture_capsule(
+    tool: str,
+    *,
+    unsigned: bool,
+    signed: bool,
+    modes: Mapping[str, capsule.Mode] = MappingProxyType({}),
+    config_keys: frozenset[str] = frozenset(),
+) -> capsule.LoadedCommandAdapter:
+    """A minimal stand-in for one tool's loaded ``command.py``.
+
+    ``modes`` carries only what a config-resolution test needs to declare — an
+    axis on a named mode; every other test never states one, so its case
+    resolves against ``_ANY_MODE`` instead.
+    """
+    return capsule.LoadedCommandAdapter(
+        build=lambda request: (),
+        fixed_command_prefix=("/bin/true",),
+        config_keys=config_keys,
+        supports_unsigned=unsigned,
+        supports_signed=signed,
+        tool=tool,
+        functional_env={},
+        mode_names=frozenset(modes) if modes else _ANY_MODE,
+        modes=modes,
+    )
+
+
+CAPSULES = {
+    tool: fixture_capsule(tool, unsigned=unsigned, signed=signed)
+    for tool, (unsigned, signed) in SIGNING.items()
+}
+
+
 def load(path: Path, **kwargs: object) -> bench.Plan:
     """``Plan.load`` with the fixture tables already supplied."""
     kwargs.setdefault("instances", INSTANCES)
     kwargs.setdefault("heap", HEAP)
-    kwargs.setdefault("signing", SIGNING)
+    kwargs.setdefault("adapters", CAPSULES)
     return bench.Plan.load(path, **kwargs)  # type: ignore[arg-type]
 
 
@@ -669,6 +721,58 @@ def test_a_tools_file_from_a_future_reader_is_refused(tmp_path: Path) -> None:
         bench.load_heap_config(path)
 
 
+# ── the capsule config blob ──────────────────────────────────────────────────
+
+
+def test_a_rows_axis_lands_in_the_cases_config(tmp_path: Path) -> None:
+    """The row states the axis; resolution folds it into the blob the loader hashes."""
+    modes = {
+        "recursive-tsv": capsule.Mode(
+            product="text", fields=("key",), axes={"concurrency": capsule.Ceiling(8)}
+        )
+    }
+    adapters = {
+        **CAPSULES,
+        "swath": fixture_capsule("swath", unsigned=True, signed=True, modes=modes),
+    }
+    path = write(tmp_path, "swath:\n  cases:\n    - {mode: recursive-tsv, concurrency: 4}\n")
+    case = load(path, adapters=adapters).cases[0]
+    assert dict(case.config) == {"concurrency": 4, "mode": "recursive-tsv"}
+
+
+def test_an_undeclared_config_key_is_refused_at_resolution(tmp_path: Path) -> None:
+    """A capsule that never declared the axis would silently ignore it."""
+    path = write(tmp_path, "swath:\n  cases:\n    - {mode: recursive-tsv, concurrency: 4}\n")
+    with pytest.raises(bench.PlanError, match="does not accept config key"):
+        load(path)  # the default swath fixture declares no axes at all
+
+
+def test_a_silent_row_gets_the_capsules_declared_default(tmp_path: Path) -> None:
+    """Absent means the tool has no such knob; a value means this is what it ran at.
+
+    A row that never mentions the axis still resolves to the capsule's declared
+    default, not an absent key, and its provenance travels with the axis, not
+    the case.
+    """
+    modes = {
+        "recursive-tsv": capsule.Mode(
+            product="text",
+            fields=("key",),
+            axes={"concurrency": capsule.Default(4, provenance="help")},
+        )
+    }
+    adapters = {
+        **CAPSULES,
+        "swath": fixture_capsule("swath", unsigned=True, signed=True, modes=modes),
+    }
+    path = write(tmp_path, "swath:\n  cases:\n    - {mode: recursive-tsv}\n")
+    case = load(path, adapters=adapters).cases[0]
+    assert dict(case.config) == {"concurrency": 4, "mode": "recursive-tsv"}
+    # A row silent on the axis carries no opinion in its ID -- only a row that
+    # states it does.
+    assert case.case_id == "recursive-tsv"
+
+
 # ── identity ─────────────────────────────────────────────────────────────────
 
 
@@ -721,11 +825,25 @@ def test_every_key_a_row_may_state_moves_both_the_id_and_the_fingerprint(
     pairs: dict[str, tuple[object, object]] = {
         "mode": ("recursive-tsv", "recursive-jsonl"),
         "signed": (False, True),
+        "concurrency": (4, 8),
         "vcpus": (2, 4),
         "memory_gb": (8, 16),
         "container_memory_gb": (4, 8),
     }
     assert set(pairs) == set(bench.ROW_FIELDS), "a row key with no coverage here"
+
+    # Only this test sweeps `concurrency`, so only here does swath need to
+    # declare the axis; every other test's default fixture stays axis-free.
+    modes = {
+        "recursive-tsv": capsule.Mode(
+            product="text", fields=("key",), axes={"concurrency": capsule.Ceiling(8)}
+        ),
+        "recursive-jsonl": capsule.Mode(product="text", fields=("key",)),
+    }
+    adapters = {
+        **CAPSULES,
+        "swath": fixture_capsule("swath", unsigned=True, signed=True, modes=modes),
+    }
 
     def case(field: str, value: object, index: int) -> bench.Case:
         directory = tmp_path / f"{field}-{index}"
@@ -738,7 +856,7 @@ def test_every_key_a_row_may_state_moves_both_the_id_and_the_fingerprint(
             + MINIMAL.format(bucket="b", tools=textwrap.indent(body, "  ")),
             encoding="utf-8",
         )
-        return load(path).cases[0]
+        return load(path, adapters=adapters).cases[0]
 
     for field, (before, after) in pairs.items():
         first, second = case(field, before, 0), case(field, after, 1)
@@ -821,12 +939,13 @@ def test_a_subject_with_no_unsigned_path_must_be_given_a_role(tmp_path: Path) ->
     """s4cmd cannot list anonymously, so a plan with no role cannot run it."""
     path = write(tmp_path, "s4cmd:\n  cases:\n    - {mode: recursive}\n", auth_role=None)
     with pytest.raises(bench.PlanError, match="must sign, but the plan states no 'auth_role'"):
-        load(path, signing={"s4cmd": (False, True)})
+        load(path, adapters={"s4cmd": fixture_capsule("s4cmd", unsigned=False, signed=True)})
 
 
 def test_a_capsule_that_cannot_list_unsigned_signs_without_being_asked(tmp_path: Path) -> None:
     path = write(tmp_path, "s4cmd:\n  cases:\n    - {mode: recursive}\n", auth_role="a-role")
-    assert load(path, signing={"s4cmd": (False, True)}).cases[0].auth_role == "a-role"
+    adapters = {"s4cmd": fixture_capsule("s4cmd", unsigned=False, signed=True)}
+    assert load(path, adapters=adapters).cases[0].auth_role == "a-role"
 
 
 def test_a_capsule_that_can_do_both_lists_unsigned_unless_asked(tmp_path: Path) -> None:
@@ -837,7 +956,8 @@ def test_a_capsule_that_can_do_both_lists_unsigned_unless_asked(tmp_path: Path) 
         "    - {mode: s3api-v2-text, signed: true}\n"
     )
     path = write(tmp_path, body, auth_role="a-role")
-    first, second = load(path, signing={"aws-cli": (True, True)}).cases
+    adapters = {"aws-cli": fixture_capsule("aws-cli", unsigned=True, signed=True)}
+    first, second = load(path, adapters=adapters).cases
     assert (first.auth_role, second.auth_role) == (None, "a-role")
     # The union rule: one row states `signed`, so both IDs render it.
     assert [c.case_id for c in (first, second)] == [
@@ -854,7 +974,7 @@ def test_asking_a_subject_for_a_stratum_it_cannot_issue_is_refused(tmp_path: Pat
         auth_role="a-role",
     )
     with pytest.raises(bench.PlanError, match="cannot do"):
-        load(path, signing={"minio-mc": (True, False)})
+        load(path, adapters={"minio-mc": fixture_capsule("minio-mc", unsigned=True, signed=False)})
 
 
 def test_a_row_stating_the_schedule_is_refused(tmp_path: Path) -> None:
