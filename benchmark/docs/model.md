@@ -333,16 +333,20 @@ them.
 | State | Written by | Terminal | Retryable | Meaning |
 | --- | --- | --- | --- | --- |
 | `SUBMITTING` | intent journaling | no | no | Intent is durable; the provider has not been called. A row left here means the process died in that window. |
-| `SUBMITTED` | submit | no | no | Created, and the provider's copy matches the recorded request. |
-| `ADOPTED` | submit | no | no | A job of that name already existed and matched the recorded request exactly. |
-| `AMBIGUOUS` | submit | no | no | The create outcome could not be established. Re-running submit reconciles the row rather than duplicating it. |
+| `SUBMITTED` | submit | no | no | Created. Covers a job this run created and one of that name it found already matching the recorded request — the distinction changes nothing anyone does. |
 | *(provider states)* | poll | no | no | `QUEUED`, `SCHEDULED`, `RUNNING`, and the rest of the provider's lifecycle. |
 | `SUCCEEDED` | poll | yes | no | The job ran cleanly. Not a verdict about the listing — that is `verify`'s question. |
 | `FAILED` | poll | yes | **yes** | Settled failure. |
-| `NOT_CREATED` | submit | yes | **yes** | The provider permanently refused creation. Never probed as ambiguous. |
-| `COLLISION` | submit | yes | **yes** | A job of that name exists and does *not* match recorded intent. |
+| `NOT_CREATED` | submit | yes | **yes** | The provider refused creation, or a job of that name exists and does *not* match recorded intent. Either way nothing of ours ran. |
 | `CANCELLED` | cancel, or the provider | yes | no | One-way. |
-| `ACCEPTED_FAILED`, `ACCEPTED_NOT_CREATED`, `ACCEPTED_COLLISION` | accept-failure | yes | no | You declared that failure final. An absent measurement, never a passing one. |
+| `ACCEPTED` | accept-failure | yes | no | You declared a failure final. An absent measurement, never a passing one; `state_detail` says which failure it was. |
+
+**The vocabulary is deliberately small.** An earlier draft separated `ADOPTED`
+from `SUBMITTED`, `COLLISION` from `NOT_CREATED`, and three `ACCEPTED_*`
+variants — eleven states guarding create races that a study launching tens of
+hand-written cases does not have. Every one of those distinctions is recoverable
+from `state_detail` and `request_json`, and none of them changed what an
+operator or a report would do. A state earns its place by changing a decision.
 
 `SUCCEEDED`, `FAILED`, and `CANCELLED` exist in both vocabularies, so a job
 cancelled from the console is indistinguishable from one this harness cancelled.

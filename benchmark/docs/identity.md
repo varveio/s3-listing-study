@@ -20,7 +20,7 @@ Three groups of inputs go into the hash:
 
 | Group | What it covers |
 | --- | --- |
-| **Environment** | The values the harness acts on: executor, auth role, target bucket/region/prefix, location, machine type, vCPUs, memory, container ceiling, heap share, timeout |
+| **Environment** | The values the harness acts on: auth role, target bucket/region/prefix, location, machine type, vCPUs, memory, container ceiling, output sink, timeout |
 | **Config** | The capsule's own keys, `{}` when empty |
 | **What ran it** | The tool slice and the platform slice |
 
@@ -101,7 +101,8 @@ asymmetry is deliberate rather than a special case.
 | The capsule's own config | yes | yes — **its own**, never the consumer's |
 | Tool slice, platform slice | yes | yes |
 | Machine type, vCPUs, memory, container ceiling, timeout | yes | **no** — recorded, not hashed |
-| `auth_role`, `heap_percent` | yes | **no** — recorded, not hashed |
+| `auth_role` | yes | **no** — recorded, not hashed |
+| Output sink | yes | **no** — a preparation's artifact is its output |
 
 **A measurement's identity answers "are these comparable?", which is a question
 about the environment. A preparation's identity answers "do we already have this
@@ -136,10 +137,25 @@ Two things follow:
 | `image_uri`, `image_set_sha256` | You need to know exactly what ran and be able to reproduce it, but the slices identify it. Two attempts of one case may have run on different images, and the row says which. |
 | `produced_by` | Which attempt made the artifact a case consumed. The artifact's content digest is what identifies it; *which run* produced those bytes is a debugging question. |
 | `signed`, `visible_memory_gb` | Derived from `auth_role` and the ceiling, both already hashed. A derived value is not a second input. |
+| `heap_percent` | A methodology constant nine of eleven subjects cannot feel. Hashing it would re-identify every Go, Rust and Python case when a share they ignore is changed, which is the law — *a field either changes the identity or it is not an input* — read backwards. It reaches the two managed runtimes as a declared axis of their capsules instead. |
+| `executor` | One executor exists. Recorded so a second one is distinguishable when it arrives; hashed then, not before. |
 
 `network` and `subnetwork` are arguable — an egress path could matter — but they
 follow from the executor's project and location, so they stay in `executor_env`
 until a run crosses VPCs.
+
+### The output sink is an input
+
+Where a subject's output goes changes what is being measured, so it is hashed
+like any other thing the harness chooses. s3kor issues one `write(2)` per key
+against unbuffered stdout — over a million syscalls on a corpus this size — and
+s5cmd's object channel is unbuffered, so its throughput is bounded by whatever
+drains the pipe. A tool streaming to a pipe and the same tool writing to a file
+are not running the same race.
+
+It also splits comparisons that `product` alone would merge: two subjects can
+both emit Parquet while one writes a directory dataset and the other a single
+file to a pipe.
 
 ### The role name is hashed; its resolution is not
 

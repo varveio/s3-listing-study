@@ -35,9 +35,12 @@ input. If no, the capsule owns it and the harness forwards it without looking.
 `mode` looks like an exception and is not one. Verification does need it —
 `verify` normalizes both sides through a capsule's `normalize.py` — but it
 arrives there as a **pass-through**: `adapters.normalize_to_path(adapter_dir,
-tool, mode, …)` hands the value on without the harness ever branching on it. The
-whole config blob goes to both capsule entry points, `command.py` and
-`normalize.py`, and the harness reads nothing at all.
+tool, mode, …)` hands the value on without the harness ever branching on it.
+
+The config blob must reach **both** capsule entry points, `command.py` and
+`normalize.py`. Today `normalize.py` is given only `(mode, prefix)`, so a
+capsule whose output shape depends on a config key cannot parse its own output —
+a gap to close alongside the blob's plumbing, not after it.
 
 ## What a capsule declares
 
@@ -54,7 +57,7 @@ and a capsule could be altered without anything noticing.
 | `MODES` | yes | The mode vocabulary, and one manifest per mode — see below |
 | `build_command(request)` | yes | Compiles the complete subject argv |
 | `SUPPORTS_UNSIGNED` | yes | Whether the subject can list without a credential |
-| `SUPPORTS_SIGNED` | no, defaults true | False only where the mechanism cannot carry a per-request credential |
+| `SUPPORTS_SIGNED` | no, defaults true | False only where the *harness* cannot yet deliver a credential this subject would accept |
 | `CONFIG_KEYS` | no, defaults empty | The config keys this capsule accepts; anything else is refused |
 | `FUNCTIONAL_ENV` | no, defaults empty | Non-secret environment the subject structurally needs |
 | `build_env(request)` | no, defaults to `FUNCTIONAL_ENV` | Environment derived from the request — heap flags, and nothing else so far |
@@ -132,13 +135,23 @@ prevent.
 ## Signing is declared, never assumed
 
 Whether a request is signed is a fact about the subject, not a plan's
-preference. Four of the eleven tools have no unsigned request path; minio-mc
-resolves credentials from a static alias and cannot carry a per-request one. So
-the capsule declares what it can issue, and the resolver obeys:
+preference. Four of the eleven tools have no unsigned request path. So the
+capsule declares what it can issue, and the resolver obeys:
 
 - no unsigned path → the case signs;
 - cannot sign → the case lists unsigned;
 - both available → **unsigned**, unless a row asks otherwise.
+
+`SUPPORTS_SIGNED = False` records a **harness limitation, not a tool property**,
+and every use of it is a defect to be retired. minio-mc is the only one: it
+resolves credentials from an `MC_HOST_<alias>` URL, and upstream's
+`parseEnvURLStr` accepts `https://ACCESS:SECRET[:TOKEN]@host` — so the subject
+can sign; the harness simply has no way to render that template. Closing it
+means the worker, which already holds the parsed credential, building the alias
+from a capsule-declared form, with percent-encoding mandatory since AWS secrets
+contain `/` and `+` while mc's parser splits on `:` and `@`. Until then mc
+appears only in unsigned tables, and its absence from a signed one is a fact
+about us.
 
 Unsigned is the default for a tool that can do either because signing adds a
 signature to roughly a thousand requests, which is a different measurement, and
