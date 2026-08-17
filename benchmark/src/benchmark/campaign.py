@@ -51,6 +51,9 @@ TERMINAL_STATES = {
     *ACCEPTED_FAILURE_STATES,
 }
 N4_BOOT_DISK = {"type": "hyperdisk-balanced", "image": "batch-cos"}
+# Anchored to the repository so verification does not depend on where the
+# operator is standing when they run it.
+DEFAULT_ADAPTER_ROOT = str(Path(__file__).resolve().parents[3] / "tools")
 # Every rendered job carries a benchmark-intent label, so one server-side
 # filtered listing covers a polling pass for a project this study shares.
 BENCHMARK_JOB_FILTER = "labels.benchmark-intent:*"
@@ -1152,7 +1155,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     verify_parser = sub.add_parser("verify")
     verify_parser.add_argument("--plan", required=True)
     verify_parser.add_argument("--reference-case", required=True)
-    verify_parser.add_argument("--adapter-root", default="tools")
+    verify_parser.add_argument("--adapter-root", default=DEFAULT_ADAPTER_ROOT)
     verify_parser.set_defaults(func=cmd_verify)
     return parser.parse_args(argv)
 

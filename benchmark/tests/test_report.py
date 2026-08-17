@@ -338,3 +338,26 @@ def test_report_recomputes_verification_instead_of_trusting_claimed_diff(tmp_pat
     assert not report.recompute_verification(
         forged, actual_result, str(actual_leaf) + "/", str(adapter_root)
     )
+
+
+def test_adapter_root_is_repo_anchored_and_absence_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A relative default reported eleven verified attempts as VERIFY_MISMATCH.
+
+    The 2026-08-17 smoke campaign was run from the state directory rather than
+    the repository root, so every recompute looked for adapters that were not
+    there and each row degraded to a mismatch -- indistinguishable from evidence
+    that genuinely disagreed with its verdict. The default now resolves against
+    the repository, and an adapter root that does not exist is refused outright
+    rather than folded into a per-attempt verdict.
+    """
+    assert Path(report.DEFAULT_ADAPTER_ROOT).is_absolute()
+    assert Path(report.DEFAULT_ADAPTER_ROOT) == ROOT / "tools"
+    monkeypatch.chdir(tmp_path)
+    assert Path(report.parse_args([]).adapter_root).is_dir()
+
+    state = tmp_path / "campaign.db"
+    campaign.open_db(str(state)).close()
+    assert report.main(["--state", str(state), "--adapter-root", str(tmp_path / "absent")]) == 1
+    assert "is not a directory" in capsys.readouterr().err

@@ -35,6 +35,7 @@ import math
 import sqlite3
 import sys
 from datetime import UTC, datetime
+from pathlib import Path
 
 from benchmark import verify
 from benchmark.campaign import (
@@ -451,17 +452,32 @@ def report_exit_code(
     return 0
 
 
+# Anchored to the repository, not the working directory. A relative default
+# resolves against wherever the operator happened to stand, and a missing
+# adapter directory then fails every recompute -- reporting a verified campaign
+# as VERIFY_MISMATCH, which is indistinguishable from evidence that genuinely
+# disagreed with its verdict.
+DEFAULT_ADAPTER_ROOT = str(Path(__file__).resolve().parents[3] / "tools")
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Print a Markdown summary of a campaign's results."
     )
     parser.add_argument("--state", default=STATE_FILENAME, help="campaign.db path (sqlite3).")
-    parser.add_argument("--adapter-root", default="tools")
+    parser.add_argument("--adapter-root", default=DEFAULT_ADAPTER_ROOT)
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if not Path(args.adapter_root).is_dir():
+        print(
+            f"report: adapter root {args.adapter_root} is not a directory; refusing to "
+            "report every attempt as a verification mismatch",
+            file=sys.stderr,
+        )
+        return 1
 
     con = open_db(args.state, readonly=True)
     try:
