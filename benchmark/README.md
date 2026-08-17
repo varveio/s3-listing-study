@@ -21,8 +21,18 @@ facts under `tools/<tool>/build/`.
   pinned worker requirements.
 - `tests/` holds this component's test suite. Repository-wide gates stay in the
   top-level `tests/`.
-- `docs/model.md` is the state model: the identities a run is named with, the
-  object layout, and the one table that binds a case to a job and its evidence.
+- `docs/` holds the design. Read `architecture.md` first; the other three are
+  reference and say so:
+  - `architecture.md` — why the harness is shaped this way: the three places a
+    fact may live, the ownership question that decides which, what the planner
+    does with a dependency, and the refuse-rather-than-guess rule.
+  - `identity.md` — what makes two runs the same measurement or different ones:
+    the case hash, the tool and platform slices, and the one input no hash can
+    cover.
+  - `model.md` — the state model: attempts, slots, the object layout, and the
+    tables that bind a case to a job and its evidence.
+  - `capsule-contract.md` — what a capsule declares to the harness and what the
+    harness promises it. The Python boundary between `benchmark/` and `tools/`.
 - `docs/running.md` is the operator runbook: prerequisites, submission, the job
   state machine, monitoring, the recovery commands, verification, and reporting.
   No campaign has run yet, so that procedure is `VERIFIED: no`.

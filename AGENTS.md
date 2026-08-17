@@ -56,6 +56,10 @@ Read *one* index, not five guesses. Order: this table → `docs/README.md`.
 | If you're... | Read |
 | --- | --- |
 | Designing or changing the comparative harness | `benchmark/README.md` — plans, toolbox, Batch jobs, capture, verification, and reporting |
+| Asking *why* the harness is shaped this way — where a fact lives, who owns it, what the planner does with a dependency | `benchmark/docs/architecture.md` — read this before the three reference pages beside it |
+| Changing what makes two runs comparable — the case hash, the tool/platform slices | `benchmark/docs/identity.md` |
+| Changing the controller's state — tables, attempt states, slots, object layout | `benchmark/docs/model.md` |
+| Writing or changing a capsule's `command.py` contract with the harness | `benchmark/docs/capsule-contract.md` — the Python boundary; `docs/operating/tool-structure.md` still owns the directory layout |
 | Designing or changing how a run works | `docs/methodology.md` — especially the five decisions |
 | Running a benchmark toolbox smoke or cloud canary | `benchmark/README.md` |
 | Actually operating a campaign — submit, monitor, retry, cancel, verify, report | `benchmark/docs/running.md` — the operator runbook. Its procedure is `VERIFIED: no` until a real campaign exercises it |

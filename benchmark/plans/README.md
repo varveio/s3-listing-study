@@ -60,26 +60,43 @@ mode — rather than quietly running the tool once.
 A plan has two shapes, and every key in it belongs to one of them.
 
 A **row** — one entry in a tool's `cases` — states what one case *is*: `mode`,
-`auth`, and the allocation (`vcpus`, `memory_gb`, `container_memory_gb`).
+`signed`, and the allocation (`vcpus`, `memory_gb`, `container_memory_gb`).
 
 A **layer** — `defaults`, or a tool's own body — states what every case under it
-*inherits*: `auth` and the allocation again, plus the schedule (`reps`,
+*inherits*: `signed` and the allocation again, plus the schedule (`reps`,
 `timeout_s`). Never `mode`: eleven tools have eleven mode vocabularies, so
 nothing above a row has a mode to state. A tool body is therefore `defaults`
 plus `cases`.
-
-`auth` is `anonymous` or `authenticated` — whether the request is signed, not
-whether the bucket is private. Every target is public, but four of the eleven
-tools have no unsigned request path, so a roster split between the two would
-compare listing against listing-plus-signing-1,000-requests. It is required in
-`defaults`, because a case that did not say cannot be compared with one that
-did, and an authenticated case is submitted under the service account that may
-read the credential — the stratum is an identity, not a flag.
 
 A row carries only what the ID and the fingerprint can *both* see, which is what
 keeps `timeout_s` out of one: it is in the fingerprint but not the ID, so two
 rows differing only there would render one ID and two fingerprints — two
 non-comparable runs filed into one case directory.
+
+### Signing is the capsule's fact, not the plan's preference
+
+Whether a request is signed says nothing about whether the bucket is private —
+every target here is public. It is a fact about the subject: four of the eleven
+tools have no unsigned request path, and one (minio-mc) resolves credentials
+from a static alias and cannot carry a per-request one. So each capsule declares
+what it can issue, and the plan does not get to overrule it:
+
+- no unsigned path → the case signs;
+- cannot sign → the case lists unsigned;
+- both available → **unsigned**, unless a row or layer says `signed: true`.
+
+Unsigned is the default for a tool that can do either because signing adds a
+signature to every one of roughly a thousand requests, which is a different
+measurement — and the cheaper one is the better baseline. A `signed:` that
+contradicts what the capsule declared is refused rather than ignored, which is
+the failure this replaced: six attempts in the first campaign recorded
+`authenticated` and ran unsigned.
+
+A signing case needs an identity, not a flag, because it runs under the service
+account that may read the credential. The plan states one top-level `auth_role`
+naming it — today `public-read`, matching `aws-s3-public-read-user` in the
+estate. A plan whose roster resolves any case to signing without an `auth_role`
+is refused.
 
 ## Cases are an ordered union
 
@@ -138,7 +155,7 @@ resolved cases are refused.
 
 Expansion order is deterministic and does not depend on YAML mapping order.
 Zip choices are the outermost factor. Independent axes follow in canonical row
-field order (`mode`, `auth`, `vcpus`, `memory_gb`,
+field order (`mode`, `signed`, `vcpus`, `memory_gb`,
 `container_memory_gb`), with the rightmost advancing fastest. In the example,
 each zipped allocation contains both modes. Expansion happens before the
 ordinary three-layer inheritance, so an omitted generator field inherits

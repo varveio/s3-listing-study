@@ -1,257 +1,15 @@
 # The state model
 
-What the benchmark records about its own runs: how a measurement is identified,
-where its evidence lands, and the table that binds the two.
+What the benchmark records about its own runs: the attempts it made, where their
+evidence landed, and the tables that bind the two.
 
 [`running.md`](running.md) is how to operate a run; this page is what a run *is*
-to the system.
+to the system. [`architecture.md`](architecture.md) is why the shape is this
+shape, and [`identity.md`](identity.md) is what a `case_id` means.
 
-## Status of this model: not implemented
-
-The controller in `../src/benchmark/campaign.py` still uses the earlier
-vocabulary — `campaign_id`, `base_job_id`, a case ID rendered from plan keys, a
-separate fingerprint, and per-tool knowledge held by the harness. Sections below
-mark what exists today only where the gap matters. Nothing here describes a
-shipped schema until this line says so.
-
-Case identity is also stated authoritatively in
-[`../plans/README.md`](../plans/README.md) § *A layer and a row*. That page and
-this one must change in the same commit, or the two will disagree about what a
-case is.
-
-## What a case is
-
-A case is **the tool and a hash over everything that can change the
-measurement**:
-
-```
-<tool>.<hash>
-aws-cli.9f300cc4d2b1
-```
-
-Three groups of inputs go into the hash:
-
-| Group | What it covers |
-| --- | --- |
-| **Environment** | The values the harness acts on: executor, auth role, target bucket/region/prefix, location, machine type, vCPUs, memory, container ceiling, timeout |
-| **Config** | The capsule's own keys, `{}` when empty |
-| **What ran it** | The tool slice and the platform slice |
-
-Anything that could make two runs non-comparable is in it by construction. One
-hash rather than a readable ID beside a fingerprint removes the law that the two
-must move together — a field either changes the identity or it is not an input —
-and removes the need for a revision counter, since a changed input is already a
-changed hash. It also makes "have we already measured exactly this?" a lookup.
-
-### The hash, normatively
-
-An unspecified encoding will be re-derived differently by the next reader, so:
-
-```python
-CASE_HASH_V1 = b"s3-listing-study-case-v1\0"
-
-
-def case_hash(environment: dict, config: dict, tool_slice: str, platform: str) -> str:
-    document = json.dumps(
-        {
-            "environment": environment,  # the table above, absent keys omitted
-            "config": config,  # the capsule's blob, as an object
-            "tool_slice_sha256": tool_slice,
-            "platform_sha256": platform,
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=True,
-        allow_nan=False,
-    ).encode()
-    return hashlib.sha256(CASE_HASH_V1 + document).hexdigest()[:12]
-```
-
-- **Domain separation and version** lead the input, as
-  `_input_digest` already does for build inputs (`build_image.py:78`).
-- **Canonical JSON** means `sort_keys=True`, `separators=(",", ":")`, ASCII
-  escaping, and no non-finite numbers — the form `build_image.py:147` already
-  uses.
-- **12 hex digits (48 bits)** is the identifier length. Collisions are a
-  correctness failure, not a nuisance: two cases sharing a prefix would merge
-  their evidence. The `UNIQUE` constraint on `job_name` and the primary key both
-  refuse the second one loudly, and 12 is chosen to match the existing job-ID
-  digest; raise it if a study ever holds enough cases to make the birthday bound
-  uncomfortable.
-- **Absent, null, and empty are different.** A key with no value is omitted; a
-  key that is explicitly null is present with `null`. `auth_role` null (unsigned)
-  and `container_memory_gb` null (no ceiling) are values, not absences.
-- `tool` and `suite` are **not** hash inputs. The tool prefixes the identifier,
-  and the suite prefixes the path.
-
-**Changing the input list re-identifies everything.** Old rows keep their
-identity and their evidence stays put; new runs get new prefixes. Bump the
-version constant when it changes, so the two generations are distinguishable.
-
-**What the hash costs:** the identity is no longer readable in a bucket listing.
-`swath.recursive-parquet-sorted.container_memory_gb-2` said what it was;
-`swath.4c1e8a77b920` does not. The columns say it instead, and reports render
-from them.
-
-## What the harness owns, and what it carries
-
-One question decides where a value belongs: **does the harness have to do
-something different because of it?**
-
-| Value | What the harness does | Owner |
-| --- | --- | --- |
-| `auth_role` | Resolves to a service account and a credential secret; null runs unsigned | harness |
-| `executor` | Selects which execution environment renders and submits the job | harness |
-| `location` | Chooses the region the machine runs in — the network distance to the target | harness |
-| `machine_type` | The shape resolved from vCPUs and memory; what the executor allocates | harness |
-| `vcpus`, `memory_gb` | The declared pair a shape is resolved from | harness |
-| `container_memory_gb` | Sets the container's cgroup ceiling | harness |
-| `timeout_s` | The worker's kill deadline, and the basis of the provider's run duration | harness |
-| `target_bucket`, `target_region`, `target_prefix` | Names the target; region reaches the subject's environment | harness |
-| mode, concurrency, page size, output flags | Nothing — forwarded, never read | capsule |
-| managed-runtime heap flags | Nothing — derived from the ceiling the capsule is told about | capsule |
-
-`mode` looks like an exception and is not one. Verification does need it —
-`verify` normalizes both sides through a capsule's `normalize.py`
-(`verify.py:468`) — but it arrives there as a **pass-through**:
-`adapters.normalize_to_path(adapter_dir, tool, mode, …)` hands the value on
-without the harness ever branching on it. Forward the whole config blob to both
-capsule entry points, `command.py` and `normalize.py`, and the harness needs to
-read nothing at all.
-
-### auth_role, and the part the capsule still needs
-
-`auth_role` is a **logical role name, nullable**, not a two-valued stratum. Null
-means unsigned: the anonymous worker service account, no secret attached. A name
-resolves through the deployment's role table to a service account and a secret
-version. Today's single credential becomes the role `public-read`; a future
-role reading a private corpus or a different AWS account is a new name rather
-than a new flag. *Today:* `auth` is `anonymous` or `authenticated`, which works
-only while there is exactly one credential.
-
-The role **name** is hashed, because what a tool may see can change what it
-lists. Its resolution is recorded but not hashed, which leaves one residual
-risk: repointing an existing role at different credentials changes the
-measurement without changing the identity. Treat a role as immutable once used.
-
-**The capsule needs the stratum too, as a boolean.** Selecting a service account
-is a harness act, but signing is also an argv decision inside six capsules
-today: `--no-sign-request` in aws-cli (`command.py:36`), s5cmd (`:22`),
-s3-fast-list (`:20`) and swath (`:58`), `--target-no-sign-request` in s7cmd
-(`:32`), and a branch in rclone (`:31`). So the harness passes a derived
-`signed` boolean — `auth_role is not None` — into the capsule's request. It is
-derived, so it is not a separate hash input.
-
-### Configuration
-
-Everything on the capsule side travels as one canonical JSON `config` blob, and
-the harness treats it as **opaque bytes**: it hashes them for identity, stores
-them, and forwards them to the capsule's entry points. Nothing else needs the
-contents — a value that changes what the *subject* does is the tool's business,
-and the harness's interest ends at "these bytes differ, so this is a different
-case".
-
-**Remove `concurrency` from the shared request contract.** `CommandRequest`
-carries a typed `concurrency` field and `command_adapter.py` a shared
-`validate_concurrency` helper, both left over from when concurrency looked like
-a universal dimension. Neither earns its place: the harness does nothing with
-the value, and the guarantee the helper provides — an explicit knob a capsule
-never declared is refused — is exactly what per-capsule key declaration
-provides, stated once per capsule instead of in shared runtime code.
-
-**The capsule declares the keys it accepts, and an undeclared key is refused.**
-This pattern already exists rather than needing invention: `s4cmd` declares
-`CONCURRENCY_RANGE = (1, 8)` (`command.py:14`), the runtime reads it off the
-module (`command_adapter.py:125`), and an explicit concurrency for a capsule
-that declares no range is refused outright — *"{tool} does not support logical
-concurrency"* (`command_adapter.py:95`). Generalise that to the whole config
-blob. Without it, `concurency: 8` is silently ignored and a sweep produces cells
-that are all identical.
-
-The declaration must live **inside `command.py`**, beside `MODES` and
-`CONCURRENCY_RANGE`. `adapter_bundle_sha256` covers a closed tuple —
-`ADAPTER_FILES = ("command.py", "normalize.py")` (`build_selection.py:18`) — so
-a declaration in a new file under `adapter/` would change no identity at all.
-
-Concurrency is the case in point for what that costs. "Every tool at logical
-concurrency 8" is only meaningful if every capsule means the same thing by the
-number, and no schema can make them: the translations are `-c`, `--checkers`,
-`--list-concurrency`, `--concurrency`. That comparability rests on convention
-plus each capsule's declaration — which is where it rests today, since the
-shared field enforces a range but never a meaning.
-
-*Today:* the harness holds per-tool knowledge it should not. `plans/tools.yaml`
-carries a `heap:` table stating that swath is a JVM wanting
-`-XX:MaxRAMPercentage` and s3p is V8 wanting `--max-old-space-size={mib}`, and a
-plan may not set a heap share. The stated reason is that nine of eleven tools
-have no heap to size, so the knob would be one most cases ignored and every plan
-restated (`plans/tools.yaml:31-34`). Under this model the reason disappears with
-the table: the harness says "your ceiling is 4 GB" and the capsule answers with
-the environment its runtime needs.
-
-### What is recorded but not hashed
-
-| Value | Why it is not identity |
-| --- | --- |
-| `executor_env` (project, provisioning, boot disk, network) | Estate detail. Moving projects does not change how fast a bucket lists, and re-identifying every case because an account was reorganised is over-invalidation with no measurement behind it. |
-| Provisioning model | SPOT changes how likely an attempt is to survive, not what it measures. A preemption is a failed attempt, not a different case. |
-| `service_account`, `secret_resource` | What `auth_role` resolved to; the role name carries the meaning. |
-| `image_uri`, `image_set_sha256` | You need to know exactly what ran and be able to reproduce it, but the slices identify it. Two attempts of one case may have run on different images, and the row says which. |
-
-`network` and `subnetwork` are arguable — an egress path could matter — but they
-follow from the executor's project and location today, so they stay in
-`executor_env` until a run crosses VPCs.
-
-## The tool and platform slices
-
-The toolbox is one image holding all eleven tools, so its digest is the wrong
-granularity: bump rclone, rebuild, and every tool's hash would change — new
-prefixes and lost comparability for ten tools that did not change.
-
-Two digests replace it. **Both are defined over stage closures, not stage
-bodies**, because the pinned base of a stage is part of what ran:
-
-- **tool slice** — that tool's artifact, capsule recipe, build inputs, adapter
-  bundle, the transitive `FROM` closure of its build stages *including the
-  pinned digests on those `FROM` lines*, and the lines of the final stage that
-  install or configure it.
-- **platform slice** — the `runtime_base` digest, the APT snapshot pin, the
-  worker's pinned Python requirements, the harness revision, and the remainder
-  of the final stage.
-
-The closure requirement is load-bearing, and the obvious implementation misses
-it. The existing extractor captures a stage body *after* its `FROM` line
-(`build_image.py:92-99`), so three externally pinned bases would fall outside
-both slices: `rust@sha256:cf9dd0…` (s3-fast-list), `node@sha256:2cf067cf…`
-(s3p), and `eclipse-temurin@sha256:2f1da100…`, which reaches swath through a
-second stage — `swath_jre` — that `TOOL_STAGES` does not map
-(`build_image.py:42`). A JRE bump would then change nothing about swath's
-identity, which is the unrepairable direction of error.
-
-The same applies to the final stage. It is not only `COPY --from` lines: one
-`RUN` block symlinks `aws`, writes the `s3p` shim, and creates `/home/s7cmd`
-(`Dockerfile:121-125`). Those lines belong to their tools.
-
-**Attribution is what keeps the roster additive.** Hash the final stage whole
-and every tool's install line lands in the platform, so adding a twelfth tool
-re-identifies all eleven — losing comparability for tools that did not change.
-With per-tool lines attributed to their own slices, adding a tool leaves the
-platform digest and every existing slice byte-identical.
-
-Erring coarse is correct when attribution is unclear: over-invalidating costs
-re-runs, while under-invalidating means two different binaries share an identity
-and a comparison silently mixes them, which cannot be repaired afterwards.
-
-**Publishing the slices needs an image-set version bump.** Adding
-`tool_slice_sha256` and `platform_sha256` is not a schema-4-compatible change:
-the top-level and per-tool key sets are compared for exact equality in three
-places (`campaign.py:168`, `:196`, `Dockerfile:159-165`), and the in-image
-recompute strips only `adapter_bundle_sha256` before digesting
-(`Dockerfile:198-200`), so a new per-tool key must join that strip list or the
-manifest check fails. Note what that strip implies today: `adapter_bundle_sha256`
-is deliberately outside the toolbox manifest, so an adapter-only edit currently
-changes no digest the controller verifies — which is precisely the gap the tool
-slice closes.
+This page says **`campaign.db`** for the file and **the ledger** for the record
+inside it, following the repository's existing usage — see
+[`architecture.md`](architecture.md) § *One thing, three names*.
 
 ## Attempts
 
@@ -280,26 +38,59 @@ this group need" a query.
 
 **Submitting a case that already has a successful attempt is a refusal**, not a
 silent no-op and not an implicit repeat. Re-measuring is `reps`, or an explicit
-flag; the identity model makes the question answerable, and the answer should be
-stated rather than guessed.
+flag; the identity model makes the question answerable, and the answer is stated
+rather than guessed.
 
 Failed attempts can be pruned from the bucket later, keeping only evidence that
 settled successfully. The row stays, so "this took three tries" survives even
 when the bytes from the first two do not.
 
+### Not every attempt is a measurement
+
+Some runs exist to prove a path works, or to produce something, and their
+timings must never reach a comparison. The signing paths in swath, s7cmd and
+s3-fast-list have code but have never executed, and the first thing to do with
+them is a canary — a real job, whose duration is meaningless. So `purpose`
+records what an attempt was for:
+
+| `purpose` | In a comparison | What it is |
+| --- | --- | --- |
+| `measurement` | yes | The default. A timing the study stands behind. |
+| `preparation` | no | Produces an artifact a later case consumes. Measured, but not a listing timing. |
+| `canary` | no | Proves a path executes at all — a new signing route, a new executor, a machine shape nobody has run. |
+| `diagnostic` | no | Reproduces a failure or probes a limit. `s4cmd` hitting a 3600s timeout is worth re-running under observation; it is not worth publishing as a timing. |
+
+`verify` and `report` consider `measurement` rows only. A canary is not a stray
+row for completeness to complain about, and not a subject for a comparison to
+miss — it is simply not in the population.
+
+**A preparation is measured even though it is not compared.** If s3-fast-list
+needs 40 seconds of `ks-tool` to list in 60, then publishing 60 against another
+tool's 100 states something false about the hinted path. The preparation's
+duration is recorded like any other attempt's, so the total cost of a path that
+requires one is recoverable — and a report showing the listing timing alone says
+which cases had a preparation behind them.
+
+What `purpose` is *not* is a mode. Swath's `recursive-parquet` versus
+`recursive-parquet-sorted`, or TSV versus Parquet output, are the capsule's own
+vocabulary: they change what the subject does, they live in `config`, they are
+hashed, and each is a measurement in its own right. `purpose` answers "should
+this timing be compared?", `mode` answers "what did the tool do?", and the two
+never substitute for each other.
+
+Why a preparation may be a separate attempt at all, and what the planner does
+with one, is in [`architecture.md`](architecture.md) § *What the planner does*.
+How it is hashed differently from a measurement is in
+[`identity.md`](identity.md) § *Two identities, two questions*.
+
 ## suite and group
 
-**`suite`** is the namespace: the first path segment in the results bucket, the
-job label a polling pass filters on, and the job-name prefix keeping this
-study's jobs disjoint from anything else in the project. Constant for the life
-of a file, so it lives in `meta`.
-
-*Today:* none of the three is a suite value. The path segment is the literal
-`campaigns` (`campaign.py:703`), the poll filter is an existence test on a label
-whose value is a per-job hash — `labels.benchmark-intent:*` (`campaign.py:59`,
-`:408`) — and only the job-name prefix is the literal `benchmark`
-(`campaign.py:258`). Introducing `suite` makes the label filter exact
-(`labels.suite=<value>`) instead of a scan for anything benchmark-shaped.
+**`suite`** is the namespace, and it is one value used three ways: the first
+path segment in the results bucket, the job label a polling pass filters on, and
+the job-name prefix keeping this study's jobs disjoint from anything else in the
+project. Because the label carries the suite itself, a polling pass filters
+exactly — `labels.suite=<value>` — rather than scanning for anything
+benchmark-shaped. It is constant for the life of a file, so it lives in `meta`.
 
 **`group_id`** records what was launched together. A column only: nothing in the
 object layout needs it, because everything a launch froze is already inside each
@@ -313,20 +104,23 @@ gs://<results-bucket>/<suite>/<target-bucket>/<tool>.<hash>.s<attempt>/
 
 Deterministic, so evidence is computed from a row rather than discovered by
 listing. The worker writes `result.json` last; its presence is what makes an
-attempt complete.
+attempt complete, and checking it is one existence test on a known prefix rather
+than a listing that has to resolve which leaf is authoritative.
 
-*Today:* `campaigns/<run>/results/<bucket>/<tool>/<case>/run-<rep>/submission-<n>/<uuid>/`,
-ending in a random per-execution UUID. Dropping that leaf deletes machinery:
-`resolve_leaf`, `list_leaves` with its "exactly one leaf, refuse zero or 2+"
-rule, and the `AMBIGUOUS` branch of the retry evidence check, which becomes one
-existence check on `<prefix>/result.json`.
+`<target-bucket>` is already inside the hash, so it identifies nothing the leaf
+does not. It stays because a results bucket is browsed by humans and read by
+`gsutil`, and one level of grouping by target is what makes that bearable — the
+same reason `<suite>` leads. Every other segment identifies something the hash
+now covers, so no other segment exists.
 
-It requires **create-only writes** in exchange. `gcs.py` documents plain
-overwrites as deliberate (`gcs.py:5-7`), which a random leaf made survivable.
-With deterministic prefixes a second execution of one attempt would silently
-merge — overwriting `result.json` while leaving behind any file the first wrote
-and the second did not. An `ifGenerationMatch=0` precondition makes that a loud
-failure.
+Two properties the prefix depends on, both argued in
+[`architecture.md`](architecture.md) § *What the object store holds*:
+
+- **Writes are create-only** — `ifGenerationMatch=0`. A deterministic prefix and
+  overwrite semantics together let a second execution merge into the first.
+- **`result.json` carries `attempt_id` and the `case_id` digest**, and `report`
+  refuses evidence whose recorded identity disagrees with the prefix it was
+  found under.
 
 ## The tables
 
@@ -340,10 +134,15 @@ CREATE TABLE meta (
 ```
 
 One row, typed rather than key/value: the key set is closed and load-bearing, so
-a missing or misspelled `suite` should fail at open time as a schema error
-rather than surface as a `None` far from the problem. `CHECK (id = 1)` makes
-single-rowness a database invariant. *Today:* there is no version marker at all;
-`open_db` adds missing columns with a bare `ALTER TABLE` (`campaign.py:555-566`).
+a missing or misspelled `suite` fails at open time as a schema error rather than
+surfacing as a `None` far from the problem. `CHECK (id = 1)` makes
+single-rowness a database invariant, and `schema_version` means a file states
+its own shape instead of being probed for columns.
+
+**A file whose `schema_version` the code does not recognise is refused.** The
+guarantee is that any file a command opens, it fully understands — a command
+that adapted to whatever columns it found would write rows that are quietly
+incomplete.
 
 ```sql
 CREATE TABLE attempts (
@@ -351,6 +150,7 @@ CREATE TABLE attempts (
     case_id             TEXT NOT NULL,      -- <tool>.<hash>
     attempt             INTEGER NOT NULL,   -- ordinal, 1-based
     attempt_id          TEXT GENERATED ALWAYS AS (case_id || '.s' || attempt) VIRTUAL,
+    case_inputs         TEXT NOT NULL,      -- the canonical document case_id digests
     group_id            TEXT NOT NULL,      -- the launch this went out with
     tool                TEXT NOT NULL,
 
@@ -362,6 +162,7 @@ CREATE TABLE attempts (
     vcpus               INTEGER NOT NULL,   -- the declared pair the shape was resolved from
     memory_gb           INTEGER NOT NULL,
     container_memory_gb INTEGER,            -- null means no ceiling
+    heap_percent        INTEGER NOT NULL,   -- share of the visible ceiling a managed runtime may take
     timeout_s           INTEGER NOT NULL,
     target_bucket       TEXT NOT NULL,
     target_region       TEXT NOT NULL,
@@ -369,6 +170,14 @@ CREATE TABLE attempts (
 
     -- configuration: forwarded to the capsule, opaque here
     config              TEXT NOT NULL,      -- canonical JSON; holds mode and every tool knob
+    -- ...except its reserved axis names, projected out for querying
+    mode                TEXT    GENERATED ALWAYS AS (json_extract(config, '$.mode')) VIRTUAL,
+    concurrency         INTEGER GENERATED ALWAYS AS (json_extract(config, '$.concurrency')) VIRTUAL,
+
+    -- dependency: null for a case that consumes nothing
+    input_artifact_sha256 TEXT,             -- content digest of a consumed artifact; a hash input
+    produced_by           TEXT,             -- attempt_id that made it; lineage, not identity
+    artifact_sha256       TEXT,             -- what THIS attempt produced, once it settled
 
     -- what ran it
     tool_slice_sha256   TEXT NOT NULL,
@@ -385,8 +194,10 @@ CREATE TABLE attempts (
 
     -- the request and its outcome
     request_json        TEXT NOT NULL,      -- frozen provider request; a retry is diffed against it
-    origin              TEXT NOT NULL,      -- planned | retry
-    state               TEXT NOT NULL,
+    purpose             TEXT NOT NULL
+        CHECK (purpose IN ('measurement', 'preparation', 'canary', 'diagnostic')),
+    origin              TEXT NOT NULL CHECK (origin IN ('planned', 'retry')),
+    state               TEXT NOT NULL,      -- open vocabulary; see "The state column"
     state_detail        TEXT,               -- the provider's message, when it failed
     recorded_at         TEXT NOT NULL,      -- intent journaled, before the provider was called
     updated_at          TEXT NOT NULL,
@@ -394,28 +205,82 @@ CREATE TABLE attempts (
 
     PRIMARY KEY (case_id, attempt)
 );
-
-CREATE INDEX attempts_by_group ON attempts (group_id);
-CREATE INDEX attempts_by_state ON attempts (state);
 ```
+
+No secondary indexes. This table holds hundreds of rows and will hold thousands
+after years of campaigns, which SQLite scans faster than it parses the query
+that asked. `UNIQUE (job_name)` is there as a constraint — two rows must not
+claim one job — not as an access path.
 
 **A row is one attempt, not one case.** Nothing is overwritten and no row is
 deleted, so the table is the study's full run history even after failed evidence
 is pruned from the bucket.
 
-The hashed values are stored as columns as well: the hash makes them comparable,
-the columns make them readable. A config key worth querying can be projected and
-indexed without leaving the blob:
+The three dependency columns split by role, which is the distinction
+[`identity.md`](identity.md) turns on: `input_artifact_sha256` is content and
+therefore a hash input; `produced_by` is lineage and therefore recorded only;
+`artifact_sha256` is what this attempt *made*, written when it settles, and is
+what a later case's `input_artifact_sha256` is copied from.
 
 ```sql
-ALTER TABLE attempts ADD COLUMN mode TEXT
-    GENERATED ALWAYS AS (json_extract(config, '$.mode')) VIRTUAL;
-CREATE INDEX attempts_by_mode ON attempts (mode);
+CREATE TABLE pending (
+    group_id      TEXT NOT NULL,
+    slot          INTEGER NOT NULL,   -- ordinal within the group
+    tool          TEXT NOT NULL,
+    purpose       TEXT NOT NULL
+        CHECK (purpose IN ('measurement', 'canary', 'diagnostic')),
+    known_inputs  TEXT NOT NULL,      -- canonical JSON: every input resolved so far
+    awaiting      TEXT NOT NULL,      -- attempt_id of the preparation this waits on
+    state         TEXT NOT NULL CHECK (state IN ('BLOCKED', 'RESOLVED', 'ABANDONED')),
+    became        TEXT,               -- the attempt_id it minted, once RESOLVED
+    recorded_at   TEXT NOT NULL,
+    settled_at    TEXT,
+
+    PRIMARY KEY (group_id, slot)
+);
 ```
 
-That is a read-side projection for display and querying, not the harness
-interpreting a run-time input: the value it reaches for is one a report prints,
-never one that decides what the harness does.
+A **slot** is a measurement a launch intended and cannot yet identify, because
+one of its inputs is an artifact a preparation has not produced. It cannot be an
+`attempts` row: that table is keyed by identity and this case has none yet.
+
+`ABANDONED` is what a slot becomes when its preparation settles unsuccessfully
+and the failure is accepted — the same declaration `ACCEPTED_FAILED` makes about
+an attempt, applied to a measurement that never got to exist. An absent
+measurement, recorded as absent.
+
+`purpose` here omits `preparation`: a preparation is what a slot waits *on*,
+never what a slot becomes. A slot awaiting another slot would be a workflow.
+
+`awaiting` is what the planner reads when an attempt settles — which slots does
+this unblock? — and the fan-out is the normal case rather than the exception,
+because one preparation typically unblocks every cell of a sweep.
+
+A slot is scaffolding rather than evidence, so it is the one structure here that
+may be deleted once a group is long settled. `became` points at the attempt it
+turned into, so nothing is lost that the attempt does not already say.
+
+### Why mode and concurrency are generated rather than stored
+
+`config` has to be a blob: it is a hash input, and a hashed document is stored
+byte-exactly rather than reassembled, for the same reason `case_inputs` is. Any
+difference in how it was rebuilt would silently change the `case_id`.
+
+Given that, a plain `mode` column beside it would be a second copy of a value
+that already lives in the blob, kept in step by nothing. A generated column
+cannot drift, because SQLite computes it from `config` on every read — so the
+projection is the only way to get a queryable column without a duplicate.
+
+**`mode` and `concurrency` get one because they are the two axes a comparison is
+read along** — *what did it do* and *how wide did it go*. That is the return on
+reserving their key names in
+[`capsule-contract.md`](capsule-contract.md): a question asked across eleven
+tools wants a column, not eleven JSON paths. Every other config key stays in the
+blob, where a report can reach it if it ever needs to.
+
+`NULL` is meaningful: a capsule with no such knob projects `NULL`, and the six
+tools exposing no concurrency control are exactly the rows where a concurrency
+comparison has to declare a hole rather than assume a value.
 
 ### What is stored, and what is not
 
@@ -426,12 +291,22 @@ change: history outlives the code that wrote it.
   composes, with no way to drift from its parts.
 - `job_name` is stored, though derivable. It is the join to the provider's world
   — logs, the console, `gcloud batch jobs describe` — and `UNIQUE`, so two rows
-  cannot claim one job. Its derivation is also a rule that has already changed
-  once: the retired controller named jobs `c-<campaign>-<tool>-…`, the current
-  one `benchmark-<slug>-<hash>`, so recomputation would not find what an old row
-  submitted.
-- `result_prefix` is stored for the same reason applied to the layout: rows
-  written under an earlier layout must stay resolvable after it changes.
+  cannot claim one job.
+- `result_prefix` is stored, though derivable. A row states where its evidence
+  actually went, rather than where today's rule says it should be.
+- `case_inputs` is stored although `case_id` is a pure function of it, because
+  the function is one-way. It is what makes a hash collision loud: an insert
+  naming an existing `case_id` compares the two documents and refuses a
+  mismatch. It also answers "why is this a different case from that one?" by
+  diffing, which reading two hashes cannot.
+
+`origin` and `purpose` carry `CHECK`s; `state` does not. Both of the first two
+are closed vocabularies this harness owns entirely, and a typo in either is
+worth refusing at write time — a misspelled `purpose` would silently drop an
+attempt out of every comparison. `state` deliberately passes the provider's
+lifecycle words through as it sees them, so a constraint there would turn a
+provider adding a state into a write failure in the middle of a campaign, which
+is the worst possible moment to discover it.
 
 ### The provider's ID cannot be the key
 
@@ -478,53 +353,61 @@ One file accumulates every group, and several groups may be in flight at once.
 
 | Command | Scope |
 | --- | --- |
-| `poll` | Everything non-terminal. One listing filtered by `labels.suite` covers every group in flight, so parallel launches need no extra machinery. |
-| `status` | Optional `--group` / `--case` filters; unfiltered prints the whole history, which is the point of accumulating. |
+| `poll` | Everything non-terminal. One listing filtered by `labels.suite` covers every group in flight, so parallel launches need no extra machinery. A settled preparation also unblocks whatever slots awaited it. |
+| `status` | Optional `--group` / `--case` filters; unfiltered prints the whole history, which is the point of accumulating. Blocked slots are shown alongside attempts — a group is not understood from its rows alone while it still owes one. |
 | `retry` | One group. Rows from other groups are skipped, not refused. |
-| `cancel` | Requires `--group`; without one it refuses rather than cancelling the file. *Today:* cancels every non-terminal row, group-blind (`campaign.py:955-972`). |
-| `verify` | One group. |
+| `cancel` | Requires `--group`; without one it refuses rather than cancelling the file. |
+| `verify` | One group, `purpose = 'measurement'` only. |
+| `prune` | Deletes evidence objects for attempts that settled unsuccessfully, leaving every row. Requires `--group`, for the same reason `cancel` does: an unscoped delete over an accumulating file is the one mistake with no undo. |
 
-*Today:* `verify` is the harder blocker of the two. Its plan binding demands the
-ledger's `(tool, case_id, rep)` roster equal the plan's exactly — reporting
-"missing ledger case" or "unexpected ledger case" (`campaign.py:1026-1029`) —
-before it ever reaches the agreement check on `campaign_id` and image set. Under
-accumulation the roster equality fails first and hardest.
+### What verify binds against
 
-**Open: what `verify` binds against.** Today it re-resolves a plan and matches
-on a plan-derived fingerprint. Under this model `case_id` folds in the tool and
-platform slices, the executor, and the machine type, so re-resolving a plan
-cannot reproduce a `case_id` without also holding the exact image set and
-executor configuration. Either verification binds through the recorded columns
-instead of a re-resolved plan, or a group records the resolved case IDs it
-submitted. Also unsettled: whether one group may span several plans and buckets
-— `verify` and `retry` each take exactly one `--plan` today.
+**The group, through the recorded rows — not a re-resolved plan.**
 
-## Migration
+`case_id` folds in the tool and platform slices, the executor, and the machine
+type, so reproducing one from a plan would mean re-resolving that plan *and*
+holding the exact image set and executor configuration the launch used.
+Rebuilding an identity in order to check it is the wrong direction anyway — it
+re-derives from a file that may have been edited since, to confirm something the
+ledger already recorded.
 
-The one campaign that exists — `2026-08-17-ghcnsmoke2`, fourteen attempts —
-predates every identity input in this model. Its rows carry no group, no slices,
-and no computable case hash, and its evidence sits under the old seven-segment
-layout.
+So the roster is the group. Every attempt that went out is a row carrying its
+`case_id`, `result_prefix`, and settled `state`, which is precisely what
+completeness needs: no subject missing, none stray, each one's evidence where
+the row says it is.
 
-It is not backfilled. That database and its objects are retained as they are,
-readable by the code that wrote them; the new file starts empty. Nothing is
-gained by inventing identities for rows whose inputs were never recorded, and
-`result_prefix` exists precisely so that rows written under an earlier layout
-stay resolvable rather than needing rewriting.
+A group's roster is its attempts **plus its unresolved slots**. A `BLOCKED` slot
+is a measurement the launch intended and has not got, so a group holding one is
+incomplete and `verify` says so rather than reporting on the subset that
+happened to make it. An `ABANDONED` slot is incompleteness someone declared
+final, which reports as an absent subject — never as a passing comparison with
+one fewer tool in it.
 
-`../README.md` still says no campaign has run. That is now false and should be
-corrected in whichever commit lands first.
+That leaves the plan doing what a plan is for. **Intent is checked at submit,
+against the launch it produced** — the moment a mismatch is cheap to fix and the
+plan file is the one that was actually read.
+
+Comparability moves the same way. "Are these two attempts comparable?" is a
+column comparison — same `platform_sha256`, same environment, differing only
+where the study means them to differ — which a reader can run by hand in SQL,
+rather than a fingerprint equality test only the harness can evaluate. What
+column equality still cannot tell you is whether the corpus moved between them;
+see [`identity.md`](identity.md) § *What identity cannot cover*.
+
+Two consequences fall out. A group **may** span several plans and target
+buckets, because nothing in the roster needs them to agree. But a **comparison**
+is scoped to one target bucket, since comparing listings of different corpora is
+not a comparison — so `verify` reports per bucket within the group it was given.
 
 ## Open questions
 
-- **Where the role table lives.** `auth_role` → service account + secret version
-  is deployment configuration, not plan content. It needs a file, a schema, and
-  a validation point.
-- **The `executor` vocabulary.** What names exist, and how a name resolves to
-  the code that renders and submits a job.
 - **The `job_name` derivation.** It must be collision-free across an
-  accumulating file, fit 63 characters, and stay disjoint from the retired `c-`
-  namespace.
+  accumulating file and fit Batch's 63 characters of lowercase alphanumerics
+  and hyphens.
+- **How `group_id` is minted.** It has to be unique within an accumulating file,
+  meaningful enough to type at a prompt, and assigned without a round trip —
+  `retry`, `cancel` and `prune` all take it as their scope, so it is the handle
+  an operator uses under pressure.
 
 ## What is deliberately absent
 
@@ -532,5 +415,5 @@ No results, metrics, or verdicts. Those live in the evidence objects and are
 recomputed by `verify` and `report` on demand — a cached verdict is a second
 answer to a settled question, and the two can disagree.
 
-Back the state file up. Losing it does not destroy the evidence, but it costs
-the binding: `report` refuses results it cannot tie back to a recorded row.
+Back the ledger up. Losing it does not destroy the evidence, but it costs the
+binding: `report` refuses results it cannot tie back to a recorded row.
