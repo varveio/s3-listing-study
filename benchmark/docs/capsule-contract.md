@@ -62,7 +62,7 @@ and a capsule could be altered without anything noticing.
 | `FUNCTIONAL_ENV` | no, defaults empty | Non-secret environment the subject structurally needs |
 | `build_env(request)` | no, defaults to `FUNCTIONAL_ENV` | Environment derived from the request — heap flags, and nothing else so far |
 | `REQUIRES` | no, defaults empty | The chain of this capsule's own modes that must run before a mode, in order |
-| `VALIDATE_ARTIFACT` | no | Refuses a produced artifact that is structurally useless before any case consumes it |
+| `VALIDATE_ARTIFACT` | no, defaults empty | Per producing mode, the check that refuses an artifact that is structurally useless before anything consumes it |
 
 A capsule that declares neither `SUPPORTS_UNSIGNED` nor `SUPPORTS_SIGNED` as
 true describes a subject that can issue no request at all, and the loader
@@ -105,6 +105,7 @@ write a directory sink while its TSV mode streams to stdout.
 | `fields` | Which contract columns this mode populates. A mode emitting key-only must not be ranked against one emitting four columns — otherwise a tool wins by emitting less. |
 | `axes` | Per reserved name: `Fixed(v)`, `Default(v, provenance)`, `Ceiling(v, provenance)`, `Stated()`, `Inert`, or absent. |
 | `purpose_ceiling` | The most a plan may claim this mode is. A plan may demote a run to `canary`; it may never promote `summarize` to `measurement`. |
+| `inline` | Another mode of this capsule the worker runs untimed, in the same container, immediately before the timed subject — see *A setup exec is not a chain link*. |
 
 **`product` and `fields` translate across tools; `axes` does not.** The first two
 describe the artifact, which is why they are comparable at all. An axis name
@@ -135,9 +136,9 @@ default the capsule could cite, and a capsule that quietly chose one would freez
 every sweep at it. Resolution refuses a plan that leaves a `Stated` axis silent,
 offline, rather than folding anything in. When a prerequisite chain expands, a
 `Stated` (or `Default`/`Ceiling`) axis the prerequisite mode itself declares
-inherits the consuming row's value — s3-fast-list's `ks-split` link cuts at the
-`segments` the `list-hinted` row stated — while an axis the prerequisite does not
-declare never flows into it.
+inherits the consuming row's value, while an axis the prerequisite does not
+declare never flows into it. An inline setup exec inherits by the same rule —
+s3-fast-list's `ks-split` cuts at the `segments` the `list-hinted` row stated.
 
 `Ceiling` is `Default` plus one semantic, so it carries the same value and the
 same provenance: the subject's own number, not the study's. **What a campaign
@@ -336,13 +337,46 @@ Three constraints:
   whole sweep. See [`identity.md`](identity.md) § *Two identities, two
   questions*.
 
-**A chain may be more than one link.** s3-fast-list's hinted path is
-`list → ks-tool split → list -k`: a full listing emits a key distribution, a
-second command turns it into hints, and only then can the hinted listing run.
-`REQUIRES` is therefore an ordered list, not a single mode. What the one-edge
-rule was protecting is *dynamic* graphs — a chain discovered at run time — and a
-statically declared list preserves that completely, since the whole shape is
-readable offline and the depth is bounded by the declaration.
+**A chain may be more than one link.** `REQUIRES` is an ordered list, not a
+single mode. What the one-edge rule was protecting is *dynamic* graphs — a chain
+discovered at run time — and a statically declared list preserves that
+completely, since the whole shape is readable offline and the depth is bounded by
+the declaration.
+
+### A setup exec is not a chain link
+
+A chain link is what a **shared** artifact is for: one preparation, its own
+identity, and every consumer of those bytes bound to it. s3-fast-list's hinted
+path has both kinds of step in it. The bootstrap `list` emits a key distribution
+that a whole sweep can share, so it is a link. `ks-tool split` then cuts that
+distribution into ranges — a sub-second local transform whose output exactly one
+measurement reads — and making *that* an attempt buys a slot, a job, a VM and an
+identity for a file nothing else will ever ask for.
+
+So a mode may declare `inline`, naming another mode of the same capsule that the
+worker runs **untimed, in the same container, immediately before the timed
+subject**. The setup exec is handed whatever the chain staged, and what it
+publishes is what the subject is compiled against. Its wall clock is recorded as
+setup evidence in `result.json` and never merged into the measurement's timing;
+its captures and its sink upload under the attempt's own `inline/` directory,
+which keeps it out of the native sink a listing's row count is read from.
+
+The declaration carries the same offline-readability constraints as a chain, so
+the refusals are:
+
+- the named mode must exist in this capsule, and may not be the mode itself;
+- it must declare `purpose_ceiling = "preparation"` — a setup exec produces, it
+  does not measure;
+- it may not declare an `inline` of its own, and may not be a mode with its own
+  `REQUIRES`. One flat step inside one attempt: anything deeper puts a graph back
+  where no reviewer and no slot can see it.
+
+An inline setup exec carries **no identity of its own**. It is part of the
+measurement attempt, and the axes it runs at are already in that attempt's config
+blob, which is what the case hashed. A setup exec that fails — nonzero, timed
+out, leaving a process behind, or publishing anything other than exactly one file
+— fails the whole attempt (`EXIT_SETUP_FAILED`), because a subject run on hints
+that were never made measures something else.
 
 ### An artifact is validated before anything consumes it
 
@@ -355,11 +389,20 @@ one it was meant to beat. On a flat namespace the same code path yields a single
 empty line, producing two identical full-range tasks.
 
 Nothing about those files is corrupt. They digest cleanly and would flow
-straight into a measurement that silently means nothing. So a capsule that
-produces an artifact may declare `VALIDATE_ARTIFACT`, run when the preparation
-settles and before any consumer is minted; a refusal fails the preparation
-rather than the case that would have consumed it. This is the
-refuse-rather-than-guess rule applied to the one place where a hash cannot help.
+straight into a measurement that silently means nothing. So a capsule declares
+`VALIDATE_ARTIFACT` — a mapping from **producing mode** to the check its bytes
+must pass, because a capsule with two producers has two structures and neither
+check reads the other's file. A mode with no entry produces bytes nothing
+structural can be said about.
+
+Where it runs follows where the artifact was made. A chain link's artifact is
+checked when the preparation settles and before any consumer is minted, and a
+refusal fails the preparation rather than the case that would have consumed it.
+An inline setup exec's artifact is checked inside the attempt, before the subject
+is compiled against it, and a refusal fails that attempt as
+`EXIT_ARTIFACT_UNUSABLE` — the same claim about the same kind of bytes, one
+location over. This is the refuse-rather-than-guess rule applied to the one place
+where a hash cannot help.
 
 ### Inbound artifacts
 

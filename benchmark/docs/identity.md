@@ -114,15 +114,19 @@ Preparations are excluded from comparisons anyway
 ([`model.md`](model.md) § *Not every attempt is a measurement*), so their
 identity never needed to carry comparability. Once it does not, reuse falls out:
 a sweep of s3-fast-list across concurrency 4, 8 and 16 names **one** preparation
-rather than three, and does not build hints at three different parallelisms.
+rather than three, and does not list the bucket three times to prepare it.
 
 Two things follow:
 
-- **A prerequisite inherits only the axes it declares itself.** A row sweeping
-  concurrency sweeps the *listing* — `ks-split` declares no concurrency, so the
-  sweep collapses to one preparation. A row sweeping `segments` sweeps the
-  *artifact* — `ks-split` declares that axis, the stated value flows into the
-  link and its hash, and the sweep correctly builds one hints file per value.
+- **A prerequisite inherits only the axes it declares itself.** s3-fast-list's
+  hinted chain is two links, `list → list-hinted`: the bootstrap listing emits
+  the key distribution, and the cut points are made by an inline setup exec
+  inside the hinted attempt itself (`capsule-contract.md` § *A setup exec is not
+  a chain link*). The bootstrap declares neither `concurrency` nor `segments`, so
+  a sweep of either names **one** preparation. Both are axes of the measurement
+  and both are in its identity: `segments` is what the run listed under even
+  though only the inline exec's argv carries it, and that exec has no identity of
+  its own — it is part of the attempt whose config already states the number.
 - **A preparation's duration is an observation, not a comparable measurement.**
   Two attempts of one preparation case may have run on different machines and
   the row says which. Asking how preparation cost varies *with* the machine is a

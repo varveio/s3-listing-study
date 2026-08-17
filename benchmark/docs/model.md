@@ -71,6 +71,23 @@ duration is recorded like any other attempt's, so the total cost of a path that
 requires one is recoverable — and a report showing the listing timing alone says
 which cases had a preparation behind them.
 
+### An attempt may run one untimed exec before the timed one
+
+Not every produced thing is worth an attempt. A capsule may declare that one of
+its modes runs another of its modes `inline` — untimed, in the same container,
+immediately before the subject — and s3-fast-list's hinted path does: the cut
+points are made from the staged key distribution in the attempt that lists under
+them ([`capsule-contract.md`](capsule-contract.md) § *A setup exec is not a chain
+link*).
+
+That gives an attempt two phases and still one clock. The setup exec's argv,
+exit code, duration and output digest are recorded in `result.json` under
+`setup`, beside the timing and never inside it, and its captures and sink land in
+the attempt's own `inline/` directory rather than the native sink a row count is
+read from. It has no identity of its own: the axes it ran at are already in the
+measurement's config blob. A setup exec that fails is an attempt that fails,
+because the alternative is a subject timed against hints nobody made.
+
 ### Sometimes the failures are the measurement
 
 The vocabulary above assumes a failed attempt is a hole: `FAILED` is an owed
@@ -277,13 +294,12 @@ an attempt, applied to a measurement that never got to exist. An absent
 measurement, recorded as absent.
 
 **A slot may wait on a slot**, and `purpose` therefore includes `preparation`,
-because a declared chain can be more than one link: s3-fast-list's hinted path
-is `list → ks-tool split → list -k`, and the middle link cannot be identified
-until the first settles either. What makes this safe is not the depth but the
-*declaration* — the chain is stated in the capsule and expanded offline, so the
-whole shape is knowable before anything is submitted. A slot waiting on
-something discovered at run time would be a workflow; a slot waiting on
-something a capsule declared is a bounded expansion.
+because a declared chain can be more than one link, and a middle link cannot be
+identified until the one before it settles either. What makes this safe is not
+the depth but the *declaration* — the chain is stated in the capsule and expanded
+offline, so the whole shape is knowable before anything is submitted. A slot
+waiting on something discovered at run time would be a workflow; a slot waiting
+on something a capsule declared is a bounded expansion.
 
 `awaiting` is what the planner reads when an attempt settles — which slots does
 this unblock? — and the fan-out is the normal case rather than the exception,

@@ -123,9 +123,9 @@ reason each.
 
 ### Dependencies, and why they do not make this a workflow engine
 
-Some measurements need something built first. s3-fast-list's `ks-tool split`
-turns a key distribution into hints, and a hinted listing — what the tool is
-actually built for — cannot run until they exist.
+Some measurements need something built first. s3-fast-list's hinted listing —
+what the tool is actually built for — cannot run until a full listing has emitted
+the key distribution its hints are cut from.
 
 The dependency is **declared by the capsule**, because "this mode needs that
 mode first" is a fact about the tool, exactly like which modes exist. The plan
@@ -149,9 +149,18 @@ execution, where it is part of what was measured.
 Two structural limits keep the dependency graph finite and knowable in advance:
 a declared prerequisite names a mode of the **same capsule**, and the chain is
 **declared statically**, so its full shape is readable before anything is
-submitted. Chains are short — s3-fast-list's hinted path is two links, and
-nothing has needed a third — but the bound that matters is the declaration, not
-the number.
+submitted. Chains are short — s3-fast-list's hinted path is one link, and nothing
+has needed two — but the bound that matters is the declaration, not the number.
+
+**A step is only a link if its artifact is shared.** s3-fast-list's `ks-tool
+split` cuts the key distribution into ranges in under a second, and exactly one
+measurement reads the result, so it runs as that measurement's untimed inline
+setup exec rather than as an attempt of its own: same declaration discipline,
+same offline expansion, one slot fewer and one VM fewer. The rule above is what
+decides which a step is — a preparation is a separate attempt exactly when its
+entire effect is a content-addressable artifact *other cases can bind to*.
+See [`capsule-contract.md`](capsule-contract.md) § *A setup exec is not a chain
+link*.
 
 What the harness must never acquire is a graph discovered at run time: a step
 that decides what comes next based on what it found. That is the line between a
@@ -173,9 +182,10 @@ Booking it durably buys two things, and the second is why it exists:
 - A planner that dies between "the preparation succeeded" and "the measurement
   was submitted" leaves a record of what is owed.
 - **A preparation that fails makes a comparison short one subject, and the slot
-  is what notices.** Without slots, a failed `ks-tool` run produces a
-  clean-looking comparison quietly missing s3-fast-list — evidence that looks
-  fine and is not, which is the failure this whole design is built against.
+  is what notices.** Without slots, a failed bootstrap listing produces a
+  clean-looking comparison quietly missing s3-fast-list's hinted arm — evidence
+  that looks fine and is not, which is the failure this whole design is built
+  against.
 
 ## Refuse rather than guess
 
