@@ -53,7 +53,7 @@ and a capsule could be altered without anything noticing.
 | Export | Required | What it states |
 | --- | --- | --- |
 | `TOOL` | yes | The tool slug this capsule is for |
-| `FIXED_COMMAND_PREFIX` | yes | The subject's executable, recorded and cross-checked against `build/image.json` |
+| `EXECUTABLES` | yes | The subject's executables, cross-checked against `build/image.json`; each mode names which it runs |
 | `MODES` | yes | The mode vocabulary, and one manifest per mode — see below |
 | `build_command(request)` | yes | Compiles the complete subject argv |
 | `SUPPORTS_UNSIGNED` | yes | Whether the subject can list without a credential |
@@ -61,7 +61,8 @@ and a capsule could be altered without anything noticing.
 | `CONFIG_KEYS` | no, defaults empty | The config keys this capsule accepts; anything else is refused |
 | `FUNCTIONAL_ENV` | no, defaults empty | Non-secret environment the subject structurally needs |
 | `build_env(request)` | no, defaults to `FUNCTIONAL_ENV` | Environment derived from the request — heap flags, and nothing else so far |
-| `REQUIRES` | no, defaults empty | A mode that must run before another mode of this same capsule |
+| `REQUIRES` | no, defaults empty | The chain of this capsule's own modes that must run before a mode, in order |
+| `VALIDATE_ARTIFACT` | no | Refuses a produced artifact that is structurally useless before any case consumes it |
 
 A capsule that declares neither `SUPPORTS_UNSIGNED` nor `SUPPORTS_SIGNED` as
 true describes a subject that can issue no request at all, and the loader
@@ -213,8 +214,29 @@ tools:
   recorded, projected into a column, and a plan can vary it.
 - **Record the effective value, including the default.** A plan stating no
   concurrency gets the capsule's default written into `config`, not an absent
-  key. Absent means *this tool has no such knob*; a value means *this is what it
-  ran at*.
+  key — the loader merges declared defaults **before hashing**, so the identity
+  reflects what ran. Absent means *this tool has no such knob*; a value means
+  *this is what it ran at*.
+
+### A recorded default must carry its provenance
+
+A capsule that misses an upstream version bump writes a confident lie into
+`config`, and a recorded-but-wrong value is **worse than an absent one, because
+it claims knowledge**. So each declared default states where it came from:
+
+| Provenance | Meaning |
+| --- | --- |
+| `help` | Printed by the subject's own `--help`, checkable at build time |
+| `source@<rev>` | Read from upstream source at a pinned revision |
+| `unverified` | Believed, not established — surfaced as such in every report |
+
+A build-time check can only close the first kind: it diffs `help`-provenance
+defaults against the binary's actual `--help` output and fails the build on
+drift. It cannot receipt s3p's 100 (a source constant), mc's SDK retry
+constants, or s7cmd's unset timeouts that fall through to an AWS SDK default —
+which is exactly why a blanket `--help` gate would either block those capsules
+or invite fabricated receipts. `unverified` is the honest state for them until
+someone runs the tool and writes a receipt.
 
 Reserved today: `mode` and `concurrency`. Page size is the obvious next one.
 Reserving a name costs a line in a capsule; discovering after a campaign that
@@ -279,6 +301,42 @@ Three constraints:
   whole sweep. See [`identity.md`](identity.md) § *Two identities, two
   questions*.
 
-What the planner does with the declaration is in
+**A chain may be more than one link.** s3-fast-list's hinted path is
+`list → ks-tool split → list -k`: a full listing emits a key distribution, a
+second command turns it into hints, and only then can the hinted listing run.
+`REQUIRES` is therefore an ordered list, not a single mode. What the one-edge
+rule was protecting is *dynamic* graphs — a chain discovered at run time — and a
+statically declared list preserves that completely, since the whole shape is
+readable offline and the depth is bounded by the declaration.
+
+### An artifact is validated before anything consumes it
+
+A digest proves an artifact is *unchanged*, not that it is *usable*. s3-fast-list
+is the worked example: `ks-tool split` emits one cut point per line, but if the
+first distribution row alone exceeds the average the first line comes out
+**empty** — and an empty cut point becomes a full-range serial scan running
+alongside every real segment, so the hinted run can be slower than the unhinted
+one it was meant to beat. On a flat namespace the same code path yields a single
+empty line, producing two identical full-range tasks.
+
+Nothing about those files is corrupt. They digest cleanly and would flow
+straight into a measurement that silently means nothing. So a capsule that
+produces an artifact may declare `VALIDATE_ARTIFACT`, run when the preparation
+settles and before any consumer is minted; a refusal fails the preparation
+rather than the case that would have consumed it. This is the
+refuse-rather-than-guess rule applied to the one place where a hash cannot help.
+
+### Inbound artifacts
+
+`sink_dir` tells a mode where it may write. A mode that *consumes* an artifact
+needs the symmetric thing: a container-local path where the harness has staged
+the bytes it is to read. Without it, a hints file, a shard plan, or a commands
+file cannot reach argv at all — and this is what blocks s5cmd's defining mode,
+which is a single process reading one file, not a multi-process invocation.
+
+An inbound artifact is content-addressed like any other, so the case that
+consumes it hashes the digest, never the path.
+
+What the planner does with these declarations is in
 [`architecture.md`](architecture.md); where the resulting attempts are recorded
 is in [`model.md`](model.md).

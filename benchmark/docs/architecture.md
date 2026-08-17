@@ -144,12 +144,20 @@ is a content-addressable artifact. An effect no digest captures — a warmed
 cache, mutated remote state — has to live inside the measured case's own
 execution, where it is part of what was measured.
 
-Two structural limits keep the dependency graph one edge deep: a declared
-prerequisite names a mode of the **same capsule**, and a slot may never wait on
-another slot. What this harness is, is a record of attempts plus a reconciler
-that walks them toward settled — not a workflow engine. One dependency edge with
-a booked slot is not a reason to become one, and the moment that stops being
-true it should be argued rather than grown into.
+Two structural limits keep the dependency graph finite and knowable in advance:
+a declared prerequisite names a mode of the **same capsule**, and the chain is
+**declared statically**, so its full shape is readable before anything is
+submitted. Chains are short — s3-fast-list's hinted path is two links, and
+nothing has needed a third — but the bound that matters is the declaration, not
+the number.
+
+What the harness must never acquire is a graph discovered at run time: a step
+that decides what comes next based on what it found. That is the line between a
+reconciler and a workflow engine, and a statically declared chain stays on the
+right side of it — the planner can print the whole expansion offline, which no
+workflow engine can promise.
+
+So a slot may wait on a slot, provided the declaration said it would.
 
 ### Why a slot is booked rather than remembered
 

@@ -71,6 +71,30 @@ duration is recorded like any other attempt's, so the total cost of a path that
 requires one is recoverable — and a report showing the listing timing alone says
 which cases had a preparation behind them.
 
+### Sometimes the failures are the measurement
+
+The vocabulary above assumes a failed attempt is a hole: `FAILED` is an owed
+retry, `ACCEPTED` is an absent measurement, and `verify` reads either as a
+missing subject. For one class of case that is exactly backwards.
+
+s3kor's listing path spawns its printer goroutine before binding the channel it
+reads, so a run either succeeds, hangs, or panics. The useful result is not one
+timing — it is **a rate over twenty attempts of one identical case**, and the
+hangs are the finding. The same inversion applies to a diagnostic that
+successfully reproduces its own failure: s4cmd exiting 124 at a 300-second
+deadline is the intended outcome, not a hole to be retried.
+
+So a case may declare that its statistic is a **rate**, and for those:
+
+- failed attempts are data points, not omissions — `verify` counts them rather
+  than reporting the group incomplete;
+- `retry` leaves them alone, because a retry would be resampling;
+- `report` renders the rate and the sample size, never a mean duration over the
+  survivors, which would be a survivorship result dressed as a timing.
+
+`reps` already allocates the repeats. What is new is only that completeness and
+retry stop treating a settled failure as something owed.
+
 What `purpose` is *not* is a mode. Swath's `recursive-parquet` versus
 `recursive-parquet-sorted`, or TSV versus Parquet output, are the capsule's own
 vocabulary: they change what the subject does, they live in `config`, they are
@@ -228,9 +252,9 @@ CREATE TABLE pending (
     slot          INTEGER NOT NULL,   -- ordinal within the group
     tool          TEXT NOT NULL,
     purpose       TEXT NOT NULL
-        CHECK (purpose IN ('measurement', 'canary', 'diagnostic')),
+        CHECK (purpose IN ('measurement', 'preparation', 'canary', 'diagnostic')),
     known_inputs  TEXT NOT NULL,      -- canonical JSON: every input resolved so far
-    awaiting      TEXT NOT NULL,      -- attempt_id of the preparation this waits on
+    awaiting      TEXT NOT NULL,      -- attempt_id, or (group_id, slot) of an earlier slot
     state         TEXT NOT NULL CHECK (state IN ('BLOCKED', 'RESOLVED', 'ABANDONED')),
     became        TEXT,               -- the attempt_id it minted, once RESOLVED
     recorded_at   TEXT NOT NULL,
@@ -249,8 +273,14 @@ and the failure is accepted — the same declaration `ACCEPTED_FAILED` makes abo
 an attempt, applied to a measurement that never got to exist. An absent
 measurement, recorded as absent.
 
-`purpose` here omits `preparation`: a preparation is what a slot waits *on*,
-never what a slot becomes. A slot awaiting another slot would be a workflow.
+**A slot may wait on a slot**, and `purpose` therefore includes `preparation`,
+because a declared chain can be more than one link: s3-fast-list's hinted path
+is `list → ks-tool split → list -k`, and the middle link cannot be identified
+until the first settles either. What makes this safe is not the depth but the
+*declaration* — the chain is stated in the capsule and expanded offline, so the
+whole shape is knowable before anything is submitted. A slot waiting on
+something discovered at run time would be a workflow; a slot waiting on
+something a capsule declared is a bounded expansion.
 
 `awaiting` is what the planner reads when an attempt settles — which slots does
 this unblock? — and the fan-out is the normal case rather than the exception,
@@ -281,6 +311,20 @@ blob, where a report can reach it if it ever needs to.
 `NULL` is meaningful: a capsule with no such knob projects `NULL`, and the six
 tools exposing no concurrency control are exactly the rows where a concurrency
 comparison has to declare a hole rather than assume a value.
+
+### What was asked for, and what happened
+
+`config` records what a case *asked for*. For several subjects that is a ceiling
+rather than a setting: swath's `--concurrency` is an AIMD limit starting at
+`min(4, N)`, s5cmd's effective width is `min(numworkers, shards)`, and
+s3-fast-list's is `min(c, N+1)`. Writing the nominal number into a hashed blob
+and calling it *the* concurrency would be the same lie the axis states exist to
+prevent, one column over.
+
+So the **achieved** value is a fact about the run and belongs in evidence beside
+the timing, never in `config`. A capsule declaring a `Ceiling` axis is saying
+the two can differ; a report quoting a concurrency without saying which one it
+means is quoting nothing.
 
 ### What is stored, and what is not
 

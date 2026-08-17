@@ -20,7 +20,7 @@ Three groups of inputs go into the hash:
 
 | Group | What it covers |
 | --- | --- |
-| **Environment** | The values the harness acts on: auth role, target bucket/region/prefix, location, machine type, vCPUs, memory, container ceiling, output sink, timeout |
+| **Environment** | The values the harness acts on: auth role, target bucket/region/prefix, location, machine type, vCPUs, memory, container ceiling, output target, timeout |
 | **Config** | The capsule's own keys, `{}` when empty |
 | **What ran it** | The tool slice and the platform slice |
 
@@ -102,7 +102,7 @@ asymmetry is deliberate rather than a special case.
 | Tool slice, platform slice | yes | yes |
 | Machine type, vCPUs, memory, container ceiling, timeout | yes | **no** — recorded, not hashed |
 | `auth_role` | yes | **no** — recorded, not hashed |
-| Output sink | yes | **no** — a preparation's artifact is its output |
+| Output target | yes | **no** — a preparation's artifact is its output |
 
 **A measurement's identity answers "are these comparable?", which is a question
 about the environment. A preparation's identity answers "do we already have this
@@ -144,7 +144,7 @@ Two things follow:
 follow from the executor's project and location, so they stay in `executor_env`
 until a run crosses VPCs.
 
-### The output sink is an input
+### The output target is an input
 
 Where a subject's output goes changes what is being measured, so it is hashed
 like any other thing the harness chooses. s3kor issues one `write(2)` per key
