@@ -168,10 +168,11 @@ def _segments(request: CommandRequest) -> str:
 
 
 def _split_tail(request: CommandRequest) -> tuple[str, ...]:
-    # Flag-letter trap: `-c` is the segment count on `split` and the listing
-    # concurrency on the lister, so it is deliberately not the `concurrency`
-    # axis. **Receipt owed**: these spellings come from the hinted-workflow
-    # design note, not from a source read or a `ks-tool split --help`.
+    # Flag-letter trap: `-c` is the segment count on `split` (`--count`) and
+    # the listing concurrency on the lister, so it is deliberately not the
+    # `concurrency` axis. Spellings verified against `ks-tool split --help`
+    # in the toolbox built at source@6c72f59: `-k/--ks`, `-c/--count`,
+    # `-o/--output`, exactly as rendered here.
     return (
         "split",
         "-k",
