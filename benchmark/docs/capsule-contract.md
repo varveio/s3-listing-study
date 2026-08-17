@@ -51,7 +51,7 @@ and a capsule could be altered without anything noticing.
 | --- | --- | --- |
 | `TOOL` | yes | The tool slug this capsule is for |
 | `FIXED_COMMAND_PREFIX` | yes | The subject's executable, recorded and cross-checked against `build/image.json` |
-| `MODES` | yes | The mode vocabulary this capsule accepts |
+| `MODES` | yes | The mode vocabulary, and one manifest per mode — see below |
 | `build_command(request)` | yes | Compiles the complete subject argv |
 | `SUPPORTS_UNSIGNED` | yes | Whether the subject can list without a credential |
 | `SUPPORTS_SIGNED` | no, defaults true | False only where the mechanism cannot carry a per-request credential |
@@ -63,6 +63,71 @@ and a capsule could be altered without anything noticing.
 A capsule that declares neither `SUPPORTS_UNSIGNED` nor `SUPPORTS_SIGNED` as
 true describes a subject that can issue no request at all, and the loader
 refuses it.
+
+## A mode is not just a legal string
+
+`MODES` maps each mode to a manifest, because the facts the harness needs vary
+*per mode* rather than per tool:
+
+```python
+MODES = {
+    "recursive-tsv": Mode(
+        product="text",
+        fields=("key", "size", "mtime", "etag"),
+        axes={"concurrency": Ceiling(8)},
+    ),
+    "recursive-parquet-sorted": Mode(
+        product="parquet-sorted",
+        fields=("key", "size", "mtime", "etag"),
+        axes={"concurrency": Ceiling(8)},
+        purpose_ceiling="measurement",
+    ),
+}
+```
+
+None of this is used to *run* the tool — `build_command` still owns argv
+entirely and the harness never interprets a mode. The manifest exists for what
+happens afterwards: deciding what a result may be compared with, and recording
+what it actually ran at.
+
+**Per mode, not per capsule**, because the truth differs within one tool:
+rclone's `--checkers` is live on its walk mode and inert on its flat one;
+s7cmd's `--no-sort` reaches one of five recursive modes; swath's Parquet modes
+write a directory sink while its TSV mode streams to stdout.
+
+| Field | What it is for |
+| --- | --- |
+| `product` | The output artifact — `text`, `parquet`, `parquet-sorted`. **Shared vocabulary**: "text" means the same for aws-cli and swath, so a report can group a text stratum and keep a Parquet number out of it. |
+| `fields` | Which contract columns this mode populates. A mode emitting key-only must not be ranked against one emitting four columns — otherwise a tool wins by emitting less. |
+| `axes` | Per reserved name: `Fixed(v)`, `Default(v)`, `Ceiling(v)`, `Inert`, or absent. |
+| `purpose_ceiling` | The most a plan may claim this mode is. A plan may demote a run to `canary`; it may never promote `summarize` to `measurement`. |
+
+**`product` and `fields` translate across tools; `axes` does not.** The first two
+describe the artifact, which is why they are comparable at all. An axis name
+identifies the axis and explicitly not the semantics — `-c`, `--checkers` and
+`--list-concurrency` govern different things, and no declaration makes them one.
+`axes` exists so the recorded value stops lying, not so it can be compared.
+
+### The five states of an axis
+
+`Absent` currently has to mean five things at once, and cannot:
+
+| State | Means | Example |
+| --- | --- | --- |
+| absent | This tool has no such knob | minio-mc concurrency |
+| `Fixed(v)` | Real, effective, and not settable | ps3 at 256 |
+| `Default(v)` | Settable; this is what it runs at unsilenced | s4cmd `-c` |
+| `Ceiling(v)` | Settable, but the effective width is lower and data-dependent | swath's AIMD start at `min(4,N)`; s5cmd's `min(numworkers, shards)` |
+| `Inert` | Flag accepted, no effect **on this mode** | rclone `--checkers` on flat `ListR` |
+
+`Inert` means *statically* inert for the mode. A knob whose effect depends on the
+target — s4cmd's `-c` does nothing on a flat prefix but works on a nested one —
+is not `Inert`; namespace shape is an analysis covariate, not a declaration.
+
+A `Ceiling` axis records what was *asked for*; what was *achieved* is a fact
+about the run and belongs in evidence, never in `config`. Writing a nominal 8
+into a hashed blob when the tool ran at 4 is the same lie this table exists to
+prevent.
 
 ## Signing is declared, never assumed
 
