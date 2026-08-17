@@ -6,10 +6,10 @@ import argparse
 import importlib.util
 import json
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from types import ModuleType
+from types import MappingProxyType, ModuleType
 from typing import Protocol, cast
 
 
@@ -27,8 +27,23 @@ class CommandRequest:
     prefix: str = ""
     tool: str = ""
     operation: str = "list"
-    auth: str = "anonymous"
-    concurrency: int | None = None
+    signed: bool = False
+    """Whether the subject should sign its requests.
+
+    Derived by the harness from the case's auth role -- null role, unsigned --
+    and passed as a boolean because signing is an argv decision several
+    capsules make (``--no-sign-request`` and friends), while *which* identity
+    signs is the harness's business and never the subject's.
+    """
+
+    config: Mapping[str, object] = MappingProxyType({})
+    """The capsule's own knobs, forwarded verbatim and never read by the harness.
+
+    A capsule declares the keys it accepts in ``CONFIG_KEYS``; anything else is
+    refused before ``build_command`` runs, so a misspelled knob is an error
+    rather than a sweep whose cells are all identical.
+    """
+
     sink_dir: str = ""
     """Container-local directory a mode with a native file sink may write into.
 
@@ -53,7 +68,23 @@ class LoadedCommandAdapter:
 
     build: CommandBuilder
     fixed_command_prefix: tuple[str, ...]
-    concurrency_range: tuple[int, int] | None
+    config_keys: frozenset[str]
+    supports_unsigned: bool
+    """Whether this subject can list without a credential.
+
+    The interesting half of the question: signing is the default credential
+    chain and every subject here can do it, while four have no unsigned request
+    path at all. A capsule states this because it is a fact about the tool, and
+    a stratum it cannot issue is refused rather than silently ignored — which is
+    what let a signing case run unsigned while every receipt recorded it signed.
+    """
+
+    supports_signed: bool
+    """Almost always true, and false only where the capsule's own mechanism cannot
+    carry a credential — mc resolves one from a static alias, not per request.
+
+    A capsule omits ``SUPPORTS_SIGNED`` and the loader defaults it to true."""
+
     tool: str
     functional_env: dict[str, str]
     """Non-secret, tool-specific environment the subject structurally needs.
@@ -68,38 +99,16 @@ class LoadedCommandAdapter:
 
     def compile(self, request: CommandRequest) -> tuple[str, ...]:
         """Return the complete subject argv the attempt engine will execute."""
-        validate_concurrency(
-            request,
-            tool=self.tool,
-            supported_range=self.concurrency_range,
-        )
+        undeclared = sorted(set(request.config) - self.config_keys)
+        if undeclared:
+            raise CommandAdapterError(
+                f"{self.tool} does not accept config key(s): {', '.join(undeclared)}"
+            )
+        if request.signed and not self.supports_signed:
+            raise CommandAdapterError(f"{self.tool} cannot sign its requests")
+        if not request.signed and not self.supports_unsigned:
+            raise CommandAdapterError(f"{self.tool} has no unsigned request path")
         return self.build(request)
-
-
-def validate_concurrency(
-    request: CommandRequest,
-    *,
-    tool: str,
-    supported_range: tuple[int, int] | None = None,
-) -> int | None:
-    """Validate an explicit logical concurrency for one adapter.
-
-    Absence means the adapter keeps its registered default. An explicit value
-    is accepted only when the adapter declares a finite inclusive range.
-    """
-    value = request.concurrency
-    if value is None:
-        return None
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise CommandAdapterError("concurrency must be an integer")
-    if supported_range is None:
-        raise CommandAdapterError(f"{tool} does not support logical concurrency")
-    minimum, maximum = supported_range
-    if not minimum <= value <= maximum:
-        raise CommandAdapterError(
-            f"{tool} concurrency must be an integer in {minimum}..{maximum}; got: {value}"
-        )
-    return value
 
 
 def _load_module(path: Path) -> ModuleType:
@@ -122,7 +131,9 @@ def load_command_adapter(
     build = getattr(module, "build_command", None)
     prefix = getattr(module, "FIXED_COMMAND_PREFIX", None)
     tool = getattr(module, "TOOL", None)
-    concurrency_range = getattr(module, "CONCURRENCY_RANGE", None)
+    config_keys: frozenset[str] = getattr(module, "CONFIG_KEYS", frozenset())
+    supports_unsigned = getattr(module, "SUPPORTS_UNSIGNED", None)
+    supports_signed = getattr(module, "SUPPORTS_SIGNED", True)
     functional_env = getattr(module, "FUNCTIONAL_ENV", {})
     if not callable(build):
         raise CommandAdapterError(f"{path} does not export callable build_command")
@@ -139,20 +150,22 @@ def load_command_adapter(
         raise CommandAdapterError(
             f"bundled driver is for {tool}, not requested tool {expected_tool}"
         )
-    if concurrency_range is not None and (
-        not isinstance(concurrency_range, tuple)
-        or len(concurrency_range) != 2
-        or any(isinstance(value, bool) or not isinstance(value, int) for value in concurrency_range)
-        or concurrency_range[0] < 1
-        or concurrency_range[0] > concurrency_range[1]
+    if not isinstance(config_keys, frozenset) or not all(
+        isinstance(key, str) and key for key in config_keys
     ):
-        raise CommandAdapterError(
-            f"{path} exports invalid CONCURRENCY_RANGE; expected positive (minimum, maximum)"
-        )
+        raise CommandAdapterError(f"{path} exports invalid CONFIG_KEYS; expected frozenset[str]")
+    if not isinstance(supports_unsigned, bool):
+        raise CommandAdapterError(f"{path} does not export bool SUPPORTS_UNSIGNED")
+    if not isinstance(supports_signed, bool):
+        raise CommandAdapterError(f"{path} exports a non-bool SUPPORTS_SIGNED")
+    if not supports_unsigned and not supports_signed:
+        raise CommandAdapterError(f"{path} declares a subject that can issue no request at all")
     return LoadedCommandAdapter(
         cast(CommandBuilder, build),
         prefix,
-        cast(tuple[int, int] | None, concurrency_range),
+        config_keys,
+        supports_unsigned,
+        supports_signed,
         tool,
         cast(dict[str, str], functional_env),
     )
@@ -169,7 +182,8 @@ def build_parser(prog: str) -> argparse.ArgumentParser:
     parser.add_argument("bucket")
     parser.add_argument("region")
     parser.add_argument("prefix", nargs="?", default="")
-    parser.add_argument("--concurrency", type=int)
+    parser.add_argument("--signed", action="store_true")
+    parser.add_argument("--config", default="{}", metavar="JSON")
     return parser
 
 
@@ -182,15 +196,22 @@ def command_adapter_main(
     """Parse one request and print adapter argv as JSON for human inspection."""
     args = build_parser(prog).parse_args(argv)
     try:
+        config = json.loads(args.config)
+        if not isinstance(config, dict):
+            raise CommandAdapterError("--config must be a JSON object")
         command = build(
             CommandRequest(
                 args.mode,
                 args.bucket,
                 args.region,
                 args.prefix,
-                concurrency=args.concurrency,
+                signed=args.signed,
+                config=config,
             )
         )
+    except json.JSONDecodeError as exc:
+        print(f"{prog}: --config is not valid JSON: {exc}", file=sys.stderr)
+        return 2
     except CommandAdapterError as exc:
         print(f"{prog}: {exc}", file=sys.stderr)
         return 2

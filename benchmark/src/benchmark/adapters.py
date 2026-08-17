@@ -28,6 +28,7 @@ import importlib.util
 import subprocess
 import sys
 import uuid
+from collections.abc import Mapping
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -54,7 +55,8 @@ def compile_command(
     bucket: str,
     region: str,
     prefix: str = "",
-    auth: str = "anonymous",
+    signed: bool = False,
+    config: Mapping[str, object] | None = None,
     sink_dir: str = "",
 ) -> tuple[tuple[str, ...], dict[str, str]]:
     """Load ``<adapter_dir>/command.py`` and compile this case's exact subject argv.
@@ -71,7 +73,8 @@ def compile_command(
             region=region,
             prefix=prefix,
             tool=tool,
-            auth=auth,
+            signed=signed,
+            config=config or {},
             sink_dir=sink_dir,
         )
         return adapter.compile(request), adapter.functional_env

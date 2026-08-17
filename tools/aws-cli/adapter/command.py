@@ -7,7 +7,6 @@ from benchmark.runtime.command_adapter import (
     CommandAdapterError,
     CommandRequest,
     command_adapter_main,
-    validate_concurrency,
 )
 
 TOOL = "aws-cli"
@@ -25,6 +24,9 @@ MODES = frozenset(
         "s3-ls-delimiter",
     }
 )
+SUPPORTS_UNSIGNED = True
+"""--no-sign-request lists anonymously; otherwise the credential in the
+environment signs."""
 Q_CONTENTS = "Contents[].[Key,Size,ETag,LastModified,StorageClass]"
 Q_VERSIONS = "Versions[].[Key,Size,ETag,LastModified,StorageClass]"
 
@@ -33,7 +35,7 @@ def _auth_flags(request: CommandRequest) -> tuple[str, ...]:
     # Authenticated runs sign requests with the credential the engine put in
     # the child's environment; anonymous runs pin no-sign-request so a subject
     # can never fall back to an ambient credential it should not have.
-    return ("--no-sign-request",) if request.auth == "anonymous" else ()
+    return ("--no-sign-request",) if not request.signed else ()
 
 
 def _s3api(request: CommandRequest, operation: str) -> list[str]:
@@ -112,7 +114,6 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
 
 
 def build_command(request: CommandRequest) -> tuple[str, ...]:
-    validate_concurrency(request, tool=TOOL)
     return *FIXED_COMMAND_PREFIX, *_build_tail(request)
 
 

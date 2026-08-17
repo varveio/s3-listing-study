@@ -1,13 +1,16 @@
 # Large-bucket diagnostic timing campaign. No correctness verifier is available.
 spec_version: 2
 
+# Used only by the subjects that cannot list without a credential; each capsule
+# declares which request strata it can issue.
+auth_role: public_auth_list
+
 bucket: noaa-rtma-pds
 region: us-east-1
 
 defaults:
   reps: 1
   timeout_s: 28800
-  auth: anonymous
   vcpus: 2
   memory_gb: 4
   container_memory_gb: 2
@@ -21,13 +24,9 @@ tools:
   s3-fast-list:
 
   s3kor:
-    auth: authenticated
   s4cmd:
-    auth: authenticated
   s3p:
-    auth: authenticated
   ps3:
-    auth: authenticated
 
   swath:
     cases:

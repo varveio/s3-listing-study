@@ -317,23 +317,25 @@ def render_batch_job(
 ) -> dict[str, Any]:
     _validate_batch_options(options)
     secret_variables: dict[str, str] = {}
-    if case.auth == "authenticated":
+    if case.auth_role is not None:
         if not options.authenticated_worker_sa:
             raise CampaignError(
-                "authenticated case requires an authenticated worker service account"
+                f"case signs with role {case.auth_role} and requires a signing worker "
+                "service account"
             )
         secret = options.aws_credential_secret
         if not secret or SECRET_RE.fullmatch(secret) is None:
-            raise CampaignError("authenticated case requires a Secret Manager version resource")
-        # One variable, whose payload the worker parses. An anonymous case's
-        # job has no environment block at all, so the stratum a case was
-        # submitted in decides whether a credential is present.
+            raise CampaignError(
+                f"case signs with role {case.auth_role} and requires a Secret Manager "
+                "version resource"
+            )
+        # One variable, whose payload the worker parses. A case that lists
+        # unsigned has no environment block at all, so the role a case resolved
+        # to is what decides whether a credential is present.
         secret_variables = {CREDENTIAL_ENV_VAR: secret}
         service_account = options.authenticated_worker_sa
-    elif case.auth == "anonymous":
-        service_account = options.anonymous_worker_sa
     else:
-        raise CampaignError(f"unknown authentication stratum: {case.auth}")
+        service_account = options.anonymous_worker_sa
 
     container_memory = case.resources.container_memory_gb
     pairs = (
@@ -341,7 +343,7 @@ def render_batch_job(
         ("--mode", case.mode),
         ("--bucket", bucket),
         ("--region", region),
-        ("--auth", case.auth),
+        *(() if case.auth_role is None else (("--auth-role", case.auth_role),)),
         ("--prefix", ""),
         ("--output", "/tmp/attempt"),
         ("--destination", destination),

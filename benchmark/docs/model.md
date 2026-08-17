@@ -50,11 +50,12 @@ An unspecified encoding will be re-derived differently by the next reader, so:
 ```python
 CASE_HASH_V1 = b"s3-listing-study-case-v1\0"
 
+
 def case_hash(environment: dict, config: dict, tool_slice: str, platform: str) -> str:
     document = json.dumps(
         {
-            "environment": environment,   # the table above, absent keys omitted
-            "config": config,             # the capsule's blob, as an object
+            "environment": environment,  # the table above, absent keys omitted
+            "config": config,  # the capsule's blob, as an object
             "tool_slice_sha256": tool_slice,
             "platform_sha256": platform,
         },

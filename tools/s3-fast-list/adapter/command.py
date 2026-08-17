@@ -5,19 +5,21 @@ from benchmark.runtime.command_adapter import (
     CommandAdapterError,
     CommandRequest,
     command_adapter_main,
-    validate_concurrency,
 )
 
 TOOL = "s3-fast-list"
 FIXED_COMMAND_PREFIX = ("/usr/bin/s3-fast-list",)
 MODES = frozenset({"list"})
+SUPPORTS_UNSIGNED = True
+"""--no-sign-request lists anonymously. The signed path drops the flag and has
+not been exercised by a committed run."""
 
 
 def _build_tail(request: CommandRequest) -> tuple[str, ...]:
     if request.mode != "list":
         raise CommandAdapterError(f"unknown mode: {request.mode}")
     argv = [
-        "--no-sign-request",
+        *((), ("--no-sign-request",))[not request.signed],
         "--output-parquet-file",
         "/dev/stdout",
         "--output-ks-file",
@@ -30,7 +32,6 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
 
 
 def build_command(request: CommandRequest) -> tuple[str, ...]:
-    validate_concurrency(request, tool=TOOL)
     return *FIXED_COMMAND_PREFIX, *_build_tail(request)
 
 

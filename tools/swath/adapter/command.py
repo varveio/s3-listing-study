@@ -5,7 +5,6 @@ from benchmark.runtime.command_adapter import (
     CommandAdapterError,
     CommandRequest,
     command_adapter_main,
-    validate_concurrency,
 )
 
 TOOL = "swath"
@@ -23,6 +22,9 @@ MODES = frozenset(
         "recursive-parquet-sorted",
     }
 )
+SUPPORTS_UNSIGNED = True
+"""--no-sign-request lists anonymously. The signed path drops the flag and has
+not been exercised by a committed run."""
 
 SINK_MODES = frozenset({"recursive-parquet", "recursive-parquet-sorted"})
 """Modes whose listing lands in the engine's sink directory, not on stdout.
@@ -55,7 +57,7 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
         uri,
         "--region",
         request.region,
-        "--no-sign-request",
+        *((), ("--no-sign-request",))[not request.signed],
         "--concurrency",
         "8",
     )
@@ -99,7 +101,6 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
 
 
 def build_command(request: CommandRequest) -> tuple[str, ...]:
-    validate_concurrency(request, tool=TOOL)
     return *FIXED_COMMAND_PREFIX, *_build_tail(request)
 
 

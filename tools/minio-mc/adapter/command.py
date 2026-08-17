@@ -5,7 +5,6 @@ from benchmark.runtime.command_adapter import (
     CommandAdapterError,
     CommandRequest,
     command_adapter_main,
-    validate_concurrency,
 )
 
 TOOL = "minio-mc"
@@ -13,6 +12,12 @@ FIXED_COMMAND_PREFIX = ("/usr/bin/mc",)
 MODES = frozenset(
     {"recursive", "recursive-json", "shallow", "shallow-json", "versions-json", "find", "find-json"}
 )
+SUPPORTS_UNSIGNED = True
+"""The keyless MC_HOST_s3 alias issues unsigned requests."""
+SUPPORTS_SIGNED = False
+"""FUNCTIONAL_ENV is a static, request-independent declaration, so this
+mechanism has no way to put a credential into a per-request alias URL.
+Signing mc needs a different mechanism, not a different flag."""
 FUNCTIONAL_ENV = {"MC_HOST_s3": "https://s3.amazonaws.com"}
 """Defines the ad-hoc alias `s3` mc's argv below targets.
 
@@ -48,7 +53,6 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
 
 
 def build_command(request: CommandRequest) -> tuple[str, ...]:
-    validate_concurrency(request, tool=TOOL)
     return *FIXED_COMMAND_PREFIX, *_build_tail(request)
 
 

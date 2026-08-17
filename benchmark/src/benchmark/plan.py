@@ -91,7 +91,7 @@ SPEC_VERSION = 2
 # number is a promise rather than a check.
 FINGERPRINT_VERSION = 1
 
-TOP_LEVEL = ("spec_version", "bucket", "region", "defaults", "tools", "exclude")
+TOP_LEVEL = ("spec_version", "bucket", "region", "auth_role", "defaults", "tools", "exclude")
 
 # What a box is, in the terms a plan states it: shape, not product name. The
 # machine type is resolved from the pair through benchmark/plans/instances.yaml, so a plan
@@ -119,23 +119,27 @@ RESOURCE_FIELDS = (*BOX_FIELDS, *PROCESS_FIELDS)
 # directory.
 SCHEDULE_FIELDS = ("reps", "timeout_s")
 
-# Whether the request is signed, not whether the bucket is private: every target
-# is public and four of the eleven tools have no unsigned path, so a mixed roster
-# would compare listing against listing-plus-signing-1,000-requests. A stratum is
-# an identity too — an authenticated case runs as the service account that may
-# read the credential (infra/.../aws-credentials.tf).
-AUTH_CHOICES = ("anonymous", "authenticated")
+# Whether the request is signed is a fact about the subject, not a plan's
+# preference: four of the eleven tools have no unsigned path and four can only
+# list anonymously, so each capsule declares what it can issue and the plan
+# supplies the role to sign *with* when signing is required. A role is an
+# identity — a signing case runs as the service account that may read the
+# credential (infra/.../aws-credentials.tf) — so `auth_role` names one rather
+# than setting a flag.
+#
+# A capsule that can do both lists unsigned unless a row asks otherwise: signing
+# adds a signature to every one of ~1,000 requests, which is a different
+# measurement, and the cheaper one is the better default.
 
 # What a row may state: what one case *is*. `mode` first so it leads every
 # derived ID; the rest follow in this order, so an ID is a function of the key
 # set and not of the order someone typed them in.
-ROW_FIELDS = ("mode", "auth", *RESOURCE_FIELDS)
+ROW_FIELDS = ("mode", "signed", *RESOURCE_FIELDS)
 
 # What a layer may state: what every case under it inherits. No `mode` — eleven
 # tools have eleven mode vocabularies, so nothing above a row has one to state.
-# `auth` is here as well as in a row: a campaign usually runs one stratum, and
-# saying so once beats repeating it on every line.
-LAYER_FIELDS = ("auth", *RESOURCE_FIELDS, *SCHEDULE_FIELDS)
+# `signed` is here as well as in a row, for a roster swept as one stratum.
+LAYER_FIELDS = ("signed", *RESOURCE_FIELDS, *SCHEDULE_FIELDS)
 
 TOOL_FIELDS = ("cases", *LAYER_FIELDS)
 
@@ -204,7 +208,8 @@ class Case:
     tool: str
     case_id: str
     mode: str
-    auth: str
+    auth_role: str | None
+    """The role this case signs with, or None when it lists unsigned."""
     resources: Resources
     reps: int
     timeout_s: int
@@ -246,9 +251,10 @@ class Plan:
         default_modes: Mapping[str, str] | None = None,
         instances: Mapping[tuple[int, int], str] | None = None,
         heap: HeapConfig | None = None,
+        signing: Mapping[str, tuple[bool, bool]] | None = None,
     ) -> Plan:
         """Read a plan; tables default to files under ``benchmark/plans/``."""
-        return _load(path, default_modes, instances, heap)
+        return _load(path, default_modes, instances, heap, signing)
 
     def tools(self) -> list[str]:
         """Every tool with at least one case, in plan order."""
@@ -440,6 +446,7 @@ def _load(
     default_modes: Mapping[str, str] | None,
     instances: Mapping[tuple[int, int], str] | None,
     heap: HeapConfig | None,
+    signing: Mapping[str, tuple[bool, bool]] | None,
 ) -> Plan:
     raw, doc = _read_yaml_mapping(path, "plan")
 
@@ -464,7 +471,7 @@ def _load(
     _reject_unknown(defaults, LAYER_FIELDS, "[defaults]", path)
     base_resources = _resources(defaults, "defaults", path, complete=True)
     base_schedule = _schedule(defaults, "defaults", path, complete=True)
-    base_auth = _auth(defaults, "defaults", path, complete=True)
+    base_signed = _signed(defaults, "defaults", path, complete=True)
 
     region = _string(doc, "region", "plan", path)
     # Resolved next to the plan rather than passed down from the caller, so a
@@ -472,6 +479,8 @@ def _load(
     modes = default_modes if default_modes is not None else _sibling_default_modes(doc, path)
     catalogue = instances if instances is not None else load_instances(_sibling(path, "instances"))
     heap_config = heap if heap is not None else load_heap_config(_sibling(path, "tools"))
+    capability = signing if signing is not None else load_signing(doc, path)
+    auth_role = _auth_role(doc, path)
 
     plan = Plan(
         path=path,
@@ -480,7 +489,7 @@ def _load(
         region=region,
         cases=_cases(
             doc,
-            {**base_resources, **base_auth},
+            {**base_resources, **base_signed},
             base_schedule,
             modes,
             _Context(
@@ -488,6 +497,8 @@ def _load(
                 region=region,
                 instances=catalogue,
                 heap=heap_config,
+                signing=capability,
+                auth_role=auth_role,
                 path=path,
             ),
         ),
@@ -570,20 +581,56 @@ def _reject_mode(table: Mapping[str, Any], where: str, path: Path) -> None:
         )
 
 
-def _auth(table: Mapping[str, Any], where: str, path: Path, *, complete: bool) -> dict[str, str]:
-    """The stratum ``table`` states. Required of ``defaults``, so a plan written
-    before the field existed is refused rather than taking one nobody chose."""
-    value = table.get("auth")
+def _auth_role(doc: Mapping[str, Any], path: Path) -> str | None:
+    """The role a case signs with when its subject cannot list anonymously."""
+    value = doc.get("auth_role")
     if value is None:
-        if complete:
-            raise PlanError(
-                f"'{where}' in {path} has no 'auth' ({'|'.join(AUTH_CHOICES)}) — a case that "
-                "did not say whether it signed cannot be compared with one that did"
-            )
+        return None
+    if not isinstance(value, str) or not value or any(c.isspace() for c in value):
+        raise PlanError(f"'auth_role' in {path} is not a non-empty whitespace-free name: {value!r}")
+    return value
+
+
+def load_signing(doc: Mapping[str, Any], path: Path) -> dict[str, tuple[bool, bool]]:
+    """Read each rostered capsule's declared request strata.
+
+    Imported lazily: a plan is resolved against the capsules it names, but the
+    adapter loader pulls in the runtime contract, and most callers of this module
+    never touch a capsule at all.
+    """
+    from benchmark.adapters import adapter_dir_for
+    from benchmark.runtime.command_adapter import load_command_adapter
+
+    root = Path(__file__).resolve().parents[3] / "tools"
+    tools = doc.get("tools")
+    names = sorted(tools) if isinstance(tools, Mapping) else []
+    capability: dict[str, tuple[bool, bool]] = {}
+    for tool in names:
+        adapter = adapter_dir_for(str(tool), str(root)) / "command.py"
+        if not adapter.is_file():
+            continue
+        try:
+            loaded = load_command_adapter(adapter, expected_tool=str(tool))
+            capability[str(tool)] = (loaded.supports_unsigned, loaded.supports_signed)
+        except Exception as exc:  # a capsule that will not load is a plan error
+            raise PlanError(f"'tools.{tool}' in {path}: {exc}") from exc
+    return capability
+
+
+def _signed(table: Mapping[str, Any], where: str, path: Path, *, complete: bool) -> dict[str, bool]:
+    """The signing override ``table`` states, if any.
+
+    Not required anywhere: a capsule that can issue only one stratum decides for
+    itself, and one that can do both lists unsigned unless asked. An override is
+    refused later against the capsule's declared capability.
+    """
+    del complete
+    value = table.get("signed")
+    if value is None:
         return {}
-    if value not in AUTH_CHOICES:
-        raise PlanError(f"'{where}' 'auth' in {path} is not {'|'.join(AUTH_CHOICES)}: {value!r}")
-    return {"auth": value}
+    if not isinstance(value, bool):
+        raise PlanError(f"'{where}' 'signed' in {path} is not true or false: {value!r}")
+    return {"signed": value}
 
 
 def _schedule(
@@ -671,6 +718,8 @@ class _Context:
     region: str
     instances: Mapping[tuple[int, int], str]
     heap: HeapConfig
+    signing: Mapping[str, tuple[bool, bool]]
+    auth_role: str | None
     path: Path
 
 
@@ -720,7 +769,7 @@ def _tool_cases(
     settings = {
         **base_resources,
         **_resources(table, where, path, complete=False),
-        **_auth(table, where, path, complete=False),
+        **_signed(table, where, path, complete=False),
     }
     schedule = {**base_schedule, **_schedule(table, where, path, complete=False)}
 
@@ -800,8 +849,8 @@ def _row_field_value(key: str, value: Any, label: str, path: Path) -> str | int:
         if not isinstance(value, str) or not value.strip():
             raise PlanError(f"'{label}' 'mode' in {path} is not a non-empty string")
         return value
-    if key == "auth":
-        return _auth({key: value}, label, path, complete=False)[key]
+    if key == "signed":
+        return _signed({key: value}, label, path, complete=False)[key]
     return _positive_int(value, key, label, path)
 
 
@@ -919,6 +968,46 @@ def _zip_choices(value: Any, label: str, path: Path) -> list[dict[str, str | int
     return choices
 
 
+def _resolve_auth_role(tool: str, override: object, context: _Context) -> str | None:
+    """Decide whether this case signs, and with which role.
+
+    The capsule's declared SIGNING is the authority: a subject with no unsigned
+    request path always signs, one that can only list anonymously never does,
+    and a plan asking either of them for the other stratum is refused rather
+    than quietly ignored. Only a capsule that can issue both leaves the choice
+    open, and it lists unsigned unless a row says otherwise.
+    """
+    capability = context.signing.get(tool)
+    if capability is None:
+        raise PlanError(
+            f"'tools.{tool}' in {context.path} declares no SIGNING capability; a case cannot "
+            "be resolved without knowing which request strata the subject can issue"
+        )
+    if override is not None and not isinstance(override, bool):
+        raise PlanError(f"'tools.{tool}' in {context.path} has a non-boolean 'signed'")
+    supports_unsigned, supports_signed = capability
+    if not supports_unsigned:
+        signed = True
+    elif not supports_signed:
+        signed = False
+    else:
+        signed = bool(override)
+    if override is not None and bool(override) != signed:
+        wanted = "sign" if override else "list unsigned"
+        raise PlanError(
+            f"'tools.{tool}' in {context.path} asks the case to {wanted}, which this capsule "
+            "declares the subject cannot do"
+        )
+    if not signed:
+        return None
+    if context.auth_role is None:
+        raise PlanError(
+            f"'tools.{tool}' in {context.path} must sign, but the plan states no 'auth_role' "
+            "to sign with"
+        )
+    return context.auth_role
+
+
 def _case(
     tool: str,
     resolved: Mapping[str, Any],
@@ -928,7 +1017,7 @@ def _case(
 ) -> Case:
     path = context.path
     mode = str(resolved["mode"])
-    auth = str(resolved["auth"])
+    auth_role = _resolve_auth_role(tool, resolved.get("signed"), context)
     resources = resolved
     shape = (int(resources["vcpus"]), int(resources["memory_gb"]))
     machine_type = context.instances.get(shape)
@@ -958,6 +1047,9 @@ def _case(
     )
     env = context.heap.env_for(tool, visible_memory_gb=resolved_resources.visible_memory_gb)
 
+    chosen = tuple(
+        (key, auth_role is not None) if key == "signed" else (key, value) for key, value in chosen
+    )
     case_id = derive_case_id(chosen)
     if not CASE_ID_RE.fullmatch(case_id):
         raise PlanError(
@@ -968,7 +1060,7 @@ def _case(
         tool=tool,
         case_id=case_id,
         mode=mode,
-        auth=auth,
+        auth_role=auth_role,
         resources=resolved_resources,
         reps=schedule["reps"],
         timeout_s=schedule["timeout_s"],
@@ -979,7 +1071,7 @@ def _case(
             region=context.region,
             tool=tool,
             mode=mode,
-            auth=auth,
+            auth_role=auth_role,
             resources=resolved_resources,
             timeout_s=schedule["timeout_s"],
             env=env,
@@ -996,7 +1088,13 @@ def derive_case_id(chosen: Iterable[tuple[str, str | int | None]]) -> str:
     """
     segments: list[str] = []
     for field, value in chosen:
-        rendered = "none" if value is None else str(value)
+        if value is None:
+            rendered = "none"
+        elif isinstance(value, bool):
+            # A case ID is lowercase by contract; Python's bool is not.
+            rendered = "true" if value else "false"
+        else:
+            rendered = str(value)
         segments.append(rendered if field == "mode" else f"{field}-{rendered}")
     return ".".join(segments)
 
@@ -1007,7 +1105,7 @@ def fingerprint(
     region: str,
     tool: str,
     mode: str,
-    auth: str,
+    auth_role: str | None,
     resources: Resources,
     timeout_s: int,
     env: Sequence[tuple[str, str]] = (),
@@ -1019,7 +1117,7 @@ def fingerprint(
         "region": region,
         "tool": tool,
         "mode": mode,
-        "auth": auth,
+        "auth_role": auth_role,
         "resources": resources.as_dict(),
         "timeout_s": timeout_s,
         "env": [list(pair) for pair in env],

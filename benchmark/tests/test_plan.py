@@ -19,7 +19,6 @@ region: us-east-1
 defaults:
   reps: 3
   timeout_s: 3600
-  auth: anonymous
   vcpus: 2
   memory_gb: 8
 tools:
@@ -27,9 +26,18 @@ tools:
 """
 
 
-def write(tmp_path: Path, tools: str, *, bucket: str = "b", extra: str = "") -> Path:
+def write(
+    tmp_path: Path,
+    tools: str,
+    *,
+    bucket: str = "b",
+    extra: str = "",
+    auth_role: str | None = "fixture-role",
+) -> Path:
     path = tmp_path / f"{bucket}.yaml"
     body = MINIMAL.format(bucket=bucket, tools=textwrap.indent(textwrap.dedent(tools), "  "))
+    if auth_role is not None:
+        body = f"auth_role: {auth_role}\n" + body
     path.write_text(body + extra, encoding="utf-8")
     return path
 
@@ -61,10 +69,27 @@ HEAP = bench.HeapConfig(
 )
 
 
+SIGNING = {
+    "aws-cli": (True, True),
+    "minio-mc": (True, False),
+    "ps3": (False, True),
+    "rclone": (True, True),
+    "s3-fast-list": (True, True),
+    "s3kor": (False, True),
+    "s3p": (False, True),
+    "s4cmd": (False, True),
+    "s5cmd": (True, True),
+    "s7cmd": (True, True),
+    "swath": (True, True),
+}
+"""(supports_unsigned, supports_signed) per capsule, as the real ones declare."""
+
+
 def load(path: Path, **kwargs: object) -> bench.Plan:
     """``Plan.load`` with the fixture tables already supplied."""
     kwargs.setdefault("instances", INSTANCES)
     kwargs.setdefault("heap", HEAP)
+    kwargs.setdefault("signing", SIGNING)
     return bench.Plan.load(path, **kwargs)  # type: ignore[arg-type]
 
 
@@ -440,7 +465,7 @@ def test_a_product_may_inherit_the_default_mode(tmp_path: Path) -> None:
             "unknown key",
         ),
         ("- {product: {mode: [[recursive-tsv]]}}", "mode.*not a non-empty string"),
-        ("- {product: {auth: [signed]}}", r"is not anonymous\|authenticated"),
+        ('- {product: {signed: ["yes"]}}', r"is not true or false"),
         ("- {product: {memory_gb: [false]}}", "not a positive integer"),
         ("- {product: {mode: [recursive-tsv]}, mystery: 1}", "extra key"),
     ],
@@ -695,7 +720,7 @@ def test_every_key_a_row_may_state_moves_both_the_id_and_the_fingerprint(
     # Two legal values per key, both resolving to a shape the catalogue offers.
     pairs: dict[str, tuple[object, object]] = {
         "mode": ("recursive-tsv", "recursive-jsonl"),
-        "auth": ("anonymous", "authenticated"),
+        "signed": (False, True),
         "vcpus": (2, 4),
         "memory_gb": (8, 16),
         "container_memory_gb": (4, 8),
@@ -709,7 +734,9 @@ def test_every_key_a_row_may_state_moves_both_the_id_and_the_fingerprint(
         row = {"mode": "recursive-tsv"} | {field: value}
         body = "swath:\n  cases:\n    - {" + ", ".join(f"{k}: {v}" for k, v in row.items()) + "}\n"
         path.write_text(
-            MINIMAL.format(bucket="b", tools=textwrap.indent(body, "  ")), encoding="utf-8"
+            "auth_role: fixture-role\n"
+            + MINIMAL.format(bucket="b", tools=textwrap.indent(body, "  ")),
+            encoding="utf-8",
         )
         return load(path).cases[0]
 
@@ -790,39 +817,44 @@ def test_a_row_without_a_mode_and_no_tool_default_is_refused(tmp_path: Path) -> 
         load(path, default_modes={"s3p": "ls"})
 
 
-def test_a_plan_that_does_not_say_whether_it_signed_is_refused(tmp_path: Path) -> None:
-    """Four of the eleven tools have no unsigned path, so this is never implicit."""
-    path = write(tmp_path, ONE_CASE)
-    path.write_text(
-        path.read_text(encoding="utf-8").replace("  auth: anonymous\n", ""), encoding="utf-8"
+def test_a_subject_with_no_unsigned_path_must_be_given_a_role(tmp_path: Path) -> None:
+    """s4cmd cannot list anonymously, so a plan with no role cannot run it."""
+    path = write(tmp_path, "s4cmd:\n  cases:\n    - {mode: recursive}\n", auth_role=None)
+    with pytest.raises(bench.PlanError, match="must sign, but the plan states no 'auth_role'"):
+        load(path, signing={"s4cmd": (False, True)})
+
+
+def test_a_capsule_that_cannot_list_unsigned_signs_without_being_asked(tmp_path: Path) -> None:
+    path = write(tmp_path, "s4cmd:\n  cases:\n    - {mode: recursive}\n", auth_role="a-role")
+    assert load(path, signing={"s4cmd": (False, True)}).cases[0].auth_role == "a-role"
+
+
+def test_a_capsule_that_can_do_both_lists_unsigned_unless_asked(tmp_path: Path) -> None:
+    """Signing every one of ~1,000 requests is a different measurement, so it is opt-in."""
+    body = (
+        "aws-cli:\n  cases:\n"
+        "    - {mode: s3api-v2-text}\n"
+        "    - {mode: s3api-v2-text, signed: true}\n"
     )
-    with pytest.raises(bench.PlanError, match="has no 'auth'"):
-        load(path)
-
-
-def test_a_stratum_that_is_not_one_of_the_two_is_refused(tmp_path: Path) -> None:
-    path = write(tmp_path, "swath:\n  auth: signed\n  cases:\n    - {mode: recursive-tsv}\n")
-    with pytest.raises(bench.PlanError, match=r"is not anonymous\|authenticated"):
-        load(path)
-
-
-def test_a_row_may_sweep_the_stratum_and_it_renders(tmp_path: Path) -> None:
-    """Running one tool both ways measures signing; the ID has to say which is which."""
-    path = write(
-        tmp_path,
-        """
-        aws-cli:
-          cases:
-            - {mode: s3api-v2-text, auth: anonymous}
-            - {mode: s3api-v2-text, auth: authenticated}
-        """,
-    )
-    first, second = load(path).cases
+    path = write(tmp_path, body, auth_role="a-role")
+    first, second = load(path, signing={"aws-cli": (True, True)}).cases
+    assert (first.auth_role, second.auth_role) == (None, "a-role")
+    # The union rule: one row states `signed`, so both IDs render it.
     assert [c.case_id for c in (first, second)] == [
-        "s3api-v2-text.auth-anonymous",
-        "s3api-v2-text.auth-authenticated",
+        "s3api-v2-text.signed-false",
+        "s3api-v2-text.signed-true",
     ]
     assert first.fingerprint != second.fingerprint
+
+
+def test_asking_a_subject_for_a_stratum_it_cannot_issue_is_refused(tmp_path: Path) -> None:
+    path = write(
+        tmp_path,
+        "minio-mc:\n  cases:\n    - {mode: recursive, signed: true}\n",
+        auth_role="a-role",
+    )
+    with pytest.raises(bench.PlanError, match="cannot do"):
+        load(path, signing={"minio-mc": (True, False)})
 
 
 def test_a_row_stating_the_schedule_is_refused(tmp_path: Path) -> None:
@@ -880,7 +912,7 @@ def test_a_tool_body_is_the_defaults_vocabulary_plus_its_rows() -> None:
     assert "mode" not in bench.LAYER_FIELDS
     # The overlap is what a case is *and* can sensibly be defaulted: the
     # allocation, and which stratum it ran in.
-    assert set(bench.ROW_FIELDS) & set(bench.LAYER_FIELDS) == {*bench.RESOURCE_FIELDS, "auth"}
+    assert set(bench.ROW_FIELDS) & set(bench.LAYER_FIELDS) == {*bench.RESOURCE_FIELDS, "signed"}
 
 
 def test_incomplete_defaults_are_refused(tmp_path: Path) -> None:

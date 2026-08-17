@@ -5,7 +5,6 @@ from benchmark.runtime.command_adapter import (
     CommandAdapterError,
     CommandRequest,
     command_adapter_main,
-    validate_concurrency,
 )
 
 TOOL = "rclone"
@@ -22,13 +21,16 @@ MODES = frozenset(
         "walk-debug",
     }
 )
+SUPPORTS_UNSIGNED = True
+"""The s3 backend falls back to anonymous credentials when none are configured;
+env_auth=true is what makes it read the credential the engine populated."""
 
 
 def _build_tail(request: CommandRequest) -> tuple[str, ...]:
     backend = f"s3,provider=AWS,region={request.region}"
     if request.mode == "listv1":
         backend += ",list_version=1"
-    if request.auth == "authenticated":
+    if request.signed:
         # rclone's s3 backend falls back to anonymous credentials when none
         # are configured (backend/s3/s3.go:1508-1511); env_auth=true is what
         # tells it to actually read AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY
@@ -86,7 +88,6 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
 
 
 def build_command(request: CommandRequest) -> tuple[str, ...]:
-    validate_concurrency(request, tool=TOOL)
     return *FIXED_COMMAND_PREFIX, *_build_tail(request)
 
 

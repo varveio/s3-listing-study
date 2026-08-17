@@ -5,23 +5,33 @@ from benchmark.runtime.command_adapter import (
     CommandAdapterError,
     CommandRequest,
     command_adapter_main,
-    validate_concurrency,
 )
 
 TOOL = "s4cmd"
 FIXED_COMMAND_PREFIX = ("/usr/local/bin/s4cmd",)
 MODES = frozenset({"recursive", "shallow", "show-directory", "du"})
+SUPPORTS_UNSIGNED = False
+"""No unsigned request path; it signs with the credential in the environment."""
+CONFIG_KEYS = frozenset({"concurrency"})
 CONCURRENCY_RANGE = (1, 8)
 DEFAULT_CONCURRENCY = 4
 
 
+def _concurrency(request: CommandRequest) -> int:
+    """Validate this capsule's own knob; the harness forwards it without reading it."""
+    value = request.config.get("concurrency", DEFAULT_CONCURRENCY)
+    minimum, maximum = CONCURRENCY_RANGE
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise CommandAdapterError(f"{TOOL} concurrency must be an integer; got: {value!r}")
+    if not minimum <= value <= maximum:
+        raise CommandAdapterError(
+            f"{TOOL} concurrency must be an integer in {minimum}..{maximum}; got: {value}"
+        )
+    return value
+
+
 def _build_tail(request: CommandRequest) -> tuple[str, ...]:
-    threads = validate_concurrency(
-        request,
-        tool=TOOL,
-        supported_range=CONCURRENCY_RANGE,
-    )
-    threads_arg = str(DEFAULT_CONCURRENCY if threads is None else threads)
+    threads_arg = str(_concurrency(request))
     url = f"s3://{request.bucket}/{request.prefix}"
     commands = {
         "recursive": ("ls", "-r", "-c", threads_arg, url),

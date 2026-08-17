@@ -5,12 +5,13 @@ from benchmark.runtime.command_adapter import (
     CommandAdapterError,
     CommandRequest,
     command_adapter_main,
-    validate_concurrency,
 )
 
 TOOL = "s3p"
 FIXED_COMMAND_PREFIX = ("/usr/local/bin/s3p",)
 MODES = frozenset({"ls", "ls-long", "ls-raw", "summarize"})
+SUPPORTS_UNSIGNED = False
+"""No unsigned request path; it signs with the credential in the environment."""
 
 
 def _build_tail(request: CommandRequest) -> tuple[str, ...]:
@@ -31,7 +32,6 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
 
 
 def build_command(request: CommandRequest) -> tuple[str, ...]:
-    validate_concurrency(request, tool=TOOL)
     return *FIXED_COMMAND_PREFIX, *_build_tail(request)
 
 

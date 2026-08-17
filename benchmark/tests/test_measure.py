@@ -160,7 +160,7 @@ def test_environment_boundary_rejects_reserved_collisions() -> None:
 
 def test_credential_payload_parses_and_refuses_the_wrong_stratum() -> None:
     parsed = measure.resolve_credential_env(
-        "authenticated",
+        "public_auth_list",
         {
             CREDENTIAL_ENV_VAR: (
                 "AWS_ACCESS_KEY_ID=AKIAEXAMPLE\nAWS_SECRET_ACCESS_KEY=secret/value+with=padding\n\n"
@@ -172,19 +172,17 @@ def test_credential_payload_parses_and_refuses_the_wrong_stratum() -> None:
         "AWS_ACCESS_KEY_ID": "AKIAEXAMPLE",
         "AWS_SECRET_ACCESS_KEY": "secret/value+with=padding",
     }
-    assert measure.resolve_credential_env("anonymous", {}) == {}
+    assert measure.resolve_credential_env(None, {}) == {}
     with pytest.raises(ValueError, match="missing required key"):
         measure.resolve_credential_env(
-            "authenticated", {CREDENTIAL_ENV_VAR: "AWS_ACCESS_KEY_ID=AKIAEXAMPLE"}
+            "public_auth_list", {CREDENTIAL_ENV_VAR: "AWS_ACCESS_KEY_ID=AKIAEXAMPLE"}
         )
     with pytest.raises(ValueError, match="unsupported key"):
         measure.resolve_credential_env("authenticated", {CREDENTIAL_ENV_VAR: "GOOGLE_TOKEN=nope"})
     with pytest.raises(ValueError, match="requires"):
-        measure.resolve_credential_env("authenticated", {})
-    with pytest.raises(ValueError, match="anonymous"):
-        measure.resolve_credential_env(
-            "anonymous", {CREDENTIAL_ENV_VAR: "AWS_ACCESS_KEY_ID=AKIAEXAMPLE"}
-        )
+        measure.resolve_credential_env("public_auth_list", {})
+    with pytest.raises(ValueError, match="no auth role"):
+        measure.resolve_credential_env(None, {CREDENTIAL_ENV_VAR: "AWS_ACCESS_KEY_ID=AKIAEXAMPLE"})
 
 
 @pytest.mark.parametrize(
@@ -420,8 +418,8 @@ def test_missing_credential_fails_before_adapter_or_subject(
         "b",
         "--region",
         "r",
-        "--auth",
-        "authenticated",
+        "--auth-role",
+        "public_auth_list",
         "--output",
         str(tmp_path),
         "--destination",

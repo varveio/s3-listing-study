@@ -5,7 +5,6 @@ from benchmark.runtime.command_adapter import (
     CommandAdapterError,
     CommandRequest,
     command_adapter_main,
-    validate_concurrency,
 )
 
 TOOL = "s7cmd"
@@ -23,13 +22,17 @@ MODES = frozenset(
         "bucket-list",
     }
 )
+SUPPORTS_UNSIGNED = True
+"""--target-no-sign-request lists anonymously. The signed path drops the flag
+and has not been exercised by a committed run."""
 
 
 def _build_tail(request: CommandRequest) -> tuple[str, ...]:
     target = f"s3://{request.bucket}/{request.prefix}"
     obs = ("-vv", "--disable-color-tracing")
     parallel = ("--max-parallel-listings", "16")
-    anonymous = ("--target-no-sign-request", "--target-region", request.region)
+    stratum = () if request.signed else ("--target-no-sign-request",)
+    anonymous = (*stratum, "--target-region", request.region)
     commands = {
         "recursive-tsv": (
             "ls",
@@ -100,7 +103,6 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
 
 
 def build_command(request: CommandRequest) -> tuple[str, ...]:
-    validate_concurrency(request, tool=TOOL)
     return *FIXED_COMMAND_PREFIX, *_build_tail(request)
 
 

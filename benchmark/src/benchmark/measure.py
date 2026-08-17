@@ -125,21 +125,21 @@ def parse_credential_env(blob: str) -> dict[str, str]:
     return result
 
 
-def resolve_credential_env(auth: str, environ: Mapping[str, str]) -> dict[str, str]:
-    """Return the subject's credential variables for this case's stratum.
+def resolve_credential_env(auth_role: str | None, environ: Mapping[str, str]) -> dict[str, str]:
+    """Return the subject's credential variables for this case's role.
 
     The credential arrives as the single Batch secretVariable the controller
-    attaches to an authenticated case's job and nothing else. An anonymous case
-    whose environment carries one was submitted in the wrong stratum, which is a
-    refusal rather than something to drop silently.
+    attaches to a signing case's job and nothing else. A case that resolved to
+    no role, yet whose environment carries a credential, was submitted wrong —
+    a refusal rather than something to drop silently.
     """
     blob = environ.get(CREDENTIAL_ENV_VAR)
-    if auth == "authenticated":
+    if auth_role is not None:
         if not blob:
-            raise ValueError(f"authenticated case requires {CREDENTIAL_ENV_VAR}")
+            raise ValueError(f"case signing with role {auth_role} requires {CREDENTIAL_ENV_VAR}")
         return parse_credential_env(blob)
     if blob:
-        raise ValueError(f"{CREDENTIAL_ENV_VAR} is set but --auth is anonymous")
+        raise ValueError(f"{CREDENTIAL_ENV_VAR} is set but the case resolved to no auth role")
     return {}
 
 
@@ -243,7 +243,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--bucket", required=True)
     parser.add_argument("--region", required=True)
     parser.add_argument("--prefix", default="")
-    parser.add_argument("--auth", default="anonymous", choices=("anonymous", "authenticated"))
+    parser.add_argument(
+        "--auth-role",
+        default=None,
+        help="Logical role this case signs with. Absent lists unsigned.",
+    )
     parser.add_argument(
         "--adapter-root",
         default=adapters.DEFAULT_ADAPTER_ROOT,
@@ -755,7 +759,7 @@ def main(argv: list[str] | None = None) -> int:
     attempt_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        credential_env = resolve_credential_env(args.auth, os.environ)
+        credential_env = resolve_credential_env(args.auth_role, os.environ)
     except ValueError as exc:
         print(f"measure: {exc}", file=sys.stderr)
         return 2
@@ -776,7 +780,7 @@ def main(argv: list[str] | None = None) -> int:
             bucket=args.bucket,
             region=args.region,
             prefix=args.prefix,
-            auth=args.auth,
+            signed=args.auth_role is not None,
             sink_dir=str(native_root),
         )
     except adapters.AdapterError as exc:
@@ -878,7 +882,7 @@ def main(argv: list[str] | None = None) -> int:
         "bucket": args.bucket,
         "region": args.region,
         "prefix": args.prefix,
-        "auth": args.auth,
+        "auth_role": args.auth_role,
         "attempt_uuid": attempt_uuid,
         "destination": leaf_destination,
         "argv": list(command),

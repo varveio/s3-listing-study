@@ -107,7 +107,8 @@ def test_image_set_requires_pinned_complete_provenance(tmp_path: Path) -> None:
 
 
 def test_batch_render_passes_identity_resources_and_auth_policy() -> None:
-    case = Plan.load(ROOT / "benchmark/plans/buckets/noaa-ghcn-pds.yaml").cases[0]
+    plan = Plan.load(ROOT / "benchmark/plans/buckets/noaa-ghcn-pds.yaml")
+    case = next(case for case in plan.cases if case.auth_role is not None)
     options = campaign.BatchOptions(
         "anonymous@example.test",
         "authenticated@example.test",
@@ -156,9 +157,9 @@ def test_batch_render_passes_identity_resources_and_auth_policy() -> None:
 
 def test_authenticated_render_fails_closed_without_sa_and_secret() -> None:
     plan = Plan.load(ROOT / "benchmark/plans/buckets/noaa-ghcn-pds.yaml")
-    case = next(case for case in plan.cases if case.auth == "authenticated")
+    case = next(case for case in plan.cases if case.auth_role is not None)
     options = campaign.BatchOptions("anon@example.test", None, None, None, None, "SPOT")
-    with pytest.raises(campaign.CampaignError, match="authenticated worker"):
+    with pytest.raises(campaign.CampaignError, match="signing worker"):
         campaign.render_batch_job(
             case,
             "gs://results/leaf/",
@@ -177,7 +178,7 @@ def test_authenticated_render_fails_closed_without_sa_and_secret() -> None:
 def test_anonymous_case_carries_no_credential_even_when_one_is_configured() -> None:
     """The stratum decides: a configured secret reaches authenticated cases only."""
     case = replace(
-        Plan.load(ROOT / "benchmark/plans/buckets/noaa-ghcn-pds.yaml").cases[0], auth="anonymous"
+        Plan.load(ROOT / "benchmark/plans/buckets/noaa-ghcn-pds.yaml").cases[0], auth_role=None
     )
     options = campaign.BatchOptions(
         "anon@example.test",
@@ -258,7 +259,7 @@ class ExistingClient:
 
 def test_already_exists_adopts_only_exact_job() -> None:
     case = replace(
-        Plan.load(ROOT / "benchmark/plans/buckets/noaa-ghcn-pds.yaml").cases[0], auth="anonymous"
+        Plan.load(ROOT / "benchmark/plans/buckets/noaa-ghcn-pds.yaml").cases[0], auth_role=None
     )
     options = campaign.BatchOptions("anon@example.test", None, None, None, None, "SPOT")
     document = campaign.render_batch_job(
@@ -300,7 +301,7 @@ def test_already_exists_adopts_only_exact_job() -> None:
 def test_provider_resolved_locations_do_not_read_as_a_different_job() -> None:
     """Batch expands an unrestricted request into the region and its zones."""
     plan = Plan.load(ROOT / "benchmark/plans/buckets/noaa-ghcn-pds.yaml")
-    case = replace(plan.cases[0], auth="anonymous")
+    case = replace(plan.cases[0], auth_role=None)
     unrestricted = campaign.BatchOptions("anon@example.test", None, None, None, None, "SPOT")
     document = campaign.render_batch_job(
         case,
@@ -362,7 +363,7 @@ def test_permanent_create_rejection_is_definitively_not_created() -> None:
 
 def test_retry_rewrites_only_retry_identity() -> None:
     case = replace(
-        Plan.load(ROOT / "benchmark/plans/buckets/noaa-ghcn-pds.yaml").cases[0], auth="anonymous"
+        Plan.load(ROOT / "benchmark/plans/buckets/noaa-ghcn-pds.yaml").cases[0], auth_role=None
     )
     options = campaign.BatchOptions("anon@example.test", None, None, None, None, "SPOT")
     first = campaign.render_batch_job(

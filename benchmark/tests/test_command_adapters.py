@@ -399,6 +399,10 @@ def test_every_mode_matches_the_frozen_subject_argv_contract(tool: str) -> None:
                     region,
                     prefix,
                     tool=tool,
+                    # The stratum the planner would pick: unsigned wherever the
+                    # capsule can issue it, since signing ~1,000 requests is a
+                    # different measurement and the cheaper one is the default.
+                    signed=not adapter.supports_unsigned,
                     sink_dir=SINK,
                 )
                 try:
@@ -426,7 +430,8 @@ def test_s4cmd_rejects_invalid_concurrency_override(value: object) -> None:
                 BUCKET,
                 REGION,
                 tool="s4cmd",
-                concurrency=value,  # type: ignore[arg-type]
+                signed=True,
+                config={"concurrency": value},
             )
         )
 
@@ -444,7 +449,8 @@ def test_s4cmd_accepts_every_registered_concurrency_in_the_full_matrix() -> None
                             region,
                             prefix,
                             tool="s4cmd",
-                            concurrency=concurrency,
+                            signed=True,
+                            config={"concurrency": concurrency},
                         )
                     )
                     index = argv.index("-c")
@@ -457,8 +463,17 @@ def test_s4cmd_accepts_every_registered_concurrency_in_the_full_matrix() -> None
 def test_other_adapters_reject_explicit_logical_concurrency(tool: str) -> None:
     adapter = load_command_adapter(adapter_path(tool))
     mode = sorted(EXPECTED_MODES[tool])[0]
-    with pytest.raises(CommandAdapterError, match="does not support logical concurrency"):
-        adapter.compile(CommandRequest(mode, BUCKET, REGION, tool=tool, concurrency=1))
+    with pytest.raises(CommandAdapterError, match="does not accept config key"):
+        adapter.compile(
+            CommandRequest(
+                mode,
+                BUCKET,
+                REGION,
+                tool=tool,
+                signed=not load_command_adapter(adapter_path(tool)).supports_unsigned,
+                config={"concurrency": 1},
+            )
+        )
 
 
 def test_commands_compile_exact_subject_argv() -> None:
