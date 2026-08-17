@@ -52,8 +52,10 @@ def _rows(loaded: bench.Plan) -> list[dict[str, object]]:
     return [
         {
             "tool": case.tool,
-            "case": case.case_id,
+            "case": case.label,
             "mode": case.mode,
+            "purpose": case.purpose,
+            "statistic": case.statistic,
             "vcpus": case.resources.vcpus,
             "memory_gb": case.resources.memory_gb,
             "machine_type": case.resources.machine_type,
@@ -69,14 +71,22 @@ def _rows(loaded: bench.Plan) -> list[dict[str, object]]:
             # Whatever the heap table named, rather than a list of env vars kept
             # in step with it by hand: a case carries at most one.
             "heap": "; ".join(value for _, value in case.env) or "-",
-            "fingerprint": case.fingerprint,
         }
         for case in loaded.cases
     ]
 
 
 def _render(loaded: bench.Plan, rows: Sequence[dict[str, object]]) -> str:
-    columns = ("tool", "case", "machine_type", "container_memory_gb", "heap", "reps", "timeout_s")
+    columns = (
+        "tool",
+        "case",
+        "purpose",
+        "machine_type",
+        "container_memory_gb",
+        "heap",
+        "reps",
+        "timeout_s",
+    )
     widths = {c: max(len(c), *(len(str(r[c])) for r in rows)) for c in columns} if rows else {}
     lines = [
         f"{loaded.bucket} ({loaded.region}) — {len(rows)} cases, "

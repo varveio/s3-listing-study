@@ -4,14 +4,30 @@
 from benchmark.runtime.command_adapter import (
     CommandAdapterError,
     CommandRequest,
+    Executable,
+    Mode,
     command_adapter_main,
 )
 
 TOOL = "s3kor"
-FIXED_COMMAND_PREFIX = ("/usr/local/bin/s3kor",)
-MODES = frozenset({"list", "list-versions"})
+S3KOR = Executable(TOOL, ("/usr/local/bin/s3kor",))
+EXECUTABLES = (S3KOR,)
 SUPPORTS_UNSIGNED = False
 """No unsigned request path; it signs with the credential in the environment."""
+
+FIELDS = ("key",)
+"""Neither mode exposes size, etag, mtime or storage_class; `normalize.py`
+emits every one of them as NULL for both modes."""
+
+# No concurrency axis: `ls` drives the SDK's `ListObjectsV2Pages`/
+# `ListObjectVersionsPages` auto-paginator, a single serial continuation
+# chain -- concurrency is structurally 1, not a settable knob. `-c/--concurrent`
+# exists only on `cp`/`sync`, not `ls` (`s3kor.go:48,76` vs `39-41`). Absence
+# is the declaration.
+MODES = {
+    "list": Mode(product="text", fields=FIELDS, executable=S3KOR.name),
+    "list-versions": Mode(product="text", fields=FIELDS, executable=S3KOR.name),
+}
 
 
 def _build_tail(request: CommandRequest) -> tuple[str, ...]:
@@ -24,7 +40,7 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
 
 
 def build_command(request: CommandRequest) -> tuple[str, ...]:
-    return *FIXED_COMMAND_PREFIX, *_build_tail(request)
+    return *S3KOR.argv, *_build_tail(request)
 
 
 if __name__ == "__main__":

@@ -2,9 +2,12 @@
 
 SDK calls are typed (list_blobs pagination, blob.exists(), download_as_bytes())
 instead of parsing `gsutil ls`/`gsutil stat` text output, and there is no
-external binary to shell out to. Every upload here is a plain overwrite --
-no create-only (ifGenerationMatch=0) precondition, deliberately still out of
-scope (see README.md, "Evidence publication is not sealed").
+external binary to shell out to.
+
+An upload is a plain overwrite unless the caller asks for ``create_only``, which
+sends ``ifGenerationMatch=0``. Evidence is written that way: the attempt prefix
+is deterministic, so overwrite semantics would let a second execution of one
+attempt silently merge into the first (`benchmark/docs/architecture.md`).
 """
 
 from __future__ import annotations
@@ -54,17 +57,36 @@ def download_bytes(uri: str) -> bytes:
     return cast(bytes, client().bucket(bucket_name).blob(name).download_as_bytes())
 
 
-def upload_file(local_path: Path, uri: str) -> None:
+def upload_file(local_path: Path, uri: str, *, create_only: bool = False) -> None:
     bucket_name, name = parse_gs_uri(uri)
-    client().bucket(bucket_name).blob(name).upload_from_filename(str(local_path))
+    client().bucket(bucket_name).blob(name).upload_from_filename(
+        str(local_path), if_generation_match=0 if create_only else None
+    )
 
 
-def upload_tree(local_root: Path, uri: str) -> None:
+def upload_tree(local_root: Path, uri: str, *, create_only: bool = False) -> None:
     """Recursively upload files below ``local_root``, preserving relative paths."""
     for path in sorted(local_root.rglob("*")):
         if path.is_file():
             relative = path.relative_to(local_root).as_posix()
-            upload_file(path, uri.rstrip("/") + "/" + relative)
+            upload_file(path, uri.rstrip("/") + "/" + relative, create_only=create_only)
+
+
+def delete_prefix(uri: str) -> int:
+    """Delete every object below a prefix; returns how many went.
+
+    Used by ``campaign prune`` on the evidence of attempts that settled
+    unsuccessfully. Nothing else in the harness deletes an object.
+    """
+    bucket_name, prefix = parse_gs_uri(uri)
+    if not prefix.endswith("/"):
+        prefix += "/"
+    bucket = client().bucket(bucket_name)
+    deleted = 0
+    for blob in list(bucket.list_blobs(prefix=prefix)):
+        blob.delete()
+        deleted += 1
+    return deleted
 
 
 def download_tree(uri: str, local_root: Path) -> None:

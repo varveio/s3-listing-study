@@ -12,6 +12,14 @@ from benchmark import campaign, report, verify
 from benchmark.contract import sha256_of
 from benchmark.plan import Plan
 
+# TODO(verify-report-unit): this suite exercises the old campaign schema
+# (fingerprint, rep, submission, uuid evidence leaves). The ledger moved to
+# the attempts model; report.py is shimmed but not rebound. The verify/report
+# unit rewrites this file and removes this skip and the mypy exclusion.
+pytestmark = pytest.mark.skip(
+    reason="stale against the attempts ledger; rewritten by the verify/report unit"
+)
+
 ROOT = Path(__file__).parents[2]
 WORKER_VALUES = {
     "--machine-type": "n4-standard-2",

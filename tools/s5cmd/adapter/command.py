@@ -4,17 +4,43 @@
 from benchmark.runtime.command_adapter import (
     CommandAdapterError,
     CommandRequest,
+    Executable,
+    Mode,
     command_adapter_main,
 )
 
 TOOL = "s5cmd"
-FIXED_COMMAND_PREFIX = ("/s5cmd",)
-MODES = frozenset(
-    {"recursive", "delimiter", "rootkeys", "json", "listv1", "allversions", "fullpath"}
-)
+S5CMD = Executable(TOOL, ("/s5cmd",))
+EXECUTABLES = (S5CMD,)
 SUPPORTS_UNSIGNED = True
 """--no-sign-request lists anonymously; otherwise the credential in the
 environment signs."""
+
+FULL_FIELDS = ("key", "size", "etag", "mtime", "storage_class")
+KEY_ONLY = ("key",)
+"""`--show-fullpath` prints one absolute URL per line and nothing else
+(`normalize.py`'s `fullpath` query selects `NULL` for the other four columns)."""
+
+# Every mode here is a single `ls` invocation. `--numworkers` (default 256)
+# sizes the `run`/transfer worker pool and is never consumed by the LIST chain
+# (`command/app.go:18`, `command/run.go:76`) -- exactly aws-cli's `s3api`/`s3 ls`
+# case, so absence is the declaration for the same reason.
+MODES = {
+    "recursive": Mode(product="text", fields=FULL_FIELDS, executable=S5CMD.name),
+    "delimiter": Mode(product="text", fields=FULL_FIELDS, executable=S5CMD.name),
+    "rootkeys": Mode(product="text", fields=FULL_FIELDS, executable=S5CMD.name),
+    "json": Mode(product="text", fields=FULL_FIELDS, executable=S5CMD.name),
+    "listv1": Mode(product="text", fields=FULL_FIELDS, executable=S5CMD.name),
+    # ListObjectVersions on this study's unversioned buckets collapses to
+    # current objects, so its throughput is not comparable to the other modes'.
+    "allversions": Mode(
+        product="text",
+        fields=FULL_FIELDS,
+        purpose_ceiling="diagnostic",
+        executable=S5CMD.name,
+    ),
+    "fullpath": Mode(product="text", fields=KEY_ONLY, executable=S5CMD.name),
+}
 
 
 def _auth_flags(request: CommandRequest) -> tuple[str, ...]:
@@ -44,7 +70,7 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
 
 
 def build_command(request: CommandRequest) -> tuple[str, ...]:
-    return *FIXED_COMMAND_PREFIX, *_build_tail(request)
+    return *S5CMD.argv, *_build_tail(request)
 
 
 if __name__ == "__main__":

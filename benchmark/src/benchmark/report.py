@@ -39,12 +39,10 @@ from pathlib import Path
 
 from benchmark import verify
 from benchmark.campaign import (
-    ACCEPTED_FAILURE_STATES,
     STATE_FILENAME,
     TERMINAL_STATES,
-    all_submissions,
-    latest_submissions,
-    open_db,
+    attempt_rows,
+    open_ledger,
 )
 from benchmark.contract import VERDICT_EXIT_CODES
 from benchmark.verify import has_result_marker, read_bytes_at, resolve_leaf, verdict_for
@@ -69,7 +67,7 @@ COLUMNS = (
     "max_rss_kb",
     "verdict",
 )
-FINAL_REPORT_STATES = {"SUCCEEDED", "CANCELLED", *ACCEPTED_FAILURE_STATES}
+FINAL_REPORT_STATES = {"SUCCEEDED", "CANCELLED", "ACCEPTED"}
 
 
 def load_json_at(leaf: str, name: str) -> tuple[dict[str, object], bytes] | None:
@@ -479,12 +477,10 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
-    con = open_db(args.state, readonly=True)
+    con = open_ledger(args.state, readonly=True)
     try:
-        all_rows = all_submissions(con)
-        rows = [
-            row_for(db_row, adapter_root=args.adapter_root) for db_row in latest_submissions(con)
-        ]
+        all_rows = attempt_rows(con)
+        rows = [row_for(db_row, adapter_root=args.adapter_root) for db_row in all_rows]
     finally:
         con.close()
 

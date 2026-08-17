@@ -29,7 +29,6 @@ import stat
 import subprocess
 import sys
 import time
-import uuid
 from collections.abc import Iterator, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
@@ -258,7 +257,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--destination",
         required=True,
-        help="GCS destination prefix; this invocation appends its own uuid4 leaf.",
+        help="The attempt's result prefix, computed from its ledger row. Written "
+        "into as-is: the prefix is the identity, so nothing is appended to it.",
     )
     parser.add_argument(
         "--timeout", type=int, default=3600, help="Seconds before the subject is killed."
@@ -281,13 +281,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--adapter-bundle-sha256", required=True)
     parser.add_argument("--harness-revision", required=True)
     parser.add_argument("--subject-workdir", required=True)
-    parser.add_argument("--campaign-id", required=True)
-    parser.add_argument("--job-id", required=True)
+    parser.add_argument("--group-id", required=True)
+    parser.add_argument("--job-name", required=True)
     parser.add_argument("--case-id", required=True)
-    parser.add_argument("--case-fingerprint", required=True)
+    parser.add_argument("--attempt-id", required=True)
     parser.add_argument("--image-set-sha256", required=True)
-    parser.add_argument("--run-ordinal", required=True, type=int)
-    parser.add_argument("--submission-number", required=True, type=int)
     parser.add_argument("--machine-type", required=True)
     parser.add_argument("--vcpus", required=True, type=int)
     parser.add_argument("--memory-gb", required=True, type=int)
@@ -747,10 +745,12 @@ def upload(attempt_dir: Path, destination: str) -> bool:
     try:
         for path in artifacts:
             if path.is_dir():
-                gcs.upload_tree(path, destination.rstrip("/") + "/" + path.name)
+                gcs.upload_tree(path, destination.rstrip("/") + "/" + path.name, create_only=True)
             else:
-                gcs.upload_file(path, destination.rstrip("/") + "/" + path.name)
-        gcs.upload_file(attempt_dir / "result.json", destination.rstrip("/") + "/result.json")
+                gcs.upload_file(path, destination.rstrip("/") + "/" + path.name, create_only=True)
+        gcs.upload_file(
+            attempt_dir / "result.json", destination.rstrip("/") + "/result.json", create_only=True
+        )
     except Exception as exc:
         print(f"measure: upload failed: {exc}", file=sys.stderr)
         return False
@@ -836,11 +836,12 @@ def main(argv: list[str] | None = None) -> int:
         **credential_env,
     }
 
-    # Every invocation gets its own leaf: two launches of the same case
-    # never contend for the same destination, and there is no "last write
-    # wins" to reason about.
-    attempt_uuid = str(uuid.uuid4())
-    leaf_destination = args.destination.rstrip("/") + "/" + attempt_uuid + "/"
+    # The attempt's own prefix, and no leaf below it: the ledger row already
+    # names one attempt, so "is this attempt complete" is one existence test on
+    # a known prefix rather than a listing that resolves which leaf is
+    # authoritative. Create-only writes are what keep a second execution of this
+    # attempt from merging into the first.
+    attempt_destination = args.destination.rstrip("/") + "/"
 
     started_at = datetime.now(UTC).isoformat()
     execution = run_tool(
@@ -907,8 +908,7 @@ def main(argv: list[str] | None = None) -> int:
         "region": args.region,
         "prefix": args.prefix,
         "auth_role": args.auth_role,
-        "attempt_uuid": attempt_uuid,
-        "destination": leaf_destination,
+        "destination": attempt_destination,
         "argv": list(command),
         "case_env": case_env,
         "config": config,
@@ -942,12 +942,10 @@ def main(argv: list[str] | None = None) -> int:
         "applied_subject_workdir": args.subject_workdir,
         "worker_workdir": os.getcwd(),
         "image_set_sha256": args.image_set_sha256,
-        "campaign_id": args.campaign_id,
-        "job_id": args.job_id,
+        "group_id": args.group_id,
+        "job_name": args.job_name,
         "case_id": args.case_id,
-        "case_fingerprint": args.case_fingerprint,
-        "run_ordinal": args.run_ordinal,
-        "submission_number": args.submission_number,
+        "attempt_id": args.attempt_id,
         "declared_resources": {
             "machine_type": args.machine_type,
             "vcpus": args.vcpus,
@@ -959,7 +957,7 @@ def main(argv: list[str] | None = None) -> int:
     }
     write_result_atomic(attempt_dir / "result.json", result)
 
-    if not upload(attempt_dir, leaf_destination):
+    if not upload(attempt_dir, attempt_destination):
         return 1
 
     cgroup_result = execution["cgroup"]

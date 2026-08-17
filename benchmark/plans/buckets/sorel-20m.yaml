@@ -20,19 +20,39 @@ tools:
   s5cmd:
   rclone:
   minio-mc:
+  # The historical frozen cap, stated since the capsule now declares s7cmd's
+  # own default of 64: a silent row would record 64 and run at it. Pending
+  # the owner's unfreeze decision.
   s7cmd:
+    cases:
+      - {concurrency: 16}
   s3-fast-list:
 
   s3kor:
+  # Historical ask preserved as a stated row, like s7cmd and s3p above: the
+  # capsule now declares s4cmd's own cpu_count*4 default (32 on the smoke
+  # runner) and renders whatever the row records.
   s4cmd:
+    cases:
+      - {concurrency: 4}
+  # Same shape as s7cmd above: s3p's capsule declares its own default of 100,
+  # so the historical frozen cap of 8 is stated per row, pending unfreeze.
   s3p:
+    cases:
+      - {concurrency: 8}
   ps3:
 
+  # `concurrency: 8` is stated per row, not inherited: the capsule declares
+  # Swath's own default of 64, so a silent row would record 64 and run at it.
+  # The 8 is this study's historical frozen cap, preserved here pending the
+  # owner's unfreeze decision — visible and reviewable now that it is plan
+  # content rather than a prose convention.
   swath:
     cases:
-      - {mode: recursive-tsv}
+      - {mode: recursive-tsv, concurrency: 8}
       - product:
           mode: [recursive-parquet, recursive-parquet-sorted]
+          concurrency: [8]
           zip:
             - {vcpus: 2, memory_gb: 4, container_memory_gb: 2}
             - {vcpus: 2, memory_gb: 4, container_memory_gb: 4}

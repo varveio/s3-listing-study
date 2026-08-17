@@ -4,14 +4,14 @@
 from benchmark.runtime.command_adapter import (
     CommandAdapterError,
     CommandRequest,
+    Executable,
+    Mode,
     command_adapter_main,
 )
 
 TOOL = "minio-mc"
-FIXED_COMMAND_PREFIX = ("/usr/bin/mc",)
-MODES = frozenset(
-    {"recursive", "recursive-json", "shallow", "shallow-json", "versions-json", "find", "find-json"}
-)
+MC = Executable(TOOL, ("/usr/bin/mc",))
+EXECUTABLES = (MC,)
 SUPPORTS_UNSIGNED = True
 """The keyless MC_HOST_s3 alias issues unsigned requests."""
 SUPPORTS_SIGNED = False
@@ -33,6 +33,32 @@ into a per-request alias URL, since ``FUNCTIONAL_ENV`` is a static,
 request-independent declaration.
 """
 
+FULL_FIELDS = ("key", "size", "etag", "mtime", "storage_class")
+"""``*-json`` modes: the fidelity path, exact sizes and real ETags
+(``normalize.py`` JSON query)."""
+TEXT_FIELDS = ("key", "mtime", "storage_class")
+"""``recursive``/``shallow``: the text sink humanises size (LOSSY) and prints
+no ETag at all, so ``normalize.py`` emits both as NULL (``normalize.py``
+``QUERIES["text"]``)."""
+FIND_JSON_FIELDS = ("key", "size", "mtime")
+"""``find --json`` fetches neither ETag nor storage class (``normalize.py``
+``QUERIES["find-json"]``)."""
+FIND_FIELDS = ("key",)
+"""``find`` prints one path per line and nothing else."""
+
+# No concurrency axis: minio-go's List() issues one ListObjectsV2 request at a
+# time -- concurrency is structurally 1, not a settable knob (`api-list.go:
+# 100-165`). Absence is the declaration.
+MODES = {
+    "recursive": Mode(product="text", fields=TEXT_FIELDS, executable=MC.name),
+    "recursive-json": Mode(product="text", fields=FULL_FIELDS, executable=MC.name),
+    "shallow": Mode(product="text", fields=TEXT_FIELDS, executable=MC.name),
+    "shallow-json": Mode(product="text", fields=FULL_FIELDS, executable=MC.name),
+    "versions-json": Mode(product="text", fields=FULL_FIELDS, executable=MC.name),
+    "find": Mode(product="text", fields=FIND_FIELDS, executable=MC.name),
+    "find-json": Mode(product="text", fields=FIND_JSON_FIELDS, executable=MC.name),
+}
+
 
 def _build_tail(request: CommandRequest) -> tuple[str, ...]:
     prefix = request.prefix[1:] if request.prefix.startswith("/") else request.prefix
@@ -53,7 +79,7 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
 
 
 def build_command(request: CommandRequest) -> tuple[str, ...]:
-    return *FIXED_COMMAND_PREFIX, *_build_tail(request)
+    return *MC.argv, *_build_tail(request)
 
 
 if __name__ == "__main__":

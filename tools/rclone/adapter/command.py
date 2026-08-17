@@ -4,26 +4,76 @@
 from benchmark.runtime.command_adapter import (
     CommandAdapterError,
     CommandRequest,
+    Default,
+    Executable,
+    Inert,
+    Mode,
     command_adapter_main,
 )
 
 TOOL = "rclone"
-FIXED_COMMAND_PREFIX = ("/usr/local/bin/rclone",)
-MODES = frozenset(
-    {
-        "recursive-fastlist",
-        "recursive-hierarchical",
-        "recursive-walk",
-        "delimiter-shallow",
-        "listv1",
-        "lsf",
-        "debug",
-        "walk-debug",
-    }
-)
+RCLONE = Executable("rclone", ("/usr/local/bin/rclone",))
+EXECUTABLES = (RCLONE,)
 SUPPORTS_UNSIGNED = True
 """The s3 backend falls back to anonymous credentials when none are configured;
 env_auth=true is what makes it read the credential the engine populated."""
+
+CHECKERS = Default(8, "help")
+"""`--checkers`: the concurrent-directory fan-out of a genuine hierarchical walk.
+
+`in := make(chan listJob, ci.Checkers)` (`fs/walk/walk.go:380` @ 5bc93a2a7), so
+the width is across directories and not within one. The 8 is upstream's own
+default, receipted from the pinned binary's help output
+(`receipts/smoke/_build/version.md`), which is why the provenance is `help`
+rather than the `fs/config.go:60-61` reading that agrees with it.
+"""
+
+LSJSON_FIELDS = ("key", "size", "mtime", "storage_class")
+"""What `normalize.py` selects out of an `lsjson` payload. etag is absent by
+design: rclone's S3 listing path never surfaces the raw ETag."""
+
+LSF_FIELDS = ("key", "size")
+"""`lsf --format ps` prints path and size only, so it cannot be ranked against
+the `lsjson` modes -- it would win partly by emitting less."""
+
+WALK_AXES = {"concurrency": CHECKERS}
+"""Only `--disable ListR` reaches `walk.Walk`, and only there does the pool exist."""
+
+FLAT_AXES = {"concurrency": Inert()}
+"""Every other mode: `--checkers` is accepted and bounds nothing.
+
+`lsjson`/`lsf` call `walk.ListR` directly, which takes the flat backend `ListR`
+-- one serial continuation chain -- whenever recursion is unbounded, never
+consulting `--fast-list` (`fs/walk/walk.go:149-163` @ 5bc93a2a7); traced at zero
+`delimiter=` requests in `receipts/smoke/_capability/debug`. `delimiter-shallow`
+is inert for the other reason: bounded recursion does reach the walk, but a
+single delimiter level descends into no directory, so the pool has one job.
+"""
+
+MODES = {
+    "recursive-fastlist": Mode(product="text", fields=LSJSON_FIELDS, axes=FLAT_AXES),
+    "recursive-hierarchical": Mode(product="text", fields=LSJSON_FIELDS, axes=FLAT_AXES),
+    "recursive-walk": Mode(product="text", fields=LSJSON_FIELDS, axes=WALK_AXES),
+    "delimiter-shallow": Mode(product="text", fields=LSJSON_FIELDS, axes=FLAT_AXES),
+    "listv1": Mode(product="text", fields=LSJSON_FIELDS, axes=FLAT_AXES),
+    "lsf": Mode(product="text", fields=LSF_FIELDS, axes=FLAT_AXES),
+    # `-vv --dump headers` prints every request line on stderr, which perturbs
+    # the timing it exists to explain.
+    "debug": Mode(
+        product="text", fields=LSJSON_FIELDS, axes=FLAT_AXES, purpose_ceiling="diagnostic"
+    ),
+    "walk-debug": Mode(
+        product="text", fields=LSJSON_FIELDS, axes=WALK_AXES, purpose_ceiling="diagnostic"
+    ),
+}
+
+
+def _checkers(request: CommandRequest) -> str:
+    """Render the asked-for fan-out; declared in :data:`MODES`, never pinned here."""
+    value = request.config.get("concurrency", CHECKERS.value)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise CommandAdapterError(f"{TOOL} concurrency must be a positive integer; got: {value!r}")
+    return str(value)
 
 
 def _build_tail(request: CommandRequest) -> tuple[str, ...]:
@@ -40,19 +90,11 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
     if request.prefix:
         remote += f"/{request.prefix}"
     standard = ("--files-only", "--use-server-modtime", "--no-mimetype")
+    walk = ("--disable", "ListR", "--checkers", _checkers(request))
     commands = {
         "recursive-fastlist": ("lsjson", "--fast-list", *standard, "-R", remote),
-        "recursive-hierarchical": ("lsjson", *standard, "--checkers", "4", "-R", remote),
-        "recursive-walk": (
-            "lsjson",
-            *standard,
-            "--disable",
-            "ListR",
-            "--checkers",
-            "4",
-            "-R",
-            remote,
-        ),
+        "recursive-hierarchical": ("lsjson", *standard, "-R", remote),
+        "recursive-walk": ("lsjson", *standard, *walk, "-R", remote),
         "delimiter-shallow": ("lsjson", "--use-server-modtime", "--no-mimetype", remote),
         "listv1": ("lsjson", "--fast-list", *standard, "-R", remote),
         "lsf": (
@@ -70,10 +112,7 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
         "walk-debug": (
             "lsjson",
             *standard,
-            "--disable",
-            "ListR",
-            "--checkers",
-            "4",
+            *walk,
             "-R",
             "-vv",
             "--dump",
@@ -88,7 +127,7 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
 
 
 def build_command(request: CommandRequest) -> tuple[str, ...]:
-    return *FIXED_COMMAND_PREFIX, *_build_tail(request)
+    return *RCLONE.argv, *_build_tail(request)
 
 
 if __name__ == "__main__":

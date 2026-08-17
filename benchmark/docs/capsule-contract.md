@@ -78,12 +78,12 @@ MODES = {
     "recursive-tsv": Mode(
         product="text",
         fields=("key", "size", "mtime", "etag"),
-        axes={"concurrency": Ceiling(8)},
+        axes={"concurrency": Ceiling(64, "source@cef8ec2")},
     ),
     "recursive-parquet-sorted": Mode(
         product="parquet-sorted",
         fields=("key", "size", "mtime", "etag"),
-        axes={"concurrency": Ceiling(8)},
+        axes={"concurrency": Ceiling(64, "source@cef8ec2")},
         purpose_ceiling="measurement",
     ),
 }
@@ -103,7 +103,7 @@ write a directory sink while its TSV mode streams to stdout.
 | --- | --- |
 | `product` | The output artifact — `text`, `parquet`, `parquet-sorted`. **Shared vocabulary**: "text" means the same for aws-cli and swath, so a report can group a text stratum and keep a Parquet number out of it. |
 | `fields` | Which contract columns this mode populates. A mode emitting key-only must not be ranked against one emitting four columns — otherwise a tool wins by emitting less. |
-| `axes` | Per reserved name: `Fixed(v)`, `Default(v)`, `Ceiling(v)`, `Inert`, or absent. |
+| `axes` | Per reserved name: `Fixed(v)`, `Default(v, provenance)`, `Ceiling(v, provenance)`, `Inert`, or absent. |
 | `purpose_ceiling` | The most a plan may claim this mode is. A plan may demote a run to `canary`; it may never promote `summarize` to `measurement`. |
 
 **`product` and `fields` translate across tools; `axes` does not.** The first two
@@ -121,17 +121,21 @@ identifies the axis and explicitly not the semantics — `-c`, `--checkers` and
 | absent | This tool has no such knob | minio-mc concurrency |
 | `Fixed(v)` | Real, effective, and not settable | ps3 at 256 |
 | `Default(v)` | Settable; this is what it runs at unsilenced | s4cmd `-c` |
-| `Ceiling(v)` | Settable, but the effective width is lower and data-dependent | swath's AIMD start at `min(4,N)`; s5cmd's `min(numworkers, shards)` |
+| `Ceiling(v, provenance)` | Settable; the subject's own limit when unsilenced, and the effective width is lower and data-dependent | swath's 64 with an AIMD start at `min(4,N)`; s5cmd's `min(numworkers, shards)` |
 | `Inert` | Flag accepted, no effect **on this mode** | rclone `--checkers` on flat `ListR` |
 
 `Inert` means *statically* inert for the mode. A knob whose effect depends on the
 target — s4cmd's `-c` does nothing on a flat prefix but works on a nested one —
 is not `Inert`; namespace shape is an analysis covariate, not a declaration.
 
-A `Ceiling` axis records what was *asked for*; what was *achieved* is a fact
-about the run and belongs in evidence, never in `config`. Writing a nominal 8
-into a hashed blob when the tool ran at 4 is the same lie this table exists to
-prevent.
+`Ceiling` is `Default` plus one semantic, so it carries the same value and the
+same provenance: the subject's own number, not the study's. **What a campaign
+asks for is plan content** — a row states `concurrency: 8` against swath's
+declared 64, which is what makes a detune visible and reviewable instead of a
+prose convention buried in a capsule. What was *achieved* is a third thing
+again: a fact about the run, which belongs in evidence and never in `config`.
+Writing a nominal 8 into a hashed blob when the tool ran at 4 is the same lie
+this table exists to prevent.
 
 ## Signing is declared, never assumed
 
@@ -218,11 +222,12 @@ tools:
   reflects what ran. Absent means *this tool has no such knob*; a value means
   *this is what it ran at*.
 
-### A recorded default must carry its provenance
+### A recorded number must carry its provenance
 
 A capsule that misses an upstream version bump writes a confident lie into
 `config`, and a recorded-but-wrong value is **worse than an absent one, because
-it claims knowledge**. So each declared default states where it came from:
+it claims knowledge**. So each number a capsule records for its subject — a
+`Default` and equally a `Ceiling` — states where it came from:
 
 | Provenance | Meaning |
 | --- | --- |
@@ -347,7 +352,10 @@ file cannot reach argv at all — and this is what blocks s5cmd's defining mode,
 which is a single process reading one file, not a multi-process invocation.
 
 An inbound artifact is content-addressed like any other, so the case that
-consumes it hashes the digest, never the path.
+consumes it hashes the digest, never the path. The request carries the staging
+as `artifact_path` — the symmetric field to `sink_dir`, empty for the many
+modes that consume nothing, and a consuming capsule refuses an empty one
+rather than inventing a location.
 
 What the planner does with these declarations is in
 [`architecture.md`](architecture.md); where the resulting attempts are recorded

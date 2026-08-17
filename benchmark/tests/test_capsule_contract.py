@@ -109,7 +109,9 @@ def test_a_declared_axis_reaches_the_config_the_identity_hashes(tmp_path: Path) 
     adapter = load(
         tmp_path,
         "\nMODES = {\n"
-        '    "list": Mode(product="text", fields=("key",), axes={"concurrency": Ceiling(8)}),\n'
+        '    "list": Mode(\n'
+        '        product="text", fields=("key",), axes={"concurrency": Ceiling(8, "help")}\n'
+        "    ),\n"
         '    "default": Mode(\n'
         '        product="text", fields=("key",), axes={"concurrency": Default(4, "help")}\n'
         "    ),\n"
@@ -209,22 +211,29 @@ def test_the_effective_config_refuses_what_the_capsule_never_declared(
         adapter.effective_config("recursive", {})
 
 
+@pytest.mark.parametrize("axis", [Default, Ceiling])
 @pytest.mark.parametrize("provenance", ["help", "unverified", "source@8f2c1a0"])
-def test_a_recorded_default_carries_its_provenance(provenance: str) -> None:
-    assert Default(4, provenance).value == 4
+def test_a_recorded_number_carries_its_provenance(
+    axis: type[Default | Ceiling], provenance: str
+) -> None:
+    """Both states that record a subject's own number state where it came from."""
+    assert axis(4, provenance).value == 4
 
 
+@pytest.mark.parametrize("axis", [Default, Ceiling])
 @pytest.mark.parametrize("provenance", ["", "believed", "source@", "help ", "SOURCE@abc"])
-def test_a_default_with_no_receipt_behind_it_is_refused(provenance: str) -> None:
+def test_a_recorded_number_with_no_receipt_behind_it_is_refused(
+    axis: type[Default | Ceiling], provenance: str
+) -> None:
     """A recorded-but-wrong value is worse than an absent one: it claims knowledge."""
     with pytest.raises(CommandAdapterError, match="provenance"):
-        Default(4, provenance)
+        axis(4, provenance)
 
 
 @pytest.mark.parametrize(
     "axes",
     [
-        {"checkers": Ceiling(4)},
+        {"checkers": Ceiling(4, "help")},
         {"workers": Fixed(8)},
         {"page_size": Default(1000, "help")},
     ],
@@ -237,7 +246,7 @@ def test_an_axis_the_study_has_not_reserved_is_refused(axes: dict[str, object]) 
 
 @pytest.mark.parametrize(
     "axis",
-    [Fixed(50), Fixed(100), Default(HEAP_PERCENT, "help"), Ceiling(HEAP_PERCENT), Inert()],
+    [Fixed(50), Fixed(100), Default(HEAP_PERCENT, "help"), Ceiling(HEAP_PERCENT, "help"), Inert()],
 )
 def test_the_heap_share_is_the_harness_s_and_a_capsule_may_only_restate_it(axis: object) -> None:
     with pytest.raises(CommandAdapterError, match="methodology share"):

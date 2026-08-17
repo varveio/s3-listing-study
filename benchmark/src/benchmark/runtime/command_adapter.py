@@ -72,6 +72,15 @@ AxisValue = int | str
 """What an axis may carry. A bool is refused: a flag is not a swept value."""
 
 
+def _check_provenance(provenance: str) -> None:
+    """Where a recorded number came from -- required of every axis that records one."""
+    if provenance not in _LITERAL_PROVENANCE and not _PROVENANCE_RE.fullmatch(provenance):
+        raise CommandAdapterError(
+            f"axis provenance must be one of {_LITERAL_PROVENANCE} or 'source@<rev>': "
+            f"{provenance!r}"
+        )
+
+
 def _check_axis_value(value: object) -> AxisValue:
     if isinstance(value, bool) or not isinstance(value, int | str) or value == "":
         raise CommandAdapterError(f"axis value must be a non-empty int or str: {value!r}")
@@ -103,28 +112,31 @@ class Default:
 
     def __post_init__(self) -> None:
         _check_axis_value(self.value)
-        if self.provenance not in _LITERAL_PROVENANCE and not _PROVENANCE_RE.fullmatch(
-            self.provenance
-        ):
-            raise CommandAdapterError(
-                f"default provenance must be one of {_LITERAL_PROVENANCE} or 'source@<rev>': "
-                f"{self.provenance!r}"
-            )
+        _check_provenance(self.provenance)
 
 
 @dataclass(frozen=True, slots=True)
 class Ceiling:
-    """Settable, but the effective width is lower and data-dependent.
+    """Settable; the subject's own limit when unsilenced, and an upper bound.
 
-    swath's AIMD starting at ``min(4, N)``, s5cmd's ``min(numworkers, shards)``.
-    The value records what was *asked for*; what was achieved is a fact about the
-    run and belongs in evidence, never in ``config``.
+    Exactly :class:`Default` plus one semantic: the recorded number is a bound
+    whose effective width is lower and data-dependent -- swath's AIMD starting at
+    ``min(4, N)``, s5cmd's ``min(numworkers, shards)``. So it carries the same
+    provenance, for the same reason.
+
+    The value is the *subject's* number, never the study's: what a campaign asks
+    for is plan content, which is what makes a detune reviewable in the plan
+    rather than buried in a capsule. What was *achieved* is a fact about the run
+    and belongs in evidence, never in ``config``.
     """
 
     value: AxisValue
+    provenance: str
+    """``help``, ``source@<rev>``, or ``unverified`` -- see the contract page."""
 
     def __post_init__(self) -> None:
         _check_axis_value(self.value)
+        _check_provenance(self.provenance)
 
 
 @dataclass(frozen=True, slots=True)
@@ -284,6 +296,19 @@ class CommandRequest:
     the attempt engine collects, scans, and publishes whatever lands there. An
     adapter never chooses its own path: a container-local path the engine does
     not know about is output the attempt record cannot account for.
+    """
+
+    artifact_path: str = ""
+    """Container-local path where the harness staged the artifact this case consumes.
+
+    The symmetric thing to :attr:`sink_dir`, for the modes that read an
+    artifact a preparation produced — hints, a key distribution, a commands
+    file. Empty for the many modes that consume nothing. Identity never sees
+    this path: the case hashes the artifact's content digest, and the engine
+    stages the bytes wherever it likes. A consuming capsule refuses an empty
+    path rather than inventing one, for the same reason ``sink_dir`` works
+    that way — a path the engine does not know about is input the attempt
+    record cannot account for.
     """
 
     visible_memory_gb: float | None = None

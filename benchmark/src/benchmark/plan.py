@@ -23,10 +23,12 @@ inherits: the stratum and allocation again, plus the schedule, and never
 ``mode``. Both draw on one flat vocabulary, so a tool body is ``defaults`` plus
 ``cases``.
 
-A row may carry only keys the ID and the fingerprint can *both* see, which is
-what keeps ``timeout_s`` out of one: it is in the fingerprint but not the ID, so
-two rows differing only there would render one ID and two fingerprints — two
-non-comparable runs filed into one case directory.
+**A plan states intent; it does not name identity.** A case's ``case_id`` is a
+hash over inputs a plan does not hold — the tool and platform slices of the
+image set a launch froze — so it is minted at submit
+(``benchmark/docs/identity.md``). What a row renders here is a *label*: the
+axes it varies, for a reviewer reading ``resolve-plan`` and for refusing two
+rows that resolve to one case.
 
 **Cases are an ordered union.** Each entry is either one literal row or an
 explicit product generator with an optional atomic zip factor. Generators
@@ -47,27 +49,22 @@ a fraction of what they can see; that share lives with the heap policies in
 ``benchmark/plans/tools.yaml`` rather than in a plan, since it configures two tools out of
 eleven and every plan would otherwise restate a figure most cases ignore.
 
-**The derived ID is a path, not an identity.** Adding a key to one row changes
-every ID that tool generates, so an ID cannot be what says "these attempts are the
-same case". :attr:`Case.fingerprint` is — a digest over the resolved case, which
-survives ID scheme changes and, more importantly, refuses the reverse mistake:
-editing a row's value while the derived ID happens to land the same would
-otherwise append non-comparable runs into one case directory. ``reps`` is
-excluded from it because how many times we ran something is not part of what we
-ran; ``timeout_s`` is included because it can truncate a run and therefore
-change the result.
+**A row may also say what its attempts are for.** ``purpose`` demotes a case out
+of comparisons — a canary proving a signing path executes is a real job whose
+duration means nothing — and ``statistic: rate`` says the failures are the
+result rather than a hole. Both default from the capsule: a mode's declared
+``purpose_ceiling`` is the most a plan may claim it is, and a plan may demote
+below it but never promote above.
 """
 
 from __future__ import annotations
 
 import hashlib
 import itertools
-import json
 import re
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 import yaml
@@ -87,15 +84,6 @@ if TYPE_CHECKING:
 # `product` key rather than misreading the generator as a row. A v1 plan is
 # refused rather than reinterpreted.
 SPEC_VERSION = 2
-
-# Versioned separately from the spec: the fingerprint function is part of the
-# on-disk contract the append guard will enforce, so changing how it is computed
-# is a migration and must be visible as one.
-#
-# Nothing reads a fingerprint yet — `resolve-plan` emits one and the attempt
-# store that would refuse a mismatched append is not written. Until it is, this
-# number is a promise rather than a check.
-FINGERPRINT_VERSION = 1
 
 TOP_LEVEL = ("spec_version", "bucket", "region", "auth_role", "defaults", "tools", "exclude")
 
@@ -147,7 +135,17 @@ SCHEDULE_FIELDS = ("reps", "timeout_s")
 # capsule declares the knob per mode, so the row that names the mode is where
 # a value for it belongs. Resolution refuses it for a capsule that declares no
 # such axis, and folds it into `Case.config` rather than into argv directly.
-ROW_FIELDS = ("mode", "signed", "concurrency", *RESOURCE_FIELDS)
+#
+# `purpose` and `statistic` are what an attempt is *for* and how it is read.
+# They are row fields rather than layer defaults because a canary or a rate case
+# is one row's claim about one case, and a whole plan demoted by inheritance is
+# a plan nobody meant to write.
+ROW_FIELDS = ("mode", "purpose", "statistic", "signed", "concurrency", *RESOURCE_FIELDS)
+
+# Whether the case's result is a timing or a rate over its repeats. `rate` is
+# for a subject that succeeds, hangs or panics — s3kor's listing path — where
+# the failures are the finding, so `retry` leaves them alone.
+STATISTICS = ("timing", "rate")
 
 # What a layer may state: what every case under it inherits. No `mode` — eleven
 # tools have eleven mode vocabularies, so nothing above a row has one to state.
@@ -157,8 +155,8 @@ LAYER_FIELDS = ("signed", *RESOURCE_FIELDS, *SCHEDULE_FIELDS)
 TOOL_FIELDS = ("cases", *LAYER_FIELDS)
 
 # Anchored with ``\Z`` and applied with ``fullmatch``: ``$`` also matches before
-# a trailing newline, and a case ID is used as a directory name.
-CASE_ID_RE = re.compile(r"\A[a-z0-9][a-z0-9._-]{0,80}\Z")
+# a trailing newline, and a label is printed and grepped.
+CASE_LABEL_RE = re.compile(r"\A[a-z0-9][a-z0-9._-]{0,80}\Z")
 TOOL_RE = re.compile(r"\A[a-z0-9][a-z0-9-]{0,40}\Z")
 
 
@@ -219,13 +217,21 @@ class Case:
     """One resolved row of a tool's ``cases`` — the unit a campaign submits."""
 
     tool: str
-    case_id: str
+    label: str
+    """What this row varies, rendered for a reader. Not the case's identity —
+    that is a hash over inputs only a launch holds; see the module docstring."""
     mode: str
+    purpose: str
+    """What the attempts are for, and therefore whether they may be compared."""
+    statistic: str
     auth_role: str | None
     """The role this case signs with, or None when it lists unsigned."""
     resources: Resources
     reps: int
     timeout_s: int
+    heap_percent: int
+    """The share of the visible ceiling a managed runtime may take, as applied to
+    :attr:`env`. Carried because the ledger records it on every row."""
     # The values this case was rendered into an ID from, in ID order: the union
     # of the keys the tool's rows state, so a row that omitted one carries the
     # value it inherited. Kept so a reader can group by a key without re-parsing
@@ -238,9 +244,8 @@ class Case:
     # them. Produced by the capsule's ``effective_config(mode, ...)`` at
     # resolution: the row's ``mode`` and any reserved axis it stated (today just
     # ``concurrency``), plus whatever declared default the capsule fills in when
-    # a row leaves an axis silent. Key-sorted, matching what was hashed.
+    # a row leaves an axis silent. Key-sorted, matching what is hashed.
     config: tuple[tuple[str, object], ...]
-    fingerprint: str
 
 
 @dataclass(frozen=True)
@@ -875,6 +880,18 @@ def _row_field_value(key: str, value: Any, label: str, path: Path) -> str | int:
         if not isinstance(value, str) or not value.strip():
             raise PlanError(f"'{label}' 'mode' in {path} is not a non-empty string")
         return value
+    if key == "statistic":
+        if value not in STATISTICS:
+            raise PlanError(f"'{label}' 'statistic' in {path} is not one of {'|'.join(STATISTICS)}")
+        return str(value)
+    if key == "purpose":
+        # Which purposes exist is the capsule contract's vocabulary; whether
+        # *this* mode may claim one is checked against its manifest in `_case`.
+        from benchmark.runtime.command_adapter import PURPOSES
+
+        if value not in PURPOSES:
+            raise PlanError(f"'{label}' 'purpose' in {path} is not one of {'|'.join(PURPOSES)}")
+        return str(value)
     if key == "signed":
         return _signed({key: value}, label, path, complete=False)[key]
     return _positive_int(value, key, label, path)
@@ -1085,43 +1102,58 @@ def _case(
     chosen = tuple(
         (key, auth_role is not None) if key == "signed" else (key, value) for key, value in chosen
     )
-    case_id = derive_case_id(chosen)
-    if not CASE_ID_RE.fullmatch(case_id):
+    label = case_label(chosen)
+    if not CASE_LABEL_RE.fullmatch(label):
         raise PlanError(
-            f"'tools.{tool}' in {path} generates the unusable case id {case_id!r} "
+            f"'tools.{tool}' in {path} generates the unusable case label {label!r} "
             "(axis values must be lowercase, digits, '.', '_' or '-')"
         )
     return Case(
         tool=tool,
-        case_id=case_id,
+        label=label,
         mode=mode,
+        purpose=_purpose(tool, resolved.get("purpose"), mode, adapter, path),
+        statistic=str(resolved.get("statistic", STATISTICS[0])),
         auth_role=auth_role,
         resources=resolved_resources,
         reps=schedule["reps"],
         timeout_s=schedule["timeout_s"],
+        heap_percent=context.heap.percent,
         axes=chosen,
         env=env,
         config=tuple(config.items()),
-        fingerprint=fingerprint(
-            bucket=context.bucket,
-            region=context.region,
-            tool=tool,
-            mode=mode,
-            auth_role=auth_role,
-            resources=resolved_resources,
-            timeout_s=schedule["timeout_s"],
-            env=env,
-            config=config,
-        ),
     )
 
 
-def derive_case_id(chosen: Iterable[tuple[str, str | int | None]]) -> str:
+def _purpose(
+    tool: str, stated: object, mode: str, adapter: LoadedCommandAdapter, path: Path
+) -> str:
+    """What this case's attempts are for: the row's claim, or the mode's ceiling.
+
+    Defaulting to the ceiling rather than to ``measurement`` is what lets a mode
+    that can only ever be a preparation say so once, in the capsule, instead of
+    every row that names it repeating the demotion.
+    """
+    manifest = adapter.modes.get(mode)
+    ceiling = "measurement" if manifest is None else manifest.purpose_ceiling
+    if stated is None:
+        return ceiling
+    purpose = str(stated)
+    if manifest is not None and not manifest.permits_purpose(purpose):
+        raise PlanError(
+            f"'tools.{tool}' in {path} claims mode {mode!r} is a {purpose}, above the "
+            f"{ceiling!r} its capsule declares — a plan may demote a mode, never promote it"
+        )
+    return purpose
+
+
+def case_label(chosen: Iterable[tuple[str, str | int | None]]) -> str:
     """``recursive-parquet.container_memory_gb-2`` — the mode, then each key.
 
     Every key any of the tool's rows states appears, even one only a single row
-    varies: dropping it would make the ID mean "whatever the default was at the
-    time". ``none`` is the ceiling nobody set — a real answer, not an absent key.
+    varies: dropping it would make the label mean "whatever the default was at
+    the time". ``none`` is the ceiling nobody set — a real answer, not an absent
+    key.
     """
     segments: list[str] = []
     for field, value in chosen:
@@ -1134,41 +1166,6 @@ def derive_case_id(chosen: Iterable[tuple[str, str | int | None]]) -> str:
             rendered = str(value)
         segments.append(rendered if field == "mode" else f"{field}-{rendered}")
     return ".".join(segments)
-
-
-def fingerprint(
-    *,
-    bucket: str,
-    region: str,
-    tool: str,
-    mode: str,
-    auth_role: str | None,
-    resources: Resources,
-    timeout_s: int,
-    env: Sequence[tuple[str, str]] = (),
-    config: Mapping[str, object] = MappingProxyType({}),
-) -> str:
-    """A digest over the resolved case — what makes two attempts comparable.
-
-    ``config`` is the capsule's own effective blob: a value in it changes what
-    the *subject* does, by the same rule that makes ``timeout_s`` part of this
-    and ``reps`` not, so two rows differing only in a config key are two
-    non-comparable measurements and must render two fingerprints.
-    """
-    payload = {
-        "fingerprint_version": FINGERPRINT_VERSION,
-        "bucket": bucket,
-        "region": region,
-        "tool": tool,
-        "mode": mode,
-        "auth_role": auth_role,
-        "resources": resources.as_dict(),
-        "timeout_s": timeout_s,
-        "env": [list(pair) for pair in env],
-        "config": dict(config),
-    }
-    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _exclusions(doc: Mapping[str, Any], path: Path) -> tuple[Exclusion, ...]:
@@ -1199,9 +1196,9 @@ def _reject_overlap(plan: Plan, path: Path) -> None:
         raise PlanError(f"plan {path} both runs and excludes {', '.join(both)}")
     seen: set[tuple[str, str]] = set()
     for case in plan.cases:
-        key = (case.tool, case.case_id)
+        key = (case.tool, case.label)
         if key in seen:
-            raise PlanError(f"plan {path} generates {case.tool} case {case.case_id!r} twice")
+            raise PlanError(f"plan {path} generates {case.tool} case {case.label!r} twice")
         seen.add(key)
 
 

@@ -340,7 +340,7 @@ def test_count_failure_uploads_result_marker_before_exit(
     monkeypatch.setattr(
         gcs,
         "upload_file",
-        lambda path, uri: uploaded.append((uri, Path(path).read_bytes())),
+        lambda path, uri, **_kwargs: uploaded.append((uri, Path(path).read_bytes())),
     )
     code = measure.main(
         [
@@ -376,20 +376,16 @@ def test_count_failure_uploads_result_marker_before_exit(
             str(metadata["harness_revision"]),
             "--subject-workdir",
             str(selected["subject_workdir"]),
-            "--campaign-id",
-            "2026-08-16-candidate",
-            "--job-id",
-            "job",
+            "--group-id",
+            "g20260816-000000",
+            "--job-name",
+            "suite-aws-cli-9f300cc4d2b1-s1",
             "--case-id",
-            "case",
-            "--case-fingerprint",
-            "f" * 64,
+            "aws-cli.9f300cc4d2b1",
+            "--attempt-id",
+            "aws-cli.9f300cc4d2b1.s1",
             "--image-set-sha256",
             "1" * 64,
-            "--run-ordinal",
-            "1",
-            "--submission-number",
-            "1",
             "--machine-type",
             "machine",
             "--vcpus",
@@ -477,20 +473,16 @@ def test_the_cases_config_and_heap_share_reach_the_capsule(
             str(metadata["harness_revision"]),
             "--subject-workdir",
             str(selected["subject_workdir"]),
-            "--campaign-id",
-            "2026-08-16-candidate",
-            "--job-id",
-            "job",
+            "--group-id",
+            "g20260816-000000",
+            "--job-name",
+            "suite-aws-cli-9f300cc4d2b1-s1",
             "--case-id",
-            "case",
-            "--case-fingerprint",
-            "f" * 64,
+            "aws-cli.9f300cc4d2b1",
+            "--attempt-id",
+            "aws-cli.9f300cc4d2b1.s1",
             "--image-set-sha256",
             "1" * 64,
-            "--run-ordinal",
-            "1",
-            "--submission-number",
-            "1",
             "--machine-type",
             "machine",
             "--vcpus",
@@ -556,20 +548,16 @@ def test_missing_credential_fails_before_adapter_or_subject(
         "d" * 40,
         "--subject-workdir",
         os.getcwd(),
-        "--campaign-id",
-        "2026-08-16-x",
-        "--job-id",
-        "j",
+        "--group-id",
+        "g20260816-000000",
+        "--job-name",
+        "suite-aws-cli-9f300cc4d2b1-s1",
         "--case-id",
-        "c",
-        "--case-fingerprint",
-        "e" * 64,
+        "aws-cli.9f300cc4d2b1",
+        "--attempt-id",
+        "aws-cli.9f300cc4d2b1.s1",
         "--image-set-sha256",
         "f" * 64,
-        "--run-ordinal",
-        "1",
-        "--submission-number",
-        "1",
         "--machine-type",
         "m",
         "--vcpus",
@@ -591,8 +579,14 @@ def test_recursive_upload_preserves_native_paths(
     (attempt / "native/listing/data").mkdir(parents=True)
     (attempt / "native/listing/data/part.parquet").write_bytes(b"part")
     (attempt / "result.json").write_text("{}")
-    uploaded: list[str] = []
-    monkeypatch.setattr(gcs, "upload_file", lambda _path, uri: uploaded.append(uri))
+    uploaded: list[tuple[str, bool]] = []
+    monkeypatch.setattr(
+        gcs,
+        "upload_file",
+        lambda _path, uri, *, create_only=False: uploaded.append((uri, create_only)),
+    )
     assert measure.upload(attempt, "gs://bucket/leaf/")
-    assert "gs://bucket/leaf/native/listing/data/part.parquet" in uploaded
-    assert uploaded[-1] == "gs://bucket/leaf/result.json"
+    assert ("gs://bucket/leaf/native/listing/data/part.parquet", True) in uploaded
+    # Create-only, and the marker last: a deterministic prefix plus overwrite
+    # semantics would let a second execution merge into the first.
+    assert uploaded[-1] == ("gs://bucket/leaf/result.json", True)

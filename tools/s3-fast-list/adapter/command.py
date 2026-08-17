@@ -1,29 +1,143 @@
 #!/usr/bin/env python3
 """Compile s3-fast-list parameters into exact standalone argv."""
 
+from pathlib import Path
+
 from benchmark.runtime.command_adapter import (
+    Ceiling,
     CommandAdapterError,
     CommandRequest,
+    Executable,
+    Inert,
+    Mode,
     command_adapter_main,
 )
 
 TOOL = "s3-fast-list"
-FIXED_COMMAND_PREFIX = ("/usr/bin/s3-fast-list",)
-MODES = frozenset({"list"})
+S3_FAST_LIST = Executable("s3-fast-list", ("/usr/bin/s3-fast-list",))
+KS_TOOL = Executable("ks-tool", ("/usr/bin/ks-tool",))
+"""The hints generator, the second crate of the same Cargo workspace.
+
+``build/Dockerfile:45`` copies it beside the lister, so it is in the image the
+receipts were taken from — but ``build/image.json`` registers one executable and
+the loader cross-checks that one only, so nothing outside this line binds
+``/usr/bin/ks-tool`` to a build. No committed receipt has ever run it.
+"""
+EXECUTABLES = (S3_FAST_LIST, KS_TOOL)
 SUPPORTS_UNSIGNED = True
 """--no-sign-request lists anonymously. The signed path drops the flag and has
 not been exercised by a committed run."""
 
+CONFIG_KEYS = frozenset({"segments"})
+"""CHAFE. Segment count is the hinted path's *second* axis — sweeping it means
+one preparation per value — but the study reserves no name for it, so it can
+only travel as an ordinary config key. It therefore gets none of the axis
+machinery: no `Default`, no provenance, and no merge-before-hashing, so a plan
+that states nothing produces a preparation whose identity omits the number it
+ran at. Reserving `segments` beside `concurrency` is what closes this."""
 
-def _build_tail(request: CommandRequest) -> tuple[str, ...]:
-    if request.mode != "list":
-        raise CommandAdapterError(f"unknown mode: {request.mode}")
+CONCURRENCY = Ceiling(100, "source@6c72f59")
+"""``-c/--concurrency`` as the subject runs it unsilenced (``main.rs:33``).
+
+A ceiling because the flag caps in-flight range tasks rather than creating them:
+``flat_reactor_task`` pulls from ``hints.next()`` only while ``joins.len() <
+flat_concurrency`` (``tasks_s3.rs:36``), so the effective width is
+``min(c, N+1)`` for an N-cut-point hints file and any ``c <= N+1`` lists the
+same file identically. What a campaign asks for is plan content.
+"""
+
+FIELDS = ("key", "size", "etag", "mtime")
+"""What ``normalize.py`` can populate: the Arrow schema carries Key, Size,
+LastModified and ETag, and no StorageClass at all."""
+
+CUT_POINT_FIELDS = ("key",)
+"""CHAFE. A hints file is one key-range cut point per line — a key *prefix*,
+carrying no object and populating no listing column. The contract's `fields`
+vocabulary has no word for that, so this declares the nearest honest thing and
+``purpose_ceiling="preparation"`` keeps the mode out of every listing table.
+Read as "key-shaped", not as "emits keys".
+"""
+
+MODES = {
+    # `-c` is accepted and statically inert here: with no hints file N=0, so
+    # there is exactly one range pair and one flat-list task (`main.rs:191-218`).
+    "list": Mode(
+        product="parquet",
+        fields=FIELDS,
+        axes={"concurrency": Inert()},
+        executable=S3_FAST_LIST.name,
+    ),
+    "ks-split": Mode(
+        product="text",
+        fields=CUT_POINT_FIELDS,
+        purpose_ceiling="preparation",
+        executable=KS_TOOL.name,
+    ),
+    "list-hinted": Mode(
+        product="parquet",
+        fields=FIELDS,
+        axes={"concurrency": CONCURRENCY},
+        executable=S3_FAST_LIST.name,
+    ),
+}
+
+REQUIRES = {"list-hinted": ("list", "ks-split")}
+"""The hinted path is a three-link chain, not a two-link one: a full listing
+emits the `.ks` key distribution, `ks-tool split` turns it into cut points, and
+only then can `list -k` run. The bootstrap listing is not overhead — it *is* the
+unhinted arm, which is why it keeps a `measurement` ceiling and only the split
+carries `preparation`."""
+
+KS_NAME = "keyspace.ks"
+"""The key distribution a listing drops into the engine's sink, and the artifact
+`ks-split` consumes. Written only when the engine offers a sink: a listing with
+nowhere to publish it discards it, as every committed receipt did."""
+
+HINTS_NAME = "hints.input"
+"""The cut points `ks-split` publishes into the engine's sink."""
+
+
+def _sink_path(request: CommandRequest, name: str) -> str:
+    if not request.sink_dir:
+        raise CommandAdapterError(
+            f"mode {request.mode!r} publishes {name} and requires a sink directory"
+        )
+    return f"{request.sink_dir.rstrip('/')}/{name}"
+
+
+def _staged_artifact(request: CommandRequest, name: str) -> str:
+    """Where the harness staged the artifact this mode reads.
+
+    Refused rather than invented when empty: a path this adapter chose itself
+    would name bytes the engine never staged, and one carried in ``config``
+    would hash the path where the contract hashes the digest.
+    """
+    if not request.artifact_path:
+        raise CommandAdapterError(
+            f"{TOOL} mode {request.mode!r} consumes a staged {name} and requires an artifact path"
+        )
+    return request.artifact_path
+
+
+def _concurrency(request: CommandRequest) -> str:
+    value = request.config.get("concurrency", CONCURRENCY.value)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise CommandAdapterError(f"{TOOL} concurrency must be a positive integer; got: {value!r}")
+    return str(value)
+
+
+def _list_tail(request: CommandRequest, hints: tuple[str, ...]) -> tuple[str, ...]:
+    # The `.ks` goes to /dev/null unless the engine offers somewhere to publish
+    # it: with no `--output-ks-file` the tool writes one into its working
+    # directory, which is output no attempt record could account for.
+    ks = f"{request.sink_dir.rstrip('/')}/{KS_NAME}" if request.sink_dir else "/dev/null"
     argv = [
         *((), ("--no-sign-request",))[not request.signed],
         "--output-parquet-file",
         "/dev/stdout",
         "--output-ks-file",
-        "/dev/null",
+        ks,
+        *hints,
     ]
     if request.prefix:
         argv.extend(("--prefix", request.prefix))
@@ -31,8 +145,81 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
     return tuple(argv)
 
 
+def _segments(request: CommandRequest) -> str:
+    """How many segments the cut points divide the keyspace into.
+
+    Stated by the plan and never defaulted here: upstream's own number is not
+    recorded in anything this capsule can cite, and a preparation that quietly
+    chose one would freeze the whole sweep at it.
+    """
+    value = request.config.get("segments")
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise CommandAdapterError(f"{TOOL} segments must be a positive integer; got: {value!r}")
+    return str(value)
+
+
+def _split_tail(request: CommandRequest) -> tuple[str, ...]:
+    # Flag-letter trap: `-c` is the segment count on `split` and the listing
+    # concurrency on the lister, so it is deliberately not the `concurrency`
+    # axis. **Receipt owed**: these spellings come from the hinted-workflow
+    # design note, not from a source read or a `ks-tool split --help`.
+    return (
+        "split",
+        "-k",
+        _staged_artifact(request, "key distribution"),
+        "-c",
+        _segments(request),
+        "-o",
+        _sink_path(request, HINTS_NAME),
+    )
+
+
 def build_command(request: CommandRequest) -> tuple[str, ...]:
-    return *FIXED_COMMAND_PREFIX, *_build_tail(request)
+    if request.mode == "list":
+        return *S3_FAST_LIST.argv, *_list_tail(request, ())
+    if request.mode == "list-hinted":
+        hints = ("-c", _concurrency(request), "-k", _staged_artifact(request, "hints file"))
+        return *S3_FAST_LIST.argv, *_list_tail(request, hints)
+    if request.mode == "ks-split":
+        return *KS_TOOL.argv, *_split_tail(request)
+    raise CommandAdapterError(f"unknown mode: {request.mode}")
+
+
+def _validate_hints(path: Path) -> None:
+    """Refuse a hints file that digests cleanly and means nothing.
+
+    ``ks-tool split`` emits ``last_prefix`` each time a running sum crosses
+    ``total/count`` (``ks-tool/utils.rs:88-116``), and ``last_prefix`` starts
+    empty — so both degeneracies are silent, and a run on either is not a slower
+    hinted listing but a measurement of something else entirely.
+
+    The gate the source note asks for has a third clause this signature cannot
+    carry: a cut count far below the requested segment count. The requested count
+    is config, and a validator is handed a path only.
+    """
+    lines = path.read_text(encoding="utf-8", errors="surrogateescape").split("\n")
+    # A trailing newline is a terminator, not a cut point.
+    if lines and lines[-1] == "":
+        lines.pop()
+    if not lines:
+        raise CommandAdapterError(f"{path}: hints file holds no cut point at all")
+    if lines == [""]:
+        # `split` can emit no more cut points than the `.ks` has prefixes, so a
+        # flat namespace collapses to one empty line whatever `-c` asked for.
+        raise CommandAdapterError(
+            f"{path}: a single empty cut point is the flat-namespace collapse — two identical "
+            f"full-range tasks"
+        )
+    if not lines[0]:
+        # Pair 0 becomes ("", None) — a full-range serial listing running
+        # alongside every real segment, so the hinted run can be the slower one.
+        raise CommandAdapterError(
+            f"{path}: first cut point is empty, so the hinted run would scan the full range "
+            f"serially alongside every segment"
+        )
+
+
+VALIDATE_ARTIFACT = _validate_hints
 
 
 if __name__ == "__main__":

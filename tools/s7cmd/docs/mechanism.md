@@ -150,7 +150,11 @@ SDK **standard** retry mode, `max_attempts` default 10, initial backoff
 100 ms [SRC s3ls-rs src/storage/s3/client_builder.rs:154-160 @ bf42067]
 [DOC help]. No operation/connect/read timeout is set unless the user passes
 one — `build_timeout_config` returns `None` when all four are unset
-[SRC s3ls-rs src/storage/s3/client_builder.rs:164-191 @ bf42067].
+[SRC s3ls-rs src/storage/s3/client_builder.rs:164-191 @ bf42067]. So the
+effective connect timeout is the AWS Rust SDK's own default, and every capsule
+mode runs at it: the number is `unverified` here — nothing in this study has
+read or measured it — and is receipt owed, which matters because it multiplies
+against `--aws-max-attempts 10` on a stalled connection.
 **Stalled-stream protection is ON by default**
 (`--disable-stalled-stream-protection` to turn off)
 [SRC s3ls-rs src/storage/s3/client_builder.rs:36-46 @ bf42067]. `s3ls-rs`

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ast
 import json
 import textwrap
 from collections.abc import Mapping
@@ -37,6 +36,7 @@ def write(
     extra: str = "",
     auth_role: str | None = "fixture-role",
 ) -> Path:
+    tmp_path.mkdir(parents=True, exist_ok=True)
     path = tmp_path / f"{bucket}.yaml"
     body = MINIMAL.format(bucket=bucket, tools=textwrap.indent(textwrap.dedent(tools), "  "))
     if auth_role is not None:
@@ -187,15 +187,11 @@ def test_every_default_mode_is_one_its_adapter_implements() -> None:
     root = Path(__file__).resolve().parents[2]
     defaults = bench.load_default_modes(bench.bench_dir() / "tools.yaml")
     for tool, mode in defaults.items():
-        source = (root / "tools" / tool / "adapter" / "command.py").read_text(encoding="utf-8")
-        node = next(
-            n
-            for n in ast.walk(ast.parse(source))
-            if isinstance(n, ast.Assign) and any(getattr(t, "id", "") == "MODES" for t in n.targets)
-        )
-        value = node.value
-        implemented = ast.literal_eval(value.args[0] if isinstance(value, ast.Call) else value)
-        assert mode in implemented, f"{tool}: {mode!r} not in {sorted(implemented)}"
+        # Through the loader rather than the source text: a capsule declares its
+        # vocabulary as a literal set or as Mode manifests, and which shape it is
+        # on is not this guard's business.
+        adapter = capsule.load_command_adapter(root / "tools" / tool / "adapter" / "command.py")
+        assert mode in adapter.mode_names, f"{tool}: {mode!r} not in {sorted(adapter.mode_names)}"
 
 
 def test_the_committed_catalogue_offers_no_shared_core_machines() -> None:
@@ -257,7 +253,7 @@ def test_an_empty_tool_runs_once_at_its_default_mode(tmp_path: Path) -> None:
     """Writing the name and stopping is the whole declaration."""
     path = write(tmp_path, "s5cmd:\ns3p:\n")
     loaded = load(path, default_modes={"s5cmd": "recursive", "s3p": "ls"})
-    assert [(c.tool, c.case_id, c.mode) for c in loaded.cases] == [
+    assert [(c.tool, c.label, c.mode) for c in loaded.cases] == [
         ("s5cmd", "recursive", "recursive"),
         ("s3p", "ls", "ls"),
     ]
@@ -294,7 +290,7 @@ def test_each_row_is_one_case(tmp_path: Path) -> None:
             - {mode: recursive-parquet, memory_gb: 8}
         """,
     )
-    ids = [case.case_id for case in load(path).cases]
+    ids = [case.label for case in load(path).cases]
     assert ids == [
         "recursive-tsv.memory_gb-4",
         "recursive-tsv.memory_gb-8",
@@ -349,7 +345,7 @@ def test_rows_are_ragged_so_one_mode_can_be_swept_alone(tmp_path: Path) -> None:
         """,
     )
     cases = load(path).cases
-    assert [c.case_id for c in cases] == [
+    assert [c.label for c in cases] == [
         "recursive-tsv.vcpus-2.memory_gb-4",
         "recursive-parquet-sorted.vcpus-4.memory_gb-8",
         "recursive-parquet-sorted.vcpus-4.memory_gb-16",
@@ -377,7 +373,7 @@ def test_the_id_renders_the_union_of_the_keys_the_rows_state(tmp_path: Path) -> 
         """,
     )
     cases = load(path).cases
-    assert [c.case_id for c in cases] == [
+    assert [c.label for c in cases] == [
         "recursive-tsv.container_memory_gb-none",
         "recursive-parquet-sorted.container_memory_gb-2",
     ]
@@ -415,7 +411,7 @@ def test_a_row_may_omit_the_mode_and_inherit_the_tool_default(tmp_path: Path) ->
         """,
     )
     cases = load(path, default_modes={"s5cmd": "recursive"}).cases
-    assert [(c.mode, c.case_id) for c in cases] == [
+    assert [(c.mode, c.label) for c in cases] == [
         ("recursive", "recursive.vcpus-2"),
         ("recursive", "recursive.vcpus-4"),
     ]
@@ -728,7 +724,7 @@ def test_a_rows_axis_lands_in_the_cases_config(tmp_path: Path) -> None:
     """The row states the axis; resolution folds it into the blob the loader hashes."""
     modes = {
         "recursive-tsv": capsule.Mode(
-            product="text", fields=("key",), axes={"concurrency": capsule.Ceiling(8)}
+            product="text", fields=("key",), axes={"concurrency": capsule.Ceiling(64, "unverified")}
         )
     }
     adapters = {
@@ -770,60 +766,25 @@ def test_a_silent_row_gets_the_capsules_declared_default(tmp_path: Path) -> None
     assert dict(case.config) == {"concurrency": 4, "mode": "recursive-tsv"}
     # A row silent on the axis carries no opinion in its ID -- only a row that
     # states it does.
-    assert case.case_id == "recursive-tsv"
+    assert case.label == "recursive-tsv"
 
 
-# ── identity ─────────────────────────────────────────────────────────────────
+# ── what a row resolves to ───────────────────────────────────────────────────
 
 
-def test_every_field_of_a_case_moves_its_fingerprint(tmp_path: Path) -> None:
-    """Identity must cover the whole resolved case, not just the parts with tests.
-
-    The bucket in particular is load-bearing — other tests use separate
-    directories on the strength of it — but nothing asserted it.
-    """
-    base = "swath:\n  cases:\n    - {mode: recursive-tsv}\n"
-
-    def fingerprint_of(body: str, *, bucket: str = "b", region: str = "us-east-1") -> str:
-        directory = tmp_path / f"{bucket}-{region}-{abs(hash(body))}"
-        directory.mkdir()
-        path = directory / f"{bucket}.yaml"
-        text = MINIMAL.format(bucket=bucket, tools=textwrap.indent(body, "  "))
-        path.write_text(text.replace("region: us-east-1", f"region: {region}"), encoding="utf-8")
-        return load(path, default_modes={"swath": "recursive-tsv"}).cases[0].fingerprint
-
-    reference = fingerprint_of(base)
-    assert fingerprint_of(base, bucket="other") != reference
-    assert fingerprint_of(base, region="eu-west-1") != reference
-    # mode, via a different mode of the same tool.
-    assert fingerprint_of("swath:\n  cases:\n    - {mode: recursive-jsonl}\n") != reference
-    # env, via the ceiling that the heap share is rendered against.
-    assert fingerprint_of(f"{base}  container_memory_gb: 2\n") != reference
-
-
-def test_two_tools_running_the_same_mode_differ(tmp_path: Path) -> None:
-    """The tool is part of identity, not merely part of the receipt path."""
-    path = write(
-        tmp_path, "s5cmd:\n  cases:\n    - {mode: list}\ns3kor:\n  cases:\n    - {mode: list}\n"
-    )
-    first, second = load(path).cases
-    assert first.case_id == second.case_id  # same derived path segment
-    assert first.fingerprint != second.fingerprint
-
-
-def test_every_key_a_row_may_state_moves_both_the_id_and_the_fingerprint(
-    tmp_path: Path,
-) -> None:
+def test_every_key_a_row_may_state_changes_the_case_it_resolves_to(tmp_path: Path) -> None:
     """The law that makes the row vocabulary checkable rather than remembered.
 
-    A key visible to one but not the other is the ``timeout_s`` hazard: same ID,
-    different fingerprints, so two non-comparable runs land in one directory.
-    Adding a key to ``ROW_FIELDS`` without rendering it into the ID fails here
-    rather than in a campaign.
+    A row key that reaches neither the label nor the resolved case is a key two
+    rows can differ on while the campaign files them as one attempt of one case.
+    Adding a key to ``ROW_FIELDS`` without wiring it through fails here rather
+    than in a campaign.
     """
     # Two legal values per key, both resolving to a shape the catalogue offers.
     pairs: dict[str, tuple[object, object]] = {
         "mode": ("recursive-tsv", "recursive-jsonl"),
+        "purpose": ("measurement", "canary"),
+        "statistic": ("timing", "rate"),
         "signed": (False, True),
         "concurrency": (4, 8),
         "vcpus": (2, 4),
@@ -836,7 +797,9 @@ def test_every_key_a_row_may_state_moves_both_the_id_and_the_fingerprint(
     # declare the axis; every other test's default fixture stays axis-free.
     modes = {
         "recursive-tsv": capsule.Mode(
-            product="text", fields=("key",), axes={"concurrency": capsule.Ceiling(8)}
+            product="text",
+            fields=("key",),
+            axes={"concurrency": capsule.Ceiling(64, "unverified")},
         ),
         "recursive-jsonl": capsule.Mode(product="text", fields=("key",)),
     }
@@ -860,44 +823,48 @@ def test_every_key_a_row_may_state_moves_both_the_id_and_the_fingerprint(
 
     for field, (before, after) in pairs.items():
         first, second = case(field, before, 0), case(field, after, 1)
-        assert first.case_id != second.case_id, f"{field} does not reach the id"
-        assert first.fingerprint != second.fingerprint, f"{field} does not reach the fingerprint"
+        assert first.label != second.label, f"{field} does not reach the label"
+        assert first != second, f"{field} does not reach the resolved case"
 
 
-def test_reps_are_not_part_of_identity(tmp_path: Path) -> None:
-    """How many times we ran something is not part of what we ran."""
-    fingerprints = []
-    for reps in (3, 7):
-        # Same bucket, separate directories: the bucket name is part of identity,
-        # so varying it here would prove nothing about reps.
-        directory = tmp_path / str(reps)
-        directory.mkdir()
-        path = directory / "b.yaml"
-        path.write_text(
-            MINIMAL.format(bucket="b", tools=textwrap.indent(ONE_CASE, "  ")).replace(
-                "reps: 3", f"reps: {reps}"
-            ),
-            encoding="utf-8",
-        )
-        fingerprints.append(load(path).cases[0].fingerprint)
-    assert fingerprints[0] == fingerprints[1]
+def test_a_row_may_demote_a_mode_below_its_ceiling_and_never_promote_it(
+    tmp_path: Path,
+) -> None:
+    """`purpose` answers "should this timing be compared?", and the capsule caps it."""
+    modes = {
+        "recursive-tsv": capsule.Mode(product="text", fields=("key",)),
+        "hints": capsule.Mode(product="text", fields=("key",), purpose_ceiling="preparation"),
+    }
+    adapters = {
+        **CAPSULES,
+        "swath": fixture_capsule("swath", unsigned=True, signed=True, modes=modes),
+    }
+    body = "swath:\n  cases:\n    - {mode: recursive-tsv}\n    - {mode: hints}\n"
+    measurement, preparation = load(write(tmp_path, body), adapters=adapters).cases
+    # The default is the mode's own ceiling, so a mode that can only ever be a
+    # preparation says so once, in the capsule.
+    assert (measurement.purpose, preparation.purpose) == ("measurement", "preparation")
+
+    demoted = write(
+        tmp_path / "demoted", "swath:\n  cases:\n    - {mode: recursive-tsv, purpose: canary}\n"
+    )
+    assert load(demoted, adapters=adapters).cases[0].purpose == "canary"
+
+    promoted = write(
+        tmp_path / "promoted", "swath:\n  cases:\n    - {mode: hints, purpose: measurement}\n"
+    )
+    with pytest.raises(bench.PlanError, match="never promote"):
+        load(promoted, adapters=adapters)
 
 
-def test_timeout_is_part_of_identity(tmp_path: Path) -> None:
-    """A timeout can truncate a run, so it can change the result."""
-    fingerprints = []
-    for timeout in (3600, 7200):
-        directory = tmp_path / str(timeout)
-        directory.mkdir()
-        path = directory / "b.yaml"
-        path.write_text(
-            MINIMAL.format(bucket="b", tools=textwrap.indent(ONE_CASE, "  ")).replace(
-                "timeout_s: 3600", f"timeout_s: {timeout}"
-            ),
-            encoding="utf-8",
-        )
-        fingerprints.append(load(path).cases[0].fingerprint)
-    assert fingerprints[0] != fingerprints[1]
+def test_a_purpose_or_statistic_outside_the_vocabulary_is_refused(tmp_path: Path) -> None:
+    for row, expected in (
+        ("{mode: recursive-tsv, purpose: important}", "purpose"),
+        ("{mode: recursive-tsv, statistic: median}", "statistic"),
+    ):
+        path = write(tmp_path / expected, f"swath:\n  cases:\n    - {row}\n")
+        with pytest.raises(bench.PlanError, match=expected):
+            load(path)
 
 
 # ── refusals ─────────────────────────────────────────────────────────────────
@@ -960,11 +927,12 @@ def test_a_capsule_that_can_do_both_lists_unsigned_unless_asked(tmp_path: Path) 
     first, second = load(path, adapters=adapters).cases
     assert (first.auth_role, second.auth_role) == (None, "a-role")
     # The union rule: one row states `signed`, so both IDs render it.
-    assert [c.case_id for c in (first, second)] == [
+    assert [c.label for c in (first, second)] == [
         "s3api-v2-text.signed-false",
         "s3api-v2-text.signed-true",
     ]
-    assert first.fingerprint != second.fingerprint
+    # Signing is a different measurement, so the two rows are two cases.
+    assert first != second
 
 
 def test_asking_a_subject_for_a_stratum_it_cannot_issue_is_refused(tmp_path: Path) -> None:
@@ -1111,7 +1079,7 @@ def test_resolve_plan_expands_the_committed_plan(capsys: pytest.CaptureFixture[s
     assert bench_cli.resolve_plan_main(["--bucket", "noaa-ghcn-pds"]) == 0
     out = capsys.readouterr().out
     assert "14 cases, 14 attempts" in out
-    assert "recursive-parquet-sorted.container_memory_gb-2" in out
+    assert "recursive-parquet-sorted.concurrency-8.container_memory_gb-2" in out
 
 
 def test_resolve_plan_emits_machine_readable_cases(
