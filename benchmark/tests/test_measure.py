@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gzip
 import hashlib
 import json
 import os
@@ -738,7 +739,17 @@ def _cut_points(path: Path) -> None:
 VALIDATE_ARTIFACT = {"split": _cut_points}
 '''
 
-INLINE_SUBJECT = """\
+ENV_NAMES = """\
+import os
+import sys
+
+# Names only, never values: what an exec was handed is the claim under test, and
+# printing the credential itself would be the leak.
+print(sorted(n for n in os.environ if n.startswith("AWS_")), file=sys.stderr)
+"""
+
+INLINE_SUBJECT = (
+    """\
 import sys
 from pathlib import Path
 
@@ -748,8 +759,11 @@ hints = Path(sys.argv[1]).read_text()
 Path(sys.argv[2], "listing.txt").write_text(hints)
 print(hints, end="")
 """
+    + ENV_NAMES
+)
 
-INLINE_SPLIT = """\
+INLINE_SPLIT = (
+    """\
 import sys
 import time
 from pathlib import Path
@@ -758,6 +772,8 @@ time.sleep(0.2)
 keyspace = Path(sys.argv[1]).read_text()
 Path(sys.argv[2], "hints.input").write_text(keyspace)
 """
+    + ENV_NAMES
+)
 
 
 def inline_capsule(tmp_path: Path, split: str = INLINE_SPLIT) -> Path:
@@ -776,6 +792,7 @@ def run_inline_worker(
     *,
     mode: str = "hinted",
     split: str = INLINE_SPLIT,
+    auth_role: str | None = None,
     uploaded: list[tuple[str, bytes]] | None = None,
 ) -> int:
     """Run one attempt of the fixture capsule against a staged `.ks`.
@@ -806,6 +823,7 @@ def run_inline_worker(
         [
             "--tool",
             "s3-fast-list",
+            *(() if auth_role is None else ("--auth-role", auth_role)),
             "--mode",
             mode,
             "--bucket",
@@ -901,6 +919,29 @@ def test_an_inline_setup_runs_untimed_before_the_subject_it_feeds(
     }
     assert (tmp_path / "attempt/inline/stdout.log").exists()
     assert uploaded[-1][0].endswith("/result.json")
+
+
+def test_the_credential_reaches_the_subject_and_not_the_setup_exec(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A setup exec transforms staged bytes locally: it has nothing to sign with.
+
+    Both execs print the names of the AWS variables they were handed — names, so
+    that the check itself cannot be the leak.
+    """
+    monkeypatch.setenv(
+        CREDENTIAL_ENV_VAR, "AWS_ACCESS_KEY_ID=fixture-key\nAWS_SECRET_ACCESS_KEY=fixture-secret\n"
+    )
+    assert run_inline_worker(tmp_path, monkeypatch, auth_role="public-read") == 0
+
+    setup_env = (tmp_path / "attempt/inline/stderr.log").read_text()
+    with gzip.open(tmp_path / "attempt/stderr.log.gz", "rt") as handle:
+        subject_env = handle.read()
+    assert "AWS_ACCESS_KEY_ID" in subject_env
+    assert "AWS_ACCESS_KEY_ID" not in setup_env
+    assert "AWS_SECRET_ACCESS_KEY" not in setup_env
+    # What it does still get: the region, and the harness base it shares.
+    assert "AWS_REGION" in setup_env
 
 
 def test_a_preparation_is_not_asked_for_a_row_count_it_has_no_answer_to(

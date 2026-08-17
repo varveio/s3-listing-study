@@ -790,7 +790,6 @@ def run_inline_setup(
     consumer_config: Mapping[str, object],
     artifact_path: str,
     attempt_dir: Path,
-    credential_env: Mapping[str, str],
     visible_memory_gb: float,
 ) -> tuple[str, dict[str, object]]:
     """Run one mode's declared setup exec untimed, and return what the subject reads.
@@ -804,6 +803,10 @@ def run_inline_setup(
     consumer that found it in ``native/`` would count the harness's own scaffolding
     as listed rows. Exactly one file, the same contract a consumed preparation
     holds to: the harness has no way to choose between two.
+
+    It runs without the credential. A setup exec is by contract a local transform
+    of what the chain already staged, so it has nothing to sign, and the fewer
+    execs that hold secret material the smaller the surface that can leak it.
     """
     # The same inheritance a chain link gets, from the same rule.
     shared = shared_axis_values(adapter.modes[mode], consumer_config)
@@ -840,7 +843,7 @@ def run_inline_setup(
         setup_dir,
         args.timeout,
         args.term_grace,
-        subject_env(args.region, functional_env, credential_env),
+        subject_env(args.region, functional_env, {}),
         cwd=args.subject_workdir,
     )
     settled = all(
@@ -1033,7 +1036,6 @@ def main(argv: list[str] | None = None) -> int:
                 consumer_config=config,
                 artifact_path=artifact_path,
                 attempt_dir=attempt_dir,
-                credential_env=credential_env,
                 visible_memory_gb=visible_memory_gb,
             )
         except SetupFailed as exc:

@@ -371,6 +371,12 @@ the refusals are:
   `REQUIRES`. One flat step inside one attempt: anything deeper puts a graph back
   where no reviewer and no slot can see it.
 
+**The credential reaches only the timed subject.** A setup exec is by contract a
+local transform of bytes the chain already staged, so it gets the harness base
+environment, the region, and its capsule's functional environment — and not the
+signing credential. A mode that has to sign to do its work is a preparation with
+its own identity, not an inline setup.
+
 An inline setup exec carries **no identity of its own**. It is part of the
 measurement attempt, and the axes it runs at are already in that attempt's config
 blob, which is what the case hashed. A setup exec that fails — nonzero, timed
