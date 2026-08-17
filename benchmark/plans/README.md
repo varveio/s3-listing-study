@@ -79,15 +79,22 @@ Everything else a row states is a flat scalar. A row may also carry `config`, a
 mapping of the capsule-declared keys the study reserves no row field for:
 
 ```yaml
-s3-fast-list:
+some-tool:
   cases:
-    - {mode: ks-split, config: {segments: 16}}
+    - {mode: list, config: {page_size: 500}}
 ```
 
-A reserved axis stays a first-class row field — `concurrency` is one, because a
-report reads that column across all eleven tools. `config` is for a knob that is
-one tool's own business: s3-fast-list's `segments`, which its `ks-split` mode
-requires and no other subject has.
+A reserved axis stays a first-class row field — `concurrency` and `segments`
+are, because a report reads those columns across tools. s3-fast-list's hinted
+path states both flat:
+
+```yaml
+s3-fast-list:
+  cases:
+    - {mode: list-hinted, segments: 16}
+```
+
+`config` is for a knob that is one tool's own business and no axis describes.
 
 Its keys are folded into the case's config blob *before* the capsule sees it, so
 the capsule's own refusal still runs over them: a key it never declared in

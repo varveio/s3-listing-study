@@ -50,7 +50,7 @@ The order is what ``purpose_ceiling`` is read against: a plan may demote a mode
 below its ceiling, never promote one above it.
 """
 
-RESERVED_AXES = ("concurrency", "heap_percent")
+RESERVED_AXES = ("concurrency", "heap_percent", "segments")
 """Config key names reserved for axes a comparison is read along.
 
 A capsule with such a knob calls it by the reserved name and declares it, rather
@@ -58,6 +58,11 @@ than pinning a number inside ``build_command`` where no report can see it and no
 plan can sweep it. The *name* is the study's; the meaning stays the capsule's --
 ``-c``, ``--checkers`` and ``--list-concurrency`` govern different things and no
 declaration makes them one.
+
+``segments`` is how many pieces a prepared artifact divides the work into --
+s3-fast-list's hinted path cuts the keyspace into N ranges. It is an axis of the
+*consuming* measurement even though only the preparation's argv carries it: the
+artifact's shape is what the run listed under, so it belongs in the identity.
 """
 
 RESERVED_CONFIG_KEYS = ("mode", *RESERVED_AXES)
@@ -140,6 +145,19 @@ class Ceiling:
 
 
 @dataclass(frozen=True, slots=True)
+class Stated:
+    """Settable, and the capsule carries no value at all: the plan must state it.
+
+    s3-fast-list's ``segments`` — upstream records no default the capsule could
+    cite, and a preparation that quietly chose one would freeze the whole sweep
+    at it. Distinct from :class:`Default` with an ``unverified`` provenance,
+    which still asserts *a* number; ``Stated`` asserts there is none to record,
+    so ``effective_config`` refuses a plan that leaves it silent rather than
+    folding anything in.
+    """
+
+
+@dataclass(frozen=True, slots=True)
 class Inert:
     """The flag is accepted and has no effect *on this mode* — rclone's
     ``--checkers`` under flat ``ListR``.
@@ -150,7 +168,7 @@ class Inert:
     """
 
 
-Axis = Fixed | Default | Ceiling | Inert
+Axis = Fixed | Default | Ceiling | Stated | Inert
 
 
 @dataclass(frozen=True, slots=True)
@@ -240,7 +258,7 @@ class Mode:
                 f"reserved names are {RESERVED_AXES}"
             )
         for name, axis in axes.items():
-            if not isinstance(axis, Fixed | Default | Ceiling | Inert):
+            if not isinstance(axis, Fixed | Default | Ceiling | Stated | Inert):
                 raise CommandAdapterError(f"axis {name} is not an axis state: {axis!r}")
         heap = axes.get("heap_percent")
         if heap is not None and heap != Fixed(HEAP_PERCENT):
@@ -453,6 +471,11 @@ class LoadedCommandAdapter:
                         f"{self.tool} mode {mode!r} fixes {name}; a plan may not set it"
                     )
                 continue
+            if isinstance(axis, Stated):
+                raise CommandAdapterError(
+                    f"{self.tool} mode {mode!r} declares {name} with no value of its own; "
+                    f"the plan must state it"
+                )
             if isinstance(axis, Fixed | Default | Ceiling):
                 merged[name] = axis.value
         return {key: merged[key] for key in sorted(merged)}

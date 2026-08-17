@@ -42,6 +42,7 @@ from benchmark.runtime.command_adapter import (  # noqa: F401
     Fixed,
     Inert,
     Mode,
+    Stated,
 )
 
 TOOL = "fixture"
@@ -111,6 +112,29 @@ def test_a_declared_axis_reaches_the_config_the_identity_hashes(tmp_path: Path) 
     # did nothing here, and there is no such flag there.
     assert adapter.effective_config("inert", {}) == {"mode": "inert"}
     assert adapter.effective_config("absent", {}) == {"mode": "absent"}
+
+
+def test_a_stated_axis_folds_the_plans_value_and_refuses_silence(tmp_path: Path) -> None:
+    """`Stated` asserts the capsule has no number of its own: a plan value passes
+    through into the hashed blob, and a silent plan is refused rather than
+    handed an invented default — s3-fast-list's `segments`."""
+    adapter = load(
+        tmp_path,
+        "\nMODES = {\n"
+        '    "split": Mode(\n'
+        '        product="text",\n'
+        '        fields=("key",),\n'
+        '        axes={"segments": Stated()},\n'
+        '        purpose_ceiling="preparation",\n'
+        "    ),\n"
+        "}\n",
+    )
+    assert adapter.effective_config("split", {"segments": 16}) == {
+        "mode": "split",
+        "segments": 16,
+    }
+    with pytest.raises(CommandAdapterError, match="the plan must state it"):
+        adapter.effective_config("split", {})
 
 
 def test_a_plan_sets_a_settable_axis_and_never_a_fixed_one(tmp_path: Path) -> None:

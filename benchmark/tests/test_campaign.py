@@ -318,10 +318,16 @@ def test_a_dry_run_renders_every_planned_attempt_and_writes_nothing(
     )
     rendered = capsys.readouterr().out.splitlines()
     cases = len(loaded_plan().cases)
+    # The hinted s3-fast-list row expands to a chain: its bootstrap `list`
+    # preparation submits immediately (one attempt, replacing the hinted
+    # measurement in the count), while `ks-split` and `list-hinted` wait on
+    # their inputs and are booked as the two slots.
     assert (
-        rendered[-1] == f"campaign: {cases} plan row(s) expand to {cases} attempt(s) and 0 slot(s)"
+        rendered[-1] == f"campaign: {cases} plan row(s) expand to {cases} attempt(s) and 2 slot(s)"
     )
-    assert len(rendered[:-1]) == cases
+    # One rendered line per expanded step: the chain's two waiting links print
+    # alongside the immediate attempts.
+    assert len(rendered[:-1]) == cases + 2
     assert not state.exists()
 
 
@@ -549,28 +555,19 @@ defaults:
 tools:
   s3-fast-list:
     cases:
-      - {mode: list-hinted, concurrency: 8}
+      - {mode: list-hinted, concurrency: 8, segments: 16}
 """
 
 
 def hinted_capsule() -> Any:
-    """The real s3-fast-list capsule, holding the segment count its own chain omits.
+    """The real s3-fast-list capsule, untouched.
 
-    `ks-split` takes this capsule's config and never the consumer's, and the
-    capsule declares `segments` with no default (`tools/s3-fast-list/adapter/
-    command.py`), so the automatic link cannot be built — which plan expansion
-    now refuses (`test_plan.py`). Supplying the count at build time is the whole
-    fixture: the chain, the modes and the artifact validator stay the capsule's,
-    so these tests still fail when its `REQUIRES` moves.
+    The row states `segments` and chain expansion hands it to the `ks-split`
+    link — the axis the capsule declares `Stated`. The chain, the modes and the
+    artifact validator all stay the capsule's, so these tests still fail when
+    its `REQUIRES` moves.
     """
-    adapter = bench.load_capsule("s3-fast-list")
-
-    def build(request: Any) -> tuple[str, ...]:
-        if request.mode == "ks-split":
-            request = replace(request, config={**request.config, "segments": 16})
-        return adapter.build(request)
-
-    return replace(adapter, build=build)
+    return bench.load_capsule("s3-fast-list")
 
 
 def hinted_plan(tmp_path: Path, body: str = HINTED) -> Plan:

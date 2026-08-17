@@ -151,9 +151,9 @@ def test_the_committed_plan_loads() -> None:
     assert loaded.bucket == "noaa-ghcn-pds"
     assert loaded.region == "us-east-1"
     assert len(loaded.tools()) == 11
-    # Ten bare tools, plus swath's four rows: 2 streaming modes at one ceiling
-    # and the sorted mode at two.
-    assert len(loaded.cases) == 14
+    # Nine bare tools, plus s3-fast-list's two rows and swath's four: 2
+    # streaming modes at one ceiling and the sorted mode at two.
+    assert len(loaded.cases) == 15
     assert len(loaded.cases_for("swath")) == 4
 
     # The sweep is the container ceiling; the box does not move, so nothing but
@@ -544,9 +544,9 @@ def test_duplicate_values_on_an_independent_axis_are_refused_as_one_case(
 
 
 @pytest.mark.parametrize("bucket", ["noaa-rtma-pds", "sorel-20m"])
-def test_large_bucket_campaign_plans_resolve_seventeen_cases(bucket: str) -> None:
+def test_large_bucket_campaign_plans_resolve_eighteen_cases(bucket: str) -> None:
     loaded = bench.Plan.load(bench.default_path(bucket))
-    assert len(loaded.cases) == 17
+    assert len(loaded.cases) == 18
     assert len(loaded.cases_for("swath")) == 7
 
 
@@ -710,27 +710,27 @@ def test_a_rows_config_key_reaches_the_blob_and_the_cases_identity(tmp_path: Pat
             unsigned=True,
             signed=True,
             modes=modes,
-            config_keys=frozenset({"segments"}),
+            config_keys=frozenset({"page_size"}),
         ),
     }
     path = write(
         tmp_path,
         "s3-fast-list:\n  cases:\n"
-        "    - {mode: ks-split, config: {segments: 16}}\n"
-        "    - {mode: ks-split, config: {segments: 32}}\n",
+        "    - {mode: ks-split, config: {page_size: 16}}\n"
+        "    - {mode: ks-split, config: {page_size: 32}}\n",
     )
     cases = load(path, adapters=adapters).cases
     assert [dict(case.config) for case in cases] == [
-        {"mode": "ks-split", "segments": 16},
-        {"mode": "ks-split", "segments": 32},
+        {"mode": "ks-split", "page_size": 16},
+        {"mode": "ks-split", "page_size": 32},
     ]
-    assert [case.label for case in cases] == ["ks-split.segments-16", "ks-split.segments-32"]
+    assert [case.label for case in cases] == ["ks-split.page_size-16", "ks-split.page_size-32"]
 
 
 def test_a_config_key_the_capsule_never_declared_is_refused(tmp_path: Path) -> None:
     """The hatch does not bypass the capsule: it is folded in before it refuses."""
     path = write(
-        tmp_path, "swath:\n  cases:\n    - {mode: recursive-tsv, config: {segments: 16}}\n"
+        tmp_path, "swath:\n  cases:\n    - {mode: recursive-tsv, config: {page_size: 16}}\n"
     )
     with pytest.raises(bench.PlanError):
         load(path)
@@ -746,11 +746,9 @@ def test_a_config_key_that_has_a_row_field_of_its_own_is_refused(tmp_path: Path)
 
 
 def test_a_row_stating_segments_compiles_the_real_capsules_split(tmp_path: Path) -> None:
-    """The gap this closed: `ks-split` requires `segments` and no plan could say it."""
+    """`segments` is a reserved axis, stated flat on the row like `concurrency`."""
     adapter = bench.load_capsule("s3-fast-list")
-    path = write(
-        tmp_path, "s3-fast-list:\n  cases:\n    - {mode: ks-split, config: {segments: 16}}\n"
-    )
+    path = write(tmp_path, "s3-fast-list:\n  cases:\n    - {mode: ks-split, segments: 16}\n")
     case = load(path, adapters={**CAPSULES, "s3-fast-list": adapter}).cases[0]
     argv = adapter.compile(
         capsule.CommandRequest(
@@ -766,14 +764,30 @@ def test_a_row_stating_segments_compiles_the_real_capsules_split(tmp_path: Path)
     assert argv[-6:] == ("-k", "/staged/keyspace.ks", "-c", "16", "-o", "/sink/hints.input")
 
 
-def test_a_chain_link_the_capsule_cannot_build_is_refused_offline(tmp_path: Path) -> None:
-    """The `list-hinted` gap: a prerequisite takes the capsule's own config, which
-    states no segment count, so the chain is unbuildable — here rather than on a VM."""
+def test_a_hinted_row_without_segments_is_refused_at_resolution(tmp_path: Path) -> None:
+    """`list-hinted` declares `segments` as `Stated`: the capsule has no number of
+    its own to fold in, so a silent row is refused at load, not on a VM."""
     adapter = bench.load_capsule("s3-fast-list")
     path = write(tmp_path, "s3-fast-list:\n  cases:\n    - {mode: list-hinted, concurrency: 8}\n")
+    with pytest.raises(bench.PlanError, match="segments"):
+        load(path, adapters={**CAPSULES, "s3-fast-list": adapter})
+
+
+def test_a_hinted_rows_segments_reaches_its_ks_split_link(tmp_path: Path) -> None:
+    """Chain expansion hands the consumer's value to an axis the prerequisite
+    itself declares — the split cuts at the count the hinted row stated — while
+    `concurrency`, which `ks-split` never declares, stays out of the link."""
+    adapter = bench.load_capsule("s3-fast-list")
+    path = write(
+        tmp_path, "s3-fast-list:\n  cases:\n    - {mode: list-hinted, segments: 16}\n"
+    )
     case = load(path, adapters={**CAPSULES, "s3-fast-list": adapter}).cases[0]
-    with pytest.raises(bench.PlanError):
-        bench.expand_requirements(case, adapter)
+    links = bench.expand_requirements(case, adapter)
+    assert [link.mode for link in links] == ["list", "ks-split", "list-hinted"]
+    split = dict(links[1].config)
+    assert split["segments"] == 16
+    assert "concurrency" not in split
+    assert dict(case.config)["segments"] == 16
 
 
 # ── what a row resolves to ───────────────────────────────────────────────────
@@ -794,19 +808,25 @@ def test_every_key_a_row_may_state_changes_the_case_it_resolves_to(tmp_path: Pat
         "statistic": ("timing", "rate"),
         "signed": (False, True),
         "concurrency": (4, 8),
+        "segments": (16, 32),
         "vcpus": (2, 4),
         "memory_gb": (8, 16),
         "container_memory_gb": (4, 8),
     }
     assert set(pairs) == set(bench.ROW_FIELDS), "a row key with no coverage here"
 
-    # Only this test sweeps `concurrency`, so only here does swath need to
-    # declare the axis; every other test's default fixture stays axis-free.
+    # Only this test sweeps the row axes, so only here does swath need to
+    # declare them; every other test's default fixture stays axis-free.
+    # `segments` is `Default` rather than `Stated` so the rows sweeping the
+    # other keys may leave it silent.
     modes = {
         "recursive-tsv": capsule.Mode(
             product="text",
             fields=("key",),
-            axes={"concurrency": capsule.Ceiling(64, "unverified")},
+            axes={
+                "concurrency": capsule.Ceiling(64, "unverified"),
+                "segments": capsule.Default(64, "unverified"),
+            },
         ),
         "recursive-jsonl": capsule.Mode(product="text", fields=("key",)),
     }
@@ -1085,8 +1105,8 @@ def test_a_mode_the_adapter_lacks_is_refused(tmp_path: Path) -> None:
 def test_resolve_plan_expands_the_committed_plan(capsys: pytest.CaptureFixture[str]) -> None:
     assert bench_cli.resolve_plan_main(["--bucket", "noaa-ghcn-pds"]) == 0
     out = capsys.readouterr().out
-    assert "14 cases, 14 attempts" in out
-    assert "recursive-parquet-sorted.concurrency-8.container_memory_gb-2" in out
+    assert "15 cases, 15 attempts" in out
+    assert "recursive-parquet-sorted.container_memory_gb-2" in out
 
 
 def test_resolve_plan_emits_machine_readable_cases(
@@ -1094,7 +1114,7 @@ def test_resolve_plan_emits_machine_readable_cases(
 ) -> None:
     assert bench_cli.resolve_plan_main(["--bucket", "noaa-ghcn-pds", "--json"]) == 0
     payload = json.loads(capsys.readouterr().out)
-    assert len(payload["cases"]) == 14
+    assert len(payload["cases"]) == 15
     # The plan digest travels with the resolution so a submission can cite the
     # exact bytes it expanded.
     assert len(payload["plan_sha256"]) == 64

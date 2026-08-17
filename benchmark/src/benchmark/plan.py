@@ -130,24 +130,38 @@ SCHEDULE_FIELDS = ("reps", "timeout_s")
 # derived ID; the rest follow in this order, so an ID is a function of the key
 # set and not of the order someone typed them in.
 #
-# `concurrency` is the one reserved axis a row may set today (see
+# `concurrency` and `segments` are the reserved axes a row may set (see
 # `benchmark/docs/capsule-contract.md` "Configuration is opaque, and its key
-# names are not"). It is not resource allocation and not a layer default: a
+# names are not"); `heap_percent` is the harness's own methodology share and no
+# row states it. An axis is not resource allocation and not a layer default: a
 # capsule declares the knob per mode, so the row that names the mode is where
-# a value for it belongs. Resolution refuses it for a capsule that declares no
+# a value for it belongs. Resolution refuses one for a capsule that declares no
 # such axis, and folds it into `Case.config` rather than into argv directly.
 #
 # `purpose` and `statistic` are what an attempt is *for* and how it is read.
 # They are row fields rather than layer defaults because a canary or a rate case
 # is one row's claim about one case, and a whole plan demoted by inheritance is
 # a plan nobody meant to write.
-ROW_FIELDS = ("mode", "purpose", "statistic", "signed", "concurrency", *RESOURCE_FIELDS)
+ROW_FIELDS = (
+    "mode",
+    "purpose",
+    "statistic",
+    "signed",
+    "concurrency",
+    "segments",
+    *RESOURCE_FIELDS,
+)
 
-# The escape hatch for a capsule-declared key the study reserves no name for --
-# s3-fast-list's `segments`, which its `ks-split` mode requires and no axis
-# describes. A flat mapping, folded into the blob before the capsule's own
-# refusal runs, so a typo or an undeclared key still fails there. A key that has
-# a row field of its own is refused: one way to say each thing.
+# The row axes resolution lifts into the config blob; `mode` travels separately
+# and `heap_percent` is the harness's, so this is ROW_FIELDS ∩ RESERVED_AXES
+# spelled once.
+ROW_AXES = ("concurrency", "segments")
+
+# The escape hatch for a capsule-declared key the study reserves no row field
+# for -- a knob only one subject has and no axis describes. A flat mapping,
+# folded into the blob before the capsule's own refusal runs, so a typo or an
+# undeclared key still fails there. A key that has a row field of its own is
+# refused: one way to say each thing.
 ROW_CONFIG = "config"
 
 # Whether the case's result is a timing or a rate over its repeats. `rate` is
@@ -247,8 +261,9 @@ class Case:
     axes: tuple[tuple[str, str | int | None], ...]
     # The capsule's own knobs -- the harness reads none of these, only forwards
     # them. Produced by the capsule's ``effective_config(mode, ...)`` at
-    # resolution: the row's ``mode``, any reserved axis it stated (today just
-    # ``concurrency``) and whatever its ``config`` mapping carried, plus every
+    # resolution: the row's ``mode``, any reserved axis it stated
+    # (``concurrency``, ``segments``) and whatever its ``config`` mapping
+    # carried, plus every
     # declared default the capsule fills in when a row leaves an axis silent.
     # Key-sorted, matching what is hashed.
     config: tuple[tuple[str, object], ...]
@@ -644,13 +659,20 @@ def expand_requirements(case: Case, adapter: LoadedCommandAdapter) -> tuple[Case
     expansion rather than a graph discovered at run time
     (`architecture.md` § *Dependencies*).
 
-    A prerequisite takes whatever config the capsule says its own mode takes and
-    never the consumer's, which is what collapses a sweep over any measurement
-    axis to one preparation (`identity.md` § *Two identities, two questions*).
-    Everything the harness acts on — the box, the role, the deadline — it does
-    inherit: those are recorded on a preparation's row and stay out of its hash.
+    A prerequisite takes the config the capsule says its own mode takes, plus
+    the consumer's value for any axis the prerequisite mode *itself declares* —
+    s3-fast-list's `ks-split` declares `segments`, so the row's segment count
+    reaches the split that cuts at it. Axes the prerequisite does not declare
+    never flow, which is what collapses a sweep over a measurement-only axis to
+    one preparation (`identity.md` § *Two identities, two questions*); a sweep
+    over a shared axis correctly builds one preparation per value. Everything
+    the harness acts on — the box, the role, the deadline — it does inherit:
+    those are recorded on a preparation's row and stay out of its hash.
     """
+    from benchmark.runtime.command_adapter import Ceiling, Default, Stated
+
     links: list[Case] = []
+    consumer = dict(case.config)
     for mode in adapter.requires.get(case.mode, ()):
         manifest = adapter.modes[mode]
         if not manifest.permits_purpose("preparation"):
@@ -658,8 +680,16 @@ def expand_requirements(case: Case, adapter: LoadedCommandAdapter) -> tuple[Case
                 f"{case.tool}: mode {case.mode!r} requires {mode!r}, whose capsule caps it at "
                 f"{manifest.purpose_ceiling!r} — a prerequisite runs as a preparation"
             )
+        # Only a settable axis inherits: a `Fixed` one refuses any set value,
+        # and a value on an `Inert` one would split shared preparations over a
+        # knob that does nothing.
+        shared = {
+            name: consumer[name]
+            for name, axis in manifest.axes.items()
+            if name in consumer and isinstance(axis, Default | Ceiling | Stated)
+        }
         try:
-            config = adapter.effective_config(mode, {})
+            config = adapter.effective_config(mode, shared)
         except Exception as exc:
             raise PlanError(f"{case.tool}: prerequisite {mode!r} of {case.mode!r}: {exc}") from exc
         _compile_prerequisite(case, adapter, mode, config)
@@ -685,8 +715,9 @@ def _compile_prerequisite(
 ) -> None:
     """Build the prerequisite's argv here, so a chain it cannot state fails offline.
 
-    A link takes the capsule's own config and never the consumer's, so a knob the
-    capsule declares and defaults nowhere reaches ``build_command`` unset — which
+    ``config`` arrives already merged — the capsule's own values plus the
+    consumer's for any axis this link declares — so what compiles here is
+    exactly what a worker would be handed. A knob the chain still leaves unset
     is a refusal on an allocated VM unless it is one here. The staging paths are
     placeholders: what the engine will pass, not what it will pass *here*.
     """
@@ -1169,13 +1200,14 @@ def _case(
             "without loading its command adapter"
         )
     auth_role = _resolve_auth_role(tool, resolved.get("signed"), adapter, context)
-    # `concurrency` is the one reserved axis a row may state today, and `config`
+    # A row states an axis flat (`concurrency`, `segments`), and `config`
     # carries the capsule-declared keys no row field names. Resolution folds both
     # into the config blob rather than passing either straight to argv, so the
     # capsule's own refusal still runs over everything a plan asked for.
     row_config: dict[str, object] = dict(resolved.get(ROW_CONFIG) or {})
-    if "concurrency" in resolved:
-        row_config["concurrency"] = resolved["concurrency"]
+    for axis in ROW_AXES:
+        if axis in resolved:
+            row_config[axis] = resolved[axis]
     try:
         config = adapter.effective_config(mode, row_config)
     except Exception as exc:  # a capsule refusing this config is a plan error

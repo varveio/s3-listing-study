@@ -10,6 +10,7 @@ from benchmark.runtime.command_adapter import (
     Executable,
     Inert,
     Mode,
+    Stated,
     command_adapter_main,
 )
 
@@ -28,16 +29,16 @@ SUPPORTS_UNSIGNED = True
 """--no-sign-request lists anonymously. The signed path drops the flag and has
 not been exercised by a committed run."""
 
-CONFIG_KEYS = frozenset({"segments"})
-"""CHAFE. Segment count is the hinted path's *second* axis — sweeping it means
-one preparation per value — but the study reserves no name for it, so it travels
-as an ordinary config key. A row states it through `config:`
-(`benchmark/plans/README.md`), so a `ks-split` case can now name the number it
-splits at. What is still missing is the axis machinery: no `Default`, no
-provenance, and no merge-before-hashing, so a `list-hinted` row's automatic
-`ks-split` link — which takes this capsule's config and never the consumer's —
-still arrives with no segment count at all. Reserving `segments` beside
-`concurrency` is what closes that."""
+SEGMENTS = Stated()
+"""How many key ranges the cut points divide the bucket into.
+
+The hinted path's *second* axis: the effective width of `list-hinted` is
+``min(concurrency, N+1)``, so the segment count shapes the measurement even
+though only `ks-split`'s argv carries it. `Stated` because upstream records no
+default this capsule could cite, and a preparation that quietly chose one would
+freeze the whole sweep at it — the plan states it, it enters both identities,
+and a sweep builds one hints file per value.
+"""
 
 CONCURRENCY = Ceiling(100, "source@6c72f59")
 """``-c/--concurrency`` as the subject runs it unsilenced (``main.rs:33``).
@@ -73,13 +74,18 @@ MODES = {
     "ks-split": Mode(
         product="text",
         fields=CUT_POINT_FIELDS,
+        axes={"segments": SEGMENTS},
         purpose_ceiling="preparation",
         executable=KS_TOOL.name,
     ),
+    # `segments` is declared here too, though this argv never carries it: the
+    # cut count is what the run listed under, so it belongs in the measurement
+    # identity — and chain expansion hands the stated value to the `ks-split`
+    # link, which is the argv that does carry it.
     "list-hinted": Mode(
         product="parquet",
         fields=FIELDS,
-        axes={"concurrency": CONCURRENCY},
+        axes={"concurrency": CONCURRENCY, "segments": SEGMENTS},
         executable=S3_FAST_LIST.name,
     ),
 }

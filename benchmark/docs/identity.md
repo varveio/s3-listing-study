@@ -98,7 +98,7 @@ asymmetry is deliberate rather than a special case.
 | | Hashed for a measurement | Hashed for a preparation |
 | --- | --- | --- |
 | Target bucket, region, prefix | yes | yes |
-| The capsule's own config | yes | yes — **its own**, never the consumer's |
+| The capsule's own config | yes | yes — **its own**, plus the consumer's value for an axis this mode itself declares |
 | Tool slice, platform slice | yes | yes |
 | Machine type, vCPUs, memory, container ceiling, timeout | yes | **no** — recorded, not hashed |
 | `auth_role` | yes | **no** — recorded, not hashed |
@@ -118,9 +118,11 @@ rather than three, and does not build hints at three different parallelisms.
 
 Two things follow:
 
-- **A prerequisite does not inherit the consumer's config.** A row sweeping
-  concurrency sweeps the *listing*. Any sweep over any measurement axis
-  collapses to one preparation.
+- **A prerequisite inherits only the axes it declares itself.** A row sweeping
+  concurrency sweeps the *listing* — `ks-split` declares no concurrency, so the
+  sweep collapses to one preparation. A row sweeping `segments` sweeps the
+  *artifact* — `ks-split` declares that axis, the stated value flows into the
+  link and its hash, and the sweep correctly builds one hints file per value.
 - **A preparation's duration is an observation, not a comparable measurement.**
   Two attempts of one preparation case may have run on different machines and
   the row says which. Asking how preparation cost varies *with* the machine is a

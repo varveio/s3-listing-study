@@ -103,7 +103,7 @@ write a directory sink while its TSV mode streams to stdout.
 | --- | --- |
 | `product` | The output artifact — `text`, `parquet`, `parquet-sorted`. **Shared vocabulary**: "text" means the same for aws-cli and swath, so a report can group a text stratum and keep a Parquet number out of it. |
 | `fields` | Which contract columns this mode populates. A mode emitting key-only must not be ranked against one emitting four columns — otherwise a tool wins by emitting less. |
-| `axes` | Per reserved name: `Fixed(v)`, `Default(v, provenance)`, `Ceiling(v, provenance)`, `Inert`, or absent. |
+| `axes` | Per reserved name: `Fixed(v)`, `Default(v, provenance)`, `Ceiling(v, provenance)`, `Stated()`, `Inert`, or absent. |
 | `purpose_ceiling` | The most a plan may claim this mode is. A plan may demote a run to `canary`; it may never promote `summarize` to `measurement`. |
 
 **`product` and `fields` translate across tools; `axes` does not.** The first two
@@ -112,9 +112,9 @@ identifies the axis and explicitly not the semantics — `-c`, `--checkers` and
 `--list-concurrency` govern different things, and no declaration makes them one.
 `axes` exists so the recorded value stops lying, not so it can be compared.
 
-### The five states of an axis
+### The six states of an axis
 
-`Absent` currently has to mean five things at once, and cannot:
+`Absent` currently has to mean six things at once, and cannot:
 
 | State | Means | Example |
 | --- | --- | --- |
@@ -122,11 +122,22 @@ identifies the axis and explicitly not the semantics — `-c`, `--checkers` and
 | `Fixed(v)` | Real, effective, and not settable | ps3 at 256 |
 | `Default(v)` | Settable; this is what it runs at unsilenced | s4cmd `-c` |
 | `Ceiling(v, provenance)` | Settable; the subject's own limit when unsilenced, and the effective width is lower and data-dependent | swath's 64 with an AIMD start at `min(4,N)`; s5cmd's `min(numworkers, shards)` |
+| `Stated()` | Settable, and the capsule has no value of its own: the plan must state it | s3-fast-list `segments` |
 | `Inert` | Flag accepted, no effect **on this mode** | rclone `--checkers` on flat `ListR` |
 
 `Inert` means *statically* inert for the mode. A knob whose effect depends on the
 target — s4cmd's `-c` does nothing on a flat prefix but works on a nested one —
 is not `Inert`; namespace shape is an analysis covariate, not a declaration.
+
+`Stated` is not `Default` with an `unverified` provenance: that still asserts *a*
+number, where `Stated` asserts there is none to record — upstream documents no
+default the capsule could cite, and a capsule that quietly chose one would freeze
+every sweep at it. Resolution refuses a plan that leaves a `Stated` axis silent,
+offline, rather than folding anything in. When a prerequisite chain expands, a
+`Stated` (or `Default`/`Ceiling`) axis the prerequisite mode itself declares
+inherits the consuming row's value — s3-fast-list's `ks-split` link cuts at the
+`segments` the `list-hinted` row stated — while an axis the prerequisite does not
+declare never flows into it.
 
 `Ceiling` is `Default` plus one semantic, so it carries the same value and the
 same provenance: the subject's own number, not the study's. **What a campaign
@@ -188,11 +199,11 @@ into `config`. That is the relationship the plan already has with `signed`,
 which a row states and the resolver turns into `auth_role`.
 
 A row may also state any capsule-declared key with no row field of its own
-directly under `config:` — s3-fast-list's `segments`, which its `ks-split`
-mode requires and no other subject has. Those keys are folded into the blob
-before the capsule sees it, so its own refusals still decide what is legal
-there: an undeclared key, or one its mode declares `Fixed`, is refused exactly
-as it would be if `build_command` read it directly.
+directly under `config:` — a knob only one subject has and no axis describes.
+Those keys are folded into the blob before the capsule sees it, so its own
+refusals still decide what is legal there: an undeclared key, or one its mode
+declares `Fixed`, is refused exactly as it would be if `build_command` read it
+directly.
 
 **An undeclared key is refused.** `LoadedCommandAdapter.compile` rejects
 anything outside `CONFIG_KEYS` before `build_command` runs. Without that,
