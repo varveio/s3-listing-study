@@ -65,6 +65,9 @@ DATASET_MODES = {("swath", "recursive-parquet"), ("swath", "recursive-parquet-so
 
 UNEXERCISED = {
     "ps3": {"list-versions"},
+    # The hinted mode's first live run (c-2026-08-17-large, noaa-rtma-pds)
+    # postdates the committed corpus; no committed payload reaches it yet.
+    "s3-fast-list": {"list-hinted"},
     "s3p": {"ls-long"},
     "s4cmd": {"du", "shallow", "show-directory"},
     # v0.1.0 receipts were retired with that subject; v0.2.0 currently has
@@ -83,7 +86,7 @@ UNEXERCISED = {
 # listing but a corrupt payload. Only a 0-byte stream means "zero objects" for
 # s3-fast-list, and the adapter refuses the newline — see
 # `test_a_newline_only_parquet_stream_is_refused`, which pins that half.
-BINARY_MODES = {("s3-fast-list", "list")}
+BINARY_MODES = {("s3-fast-list", "list"), ("s3-fast-list", "list-hinted")}
 
 REPO = repo_root()
 
@@ -448,6 +451,9 @@ FIXTURES[("s3-fast-list", "list")] = (
     "normals-hourly/",
     [b"normals-hourly/access/A.csv"],
 )
+# The hinted mode emits the identical parquet through the identical writer —
+# the hints only shape how the keyspace was walked — so one payload serves both.
+FIXTURES[("s3-fast-list", "list-hinted")] = FIXTURES[("s3-fast-list", "list")]
 
 
 def adapter_path(tool: str) -> Path:

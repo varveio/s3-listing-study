@@ -58,7 +58,12 @@ UNREADABLE_EXIT = 1
 
 # Declared rather than inferred, so the equivalence harness can name a mode no
 # committed payload exercises — untested by construction, and invisible otherwise.
-MODES = frozenset({"list"})
+# `list-hinted` emits the same Arrow schema through the same writer — the hints
+# only shape *how* the keyspace was walked — so one query serves both; its
+# absence here failed the first live hinted attempt at postprocessing after a
+# perfect run. `ks-split` stays out: preparation-ceiling modes are never
+# row-counted (the worker skips them), and a cut-point file has no row count.
+MODES = frozenset({"list", "list-hinted"})
 
 # make_timestamp() takes MICROseconds; the epoch is UTC and the timestamp is
 # tz-naive, so the formatted components are UTC by construction and the `Z` is
