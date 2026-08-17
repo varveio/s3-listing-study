@@ -24,18 +24,38 @@ harness only carries it to the capsule, and it is tool configuration.
 
 | Value | What the harness does | Owner |
 | --- | --- | --- |
-| `auth` | Selects the Batch service account and attaches the credential secret | harness |
+| `auth_role` | Resolves to a Batch service account and a credential secret; null runs unsigned | harness |
 | `vcpus`, `memory_gb` | Chooses the machine type | harness |
 | `container_memory_gb` | Sets the container's cgroup ceiling | harness |
 | `timeout_s` | Kill deadline, and the provider's `maxRunDuration` | harness |
 | `target_bucket`, `target_region`, `target_prefix` | Names the target; region reaches the subject's environment | harness |
+| `executor` | Selects which execution environment renders and submits the job | harness |
+| `location` | Chooses the region the machine runs in — the network distance to the target | harness |
+| `machine_type` | The shape resolved from vCPUs and memory; what Batch actually allocates | harness |
 | mode, concurrency, page size, output flags | Nothing — passed through | capsule |
 | managed-runtime heap flags | Nothing — derived from the ceiling the capsule is told about | capsule |
 
-`auth` is the clearest case and the reason the rule is worth stating. It is not
-a flag the subject receives: it picks the *identity* the task runs as, and IAM
-is what enforces that only the authenticated worker can read the credential.
-The tool only ever sees whatever ended up in its environment.
+`auth_role` is the clearest case and the reason the rule is worth stating. It is
+not a flag the subject receives: it picks the *identity* the task runs as, and
+IAM is what enforces that only that identity can read the credential. The tool
+only ever sees whatever ended up in its environment.
+
+It is a **logical role name, nullable** — not a two-valued stratum. Null means
+unsigned: the anonymous worker service account, no secret attached. A name means
+the harness looks it up in the deployment's role table and gets back a service
+account and a Secret Manager version. Today's single credential becomes the role
+`public_auth_list`; a future role that can read a private corpus or a different
+AWS account is a new name, not a new flag.
+
+*Today:* `auth` is `anonymous` or `authenticated`, which works only while there
+is exactly one credential. A second one has nowhere to go.
+
+The role **name** is hashed, because what a tool is allowed to see can change
+what it lists. The resolved service account and secret resource are recorded but
+not hashed — they are estate details, like the project. That leaves one residual
+risk worth stating: repointing an existing role at different credentials would
+change the measurement without changing the identity. Treat a role as immutable
+once used, and mint a new name when the credential behind it changes.
 
 Everything on the capsule side travels as one opaque, canonical JSON `config`
 blob. The harness never interprets it.
@@ -80,14 +100,16 @@ aws-cli.9f300cc4d2b1
 
 The hash covers, canonically:
 
-- **the environment fields** — auth, target bucket, region and prefix, vCPUs,
-  memory, container ceiling, timeout;
+- **the environment fields** — the executor, the auth role name, target bucket,
+  region and prefix, the location, the resolved machine type, vCPUs, memory,
+  container ceiling, timeout;
 - **the config blob** — the capsule's own keys, canonical JSON, `{}` when empty;
 - **the tool slice** — that tool's artifact, capsule recipe, build inputs,
-  adapter bundle, and its stage in the toolbox recipe;
+  adapter bundle, its stage in the toolbox recipe, and the `COPY --from` lines
+  that install it;
 - **the platform slice** — the shared base image digest, the APT snapshot pin,
   the worker's pinned Python requirements, the harness revision, and the final
-  toolbox stage.
+  toolbox stage with those per-tool `COPY` lines removed.
 
 Anything that could make two runs non-comparable is in it by construction.
 
@@ -116,6 +138,55 @@ under every measurement.
 exactly what ran, and be able to reproduce it — they are simply not identity.
 Two attempts of one case may therefore have run on different images, and the row
 says which.
+
+`location` and `machine_type` are hashed for the same reason the tool slice is:
+they are what actually ran. A VM's GCP region sets the network distance to the
+target bucket, which is the effect [`../../docs/open-questions.md`](../../docs/open-questions.md)
+§1 exists to measure; and the machine type is resolved from the declared vCPU
+and memory pair through `plans/instances.yaml`, so editing that catalogue would
+otherwise change the hardware without changing the identity.
+
+`executor` is hashed for the strongest version of the same reason: the same case
+run on GCP Batch, on another provider's batch service, or on a local machine is
+not the same measurement, and nothing else in the row would say so.
+
+Its parameters go in `executor_env` — a canonical JSON blob holding the project,
+the provisioning model, the boot disk, and the network — recorded and not
+hashed, the same split the capsule config gets. The two parameters that actually
+shape a measurement are promoted out of it into hashed columns: `location`,
+because region sets the network distance to the target, and `machine_type`,
+because it is the hardware. The rest is estate detail: moving projects does not
+change how fast a bucket lists, and re-identifying every case because an account
+was reorganized would be over-invalidation with no measurement behind it.
+
+The provisioning model stays unhashed for a related reason: SPOT changes how
+likely an attempt is to survive, not what it measures, and a preemption is a
+failed attempt rather than a different case. `network` and `subnetwork` are
+arguable — an egress path could matter — but they follow from the executor's
+project and location today, so they stay in `executor_env` until a run crosses
+VPCs.
+
+### Both slices are computable from what the build already has
+
+Nothing new needs to be recorded at build time to derive them. The per-tool
+digests — artifact, capsule recipe, build inputs, adapter bundle — are already in
+the toolbox manifest, and `build_image.py` already extracts each tool's
+Dockerfile stage by name, because `validate_executed_sources` checks that a
+stage installs the artifact the capsule declared. The platform inputs are all
+pinned in that same Dockerfile: the `runtime_base` digest, the
+`snapshot.debian.org` timestamp, and `requirements-worker.txt`.
+
+Both should be computed by the build and written into the schema-4 image set as
+`tool_slice_sha256` and `platform_sha256`, so the controller reads them rather
+than reparsing a Dockerfile at submit time.
+
+**Attributing the `COPY --from` lines to their tool is what keeps the roster
+additive.** All of them live in the final stage, so hashing that stage whole
+would put every tool's install line in the platform — and adding a twelfth tool
+would then re-identify all eleven existing ones, losing comparability for tools
+that did not change. With each `COPY --from=<tool stage>` line attributed to its
+own slice, adding a tool leaves the platform digest and every existing slice
+byte-identical.
 
 **The error directions are not symmetric.** Over-invalidating costs re-runs.
 Under-invalidating means two different binaries share an identity and a
@@ -226,11 +297,14 @@ CREATE TABLE attempts (
     tool                TEXT NOT NULL,
 
     -- environment: the harness reads these and acts
-    auth                TEXT NOT NULL,      -- anonymous | authenticated
+    auth_role           TEXT,               -- logical role name; null runs unsigned
     target_bucket       TEXT NOT NULL,
     target_region       TEXT NOT NULL,
     target_prefix       TEXT NOT NULL,
-    vcpus               INTEGER NOT NULL,
+    executor            TEXT NOT NULL,      -- which execution environment ran it
+    location            TEXT NOT NULL,      -- region: the network distance to the target
+    machine_type        TEXT NOT NULL,      -- resolved shape; what the executor allocated
+    vcpus               INTEGER NOT NULL,   -- the declared pair the shape was resolved from
     memory_gb           INTEGER NOT NULL,
     container_memory_gb INTEGER,            -- null means no ceiling
     timeout_s           INTEGER NOT NULL,
@@ -244,11 +318,12 @@ CREATE TABLE attempts (
     image_uri           TEXT NOT NULL,      -- pinned @sha256 toolbox; recorded, not identity
     image_set_sha256    TEXT NOT NULL,      -- the eleven-tool provenance document
 
-    -- where it ran
-    project             TEXT NOT NULL,
-    location            TEXT NOT NULL,
+    -- where it ran: the executor's own parameters, recorded not hashed
+    executor_env        TEXT NOT NULL,      -- canonical JSON: project, provisioning, boot disk, network
+    service_account     TEXT NOT NULL,      -- what auth_role resolved to
+    secret_resource     TEXT,               -- the credential version, when a role was used
     job_name            TEXT NOT NULL UNIQUE,  -- provider job ID: sanitized, <= 63 chars
-    evidence_prefix     TEXT NOT NULL,
+    result_prefix       TEXT NOT NULL,      -- gs://.../<tool>.<hash>.s<n>/
 
     -- the request and its outcome
     request_json        TEXT NOT NULL,      -- frozen provider request; a retry is diffed against it
@@ -294,9 +369,13 @@ change — history outlives the code that wrote it.
 
 - `attempt_id` is **not** stored: a generated column over the two columns it
   composes. Greppable and indexable, with no way to drift from its parts.
-- `job_name` is stored: its sanitize-and-hash derivation may change, and
-  recomputing it later would orphan jobs already out there.
-- `evidence_prefix` is stored for the same reason applied to the layout: rows
+- `job_name` is stored, and it is worth asking why, since it is derivable from
+  `attempt_id`. Two reasons it stays. It is the join to the provider's world —
+  logs, the console, `gcloud batch jobs describe` — and it must be `UNIQUE`, so
+  two rows cannot claim one job. And its derivation is a rule that has already
+  changed once: the retired controller and the current one name jobs
+  differently, so a recomputation would not find what an old row submitted.
+- `result_prefix` is stored for the same reason applied to the layout: rows
   written under an earlier layout must stay resolvable after it changes.
 
 ### The provider's ID cannot be the key
