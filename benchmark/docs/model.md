@@ -9,10 +9,64 @@ to the system.
 ## Status of this model: not implemented
 
 The controller in `../src/benchmark/campaign.py` still uses the earlier
-single-run vocabulary — `campaign_id`, `base_job_id`, a case ID rendered from
-plan keys, and a separate fingerprint. Sections below mark what exists today
-where it differs. Nothing here describes a shipped schema until this line says
-so.
+vocabulary — `campaign_id`, `base_job_id`, a case ID rendered from plan keys, a
+separate fingerprint, and per-tool knowledge held by the harness. Sections below
+mark what exists today where it differs. Nothing here describes a shipped schema
+until this line says so.
+
+## What the harness owns, and what it carries
+
+One question decides where a value belongs: **does the harness have to do
+something different because of it?**
+
+If yes, it is an environment field — the harness reads it and acts. If no, the
+harness only carries it to the capsule, and it is tool configuration.
+
+| Value | What the harness does | Owner |
+| --- | --- | --- |
+| `auth` | Selects the Batch service account and attaches the credential secret | harness |
+| `vcpus`, `memory_gb` | Chooses the machine type | harness |
+| `container_memory_gb` | Sets the container's cgroup ceiling | harness |
+| `timeout_s` | Kill deadline, and the provider's `maxRunDuration` | harness |
+| `target_bucket`, `target_region`, `target_prefix` | Names the target; region reaches the subject's environment | harness |
+| mode, concurrency, page size, output flags | Nothing — passed through | capsule |
+| managed-runtime heap flags | Nothing — derived from the ceiling the capsule is told about | capsule |
+
+`auth` is the clearest case and the reason the rule is worth stating. It is not
+a flag the subject receives: it picks the *identity* the task runs as, and IAM
+is what enforces that only the authenticated worker can read the credential.
+The tool only ever sees whatever ended up in its environment.
+
+Everything on the capsule side travels as one opaque, canonical JSON `config`
+blob. The harness never interprets it.
+
+**The capsule must declare the keys it accepts**, the way it already declares
+its modes, and an undeclared key must be refused. Without that, `concurency: 8`
+is silently ignored and a sweep produces cells that are all identical — the
+failure the plan schema's closed vocabulary exists to prevent. The declaration
+lives in `tools/<tool>/adapter/`, so it is covered by `adapter_bundle_sha256`
+and changing it changes that tool's identity.
+
+*Today:* the harness holds per-tool knowledge it should not. `plans/tools.yaml`
+carries a `heap:` table stating that swath is a JVM wanting
+`-XX:MaxRAMPercentage` and s3p is V8 wanting `--max-old-space-size` in MiB —
+which is why a plan is forbidden from setting a heap share, a rule that exists
+only because the knowledge sits in the wrong place. Under this model the harness
+says "your ceiling is 4 GB" and the capsule answers with the environment its
+runtime needs.
+
+### The cost: cross-tool dimensions become a convention
+
+Concurrency is the case in point. Its whole purpose is to make "every tool at
+logical concurrency 8" expressible, and that only means something if every
+capsule means the same thing by the number. As config, that rests on a
+documented convention and each capsule's declaration rather than on a column.
+
+That is where it rests already: the translation into `--numworkers`,
+`--checkers`, or `--list-concurrency` is per-adapter, no capsule currently
+declares a supported range, and nothing enforces that two of them mean the same
+thing. Naming it a convention states the situation honestly instead of implying
+a guarantee the code does not provide.
 
 ## One identity
 
@@ -24,32 +78,63 @@ the measurement**:
 aws-cli.9f300cc4d2b1
 ```
 
-The hash covers, in canonical form: mode, auth, the target bucket and region,
-the prefix, the resource allocation (vCPUs, memory, container ceiling), the
-timeout, any case environment, and the pinned toolbox image digest. Anything
-that could make two runs non-comparable is in it by construction.
+The hash covers, canonically:
 
-That last property is the point. The earlier model had a readable ID rendered
-from the plan keys *and* a fingerprint hashed over the resolved case, which
-forced a law: every key must move both, or one ID renders two fingerprints and
-two non-comparable runs land in one directory. `timeout_s` is barred from plan
-rows for exactly that reason. With a single hash the law is unnecessary — a
-field either changes the identity or it is not an input.
+- **the environment fields** — auth, target bucket, region and prefix, vCPUs,
+  memory, container ceiling, timeout;
+- **the config blob** — the capsule's own keys, canonical JSON, `{}` when empty;
+- **the tool slice** — that tool's artifact, capsule recipe, build inputs,
+  adapter bundle, and its stage in the toolbox recipe;
+- **the platform slice** — the shared base image digest, the APT snapshot pin,
+  the worker's pinned Python requirements, the harness revision, and the final
+  toolbox stage.
 
-It also removes the need for a revision counter. A rebuilt toolbox is a
-different image digest, so a different hash, so a different case: no allocation,
-no counter, nothing to keep in sync. And "have we already measured exactly
-this?" becomes a primary-key lookup rather than a comparison.
+Anything that could make two runs non-comparable is in it by construction.
 
-**What it costs:** the identity is no longer readable in a bucket listing.
-`swath.recursive-parquet-sorted.container_memory_gb-2` said what it was;
-`swath.4c1e8a77b920` does not. The columns say it instead, reports render from
-them, and each attempt's `result.json` carries its own full provenance — so a
-lost database is rebuilt by reading objects, not by parsing their names.
+That is the point of a single hash. The earlier model had a readable ID rendered
+from plan keys *and* a fingerprint hashed over resolved values, which forced a
+law: every key must move both, or one ID renders two fingerprints and two
+non-comparable runs land in one directory. `timeout_s` is barred from plan rows
+for exactly that reason. With one hash the law is unnecessary — a field either
+changes the identity or it is not an input. A revision counter is unnecessary
+too: a changed input is a changed hash, with nothing to allocate and nothing to
+keep in sync. And "have we already measured exactly this?" becomes a lookup.
+
+### Why the slices, and not the image digest
+
+The toolbox is one image holding all eleven tools, so its digest is the wrong
+granularity for a case. Bump rclone, rebuild, and every tool's hash changes —
+new prefixes and lost comparability for ten tools that did not change.
+
+Hashing the per-tool slice plus the shared platform slice fixes that. rclone's
+bump leaves aws-cli's identity untouched, because aws-cli's artifact, adapter,
+and stage are unchanged and so is the base. A Debian snapshot bump or an edit to
+`measure.py` correctly re-identifies everything, because that moves the floor
+under every measurement.
+
+`image_uri` and `image_set_sha256` stay as recorded columns — you need to know
+exactly what ran, and be able to reproduce it — they are simply not identity.
+Two attempts of one case may therefore have run on different images, and the row
+says which.
+
+**The error directions are not symmetric.** Over-invalidating costs re-runs.
+Under-invalidating means two different binaries share an identity and a
+comparison silently mixes them, which cannot be repaired afterwards. When it is
+unclear whether something belongs in the platform slice, put it in.
+
+This separation only holds while the eleven builds are independent stages over a
+shared base. A recipe that made one tool's stage depend on another's would make
+the slices inseparable, and identity would fall back to the whole image.
 
 **Changing what goes into the hash re-identifies everything.** Old rows keep
-their identity and their evidence stays put; new runs of the same plan get new
-prefixes. Treat the input list as a contract.
+their identity and their evidence stays put; new runs get new prefixes. Treat
+the input list as a contract.
+
+**What the hash costs:** the identity is no longer readable in a bucket listing.
+`swath.recursive-parquet-sorted.container_memory_gb-2` said what it was;
+`swath.4c1e8a77b920` does not. The columns say it instead, reports render from
+them, and each attempt's `result.json` carries its own provenance — so a lost
+database is rebuilt by reading objects, not by parsing their names.
 
 ### Attempts
 
@@ -62,19 +147,21 @@ They are told apart by an ordinal, always present:
 <tool>.<hash>.s3
 ```
 
-`.s1` is written out rather than implied. A suffix that appears only on retries
+`.s1` is written out rather than implied. A suffix appearing only on retries
 would make every consumer — the path builder, the parser, a glob, a person
 reading a listing — carry the same special case, and a prefix could no longer be
 read by shape.
 
-The manager allocates the next ordinal as `max(attempt) + 1`. The ledger already
-says which kind each was: a row whose predecessor settled in a failure state is a
-retry, one whose predecessor succeeded is a repeat. Nothing needs to record that
-separately.
+The manager allocates the next ordinal as `max(attempt) + 1`. Deliberate repeats
+work the same way: `reps: 3` allocates three attempts of one case, each its own
+Batch job on its own fresh VM, which is what makes the spread mean anything.
+Repeats share *declared* inputs, not conditions — different machine, different
+host, different time of day — so a spread across attempts measures the
+environment as much as the tool.
 
-Failed attempts can be pruned later — their prefixes deleted, keeping only the
-evidence that settled successfully. The ledger row stays regardless, so "this
-took three tries" survives even when the bytes from the first two do not.
+Failed attempts can be pruned later, keeping only evidence that settled
+successfully. The ledger row stays, so "this took three tries" survives even
+when the bytes from the first two do not.
 
 ### suite and group
 
@@ -84,8 +171,8 @@ and the job-name prefix keeping this study's jobs disjoint from anything else in
 the project. Constant for the life of a file, so it lives in `meta`. *Today:*
 all three are the hardcoded string `benchmark`.
 
-**`group_id`** records what was launched together. It is a column only: nothing
-in the object layout needs it, because the image digest is already inside every
+**`group_id`** records what was launched together. A column only: nothing in the
+object layout needs it, because everything a launch froze is already inside each
 case hash.
 
 ## Object layout
@@ -136,10 +223,9 @@ CREATE TABLE attempts (
     attempt             INTEGER NOT NULL,   -- ordinal, 1-based
     attempt_id          TEXT GENERATED ALWAYS AS (case_id || '.s' || attempt) VIRTUAL,
     group_id            TEXT NOT NULL,      -- the launch this went out with
-
-    -- the hashed inputs, kept legible
     tool                TEXT NOT NULL,
-    mode                TEXT NOT NULL,
+
+    -- environment: the harness reads these and acts
     auth                TEXT NOT NULL,      -- anonymous | authenticated
     target_bucket       TEXT NOT NULL,
     target_region       TEXT NOT NULL,
@@ -148,12 +234,17 @@ CREATE TABLE attempts (
     memory_gb           INTEGER NOT NULL,
     container_memory_gb INTEGER,            -- null means no ceiling
     timeout_s           INTEGER NOT NULL,
-    case_env            TEXT NOT NULL,      -- canonical JSON; {} when empty
-    image_uri           TEXT NOT NULL,      -- pinned @sha256 toolbox
 
-    -- context, not hashed
+    -- configuration: carried to the capsule, never interpreted here
+    config              TEXT NOT NULL,      -- canonical JSON; {} when empty
+
+    -- what ran it
+    tool_slice_sha256   TEXT NOT NULL,      -- artifact, recipe, build inputs, adapter, stage
+    platform_sha256     TEXT NOT NULL,      -- base image, APT pin, worker deps, harness, final stage
+    image_uri           TEXT NOT NULL,      -- pinned @sha256 toolbox; recorded, not identity
     image_set_sha256    TEXT NOT NULL,      -- the eleven-tool provenance document
-    harness_revision    TEXT NOT NULL,
+
+    -- where it ran
     project             TEXT NOT NULL,
     location            TEXT NOT NULL,
     job_name            TEXT NOT NULL UNIQUE,  -- provider job ID: sanitized, <= 63 chars
@@ -161,6 +252,7 @@ CREATE TABLE attempts (
 
     -- the request and its outcome
     request_json        TEXT NOT NULL,      -- frozen provider request; a retry is diffed against it
+    origin              TEXT NOT NULL,      -- planned | retry
     state               TEXT NOT NULL,
     state_detail        TEXT,               -- the provider's message, when it failed
     recorded_at         TEXT NOT NULL,      -- intent journaled, before the provider was called
@@ -178,10 +270,22 @@ CREATE INDEX attempts_by_state ON attempts (state);
 deleted, so the table is the study's full run history even after failed evidence
 is pruned from the bucket.
 
-The hashed inputs are stored as columns too — the hash makes them comparable,
+The hashed values are stored as columns as well: the hash makes them comparable,
 the columns make them readable, and reports render from the columns.
-`image_set_sha256` and `harness_revision` sit outside the hash because the image
-digest already covers what ran; they stay for provenance.
+
+`origin` exists because inference does not cover it. A retry is allocated after
+its predecessor settles, so its predecessor's state identifies it — but three
+planned repeats are created together, before any of them finishes. Recording it
+also makes "how many retries did this campaign need" a query rather than an
+investigation.
+
+A config key worth querying can be projected without leaving the blob:
+
+```sql
+concurrency INTEGER GENERATED ALWAYS AS (json_extract(config, '$.concurrency')) VIRTUAL
+```
+
+which indexes, so `WHERE concurrency > 10` stays a real question.
 
 ### What is stored, and what is not
 
@@ -250,7 +354,7 @@ answer to a settled question, and the two can disagree.
 
 ```sh
 sqlite3 'file:benchmark.db?mode=ro' \
-  'SELECT attempt_id, state, tool, mode, target_bucket FROM attempts ORDER BY case_id, attempt'
+  'SELECT attempt_id, state, tool, target_bucket, config FROM attempts ORDER BY case_id, attempt'
 ```
 
 Back the file up. Losing it loses the *binding*, not the evidence: the objects
