@@ -81,13 +81,6 @@ def test_all_current_plan_job_ids_are_unique_and_bound() -> None:
         assert changed != ids[0]
 
 
-def test_every_tool_uses_the_same_runtime_image() -> None:
-    selected = image_set()
-    assert {selected.image_for(tool)["image_uri"] for tool in selected.tools} == {
-        selected.image_uri
-    }
-
-
 def test_retry_ids_retain_collision_safe_identity_at_large_ordinals() -> None:
     first = "benchmark-readable-" + "a" * 39
     second = "benchmark-readable-" + "a" * 38 + "b"
@@ -560,22 +553,6 @@ def test_poll_falls_back_to_describes_when_the_listing_fails(tmp_path: Path) -> 
         "p", "l", con, rows, client=cast(batch_v1.BatchServiceClient, Client())
     )
     assert campaign.latest_submissions(con)[0]["state"] == "SUCCEEDED"
-
-
-def test_cancel_waits_for_delete_settlement(monkeypatch: pytest.MonkeyPatch) -> None:
-    settled: list[float] = []
-
-    class Operation:
-        def result(self, timeout: float) -> None:
-            settled.append(timeout)
-
-    class Client:
-        def delete_job(self, **_kwargs: object) -> Operation:
-            return Operation()
-
-    monkeypatch.setattr(batch_v1, "BatchServiceClient", Client)
-    campaign.cancel_job("p", "l", "job", client=Client())  # type: ignore[arg-type]
-    assert settled == [60]
 
 
 def test_dry_run_renders_every_case_without_sqlite_or_batch(

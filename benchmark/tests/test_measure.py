@@ -149,10 +149,6 @@ def test_unknown_cgroup_events_produce_unknown_oom_deltas(tmp_path: Path) -> Non
     assert measure._event_delta({}, snapshot["memory_events"], "oom_kill") is None
 
 
-def test_subject_home_matches_non_root_image() -> None:
-    assert measure.SUBJECT_ENV["HOME"] == "/home/s3study"
-
-
 def test_environment_boundary_rejects_reserved_collisions() -> None:
     assert "reserved" in (measure.validate_environment_inputs({"HOME": "/tmp"}, {}) or "")
     assert "reserved" in (

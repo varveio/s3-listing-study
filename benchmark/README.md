@@ -21,6 +21,8 @@ facts under `tools/<tool>/build/`.
   pinned worker requirements.
 - `tests/` holds this component's test suite. Repository-wide gates stay in the
   top-level `tests/`.
+- `docs/model.md` is the state model: the identities a run is named with, the
+  object layout, and the one table that binds a case to a job and its evidence.
 - `docs/running.md` is the operator runbook: prerequisites, submission, the job
   state machine, monitoring, the recovery commands, verification, and reporting.
   No campaign has run yet, so that procedure is `VERIFIED: no`.

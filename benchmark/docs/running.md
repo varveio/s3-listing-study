@@ -63,7 +63,9 @@ tool enforces for you; a missing item surfaces as a provider error mid-campaign.
    reused ID against a changed plan is what `COLLISION` exists to catch.
 
 Keep `campaign.db` — it is authoritative controller state, not a cache, and it
-is not interchangeable with the evidence in GCS. Back it up.
+is not interchangeable with the evidence in GCS. Back it up. What is inside it —
+the one table, its keys, and every state it records — is in
+[`model.md`](model.md).
 
 ## Submit
 

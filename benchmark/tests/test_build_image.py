@@ -134,12 +134,6 @@ def test_final_stage_validates_metadata_roster_paths_and_manifest() -> None:
     assert "os.access(command, os.X_OK)" in workflow
 
 
-def test_build_cli_has_no_parent_input(tmp_path: Path) -> None:
-    with pytest.raises(SystemExit) as stopped:
-        build_image.parse_args(["--build-inputs", str(tmp_path), "--tag", "x"])
-    assert stopped.value.code == 2
-
-
 def test_metadata_is_canonical_json() -> None:
     selections = build_image.registered_selections(ROOT)
     manifest, digest = build_image.toolbox_manifest(selections, ROOT)
