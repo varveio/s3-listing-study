@@ -73,6 +73,32 @@ keeps `timeout_s` out of one: it is in the fingerprint but not the ID, so two
 rows differing only there would render one ID and two fingerprints — two
 non-comparable runs filed into one case directory.
 
+### `config` is the one nested map
+
+Everything else a row states is a flat scalar. A row may also carry `config`, a
+mapping of the capsule-declared keys the study reserves no row field for:
+
+```yaml
+s3-fast-list:
+  cases:
+    - {mode: ks-split, config: {segments: 16}}
+```
+
+A reserved axis stays a first-class row field — `concurrency` is one, because a
+report reads that column across all eleven tools. `config` is for a knob that is
+one tool's own business: s3-fast-list's `segments`, which its `ks-split` mode
+requires and no other subject has.
+
+Its keys are folded into the case's config blob *before* the capsule sees it, so
+the capsule's own refusal still runs over them: a key it never declared in
+`CONFIG_KEYS`, or one its mode declares `Fixed`, is refused there rather than
+quietly forwarded. A key with a row field of its own — `mode`, `concurrency` — is
+refused inside `config`: one way to say each thing.
+
+These keys are hashed and rendered into the case label exactly as a row field is,
+so two rows differing only in a `config` value are two cases rather than one
+refused duplicate.
+
 ### Signing is the capsule's fact, not the plan's preference
 
 Whether a request is signed says nothing about whether the bucket is private —

@@ -536,17 +536,16 @@ def test_a_concurrency_reaches_argv_only_where_the_capsule_declares_the_axis(too
     axis must put the value in argv; a capsule that never accepts the key must
     refuse it; an Inert or undeclared mode makes no promise either way — the
     flag may exist upstream and bound nothing, which is the capsule's business.
-    Read from the capsule's own declaration rather than a roster here, so a
-    capsule converting to the manifest shape needs no edit to this file.
+    Read from the capsule's own declaration rather than a roster here.
     """
     adapter = load_command_adapter(adapter_path(tool))
     if "concurrency" not in adapter.accepted_config_keys:
         with pytest.raises(CommandAdapterError, match="does not accept config key"):
             adapter.compile(_request(tool, adapter, config={"concurrency": 2}))
         return
-    for mode in sorted(adapter.mode_names):
-        axis = adapter.modes[mode].axes.get("concurrency") if adapter.modes else None
-        if adapter.modes and not isinstance(axis, Default | Ceiling):
+    for mode in sorted(adapter.modes):
+        axis = adapter.modes[mode].axes.get("concurrency")
+        if not isinstance(axis, Default | Ceiling):
             continue
         request = CommandRequest(
             mode,

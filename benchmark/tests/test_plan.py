@@ -88,20 +88,24 @@ SIGNING = {
 """(supports_unsigned, supports_signed) per capsule, as the real ones declare."""
 
 
-class _AnyMode(frozenset[str]):
+_GENERIC_MODE = capsule.Mode(product="text", fields=("key",))
+
+
+class _AnyMode(dict[str, capsule.Mode]):
     """A fixture capsule's mode vocabulary, when the test does not name one.
 
     These fixtures exist to exercise plan resolution -- cascade, IDs, signing --
     never one tool's real mode vocabulary, which `check_modes` and the AST
     reader already hold to the real capsules. Membership here is deliberately
-    unchecked so a test can spell any mode name it likes.
+    unchecked, and every name resolves to one manifest declaring nothing, so a
+    test can spell any mode it likes.
     """
 
     def __contains__(self, item: object) -> bool:
         return True
 
-
-_ANY_MODE = _AnyMode()
+    def __missing__(self, key: str) -> capsule.Mode:
+        return _GENERIC_MODE
 
 
 def fixture_capsule(
@@ -126,8 +130,7 @@ def fixture_capsule(
         supports_signed=signed,
         tool=tool,
         functional_env={},
-        mode_names=frozenset(modes) if modes else _ANY_MODE,
-        modes=modes,
+        modes=modes or _AnyMode(),
     )
 
 
@@ -187,11 +190,10 @@ def test_every_default_mode_is_one_its_adapter_implements() -> None:
     root = Path(__file__).resolve().parents[2]
     defaults = bench.load_default_modes(bench.bench_dir() / "tools.yaml")
     for tool, mode in defaults.items():
-        # Through the loader rather than the source text: a capsule declares its
-        # vocabulary as a literal set or as Mode manifests, and which shape it is
-        # on is not this guard's business.
+        # Through the loader rather than the source text, so a mode declared in a
+        # shape this guard does not know about still counts.
         adapter = capsule.load_command_adapter(root / "tools" / tool / "adapter" / "command.py")
-        assert mode in adapter.mode_names, f"{tool}: {mode!r} not in {sorted(adapter.mode_names)}"
+        assert mode in adapter.modes, f"{tool}: {mode!r} not in {sorted(adapter.modes)}"
 
 
 def test_the_committed_catalogue_offers_no_shared_core_machines() -> None:
@@ -767,6 +769,76 @@ def test_a_silent_row_gets_the_capsules_declared_default(tmp_path: Path) -> None
     # A row silent on the axis carries no opinion in its ID -- only a row that
     # states it does.
     assert case.label == "recursive-tsv"
+
+
+def test_a_rows_config_key_reaches_the_blob_and_the_cases_identity(tmp_path: Path) -> None:
+    """The escape hatch for a capsule key the study reserves no row field for.
+
+    It is hashed and labelled like a row field, so two rows differing only there
+    are two cases rather than one refused duplicate.
+    """
+    modes = {"ks-split": capsule.Mode(product="text", fields=("key",))}
+    adapters = {
+        **CAPSULES,
+        "s3-fast-list": fixture_capsule(
+            "s3-fast-list",
+            unsigned=True,
+            signed=True,
+            modes=modes,
+            config_keys=frozenset({"segments"}),
+        ),
+    }
+    path = write(
+        tmp_path,
+        "s3-fast-list:\n  cases:\n"
+        "    - {mode: ks-split, config: {segments: 16}}\n"
+        "    - {mode: ks-split, config: {segments: 32}}\n",
+    )
+    cases = load(path, adapters=adapters).cases
+    assert [dict(case.config) for case in cases] == [
+        {"mode": "ks-split", "segments": 16},
+        {"mode": "ks-split", "segments": 32},
+    ]
+    assert [case.label for case in cases] == ["ks-split.segments-16", "ks-split.segments-32"]
+
+
+def test_a_config_key_the_capsule_never_declared_is_refused(tmp_path: Path) -> None:
+    """The hatch does not bypass the capsule: it is folded in before it refuses."""
+    path = write(
+        tmp_path, "swath:\n  cases:\n    - {mode: recursive-tsv, config: {segments: 16}}\n"
+    )
+    with pytest.raises(bench.PlanError, match="does not accept config key"):
+        load(path)
+
+
+def test_a_config_key_that_has_a_row_field_of_its_own_is_refused(tmp_path: Path) -> None:
+    """One way to say each thing: a reserved axis is a row field, not config."""
+    path = write(
+        tmp_path, "swath:\n  cases:\n    - {mode: recursive-tsv, config: {concurrency: 4}}\n"
+    )
+    with pytest.raises(bench.PlanError, match="state it on the row"):
+        load(path)
+
+
+def test_a_row_stating_segments_compiles_the_real_capsules_split(tmp_path: Path) -> None:
+    """The gap this closed: `ks-split` requires `segments` and no plan could say it."""
+    adapter = bench.load_capsule("s3-fast-list")
+    path = write(
+        tmp_path, "s3-fast-list:\n  cases:\n    - {mode: ks-split, config: {segments: 16}}\n"
+    )
+    case = load(path, adapters={**CAPSULES, "s3-fast-list": adapter}).cases[0]
+    argv = adapter.compile(
+        capsule.CommandRequest(
+            case.mode,
+            "b",
+            "us-east-1",
+            tool="s3-fast-list",
+            config=dict(case.config),
+            sink_dir="/sink",
+            artifact_path="/staged/keyspace.ks",
+        )
+    )
+    assert argv[-6:] == ("-k", "/staged/keyspace.ks", "-c", "16", "-o", "/sink/hints.input")
 
 
 # ── what a row resolves to ───────────────────────────────────────────────────

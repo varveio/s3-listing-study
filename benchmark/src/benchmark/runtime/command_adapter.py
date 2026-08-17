@@ -399,11 +399,8 @@ class LoadedCommandAdapter:
     a reserved or credential name.
     """
 
-    mode_names: frozenset[str] = frozenset()
-    """The capsule's mode vocabulary, whichever shape it declared ``MODES`` in."""
-
-    modes: Mapping[str, Mode] = MappingProxyType({})
-    """One manifest per mode — empty for a capsule still on the legacy shape."""
+    modes: Mapping[str, Mode]
+    """One manifest per mode; the capsule's whole mode vocabulary."""
 
     executables: tuple[Executable, ...] = ()
     """The subject's executables; the first is the one ``build/image.json`` registers."""
@@ -441,16 +438,15 @@ class LoadedCommandAdapter:
         while a value means *this is what it ran at*. ``mode`` is folded in here:
         a plan keeps it as a named row field, and resolution puts it in the blob.
         """
-        if mode not in self.mode_names:
+        if mode not in self.modes:
             raise CommandAdapterError(f"{self.tool} has no mode {mode!r}")
         if "mode" in config:
             raise CommandAdapterError(
                 f"{self.tool}: mode is a plan row field folded in by resolution, not a config key"
             )
         self._refuse_undeclared(config)
-        manifest = self.modes.get(mode)
         merged: dict[str, object] = {"mode": mode, **config}
-        for name, axis in ({} if manifest is None else manifest.axes).items():
+        for name, axis in self.modes[mode].axes.items():
             if name in config:
                 if isinstance(axis, Fixed):
                     raise CommandAdapterError(
@@ -488,11 +484,9 @@ def _load_module(path: Path) -> ModuleType:
     return module
 
 
-def _load_executables(module: ModuleType, path: Path) -> tuple[Executable, ...] | None:
-    """The declared executables, or ``None`` for a capsule still on the legacy shape."""
+def _load_executables(module: ModuleType, path: Path) -> tuple[Executable, ...]:
+    """The subject's declared executables; the first is the one the image registers."""
     raw = getattr(module, "EXECUTABLES", None)
-    if raw is None:
-        return None
     if not isinstance(raw, tuple) or not raw or not all(isinstance(e, Executable) for e in raw):
         raise CommandAdapterError(f"{path} EXECUTABLES must be a non-empty tuple of Executable")
     executables = cast(tuple[Executable, ...], raw)
@@ -523,28 +517,19 @@ def _load_modes(
     return MappingProxyType(modes)
 
 
-def _load_legacy_modes(module: ModuleType, path: Path) -> frozenset[str]:
-    raw = getattr(module, "MODES", None)
-    if not isinstance(raw, frozenset | set) or not raw:
-        raise CommandAdapterError(f"{path} does not export a non-empty MODES")
-    if not all(isinstance(mode, str) and mode for mode in raw):
-        raise CommandAdapterError(f"{path} MODES names a mode that is not a non-empty string")
-    return frozenset(cast(set[str], raw))
-
-
 def _load_requires(
-    module: ModuleType, path: Path, mode_names: frozenset[str]
+    module: ModuleType, path: Path, modes: Mapping[str, Mode]
 ) -> Mapping[str, tuple[str, ...]]:
     raw = getattr(module, "REQUIRES", {})
     if not isinstance(raw, Mapping):
         raise CommandAdapterError(f"{path} REQUIRES must map a mode to its ordered prerequisites")
     requires: dict[str, tuple[str, ...]] = {}
     for mode, chain in raw.items():
-        if mode not in mode_names:
+        if mode not in modes:
             raise CommandAdapterError(f"{path} REQUIRES names unknown mode {mode!r}")
         if not isinstance(chain, tuple) or not chain:
             raise CommandAdapterError(f"{path} REQUIRES[{mode!r}] must be a non-empty tuple")
-        unknown = [step for step in chain if step not in mode_names]
+        unknown = [step for step in chain if step not in modes]
         if unknown:
             # A dependency on something another tool produced is a different
             # problem: that artifact is an input the study supplies.
@@ -666,26 +651,7 @@ def load_command_adapter(
         raise CommandAdapterError(f"{path} declares a subject that can issue no request at all")
 
     executables = _load_executables(module, path)
-    modes: Mapping[str, Mode] = MappingProxyType({})
-    if executables is None:
-        # TODO(capsule-manifests): delete this branch, and the loose
-        # FIXED_COMMAND_PREFIX with it, once all eleven capsules under
-        # tools/*/adapter/command.py export EXECUTABLES and Mode manifests.
-        prefix = getattr(module, "FIXED_COMMAND_PREFIX", None)
-        if not isinstance(prefix, tuple) or not all(isinstance(item, str) for item in prefix):
-            raise CommandAdapterError(
-                f"{path} does not export tuple[str, ...] FIXED_COMMAND_PREFIX"
-            )
-        executables = (Executable(tool, prefix),)
-        mode_names = _load_legacy_modes(module, path)
-    else:
-        if getattr(module, "FIXED_COMMAND_PREFIX", None) is not None:
-            raise CommandAdapterError(
-                f"{path} declares both EXECUTABLES and FIXED_COMMAND_PREFIX; "
-                f"EXECUTABLES replaces it"
-            )
-        modes = _load_modes(module, path, executables)
-        mode_names = frozenset(modes)
+    modes = _load_modes(module, path, executables)
     _check_registered_executable(path, executables[0])
 
     return LoadedCommandAdapter(
@@ -696,10 +662,9 @@ def load_command_adapter(
         supports_signed,
         tool,
         cast(dict[str, str], functional_env),
-        mode_names,
         modes,
         executables,
-        _load_requires(module, path, mode_names),
+        _load_requires(module, path, modes),
         _load_build_env(module, path, functional_env),
         _load_validate_artifact(module, path),
     )

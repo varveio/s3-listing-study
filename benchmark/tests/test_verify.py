@@ -10,7 +10,7 @@ import duckdb
 import pytest
 
 from benchmark import adapters, campaign, verify
-from benchmark.contract import sha256_of
+from benchmark.contract import EXIT_INCOMPLETE_GROUP, sha256_of
 
 COMMAND_PY = """
 from benchmark.runtime.command_adapter import Executable, Mode
@@ -225,7 +225,7 @@ def test_a_blocked_slot_makes_the_group_incomplete(tmp_path: Path) -> None:
     code, report = verify.verify_group(con, "g1", adapter_root=root, write_record=False)
     assert (report["verdict"], report["complete"]) == ("INCOMPLETE", False)
     assert len(report["blocked"]) == 1
-    assert code == verify.EXIT_INCOMPLETE_GROUP
+    assert code == EXIT_INCOMPLETE_GROUP
 
 
 def test_an_abandoned_slot_is_an_absent_subject(tmp_path: Path) -> None:

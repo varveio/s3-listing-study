@@ -142,6 +142,13 @@ SCHEDULE_FIELDS = ("reps", "timeout_s")
 # a plan nobody meant to write.
 ROW_FIELDS = ("mode", "purpose", "statistic", "signed", "concurrency", *RESOURCE_FIELDS)
 
+# The escape hatch for a capsule-declared key the study reserves no name for --
+# s3-fast-list's `segments`, which its `ks-split` mode requires and no axis
+# describes. A flat mapping, folded into the blob before the capsule's own
+# refusal runs, so a typo or an undeclared key still fails there. A key that has
+# a row field of its own is refused: one way to say each thing.
+ROW_CONFIG = "config"
+
 # Whether the case's result is a timing or a rate over its repeats. `rate` is
 # for a subject that succeeds, hangs or panics — s3kor's listing path — where
 # the failures are the finding, so `retry` leaves them alone.
@@ -242,9 +249,10 @@ class Case:
     env: tuple[tuple[str, str], ...]
     # The capsule's own knobs -- the harness reads none of these, only forwards
     # them. Produced by the capsule's ``effective_config(mode, ...)`` at
-    # resolution: the row's ``mode`` and any reserved axis it stated (today just
-    # ``concurrency``), plus whatever declared default the capsule fills in when
-    # a row leaves an axis silent. Key-sorted, matching what is hashed.
+    # resolution: the row's ``mode``, any reserved axis it stated (today just
+    # ``concurrency``) and whatever its ``config`` mapping carried, plus every
+    # declared default the capsule fills in when a row leaves an axis silent.
+    # Key-sorted, matching what is hashed.
     config: tuple[tuple[str, object], ...]
 
 
@@ -692,8 +700,8 @@ def expand_requirements(case: Case, adapter: LoadedCommandAdapter) -> tuple[Case
     """
     links: list[Case] = []
     for mode in adapter.requires.get(case.mode, ()):
-        manifest = adapter.modes.get(mode)
-        if manifest is not None and not manifest.permits_purpose("preparation"):
+        manifest = adapter.modes[mode]
+        if not manifest.permits_purpose("preparation"):
             raise PlanError(
                 f"{case.tool}: mode {case.mode!r} requires {mode!r}, whose capsule caps it at "
                 f"{manifest.purpose_ceiling!r} — a prerequisite runs as a preparation"
@@ -880,11 +888,19 @@ def _tool_cases(
     # omitting a ceiling its sibling stated would give one tool IDs of two
     # shapes. `mode` is always in it, or a bare tool would render an empty ID.
     rendered = tuple(f for f in ROW_FIELDS if f == "mode" or any(f in row for row in rows))
+    # A row varying only a capsule knob is still a different case, so every key
+    # any row's `config` states is rendered too — sorted, since a mapping's order
+    # is the author's typing and an ID is not.
+    config_keys = sorted({key for row in rows for key in row.get(ROW_CONFIG, {})})
 
     cases: list[Case] = []
     for row in rows:
         resolved = {**settings, **row, "mode": _row_mode(row, tool, where, default_modes, path)}
-        chosen = tuple((field, resolved.get(field)) for field in rendered)
+        row_config: Mapping[str, str | int] = row.get(ROW_CONFIG, {})
+        chosen = (
+            *((field, resolved.get(field)) for field in rendered),
+            *((key, row_config.get(key)) for key in config_keys),
+        )
         cases.append(_case(tool, resolved, chosen, schedule, context))
     return cases
 
@@ -941,8 +957,40 @@ def _literal_row(entry: Mapping[str, Any], label: str, path: Path) -> dict[str, 
             f"'{label}' in {path} states {', '.join(scheduling)} — that is "
             "scheduling, not what a case is; set it on the tool or in defaults"
         )
-    _reject_unknown(entry, ROW_FIELDS, f"'{label}'", path)
-    return {key: _row_field_value(key, value, label, path) for key, value in entry.items()}
+    _reject_unknown(entry, (*ROW_FIELDS, ROW_CONFIG), f"'{label}'", path)
+    return {
+        key: _config_map(value, label, path)
+        if key == ROW_CONFIG
+        else _row_field_value(key, value, label, path)
+        for key, value in entry.items()
+    }
+
+
+def _config_map(value: Any, label: str, path: Path) -> dict[str, str | int]:
+    """A row's ``config`` — the capsule-declared keys no row field names.
+
+    Flat and scalar, because these keys are hashed into the case's blob and
+    rendered into its label exactly as a row field is. Whether the capsule
+    actually declares each key is its own question, asked by
+    ``effective_config`` at resolution.
+    """
+    if not isinstance(value, dict) or not value:
+        raise PlanError(f"'{label}' 'config' in {path} is not a non-empty mapping")
+    resolved: dict[str, str | int] = {}
+    for key, item in value.items():
+        if not isinstance(key, str) or not key:
+            raise PlanError(f"'{label}' 'config' in {path} has a key that is not a name: {key!r}")
+        if key in ROW_FIELDS:
+            raise PlanError(
+                f"'{label}' 'config' in {path} states {key!r}, which a row states directly — "
+                "state it on the row, not in 'config'"
+            )
+        if isinstance(item, bool) or not isinstance(item, int | str) or item == "":
+            raise PlanError(
+                f"'{label}' 'config.{key}' in {path} is not a non-empty string or integer: {item!r}"
+            )
+        resolved[key] = item
+    return resolved
 
 
 def _row_field_value(key: str, value: Any, label: str, path: Path) -> str | int:
@@ -1134,9 +1182,13 @@ def _case(
             "without loading its command adapter"
         )
     auth_role = _resolve_auth_role(tool, resolved.get("signed"), adapter, context)
-    # `concurrency` is the one reserved axis a row may state today; resolution
-    # folds it into the config blob rather than passing it straight to argv.
-    row_config = {"concurrency": resolved["concurrency"]} if "concurrency" in resolved else {}
+    # `concurrency` is the one reserved axis a row may state today, and `config`
+    # carries the capsule-declared keys no row field names. Resolution folds both
+    # into the config blob rather than passing either straight to argv, so the
+    # capsule's own refusal still runs over everything a plan asked for.
+    row_config: dict[str, object] = dict(resolved.get(ROW_CONFIG) or {})
+    if "concurrency" in resolved:
+        row_config["concurrency"] = resolved["concurrency"]
     try:
         config = adapter.effective_config(mode, row_config)
     except Exception as exc:  # a capsule refusing this config is a plan error
@@ -1205,12 +1257,12 @@ def _purpose(
     that can only ever be a preparation say so once, in the capsule, instead of
     every row that names it repeating the demotion.
     """
-    manifest = adapter.modes.get(mode)
-    ceiling = "measurement" if manifest is None else manifest.purpose_ceiling
+    manifest = adapter.modes[mode]
+    ceiling = manifest.purpose_ceiling
     if stated is None:
         return ceiling
     purpose = str(stated)
-    if manifest is not None and not manifest.permits_purpose(purpose):
+    if not manifest.permits_purpose(purpose):
         raise PlanError(
             f"'tools.{tool}' in {path} claims mode {mode!r} is a {purpose}, above the "
             f"{ceiling!r} its capsule declares — a plan may demote a mode, never promote it"

@@ -42,9 +42,7 @@ and storage_class are never printed by ``ls`` and are always NULL."""
 MODES = {
     "recursive": Mode(product="text", fields=TEXT_FIELDS, axes=AXES, executable=S4CMD.name),
     "shallow": Mode(product="text", fields=TEXT_FIELDS, axes=AXES, executable=S4CMD.name),
-    "show-directory": Mode(
-        product="text", fields=TEXT_FIELDS, axes=AXES, executable=S4CMD.name
-    ),
+    "show-directory": Mode(product="text", fields=TEXT_FIELDS, axes=AXES, executable=S4CMD.name),
     # du emits an aggregate size only -- normalize.py is a documented no-op,
     # zero per-key rows, so it can never be ranked against a per-key listing.
     "du": Mode(

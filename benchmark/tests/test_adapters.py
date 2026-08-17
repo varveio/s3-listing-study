@@ -739,9 +739,7 @@ def test_normalizer_can_read_an_existing_raw_path_without_stdin(tool: str, tmp_p
 
 
 @pytest.mark.parametrize("tool", PORTED)
-def test_the_config_blob_reaches_the_normalizer(
-    tool: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_the_config_blob_reaches_the_normalizer(tool: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """The same blob ``command.py`` compiled argv from reaches ``normalize.py`` too.
 
     Unused by every adapter today, but genuinely threaded through the CLI

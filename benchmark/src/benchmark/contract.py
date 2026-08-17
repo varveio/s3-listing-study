@@ -11,8 +11,8 @@ import hashlib
 from pathlib import Path
 
 # verify.py's refusal ladder: a distinct code per reason a comparison did not
-# reach a verdict, never folded into FAIL. campaign.py's `verify` subcommand
-# reads the same codes off verify_leaves() rather than redefining them.
+# reach a verdict, never folded into FAIL. Codes 0-8 are per comparison; 9 is the
+# group rung, for a ledger group that never reached one.
 EXIT_PASS = 0
 EXIT_FAIL = 1
 EXIT_DRIFT = 2
@@ -22,6 +22,7 @@ EXIT_BINDING_MISMATCH = 5
 EXIT_NORMALIZE_FAILED = 6
 EXIT_FAILED_SUBJECT = 7
 EXIT_MALFORMED_INPUT = 8
+EXIT_INCOMPLETE_GROUP = 9
 
 VERDICT_EXIT_CODES = {"PASS": EXIT_PASS, "DRIFT": EXIT_DRIFT, "FAIL": EXIT_FAIL}
 

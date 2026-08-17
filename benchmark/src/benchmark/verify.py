@@ -78,6 +78,7 @@ from benchmark.contract import (
     EXIT_DRIFT,
     EXIT_FAIL,
     EXIT_FAILED_SUBJECT,
+    EXIT_INCOMPLETE_GROUP,
     EXIT_MALFORMED_INPUT,
     EXIT_MISSING_MARKER,
     EXIT_NORMALIZE_FAILED,
@@ -99,7 +100,6 @@ MISMATCH_FIELDS = ("size", "etag", "mtime", "storage_class")
 SAMPLE_LIMIT = 5
 
 # Group-level rungs on contract.py's refusal ladder, which is per comparison.
-EXIT_INCOMPLETE_GROUP = 9
 VERDICT_ORDER = ("UNCOMPARED", "PASS", "DRIFT", "FAIL")
 GROUP_EXIT_CODES = {
     "UNCOMPARED": EXIT_PASS,

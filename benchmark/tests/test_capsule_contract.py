@@ -53,27 +53,12 @@ MODES = {"list": Mode(product="text", fields=("key", "size"))}
 def build_command(request: CommandRequest) -> tuple[str, ...]:
     return (*EXECUTABLES[0].argv, request.mode)
 '''
-LEGACY = '''\
-"""A fixture capsule on the pre-manifest shape the loader still accepts."""
-
-from benchmark.runtime.command_adapter import CommandRequest
-
-TOOL = "fixture"
-FIXED_COMMAND_PREFIX = ("/usr/local/bin/fixture",)
-MODES = frozenset({"list", "shallow"})
-SUPPORTS_UNSIGNED = True
-
-
-def build_command(request: CommandRequest) -> tuple[str, ...]:
-    return (*FIXED_COMMAND_PREFIX, request.mode)
-'''
 
 
 def write_capsule(
     tmp_path: Path,
     body: str = "",
     *,
-    header: str = HEADER,
     registered: tuple[str, ...] | None = None,
 ) -> Path:
     """Write a fixture capsule and return its ``adapter/command.py``.
@@ -84,7 +69,7 @@ def write_capsule(
     adapter = tmp_path / "fixture" / "adapter"
     adapter.mkdir(parents=True)
     path = adapter / "command.py"
-    path.write_text(header + body, encoding="utf-8")
+    path.write_text(HEADER + body, encoding="utf-8")
     if registered is not None:
         build = tmp_path / "fixture" / "build"
         build.mkdir()
@@ -98,10 +83,9 @@ def load(
     tmp_path: Path,
     body: str = "",
     *,
-    header: str = HEADER,
     registered: tuple[str, ...] | None = None,
 ) -> LoadedCommandAdapter:
-    return load_command_adapter(write_capsule(tmp_path, body, header=header, registered=registered))
+    return load_command_adapter(write_capsule(tmp_path, body, registered=registered))
 
 
 def test_a_declared_axis_reaches_the_config_the_identity_hashes(tmp_path: Path) -> None:
@@ -365,21 +349,6 @@ def test_a_subject_that_can_issue_no_request_at_all_is_refused(tmp_path: Path) -
 def test_signing_defaults_to_available(tmp_path: Path) -> None:
     adapter = load(tmp_path)
     assert adapter.supports_signed and adapter.supports_unsigned
-
-
-def test_the_pre_manifest_shape_still_loads(tmp_path: Path) -> None:
-    """The eleven capsules convert one at a time, and the gates stay green meanwhile."""
-    adapter = load(tmp_path, header=LEGACY)
-    assert adapter.mode_names == frozenset({"list", "shallow"})
-    assert adapter.modes == {}
-    assert adapter.fixed_command_prefix == ARGV
-    assert adapter.executables == (Executable("fixture", ARGV),)
-    assert adapter.effective_config("list", {}) == {"mode": "list"}
-
-
-def test_a_converted_capsule_states_its_executable_once(tmp_path: Path) -> None:
-    with pytest.raises(CommandAdapterError, match="EXECUTABLES replaces it"):
-        load(tmp_path, '\nFIXED_COMMAND_PREFIX = ("/usr/local/bin/fixture",)\n')
 
 
 def test_build_env_defaults_to_the_static_functional_environment(tmp_path: Path) -> None:

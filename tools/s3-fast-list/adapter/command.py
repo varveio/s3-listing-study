@@ -30,11 +30,14 @@ not been exercised by a committed run."""
 
 CONFIG_KEYS = frozenset({"segments"})
 """CHAFE. Segment count is the hinted path's *second* axis — sweeping it means
-one preparation per value — but the study reserves no name for it, so it can
-only travel as an ordinary config key. It therefore gets none of the axis
-machinery: no `Default`, no provenance, and no merge-before-hashing, so a plan
-that states nothing produces a preparation whose identity omits the number it
-ran at. Reserving `segments` beside `concurrency` is what closes this."""
+one preparation per value — but the study reserves no name for it, so it travels
+as an ordinary config key. A row states it through `config:`
+(`benchmark/plans/README.md`), so a `ks-split` case can now name the number it
+splits at. What is still missing is the axis machinery: no `Default`, no
+provenance, and no merge-before-hashing, so a `list-hinted` row's automatic
+`ks-split` link — which takes this capsule's config and never the consumer's —
+still arrives with no segment count at all. Reserving `segments` beside
+`concurrency` is what closes that."""
 
 CONCURRENCY = Ceiling(100, "source@6c72f59")
 """``-c/--concurrency`` as the subject runs it unsilenced (``main.rs:33``).
