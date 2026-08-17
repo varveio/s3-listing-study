@@ -45,9 +45,10 @@ says nothing about enforcing it.
 Sweeping the ceiling therefore holds the machine, its cores and its neighbours
 still, and reaches sizes no machine type sells. A managed runtime is additionally
 told what share of that it may use as heap, because a JVM and V8 both default to
-a fraction of what they can see; that share lives with the heap policies in
+a fraction of what they can see; that share lives in
 ``benchmark/plans/tools.yaml`` rather than in a plan, since it configures two tools out of
-eleven and every plan would otherwise restate a figure most cases ignore.
+eleven and every plan would otherwise restate a figure most cases ignore. The
+capsule turns the share into whatever variable its runtime reads.
 
 **A row may also say what its attempts are for.** ``purpose`` demotes a case out
 of comparisons — a canary proving a signing path executes is a real job whose
@@ -237,16 +238,13 @@ class Case:
     reps: int
     timeout_s: int
     heap_percent: int
-    """The share of the visible ceiling a managed runtime may take, as applied to
-    :attr:`env`. Carried because the ledger records it on every row."""
+    """The share of the visible ceiling a managed runtime may take. Carried
+    because the ledger records it on every row; the capsule renders it."""
     # The values this case was rendered into an ID from, in ID order: the union
     # of the keys the tool's rows state, so a row that omitted one carries the
     # value it inherited. Kept so a reader can group by a key without re-parsing
     # the ID. ``None`` is the container ceiling nobody set.
     axes: tuple[tuple[str, str | int | None], ...]
-    # What the runtime must be told about its own memory, if it is the kind that
-    # needs telling. Empty for a tool with no managed heap.
-    env: tuple[tuple[str, str], ...]
     # The capsule's own knobs -- the harness reads none of these, only forwards
     # them. Produced by the capsule's ``effective_config(mode, ...)`` at
     # resolution: the row's ``mode``, any reserved axis it stated (today just
@@ -334,43 +332,17 @@ def default_path(bucket: str) -> Path:
 
 
 @dataclass(frozen=True)
-class HeapPolicy:
-    """How one runtime is told how much of its memory it may use as heap.
-
-    Only a managed runtime needs this. A Go or Rust tool takes what it takes;
-    a JVM and V8 both default to a *fraction* of what they can see, so leaving
-    it alone would make the runtime's own heuristic the independent variable
-    rather than the memory we set.
-    """
-
-    env: str
-    # ``{percent}`` and ``{mib}`` are the two shapes a runtime accepts: the JVM
-    # reads its cgroup ceiling itself and wants a proportion, V8 does not and
-    # wants an absolute size.
-    value: str
-
-    def render(self, *, percent: int, visible_memory_gb: int) -> tuple[str, str]:
-        return self.env, self.value.format(
-            percent=percent, mib=visible_memory_gb * 1024 * percent // 100
-        )
-
-
-@dataclass(frozen=True)
 class HeapConfig:
-    """The share a managed runtime may use, and how each one is told.
+    """The share of the visible ceiling a managed runtime may use as heap.
 
     Not part of a plan: nine of the eleven tools have no heap to size, so a
     per-bucket setting would be a knob most cases ignore and every plan restates.
+    The share travels to the capsule, which owns the translation into whatever
+    variable its runtime reads (`capsule-contract.md` § *The ceiling, and the
+    share of it*).
     """
 
     percent: int
-    policies: Mapping[str, HeapPolicy]
-
-    def env_for(self, tool: str, *, visible_memory_gb: int) -> tuple[tuple[str, str], ...]:
-        policy = self.policies.get(tool)
-        if policy is None:
-            return ()
-        return (policy.render(percent=self.percent, visible_memory_gb=visible_memory_gb),)
 
 
 def load_heap_config(path: Path) -> HeapConfig:
@@ -378,35 +350,15 @@ def load_heap_config(path: Path) -> HeapConfig:
     doc = _tool_defaults_document(path)
     heap = doc.get("heap")
     if heap is None:
-        return HeapConfig(percent=100, policies={})
+        return HeapConfig(percent=100)
     if not isinstance(heap, dict):
         raise PlanError(f"'heap' in {path} is not a mapping")
-    _reject_unknown(heap, ("percent", "tools"), "'heap'", path)
+    _reject_unknown(heap, ("percent",), "'heap'", path)
 
     percent = _positive_int(heap.get("percent"), "percent", "heap", path)
     if percent > 100:
         raise PlanError(f"'heap' percent in {path} is {percent}, which is over 100")
-
-    table = heap.get("tools")
-    if table is None:
-        return HeapConfig(percent=percent, policies={})
-    if not isinstance(table, dict):
-        raise PlanError(f"'heap.tools' in {path} is not a mapping")
-    policies: dict[str, HeapPolicy] = {}
-    for tool, entry in table.items():
-        where = f"heap.tools.{tool}"
-        if not isinstance(entry, dict):
-            raise PlanError(f"'{where}' in {path} is not a mapping")
-        _reject_unknown(entry, ("env", "value"), f"'{where}'", path)
-        value = _string(entry, "value", where, path)
-        unknown = set(re.findall(r"\{(\w+)\}", value)) - {"percent", "mib"}
-        if unknown:
-            raise PlanError(
-                f"'{where}' value in {path} uses unknown placeholder(s) "
-                f"{', '.join(sorted(unknown))} (percent|mib)"
-            )
-        policies[tool] = HeapPolicy(env=_string(entry, "env", where, path), value=value)
-    return HeapConfig(percent=percent, policies=policies)
+    return HeapConfig(percent=percent)
 
 
 def load_instances(path: Path) -> dict[tuple[int, int], str]:
@@ -710,6 +662,7 @@ def expand_requirements(case: Case, adapter: LoadedCommandAdapter) -> tuple[Case
             config = adapter.effective_config(mode, {})
         except Exception as exc:
             raise PlanError(f"{case.tool}: prerequisite {mode!r} of {case.mode!r}: {exc}") from exc
+        _compile_prerequisite(case, adapter, mode, config)
         axes: tuple[tuple[str, str | int | None], ...] = (("mode", mode),)
         links.append(
             replace(
@@ -725,6 +678,40 @@ def expand_requirements(case: Case, adapter: LoadedCommandAdapter) -> tuple[Case
             )
         )
     return (*links, case)
+
+
+def _compile_prerequisite(
+    case: Case, adapter: LoadedCommandAdapter, mode: str, config: Mapping[str, object]
+) -> None:
+    """Build the prerequisite's argv here, so a chain it cannot state fails offline.
+
+    A link takes the capsule's own config and never the consumer's, so a knob the
+    capsule declares and defaults nowhere reaches ``build_command`` unset — which
+    is a refusal on an allocated VM unless it is one here. The staging paths are
+    placeholders: what the engine will pass, not what it will pass *here*.
+    """
+    from benchmark.runtime.command_adapter import CommandRequest
+
+    try:
+        adapter.compile(
+            CommandRequest(
+                mode=mode,
+                bucket="placeholder-bucket",
+                region="placeholder-region",
+                tool=case.tool,
+                signed=case.auth_role is not None,
+                config=config,
+                sink_dir="/sink",
+                artifact_path="/staged/placeholder",
+                visible_memory_gb=float(case.resources.visible_memory_gb),
+                heap_percent=case.heap_percent,
+            )
+        )
+    except Exception as exc:
+        raise PlanError(
+            f"{case.tool}: mode {case.mode!r} requires {mode!r}, which its capsule cannot "
+            f"build: {exc}"
+        ) from exc
 
 
 def _signed(table: Mapping[str, Any], where: str, path: Path, *, complete: bool) -> dict[str, bool]:
@@ -1220,8 +1207,6 @@ def _case(
         machine_type=machine_type,
         container_memory_gb=container_memory_gb,
     )
-    env = context.heap.env_for(tool, visible_memory_gb=resolved_resources.visible_memory_gb)
-
     chosen = tuple(
         (key, auth_role is not None) if key == "signed" else (key, value) for key, value in chosen
     )
@@ -1243,7 +1228,6 @@ def _case(
         timeout_s=schedule["timeout_s"],
         heap_percent=context.heap.percent,
         axes=chosen,
-        env=env,
         config=tuple(config.items()),
     )
 

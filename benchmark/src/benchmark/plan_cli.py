@@ -61,16 +61,15 @@ def _rows(loaded: bench.Plan) -> list[dict[str, object]]:
             "machine_type": case.resources.machine_type,
             "container_memory_gb": case.resources.container_memory_gb or "-",
             "docker_options": list(case.resources.docker_options),
-            "env": dict(case.env),
             "config": dict(case.config),
             # Derived, and carried because they are what a Batch job is told.
             "memory_mib": case.resources.memory_mib,
             "cpu_milli": case.resources.cpu_milli,
             "reps": case.reps,
             "timeout_s": case.timeout_s,
-            # Whatever the heap table named, rather than a list of env vars kept
-            # in step with it by hand: a case carries at most one.
-            "heap": "; ".join(value for _, value in case.env) or "-",
+            # The share, not the variable: the capsule renders the flag its own
+            # runtime reads, and nine of eleven tools read none.
+            "heap_percent": case.heap_percent,
         }
         for case in loaded.cases
     ]
@@ -83,7 +82,7 @@ def _render(loaded: bench.Plan, rows: Sequence[dict[str, object]]) -> str:
         "purpose",
         "machine_type",
         "container_memory_gb",
-        "heap",
+        "heap_percent",
         "reps",
         "timeout_s",
     )

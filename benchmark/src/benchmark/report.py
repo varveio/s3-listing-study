@@ -330,17 +330,26 @@ def attach_preparations(rows: list[dict[str, Any]]) -> None:
     """
     by_attempt = {row["attempt_id"]: row for row in rows}
     for row in rows:
-        chain, current = [], row["produced_by"]
-        while current is not None and current in by_attempt and current not in chain:
+        chain: list[str] = []
+        current, outside = row["produced_by"], None
+        while current is not None and current not in chain:
+            if current not in by_attempt:
+                # A preparation another group made, reused by this one: the rows
+                # it would be summed from are not in this report, and a sum over
+                # the links that are is a smaller number wearing a total's name.
+                outside = current
+                break
             chain.append(current)
             current = by_attempt[current]["produced_by"]
-        if not chain:
+        if not chain and outside is None:
             continue
         durations = [by_attempt[a]["wall_seconds"] for a in chain]
         row["preparations"] = chain
+        row["crosses_group"] = outside
         row["prep_seconds"] = (
             round(sum(durations), 6)
-            if all(isinstance(d, (int, float)) and not isinstance(d, bool) for d in durations)
+            if outside is None
+            and all(isinstance(d, (int, float)) and not isinstance(d, bool) for d in durations)
             else "-"
         )
 
@@ -397,12 +406,21 @@ def stratum_lines(rows: list[dict[str, Any]]) -> list[str]:
 
 
 def preparation_lines(rows: list[dict[str, Any]]) -> list[str]:
-    return [
-        f"- `{row['attempt_id']}` ran behind {', '.join(row['preparations'])} "
-        f"({row['prep_seconds']}s of preparation)"
-        for row in rows
-        if row.get("preparations")
-    ]
+    lines = []
+    for row in rows:
+        if not row.get("preparations") and row.get("crosses_group") is None:
+            continue
+        behind = ", ".join(row["preparations"]) or "no attempt in this report"
+        line = f"- `{row['attempt_id']}` ran behind {behind} "
+        if row.get("crosses_group") is not None:
+            line += (
+                f"and `{row['crosses_group']}`, which is outside this report — the chain "
+                "crosses a group boundary, so its preparation cost is unknown"
+            )
+        else:
+            line += f"({row['prep_seconds']}s of preparation)"
+        lines.append(line)
+    return lines
 
 
 def render_markdown(rows: list[dict[str, Any]], *, blocked: list[str]) -> str:

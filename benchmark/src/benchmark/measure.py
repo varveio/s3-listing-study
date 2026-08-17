@@ -49,7 +49,6 @@ EXIT_IMAGE_MISMATCH = 10
 EXIT_POSTPROCESSING_FAILED = 11
 EXIT_ARTIFACT_UNUSABLE = 12
 PINNED_IMAGE_RE = re.compile(r"\A[^\s@]+@sha256:[0-9a-f]{64}\Z")
-CASE_ENV_KEYS = frozenset({"JAVA_TOOL_OPTIONS", "NODE_OPTIONS"})
 
 SECRET_PATTERNS = {
     "credential-shaped value": re.compile(
@@ -78,22 +77,6 @@ SUBJECT_ENV = {
     "LC_ALL": "C.UTF-8",
     "AWS_EC2_METADATA_DISABLED": "true",
 }
-
-
-def parse_case_env(pairs: list[str]) -> dict[str, str]:
-    env = {}
-    for pair in pairs:
-        name, _, value = pair.partition("=")
-        if not name or not _ or "\x00" in pair:
-            raise ValueError(f"--case-env must be NAME=VALUE without NUL bytes: {pair!r}")
-        if name not in CASE_ENV_KEYS:
-            raise ValueError(f"--case-env names unsupported key: {name}")
-        if not value:
-            raise ValueError(f"--case-env {name} value must not be empty")
-        if name in env:
-            raise ValueError(f"--case-env repeats {name}")
-        env[name] = value
-    return env
 
 
 def parse_credential_env(blob: str) -> dict[str, str]:
@@ -144,21 +127,12 @@ def resolve_credential_env(auth_role: str | None, environ: Mapping[str, str]) ->
     return {}
 
 
-def validate_environment_inputs(
-    functional_env: dict[str, str],
-    case_env: dict[str, str],
-) -> str | None:
+def validate_environment_inputs(functional_env: dict[str, str]) -> str | None:
     """Refuse environment names that could widen or shadow the auth boundary."""
     reserved = set(SUBJECT_ENV) | AWS_CREDENTIAL_ENV_KEYS | {"AWS_REGION", "AWS_DEFAULT_REGION"}
     collisions = sorted(set(functional_env) & reserved)
     if collisions:
         return f"capsule environment collides with reserved key(s): {', '.join(collisions)}"
-    case_collisions = sorted(set(case_env) & reserved)
-    if case_collisions:
-        return f"case environment collides with reserved key(s): {', '.join(case_collisions)}"
-    overlap = sorted(set(functional_env) & set(case_env))
-    if overlap:
-        return f"environment sources collide on key(s): {', '.join(overlap)}"
     return None
 
 
@@ -265,13 +239,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--timeout", type=int, default=3600, help="Seconds before the subject is killed."
     )
     parser.add_argument("--term-grace", type=float, default=5.0)
-    parser.add_argument(
-        "--case-env",
-        action="append",
-        default=[],
-        metavar="NAME=VALUE",
-        help="Extra environment for the subject, e.g. JAVA_TOOL_OPTIONS for swath. Repeatable.",
-    )
     parser.add_argument("--image", required=True)
     parser.add_argument("--toolbox-manifest-sha256", required=True)
     parser.add_argument("--toolbox-recipe-sha256", required=True)
@@ -816,6 +783,17 @@ def main(argv: list[str] | None = None) -> int:
         print(f"measure: --config is not valid JSON: {exc}", file=sys.stderr)
         return 2
 
+    # The config is the authority on what ran: `--mode` is the same answer
+    # rendered twice into one request, and two answers that disagree are a
+    # controller bug rather than something to pick a winner from.
+    if args.mode != config.get("mode"):
+        print(
+            f"measure: --mode {args.mode!r} is not the {config.get('mode')!r} its config "
+            "states; the config is what the case hashed",
+            file=sys.stderr,
+        )
+        return 2
+
     metadata_error = validate_image_metadata(args)
     if metadata_error:
         print(f"measure: {metadata_error}; refusing to execute", file=sys.stderr)
@@ -866,25 +844,20 @@ def main(argv: list[str] | None = None) -> int:
     if not preflight(command):
         return 127
 
-    try:
-        case_env = parse_case_env(args.case_env)
-    except ValueError as exc:
-        print(f"measure: {exc}", file=sys.stderr)
-        return 2
-    environment_error = validate_environment_inputs(functional_env, case_env)
+    environment_error = validate_environment_inputs(functional_env)
     if environment_error:
         print(f"measure: {environment_error}", file=sys.stderr)
         return 2
-    # The credential is deliberately kept out of case_env: case_env is recorded
-    # in result.json (a published artifact), while these values are secret
-    # material. Batch's secretVariable lands in os.environ, and this is how it
-    # reaches the subject without ever being written down.
+    # The credential is deliberately kept out of the capsule's environment, which
+    # is recorded in result.json (a published artifact) through the argv it
+    # compiled; these values are secret material. Batch's secretVariable lands in
+    # os.environ, and this is how it reaches the subject without being written
+    # down.
     env = {
         **SUBJECT_ENV,
         "AWS_REGION": args.region,
         "AWS_DEFAULT_REGION": args.region,
         **functional_env,
-        **case_env,
         **credential_env,
     }
 
@@ -962,7 +935,6 @@ def main(argv: list[str] | None = None) -> int:
         "auth_role": args.auth_role,
         "destination": attempt_destination,
         "argv": list(command),
-        "case_env": case_env,
         "config": config,
         # Lineage, beside the timing: which bytes this case consumed, and where
         # the harness staged them from.

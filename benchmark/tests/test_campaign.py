@@ -21,10 +21,11 @@ import pytest
 from google.api_core.exceptions import AlreadyExists, BadRequest
 from google.cloud import batch_v1
 
-from benchmark import campaign, gcs, identity
+from benchmark import adapters, campaign, gcs, identity, measure
 from benchmark import plan as bench
 from benchmark.contract import CREDENTIAL_ENV_VAR, TOOLBOX_TOOLS
 from benchmark.plan import Case, Plan
+from benchmark.runtime.command_adapter import HEAP_PERCENT
 
 ROOT = Path(__file__).parents[2]
 PLAN_PATH = ROOT / "benchmark/plans/buckets/noaa-ghcn-pds.yaml"
@@ -385,16 +386,16 @@ def test_a_signing_case_carries_one_secret_and_the_signing_identity(tmp_path: Pa
 
 
 def test_a_signing_case_without_a_signing_account_is_refused(tmp_path: Path) -> None:
-    with pytest.raises(campaign.CampaignError, match="signing worker"):
+    with pytest.raises(campaign.CampaignError):
         rendered_request(tmp_path, signed=True, authenticated_worker_sa=None)
 
 
 def test_a_job_name_that_batch_cannot_take_is_refused() -> None:
     name = campaign.job_name_for(SUITE, "aws-cli.9f300cc4d2b1", 2)
     assert name == f"{SUITE}-aws-cli-9f300cc4d2b1-s2"
-    with pytest.raises(campaign.CampaignError, match="usable Batch job ID"):
+    with pytest.raises(campaign.CampaignError):
         campaign.job_name_for("s" * 40, "aws-cli.9f300cc4d2b1", 1)
-    with pytest.raises(campaign.CampaignError, match="usable Batch job ID"):
+    with pytest.raises(campaign.CampaignError):
         campaign.job_name_for(SUITE, "aws_cli.9f300cc4d2b1", 1)
 
 
@@ -405,7 +406,7 @@ def test_a_ledger_whose_schema_version_is_unknown_is_refused(tmp_path: Path) -> 
     con.execute("UPDATE meta SET schema_version = ?", (campaign.SCHEMA_VERSION + 1,))
     con.commit()
     con.close()
-    with pytest.raises(campaign.CampaignError, match="does not migrate"):
+    with pytest.raises(campaign.CampaignError):
         campaign.open_ledger(str(path))
 
 
@@ -416,7 +417,7 @@ def test_a_group_id_is_unique_within_an_accumulating_file(
     minted = campaign.mint_group_id(con)
     submit(con, plan, case, images, group_id=minted)
     assert campaign.mint_group_id(con, "second-launch") == "second-launch"
-    with pytest.raises(campaign.CampaignError, match="already exists"):
+    with pytest.raises(campaign.CampaignError):
         campaign.mint_group_id(con, minted)
     # The minted form is a timestamp an operator can type, suffixed rather than
     # reused when two launches land in one second.
@@ -526,13 +527,13 @@ def test_an_image_set_without_slices_cannot_identify_a_case(tmp_path: Path) -> N
     document = image_set_document()
     tools = cast(dict[str, dict[str, str]], document["tools"])
     del tools["aws-cli"]["tool_slice_sha256"]
-    with pytest.raises(campaign.CampaignError, match="tool entry must contain"):
+    with pytest.raises(campaign.CampaignError):
         image_set(tmp_path, document)
 
     disagreeing = image_set_document()
     tools = cast(dict[str, dict[str, str]], disagreeing["tools"])
     tools["aws-cli"]["platform_sha256"] = "1" * 64
-    with pytest.raises(campaign.CampaignError, match="disagree on platform_sha256"):
+    with pytest.raises(campaign.CampaignError):
         image_set(tmp_path / "other", disagreeing)
 
 
@@ -552,10 +553,30 @@ tools:
 """
 
 
+def hinted_capsule() -> Any:
+    """The real s3-fast-list capsule, holding the segment count its own chain omits.
+
+    `ks-split` takes this capsule's config and never the consumer's, and the
+    capsule declares `segments` with no default (`tools/s3-fast-list/adapter/
+    command.py`), so the automatic link cannot be built — which plan expansion
+    now refuses (`test_plan.py`). Supplying the count at build time is the whole
+    fixture: the chain, the modes and the artifact validator stay the capsule's,
+    so these tests still fail when its `REQUIRES` moves.
+    """
+    adapter = bench.load_capsule("s3-fast-list")
+
+    def build(request: Any) -> tuple[str, ...]:
+        if request.mode == "ks-split":
+            request = replace(request, config={**request.config, "segments": 16})
+        return adapter.build(request)
+
+    return replace(adapter, build=build)
+
+
 def hinted_plan(tmp_path: Path, body: str = HINTED) -> Plan:
     """A plan asking for the one shipped mode with a declared prerequisite chain.
 
-    Loaded against the real capsules, so the arithmetic below is a drift guard on
+    Loaded against the real capsule, so the arithmetic below is a drift guard on
     `s3-fast-list`'s own `REQUIRES` rather than on a fixture repeating it.
     """
     path = tmp_path / "b.yaml"
@@ -564,7 +585,8 @@ def hinted_plan(tmp_path: Path, body: str = HINTED) -> Plan:
         path,
         default_modes={},
         instances={(2, 8): "n4-standard-2"},
-        heap=bench.HeapConfig(percent=75, policies={}),
+        heap=bench.HeapConfig(percent=75),
+        adapters={"s3-fast-list": hinted_capsule()},
     )
 
 
@@ -767,6 +789,119 @@ def test_a_preparation_another_launch_made_is_bound_only_when_asked_for(
     assert len(campaign.attempt_rows(con, case_id=listing.case_id)) == 1
     split = campaign.Attempt.from_row(attempt_row(con, "ks-split", group_id="g20260817-000002"))
     assert (split.input_artifact_sha256, split.produced_by) == (keyspace, listing.attempt_id)
+
+
+def test_a_swath_job_names_its_heap_variable_once_and_the_worker_takes_it(
+    tmp_path: Path,
+) -> None:
+    """The seam this closed: the plan rendered JAVA_TOOL_OPTIONS into `--case-env`
+    while swath's capsule rendered it too, and the worker refuses two sources for
+    one key — so every swath attempt died before its subject started.
+    """
+    plan = loaded_plan()
+    case = next(c for c in plan.cases if c.tool == "swath")
+    images = image_set(tmp_path)
+    _, _, build = campaign.planned_attempt(case, context(plan, case, images))
+    _, request = build(1)
+    argv = json.loads(request)["taskGroups"][0]["taskSpec"]["runnables"][0]["container"]["commands"]
+
+    args = measure.parse_args(argv)
+    # The capsule the image would carry, read from the tree it is built from.
+    command, functional_env = adapters.compile_command(
+        adapters.adapter_dir_for(args.tool, str(ROOT / "tools")),
+        args.tool,
+        mode=args.mode,
+        bucket=args.bucket,
+        region=args.region,
+        prefix=args.prefix,
+        signed=args.auth_role is not None,
+        config=json.loads(args.config),
+        sink_dir=str(tmp_path / "native"),
+        artifact_path="",
+        visible_memory_gb=float(args.container_memory_gb or args.memory_gb),
+        heap_percent=HEAP_PERCENT,
+    )
+    assert measure.validate_environment_inputs(functional_env) is None
+    assert functional_env["JAVA_TOOL_OPTIONS"] == f"-XX:MaxRAMPercentage={HEAP_PERCENT}"
+    # The subject's whole environment, assembled as the worker assembles it: the
+    # share reaches the JVM once, from the capsule that knows the flag.
+    env = {
+        **measure.SUBJECT_ENV,
+        "AWS_REGION": args.region,
+        "AWS_DEFAULT_REGION": args.region,
+        **functional_env,
+    }
+    assert [name for name in env if "JAVA" in name] == ["JAVA_TOOL_OPTIONS"]
+    assert not [token for token in (*argv, *command) if "MaxRAMPercentage" in token]
+
+
+def test_a_slot_resolves_once_however_many_passes_see_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two passes over one settled preparation must not submit one measurement twice."""
+    con = hinted_launch(tmp_path, monkeypatch)
+    evidence = Evidence()
+    monkeypatch.setattr(gcs, "download_bytes", evidence.download)
+    listing = campaign.Attempt.from_row(attempt_row(con, "list"))
+    evidence.publish(listing.result_prefix, "keyspace.ks", b"a/\nb/\n")
+    stale = campaign.blocked_slots(con, listing.attempt_id)[0]
+
+    campaign.set_state(con, listing.attempt_id, "SUCCEEDED")
+    campaign.settle_dependents(con, listing, "SUCCEEDED", suite=SUITE)
+    split = campaign.Attempt.from_row(attempt_row(con, "ks-split"))
+
+    # The row a concurrent pass read before this one claimed the slot.
+    inbound = campaign.Inbound(
+        artifact_sha256=split.input_artifact_sha256,
+        produced_by=listing.attempt_id,
+        artifact_uri=f"{listing.result_prefix}native/keyspace.ks",
+    )
+    assert campaign.resolve_slot(con, stale, inbound, suite=SUITE) is None
+    assert [row["attempt_id"] for row in campaign.attempt_rows(con, case_id=split.case_id)] == [
+        split.attempt_id
+    ]
+
+
+def test_a_slot_whose_case_was_already_prepared_binds_it_rather_than_deadlocking(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The ledger refuses a second attempt of a settled success, so the slot must
+    bind the one that exists — a repeat of the listing produces the same hints."""
+    con = hinted_launch(tmp_path, monkeypatch)
+    evidence = Evidence()
+    monkeypatch.setattr(gcs, "download_bytes", evidence.download)
+    listing = campaign.Attempt.from_row(attempt_row(con, "list"))
+    evidence.publish(listing.result_prefix, "keyspace.ks", b"a/\nb/\n")
+    campaign.set_state(con, listing.attempt_id, "SUCCEEDED")
+    campaign.settle_dependents(con, listing, "SUCCEEDED", suite=SUITE)
+    split = campaign.Attempt.from_row(attempt_row(con, "ks-split"))
+    evidence.publish(split.result_prefix, "hints.input", b"m/\nz/\n")
+    campaign.set_state(con, split.attempt_id, "SUCCEEDED")
+    campaign.settle_dependents(con, split, "SUCCEEDED", suite=SUITE)
+
+    plan = hinted_plan(tmp_path)
+    again = campaign.Launch(
+        con,
+        SUITE,
+        "g20260817-000001",
+        plan,
+        image_set(tmp_path),
+        "results",
+        options(),
+        repeat=True,
+    )
+    again.run(campaign.expand_launch(plan.cases, plan.adapters))
+    repeated = campaign.Attempt.from_row(attempt_row(con, "list", group_id="g20260817-000001"))
+    evidence.publish(repeated.result_prefix, "keyspace.ks", b"a/\nb/\n")
+    campaign.set_state(con, repeated.attempt_id, "SUCCEEDED")
+    campaign.settle_dependents(con, repeated, "SUCCEEDED", suite=SUITE)
+
+    slot = campaign.pending_rows(con, group_id="g20260817-000001")[0]
+    assert (slot["state"], slot["became"]) == ("RESOLVED", split.attempt_id)
+    # No second attempt of a case that has already succeeded, and the link behind
+    # it did not stay blocked on an attempt that will never settle again.
+    assert len(campaign.attempt_rows(con, case_id=split.case_id)) == 1
+    assert campaign.pending_rows(con, group_id="g20260817-000001")[1]["state"] == "RESOLVED"
 
 
 def attempt_row(

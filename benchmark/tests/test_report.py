@@ -254,6 +254,18 @@ def test_a_preparations_cost_rides_with_the_timing_it_enabled(tmp_path: Path) ->
     ]
 
 
+def test_a_preparation_from_another_group_is_a_cost_this_report_cannot_state(
+    tmp_path: Path,
+) -> None:
+    """Summing only the links that are here is a smaller number wearing a total's name."""
+    con = ledger(tmp_path)
+    reused = record(con, tmp_path, tool="alpha", digest="bbbb", produced_by="alpha.deadbeef.s1")
+    write_evidence(reused, wall_seconds=70.0)
+    rows = rows_of(con, adapter_root(tmp_path, "alpha"))
+    assert rows[0]["prep_seconds"] == "-"
+    assert "crosses a group boundary" in report.preparation_lines(rows)[0]
+
+
 def test_each_bucket_is_its_own_section_and_its_own_strata(tmp_path: Path) -> None:
     con = ledger(tmp_path)
     for bucket, tool in (("bucket-one", "alpha"), ("bucket-two", "beta")):

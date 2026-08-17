@@ -165,12 +165,8 @@ def test_unknown_cgroup_events_produce_unknown_oom_deltas(tmp_path: Path) -> Non
 
 
 def test_environment_boundary_rejects_reserved_collisions() -> None:
-    assert "reserved" in (measure.validate_environment_inputs({"HOME": "/tmp"}, {}) or "")
-    assert "reserved" in (
-        measure.validate_environment_inputs({}, {"AWS_ACCESS_KEY_ID": "leaked"}) or ""
-    )
-    with pytest.raises(ValueError, match="unsupported"):
-        measure.parse_case_env(["AWS_ACCESS_KEY_ID=not-allowed"])
+    assert "reserved" in (measure.validate_environment_inputs({"HOME": "/tmp"}) or "")
+    assert "reserved" in (measure.validate_environment_inputs({"AWS_ACCESS_KEY_ID": "x"}) or "")
 
 
 def test_credential_payload_parses_and_refuses_the_wrong_stratum() -> None:
@@ -441,69 +437,73 @@ def test_the_cases_config_and_heap_share_reach_the_capsule(
     monkeypatch.setattr(measure, "row_count_for", lambda *_args: (0, None))
     monkeypatch.setattr(gcs, "upload_file", lambda *_args, **_kwargs: None)
 
-    code = measure.main(
-        [
-            "--tool",
-            "aws-cli",
-            "--mode",
-            "recursive",
-            "--bucket",
-            "bucket",
-            "--region",
-            "region",
-            "--output",
-            str(attempt),
-            "--destination",
-            "gs://results/job/",
-            "--image",
-            "registry/derived@sha256:" + "a" * 64,
-            "--toolbox-manifest-sha256",
-            str(metadata["toolbox_manifest_sha256"]),
-            "--toolbox-recipe-sha256",
-            str(metadata["toolbox_recipe_sha256"]),
-            "--tool-recipe-sha256",
-            str(selected["recipe_sha256"]),
-            "--tool-build-inputs-sha256",
-            str(selected["build_inputs_sha256"]),
-            "--tool-version",
-            str(selected["tool_version"]),
-            "--tool-build-sha256",
-            str(selected["tool_build_sha256"]),
-            "--adapter-bundle-sha256",
-            str(selected["adapter_bundle_sha256"]),
-            "--harness-revision",
-            str(metadata["harness_revision"]),
-            "--subject-workdir",
-            str(selected["subject_workdir"]),
-            "--group-id",
-            "g20260816-000000",
-            "--job-name",
-            "suite-aws-cli-9f300cc4d2b1-s1",
-            "--case-id",
-            "aws-cli.9f300cc4d2b1",
-            "--attempt-id",
-            "aws-cli.9f300cc4d2b1.s1",
-            "--image-set-sha256",
-            "1" * 64,
-            "--machine-type",
-            "machine",
-            "--vcpus",
-            "2",
-            "--memory-gb",
-            "4",
-            "--container-memory-gb",
-            "2",
-            "--config",
-            '{"mode": "recursive", "concurrency": 8}',
-            "--image-metadata",
-            str(metadata_path),
-        ]
-    )
-    assert code == 0
+    argv = [
+        "--tool",
+        "aws-cli",
+        "--mode",
+        "recursive",
+        "--bucket",
+        "bucket",
+        "--region",
+        "region",
+        "--output",
+        str(attempt),
+        "--destination",
+        "gs://results/job/",
+        "--image",
+        "registry/derived@sha256:" + "a" * 64,
+        "--toolbox-manifest-sha256",
+        str(metadata["toolbox_manifest_sha256"]),
+        "--toolbox-recipe-sha256",
+        str(metadata["toolbox_recipe_sha256"]),
+        "--tool-recipe-sha256",
+        str(selected["recipe_sha256"]),
+        "--tool-build-inputs-sha256",
+        str(selected["build_inputs_sha256"]),
+        "--tool-version",
+        str(selected["tool_version"]),
+        "--tool-build-sha256",
+        str(selected["tool_build_sha256"]),
+        "--adapter-bundle-sha256",
+        str(selected["adapter_bundle_sha256"]),
+        "--harness-revision",
+        str(metadata["harness_revision"]),
+        "--subject-workdir",
+        str(selected["subject_workdir"]),
+        "--group-id",
+        "g20260816-000000",
+        "--job-name",
+        "suite-aws-cli-9f300cc4d2b1-s1",
+        "--case-id",
+        "aws-cli.9f300cc4d2b1",
+        "--attempt-id",
+        "aws-cli.9f300cc4d2b1.s1",
+        "--image-set-sha256",
+        "1" * 64,
+        "--machine-type",
+        "machine",
+        "--vcpus",
+        "2",
+        "--memory-gb",
+        "4",
+        "--container-memory-gb",
+        "2",
+        "--config",
+        '{"mode": "recursive", "concurrency": 8}',
+        "--image-metadata",
+        str(metadata_path),
+    ]
+    assert measure.main(argv) == 0
     assert len(calls) == 1
     assert calls[0]["config"] == {"mode": "recursive", "concurrency": 8}
     assert calls[0]["visible_memory_gb"] == 2.0  # the container ceiling, not the 4 GB box
     assert calls[0]["heap_percent"] == HEAP_PERCENT
+
+    # The same answer arrives twice in one request; disagreement is a controller
+    # bug, and the config is what the case hashed.
+    assert argv[2:4] == ["--mode", "recursive"]
+    assert measure.main([*argv[:3], "recursive-jsonl", *argv[4:]]) == 2
+    assert len(calls) == 1
 
 
 def test_missing_credential_fails_before_adapter_or_subject(

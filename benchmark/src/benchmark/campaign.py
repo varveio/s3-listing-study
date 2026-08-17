@@ -618,7 +618,6 @@ def request_argument(document: Mapping[str, Any], name: str) -> str:
 def render_batch_job(
     attempt: Attempt,
     image: Mapping[str, str],
-    case_env: Iterable[tuple[str, str]],
     *,
     suite: str,
     options: BatchOptions,
@@ -661,8 +660,6 @@ def render_batch_job(
         *_artifact_pairs(attempt, artifact_uri),
     )
     commands = [item for pair in pairs for item in pair]
-    for name, value in case_env:
-        commands.extend(("--case-env", f"{name}={value}"))
     container: dict[str, Any] = {"imageUri": image["image_uri"], "commands": commands}
     if container_memory is not None:
         container["options"] = shlex.join(
@@ -971,6 +968,11 @@ def pending_rows(con: sqlite3.Connection, *, group_id: str | None = None) -> lis
     return con.execute(f"SELECT * FROM pending{clause} ORDER BY group_id, slot", values).fetchall()
 
 
+# The insert's column list and its named parameters are both rendered from this
+# tuple, so the row's field order is the dataclass's and cannot drift from it.
+_INSERT_COLUMNS = tuple(Attempt.__dataclass_fields__)
+
+
 def journal_intent(
     con: sqlite3.Connection,
     *,
@@ -1029,9 +1031,6 @@ def journal_intent(
     return attempt, request
 
 
-_INSERT_COLUMNS = tuple(Attempt.__dataclass_fields__)
-
-
 def set_state(
     con: sqlite3.Connection, attempt_id: str, state: str, detail: str | None = None
 ) -> None:
@@ -1042,22 +1041,6 @@ def set_state(
         "settled_at=CASE WHEN ? THEN ? ELSE settled_at END WHERE attempt_id=?",
         (state, detail, now, state in TERMINAL_STATES, now, attempt_id),
     )
-
-
-def _heap_env(
-    tool: str, *, visible_memory_gb: int, heap_percent: int
-) -> tuple[tuple[str, str], ...]:
-    """What a managed runtime is told about its own memory, from the shared table.
-
-    Derived rather than stored: the row carries `heap_percent` and the ceiling,
-    and `benchmark/plans/tools.yaml` says which variable each runtime reads. A
-    retry re-derives it and the frozen-request diff refuses if the table moved.
-    """
-    policies = bench.load_heap_config(bench.bench_dir() / "tools.yaml").policies
-    policy = policies.get(tool)
-    if policy is None:
-        return ()
-    return (policy.render(percent=heap_percent, visible_memory_gb=visible_memory_gb),)
 
 
 def _submit(con: sqlite3.Connection, attempt: Attempt, request: str, options: BatchOptions) -> str:
@@ -1106,11 +1089,6 @@ def planned_attempt(
         input_artifact_sha256=inbound.artifact_sha256,
     )
     config = _canonical(dict(case.config))
-    env = _heap_env(
-        case.tool,
-        visible_memory_gb=case.resources.visible_memory_gb,
-        heap_percent=case.heap_percent,
-    )
 
     def build(ordinal: int) -> tuple[Attempt, str]:
         attempt = Attempt(
@@ -1156,7 +1134,6 @@ def planned_attempt(
             render_batch_job(
                 attempt,
                 image,
-                env,
                 suite=context.suite,
                 options=options,
                 artifact_uri=inbound.artifact_uri or "",
@@ -1196,11 +1173,6 @@ def retry_attempt(
     previous = Attempt.from_row(row)
     image = image_set.image_for(previous.tool)
     frozen = json.loads(row["request_json"])
-    env = _heap_env(
-        previous.tool,
-        visible_memory_gb=previous.visible_memory_gb,
-        heap_percent=previous.heap_percent,
-    )
 
     def build(ordinal: int) -> tuple[Attempt, str]:
         attempt_id = identity.attempt_id(previous.case_id, ordinal)
@@ -1221,7 +1193,6 @@ def retry_attempt(
         request = render_batch_job(
             attempt,
             image,
-            env,
             suite=suite,
             options=options,
             # Read back rather than re-resolved: a retry re-runs the attempt that
@@ -1270,7 +1241,6 @@ def _case_document(case: Case) -> dict[str, Any]:
             for name in ("vcpus", "memory_gb", "machine_type", "container_memory_gb")
         },
         "axes": [list(pair) for pair in case.axes],
-        "env": [list(pair) for pair in case.env],
         "config": [list(pair) for pair in case.config],
     }
 
@@ -1294,7 +1264,6 @@ def _case_from_document(document: Any) -> Case:
             },
             resources=bench.Resources(**document["resources"]),
             axes=tuple((str(key), value) for key, value in document["axes"]),
-            env=tuple((str(key), str(value)) for key, value in document["env"]),
             config=tuple((str(key), value) for key, value in document["config"]),
         )
     except (KeyError, TypeError, ValueError) as exc:
@@ -1440,10 +1409,68 @@ def book_slot(con: sqlite3.Connection, case: Case, context: LaunchContext, *, aw
     return slot
 
 
+def _claim_slot(con: sqlite3.Connection, slot: sqlite3.Row, case_id: str) -> bool:
+    """Take a BLOCKED slot for this pass, before anything is minted or submitted.
+
+    The claim is the case identity the slot is about to become, written under one
+    `BEGIN IMMEDIATE`: a second pass finds `became` already set and does nothing,
+    and a pass that dies between claiming and resolving leaves the slot owed
+    rather than submitting the same measurement twice. A claim is told from a
+    resolution by the state beside it — `BLOCKED` with a `became` is claimed.
+    """
+    con.execute("BEGIN IMMEDIATE")
+    try:
+        claimed = (
+            con.execute(
+                "UPDATE pending SET became=? WHERE group_id=? AND slot=? AND state='BLOCKED' "
+                "AND became IS NULL",
+                (case_id, slot["group_id"], slot["slot"]),
+            ).rowcount
+            == 1
+        )
+        con.execute("COMMIT")
+    except BaseException:
+        con.execute("ROLLBACK")
+        raise
+    return claimed
+
+
+def _already_attempted(con: sqlite3.Connection, case_id: str, purpose: str) -> Attempt | None:
+    """The successful attempt of this exact case a slot may bind instead of re-running.
+
+    Reuse within a launch is free and is what a shared preparation means, so a
+    slot whose case has already succeeded binds that attempt rather than asking
+    the ledger to journal a second one — which it refuses, deadlocking the slot.
+    A preparation's artifact is re-digested here for the same reason
+    :meth:`Launch.reuse` does it: the row's recorded digest and the evidence must
+    still agree.
+    """
+    row = con.execute(
+        "SELECT * FROM attempts WHERE case_id=? AND state='SUCCEEDED' ORDER BY attempt DESC "
+        "LIMIT 1",
+        (case_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    if purpose == "preparation":
+        _, digest = produced_artifact(row["result_prefix"])
+        if row["artifact_sha256"] is not None and row["artifact_sha256"] != digest:
+            raise CampaignError(
+                f"{row['attempt_id']}: recorded artifact digest {row['artifact_sha256']} is not "
+                f"the {digest} its evidence carries"
+            )
+    return Attempt.from_row(row)
+
+
 def resolve_slot(
     con: sqlite3.Connection, slot: sqlite3.Row, inbound: Inbound, *, suite: str
-) -> Attempt:
-    """Mint the identity a slot was waiting for, submit it, and record what it became."""
+) -> Attempt | None:
+    """Mint the identity a slot was waiting for, submit it, and record what it became.
+
+    `None` when another pass holds the claim: a slot resolves once, and a second
+    pass over the same settled preparation does nothing rather than submitting a
+    second job for one measurement.
+    """
     reference = slot_reference(str(slot["group_id"]), int(slot["slot"]))
     document = json.loads(slot["known_inputs"])
     if not isinstance(document, dict):
@@ -1451,7 +1478,13 @@ def resolve_slot(
     context = LaunchContext.from_document(
         document.get("launch"), suite=suite, group_id=str(slot["group_id"])
     )
-    attempt = submit_case(con, _case_from_document(document.get("case")), context, inbound=inbound)
+    case = _case_from_document(document.get("case"))
+    case_id, _, _ = planned_attempt(case, context, inbound=inbound)
+    if not _claim_slot(con, slot, case_id):
+        return None
+    attempt = _already_attempted(con, case_id, case.purpose) or submit_case(
+        con, case, context, inbound=inbound
+    )
     con.execute(
         "UPDATE pending SET state='RESOLVED', became=?, settled_at=? WHERE group_id=? AND slot=?",
         (attempt.attempt_id, _now(), slot["group_id"], slot["slot"]),
@@ -1531,7 +1564,16 @@ def settle_dependents(con: sqlite3.Connection, attempt: Attempt, state: str, *, 
             # The slot stays owed, which is what a slot is for.
             print(f"campaign: slot {reference} could not be resolved: {exc}", file=sys.stderr)
             continue
+        if resolved is None:
+            continue
         print(f"campaign: slot {reference} -> {resolved.attempt_id} {resolved.job_name}")
+        bound = con.execute(
+            "SELECT state FROM attempts WHERE attempt_id=?", (resolved.attempt_id,)
+        ).fetchone()
+        if bound is not None and bound["state"] == "SUCCEEDED":
+            # The slot bound an attempt that had already settled, so nothing will
+            # settle later to unblock whatever waits behind it.
+            settle_dependents(con, resolved, "SUCCEEDED", suite=suite)
 
 
 @dataclass
@@ -1553,6 +1595,8 @@ class Launch:
     repeat: bool = False
     reuse_preparations: bool = False
     bound: dict[int, Inbound] = field(default_factory=dict)
+    booked: int = 0
+    """Slots this pass actually opened — what the launch still owes."""
 
     def context_for(self, tool: str) -> LaunchContext:
         return LaunchContext.for_tool(
@@ -1576,6 +1620,7 @@ class Launch:
         if not inbound.mintable:
             assert inbound.awaiting is not None
             slot = book_slot(self.con, case, context, awaiting=inbound.awaiting)
+            self.booked += 1
             print(
                 f"campaign: slot {self.group_id}/{slot} {case.tool} {case.mode} "
                 f"awaiting {inbound.awaiting}"
@@ -1744,7 +1789,11 @@ def cmd_submit(args: argparse.Namespace) -> int:
         )
         for line in rendered:
             print(line)
-        _announce_shape(loaded.cases, steps)
+        _announce_shape(
+            loaded.cases,
+            steps,
+            slots=sum(1 for step in steps if step.waits_for is not None),
+        )
         return 0
     con = open_ledger(args.state, suite=suite)
     try:
@@ -1760,16 +1809,21 @@ def cmd_submit(args: argparse.Namespace) -> int:
             reuse_preparations=args.reuse_preparations,
         )
         launch.run(steps)
-        _announce_shape(loaded.cases, steps)
+        _announce_shape(loaded.cases, steps, slots=launch.booked)
         print(f"campaign: group {launch.group_id}")
     finally:
         con.close()
     return 0
 
 
-def _announce_shape(cases: Iterable[Case], steps: Iterable[Step]) -> None:
+def _announce_shape(cases: Iterable[Case], steps: Iterable[Step], *, slots: int) -> None:
+    """What the launch came to: rows in, and the attempts and slots they became.
+
+    `slots` is what was actually booked, not what declared a prerequisite: a step
+    whose preparation was bound from an earlier attempt is identifiable now and
+    is submitted rather than owed.
+    """
     expanded = list(steps)
-    slots = sum(1 for step in expanded if step.waits_for is not None)
     print(
         f"campaign: {len(list(cases))} plan row(s) expand to {len(expanded) - slots} "
         f"attempt(s) and {slots} slot(s)"
