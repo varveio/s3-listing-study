@@ -159,7 +159,18 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
         else ("--max-parallel-listings", _concurrency(request))
     )
     stratum = () if request.signed else ("--target-no-sign-request",)
-    anonymous = (*stratum, "--target-region", request.region)
+    # The SDK's own connect-timeout default proved too tight for this study's
+    # boxes: a real dispatch-level connect timeout at ~3.1s killed the whole
+    # listing outright (no retry classification covers it) on both a 2-vCPU/
+    # 64-way ghcn run at the very start of its work and a 2-vCPU/64-way sorel
+    # run 25 minutes into an otherwise-clean 10M-object listing -- a socket
+    # queued behind sixty-three others on two cores occasionally needs longer
+    # than 3.1s to complete a handshake, and the tool has no fallback for that
+    # one slow connection. Fixed rather than plan-tunable: it is headroom for
+    # this harness's own contention, not a methodology axis, so every mode
+    # gets it regardless of what a plan asks for.
+    resilient = ("--connect-timeout-milliseconds", "15000")
+    anonymous = (*stratum, "--target-region", request.region, *resilient)
     tsv = ("--tsv", "--show-storage-class", "--show-etag")
     commands = {
         "recursive-tsv": ("ls", "-r", *obs, *tsv, *parallel, *anonymous, target),

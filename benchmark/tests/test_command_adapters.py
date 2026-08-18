@@ -280,7 +280,7 @@ def _s7cmd(mode: str, prefix: str) -> tuple[str, ...]:
     target = f"s3://{BUCKET}/{prefix}"
     obs = ("-vv", "--disable-color-tracing")
     parallel = ("--max-parallel-listings", "64")
-    anon = ("--target-no-sign-request", "--target-region", REGION)
+    anon = ("--target-no-sign-request", "--target-region", REGION, "--connect-timeout-milliseconds", "15000")
     fields = ("--tsv", "--show-storage-class", "--show-etag")
     return {
         "recursive-tsv": ("ls", "-r", *obs, *fields, *parallel, *anon, target),

@@ -9,5 +9,5 @@
   ],
   "command": "adapter/command.py",
   "normalizer": "adapter/normalize.py",
-  "adapter_bundle_sha256": "46fd36a8224b41a59fc55c7a73fda9c692dd1ac46145a4aa9952580790bd56c6"
+  "adapter_bundle_sha256": "bb93ff2395d0724e3d3f2c45835e9857e69ace4ff9b7c9de5beb245692aaa7fb"
 }
