@@ -161,7 +161,14 @@ def result_semantic_errors(result: dict[str, object]) -> list[str]:
             errors.append("exit_code")
         errors.extend(
             name
-            for name in ("wall_seconds", "max_rss_kb", "row_count", "row_count_error")
+            for name in (
+                "wall_seconds",
+                "max_rss_kb",
+                "row_count",
+                "row_count_error",
+                "product",
+                "product_error",
+            )
             if result.get(name) is not None
         )
         return errors
@@ -213,10 +220,57 @@ def result_semantic_errors(result: dict[str, object]) -> list[str]:
                 isinstance(value, bool) or not isinstance(value, int) or value < 0
             ):
                 errors.append(f"execution.cgroup.{name}")
-    if exit_code == 0 and timed_out is False and row_count_error is None and row_count is None:
+    errors.extend(result_capture_errors(result))
+    counted = exit_code == 0 and timed_out is False and result.get("product_error") is None
+    if counted and row_count_error is None and row_count is None:
         errors.append("row_count")
-    if (exit_code != 0 or timed_out is True) and row_count is not None:
+    if not counted and row_count is not None:
         errors.append("row_count")
+    return errors
+
+
+def result_capture_errors(result: dict[str, object]) -> list[str]:
+    """Where the marker fails to say what this attempt published, and how.
+
+    A stdout capture may be absent, and only for the one reason: the mode's
+    product travels on fd 1, so those bytes are the product and there is no
+    second thing to log. Anything else absent is a marker that cannot be read.
+    """
+    errors: list[str] = []
+    product = result.get("product")
+    if product is not None:
+        errors.extend(f"product.{name}" for name in _artifact_errors(product, digest_optional=True))
+    product_error = result.get("product_error")
+    if product_error is not None and not isinstance(product_error, str):
+        errors.append("product_error")
+    for stem in ("stdout", "stderr"):
+        capture = result.get(stem)
+        if capture is None:
+            if stem == "stderr" or product is None:
+                errors.append(stem)
+            continue
+        errors.extend(f"{stem}.{name}" for name in _artifact_errors(capture))
+    return errors
+
+
+def _artifact_errors(block: object, *, digest_optional: bool = False) -> list[str]:
+    """The name/size/digest every published artifact is recorded by."""
+    if not isinstance(block, dict):
+        return ["shape"]
+    errors: list[str] = []
+    name = block.get("name")
+    if not isinstance(name, str) or not name:
+        errors.append("name")
+    size = block.get("size_bytes")
+    if isinstance(size, bool) or not isinstance(size, int) or size < 0:
+        errors.append("size_bytes")
+    digest = block.get("sha256")
+    if digest is None:
+        # A dataset is many files with no one digest; native_manifest binds each.
+        if not digest_optional or block.get("channel") != "dataset":
+            errors.append("sha256")
+    elif not isinstance(digest, str) or len(digest) != 64 or set(digest) - HEX64:
+        errors.append("sha256")
     return errors
 
 

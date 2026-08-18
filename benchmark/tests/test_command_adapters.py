@@ -30,6 +30,10 @@ from benchmark.runtime.command_adapter import (
     shared_axis_values,
 )
 
+PRODUCT = {"listing": "listing.txt"}
+LISTING = "listing"
+"""What a fixture mode publishes its measured product as."""
+
 ROOT = Path(__file__).parents[2]
 TOOLS = (
     "aws-cli",
@@ -213,8 +217,11 @@ def _s3_fast_list(mode: str, prefix: str) -> tuple[str, ...]:
     scoped = ("--prefix", prefix) if prefix else ()
     return (
         "--no-sign-request",
+        # The listing is the measured product and lands in the sink under its own
+        # name; it travelled as `stdout.log.gz` for as long as this said
+        # `/dev/stdout`, gzipping Parquet under a name that called it a log.
         "--output-parquet-file",
-        "/dev/stdout",
+        f"{SINK}/listing.parquet",
         # A sink is offered here, so the key distribution is published rather
         # than discarded — it is what `ks-split` consumes.
         "--output-ks-file",
@@ -614,13 +621,27 @@ def test_one_rule_decides_what_a_producing_mode_inherits() -> None:
             # The harness's own share, which no row and no producer may restate.
             "heap_percent": Fixed(HEAP_PERCENT),
         },
+        artifacts=PRODUCT,
+        product_artifact=LISTING,
     )
     assert shared_axis_values(settable, consumer) == {"concurrency": 8, "segments": 16}
     # A knob that does nothing here would split shared preparations over nothing.
-    inert = Mode(product="text", fields=("key",), axes={"concurrency": Inert()})
+    inert = Mode(
+        product="text",
+        fields=("key",),
+        axes={"concurrency": Inert()},
+        artifacts=PRODUCT,
+        product_artifact=LISTING,
+    )
     assert shared_axis_values(inert, consumer) == {}
     # An axis the producer never declares is not its business at all.
-    assert shared_axis_values(Mode(product="text", fields=("key",)), consumer) == {}
+    assert (
+        shared_axis_values(
+            Mode(product="text", fields=("key",), artifacts=PRODUCT, product_artifact=LISTING),
+            consumer,
+        )
+        == {}
+    )
 
 
 def test_commands_compile_exact_subject_argv() -> None:

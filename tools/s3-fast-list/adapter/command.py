@@ -62,6 +62,18 @@ vocabulary has no word for that, so this declares the nearest honest thing and
 Read as "key-shaped", not as "emits keys".
 """
 
+LISTING = "listing"
+KEYSPACE = "keyspace"
+HINTS = "hints"
+"""The logical names this capsule publishes under: the measured listing, the key
+distribution a listing drops beside it, and the cut points computed from that."""
+
+LISTING_NAME = "listing.parquet"
+"""What `--output-parquet-file` is pointed at. Parquet is what the flag writes,
+so the name says parquet: the same bytes travelled as `stdout.log.gz` for as long
+as the destination was `/dev/stdout`, gzipping a columnar file under a name that
+called it a log."""
+
 KS_NAME = "keyspace.ks"
 """The key distribution a listing drops into the engine's sink, and the artifact
 the hinted measurement's inline `ks-split` consumes. Written only when the engine
@@ -81,7 +93,9 @@ MODES = {
         fields=FIELDS,
         axes={"concurrency": Inert()},
         executable=S3_FAST_LIST.name,
-        artifacts={"keyspace": KS_NAME},
+        artifacts={LISTING: LISTING_NAME, KEYSPACE: KS_NAME},
+        product_artifact=LISTING,
+        product_channel="file",
     ),
     "ks-split": Mode(
         product="text",
@@ -89,7 +103,7 @@ MODES = {
         axes={"segments": SEGMENTS},
         purpose_ceiling="preparation",
         executable=KS_TOOL.name,
-        artifacts={"hints": HINTS_NAME},
+        artifacts={HINTS: HINTS_NAME},
     ),
     # `segments` is declared here too, though this argv never carries it: the
     # cut count is what the run listed under, so it belongs in the measurement
@@ -103,11 +117,13 @@ MODES = {
         axes={"concurrency": CONCURRENCY, "segments": SEGMENTS},
         executable=S3_FAST_LIST.name,
         inline="ks-split",
-        artifacts={"keyspace": KS_NAME},
+        artifacts={LISTING: LISTING_NAME, KEYSPACE: KS_NAME},
+        product_artifact=LISTING,
+        product_channel="file",
     ),
 }
 
-REQUIRES = {"list-hinted": (("list", "keyspace"),)}
+REQUIRES = {"list-hinted": (("list", KEYSPACE),)}
 """The hinted path needs a full listing first: only a `list` emits the `.ks` key
 distribution the cut points are computed from — and it is named, not inferred
 from the listing's sink holding one file, which it will not for long. That
@@ -158,7 +174,7 @@ def _list_tail(request: CommandRequest, hints: tuple[str, ...]) -> tuple[str, ..
     argv = [
         *((), ("--no-sign-request",))[not request.signed],
         "--output-parquet-file",
-        "/dev/stdout",
+        _sink_path(request, LISTING_NAME),
         "--output-ks-file",
         ks,
         *hints,

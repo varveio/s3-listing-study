@@ -49,8 +49,26 @@ AXES = {"concurrency": CONCURRENCY, "heap_percent": Fixed(HEAP_PERCENT)}
 funnels through the same bisection LIST, so every mode takes the concurrency
 flag."""
 
+LISTING = "listing"
+SUMMARY = "summary"
+"""The logical names a mode publishes its product under: a per-key listing, or
+the aggregate report that is not one."""
+
+TEXT = {LISTING: "listing.txt"}
+SUMMARY_TEXT = {SUMMARY: "summary.txt"}
+"""s3p prints and takes no output destination, so the worker lands fd 1 in the
+declared file. `summarize` publishes under its own name because what it holds is
+an aggregate report with no per-object records in it at all."""
+
 MODES = {
-    "ls": Mode(product="text", fields=KEY_ONLY, axes=AXES, executable=S3P.name),
+    "ls": Mode(
+        product="text",
+        fields=KEY_ONLY,
+        axes=AXES,
+        executable=S3P.name,
+        artifacts=TEXT,
+        product_artifact=LISTING,
+    ),
     # Lossy: size is human-rounded and the line is space-joined, so only the
     # key survives normalization. Not a verification mode.
     "ls-long": Mode(
@@ -59,8 +77,17 @@ MODES = {
         axes=AXES,
         purpose_ceiling="diagnostic",
         executable=S3P.name,
+        artifacts=TEXT,
+        product_artifact=LISTING,
     ),
-    "ls-raw": Mode(product="text", fields=TEXT_FIELDS, axes=AXES, executable=S3P.name),
+    "ls-raw": Mode(
+        product="text",
+        fields=TEXT_FIELDS,
+        axes=AXES,
+        executable=S3P.name,
+        artifacts=TEXT,
+        product_artifact=LISTING,
+    ),
     # An aggregate report with no per-object records at all -- honest as the
     # `ls - summarize` emit-cost instrument, dishonest as a leaderboard row.
     "summarize": Mode(
@@ -69,6 +96,8 @@ MODES = {
         axes=AXES,
         purpose_ceiling="diagnostic",
         executable=S3P.name,
+        artifacts=SUMMARY_TEXT,
+        product_artifact=SUMMARY,
     ),
 }
 

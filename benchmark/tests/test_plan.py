@@ -82,7 +82,13 @@ SIGNING = {
 """(supports_unsigned, supports_signed) per capsule, as the real ones declare."""
 
 
-_GENERIC_MODE = capsule.Mode(product="text", fields=("key",))
+PRODUCT = {"listing": "listing.txt"}
+LISTING = "listing"
+"""What a fixture mode publishes its measured product as."""
+
+_GENERIC_MODE = capsule.Mode(
+    product="text", fields=("key",), artifacts=PRODUCT, product_artifact=LISTING
+)
 
 
 class _AnyMode(dict[str, capsule.Mode]):
@@ -651,7 +657,11 @@ def test_a_rows_axis_lands_in_the_cases_config(tmp_path: Path) -> None:
     """The row states the axis; resolution folds it into the blob the loader hashes."""
     modes = {
         "recursive-tsv": capsule.Mode(
-            product="text", fields=("key",), axes={"concurrency": capsule.Ceiling(64, "unverified")}
+            product="text",
+            fields=("key",),
+            axes={"concurrency": capsule.Ceiling(64, "unverified")},
+            artifacts=PRODUCT,
+            product_artifact=LISTING,
         )
     }
     adapters = {
@@ -682,6 +692,8 @@ def test_a_silent_row_gets_the_capsules_declared_default(tmp_path: Path) -> None
             product="text",
             fields=("key",),
             axes={"concurrency": capsule.Default(4, provenance="help")},
+            artifacts=PRODUCT,
+            product_artifact=LISTING,
         )
     }
     adapters = {
@@ -702,7 +714,11 @@ def test_a_rows_config_key_reaches_the_blob_and_the_cases_identity(tmp_path: Pat
     It is hashed and labelled like a row field, so two rows differing only there
     are two cases rather than one refused duplicate.
     """
-    modes = {"ks-split": capsule.Mode(product="text", fields=("key",))}
+    modes = {
+        "ks-split": capsule.Mode(
+            product="text", fields=("key",), artifacts=PRODUCT, product_artifact=LISTING
+        )
+    }
     adapters = {
         **CAPSULES,
         "s3-fast-list": fixture_capsule(
@@ -801,7 +817,13 @@ def test_an_inline_setup_the_capsule_cannot_build_is_refused_at_resolution(
             axes={"segments": capsule.Stated()},
             purpose_ceiling="preparation",
         ),
-        "hinted": capsule.Mode(product="text", fields=("key",), inline="split"),
+        "hinted": capsule.Mode(
+            product="text",
+            fields=("key",),
+            inline="split",
+            artifacts=PRODUCT,
+            product_artifact=LISTING,
+        ),
     }
 
     def refuse_split(request: capsule.CommandRequest) -> tuple[str, ...]:
@@ -861,8 +883,12 @@ def test_every_key_a_row_may_state_changes_the_case_it_resolves_to(tmp_path: Pat
                 "concurrency": capsule.Ceiling(64, "unverified"),
                 "segments": capsule.Default(64, "unverified"),
             },
+            artifacts=PRODUCT,
+            product_artifact=LISTING,
         ),
-        "recursive-jsonl": capsule.Mode(product="text", fields=("key",)),
+        "recursive-jsonl": capsule.Mode(
+            product="text", fields=("key",), artifacts=PRODUCT, product_artifact=LISTING
+        ),
     }
     adapters = {
         **CAPSULES,
@@ -893,7 +919,9 @@ def test_a_row_may_demote_a_mode_below_its_ceiling_and_never_promote_it(
 ) -> None:
     """`purpose` answers "should this timing be compared?", and the capsule caps it."""
     modes = {
-        "recursive-tsv": capsule.Mode(product="text", fields=("key",)),
+        "recursive-tsv": capsule.Mode(
+            product="text", fields=("key",), artifacts=PRODUCT, product_artifact=LISTING
+        ),
         "hints": capsule.Mode(product="text", fields=("key",), purpose_ceiling="preparation"),
     }
     adapters = {

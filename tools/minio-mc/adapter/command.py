@@ -49,14 +49,64 @@ FIND_FIELDS = ("key",)
 # No concurrency axis: minio-go's List() issues one ListObjectsV2 request at a
 # time -- concurrency is structurally 1, not a settable knob (`api-list.go:
 # 100-165`). Absence is the declaration.
+LISTING = "listing"
+"""The logical name every mode here publishes its listing under."""
+
+TEXT = {LISTING: "listing.txt"}
+JSON = {LISTING: "listing.json"}
+"""mc prints its listing and has no flag that writes one to a path, so the worker
+lands fd 1 in the declared file; the global `--json` chooses which of these it is."""
+
 MODES = {
-    "recursive": Mode(product="text", fields=TEXT_FIELDS, executable=MC.name),
-    "recursive-json": Mode(product="text", fields=FULL_FIELDS, executable=MC.name),
-    "shallow": Mode(product="text", fields=TEXT_FIELDS, executable=MC.name),
-    "shallow-json": Mode(product="text", fields=FULL_FIELDS, executable=MC.name),
-    "versions-json": Mode(product="text", fields=FULL_FIELDS, executable=MC.name),
-    "find": Mode(product="text", fields=FIND_FIELDS, executable=MC.name),
-    "find-json": Mode(product="text", fields=FIND_JSON_FIELDS, executable=MC.name),
+    "recursive": Mode(
+        product="text",
+        fields=TEXT_FIELDS,
+        executable=MC.name,
+        artifacts=TEXT,
+        product_artifact=LISTING,
+    ),
+    "recursive-json": Mode(
+        product="text",
+        fields=FULL_FIELDS,
+        executable=MC.name,
+        artifacts=JSON,
+        product_artifact=LISTING,
+    ),
+    "shallow": Mode(
+        product="text",
+        fields=TEXT_FIELDS,
+        executable=MC.name,
+        artifacts=TEXT,
+        product_artifact=LISTING,
+    ),
+    "shallow-json": Mode(
+        product="text",
+        fields=FULL_FIELDS,
+        executable=MC.name,
+        artifacts=JSON,
+        product_artifact=LISTING,
+    ),
+    "versions-json": Mode(
+        product="text",
+        fields=FULL_FIELDS,
+        executable=MC.name,
+        artifacts=JSON,
+        product_artifact=LISTING,
+    ),
+    "find": Mode(
+        product="text",
+        fields=FIND_FIELDS,
+        executable=MC.name,
+        artifacts=TEXT,
+        product_artifact=LISTING,
+    ),
+    "find-json": Mode(
+        product="text",
+        fields=FIND_JSON_FIELDS,
+        executable=MC.name,
+        artifacts=JSON,
+        product_artifact=LISTING,
+    ),
 }
 
 

@@ -24,9 +24,28 @@ emits every one of them as NULL for both modes."""
 # chain -- concurrency is structurally 1, not a settable knob. `-c/--concurrent`
 # exists only on `cp`/`sync`, not `ls` (`s3kor.go:48,76` vs `39-41`). Absence
 # is the declaration.
+LISTING = "listing"
+"""The logical name every mode here publishes its listing under."""
+
+TEXT = {LISTING: "listing.txt"}
+"""s3kor prints its listing and takes no output destination, so the worker lands
+fd 1 in the declared file."""
+
 MODES = {
-    "list": Mode(product="text", fields=FIELDS, executable=S3KOR.name),
-    "list-versions": Mode(product="text", fields=FIELDS, executable=S3KOR.name),
+    "list": Mode(
+        product="text",
+        fields=FIELDS,
+        executable=S3KOR.name,
+        artifacts=TEXT,
+        product_artifact=LISTING,
+    ),
+    "list-versions": Mode(
+        product="text",
+        fields=FIELDS,
+        executable=S3KOR.name,
+        artifacts=TEXT,
+        product_artifact=LISTING,
+    ),
 }
 
 

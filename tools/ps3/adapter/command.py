@@ -36,20 +36,44 @@ LIST_FIELDS = ("key", "size", "mtime")
 """`readObjectsV2`'s one fixed print line exposes key, size and mtime only;
 etag and storage_class are not printed at all."""
 
+LISTING = "listing"
+"""The logical name every mode here publishes its listing under."""
+
+TEXT = {LISTING: "listing.txt"}
+"""pS3 prints its listing and takes no output destination, so the worker lands
+fd 1 in the declared file."""
+
 MODES = {
     "list": Mode(
-        product="text", fields=LIST_FIELDS, axes={"concurrency": CONCURRENCY}, executable=PS3.name
+        product="text",
+        fields=LIST_FIELDS,
+        axes={"concurrency": CONCURRENCY},
+        executable=PS3.name,
+        artifacts=TEXT,
+        product_artifact=LISTING,
     ),
     # list-object-versions has no command source in the checkout; `normalize.py`
     # assumes it shares list-objects-v2's line shape, so this manifest does too
     # -- unverified, and no worse than the normalizer's own working assumption.
-    "list-versions": Mode(product="text", fields=LIST_FIELDS, executable=PS3.name),
+    "list-versions": Mode(
+        product="text",
+        fields=LIST_FIELDS,
+        executable=PS3.name,
+        artifacts=TEXT,
+        product_artifact=LISTING,
+    ),
     # head-objects has no command source either and was never run. Its fields
     # here carry the same unverified assumption as list-versions, for the same
     # reason -- but normalize.py's own MODES excludes "head" outright, so this
     # mode can never be normalized against what it declares. That contradiction
     # is reported, not papered over here; see the dispatch report.
-    "head": Mode(product="text", fields=LIST_FIELDS, executable=PS3.name),
+    "head": Mode(
+        product="text",
+        fields=LIST_FIELDS,
+        executable=PS3.name,
+        artifacts=TEXT,
+        product_artifact=LISTING,
+    ),
 }
 
 

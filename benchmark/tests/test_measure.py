@@ -781,6 +781,10 @@ from benchmark.runtime.command_adapter import (
 TOOL = "s3-fast-list"
 EXECUTABLES = (Executable("fixture", (sys.executable,)),)
 SUPPORTS_UNSIGNED = True
+PRODUCT = {"listing": "listing.txt"}
+LISTING = "listing"
+"""What a fixture mode publishes its measured product as."""
+
 MODES = {
     "split": Mode(
         product="text",
@@ -788,7 +792,39 @@ MODES = {
         axes={"segments": Stated()},
         purpose_ceiling="preparation",
     ),
-    "hinted": Mode(product="text", fields=("key",), axes={"segments": Stated()}, inline="split"),
+    "hinted": Mode(
+        product="text",
+        fields=("key",),
+        axes={"segments": Stated()},
+        inline="split",
+        artifacts=PRODUCT,
+        product_artifact=LISTING,
+    ),
+    # The two classes of subject, side by side: one that only prints, and one
+    # with an output flag of its own.
+    "prints": Mode(
+        product="text",
+        fields=("key",),
+        axes={"segments": Stated()},
+        artifacts=PRODUCT,
+        product_artifact=LISTING,
+    ),
+    "writes": Mode(
+        product="parquet",
+        fields=("key",),
+        axes={"segments": Stated()},
+        artifacts={"listing": "listing.parquet"},
+        product_artifact="listing",
+        product_channel="file",
+    ),
+    "silent": Mode(
+        product="parquet",
+        fields=("key",),
+        axes={"segments": Stated()},
+        artifacts={"listing": "listing.parquet"},
+        product_artifact="listing",
+        product_channel="file",
+    ),
 }
 
 
@@ -802,6 +838,17 @@ def build_command(request: CommandRequest) -> tuple[str, ...]:
             request.sink_dir,
             str(request.config["segments"]),
         )
+    if request.mode == "prints":
+        return (sys.executable, str(here / "prints.py"), request.artifact_path)
+    if request.mode == "writes":
+        return (
+            sys.executable,
+            str(here / "writes.py"),
+            request.artifact_path,
+            request.sink_dir + "/listing.parquet",
+        )
+    if request.mode == "silent":
+        return (sys.executable, "-c", "pass")
     return (sys.executable, str(here / "subject.py"), request.artifact_path, request.sink_dir)
 
 
@@ -836,6 +883,25 @@ print(hints, end="")
     + ENV_NAMES
 )
 
+PRINTS_SUBJECT = """\
+import sys
+from pathlib import Path
+
+# The nine subjects that only print: no output flag, diagnostics on stderr.
+print(Path(sys.argv[1]).read_text(), end="")
+print("listed", file=sys.stderr)
+"""
+
+WRITES_SUBJECT = """\
+import sys
+from pathlib import Path
+
+# The two subjects with an output flag: the capsule points it at the declared
+# path, and stdout is left free to be the log it claims to be.
+Path(sys.argv[2]).write_text(Path(sys.argv[1]).read_text())
+print("wrote the listing")
+"""
+
 INLINE_SPLIT = (
     """\
 import sys
@@ -857,6 +923,8 @@ def inline_capsule(tmp_path: Path, split: str = INLINE_SPLIT) -> Path:
     (adapter / "command.py").write_text(INLINE_CAPSULE, encoding="utf-8")
     (adapter / "subject.py").write_text(INLINE_SUBJECT, encoding="utf-8")
     (adapter / "split.py").write_text(split, encoding="utf-8")
+    (adapter / "prints.py").write_text(PRINTS_SUBJECT, encoding="utf-8")
+    (adapter / "writes.py").write_text(WRITES_SUBJECT, encoding="utf-8")
     return tmp_path / "tools"
 
 
@@ -1108,3 +1176,58 @@ def test_an_inline_artifact_the_capsule_refuses_is_unusable(
         'Path(sys.argv[2], "hints.input").write_text("\\n")\n'
     )
     assert run_inline_worker(tmp_path, monkeypatch, split=empty) == measure.EXIT_ARTIFACT_UNUSABLE
+
+
+def test_a_product_lands_under_its_declared_name_whichever_channel_carries_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Both classes of subject publish one file, named for what is in it.
+
+    A subject that only prints has fd 1 landed in the declared path, so the
+    attempt has no stdout log — those bytes *are* the product. A subject with an
+    output flag has been pointed at the same path by its capsule, which leaves
+    stdout free to be the log it always claimed to be. Neither publishes a
+    131 MB listing as `stdout.log.gz`.
+    """
+    keyspace = "a/\nb/\n"
+
+    (tmp_path / "prints").mkdir()
+    (tmp_path / "writes").mkdir()
+    assert run_inline_worker(tmp_path / "prints", monkeypatch, mode="prints") == 0
+    printed = json.loads((tmp_path / "prints/attempt/result.json").read_bytes())
+    product = tmp_path / "prints/attempt/native/listing.txt"
+    assert product.read_text() == keyspace
+    assert printed["product"] == {
+        "artifact": "listing",
+        "name": "native/listing.txt",
+        "channel": "stdout",
+        "size_bytes": len(keyspace),
+        "sha256": hashlib.sha256(keyspace.encode()).hexdigest(),
+    }
+    assert printed["stdout"] is None
+    assert not (tmp_path / "prints/attempt/stdout.log.gz").exists()
+    assert printed["native_manifest"] == {"listing.txt": printed["product"]["sha256"]}
+
+    assert run_inline_worker(tmp_path / "writes", monkeypatch, mode="writes") == 0
+    written = json.loads((tmp_path / "writes/attempt/result.json").read_bytes())
+    assert (tmp_path / "writes/attempt/native/listing.parquet").read_text() == keyspace
+    assert written["product"]["name"] == "native/listing.parquet"
+    assert written["product"]["channel"] == "file"
+    assert written["product"]["sha256"] == printed["product"]["sha256"]
+    # Its stdout is a genuine log, and is captured as one.
+    assert written["stdout"]["name"] == "stdout.log.gz"
+    assert (tmp_path / "writes/attempt/stdout.log.gz").exists()
+
+
+def test_a_clean_subject_that_never_wrote_its_declared_product_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Exit zero is not evidence. A mode says where its listing lands, and an
+    attempt with nothing there has published no measurement however good its
+    timing looks — so it settles unusable rather than counting as a run."""
+    code = run_inline_worker(tmp_path, monkeypatch, mode="silent")
+    assert code == measure.EXIT_ARTIFACT_UNUSABLE
+    result = json.loads((tmp_path / "attempt/result.json").read_bytes())
+    assert result["exit_code"] == 0
+    assert result["product_error"] == "declared product listing.parquet was not written"
+    assert result["row_count"] is None

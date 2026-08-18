@@ -15,13 +15,27 @@ from benchmark.contract import EXIT_INCOMPLETE_GROUP, sha256_of
 COMMAND_PY = """
 from benchmark.runtime.command_adapter import Executable, Mode
 
+PRODUCT = {{"listing": "listing.txt"}}
+LISTING = "listing"
+
 TOOL = "{tool}"
 EXECUTABLES = (Executable("{tool}", ("/usr/bin/{tool}",)),)
 MODES = {{
-    "text-full": Mode(product="text", fields=("key", "size", "etag", "mtime", "storage_class")),
-    "text-keys": Mode(product="text", fields=("key",)),
+    "text-full": Mode(
+        product="text",
+        fields=("key", "size", "etag", "mtime", "storage_class"),
+        artifacts=PRODUCT,
+        product_artifact=LISTING,
+    ),
+    "text-keys": Mode(
+        product="text", fields=("key",), artifacts=PRODUCT, product_artifact=LISTING
+    ),
     "parquet-full": Mode(
-        product="parquet", fields=("key", "size", "etag", "mtime", "storage_class")
+        product="parquet",
+        fields=("key", "size", "etag", "mtime", "storage_class"),
+        artifacts={{"listing": "listing"}},
+        product_artifact=LISTING,
+        product_channel="dataset",
     ),
 }}
 SUPPORTS_UNSIGNED = True
@@ -145,10 +159,23 @@ def write_evidence(
 ) -> Path:
     prefix = Path(attempt.result_prefix)
     prefix.mkdir(parents=True, exist_ok=True)
-    stdout_gz = prefix / "stdout.log.gz"
     stderr_gz = prefix / "stderr.log.gz"
-    stdout_gz.write_bytes(gzip.compress(("\n".join(listing) + "\n").encode()))
     stderr_gz.write_bytes(gzip.compress(b""))
+    mode = json.loads(attempt.config)["mode"]
+    native = prefix / "native"
+    body = ("\n".join(listing) + "\n").encode()
+    if mode == "parquet-full":
+        # A directory of parts: the shape nothing but a declaration can route to
+        # the right normalizer, since a side output makes any sink non-empty.
+        product_name, channel = "listing", "dataset"
+        (native / product_name).mkdir(parents=True, exist_ok=True)
+        (native / product_name / "part-0.txt").write_bytes(body)
+    else:
+        product_name, channel = "listing.txt", "stdout"
+        native.mkdir(parents=True, exist_ok=True)
+        (native / product_name).write_bytes(body)
+    published = sorted(path for path in native.rglob("*") if path.is_file())
+    product = native / product_name
     result: dict[str, object] = {
         "attempt_id": attempt.attempt_id,
         "case_id": attempt.case_id,
@@ -169,11 +196,24 @@ def write_evidence(
             "elapsed_ns": 1_500_000_000,
             "cgroup": {"oom_delta": 0, "oom_kill_delta": 0},
         },
-        "stdout_gz": stdout_gz.name,
-        "stdout_gz_sha256": sha256_of(stdout_gz),
-        "stderr_gz": stderr_gz.name,
-        "stderr_gz_sha256": sha256_of(stderr_gz),
-        "native_manifest": {},
+        "product": {
+            "artifact": "listing",
+            "name": f"native/{product_name}",
+            "channel": channel,
+            "size_bytes": sum(path.stat().st_size for path in published),
+            "sha256": sha256_of(product) if product.is_file() else None,
+        },
+        "product_error": None,
+        # The subject only printed, so fd 1 was the product and there is no log.
+        "stdout": None,
+        "stderr": {
+            "name": stderr_gz.name,
+            "size_bytes": stderr_gz.stat().st_size,
+            "sha256": sha256_of(stderr_gz),
+        },
+        "native_manifest": {
+            path.relative_to(native).as_posix(): sha256_of(path) for path in published
+        },
         **overrides,
     }
     (prefix / "result.json").write_text(json.dumps(result))
@@ -337,22 +377,20 @@ def test_normalize_is_given_the_rows_recorded_config(tmp_path: Path) -> None:
     subject = verify.Subject.from_row(ledger.attempt_rows(con)[0])
     adapter_dir = adapters.adapter_dir_for("alpha", root)
     result = json.loads((prefix / "result.json").read_text())
-    staging = tmp_path / "staging"
-    staging.mkdir()
+    manifest = adapters.mode_manifest(adapter_dir, "alpha", subject.mode)
     output = tmp_path / "out.tsv"
-    verify.normalize_evidence(prefix, result, adapter_dir, subject, output, staging)
+    verify.normalize_evidence(prefix, result, adapter_dir, subject, manifest, output)
     assert output.read_text().splitlines()[0].split("\t")[0] == "a/one"
 
     stripped = tmp_path / "stripped.tsv"
-    (tmp_path / "staging-two").mkdir()
     with pytest.raises(adapters.AdapterError):
         verify.normalize_evidence(
             prefix,
             result,
             adapter_dir,
             verify.Subject(**{**vars(subject), "config": {}}),
+            manifest,
             stripped,
-            tmp_path / "staging-two",
         )
 
 
@@ -457,10 +495,8 @@ def test_artifact_hashes_bind_stream_and_native_bytes(tmp_path: Path) -> None:
     stderr.write_bytes(b"stderr")
     part.write_bytes(b"native")
     result: dict[str, object] = {
-        "stdout_gz": stdout.name,
-        "stdout_gz_sha256": sha256_of(stdout),
-        "stderr_gz": stderr.name,
-        "stderr_gz_sha256": sha256_of(stderr),
+        "stdout": {"name": stdout.name, "size_bytes": 6, "sha256": sha256_of(stdout)},
+        "stderr": {"name": stderr.name, "size_bytes": 6, "sha256": sha256_of(stderr)},
         "native_manifest": {"data/part.parquet": sha256_of(part)},
     }
     verify.validate_captured_artifacts(prefix, result)

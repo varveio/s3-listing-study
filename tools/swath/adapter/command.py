@@ -46,9 +46,44 @@ ALIGNED_FIELDS = ("key", "size", "mtime")
 AXES = {"concurrency": CONCURRENCY, "heap_percent": Fixed(HEAP_PERCENT)}
 """Swath is a JVM, so every mode feels the heap share; every mode takes the flag."""
 
+LISTING = "listing"
+"""The logical name every mode here publishes its listing under."""
+
+DATASET_NAME = "listing"
+"""The dataset directory built under the engine's sink.
+
+No recognized extension, so ``-o`` infers a directory dataset; the explicit
+``--format parquet`` then supplies the format. A ``.parquet`` suffix would infer
+FILE kind instead, which the sorted mode rejects as non-resumable.
+"""
+
+DATASET = {LISTING: DATASET_NAME}
+"""A directory rather than a file, which is what `product_channel="dataset"`
+says: verify normalizes its parts through `--dataset`, not through one path."""
+
+TSV = {LISTING: "listing.tsv"}
+JSONL = {LISTING: "listing.jsonl"}
+TABLE = {LISTING: "listing.txt"}
+"""What `--format` renders on stdout. The text formats take no destination, so
+the worker lands fd 1 in the declared file; only the Parquet modes have `-o`."""
+
 MODES = {
-    "recursive-tsv": Mode(product="text", fields=TEXT_FIELDS, axes=AXES, executable=SWATH.name),
-    "recursive-jsonl": Mode(product="text", fields=TEXT_FIELDS, axes=AXES, executable=SWATH.name),
+    "recursive-tsv": Mode(
+        product="text",
+        fields=TEXT_FIELDS,
+        axes=AXES,
+        executable=SWATH.name,
+        artifacts=TSV,
+        product_artifact=LISTING,
+    ),
+    "recursive-jsonl": Mode(
+        product="text",
+        fields=TEXT_FIELDS,
+        axes=AXES,
+        executable=SWATH.name,
+        artifacts=JSONL,
+        product_artifact=LISTING,
+    ),
     # Aligned text discards etag and storage_class, so it cannot be verified on
     # the same fields as the modes it would be ranked against.
     "recursive-table": Mode(
@@ -57,32 +92,50 @@ MODES = {
         axes=AXES,
         purpose_ceiling="diagnostic",
         executable=SWATH.name,
+        artifacts=TABLE,
+        product_artifact=LISTING,
     ),
-    "seed-none": Mode(product="text", fields=TEXT_FIELDS, axes=AXES, executable=SWATH.name),
+    "seed-none": Mode(
+        product="text",
+        fields=TEXT_FIELDS,
+        axes=AXES,
+        executable=SWATH.name,
+        artifacts=TSV,
+        product_artifact=LISTING,
+    ),
     "recursive-parquet": Mode(
-        product="parquet", fields=TEXT_FIELDS, axes=AXES, executable=SWATH.name
+        product="parquet",
+        fields=TEXT_FIELDS,
+        axes=AXES,
+        executable=SWATH.name,
+        artifacts=DATASET,
+        product_artifact=LISTING,
+        product_channel="dataset",
     ),
     "recursive-parquet-sorted": Mode(
-        product="parquet-sorted", fields=TEXT_FIELDS, axes=AXES, executable=SWATH.name
+        product="parquet-sorted",
+        fields=TEXT_FIELDS,
+        axes=AXES,
+        executable=SWATH.name,
+        artifacts=DATASET,
+        product_artifact=LISTING,
+        product_channel="dataset",
     ),
 }
 
-SINK_MODES = frozenset({"recursive-parquet", "recursive-parquet-sorted"})
+SINK_MODES = frozenset(
+    mode for mode, manifest in MODES.items() if manifest.product_channel == "dataset"
+)
 """Modes whose listing lands in the engine's sink directory, not on stdout.
+
+Read off the manifests rather than listed again: which channel a mode's product
+travels on is declared once, and argv is what has to agree with it.
 
 Swath refuses Parquet on stdout at every version this study has tested: the
 sink is opened through ``OutputOptions.openParquetDir``, which rejects a stdout
 destination outright ("Parquet output requires -o <dir>"). Sorted output is
 narrower still — ``ListCommand.validateSortFlags`` requires ``--format parquet``
 AND a directory-dataset destination, refusing both stdout and a single file.
-"""
-
-DATASET_NAME = "listing"
-"""The dataset directory built under the engine's sink.
-
-No recognized extension, so ``-o`` infers a directory dataset; the explicit
-``--format parquet`` then supplies the format. A ``.parquet`` suffix would infer
-FILE kind instead, which the sorted mode rejects as non-resumable.
 """
 
 

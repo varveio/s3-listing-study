@@ -88,6 +88,60 @@ read from. It has no identity of its own: the axes it ran at are already in the
 measurement's config blob. A setup exec that fails is an attempt that fails,
 because the alternative is a subject timed against hints nobody made.
 
+### What an attempt publishes
+
+```text
+gs://<results-bucket>/<suite>/<target-bucket>/<tool>.<hash>.s<attempt>/
+  result.json
+  stderr.log.gz
+  stdout.log.gz        -- only when stdout is a log
+  native/listing.txt   -- the product, named for what is in it
+```
+
+**The product is a file the mode declares, and stdout is a log**
+([`capsule-contract.md`](capsule-contract.md) § *The product travels on a
+declared file*). It lands in the sink under its declared name, so
+`native_manifest` binds it by digest along with everything else the subject
+published, and `result.json` points at it:
+
+```json
+"product": {
+  "artifact": "listing",
+  "name": "native/listing.parquet",
+  "channel": "file",
+  "size_bytes": 137194003,
+  "sha256": "…"
+},
+"product_error": null,
+"stdout": {"name": "stdout.log.gz", "size_bytes": 402, "sha256": "…"},
+"stderr": {"name": "stderr.log.gz", "size_bytes": 88, "sha256": "…"}
+```
+
+Every block describes the file it names — its size as uploaded and its digest —
+which the three flat `stdout_gz` / `stdout_size` / `stdout_gz_sha256` keys it
+replaces did not: one of them was the *uncompressed* size of a file the other two
+described compressed.
+
+Three things this shape is saying:
+
+- **`channel` says which class of subject ran**, so no reader has to infer it.
+  `stdout` means the worker landed fd 1 in the product file, and then `"stdout"`
+  is `null` — there is no second capture, because those bytes are the product.
+- **`sha256` is null for a `dataset`**, which is a directory of parts with no one
+  digest. `native_manifest` binds every part of it, so nothing is unbound.
+- **`product_error` is how a clean run says it published nothing.** A subject
+  that exits zero and writes nothing where its mode says it writes has no
+  measurement in it; the attempt settles `EXIT_ARTIFACT_UNUSABLE`.
+
+A preparation carries `"product": null`: what it publishes is an artifact for a
+later case, not a measured product.
+
+The product uploads as the subject wrote it, uncompressed. That is a real cost
+for the text subjects, whose listings compressed well — the decision that a
+published artifact is named and shaped like what it is was taken over that
+saving, and a `compress` declaration could ride on `product` later if the storage
+bill argues for it.
+
 ### A memory figure is a figure of one invocation, above a floor
 
 `max_rss_kb` is the subject's own `ru_maxrss`, reaped per invocation with

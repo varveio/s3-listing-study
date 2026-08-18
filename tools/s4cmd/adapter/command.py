@@ -39,10 +39,42 @@ TEXT_FIELDS = ("key", "size")
 """``normalize.py``'s QUERY only ever emits ``key`` and ``size``; etag, mtime
 and storage_class are never printed by ``ls`` and are always NULL."""
 
+LISTING = "listing"
+SUMMARY = "summary"
+"""The logical names a mode publishes its product under: a per-key listing, or
+the aggregate report that is not one."""
+
+TEXT = {LISTING: "listing.txt"}
+SUMMARY_TEXT = {SUMMARY: "summary.txt"}
+"""s4cmd prints and takes no output destination, so the worker lands fd 1 in the
+declared file. `du` publishes under its own name because what it holds is one
+aggregate size and no per-key rows."""
+
 MODES = {
-    "recursive": Mode(product="text", fields=TEXT_FIELDS, axes=AXES, executable=S4CMD.name),
-    "shallow": Mode(product="text", fields=TEXT_FIELDS, axes=AXES, executable=S4CMD.name),
-    "show-directory": Mode(product="text", fields=TEXT_FIELDS, axes=AXES, executable=S4CMD.name),
+    "recursive": Mode(
+        product="text",
+        fields=TEXT_FIELDS,
+        axes=AXES,
+        executable=S4CMD.name,
+        artifacts=TEXT,
+        product_artifact=LISTING,
+    ),
+    "shallow": Mode(
+        product="text",
+        fields=TEXT_FIELDS,
+        axes=AXES,
+        executable=S4CMD.name,
+        artifacts=TEXT,
+        product_artifact=LISTING,
+    ),
+    "show-directory": Mode(
+        product="text",
+        fields=TEXT_FIELDS,
+        axes=AXES,
+        executable=S4CMD.name,
+        artifacts=TEXT,
+        product_artifact=LISTING,
+    ),
     # du emits an aggregate size only -- normalize.py is a documented no-op,
     # zero per-key rows, so it can never be ranked against a per-key listing.
     "du": Mode(
@@ -51,6 +83,8 @@ MODES = {
         axes=AXES,
         purpose_ceiling="diagnostic",
         executable=S4CMD.name,
+        artifacts=SUMMARY_TEXT,
+        product_artifact=SUMMARY,
     ),
 }
 

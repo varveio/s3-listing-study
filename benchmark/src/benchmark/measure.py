@@ -29,6 +29,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Iterator, Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -44,6 +45,7 @@ from benchmark.runtime.command_adapter import (
     HEAP_PERCENT,
     CommandRequest,
     LoadedCommandAdapter,
+    Mode,
     shared_axis_values,
 )
 
@@ -52,6 +54,11 @@ EXIT_SECRET_DETECTED = 9
 EXIT_IMAGE_MISMATCH = 10
 EXIT_POSTPROCESSING_FAILED = 11
 EXIT_ARTIFACT_UNUSABLE = 12
+"""The bytes a case turns on are unusable, or a clean subject never wrote them.
+
+Both are the same verdict for a reader: this attempt has no measurement in it.
+A missing declared product belongs here rather than under postprocessing —
+nothing failed to process, there was nothing published to process."""
 EXIT_SETUP_FAILED = 13
 """The untimed inline setup exec did not leave the subject something to run on.
 
@@ -428,11 +435,17 @@ def run_tool(
     *,
     cwd: str | None = None,
     reset_peak: bool = False,
+    stdout_path: Path | None = None,
 ) -> dict[str, object]:
     """Run argv, capture stdout/stderr to files, return
     (exit_code, wall_s, max_rss_kb, timed_out).
+
+    ``stdout_path`` is where fd 1 lands. It defaults to this phase's own log,
+    and a subject that only prints its listing is handed its declared product
+    file instead: those bytes *are* the product, and writing them to a log and
+    a copy would double a listing that can run to gigabytes.
     """
-    stdout_path = attempt_dir / "stdout.log"
+    stdout_path = attempt_dir / "stdout.log" if stdout_path is None else stdout_path
     stderr_path = attempt_dir / "stderr.log"
 
     procs.enable_child_subreaper()
@@ -610,6 +623,7 @@ def final_exit_code(
     timed_out: bool,
     row_count_error: str | None,
     *,
+    product_error: str | None = None,
     oom_kill_delta: int | None = None,
     process_group_empty: bool = True,
     descendants_empty: bool = True,
@@ -621,6 +635,8 @@ def final_exit_code(
         return 1
     if oom_kill_delta is not None and oom_kill_delta > 0:
         return 1
+    if product_error is not None:
+        return EXIT_ARTIFACT_UNUSABLE
     if row_count_error is not None:
         return EXIT_POSTPROCESSING_FAILED
     return 0
@@ -777,6 +793,90 @@ def run_inline_setup(
     return str(output), setup
 
 
+@dataclass(frozen=True, slots=True)
+class Product:
+    """The file this attempt publishes its measured product as.
+
+    Resolved from the capsule's own declaration, never from what the sink turns
+    out to hold: a subject with a side output writes a file whichever channel
+    its product travels on, so the sink cannot answer the question.
+    """
+
+    artifact: str
+    """The logical name the mode declares it under."""
+
+    name: str
+    """Its path relative to the sink."""
+
+    path: Path
+    channel: str
+    """One of :data:`~benchmark.runtime.command_adapter.PRODUCT_CHANNELS`."""
+
+    @property
+    def takes_stdout(self) -> bool:
+        """Whether fd 1 is the product, so this attempt has no stdout log."""
+        return self.channel == "stdout"
+
+
+def declared_product(manifest: Mode | None, native_root: Path) -> Product | None:
+    """Where this mode publishes its measured product, or ``None`` for a preparation.
+
+    A mode capped at ``preparation`` publishes an artifact a later case consumes
+    and no measured product at all, which is the only mode a capsule may leave
+    undeclared -- the loader refuses every other silence.
+    """
+    if manifest is None or not manifest.product_artifact:
+        return None
+    name = manifest.product_file
+    return Product(manifest.product_artifact, name, native_root / name, manifest.product_channel)
+
+
+def product_gap(product: Product) -> str | None:
+    """Why the declared product is not there, or ``None`` when it is.
+
+    A subject that exited clean and wrote nothing where its capsule says it
+    writes has published no measurement, however good its timing looks.
+    """
+    try:
+        if product.channel == "dataset":
+            if not product.path.is_dir() or not any(retained_files(product.path)):
+                return f"declared product dataset {product.name} holds no file"
+        elif not product.path.is_file():
+            return f"declared product {product.name} was not written"
+    except ArtifactSafetyError as exc:
+        return f"declared product {product.name} is not publishable: {exc}"
+    return None
+
+
+def capture_block(path: Path | None) -> dict[str, object] | None:
+    """Name, size and digest of one uploaded capture, or ``None`` when there is none.
+
+    ``None`` is the honest record for a subject that only prints: fd 1 carried
+    the product, so no stdout log exists to describe.
+    """
+    if path is None or not path.is_file():
+        return None
+    return {"name": path.name, "size_bytes": path.stat().st_size, "sha256": sha256_of(path)}
+
+
+def product_block(product: Product | None) -> dict[str, object] | None:
+    """What the attempt published as its product, and which channel carried it.
+
+    ``sha256`` is null for a dataset, which is many files and has no one digest;
+    ``native_manifest`` binds every part of it either way, so nothing is lost.
+    """
+    if product is None:
+        return None
+    files = list(retained_files(product.path))
+    return {
+        "artifact": product.artifact,
+        "name": f"native/{product.name}",
+        "channel": product.channel,
+        "size_bytes": sum(path.stat().st_size for path in files),
+        "sha256": sha256_of(product.path) if product.path.is_file() else None,
+    }
+
+
 def gzip_file(path: Path) -> Path:
     gz_path = path.with_suffix(path.suffix + ".gz")
     with open(path, "rb") as src, gzip.open(gz_path, "wb") as dst:
@@ -931,12 +1031,10 @@ def publish_setup_failure(
         "row_count_error": None,
         "started_at": started_at,
         "finished_at": datetime.now(UTC).isoformat(),
-        "stdout_size": 0,
-        "stderr_size": 0,
-        "stdout_gz": None,
-        "stdout_gz_sha256": None,
-        "stderr_gz": None,
-        "stderr_gz_sha256": None,
+        "product": None,
+        "product_error": None,
+        "stdout": None,
+        "stderr": None,
         "native_manifest": {},
         "artifacts_size_bytes": sum(
             p.stat().st_size for p in attempt_dir.rglob("*") if p.is_file()
@@ -1078,6 +1176,16 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     env = subject_env(args.region, functional_env, credential_env)
 
+    # Where this attempt's product is published, and so where fd 1 goes: a
+    # subject that only prints has its listing landed in the declared file
+    # directly, and one with an output flag has already been pointed at it by
+    # its capsule, leaving stdout to be the log it claims to be.
+    product = declared_product(manifest, native_root)
+    if product is not None:
+        product.path.parent.mkdir(parents=True, exist_ok=True)
+    stdout_path = attempt_dir / "stdout.log"
+    subject_stdout = product.path if product is not None and product.takes_stdout else stdout_path
+
     started_at = datetime.now(UTC).isoformat()
     execution = run_tool(
         command,
@@ -1089,6 +1197,7 @@ def main(argv: list[str] | None = None) -> int:
         # The container's peak is not per exec: only an attempt whose setup exec
         # already ran has something to clear out of it.
         reset_peak=setup is not None,
+        stdout_path=subject_stdout,
     )
     exit_value = execution["exit_code"]
     if isinstance(exit_value, bool) or not isinstance(exit_value, int):
@@ -1107,15 +1216,15 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
-    stdout_path = attempt_dir / "stdout.log"
     stderr_path = attempt_dir / "stderr.log"
-    stdout_size = stdout_path.stat().st_size if stdout_path.exists() else 0
-    stderr_size = stderr_path.stat().st_size if stderr_path.exists() else 0
 
     # Scanned uncompressed, before anything is uploaded: a hit here refuses
     # the whole leaf outright rather than uploading the captured output and
-    # hoping something downstream notices.
-    scanned = [stdout_path, stderr_path, native_root]
+    # hoping something downstream notices. The product is under the sink, so
+    # scanning that covers it whichever channel wrote it.
+    scanned = [stderr_path, native_root]
+    if subject_stdout == stdout_path:
+        scanned.insert(0, stdout_path)
     if setup is not None:
         # The setup exec's own captures and sink upload with the attempt, so they
         # are held to the same gate as the subject's.
@@ -1138,13 +1247,28 @@ def main(argv: list[str] | None = None) -> int:
     # a question that does not apply to it. Asking it anyway failed a perfect
     # preparation on a normalizer that rightly refused the mode.
     counts_a_listing = manifest is None or manifest.purpose_ceiling != "preparation"
+    product_error = (
+        product_gap(product) if product is not None and exit_code == 0 and not timed_out else None
+    )
+    if product_error:
+        print(f"measure: {product_error}", file=sys.stderr)
     row_count = row_count_error = None
-    if exit_code == 0 and not timed_out and counts_a_listing:
+    if exit_code == 0 and not timed_out and counts_a_listing and not product_error:
+        # The product, not the log: a listing whose subject prints it and one
+        # whose subject writes it are the same bytes at the same path now. A
+        # dataset has no single path to hand over, and the capsule reads it off
+        # the sink root it is given anyway.
+        countable = product is not None and product.channel != "dataset"
         row_count, row_count_error = row_count_for(
-            str(adapter_dir), args.tool, args.mode, args.prefix, stdout_path, native_root
+            str(adapter_dir),
+            args.tool,
+            args.mode,
+            args.prefix,
+            product.path if product is not None and countable else stdout_path,
+            native_root,
         )
 
-    stdout_gz = gzip_file(stdout_path) if stdout_path.exists() else None
+    stdout_gz = gzip_file(stdout_path) if subject_stdout == stdout_path else None
     stderr_gz = gzip_file(stderr_path) if stderr_path.exists() else None
     native_files = native_manifest(native_root)
     # Computed once, before the marker is written -- nothing after this adds
@@ -1166,12 +1290,12 @@ def main(argv: list[str] | None = None) -> int:
         "row_count_error": row_count_error,
         "started_at": started_at,
         "finished_at": finished_at,
-        "stdout_size": stdout_size,
-        "stderr_size": stderr_size,
-        "stdout_gz": stdout_gz.name if stdout_gz else None,
-        "stdout_gz_sha256": sha256_of(stdout_gz) if stdout_gz else None,
-        "stderr_gz": stderr_gz.name if stderr_gz else None,
-        "stderr_gz_sha256": sha256_of(stderr_gz) if stderr_gz else None,
+        # What was measured, and which channel carried it. A subject that only
+        # prints has no stdout log at all: those bytes are the product.
+        "product": product_block(product),
+        "product_error": product_error,
+        "stdout": capture_block(stdout_gz),
+        "stderr": capture_block(stderr_gz),
         "native_manifest": native_files,
         "artifacts_size_bytes": artifacts_size_bytes,
     }
@@ -1187,6 +1311,7 @@ def main(argv: list[str] | None = None) -> int:
         exit_code,
         timed_out,
         row_count_error,
+        product_error=product_error,
         oom_kill_delta=oom_kill_delta if isinstance(oom_kill_delta, int) else None,
         process_group_empty=bool(execution["process_group_empty"]),
         descendants_empty=bool(execution["descendants_empty"]),
@@ -1194,6 +1319,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     if exit_code != 0:
         print(f"measure: {args.tool} exited {exit_code}", file=sys.stderr)
+    elif completion == EXIT_ARTIFACT_UNUSABLE:
+        print("measure: the subject exited clean and published no product", file=sys.stderr)
     elif completion == EXIT_POSTPROCESSING_FAILED:
         print("measure: successful subject output could not be counted", file=sys.stderr)
     elif completion != 0:

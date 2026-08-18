@@ -43,6 +43,16 @@ PRODUCTS = ("text", "parquet", "parquet-sorted")
 """The shared output vocabulary. ``text`` means the same thing for every tool,
 which is what lets a report group a text stratum and keep Parquet out of it."""
 
+PRODUCT_CHANNELS = ("stdout", "file", "dataset")
+"""How a mode's product reaches the file it is published as.
+
+``stdout`` says the subject only prints, so the worker redirects fd 1 into the
+declared path and this attempt has no separate stdout log — the product *is*
+those bytes, and a subject that only prints already sends its diagnostics to
+stderr. ``file`` and ``dataset`` say the subject writes the path itself, so
+stdout stays a log and is captured beside the product.
+"""
+
 PURPOSES = ("diagnostic", "canary", "preparation", "measurement")
 """The attempt purposes of ``model.md``, weakest claim first.
 
@@ -247,10 +257,26 @@ class Mode:
     product_artifact: str = ""
     """Which of :attr:`artifacts` carries this mode's *measured* output.
 
-    Empty means this mode's product does not travel as a declared file yet — it
-    still streams through stdout — which is every mode today. Set, it must name
-    a key of ``artifacts``; the loader refuses anything else, because a product
-    pointing at a file the mode does not publish is a promise nothing keeps.
+    Every mode a plan may measure names one, and the loader refuses a name the
+    mode does not publish: a product pointing at a file the mode does not write
+    is a promise nothing keeps. Empty is reserved for a mode capped at
+    ``preparation``, which publishes an artifact for a later case and never a
+    measured product.
+    """
+
+    product_channel: str = "stdout"
+    """One of :data:`PRODUCT_CHANNELS`: how :attr:`product_artifact` gets its bytes.
+
+    ``stdout`` — the subject prints its listing and the worker redirects fd 1
+    into the declared path, which is the only channel nine of the eleven
+    subjects offer. ``file`` — the subject has an output flag and the capsule
+    points it at the declared path. ``dataset`` — the same, except what it
+    writes is a directory of parts.
+
+    Declared rather than inferred from what the sink happens to hold: a tool
+    with a side output writes a file whichever channel its product travels on,
+    so the sink cannot answer this, and reading it as an answer routed every
+    ``s3-fast-list`` listing into the directory-dataset normalizer.
     """
 
     purpose_ceiling: str = "measurement"
@@ -307,11 +333,28 @@ class Mode:
                 f"heap_percent is the harness's methodology share and must be declared "
                 f"Fixed({HEAP_PERCENT}), not {heap!r}"
             )
+        if self.product_channel not in PRODUCT_CHANNELS:
+            raise CommandAdapterError(
+                f"mode product_channel must be one of {PRODUCT_CHANNELS}: {self.product_channel!r}"
+            )
         artifacts = self._checked_artifacts()
         if self.product_artifact and self.product_artifact not in artifacts:
             raise CommandAdapterError(
                 f"mode product_artifact {self.product_artifact!r} is not one of the artifacts "
                 f"this mode publishes: {sorted(artifacts) or 'none'}"
+            )
+        if not self.product_artifact and self.purpose_ceiling != "preparation":
+            # Undeclared, the worker has nowhere to land the product but a log,
+            # which is the arrangement this replaces — so a mode that forgets it
+            # fails to load rather than quietly streaming its listing into one.
+            raise CommandAdapterError(
+                "a measured mode names the artifact its product is published as; only a "
+                "preparation-capped mode leaves product_artifact empty"
+            )
+        if self.product_artifact and self.purpose_ceiling == "preparation":
+            raise CommandAdapterError(
+                f"mode is capped at preparation, so what it publishes is an artifact for a "
+                f"later case and not a measured product: {self.product_artifact!r}"
             )
         # Canonical column order, so two modes populating the same columns
         # declare the same tuple whatever order their authors wrote it in.
@@ -344,6 +387,15 @@ class Mode:
             # digest would look right whichever name asked for it.
             raise CommandAdapterError(f"mode artifacts name one file twice: {self.artifacts}")
         return artifacts
+
+    @property
+    def product_file(self) -> str:
+        """The sink-relative path this mode's measured product is published as.
+
+        Empty for a preparation-capped mode, which has no measured product; every
+        other mode resolves, because the loader refused the alternative.
+        """
+        return self.artifacts[self.product_artifact] if self.product_artifact else ""
 
     def permits_purpose(self, purpose: str) -> bool:
         """Whether a plan may claim this mode ran for ``purpose``."""

@@ -33,6 +33,11 @@ from benchmark.runtime.command_adapter import (
 
 ARGV = ("/usr/local/bin/fixture",)
 TEXT, KEY = "text", ("key",)
+PRODUCT = {"listing": "listing.txt"}
+LISTING = "listing"
+"""What a fixture mode publishes its measured product as, when the case under
+test is not about the declaration itself."""
+
 HEADER = '''\
 """A fixture capsule: the smallest thing the loader will accept."""
 
@@ -48,10 +53,17 @@ from benchmark.runtime.command_adapter import (  # noqa: F401
     Stated,
 )
 
+PRODUCT = {"listing": "listing.txt"}
+LISTING = "listing"
+
 TOOL = "fixture"
 EXECUTABLES = (Executable("fixture", ("/usr/local/bin/fixture",)),)
 SUPPORTS_UNSIGNED = True
-MODES = {"list": Mode(product="text", fields=("key", "size"))}
+MODES = {
+    "list": Mode(
+        product="text", fields=("key", "size"), artifacts=PRODUCT, product_artifact=LISTING
+    )
+}
 
 
 def build_command(request: CommandRequest) -> tuple[str, ...]:
@@ -98,14 +110,25 @@ def test_a_declared_axis_reaches_the_config_the_identity_hashes(tmp_path: Path) 
         tmp_path,
         "\nMODES = {\n"
         '    "list": Mode(\n'
-        '        product="text", fields=("key",), axes={"concurrency": Ceiling(8, "help")}\n'
+        '        product="text", fields=("key",), axes={"concurrency": Ceiling(8, "help")},\n'
+        "        artifacts=PRODUCT, product_artifact=LISTING,\n"
         "    ),\n"
         '    "default": Mode(\n'
-        '        product="text", fields=("key",), axes={"concurrency": Default(4, "help")}\n'
+        '        product="text", fields=("key",), axes={"concurrency": Default(4, "help")},\n'
+        "        artifacts=PRODUCT, product_artifact=LISTING,\n"
         "    ),\n"
-        '    "fixed": Mode(product="text", fields=("key",), axes={"concurrency": Fixed(256)}),\n'
-        '    "inert": Mode(product="text", fields=("key",), axes={"concurrency": Inert()}),\n'
-        '    "absent": Mode(product="text", fields=("key",)),\n'
+        '    "fixed": Mode(\n'
+        '        product="text", fields=("key",), axes={"concurrency": Fixed(256)},\n'
+        "        artifacts=PRODUCT, product_artifact=LISTING,\n"
+        "    ),\n"
+        '    "inert": Mode(\n'
+        '        product="text", fields=("key",), axes={"concurrency": Inert()},\n'
+        "        artifacts=PRODUCT, product_artifact=LISTING,\n"
+        "    ),\n"
+        '    "absent": Mode(\n'
+        '        product="text", fields=("key",),\n'
+        "        artifacts=PRODUCT, product_artifact=LISTING,\n"
+        "    ),\n"
         "}\n",
     )
     assert adapter.effective_config("list", {}) == {"concurrency": 8, "mode": "list"}
@@ -146,9 +169,13 @@ def test_a_plan_sets_a_settable_axis_and_never_a_fixed_one(tmp_path: Path) -> No
         '\nCONFIG_KEYS = frozenset({"concurrency"})\n'
         "MODES = {\n"
         '    "list": Mode(\n'
-        '        product="text", fields=("key",), axes={"concurrency": Default(4, "help")}\n'
+        '        product="text", fields=("key",), axes={"concurrency": Default(4, "help")},\n'
+        "        artifacts=PRODUCT, product_artifact=LISTING,\n"
         "    ),\n"
-        '    "fixed": Mode(product="text", fields=("key",), axes={"concurrency": Fixed(256)}),\n'
+        '    "fixed": Mode(\n'
+        '        product="text", fields=("key",), axes={"concurrency": Fixed(256)},\n'
+        "        artifacts=PRODUCT, product_artifact=LISTING,\n"
+        "    ),\n"
         "}\n",
     )
     assert adapter.effective_config("list", {"concurrency": 16}) == {
@@ -171,6 +198,7 @@ def test_the_merged_blob_round_trips_through_compile(tmp_path: Path) -> None:
         "\nMODES = {\n"
         '    "list": Mode(\n'
         '        product="text",\n'
+        "        artifacts=PRODUCT, product_artifact=LISTING,\n"
         '        fields=("key",),\n'
         '        axes={"heap_percent": Fixed(HEAP_PERCENT), "concurrency": Fixed(256)},\n'
         "    )\n"
@@ -191,9 +219,13 @@ def test_an_axis_is_declared_once_in_the_manifest_and_not_again_in_config_keys(
         tmp_path,
         "\nMODES = {\n"
         '    "list": Mode(\n'
-        '        product="text", fields=("key",), axes={"concurrency": Default(4, "help")}\n'
+        '        product="text", fields=("key",), axes={"concurrency": Default(4, "help")},\n'
+        "        artifacts=PRODUCT, product_artifact=LISTING,\n"
         "    ),\n"
-        '    "fixed": Mode(product="text", fields=("key",), axes={"concurrency": Fixed(256)}),\n'
+        '    "fixed": Mode(\n'
+        '        product="text", fields=("key",), axes={"concurrency": Fixed(256)},\n'
+        "        artifacts=PRODUCT, product_artifact=LISTING,\n"
+        "    ),\n"
         "}\n",
     )
     assert not adapter.config_keys
@@ -246,7 +278,13 @@ def test_a_recorded_number_with_no_receipt_behind_it_is_refused(
 def test_an_axis_the_study_has_not_reserved_is_refused(axes: dict[str, object]) -> None:
     """A capsule free to name its own axis makes the axis unqueryable across tools."""
     with pytest.raises(CommandAdapterError):
-        Mode(product="text", fields=("key",), axes=axes)  # type: ignore[arg-type]
+        Mode(
+            product="text",
+            fields=("key",),
+            axes=axes,  # type: ignore[arg-type]
+            artifacts=PRODUCT,
+            product_artifact=LISTING,
+        )
 
 
 @pytest.mark.parametrize(
@@ -255,7 +293,13 @@ def test_an_axis_the_study_has_not_reserved_is_refused(axes: dict[str, object]) 
 )
 def test_the_heap_share_is_the_harness_s_and_a_capsule_may_only_restate_it(axis: object) -> None:
     with pytest.raises(CommandAdapterError):
-        Mode(product="text", fields=("key",), axes={"heap_percent": axis})  # type: ignore[dict-item]
+        Mode(
+            product="text",
+            fields=("key",),
+            axes={"heap_percent": axis},  # type: ignore[dict-item]
+            artifacts=PRODUCT,
+            product_artifact=LISTING,
+        )
 
 
 def test_a_managed_runtime_capsule_hashes_the_share_it_ran_under(tmp_path: Path) -> None:
@@ -264,6 +308,7 @@ def test_a_managed_runtime_capsule_hashes_the_share_it_ran_under(tmp_path: Path)
         "\nMODES = {\n"
         '    "list": Mode(\n'
         '        product="text",\n'
+        "        artifacts=PRODUCT, product_artifact=LISTING,\n"
         '        fields=("key",),\n'
         '        axes={"heap_percent": Fixed(HEAP_PERCENT)},\n'
         "    )\n"
@@ -280,35 +325,56 @@ def test_a_mode_describes_its_artifact_in_the_shared_vocabulary(
     product: str, fields: tuple[str, ...]
 ) -> None:
     with pytest.raises(CommandAdapterError):
-        Mode(product=product, fields=fields)
+        Mode(product=product, fields=fields, artifacts=PRODUCT, product_artifact=LISTING)
 
 
 def test_mode_fields_are_canonically_ordered() -> None:
     """Two modes populating the same columns must declare the same tuple."""
-    assert Mode(product="text", fields=("mtime", "key", "size")).fields == ("key", "size", "mtime")
+    assert Mode(
+        product="text", fields=("mtime", "key", "size"), artifacts=PRODUCT, product_artifact=LISTING
+    ).fields == ("key", "size", "mtime")
 
 
 def test_a_plan_may_demote_a_mode_and_never_promote_one() -> None:
-    assert Mode(product="text", fields=("key",)).purpose_ceiling == "measurement"
-    summarize = Mode(product="text", fields=("key",), purpose_ceiling="diagnostic")
+    assert (
+        Mode(
+            product="text", fields=("key",), artifacts=PRODUCT, product_artifact=LISTING
+        ).purpose_ceiling
+        == "measurement"
+    )
+    summarize = Mode(
+        product="text",
+        fields=("key",),
+        purpose_ceiling="diagnostic",
+        artifacts=PRODUCT,
+        product_artifact=LISTING,
+    )
     assert summarize.permits_purpose("diagnostic")
     assert not summarize.permits_purpose("canary")
     assert not summarize.permits_purpose("measurement")
-    assert Mode(product="text", fields=("key",)).permits_purpose("canary")
+    assert Mode(
+        product="text", fields=("key",), artifacts=PRODUCT, product_artifact=LISTING
+    ).permits_purpose("canary")
     with pytest.raises(CommandAdapterError):
         summarize.permits_purpose("smoke")
 
 
 CHAIN_MODES = (
     "\nMODES = {\n"
-    '    "list": Mode(product="text", fields=("key",), artifacts={"keyspace": "k.ks"}),\n'
+    '    "list": Mode(\n'
+    '        product="text", fields=("key",),\n'
+    '        artifacts={"keyspace": "k.ks"}, product_artifact="keyspace",\n'
+    "    ),\n"
     '    "split": Mode(\n'
     '        product="text",\n'
     '        fields=("key",),\n'
     '        purpose_ceiling="preparation",\n'
     '        artifacts={"hints": "hints.input"},\n'
     "    ),\n"
-    '    "hinted": Mode(product="text", fields=("key",)),\n'
+    '    "hinted": Mode(\n'
+    '        product="text", fields=("key",),\n'
+    "        artifacts=PRODUCT, product_artifact=LISTING,\n"
+    "    ),\n"
     "}\n"
 )
 """Two producers, each publishing one named file, and the mode that consumes them."""
@@ -368,12 +434,17 @@ def test_a_prerequisite_the_planner_could_not_expand_offline_is_refused(
         lambda: Mode(TEXT, KEY, artifacts={"keyspace": "k.ks"}, product_artifact="listing"),
         lambda: Mode(TEXT, KEY, product_artifact="listing"),
         # One file under two names makes the reverse lookup a guess.
-        lambda: Mode(TEXT, KEY, artifacts={"keyspace": "k.ks", "listing": "k.ks"}),
+        lambda: Mode(
+            TEXT,
+            KEY,
+            artifacts={"keyspace": "k.ks", "listing": "k.ks"},
+            product_artifact="keyspace",
+        ),
         # A path outside the sink names bytes no attempt record accounts for.
-        lambda: Mode(TEXT, KEY, artifacts={"keyspace": "/etc/passwd"}),
-        lambda: Mode(TEXT, KEY, artifacts={"keyspace": "../k.ks"}),
-        lambda: Mode(TEXT, KEY, artifacts={"keyspace": ""}),
-        lambda: Mode(TEXT, KEY, artifacts={"": "k.ks"}),
+        lambda: Mode(TEXT, KEY, artifacts={"keyspace": "/etc/passwd"}, product_artifact="keyspace"),
+        lambda: Mode(TEXT, KEY, artifacts={"keyspace": "../k.ks"}, product_artifact="keyspace"),
+        lambda: Mode(TEXT, KEY, artifacts={"keyspace": ""}, product_artifact="keyspace"),
+        lambda: Mode(TEXT, KEY, artifacts={"": "k.ks"}, product_artifact="keyspace"),
     ],
 )
 def test_an_artifact_declaration_the_sink_could_not_hold_is_refused(
@@ -393,9 +464,38 @@ def test_a_mode_names_the_artifact_that_carries_its_measured_product() -> None:
         product_artifact="listing",
     )
     assert mode.product == "parquet"
-    assert mode.artifacts["listing"] == "listing.parquet"
-    # Empty is the honest state while a product still streams through stdout.
-    assert Mode(product="text", fields=("key",)).product_artifact == ""
+    assert mode.product_file == "listing.parquet"
+    # Empty only where there is no measured product to name: what a preparation
+    # publishes is an artifact for a later case.
+    split = Mode(TEXT, KEY, artifacts={"hints": "hints.input"}, purpose_ceiling="preparation")
+    assert split.product_artifact == ""
+    assert split.product_file == ""
+
+
+@pytest.mark.parametrize(
+    "declare",
+    [
+        # Undeclared, the worker has nowhere to land the product but a log.
+        lambda: Mode(TEXT, KEY),
+        lambda: Mode(TEXT, KEY, purpose_ceiling="diagnostic"),
+        # A preparation publishes for a later case, never a measured product.
+        lambda: Mode(
+            TEXT, KEY, artifacts=PRODUCT, product_artifact=LISTING, purpose_ceiling="preparation"
+        ),
+        # A channel outside the vocabulary leaves the worker guessing again.
+        lambda: Mode(
+            TEXT, KEY, artifacts=PRODUCT, product_artifact=LISTING, product_channel="pipe"
+        ),
+    ],
+)
+def test_a_mode_declares_where_its_product_travels_or_does_not_load(
+    declare: Callable[[], Mode],
+) -> None:
+    """The channel cannot be read off the sink: a tool with a side output writes
+    a file whichever channel its product takes, which is how every s3-fast-list
+    listing came to be routed into the directory-dataset normalizer."""
+    with pytest.raises(CommandAdapterError):
+        declare()
 
 
 def test_the_declared_executable_is_cross_checked_against_the_registered_image(
@@ -413,7 +513,8 @@ def test_a_mode_running_an_undeclared_executable_is_refused(tmp_path: Path) -> N
     with pytest.raises(CommandAdapterError):
         load(
             tmp_path,
-            '\nMODES = {"list": Mode(product="text", fields=("key",), executable="ks-tool")}\n',
+            '\nMODES = {"list": Mode(product="text", fields=("key",), executable="ks-tool",\n'
+            "    artifacts=PRODUCT, product_artifact=LISTING)}\n",
         )
 
 
@@ -481,7 +582,10 @@ def test_an_inline_setup_exec_names_one_preparation_mode_of_this_capsule(tmp_pat
         tmp_path,
         "\nMODES = {\n"
         '    "split": Mode(product="text", fields=("key",), purpose_ceiling="preparation"),\n'
-        '    "hinted": Mode(product="text", fields=("key",), inline="split"),\n'
+        '    "hinted": Mode(\n'
+        '        product="text", fields=("key",), inline="split",\n'
+        "        artifacts=PRODUCT, product_artifact=LISTING,\n"
+        "    ),\n"
         "}\n",
     )
     assert adapter.modes["hinted"].inline == "split"
@@ -492,13 +596,21 @@ def test_an_inline_setup_exec_names_one_preparation_mode_of_this_capsule(tmp_pat
     "body",
     [
         # An inline mode this capsule does not have.
-        '\nMODES = {"list": Mode(product="text", fields=("key",), inline="split")}\n',
+        '\nMODES = {"list": Mode(product="text", fields=("key",), inline="split",\n'
+        "    artifacts=PRODUCT, product_artifact=LISTING)}\n",
         # A mode running itself as its own setup.
-        '\nMODES = {"list": Mode(product="text", fields=("key",), inline="list")}\n',
+        '\nMODES = {"list": Mode(product="text", fields=("key",), inline="list",\n'
+        "    artifacts=PRODUCT, product_artifact=LISTING)}\n",
         # A setup exec that is allowed to claim it measured something.
         "\nMODES = {\n"
-        '    "split": Mode(product="text", fields=("key",)),\n'
-        '    "hinted": Mode(product="text", fields=("key",), inline="split"),\n'
+        '    "split": Mode(\n'
+        '        product="text", fields=("key",),\n'
+        "        artifacts=PRODUCT, product_artifact=LISTING,\n"
+        "    ),\n"
+        '    "hinted": Mode(\n'
+        '        product="text", fields=("key",), inline="split",\n'
+        "        artifacts=PRODUCT, product_artifact=LISTING,\n"
+        "    ),\n"
         "}\n",
         # A setup exec with a setup exec of its own.
         "\nMODES = {\n"
@@ -506,13 +618,22 @@ def test_an_inline_setup_exec_names_one_preparation_mode_of_this_capsule(tmp_pat
         '    "split": Mode(\n'
         '        product="text", fields=("key",), purpose_ceiling="preparation", inline="seed"\n'
         "    ),\n"
-        '    "hinted": Mode(product="text", fields=("key",), inline="split"),\n'
+        '    "hinted": Mode(\n'
+        '        product="text", fields=("key",), inline="split",\n'
+        "        artifacts=PRODUCT, product_artifact=LISTING,\n"
+        "    ),\n"
         "}\n",
         # A setup exec that is also a chain link: it needs a step of its own.
         "\nMODES = {\n"
-        '    "list": Mode(product="text", fields=("key",), artifacts={"keyspace": "k.ks"}),\n'
+        '    "list": Mode(\n'
+        '        product="text", fields=("key",),\n'
+        '        artifacts={"keyspace": "k.ks"}, product_artifact="keyspace",\n'
+        "    ),\n"
         '    "split": Mode(product="text", fields=("key",), purpose_ceiling="preparation"),\n'
-        '    "hinted": Mode(product="text", fields=("key",), inline="split"),\n'
+        '    "hinted": Mode(\n'
+        '        product="text", fields=("key",), inline="split",\n'
+        "        artifacts=PRODUCT, product_artifact=LISTING,\n"
+        "    ),\n"
         "}\n"
         'REQUIRES = {"split": (("list", "keyspace"),)}\n',
     ],

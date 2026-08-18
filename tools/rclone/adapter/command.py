@@ -50,20 +50,76 @@ is inert for the other reason: bounded recursion does reach the walk, but a
 single delimiter level descends into no directory, so the pool has one job.
 """
 
+LISTING = "listing"
+"""The logical name every mode here publishes its listing under."""
+
+JSON = {LISTING: "listing.json"}
+TEXT = {LISTING: "listing.txt"}
+"""`lsjson` prints a JSON array and `lsf` prints separated columns, both on
+stdout: rclone's listing subcommands take no output destination, so the worker
+lands fd 1 in the declared file. The debug modes' `-vv --dump` goes to stderr and
+leaves the product alone."""
+
 MODES = {
-    "recursive-fastlist": Mode(product="text", fields=LSJSON_FIELDS, axes=FLAT_AXES),
-    "recursive-hierarchical": Mode(product="text", fields=LSJSON_FIELDS, axes=FLAT_AXES),
-    "recursive-walk": Mode(product="text", fields=LSJSON_FIELDS, axes=WALK_AXES),
-    "delimiter-shallow": Mode(product="text", fields=LSJSON_FIELDS, axes=FLAT_AXES),
-    "listv1": Mode(product="text", fields=LSJSON_FIELDS, axes=FLAT_AXES),
-    "lsf": Mode(product="text", fields=LSF_FIELDS, axes=FLAT_AXES),
+    "recursive-fastlist": Mode(
+        product="text",
+        fields=LSJSON_FIELDS,
+        axes=FLAT_AXES,
+        artifacts=JSON,
+        product_artifact=LISTING,
+    ),
+    "recursive-hierarchical": Mode(
+        product="text",
+        fields=LSJSON_FIELDS,
+        axes=FLAT_AXES,
+        artifacts=JSON,
+        product_artifact=LISTING,
+    ),
+    "recursive-walk": Mode(
+        product="text",
+        fields=LSJSON_FIELDS,
+        axes=WALK_AXES,
+        artifacts=JSON,
+        product_artifact=LISTING,
+    ),
+    "delimiter-shallow": Mode(
+        product="text",
+        fields=LSJSON_FIELDS,
+        axes=FLAT_AXES,
+        artifacts=JSON,
+        product_artifact=LISTING,
+    ),
+    "listv1": Mode(
+        product="text",
+        fields=LSJSON_FIELDS,
+        axes=FLAT_AXES,
+        artifacts=JSON,
+        product_artifact=LISTING,
+    ),
+    "lsf": Mode(
+        product="text",
+        fields=LSF_FIELDS,
+        axes=FLAT_AXES,
+        artifacts=TEXT,
+        product_artifact=LISTING,
+    ),
     # `-vv --dump headers` prints every request line on stderr, which perturbs
     # the timing it exists to explain.
     "debug": Mode(
-        product="text", fields=LSJSON_FIELDS, axes=FLAT_AXES, purpose_ceiling="diagnostic"
+        product="text",
+        fields=LSJSON_FIELDS,
+        axes=FLAT_AXES,
+        purpose_ceiling="diagnostic",
+        artifacts=JSON,
+        product_artifact=LISTING,
     ),
     "walk-debug": Mode(
-        product="text", fields=LSJSON_FIELDS, axes=WALK_AXES, purpose_ceiling="diagnostic"
+        product="text",
+        fields=LSJSON_FIELDS,
+        axes=WALK_AXES,
+        purpose_ceiling="diagnostic",
+        artifacts=JSON,
+        product_artifact=LISTING,
     ),
 }
 

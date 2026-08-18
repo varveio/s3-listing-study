@@ -52,7 +52,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import gzip
 import hashlib
 import json
 import sqlite3
@@ -85,6 +84,7 @@ from benchmark.ledger import (
     open_ledger,
     pending_rows,
 )
+from benchmark.runtime.command_adapter import Mode
 
 _COLUMNS = (
     "{'key':'VARCHAR','size':'VARCHAR','etag':'VARCHAR',"
@@ -391,40 +391,37 @@ def normalize_evidence(
     result: Mapping[str, object],
     adapter_dir: Path,
     subject: Subject,
+    manifest: Mode,
     output_path: Path,
-    staging: Path,
 ) -> None:
-    """Normalize a stream or natively captured dataset through the capsule.
+    """Normalize this attempt's declared product through the capsule.
+
+    Which file that is, and whether it is one file or a directory of parts, is
+    read off the mode's own declaration. Asking the evidence instead — *is
+    `native/` non-empty?* — answered "directory dataset" for any subject with a
+    side output, which sent every `s3-fast-list` listing to a normalizer that
+    rightly refused a `--dataset` it does not accept.
 
     The row's recorded `config` blob is forwarded, not reconstructed: a capsule
     whose output shape depends on a config key has to parse its own output with
     the same blob `command.py` compiled argv from.
     """
     validate_captured_artifacts(local_prefix, result)
-    native_root = local_prefix / "native"
-    if native_root.is_dir() and any(path.is_file() for path in native_root.rglob("*")):
-        adapters.normalize_to_path(
-            adapter_dir,
-            subject.tool,
-            subject.mode,
-            subject.target_prefix,
-            output_path,
-            dataset=native_root,
-            config=subject.config,
+    if not manifest.product_artifact:
+        raise adapters.AdapterError(
+            f"{subject.tool} mode {subject.mode!r} publishes no measured product to compare"
         )
-        return
-    stdout_gz = local_prefix / "stdout.log.gz"
-    input_path = staging / "stdout.log"
-    with gzip.open(stdout_gz, "rb") as source, input_path.open("wb") as output:
-        while chunk := source.read(1024 * 1024):
-            output.write(chunk)
+    product = local_prefix / "native" / manifest.product_file
+    channel: dict[str, Path | None] = {"dataset": None, "input": None}
+    channel["dataset" if manifest.product_channel == "dataset" else "input"] = product
     adapters.normalize_to_path(
         adapter_dir,
         subject.tool,
         subject.mode,
         subject.target_prefix,
         output_path,
-        input_path=input_path,
+        input_path=channel["input"],
+        dataset=channel["dataset"],
         config=subject.config,
     )
 
@@ -440,8 +437,16 @@ def _manifest(root: Path) -> dict[str, str]:
 def validate_captured_artifacts(local_prefix: Path, result: Mapping[str, object]) -> None:
     """Bind normalized bytes to hashes in the result marker uploaded after the artifacts."""
     for stem in ("stdout", "stderr"):
-        name = result.get(f"{stem}_gz")
-        expected = result.get(f"{stem}_gz_sha256")
+        capture = result.get(stem)
+        if capture is None:
+            # Only stdout may be absent, and only because the product took fd 1.
+            if stem == "stdout" and not (local_prefix / "stdout.log.gz").exists():
+                continue
+            raise adapters.AdapterError(f"{stem}: result.json has invalid artifact identity")
+        if not isinstance(capture, Mapping):
+            raise adapters.AdapterError(f"{stem}: result.json has invalid artifact identity")
+        name = capture.get("name")
+        expected = capture.get("sha256")
         if not isinstance(name, str) or Path(name).name != name or not isinstance(expected, str):
             raise adapters.AdapterError(f"{stem}: result.json has invalid artifact identity")
         path = local_prefix / name
@@ -523,8 +528,8 @@ def prepare_subject(
             result,
             adapters.adapter_dir_for(subject.tool, adapter_root),
             subject,
+            manifest,
             tsv,
-            staging,
         )
     except adapters.AdapterError as exc:
         return None, _gap(subject, "normalize", str(exc))

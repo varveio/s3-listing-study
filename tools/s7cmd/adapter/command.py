@@ -47,30 +47,93 @@ SEQUENTIAL = {"concurrency": Inert()}
 """Without `-r` the engine always sets `delimiter = "/"`, so the same flag reaches
 a listing that is one sequential paginated call whatever it says."""
 
+LISTING = "listing"
+"""The logical name every mode here publishes its listing under."""
+
+TSV = {LISTING: "listing.tsv"}
+JSON = {LISTING: "listing.json"}
+TEXT = {LISTING: "listing.txt"}
+"""What `--tsv` / `--json` / neither render on stdout. s7cmd takes no output
+destination, so the worker lands fd 1 in the declared file, and `-vv` tracing
+goes to stderr and leaves the product alone."""
+
 MODES = {
     # Sorted: the Aggregator buffers every entry into a Vec and emits nothing
     # until the last page, so output is key-ordered and time-to-first-byte is
     # end-of-listing. `product` has no vocabulary for sorted text -- only
     # parquet-sorted -- so the fact lives here.
-    "recursive-tsv": Mode(product="text", fields=ALL_FIELDS, axes=PARALLEL),
+    "recursive-tsv": Mode(
+        product="text",
+        fields=ALL_FIELDS,
+        axes=PARALLEL,
+        artifacts=TSV,
+        product_artifact=LISTING,
+    ),
     # The one mode that reaches `--no-sort`: the Aggregator streams, so records
     # arrive in listing order (lexicographic within one op, interleaved across
     # parallel ops) and RSS stays near-constant instead of growing with the Vec.
-    "recursive-tsv-nosort": Mode(product="text", fields=ALL_FIELDS, axes=PARALLEL),
-    "recursive-aligned": Mode(product="text", fields=ALIGNED_FIELDS, axes=PARALLEL),
-    "recursive-json": Mode(product="text", fields=ALL_FIELDS, axes=PARALLEL),
-    "recursive-one": Mode(product="text", fields=KEY_FIELDS, axes=PARALLEL),
-    "all-versions": Mode(product="text", fields=ALL_FIELDS, axes=PARALLEL),
+    "recursive-tsv-nosort": Mode(
+        product="text",
+        fields=ALL_FIELDS,
+        axes=PARALLEL,
+        artifacts=TSV,
+        product_artifact=LISTING,
+    ),
+    "recursive-aligned": Mode(
+        product="text",
+        fields=ALIGNED_FIELDS,
+        axes=PARALLEL,
+        artifacts=TEXT,
+        product_artifact=LISTING,
+    ),
+    "recursive-json": Mode(
+        product="text",
+        fields=ALL_FIELDS,
+        axes=PARALLEL,
+        artifacts=JSON,
+        product_artifact=LISTING,
+    ),
+    "recursive-one": Mode(
+        product="text",
+        fields=KEY_FIELDS,
+        axes=PARALLEL,
+        artifacts=TEXT,
+        product_artifact=LISTING,
+    ),
+    "all-versions": Mode(
+        product="text",
+        fields=ALL_FIELDS,
+        axes=PARALLEL,
+        artifacts=TSV,
+        product_artifact=LISTING,
+    ),
     # `--max-depth 1` synthesizes a CommonPrefix at the boundary instead of
     # recursing, so nothing is ever spawned and the walk is one API call. The
     # knob is not inert -- the parallel path is armed -- its width is bounded by
     # a keyspace this mode refuses to descend into.
-    "max-depth": Mode(product="text", fields=ALL_FIELDS, axes=PARALLEL),
-    "shallow-tsv": Mode(product="text", fields=ALL_FIELDS, axes=SEQUENTIAL),
+    "max-depth": Mode(
+        product="text",
+        fields=ALL_FIELDS,
+        axes=PARALLEL,
+        artifacts=TSV,
+        product_artifact=LISTING,
+    ),
+    "shallow-tsv": Mode(
+        product="text",
+        fields=ALL_FIELDS,
+        axes=SEQUENTIAL,
+        artifacts=TSV,
+        product_artifact=LISTING,
+    ),
     # `ls` with no target is ListBuckets, not a listing: `normalize.py` has no
     # query for it, and anonymously S3 answers 307 and the tool exits 1.
     "bucket-list": Mode(
-        product="text", fields=KEY_FIELDS, axes=SEQUENTIAL, purpose_ceiling="diagnostic"
+        product="text",
+        fields=KEY_FIELDS,
+        axes=SEQUENTIAL,
+        purpose_ceiling="diagnostic",
+        artifacts=TEXT,
+        product_artifact=LISTING,
     ),
 }
 

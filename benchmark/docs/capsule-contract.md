@@ -107,7 +107,8 @@ write a directory sink while its TSV mode streams to stdout.
 | `purpose_ceiling` | The most a plan may claim this mode is. A plan may demote a run to `canary`; it may never promote `summarize` to `measurement`. A mode capped at `preparation` is also never row-counted: what it publishes is not a listing, and the worker records a null count rather than asking a normalizer a question about a mode it does not have. |
 | `inline` | Another mode of this capsule the worker runs untimed, in the same container, immediately before the timed subject — see *A setup exec is not a chain link*. |
 | `artifacts` | Logical name to the filename this mode publishes into its sink. What a consumer asks for by name — see *A producer declares its artifacts by name*. |
-| `product_artifact` | Which of `artifacts` carries this mode's *measured* output. Empty while a product still streams through stdout, which is every mode today. |
+| `product_artifact` | Which of `artifacts` carries this mode's *measured* output. Every mode a plan may measure names one; only a `preparation`-capped mode leaves it empty. |
+| `product_channel` | How that file gets its bytes — `stdout`, `file`, or `dataset`. See *The product travels on a declared file*. |
 
 **`product` and `fields` translate across tools; `axes` does not.** The first two
 describe the artifact, which is why they are comparable at all. An axis name
@@ -372,14 +373,18 @@ catches the sink holding one *wrong* file, which no count ever could.
 `artifacts` is not `product` under another name. `product` is the **format**
 vocabulary — `text`, `parquet` — shared across tools so a report can keep a
 Parquet number out of a text stratum. `artifacts` says which files land.
-`product_artifact` names which of them carries the measured output; empty means
-the product does not travel as a declared file yet.
+`product_artifact` names which of them carries the measured output; empty is
+reserved for a `preparation`-capped mode, which publishes for a later case and
+measures nothing.
 
 The refusals, all at load:
 
 - an artifact name the required mode does not declare;
 - a required mode that declares no artifacts at all;
 - a `product_artifact` that is not one of the mode's own `artifacts`;
+- a measured mode that names no product at all, and a `preparation`-capped mode
+  that names one;
+- a `product_channel` outside the three the worker knows how to honour;
 - a bare mode where the pair belongs — sugar for "its sole artifact" is exactly
   the inference this replaces, and it would silently rebind every consumer the
   day a capsule publishes a second file;
@@ -388,8 +393,53 @@ The refusals, all at load:
   question is how evidence comes to disagree with itself. No capsule declares
   that shape; the column has to grow a name before one can.
 
-Only `s3-fast-list` declares artifacts today, because only its chain consumes
-one: `list` publishes `keyspace`, `ks-split` publishes `hints`.
+Every capsule declares artifacts, because every measured mode publishes its
+product as one. `s3-fast-list` is the only one that publishes two: `list` and
+`list-hinted` publish `listing` beside `keyspace`, and only `keyspace` is
+consumed — by `ks-split`, which publishes `hints`.
+
+### The product travels on a declared file
+
+**A tool's product is written to a file and that file is uploaded. stdout is a
+log** (owner decision, 2026-08-18). The product lands in the sink, under a name
+whose extension says what is in it, and `native_manifest` binds it by digest
+like every other published file.
+
+It used to travel on stdout: the capsule pointed the tool at `/dev/stdout`, the
+worker redirected fd 1 into `attempt_dir/stdout.log`, gzipped it and uploaded
+it. So `s3-fast-list`'s 131 MB **Parquet** listing shipped as `stdout.log.gz` —
+gzip applied to already-compressed columnar data, under a name that called it a
+log. `output_target` has been a hashed field of every measurement identity,
+fixed at `"file"`, the whole time.
+
+Only two of the eleven subjects can write a listing to a path, so
+`product_channel` says which mechanism this mode uses:
+
+| Channel | Who writes it | Subjects |
+| --- | --- | --- |
+| `stdout` | the worker redirects fd 1 into the declared path | the nine that only print — `aws-cli`, `s5cmd`, `rclone`, `minio-mc`, `s7cmd`, `s3kor`, `s3p`, `ps3`, `s4cmd`, plus swath's text formats |
+| `file` | the capsule points the tool's own flag there | `s3-fast-list` (`--output-parquet-file`) |
+| `dataset` | the same, except what it writes is a directory of parts | swath's Parquet modes (`-o`) |
+
+`aws-cli`'s `--output` is the *format* selector (`text`/`json`/`yaml-stream`),
+not a destination, which is why it sits in the first row.
+
+**On the `stdout` channel there is no stdout log**, and that asymmetry is
+deliberate: those bytes *are* the product, a subject that only prints already
+sends its diagnostics to stderr, and teeing would double a listing that can run
+to gigabytes. `result.json` records which channel applied, so a reader never has
+to infer it from which files happen to be there.
+
+The channel is declared rather than inferred for the reason the inference
+already failed. `verify` asked *"is `native/` non-empty?"* to decide whether a
+product was a directory dataset — true for any subject with a side output, so
+every `s3-fast-list` listing was routed to a normalizer that rightly refuses a
+`--dataset` it does not accept, while its actual listing sat in `stdout.log.gz`.
+
+One refusal rides with this, in the worker: **a subject that exits clean and
+wrote nothing at the declared path publishes no measurement**, however good its
+timing looks. The attempt records `product_error` and settles
+`EXIT_ARTIFACT_UNUSABLE` rather than counting as a run.
 
 ### A setup exec is not a chain link
 

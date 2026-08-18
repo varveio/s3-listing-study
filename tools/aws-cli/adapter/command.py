@@ -30,16 +30,84 @@ both as NULL (`normalize.py:134-137,148-157`)."""
 # exposes no listing-concurrency knob at all. `max_concurrent_requests` governs
 # the `s3` transfer commands' file-transfer pool, not `s3api`/`s3 ls` listing,
 # so it is not this axis. Absence is the declaration.
+LISTING = "listing"
+"""The logical name every mode here publishes its listing under."""
+
+TEXT = {LISTING: "listing.txt"}
+JSON = {LISTING: "listing.json"}
+YAML = {LISTING: "listing.yaml"}
+"""What `--output` renders, and so what the product file is named.
+
+`--output` selects the *format*, not a destination: aws-cli has no flag that
+writes a listing to a path, so every mode here prints and the worker lands
+fd 1 in the declared file. `yaml-stream` is a stream of YAML documents rather
+than one document, which no other extension says better.
+"""
+
 MODES = {
-    "s3api-v2-text": Mode(product="text", fields=FULL_FIELDS, executable=AWS.name),
-    "s3api-v2-json": Mode(product="text", fields=FULL_FIELDS, executable=AWS.name),
-    "s3api-v2-yamlstream": Mode(product="text", fields=FULL_FIELDS, executable=AWS.name),
-    "s3api-v1-text": Mode(product="text", fields=FULL_FIELDS, executable=AWS.name),
-    "s3api-versions-text": Mode(product="text", fields=FULL_FIELDS, executable=AWS.name),
-    "s3api-v2-delimiter": Mode(product="text", fields=FULL_FIELDS, executable=AWS.name),
-    "s3api-v2-remainder": Mode(product="text", fields=FULL_FIELDS, executable=AWS.name),
-    "s3-ls-recursive": Mode(product="text", fields=LS_FIELDS, executable=AWS.name),
-    "s3-ls-delimiter": Mode(product="text", fields=LS_FIELDS, executable=AWS.name),
+    "s3api-v2-text": Mode(
+        product="text",
+        fields=FULL_FIELDS,
+        executable=AWS.name,
+        artifacts=TEXT,
+        product_artifact=LISTING,
+    ),
+    "s3api-v2-json": Mode(
+        product="text",
+        fields=FULL_FIELDS,
+        executable=AWS.name,
+        artifacts=JSON,
+        product_artifact=LISTING,
+    ),
+    "s3api-v2-yamlstream": Mode(
+        product="text",
+        fields=FULL_FIELDS,
+        executable=AWS.name,
+        artifacts=YAML,
+        product_artifact=LISTING,
+    ),
+    "s3api-v1-text": Mode(
+        product="text",
+        fields=FULL_FIELDS,
+        executable=AWS.name,
+        artifacts=TEXT,
+        product_artifact=LISTING,
+    ),
+    "s3api-versions-text": Mode(
+        product="text",
+        fields=FULL_FIELDS,
+        executable=AWS.name,
+        artifacts=TEXT,
+        product_artifact=LISTING,
+    ),
+    "s3api-v2-delimiter": Mode(
+        product="text",
+        fields=FULL_FIELDS,
+        executable=AWS.name,
+        artifacts=JSON,
+        product_artifact=LISTING,
+    ),
+    "s3api-v2-remainder": Mode(
+        product="text",
+        fields=FULL_FIELDS,
+        executable=AWS.name,
+        artifacts=TEXT,
+        product_artifact=LISTING,
+    ),
+    "s3-ls-recursive": Mode(
+        product="text",
+        fields=LS_FIELDS,
+        executable=AWS.name,
+        artifacts=TEXT,
+        product_artifact=LISTING,
+    ),
+    "s3-ls-delimiter": Mode(
+        product="text",
+        fields=LS_FIELDS,
+        executable=AWS.name,
+        artifacts=TEXT,
+        product_artifact=LISTING,
+    ),
 }
 
 

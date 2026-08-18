@@ -11,11 +11,21 @@ from benchmark.contract import sha256_of
 COMMAND_PY = """
 from benchmark.runtime.command_adapter import Executable, Mode
 
+PRODUCT = {{"listing": "listing.txt"}}
+LISTING = "listing"
+
 TOOL = "{tool}"
 EXECUTABLES = (Executable("{tool}", ("/usr/bin/{tool}",)),)
 MODES = {{
-    "text-full": Mode(product="text", fields=("key", "size", "etag", "mtime", "storage_class")),
-    "text-keys": Mode(product="text", fields=("key",)),
+    "text-full": Mode(
+        product="text",
+        fields=("key", "size", "etag", "mtime", "storage_class"),
+        artifacts=PRODUCT,
+        product_artifact=LISTING,
+    ),
+    "text-keys": Mode(
+        product="text", fields=("key",), artifacts=PRODUCT, product_artifact=LISTING
+    ),
 }}
 SUPPORTS_UNSIGNED = True
 
@@ -138,10 +148,12 @@ def write_evidence(
 ) -> Path:
     prefix = Path(attempt.result_prefix)
     prefix.mkdir(parents=True, exist_ok=True)
-    stdout_gz = prefix / "stdout.log.gz"
     stderr_gz = prefix / "stderr.log.gz"
-    stdout_gz.write_bytes(gzip.compress(("\n".join(listing) + "\n").encode()))
     stderr_gz.write_bytes(gzip.compress(b""))
+    native = prefix / "native"
+    native.mkdir(exist_ok=True)
+    product = native / "listing.txt"
+    product.write_bytes(("\n".join(listing) + "\n").encode())
     result: dict[str, object] = {
         "attempt_id": attempt.attempt_id,
         "case_id": attempt.case_id,
@@ -178,11 +190,22 @@ def write_evidence(
             "elapsed_ns": int(wall_seconds * 1_000_000_000),
             "cgroup": {"oom_delta": 0, "oom_kill_delta": 0},
         },
-        "stdout_gz": stdout_gz.name,
-        "stdout_gz_sha256": sha256_of(stdout_gz),
-        "stderr_gz": stderr_gz.name,
-        "stderr_gz_sha256": sha256_of(stderr_gz),
-        "native_manifest": {},
+        "product": {
+            "artifact": "listing",
+            "name": "native/listing.txt",
+            "channel": "stdout",
+            "size_bytes": product.stat().st_size,
+            "sha256": sha256_of(product),
+        },
+        "product_error": None,
+        # The subject only printed, so fd 1 was the product and there is no log.
+        "stdout": None,
+        "stderr": {
+            "name": stderr_gz.name,
+            "size_bytes": stderr_gz.stat().st_size,
+            "sha256": sha256_of(stderr_gz),
+        },
+        "native_manifest": {"listing.txt": sha256_of(product)},
         **overrides,
     }
     (prefix / "result.json").write_text(json.dumps(result))
@@ -338,6 +361,7 @@ def test_a_setup_failure_reads_as_evidence_rather_than_a_broken_result(tmp_path:
         max_rss_kb=None,
         row_count=None,
         native_manifest={},
+        product=None,
         setup={
             "mode": "prep",
             "command": ["/usr/bin/alpha", "prep"],
