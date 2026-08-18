@@ -677,7 +677,8 @@ def expand_requirements(case: Case, adapter: LoadedCommandAdapter) -> tuple[Case
 
     links: list[Case] = []
     consumer = dict(case.config)
-    for mode in adapter.requires.get(case.mode, ()):
+    for step in adapter.requires.get(case.mode, ()):
+        mode = step.mode
         manifest = adapter.modes[mode]
         if not manifest.permits_purpose("preparation"):
             raise PlanError(

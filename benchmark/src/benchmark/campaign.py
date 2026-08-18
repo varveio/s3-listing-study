@@ -54,7 +54,7 @@ from benchmark.ledger import (
     validate_suite,
 )
 from benchmark.plan import Case, Plan
-from benchmark.runtime.command_adapter import LoadedCommandAdapter
+from benchmark.runtime.command_adapter import CommandAdapterError, LoadedCommandAdapter
 
 # One executor exists. Recorded so a second one is distinguishable when it
 # arrives (`identity.md`: hashed then, not before).
@@ -101,6 +101,7 @@ TOOL_IMAGE_FIELDS = {
     "tool_slice_sha256",
     "platform_sha256",
 }
+
 
 @dataclass(frozen=True)
 class ImageSet:
@@ -883,31 +884,40 @@ def expand_launch(
     return tuple(steps)
 
 
-def produced_artifact(result_prefix: str) -> tuple[str, str]:
-    """`(object uri, sha256)` of the one file a preparation published into its sink.
+def produced_artifact(result_prefix: str, tool: str, mode: str) -> tuple[str, str]:
+    """`(object uri, sha256)` of the artifact a producer's consumers named.
+
+    The capsule says which of `mode`'s declared artifacts the chain takes from it
+    (`capsule-contract.md` § *Declaring a prerequisite*), and that name is looked
+    up in the evidence by the filename the mode publishes it under. Selecting the
+    sink's only file instead held only while every producer happened to publish
+    one — a listing that writes its product to a file publishes two, and picking
+    the wrong one stages the wrong bytes under a correct-looking digest.
 
     The digest is the worker's own: `result.json` carries a content hash per
     native file, so nothing here re-reads bytes to answer a question the evidence
-    already answered. Exactly one file is the contract a consumed mode holds to —
-    the harness has no way to choose between two, and choosing wrong stages the
-    wrong bytes under a correct-looking digest.
+    already answered.
     """
+    try:
+        artifact, filename = bench.load_capsule(tool).consumed_artifact(mode)
+    except (CommandAdapterError, bench.PlanError) as exc:
+        raise CampaignError(f"{tool}: nothing consumes what mode {mode!r} makes: {exc}") from None
     marker = f"{result_prefix.rstrip('/')}/result.json"
     try:
         document = json.loads(gcs.download_bytes(marker))
     except (GoogleAPIError, OSError, ValueError) as exc:
         raise CampaignError(f"{marker}: evidence is unreadable: {exc}") from None
     manifest = document.get("native_manifest") if isinstance(document, dict) else None
-    if not isinstance(manifest, dict) or len(manifest) != 1:
-        found = len(manifest) if isinstance(manifest, dict) else "no"
+    if not isinstance(manifest, dict) or filename not in manifest:
+        published = sorted(manifest) if isinstance(manifest, dict) else "no manifest"
         raise CampaignError(
-            f"{marker}: a consumed preparation publishes exactly one artifact into its "
-            f"sink, and this one published {found}"
+            f"{marker}: mode {mode!r} publishes {artifact} as {filename!r} and this attempt "
+            f"published {published}"
         )
-    ((name, digest),) = manifest.items()
+    digest = manifest[filename]
     if not isinstance(digest, str) or HEX64_RE.fullmatch(digest) is None:
         raise CampaignError(f"{marker}: artifact digest is not 64 lowercase hex digits")
-    return f"{result_prefix.rstrip('/')}/native/{name}", digest
+    return f"{result_prefix.rstrip('/')}/native/{filename}", digest
 
 
 def validate_artifact(tool: str, mode: str, uri: str) -> None:
@@ -998,7 +1008,7 @@ def _claim_slot(con: sqlite3.Connection, slot: sqlite3.Row, case_id: str) -> boo
     return claimed
 
 
-def _already_attempted(con: sqlite3.Connection, case_id: str, purpose: str) -> Attempt | None:
+def _already_attempted(con: sqlite3.Connection, case_id: str, case: Case) -> Attempt | None:
     """The successful attempt of this exact case a slot may bind instead of re-running.
 
     Reuse within a launch is free and is what a shared preparation means, so a
@@ -1015,8 +1025,8 @@ def _already_attempted(con: sqlite3.Connection, case_id: str, purpose: str) -> A
     ).fetchone()
     if row is None:
         return None
-    if purpose == "preparation":
-        _, digest = produced_artifact(row["result_prefix"])
+    if case.purpose == "preparation":
+        _, digest = produced_artifact(row["result_prefix"], case.tool, case.mode)
         if row["artifact_sha256"] is not None and row["artifact_sha256"] != digest:
             raise CampaignError(
                 f"{row['attempt_id']}: recorded artifact digest {row['artifact_sha256']} is not "
@@ -1045,7 +1055,7 @@ def resolve_slot(
     case_id, _, _ = planned_attempt(case, context, inbound=inbound)
     if not _claim_slot(con, slot, case_id):
         return None
-    attempt = _already_attempted(con, case_id, case.purpose) or submit_case(
+    attempt = _already_attempted(con, case_id, case) or submit_case(
         con, case, context, inbound=inbound
     )
     con.execute(
@@ -1099,8 +1109,9 @@ def settle_dependents(con: sqlite3.Connection, attempt: Attempt, state: str, *, 
     if state != "SUCCEEDED" or attempt.purpose != "preparation":
         return
     waiting = blocked_slots(con, attempt.attempt_id)
+    mode = str(json.loads(attempt.config)["mode"])
     try:
-        uri, digest = produced_artifact(attempt.result_prefix)
+        uri, digest = produced_artifact(attempt.result_prefix, attempt.tool, mode)
     except CampaignError as exc:
         set_state(con, attempt.attempt_id, "FAILED", str(exc)[:500])
         print(
@@ -1113,7 +1124,7 @@ def settle_dependents(con: sqlite3.Connection, attempt: Attempt, state: str, *, 
         (digest, _now(), attempt.attempt_id),
     )
     try:
-        validate_artifact(attempt.tool, str(json.loads(attempt.config)["mode"]), uri)
+        validate_artifact(attempt.tool, mode, uri)
     except CampaignError as exc:
         set_state(con, attempt.attempt_id, "FAILED", str(exc)[:500])
         print(f"campaign: {attempt.attempt_id} failed artifact validation: {exc}", file=sys.stderr)
@@ -1221,7 +1232,7 @@ class Launch:
                 "preparation across launches is a decision, not a default — pass "
                 "--reuse-preparations, or --repeat to build it again"
             )
-        uri, digest = produced_artifact(row["result_prefix"])
+        uri, digest = produced_artifact(row["result_prefix"], case.tool, case.mode)
         if row["artifact_sha256"] is not None and row["artifact_sha256"] != digest:
             raise CampaignError(
                 f"{row['attempt_id']}: recorded artifact digest {row['artifact_sha256']} is not "

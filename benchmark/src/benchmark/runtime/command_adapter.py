@@ -16,7 +16,7 @@ import re
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from types import MappingProxyType, ModuleType
 from typing import Protocol, cast
 
@@ -232,6 +232,27 @@ class Mode:
     """Per reserved name: what the knob is on this mode. An axis name identifies
     the axis and explicitly not its semantics."""
 
+    artifacts: Mapping[str, str] = field(default_factory=lambda: MappingProxyType({}))
+    """Logical name to the filename this mode publishes into its sink.
+
+    Not :attr:`product` under another name: ``product`` is the *format*
+    vocabulary — ``text``, ``parquet`` — shared across tools so a report can keep
+    a Parquet number out of a text stratum. This says which files land, so a
+    consumer can ask for one of them by name. A mode publishing a listing beside
+    a key distribution has one ``product`` and two artifacts, and the harness has
+    no way to tell them apart from the sink alone: two files in a manifest is not
+    a question a count can answer.
+    """
+
+    product_artifact: str = ""
+    """Which of :attr:`artifacts` carries this mode's *measured* output.
+
+    Empty means this mode's product does not travel as a declared file yet — it
+    still streams through stdout — which is every mode today. Set, it must name
+    a key of ``artifacts``; the loader refuses anything else, because a product
+    pointing at a file the mode does not publish is a promise nothing keeps.
+    """
+
     purpose_ceiling: str = "measurement"
     """The most a plan may claim this mode is."""
 
@@ -286,16 +307,67 @@ class Mode:
                 f"heap_percent is the harness's methodology share and must be declared "
                 f"Fixed({HEAP_PERCENT}), not {heap!r}"
             )
+        artifacts = self._checked_artifacts()
+        if self.product_artifact and self.product_artifact not in artifacts:
+            raise CommandAdapterError(
+                f"mode product_artifact {self.product_artifact!r} is not one of the artifacts "
+                f"this mode publishes: {sorted(artifacts) or 'none'}"
+            )
         # Canonical column order, so two modes populating the same columns
         # declare the same tuple whatever order their authors wrote it in.
         object.__setattr__(self, "fields", tuple(n for n in FIELD_NAMES if n in set(self.fields)))
         object.__setattr__(self, "axes", MappingProxyType(axes))
+        object.__setattr__(self, "artifacts", MappingProxyType(artifacts))
+
+    def _checked_artifacts(self) -> dict[str, str]:
+        """The declared sink filenames, held to what a manifest key can be.
+
+        A manifest keys every published file by its path relative to the sink
+        root, so a nested name is legal and an absolute or escaping one names
+        bytes no attempt record accounts for.
+        """
+        if not isinstance(self.artifacts, Mapping):
+            raise CommandAdapterError("mode artifacts must map a logical name to a filename")
+        artifacts: dict[str, str] = {}
+        for name, filename in self.artifacts.items():
+            if not isinstance(name, str) or not name:
+                raise CommandAdapterError(f"artifact name must be a non-empty string: {name!r}")
+            if not isinstance(filename, str) or not filename:
+                raise CommandAdapterError(f"artifact {name} must name a file in the sink")
+            if filename.startswith("/") or ".." in PurePosixPath(filename).parts:
+                raise CommandAdapterError(
+                    f"artifact {name} must be a path under the sink, not {filename!r}"
+                )
+            artifacts[name] = filename
+        if len(set(artifacts.values())) != len(artifacts):
+            # Two names over one file makes the reverse lookup a guess, and the
+            # digest would look right whichever name asked for it.
+            raise CommandAdapterError(f"mode artifacts name one file twice: {self.artifacts}")
+        return artifacts
 
     def permits_purpose(self, purpose: str) -> bool:
         """Whether a plan may claim this mode ran for ``purpose``."""
         if purpose not in PURPOSES:
             raise CommandAdapterError(f"unknown purpose: {purpose!r}")
         return PURPOSES.index(purpose) <= PURPOSES.index(self.purpose_ceiling)
+
+
+@dataclass(frozen=True, slots=True)
+class Requirement:
+    """One link of a declared chain: a mode of this capsule, and what is taken from it.
+
+    A capsule writes the pair — ``("list", "keyspace")`` — and never the bare
+    mode. Naming only the mode leaves the harness to pick a file out of the
+    producer's sink, and the only rule available to it is *"there is exactly one,
+    take it"*, which holds by coincidence and stops holding the moment a producer
+    publishes its listing beside its key distribution. The failure is silent: a
+    131 MB listing staged where a hints file belongs, under a digest that checks
+    out.
+    """
+
+    mode: str
+    artifact: str
+    """The logical name — a key of the producing mode's ``artifacts``, not a filename."""
 
 
 def shared_axis_values(manifest: Mode, consumer: Mapping[str, object]) -> dict[str, object]:
@@ -464,8 +536,11 @@ class LoadedCommandAdapter:
     executables: tuple[Executable, ...] = ()
     """The subject's executables; the first is the one ``build/image.json`` registers."""
 
-    requires: Mapping[str, tuple[str, ...]] = field(default_factory=lambda: MappingProxyType({}))
-    """Per mode, the ordered chain of this capsule's own modes that must run first."""
+    requires: Mapping[str, tuple[Requirement, ...]] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
+    """Per mode, the ordered chain of this capsule's own modes that must run first,
+    each naming the artifact taken from it."""
 
     build_env: EnvBuilder = field(default_factory=lambda: _static_env({}))
     """The request-derived environment; defaults to returning ``FUNCTIONAL_ENV``."""
@@ -480,9 +555,52 @@ class LoadedCommandAdapter:
     """Derived, never declared: see the class docstring. Any value passed in is
     replaced with the union, so it cannot drift from the manifests."""
 
+    chain_artifacts: Mapping[str, str] = field(default_factory=lambda: MappingProxyType({}))
+    """Derived from ``REQUIRES``: per producing mode, the logical artifact the
+    chain takes from it. Any value passed in is replaced."""
+
     def __post_init__(self) -> None:
         axes = {name for manifest in self.modes.values() for name in manifest.axes}
         object.__setattr__(self, "accepted_config_keys", self.config_keys | axes | {"mode"})
+        object.__setattr__(self, "chain_artifacts", MappingProxyType(self._chain_artifacts()))
+
+    def _chain_artifacts(self) -> dict[str, str]:
+        """Invert ``requires``: which artifact each producing mode is consumed for.
+
+        A producer serving two consumers that want *different* artifacts of it is
+        refused here rather than resolved per consumer, because the harness
+        records one ``artifact_sha256`` against the producing attempt and two
+        answers to that one question is how evidence comes to disagree with
+        itself. No capsule declares that shape; when one wants to, the column has
+        to grow a name first.
+        """
+        artifacts: dict[str, str] = {}
+        for consumer, chain in self.requires.items():
+            for step in chain:
+                taken = artifacts.setdefault(step.mode, step.artifact)
+                if taken != step.artifact:
+                    raise CommandAdapterError(
+                        f"{self.tool}: mode {step.mode!r} is consumed for {taken!r} and "
+                        f"{consumer!r} wants {step.artifact!r} from it"
+                    )
+        return artifacts
+
+    def consumed_artifact(self, mode: str) -> tuple[str, str]:
+        """The `(logical name, sink filename)` the declared chain takes from ``mode``.
+
+        The question a settled preparation is read with: its manifest may carry
+        more than one file, and only the declaration says which of them the chain
+        was for.
+        """
+        manifest = self.modes.get(mode)
+        if manifest is None:
+            raise CommandAdapterError(f"{self.tool} has no mode {mode!r}")
+        artifact = self.chain_artifacts.get(mode)
+        if artifact is None:
+            raise CommandAdapterError(
+                f"{self.tool}: no mode of this capsule consumes what {mode!r} publishes"
+            )
+        return artifact, manifest.artifacts[artifact]
 
     def compile(self, request: CommandRequest) -> tuple[str, ...]:
         """Return the complete subject argv the attempt engine will execute."""
@@ -587,33 +705,61 @@ def _load_modes(
 
 def _load_requires(
     module: ModuleType, path: Path, modes: Mapping[str, Mode]
-) -> Mapping[str, tuple[str, ...]]:
+) -> Mapping[str, tuple[Requirement, ...]]:
     raw = getattr(module, "REQUIRES", {})
     if not isinstance(raw, Mapping):
         raise CommandAdapterError(f"{path} REQUIRES must map a mode to its ordered prerequisites")
-    requires: dict[str, tuple[str, ...]] = {}
+    requires: dict[str, tuple[Requirement, ...]] = {}
     for mode, chain in raw.items():
         if mode not in modes:
             raise CommandAdapterError(f"{path} REQUIRES names unknown mode {mode!r}")
         if not isinstance(chain, tuple) or not chain:
             raise CommandAdapterError(f"{path} REQUIRES[{mode!r}] must be a non-empty tuple")
-        unknown = [step for step in chain if step not in modes]
-        if unknown:
-            # A dependency on something another tool produced is a different
-            # problem: that artifact is an input the study supplies.
-            raise CommandAdapterError(
-                f"{path} REQUIRES[{mode!r}] names mode(s) this capsule does not have: "
-                f"{', '.join(map(repr, unknown))}"
-            )
-        if len(set(chain)) != len(chain):
+        steps = tuple(_requirement(step, mode, path, modes) for step in chain)
+        if len({step.mode for step in steps}) != len(steps):
             raise CommandAdapterError(f"{path} REQUIRES[{mode!r}] repeats a prerequisite")
-        requires[mode] = chain
+        requires[mode] = steps
     for mode in requires:
         _refuse_requires_cycle(requires, mode, path)
     return MappingProxyType(requires)
 
 
-def _refuse_requires_cycle(requires: Mapping[str, tuple[str, ...]], mode: str, path: Path) -> None:
+def _requirement(step: object, mode: str, path: Path, modes: Mapping[str, Mode]) -> Requirement:
+    """One `(mode, artifact)` pair of a chain, held to what the producer declares.
+
+    The bare mode is refused rather than read as *"whatever that mode's sole
+    artifact is"*: a capsule that later publishes a second file would silently
+    change what every consumer binds.
+    """
+    if not isinstance(step, tuple) or len(step) != 2 or not all(isinstance(v, str) for v in step):
+        raise CommandAdapterError(
+            f"{path} REQUIRES[{mode!r}] must name each prerequisite as (mode, artifact): {step!r}"
+        )
+    prerequisite, artifact = cast(tuple[str, str], step)
+    manifest = modes.get(prerequisite)
+    if manifest is None:
+        # A dependency on something another tool produced is a different
+        # problem: that artifact is an input the study supplies.
+        raise CommandAdapterError(
+            f"{path} REQUIRES[{mode!r}] names mode {prerequisite!r}, which this capsule "
+            f"does not have"
+        )
+    if not manifest.artifacts:
+        raise CommandAdapterError(
+            f"{path} REQUIRES[{mode!r}] names {prerequisite!r}, which declares no artifact "
+            f"for anything to consume"
+        )
+    if artifact not in manifest.artifacts:
+        raise CommandAdapterError(
+            f"{path} REQUIRES[{mode!r}] wants {artifact!r} from {prerequisite!r}, which "
+            f"publishes {sorted(manifest.artifacts)}"
+        )
+    return Requirement(prerequisite, artifact)
+
+
+def _refuse_requires_cycle(
+    requires: Mapping[str, tuple[Requirement, ...]], mode: str, path: Path
+) -> None:
     """Walk one mode's chain transitively: a cycle is a shape no reviewer can read offline."""
 
     def walk(current: str, chain: tuple[str, ...]) -> None:
@@ -622,7 +768,7 @@ def _refuse_requires_cycle(requires: Mapping[str, tuple[str, ...]], mode: str, p
                 f"{path} REQUIRES makes {mode!r} depend on itself through {current!r}"
             )
         for step in requires.get(current, ()):
-            walk(step, (*chain, current))
+            walk(step.mode, (*chain, current))
 
     walk(mode, ())
 
@@ -661,7 +807,7 @@ def _load_validate_artifact(
 
 
 def _check_inline(
-    modes: Mapping[str, Mode], requires: Mapping[str, tuple[str, ...]], path: Path
+    modes: Mapping[str, Mode], requires: Mapping[str, tuple[Requirement, ...]], path: Path
 ) -> None:
     """Hold an inline setup exec to one flat, offline-readable step.
 

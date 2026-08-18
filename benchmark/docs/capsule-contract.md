@@ -61,7 +61,7 @@ and a capsule could be altered without anything noticing.
 | `CONFIG_KEYS` | no, defaults empty | The config keys this capsule accepts; anything else is refused |
 | `FUNCTIONAL_ENV` | no, defaults empty | Non-secret environment the subject structurally needs |
 | `build_env(request)` | no, defaults to `FUNCTIONAL_ENV` | Environment derived from the request — heap flags, and nothing else so far |
-| `REQUIRES` | no, defaults empty | The chain of this capsule's own modes that must run before a mode, in order |
+| `REQUIRES` | no, defaults empty | The chain of this capsule's own modes that must run before a mode, in order, each naming the artifact taken from it |
 | `VALIDATE_ARTIFACT` | no, defaults empty | Per producing mode, the check that refuses an artifact that is structurally useless before anything consumes it |
 
 A capsule that declares neither `SUPPORTS_UNSIGNED` nor `SUPPORTS_SIGNED` as
@@ -106,6 +106,8 @@ write a directory sink while its TSV mode streams to stdout.
 | `axes` | Per reserved name: `Fixed(v)`, `Default(v, provenance)`, `Ceiling(v, provenance)`, `Stated()`, `Inert`, or absent. |
 | `purpose_ceiling` | The most a plan may claim this mode is. A plan may demote a run to `canary`; it may never promote `summarize` to `measurement`. A mode capped at `preparation` is also never row-counted: what it publishes is not a listing, and the worker records a null count rather than asking a normalizer a question about a mode it does not have. |
 | `inline` | Another mode of this capsule the worker runs untimed, in the same container, immediately before the timed subject — see *A setup exec is not a chain link*. |
+| `artifacts` | Logical name to the filename this mode publishes into its sink. What a consumer asks for by name — see *A producer declares its artifacts by name*. |
+| `product_artifact` | Which of `artifacts` carries this mode's *measured* output. Empty while a product still streams through stdout, which is every mode today. |
 
 **`product` and `fields` translate across tools; `axes` does not.** The first two
 describe the artifact, which is why they are comparable at all. An axis name
@@ -319,10 +321,15 @@ rendered heap flags are then derived from values already hashed, so like
 
 That a hinted listing needs hints is a fact about the tool, in the same category
 as which modes exist. So the capsule states it — `REQUIRES`, mapping a mode to
-the mode that must precede it — and the plan says nothing at all. A row asking
-for the dependent mode is asking for whatever that mode requires.
+the mode that must precede it **and the artifact taken from it** — and the plan
+says nothing at all. A row asking for the dependent mode is asking for whatever
+that mode requires.
 
-Three constraints:
+```python
+REQUIRES = {"list-hinted": (("list", "keyspace"),)}
+```
+
+Four constraints:
 
 - **The prerequisite names a mode of the same capsule.** A dependency on
   something another tool produced — an S3 Inventory, say — is a different
@@ -337,11 +344,52 @@ Three constraints:
   whole sweep. See [`identity.md`](identity.md) § *Two identities, two
   questions*.
 
+- **The prerequisite names the artifact, not just the mode.** The pair is
+  required and the bare mode is refused; see below.
+
 **A chain may be more than one link.** `REQUIRES` is an ordered list, not a
 single mode. What the one-edge rule was protecting is *dynamic* graphs — a chain
 discovered at run time — and a statically declared list preserves that
 completely, since the whole shape is readable offline and the depth is bounded by
 the declaration.
+
+### A producer declares its artifacts by name
+
+A mode declares every file it publishes into its sink, under a logical name:
+
+```python
+"list": Mode(..., artifacts={"keyspace": KS_NAME}),
+```
+
+and a consumer names the one it wants. This is not decoration. Selecting a
+producer's artifact was *"the manifest holds exactly one file, take it"* — true
+only for as long as every producing mode published exactly one, and a listing
+that writes its product to a file publishes two. The failure that rule reaches
+is silent in the worst direction: a 131 MB listing staged where a 679 KB hints
+file belongs, under a digest that checks out. Named, the same lookup also
+catches the sink holding one *wrong* file, which no count ever could.
+
+`artifacts` is not `product` under another name. `product` is the **format**
+vocabulary — `text`, `parquet` — shared across tools so a report can keep a
+Parquet number out of a text stratum. `artifacts` says which files land.
+`product_artifact` names which of them carries the measured output; empty means
+the product does not travel as a declared file yet.
+
+The refusals, all at load:
+
+- an artifact name the required mode does not declare;
+- a required mode that declares no artifacts at all;
+- a `product_artifact` that is not one of the mode's own `artifacts`;
+- a bare mode where the pair belongs — sugar for "its sole artifact" is exactly
+  the inference this replaces, and it would silently rebind every consumer the
+  day a capsule publishes a second file;
+- two consumers wanting *different* artifacts of one producing mode. The
+  producing attempt records one `artifact_sha256`, and two answers to that one
+  question is how evidence comes to disagree with itself. No capsule declares
+  that shape; the column has to grow a name before one can.
+
+Only `s3-fast-list` declares artifacts today, because only its chain consumes
+one: `list` publishes `keyspace`, `ks-split` publishes `hints`.
 
 ### A setup exec is not a chain link
 

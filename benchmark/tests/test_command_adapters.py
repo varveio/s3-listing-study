@@ -471,7 +471,7 @@ def consuming_modes(adapter: LoadedCommandAdapter) -> frozenset[str]:
     """
     modes = set(adapter.requires)
     for chain in adapter.requires.values():
-        modes.update(chain[1:])
+        modes.update(step.mode for step in chain[1:])
     modes.update(manifest.inline for manifest in adapter.modes.values() if manifest.inline)
     return frozenset(modes)
 

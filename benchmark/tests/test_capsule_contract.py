@@ -11,6 +11,7 @@ what it says.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -26,10 +27,12 @@ from benchmark.runtime.command_adapter import (
     Inert,
     LoadedCommandAdapter,
     Mode,
+    Requirement,
     load_command_adapter,
 )
 
 ARGV = ("/usr/local/bin/fixture",)
+TEXT, KEY = "text", ("key",)
 HEADER = '''\
 """A fixture capsule: the smallest thing the loader will accept."""
 
@@ -296,43 +299,103 @@ def test_a_plan_may_demote_a_mode_and_never_promote_one() -> None:
         summarize.permits_purpose("smoke")
 
 
-def test_a_prerequisite_chain_is_this_capsule_s_own_modes_in_order(tmp_path: Path) -> None:
+CHAIN_MODES = (
+    "\nMODES = {\n"
+    '    "list": Mode(product="text", fields=("key",), artifacts={"keyspace": "k.ks"}),\n'
+    '    "split": Mode(\n'
+    '        product="text",\n'
+    '        fields=("key",),\n'
+    '        purpose_ceiling="preparation",\n'
+    '        artifacts={"hints": "hints.input"},\n'
+    "    ),\n"
+    '    "hinted": Mode(product="text", fields=("key",)),\n'
+    "}\n"
+)
+"""Two producers, each publishing one named file, and the mode that consumes them."""
+
+
+def test_a_prerequisite_chain_names_a_mode_and_the_artifact_taken_from_it(
+    tmp_path: Path,
+) -> None:
     adapter = load(
         tmp_path,
-        "\nMODES = {\n"
-        '    "list": Mode(product="text", fields=("key",)),\n'
-        '    "split": Mode(product="text", fields=("key",), purpose_ceiling="preparation"),\n'
-        '    "hinted": Mode(product="text", fields=("key",)),\n'
-        "}\n"
-        'REQUIRES = {"hinted": ("list", "split")}\n',
+        CHAIN_MODES + 'REQUIRES = {"hinted": (("list", "keyspace"), ("split", "hints"))}\n',
     )
-    assert adapter.requires == {"hinted": ("list", "split")}
+    assert adapter.requires == {
+        "hinted": (Requirement("list", "keyspace"), Requirement("split", "hints"))
+    }
+    # What a settled producer's evidence is read with: the name, and the file the
+    # producing mode publishes it under.
+    assert adapter.consumed_artifact("list") == ("keyspace", "k.ks")
+    with pytest.raises(CommandAdapterError):
+        # Nothing declares a chain through `hinted`, so nothing consumes it.
+        adapter.consumed_artifact("hinted")
 
 
 @pytest.mark.parametrize(
     "requires",
     [
-        '{"hinted": ("inventory",)}',
-        '{"unknown": ("list",)}',
-        '{"hinted": ("hinted",)}',
-        '{"hinted": ("list",), "list": ("hinted",)}',
-        '{"hinted": ("list", "list")}',
+        # A mode of another tool: that artifact is an input the study supplies.
+        '{"hinted": (("inventory", "keyspace"),)}',
+        '{"unknown": (("list", "keyspace"),)}',
+        '{"hinted": (("hinted", "keyspace"),)}',
+        '{"hinted": (("list", "keyspace"),), "list": (("hinted", "keyspace"),)}',
+        '{"hinted": (("list", "keyspace"), ("list", "keyspace"))}',
         '{"hinted": ()}',
         '{"hinted": "list"}',
+        # The bare mode: sugar for "its sole artifact" is exactly the inference
+        # that breaks when a producer publishes a second file.
+        '{"hinted": ("list",)}',
+        # An artifact the producing mode does not publish.
+        '{"hinted": (("list", "hints"),)}',
+        # A producer with nothing declared to consume.
+        '{"hinted": (("hinted", "keyspace"),)}',
+        # Two consumers disagreeing about what one producer is consumed for.
+        '{"hinted": (("list", "keyspace"),), "split": (("list", "listing"),)}',
     ],
 )
 def test_a_prerequisite_the_planner_could_not_expand_offline_is_refused(
     tmp_path: Path, requires: str
 ) -> None:
-    body = (
-        "\nMODES = {\n"
-        '    "list": Mode(product="text", fields=("key",)),\n'
-        '    "hinted": Mode(product="text", fields=("key",)),\n'
-        "}\n"
-        f"REQUIRES = {requires}\n"
-    )
     with pytest.raises(CommandAdapterError):
-        load(tmp_path, body)
+        load(tmp_path, CHAIN_MODES + f"REQUIRES = {requires}\n")
+
+
+@pytest.mark.parametrize(
+    "declare",
+    [
+        # A measured product this mode does not publish is a promise nothing keeps.
+        lambda: Mode(TEXT, KEY, artifacts={"keyspace": "k.ks"}, product_artifact="listing"),
+        lambda: Mode(TEXT, KEY, product_artifact="listing"),
+        # One file under two names makes the reverse lookup a guess.
+        lambda: Mode(TEXT, KEY, artifacts={"keyspace": "k.ks", "listing": "k.ks"}),
+        # A path outside the sink names bytes no attempt record accounts for.
+        lambda: Mode(TEXT, KEY, artifacts={"keyspace": "/etc/passwd"}),
+        lambda: Mode(TEXT, KEY, artifacts={"keyspace": "../k.ks"}),
+        lambda: Mode(TEXT, KEY, artifacts={"keyspace": ""}),
+        lambda: Mode(TEXT, KEY, artifacts={"": "k.ks"}),
+    ],
+)
+def test_an_artifact_declaration_the_sink_could_not_hold_is_refused(
+    declare: Callable[[], Mode],
+) -> None:
+    with pytest.raises(CommandAdapterError):
+        declare()
+
+
+def test_a_mode_names_the_artifact_that_carries_its_measured_product() -> None:
+    """``product_artifact`` is which file, ``product`` is which format: a mode
+    publishing a key distribution beside a Parquet listing has one of each."""
+    mode = Mode(
+        product="parquet",
+        fields=("key",),
+        artifacts={"keyspace": "k.ks", "listing": "listing.parquet"},
+        product_artifact="listing",
+    )
+    assert mode.product == "parquet"
+    assert mode.artifacts["listing"] == "listing.parquet"
+    # Empty is the honest state while a product still streams through stdout.
+    assert Mode(product="text", fields=("key",)).product_artifact == ""
 
 
 def test_the_declared_executable_is_cross_checked_against_the_registered_image(
@@ -447,11 +510,11 @@ def test_an_inline_setup_exec_names_one_preparation_mode_of_this_capsule(tmp_pat
         "}\n",
         # A setup exec that is also a chain link: it needs a step of its own.
         "\nMODES = {\n"
-        '    "list": Mode(product="text", fields=("key",)),\n'
+        '    "list": Mode(product="text", fields=("key",), artifacts={"keyspace": "k.ks"}),\n'
         '    "split": Mode(product="text", fields=("key",), purpose_ceiling="preparation"),\n'
         '    "hinted": Mode(product="text", fields=("key",), inline="split"),\n'
         "}\n"
-        'REQUIRES = {"split": ("list",)}\n',
+        'REQUIRES = {"split": (("list", "keyspace"),)}\n',
     ],
 )
 def test_an_inline_setup_the_planner_could_not_read_offline_is_refused(

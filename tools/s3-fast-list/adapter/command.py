@@ -62,47 +62,6 @@ vocabulary has no word for that, so this declares the nearest honest thing and
 Read as "key-shaped", not as "emits keys".
 """
 
-MODES = {
-    # `-c` is accepted and statically inert here: with no hints file N=0, so
-    # there is exactly one range pair and one flat-list task (`main.rs:191-218`).
-    "list": Mode(
-        product="parquet",
-        fields=FIELDS,
-        axes={"concurrency": Inert()},
-        executable=S3_FAST_LIST.name,
-    ),
-    "ks-split": Mode(
-        product="text",
-        fields=CUT_POINT_FIELDS,
-        axes={"segments": SEGMENTS},
-        purpose_ceiling="preparation",
-        executable=KS_TOOL.name,
-    ),
-    # `segments` is declared here too, though this argv never carries it: the
-    # cut count is what the run listed under, so it belongs in the measurement
-    # identity — and the inline `ks-split` exec inherits the stated value, which
-    # is the argv that does carry it.
-    "list-hinted": Mode(
-        product="parquet",
-        fields=FIELDS,
-        axes={"concurrency": CONCURRENCY, "segments": SEGMENTS},
-        executable=S3_FAST_LIST.name,
-        inline="ks-split",
-    ),
-}
-
-REQUIRES = {"list-hinted": ("list",)}
-"""The hinted path needs a full listing first: only a `list` emits the `.ks` key
-distribution the cut points are computed from. That bootstrap listing is not
-overhead — it *is* the unhinted arm, which is why it keeps a `measurement`
-ceiling and only the split carries `preparation`.
-
-`ks-split` is not a link here. Cutting an existing `.ks` into ranges is a
-sub-second local transform whose output one measurement consumes and nothing
-else, so it runs as that measurement's inline setup exec (`MODES`, `inline`)
-rather than buying a slot, a job and a VM of its own. It stays a declared mode:
-it is what the inline exec runs, and a plan may still name it directly."""
-
 KS_NAME = "keyspace.ks"
 """The key distribution a listing drops into the engine's sink, and the artifact
 the hinted measurement's inline `ks-split` consumes. Written only when the engine
@@ -113,6 +72,53 @@ HINTS_NAME = "hints.input"
 """The cut points `ks-split` publishes into the sink it is given — the attempt's
 own setup directory when it runs inline, an ordinary preparation sink when a plan
 names the mode directly."""
+
+MODES = {
+    # `-c` is accepted and statically inert here: with no hints file N=0, so
+    # there is exactly one range pair and one flat-list task (`main.rs:191-218`).
+    "list": Mode(
+        product="parquet",
+        fields=FIELDS,
+        axes={"concurrency": Inert()},
+        executable=S3_FAST_LIST.name,
+        artifacts={"keyspace": KS_NAME},
+    ),
+    "ks-split": Mode(
+        product="text",
+        fields=CUT_POINT_FIELDS,
+        axes={"segments": SEGMENTS},
+        purpose_ceiling="preparation",
+        executable=KS_TOOL.name,
+        artifacts={"hints": HINTS_NAME},
+    ),
+    # `segments` is declared here too, though this argv never carries it: the
+    # cut count is what the run listed under, so it belongs in the measurement
+    # identity — and the inline `ks-split` exec inherits the stated value, which
+    # is the argv that does carry it. The hinted listing publishes a `.ks` of its
+    # own for the same reason the unhinted one does: the flag is not optional,
+    # only its destination is.
+    "list-hinted": Mode(
+        product="parquet",
+        fields=FIELDS,
+        axes={"concurrency": CONCURRENCY, "segments": SEGMENTS},
+        executable=S3_FAST_LIST.name,
+        inline="ks-split",
+        artifacts={"keyspace": KS_NAME},
+    ),
+}
+
+REQUIRES = {"list-hinted": (("list", "keyspace"),)}
+"""The hinted path needs a full listing first: only a `list` emits the `.ks` key
+distribution the cut points are computed from — and it is named, not inferred
+from the listing's sink holding one file, which it will not for long. That
+bootstrap listing is not overhead — it *is* the unhinted arm, which is why it
+keeps a `measurement` ceiling and only the split carries `preparation`.
+
+`ks-split` is not a link here. Cutting an existing `.ks` into ranges is a
+sub-second local transform whose output one measurement consumes and nothing
+else, so it runs as that measurement's inline setup exec (`MODES`, `inline`)
+rather than buying a slot, a job and a VM of its own. It stays a declared mode:
+it is what the inline exec runs, and a plan may still name it directly."""
 
 
 def _sink_path(request: CommandRequest, name: str) -> str:

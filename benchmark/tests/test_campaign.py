@@ -685,10 +685,13 @@ class Evidence:
         self.objects: dict[str, bytes] = {}
 
     def publish(self, result_prefix: str, name: str, content: bytes) -> str:
+        """Add one file to an attempt's sink, keeping whatever it published before."""
+        marker = f"{result_prefix}result.json"
         digest = hashlib.sha256(content).hexdigest()
-        self.objects[f"{result_prefix}result.json"] = json.dumps(
-            {"native_manifest": {name: digest}}
-        ).encode()
+        published = (
+            json.loads(self.objects[marker])["native_manifest"] if marker in self.objects else {}
+        )
+        self.objects[marker] = json.dumps({"native_manifest": {**published, name: digest}}).encode()
         self.objects[f"{result_prefix}native/{name}"] = content
         return digest
 
@@ -779,6 +782,10 @@ def test_a_settled_preparation_resolves_the_measurement_that_waited_on_it(
     assert [row["state"] for row in ledger.pending_rows(con)] == ["BLOCKED"]
 
     keyspace = evidence.publish(listing.result_prefix, "keyspace.ks", b"a/\nb/\n")
+    # A second file in the same sink, which is what a listing publishing its
+    # product lands beside its key distribution: the chain binds the artifact
+    # `REQUIRES` named, not the one the sink happens to hold.
+    evidence.publish(listing.result_prefix, "listing.parquet", b"PAR1" * 64)
     ledger.set_state(con, listing.attempt_id, "SUCCEEDED")
     campaign.settle_dependents(con, listing, "SUCCEEDED", suite=SUITE)
 
@@ -822,24 +829,26 @@ def test_an_artifact_is_validated_against_the_mode_that_produced_it(
 def test_a_preparation_with_no_consumable_artifact_fails_and_abandons_what_awaited_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A preparation the harness cannot read one artifact out of must not resolve
+    """A preparation whose sink does not hold the named artifact must not resolve
     the measurement waiting on it — and the slot survives the failure, because a
-    retry may still pay it."""
+    retry may still pay it.
+
+    One file under a plausible name is the case a count could never catch: the
+    listing published something, and it is not the key distribution the hinted
+    run is compiled against.
+    """
     con = hinted_launch(tmp_path, monkeypatch)
     evidence = Evidence()
     monkeypatch.setattr(gcs, "download_bytes", evidence.download)
     listing = ledger.Attempt.from_row(attempt_row(con, "list"))
-    # Two files in the sink: the harness has no way to choose between them.
-    evidence.objects[f"{listing.result_prefix}result.json"] = json.dumps(
-        {"native_manifest": {"keyspace.ks": "a" * 64, "extra.ks": "b" * 64}}
-    ).encode()
+    evidence.publish(listing.result_prefix, "listing.parquet", b"PAR1")
     ledger.set_state(con, listing.attempt_id, "SUCCEEDED")
     campaign.settle_dependents(con, listing, "SUCCEEDED", suite=SUITE)
 
     row = con.execute(
         "SELECT state, state_detail FROM attempts WHERE attempt_id=?", (listing.attempt_id,)
     ).fetchone()
-    assert row["state"] == "FAILED" and "exactly one artifact" in row["state_detail"]
+    assert row["state"] == "FAILED" and "keyspace.ks" in row["state_detail"]
     assert ledger.pending_rows(con)[0]["state"] == "BLOCKED"
 
     ledger.set_state(con, listing.attempt_id, "ACCEPTED", "accepted FAILED")
