@@ -4,24 +4,101 @@
 from benchmark.runtime.command_adapter import (
     CommandAdapterError,
     CommandRequest,
+    Default,
+    Executable,
+    Mode,
     command_adapter_main,
-    validate_concurrency,
 )
 
 TOOL = "s4cmd"
-FIXED_COMMAND_PREFIX = ("/usr/local/bin/s4cmd",)
-MODES = frozenset({"recursive", "shallow", "show-directory", "du"})
-CONCURRENCY_RANGE = (1, 8)
-DEFAULT_CONCURRENCY = 4
+S4CMD = Executable("s4cmd", ("/usr/local/bin/s4cmd",))
+EXECUTABLES = (S4CMD,)
+SUPPORTS_UNSIGNED = False
+"""No unsigned request path; it signs with the credential in the environment."""
+
+CONCURRENCY = Default(32, "source@80059bf")
+"""s4cmd's own ``-c/--num-threads`` default when unsilenced: ``cpu_count() * 4``
+(``s4cmd.py:121,1859``), a formula rather than a portable constant.
+
+``32`` is the value that formula produces on the study's own 8-core smoke
+runner (``docs/mechanism.md`` § "Modes and tunables"; also `NOTES.md`), the only
+instantiation this capsule has a committed receipt for. It is not a subject
+fact independent of machine shape: a differently-sized runner yields a
+different number, and this capsule has no visibility into the container's
+actual vCPU allocation to compute the honest value it would run at.
+
+The historical ``CONCURRENCY_RANGE = (1, 8)`` guard that used to clamp this
+render is dropped: it was arbitrary by accident (bracketing a 32-thread
+default against an 8-core runner where the native default is exactly 32, not
+a fact about s4cmd) and would reject this very default.
+"""
+
+AXES = {"concurrency": CONCURRENCY}
+
+TEXT_FIELDS = ("key", "size")
+"""``normalize.py``'s QUERY only ever emits ``key`` and ``size``; etag, mtime
+and storage_class are never printed by ``ls`` and are always NULL."""
+
+LISTING = "listing"
+SUMMARY = "summary"
+"""The logical names a mode publishes its product under: a per-key listing, or
+the aggregate report that is not one."""
+
+TEXT = {LISTING: "listing.txt"}
+SUMMARY_TEXT = {SUMMARY: "summary.txt"}
+"""s4cmd prints and takes no output destination, so the worker lands fd 1 in the
+declared file. `du` publishes under its own name because what it holds is one
+aggregate size and no per-key rows."""
+
+MODES = {
+    "recursive": Mode(
+        product="text",
+        fields=TEXT_FIELDS,
+        axes=AXES,
+        executable=S4CMD.name,
+        artifacts=TEXT,
+        product_artifact=LISTING,
+    ),
+    "shallow": Mode(
+        product="text",
+        fields=TEXT_FIELDS,
+        axes=AXES,
+        executable=S4CMD.name,
+        artifacts=TEXT,
+        product_artifact=LISTING,
+    ),
+    "show-directory": Mode(
+        product="text",
+        fields=TEXT_FIELDS,
+        axes=AXES,
+        executable=S4CMD.name,
+        artifacts=TEXT,
+        product_artifact=LISTING,
+    ),
+    # du emits an aggregate size only -- normalize.py is a documented no-op,
+    # zero per-key rows, so it can never be ranked against a per-key listing.
+    "du": Mode(
+        product="text",
+        fields=("size",),
+        axes=AXES,
+        purpose_ceiling="diagnostic",
+        executable=S4CMD.name,
+        artifacts=SUMMARY_TEXT,
+        product_artifact=SUMMARY,
+    ),
+}
+
+
+def _concurrency(request: CommandRequest) -> str:
+    """Render the asked-for thread count; declared in :data:`MODES`, never pinned here."""
+    value = request.config.get("concurrency", CONCURRENCY.value)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise CommandAdapterError(f"{TOOL} concurrency must be a positive integer; got: {value!r}")
+    return str(value)
 
 
 def _build_tail(request: CommandRequest) -> tuple[str, ...]:
-    threads = validate_concurrency(
-        request,
-        tool=TOOL,
-        supported_range=CONCURRENCY_RANGE,
-    )
-    threads_arg = str(DEFAULT_CONCURRENCY if threads is None else threads)
+    threads_arg = _concurrency(request)
     url = f"s3://{request.bucket}/{request.prefix}"
     commands = {
         "recursive": ("ls", "-r", "-c", threads_arg, url),
@@ -36,7 +113,7 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
 
 
 def build_command(request: CommandRequest) -> tuple[str, ...]:
-    return *FIXED_COMMAND_PREFIX, *_build_tail(request)
+    return *S4CMD.argv, *_build_tail(request)
 
 
 if __name__ == "__main__":

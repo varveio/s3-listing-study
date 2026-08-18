@@ -65,6 +65,9 @@ DATASET_MODES = {("swath", "recursive-parquet"), ("swath", "recursive-parquet-so
 
 UNEXERCISED = {
     "ps3": {"list-versions"},
+    # The hinted mode's first live run (c-2026-08-17-large, noaa-rtma-pds)
+    # postdates the committed corpus; no committed payload reaches it yet.
+    "s3-fast-list": {"list-hinted"},
     "s3p": {"ls-long"},
     "s4cmd": {"du", "shallow", "show-directory"},
     # v0.1.0 receipts were retired with that subject; v0.2.0 currently has
@@ -83,7 +86,7 @@ UNEXERCISED = {
 # listing but a corrupt payload. Only a 0-byte stream means "zero objects" for
 # s3-fast-list, and the adapter refuses the newline — see
 # `test_a_newline_only_parquet_stream_is_refused`, which pins that half.
-BINARY_MODES = {("s3-fast-list", "list")}
+BINARY_MODES = {("s3-fast-list", "list"), ("s3-fast-list", "list-hinted")}
 
 REPO = repo_root()
 
@@ -448,6 +451,9 @@ FIXTURES[("s3-fast-list", "list")] = (
     "normals-hourly/",
     [b"normals-hourly/access/A.csv"],
 )
+# The hinted mode emits the identical parquet through the identical writer —
+# the hints only shape how the keyspace was walked — so one payload serves both.
+FIXTURES[("s3-fast-list", "list-hinted")] = FIXTURES[("s3-fast-list", "list")]
 
 
 def adapter_path(tool: str) -> Path:
@@ -738,6 +744,29 @@ def test_normalizer_can_read_an_existing_raw_path_without_stdin(tool: str, tmp_p
     assert by_path.stdout == by_stdin.stdout
 
 
+@pytest.mark.parametrize("tool", PORTED)
+def test_the_config_blob_reaches_the_normalizer(tool: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The same blob ``command.py`` compiled argv from reaches ``normalize.py`` too.
+
+    Unused by every adapter today, but genuinely threaded through the CLI
+    boundary rather than defaulted away, so a capsule whose output shape
+    depends on a config key can parse its own output later.
+    """
+    adapter = load_adapter(REPO, tool)
+    mode = next(mode for fixture_tool, mode in FIXTURES if fixture_tool == tool)
+    captured: list[object] = []
+
+    def capture(*_args: object, config: object = None, **_kwargs: object) -> int:
+        captured.append(config)
+        return 0
+
+    monkeypatch.setattr(adapter, "normalize", capture)
+    monkeypatch.setattr(adapter.sys, "stdin", SimpleNamespace(buffer=io.BytesIO(b"")))
+    monkeypatch.setattr(adapter.sys, "stdout", SimpleNamespace(buffer=io.BytesIO()))
+    assert adapter.main([mode, "", "--config", '{"mode": "x", "concurrency": 4}']) == 0
+    assert captured == [{"mode": "x", "concurrency": 4}]
+
+
 @pytest.mark.parametrize(
     ("tool", "mode"),
     sorted(set(FIXTURES) - DATASET_MODES),
@@ -792,7 +821,7 @@ def test_swath_treats_a_closed_downstream_as_success(
 ) -> None:
     adapter = load_adapter(REPO, "swath")
 
-    def broken_pipe(*_args: object) -> int:
+    def broken_pipe(*_args: object, **_kwargs: object) -> int:
         raise BrokenPipeError
 
     monkeypatch.setattr(adapter, "normalize", broken_pipe)

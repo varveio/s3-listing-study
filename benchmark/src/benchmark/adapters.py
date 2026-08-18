@@ -25,14 +25,22 @@ for stream-shaped inputs.
 from __future__ import annotations
 
 import importlib.util
+import json
 import subprocess
 import sys
 import uuid
+from collections.abc import Mapping
 from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-from benchmark.runtime.command_adapter import CommandRequest, load_command_adapter
+from benchmark.runtime.command_adapter import (
+    HEAP_PERCENT,
+    CommandRequest,
+    LoadedCommandAdapter,
+    Mode,
+    load_command_adapter,
+)
 
 DEFAULT_ADAPTER_ROOT = "/opt/benchmark/tools"
 
@@ -46,6 +54,32 @@ def adapter_dir_for(tool: str, adapter_root: str) -> Path:
     return Path(adapter_root) / tool / "adapter"
 
 
+def load_adapter(adapter_dir: Path | str, tool: str) -> LoadedCommandAdapter:
+    """One bundled capsule's loaded ``command.py``, with its refusals as AdapterError.
+
+    Reached where a caller needs the declaration itself rather than one compiled
+    argv -- an inline setup exec's mode, its config, its validator -- so the
+    capsule stays the one answer to what it declares.
+    """
+    try:
+        return load_command_adapter(Path(adapter_dir) / "command.py", expected_tool=tool)
+    except Exception as exc:
+        raise AdapterError(f"{tool}: could not load command adapter: {exc}") from exc
+
+
+def mode_manifest(adapter_dir: Path | str, tool: str, mode: str) -> Mode:
+    """The capsule's manifest for one mode: what it produces and which fields.
+
+    Resolved from the capsule rather than read off a column, because product and
+    fields are a pure function of ``(tool, mode)`` at the revision the row
+    already pins -- a stored copy would be a second answer that can disagree.
+    """
+    try:
+        return load_adapter(adapter_dir, tool).modes[mode]
+    except Exception as exc:
+        raise AdapterError(f"{tool}: no mode manifest for {mode!r}: {exc}") from exc
+
+
 def compile_command(
     adapter_dir: Path | str,
     tool: str,
@@ -54,13 +88,18 @@ def compile_command(
     bucket: str,
     region: str,
     prefix: str = "",
-    auth: str = "anonymous",
+    signed: bool = False,
+    config: Mapping[str, object] | None = None,
     sink_dir: str = "",
+    artifact_path: str = "",
+    visible_memory_gb: float | None = None,
+    heap_percent: int = HEAP_PERCENT,
 ) -> tuple[tuple[str, ...], dict[str, str]]:
     """Load ``<adapter_dir>/command.py`` and compile this case's exact subject argv.
 
-    Returns ``(argv, functional_env)``: functional_env is the capsule's own
-    non-secret, tool-specific environment (LoadedCommandAdapter.functional_env),
+    Returns ``(argv, env)``: env is the capsule's request-derived environment
+    (``LoadedCommandAdapter.build_env(request)``, which defaults to its static
+    ``FUNCTIONAL_ENV`` for a capsule that declares nothing request-derived),
     which the caller merges into the subject's env alongside its own base env.
     """
     try:
@@ -71,10 +110,14 @@ def compile_command(
             region=region,
             prefix=prefix,
             tool=tool,
-            auth=auth,
+            signed=signed,
+            config=config or {},
             sink_dir=sink_dir,
+            artifact_path=artifact_path,
+            visible_memory_gb=visible_memory_gb,
+            heap_percent=heap_percent,
         )
-        return adapter.compile(request), adapter.functional_env
+        return adapter.compile(request), adapter.build_env(request)
     except Exception as exc:
         raise AdapterError(f"{tool}: could not compile command: {exc}") from exc
 
@@ -105,6 +148,7 @@ def _normalizer_command(
     adapter_dir: Path | str,
     mode: str,
     prefix: str,
+    config: Mapping[str, object],
     *,
     input_path: Path | None = None,
     dataset: Path | None = None,
@@ -115,6 +159,10 @@ def _normalizer_command(
         command.extend(("--input", str(input_path)))
     if dataset is not None:
         command.extend(("--dataset", str(dataset)))
+    # Always present, never left to the CLI's own default: the same blob
+    # command.py compiled argv from, so a capsule whose output shape depends
+    # on a config key can parse its own output.
+    command.extend(("--config", json.dumps(dict(config), sort_keys=True, separators=(",", ":"))))
     return command
 
 
@@ -127,13 +175,16 @@ def normalize_to_path(
     *,
     input_path: Path | None = None,
     dataset: Path | None = None,
+    config: Mapping[str, object] | None = None,
 ) -> None:
     """Normalize a file or native dataset without materializing it in memory."""
     if (input_path is None) == (dataset is None):
         raise AdapterError("normalization requires exactly one of input_path or dataset")
     with output_path.open("wb") as output:
         result = subprocess.run(
-            _normalizer_command(adapter_dir, mode, prefix, input_path=input_path, dataset=dataset),
+            _normalizer_command(
+                adapter_dir, mode, prefix, config or {}, input_path=input_path, dataset=dataset
+            ),
             stdout=output,
             stderr=subprocess.PIPE,
             check=False,
@@ -147,13 +198,19 @@ def normalize_to_path(
 
 
 def normalize_attempt(
-    adapter_dir: Path | str, tool: str, mode: str, prefix: str, native: bytes
+    adapter_dir: Path | str,
+    tool: str,
+    mode: str,
+    prefix: str,
+    native: bytes,
+    *,
+    config: Mapping[str, object] | None = None,
 ) -> bytes:
     """Compatibility helper for small, stream-shaped fixtures."""
     normalize_path = Path(adapter_dir) / "normalize.py"
-    result = subprocess.run(
-        [sys.executable, str(normalize_path), mode, prefix], input=native, capture_output=True
-    )
+    blob = json.dumps(dict(config or {}), sort_keys=True, separators=(",", ":"))
+    command = [sys.executable, str(normalize_path), mode, prefix, "--config", blob]
+    result = subprocess.run(command, input=native, capture_output=True)
     if result.returncode != 0:
         raise AdapterError(
             f"{tool} normalize.py ({mode}) exited {result.returncode}: "

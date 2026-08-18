@@ -57,7 +57,7 @@ jobs:
               's3p', 's4cmd', 's5cmd', 's7cmd', 'swath',
           }
           tools = metadata['tools']
-          if metadata['schema_version'] != 4 or set(tools) != expected_tools:
+          if metadata['schema_version'] != 5 or set(tools) != expected_tools:
               raise SystemExit('toolbox metadata roster/schema mismatch')
           for tool, metadata in sorted(tools.items()):
               workdir = Path(metadata['subject_workdir'])

@@ -61,9 +61,12 @@ capture) and `_capability/bucket-list` (a probe, not a listing mode). Bucket
 (sha256 `c78a…2adb`, 148,917 keys). Every run **anonymous**
 (`--target-no-sign-request`, credential-starved wrapper mode,
 `auth=anonymous` enforced). Image `s7cmd@sha256:0709…da`, arch arm64 native.
-Concurrency pinned to `--max-parallel-listings 16` (the tool's own default,
-64, exceeds this subject's `CONCURRENCY_CAP=16`) on every recursive mode;
-non-recursive modes are sequential by construction regardless of the flag.
+Every recursive receipt below ran at `--max-parallel-listings 16`, which the
+capsule pinned in argv at the time; non-recursive modes are sequential by
+construction regardless of the flag. The capsule no longer decides that number:
+it declares the tool's own 64 as a `concurrency` ceiling
+[RUN receipts/smoke/_build/help-and-version.txt] and a plan row asks for
+whatever a campaign wants, so a detune is visible where it is reviewable.
 All verifier verdicts **PASS** (claim `smoke-modes-all-pass`, `confirmed`).
 
 | Mode | Scope | Invocation (argv appended to the image entrypoint) | Exit | Wall (s) | api_calls | Receipt |

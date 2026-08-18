@@ -23,10 +23,12 @@ inherits: the stratum and allocation again, plus the schedule, and never
 ``mode``. Both draw on one flat vocabulary, so a tool body is ``defaults`` plus
 ``cases``.
 
-A row may carry only keys the ID and the fingerprint can *both* see, which is
-what keeps ``timeout_s`` out of one: it is in the fingerprint but not the ID, so
-two rows differing only there would render one ID and two fingerprints — two
-non-comparable runs filed into one case directory.
+**A plan states intent; it does not name identity.** A case's ``case_id`` is a
+hash over inputs a plan does not hold — the tool and platform slices of the
+image set a launch froze — so it is minted at submit
+(``benchmark/docs/identity.md``). What a row renders here is a *label*: the
+axes it varies, for a reviewer reading ``resolve-plan`` and for refusing two
+rows that resolve to one case.
 
 **Cases are an ordered union.** Each entry is either one literal row or an
 explicit product generator with an optional atomic zip factor. Generators
@@ -43,33 +45,35 @@ says nothing about enforcing it.
 Sweeping the ceiling therefore holds the machine, its cores and its neighbours
 still, and reaches sizes no machine type sells. A managed runtime is additionally
 told what share of that it may use as heap, because a JVM and V8 both default to
-a fraction of what they can see; that share lives with the heap policies in
+a fraction of what they can see; that share lives in
 ``benchmark/plans/tools.yaml`` rather than in a plan, since it configures two tools out of
-eleven and every plan would otherwise restate a figure most cases ignore.
+eleven and every plan would otherwise restate a figure most cases ignore. The
+capsule turns the share into whatever variable its runtime reads.
 
-**The derived ID is a path, not an identity.** Adding a key to one row changes
-every ID that tool generates, so an ID cannot be what says "these attempts are the
-same case". :attr:`Case.fingerprint` is — a digest over the resolved case, which
-survives ID scheme changes and, more importantly, refuses the reverse mistake:
-editing a row's value while the derived ID happens to land the same would
-otherwise append non-comparable runs into one case directory. ``reps`` is
-excluded from it because how many times we ran something is not part of what we
-ran; ``timeout_s`` is included because it can truncate a run and therefore
-change the result.
+**A row may also say what its attempts are for.** ``purpose`` demotes a case out
+of comparisons — a canary proving a signing path executes is a real job whose
+duration means nothing — and ``statistic: rate`` says the failures are the
+result rather than a hole. Both default from the capsule: a mode's declared
+``purpose_ceiling`` is the most a plan may claim it is, and a plan may demote
+below it but never promote above.
 """
 
 from __future__ import annotations
 
 import hashlib
 import itertools
-import json
 import re
 from collections.abc import Collection, Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import yaml
+
+if TYPE_CHECKING:
+    # Not imported at runtime: most callers of this module never touch a
+    # capsule at all, and the adapter loader pulls in the runtime contract.
+    from benchmark.runtime.command_adapter import LoadedCommandAdapter
 
 # Bumped only when a file written for an older reader would be misread by this
 # one. Unknown versions are refused rather than best-effort parsed. One number
@@ -82,16 +86,7 @@ import yaml
 # refused rather than reinterpreted.
 SPEC_VERSION = 2
 
-# Versioned separately from the spec: the fingerprint function is part of the
-# on-disk contract the append guard will enforce, so changing how it is computed
-# is a migration and must be visible as one.
-#
-# Nothing reads a fingerprint yet — `resolve-plan` emits one and the attempt
-# store that would refuse a mismatched append is not written. Until it is, this
-# number is a promise rather than a check.
-FINGERPRINT_VERSION = 1
-
-TOP_LEVEL = ("spec_version", "bucket", "region", "defaults", "tools", "exclude")
+TOP_LEVEL = ("spec_version", "bucket", "region", "auth_role", "defaults", "tools", "exclude")
 
 # What a box is, in the terms a plan states it: shape, not product name. The
 # machine type is resolved from the pair through benchmark/plans/instances.yaml, so a plan
@@ -119,29 +114,71 @@ RESOURCE_FIELDS = (*BOX_FIELDS, *PROCESS_FIELDS)
 # directory.
 SCHEDULE_FIELDS = ("reps", "timeout_s")
 
-# Whether the request is signed, not whether the bucket is private: every target
-# is public and four of the eleven tools have no unsigned path, so a mixed roster
-# would compare listing against listing-plus-signing-1,000-requests. A stratum is
-# an identity too — an authenticated case runs as the service account that may
-# read the credential (infra/.../aws-credentials.tf).
-AUTH_CHOICES = ("anonymous", "authenticated")
+# Whether the request is signed is a fact about the subject, not a plan's
+# preference: four of the eleven tools have no unsigned path and four can only
+# list anonymously, so each capsule declares what it can issue and the plan
+# supplies the role to sign *with* when signing is required. A role is an
+# identity — a signing case runs as the service account that may read the
+# credential (infra/.../aws-credentials.tf) — so `auth_role` names one rather
+# than setting a flag.
+#
+# A capsule that can do both lists unsigned unless a row asks otherwise: signing
+# adds a signature to every one of ~1,000 requests, which is a different
+# measurement, and the cheaper one is the better default.
 
 # What a row may state: what one case *is*. `mode` first so it leads every
 # derived ID; the rest follow in this order, so an ID is a function of the key
 # set and not of the order someone typed them in.
-ROW_FIELDS = ("mode", "auth", *RESOURCE_FIELDS)
+#
+# `concurrency` and `segments` are the reserved axes a row may set (see
+# `benchmark/docs/capsule-contract.md` "Configuration is opaque, and its key
+# names are not"); `heap_percent` is the harness's own methodology share and no
+# row states it. An axis is not resource allocation and not a layer default: a
+# capsule declares the knob per mode, so the row that names the mode is where
+# a value for it belongs. Resolution refuses one for a capsule that declares no
+# such axis, and folds it into `Case.config` rather than into argv directly.
+#
+# `purpose` and `statistic` are what an attempt is *for* and how it is read.
+# They are row fields rather than layer defaults because a canary or a rate case
+# is one row's claim about one case, and a whole plan demoted by inheritance is
+# a plan nobody meant to write.
+ROW_FIELDS = (
+    "mode",
+    "purpose",
+    "statistic",
+    "signed",
+    "concurrency",
+    "segments",
+    *RESOURCE_FIELDS,
+)
+
+# The row axes resolution lifts into the config blob; `mode` travels separately
+# and `heap_percent` is the harness's, so this is ROW_FIELDS ∩ RESERVED_AXES
+# spelled once.
+ROW_AXES = ("concurrency", "segments")
+
+# The escape hatch for a capsule-declared key the study reserves no row field
+# for -- a knob only one subject has and no axis describes. A flat mapping,
+# folded into the blob before the capsule's own refusal runs, so a typo or an
+# undeclared key still fails there. A key that has a row field of its own is
+# refused: one way to say each thing.
+ROW_CONFIG = "config"
+
+# Whether the case's result is a timing or a rate over its repeats. `rate` is
+# for a subject that succeeds, hangs or panics — s3kor's listing path — where
+# the failures are the finding, so `retry` leaves them alone.
+STATISTICS = ("timing", "rate")
 
 # What a layer may state: what every case under it inherits. No `mode` — eleven
 # tools have eleven mode vocabularies, so nothing above a row has one to state.
-# `auth` is here as well as in a row: a campaign usually runs one stratum, and
-# saying so once beats repeating it on every line.
-LAYER_FIELDS = ("auth", *RESOURCE_FIELDS, *SCHEDULE_FIELDS)
+# `signed` is here as well as in a row, for a roster swept as one stratum.
+LAYER_FIELDS = ("signed", *RESOURCE_FIELDS, *SCHEDULE_FIELDS)
 
 TOOL_FIELDS = ("cases", *LAYER_FIELDS)
 
 # Anchored with ``\Z`` and applied with ``fullmatch``: ``$`` also matches before
-# a trailing newline, and a case ID is used as a directory name.
-CASE_ID_RE = re.compile(r"\A[a-z0-9][a-z0-9._-]{0,80}\Z")
+# a trailing newline, and a label is printed and grepped.
+CASE_LABEL_RE = re.compile(r"\A[a-z0-9][a-z0-9._-]{0,80}\Z")
 TOOL_RE = re.compile(r"\A[a-z0-9][a-z0-9-]{0,40}\Z")
 
 
@@ -202,21 +239,34 @@ class Case:
     """One resolved row of a tool's ``cases`` — the unit a campaign submits."""
 
     tool: str
-    case_id: str
+    label: str
+    """What this row varies, rendered for a reader. Not the case's identity —
+    that is a hash over inputs only a launch holds; see the module docstring."""
     mode: str
-    auth: str
+    purpose: str
+    """What the attempts are for, and therefore whether they may be compared."""
+    statistic: str
+    auth_role: str | None
+    """The role this case signs with, or None when it lists unsigned."""
     resources: Resources
     reps: int
     timeout_s: int
+    heap_percent: int
+    """The share of the visible ceiling a managed runtime may take. Carried
+    because the ledger records it on every row; the capsule renders it."""
     # The values this case was rendered into an ID from, in ID order: the union
     # of the keys the tool's rows state, so a row that omitted one carries the
     # value it inherited. Kept so a reader can group by a key without re-parsing
     # the ID. ``None`` is the container ceiling nobody set.
     axes: tuple[tuple[str, str | int | None], ...]
-    # What the runtime must be told about its own memory, if it is the kind that
-    # needs telling. Empty for a tool with no managed heap.
-    env: tuple[tuple[str, str], ...]
-    fingerprint: str
+    # The capsule's own knobs -- the harness reads none of these, only forwards
+    # them. Produced by the capsule's ``effective_config(mode, ...)`` at
+    # resolution: the row's ``mode``, any reserved axis it stated
+    # (``concurrency``, ``segments``) and whatever its ``config`` mapping
+    # carried, plus every
+    # declared default the capsule fills in when a row leaves an axis silent.
+    # Key-sorted, matching what is hashed.
+    config: tuple[tuple[str, object], ...]
 
 
 @dataclass(frozen=True)
@@ -237,6 +287,11 @@ class Plan:
     region: str
     cases: tuple[Case, ...]
     exclusions: tuple[Exclusion, ...]
+    # The capsules this plan resolved against. Carried because a launch expands
+    # each row's declared prerequisites (:func:`expand_requirements`) from the
+    # same loaded capsule the case was resolved with, rather than reloading one
+    # that may have moved since.
+    adapters: Mapping[str, LoadedCommandAdapter]
 
     @classmethod
     def load(
@@ -246,9 +301,16 @@ class Plan:
         default_modes: Mapping[str, str] | None = None,
         instances: Mapping[tuple[int, int], str] | None = None,
         heap: HeapConfig | None = None,
+        adapters: Mapping[str, LoadedCommandAdapter] | None = None,
     ) -> Plan:
-        """Read a plan; tables default to files under ``benchmark/plans/``."""
-        return _load(path, default_modes, instances, heap)
+        """Read a plan; tables default to files under ``benchmark/plans/``.
+
+        ``adapters`` is each rostered tool's loaded ``command.py`` -- signing
+        capability and config surface both come from it. Defaults to loading
+        the real capsules under ``tools/``; a caller with no bucket to run
+        against a real tree supplies fixtures instead.
+        """
+        return _load(path, default_modes, instances, heap, adapters)
 
     def tools(self) -> list[str]:
         """Every tool with at least one case, in plan order."""
@@ -285,43 +347,17 @@ def default_path(bucket: str) -> Path:
 
 
 @dataclass(frozen=True)
-class HeapPolicy:
-    """How one runtime is told how much of its memory it may use as heap.
-
-    Only a managed runtime needs this. A Go or Rust tool takes what it takes;
-    a JVM and V8 both default to a *fraction* of what they can see, so leaving
-    it alone would make the runtime's own heuristic the independent variable
-    rather than the memory we set.
-    """
-
-    env: str
-    # ``{percent}`` and ``{mib}`` are the two shapes a runtime accepts: the JVM
-    # reads its cgroup ceiling itself and wants a proportion, V8 does not and
-    # wants an absolute size.
-    value: str
-
-    def render(self, *, percent: int, visible_memory_gb: int) -> tuple[str, str]:
-        return self.env, self.value.format(
-            percent=percent, mib=visible_memory_gb * 1024 * percent // 100
-        )
-
-
-@dataclass(frozen=True)
 class HeapConfig:
-    """The share a managed runtime may use, and how each one is told.
+    """The share of the visible ceiling a managed runtime may use as heap.
 
     Not part of a plan: nine of the eleven tools have no heap to size, so a
     per-bucket setting would be a knob most cases ignore and every plan restates.
+    The share travels to the capsule, which owns the translation into whatever
+    variable its runtime reads (`capsule-contract.md` § *The ceiling, and the
+    share of it*).
     """
 
     percent: int
-    policies: Mapping[str, HeapPolicy]
-
-    def env_for(self, tool: str, *, visible_memory_gb: int) -> tuple[tuple[str, str], ...]:
-        policy = self.policies.get(tool)
-        if policy is None:
-            return ()
-        return (policy.render(percent=self.percent, visible_memory_gb=visible_memory_gb),)
 
 
 def load_heap_config(path: Path) -> HeapConfig:
@@ -329,35 +365,15 @@ def load_heap_config(path: Path) -> HeapConfig:
     doc = _tool_defaults_document(path)
     heap = doc.get("heap")
     if heap is None:
-        return HeapConfig(percent=100, policies={})
+        return HeapConfig(percent=100)
     if not isinstance(heap, dict):
         raise PlanError(f"'heap' in {path} is not a mapping")
-    _reject_unknown(heap, ("percent", "tools"), "'heap'", path)
+    _reject_unknown(heap, ("percent",), "'heap'", path)
 
     percent = _positive_int(heap.get("percent"), "percent", "heap", path)
     if percent > 100:
         raise PlanError(f"'heap' percent in {path} is {percent}, which is over 100")
-
-    table = heap.get("tools")
-    if table is None:
-        return HeapConfig(percent=percent, policies={})
-    if not isinstance(table, dict):
-        raise PlanError(f"'heap.tools' in {path} is not a mapping")
-    policies: dict[str, HeapPolicy] = {}
-    for tool, entry in table.items():
-        where = f"heap.tools.{tool}"
-        if not isinstance(entry, dict):
-            raise PlanError(f"'{where}' in {path} is not a mapping")
-        _reject_unknown(entry, ("env", "value"), f"'{where}'", path)
-        value = _string(entry, "value", where, path)
-        unknown = set(re.findall(r"\{(\w+)\}", value)) - {"percent", "mib"}
-        if unknown:
-            raise PlanError(
-                f"'{where}' value in {path} uses unknown placeholder(s) "
-                f"{', '.join(sorted(unknown))} (percent|mib)"
-            )
-        policies[tool] = HeapPolicy(env=_string(entry, "env", where, path), value=value)
-    return HeapConfig(percent=percent, policies=policies)
+    return HeapConfig(percent=percent)
 
 
 def load_instances(path: Path) -> dict[tuple[int, int], str]:
@@ -440,6 +456,7 @@ def _load(
     default_modes: Mapping[str, str] | None,
     instances: Mapping[tuple[int, int], str] | None,
     heap: HeapConfig | None,
+    adapters: Mapping[str, LoadedCommandAdapter] | None,
 ) -> Plan:
     raw, doc = _read_yaml_mapping(path, "plan")
 
@@ -464,7 +481,7 @@ def _load(
     _reject_unknown(defaults, LAYER_FIELDS, "[defaults]", path)
     base_resources = _resources(defaults, "defaults", path, complete=True)
     base_schedule = _schedule(defaults, "defaults", path, complete=True)
-    base_auth = _auth(defaults, "defaults", path, complete=True)
+    base_signed = _signed(defaults, "defaults", path, complete=True)
 
     region = _string(doc, "region", "plan", path)
     # Resolved next to the plan rather than passed down from the caller, so a
@@ -472,6 +489,8 @@ def _load(
     modes = default_modes if default_modes is not None else _sibling_default_modes(doc, path)
     catalogue = instances if instances is not None else load_instances(_sibling(path, "instances"))
     heap_config = heap if heap is not None else load_heap_config(_sibling(path, "tools"))
+    resolved_adapters = adapters if adapters is not None else load_adapters(doc, path)
+    auth_role = _auth_role(doc, path)
 
     plan = Plan(
         path=path,
@@ -480,7 +499,7 @@ def _load(
         region=region,
         cases=_cases(
             doc,
-            {**base_resources, **base_auth},
+            {**base_resources, **base_signed},
             base_schedule,
             modes,
             _Context(
@@ -488,10 +507,13 @@ def _load(
                 region=region,
                 instances=catalogue,
                 heap=heap_config,
+                adapters=resolved_adapters,
+                auth_role=auth_role,
                 path=path,
             ),
         ),
         exclusions=_exclusions(doc, path),
+        adapters=resolved_adapters,
     )
     _reject_overlap(plan, path)
     return plan
@@ -570,20 +592,204 @@ def _reject_mode(table: Mapping[str, Any], where: str, path: Path) -> None:
         )
 
 
-def _auth(table: Mapping[str, Any], where: str, path: Path, *, complete: bool) -> dict[str, str]:
-    """The stratum ``table`` states. Required of ``defaults``, so a plan written
-    before the field existed is refused rather than taking one nobody chose."""
-    value = table.get("auth")
+def _auth_role(doc: Mapping[str, Any], path: Path) -> str | None:
+    """The role a case signs with when its subject cannot list anonymously."""
+    value = doc.get("auth_role")
     if value is None:
-        if complete:
+        return None
+    if not isinstance(value, str) or not value or any(c.isspace() for c in value):
+        raise PlanError(f"'auth_role' in {path} is not a non-empty whitespace-free name: {value!r}")
+    return value
+
+
+def capsules_dir() -> Path:
+    """``tools/`` at the repo root, where every capsule's ``command.py`` lives."""
+    return Path(__file__).resolve().parents[3] / "tools"
+
+
+def capsule_path(tool: str) -> Path:
+    """Imported lazily throughout: the adapter loader pulls in the runtime
+    contract, and most callers of this module never touch a capsule at all.
+    """
+    from benchmark.adapters import adapter_dir_for
+
+    return adapter_dir_for(tool, str(capsules_dir())) / "command.py"
+
+
+def load_capsule(tool: str) -> LoadedCommandAdapter:
+    """One tool's loaded ``command.py``, by name.
+
+    Reached from outside plan resolution when a settled preparation has to be
+    validated against the capsule that declared the artifact — the capsule owns
+    what its own bytes must look like, and no controller-side copy of that
+    knowledge would stay in step.
+    """
+    from benchmark.runtime.command_adapter import load_command_adapter
+
+    path = capsule_path(tool)
+    try:
+        return load_command_adapter(path, expected_tool=tool)
+    except Exception as exc:
+        raise PlanError(f"{tool}: {exc}") from exc
+
+
+def load_adapters(doc: Mapping[str, Any], path: Path) -> dict[str, LoadedCommandAdapter]:
+    """Load each rostered tool's ``command.py``: its declared request strata and
+    config surface both come from here, so a case resolves signing and its
+    ``config`` blob against the one loaded capsule rather than two.
+    """
+    tools = doc.get("tools")
+    names = sorted(tools) if isinstance(tools, Mapping) else []
+    loaded: dict[str, LoadedCommandAdapter] = {}
+    for tool in names:
+        if not capsule_path(str(tool)).is_file():
+            continue
+        try:
+            loaded[str(tool)] = load_capsule(str(tool))
+        except PlanError as exc:  # a capsule that will not load is a plan error
+            raise PlanError(f"'tools.{tool}' in {path}: {exc}") from exc
+    return loaded
+
+
+def expand_requirements(case: Case, adapter: LoadedCommandAdapter) -> tuple[Case, ...]:
+    """The chain one row comes to: its prerequisites in order, then the row itself.
+
+    The capsule declares the chain and the plan says nothing, so the whole shape
+    is readable before anything is submitted — which is what keeps this a bounded
+    expansion rather than a graph discovered at run time
+    (`architecture.md` § *Dependencies*).
+
+    A prerequisite takes the config the capsule says its own mode takes, plus
+    the consumer's value for any axis the prerequisite mode *itself declares*.
+    Axes the prerequisite does not declare never flow, which is what collapses a
+    sweep over a measurement-only axis to one preparation (`identity.md` § *Two
+    identities, two questions*) — s3-fast-list's bootstrap `list` declares
+    neither `concurrency` nor `segments`, so a sweep of either names one
+    listing; a sweep over an axis a prerequisite does declare correctly builds
+    one preparation per value. Everything the harness acts on — the box, the
+    role, the deadline — it does inherit: those are recorded on a preparation's
+    row and stay out of its hash.
+
+    A mode's inline setup exec is not expanded here: it is not a case, it runs
+    inside the consuming attempt, and resolution has already compiled it.
+    """
+    from benchmark.runtime.command_adapter import shared_axis_values
+
+    links: list[Case] = []
+    consumer = dict(case.config)
+    for step in adapter.requires.get(case.mode, ()):
+        mode = step.mode
+        manifest = adapter.modes[mode]
+        if not manifest.permits_purpose("preparation"):
             raise PlanError(
-                f"'{where}' in {path} has no 'auth' ({'|'.join(AUTH_CHOICES)}) — a case that "
-                "did not say whether it signed cannot be compared with one that did"
+                f"{case.tool}: mode {case.mode!r} requires {mode!r}, whose capsule caps it at "
+                f"{manifest.purpose_ceiling!r} — a prerequisite runs as a preparation"
             )
+        try:
+            config = adapter.effective_config(mode, shared_axis_values(manifest, consumer))
+        except Exception as exc:
+            raise PlanError(f"{case.tool}: prerequisite {mode!r} of {case.mode!r}: {exc}") from exc
+        _compile_prerequisite(case, adapter, mode, config)
+        axes: tuple[tuple[str, str | int | None], ...] = (("mode", mode),)
+        links.append(
+            replace(
+                case,
+                mode=mode,
+                purpose="preparation",
+                statistic=STATISTICS[0],
+                # One preparation serves every repeat of the row that needs it.
+                reps=1,
+                label=case_label(axes),
+                axes=axes,
+                config=tuple(config.items()),
+            )
+        )
+    return (*links, case)
+
+
+def _compile_offline(
+    adapter: LoadedCommandAdapter,
+    case: Case,
+    mode: str,
+    config: Mapping[str, object],
+) -> None:
+    """Compile one of a row's other modes here, so what it cannot state fails at load.
+
+    ``config`` arrives already merged — the capsule's own values plus the
+    consumer's for any axis this mode declares — so what compiles here is exactly
+    what a worker would be handed. A knob still left unset is a refusal on an
+    allocated VM unless it is one here. The staging paths are placeholders: what
+    the engine will pass, not what it will pass *here*.
+    """
+    from benchmark.runtime.command_adapter import CommandRequest
+
+    adapter.compile(
+        CommandRequest(
+            mode=mode,
+            bucket="placeholder-bucket",
+            region="placeholder-region",
+            tool=case.tool,
+            signed=case.auth_role is not None,
+            config=config,
+            sink_dir="/sink",
+            artifact_path="/staged/placeholder",
+            visible_memory_gb=float(case.resources.visible_memory_gb),
+            heap_percent=case.heap_percent,
+        )
+    )
+
+
+def _compile_prerequisite(
+    case: Case, adapter: LoadedCommandAdapter, mode: str, config: Mapping[str, object]
+) -> None:
+    """Build the prerequisite's argv offline, so a chain it cannot state fails at load."""
+    try:
+        _compile_offline(adapter, case, mode, config)
+    except Exception as exc:
+        raise PlanError(
+            f"{case.tool}: mode {case.mode!r} requires {mode!r}, which its capsule cannot "
+            f"build: {exc}"
+        ) from exc
+
+
+def _compile_inline(case: Case, adapter: LoadedCommandAdapter, path: Path) -> None:
+    """Build the row's inline setup exec offline, for the reason a chain link is built.
+
+    The inline exec never becomes a case of its own, so nothing else would compile
+    it before an allocated VM did — and a hinted row whose split cannot be built
+    is a plan error, not a measurement that dies in its own container.
+    """
+    from benchmark.runtime.command_adapter import shared_axis_values
+
+    mode = adapter.modes[case.mode].inline
+    if not mode:
+        return
+    try:
+        config = adapter.effective_config(
+            mode, shared_axis_values(adapter.modes[mode], dict(case.config))
+        )
+        _compile_offline(adapter, case, mode, config)
+    except Exception as exc:
+        raise PlanError(
+            f"'tools.{case.tool}' in {path}: mode {case.mode!r} runs {mode!r} as inline setup, "
+            f"which its capsule cannot build: {exc}"
+        ) from exc
+
+
+def _signed(table: Mapping[str, Any], where: str, path: Path, *, complete: bool) -> dict[str, bool]:
+    """The signing override ``table`` states, if any.
+
+    Not required anywhere: a capsule that can issue only one stratum decides for
+    itself, and one that can do both lists unsigned unless asked. An override is
+    refused later against the capsule's declared capability.
+    """
+    del complete
+    value = table.get("signed")
+    if value is None:
         return {}
-    if value not in AUTH_CHOICES:
-        raise PlanError(f"'{where}' 'auth' in {path} is not {'|'.join(AUTH_CHOICES)}: {value!r}")
-    return {"auth": value}
+    if not isinstance(value, bool):
+        raise PlanError(f"'{where}' 'signed' in {path} is not true or false: {value!r}")
+    return {"signed": value}
 
 
 def _schedule(
@@ -671,6 +877,8 @@ class _Context:
     region: str
     instances: Mapping[tuple[int, int], str]
     heap: HeapConfig
+    adapters: Mapping[str, LoadedCommandAdapter]
+    auth_role: str | None
     path: Path
 
 
@@ -720,7 +928,7 @@ def _tool_cases(
     settings = {
         **base_resources,
         **_resources(table, where, path, complete=False),
-        **_auth(table, where, path, complete=False),
+        **_signed(table, where, path, complete=False),
     }
     schedule = {**base_schedule, **_schedule(table, where, path, complete=False)}
 
@@ -729,11 +937,19 @@ def _tool_cases(
     # omitting a ceiling its sibling stated would give one tool IDs of two
     # shapes. `mode` is always in it, or a bare tool would render an empty ID.
     rendered = tuple(f for f in ROW_FIELDS if f == "mode" or any(f in row for row in rows))
+    # A row varying only a capsule knob is still a different case, so every key
+    # any row's `config` states is rendered too — sorted, since a mapping's order
+    # is the author's typing and an ID is not.
+    config_keys = sorted({key for row in rows for key in row.get(ROW_CONFIG, {})})
 
     cases: list[Case] = []
     for row in rows:
         resolved = {**settings, **row, "mode": _row_mode(row, tool, where, default_modes, path)}
-        chosen = tuple((field, resolved.get(field)) for field in rendered)
+        row_config: Mapping[str, str | int] = row.get(ROW_CONFIG, {})
+        chosen = (
+            *((field, resolved.get(field)) for field in rendered),
+            *((key, row_config.get(key)) for key in config_keys),
+        )
         cases.append(_case(tool, resolved, chosen, schedule, context))
     return cases
 
@@ -790,8 +1006,40 @@ def _literal_row(entry: Mapping[str, Any], label: str, path: Path) -> dict[str, 
             f"'{label}' in {path} states {', '.join(scheduling)} — that is "
             "scheduling, not what a case is; set it on the tool or in defaults"
         )
-    _reject_unknown(entry, ROW_FIELDS, f"'{label}'", path)
-    return {key: _row_field_value(key, value, label, path) for key, value in entry.items()}
+    _reject_unknown(entry, (*ROW_FIELDS, ROW_CONFIG), f"'{label}'", path)
+    return {
+        key: _config_map(value, label, path)
+        if key == ROW_CONFIG
+        else _row_field_value(key, value, label, path)
+        for key, value in entry.items()
+    }
+
+
+def _config_map(value: Any, label: str, path: Path) -> dict[str, str | int]:
+    """A row's ``config`` — the capsule-declared keys no row field names.
+
+    Flat and scalar, because these keys are hashed into the case's blob and
+    rendered into its label exactly as a row field is. Whether the capsule
+    actually declares each key is its own question, asked by
+    ``effective_config`` at resolution.
+    """
+    if not isinstance(value, dict) or not value:
+        raise PlanError(f"'{label}' 'config' in {path} is not a non-empty mapping")
+    resolved: dict[str, str | int] = {}
+    for key, item in value.items():
+        if not isinstance(key, str) or not key:
+            raise PlanError(f"'{label}' 'config' in {path} has a key that is not a name: {key!r}")
+        if key in ROW_FIELDS:
+            raise PlanError(
+                f"'{label}' 'config' in {path} states {key!r}, which a row states directly — "
+                "state it on the row, not in 'config'"
+            )
+        if isinstance(item, bool) or not isinstance(item, int | str) or item == "":
+            raise PlanError(
+                f"'{label}' 'config.{key}' in {path} is not a non-empty string or integer: {item!r}"
+            )
+        resolved[key] = item
+    return resolved
 
 
 def _row_field_value(key: str, value: Any, label: str, path: Path) -> str | int:
@@ -800,8 +1048,20 @@ def _row_field_value(key: str, value: Any, label: str, path: Path) -> str | int:
         if not isinstance(value, str) or not value.strip():
             raise PlanError(f"'{label}' 'mode' in {path} is not a non-empty string")
         return value
-    if key == "auth":
-        return _auth({key: value}, label, path, complete=False)[key]
+    if key == "statistic":
+        if value not in STATISTICS:
+            raise PlanError(f"'{label}' 'statistic' in {path} is not one of {'|'.join(STATISTICS)}")
+        return str(value)
+    if key == "purpose":
+        # Which purposes exist is the capsule contract's vocabulary; whether
+        # *this* mode may claim one is checked against its manifest in `_case`.
+        from benchmark.runtime.command_adapter import PURPOSES
+
+        if value not in PURPOSES:
+            raise PlanError(f"'{label}' 'purpose' in {path} is not one of {'|'.join(PURPOSES)}")
+        return str(value)
+    if key == "signed":
+        return _signed({key: value}, label, path, complete=False)[key]
     return _positive_int(value, key, label, path)
 
 
@@ -919,6 +1179,42 @@ def _zip_choices(value: Any, label: str, path: Path) -> list[dict[str, str | int
     return choices
 
 
+def _resolve_auth_role(
+    tool: str, override: object, adapter: LoadedCommandAdapter, context: _Context
+) -> str | None:
+    """Decide whether this case signs, and with which role.
+
+    The capsule's declared SIGNING is the authority: a subject with no unsigned
+    request path always signs, one that can only list anonymously never does,
+    and a plan asking either of them for the other stratum is refused rather
+    than quietly ignored. Only a capsule that can issue both leaves the choice
+    open, and it lists unsigned unless a row says otherwise.
+    """
+    if override is not None and not isinstance(override, bool):
+        raise PlanError(f"'tools.{tool}' in {context.path} has a non-boolean 'signed'")
+    supports_unsigned, supports_signed = adapter.supports_unsigned, adapter.supports_signed
+    if not supports_unsigned:
+        signed = True
+    elif not supports_signed:
+        signed = False
+    else:
+        signed = bool(override)
+    if override is not None and bool(override) != signed:
+        wanted = "sign" if override else "list unsigned"
+        raise PlanError(
+            f"'tools.{tool}' in {context.path} asks the case to {wanted}, which this capsule "
+            "declares the subject cannot do"
+        )
+    if not signed:
+        return None
+    if context.auth_role is None:
+        raise PlanError(
+            f"'tools.{tool}' in {context.path} must sign, but the plan states no 'auth_role' "
+            "to sign with"
+        )
+    return context.auth_role
+
+
 def _case(
     tool: str,
     resolved: Mapping[str, Any],
@@ -928,7 +1224,25 @@ def _case(
 ) -> Case:
     path = context.path
     mode = str(resolved["mode"])
-    auth = str(resolved["auth"])
+    adapter = context.adapters.get(tool)
+    if adapter is None:
+        raise PlanError(
+            f"'tools.{tool}' in {path} declares no capsule; a case cannot be resolved "
+            "without loading its command adapter"
+        )
+    auth_role = _resolve_auth_role(tool, resolved.get("signed"), adapter, context)
+    # A row states an axis flat (`concurrency`, `segments`), and `config`
+    # carries the capsule-declared keys no row field names. Resolution folds both
+    # into the config blob rather than passing either straight to argv, so the
+    # capsule's own refusal still runs over everything a plan asked for.
+    row_config: dict[str, object] = dict(resolved.get(ROW_CONFIG) or {})
+    for axis in ROW_AXES:
+        if axis in resolved:
+            row_config[axis] = resolved[axis]
+    try:
+        config = adapter.effective_config(mode, row_config)
+    except Exception as exc:  # a capsule refusing this config is a plan error
+        raise PlanError(f"'tools.{tool}' in {path}: {exc}") from exc
     resources = resolved
     shape = (int(resources["vcpus"]), int(resources["memory_gb"]))
     machine_type = context.instances.get(shape)
@@ -956,76 +1270,74 @@ def _case(
         machine_type=machine_type,
         container_memory_gb=container_memory_gb,
     )
-    env = context.heap.env_for(tool, visible_memory_gb=resolved_resources.visible_memory_gb)
-
-    case_id = derive_case_id(chosen)
-    if not CASE_ID_RE.fullmatch(case_id):
+    chosen = tuple(
+        (key, auth_role is not None) if key == "signed" else (key, value) for key, value in chosen
+    )
+    label = case_label(chosen)
+    if not CASE_LABEL_RE.fullmatch(label):
         raise PlanError(
-            f"'tools.{tool}' in {path} generates the unusable case id {case_id!r} "
+            f"'tools.{tool}' in {path} generates the unusable case label {label!r} "
             "(axis values must be lowercase, digits, '.', '_' or '-')"
         )
-    return Case(
+    case = Case(
         tool=tool,
-        case_id=case_id,
+        label=label,
         mode=mode,
-        auth=auth,
+        purpose=_purpose(tool, resolved.get("purpose"), mode, adapter, path),
+        statistic=str(resolved.get("statistic", STATISTICS[0])),
+        auth_role=auth_role,
         resources=resolved_resources,
         reps=schedule["reps"],
         timeout_s=schedule["timeout_s"],
+        heap_percent=context.heap.percent,
         axes=chosen,
-        env=env,
-        fingerprint=fingerprint(
-            bucket=context.bucket,
-            region=context.region,
-            tool=tool,
-            mode=mode,
-            auth=auth,
-            resources=resolved_resources,
-            timeout_s=schedule["timeout_s"],
-            env=env,
-        ),
+        config=tuple(config.items()),
     )
+    _compile_inline(case, adapter, path)
+    return case
 
 
-def derive_case_id(chosen: Iterable[tuple[str, str | int | None]]) -> str:
+def _purpose(
+    tool: str, stated: object, mode: str, adapter: LoadedCommandAdapter, path: Path
+) -> str:
+    """What this case's attempts are for: the row's claim, or the mode's ceiling.
+
+    Defaulting to the ceiling rather than to ``measurement`` is what lets a mode
+    that can only ever be a preparation say so once, in the capsule, instead of
+    every row that names it repeating the demotion.
+    """
+    manifest = adapter.modes[mode]
+    ceiling = manifest.purpose_ceiling
+    if stated is None:
+        return ceiling
+    purpose = str(stated)
+    if not manifest.permits_purpose(purpose):
+        raise PlanError(
+            f"'tools.{tool}' in {path} claims mode {mode!r} is a {purpose}, above the "
+            f"{ceiling!r} its capsule declares — a plan may demote a mode, never promote it"
+        )
+    return purpose
+
+
+def case_label(chosen: Iterable[tuple[str, str | int | None]]) -> str:
     """``recursive-parquet.container_memory_gb-2`` — the mode, then each key.
 
     Every key any of the tool's rows states appears, even one only a single row
-    varies: dropping it would make the ID mean "whatever the default was at the
-    time". ``none`` is the ceiling nobody set — a real answer, not an absent key.
+    varies: dropping it would make the label mean "whatever the default was at
+    the time". ``none`` is the ceiling nobody set — a real answer, not an absent
+    key.
     """
     segments: list[str] = []
     for field, value in chosen:
-        rendered = "none" if value is None else str(value)
+        if value is None:
+            rendered = "none"
+        elif isinstance(value, bool):
+            # A case ID is lowercase by contract; Python's bool is not.
+            rendered = "true" if value else "false"
+        else:
+            rendered = str(value)
         segments.append(rendered if field == "mode" else f"{field}-{rendered}")
     return ".".join(segments)
-
-
-def fingerprint(
-    *,
-    bucket: str,
-    region: str,
-    tool: str,
-    mode: str,
-    auth: str,
-    resources: Resources,
-    timeout_s: int,
-    env: Sequence[tuple[str, str]] = (),
-) -> str:
-    """A digest over the resolved case — what makes two attempts comparable."""
-    payload = {
-        "fingerprint_version": FINGERPRINT_VERSION,
-        "bucket": bucket,
-        "region": region,
-        "tool": tool,
-        "mode": mode,
-        "auth": auth,
-        "resources": resources.as_dict(),
-        "timeout_s": timeout_s,
-        "env": [list(pair) for pair in env],
-    }
-    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _exclusions(doc: Mapping[str, Any], path: Path) -> tuple[Exclusion, ...]:
@@ -1056,9 +1368,9 @@ def _reject_overlap(plan: Plan, path: Path) -> None:
         raise PlanError(f"plan {path} both runs and excludes {', '.join(both)}")
     seen: set[tuple[str, str]] = set()
     for case in plan.cases:
-        key = (case.tool, case.case_id)
+        key = (case.tool, case.label)
         if key in seen:
-            raise PlanError(f"plan {path} generates {case.tool} case {case.case_id!r} twice")
+            raise PlanError(f"plan {path} generates {case.tool} case {case.label!r} twice")
         seen.add(key)
 
 

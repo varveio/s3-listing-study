@@ -42,22 +42,10 @@ heap:
   # non-heap memory for metaspace, code cache, threads and direct buffers, and
   # a container that hands all of it to the heap gets killed rather than
   # collected.
-  percent: 75
-
-  # `{percent}` and `{mib}` are substituted per case: the JVM takes a proportion
-  # of the ceiling it reads for itself, V8 takes a size in MiB. Node has read
-  # its cgroup limit since v12 (and cgroup v2 since 20.3), so this is pinned
-  # because the default is version-dependent, not because V8 cannot see it.
   #
-  # JAVA_TOOL_OPTIONS makes the JVM print "Picked up JAVA_TOOL_OPTIONS: ..." to
-  # stderr on every run, unconditionally — the request for a switch to suppress
-  # it was closed Won't Fix. Every swath receipt will carry that line. If
-  # swath's launcher honours JAVA_OPTS or JDK_JAVA_OPTIONS, prefer one of those.
-  tools:
-    swath:
-      env: JAVA_TOOL_OPTIONS
-      value: "-XX:MaxRAMPercentage={percent}"
-
-    s3p:
-      env: NODE_OPTIONS
-      value: "--max-old-space-size={mib}"
+  # The share and nothing else: which variable a runtime reads, and whether it
+  # wants a proportion or a size in MiB, is the capsule's to render from the
+  # share it is handed (`benchmark/docs/capsule-contract.md` § "The ceiling, and
+  # the share of it"). Stating it here too put the same variable in the job
+  # twice, and the worker refuses two sources for one key.
+  percent: 75

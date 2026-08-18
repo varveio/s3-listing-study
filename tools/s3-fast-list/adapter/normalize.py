@@ -42,6 +42,7 @@ refuse all four identically.
 from __future__ import annotations
 
 import sys
+from collections.abc import Mapping
 from typing import IO
 
 from benchmark.runtime.duckdb_adapter import (
@@ -57,7 +58,12 @@ UNREADABLE_EXIT = 1
 
 # Declared rather than inferred, so the equivalence harness can name a mode no
 # committed payload exercises — untested by construction, and invisible otherwise.
-MODES = frozenset({"list"})
+# `list-hinted` emits the same Arrow schema through the same writer — the hints
+# only shape *how* the keyspace was walked — so one query serves both; its
+# absence here failed the first live hinted attempt at postprocessing after a
+# perfect run. `ks-split` stays out: preparation-ceiling modes are never
+# row-counted (the worker skips them), and a cut-point file has no row count.
+MODES = frozenset({"list", "list-hinted"})
 
 # make_timestamp() takes MICROseconds; the epoch is UTC and the timestamp is
 # tz-naive, so the formatted components are UTC by construction and the `Z` is
@@ -85,7 +91,13 @@ def count_rows(data: bytes, mode: str, prefix: str = "", native_root: str = "") 
             raise ValueError(f"input is not readable parquet: {exc}") from exc
 
 
-def normalize(out: IO[bytes], data: bytes, mode: str, prefix: str = "") -> int:
+def normalize(
+    out: IO[bytes],
+    data: bytes,
+    mode: str,
+    prefix: str = "",
+    config: Mapping[str, object] | None = None,
+) -> int:
     import duckdb
 
     if mode not in MODES:

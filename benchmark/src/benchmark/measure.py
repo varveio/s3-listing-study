@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import argparse
 import contextlib
-import ctypes
 import gzip
 import hashlib
 import json
@@ -29,24 +28,56 @@ import stat
 import subprocess
 import sys
 import time
-import uuid
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
-from benchmark import adapters, gcs
-from benchmark.contract import TOOLBOX_TOOLS, sha256_of
+from benchmark import adapters, gcs, procs
+from benchmark.contract import (
+    AWS_CREDENTIAL_ENV_KEYS,
+    AWS_CREDENTIAL_REQUIRED_ENV_KEYS,
+    CREDENTIAL_ENV_VAR,
+    TOOLBOX_TOOLS,
+    sha256_of,
+)
+from benchmark.runtime.command_adapter import (
+    HEAP_PERCENT,
+    PURPOSES,
+    CommandRequest,
+    LoadedCommandAdapter,
+    Mode,
+    shared_axis_values,
+)
 
 EXIT_ADAPTER_ERROR = 3
 EXIT_SECRET_DETECTED = 9
 EXIT_IMAGE_MISMATCH = 10
 EXIT_POSTPROCESSING_FAILED = 11
+EXIT_ARTIFACT_UNUSABLE = 12
+"""The bytes a case turns on are unusable, or a clean subject never wrote them.
+
+Both are the same verdict for a reader: this attempt has no measurement in it.
+A missing declared product belongs here rather than under postprocessing —
+nothing failed to process, there was nothing published to process."""
+EXIT_SETUP_FAILED = 13
+"""The untimed inline setup exec did not leave the subject something to run on.
+
+Distinct from EXIT_ARTIFACT_UNUSABLE, which stays the verdict on *bytes* that
+exist and are not usable, wherever they came from: this one says the setup exec
+itself failed — nonzero, timed out, left a process behind, or published anything
+other than exactly one file.
+"""
+SETUP_TIMEOUT_S = 300
+"""The most an untimed setup exec gets, whatever the subject's deadline is.
+
+Both phases run inside one provider deadline that covers the container, not a
+phase: a setup allowed the subject's full timeout could push the measurement
+past it and have the whole attempt hard-killed, evidence and all. A setup exec
+is by contract a cheap local transform of what the chain already staged, so a
+bound this far below any subject's deadline costs a legitimate one nothing.
+"""
 PINNED_IMAGE_RE = re.compile(r"\A[^\s@]+@sha256:[0-9a-f]{64}\Z")
-CASE_ENV_KEYS = frozenset({"JAVA_TOOL_OPTIONS", "NODE_OPTIONS"})
-AWS_CREDENTIAL_ENV_KEYS = frozenset(
-    {"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"}
-)
-AWS_CREDENTIAL_REQUIRED_ENV_KEYS = frozenset({"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"})
 
 SECRET_PATTERNS = {
     "credential-shaped value": re.compile(
@@ -77,48 +108,60 @@ SUBJECT_ENV = {
 }
 
 
-def parse_case_env(pairs: list[str]) -> dict[str, str]:
-    env = {}
-    for pair in pairs:
-        name, _, value = pair.partition("=")
-        if not name or not _ or "\x00" in pair:
-            raise ValueError(f"--case-env must be NAME=VALUE without NUL bytes: {pair!r}")
-        if name not in CASE_ENV_KEYS:
-            raise ValueError(f"--case-env names unsupported key: {name}")
+def parse_credential_env(blob: str) -> dict[str, str]:
+    """Parse ``KEY=VALUE`` lines into a validated AWS credential mapping.
+
+    Matches the Secret Manager payload format in
+    ``infra/terraform/modules/gcp/s3-listing-study/aws-credentials.tf``: one
+    ``KEY=VALUE`` per line, ``AWS_SESSION_TOKEN`` optional.
+    """
+    result: dict[str, str] = {}
+    for line_number, raw_line in enumerate(blob.splitlines(), start=1):
+        line = raw_line.strip()
+        if not line:
+            continue
+        key, separator, value = line.partition("=")
+        if not separator:
+            raise ValueError(f"credential line {line_number} is not KEY=VALUE")
+        key = key.strip()
+        value = value.strip()
+        if key not in AWS_CREDENTIAL_ENV_KEYS:
+            raise ValueError(f"credential line {line_number} names an unsupported key: {key}")
+        if key in result:
+            raise ValueError(f"credential line {line_number} duplicates key: {key}")
         if not value:
-            raise ValueError(f"--case-env {name} value must not be empty")
-        if name in env:
-            raise ValueError(f"--case-env repeats {name}")
-        env[name] = value
-    return env
+            raise ValueError(f"credential line {line_number} has an empty value")
+        result[key] = value
+    missing = sorted(AWS_CREDENTIAL_REQUIRED_ENV_KEYS - set(result))
+    if missing:
+        raise ValueError(f"credential payload is missing required key(s): {', '.join(missing)}")
+    return result
 
 
-def validate_environment_inputs(
-    auth: str,
-    pass_env: list[str],
-    functional_env: dict[str, str],
-    case_env: dict[str, str],
-) -> str | None:
+def resolve_credential_env(auth_role: str | None, environ: Mapping[str, str]) -> dict[str, str]:
+    """Return the subject's credential variables for this case's role.
+
+    The credential arrives as the single Batch secretVariable the controller
+    attaches to a signing case's job and nothing else. A case that resolved to
+    no role, yet whose environment carries a credential, was submitted wrong —
+    a refusal rather than something to drop silently.
+    """
+    blob = environ.get(CREDENTIAL_ENV_VAR)
+    if auth_role is not None:
+        if not blob:
+            raise ValueError(f"case signing with role {auth_role} requires {CREDENTIAL_ENV_VAR}")
+        return parse_credential_env(blob)
+    if blob:
+        raise ValueError(f"{CREDENTIAL_ENV_VAR} is set but the case resolved to no auth role")
+    return {}
+
+
+def validate_environment_inputs(functional_env: dict[str, str]) -> str | None:
     """Refuse environment names that could widen or shadow the auth boundary."""
-    passed = set(pass_env)
-    if len(passed) != len(pass_env):
-        return "--pass-env repeats a variable"
-    if auth == "anonymous" and passed:
-        return "anonymous cases must not carry credential variables"
-    if auth == "authenticated":
-        unknown = sorted(passed - AWS_CREDENTIAL_ENV_KEYS)
-        missing = sorted(AWS_CREDENTIAL_REQUIRED_ENV_KEYS - passed)
-        if unknown:
-            return f"authenticated case has unsupported credential key(s): {', '.join(unknown)}"
-        if missing:
-            return f"authenticated case is missing credential key(s): {', '.join(missing)}"
     reserved = set(SUBJECT_ENV) | AWS_CREDENTIAL_ENV_KEYS | {"AWS_REGION", "AWS_DEFAULT_REGION"}
     collisions = sorted(set(functional_env) & reserved)
     if collisions:
         return f"capsule environment collides with reserved key(s): {', '.join(collisions)}"
-    overlap = sorted((set(functional_env) & set(case_env)) | (set(case_env) & passed))
-    if overlap:
-        return f"environment sources collide on key(s): {', '.join(overlap)}"
     return None
 
 
@@ -201,10 +244,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Compile, run, and upload one case's attempt.")
     parser.add_argument("--tool", required=True)
     parser.add_argument("--mode", required=True)
+    parser.add_argument(
+        "--purpose",
+        required=True,
+        choices=PURPOSES,
+        help="What this attempt is for. A preparation publishes an artifact for "
+        "a later case and no measured product.",
+    )
     parser.add_argument("--bucket", required=True)
     parser.add_argument("--region", required=True)
     parser.add_argument("--prefix", default="")
-    parser.add_argument("--auth", default="anonymous", choices=("anonymous", "authenticated"))
+    parser.add_argument(
+        "--auth-role",
+        default=None,
+        help="Logical role this case signs with. Absent lists unsigned.",
+    )
     parser.add_argument(
         "--adapter-root",
         default=adapters.DEFAULT_ADAPTER_ROOT,
@@ -214,27 +268,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--destination",
         required=True,
-        help="GCS destination prefix; this invocation appends its own uuid4 leaf.",
+        help="The attempt's result prefix, computed from its ledger row. Written "
+        "into as-is: the prefix is the identity, so nothing is appended to it.",
     )
     parser.add_argument(
         "--timeout", type=int, default=3600, help="Seconds before the subject is killed."
     )
     parser.add_argument("--term-grace", type=float, default=5.0)
-    parser.add_argument(
-        "--case-env",
-        action="append",
-        default=[],
-        metavar="NAME=VALUE",
-        help="Extra environment for the subject, e.g. JAVA_TOOL_OPTIONS for swath. Repeatable.",
-    )
-    parser.add_argument(
-        "--pass-env",
-        action="append",
-        default=[],
-        metavar="NAME",
-        help="Copy NAME from this process's own environment into the subject's env "
-        "(e.g. a Batch secretVariable). Repeatable. Never recorded in result.json.",
-    )
     parser.add_argument("--image", required=True)
     parser.add_argument("--toolbox-manifest-sha256", required=True)
     parser.add_argument("--toolbox-recipe-sha256", required=True)
@@ -245,19 +285,57 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--adapter-bundle-sha256", required=True)
     parser.add_argument("--harness-revision", required=True)
     parser.add_argument("--subject-workdir", required=True)
-    parser.add_argument("--campaign-id", required=True)
-    parser.add_argument("--job-id", required=True)
+    parser.add_argument("--group-id", required=True)
+    parser.add_argument("--job-name", required=True)
     parser.add_argument("--case-id", required=True)
-    parser.add_argument("--case-fingerprint", required=True)
+    parser.add_argument("--attempt-id", required=True)
     parser.add_argument("--image-set-sha256", required=True)
-    parser.add_argument("--run-ordinal", required=True, type=int)
-    parser.add_argument("--submission-number", required=True, type=int)
     parser.add_argument("--machine-type", required=True)
     parser.add_argument("--vcpus", required=True, type=int)
     parser.add_argument("--memory-gb", required=True, type=int)
     parser.add_argument("--container-memory-gb", required=True, type=parse_optional_gb)
+    parser.add_argument(
+        "--config",
+        required=True,
+        metavar="JSON",
+        help="The case's effective capsule config blob (LoadedCommandAdapter.effective_config).",
+    )
+    parser.add_argument(
+        "--input-artifact",
+        default="",
+        metavar="gs://...",
+        help="The object holding the artifact this case consumes, staged locally "
+        "before the subject runs. Empty for the many modes that consume nothing.",
+    )
+    parser.add_argument(
+        "--input-artifact-sha256",
+        default="",
+        help="The content digest this case hashed. The staged bytes are verified "
+        "against it, and a mismatch refuses the attempt.",
+    )
     parser.add_argument("--image-metadata", default="/opt/benchmark/image-metadata.json")
     return parser.parse_args(argv)
+
+
+def stage_artifact(uri: str, expected_sha256: str, into: Path) -> Path:
+    """Download the artifact this case consumes and refuse bytes that moved.
+
+    Verified before the subject ever sees it: the case hashed this digest, so
+    content that does not match it is a different case wearing this one's
+    identity. Staged outside the attempt directory, because what lands there is
+    this attempt's own evidence and a consumed artifact is somebody else's.
+    """
+    if not expected_sha256:
+        raise ValueError(f"--input-artifact {uri} carries no digest to verify it against")
+    into.mkdir(parents=True, exist_ok=True)
+    target = into / uri.rstrip("/").rsplit("/", 1)[-1]
+    target.write_bytes(gcs.download_bytes(uri))
+    staged = sha256_of(target)
+    if staged != expected_sha256:
+        raise ValueError(
+            f"staged artifact {uri} digests {staged}, not the {expected_sha256} this case consumes"
+        )
+    return target
 
 
 def validate_image_metadata(args: argparse.Namespace) -> str | None:
@@ -287,16 +365,18 @@ def validate_image_metadata(args: argparse.Namespace) -> str | None:
         "adapter_bundle_sha256",
         "subject_workdir",
         "executable",
+        "tool_slice_sha256",
+        "platform_sha256",
     }
     if (
-        metadata.get("schema_version") != 4
+        metadata.get("schema_version") != 5
         or not isinstance(tools, dict)
         or set(tools) != TOOLBOX_TOOLS
         or any(not isinstance(value, dict) or set(value) != tool_fields for value in tools.values())
     ):
         return "image metadata schema is not supported"
     toolbox_projection = {
-        "schema_version": 2,
+        "schema_version": 3,
         "toolbox_recipe_sha256": metadata.get("toolbox_recipe_sha256"),
         "tools": {
             tool: {
@@ -362,23 +442,39 @@ def run_tool(
     env: dict[str, str],
     *,
     cwd: str | None = None,
+    reset_peak: bool = False,
+    stdout_path: Path | None = None,
 ) -> dict[str, object]:
     """Run argv, capture stdout/stderr to files, return
     (exit_code, wall_s, max_rss_kb, timed_out).
+
+    ``stdout_path`` is where fd 1 lands. It defaults to this phase's own log,
+    and a subject that only prints its listing is handed its declared product
+    file instead: those bytes *are* the product, and writing them to a log and
+    a copy would double a listing that can run to gigabytes.
     """
-    stdout_path = attempt_dir / "stdout.log"
+    stdout_path = attempt_dir / "stdout.log" if stdout_path is None else stdout_path
     stderr_path = attempt_dir / "stderr.log"
 
-    enable_child_subreaper()
-    baseline_descendants = descendant_pids(os.getpid())
-    cgroup = cgroup_v2_directory()
-    cgroup_before = cgroup_snapshot(cgroup)
-    usage_before = resource.getrusage(resource.RUSAGE_CHILDREN)
+    procs.enable_child_subreaper()
+    baseline_descendants = procs.descendant_pids(os.getpid())
+    cgroup = procs.cgroup_v2_directory()
+    peak_reset = procs.reset_memory_peak(cgroup) if reset_peak else False
+    cgroup_before = procs.cgroup_snapshot(cgroup)
+    # Shrink the fork-inherited floor to this worker's live footprint, then
+    # record what is left of it: the child's `ru_maxrss` starts from the mark
+    # this worker carries into the fork, so a figure near this number has
+    # measured nothing about the subject. Read just before the spawn, and a
+    # bound on what the subject can *show*, not one the figure must clear --
+    # the child re-execs, so it can land marginally under.
+    rss_floor_reset = procs.reset_self_peak_rss()
+    rss_floor_kb = procs.self_peak_rss_kb()
     start_ns = time.monotonic_ns()
     timed_out = False
     term_sent = False
     kill_sent = False
     process_tree_clean = True
+    subject_usage: resource.struct_rusage | None = None
     tracked_pids: set[int] = set()
     with open(stdout_path, "wb") as stdout_f, open(stderr_path, "wb") as stderr_f:
         proc = subprocess.Popen(
@@ -390,15 +486,47 @@ def run_tool(
             cwd=cwd,
             start_new_session=True,
         )
+
+        def reap_subject(timeout: float | None) -> bool:
+            """Wait the subject with ``os.wait4``, and let nothing wait it first.
+
+            ``Popen.poll``/``wait`` reap the child themselves, which folds its
+            rusage into this worker's process-lifetime ``RUSAGE_CHILDREN``
+            high-water mark — and with two execs per attempt, that mark reports
+            the fatter phase for both. So the first successful wait on this pid
+            is this one, and the status goes back onto the Popen object so
+            nothing re-waits it. ``None`` waits without a deadline.
+            """
+            nonlocal subject_usage
+            wait_until = None if timeout is None else time.monotonic() + timeout
+            while proc.returncode is None:
+                try:
+                    reaped, status, usage = os.wait4(proc.pid, os.WNOHANG)
+                except ChildProcessError:
+                    # The status is unobtainable and the child is gone either
+                    # way, which is what subprocess itself records here.
+                    proc.returncode = 0
+                    break
+                if reaped != 0:
+                    subject_usage = usage
+                    proc.returncode = os.waitstatus_to_exitcode(status)
+                    break
+                if wait_until is not None and time.monotonic() >= wait_until:
+                    return False
+                time.sleep(0.01)
+            return True
+
         tracked_pids.add(proc.pid)
         deadline = time.monotonic() + timeout
         while True:
-            proc.poll()
-            tracked_pids.update(subject_processes(proc.pid, tracked_pids, baseline_descendants))
+            reap_subject(0)
+            tracked_pids.update(
+                procs.subject_processes(proc.pid, tracked_pids, baseline_descendants)
+            )
             if proc.returncode is not None:
                 exit_code = proc.returncode
-                residual = live_pids(tracked_pids - {proc.pid})
-                if residual or process_group_exists(proc.pid):
+                residual = procs.live_pids(tracked_pids - {proc.pid})
+                if residual or procs.process_group_exists(proc.pid):
                     process_tree_clean = False
                 break
             if time.monotonic() >= deadline:
@@ -407,8 +535,8 @@ def run_tool(
                 break
             time.sleep(0.01)
 
-        residual = live_pids(tracked_pids - {proc.pid})
-        if timed_out or residual or process_group_exists(proc.pid):
+        residual = procs.live_pids(tracked_pids - {proc.pid})
+        if timed_out or residual or procs.process_group_exists(proc.pid):
             if timed_out:
                 exit_code = 124  # conventional timeout exit code
             try:
@@ -416,67 +544,70 @@ def run_tool(
                 term_sent = True
             except ProcessLookupError:
                 pass
-            signal_pids(residual, signal.SIGTERM)
+            procs.signal_pids(residual, signal.SIGTERM)
             term_sent = term_sent or bool(residual)
             grace_deadline = time.monotonic() + term_grace
             while time.monotonic() < grace_deadline:
-                proc.poll()
-                tracked_pids.update(subject_processes(proc.pid, tracked_pids, baseline_descendants))
-                residual = live_pids(tracked_pids - {proc.pid})
-                if not process_group_exists(proc.pid) and not residual:
+                reap_subject(0)
+                tracked_pids.update(
+                    procs.subject_processes(proc.pid, tracked_pids, baseline_descendants)
+                )
+                residual = procs.live_pids(tracked_pids - {proc.pid})
+                if not procs.process_group_exists(proc.pid) and not residual:
                     break
                 time.sleep(0.01)
-            residual = live_pids(tracked_pids - {proc.pid})
-            if process_group_exists(proc.pid) or residual:
+            residual = procs.live_pids(tracked_pids - {proc.pid})
+            if procs.process_group_exists(proc.pid) or residual:
                 try:
                     os.killpg(proc.pid, signal.SIGKILL)
                     kill_sent = True
                 except ProcessLookupError:
                     pass
-                signal_pids(residual, signal.SIGKILL)
+                procs.signal_pids(residual, signal.SIGKILL)
                 kill_sent = kill_sent or bool(residual)
-            try:
-                proc.wait(timeout=max(term_grace, 1.0))
-            except subprocess.TimeoutExpired:
+            if not reap_subject(max(term_grace, 1.0)):
                 with contextlib.suppress(ProcessLookupError):
                     os.killpg(proc.pid, signal.SIGKILL)
-                proc.wait()
+                reap_subject(None)
         else:
-            proc.wait()
+            reap_subject(None)
     elapsed_ns = time.monotonic_ns() - start_ns
-    group_empty = not process_group_exists(proc.pid)
+    group_empty = not procs.process_group_exists(proc.pid)
     if not group_empty:
         try:
             os.killpg(proc.pid, signal.SIGKILL)
             kill_sent = True
         except ProcessLookupError:
             pass
-        group_empty = not process_group_exists(proc.pid)
+        group_empty = not procs.process_group_exists(proc.pid)
     cleanup_deadline = time.monotonic() + max(term_grace, 1.0)
     while True:
-        tracked_pids.update(subject_processes(proc.pid, tracked_pids, baseline_descendants))
-        descendants = live_pids(tracked_pids - {proc.pid})
+        tracked_pids.update(procs.subject_processes(proc.pid, tracked_pids, baseline_descendants))
+        descendants = procs.live_pids(tracked_pids - {proc.pid})
         if not descendants or time.monotonic() >= cleanup_deadline:
             break
-        signal_pids(descendants, signal.SIGKILL)
+        procs.signal_pids(descendants, signal.SIGKILL)
         kill_sent = True
-        wait_for_pids_to_exit(descendants, min(0.1, max(0.0, cleanup_deadline - time.monotonic())))
-    tracked_pids.update(subject_processes(proc.pid, tracked_pids, baseline_descendants))
-    descendants_empty = not live_pids(tracked_pids - {proc.pid})
-    group_empty = not process_group_exists(proc.pid)
-    reap_children(tracked_pids - {proc.pid})
+        procs.wait_for_pids_to_exit(
+            descendants, min(0.1, max(0.0, cleanup_deadline - time.monotonic()))
+        )
+    tracked_pids.update(procs.subject_processes(proc.pid, tracked_pids, baseline_descendants))
+    descendants_empty = not procs.live_pids(tracked_pids - {proc.pid})
+    group_empty = not procs.process_group_exists(proc.pid)
+    procs.reap_children(tracked_pids - {proc.pid})
 
-    usage_after = resource.getrusage(resource.RUSAGE_CHILDREN)
-    cgroup_after = cgroup_snapshot(cgroup)
+    cgroup_after = procs.cgroup_snapshot(cgroup)
     before_events = cgroup_before.get("memory_events")
     after_events = cgroup_after.get("memory_events")
     return {
         "exit_code": exit_code,
         "elapsed_ns": elapsed_ns,
         "wall_seconds": round(elapsed_ns / 1_000_000_000, 6),
-        "max_rss_kb": usage_after.ru_maxrss,
-        "user_cpu_seconds": usage_after.ru_utime - usage_before.ru_utime,
-        "system_cpu_seconds": usage_after.ru_stime - usage_before.ru_stime,
+        "max_rss_kb": subject_usage.ru_maxrss if subject_usage is not None else 0,
+        "max_rss_floor_kb": rss_floor_kb,
+        "max_rss_floor_reset": rss_floor_reset,
+        "user_cpu_seconds": subject_usage.ru_utime if subject_usage is not None else 0.0,
+        "system_cpu_seconds": subject_usage.ru_stime if subject_usage is not None else 0.0,
         "timed_out": timed_out,
         "term_sent": term_sent,
         "kill_sent": kill_sent,
@@ -486,148 +617,13 @@ def run_tool(
         "subreaper_enabled": True,
         "cgroup": {
             "location": str(cgroup) if cgroup else None,
+            "memory_peak_reset": peak_reset,
             "before": cgroup_before,
             "after": cgroup_after,
-            "oom_delta": _event_delta(before_events, after_events, "oom"),
-            "oom_kill_delta": _event_delta(before_events, after_events, "oom_kill"),
+            "oom_delta": procs._event_delta(before_events, after_events, "oom"),
+            "oom_kill_delta": procs._event_delta(before_events, after_events, "oom_kill"),
         },
     }
-
-
-def enable_child_subreaper() -> None:
-    """Make daemonizing grandchildren remain observable by this worker."""
-    libc = ctypes.CDLL(None, use_errno=True)
-    if libc.prctl(36, 1, 0, 0, 0) != 0:  # PR_SET_CHILD_SUBREAPER
-        error = ctypes.get_errno()
-        raise OSError(error, f"could not enable child subreaper: {os.strerror(error)}")
-
-
-def process_table() -> dict[int, tuple[int, int, str]]:
-    """Return pid -> (parent pid, process group, state) from Linux procfs."""
-    table: dict[int, tuple[int, int, str]] = {}
-    for stat_path in Path("/proc").glob("[0-9]*/stat"):
-        try:
-            pid = int(stat_path.parent.name)
-            fields = stat_path.read_text().rsplit(") ", 1)[1].split()
-            table[pid] = (int(fields[1]), int(fields[2]), fields[0])
-        except (OSError, IndexError, ValueError):
-            continue
-    return table
-
-
-def descendant_pids(
-    root_pid: int, table: dict[int, tuple[int, int, str]] | None = None
-) -> set[int]:
-    table = table or process_table()
-    found: set[int] = set()
-    frontier = {root_pid}
-    while frontier:
-        children = {
-            pid
-            for pid, (parent, _group, state) in table.items()
-            if parent in frontier and state != "Z" and pid not in found
-        }
-        found.update(children)
-        frontier = children
-    return found
-
-
-def subject_processes(root_pid: int, tracked: set[int], baseline_descendants: set[int]) -> set[int]:
-    """Find the subject family, including children that escaped with setsid()."""
-    table = process_table()
-    family = {root_pid, *tracked}
-    # A subreaper adopts daemonized descendants. This worker is dedicated to
-    # one synchronous subject, so any newly adopted child belongs to it; the
-    # baseline prevents touching a child that predated this invocation.
-    family.update(
-        pid
-        for pid, (parent, _group, state) in table.items()
-        if parent == os.getpid() and pid not in baseline_descendants and state != "Z"
-    )
-    frontier = set(family)
-    while frontier:
-        children = {
-            pid
-            for pid, (parent, _group, state) in table.items()
-            if parent in frontier and state != "Z" and pid not in family
-        }
-        family.update(children)
-        frontier = children
-    return family
-
-
-def live_pids(pids: set[int]) -> set[int]:
-    table = process_table()
-    return {pid for pid in pids if pid in table and table[pid][2] != "Z"}
-
-
-def signal_pids(pids: set[int], sig: signal.Signals) -> None:
-    for pid in sorted(pids):
-        with contextlib.suppress(ProcessLookupError):
-            os.kill(pid, sig)
-
-
-def wait_for_pids_to_exit(pids: set[int], timeout: float) -> None:
-    deadline = time.monotonic() + timeout
-    while live_pids(pids) and time.monotonic() < deadline:
-        time.sleep(0.01)
-
-
-def reap_children(pids: set[int]) -> None:
-    for pid in sorted(pids):
-        with contextlib.suppress(ChildProcessError):
-            os.waitpid(pid, os.WNOHANG)
-
-
-def process_group_exists(process_group: int) -> bool:
-    """Whether a live (non-zombie) process remains in the subject group."""
-    for stat_path in Path("/proc").glob("[0-9]*/stat"):
-        try:
-            fields = stat_path.read_text().rsplit(") ", 1)[1].split()
-            state, group = fields[0], int(fields[2])
-        except (OSError, IndexError, ValueError):
-            continue
-        if group == process_group and state != "Z":
-            return True
-    return False
-
-
-def cgroup_v2_directory() -> Path | None:
-    override = os.environ.get("BENCHMARK_CGROUP_DIR")
-    if override:
-        return Path(override)
-    try:
-        relative = Path(
-            Path("/proc/self/cgroup").read_text().split("0::", 1)[1].splitlines()[0].lstrip("/")
-        )
-        return Path("/sys/fs/cgroup") / relative
-    except (OSError, IndexError):
-        return None
-
-
-def cgroup_snapshot(directory: Path | None) -> dict[str, object]:
-    if directory is None:
-        return {"memory_current_bytes": None, "memory_peak_bytes": None, "memory_events": None}
-    try:
-        events = {
-            name: int(value)
-            for name, value in (
-                line.split() for line in (directory / "memory.events").read_text().splitlines()
-            )
-        }
-        return {
-            "memory_current_bytes": int((directory / "memory.current").read_text()),
-            "memory_peak_bytes": int((directory / "memory.peak").read_text()),
-            "memory_events": events,
-        }
-    except (OSError, ValueError):
-        return {"memory_current_bytes": None, "memory_peak_bytes": None, "memory_events": None}
-
-
-def _event_delta(before: object, after: object, name: str) -> int | None:
-    if not isinstance(before, dict) or not isinstance(after, dict):
-        return None
-    return int(after.get(name, 0)) - int(before.get(name, 0))
 
 
 def final_exit_code(
@@ -635,6 +631,7 @@ def final_exit_code(
     timed_out: bool,
     row_count_error: str | None,
     *,
+    product_error: str | None = None,
     oom_kill_delta: int | None = None,
     process_group_empty: bool = True,
     descendants_empty: bool = True,
@@ -646,9 +643,279 @@ def final_exit_code(
         return 1
     if oom_kill_delta is not None and oom_kill_delta > 0:
         return 1
+    if product_error is not None:
+        return EXIT_ARTIFACT_UNUSABLE
     if row_count_error is not None:
         return EXIT_POSTPROCESSING_FAILED
     return 0
+
+
+class SetupFailed(RuntimeError):
+    """The untimed setup exec left the timed subject nothing it could run on.
+
+    Carries the setup block as far as it got, because what the failed exec
+    captured is the evidence for why the attempt has no measurement in it.
+    """
+
+    def __init__(self, message: str, code: int, setup: Mapping[str, object]) -> None:
+        super().__init__(message)
+        self.code = code
+        self.setup = dict(setup)
+
+
+def subject_env(
+    region: str, functional_env: Mapping[str, str], credential_env: Mapping[str, str]
+) -> dict[str, str]:
+    """The environment an exec of this attempt gets: harness base, capsule, credential.
+
+    The credential is deliberately kept out of the capsule's environment, which is
+    recorded in result.json (a published artifact) through the argv it compiled;
+    these values are secret material. Batch's secretVariable lands in os.environ,
+    and this is how it reaches the subject without being written down.
+    """
+    return {
+        **SUBJECT_ENV,
+        "AWS_REGION": region,
+        "AWS_DEFAULT_REGION": region,
+        **functional_env,
+        **credential_env,
+    }
+
+
+def run_inline_setup(
+    adapter: LoadedCommandAdapter,
+    mode: str,
+    args: argparse.Namespace,
+    *,
+    consumer_config: Mapping[str, object],
+    artifact_path: str,
+    attempt_dir: Path,
+    visible_memory_gb: float,
+) -> tuple[str, dict[str, object]]:
+    """Run one mode's declared setup exec untimed, and return what the subject reads.
+
+    Same container and same process hygiene as the subject, and explicitly not
+    the same clock: the returned block records the setup's wall time as
+    evidence, and nothing merges it into the measurement's timing. Its deadline
+    is its own too — :data:`SETUP_TIMEOUT_S`, so the two phases together stay
+    inside the one deadline the provider gives the container.
+
+    Its sink is under the attempt directory rather than the native root, because
+    what it publishes is setup evidence and never the subject's product — a
+    consumer that found it in ``native/`` would count the harness's own scaffolding
+    as listed rows. Exactly one file, the same contract a consumed preparation
+    holds to: the harness has no way to choose between two.
+
+    It runs without the credential. A setup exec is by contract a local transform
+    of what the chain already staged, so it has nothing to sign, and the fewer
+    execs that hold secret material the smaller the surface that can leak it.
+    """
+    # The same inheritance a chain link gets, from the same rule.
+    shared = shared_axis_values(adapter.modes[mode], consumer_config)
+    setup_dir = attempt_dir / "inline"
+    sink = setup_dir / "sink"
+    sink.mkdir(parents=True, exist_ok=True)
+    # Filled in as the phase gets through it, so a refusal at any point still
+    # says what happened rather than only that something did.
+    setup: dict[str, object] = {
+        "mode": mode,
+        "command": [],
+        "exit_code": None,
+        "wall_s": None,
+        "output": {},
+        "validated": False,
+    }
+
+    def failed(message: str, code: int) -> SetupFailed:
+        return SetupFailed(message, code, setup)
+
+    try:
+        request = CommandRequest(
+            mode=mode,
+            bucket=args.bucket,
+            region=args.region,
+            prefix=args.prefix,
+            tool=args.tool,
+            signed=args.auth_role is not None,
+            config=adapter.effective_config(mode, shared),
+            sink_dir=str(sink),
+            artifact_path=artifact_path,
+            visible_memory_gb=visible_memory_gb,
+            heap_percent=HEAP_PERCENT,
+        )
+        command = adapter.compile(request)
+        functional_env = adapter.build_env(request)
+    except Exception as exc:
+        raise failed(f"{args.tool} setup {mode!r}: {exc}", EXIT_ADAPTER_ERROR) from None
+    setup["command"] = list(command)
+
+    environment_error = validate_environment_inputs(functional_env)
+    if environment_error:
+        raise failed(f"setup {mode!r}: {environment_error}", 2)
+    if not preflight(command):
+        raise failed(f"setup {mode!r} has no executable to run", EXIT_SETUP_FAILED)
+
+    execution = run_tool(
+        command,
+        setup_dir,
+        min(args.timeout, SETUP_TIMEOUT_S),
+        args.term_grace,
+        subject_env(args.region, functional_env, {}),
+        cwd=args.subject_workdir,
+    )
+    setup["exit_code"] = execution["exit_code"]
+    setup["wall_s"] = execution["wall_seconds"]
+    settled = all(
+        execution.get(field) is True
+        for field in ("process_group_empty", "descendants_empty", "process_tree_clean")
+    )
+    if execution["exit_code"] != 0 or execution["timed_out"] or not settled:
+        raise failed(
+            f"setup {mode!r} exited {execution['exit_code']} "
+            f"(timed_out={execution['timed_out']}, settled={settled})",
+            EXIT_SETUP_FAILED,
+        )
+    try:
+        produced = sorted(retained_files(sink))
+    except ArtifactSafetyError as exc:
+        raise failed(
+            f"setup {mode!r} published unusable output: {exc}", EXIT_SETUP_FAILED
+        ) from None
+    setup["output"] = {path.name: sha256_of(path) for path in produced}
+    if len(produced) != 1:
+        raise failed(
+            f"setup {mode!r} publishes exactly one artifact into its sink, and this one "
+            f"published {len(produced)}",
+            EXIT_SETUP_FAILED,
+        )
+    output = produced[0]
+    validator = adapter.validate_artifact.get(mode)
+    if validator is not None:
+        try:
+            validator(output)
+        except Exception as exc:
+            raise failed(
+                f"setup {mode!r} produced no usable artifact: {exc}", EXIT_ARTIFACT_UNUSABLE
+            ) from None
+    setup["validated"] = validator is not None
+    return str(output), setup
+
+
+@dataclass(frozen=True, slots=True)
+class Product:
+    """The file this attempt publishes its measured product as.
+
+    Resolved from the capsule's own declaration, never from what the sink turns
+    out to hold: a subject with a side output writes a file whichever channel
+    its product travels on, so the sink cannot answer the question.
+    """
+
+    artifact: str
+    """The logical name the mode declares it under."""
+
+    name: str
+    """Its path relative to the sink."""
+
+    path: Path
+    channel: str
+    """One of :data:`~benchmark.runtime.command_adapter.PRODUCT_CHANNELS`."""
+
+    compress: bool = False
+    """Whether these bytes are gzipped before they are uploaded."""
+
+    @property
+    def takes_stdout(self) -> bool:
+        """Whether fd 1 is the product, so this attempt has no stdout log."""
+        return self.channel == "stdout"
+
+
+def declared_product(manifest: Mode | None, native_root: Path, *, purpose: str) -> Product | None:
+    """Where this attempt publishes its measured product, or ``None`` when it has none.
+
+    Gated on the attempt's purpose, not only on the mode's declaration. A mode
+    capped at ``preparation`` declares no product at all, but a measuring mode
+    demoted to ``preparation`` by a plan -- the bootstrap ``list`` a hinted-only
+    plan still mints -- publishes for the chain and for nothing else. Measuring
+    its product would upload a 131 MB listing no consumer reads, and count rows
+    for a comparison it is not in.
+    """
+    if manifest is None or not manifest.product_artifact or purpose == "preparation":
+        return None
+    name = manifest.product_file
+    return Product(
+        manifest.product_artifact,
+        name,
+        native_root / name,
+        manifest.product_channel,
+        manifest.compresses_product,
+    )
+
+
+def product_gap(product: Product) -> str | None:
+    """Why the declared product is not there, or ``None`` when it is.
+
+    A subject that exited clean and wrote nothing where its capsule says it
+    writes has published no measurement, however good its timing looks.
+    """
+    try:
+        if product.channel == "dataset":
+            if not product.path.is_dir() or not any(retained_files(product.path)):
+                return f"declared product dataset {product.name} holds no file"
+        elif not product.path.is_file():
+            return f"declared product {product.name} was not written"
+    except ArtifactSafetyError as exc:
+        return f"declared product {product.name} is not publishable: {exc}"
+    return None
+
+
+def capture_block(path: Path | None) -> dict[str, object] | None:
+    """Name, size and digest of one uploaded capture, or ``None`` when there is none.
+
+    ``None`` is the honest record for a subject that only prints: fd 1 carried
+    the product, so no stdout log exists to describe.
+    """
+    if path is None or not path.is_file():
+        return None
+    return {"name": path.name, "size_bytes": path.stat().st_size, "sha256": sha256_of(path)}
+
+
+def product_block(product: Product | None) -> dict[str, object] | None:
+    """What the attempt published as its product, and which channel carried it.
+
+    ``None`` where nothing landed at the declared path -- a subject killed before
+    it opened its output file published no product, and describing one with a
+    null digest would read downstream as evidence that disagrees with itself
+    rather than as the honest failure it is. Whatever debris the sink does hold
+    stays bound by ``native_manifest``.
+
+    ``sha256`` is null for a dataset, which is many files and has no one digest;
+    ``native_manifest`` binds every part of it either way, so nothing is lost.
+    """
+    if product is None or product_gap(product) is not None:
+        return None
+    return {
+        "artifact": product.artifact,
+        "name": f"native/{product.name}",
+        "channel": product.channel,
+        "size_bytes": sum(path.stat().st_size for path in retained_files(product.path)),
+        "sha256": None if product.channel == "dataset" else sha256_of(product.path),
+    }
+
+
+def published_product(product: Product | None, *, gap: str | None) -> Product | None:
+    """Compress the product where its mode says these bytes are worth compressing.
+
+    Called after the row count and the secret scan, which read what the subject
+    wrote, and before the manifest and the product block, which describe what is
+    uploaded — so `result.json` names, sizes and digests the file the sink
+    actually holds, under a name that says what it is.
+
+    A product that never landed is left alone: there is nothing to compress, and
+    `product_gap` has already said so.
+    """
+    if product is None or not product.compress or gap is not None:
+        return product
+    return replace(product, name=f"{product.name}.gz", path=gzip_file(product.path))
 
 
 def gzip_file(path: Path) -> Path:
@@ -705,14 +972,117 @@ def upload(attempt_dir: Path, destination: str) -> bool:
     try:
         for path in artifacts:
             if path.is_dir():
-                gcs.upload_tree(path, destination.rstrip("/") + "/" + path.name)
+                gcs.upload_tree(path, destination.rstrip("/") + "/" + path.name, create_only=True)
             else:
-                gcs.upload_file(path, destination.rstrip("/") + "/" + path.name)
-        gcs.upload_file(attempt_dir / "result.json", destination.rstrip("/") + "/result.json")
+                gcs.upload_file(path, destination.rstrip("/") + "/" + path.name, create_only=True)
+        gcs.upload_file(
+            attempt_dir / "result.json", destination.rstrip("/") + "/result.json", create_only=True
+        )
     except Exception as exc:
         print(f"measure: upload failed: {exc}", file=sys.stderr)
         return False
     return True
+
+
+def attempt_identity(
+    args: argparse.Namespace, config: Mapping[str, object], destination: str
+) -> dict[str, object]:
+    """What result.json says about *which* attempt this is, whatever became of it.
+
+    Written by both markers a worker can publish — a measurement, and a setup
+    exec that failed before the subject was ever compiled — so the second is
+    this same document with its execution fields empty rather than a shape of
+    its own that every reader would have to learn.
+    """
+    return {
+        "tool": args.tool,
+        "mode": args.mode,
+        "bucket": args.bucket,
+        "region": args.region,
+        "prefix": args.prefix,
+        "auth_role": args.auth_role,
+        "destination": destination,
+        "config": config,
+        # Lineage, beside the timing: which bytes this case consumed, and where
+        # the harness staged them from.
+        "input_artifact": args.input_artifact or None,
+        "input_artifact_sha256": args.input_artifact_sha256 or None,
+        "image": args.image,
+        "toolbox_manifest_sha256": args.toolbox_manifest_sha256,
+        "toolbox_recipe_sha256": args.toolbox_recipe_sha256,
+        "tool_recipe_sha256": args.tool_recipe_sha256,
+        "tool_build_inputs_sha256": args.tool_build_inputs_sha256,
+        "tool_version": args.tool_version,
+        "tool_build_sha256": args.tool_build_sha256,
+        "adapter_bundle_sha256": args.adapter_bundle_sha256,
+        "harness_revision": args.harness_revision,
+        "subject_workdir": args.subject_workdir,
+        "applied_subject_workdir": args.subject_workdir,
+        "worker_workdir": os.getcwd(),
+        "image_set_sha256": args.image_set_sha256,
+        "group_id": args.group_id,
+        "job_name": args.job_name,
+        "case_id": args.case_id,
+        "attempt_id": args.attempt_id,
+        "declared_resources": {
+            "machine_type": args.machine_type,
+            "vcpus": args.vcpus,
+            "memory_gb": args.memory_gb,
+            "container_memory_gb": args.container_memory_gb,
+        },
+        "observed_architecture": platform.machine(),
+        "batch_job_uid": os.environ.get("BATCH_JOB_UID"),
+    }
+
+
+def publish_setup_failure(
+    args: argparse.Namespace,
+    *,
+    config: Mapping[str, object],
+    attempt_dir: Path,
+    destination: str,
+    setup: Mapping[str, object],
+    exit_code: int,
+    started_at: str,
+) -> int:
+    """Upload what the failed setup exec left behind, and return its ladder code.
+
+    The exec ran, captured output, and that capture is the only account of why
+    this attempt has no measurement in it — the same rule the subject's own
+    failures are held to. The subject never ran, so its fields are explicitly
+    null rather than zeros a reader could mistake for a measurement.
+    """
+    secret_hit = scan_for_secrets([attempt_dir / "inline"])
+    if secret_hit:
+        print(
+            f"measure: possible secret in {secret_hit}; refusing to upload this attempt",
+            file=sys.stderr,
+        )
+        return EXIT_SECRET_DETECTED
+    result = {
+        **attempt_identity(args, config, destination),
+        "argv": None,
+        "setup": dict(setup),
+        "exit_code": exit_code,
+        "timed_out": False,
+        "execution": None,
+        "wall_seconds": None,
+        "max_rss_kb": None,
+        "row_count": None,
+        "row_count_error": None,
+        "started_at": started_at,
+        "finished_at": datetime.now(UTC).isoformat(),
+        "product": None,
+        "product_error": None,
+        "stdout": None,
+        "stderr": None,
+        "native_manifest": {},
+        "artifacts_size_bytes": sum(
+            p.stat().st_size for p in attempt_dir.rglob("*") if p.is_file()
+        ),
+    }
+    write_result_atomic(attempt_dir / "result.json", result)
+    return exit_code if upload(attempt_dir, destination) else 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -723,10 +1093,27 @@ def main(argv: list[str] | None = None) -> int:
     attempt_dir = Path(args.output).resolve()
     attempt_dir.mkdir(parents=True, exist_ok=True)
 
-    missing_pass_env = [name for name in args.pass_env if name not in os.environ]
-    if missing_pass_env:
+    try:
+        credential_env = resolve_credential_env(args.auth_role, os.environ)
+    except ValueError as exc:
+        print(f"measure: {exc}", file=sys.stderr)
+        return 2
+
+    try:
+        config = json.loads(args.config)
+        if not isinstance(config, dict):
+            raise ValueError("--config must be a JSON object")
+    except (json.JSONDecodeError, ValueError) as exc:
+        print(f"measure: --config is not valid JSON: {exc}", file=sys.stderr)
+        return 2
+
+    # The config is the authority on what ran: `--mode` is the same answer
+    # rendered twice into one request, and two answers that disagree are a
+    # controller bug rather than something to pick a winner from.
+    if args.mode != config.get("mode"):
         print(
-            f"measure: --pass-env variable(s) not set in this environment: {missing_pass_env}",
+            f"measure: --mode {args.mode!r} is not the {config.get('mode')!r} its config "
+            "states; the config is what the case hashed",
             file=sys.stderr,
         )
         return 2
@@ -739,6 +1126,69 @@ def main(argv: list[str] | None = None) -> int:
     native_root = (attempt_dir / "native").resolve()
     native_root.mkdir(exist_ok=True)
     adapter_dir = adapters.adapter_dir_for(args.tool, args.adapter_root).resolve()
+    # What the subject can see: the container's cgroup ceiling, or the whole
+    # box when the case set none. A managed runtime's share of it is fixed at
+    # the harness's one methodology constant, never a per-case choice.
+    visible_memory_gb = float(
+        args.container_memory_gb if args.container_memory_gb is not None else args.memory_gb
+    )
+    artifact_path = ""
+    if args.input_artifact:
+        try:
+            artifact_path = str(
+                stage_artifact(
+                    args.input_artifact,
+                    args.input_artifact_sha256,
+                    attempt_dir.parent / f"{attempt_dir.name}-inbound",
+                )
+            )
+        except Exception as exc:
+            print(f"measure: {exc}", file=sys.stderr)
+            return EXIT_ARTIFACT_UNUSABLE
+
+    # The attempt's own prefix, and no leaf below it: the ledger row already
+    # names one attempt, so "is this attempt complete" is one existence test on
+    # a known prefix rather than a listing that resolves which leaf is
+    # authoritative. Create-only writes are what keep a second execution of this
+    # attempt from merging into the first.
+    attempt_destination = args.destination.rstrip("/") + "/"
+
+    # An untimed pre-phase, before the subject argv exists: what it publishes is
+    # what the subject consumes, so it runs here rather than as its own attempt.
+    setup: dict[str, object] | None = None
+    try:
+        adapter = adapters.load_adapter(adapter_dir, args.tool)
+    except adapters.AdapterError as exc:
+        print(f"measure: {exc}", file=sys.stderr)
+        return EXIT_ADAPTER_ERROR
+    # A mode the capsule does not have declares nothing; compiling it below is
+    # what says so, in the one place that already refuses it.
+    manifest = adapter.modes.get(args.mode)
+    inline_mode = manifest.inline if manifest is not None else ""
+    if inline_mode:
+        setup_started_at = datetime.now(UTC).isoformat()
+        try:
+            artifact_path, setup = run_inline_setup(
+                adapter,
+                inline_mode,
+                args,
+                consumer_config=config,
+                artifact_path=artifact_path,
+                attempt_dir=attempt_dir,
+                visible_memory_gb=visible_memory_gb,
+            )
+        except SetupFailed as exc:
+            print(f"measure: {exc}", file=sys.stderr)
+            return publish_setup_failure(
+                args,
+                config=config,
+                attempt_dir=attempt_dir,
+                destination=attempt_destination,
+                setup=exc.setup,
+                exit_code=exc.code,
+                started_at=setup_started_at,
+            )
+
     try:
         command, functional_env = adapters.compile_command(
             adapter_dir,
@@ -747,8 +1197,12 @@ def main(argv: list[str] | None = None) -> int:
             bucket=args.bucket,
             region=args.region,
             prefix=args.prefix,
-            auth=args.auth,
+            signed=args.auth_role is not None,
+            config=config,
             sink_dir=str(native_root),
+            artifact_path=artifact_path,
+            visible_memory_gb=visible_memory_gb,
+            heap_percent=HEAP_PERCENT,
         )
     except adapters.AdapterError as exc:
         print(f"measure: {exc}", file=sys.stderr)
@@ -757,36 +1211,21 @@ def main(argv: list[str] | None = None) -> int:
     if not preflight(command):
         return 127
 
-    try:
-        case_env = parse_case_env(args.case_env)
-    except ValueError as exc:
-        print(f"measure: {exc}", file=sys.stderr)
-        return 2
-    environment_error = validate_environment_inputs(
-        args.auth, args.pass_env, functional_env, case_env
-    )
+    environment_error = validate_environment_inputs(functional_env)
     if environment_error:
         print(f"measure: {environment_error}", file=sys.stderr)
         return 2
-    # --pass-env is deliberately kept out of case_env: case_env is recorded
-    # in result.json (a published artifact), and a value copied in here is a
-    # credential -- e.g. Batch's secretVariables land in os.environ, and this
-    # is how they reach the subject without ever being written down.
-    passthrough_env = {name: os.environ[name] for name in args.pass_env}
-    env = {
-        **SUBJECT_ENV,
-        "AWS_REGION": args.region,
-        "AWS_DEFAULT_REGION": args.region,
-        **functional_env,
-        **case_env,
-        **passthrough_env,
-    }
+    env = subject_env(args.region, functional_env, credential_env)
 
-    # Every invocation gets its own leaf: two launches of the same case
-    # never contend for the same destination, and there is no "last write
-    # wins" to reason about.
-    attempt_uuid = str(uuid.uuid4())
-    leaf_destination = args.destination.rstrip("/") + "/" + attempt_uuid + "/"
+    # Where this attempt's product is published, and so where fd 1 goes: a
+    # subject that only prints has its listing landed in the declared file
+    # directly, and one with an output flag has already been pointed at it by
+    # its capsule, leaving stdout to be the log it claims to be.
+    product = declared_product(manifest, native_root, purpose=args.purpose)
+    if product is not None:
+        product.path.parent.mkdir(parents=True, exist_ok=True)
+    stdout_path = attempt_dir / "stdout.log"
+    subject_stdout = product.path if product is not None and product.takes_stdout else stdout_path
 
     started_at = datetime.now(UTC).isoformat()
     execution = run_tool(
@@ -796,6 +1235,10 @@ def main(argv: list[str] | None = None) -> int:
         args.term_grace,
         env,
         cwd=args.subject_workdir,
+        # The container's peak is not per exec: only an attempt whose setup exec
+        # already ran has something to clear out of it.
+        reset_peak=setup is not None,
+        stdout_path=subject_stdout,
     )
     exit_value = execution["exit_code"]
     if isinstance(exit_value, bool) or not isinstance(exit_value, int):
@@ -814,15 +1257,20 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
-    stdout_path = attempt_dir / "stdout.log"
     stderr_path = attempt_dir / "stderr.log"
-    stdout_size = stdout_path.stat().st_size if stdout_path.exists() else 0
-    stderr_size = stderr_path.stat().st_size if stderr_path.exists() else 0
 
     # Scanned uncompressed, before anything is uploaded: a hit here refuses
     # the whole leaf outright rather than uploading the captured output and
-    # hoping something downstream notices.
-    secret_hit = scan_for_secrets([stdout_path, stderr_path, native_root])
+    # hoping something downstream notices. The product is under the sink, so
+    # scanning that covers it whichever channel wrote it.
+    scanned = [stderr_path, native_root]
+    if subject_stdout == stdout_path:
+        scanned.insert(0, stdout_path)
+    if setup is not None:
+        # The setup exec's own captures and sink upload with the attempt, so they
+        # are held to the same gate as the subject's.
+        scanned.append(attempt_dir / "inline")
+    secret_hit = scan_for_secrets(scanned)
     if secret_hit:
         print(
             f"measure: possible secret in {secret_hit}; refusing to upload this attempt",
@@ -833,13 +1281,39 @@ def main(argv: list[str] | None = None) -> int:
     # Tool failures and partial runs are deliberately not counted: their raw
     # output remains evidence, but its row
     # count is not the target's completed logical object count.
+    #
+    # Neither is a preparation's, whether its mode is capped there or a plan
+    # demoted it: a preparation never enters a completeness comparison, and what
+    # it publishes is an artifact rather than a listing — s3-fast-list's cut
+    # points are key *prefixes* — so a row count is a question that does not
+    # apply. Asking it anyway failed a perfect preparation on a normalizer that
+    # rightly refused the mode.
+    counts_a_listing = args.purpose != "preparation" and (
+        manifest is None or manifest.purpose_ceiling != "preparation"
+    )
+    product_error = (
+        product_gap(product) if product is not None and exit_code == 0 and not timed_out else None
+    )
+    if product_error:
+        print(f"measure: {product_error}", file=sys.stderr)
     row_count = row_count_error = None
-    if exit_code == 0 and not timed_out:
+    if exit_code == 0 and not timed_out and counts_a_listing and not product_error:
+        # The product, not the log: a listing whose subject prints it and one
+        # whose subject writes it are the same bytes at the same path now. A
+        # dataset has no single path to hand over, and the capsule reads it off
+        # the sink root it is given anyway.
+        countable = product is not None and product.channel != "dataset"
         row_count, row_count_error = row_count_for(
-            str(adapter_dir), args.tool, args.mode, args.prefix, stdout_path, native_root
+            str(adapter_dir),
+            args.tool,
+            args.mode,
+            args.prefix,
+            product.path if product is not None and countable else stdout_path,
+            native_root,
         )
 
-    stdout_gz = gzip_file(stdout_path) if stdout_path.exists() else None
+    product = published_product(product, gap=product_error)
+    stdout_gz = gzip_file(stdout_path) if subject_stdout == stdout_path else None
     stderr_gz = gzip_file(stderr_path) if stderr_path.exists() else None
     native_files = native_manifest(native_root)
     # Computed once, before the marker is written -- nothing after this adds
@@ -847,16 +1321,11 @@ def main(argv: list[str] | None = None) -> int:
     artifacts_size_bytes = sum(p.stat().st_size for p in attempt_dir.rglob("*") if p.is_file())
 
     result = {
-        "tool": args.tool,
-        "mode": args.mode,
-        "bucket": args.bucket,
-        "region": args.region,
-        "prefix": args.prefix,
-        "auth": args.auth,
-        "attempt_uuid": attempt_uuid,
-        "destination": leaf_destination,
+        **attempt_identity(args, config, attempt_destination),
         "argv": list(command),
-        "case_env": case_env,
+        # The untimed pre-phase, when this mode declared one: what it ran, what
+        # it made, and how long it took — beside the timing and never inside it.
+        "setup": setup,
         "exit_code": exit_code,
         "timed_out": timed_out,
         "execution": execution,
@@ -866,45 +1335,18 @@ def main(argv: list[str] | None = None) -> int:
         "row_count_error": row_count_error,
         "started_at": started_at,
         "finished_at": finished_at,
-        "stdout_size": stdout_size,
-        "stderr_size": stderr_size,
-        "stdout_gz": stdout_gz.name if stdout_gz else None,
-        "stdout_gz_sha256": sha256_of(stdout_gz) if stdout_gz else None,
-        "stderr_gz": stderr_gz.name if stderr_gz else None,
-        "stderr_gz_sha256": sha256_of(stderr_gz) if stderr_gz else None,
+        # What was measured, and which channel carried it. A subject that only
+        # prints has no stdout log at all: those bytes are the product.
+        "product": product_block(product),
+        "product_error": product_error,
+        "stdout": capture_block(stdout_gz),
+        "stderr": capture_block(stderr_gz),
         "native_manifest": native_files,
         "artifacts_size_bytes": artifacts_size_bytes,
-        "image": args.image,
-        "toolbox_manifest_sha256": args.toolbox_manifest_sha256,
-        "toolbox_recipe_sha256": args.toolbox_recipe_sha256,
-        "tool_recipe_sha256": args.tool_recipe_sha256,
-        "tool_build_inputs_sha256": args.tool_build_inputs_sha256,
-        "tool_version": args.tool_version,
-        "tool_build_sha256": args.tool_build_sha256,
-        "adapter_bundle_sha256": args.adapter_bundle_sha256,
-        "harness_revision": args.harness_revision,
-        "subject_workdir": args.subject_workdir,
-        "applied_subject_workdir": args.subject_workdir,
-        "worker_workdir": os.getcwd(),
-        "image_set_sha256": args.image_set_sha256,
-        "campaign_id": args.campaign_id,
-        "job_id": args.job_id,
-        "case_id": args.case_id,
-        "case_fingerprint": args.case_fingerprint,
-        "run_ordinal": args.run_ordinal,
-        "submission_number": args.submission_number,
-        "declared_resources": {
-            "machine_type": args.machine_type,
-            "vcpus": args.vcpus,
-            "memory_gb": args.memory_gb,
-            "container_memory_gb": args.container_memory_gb,
-        },
-        "observed_architecture": platform.machine(),
-        "batch_job_uid": os.environ.get("BATCH_JOB_UID"),
     }
     write_result_atomic(attempt_dir / "result.json", result)
 
-    if not upload(attempt_dir, leaf_destination):
+    if not upload(attempt_dir, attempt_destination):
         return 1
 
     cgroup_result = execution["cgroup"]
@@ -914,6 +1356,7 @@ def main(argv: list[str] | None = None) -> int:
         exit_code,
         timed_out,
         row_count_error,
+        product_error=product_error,
         oom_kill_delta=oom_kill_delta if isinstance(oom_kill_delta, int) else None,
         process_group_empty=bool(execution["process_group_empty"]),
         descendants_empty=bool(execution["descendants_empty"]),
@@ -921,6 +1364,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     if exit_code != 0:
         print(f"measure: {args.tool} exited {exit_code}", file=sys.stderr)
+    elif completion == EXIT_ARTIFACT_UNUSABLE:
+        print("measure: the subject exited clean and published no product", file=sys.stderr)
     elif completion == EXIT_POSTPROCESSING_FAILED:
         print("measure: successful subject output could not be counted", file=sys.stderr)
     elif completion != 0:

@@ -1,13 +1,16 @@
 # Large-bucket diagnostic timing campaign. No correctness verifier is available.
 spec_version: 2
 
+# Used only by the subjects that cannot list without a credential; each capsule
+# declares which request strata it can issue.
+auth_role: public-read
+
 bucket: sorel-20m
 region: us-west-2
 
 defaults:
   reps: 1
   timeout_s: 28800
-  auth: anonymous
   vcpus: 2
   memory_gb: 4
   container_memory_gb: 2
@@ -18,16 +21,21 @@ tools:
   rclone:
   minio-mc:
   s7cmd:
+  # The hinted path: cut the keyspace into `segments` ranges and list them in
+  # parallel. `segments` is stated per row — the capsule declares it `Stated`,
+  # with no default of its own — and the chain builds the cut-point file at
+  # exactly that count. The explicit `list` row is the unhinted arm it is
+  # measured against, and — once a prerequisite binds by shape — the attempt
+  # whose keyspace the hinted row consumes.
   s3-fast-list:
+    cases:
+      - {mode: list}
+      - {mode: list-hinted, segments: 16}
 
   s3kor:
-    auth: authenticated
   s4cmd:
-    auth: authenticated
   s3p:
-    auth: authenticated
   ps3:
-    auth: authenticated
 
   swath:
     cases:

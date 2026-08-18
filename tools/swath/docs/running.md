@@ -221,6 +221,20 @@ sort disk guard — `--tune sort.ignore-disk-check=on`, there being no
 `recursive-tsv`, `recursive-jsonl`, `recursive-table`, `seed-none`,
 `parquet-probe` and `sort-probe`, named to match v0.2.0's own format names.
 
+**The concurrency the capsule declares, and the receipt it owes.** `command.py`
+declares `concurrency` as a ceiling of `64` — Swath's own width when unsilenced,
+`S3Config.DEFAULT_MAX_PARALLEL` (`ConnectionOptions.java:78-80 @cef8ec2`) — and
+renders it from the run's config rather than pinning it, so the number reaches
+the record and a plan can sweep it. What this study *asks* for is plan content:
+every swath row in `benchmark/plans/buckets/` states `concurrency: 8`, which is
+the historical frozen cap under the prose-only `CONCURRENCY_CAP=8` convention,
+now visible and reviewable in the plan rather than buried in the capsule. The
+`64` is read from v0.2.0 source while `../build/image.json` pins the 0.2.4 jar,
+so it stands on the wrong revision. **Receipt owed: `list --help` on 0.2.4.**
+The capsule also renders the harness's heap share into
+`JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=<percent>`, since which variable a JVM
+reads is Swath's business and the share is the harness's.
+
 A four-mode adapter summary from 2026-08-02 is preserved as an
 [observation note](../receipts/observations-v0.2.0/adapter-modes/observation.md),
 but its exact expanded commands and raw normalized outputs were not retained.

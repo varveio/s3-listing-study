@@ -4,22 +4,96 @@
 from benchmark.runtime.command_adapter import (
     CommandAdapterError,
     CommandRequest,
+    Executable,
+    Mode,
     command_adapter_main,
-    validate_concurrency,
 )
 
 TOOL = "s5cmd"
-FIXED_COMMAND_PREFIX = ("/s5cmd",)
-MODES = frozenset(
-    {"recursive", "delimiter", "rootkeys", "json", "listv1", "allversions", "fullpath"}
-)
+S5CMD = Executable(TOOL, ("/s5cmd",))
+EXECUTABLES = (S5CMD,)
+SUPPORTS_UNSIGNED = True
+"""--no-sign-request lists anonymously; otherwise the credential in the
+environment signs."""
+
+FULL_FIELDS = ("key", "size", "etag", "mtime", "storage_class")
+KEY_ONLY = ("key",)
+"""`--show-fullpath` prints one absolute URL per line and nothing else
+(`normalize.py`'s `fullpath` query selects `NULL` for the other four columns)."""
+
+# Every mode here is a single `ls` invocation. `--numworkers` (default 256)
+# sizes the `run`/transfer worker pool and is never consumed by the LIST chain
+# (`command/app.go:18`, `command/run.go:76`) -- exactly aws-cli's `s3api`/`s3 ls`
+# case, so absence is the declaration for the same reason.
+LISTING = "listing"
+"""The logical name every mode here publishes its listing under."""
+
+TEXT = {LISTING: "listing.txt"}
+JSON = {LISTING: "listing.json"}
+"""s5cmd prints its listing and has no flag that writes one to a path, so the
+worker lands fd 1 in the declared file; `--json` chooses which of these it is."""
+
+MODES = {
+    "recursive": Mode(
+        product="text",
+        fields=FULL_FIELDS,
+        executable=S5CMD.name,
+        artifacts=TEXT,
+        product_artifact=LISTING,
+    ),
+    "delimiter": Mode(
+        product="text",
+        fields=FULL_FIELDS,
+        executable=S5CMD.name,
+        artifacts=TEXT,
+        product_artifact=LISTING,
+    ),
+    "rootkeys": Mode(
+        product="text",
+        fields=FULL_FIELDS,
+        executable=S5CMD.name,
+        artifacts=TEXT,
+        product_artifact=LISTING,
+    ),
+    "json": Mode(
+        product="text",
+        fields=FULL_FIELDS,
+        executable=S5CMD.name,
+        artifacts=JSON,
+        product_artifact=LISTING,
+    ),
+    "listv1": Mode(
+        product="text",
+        fields=FULL_FIELDS,
+        executable=S5CMD.name,
+        artifacts=TEXT,
+        product_artifact=LISTING,
+    ),
+    # ListObjectVersions on this study's unversioned buckets collapses to
+    # current objects, so its throughput is not comparable to the other modes'.
+    "allversions": Mode(
+        product="text",
+        fields=FULL_FIELDS,
+        purpose_ceiling="diagnostic",
+        executable=S5CMD.name,
+        artifacts=TEXT,
+        product_artifact=LISTING,
+    ),
+    "fullpath": Mode(
+        product="text",
+        fields=KEY_ONLY,
+        executable=S5CMD.name,
+        artifacts=TEXT,
+        product_artifact=LISTING,
+    ),
+}
 
 
 def _auth_flags(request: CommandRequest) -> tuple[str, ...]:
     # Authenticated runs sign requests with the credential the engine put in
     # the child's environment; anonymous runs pin no-sign-request so a subject
     # can never fall back to an ambient credential it should not have.
-    return ("--no-sign-request",) if request.auth == "anonymous" else ()
+    return ("--no-sign-request",) if not request.signed else ()
 
 
 def _build_tail(request: CommandRequest) -> tuple[str, ...]:
@@ -42,8 +116,7 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
 
 
 def build_command(request: CommandRequest) -> tuple[str, ...]:
-    validate_concurrency(request, tool=TOOL)
-    return *FIXED_COMMAND_PREFIX, *_build_tail(request)
+    return *S5CMD.argv, *_build_tail(request)
 
 
 if __name__ == "__main__":

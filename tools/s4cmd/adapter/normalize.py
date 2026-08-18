@@ -48,6 +48,7 @@ is fair game here — never inside a timed window.
 from __future__ import annotations
 
 import sys
+from collections.abc import Mapping
 from typing import IO
 
 from benchmark.runtime.duckdb_adapter import (
@@ -104,7 +105,13 @@ def count_rows(data: bytes, mode: str, prefix: str = "", native_root: str = "") 
     return count_lf_lines(data, selected)
 
 
-def normalize(out: IO[bytes], data: bytes, mode: str, prefix: str = "") -> int:
+def normalize(
+    out: IO[bytes],
+    data: bytes,
+    mode: str,
+    prefix: str = "",
+    config: Mapping[str, object] | None = None,
+) -> int:
     if mode == "du":
         print(
             "normalize.py: mode 'du' emits an aggregate size, not a per-key listing; "

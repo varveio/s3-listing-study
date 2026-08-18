@@ -16,10 +16,23 @@ from benchmark.runtime.build_selection import (
     load_registered_selection,
 )
 from benchmark.runtime.command_adapter import (
+    HEAP_PERCENT,
+    Ceiling,
     CommandAdapterError,
     CommandRequest,
+    Default,
+    Fixed,
+    Inert,
+    LoadedCommandAdapter,
+    Mode,
+    Stated,
     load_command_adapter,
+    shared_axis_values,
 )
+
+PRODUCT = {"listing": "listing.txt"}
+LISTING = "listing"
+"""What a fixture mode publishes its measured product as."""
 
 ROOT = Path(__file__).parents[2]
 TOOLS = (
@@ -38,6 +51,26 @@ TOOLS = (
 BUCKET = "bucket-x"
 REGION = "region-y"
 SINK = "/sink"
+ARTIFACT = "/staged/artifact"
+"""Where the engine staged the artifact a consuming mode reads — the inbound
+counterpart of :data:`SINK`. A consuming capsule refuses an empty one rather
+than inventing a path, so every consuming mode is driven with this."""
+
+REQUIRED_CONFIG: dict[tuple[str, str], dict[str, object]] = {
+    # `-c` on `ks-tool split` is the segment count, not the listing width, so it
+    # is no axis and carries no declared default: the plan states it or the
+    # preparation refuses.
+    ("s3-fast-list", "ks-split"): {"segments": 1000},
+}
+"""Config a mode structurally cannot compile without, stated here rather than
+defaulted in a capsule."""
+
+MODE_EXECUTABLES: dict[tuple[str, str], tuple[str, ...]] = {
+    ("s3-fast-list", "ks-split"): ("/usr/bin/ks-tool",),
+}
+"""Modes that run a capsule's *second* executable. Written out here, not read
+from the capsule, so the binary a mode runs stays an independent expectation --
+`build/image.json` registers the primary only and covers no other."""
 REGIONS = (REGION, "eu-west-3")
 PREFIXES = ("", "p x/雪/")
 Q_CONTENTS = "Contents[].[Key,Size,ETag,LastModified,StorageClass]"
@@ -134,14 +167,14 @@ def _rclone(mode: str, prefix: str) -> tuple[str, ...]:
     standard = ("--files-only", "--use-server-modtime", "--no-mimetype")
     return {
         "recursive-fastlist": ("lsjson", "--fast-list", *standard, "-R", remote),
-        "recursive-hierarchical": ("lsjson", *standard, "--checkers", "4", "-R", remote),
+        "recursive-hierarchical": ("lsjson", *standard, "-R", remote),
         "recursive-walk": (
             "lsjson",
             *standard,
             "--disable",
             "ListR",
             "--checkers",
-            "4",
+            "8",
             "-R",
             remote,
         ),
@@ -165,7 +198,7 @@ def _rclone(mode: str, prefix: str) -> tuple[str, ...]:
             "--disable",
             "ListR",
             "--checkers",
-            "4",
+            "8",
             "-R",
             "-vv",
             "--dump",
@@ -176,14 +209,24 @@ def _rclone(mode: str, prefix: str) -> tuple[str, ...]:
 
 
 def _s3_fast_list(mode: str, prefix: str) -> tuple[str, ...]:
-    assert mode == "list"
+    if mode == "ks-split":
+        return ("split", "-k", ARTIFACT, "-c", "1000", "-o", f"{SINK}/hints.input")
+    # The hinted mode's whole point: cut points from the staged hints file, and
+    # the width the capsule declares as the subject's own.
+    hinted = ("-c", "100", "-k", ARTIFACT) if mode == "list-hinted" else ()
     scoped = ("--prefix", prefix) if prefix else ()
     return (
         "--no-sign-request",
+        # The listing is the measured product and lands in the sink under its own
+        # name; it travelled as `stdout.log.gz` for as long as this said
+        # `/dev/stdout`, gzipping Parquet under a name that called it a log.
         "--output-parquet-file",
-        "/dev/stdout",
+        f"{SINK}/listing.parquet",
+        # A sink is offered here, so the key distribution is published rather
+        # than discarded — it is what `ks-split` consumes.
         "--output-ks-file",
-        "/dev/null",
+        f"{SINK}/keyspace.ks",
+        *hinted,
         *scoped,
         "list",
         "--region",
@@ -207,16 +250,16 @@ def _s3p(mode: str, prefix: str) -> tuple[str, ...]:
         "summarize": ("summarize",),
     }[mode]
     scoped = ("--prefix", prefix) if prefix else ()
-    return *head, "--bucket", BUCKET, "--region", REGION, "--list-concurrency", "8", *scoped
+    return *head, "--bucket", BUCKET, "--region", REGION, "--list-concurrency", "100", *scoped
 
 
 def _s4cmd(mode: str, prefix: str) -> tuple[str, ...]:
     url = f"s3://{BUCKET}/{prefix}"
     return {
-        "recursive": ("ls", "-r", "-c", "4", url),
-        "shallow": ("ls", "-c", "4", url),
-        "show-directory": ("ls", "-d", "-c", "4", url),
-        "du": ("du", "-r", "-c", "4", url),
+        "recursive": ("ls", "-r", "-c", "32", url),
+        "shallow": ("ls", "-c", "32", url),
+        "show-directory": ("ls", "-d", "-c", "32", url),
+        "du": ("du", "-r", "-c", "32", url),
     }[mode]
 
 
@@ -236,8 +279,8 @@ def _s5cmd(mode: str, prefix: str) -> tuple[str, ...]:
 def _s7cmd(mode: str, prefix: str) -> tuple[str, ...]:
     target = f"s3://{BUCKET}/{prefix}"
     obs = ("-vv", "--disable-color-tracing")
-    parallel = ("--max-parallel-listings", "16")
-    anon = ("--target-no-sign-request", "--target-region", REGION)
+    parallel = ("--max-parallel-listings", "64")
+    anon = ("--target-no-sign-request", "--target-region", REGION, "--connect-timeout-milliseconds", "15000")
     fields = ("--tsv", "--show-storage-class", "--show-etag")
     return {
         "recursive-tsv": ("ls", "-r", *obs, *fields, *parallel, *anon, target),
@@ -263,8 +306,9 @@ def _swath(mode: str, prefix: str) -> tuple[str, ...]:
         "--region",
         REGION,
         "--no-sign-request",
+        # No row states one here, so the capsule renders swath's own declared 64.
         "--concurrency",
-        "8",
+        "64",
     )
     common = (*head, "--checkpoint", "none")
     dataset = f"{SINK}/listing"
@@ -347,7 +391,7 @@ EXPECTED_MODES = {
         "debug",
         "walk-debug",
     },
-    "s3-fast-list": {"list"},
+    "s3-fast-list": {"list", "ks-split", "list-hinted"},
     "s3kor": {"list", "list-versions"},
     "s3p": {"ls", "ls-long", "ls-raw", "summarize"},
     "s4cmd": {"recursive", "shallow", "show-directory", "du"},
@@ -399,7 +443,13 @@ def test_every_mode_matches_the_frozen_subject_argv_contract(tool: str) -> None:
                     region,
                     prefix,
                     tool=tool,
+                    # The stratum the planner would pick: unsigned wherever the
+                    # capsule can issue it, since signing ~1,000 requests is a
+                    # different measurement and the cheaper one is the default.
+                    signed=not adapter.supports_unsigned,
+                    config=REQUIRED_CONFIG.get((tool, mode), {}),
                     sink_dir=SINK,
+                    artifact_path=ARTIFACT if mode in consuming_modes(adapter) else "",
                 )
                 try:
                     expected = EXPECTED[tool](mode, prefix)
@@ -413,10 +463,40 @@ def test_every_mode_matches_the_frozen_subject_argv_contract(tool: str) -> None:
                         else item.replace(f"region={REGION}", f"region={region}")
                         for item in expected
                     )
-                    assert adapter.compile(request) == (*FIXED_PREFIXES[tool], *expected)
+                    executable = MODE_EXECUTABLES.get((tool, mode), FIXED_PREFIXES[tool])
+                    assert adapter.compile(request) == (*executable, *expected)
 
 
-@pytest.mark.parametrize("value", [0, 9, -1, True, 1.5, "4"])
+def consuming_modes(adapter: LoadedCommandAdapter) -> frozenset[str]:
+    """Modes fed an artifact one of this capsule's own steps produced.
+
+    A mode declaring a chain consumes what the chain's last link published, and
+    every link after the first consumes the link before it. An inline setup exec
+    consumes what its consumer's chain staged, and hands the subject what it
+    published — so the whole set falls out of the declarations and no roster has
+    to restate it.
+    """
+    modes = set(adapter.requires)
+    for chain in adapter.requires.values():
+        modes.update(step.mode for step in chain[1:])
+    modes.update(manifest.inline for manifest in adapter.modes.values() if manifest.inline)
+    return frozenset(modes)
+
+
+def _request(tool: str, adapter: LoadedCommandAdapter, **overrides: object) -> CommandRequest:
+    """One live mode of a capsule, in the stratum the planner would pick for it."""
+    return CommandRequest(
+        sorted(EXPECTED_MODES[tool])[0],
+        BUCKET,
+        REGION,
+        tool=tool,
+        signed=not adapter.supports_unsigned,
+        sink_dir=SINK,
+        **overrides,  # type: ignore[arg-type]
+    )
+
+
+@pytest.mark.parametrize("value", [0, -1, True, 1.5, "4"])
 def test_s4cmd_rejects_invalid_concurrency_override(value: object) -> None:
     adapter = load_command_adapter(adapter_path("s4cmd"))
     with pytest.raises(CommandAdapterError):
@@ -426,7 +506,8 @@ def test_s4cmd_rejects_invalid_concurrency_override(value: object) -> None:
                 BUCKET,
                 REGION,
                 tool="s4cmd",
-                concurrency=value,  # type: ignore[arg-type]
+                signed=True,
+                config={"concurrency": value},
             )
         )
 
@@ -444,7 +525,8 @@ def test_s4cmd_accepts_every_registered_concurrency_in_the_full_matrix() -> None
                             region,
                             prefix,
                             tool="s4cmd",
-                            concurrency=concurrency,
+                            signed=True,
+                            config={"concurrency": concurrency},
                         )
                     )
                     index = argv.index("-c")
@@ -453,12 +535,113 @@ def test_s4cmd_accepts_every_registered_concurrency_in_the_full_matrix() -> None
                     assert argv[-1] == f"s3://{BUCKET}/{prefix}"
 
 
-@pytest.mark.parametrize("tool", tuple(tool for tool in TOOLS if tool != "s4cmd"))
-def test_other_adapters_reject_explicit_logical_concurrency(tool: str) -> None:
+@pytest.mark.parametrize("tool", TOOLS)
+def test_a_capsule_refuses_a_config_key_it_never_declared(tool: str) -> None:
+    """A misspelled knob is an error, not a sweep whose cells are all identical."""
     adapter = load_command_adapter(adapter_path(tool))
-    mode = sorted(EXPECTED_MODES[tool])[0]
-    with pytest.raises(CommandAdapterError, match="does not support logical concurrency"):
-        adapter.compile(CommandRequest(mode, BUCKET, REGION, tool=tool, concurrency=1))
+    with pytest.raises(CommandAdapterError, match="does not accept config key"):
+        adapter.compile(_request(tool, adapter, config={"concurency": 1}))
+
+
+@pytest.mark.parametrize("tool", TOOLS)
+def test_a_concurrency_reaches_argv_only_where_the_capsule_declares_the_axis(tool: str) -> None:
+    """Declared, never pinned: a mode with a settable axis must render the value.
+
+    Axes are per mode, so the assertion is too: a settable (Default/Ceiling)
+    axis must put the value in argv; a capsule that never accepts the key must
+    refuse it; an Inert or undeclared mode makes no promise either way — the
+    flag may exist upstream and bound nothing, which is the capsule's business.
+    Read from the capsule's own declaration rather than a roster here.
+    """
+    adapter = load_command_adapter(adapter_path(tool))
+    if "concurrency" not in adapter.accepted_config_keys:
+        with pytest.raises(CommandAdapterError, match="does not accept config key"):
+            adapter.compile(_request(tool, adapter, config={"concurrency": 2}))
+        return
+    for mode in sorted(adapter.modes):
+        axis = adapter.modes[mode].axes.get("concurrency")
+        if not isinstance(axis, Default | Ceiling):
+            continue
+        request = CommandRequest(
+            mode,
+            BUCKET,
+            REGION,
+            tool=tool,
+            signed=not adapter.supports_unsigned,
+            sink_dir=SINK,
+            artifact_path=ARTIFACT if mode in consuming_modes(adapter) else "",
+            config={"concurrency": 2, **REQUIRED_CONFIG.get((tool, mode), {})},
+        )
+        assert "2" in adapter.compile(request), f"{tool} {mode} accepted 2 and dropped it"
+
+
+def test_swath_declares_what_each_mode_produces_and_what_it_asked_for() -> None:
+    """The JVM subject's manifest: product per mode, the asked-for width, the heap share."""
+    adapter = load_command_adapter(adapter_path("swath"))
+    assert {mode: manifest.product for mode, manifest in adapter.modes.items()} == {
+        "recursive-tsv": "text",
+        "recursive-jsonl": "text",
+        "recursive-table": "text",
+        "seed-none": "text",
+        "recursive-parquet": "parquet",
+        "recursive-parquet-sorted": "parquet-sorted",
+    }
+    # The aligned sink discards etag and storage_class, so it cannot be verified
+    # on the same fields as the modes it would otherwise be ranked against.
+    assert adapter.modes["recursive-table"].fields == ("key", "size", "mtime")
+    assert not adapter.modes["recursive-table"].permits_purpose("measurement")
+    # A silent plan records swath's own width, not the study's cap: 64 from
+    # upstream source. What a campaign asks for is a row field, and what the run
+    # achieved is evidence — --concurrency is an AIMD limit starting at min(4, N).
+    assert adapter.effective_config("recursive-tsv", {}) == {
+        "concurrency": 64,
+        "heap_percent": HEAP_PERCENT,
+        "mode": "recursive-tsv",
+    }
+    assert adapter.effective_config("recursive-tsv", {"concurrency": 8})["concurrency"] == 8
+    request = CommandRequest("recursive-tsv", BUCKET, REGION, tool="swath", visible_memory_gb=2.0)
+    assert adapter.build_env(request) == {
+        "JAVA_TOOL_OPTIONS": f"-XX:MaxRAMPercentage={HEAP_PERCENT}"
+    }
+
+
+def test_one_rule_decides_what_a_producing_mode_inherits() -> None:
+    """A chain link and an inline setup exec inherit by the same rule.
+
+    The resolver expands the one and the worker runs the other, and two copies
+    of this filter are two chances to disagree about what a sweep varied.
+    """
+    consumer = {"mode": "hinted", "concurrency": 8, "segments": 16, "heap_percent": HEAP_PERCENT}
+    settable = Mode(
+        product="text",
+        fields=("key",),
+        axes={
+            "concurrency": Ceiling(64, "unverified"),
+            "segments": Stated(),
+            # The harness's own share, which no row and no producer may restate.
+            "heap_percent": Fixed(HEAP_PERCENT),
+        },
+        artifacts=PRODUCT,
+        product_artifact=LISTING,
+    )
+    assert shared_axis_values(settable, consumer) == {"concurrency": 8, "segments": 16}
+    # A knob that does nothing here would split shared preparations over nothing.
+    inert = Mode(
+        product="text",
+        fields=("key",),
+        axes={"concurrency": Inert()},
+        artifacts=PRODUCT,
+        product_artifact=LISTING,
+    )
+    assert shared_axis_values(inert, consumer) == {}
+    # An axis the producer never declares is not its business at all.
+    assert (
+        shared_axis_values(
+            Mode(product="text", fields=("key",), artifacts=PRODUCT, product_artifact=LISTING),
+            consumer,
+        )
+        == {}
+    )
 
 
 def test_commands_compile_exact_subject_argv() -> None:

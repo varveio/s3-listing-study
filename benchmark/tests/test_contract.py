@@ -165,15 +165,12 @@ def test_emit_writes_five_tab_separated_fields() -> None:
         b"2026-07-17T12:34:56Z\tSTANDARD\n"
     )
     assert line.rstrip(b"\n").count(b"\t") == 4
+    assert _line(key=b"k", size=0) == b"k\t0\t-\t-\t-\n"  # an int size renders the same
 
 
 def test_emit_fills_unexposed_fields_with_the_sentinel() -> None:
     assert _line(key=b"a/b") == b"a/b\t-\t-\t-\t-\n"
     assert _line(key=b"a/b", size="-", storage_class="-") == b"a/b\t-\t-\t-\t-\n"
-
-
-def test_emit_accepts_an_int_size() -> None:
-    assert _line(key=b"k", size=0) == b"k\t0\t-\t-\t-\n"
 
 
 def test_emit_rejects_a_quoted_etag() -> None:

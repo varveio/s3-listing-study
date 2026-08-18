@@ -6,34 +6,116 @@ from __future__ import annotations
 from benchmark.runtime.command_adapter import (
     CommandAdapterError,
     CommandRequest,
+    Executable,
+    Mode,
     command_adapter_main,
-    validate_concurrency,
 )
 
 TOOL = "aws-cli"
-FIXED_COMMAND_PREFIX = ("/usr/local/bin/aws",)
-MODES = frozenset(
-    {
-        "s3api-v2-text",
-        "s3api-v2-json",
-        "s3api-v2-yamlstream",
-        "s3api-v1-text",
-        "s3api-versions-text",
-        "s3api-v2-delimiter",
-        "s3api-v2-remainder",
-        "s3-ls-recursive",
-        "s3-ls-delimiter",
-    }
-)
+AWS = Executable(TOOL, ("/usr/local/bin/aws",))
+EXECUTABLES = (AWS,)
+SUPPORTS_UNSIGNED = True
+"""--no-sign-request lists anonymously; otherwise the credential in the
+environment signs."""
 Q_CONTENTS = "Contents[].[Key,Size,ETag,LastModified,StorageClass]"
 Q_VERSIONS = "Versions[].[Key,Size,ETag,LastModified,StorageClass]"
+
+FULL_FIELDS = ("key", "size", "etag", "mtime", "storage_class")
+LS_FIELDS = ("key", "size", "mtime")
+"""`s3 ls` prints no ETag column and no StorageClass column; normalize.py emits
+both as NULL (`normalize.py:134-137,148-157`)."""
+
+# No concurrency axis: aws-cli's measured modes are a single serial
+# ListObjectsV2/ListObjects/ListObjectVersions continuation chain, and it
+# exposes no listing-concurrency knob at all. `max_concurrent_requests` governs
+# the `s3` transfer commands' file-transfer pool, not `s3api`/`s3 ls` listing,
+# so it is not this axis. Absence is the declaration.
+LISTING = "listing"
+"""The logical name every mode here publishes its listing under."""
+
+TEXT = {LISTING: "listing.txt"}
+JSON = {LISTING: "listing.json"}
+YAML = {LISTING: "listing.yaml"}
+"""What `--output` renders, and so what the product file is named.
+
+`--output` selects the *format*, not a destination: aws-cli has no flag that
+writes a listing to a path, so every mode here prints and the worker lands
+fd 1 in the declared file. `yaml-stream` is a stream of YAML documents rather
+than one document, which no other extension says better.
+"""
+
+MODES = {
+    "s3api-v2-text": Mode(
+        product="text",
+        fields=FULL_FIELDS,
+        executable=AWS.name,
+        artifacts=TEXT,
+        product_artifact=LISTING,
+    ),
+    "s3api-v2-json": Mode(
+        product="text",
+        fields=FULL_FIELDS,
+        executable=AWS.name,
+        artifacts=JSON,
+        product_artifact=LISTING,
+    ),
+    "s3api-v2-yamlstream": Mode(
+        product="text",
+        fields=FULL_FIELDS,
+        executable=AWS.name,
+        artifacts=YAML,
+        product_artifact=LISTING,
+    ),
+    "s3api-v1-text": Mode(
+        product="text",
+        fields=FULL_FIELDS,
+        executable=AWS.name,
+        artifacts=TEXT,
+        product_artifact=LISTING,
+    ),
+    "s3api-versions-text": Mode(
+        product="text",
+        fields=FULL_FIELDS,
+        executable=AWS.name,
+        artifacts=TEXT,
+        product_artifact=LISTING,
+    ),
+    "s3api-v2-delimiter": Mode(
+        product="text",
+        fields=FULL_FIELDS,
+        executable=AWS.name,
+        artifacts=JSON,
+        product_artifact=LISTING,
+    ),
+    "s3api-v2-remainder": Mode(
+        product="text",
+        fields=FULL_FIELDS,
+        executable=AWS.name,
+        artifacts=TEXT,
+        product_artifact=LISTING,
+    ),
+    "s3-ls-recursive": Mode(
+        product="text",
+        fields=LS_FIELDS,
+        executable=AWS.name,
+        artifacts=TEXT,
+        product_artifact=LISTING,
+    ),
+    "s3-ls-delimiter": Mode(
+        product="text",
+        fields=LS_FIELDS,
+        executable=AWS.name,
+        artifacts=TEXT,
+        product_artifact=LISTING,
+    ),
+}
 
 
 def _auth_flags(request: CommandRequest) -> tuple[str, ...]:
     # Authenticated runs sign requests with the credential the engine put in
     # the child's environment; anonymous runs pin no-sign-request so a subject
     # can never fall back to an ambient credential it should not have.
-    return ("--no-sign-request",) if request.auth == "anonymous" else ()
+    return ("--no-sign-request",) if not request.signed else ()
 
 
 def _s3api(request: CommandRequest, operation: str) -> list[str]:
@@ -112,8 +194,7 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
 
 
 def build_command(request: CommandRequest) -> tuple[str, ...]:
-    validate_concurrency(request, tool=TOOL)
-    return *FIXED_COMMAND_PREFIX, *_build_tail(request)
+    return *AWS.argv, *_build_tail(request)
 
 
 if __name__ == "__main__":

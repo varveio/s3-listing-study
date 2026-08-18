@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import re
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 from typing import IO
 
@@ -270,7 +271,14 @@ def _normalize_dataset(out: IO[bytes], mode: str, dataset: str) -> int:
     return 0
 
 
-def normalize(out: IO[bytes], data: bytes, mode: str, prefix: str = "", dataset: str = "") -> int:
+def normalize(
+    out: IO[bytes],
+    data: bytes,
+    mode: str,
+    prefix: str = "",
+    dataset: str = "",
+    config: Mapping[str, object] | None = None,
+) -> int:
     if mode in PARQUET_MODES:
         return _normalize_dataset(out, mode, dataset)
     if mode in TSV_MODES:

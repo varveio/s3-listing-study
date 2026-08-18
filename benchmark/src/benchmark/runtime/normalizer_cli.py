@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import json
 import os
 import sys
-from collections.abc import Collection, Iterator, Sequence
+from collections.abc import Collection, Iterator, Mapping, Sequence
 from typing import IO, BinaryIO, Never, Protocol
 
 from .duckdb_adapter import existing_input_path
@@ -41,6 +42,11 @@ class Normalizer(Protocol):
     *directory* — a Parquet dataset is parts plus sidecars — which no amount of
     stdin can carry, so those modes are named in ``dataset_modes`` and receive
     the published directory path instead.
+
+    ``config`` is the case's effective capsule config blob, the same one
+    ``command.py`` compiled argv from -- unused by every adapter so far, but
+    threaded to every one of them so a capsule whose output shape depends on a
+    config key can parse its own output.
     """
 
     def __call__(
@@ -50,6 +56,7 @@ class Normalizer(Protocol):
         mode: str,
         prefix: str = "",
         dataset: str = "",
+        config: Mapping[str, object] | None = None,
     ) -> int: ...
 
 
@@ -82,6 +89,12 @@ def build_parser(prog: str, modes: Collection[str], error_exit: int) -> argparse
         metavar="FILE",
         help="existing raw stream path; avoids reading or staging a large listing in memory",
     )
+    parser.add_argument(
+        "--config",
+        default="{}",
+        metavar="JSON",
+        help="the case's effective capsule config blob, the same one command.py compiled",
+    )
     return parser
 
 
@@ -113,12 +126,20 @@ def normalizer_main(
     elif args.dataset:
         parser.error(f"mode {args.mode} reads its output on stdin; --dataset does not apply")
     try:
+        config: Mapping[str, object] = json.loads(args.config)
+    except json.JSONDecodeError as exc:
+        parser.error(f"--config is not valid JSON: {exc}")
+    if not isinstance(config, dict):
+        parser.error("--config must be a JSON object")
+    try:
         if args.mode in dataset_modes:
-            return normalize(sys.stdout.buffer, b"", args.mode, args.prefix, args.dataset)
+            return normalize(sys.stdout.buffer, b"", args.mode, args.prefix, args.dataset, config)
         if args.input:
             with existing_input_path(args.input), mapped_input(args.input) as data:
-                return normalize(sys.stdout.buffer, data, args.mode, args.prefix)
-        return normalize(sys.stdout.buffer, sys.stdin.buffer.read(), args.mode, args.prefix)
+                return normalize(sys.stdout.buffer, data, args.mode, args.prefix, config=config)
+        return normalize(
+            sys.stdout.buffer, sys.stdin.buffer.read(), args.mode, args.prefix, config=config
+        )
     except BrokenPipeError:
         if broken_pipe_is_success:
             return 0

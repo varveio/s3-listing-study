@@ -60,26 +60,76 @@ mode — rather than quietly running the tool once.
 A plan has two shapes, and every key in it belongs to one of them.
 
 A **row** — one entry in a tool's `cases` — states what one case *is*: `mode`,
-`auth`, and the allocation (`vcpus`, `memory_gb`, `container_memory_gb`).
+`signed`, and the allocation (`vcpus`, `memory_gb`, `container_memory_gb`).
 
 A **layer** — `defaults`, or a tool's own body — states what every case under it
-*inherits*: `auth` and the allocation again, plus the schedule (`reps`,
+*inherits*: `signed` and the allocation again, plus the schedule (`reps`,
 `timeout_s`). Never `mode`: eleven tools have eleven mode vocabularies, so
 nothing above a row has a mode to state. A tool body is therefore `defaults`
 plus `cases`.
-
-`auth` is `anonymous` or `authenticated` — whether the request is signed, not
-whether the bucket is private. Every target is public, but four of the eleven
-tools have no unsigned request path, so a roster split between the two would
-compare listing against listing-plus-signing-1,000-requests. It is required in
-`defaults`, because a case that did not say cannot be compared with one that
-did, and an authenticated case is submitted under the service account that may
-read the credential — the stratum is an identity, not a flag.
 
 A row carries only what the ID and the fingerprint can *both* see, which is what
 keeps `timeout_s` out of one: it is in the fingerprint but not the ID, so two
 rows differing only there would render one ID and two fingerprints — two
 non-comparable runs filed into one case directory.
+
+### `config` is the one nested map
+
+Everything else a row states is a flat scalar. A row may also carry `config`, a
+mapping of the capsule-declared keys the study reserves no row field for:
+
+```yaml
+some-tool:
+  cases:
+    - {mode: list, config: {page_size: 500}}
+```
+
+A reserved axis stays a first-class row field — `concurrency` and `segments`
+are, because a report reads those columns across tools. s3-fast-list's hinted
+path states both flat:
+
+```yaml
+s3-fast-list:
+  cases:
+    - {mode: list-hinted, segments: 16}
+```
+
+`config` is for a knob that is one tool's own business and no axis describes.
+
+Its keys are folded into the case's config blob *before* the capsule sees it, so
+the capsule's own refusal still runs over them: a key it never declared in
+`CONFIG_KEYS`, or one its mode declares `Fixed`, is refused there rather than
+quietly forwarded. A key with a row field of its own — `mode`, `concurrency` — is
+refused inside `config`: one way to say each thing.
+
+These keys are hashed and rendered into the case label exactly as a row field is,
+so two rows differing only in a `config` value are two cases rather than one
+refused duplicate.
+
+### Signing is the capsule's fact, not the plan's preference
+
+Whether a request is signed says nothing about whether the bucket is private —
+every target here is public. It is a fact about the subject: four of the eleven
+tools have no unsigned request path, and one (minio-mc) resolves credentials
+from a static alias and cannot carry a per-request one. So each capsule declares
+what it can issue, and the plan does not get to overrule it:
+
+- no unsigned path → the case signs;
+- cannot sign → the case lists unsigned;
+- both available → **unsigned**, unless a row or layer says `signed: true`.
+
+Unsigned is the default for a tool that can do either because signing adds a
+signature to every one of roughly a thousand requests, which is a different
+measurement — and the cheaper one is the better baseline. A `signed:` that
+contradicts what the capsule declared is refused rather than ignored, which is
+the failure this replaced: six attempts in the first campaign recorded
+`authenticated` and ran unsigned.
+
+A signing case needs an identity, not a flag, because it runs under the service
+account that may read the credential. The plan states one top-level `auth_role`
+naming it — today `public-read`, matching `aws-s3-public-read-user` in the
+estate. A plan whose roster resolves any case to signing without an `auth_role`
+is refused.
 
 ## Cases are an ordered union
 
@@ -138,7 +188,7 @@ resolved cases are refused.
 
 Expansion order is deterministic and does not depend on YAML mapping order.
 Zip choices are the outermost factor. Independent axes follow in canonical row
-field order (`mode`, `auth`, `vcpus`, `memory_gb`,
+field order (`mode`, `signed`, `vcpus`, `memory_gb`,
 `container_memory_gb`), with the rightmost advancing fastest. In the example,
 each zipped allocation contains both modes. Expansion happens before the
 ordinary three-layer inheritance, so an omitted generator field inherits
@@ -198,58 +248,55 @@ Every tool with a `build/image.json` must appear under `tools` or `exclude`
 with a reason. A tool that is simply absent is a validation error — registering
 a subject and forgetting a bucket should not look like a decision to skip it.
 
-## Case IDs are paths, not identities
+## A row has a label; identity is minted at submit
 
-An ID is derived (`recursive-parquet-sorted.container_memory_gb-2`) from the
-*union* of the keys a tool's rows state, so a ragged row set still gives that
-tool IDs of one shape: a row that omitted a key renders the value it inherited,
-and `container_memory_gb-none` is the ceiling nobody set.
+A row's derived label (`recursive-parquet-sorted.container_memory_gb-2`) is a
+reviewer's handle: it is built from the *union* of the keys a tool's rows
+state, so a ragged row set still labels one tool in one shape — a row that
+omitted a key renders the value it inherited, and `container_memory_gb-none`
+is the ceiling nobody set. The label is also what refuses two rows that
+resolve to the same thing.
 
-Because the union is what renders, adding a key to one row changes every ID that
-tool generates. Identity is therefore carried by `fingerprint`, a digest over
-the resolved case. It survives an ID scheme change, and it refuses the reverse
-mistake: editing a row's value while the derived ID lands the same would
-otherwise append non-comparable runs into one case directory.
+The label is not the identity. What a case *is* — the `case_id` a ledger row
+and an evidence prefix carry — is a hash over everything that can change the
+measurement, minted at submit when the tool and platform slices are known.
+A plan never states or predicts it; `--dry-run` prints it. What goes into
+that hash, and what deliberately stays out, is
+[`../docs/identity.md`](../docs/identity.md); where it is recorded is
+[`../docs/model.md`](../docs/model.md).
 
-`reps` is excluded from the fingerprint — how many times we ran something is
-not part of what we ran. `timeout_s` is included, because it can truncate a run
-and change the result.
+`reps` allocates attempts of one case — how many times we ran something is
+not part of what we ran. `timeout_s` is a hash input, because it can truncate
+a run and change the result.
 
-## Scheduled jobs and execution UUIDs are separate identities
+## Where the evidence goes
 
-The campaign model gives each scheduled run a stable job ID and a `run-<n>`
-ordinal. That ordinal is separate from the worker's attempt UUID: current
-`reps: 1` produces `run-1`; higher ordinals are reserved for separately
-scheduled runs, not an implemented append-later rerun command. Every actual
-worker-container execution independently mints an attempt UUID; `attempt_uuid` is
-therefore per execution, never the scheduled run identity. Every execution owns
-one authoritative tree:
+One attempt owns one authoritative prefix, computed from its row rather than
+discovered by listing:
 
 ```text
-campaigns/<campaign>/results/<bucket>/<tool>/<case>/run-<n>/submission-<n>/<attempt-uuid>/
+gs://<results-bucket>/<suite>/<target-bucket>/<tool>.<hash>.s<attempt>/
   result.json
-  stdout.log.gz
   stderr.log.gz
-  native/...
+  stdout.log.gz        -- only when stdout is a log
+  native/listing.txt   -- the product, named for what is in it
 ```
 
-Neither the campaign run ordinal, submission number, nor execution UUID is
-folded into the case or attempt fingerprint; those hashes remain content-derived
-descriptions of what ran, while the path components say which scheduled run,
-submission, and execution produced the evidence.
+**The product is a file the mode declares, and stdout is a log.** Nine of the
+eleven subjects only print, so the worker lands fd 1 in the declared file and
+there is no separate stdout capture at all — those bytes *are* the product.
+The two with an output flag of their own (`s3-fast-list`, `swath`) are pointed
+at the same path by their capsule, and their stdout uploads beside it as the
+log it is. `result.json` records which channel applied, so no reader infers it
+from which files happen to be there —
+[`../docs/model.md`](../docs/model.md) § *What an attempt publishes* has the
+block, and [`../docs/capsule-contract.md`](../docs/capsule-contract.md)
+§ *The product travels on a declared file* has the rule.
 
-Raw artifacts upload first and `result.json` uploads last. Uploads are ordinary
-object writes, not create-only writes. Fresh UUID attempt prefixes and numbered
-submission prefixes reduce accidental collisions, but they do not seal evidence
-against replacement by credentials with broader permissions. See
-[`Evidence publication is not sealed`](../README.md#evidence-publication-is-not-sealed)
-for the exact limitation. Job-name idempotence and resubmission numbering are
-campaign-controller concerns.
-
-The campaign sets automatic Batch retries to 0. Even so, its trust model does
-not assume a scheduled job and a worker execution are one-to-one. For each
-campaign-known submission prefix, the benchmark controller uses a GCS
-delimiter listing to discover only its immediate UUID children, without
-descending into or downloading raw artifacts, then GET the exact `result.json`
-from each child. More than one child under one submission is a duplicate-execution
-anomaly; reporting surfaces every result and selects none as canonical.
+Writes are create-only, `result.json` uploads last and is what makes an
+attempt complete, and the evidence names the row it belongs to — the binding
+rules and their reasons are [`../docs/model.md`](../docs/model.md)
+§ *Object layout*. Create-only writes refuse a second execution merging into
+a first; they do not seal evidence against replacement by credentials with
+broader permissions — see
+[`Evidence publication is not sealed`](../README.md#evidence-publication-is-not-sealed).

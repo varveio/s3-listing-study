@@ -18,6 +18,13 @@ spec_version: 2
 bucket: noaa-ghcn-pds
 region: us-east-1
 
+# The role a case signs with, used only by the subjects that cannot list without
+# one. Four of the eleven have no unsigned request path; the rest list
+# anonymously, because signing adds a signature to every one of ~1,000 requests
+# and that is a different measurement. Each capsule declares which it can issue,
+# so the split is a fact about the tools rather than a choice restated here.
+auth_role: public-read
+
 defaults:
   # One attempt per case for now. Raising this is cheap on Batch, where reps are
   # separate tasks rather than added wall-clock, so the number to raise it to is
@@ -28,11 +35,6 @@ defaults:
   # worker's own default is 300s, which the one large-N measurement we have
   # (148,917 keys in 146s) says would kill most tools around the 15% mark.
   timeout_s: 3600
-
-  # Signed, for every tool. Four of the eleven have no unsigned request path, and
-  # a roster split between signed and unsigned would compare listing against
-  # listing-plus-signing-1,000-requests. The bucket is public either way.
-  auth: authenticated
 
   # The shape, not a machine type: benchmark/plans/instances.yaml says which box that is.
   # The smallest modern shape — the families start at 2 GB per vCPU in their
@@ -53,7 +55,16 @@ tools:
   rclone:
   minio-mc:
   s7cmd:
+  # The hinted path: cut the keyspace into `segments` ranges and list them in
+  # parallel. `segments` is stated per row — the capsule declares it `Stated`,
+  # with no default of its own — and the chain builds the cut-point file at
+  # exactly that count. The explicit `list` row is the unhinted arm it is
+  # measured against, and — once a prerequisite binds by shape — the attempt
+  # whose keyspace the hinted row consumes.
   s3-fast-list:
+    cases:
+      - {mode: list}
+      - {mode: list-hinted, segments: 16}
   s3kor:
   s4cmd:
   s3p:
