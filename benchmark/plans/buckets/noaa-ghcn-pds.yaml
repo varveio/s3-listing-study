@@ -58,10 +58,12 @@ tools:
   # The hinted path: cut the keyspace into `segments` ranges and list them in
   # parallel. `segments` is stated per row — the capsule declares it `Stated`,
   # with no default of its own — and the chain builds the cut-point file at
-  # exactly that count. The bare default row keeps the unhinted arm.
+  # exactly that count. The explicit `list` row is the unhinted arm it is
+  # measured against, and — once a prerequisite binds by shape — the attempt
+  # whose keyspace the hinted row consumes.
   s3-fast-list:
     cases:
-      - {}
+      - {mode: list}
       - {mode: list-hinted, segments: 16}
   s3kor:
   s4cmd:
