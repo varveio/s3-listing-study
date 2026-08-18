@@ -1042,6 +1042,81 @@ def test_a_slot_resolves_once_however_many_passes_see_it(
     ]
 
 
+def test_a_slot_whose_submission_never_landed_is_finished_by_the_next_pass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A provider call that raises must not wedge the slot it was claimed for.
+
+    The claim is written with the attempt it names, so the next pass finishes it
+    from the row rather than finding a claim nothing can redeem — the failure
+    mode a claim written before the journal had, silently and forever.
+    """
+    con = hinted_launch(tmp_path, monkeypatch)
+    evidence = Evidence()
+    monkeypatch.setattr(gcs, "download_bytes", evidence.download)
+    listing = ledger.Attempt.from_row(attempt_row(con, "list"))
+    evidence.publish(listing.result_prefix, "keyspace.ks", b"a/\nb/\n")
+
+    def unreachable(*args: object, **kwargs: object) -> tuple[str, str]:
+        raise ledger.CampaignError("the provider is unreachable")
+
+    monkeypatch.setattr(batch_client, "ensure_job", unreachable)
+    ledger.set_state(con, listing.attempt_id, "SUCCEEDED")
+    campaign.settle_dependents(con, listing, "SUCCEEDED", suite=SUITE)
+
+    hinted = ledger.Attempt.from_row(attempt_row(con, "list-hinted"))
+    slot = con.execute("SELECT * FROM pending WHERE group_id=?", (listing.group_id,)).fetchone()
+    # Intent is durable and the slot names it: the row is the campaign's, and
+    # chasing an unresolved provider call is what `poll` does.
+    assert (slot["state"], slot["became"]) == ("BLOCKED", hinted.attempt_id)
+    assert attempt_row(con, "list-hinted")["state"] == "SUBMITTING"
+
+    monkeypatch.setattr(batch_client, "ensure_job", lambda *a, **k: ("SUBMITTED", None))
+    campaign.resolve_blocked_slots(con, listing.group_id, suite=SUITE)
+
+    slot = con.execute("SELECT * FROM pending WHERE group_id=?", (listing.group_id,)).fetchone()
+    assert (slot["state"], slot["became"]) == ("RESOLVED", hinted.attempt_id)
+    # Finished, not re-run: one measurement, one attempt, whatever a pass saw.
+    assert [row["attempt_id"] for row in ledger.attempt_rows(con, case_id=hinted.case_id)] == [
+        hinted.attempt_id
+    ]
+
+
+def test_a_slot_whose_attempt_was_never_journaled_keeps_no_claim(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The other half of the same invariant: no row, no claim.
+
+    A claim is written inside the journaling transaction, so a failure before the
+    row exists rolls the claim back with it and the slot stays plainly owed.
+    """
+    con = hinted_launch(tmp_path, monkeypatch)
+    evidence = Evidence()
+    monkeypatch.setattr(gcs, "download_bytes", evidence.download)
+    listing = ledger.Attempt.from_row(attempt_row(con, "list"))
+    evidence.publish(listing.result_prefix, "keyspace.ks", b"a/\nb/\n")
+
+    def unrenderable(*args: object, **kwargs: object) -> dict[str, object]:
+        raise ledger.CampaignError("the request cannot be rendered")
+
+    monkeypatch.setattr(campaign, "render_batch_job", unrenderable)
+    ledger.set_state(con, listing.attempt_id, "SUCCEEDED")
+    campaign.settle_dependents(con, listing, "SUCCEEDED", suite=SUITE)
+
+    slot = con.execute("SELECT * FROM pending WHERE group_id=?", (listing.group_id,)).fetchone()
+    assert (slot["state"], slot["became"]) == ("BLOCKED", None)
+    assert con.execute("SELECT count(*) FROM attempts").fetchone()[0] == 1
+
+    monkeypatch.undo()
+    monkeypatch.setattr(gcs, "download_bytes", evidence.download)
+    monkeypatch.setattr(batch_client, "ensure_job", lambda *a, **k: ("SUBMITTED", None))
+    campaign.resolve_blocked_slots(con, listing.group_id, suite=SUITE)
+
+    hinted = ledger.Attempt.from_row(attempt_row(con, "list-hinted"))
+    slot = con.execute("SELECT * FROM pending WHERE group_id=?", (listing.group_id,)).fetchone()
+    assert (slot["state"], slot["became"]) == ("RESOLVED", hinted.attempt_id)
+
+
 def test_a_slot_whose_case_was_already_prepared_binds_it_rather_than_deadlocking(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

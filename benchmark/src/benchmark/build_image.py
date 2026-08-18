@@ -9,12 +9,13 @@ import json
 import re
 import subprocess
 import sys
+import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from benchmark.contract import TOOLBOX_TOOLS
+from benchmark.contract import TOOL_IMAGE_FIELDS, TOOLBOX_TOOLS
 from benchmark.runtime.build_selection import (
     BuildSelection,
     BuildSelectionError,
@@ -461,11 +462,71 @@ def build_image(root: Path, revision: str, tag: str) -> str:
     return manifest_sha256
 
 
+def image_set_document(root: Path, revision: str, image_uri: str) -> dict[str, object]:
+    """The controller's image set for the toolbox built at `revision`.
+
+    The same computation the build embeds in `image-metadata.json`, projected to
+    what the controller accepts: that document carries `executable`, which the
+    worker needs to exec a subject and an image set is refused for carrying, so
+    emitting the set by hand has meant hand-filtering it every time. It is
+    derived rather than transcribed for the reason every digest here is —
+    a set that describes a different tree than the image is a lie the evidence
+    would inherit.
+
+    The revision is asserted clean, as it is for a build: the set describes the
+    tree the image was built from or it describes nothing.
+    """
+    assert_clean_revision(root, revision)
+    selections = registered_selections(root)
+    manifest, manifest_sha256 = toolbox_manifest(selections, root, revision)
+    metadata = final_image_metadata(manifest, selections, manifest_sha256, revision)
+    entries = metadata["tools"]
+    if not isinstance(entries, dict):
+        raise BuildError("built image metadata tools are malformed")
+    document = {
+        **metadata,
+        "image_uri": image_uri,
+        "tools": {
+            tool: {name: value for name, value in entry.items() if name in TOOL_IMAGE_FIELDS}
+            for tool, entry in entries.items()
+        },
+    }
+    # Validated by the code that will read it, here rather than at submit time,
+    # so a set that cannot be used is a build failure and not a campaign one.
+    # Imported locally: emitting a set must not need the controller's provider
+    # libraries loaded to do it.
+    from benchmark.campaign import load_image_set
+    from benchmark.ledger import CampaignError
+
+    with tempfile.NamedTemporaryFile("w", suffix=".json") as scratch:
+        json.dump(document, scratch)
+        scratch.flush()
+        try:
+            load_image_set(scratch.name, set(TOOLBOX_TOOLS))
+        except CampaignError as exc:
+            raise BuildError(
+                f"emitted image set is not one the controller accepts: {exc}"
+            ) from None
+    return document
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--harness-revision", required=True)
-    parser.add_argument("--tag", required=True)
-    return parser.parse_args(argv)
+    parser.add_argument("--tag", help="build the image and attest it under this tag")
+    parser.add_argument(
+        "--image-set",
+        help="write the controller's image set here, for an image already pushed and pinned",
+    )
+    parser.add_argument("--image-uri", help="the pinned registry@sha256 URI the image set records")
+    args = parser.parse_args(argv)
+    # The digest is only knowable after a push, so a set is emitted in a second
+    # invocation rather than by the build that has not been pushed yet.
+    if (args.tag is None) == (args.image_set is None):
+        parser.error("pass exactly one of --tag (build) or --image-set (emit)")
+    if args.image_set is not None and args.image_uri is None:
+        parser.error("--image-set needs the --image-uri it records")
+    return args
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -473,6 +534,13 @@ def main(argv: list[str] | None = None) -> int:
     # benchmark/src/benchmark/build_image.py -> repository root.
     root = Path(__file__).parents[3].resolve()
     try:
+        if args.image_set is not None:
+            document = image_set_document(root, args.harness_revision, args.image_uri)
+            Path(args.image_set).write_text(
+                json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+            )
+            print(f"image_set={args.image_set}")
+            return 0
         digest = build_image(root, args.harness_revision, args.tag)
     except (BuildError, BuildSelectionError, subprocess.CalledProcessError) as exc:
         print(f"build-image: {exc}", file=sys.stderr)

@@ -366,7 +366,7 @@ CREATE TABLE pending (
     awaiting      TEXT,               -- (group_id, slot) of an earlier slot, or what it became
     disqualified  TEXT,               -- canonical JSON: candidate attempt_id -> why it cannot pay
     state         TEXT NOT NULL CHECK (state IN ('BLOCKED', 'RESOLVED', 'ABANDONED')),
-    became        TEXT,               -- the attempt_id it minted, once RESOLVED
+    became        TEXT,               -- the attempt_id it minted: claimed, then paid
     recorded_at   TEXT NOT NULL,
     settled_at    TEXT,
 
@@ -455,6 +455,28 @@ rewrite names one ordinal, and a retry of the attempt a middle slot resolved int
 settles under another. Deliberately, because the spec is root-only for the reason
 above — no shipped capsule declares a chain two links deep, and the day one does,
 this is the paragraph to come back to.
+
+### A claim commits with the attempt it names
+
+Resolving a slot mints an identity and submits a job, and a second pass over the
+same settled producer must not submit that measurement twice. So the slot is
+**claimed**: `became` is written while the slot is still `BLOCKED`, and a pass
+that finds a claim already there journals nothing.
+
+The claim is written *inside the transaction that journals the attempt it names*,
+which is the whole of why it is safe. The two commit together or neither does, so
+a `BLOCKED` slot carrying a `became` always names a row the ledger holds, and
+the next pass **finishes** that claim — marks the slot `RESOLVED` from the row —
+rather than re-running it. A provider call that never landed leaves a
+`SUBMITTING` row, which is what `poll` exists to chase; a pass that dies between
+journaling and resolving leaves a claim the next pass pays.
+
+A claim written *before* the row, by contrast, is a claim nothing can redeem: the
+pass that failed after claiming is gone, the next pass sees `became` set and
+declines, and nothing anywhere reports a problem, because the producer is fine
+and the candidate is fine. That is a slot wedged permanently and silently — the
+same shape as the retry orphan above, and refused the same way: by making the
+database hold the invariant instead of the convention.
 
 ### A slot nothing can pay says so
 

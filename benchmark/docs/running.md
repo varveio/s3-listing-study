@@ -50,8 +50,21 @@ tool enforces for you; a missing item surfaces as a provider error mid-campaign.
    Commit first; there is no `--force`.
 3. **Image published and pinned.** Push through an explicitly authorized registry
    operation, then record the *immutable* `@sha256:` URI. A tag is rejected.
-4. **Image-set JSON written** — schema 5, the exact eleven-tool roster, matching
-   the built toolbox's manifest and recipe digests. Shape is in
+4. **Image-set JSON emitted** by the same build tool, at the same revision, once
+   the pushed digest is known:
+
+   ```sh
+   uv run python benchmark/src/benchmark/build_image.py \
+     --harness-revision "$(git rev-parse HEAD)" \
+     --image-set /secure/images.json \
+     --image-uri "us-docker.pkg.dev/PROJECT/REPO/toolbox@sha256:DIGEST"
+   ```
+
+   It is emitted rather than written by hand: the set is the image's own
+   metadata projected to the eleven identity fields the controller accepts, and
+   the emitted document is validated by the loader that will read it, so a set
+   the campaign would refuse fails here instead. The revision must be clean and
+   `HEAD`, exactly as for the build. Shape is in
    [`../README.md`](../README.md) § *Campaign image set*.
 5. **Credential secret**, if any case signs: one
    `projects/<p>/secrets/<s>/versions/<v>` resource whose payload is the

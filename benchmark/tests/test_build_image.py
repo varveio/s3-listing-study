@@ -268,23 +268,25 @@ def test_a_twelfth_tool_leaves_the_platform_and_every_slice_byte_identical(
     assert {tool: after[tool] for tool in before} == before
 
 
-def test_schema_5_image_set_round_trips_through_the_controller(tmp_path: Path) -> None:
-    selections = build_image.registered_selections(ROOT)
-    manifest, digest = build_image.toolbox_manifest(selections, ROOT, "e" * 40)
-    metadata = build_image.final_image_metadata(manifest, selections, digest, "e" * 40)
-    tools = metadata["tools"]
+def test_schema_5_image_set_round_trips_through_the_controller(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The build emits the controller's set, so nothing hand-filters it.
+
+    `image-metadata.json` carries `executable` and an image set carrying it is
+    refused — the projection is the build's job, and this is the round trip that
+    says so.
+    """
+    monkeypatch.setattr(build_image, "assert_clean_revision", lambda root, revision: None)
+    uri = f"us-docker.pkg.dev/p/r/toolbox@sha256:{'1' * 64}"
+    document = build_image.image_set_document(ROOT, "e" * 40, uri)
+    tools = document["tools"]
     assert isinstance(tools, dict)
-    document = {
-        **metadata,
-        "image_uri": f"us-docker.pkg.dev/p/r/toolbox@sha256:{'1' * 64}",
-        "tools": {
-            tool: {name: value for name, value in facts.items() if name != "executable"}
-            for tool, facts in tools.items()
-        },
-    }
+    assert not any("executable" in facts for facts in tools.values())
     path = tmp_path / "images.json"
     path.write_text(json.dumps(document))
     image_set = campaign.load_image_set(path, set(TOOLBOX_TOOLS))
+    assert image_set.image_uri == uri
     assert set(image_set.tools) == TOOLBOX_TOOLS
     assert len({image["platform_sha256"] for image in image_set.tools.values()}) == 1
     assert len({image["tool_slice_sha256"] for image in image_set.tools.values()}) == len(

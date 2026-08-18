@@ -26,6 +26,26 @@ EXIT_INCOMPLETE_GROUP = 9
 
 VERDICT_EXIT_CODES = {"PASS": EXIT_PASS, "DRIFT": EXIT_DRIFT, "FAIL": EXIT_FAIL}
 
+# The identity fields an image set records per tool, and the whole of what the
+# controller accepts. `image-metadata.json` inside the image carries one more —
+# `executable`, which the worker needs to exec a subject and the controller has
+# no business reading — so an image set is this projection of that document.
+TOOL_IMAGE_FIELDS = frozenset(
+    {
+        "tool_version",
+        "tool_build_sha256",
+        "tool_artifact_kind",
+        "tool_artifact_locator",
+        "tool_artifact_sha256",
+        "recipe_sha256",
+        "build_inputs_sha256",
+        "adapter_bundle_sha256",
+        "subject_workdir",
+        "tool_slice_sha256",
+        "platform_sha256",
+    }
+)
+
 TOOLBOX_TOOLS = frozenset(
     {
         "aws-cli",

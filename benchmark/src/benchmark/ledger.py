@@ -455,6 +455,7 @@ def journal_intent(
     case_inputs: str,
     build: Callable[[int], tuple[Attempt, str]],
     repeat: bool = False,
+    claim: Callable[[sqlite3.Connection, Attempt], None] | None = None,
 ) -> tuple[Attempt, str]:
     """Allocate the next ordinal and write `SUBMITTING`, before any provider call.
 
@@ -464,6 +465,11 @@ def journal_intent(
     allocated inside it because groups may be submitted concurrently: the
     primary key makes a lost race an integrity error, the transaction is what
     stops the race.
+
+    `claim` runs inside that same transaction, once the row exists: a slot's
+    claim on the attempt it is becoming commits with that attempt or not at all,
+    so a claim can always be finished from the row it names. A claim another
+    pass already holds raises, and then nothing is journaled either.
     """
     con.execute("BEGIN IMMEDIATE")
     try:
@@ -499,6 +505,8 @@ def journal_intent(
                 "now": now,
             },
         )
+        if claim is not None:
+            claim(con, attempt)
         con.execute("COMMIT")
     except BaseException:
         con.execute("ROLLBACK")

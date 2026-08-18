@@ -34,7 +34,7 @@ from google.cloud import batch_v1
 
 from benchmark import batch_client, gcs, identity
 from benchmark import plan as bench
-from benchmark.contract import CREDENTIAL_ENV_VAR, TOOLBOX_TOOLS
+from benchmark.contract import CREDENTIAL_ENV_VAR, TOOL_IMAGE_FIELDS, TOOLBOX_TOOLS
 from benchmark.ledger import (
     INSERT_COLUMNS,
     RETRYABLE_STATES,
@@ -92,21 +92,6 @@ REVISION_RE = re.compile(r"\A[0-9a-f]{40}\Z")
 # starting with a letter. A name that does not fit is refused rather than
 # truncated: a truncated name is a name two attempts can collide on.
 JOB_NAME_RE = re.compile(r"\A[a-z][a-z0-9-]{0,61}[a-z0-9]\Z")
-TOOL_IMAGE_FIELDS = {
-    "tool_version",
-    "tool_build_sha256",
-    "tool_artifact_kind",
-    "tool_artifact_locator",
-    "tool_artifact_sha256",
-    "recipe_sha256",
-    "build_inputs_sha256",
-    "adapter_bundle_sha256",
-    "subject_workdir",
-    "tool_slice_sha256",
-    "platform_sha256",
-}
-
-
 @dataclass(frozen=True)
 class ImageSet:
     """The pinned toolbox a launch runs, and the slices that identify each tool."""
@@ -717,11 +702,16 @@ def submit_case(
     *,
     inbound: Inbound = CONSUMES_NOTHING,
     repeat: bool = False,
+    claim: Callable[[sqlite3.Connection, Attempt], None] | None = None,
 ) -> Attempt:
-    """Journal one planned attempt of `case`, then create its job."""
+    """Journal one planned attempt of `case`, then create its job.
+
+    `claim` is the slot claim this attempt is journaled under, when a slot is
+    what asked for it; it commits with the row (`_claim_slot`).
+    """
     case_id, case_inputs, build = planned_attempt(case, context, inbound=inbound)
     attempt, request = journal_intent(
-        con, case_id=case_id, case_inputs=case_inputs, build=build, repeat=repeat
+        con, case_id=case_id, case_inputs=case_inputs, build=build, repeat=repeat, claim=claim
     )
     _submit(con, attempt, request, context.options)
     return attempt
@@ -1075,30 +1065,78 @@ def book_slot(
     return slot
 
 
-def _claim_slot(con: sqlite3.Connection, slot: sqlite3.Row, case_id: str) -> bool:
-    """Take a BLOCKED slot for this pass, before anything is minted or submitted.
+class SlotHeld(CampaignError):
+    """Another pass holds this slot's claim, so this one journals nothing."""
 
-    The claim is the case identity the slot is about to become, written under one
-    `BEGIN IMMEDIATE`: a second pass finds `became` already set and does nothing,
-    and a pass that dies between claiming and resolving leaves the slot owed
-    rather than submitting the same measurement twice. A claim is told from a
-    resolution by the state beside it — `BLOCKED` with a `became` is claimed.
+
+def _claim_slot(slot: sqlite3.Row, reference: str) -> Callable[[sqlite3.Connection, Attempt], None]:
+    """Write a BLOCKED slot's claim on the attempt it is becoming.
+
+    The claim is the attempt id, and it is written *inside the transaction that
+    journals that attempt* (`journal_intent`): the two commit together or neither
+    does. So `BLOCKED` with a `became` always names a row the ledger holds, and a
+    pass that dies — or a provider call that raises — between journaling and
+    resolving leaves a claim the next pass finishes, rather than one nothing can
+    redeem and no diagnosis can see. A claim is told from a resolution by the
+    state beside it: `BLOCKED` with a `became` is claimed, `RESOLVED` is paid.
+
+    A second pass finds `became` already set, journals nothing, and resolves from
+    the claim instead — one measurement is never submitted twice.
     """
-    con.execute("BEGIN IMMEDIATE")
-    try:
-        claimed = (
-            con.execute(
-                "UPDATE pending SET became=? WHERE group_id=? AND slot=? AND state='BLOCKED' "
-                "AND became IS NULL",
-                (case_id, slot["group_id"], slot["slot"]),
-            ).rowcount
-            == 1
+
+    def claim(con: sqlite3.Connection, attempt: Attempt) -> None:
+        held = con.execute(
+            "UPDATE pending SET became=? WHERE group_id=? AND slot=? AND state='BLOCKED' "
+            "AND became IS NULL",
+            (attempt.attempt_id, slot["group_id"], slot["slot"]),
+        ).rowcount
+        if held != 1:
+            raise SlotHeld(f"slot {reference} is already claimed")
+
+    return claim
+
+
+def _claimed_attempt(con: sqlite3.Connection, slot: sqlite3.Row, reference: str) -> Attempt | None:
+    """The attempt an earlier pass claimed this slot for and never finished.
+
+    Read live rather than from the caller's snapshot: the claim may have been
+    written after this pass listed the blocked slots.
+    """
+    row = con.execute(
+        "SELECT state, became FROM pending WHERE group_id=? AND slot=?",
+        (slot["group_id"], slot["slot"]),
+    ).fetchone()
+    if row is None or row["state"] != "BLOCKED" or row["became"] is None:
+        return None
+    claimed = con.execute("SELECT * FROM attempts WHERE attempt_id=?", (row["became"],)).fetchone()
+    if claimed is None:
+        # Unreachable while a claim commits with the row it names, so it means
+        # the ledger was edited or written by something else. Loud beats owed.
+        raise CampaignError(
+            f"slot {reference} claims {row['became']}, which this ledger does not hold"
         )
-        con.execute("COMMIT")
-    except BaseException:
-        con.execute("ROLLBACK")
-        raise
-    return claimed
+    return Attempt.from_row(claimed)
+
+
+def _resolve_into(
+    con: sqlite3.Connection, slot: sqlite3.Row, attempt: Attempt, reference: str
+) -> Attempt | None:
+    """Record what the slot became, and re-point whatever was waiting on it."""
+    resolved = con.execute(
+        "UPDATE pending SET state='RESOLVED', became=?, settled_at=? "
+        "WHERE group_id=? AND slot=? AND state='BLOCKED'",
+        (attempt.attempt_id, _now(), slot["group_id"], slot["slot"]),
+    ).rowcount
+    if resolved != 1:
+        return None
+    # A slot may wait on a slot: whatever waited on this one now waits on the
+    # attempt it became, so the thing that unblocks a slot is always an attempt
+    # settling.
+    con.execute(
+        "UPDATE pending SET awaiting=? WHERE awaiting=? AND state='BLOCKED'",
+        (attempt.attempt_id, reference),
+    )
+    return attempt
 
 
 def _already_attempted(con: sqlite3.Connection, case_id: str, case: Case) -> Attempt | None:
@@ -1136,8 +1174,16 @@ def resolve_slot(
     `None` when another pass holds the claim: a slot resolves once, and a second
     pass over the same settled preparation does nothing rather than submitting a
     second job for one measurement.
+
+    An earlier pass's unfinished claim is finished here rather than re-run. The
+    attempt it names was journaled with the claim, so the submission is already
+    the ledger's business — a provider call that never landed is a `SUBMITTING`
+    row, which is what `poll` exists to chase.
     """
     reference = slot_reference(str(slot["group_id"]), int(slot["slot"]))
+    claimed = _claimed_attempt(con, slot, reference)
+    if claimed is not None:
+        return _resolve_into(con, slot, claimed, reference)
     document = json.loads(slot["known_inputs"])
     if not isinstance(document, dict):
         raise CampaignError(f"slot {reference}: known inputs are not an object")
@@ -1146,23 +1192,16 @@ def resolve_slot(
     )
     case = _case_from_document(document.get("case"))
     case_id, _, _ = planned_attempt(case, context, inbound=inbound)
-    if not _claim_slot(con, slot, case_id):
+    settled = _already_attempted(con, case_id, case)
+    if settled is not None:
+        return _resolve_into(con, slot, settled, reference)
+    try:
+        attempt = submit_case(
+            con, case, context, inbound=inbound, claim=_claim_slot(slot, reference)
+        )
+    except SlotHeld:
         return None
-    attempt = _already_attempted(con, case_id, case) or submit_case(
-        con, case, context, inbound=inbound
-    )
-    con.execute(
-        "UPDATE pending SET state='RESOLVED', became=?, settled_at=? WHERE group_id=? AND slot=?",
-        (attempt.attempt_id, _now(), slot["group_id"], slot["slot"]),
-    )
-    # A slot may wait on a slot: whatever waited on this one now waits on the
-    # attempt it became, so the thing that unblocks a slot is always an attempt
-    # settling.
-    con.execute(
-        "UPDATE pending SET awaiting=? WHERE awaiting=? AND state='BLOCKED'",
-        (attempt.attempt_id, reference),
-    )
-    return attempt
+    return _resolve_into(con, slot, attempt, reference)
 
 
 def _abandon(
