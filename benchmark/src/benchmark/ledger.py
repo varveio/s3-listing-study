@@ -189,14 +189,34 @@ def validate_suite(value: str) -> str:
     return value
 
 
+# What each superseded schema is missing, as the columns this code reads. A
+# read-only command projects them in so it can still be pointed at a settled
+# campaign; nothing here makes such a file writable.
+READONLY_COMPATIBLE: dict[object, str] = {
+    1: (
+        "SELECT group_id, slot, tool, purpose, known_inputs, "
+        "NULL AS producer, awaiting, NULL AS disqualified, "
+        "state, became, recorded_at, settled_at FROM main.pending"
+    )
+}
+
+
 def open_ledger(
     path: str, *, suite: str | None = None, readonly: bool = False
 ) -> sqlite3.Connection:
     """Open `campaign.db`, creating it for `suite` when it does not exist yet.
 
-    A file whose `schema_version` this code does not recognise is refused: a
-    command that adapted to whatever columns it found would write rows that are
-    quietly incomplete.
+    A file whose `schema_version` this code does not recognise is refused for
+    **writing**: a command that adapted to whatever columns it found would write
+    rows that are quietly incomplete.
+
+    Reading is the other question. `status`, `report`, `verify` and `prune` only
+    ever ask a settled campaign what happened, and refusing them locks the
+    evidence of every campaign run before the bump away behind a version number.
+    So a superseded schema this code still knows how to *read* opens read-only,
+    with the columns it predates projected in as `NULL` -- which is what they
+    mean: a slot booked before producer specs existed named one attempt id and
+    disqualified nothing. There is no migration either way.
     """
     con = sqlite3.connect(
         f"file:{path}?mode=ro" if readonly else path, uri=readonly, isolation_level=None
@@ -217,13 +237,18 @@ def open_ledger(
         )
         return con
     row = con.execute("SELECT suite, schema_version FROM meta WHERE id = 1").fetchone()
-    if row is None or row["schema_version"] != SCHEMA_VERSION:
-        version = None if row is None else row["schema_version"]
+    version = None if row is None else row["schema_version"]
+    superseded = READONLY_COMPATIBLE.get(version) if readonly else None
+    if version != SCHEMA_VERSION and superseded is None:
         con.close()
         raise CampaignError(
             f"{path} states schema_version {version!r}; this code writes {SCHEMA_VERSION} "
             "and does not migrate"
         )
+    if superseded is not None:
+        # A temp view shadows the table it stands in for, so every statement in
+        # this module reads one shape whatever the file on disk holds.
+        con.execute(f"CREATE TEMP VIEW pending AS {superseded}")
     if suite is not None and row["suite"] != suite:
         con.close()
         raise CampaignError(f"{path} is the {row['suite']!r} suite, not {suite!r}")

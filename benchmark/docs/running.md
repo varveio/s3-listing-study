@@ -353,3 +353,13 @@ one mistake with no undo. A `SUCCEEDED` attempt's evidence is never a target.
 - **Losing `campaign.db` loses the binding**, not the evidence — but without it
   the evidence in GCS cannot be tied to intent, and `verify`/`report` will
   refuse it.
+- **A ledger written before the producer-spec change is readable, not
+  reportable.** Schema 1 files open read-only, so `status`, `report`, `verify`
+  and `prune` can be pointed at them; nothing writes to one, and there is no
+  migration. But the evidence those campaigns published is a *different shape*
+  from what `report` now reads: `result.json` carried flat `stdout_gz` /
+  `stdout_size` / `stdout_gz_sha256` keys where it now carries nested `stdout`
+  and `product` blocks, and the marker is not versioned. So `report` on a
+  pre-existing group opens the ledger, binds the rows, and then flags every one
+  of them — expect `RESULT_MISMATCH`, not a clean historical report. Read those
+  campaigns from the objects themselves, or re-run them.

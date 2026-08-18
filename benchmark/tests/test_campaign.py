@@ -420,6 +420,47 @@ def test_a_ledger_whose_schema_version_is_unknown_is_refused(tmp_path: Path) -> 
     con.close()
     with pytest.raises(ledger.CampaignError):
         ledger.open_ledger(str(path))
+    # Unknown in both directions: a version this code cannot read is not read.
+    with pytest.raises(ledger.CampaignError):
+        ledger.open_ledger(str(path), readonly=True)
+
+
+def test_a_superseded_ledger_still_opens_for_reading_and_never_for_writing(
+    tmp_path: Path,
+) -> None:
+    """Bumping the schema must not lock away the campaigns that came before it.
+
+    Every settled ledger in the state directory is schema 1, and `status`,
+    `report`, `verify` and `prune` only ask them what happened. The columns
+    schema 2 added are projected in as NULL, which is what they mean: a slot
+    booked before producer specs named one attempt id and disqualified nothing.
+    """
+    path = tmp_path / "campaign.db"
+    ledger.open_ledger(str(path), suite=SUITE).close()
+    con = sqlite3.connect(path)
+    con.executescript(
+        "CREATE TABLE old AS SELECT group_id, slot, tool, purpose, known_inputs, "
+        "awaiting, state, became, recorded_at, settled_at FROM pending;"
+        "DROP TABLE pending;"
+        "ALTER TABLE old RENAME TO pending;"
+        "INSERT INTO pending VALUES ('g1', 1, 's3-fast-list', 'measurement', '{}', "
+        "'s3-fast-list.abcdef012345.s1', 'BLOCKED', NULL, '2026-08-17T21:38:32+00:00', NULL);"
+        "UPDATE meta SET schema_version = 1;"
+    )
+    con.commit()
+    con.close()
+
+    with pytest.raises(ledger.CampaignError, match="does not migrate"):
+        ledger.open_ledger(str(path))
+    reading = ledger.open_ledger(str(path), readonly=True)
+    slot = ledger.pending_rows(reading)[0]
+    assert (slot["producer"], slot["disqualified"]) == (None, None)
+    assert slot["awaiting"] == "s3-fast-list.abcdef012345.s1"
+    # And the readers that matter can still ask a slot their question.
+    assert ledger.slot_owed_reason(reading, slot) == (
+        "no attempt in this group produces what it consumes"
+    )
+    reading.close()
 
 
 def test_a_group_id_is_unique_within_an_accumulating_file(
