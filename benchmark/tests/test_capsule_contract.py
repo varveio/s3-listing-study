@@ -393,6 +393,10 @@ def test_a_prerequisite_chain_names_a_mode_and_the_artifact_taken_from_it(
     # What a settled producer's evidence is read with: the name, and the file the
     # producing mode publishes it under.
     assert adapter.consumed_artifact("list") == ("keyspace", "k.ks")
+    # `list` publishes text, which the rule would compress — but a consumer is
+    # handed the file the sink holds, so the chain wins and it publishes raw.
+    assert adapter.modes["list"].compresses_product is False
+    assert adapter.modes["hinted"].compresses_product is True
     with pytest.raises(CommandAdapterError):
         # Nothing declares a chain through `hinted`, so nothing consumes it.
         adapter.consumed_artifact("hinted")
@@ -470,6 +474,62 @@ def test_a_mode_names_the_artifact_that_carries_its_measured_product() -> None:
     split = Mode(TEXT, KEY, artifacts={"hints": "hints.input"}, purpose_ceiling="preparation")
     assert split.product_artifact == ""
     assert split.product_file == ""
+
+
+def test_a_text_product_is_published_compressed_and_a_parquet_one_raw() -> None:
+    """`product` already says which class of bytes a mode makes, so nothing is
+    declared twice — and a mode the rule is wrong for still gets to say so."""
+    assert Mode(TEXT, KEY, artifacts=PRODUCT, product_artifact=LISTING).compresses_product is True
+    parquet = Mode(
+        "parquet", KEY, artifacts=PRODUCT, product_artifact=LISTING, product_channel="file"
+    )
+    # Gzip over columnar data spends CPU to make the evidence bigger, which is
+    # the mistake `stdout.log.gz` was.
+    assert parquet.compresses_product is False
+    counters = Mode(TEXT, KEY, artifacts=PRODUCT, product_artifact=LISTING, product_compress=False)
+    assert counters.compresses_product is False
+
+
+def test_a_capsule_may_not_declare_a_consumed_artifact_compressed(tmp_path: Path) -> None:
+    """Deriving it yields to the chain; declaring it is a contradiction, and is refused."""
+    modes = CHAIN_MODES.replace(
+        '        artifacts={"keyspace": "k.ks"}, product_artifact="keyspace",\n',
+        '        artifacts={"keyspace": "k.ks"}, product_artifact="keyspace",\n'
+        "        product_compress=True,\n",
+    )
+    with pytest.raises(CommandAdapterError, match="consumes it"):
+        load(tmp_path, modes + 'REQUIRES = {"hinted": (("list", "keyspace"),)}\n')
+
+
+@pytest.mark.parametrize(
+    "declare",
+    [
+        # A directory of parts, each of which may already be compressed: whether
+        # to compress a part is the writer's question, not the worker's.
+        lambda: Mode(
+            "parquet",
+            KEY,
+            artifacts={LISTING: "listing"},
+            product_artifact=LISTING,
+            product_channel="dataset",
+            product_compress=True,
+        ),
+        # A preparation publishes an artifact for a later case, so there is no
+        # measured product for this to be about.
+        lambda: Mode(
+            TEXT,
+            KEY,
+            artifacts={"hints": "hints.input"},
+            purpose_ceiling="preparation",
+            product_compress=False,
+        ),
+    ],
+)
+def test_a_compression_declaration_with_no_product_to_apply_to_is_refused(
+    declare: Callable[[], Mode],
+) -> None:
+    with pytest.raises(CommandAdapterError):
+        declare()
 
 
 @pytest.mark.parametrize(

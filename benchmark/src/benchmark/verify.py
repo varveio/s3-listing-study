@@ -52,8 +52,10 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
 import json
+import shutil
 import sqlite3
 import sys
 import tempfile
@@ -388,6 +390,18 @@ def stage_evidence(result_prefix: str, staging: Path) -> Path:
     return Path(result_prefix)
 
 
+def _decompressed(source: Path, into: Path) -> Path:
+    """Unpack a published product into the working directory the comparison reads.
+
+    `source.stem` drops the `.gz` the upload added, so what the normalizer is
+    handed is named for what is in it.
+    """
+    target = into / source.stem
+    with gzip.open(source, "rb") as packed, open(target, "wb") as plain:
+        shutil.copyfileobj(packed, plain)
+    return target
+
+
 def normalize_evidence(
     local_prefix: Path,
     result: Mapping[str, object],
@@ -414,6 +428,13 @@ def normalize_evidence(
             f"{subject.tool} mode {subject.mode!r} publishes no measured product to compare"
         )
     product = local_prefix / "native" / manifest.product_file
+    if manifest.compresses_product and not product.is_file():
+        # A text product is published gzipped, so the comparison unpacks it back
+        # into the file the normalizer reads. The evidence keeps the name it was
+        # uploaded under; only this working copy is the plain one. An attempt
+        # that published the plain file is read as it lies: what is in the sink
+        # is a fact about that attempt, and the mode's rule is not retroactive.
+        product = _decompressed(product.with_name(f"{product.name}.gz"), output_path.parent)
     channel: dict[str, Path | None] = {"dataset": None, "input": None}
     channel["dataset" if manifest.product_channel == "dataset" else "input"] = product
     adapters.normalize_to_path(

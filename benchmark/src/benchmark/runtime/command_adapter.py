@@ -15,7 +15,7 @@ import json
 import re
 import sys
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType, ModuleType
 from typing import Protocol, cast
@@ -278,6 +278,23 @@ class Mode:
     holds does not answer this question and no reader may treat it as if it did.
     """
 
+    product_compress: bool | None = None
+    """Whether the product is gzipped before it is uploaded.
+
+    ``None`` takes the answer from :attr:`product`, which already says what class
+    of bytes these are: ``text`` compresses well — a listing of millions of keys
+    is the most compressible thing this study produces — and ``parquet`` is
+    already columnar and compressed, so gzipping it spends CPU to make it
+    slightly bigger. This harness has done exactly that once, and named the
+    result `stdout.log.gz`.
+
+    It is per mode rather than per capsule because swath spans both classes, and
+    it is overridable because the rule is about the bytes rather than the label:
+    a mode whose text product is a handful of counters says ``False`` and is
+    believed. What lands in the sink is what `result.json` names and digests
+    either way, so this changes the size of the evidence and never its binding.
+    """
+
     purpose_ceiling: str = "measurement"
     """The most a plan may claim this mode is."""
 
@@ -350,6 +367,21 @@ class Mode:
                 "a measured mode names the artifact its product is published as; only a "
                 "preparation-capped mode leaves product_artifact empty"
             )
+        if self.product_compress is not None and not isinstance(self.product_compress, bool):
+            raise CommandAdapterError(
+                f"mode product_compress is a stated yes or no, or None to take the answer "
+                f"from the product: {self.product_compress!r}"
+            )
+        if self.product_compress and self.product_channel == "dataset":
+            raise CommandAdapterError(
+                "a dataset product is a directory of parts, and whether each part is worth "
+                "compressing is the writer's question rather than the worker's"
+            )
+        if self.product_compress is not None and not self.product_artifact:
+            raise CommandAdapterError(
+                "mode declares no measured product, so there is nothing for product_compress "
+                "to say anything about"
+            )
         if self.product_artifact and self.purpose_ceiling == "preparation":
             raise CommandAdapterError(
                 f"mode is capped at preparation, so what it publishes is an artifact for a "
@@ -360,6 +392,13 @@ class Mode:
         object.__setattr__(self, "fields", tuple(n for n in FIELD_NAMES if n in set(self.fields)))
         object.__setattr__(self, "axes", MappingProxyType(axes))
         object.__setattr__(self, "artifacts", MappingProxyType(artifacts))
+
+    @property
+    def compresses_product(self) -> bool:
+        """Whether the worker gzips this mode's product, declaration or rule."""
+        if self.product_compress is not None:
+            return self.product_compress
+        return self.product == "text" and self.product_channel != "dataset"
 
     def _checked_artifacts(self) -> dict[str, str]:
         """The declared sink filenames, held to what a manifest key can be.
@@ -614,6 +653,9 @@ class LoadedCommandAdapter:
         axes = {name for manifest in self.modes.values() for name in manifest.axes}
         object.__setattr__(self, "accepted_config_keys", self.config_keys | axes | {"mode"})
         object.__setattr__(self, "chain_artifacts", MappingProxyType(self._chain_artifacts()))
+        published = self._uncompressed_where_consumed()
+        if published:
+            object.__setattr__(self, "modes", MappingProxyType({**self.modes, **published}))
 
     def _chain_artifacts(self) -> dict[str, str]:
         """Invert ``requires``: which artifact each producing mode is consumed for.
@@ -635,6 +677,33 @@ class LoadedCommandAdapter:
                         f"{consumer!r} wants {step.artifact!r} from it"
                     )
         return artifacts
+
+    def _uncompressed_where_consumed(self) -> dict[str, Mode]:
+        """A consumed artifact is uploaded as its producer wrote it.
+
+        The chain binds bytes by digest and hands the consumer the file the sink
+        holds, so a product something downstream consumes is published raw
+        whatever the class of its bytes would otherwise say. A capsule that
+        declares both is refused rather than quietly given one of them; the
+        derived answer just yields, because a rule about storage does not get to
+        change what a consumer receives.
+
+        Only the modes that change are returned, so a capsule with no chain —
+        ten of the eleven — keeps the mapping it was loaded with.
+        """
+        resolved: dict[str, Mode] = {}
+        for mode, artifact in self.chain_artifacts.items():
+            manifest = self.modes.get(mode)
+            if manifest is None or artifact != manifest.product_artifact:
+                continue
+            if manifest.product_compress:
+                raise CommandAdapterError(
+                    f"{self.tool}: mode {mode!r} declares {artifact!r} compressed and a chain "
+                    f"consumes it — a consumed artifact is uploaded as its producer wrote it"
+                )
+            if manifest.compresses_product:
+                resolved[mode] = replace(manifest, product_compress=False)
+        return resolved
 
     def consumed_artifact(self, mode: str) -> tuple[str, str]:
         """The `(logical name, sink filename)` the declared chain takes from ``mode``.

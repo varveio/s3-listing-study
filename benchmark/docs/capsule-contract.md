@@ -109,6 +109,7 @@ write a directory sink while its TSV mode streams to stdout.
 | `artifacts` | Logical name to the filename this mode publishes into its sink. What a consumer asks for by name — see *A producer declares its artifacts by name*. |
 | `product_artifact` | Which of `artifacts` carries this mode's *measured* output. Every mode a plan may measure names one; only a `preparation`-capped mode leaves it empty. |
 | `product_channel` | How that file gets its bytes — `stdout`, `file`, or `dataset`. See *The product travels on a declared file*. |
+| `product_compress` | Whether the product is gzipped before upload. Omit it and `product` answers: `text` compresses, Parquet does not. See *A text product is uploaded compressed*. |
 
 **`product` and `fields` translate across tools; `axes` does not.** The first two
 describe the artifact, which is why they are comparable at all. An axis name
@@ -387,6 +388,11 @@ The refusals, all at load:
 - a measured mode that names no product at all, and a `preparation`-capped mode
   that names one;
 - a `product_channel` outside the three the worker knows how to honour;
+- `product_compress` on a `dataset`, which is a directory of parts whose
+  compression is the writer's question, or on a mode with no measured product at
+  all;
+- a mode declaring its product compressed when a chain consumes that same
+  artifact — the consumer is handed the file the sink holds;
 - a bare mode where the pair belongs — sugar for "its sole artifact" is exactly
   the inference this replaces, and it would silently rebind every consumer the
   day a capsule publishes a second file;
@@ -403,6 +409,26 @@ Every capsule declares artifacts, because every measured mode publishes its
 product as one. `s3-fast-list` is the only one that publishes two: `list` and
 `list-hinted` publish `listing` beside `keyspace`, and only `keyspace` is
 consumed — by `ks-split`, which publishes `hints`.
+
+### A text product is uploaded compressed
+
+A listing of five million keys is the most compressible thing this study
+produces, and it is uploaded gzipped: `native/listing.txt.gz`, sized and
+digested in `result.json` as the file the sink holds. Parquet is uploaded as the
+subject wrote it — it is already columnar and compressed, and gzipping it spends
+CPU to make it slightly bigger, which is precisely the mistake `stdout.log.gz`
+was.
+
+No capsule has to say any of that. `product` already declares which class of
+bytes a mode makes, so the rule reads off it, and `product_compress` is there
+for the mode the rule is wrong for: a text product that is a handful of counters
+says `False` and is believed.
+
+**A consumed artifact is never compressed.** The chain binds bytes by digest and
+hands the consumer the file that was uploaded, so a mode whose product is also
+its chain artifact publishes raw — the loader turns the derived answer off, and
+refuses a capsule that declares the contradiction outright. `s3-fast-list` is
+not affected: what its chain takes is `keyspace`, and its product is `listing`.
 
 ### The product travels on a declared file
 

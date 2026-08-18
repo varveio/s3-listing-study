@@ -92,6 +92,8 @@ REVISION_RE = re.compile(r"\A[0-9a-f]{40}\Z")
 # starting with a letter. A name that does not fit is refused rather than
 # truncated: a truncated name is a name two attempts can collide on.
 JOB_NAME_RE = re.compile(r"\A[a-z][a-z0-9-]{0,61}[a-z0-9]\Z")
+
+
 @dataclass(frozen=True)
 class ImageSet:
     """The pinned toolbox a launch runs, and the slices that identify each tool."""

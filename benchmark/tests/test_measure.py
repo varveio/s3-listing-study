@@ -1076,7 +1076,7 @@ def test_an_inline_setup_runs_untimed_before_the_subject_it_feeds(
     # Setup evidence is not the subject's product: the native manifest is what
     # the counter reads, and the inline sink is not in it.
     assert result["native_manifest"] == {
-        "listing.txt": hashlib.sha256(b"a/\nb/\n").hexdigest(),
+        "listing.txt.gz": sha256_of(tmp_path / "attempt/native/listing.txt.gz"),
     }
     assert (tmp_path / "attempt/inline/stdout.log").exists()
     assert uploaded[-1][0].endswith("/result.json")
@@ -1214,25 +1214,30 @@ def test_a_product_lands_under_its_declared_name_whichever_channel_carries_it(
     (tmp_path / "writes").mkdir()
     assert run_inline_worker(tmp_path / "prints", monkeypatch, mode="prints") == 0
     printed = json.loads((tmp_path / "prints/attempt/result.json").read_bytes())
-    product = tmp_path / "prints/attempt/native/listing.txt"
-    assert product.read_text() == keyspace
+    # Text, so it lands compressed — and the block describes the file the sink
+    # holds, under the name that says what it is.
+    product = tmp_path / "prints/attempt/native/listing.txt.gz"
+    assert gzip.decompress(product.read_bytes()).decode() == keyspace
+    assert not (tmp_path / "prints/attempt/native/listing.txt").exists()
     assert printed["product"] == {
         "artifact": "listing",
-        "name": "native/listing.txt",
+        "name": "native/listing.txt.gz",
         "channel": "stdout",
-        "size_bytes": len(keyspace),
-        "sha256": hashlib.sha256(keyspace.encode()).hexdigest(),
+        "size_bytes": product.stat().st_size,
+        "sha256": sha256_of(product),
     }
     assert printed["stdout"] is None
     assert not (tmp_path / "prints/attempt/stdout.log.gz").exists()
-    assert printed["native_manifest"] == {"listing.txt": printed["product"]["sha256"]}
+    assert printed["native_manifest"] == {"listing.txt.gz": printed["product"]["sha256"]}
 
     assert run_inline_worker(tmp_path / "writes", monkeypatch, mode="writes") == 0
     written = json.loads((tmp_path / "writes/attempt/result.json").read_bytes())
+    # Parquet, so it is uploaded as the subject wrote it: gzip over columnar
+    # data spends CPU to make the evidence bigger.
     assert (tmp_path / "writes/attempt/native/listing.parquet").read_text() == keyspace
     assert written["product"]["name"] == "native/listing.parquet"
     assert written["product"]["channel"] == "file"
-    assert written["product"]["sha256"] == printed["product"]["sha256"]
+    assert written["product"]["sha256"] == hashlib.sha256(keyspace.encode()).hexdigest()
     # Its stdout is a genuine log, and is captured as one.
     assert written["stdout"]["name"] == "stdout.log.gz"
     assert (tmp_path / "writes/attempt/stdout.log.gz").exists()

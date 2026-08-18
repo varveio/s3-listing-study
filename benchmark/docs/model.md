@@ -145,11 +145,22 @@ the mode's ceiling — the bootstrap `list` a hinted-only plan mints runs a
 measuring mode as a preparation, and nothing reads its listing. It is not row
 counted either, for the same reason: a preparation is in no comparison.
 
-The product uploads as the subject wrote it, uncompressed. That is a real cost
-for the text subjects, whose listings compressed well — the decision that a
-published artifact is named and shaped like what it is was taken over that
-saving, and a `compress` declaration could ride on `product` later if the storage
-bill argues for it.
+**A text product uploads gzipped; a Parquet one uploads as the subject wrote
+it.** The `product` a mode already declares says which class of bytes these are,
+and that is the whole rule: a listing of five million keys is the most
+compressible thing this study makes, and gzip over columnar Parquet spends CPU
+to produce a slightly larger file — which this harness did once, under the name
+`stdout.log.gz`. A mode may state `product_compress` outright when the rule is
+wrong for its bytes.
+
+Two things the rule does not get to touch. **A product something downstream
+consumes is published raw**, whatever its class: the chain binds the file the
+sink holds by digest and hands the consumer that file, so the loader turns
+compression off for a mode whose product is its chain artifact, and refuses a
+capsule that declares both. And **the block still describes the file that was
+uploaded** — `native/listing.txt.gz`, its compressed size, its digest — because
+naming a published artifact for what it actually is is the point the earlier
+arrangement missed.
 
 ### A memory figure is a figure of one invocation, above a floor
 

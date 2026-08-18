@@ -29,7 +29,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Iterator, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -820,6 +820,9 @@ class Product:
     channel: str
     """One of :data:`~benchmark.runtime.command_adapter.PRODUCT_CHANNELS`."""
 
+    compress: bool = False
+    """Whether these bytes are gzipped before they are uploaded."""
+
     @property
     def takes_stdout(self) -> bool:
         """Whether fd 1 is the product, so this attempt has no stdout log."""
@@ -839,7 +842,13 @@ def declared_product(manifest: Mode | None, native_root: Path, *, purpose: str) 
     if manifest is None or not manifest.product_artifact or purpose == "preparation":
         return None
     name = manifest.product_file
-    return Product(manifest.product_artifact, name, native_root / name, manifest.product_channel)
+    return Product(
+        manifest.product_artifact,
+        name,
+        native_root / name,
+        manifest.product_channel,
+        manifest.compresses_product,
+    )
 
 
 def product_gap(product: Product) -> str | None:
@@ -891,6 +900,22 @@ def product_block(product: Product | None) -> dict[str, object] | None:
         "size_bytes": sum(path.stat().st_size for path in retained_files(product.path)),
         "sha256": None if product.channel == "dataset" else sha256_of(product.path),
     }
+
+
+def published_product(product: Product | None, *, gap: str | None) -> Product | None:
+    """Compress the product where its mode says these bytes are worth compressing.
+
+    Called after the row count and the secret scan, which read what the subject
+    wrote, and before the manifest and the product block, which describe what is
+    uploaded — so `result.json` names, sizes and digests the file the sink
+    actually holds, under a name that says what it is.
+
+    A product that never landed is left alone: there is nothing to compress, and
+    `product_gap` has already said so.
+    """
+    if product is None or not product.compress or gap is not None:
+        return product
+    return replace(product, name=f"{product.name}.gz", path=gzip_file(product.path))
 
 
 def gzip_file(path: Path) -> Path:
@@ -1287,6 +1312,7 @@ def main(argv: list[str] | None = None) -> int:
             native_root,
         )
 
+    product = published_product(product, gap=product_error)
     stdout_gz = gzip_file(stdout_path) if subject_stdout == stdout_path else None
     stderr_gz = gzip_file(stderr_path) if stderr_path.exists() else None
     native_files = native_manifest(native_root)

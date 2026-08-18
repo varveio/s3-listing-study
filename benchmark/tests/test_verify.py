@@ -155,7 +155,11 @@ def record(
 
 
 def write_evidence(
-    attempt: ledger.Attempt, *, listing: tuple[str, ...] = LISTING, **overrides: object
+    attempt: ledger.Attempt,
+    *,
+    listing: tuple[str, ...] = LISTING,
+    compress: bool = False,
+    **overrides: object,
 ) -> Path:
     prefix = Path(attempt.result_prefix)
     prefix.mkdir(parents=True, exist_ok=True)
@@ -173,6 +177,11 @@ def write_evidence(
     else:
         product_name, channel = "listing.txt", "stdout"
         native.mkdir(parents=True, exist_ok=True)
+        if compress:
+            # What a text product looks like in the sink: published gzipped,
+            # under the name the block records.
+            product_name += ".gz"
+            body = gzip.compress(body)
         (native / product_name).write_bytes(body)
     published = sorted(path for path in native.rglob("*") if path.is_file())
     product = native / product_name
@@ -241,6 +250,21 @@ def test_agreement_within_one_bucket_passes(tmp_path: Path) -> None:
     code, report = verify.verify_group(con, "g1", adapter_root=root, write_record=False)
     assert (report["verdict"], report["complete"], code) == ("PASS", True, 0)
     assert [stratum["verdict"] for stratum in report["buckets"][0]["strata"]] == ["PASS"]
+
+
+def test_a_product_published_compressed_is_compared_as_its_bytes(tmp_path: Path) -> None:
+    """The comparison unpacks a gzipped text product rather than refusing it.
+
+    A text product is uploaded compressed, so the file the sink holds is not the
+    file a normalizer reads — and an attempt whose evidence carries the plain
+    file is still read as it lies, which is what the other tests here publish.
+    """
+    con = fixture_ledger(tmp_path)
+    for tool, digest in (("alpha", "aaaa"), ("beta", "bbbb")):
+        write_evidence(record(con, tmp_path, tool=tool, digest=digest), compress=True)
+    root = adapter_root(tmp_path, "alpha", "beta")
+    code, report = verify.verify_group(con, "g1", adapter_root=root, write_record=False)
+    assert (report["verdict"], code) == ("PASS", 0)
 
 
 def test_each_target_bucket_is_its_own_comparison(tmp_path: Path) -> None:
