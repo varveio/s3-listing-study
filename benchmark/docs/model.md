@@ -427,10 +427,23 @@ nothing, because every legitimate candidate is journaled in the slot's own group
 at launch time.
 
 Candidates are ordered by `(settled_at, attempt_id)` and the earliest settled
-wins. That is *monotone-stable*: `settled_at` only appends later values, so once
-any candidate settles the winner never changes and every sibling slot of a sweep
-binds the same producer — one corpus snapshot across the whole sweep. The
-`attempt_id` tiebreak makes it a total order, because millisecond ties are real.
+wins. The *ordering* is monotone-stable: `settled_at` only appends later values,
+so nothing settling afterwards moves ahead of a candidate that already has, and
+sibling slots resolved on different poll passes bind one producer — one corpus
+snapshot across the sweep. The `attempt_id` tiebreak makes it a total order,
+because millisecond ties are real.
+
+**The winner, though, is contingent, and the sweep can straddle two producers.**
+What binds is the earliest candidate the harness can *accept on that pass*, and
+acceptance is not a pure function of the producer's evidence: a `result.json`
+that will not download disqualifies its candidate for that pass, and every pass
+recomputes the verdict on purpose, in case what was unreadable was the bucket
+rather than the artifact. So if candidate X settled first but is transiently
+unreadable while four of six sibling slots resolve, those four bind Y — and the
+remaining two bind X on the next pass, once X reads. Nothing pins the winner;
+the shared snapshot is the ordinary outcome rather than an invariant, and
+`produced_by` on each consumer's row is what says which producer it actually
+got.
 
 `awaiting` is left for a **mid-chain** link, which cannot be described by shape:
 its own `input_artifact_sha256` is not knowable at booking. It names the earlier

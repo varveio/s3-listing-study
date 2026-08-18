@@ -359,11 +359,22 @@ def slot_candidates(
     slot's own group at launch time, so scoping costs nothing.
 
     Ordered by `(settled_at, attempt_id)`, because earliest-settled is
-    *monotone-stable*: `settled_at` only ever appends later values, so once any
-    candidate settles the winner never changes and every sibling slot of a sweep
-    binds the same producer — one corpus snapshot across the whole sweep. The
-    `attempt_id` tiebreak is what makes it a total order; millisecond ties are
-    real.
+    *monotone-stable in the ordering*: `settled_at` only ever appends later
+    values, so nothing that settles afterwards moves ahead of a candidate that
+    already has. That is what lets sibling slots of a sweep resolved on
+    different poll passes bind one producer, and so one corpus snapshot.
+
+    It is stability of the order, not a guarantee of the winner. The winner is
+    the earliest candidate the *caller* can accept, and acceptance is recomputed
+    every pass — a `result.json` that will not download disqualifies its
+    candidate for that pass alone, deliberately, in case what was unreadable was
+    the bucket. So a sweep whose slots resolve across two passes can straddle two
+    producers when a transient read fails between them. Nothing here pins a
+    winner; `model.md` § *What a slot waits for is a shape, not a name* states
+    the limit.
+
+    The `attempt_id` tiebreak is what makes it a total order; millisecond ties
+    are real.
     """
     where = ["group_id = ?"]
     values: list[object] = [slot["group_id"]]

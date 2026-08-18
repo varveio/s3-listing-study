@@ -18,7 +18,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-from google.api_core.exceptions import AlreadyExists, BadRequest
+from google.api_core.exceptions import AlreadyExists, BadRequest, GoogleAPIError
 from google.cloud import batch_v1
 
 from benchmark import adapters, batch_client, campaign, gcs, identity, ledger, measure, report
@@ -1339,6 +1339,62 @@ def test_abandoning_a_slot_something_could_still_pay_is_refused(
             argparse.Namespace(state=state, attempt=None, slot="g20260817-000000/9")
         )
     assert [slot["state"] for slot in ledger.pending_rows(con)] == ["BLOCKED", "BLOCKED"]
+
+
+def test_sibling_slots_bind_one_producer_even_when_they_resolve_on_different_passes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A sweep is an A/B over one corpus snapshot, so its cells must share a producer.
+
+    Two candidates of the producing shape settle, and the two slots resolve on
+    two separate passes because the provider refuses the second submission once.
+    Ordering candidates by `settled_at` is what makes the late slot bind the
+    same listing the early one did — otherwise the later pass is free to pick
+    the other attempt, and the sweep compares two listings of a bucket that grew
+    in between.
+
+    What this does *not* prove is that the winner cannot move: it is the
+    earliest candidate the pass can read, and an unreadable marker disqualifies
+    one for that pass only (`model.md` § *What a slot waits for is a shape*).
+    """
+    con = hinted_launch(tmp_path, monkeypatch, body=REPEATED)
+    evidence = Evidence()
+    monkeypatch.setattr(gcs, "download_bytes", evidence.download)
+    first, second = (
+        ledger.Attempt.from_row(row)
+        for row in ledger.attempt_rows(con, case_id=attempt_row(con, "list")["case_id"])
+    )
+    evidence.publish(first.result_prefix, "keyspace.ks", b"a/\nb/\n")
+    evidence.publish(second.result_prefix, "keyspace.ks", b"c/\nd/\n")
+    ledger.set_state(con, first.attempt_id, "SUCCEEDED")
+    ledger.set_state(con, second.attempt_id, "SUCCEEDED")
+
+    # The second slot is held back for one pass, at the seam `resolve_blocked_slots`
+    # already treats as "still owed", so the two slots resolve against two
+    # separate reads of the candidate set rather than one.
+    resolve = campaign.resolve_slot
+
+    def held_back(
+        con: sqlite3.Connection, slot: sqlite3.Row, inbound: campaign.Inbound, *, suite: str
+    ) -> ledger.Attempt | None:
+        if int(slot["slot"]) == 2:
+            raise GoogleAPIError("the provider is busy")
+        return resolve(con, slot, inbound, suite=suite)
+
+    monkeypatch.setattr(campaign, "resolve_slot", held_back)
+    campaign.settle_dependents(con, first, "SUCCEEDED", suite=SUITE)
+    assert [slot["state"] for slot in ledger.pending_rows(con)] == ["RESOLVED", "BLOCKED"]
+
+    monkeypatch.setattr(campaign, "resolve_slot", resolve)
+    campaign.resolve_blocked_slots(con, "g20260817-000000", suite=SUITE)
+    assert [slot["state"] for slot in ledger.pending_rows(con)] == ["RESOLVED", "RESOLVED"]
+    hinted = [
+        ledger.Attempt.from_row(row)
+        for row in ledger.attempt_rows(con)
+        if json.loads(row["config"])["mode"] == "list-hinted"
+    ]
+    assert len(hinted) == 2
+    assert {attempt.produced_by for attempt in hinted} == {first.attempt_id}
 
 
 def test_a_slot_abandons_only_once_every_candidate_is_gone(
