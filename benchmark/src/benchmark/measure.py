@@ -529,8 +529,8 @@ def run_tool(
             while time.monotonic() < grace_deadline:
                 reap_subject(0)
                 tracked_pids.update(
-                procs.subject_processes(proc.pid, tracked_pids, baseline_descendants)
-            )
+                    procs.subject_processes(proc.pid, tracked_pids, baseline_descendants)
+                )
                 residual = procs.live_pids(tracked_pids - {proc.pid})
                 if not procs.process_group_exists(proc.pid) and not residual:
                     break
