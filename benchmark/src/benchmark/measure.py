@@ -862,18 +862,23 @@ def capture_block(path: Path | None) -> dict[str, object] | None:
 def product_block(product: Product | None) -> dict[str, object] | None:
     """What the attempt published as its product, and which channel carried it.
 
+    ``None`` where nothing landed at the declared path -- a subject killed before
+    it opened its output file published no product, and describing one with a
+    null digest would read downstream as evidence that disagrees with itself
+    rather than as the honest failure it is. Whatever debris the sink does hold
+    stays bound by ``native_manifest``.
+
     ``sha256`` is null for a dataset, which is many files and has no one digest;
     ``native_manifest`` binds every part of it either way, so nothing is lost.
     """
-    if product is None:
+    if product is None or product_gap(product) is not None:
         return None
-    files = list(retained_files(product.path))
     return {
         "artifact": product.artifact,
         "name": f"native/{product.name}",
         "channel": product.channel,
-        "size_bytes": sum(path.stat().st_size for path in files),
-        "sha256": sha256_of(product.path) if product.path.is_file() else None,
+        "size_bytes": sum(path.stat().st_size for path in retained_files(product.path)),
+        "sha256": None if product.channel == "dataset" else sha256_of(product.path),
     }
 
 

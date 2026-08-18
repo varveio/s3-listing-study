@@ -825,6 +825,14 @@ MODES = {
         product_artifact="listing",
         product_channel="file",
     ),
+    "dies": Mode(
+        product="parquet",
+        fields=("key",),
+        axes={"segments": Stated()},
+        artifacts={"listing": "listing.parquet"},
+        product_artifact="listing",
+        product_channel="file",
+    ),
 }
 
 
@@ -849,6 +857,8 @@ def build_command(request: CommandRequest) -> tuple[str, ...]:
         )
     if request.mode == "silent":
         return (sys.executable, "-c", "pass")
+    if request.mode == "dies":
+        return (sys.executable, "-c", "raise SystemExit(9)")
     return (sys.executable, str(here / "subject.py"), request.artifact_path, request.sink_dir)
 
 
@@ -1217,6 +1227,26 @@ def test_a_product_lands_under_its_declared_name_whichever_channel_carries_it(
     # Its stdout is a genuine log, and is captured as one.
     assert written["stdout"]["name"] == "stdout.log.gz"
     assert (tmp_path / "writes/attempt/stdout.log.gz").exists()
+
+
+def test_a_subject_that_died_before_writing_its_product_publishes_no_product_block(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed attempt is a failure, and must not be dressed up as bad evidence.
+
+    s3-fast-list OOMs on the 20M-object bucket before `--output-parquet-file`
+    ever opens. Describing that as a product with a null digest is what made
+    `report` call the marker corrupt (`test_report.py`) and suppress the exit
+    code, the wall clock and the RSS peak — hiding the one thing the row says.
+    """
+    # Zero from the worker: the subject's nonzero exit is a captured outcome.
+    assert run_inline_worker(tmp_path, monkeypatch, mode="dies") == 0
+    result = json.loads((tmp_path / "attempt/result.json").read_bytes())
+    assert result["exit_code"] == 9
+    assert result["product"] is None
+    # Not a gap either: the gap is what a *clean* exit with nothing published is.
+    assert result["product_error"] is None
+    assert result["native_manifest"] == {}
 
 
 def test_a_clean_subject_that_never_wrote_its_declared_product_is_refused(

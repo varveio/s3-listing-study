@@ -345,6 +345,46 @@ def test_evidence_that_ran_another_config_is_refused(tmp_path: Path) -> None:
     assert rows[0]["evidence_state"] == "RESULT_MISMATCH"
 
 
+def test_a_subject_killed_before_its_product_reports_its_failure_not_a_mismatch(
+    tmp_path: Path,
+) -> None:
+    """An OOM is an honest failure, and the row has to say so.
+
+    `s3-fast-list list` on a 20M-object bucket dies before its output file is
+    opened. Recording that as a product whose digest is null made the marker
+    unreadable to `report`, which then blanked the exit code, the wall clock and
+    the peak RSS behind `RESULT_MISMATCH` — telling the reader the evidence is
+    corrupt when what happened is that the tool ran out of memory.
+    """
+    con = fixture_ledger(tmp_path)
+    attempt = record(con, tmp_path, tool="alpha", digest="aaaa", state="FAILED")
+    stdout_gz = Path(attempt.result_prefix)
+    stdout_gz.mkdir(parents=True, exist_ok=True)
+    stdout_gz = stdout_gz / "stdout.log.gz"
+    stdout_gz.write_bytes(gzip.compress(b"listing 4000000 keys\n"))
+    prefix = write_evidence(
+        attempt,
+        exit_code=137,
+        row_count=None,
+        # The writes-a-file class: nothing landed at the declared path, and
+        # stdout is the log it always was.
+        product=None,
+        native_manifest={},
+        stdout={
+            "name": stdout_gz.name,
+            "size_bytes": stdout_gz.stat().st_size,
+            "sha256": sha256_of(stdout_gz),
+        },
+    )
+    document = json.loads((prefix / "result.json").read_text())
+    (prefix / "native/listing.txt").unlink()
+
+    rows = rows_of(con, adapter_root(tmp_path, "alpha"))
+    assert report.result_semantic_errors(document) == []
+    assert rows[0]["evidence_state"] == "VERIFY_UNAVAILABLE"
+    assert (rows[0]["exit"], rows[0]["max_rss_kb"]) == (137, 1024)
+
+
 def test_a_setup_failure_reads_as_evidence_rather_than_a_broken_result(tmp_path: Path) -> None:
     """An attempt whose inline setup exec failed publishes a marker with no
     execution in it, and both readers must take it for what it is.

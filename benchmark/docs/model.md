@@ -122,7 +122,7 @@ which the three flat `stdout_gz` / `stdout_size` / `stdout_gz_sha256` keys it
 replaces did not: one of them was the *uncompressed* size of a file the other two
 described compressed.
 
-Three things this shape is saying:
+Four things this shape is saying:
 
 - **`channel` says which class of subject ran**, so no reader has to infer it.
   `stdout` means the worker landed fd 1 in the product file, and then `"stdout"`
@@ -132,6 +132,12 @@ Three things this shape is saying:
 - **`product_error` is how a clean run says it published nothing.** A subject
   that exits zero and writes nothing where its mode says it writes has no
   measurement in it; the attempt settles `EXIT_ARTIFACT_UNUSABLE`.
+- **`product` itself is null when nothing landed at the declared path.** A
+  subject killed before it opened its output file published no product, and
+  `report` reads a block with a null digest as a marker it cannot trust — which
+  would blank the exit code, the wall clock and the RSS peak of an attempt whose
+  whole content is *this tool ran out of memory*. A failure stays a failure.
+  Whatever debris the sink does hold is still bound by `native_manifest`.
 
 A preparation carries `"product": null`: what it publishes is an artifact for a
 later case, not a measured product.
