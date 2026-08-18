@@ -13,7 +13,7 @@ from typing import Any
 import pytest
 
 from benchmark import adapters, gcs, measure, procs
-from benchmark.contract import CREDENTIAL_ENV_VAR, TOOLBOX_TOOLS
+from benchmark.contract import CREDENTIAL_ENV_VAR, TOOLBOX_TOOLS, sha256_of
 from benchmark.runtime.command_adapter import HEAP_PERCENT
 
 ROOT = Path(__file__).parents[2]
@@ -494,6 +494,8 @@ def test_count_failure_uploads_result_marker_before_exit(
             "aws-cli",
             "--mode",
             "recursive",
+            "--purpose",
+            "measurement",
             "--bucket",
             "bucket",
             "--region",
@@ -592,6 +594,8 @@ def test_the_cases_config_and_heap_share_reach_the_capsule(
         "aws-cli",
         "--mode",
         "recursive",
+        "--purpose",
+        "measurement",
         "--bucket",
         "bucket",
         "--region",
@@ -672,6 +676,8 @@ def test_missing_credential_fails_before_adapter_or_subject(
         "x",
         "--mode",
         "x",
+        "--purpose",
+        "measurement",
         "--bucket",
         "b",
         "--region",
@@ -943,6 +949,7 @@ def run_inline_worker(
     monkeypatch: pytest.MonkeyPatch,
     *,
     mode: str = "hinted",
+    purpose: str = "measurement",
     split: str = INLINE_SPLIT,
     auth_role: str | None = None,
     uploaded: list[tuple[str, bytes]] | None = None,
@@ -978,6 +985,8 @@ def run_inline_worker(
             *(() if auth_role is None else ("--auth-role", auth_role)),
             "--mode",
             mode,
+            "--purpose",
+            purpose,
             "--bucket",
             "bucket",
             "--region",
@@ -1227,6 +1236,26 @@ def test_a_product_lands_under_its_declared_name_whichever_channel_carries_it(
     # Its stdout is a genuine log, and is captured as one.
     assert written["stdout"]["name"] == "stdout.log.gz"
     assert (tmp_path / "writes/attempt/stdout.log.gz").exists()
+
+
+def test_a_preparation_publishes_no_measured_product_even_in_a_measuring_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A product is measured output, and a preparation has no consumer for one.
+
+    The bootstrap listing a hinted-only plan mints runs `list` — a mode whose
+    product is the listing — as a `preparation`. Publishing that product uploads
+    a 131 MB parquet nothing reads, and asks for a row count on an attempt no
+    comparison contains. What the chain wants is the artifact beside it, which
+    `native_manifest` binds either way.
+    """
+    assert run_inline_worker(tmp_path, monkeypatch, mode="writes", purpose="preparation") == 0
+    result = json.loads((tmp_path / "attempt/result.json").read_bytes())
+    assert (result["product"], result["product_error"]) == (None, None)
+    assert (result["row_count"], result["row_count_error"]) == (None, None)
+    # The file itself is still published and still bound: it is the artifact.
+    listing = tmp_path / "attempt/native/listing.parquet"
+    assert result["native_manifest"] == {"listing.parquet": sha256_of(listing)}
 
 
 def test_a_subject_that_died_before_writing_its_product_publishes_no_product_block(

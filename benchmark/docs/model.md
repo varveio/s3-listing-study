@@ -140,7 +140,10 @@ Four things this shape is saying:
   Whatever debris the sink does hold is still bound by `native_manifest`.
 
 A preparation carries `"product": null`: what it publishes is an artifact for a
-later case, not a measured product.
+later case, not a measured product. That follows the **attempt's** purpose, not
+the mode's ceiling — the bootstrap `list` a hinted-only plan mints runs a
+measuring mode as a preparation, and nothing reads its listing. It is not row
+counted either, for the same reason: a preparation is in no comparison.
 
 The product uploads as the subject wrote it, uncompressed. That is a real cost
 for the text subjects, whose listings compressed well — the decision that a

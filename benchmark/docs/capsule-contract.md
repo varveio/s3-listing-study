@@ -375,7 +375,9 @@ vocabulary — `text`, `parquet` — shared across tools so a report can keep a
 Parquet number out of a text stratum. `artifacts` says which files land.
 `product_artifact` names which of them carries the measured output; empty is
 reserved for a `preparation`-capped mode, which publishes for a later case and
-measures nothing.
+measures nothing. A mode that *does* name one still publishes no product when
+the attempt running it is a preparation: the worker is told each attempt's
+`--purpose`, and what a preparation makes is an artifact for the chain.
 
 The refusals, all at load:
 

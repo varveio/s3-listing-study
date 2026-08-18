@@ -43,6 +43,7 @@ from benchmark.contract import (
 )
 from benchmark.runtime.command_adapter import (
     HEAP_PERCENT,
+    PURPOSES,
     CommandRequest,
     LoadedCommandAdapter,
     Mode,
@@ -243,6 +244,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Compile, run, and upload one case's attempt.")
     parser.add_argument("--tool", required=True)
     parser.add_argument("--mode", required=True)
+    parser.add_argument(
+        "--purpose",
+        required=True,
+        choices=PURPOSES,
+        help="What this attempt is for. A preparation publishes an artifact for "
+        "a later case and no measured product.",
+    )
     parser.add_argument("--bucket", required=True)
     parser.add_argument("--region", required=True)
     parser.add_argument("--prefix", default="")
@@ -818,14 +826,17 @@ class Product:
         return self.channel == "stdout"
 
 
-def declared_product(manifest: Mode | None, native_root: Path) -> Product | None:
-    """Where this mode publishes its measured product, or ``None`` for a preparation.
+def declared_product(manifest: Mode | None, native_root: Path, *, purpose: str) -> Product | None:
+    """Where this attempt publishes its measured product, or ``None`` when it has none.
 
-    A mode capped at ``preparation`` publishes an artifact a later case consumes
-    and no measured product at all, which is the only mode a capsule may leave
-    undeclared -- the loader refuses every other silence.
+    Gated on the attempt's purpose, not only on the mode's declaration. A mode
+    capped at ``preparation`` declares no product at all, but a measuring mode
+    demoted to ``preparation`` by a plan -- the bootstrap ``list`` a hinted-only
+    plan still mints -- publishes for the chain and for nothing else. Measuring
+    its product would upload a 131 MB listing no consumer reads, and count rows
+    for a comparison it is not in.
     """
-    if manifest is None or not manifest.product_artifact:
+    if manifest is None or not manifest.product_artifact or purpose == "preparation":
         return None
     name = manifest.product_file
     return Product(manifest.product_artifact, name, native_root / name, manifest.product_channel)
@@ -1185,7 +1196,7 @@ def main(argv: list[str] | None = None) -> int:
     # subject that only prints has its listing landed in the declared file
     # directly, and one with an output flag has already been pointed at it by
     # its capsule, leaving stdout to be the log it claims to be.
-    product = declared_product(manifest, native_root)
+    product = declared_product(manifest, native_root, purpose=args.purpose)
     if product is not None:
         product.path.parent.mkdir(parents=True, exist_ok=True)
     stdout_path = attempt_dir / "stdout.log"
@@ -1246,12 +1257,15 @@ def main(argv: list[str] | None = None) -> int:
     # output remains evidence, but its row
     # count is not the target's completed logical object count.
     #
-    # Neither is a preparation's. A mode its capsule caps at `preparation` can
-    # never enter a completeness comparison, and what it publishes is not a
-    # listing — s3-fast-list's cut points are key *prefixes* — so a row count is
-    # a question that does not apply to it. Asking it anyway failed a perfect
-    # preparation on a normalizer that rightly refused the mode.
-    counts_a_listing = manifest is None or manifest.purpose_ceiling != "preparation"
+    # Neither is a preparation's, whether its mode is capped there or a plan
+    # demoted it: a preparation never enters a completeness comparison, and what
+    # it publishes is an artifact rather than a listing — s3-fast-list's cut
+    # points are key *prefixes* — so a row count is a question that does not
+    # apply. Asking it anyway failed a perfect preparation on a normalizer that
+    # rightly refused the mode.
+    counts_a_listing = args.purpose != "preparation" and (
+        manifest is None or manifest.purpose_ceiling != "preparation"
+    )
     product_error = (
         product_gap(product) if product is not None and exit_code == 0 and not timed_out else None
     )

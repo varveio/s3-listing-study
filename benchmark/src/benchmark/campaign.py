@@ -502,6 +502,7 @@ def render_batch_job(
     pairs = (
         ("--tool", attempt.tool),
         ("--mode", str(json.loads(attempt.config)["mode"])),
+        ("--purpose", attempt.purpose),
         ("--bucket", attempt.target_bucket),
         ("--region", attempt.target_region),
         *(() if attempt.auth_role is None else (("--auth-role", attempt.auth_role),)),
