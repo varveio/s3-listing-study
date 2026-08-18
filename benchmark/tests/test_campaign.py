@@ -21,7 +21,7 @@ import pytest
 from google.api_core.exceptions import AlreadyExists, BadRequest
 from google.cloud import batch_v1
 
-from benchmark import adapters, campaign, gcs, identity, ledger, measure
+from benchmark import adapters, batch_client, campaign, gcs, identity, ledger, measure
 from benchmark import plan as bench
 from benchmark.contract import CREDENTIAL_ENV_VAR, TOOLBOX_TOOLS
 from benchmark.plan import Case, Plan
@@ -133,7 +133,7 @@ def submitted(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> tuple[sqlite3.Connection, Plan, Case, campaign.ImageSet]:
     """A ledger with one attempt in it, created against a provider that says yes."""
-    monkeypatch.setattr(campaign, "ensure_job", lambda *a, **k: ("SUBMITTED", None))
+    monkeypatch.setattr(batch_client, "ensure_job", lambda *a, **k: ("SUBMITTED", None))
     plan = loaded_plan()
     con = ledger.open_ledger(str(tmp_path / "campaign.db"), suite=SUITE)
     return con, plan, any_case(plan), image_set(tmp_path)
@@ -250,7 +250,7 @@ def test_intent_is_durable_before_the_provider_is_called(
         assert row["settled_at"] is None
         return "SUBMITTED", None
 
-    monkeypatch.setattr(campaign, "ensure_job", observe)
+    monkeypatch.setattr(batch_client, "ensure_job", observe)
     attempt = submit(con, plan, any_case(plan), image_set(tmp_path))
 
     row = con.execute("SELECT * FROM attempts").fetchone()
@@ -338,18 +338,18 @@ def test_an_existing_job_is_submitted_only_when_it_matches_recorded_intent(
     """`SUBMITTED` covers what we created and what we found; `NOT_CREATED` covers the rest."""
     attempt, request = rendered_request(tmp_path)
     name = f"projects/p/locations/us-east1/jobs/{attempt.job_name}"
-    matching = campaign._job_from_dict(request)
+    matching = batch_client._job_from_dict(request)
     matching.name = name
 
-    found = campaign.ensure_job(
+    found = batch_client.ensure_job(
         "p", "us-east1", attempt.job_name, request, client=cast(Any, ExistingClient(matching))
     )
     assert found[0] == "SUBMITTED"
 
-    different = campaign._job_from_dict(request)
+    different = batch_client._job_from_dict(request)
     different.name = name
     different.task_groups[0].task_spec.runnables[0].container.commands.append("--extra")
-    state, detail = campaign.ensure_job(
+    state, detail = batch_client.ensure_job(
         "p", "us-east1", attempt.job_name, request, client=cast(Any, ExistingClient(different))
     )
     assert state == "NOT_CREATED"
@@ -363,7 +363,7 @@ def test_a_refused_creation_is_not_created(tmp_path: Path) -> None:
         def create_job(self, **_kwargs: object) -> batch_v1.Job:
             raise BadRequest("machine type unavailable")  # type: ignore[no-untyped-call]
 
-    state, detail = campaign.ensure_job(
+    state, detail = batch_client.ensure_job(
         "p", "us-east1", attempt.job_name, request, client=cast(Any, Refusing())
     )
     assert state == "NOT_CREATED"
@@ -668,7 +668,7 @@ def test_the_suite_filter_quotes_its_value() -> None:
             return []
 
     assert (
-        campaign.list_job_states(
+        batch_client.list_job_states(
             "p",
             "us-east1",
             "c-2026-08-17-x",
@@ -697,7 +697,7 @@ class Evidence:
 
 
 def hinted_launch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> sqlite3.Connection:
-    monkeypatch.setattr(campaign, "ensure_job", lambda *a, **k: ("SUBMITTED", None))
+    monkeypatch.setattr(batch_client, "ensure_job", lambda *a, **k: ("SUBMITTED", None))
     plan = hinted_plan(tmp_path)
     con = ledger.open_ledger(str(tmp_path / "campaign.db"), suite=SUITE)
     launch = campaign.Launch(

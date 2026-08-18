@@ -24,22 +24,15 @@ import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from google.api_core.exceptions import (
-    AlreadyExists,
-    BadRequest,
-    FailedPrecondition,
-    Forbidden,
     GoogleAPIError,
-    NotFound,
-    Unauthorized,
 )
 from google.auth.exceptions import DefaultCredentialsError
 from google.cloud import batch_v1
-from google.protobuf.json_format import MessageToDict, ParseDict
 
-from benchmark import gcs, identity
+from benchmark import batch_client, gcs, identity
 from benchmark import plan as bench
 from benchmark.contract import CREDENTIAL_ENV_VAR, TOOLBOX_TOOLS
 from benchmark.ledger import (
@@ -608,146 +601,10 @@ def retry_request_document(
     return document
 
 
-def _job_from_dict(document: dict[str, Any]) -> batch_v1.Job:
-    protobuf = batch_v1.Job.pb(batch_v1.Job())
-    ParseDict(document, protobuf)
-    return cast(batch_v1.Job, batch_v1.Job.wrap(protobuf))
-
-
-def _job_document(job: batch_v1.Job) -> dict[str, Any]:
-    value = MessageToDict(batch_v1.Job.pb(job), preserving_proto_field_name=False)
-    return {
-        key: value[key]
-        for key in ("labels", "taskGroups", "allocationPolicy", "logsPolicy")
-        if key in value
-    }
-
-
-def _matches_intent(job: batch_v1.Job, resource_name: str, expected: dict[str, Any]) -> bool:
-    if job.name != resource_name:
-        return False
-    actual = batch_v1.Job(job)
-    for group in actual.task_groups:
-        group.name = ""
-    actual.allocation_policy.labels.pop("batch-job-id", None)
-    # Batch resolves allowedLocations for itself: it echoes the enclosing region
-    # back, and expands an unrestricted request into that region's zones. Neither
-    # is a different job, so the check is that every location this launch asked
-    # for survived, and the provider's own expansion is then left out of the
-    # byte comparison on both sides.
-    requested = expected.get("allocationPolicy", {}).get("location", {}).get("allowedLocations", [])
-    actual_locations = list(actual.allocation_policy.location.allowed_locations)
-    if not set(requested) <= set(actual_locations):
-        return False
-    batch_v1.AllocationPolicy.pb(actual.allocation_policy).ClearField("location")
-    intended = _job_from_dict(expected)
-    batch_v1.AllocationPolicy.pb(intended.allocation_policy).ClearField("location")
-    return _job_document(intended) == _job_document(actual)
-
-
-def _close_batch_client(client: batch_v1.BatchServiceClient) -> None:
-    try:
-        client.transport.close()  # type: ignore[no-untyped-call]
-    except Exception as exc:
-        raise CampaignError(f"could not close Batch client: {exc}") from exc
-
-
-def ensure_job(
-    project: str,
-    location: str,
-    job_name: str,
-    request: dict[str, Any],
-    *,
-    client: batch_v1.BatchServiceClient | None = None,
-) -> tuple[str, str | None]:
-    """Create the job, or reconcile with one of that name, and say which state that is.
-
-    `SUBMITTED` covers a job this run created and one of that name it found
-    already matching the recorded request; `NOT_CREATED` covers a refusal and a
-    job of that name that does not match. `model.md` § *The state column*.
-    """
-    owned = client is None
-    selected = client or batch_v1.BatchServiceClient()
-    parent = f"projects/{project}/locations/{location}"
-    resource_name = f"{parent}/jobs/{job_name}"
-    try:
-        try:
-            created = selected.create_job(
-                parent=parent,
-                job=_job_from_dict(request),
-                job_id=job_name,
-                retry=None,
-                timeout=20,
-            )
-            if not _matches_intent(created, resource_name, request):
-                raise CampaignError(
-                    f"{job_name}: provider created a job that does not match intent"
-                )
-            return "SUBMITTED", None
-        except AlreadyExists:
-            existing = selected.get_job(name=resource_name, retry=None, timeout=20)
-            if not _matches_intent(existing, resource_name, request):
-                return "NOT_CREATED", f"{job_name}: existing job does not match recorded intent"
-            return "SUBMITTED", f"{job_name}: adopted an existing job matching recorded intent"
-        except (BadRequest, Forbidden, Unauthorized, FailedPrecondition, NotFound) as exc:
-            return "NOT_CREATED", f"{type(exc).__name__}: {exc}"
-        except GoogleAPIError as exc:
-            try:
-                existing = selected.get_job(name=resource_name, retry=None, timeout=20)
-            except (NotFound, GoogleAPIError):
-                raise CampaignError(f"{job_name}: create outcome is ambiguous: {exc}") from exc
-            if not _matches_intent(existing, resource_name, request):
-                raise CampaignError(f"{job_name}: ambiguous create found a colliding job") from exc
-            return "SUBMITTED", f"{job_name}: ambiguous create found the intended job"
-    finally:
-        if owned:
-            _close_batch_client(selected)
-
-
-def describe_job(
-    project: str, location: str, job_name: str, *, client: batch_v1.BatchServiceClient
-) -> str:
-    job = client.get_job(
-        name=f"projects/{project}/locations/{location}/jobs/{job_name}", retry=None, timeout=20
-    )
-    return str(batch_v1.JobStatus.State(job.status.state).name)
-
-
-def list_job_states(
-    project: str, location: str, suite: str, *, client: batch_v1.BatchServiceClient
-) -> dict[str, str]:
-    """Job name -> provider state for this suite's jobs under the parent.
-
-    One paginated call answers a whole polling pass, and because the label
-    carries the suite the filter is exact rather than a narrowing over anything
-    benchmark-shaped. Rows are still matched by job name afterwards.
-    """
-    # Quoted because the value is opaque text to the filter grammar: an unquoted
-    # suite with hyphens is a 400 from the real API, which is exactly what the
-    # first live polling pass got.
-    request = {
-        "parent": f"projects/{project}/locations/{location}",
-        "filter": f'labels.suite="{suite}"',
-    }
-    return {
-        job.name.rsplit("/", 1)[-1]: str(batch_v1.JobStatus.State(job.status.state).name)
-        for job in client.list_jobs(request=request, retry=None, timeout=60)
-    }
-
-
-def cancel_job(
-    project: str, location: str, job_name: str, *, client: batch_v1.BatchServiceClient
-) -> None:
-    operation = client.delete_job(
-        name=f"projects/{project}/locations/{location}/jobs/{job_name}", retry=None, timeout=20
-    )
-    operation.result(timeout=60)  # type: ignore[no-untyped-call]
-
-
 def _submit(con: sqlite3.Connection, attempt: Attempt, request: str, options: BatchOptions) -> str:
     """Call the provider for an already-journaled row and record what came back."""
     try:
-        state, detail = ensure_job(
+        state, detail = batch_client.ensure_job(
             options.project, options.location, attempt.job_name, json.loads(request)
         )
     except CampaignError as exc:
@@ -1435,7 +1292,9 @@ def poll_once(con: sqlite3.Connection, suite: str, *, client: batch_v1.BatchServ
         parent = (project, attempt.location)
         if parent not in listed:
             try:
-                listed[parent] = list_job_states(project, attempt.location, suite, client=client)
+                listed[parent] = batch_client.list_job_states(
+                    project, attempt.location, suite, client=client
+                )
             except GoogleAPIError as exc:
                 # A listing that fails costs the pass nothing: every row below
                 # falls back to the point read it would have done anyway.
@@ -1444,7 +1303,9 @@ def poll_once(con: sqlite3.Connection, suite: str, *, client: batch_v1.BatchServ
         state = listed[parent].get(attempt.job_name)
         if state is None:
             try:
-                state = describe_job(project, attempt.location, attempt.job_name, client=client)
+                state = batch_client.describe_job(
+                    project, attempt.location, attempt.job_name, client=client
+                )
             except GoogleAPIError as exc:
                 print(f"campaign: describe failed for {attempt.job_name}: {exc}", file=sys.stderr)
                 all_terminal = False
@@ -1551,7 +1412,7 @@ def cmd_poll(args: argparse.Namespace) -> int:
     finally:
         try:
             if client is not None:
-                _close_batch_client(client)
+                batch_client._close_batch_client(client)
         finally:
             con.close()
 
@@ -1622,12 +1483,12 @@ def cmd_cancel(args: argparse.Namespace) -> int:
                 continue
             attempt = Attempt.from_row(row)
             project = str(json.loads(attempt.executor_env)["project"])
-            cancel_job(project, attempt.location, attempt.job_name, client=client)
+            batch_client.cancel_job(project, attempt.location, attempt.job_name, client=client)
             set_state(con, attempt.attempt_id, "CANCELLED", "cancelled by the operator")
     finally:
         try:
             if client is not None:
-                _close_batch_client(client)
+                batch_client._close_batch_client(client)
         finally:
             con.close()
     return 0
