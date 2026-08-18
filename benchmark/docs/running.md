@@ -100,9 +100,12 @@ uv run python benchmark/src/benchmark/campaign.py submit \
 
 prints one line per resolvable attempt (`attempt_id`, `job_name`, the frozen
 Batch request), one line per slot the plan cannot yet identify (`slot
-<group>/<n> <tool> <mode> awaiting <what>`), and a closing count — "N plan
-row(s) expand to M attempt(s) and K slot(s)" — so a reviewer sees the true
-shape of a launch before anything is created.
+<group>/<n> <tool> <mode> awaiting step <m> (<tool> <mode>)`), and a closing
+count — "N plan row(s) expand to M attempt(s) and K slot(s)" — so a reviewer sees
+the true shape of a launch before anything is created. **Read the slot lines**:
+they name the step that will pay each slot, which is where a plan that states a
+knob the producing mode ignores shows up as an extra bootstrap listing rather
+than as a silent duplicate hours later.
 
 Two flags change what a repeated `submit` does with what it finds:
 
@@ -146,13 +149,18 @@ uv run python benchmark/src/benchmark/campaign.py status --group g20260817-12000
 carries its own `executor_env` and `location`, so a poll pass reads those from
 the ledger rather than being told them again. One listing filtered by
 `labels.suite=<suite>` covers every group in flight, so parallel launches need
-no extra machinery. A settled preparation is resolved into whatever slots
-awaited it in the same pass that noticed it settled.
+no extra machinery. Every slot the group still owes is rechecked in the same pass
+that noticed an attempt settle — the question is "does an attempt satisfying this
+slot exist now", so a retry of a failed producer pays the slot its predecessor
+left owed.
 
 `status` is the safe command: it opens `campaign.db` read-only and prints one
 line per attempt (`attempt_id`, `state`, `purpose`, `group_id`, `job_name`) and
 one line per pending slot (`slot <group>/<n>`, its state, `purpose`, and what
-it is `awaiting`). Unfiltered it prints the whole file's history; `--group` and
+it is awaiting — an earlier slot, or the shape of any producer in its group).
+A slot no attempt in its group can pay any more prints `OWED, nothing can pay
+it:` and the reason, because a slot blocking quietly forever is the failure it
+exists to prevent. Unfiltered it prints the whole file's history; `--group` and
 `--case` narrow it. A group is not understood from its attempts alone while it
 still owes a slot — that is why slots print alongside attempts rather than in
 a separate command.
@@ -229,10 +237,12 @@ uv run python benchmark/src/benchmark/campaign.py accept-failure --attempt aws-c
 
 Moves one settled `FAILED` or `NOT_CREATED` attempt to `ACCEPTED`. It changes
 no cloud state whatsoever — it is a bookkeeping declaration that you are not
-going to retry this one, which takes it out of `retry`'s sweep. If the
-attempt was a preparation, every slot waiting on it is recorded `ABANDONED` in
+going to retry this one, which takes it out of `retry`'s sweep. Every slot in
+that attempt's group which nothing can pay any more is recorded `ABANDONED` in
 the same call — an absent measurement, propagated to whatever it would have
-unblocked.
+unblocked. A slot is exhausted only when *every* candidate of its producer's
+shape has failed, been accepted, or published nothing usable, so accepting one
+failure while a sibling attempt is still live leaves the slot owed.
 
 Use it when a case genuinely cannot run. It is not a way to make a red
 campaign look green: `verify` and `report` still see the accepted state, and

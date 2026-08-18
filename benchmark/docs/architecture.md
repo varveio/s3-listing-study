@@ -139,6 +139,17 @@ digest*, never the producing attempt's ID. Two preparations yielding identical
 bytes produce a genuinely identical measurement, which should carry one
 identity. Lineage is recorded separately, as context.
 
+The same rule decides **who may produce it**: any successful attempt in the same
+group whose shape says it publishes those bytes — tool, mode, config, target and
+slices — rather than one nominated attempt id
+([`model.md`](model.md) § *What a slot waits for is a shape, not a name*).
+Nomination could not survive a retry, which settles under a new ordinal nothing
+named; and it made a plan carrying both a `list` row and a `list-hinted` row list
+the bucket twice with byte-identical argv, discarding one result. A standalone
+preparation is minted only when the plan carries no candidate producer of its
+own, and producer steps are expanded ahead of the slots that consume them so a
+launch dying mid-expansion cannot leave a slot nothing in its group can pay.
+
 This is the rule that must not bend: **an attempt may not depend on state
 another attempt left behind unless that state is inside the hash.** A
 preparation may therefore be a separate attempt exactly when its entire effect

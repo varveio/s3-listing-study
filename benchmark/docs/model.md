@@ -353,22 +353,25 @@ CREATE TABLE pending (
     purpose       TEXT NOT NULL
         CHECK (purpose IN ('measurement', 'preparation', 'canary', 'diagnostic')),
     known_inputs  TEXT NOT NULL,      -- canonical JSON: every input resolved so far
-    awaiting      TEXT NOT NULL,      -- attempt_id, or (group_id, slot) of an earlier slot
+    producer      TEXT,               -- canonical JSON: the shape an acceptable producer has
+    awaiting      TEXT,               -- (group_id, slot) of an earlier slot, or what it became
+    disqualified  TEXT,               -- canonical JSON: candidate attempt_id -> why it cannot pay
     state         TEXT NOT NULL CHECK (state IN ('BLOCKED', 'RESOLVED', 'ABANDONED')),
     became        TEXT,               -- the attempt_id it minted, once RESOLVED
     recorded_at   TEXT NOT NULL,
     settled_at    TEXT,
 
+    CHECK ((producer IS NULL) <> (awaiting IS NULL)),
     PRIMARY KEY (group_id, slot)
 );
 ```
 
 A **slot** is a measurement a launch intended and cannot yet identify, because
-one of its inputs is an artifact a preparation has not produced. It cannot be an
+one of its inputs is an artifact nothing has produced yet. It cannot be an
 `attempts` row: that table is keyed by identity and this case has none yet.
 
-`ABANDONED` is what a slot becomes when its preparation settles unsuccessfully
-and the failure is accepted — the same declaration `ACCEPTED` makes about
+`ABANDONED` is what a slot becomes when nothing can produce that artifact any
+more and the failure is accepted — the same declaration `ACCEPTED` makes about
 an attempt, applied to a measurement that never got to exist. An absent
 measurement, recorded as absent.
 
@@ -380,9 +383,68 @@ offline, so the whole shape is knowable before anything is submitted. A slot
 waiting on something discovered at run time would be a workflow; a slot waiting
 on something a capsule declared is a bounded expansion.
 
-`awaiting` is what the planner reads when an attempt settles — which slots does
-this unblock? — and the fan-out is the normal case rather than the exception,
-because one preparation typically unblocks every cell of a sweep.
+### What a slot waits for is a shape, not a name
+
+A slot names its producer by **spec** — the tuple that says what an acceptable
+producer is:
+
+```
+{tool, mode, config, target_bucket, target_prefix, target_region,
+ tool_slice_sha256, platform_sha256}
+```
+
+Machine, vCPUs, memory, timeout, auth role and purpose are excluded — the
+exclusions [`identity.md`](identity.md) § *Two identities, two questions* already
+makes for a preparation, because the bytes do not depend on them. Every key is a
+column of `attempts`, so the document a slot stored is exactly what the
+satisfaction query compares.
+
+Naming one attempt id instead does not survive a retry: the replacement settles
+under a new ordinal, nothing rewrites `awaiting`, and the slot blocks forever
+under a docstring promising the opposite. By shape, a retry of the producer
+satisfies the same slot — and so does a plan's own `list` measurement, which is
+why a plan carrying both a `list` row and a `list-hinted` row lists the bucket
+once instead of twice with byte-identical argv.
+
+**The spec is written at booking**, not derived when a poll pass rechecks it: a
+capsule edited between launch and poll would otherwise silently change what
+satisfies the slot, which is the frozen intent `known_inputs` exists to hold.
+
+**The match carries the slot's own `group_id`, and that is load-bearing.**
+Unscoped, the spec matches attempts from any launch in the file, and a second
+campaign silently binds the first one's hours-old bytes — the decision
+`--reuse-preparations` exists to force an operator to make. Group scoping costs
+nothing, because every legitimate candidate is journaled in the slot's own group
+at launch time.
+
+Candidates are ordered by `(settled_at, attempt_id)` and the earliest settled
+wins. That is *monotone-stable*: `settled_at` only appends later values, so once
+any candidate settles the winner never changes and every sibling slot of a sweep
+binds the same producer — one corpus snapshot across the whole sweep. The
+`attempt_id` tiebreak makes it a total order, because millisecond ties are real.
+
+`awaiting` is left for a **mid-chain** link, which cannot be described by shape:
+its own `input_artifact_sha256` is not knowable at booking. It names the earlier
+slot, and is rewritten to the attempt that slot became.
+
+### A slot nothing can pay says so
+
+A candidate may succeed and still publish nothing the chain can use. Two rules
+collide there: a measurement's timing number is honest whatever its sink holds,
+so it must not be flipped to `FAILED` to express an artifact complaint — and
+"every candidate failed or was accepted" never fires while the candidate is
+`SUCCEEDED`.
+
+So an unusable artifact **disqualifies the candidate without touching its
+state**, and the reason is recorded against the slot in `disqualified`. A
+preparation is the one exception: publishing the artifact is the whole of what it
+was for, so its refusal is its own and `FAILED` keeps it retryable.
+
+When no candidate in the group is live, payable by retry, or usable, the slot is
+**owed** — reported loudly by `status` and `report` rather than blocking quietly,
+which is the "evidence that looks fine and is not" failure a slot exists to
+prevent. That same predicate is what `accept-failure` cascades on: exhaustion is
+evaluated per slot, not off the one attempt id someone accepted.
 
 A slot is scaffolding rather than evidence, so it is the one structure here that
 may be deleted once a group is long settled. `became` points at the attempt it

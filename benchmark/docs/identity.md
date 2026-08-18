@@ -110,6 +110,17 @@ artifact?", which is a question about content.** A faster machine produces the
 same hints, so the execution environment is recorded on a preparation's row and
 stays out of its hash — the same treatment `image_uri` gets for every case.
 
+**A slot's producer spec makes the same exclusions.** What a dependent case
+waits for is `{tool, mode, config, target_bucket, target_prefix, target_region,
+tool_slice_sha256, platform_sha256}` — this table's preparation column, minus
+nothing and plus nothing — because that is exactly the set the produced bytes
+depend on. Purpose is excluded too, which is what lets a plan's own `list`
+*measurement* pay a hinted row's slot: the artifact does not know what the run
+that made it was called. The spec is matched inside one group only
+([`model.md`](model.md) § *What a slot waits for is a shape, not a name*), so
+binding an artifact across launches stays the explicit `--reuse-preparations`
+decision it already was.
+
 Preparations are excluded from comparisons anyway
 ([`model.md`](model.md) § *Not every attempt is a measurement*), so their
 identity never needed to carry comparability. Once it does not, reuse falls out:
