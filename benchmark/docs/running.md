@@ -229,22 +229,40 @@ refused rather than performed. Cancels every non-terminal attempt in that
 group and marks each `CANCELLED`. There is no per-attempt form and no
 confirmation prompt. `CANCELLED` is terminal and **not** retryable.
 
-### `accept-failure` — declare one attempt's failure final
+### `accept-failure` — declare one measurement absent
 
 ```sh
 uv run python benchmark/src/benchmark/campaign.py accept-failure --attempt aws-cli.9f300cc4d2b1.s2
+uv run python benchmark/src/benchmark/campaign.py accept-failure --slot g20260817-120000/1
 ```
 
-Moves one settled `FAILED` or `NOT_CREATED` attempt to `ACCEPTED`. It changes
-no cloud state whatsoever — it is a bookkeeping declaration that you are not
-going to retry this one, which takes it out of `retry`'s sweep. Every slot in
-that attempt's group which nothing can pay any more is recorded `ABANDONED` in
-the same call — an absent measurement, propagated to whatever it would have
-unblocked. A slot is exhausted only when *every* candidate of its producer's
-shape has failed, been accepted, or published nothing usable, so accepting one
-failure while a sibling attempt is still live leaves the slot owed.
+One of the two forms is required, and they answer different questions.
 
-Use it when a case genuinely cannot run. It is not a way to make a red
+**`--attempt`** moves one settled `FAILED` or `NOT_CREATED` attempt to
+`ACCEPTED`. It changes no cloud state whatsoever — it is a bookkeeping
+declaration that you are not going to retry this one, which takes it out of
+`retry`'s sweep. Any slot **this attempt was a candidate for** and which nothing
+can pay any more is recorded `ABANDONED` in the same call, along with whatever
+was chained behind it. Two limits on that cascade:
+
+- A slot is exhausted only when *every* candidate of its producer's shape has
+  failed, been accepted, or published nothing usable, so accepting one failure
+  while a sibling attempt of the same shape is still live leaves the slot owed.
+- A slot the accepted attempt was never a candidate for is **untouched**. A
+  group is what went out together, not what depends on what, and abandoning an
+  unrelated hinted arm because an `aws-cli` row was accepted would take a
+  decision the slot went loud precisely in order to ask you for.
+
+**`--slot`** takes `<group>/<n>` and declares that slot's measurement absent
+directly. This is the form for the case `--attempt` cannot reach: a slot whose
+only candidate **succeeded** and was disqualified — it published nothing the
+chain could use — has no failed attempt to accept, because the producer's timing
+is honest and stays `SUCCEEDED` ([`model.md`](model.md) § *A slot nothing can pay
+says so*). `status` and `report` name those slots as owed. The command refuses a
+slot that is not `BLOCKED`, and refuses one anything could still pay: it is for a
+measurement that cannot happen, not one that is slow.
+
+Use either when a case genuinely cannot run. Neither is a way to make a red
 campaign look green: `verify` and `report` still see the accepted state, and
 an accepted failure is an absent measurement, not a passing one.
 

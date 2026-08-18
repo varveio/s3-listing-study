@@ -589,7 +589,9 @@ def test_accept_failure_records_which_failure_was_accepted(
     campaign.cmd_accept_failure(
         cast(
             argparse.Namespace,
-            SimpleNamespace(state=str(tmp_path / "campaign.db"), attempt=attempt.attempt_id),
+            SimpleNamespace(
+                state=str(tmp_path / "campaign.db"), attempt=attempt.attempt_id, slot=None
+            ),
         )
     )
     reopened = ledger.open_ledger(str(tmp_path / "campaign.db"), readonly=True)
@@ -646,7 +648,7 @@ def hinted_capsule() -> Any:
     return bench.load_capsule("s3-fast-list")
 
 
-def hinted_plan(tmp_path: Path, body: str = HINTED) -> Plan:
+def hinted_plan(tmp_path: Path, body: str = HINTED, *, tools: tuple[str, ...] = ()) -> Plan:
     """A plan asking for the one shipped mode with a declared prerequisite chain.
 
     Loaded against the real capsule, so the arithmetic below is a drift guard on
@@ -659,7 +661,10 @@ def hinted_plan(tmp_path: Path, body: str = HINTED) -> Plan:
         default_modes={},
         instances={(2, 8): "n4-standard-2"},
         heap=bench.HeapConfig(percent=75),
-        adapters={"s3-fast-list": hinted_capsule()},
+        adapters={
+            "s3-fast-list": hinted_capsule(),
+            **{tool: bench.load_capsule(tool) for tool in tools},
+        },
     )
 
 
@@ -731,9 +736,10 @@ def hinted_launch(
     body: str = HINTED,
     con: sqlite3.Connection | None = None,
     group_id: str = "g20260817-000000",
+    tools: tuple[str, ...] = (),
 ) -> sqlite3.Connection:
     monkeypatch.setattr(batch_client, "ensure_job", lambda *a, **k: ("SUBMITTED", None))
-    plan = hinted_plan(tmp_path, body)
+    plan = hinted_plan(tmp_path, body, tools=tools)
     con = con or ledger.open_ledger(str(tmp_path / "campaign.db"), suite=SUITE)
     launch = campaign.Launch(con, SUITE, group_id, plan, image_set(tmp_path), "results", options())
     launch.run(campaign.expand_launch(plan.cases, plan.adapters))
@@ -1035,13 +1041,18 @@ def test_a_slot_whose_case_was_already_prepared_binds_it_rather_than_deadlocking
 
 
 def attempt_row(
-    con: sqlite3.Connection, mode: str, *, group_id: str = "g20260817-000000"
+    con: sqlite3.Connection,
+    mode: str,
+    *,
+    group_id: str = "g20260817-000000",
+    tool: str = "s3-fast-list",
 ) -> sqlite3.Row:
     row = con.execute(
-        "SELECT * FROM attempts WHERE mode=? AND group_id=? ORDER BY attempt DESC LIMIT 1",
-        (mode, group_id),
+        "SELECT * FROM attempts WHERE mode=? AND group_id=? AND tool=? "
+        "ORDER BY attempt DESC LIMIT 1",
+        (mode, group_id, tool),
     ).fetchone()
-    assert row is not None, f"no {mode} attempt in {group_id}"
+    assert row is not None, f"no {tool} {mode} attempt in {group_id}"
     return cast(sqlite3.Row, row)
 
 
@@ -1208,6 +1219,87 @@ tools:
 answer other than "the one attempt someone named"."""
 
 
+UNRELATED = """
+spec_version: 2
+bucket: b
+region: us-east-1
+defaults:
+  reps: 1
+  timeout_s: 3600
+  vcpus: 2
+  memory_gb: 8
+tools:
+  s3-fast-list:
+    cases:
+      - {mode: list-hinted, concurrency: 8, segments: 8}
+      - {mode: list-hinted, concurrency: 8, segments: 16}
+      - {mode: list}
+  aws-cli:
+    cases:
+      - {mode: s3api-v2-text}
+"""
+"""One launch holding a hinted chain and a subject with nothing to do with it —
+a group is what went out together, not what depends on what."""
+
+
+def test_accepting_an_unrelated_failure_leaves_an_owed_slot_owed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Abandoning is the deliberate step an owed slot exists to force.
+
+    A group holds slots owed by shapes the accepted attempt is not one of. If
+    `accept-failure` swept those too, an operator declaring `aws-cli`'s failure
+    final would silently declare s3-fast-list's hinted arm absent in the same
+    call — taking the decision the slot went loud in order to ask for.
+    """
+    con = hinted_launch(tmp_path, monkeypatch, body=UNRELATED, tools=("aws-cli",))
+    state = str(tmp_path / "campaign.db")
+    evidence = Evidence()
+    monkeypatch.setattr(gcs, "download_bytes", evidence.download)
+
+    # The hinted slots' only candidate succeeds and publishes no `.ks`, so they
+    # are owed with nothing left that could pay them.
+    listing = ledger.Attempt.from_row(attempt_row(con, "list"))
+    evidence.publish(listing.result_prefix, "listing.parquet", b"PAR1")
+    ledger.set_state(con, listing.attempt_id, "SUCCEEDED")
+    campaign.settle_dependents(con, listing, "SUCCEEDED", suite=SUITE)
+    owed = ledger.pending_rows(con)
+    assert [slot["state"] for slot in owed] == ["BLOCKED", "BLOCKED"]
+    assert all(ledger.slot_owed_reason(con, slot) is not None for slot in owed)
+
+    unrelated = attempt_row(con, "s3api-v2-text", tool="aws-cli")
+    ledger.set_state(con, unrelated["attempt_id"], "FAILED", "preempted")
+    campaign.cmd_accept_failure(
+        argparse.Namespace(state=state, attempt=unrelated["attempt_id"], slot=None)
+    )
+    assert [slot["state"] for slot in ledger.pending_rows(con)] == ["BLOCKED", "BLOCKED"]
+
+    # And the deliberate step is available: the producer SUCCEEDED, so there is
+    # no failure to accept and the slot is named directly.
+    campaign.cmd_accept_failure(
+        argparse.Namespace(state=state, attempt=None, slot="g20260817-000000/1")
+    )
+    assert [slot["state"] for slot in ledger.pending_rows(con)] == ["ABANDONED", "BLOCKED"]
+
+
+def test_abandoning_a_slot_something_could_still_pay_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`--slot` declares a measurement impossible, not merely slow. While its
+    producer is still live the slot is waiting, and waiting is not absence."""
+    con = hinted_launch(tmp_path, monkeypatch, body=SWEEP)
+    state = str(tmp_path / "campaign.db")
+    with pytest.raises(ledger.CampaignError, match="can still be paid"):
+        campaign.cmd_accept_failure(
+            argparse.Namespace(state=state, attempt=None, slot="g20260817-000000/1")
+        )
+    with pytest.raises(ledger.CampaignError, match="no slot"):
+        campaign.cmd_accept_failure(
+            argparse.Namespace(state=state, attempt=None, slot="g20260817-000000/9")
+        )
+    assert [slot["state"] for slot in ledger.pending_rows(con)] == ["BLOCKED", "BLOCKED"]
+
+
 def test_a_slot_abandons_only_once_every_candidate_is_gone(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1218,9 +1310,13 @@ def test_a_slot_abandons_only_once_every_candidate_is_gone(
     state = str(tmp_path / "campaign.db")
     first, second = ledger.attempt_rows(con, case_id=attempt_row(con, "list")["case_id"])
     ledger.set_state(con, first["attempt_id"], "FAILED", "preempted")
-    campaign.cmd_accept_failure(argparse.Namespace(state=state, attempt=first["attempt_id"]))
+    campaign.cmd_accept_failure(
+        argparse.Namespace(state=state, attempt=first["attempt_id"], slot=None)
+    )
     assert [slot["state"] for slot in ledger.pending_rows(con)] == ["BLOCKED", "BLOCKED"]
 
     ledger.set_state(con, second["attempt_id"], "FAILED", "preempted")
-    campaign.cmd_accept_failure(argparse.Namespace(state=state, attempt=second["attempt_id"]))
+    campaign.cmd_accept_failure(
+        argparse.Namespace(state=state, attempt=second["attempt_id"], slot=None)
+    )
     assert [slot["state"] for slot in ledger.pending_rows(con)] == ["ABANDONED", "ABANDONED"]

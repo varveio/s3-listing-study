@@ -1164,32 +1164,96 @@ def resolve_slot(
     return attempt
 
 
-def abandon_dependents(con: sqlite3.Connection, group_id: str) -> list[tuple[str, str]]:
-    """Record every slot nothing can pay any more as absent, with why.
+def _abandon(
+    con: sqlite3.Connection, slot: sqlite3.Row, reason: str, abandoned: list[tuple[str, str]]
+) -> None:
+    con.execute(
+        "UPDATE pending SET state='ABANDONED', settled_at=? WHERE group_id=? AND slot=?",
+        (_now(), slot["group_id"], slot["slot"]),
+    )
+    abandoned.append((slot_reference(str(slot["group_id"]), int(slot["slot"])), reason))
 
-    `ABANDONED` is what `ACCEPTED` says about an attempt, applied to a
-    measurement that never got to exist — and it propagates, because a chain
-    whose first link is gone owes every link after it.
 
-    Exhaustion is evaluated per slot rather than off the one attempt id someone
-    accepted: a slot is owed by a *shape*, so it abandons only once every
-    candidate of that shape has failed, been accepted, or published nothing
-    usable.
+def _cascade_abandon(
+    con: sqlite3.Connection, group_id: str, abandoned: list[tuple[str, str]]
+) -> None:
+    """Carry an abandonment down the chain that hung off it.
+
+    Only mid-chain links, which name the slot they wait on: a chain whose first
+    link is gone owes every link after it, and no other slot in the group is
+    made unpayable by this one going away.
     """
-    abandoned: list[tuple[str, str]] = []
     progressed = True
     while progressed:
         progressed = False
         for slot in blocked_slots(con, group_id):
+            if slot["awaiting"] is None or "/" not in str(slot["awaiting"]):
+                continue
             reason = slot_owed_reason(con, slot)
             if reason is None:
                 continue
-            con.execute(
-                "UPDATE pending SET state='ABANDONED', settled_at=? WHERE group_id=? AND slot=?",
-                (_now(), slot["group_id"], slot["slot"]),
-            )
-            abandoned.append((slot_reference(str(slot["group_id"]), int(slot["slot"])), reason))
+            _abandon(con, slot, reason, abandoned)
             progressed = True
+
+
+def abandon_dependents(
+    con: sqlite3.Connection, group_id: str, *, accepted: str
+) -> list[tuple[str, str]]:
+    """Record the slots `accepted` was a candidate for as absent, with why.
+
+    `ABANDONED` is what `ACCEPTED` says about an attempt, applied to a
+    measurement that never got to exist.
+
+    **Only slots that counted this attempt among their candidates.** Accepting
+    one failure is a statement about that attempt, and a group holds slots owed
+    by shapes it has nothing to do with; abandoning those too would take the
+    deliberate step an owed slot exists to force and perform it on the operator's
+    behalf, silently. Those slots stay owed and stay loud, and
+    `accept-failure --slot` is how they are declared absent.
+
+    Exhaustion is still evaluated per slot rather than off the accepted id: a
+    slot is owed by a *shape*, so even a slot this attempt could have paid
+    abandons only once every candidate of that shape has failed, been accepted,
+    or published nothing usable.
+    """
+    abandoned: list[tuple[str, str]] = []
+    for slot in blocked_slots(con, group_id):
+        if all(row["attempt_id"] != accepted for row in slot_candidates(con, slot)):
+            continue
+        reason = slot_owed_reason(con, slot)
+        if reason is None:
+            continue
+        _abandon(con, slot, reason, abandoned)
+    _cascade_abandon(con, group_id, abandoned)
+    return abandoned
+
+
+def abandon_slot(con: sqlite3.Connection, reference: str) -> list[tuple[str, str]]:
+    """Declare one named slot's measurement absent, and whatever hung off it.
+
+    The operator affordance for the case `accept-failure --attempt` cannot
+    reach: a slot whose only candidate SUCCEEDED and was disqualified has no
+    failed attempt to accept, because the producer's timing is honest and stays
+    `SUCCEEDED`. Refused while anything could still pay the slot — abandoning is
+    for a measurement that cannot happen, not for one that is slow.
+    """
+    group_id, _, ordinal = reference.partition("/")
+    if not ordinal.isdigit():
+        raise CampaignError("accept-failure --slot takes <group>/<slot>")
+    slot = con.execute(
+        "SELECT * FROM pending WHERE group_id=? AND slot=?", (group_id, int(ordinal))
+    ).fetchone()
+    if slot is None:
+        raise CampaignError(f"no slot {reference} in this ledger")
+    if slot["state"] != "BLOCKED":
+        raise CampaignError(f"slot {reference} is already {slot['state']}")
+    reason = slot_owed_reason(con, slot)
+    if reason is None:
+        owed = slot["awaiting"] or producer_summary(str(slot["producer"]))
+        raise CampaignError(f"slot {reference} can still be paid: it awaits {owed}")
+    abandoned: list[tuple[str, str]] = []
+    _abandon(con, slot, reason, abandoned)
+    _cascade_abandon(con, slot["group_id"], abandoned)
     return abandoned
 
 
@@ -1320,7 +1384,9 @@ def settle_dependents(con: sqlite3.Connection, attempt: Attempt, state: str, *, 
     than an ordinal. `accept-failure` is what declares the measurement absent.
     """
     if state == "ACCEPTED":
-        for reference, reason in abandon_dependents(con, attempt.group_id):
+        for reference, reason in abandon_dependents(
+            con, attempt.group_id, accepted=attempt.attempt_id
+        ):
             print(f"campaign: slot {reference} ABANDONED: {reason}")
         return
     if state != "SUCCEEDED":
@@ -1715,6 +1781,10 @@ def cmd_cancel(args: argparse.Namespace) -> int:
 def cmd_accept_failure(args: argparse.Namespace) -> int:
     con = open_ledger(args.state)
     try:
+        if args.slot is not None:
+            for reference, reason in abandon_slot(con, args.slot):
+                print(f"campaign: slot {reference} ABANDONED: {reason}")
+            return 0
         row = con.execute("SELECT * FROM attempts WHERE attempt_id=?", (args.attempt,)).fetchone()
         if row is None or row["state"] not in RETRYABLE_STATES:
             raise CampaignError("accept-failure requires one settled failed attempt")
@@ -1808,7 +1878,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     cancel.set_defaults(func=cmd_cancel)
 
     accept_failure = sub.add_parser("accept-failure")
-    accept_failure.add_argument("--attempt", required=True)
+    accepted = accept_failure.add_mutually_exclusive_group(required=True)
+    accepted.add_argument("--attempt", help="a settled FAILED or NOT_CREATED attempt")
+    accepted.add_argument(
+        "--slot",
+        metavar="GROUP/N",
+        help="an owed slot nothing can pay -- the case a disqualified but "
+        "SUCCEEDED producer leaves, where there is no failure to accept",
+    )
     accept_failure.set_defaults(func=cmd_accept_failure)
 
     status = sub.add_parser("status")

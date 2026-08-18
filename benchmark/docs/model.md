@@ -452,6 +452,15 @@ which is the "evidence that looks fine and is not" failure a slot exists to
 prevent. That same predicate is what `accept-failure` cascades on: exhaustion is
 evaluated per slot, not off the one attempt id someone accepted.
 
+Going loud is only half of it, because abandoning an owed slot is a **deliberate
+step** an operator takes, never one a neighbouring decision takes for them.
+`accept-failure --attempt` therefore abandons only the slots that attempt was a
+candidate for, plus the chain behind them; a slot owed by an unrelated shape in
+the same group stays owed. And when the disqualified candidate is `SUCCEEDED`
+there is no failure to accept at all, so `accept-failure --slot <group>/<n>`
+names the slot itself — refused unless the slot is `BLOCKED` and nothing can pay
+it. See [`running.md`](running.md) § *`accept-failure`*.
+
 A slot is scaffolding rather than evidence, so it is the one structure here that
 may be deleted once a group is long settled. `became` points at the attempt it
 turned into, so nothing is lost that the attempt does not already say.
