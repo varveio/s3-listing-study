@@ -1324,8 +1324,10 @@ def _slot_inbound(
     The earliest-settled candidate wins. One that succeeded but published nothing
     usable is disqualified and stepped over rather than left to wedge the slot
     forever, which is the quiet failure a slot exists to prevent. `digested`
-    carries one pass's answers, so a sweep of six sibling slots reads one
-    producer's evidence once.
+    carries the answers of one `settle_dependents` call, so a sweep of six
+    sibling slots reads one producer's evidence once within that call — a poll
+    pass in which three attempts settle still makes three calls, and reads it
+    three times.
     """
     for row in slot_candidates(con, slot, state="SUCCEEDED"):
         candidate = Attempt.from_row(row)

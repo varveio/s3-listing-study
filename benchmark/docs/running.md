@@ -100,8 +100,8 @@ uv run python benchmark/src/benchmark/campaign.py submit \
 
 prints one line per resolvable attempt (`attempt_id`, `job_name`, the frozen
 Batch request), one line per slot the plan cannot yet identify (`slot
-<group>/<n> <tool> <mode> awaiting step <m> (<tool> <mode>)`), and a closing
-count — "N plan row(s) expand to M attempt(s) and K slot(s)" — so a reviewer sees
+<group>/<n> <tool> <mode> <purpose> awaiting step <m> (<tool> <mode>)`), and a
+closing count — "N plan row(s) expand to M attempt(s) and K slot(s)" — so a reviewer sees
 the true shape of a launch before anything is created. **Read the slot lines**:
 they name the step that will pay each slot, which is where a plan that states a
 knob the producing mode ignores shows up as an extra bootstrap listing rather

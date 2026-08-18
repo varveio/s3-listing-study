@@ -277,10 +277,21 @@ discovered by listing:
 ```text
 gs://<results-bucket>/<suite>/<target-bucket>/<tool>.<hash>.s<attempt>/
   result.json
-  stdout.log.gz
   stderr.log.gz
-  native/...
+  stdout.log.gz        -- only when stdout is a log
+  native/listing.txt   -- the product, named for what is in it
 ```
+
+**The product is a file the mode declares, and stdout is a log.** Nine of the
+eleven subjects only print, so the worker lands fd 1 in the declared file and
+there is no separate stdout capture at all — those bytes *are* the product.
+The two with an output flag of their own (`s3-fast-list`, `swath`) are pointed
+at the same path by their capsule, and their stdout uploads beside it as the
+log it is. `result.json` records which channel applied, so no reader infers it
+from which files happen to be there —
+[`../docs/model.md`](../docs/model.md) § *What an attempt publishes* has the
+block, and [`../docs/capsule-contract.md`](../docs/capsule-contract.md)
+§ *The product travels on a declared file* has the rule.
 
 Writes are create-only, `result.json` uploads last and is what makes an
 attempt complete, and the evidence names the row it belongs to — the binding

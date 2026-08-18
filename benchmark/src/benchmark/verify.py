@@ -83,6 +83,7 @@ from benchmark.ledger import (
     attempt_rows,
     open_ledger,
     pending_rows,
+    producer_summary,
 )
 from benchmark.runtime.command_adapter import Mode
 
@@ -199,7 +200,8 @@ def roster_for(con: sqlite3.Connection, group_id: str) -> Roster:
 
 
 def _slot_label(row: sqlite3.Row) -> str:
-    return f"slot {row['slot']} ({row['tool']}) awaiting {row['awaiting']}"
+    owed = row["awaiting"] or producer_summary(str(row["producer"]))
+    return f"slot {row['slot']} ({row['tool']}) awaiting {owed}"
 
 
 def read_bytes_at(prefix: str, name: str) -> bytes:

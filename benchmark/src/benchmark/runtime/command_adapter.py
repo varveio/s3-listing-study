@@ -273,10 +273,9 @@ class Mode:
     points it at the declared path. ``dataset`` — the same, except what it
     writes is a directory of parts.
 
-    Declared rather than inferred from what the sink happens to hold: a tool
-    with a side output writes a file whichever channel its product travels on,
-    so the sink cannot answer this, and reading it as an answer routed every
-    ``s3-fast-list`` listing into the directory-dataset normalizer.
+    Declared rather than inferred: a tool with a side output writes a file into
+    its sink whichever channel its own product travels on, so what the sink
+    holds does not answer this question and no reader may treat it as if it did.
     """
 
     purpose_ceiling: str = "measurement"

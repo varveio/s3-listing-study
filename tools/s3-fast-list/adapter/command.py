@@ -69,16 +69,14 @@ HINTS = "hints"
 distribution a listing drops beside it, and the cut points computed from that."""
 
 LISTING_NAME = "listing.parquet"
-"""What `--output-parquet-file` is pointed at. Parquet is what the flag writes,
-so the name says parquet: the same bytes travelled as `stdout.log.gz` for as long
-as the destination was `/dev/stdout`, gzipping a columnar file under a name that
-called it a log."""
+"""What `--output-parquet-file` is pointed at, and this mode's measured product.
+The extension is the flag's own format, so the published file says what is in
+it without anything downstream having to sniff for it."""
 
 KS_NAME = "keyspace.ks"
-"""The key distribution a listing drops into the engine's sink, and the artifact
-the hinted measurement's inline `ks-split` consumes. Written only when the engine
-offers a sink: a listing with nowhere to publish it discards it, as every
-committed receipt did."""
+"""The key distribution a listing drops into the engine's sink beside its
+listing, and the artifact the hinted measurement's inline `ks-split` consumes.
+Both files go to the sink, so a listing mode requires one."""
 
 HINTS_NAME = "hints.input"
 """The cut points `ks-split` publishes into the sink it is given — the attempt's
@@ -167,16 +165,15 @@ def _concurrency(request: CommandRequest) -> str:
 
 
 def _list_tail(request: CommandRequest, hints: tuple[str, ...]) -> tuple[str, ...]:
-    # The `.ks` goes to /dev/null unless the engine offers somewhere to publish
-    # it: with no `--output-ks-file` the tool writes one into its working
-    # directory, which is output no attempt record could account for.
-    ks = f"{request.sink_dir.rstrip('/')}/{KS_NAME}" if request.sink_dir else "/dev/null"
+    # Both outputs are named explicitly: with no `--output-ks-file` the tool
+    # writes one into its working directory, which is output no attempt record
+    # could account for.
     argv = [
         *((), ("--no-sign-request",))[not request.signed],
         "--output-parquet-file",
         _sink_path(request, LISTING_NAME),
         "--output-ks-file",
-        ks,
+        _sink_path(request, KS_NAME),
         *hints,
     ]
     if request.prefix:
