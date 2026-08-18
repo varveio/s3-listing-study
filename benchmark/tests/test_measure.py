@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 
-from benchmark import adapters, gcs, measure
+from benchmark import adapters, gcs, measure, procs
 from benchmark.contract import CREDENTIAL_ENV_VAR, TOOLBOX_TOOLS
 from benchmark.runtime.command_adapter import HEAP_PERCENT
 
@@ -218,7 +218,7 @@ def test_a_workers_own_balloon_does_not_become_the_next_subjects_peak(tmp_path: 
 
     # Probed against the kernel directly rather than read off the recorded
     # flag: a worker that stopped resetting must fail this test, not skip it.
-    if not measure.reset_self_peak_rss():
+    if not procs.reset_self_peak_rss():
         pytest.skip("this kernel refuses the clear_refs peak reset")
 
     before = lean_exec("before")
@@ -253,7 +253,7 @@ def test_a_refused_peak_reset_is_recorded_rather_than_assumed(
     ever been, and a reader given the number alone would read a stale balloon as
     the subject's own footprint.
     """
-    monkeypatch.setattr(measure, "reset_self_peak_rss", lambda: False)
+    monkeypatch.setattr(procs, "reset_self_peak_rss", lambda: False)
     attempt = tmp_path / "attempt"
     attempt.mkdir()
     execution = measure.run_tool(
@@ -299,17 +299,17 @@ def test_the_container_peak_records_whether_it_could_be_reset(
     assert cgroup_result["memory_peak_reset"] is True
     assert (cgroup / "memory.peak").read_text() == "reset"
 
-    assert measure.reset_memory_peak(tmp_path / "absent") is False
-    assert measure.reset_memory_peak(None) is False
+    assert procs.reset_memory_peak(tmp_path / "absent") is False
+    assert procs.reset_memory_peak(None) is False
 
 
 def test_unknown_cgroup_events_produce_unknown_oom_deltas(tmp_path: Path) -> None:
     cgroup = tmp_path / "cgroup"
     cgroup.mkdir()
-    snapshot = measure.cgroup_snapshot(cgroup)
+    snapshot = procs.cgroup_snapshot(cgroup)
     assert snapshot["memory_events"] is None
-    assert measure._event_delta(snapshot["memory_events"], {}, "oom") is None
-    assert measure._event_delta({}, snapshot["memory_events"], "oom_kill") is None
+    assert procs._event_delta(snapshot["memory_events"], {}, "oom") is None
+    assert procs._event_delta({}, snapshot["memory_events"], "oom_kill") is None
 
 
 def test_environment_boundary_rejects_reserved_collisions() -> None:

@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import argparse
 import contextlib
-import ctypes
 import gzip
 import hashlib
 import json
@@ -33,7 +32,7 @@ from collections.abc import Iterator, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 
-from benchmark import adapters, gcs
+from benchmark import adapters, gcs, procs
 from benchmark.contract import (
     AWS_CREDENTIAL_ENV_KEYS,
     AWS_CREDENTIAL_REQUIRED_ENV_KEYS,
@@ -436,19 +435,19 @@ def run_tool(
     stdout_path = attempt_dir / "stdout.log"
     stderr_path = attempt_dir / "stderr.log"
 
-    enable_child_subreaper()
-    baseline_descendants = descendant_pids(os.getpid())
-    cgroup = cgroup_v2_directory()
-    peak_reset = reset_memory_peak(cgroup) if reset_peak else False
-    cgroup_before = cgroup_snapshot(cgroup)
+    procs.enable_child_subreaper()
+    baseline_descendants = procs.descendant_pids(os.getpid())
+    cgroup = procs.cgroup_v2_directory()
+    peak_reset = procs.reset_memory_peak(cgroup) if reset_peak else False
+    cgroup_before = procs.cgroup_snapshot(cgroup)
     # Shrink the fork-inherited floor to this worker's live footprint, then
     # record what is left of it: the child's `ru_maxrss` starts from the mark
     # this worker carries into the fork, so a figure near this number has
     # measured nothing about the subject. Read just before the spawn, and a
     # bound on what the subject can *show*, not one the figure must clear --
     # the child re-execs, so it can land marginally under.
-    rss_floor_reset = reset_self_peak_rss()
-    rss_floor_kb = self_peak_rss_kb()
+    rss_floor_reset = procs.reset_self_peak_rss()
+    rss_floor_kb = procs.self_peak_rss_kb()
     start_ns = time.monotonic_ns()
     timed_out = False
     term_sent = False
@@ -500,11 +499,13 @@ def run_tool(
         deadline = time.monotonic() + timeout
         while True:
             reap_subject(0)
-            tracked_pids.update(subject_processes(proc.pid, tracked_pids, baseline_descendants))
+            tracked_pids.update(
+                procs.subject_processes(proc.pid, tracked_pids, baseline_descendants)
+            )
             if proc.returncode is not None:
                 exit_code = proc.returncode
-                residual = live_pids(tracked_pids - {proc.pid})
-                if residual or process_group_exists(proc.pid):
+                residual = procs.live_pids(tracked_pids - {proc.pid})
+                if residual or procs.process_group_exists(proc.pid):
                     process_tree_clean = False
                 break
             if time.monotonic() >= deadline:
@@ -513,8 +514,8 @@ def run_tool(
                 break
             time.sleep(0.01)
 
-        residual = live_pids(tracked_pids - {proc.pid})
-        if timed_out or residual or process_group_exists(proc.pid):
+        residual = procs.live_pids(tracked_pids - {proc.pid})
+        if timed_out or residual or procs.process_group_exists(proc.pid):
             if timed_out:
                 exit_code = 124  # conventional timeout exit code
             try:
@@ -522,24 +523,26 @@ def run_tool(
                 term_sent = True
             except ProcessLookupError:
                 pass
-            signal_pids(residual, signal.SIGTERM)
+            procs.signal_pids(residual, signal.SIGTERM)
             term_sent = term_sent or bool(residual)
             grace_deadline = time.monotonic() + term_grace
             while time.monotonic() < grace_deadline:
                 reap_subject(0)
-                tracked_pids.update(subject_processes(proc.pid, tracked_pids, baseline_descendants))
-                residual = live_pids(tracked_pids - {proc.pid})
-                if not process_group_exists(proc.pid) and not residual:
+                tracked_pids.update(
+                procs.subject_processes(proc.pid, tracked_pids, baseline_descendants)
+            )
+                residual = procs.live_pids(tracked_pids - {proc.pid})
+                if not procs.process_group_exists(proc.pid) and not residual:
                     break
                 time.sleep(0.01)
-            residual = live_pids(tracked_pids - {proc.pid})
-            if process_group_exists(proc.pid) or residual:
+            residual = procs.live_pids(tracked_pids - {proc.pid})
+            if procs.process_group_exists(proc.pid) or residual:
                 try:
                     os.killpg(proc.pid, signal.SIGKILL)
                     kill_sent = True
                 except ProcessLookupError:
                     pass
-                signal_pids(residual, signal.SIGKILL)
+                procs.signal_pids(residual, signal.SIGKILL)
                 kill_sent = kill_sent or bool(residual)
             if not reap_subject(max(term_grace, 1.0)):
                 with contextlib.suppress(ProcessLookupError):
@@ -548,29 +551,31 @@ def run_tool(
         else:
             reap_subject(None)
     elapsed_ns = time.monotonic_ns() - start_ns
-    group_empty = not process_group_exists(proc.pid)
+    group_empty = not procs.process_group_exists(proc.pid)
     if not group_empty:
         try:
             os.killpg(proc.pid, signal.SIGKILL)
             kill_sent = True
         except ProcessLookupError:
             pass
-        group_empty = not process_group_exists(proc.pid)
+        group_empty = not procs.process_group_exists(proc.pid)
     cleanup_deadline = time.monotonic() + max(term_grace, 1.0)
     while True:
-        tracked_pids.update(subject_processes(proc.pid, tracked_pids, baseline_descendants))
-        descendants = live_pids(tracked_pids - {proc.pid})
+        tracked_pids.update(procs.subject_processes(proc.pid, tracked_pids, baseline_descendants))
+        descendants = procs.live_pids(tracked_pids - {proc.pid})
         if not descendants or time.monotonic() >= cleanup_deadline:
             break
-        signal_pids(descendants, signal.SIGKILL)
+        procs.signal_pids(descendants, signal.SIGKILL)
         kill_sent = True
-        wait_for_pids_to_exit(descendants, min(0.1, max(0.0, cleanup_deadline - time.monotonic())))
-    tracked_pids.update(subject_processes(proc.pid, tracked_pids, baseline_descendants))
-    descendants_empty = not live_pids(tracked_pids - {proc.pid})
-    group_empty = not process_group_exists(proc.pid)
-    reap_children(tracked_pids - {proc.pid})
+        procs.wait_for_pids_to_exit(
+            descendants, min(0.1, max(0.0, cleanup_deadline - time.monotonic()))
+        )
+    tracked_pids.update(procs.subject_processes(proc.pid, tracked_pids, baseline_descendants))
+    descendants_empty = not procs.live_pids(tracked_pids - {proc.pid})
+    group_empty = not procs.process_group_exists(proc.pid)
+    procs.reap_children(tracked_pids - {proc.pid})
 
-    cgroup_after = cgroup_snapshot(cgroup)
+    cgroup_after = procs.cgroup_snapshot(cgroup)
     before_events = cgroup_before.get("memory_events")
     after_events = cgroup_after.get("memory_events")
     return {
@@ -594,192 +599,10 @@ def run_tool(
             "memory_peak_reset": peak_reset,
             "before": cgroup_before,
             "after": cgroup_after,
-            "oom_delta": _event_delta(before_events, after_events, "oom"),
-            "oom_kill_delta": _event_delta(before_events, after_events, "oom_kill"),
+            "oom_delta": procs._event_delta(before_events, after_events, "oom"),
+            "oom_kill_delta": procs._event_delta(before_events, after_events, "oom_kill"),
         },
     }
-
-
-def enable_child_subreaper() -> None:
-    """Make daemonizing grandchildren remain observable by this worker."""
-    libc = ctypes.CDLL(None, use_errno=True)
-    if libc.prctl(36, 1, 0, 0, 0) != 0:  # PR_SET_CHILD_SUBREAPER
-        error = ctypes.get_errno()
-        raise OSError(error, f"could not enable child subreaper: {os.strerror(error)}")
-
-
-def process_table() -> dict[int, tuple[int, int, str]]:
-    """Return pid -> (parent pid, process group, state) from Linux procfs."""
-    table: dict[int, tuple[int, int, str]] = {}
-    for stat_path in Path("/proc").glob("[0-9]*/stat"):
-        try:
-            pid = int(stat_path.parent.name)
-            fields = stat_path.read_text().rsplit(") ", 1)[1].split()
-            table[pid] = (int(fields[1]), int(fields[2]), fields[0])
-        except (OSError, IndexError, ValueError):
-            continue
-    return table
-
-
-def descendant_pids(
-    root_pid: int, table: dict[int, tuple[int, int, str]] | None = None
-) -> set[int]:
-    table = table or process_table()
-    found: set[int] = set()
-    frontier = {root_pid}
-    while frontier:
-        children = {
-            pid
-            for pid, (parent, _group, state) in table.items()
-            if parent in frontier and state != "Z" and pid not in found
-        }
-        found.update(children)
-        frontier = children
-    return found
-
-
-def subject_processes(root_pid: int, tracked: set[int], baseline_descendants: set[int]) -> set[int]:
-    """Find the subject family, including children that escaped with setsid()."""
-    table = process_table()
-    family = {root_pid, *tracked}
-    # A subreaper adopts daemonized descendants. This worker is dedicated to
-    # one synchronous subject, so any newly adopted child belongs to it; the
-    # baseline prevents touching a child that predated this invocation.
-    family.update(
-        pid
-        for pid, (parent, _group, state) in table.items()
-        if parent == os.getpid() and pid not in baseline_descendants and state != "Z"
-    )
-    frontier = set(family)
-    while frontier:
-        children = {
-            pid
-            for pid, (parent, _group, state) in table.items()
-            if parent in frontier and state != "Z" and pid not in family
-        }
-        family.update(children)
-        frontier = children
-    return family
-
-
-def live_pids(pids: set[int]) -> set[int]:
-    table = process_table()
-    return {pid for pid in pids if pid in table and table[pid][2] != "Z"}
-
-
-def signal_pids(pids: set[int], sig: signal.Signals) -> None:
-    for pid in sorted(pids):
-        with contextlib.suppress(ProcessLookupError):
-            os.kill(pid, sig)
-
-
-def wait_for_pids_to_exit(pids: set[int], timeout: float) -> None:
-    deadline = time.monotonic() + timeout
-    while live_pids(pids) and time.monotonic() < deadline:
-        time.sleep(0.01)
-
-
-def reap_children(pids: set[int]) -> None:
-    for pid in sorted(pids):
-        with contextlib.suppress(ChildProcessError):
-            os.waitpid(pid, os.WNOHANG)
-
-
-def process_group_exists(process_group: int) -> bool:
-    """Whether a live (non-zombie) process remains in the subject group."""
-    for stat_path in Path("/proc").glob("[0-9]*/stat"):
-        try:
-            fields = stat_path.read_text().rsplit(") ", 1)[1].split()
-            state, group = fields[0], int(fields[2])
-        except (OSError, IndexError, ValueError):
-            continue
-        if group == process_group and state != "Z":
-            return True
-    return False
-
-
-def cgroup_v2_directory() -> Path | None:
-    override = os.environ.get("BENCHMARK_CGROUP_DIR")
-    if override:
-        return Path(override)
-    try:
-        relative = Path(
-            Path("/proc/self/cgroup").read_text().split("0::", 1)[1].splitlines()[0].lstrip("/")
-        )
-        return Path("/sys/fs/cgroup") / relative
-    except (OSError, IndexError):
-        return None
-
-
-def reset_memory_peak(directory: Path | None) -> bool:
-    """Try to clear the container's memory high-water mark, and say whether it took.
-
-    ``memory.peak`` is per container and accepts a reset write only on Linux
-    6.12 and later, so an attempt that ran an untimed setup exec first may be
-    stuck publishing the larger of the two phases. Recorded either way, because a
-    reader cannot otherwise tell which of the two the number describes.
-    """
-    if directory is None:
-        return False
-    try:
-        (directory / "memory.peak").write_text("reset")
-    except OSError:
-        return False
-    return True
-
-
-def self_peak_rss_kb() -> int | None:
-    """This worker's own resident high-water mark, or None where procfs has none."""
-    try:
-        for line in Path("/proc/self/status").read_text().splitlines():
-            if line.startswith("VmHWM:"):
-                return int(line.split()[1])
-    except (OSError, ValueError, IndexError):
-        return None
-    return None
-
-
-def reset_self_peak_rss() -> bool:
-    """Drop this worker's own high-water mark to its live footprint, and say whether it took.
-
-    A fork hands the child ``mm->hiwater_rss``, not the parent's current
-    residency, so ``ru_maxrss`` carries a floor equal to the fattest this worker
-    has ever been -- measured here: a parent that touched 300 MB and freed it
-    makes ``python -c pass`` report 318 MB. Writing 5 to ``clear_refs`` resets
-    the mark to the current RSS (``Documentation/filesystems/proc.rst``), which
-    is the smallest floor a fork can carry and leaves a genuinely fat subject
-    reporting its own peak unchanged.
-    """
-    try:
-        Path("/proc/self/clear_refs").write_text("5\n")
-    except OSError:
-        return False
-    return True
-
-
-def cgroup_snapshot(directory: Path | None) -> dict[str, object]:
-    if directory is None:
-        return {"memory_current_bytes": None, "memory_peak_bytes": None, "memory_events": None}
-    try:
-        events = {
-            name: int(value)
-            for name, value in (
-                line.split() for line in (directory / "memory.events").read_text().splitlines()
-            )
-        }
-        return {
-            "memory_current_bytes": int((directory / "memory.current").read_text()),
-            "memory_peak_bytes": int((directory / "memory.peak").read_text()),
-            "memory_events": events,
-        }
-    except (OSError, ValueError):
-        return {"memory_current_bytes": None, "memory_peak_bytes": None, "memory_events": None}
-
-
-def _event_delta(before: object, after: object, name: str) -> int | None:
-    if not isinstance(before, dict) or not isinstance(after, dict):
-        return None
-    return int(after.get(name, 0)) - int(before.get(name, 0))
 
 
 def final_exit_code(
