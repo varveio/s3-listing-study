@@ -82,6 +82,11 @@ COLUMNS = (
     "wall_seconds",
     "prep_seconds",
     "max_rss_kb",
+    # The fork-inherited floor under the figure beside it. Rendered rather than
+    # left in the marker because the reset that shrinks it can fail on a kernel
+    # or a procfs that refuses the write, and a contaminated RSS column that
+    # says so is worth more than a clean-looking one that does not.
+    "max_rss_floor_kb",
     "verdict",
 )
 FINAL_REPORT_STATES = {"SUCCEEDED", "CANCELLED", "ACCEPTED"}
@@ -299,6 +304,7 @@ def row_for(row: sqlite3.Row, *, adapter_root: str) -> dict[str, Any]:
         "wall_seconds": "-",
         "prep_seconds": "-",
         "max_rss_kb": "-",
+        "max_rss_floor_kb": "-",
         "verdict": "-",
     }
     if not has_result_marker(row["result_prefix"]):
@@ -316,12 +322,19 @@ def row_for(row: sqlite3.Row, *, adapter_root: str) -> dict[str, Any]:
         return {**base, "evidence_state": "IDENTITY_MISMATCH"}
     if result_binding_errors(row, result):
         return {**base, "evidence_state": "RESULT_MISMATCH"}
+    execution = result.get("execution")
     measured = {
         **base,
         "exit": result.get("exit_code", "-"),
         "row_count": result.get("row_count", "-"),
         "wall_seconds": result.get("wall_seconds", "-"),
         "max_rss_kb": result.get("max_rss_kb", "-"),
+        # Only the execution block carries the floor: it is a fact about the
+        # invocation, like the cgroup peak beside it, and never mirrored onto
+        # the subject fields.
+        "max_rss_floor_kb": (
+            execution.get("max_rss_floor_kb", "-") if isinstance(execution, dict) else "-"
+        ),
     }
     loaded_verify = load_json_at(row["result_prefix"], "verify.json")
     if loaded_verify is None:

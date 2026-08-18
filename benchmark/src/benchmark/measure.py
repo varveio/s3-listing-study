@@ -441,6 +441,14 @@ def run_tool(
     cgroup = cgroup_v2_directory()
     peak_reset = reset_memory_peak(cgroup) if reset_peak else False
     cgroup_before = cgroup_snapshot(cgroup)
+    # Shrink the fork-inherited floor to this worker's live footprint, then
+    # record what is left of it: the child's `ru_maxrss` starts from the mark
+    # this worker carries into the fork, so a figure near this number has
+    # measured nothing about the subject. Read just before the spawn, and a
+    # bound on what the subject can *show*, not one the figure must clear --
+    # the child re-execs, so it can land marginally under.
+    rss_floor_reset = reset_self_peak_rss()
+    rss_floor_kb = self_peak_rss_kb()
     start_ns = time.monotonic_ns()
     timed_out = False
     term_sent = False
@@ -570,6 +578,8 @@ def run_tool(
         "elapsed_ns": elapsed_ns,
         "wall_seconds": round(elapsed_ns / 1_000_000_000, 6),
         "max_rss_kb": subject_usage.ru_maxrss if subject_usage is not None else 0,
+        "max_rss_floor_kb": rss_floor_kb,
+        "max_rss_floor_reset": rss_floor_reset,
         "user_cpu_seconds": subject_usage.ru_utime if subject_usage is not None else 0.0,
         "system_cpu_seconds": subject_usage.ru_stime if subject_usage is not None else 0.0,
         "timed_out": timed_out,
@@ -713,6 +723,35 @@ def reset_memory_peak(directory: Path | None) -> bool:
         return False
     try:
         (directory / "memory.peak").write_text("reset")
+    except OSError:
+        return False
+    return True
+
+
+def self_peak_rss_kb() -> int | None:
+    """This worker's own resident high-water mark, or None where procfs has none."""
+    try:
+        for line in Path("/proc/self/status").read_text().splitlines():
+            if line.startswith("VmHWM:"):
+                return int(line.split()[1])
+    except (OSError, ValueError, IndexError):
+        return None
+    return None
+
+
+def reset_self_peak_rss() -> bool:
+    """Drop this worker's own high-water mark to its live footprint, and say whether it took.
+
+    A fork hands the child ``mm->hiwater_rss``, not the parent's current
+    residency, so ``ru_maxrss`` carries a floor equal to the fattest this worker
+    has ever been -- measured here: a parent that touched 300 MB and freed it
+    makes ``python -c pass`` report 318 MB. Writing 5 to ``clear_refs`` resets
+    the mark to the current RSS (``Documentation/filesystems/proc.rst``), which
+    is the smallest floor a fork can carry and leaves a genuinely fat subject
+    reporting its own peak unchanged.
+    """
+    try:
+        Path("/proc/self/clear_refs").write_text("5\n")
     except OSError:
         return False
     return True

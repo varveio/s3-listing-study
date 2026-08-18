@@ -362,6 +362,39 @@ def test_a_setup_failure_reads_as_evidence_rather_than_a_broken_result(tmp_path:
     assert report.result_semantic_errors({**document, "exit_code": 0}) == ["exit_code"]
 
 
+def test_an_rss_figure_is_rendered_beside_the_floor_it_sits_on(tmp_path: Path) -> None:
+    """The floor travels with the figure, and its absence is not a zero.
+
+    A figure near the mark a fork handed the child has measured nothing about
+    the subject, and only the floor beside it says which case this is. Evidence
+    written before the worker recorded one renders `-` rather than inviting a
+    reader to treat a missing floor as no floor.
+    """
+    con = ledger(tmp_path)
+    write_evidence(
+        record(con, tmp_path, tool="alpha", digest="aaaa"),
+        execution={
+            "timed_out": False,
+            "subreaper_enabled": True,
+            "process_tree_clean": True,
+            "process_group_empty": True,
+            "descendants_empty": True,
+            "max_rss_kb": 1024,
+            "max_rss_floor_kb": 900,
+            "max_rss_floor_reset": True,
+            "elapsed_ns": 1_500_000_000,
+            "cgroup": {"oom_delta": 0, "oom_kill_delta": 0},
+        },
+    )
+    write_evidence(record(con, tmp_path, tool="beta", digest="bbbb"))
+
+    rows = {row["tool"]: row for row in rows_of(con, adapter_root(tmp_path, "alpha", "beta"))}
+    assert rows["alpha"]["max_rss_kb"] == 1024
+    assert rows["alpha"]["max_rss_floor_kb"] == 900
+    assert rows["beta"]["max_rss_floor_kb"] == "-"
+    assert "max_rss_floor_kb" in report.render_markdown(list(rows.values()), blocked=[])
+
+
 def test_a_verify_record_that_disagrees_with_its_own_diff_is_not_a_verdict(
     tmp_path: Path,
 ) -> None:

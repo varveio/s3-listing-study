@@ -88,6 +88,31 @@ read from. It has no identity of its own: the axes it ran at are already in the
 measurement's config blob. A setup exec that fails is an attempt that fails,
 because the alternative is a subject timed against hints nobody made.
 
+### A memory figure is a figure of one invocation, above a floor
+
+`max_rss_kb` is the subject's own `ru_maxrss`, reaped per invocation with
+`wait4` so that with two phases in one container the setup exec's peak is never
+published as the measurement's. What that does not buy is a number that starts
+at zero. A forked child inherits the parent's `mm->hiwater_rss`, so every figure
+sits on a floor equal to the fattest this worker has ever been — measured: a
+worker that touched 300 MB and freed it makes `python -c pass` report 318 MB.
+
+Two things answer it, and neither is a correction to the figure. The worker
+drops its own high-water mark to its live footprint immediately before the fork,
+which is the smallest floor a fork can carry; and it records what remains as
+`max_rss_floor_kb` beside the measurement, with `max_rss_floor_reset` saying
+whether the kernel took the write. `report` renders the floor as its own column
+for the same reason the cgroup peak records `memory_peak_reset`: the reset can
+fail where procfs refuses the write, and a reader cannot otherwise tell a lean
+subject from one that genuinely used the worker's footprint.
+
+So a subject whose figure is near its floor has measured nothing about itself,
+and the floor is what says so. Read it as the level the figure starts from
+rather than an exact bound it must clear — the floor is sampled just before the
+fork, and a child that re-execs can land marginally under it. Neither number is
+subtracted from the other: `max_rss_kb` stays what the kernel reported for that
+invocation.
+
 ### Sometimes the failures are the measurement
 
 The vocabulary above assumes a failed attempt is a hole: `FAILED` is an owed

@@ -166,9 +166,8 @@ def test_each_exec_reports_its_own_peak_rss(tmp_path: Path) -> None:
     separates them (Linux semantics; this suite is Linux-only).
 
     Every figure here is read against the lean baseline rather than an absolute
-    bound: a forked child inherits its parent's high-water mark on Linux, so the
-    baseline is whatever process ran this suite, and the fat child is sized to
-    clear it.
+    bound: a forked child starts at the floor the worker was reset to, which is
+    whatever process ran this suite, and the fat child is sized to clear it.
     """
 
     def peak(name: str, script: str) -> int:
@@ -194,6 +193,80 @@ def test_each_exec_reports_its_own_peak_rss(tmp_path: Path) -> None:
     assert fat > before + 200_000
     # The claim: the fat exec's peak did not follow the lean one that came next.
     assert after < before + 20_000
+
+
+def test_a_workers_own_balloon_does_not_become_the_next_subjects_peak(tmp_path: Path) -> None:
+    """The floor a fork inherits is the parent's mark, so the worker drops it first.
+
+    A child inherits ``mm->hiwater_rss`` rather than the parent's live
+    footprint, so a worker that ever ballooned would publish that balloon as
+    every later subject's measurement: 300 MB touched and freed here makes
+    ``python -c pass`` report 318 MB without the pre-fork reset. Linux
+    semantics; this suite is Linux-only.
+    """
+
+    def lean_exec(name: str) -> dict[str, object]:
+        directory = tmp_path / name
+        directory.mkdir()
+        return measure.run_tool(
+            (sys.executable, "-c", "pass"),
+            directory,
+            timeout=60,
+            term_grace=0.1,
+            env=dict(os.environ),
+        )
+
+    # Probed against the kernel directly rather than read off the recorded
+    # flag: a worker that stopped resetting must fail this test, not skip it.
+    if not measure.reset_self_peak_rss():
+        pytest.skip("this kernel refuses the clear_refs peak reset")
+
+    before = lean_exec("before")
+    baseline = before["max_rss_kb"]
+    assert isinstance(baseline, int)
+    assert before["max_rss_floor_reset"] is True
+
+    # Written to, not merely allocated, and then released: the worker's live
+    # footprint returns to lean while its high-water mark stays fat.
+    balloon = bytearray(300_000 * 1024)
+    balloon[::4096] = b"x" * (len(balloon) // 4096)
+    del balloon
+
+    after = lean_exec("after")
+    peak = after["max_rss_kb"]
+    assert isinstance(peak, int)
+    # The claim: a balloon this worker has already freed did not follow it into
+    # the child and get published as that child's peak.
+    assert peak < baseline + 100_000
+
+    floor = after["max_rss_floor_kb"]
+    assert isinstance(floor, int)
+    assert 0 < floor < 200_000
+
+
+def test_a_refused_peak_reset_is_recorded_rather_than_assumed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The figure publishes either way, so the flag is what qualifies the floor.
+
+    Where procfs refuses the write the floor stays the fattest this worker has
+    ever been, and a reader given the number alone would read a stale balloon as
+    the subject's own footprint.
+    """
+    monkeypatch.setattr(measure, "reset_self_peak_rss", lambda: False)
+    attempt = tmp_path / "attempt"
+    attempt.mkdir()
+    execution = measure.run_tool(
+        (sys.executable, "-c", "pass"),
+        attempt,
+        timeout=30,
+        term_grace=0.1,
+        env=dict(os.environ),
+    )
+    assert execution["max_rss_floor_reset"] is False
+    floor = execution["max_rss_floor_kb"]
+    assert isinstance(floor, int)
+    assert floor > 0
 
 
 def test_the_container_peak_records_whether_it_could_be_reset(
