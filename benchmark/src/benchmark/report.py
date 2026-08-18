@@ -47,7 +47,7 @@ from pathlib import Path
 from typing import Any
 
 from benchmark import adapters
-from benchmark.campaign import (
+from benchmark.ledger import (
     STATE_FILENAME,
     TERMINAL_STATES,
     attempt_rows,

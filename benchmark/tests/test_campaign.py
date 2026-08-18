@@ -21,7 +21,7 @@ import pytest
 from google.api_core.exceptions import AlreadyExists, BadRequest
 from google.cloud import batch_v1
 
-from benchmark import adapters, campaign, gcs, identity, measure
+from benchmark import adapters, campaign, gcs, identity, ledger, measure
 from benchmark import plan as bench
 from benchmark.contract import CREDENTIAL_ENV_VAR, TOOLBOX_TOOLS
 from benchmark.plan import Case, Plan
@@ -122,7 +122,7 @@ def submit(
     *,
     group_id: str = "g20260817-000000",
     repeat: bool = False,
-) -> campaign.Attempt:
+) -> ledger.Attempt:
     return campaign.submit_case(
         con, case, context(plan, case, images, group_id=group_id), repeat=repeat
     )
@@ -135,7 +135,7 @@ def submitted(
     """A ledger with one attempt in it, created against a provider that says yes."""
     monkeypatch.setattr(campaign, "ensure_job", lambda *a, **k: ("SUBMITTED", None))
     plan = loaded_plan()
-    con = campaign.open_ledger(str(tmp_path / "campaign.db"), suite=SUITE)
+    con = ledger.open_ledger(str(tmp_path / "campaign.db"), suite=SUITE)
     return con, plan, any_case(plan), image_set(tmp_path)
 
 
@@ -170,11 +170,11 @@ def test_two_cases_hashing_to_one_case_id_are_refused(
     con, plan, case, images = submitted
     attempt = submit(con, plan, case, images)
 
-    def build(ordinal: int) -> tuple[campaign.Attempt, str]:
+    def build(ordinal: int) -> tuple[ledger.Attempt, str]:
         raise AssertionError("a colliding insert must be refused before it renders")
 
-    with pytest.raises(campaign.CampaignError, match="hash to one case_id"):
-        campaign.journal_intent(
+    with pytest.raises(ledger.CampaignError, match="hash to one case_id"):
+        ledger.journal_intent(
             con,
             case_id=attempt.case_id,
             case_inputs=json.dumps({"environment": "something else"}),
@@ -188,13 +188,13 @@ def test_an_ordinal_cannot_be_read_past_an_open_transaction(
     """`max(attempt) + 1` is allocated under the write lock, so a race cannot share one."""
     con, plan, case, images = submitted
     first = submit(con, plan, case, images)
-    other = campaign.open_ledger(str(tmp_path / "campaign.db"), suite=SUITE)
+    other = ledger.open_ledger(str(tmp_path / "campaign.db"), suite=SUITE)
     other.execute("PRAGMA busy_timeout=50")
     raced: list[Exception] = []
 
-    def build(ordinal: int) -> tuple[campaign.Attempt, str]:
+    def build(ordinal: int) -> tuple[ledger.Attempt, str]:
         try:
-            campaign.journal_intent(
+            ledger.journal_intent(
                 other,
                 case_id=first.case_id,
                 case_inputs=first.case_inputs,
@@ -204,7 +204,7 @@ def test_an_ordinal_cannot_be_read_past_an_open_transaction(
             raced.append(exc)
         return _replaced(first, ordinal), "{}"
 
-    second, _ = campaign.journal_intent(
+    second, _ = ledger.journal_intent(
         con, case_id=first.case_id, case_inputs=first.case_inputs, build=build
     )
     other.close()
@@ -212,11 +212,11 @@ def test_an_ordinal_cannot_be_read_past_an_open_transaction(
     assert raced, "a concurrent journal was allowed to read the ordinal mid-transaction"
 
 
-def _replaced(attempt: campaign.Attempt, ordinal: int) -> campaign.Attempt:
+def _replaced(attempt: ledger.Attempt, ordinal: int) -> ledger.Attempt:
     attempt_id = identity.attempt_id(attempt.case_id, ordinal)
-    return campaign.Attempt(
+    return ledger.Attempt(
         **{
-            **{name: getattr(attempt, name) for name in campaign.Attempt.__dataclass_fields__},
+            **{name: getattr(attempt, name) for name in ledger.Attempt.__dataclass_fields__},
             "attempt": ordinal,
             "job_name": campaign.job_name_for(SUITE, attempt.case_id, ordinal),
             "result_prefix": f"gs://results/{SUITE}/b/{attempt_id}/",
@@ -230,9 +230,9 @@ def test_a_case_with_a_successful_attempt_is_not_resubmitted(
     """Re-measuring is `reps` or an explicit flag, never an implicit repeat."""
     con, plan, case, images = submitted
     attempt = submit(con, plan, case, images)
-    campaign.set_state(con, attempt.attempt_id, "SUCCEEDED")
+    ledger.set_state(con, attempt.attempt_id, "SUCCEEDED")
 
-    with pytest.raises(campaign.CampaignError, match="already has a successful attempt"):
+    with pytest.raises(ledger.CampaignError, match="already has a successful attempt"):
         submit(con, plan, case, images)
     assert submit(con, plan, case, images, repeat=True).attempt == 2
 
@@ -240,7 +240,7 @@ def test_a_case_with_a_successful_attempt_is_not_resubmitted(
 def test_intent_is_durable_before_the_provider_is_called(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    con = campaign.open_ledger(str(tmp_path / "campaign.db"), suite=SUITE)
+    con = ledger.open_ledger(str(tmp_path / "campaign.db"), suite=SUITE)
     plan = loaded_plan()
 
     def observe(*_args: object, **_kwargs: object) -> tuple[str, str | None]:
@@ -255,7 +255,7 @@ def test_intent_is_durable_before_the_provider_is_called(
 
     row = con.execute("SELECT * FROM attempts").fetchone()
     assert (row["state"], row["settled_at"]) == ("SUBMITTED", None)
-    campaign.set_state(con, attempt.attempt_id, "FAILED", "the machine went away")
+    ledger.set_state(con, attempt.attempt_id, "FAILED", "the machine went away")
     settled = con.execute("SELECT state, state_detail, settled_at FROM attempts").fetchone()
     assert settled["state_detail"] == "the machine went away"
     assert settled["settled_at"] is not None
@@ -272,7 +272,7 @@ class ExistingClient:
         return self.job
 
 
-def rendered_request(tmp_path: Path, **overrides: Any) -> tuple[campaign.Attempt, dict[str, Any]]:
+def rendered_request(tmp_path: Path, **overrides: Any) -> tuple[ledger.Attempt, dict[str, Any]]:
     plan = loaded_plan()
     case = any_case(plan, signed=bool(overrides.pop("signed", False)))
     images = image_set(tmp_path)
@@ -393,42 +393,42 @@ def test_a_signing_case_carries_one_secret_and_the_signing_identity(tmp_path: Pa
 
 
 def test_a_signing_case_without_a_signing_account_is_refused(tmp_path: Path) -> None:
-    with pytest.raises(campaign.CampaignError):
+    with pytest.raises(ledger.CampaignError):
         rendered_request(tmp_path, signed=True, authenticated_worker_sa=None)
 
 
 def test_a_job_name_that_batch_cannot_take_is_refused() -> None:
     name = campaign.job_name_for(SUITE, "aws-cli.9f300cc4d2b1", 2)
     assert name == f"{SUITE}-aws-cli-9f300cc4d2b1-s2"
-    with pytest.raises(campaign.CampaignError):
+    with pytest.raises(ledger.CampaignError):
         campaign.job_name_for("s" * 40, "aws-cli.9f300cc4d2b1", 1)
-    with pytest.raises(campaign.CampaignError):
+    with pytest.raises(ledger.CampaignError):
         campaign.job_name_for(SUITE, "aws_cli.9f300cc4d2b1", 1)
 
 
 def test_a_ledger_whose_schema_version_is_unknown_is_refused(tmp_path: Path) -> None:
     path = tmp_path / "campaign.db"
-    campaign.open_ledger(str(path), suite=SUITE).close()
+    ledger.open_ledger(str(path), suite=SUITE).close()
     con = sqlite3.connect(path)
-    con.execute("UPDATE meta SET schema_version = ?", (campaign.SCHEMA_VERSION + 1,))
+    con.execute("UPDATE meta SET schema_version = ?", (ledger.SCHEMA_VERSION + 1,))
     con.commit()
     con.close()
-    with pytest.raises(campaign.CampaignError):
-        campaign.open_ledger(str(path))
+    with pytest.raises(ledger.CampaignError):
+        ledger.open_ledger(str(path))
 
 
 def test_a_group_id_is_unique_within_an_accumulating_file(
     submitted: tuple[sqlite3.Connection, Plan, Case, campaign.ImageSet],
 ) -> None:
     con, plan, case, images = submitted
-    minted = campaign.mint_group_id(con)
+    minted = ledger.mint_group_id(con)
     submit(con, plan, case, images, group_id=minted)
-    assert campaign.mint_group_id(con, "second-launch") == "second-launch"
-    with pytest.raises(campaign.CampaignError):
-        campaign.mint_group_id(con, minted)
+    assert ledger.mint_group_id(con, "second-launch") == "second-launch"
+    with pytest.raises(ledger.CampaignError):
+        ledger.mint_group_id(con, minted)
     # The minted form is a timestamp an operator can type, suffixed rather than
     # reused when two launches land in one second.
-    assert campaign.mint_group_id(con).startswith(minted.rsplit("-", 1)[0][:9])
+    assert ledger.mint_group_id(con).startswith(minted.rsplit("-", 1)[0][:9])
 
 
 def test_retry_leaves_other_groups_and_rate_cases_alone(
@@ -441,11 +441,11 @@ def test_retry_leaves_other_groups_and_rate_cases_alone(
     sampled = submit(con, plan, plan.cases[1], images, group_id="mine")
     theirs = submit(con, plan, plan.cases[2], images, group_id="theirs")
     for attempt in (mine, sampled, theirs):
-        campaign.set_state(con, attempt.attempt_id, "FAILED", "settled failure")
+        ledger.set_state(con, attempt.attempt_id, "FAILED", "settled failure")
     con.execute("UPDATE attempts SET statistic='rate' WHERE attempt_id=?", (sampled.attempt_id,))
     retried: list[str] = []
 
-    def observe(con: sqlite3.Connection, row: sqlite3.Row, **kwargs: object) -> campaign.Attempt:
+    def observe(con: sqlite3.Connection, row: sqlite3.Row, **kwargs: object) -> ledger.Attempt:
         retried.append(row["attempt_id"])
         return mine
 
@@ -478,12 +478,12 @@ def test_one_rows_retry_refusal_does_not_abort_the_sweep(
     answered = submit(con, plan, case, images, group_id="mine")
     preempted = submit(con, plan, plan.cases[1], images, group_id="mine")
     for attempt in (answered, preempted):
-        campaign.set_state(con, attempt.attempt_id, "FAILED", "spot reclaimed the machine")
+        ledger.set_state(con, attempt.attempt_id, "FAILED", "spot reclaimed the machine")
     retried: list[str] = []
 
-    def observe(con: sqlite3.Connection, row: sqlite3.Row, **kwargs: object) -> campaign.Attempt:
+    def observe(con: sqlite3.Connection, row: sqlite3.Row, **kwargs: object) -> ledger.Attempt:
         if row["attempt_id"] == answered.attempt_id:
-            raise campaign.CampaignError("already has a successful attempt")
+            raise ledger.CampaignError("already has a successful attempt")
         retried.append(row["attempt_id"])
         return preempted
 
@@ -524,13 +524,13 @@ def test_a_retry_that_would_change_the_frozen_request_is_refused(
     """A retry re-runs an attempt; changing the image set is a new campaign."""
     con, plan, case, images = submitted
     attempt = submit(con, plan, case, images)
-    campaign.set_state(con, attempt.attempt_id, "FAILED", "settled failure")
+    ledger.set_state(con, attempt.attempt_id, "FAILED", "settled failure")
     row = con.execute("SELECT * FROM attempts WHERE attempt_id=?", (attempt.attempt_id,)).fetchone()
 
     moved = image_set_document()
     tools = cast(dict[str, dict[str, str]], moved["tools"])
     tools[case.tool]["tool_version"] = "2.0"
-    with pytest.raises(campaign.CampaignError, match="new campaign, not a retry"):
+    with pytest.raises(ledger.CampaignError, match="new campaign, not a retry"):
         campaign.retry_attempt(
             con,
             row,
@@ -552,7 +552,7 @@ def test_a_retry_replays_the_deadline_its_ledger_was_frozen_under(
     """
     con, plan, case, images = submitted
     attempt = submit(con, plan, case, images)
-    campaign.set_state(con, attempt.attempt_id, "FAILED", "settled failure")
+    ledger.set_state(con, attempt.attempt_id, "FAILED", "settled failure")
     stored = "SELECT request_json FROM attempts WHERE attempt_id=?"
     frozen = json.loads(con.execute(stored, (attempt.attempt_id,)).fetchone()[0])
     assert campaign.request_max_run_duration(frozen) == (
@@ -578,7 +578,7 @@ def test_accept_failure_records_which_failure_was_accepted(
 ) -> None:
     con, plan, case, images = submitted
     attempt = submit(con, plan, case, images)
-    campaign.set_state(con, attempt.attempt_id, "NOT_CREATED", "Forbidden: no quota")
+    ledger.set_state(con, attempt.attempt_id, "NOT_CREATED", "Forbidden: no quota")
     con.close()
 
     campaign.cmd_accept_failure(
@@ -587,7 +587,7 @@ def test_accept_failure_records_which_failure_was_accepted(
             SimpleNamespace(state=str(tmp_path / "campaign.db"), attempt=attempt.attempt_id),
         )
     )
-    reopened = campaign.open_ledger(str(tmp_path / "campaign.db"), readonly=True)
+    reopened = ledger.open_ledger(str(tmp_path / "campaign.db"), readonly=True)
     row = reopened.execute("SELECT state, state_detail FROM attempts").fetchone()
     assert row["state"] == "ACCEPTED"
     assert "NOT_CREATED" in row["state_detail"] and "no quota" in row["state_detail"]
@@ -604,13 +604,13 @@ def test_an_image_set_without_slices_cannot_identify_a_case(tmp_path: Path) -> N
     document = image_set_document()
     tools = cast(dict[str, dict[str, str]], document["tools"])
     del tools["aws-cli"]["tool_slice_sha256"]
-    with pytest.raises(campaign.CampaignError):
+    with pytest.raises(ledger.CampaignError):
         image_set(tmp_path, document)
 
     disagreeing = image_set_document()
     tools = cast(dict[str, dict[str, str]], disagreeing["tools"])
     tools["aws-cli"]["platform_sha256"] = "1" * 64
-    with pytest.raises(campaign.CampaignError):
+    with pytest.raises(ledger.CampaignError):
         image_set(tmp_path / "other", disagreeing)
 
 
@@ -699,7 +699,7 @@ class Evidence:
 def hinted_launch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> sqlite3.Connection:
     monkeypatch.setattr(campaign, "ensure_job", lambda *a, **k: ("SUBMITTED", None))
     plan = hinted_plan(tmp_path)
-    con = campaign.open_ledger(str(tmp_path / "campaign.db"), suite=SUITE)
+    con = ledger.open_ledger(str(tmp_path / "campaign.db"), suite=SUITE)
     launch = campaign.Launch(
         con, SUITE, "g20260817-000000", plan, image_set(tmp_path), "results", options()
     )
@@ -775,15 +775,15 @@ def test_a_settled_preparation_resolves_the_measurement_that_waited_on_it(
     con = hinted_launch(tmp_path, monkeypatch)
     evidence = Evidence()
     monkeypatch.setattr(gcs, "download_bytes", evidence.download)
-    listing = campaign.Attempt.from_row(attempt_row(con, "list"))
-    assert [row["state"] for row in campaign.pending_rows(con)] == ["BLOCKED"]
+    listing = ledger.Attempt.from_row(attempt_row(con, "list"))
+    assert [row["state"] for row in ledger.pending_rows(con)] == ["BLOCKED"]
 
     keyspace = evidence.publish(listing.result_prefix, "keyspace.ks", b"a/\nb/\n")
-    campaign.set_state(con, listing.attempt_id, "SUCCEEDED")
+    ledger.set_state(con, listing.attempt_id, "SUCCEEDED")
     campaign.settle_dependents(con, listing, "SUCCEEDED", suite=SUITE)
 
-    hinted = campaign.Attempt.from_row(attempt_row(con, "list-hinted"))
-    slot = campaign.pending_rows(con)[0]
+    hinted = ledger.Attempt.from_row(attempt_row(con, "list-hinted"))
+    slot = ledger.pending_rows(con)[0]
     assert (slot["state"], slot["became"]) == ("RESOLVED", hinted.attempt_id)
     # The measurement consumes the key distribution directly: the cut points it
     # lists under are made by its own inline setup exec, so no second attempt
@@ -812,7 +812,7 @@ def test_an_artifact_is_validated_against_the_mode_that_produced_it(
     evidence.publish("gs://results/prep/", "hints.input", b"\nz/\n")
     monkeypatch.setattr(gcs, "download_bytes", evidence.download)
     uri = "gs://results/prep/native/hints.input"
-    with pytest.raises(campaign.CampaignError, match="first cut point is empty"):
+    with pytest.raises(ledger.CampaignError, match="first cut point is empty"):
         campaign.validate_artifact("s3-fast-list", "ks-split", uri)
     # The same bytes under the mode that publishes a key distribution: the capsule
     # declares no check for it, so there is nothing to refuse.
@@ -828,23 +828,23 @@ def test_a_preparation_with_no_consumable_artifact_fails_and_abandons_what_await
     con = hinted_launch(tmp_path, monkeypatch)
     evidence = Evidence()
     monkeypatch.setattr(gcs, "download_bytes", evidence.download)
-    listing = campaign.Attempt.from_row(attempt_row(con, "list"))
+    listing = ledger.Attempt.from_row(attempt_row(con, "list"))
     # Two files in the sink: the harness has no way to choose between them.
     evidence.objects[f"{listing.result_prefix}result.json"] = json.dumps(
         {"native_manifest": {"keyspace.ks": "a" * 64, "extra.ks": "b" * 64}}
     ).encode()
-    campaign.set_state(con, listing.attempt_id, "SUCCEEDED")
+    ledger.set_state(con, listing.attempt_id, "SUCCEEDED")
     campaign.settle_dependents(con, listing, "SUCCEEDED", suite=SUITE)
 
     row = con.execute(
         "SELECT state, state_detail FROM attempts WHERE attempt_id=?", (listing.attempt_id,)
     ).fetchone()
     assert row["state"] == "FAILED" and "exactly one artifact" in row["state_detail"]
-    assert campaign.pending_rows(con)[0]["state"] == "BLOCKED"
+    assert ledger.pending_rows(con)[0]["state"] == "BLOCKED"
 
-    campaign.set_state(con, listing.attempt_id, "ACCEPTED", "accepted FAILED")
+    ledger.set_state(con, listing.attempt_id, "ACCEPTED", "accepted FAILED")
     campaign.settle_dependents(con, listing, "ACCEPTED", suite=SUITE)
-    assert campaign.pending_rows(con)[0]["state"] == "ABANDONED"
+    assert ledger.pending_rows(con)[0]["state"] == "ABANDONED"
 
 
 def test_a_preparation_another_launch_made_is_bound_only_when_asked_for(
@@ -854,16 +854,16 @@ def test_a_preparation_another_launch_made_is_bound_only_when_asked_for(
     con = hinted_launch(tmp_path, monkeypatch)
     evidence = Evidence()
     monkeypatch.setattr(gcs, "download_bytes", evidence.download)
-    listing = campaign.Attempt.from_row(attempt_row(con, "list"))
+    listing = ledger.Attempt.from_row(attempt_row(con, "list"))
     keyspace = evidence.publish(listing.result_prefix, "keyspace.ks", b"a/\nb/\n")
-    campaign.set_state(con, listing.attempt_id, "SUCCEEDED")
+    ledger.set_state(con, listing.attempt_id, "SUCCEEDED")
 
     plan = hinted_plan(tmp_path)
     steps = campaign.expand_launch(plan.cases, plan.adapters)
     again = campaign.Launch(
         con, SUITE, "g20260817-000001", plan, image_set(tmp_path), "results", options()
     )
-    with pytest.raises(campaign.CampaignError, match="reusing a preparation across launches"):
+    with pytest.raises(ledger.CampaignError, match="reusing a preparation across launches"):
         again.run(steps)
 
     reusing = campaign.Launch(
@@ -880,8 +880,8 @@ def test_a_preparation_another_launch_made_is_bound_only_when_asked_for(
     # No second listing was submitted, and the measurement it unblocks is an
     # attempt rather than a slot: its identity is complete the moment the digest
     # is known.
-    assert len(campaign.attempt_rows(con, case_id=listing.case_id)) == 1
-    hinted = campaign.Attempt.from_row(attempt_row(con, "list-hinted", group_id="g20260817-000002"))
+    assert len(ledger.attempt_rows(con, case_id=listing.case_id)) == 1
+    hinted = ledger.Attempt.from_row(attempt_row(con, "list-hinted", group_id="g20260817-000002"))
     assert (hinted.input_artifact_sha256, hinted.produced_by) == (keyspace, listing.attempt_id)
 
 
@@ -936,13 +936,13 @@ def test_a_slot_resolves_once_however_many_passes_see_it(
     con = hinted_launch(tmp_path, monkeypatch)
     evidence = Evidence()
     monkeypatch.setattr(gcs, "download_bytes", evidence.download)
-    listing = campaign.Attempt.from_row(attempt_row(con, "list"))
+    listing = ledger.Attempt.from_row(attempt_row(con, "list"))
     evidence.publish(listing.result_prefix, "keyspace.ks", b"a/\nb/\n")
     stale = campaign.blocked_slots(con, listing.attempt_id)[0]
 
-    campaign.set_state(con, listing.attempt_id, "SUCCEEDED")
+    ledger.set_state(con, listing.attempt_id, "SUCCEEDED")
     campaign.settle_dependents(con, listing, "SUCCEEDED", suite=SUITE)
-    hinted = campaign.Attempt.from_row(attempt_row(con, "list-hinted"))
+    hinted = ledger.Attempt.from_row(attempt_row(con, "list-hinted"))
 
     # The row a concurrent pass read before this one claimed the slot.
     inbound = campaign.Inbound(
@@ -951,7 +951,7 @@ def test_a_slot_resolves_once_however_many_passes_see_it(
         artifact_uri=f"{listing.result_prefix}native/keyspace.ks",
     )
     assert campaign.resolve_slot(con, stale, inbound, suite=SUITE) is None
-    assert [row["attempt_id"] for row in campaign.attempt_rows(con, case_id=hinted.case_id)] == [
+    assert [row["attempt_id"] for row in ledger.attempt_rows(con, case_id=hinted.case_id)] == [
         hinted.attempt_id
     ]
 
@@ -964,12 +964,12 @@ def test_a_slot_whose_case_was_already_prepared_binds_it_rather_than_deadlocking
     con = hinted_launch(tmp_path, monkeypatch)
     evidence = Evidence()
     monkeypatch.setattr(gcs, "download_bytes", evidence.download)
-    listing = campaign.Attempt.from_row(attempt_row(con, "list"))
+    listing = ledger.Attempt.from_row(attempt_row(con, "list"))
     evidence.publish(listing.result_prefix, "keyspace.ks", b"a/\nb/\n")
-    campaign.set_state(con, listing.attempt_id, "SUCCEEDED")
+    ledger.set_state(con, listing.attempt_id, "SUCCEEDED")
     campaign.settle_dependents(con, listing, "SUCCEEDED", suite=SUITE)
-    hinted = campaign.Attempt.from_row(attempt_row(con, "list-hinted"))
-    campaign.set_state(con, hinted.attempt_id, "SUCCEEDED")
+    hinted = ledger.Attempt.from_row(attempt_row(con, "list-hinted"))
+    ledger.set_state(con, hinted.attempt_id, "SUCCEEDED")
 
     plan = hinted_plan(tmp_path)
     again = campaign.Launch(
@@ -983,16 +983,16 @@ def test_a_slot_whose_case_was_already_prepared_binds_it_rather_than_deadlocking
         repeat=True,
     )
     again.run(campaign.expand_launch(plan.cases, plan.adapters))
-    repeated = campaign.Attempt.from_row(attempt_row(con, "list", group_id="g20260817-000001"))
+    repeated = ledger.Attempt.from_row(attempt_row(con, "list", group_id="g20260817-000001"))
     evidence.publish(repeated.result_prefix, "keyspace.ks", b"a/\nb/\n")
-    campaign.set_state(con, repeated.attempt_id, "SUCCEEDED")
+    ledger.set_state(con, repeated.attempt_id, "SUCCEEDED")
     campaign.settle_dependents(con, repeated, "SUCCEEDED", suite=SUITE)
 
-    slot = campaign.pending_rows(con, group_id="g20260817-000001")[0]
+    slot = ledger.pending_rows(con, group_id="g20260817-000001")[0]
     assert (slot["state"], slot["became"]) == ("RESOLVED", hinted.attempt_id)
     # No second attempt of a case that has already succeeded: the slot bound the
     # one that exists rather than asking the ledger for a run it refuses.
-    assert len(campaign.attempt_rows(con, case_id=hinted.case_id)) == 1
+    assert len(ledger.attempt_rows(con, case_id=hinted.case_id)) == 1
 
 
 def attempt_row(

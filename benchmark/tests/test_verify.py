@@ -9,7 +9,7 @@ from pathlib import Path
 import duckdb
 import pytest
 
-from benchmark import adapters, campaign, verify
+from benchmark import adapters, campaign, ledger, verify
 from benchmark.contract import EXIT_INCOMPLETE_GROUP, sha256_of
 
 COMMAND_PY = """
@@ -72,8 +72,8 @@ def adapter_root(tmp_path: Path, *tools: str) -> str:
     return str(root)
 
 
-def ledger(tmp_path: Path) -> sqlite3.Connection:
-    return campaign.open_ledger(str(tmp_path / "campaign.db"), suite="fixture")
+def fixture_ledger(tmp_path: Path) -> sqlite3.Connection:
+    return ledger.open_ledger(str(tmp_path / "campaign.db"), suite="fixture")
 
 
 def record(
@@ -88,15 +88,15 @@ def record(
     statistic: str = "timing",
     state: str = "SUCCEEDED",
     group_id: str = "g1",
-) -> campaign.Attempt:
+) -> ledger.Attempt:
     """Journal one attempt through the ledger's own writer, then settle it."""
     case_id = f"{tool}.{digest}"
     config = json.dumps({"mode": mode}, sort_keys=True, separators=(",", ":"))
 
-    def build(ordinal: int) -> tuple[campaign.Attempt, str]:
+    def build(ordinal: int) -> tuple[ledger.Attempt, str]:
         attempt_id = f"{case_id}.s{ordinal}"
         return (
-            campaign.Attempt(
+            ledger.Attempt(
                 case_id=case_id,
                 attempt=ordinal,
                 case_inputs=json.dumps({"case": case_id}),
@@ -133,15 +133,15 @@ def record(
             "{}",
         )
 
-    attempt, _request = campaign.journal_intent(
+    attempt, _request = ledger.journal_intent(
         con, case_id=case_id, case_inputs=json.dumps({"case": case_id}), build=build, repeat=True
     )
-    campaign.set_state(con, attempt.attempt_id, state)
+    ledger.set_state(con, attempt.attempt_id, state)
     return attempt
 
 
 def write_evidence(
-    attempt: campaign.Attempt, *, listing: tuple[str, ...] = LISTING, **overrides: object
+    attempt: ledger.Attempt, *, listing: tuple[str, ...] = LISTING, **overrides: object
 ) -> Path:
     prefix = Path(attempt.result_prefix)
     prefix.mkdir(parents=True, exist_ok=True)
@@ -190,7 +190,7 @@ def add_slot(con: sqlite3.Connection, *, state: str, group_id: str = "g1", slot:
 
 def agreeing_group(tmp_path: Path) -> tuple[sqlite3.Connection, str]:
     """One bucket, two tools, identical listings: the shape a comparison wants."""
-    con = ledger(tmp_path)
+    con = fixture_ledger(tmp_path)
     for tool, digest in (("alpha", "aaaa"), ("beta", "bbbb")):
         write_evidence(record(con, tmp_path, tool=tool, digest=digest))
     return con, adapter_root(tmp_path, "alpha", "beta")
@@ -204,7 +204,7 @@ def test_agreement_within_one_bucket_passes(tmp_path: Path) -> None:
 
 
 def test_each_target_bucket_is_its_own_comparison(tmp_path: Path) -> None:
-    con = ledger(tmp_path)
+    con = fixture_ledger(tmp_path)
     for bucket, listing in (("bucket-one", LISTING), ("bucket-two", ("b/other 9",))):
         for tool, digest in (("alpha", f"a{bucket[-3:]}"), ("beta", f"b{bucket[-3:]}")):
             write_evidence(
@@ -239,7 +239,7 @@ def test_an_abandoned_slot_is_an_absent_subject(tmp_path: Path) -> None:
 
 
 def test_an_accepted_attempt_is_absent_not_a_smaller_comparison(tmp_path: Path) -> None:
-    con = ledger(tmp_path)
+    con = fixture_ledger(tmp_path)
     write_evidence(record(con, tmp_path, tool="alpha", digest="aaaa"))
     record(con, tmp_path, tool="beta", digest="bbbb", state="ACCEPTED")
     root = adapter_root(tmp_path, "alpha", "beta")
@@ -250,7 +250,7 @@ def test_an_accepted_attempt_is_absent_not_a_smaller_comparison(tmp_path: Path) 
 
 
 def test_evidence_naming_another_attempt_is_refused(tmp_path: Path) -> None:
-    con = ledger(tmp_path)
+    con = fixture_ledger(tmp_path)
     write_evidence(record(con, tmp_path, tool="alpha", digest="aaaa"))
     stray = record(con, tmp_path, tool="beta", digest="bbbb")
     write_evidence(stray, attempt_id="beta.cccc.s1")
@@ -291,7 +291,7 @@ def test_a_canary_is_not_in_the_population(tmp_path: Path) -> None:
 
 
 def test_rate_case_failures_are_data_points(tmp_path: Path) -> None:
-    con = ledger(tmp_path)
+    con = fixture_ledger(tmp_path)
     write_evidence(record(con, tmp_path, tool="alpha", digest="aaaa", statistic="rate"))
     record(con, tmp_path, tool="alpha", digest="aaaa", statistic="rate", state="FAILED")
     root = adapter_root(tmp_path, "alpha")
@@ -312,7 +312,7 @@ def test_rate_case_failures_are_data_points(tmp_path: Path) -> None:
 
 
 def test_a_mode_is_only_compared_within_its_product_and_field_set(tmp_path: Path) -> None:
-    con = ledger(tmp_path)
+    con = fixture_ledger(tmp_path)
     for tool, digest, mode in (
         ("alpha", "aaaa", "text-full"),
         ("beta", "bbbb", "text-keys"),
@@ -330,11 +330,11 @@ def test_a_mode_is_only_compared_within_its_product_and_field_set(tmp_path: Path
 
 
 def test_normalize_is_given_the_rows_recorded_config(tmp_path: Path) -> None:
-    con = ledger(tmp_path)
+    con = fixture_ledger(tmp_path)
     attempt = record(con, tmp_path, tool="alpha", digest="aaaa")
     prefix = write_evidence(attempt)
     root = adapter_root(tmp_path, "alpha")
-    subject = verify.Subject.from_row(campaign.attempt_rows(con)[0])
+    subject = verify.Subject.from_row(ledger.attempt_rows(con)[0])
     adapter_dir = adapters.adapter_dir_for("alpha", root)
     result = json.loads((prefix / "result.json").read_text())
     staging = tmp_path / "staging"

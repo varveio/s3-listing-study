@@ -5,7 +5,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-from benchmark import campaign, measure, report, verify
+from benchmark import campaign, ledger, measure, report, verify
 from benchmark.contract import sha256_of
 
 COMMAND_PY = """
@@ -62,8 +62,8 @@ def adapter_root(tmp_path: Path, *tools: str) -> str:
     return str(root)
 
 
-def ledger(tmp_path: Path) -> sqlite3.Connection:
-    return campaign.open_ledger(str(tmp_path / "campaign.db"), suite="fixture")
+def fixture_ledger(tmp_path: Path) -> sqlite3.Connection:
+    return ledger.open_ledger(str(tmp_path / "campaign.db"), suite="fixture")
 
 
 def record(
@@ -78,14 +78,14 @@ def record(
     statistic: str = "timing",
     state: str = "SUCCEEDED",
     produced_by: str | None = None,
-) -> campaign.Attempt:
+) -> ledger.Attempt:
     case_id = f"{tool}.{digest}"
     config = json.dumps({"mode": mode}, sort_keys=True, separators=(",", ":"))
 
-    def build(ordinal: int) -> tuple[campaign.Attempt, str]:
+    def build(ordinal: int) -> tuple[ledger.Attempt, str]:
         attempt_id = f"{case_id}.s{ordinal}"
         return (
-            campaign.Attempt(
+            ledger.Attempt(
                 case_id=case_id,
                 attempt=ordinal,
                 case_inputs=json.dumps({"case": case_id}),
@@ -122,15 +122,15 @@ def record(
             "{}",
         )
 
-    attempt, _request = campaign.journal_intent(
+    attempt, _request = ledger.journal_intent(
         con, case_id=case_id, case_inputs=json.dumps({"case": case_id}), build=build, repeat=True
     )
-    campaign.set_state(con, attempt.attempt_id, state)
+    ledger.set_state(con, attempt.attempt_id, state)
     return attempt
 
 
 def write_evidence(
-    attempt: campaign.Attempt,
+    attempt: ledger.Attempt,
     *,
     listing: tuple[str, ...] = LISTING,
     wall_seconds: float = 1.5,
@@ -191,7 +191,7 @@ def write_evidence(
 
 def verified_group(tmp_path: Path) -> tuple[sqlite3.Connection, str]:
     """Two agreeing subjects, verified, so report has real verify.json records."""
-    con = ledger(tmp_path)
+    con = fixture_ledger(tmp_path)
     for tool, digest in (("alpha", "aaaa"), ("beta", "bbbb")):
         write_evidence(record(con, tmp_path, tool=tool, digest=digest))
     root = adapter_root(tmp_path, "alpha", "beta")
@@ -200,7 +200,7 @@ def verified_group(tmp_path: Path) -> tuple[sqlite3.Connection, str]:
 
 
 def rows_of(con: sqlite3.Connection, root: str) -> list[dict[str, object]]:
-    return report.report_rows(campaign.attempt_rows(con), adapter_root=root)
+    return report.report_rows(ledger.attempt_rows(con), adapter_root=root)
 
 
 def test_a_verified_group_reports_its_verdicts(tmp_path: Path) -> None:
@@ -220,7 +220,7 @@ def test_a_blocked_slot_keeps_the_report_from_being_final(tmp_path: Path) -> Non
 
 
 def test_a_rate_case_renders_a_rate_and_a_sample_size(tmp_path: Path) -> None:
-    con = ledger(tmp_path)
+    con = fixture_ledger(tmp_path)
     write_evidence(record(con, tmp_path, tool="alpha", digest="aaaa", statistic="rate"))
     record(con, tmp_path, tool="alpha", digest="aaaa", statistic="rate", state="FAILED")
     rows = rows_of(con, adapter_root(tmp_path, "alpha"))
@@ -234,7 +234,7 @@ def test_a_rate_case_renders_a_rate_and_a_sample_size(tmp_path: Path) -> None:
 
 
 def test_a_preparations_cost_rides_with_the_timing_it_enabled(tmp_path: Path) -> None:
-    con = ledger(tmp_path)
+    con = fixture_ledger(tmp_path)
     preparation = record(con, tmp_path, tool="alpha", digest="prep", purpose="preparation")
     write_evidence(preparation, wall_seconds=40.0)
     measurement = record(
@@ -258,7 +258,7 @@ def test_a_preparation_from_another_group_is_a_cost_this_report_cannot_state(
     tmp_path: Path,
 ) -> None:
     """Summing only the links that are here is a smaller number wearing a total's name."""
-    con = ledger(tmp_path)
+    con = fixture_ledger(tmp_path)
     reused = record(con, tmp_path, tool="alpha", digest="bbbb", produced_by="alpha.deadbeef.s1")
     write_evidence(reused, wall_seconds=70.0)
     rows = rows_of(con, adapter_root(tmp_path, "alpha"))
@@ -267,7 +267,7 @@ def test_a_preparation_from_another_group_is_a_cost_this_report_cannot_state(
 
 
 def test_each_bucket_is_its_own_section_and_its_own_strata(tmp_path: Path) -> None:
-    con = ledger(tmp_path)
+    con = fixture_ledger(tmp_path)
     for bucket, tool in (("bucket-one", "alpha"), ("bucket-two", "beta")):
         write_evidence(record(con, tmp_path, tool=tool, digest=bucket[-3:], bucket=bucket))
     rows = rows_of(con, adapter_root(tmp_path, "alpha", "beta"))
@@ -282,7 +282,7 @@ def test_each_bucket_is_its_own_section_and_its_own_strata(tmp_path: Path) -> No
 
 
 def test_a_key_only_mode_is_not_ranked_against_a_five_field_one(tmp_path: Path) -> None:
-    con = ledger(tmp_path)
+    con = fixture_ledger(tmp_path)
     write_evidence(record(con, tmp_path, tool="alpha", digest="aaaa"))
     write_evidence(record(con, tmp_path, tool="beta", digest="bbbb", mode="text-keys"))
     rows = rows_of(con, adapter_root(tmp_path, "alpha", "beta"))
@@ -293,7 +293,7 @@ def test_a_key_only_mode_is_not_ranked_against_a_five_field_one(tmp_path: Path) 
 
 
 def test_a_canary_is_not_a_comparison_subject(tmp_path: Path) -> None:
-    con = ledger(tmp_path)
+    con = fixture_ledger(tmp_path)
     write_evidence(record(con, tmp_path, tool="alpha", digest="aaaa"))
     write_evidence(record(con, tmp_path, tool="alpha", digest="cccc", purpose="canary"))
     rows = rows_of(con, adapter_root(tmp_path, "alpha"))
@@ -305,7 +305,7 @@ def test_a_canary_is_not_a_comparison_subject(tmp_path: Path) -> None:
 
 
 def test_evidence_naming_another_attempt_is_refused(tmp_path: Path) -> None:
-    con = ledger(tmp_path)
+    con = fixture_ledger(tmp_path)
     write_evidence(record(con, tmp_path, tool="alpha", digest="aaaa"), attempt_id="alpha.zzzz.s1")
     rows = rows_of(con, adapter_root(tmp_path, "alpha"))
     assert rows[0]["evidence_state"] == "IDENTITY_MISMATCH"
@@ -313,7 +313,7 @@ def test_evidence_naming_another_attempt_is_refused(tmp_path: Path) -> None:
 
 
 def test_evidence_that_ran_another_config_is_refused(tmp_path: Path) -> None:
-    con = ledger(tmp_path)
+    con = fixture_ledger(tmp_path)
     write_evidence(
         record(con, tmp_path, tool="alpha", digest="aaaa"),
         config={"mode": "text-full", "concurrency": 8},
@@ -330,7 +330,7 @@ def test_a_setup_failure_reads_as_evidence_rather_than_a_broken_result(tmp_path:
     execution block; report reads that block for every attempt with a marker, so
     the null has to mean "the subject never ran" rather than "malformed".
     """
-    con = ledger(tmp_path)
+    con = fixture_ledger(tmp_path)
     prefix = write_evidence(
         record(con, tmp_path, tool="alpha", digest="aaaa", state="FAILED"),
         exit_code=measure.EXIT_SETUP_FAILED,
@@ -370,7 +370,7 @@ def test_an_rss_figure_is_rendered_beside_the_floor_it_sits_on(tmp_path: Path) -
     written before the worker recorded one renders `-` rather than inviting a
     reader to treat a missing floor as no floor.
     """
-    con = ledger(tmp_path)
+    con = fixture_ledger(tmp_path)
     write_evidence(
         record(con, tmp_path, tool="alpha", digest="aaaa"),
         execution={

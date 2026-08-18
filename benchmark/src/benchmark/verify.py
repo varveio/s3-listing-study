@@ -66,13 +66,6 @@ from typing import Any
 import duckdb
 
 from benchmark import adapters, gcs
-from benchmark.campaign import (
-    STATE_FILENAME,
-    TERMINAL_STATES,
-    attempt_rows,
-    open_ledger,
-    pending_rows,
-)
 from benchmark.contract import (
     EXIT_BINDING_MISMATCH,
     EXIT_DRIFT,
@@ -84,6 +77,13 @@ from benchmark.contract import (
     EXIT_NORMALIZE_FAILED,
     EXIT_PASS,
     sha256_of,
+)
+from benchmark.ledger import (
+    STATE_FILENAME,
+    TERMINAL_STATES,
+    attempt_rows,
+    open_ledger,
+    pending_rows,
 )
 
 _COLUMNS = (
