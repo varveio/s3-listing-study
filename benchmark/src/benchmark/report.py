@@ -53,6 +53,8 @@ from benchmark.ledger import (
     attempt_rows,
     open_ledger,
     pending_rows,
+    producer_summary,
+    slot_owed_reason,
 )
 from benchmark.verify import (
     has_result_marker,
@@ -504,6 +506,21 @@ def preparation_lines(rows: list[dict[str, Any]]) -> list[str]:
     return lines
 
 
+def slot_note(con: sqlite3.Connection, slot: sqlite3.Row) -> str:
+    """One blocked slot, and whether anything can still pay it.
+
+    A slot no attempt in its group can ever satisfy is a measurement quietly
+    absent -- the failure a slot exists to make visible -- so it is reported as
+    owed rather than as merely waiting.
+    """
+    owed = slot["awaiting"] or producer_summary(str(slot["producer"]))
+    note = f"{slot['slot']} ({slot['tool']}) awaiting {owed}"
+    reason = slot_owed_reason(con, slot)
+    if reason is None:
+        return note
+    return f"{note} -- UNSATISFIABLE, nothing in this group can pay it: {reason}"
+
+
 def render_markdown(rows: list[dict[str, Any]], *, blocked: list[str]) -> str:
     header = "| " + " | ".join(COLUMNS) + " |"
     separator = "| " + " | ".join("---" for _ in COLUMNS) + " |"
@@ -597,7 +614,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         rows = report_rows(attempt_rows(con, group_id=args.group), adapter_root=args.adapter_root)
         blocked = [
-            f"slot {slot['slot']} ({slot['tool']}) awaiting {slot['awaiting']}"
+            slot_note(con, slot)
             for slot in pending_rows(con, group_id=args.group)
             if slot["state"] == "BLOCKED"
         ]

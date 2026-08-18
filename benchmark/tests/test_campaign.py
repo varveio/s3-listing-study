@@ -21,7 +21,7 @@ import pytest
 from google.api_core.exceptions import AlreadyExists, BadRequest
 from google.cloud import batch_v1
 
-from benchmark import adapters, batch_client, campaign, gcs, identity, ledger, measure
+from benchmark import adapters, batch_client, campaign, gcs, identity, ledger, measure, report
 from benchmark import plan as bench
 from benchmark.contract import CREDENTIAL_ENV_VAR, TOOLBOX_TOOLS
 from benchmark.plan import Case, Plan
@@ -318,17 +318,22 @@ def test_a_dry_run_renders_every_planned_attempt_and_writes_nothing(
     )
     rendered = capsys.readouterr().out.splitlines()
     cases = len(loaded_plan().cases)
-    # The hinted s3-fast-list row expands to a two-link chain: its bootstrap
-    # `list` preparation submits immediately (one attempt, replacing the hinted
-    # measurement in the count), while `list-hinted` waits on the artifact and is
-    # booked as the one slot. Its `ks-split` runs inside that attempt and books
-    # nothing.
+    # The hinted s3-fast-list row waits on a bootstrap listing, and this plan's
+    # own unhinted `list` row is one: the slot is paid by that measurement's
+    # artifact, so no standalone preparation is minted and the bucket is listed
+    # once rather than twice with byte-identical argv. Its `ks-split` runs inside
+    # the hinted attempt and books nothing.
     assert (
-        rendered[-1] == f"campaign: {cases} plan row(s) expand to {cases} attempt(s) and 1 slot(s)"
+        rendered[-1]
+        == f"campaign: {cases} plan row(s) expand to {cases - 1} attempt(s) and 1 slot(s)"
     )
-    # One rendered line per expanded step: the chain's one waiting link prints
-    # alongside the immediate attempts.
-    assert len(rendered[:-1]) == cases + 1
+    # One rendered line per expanded step, and the expansion is the plan's own
+    # rows: nothing was added behind them.
+    assert len(rendered[:-1]) == cases
+    slots = [line for line in rendered if line.startswith("slot ")]
+    assert slots == [
+        "slot dry-run/1 s3-fast-list list-hinted measurement awaiting step 1 (s3-fast-list list)"
+    ]
     assert not state.exists()
 
 
@@ -699,13 +704,38 @@ class Evidence:
         return self.objects[uri]
 
 
-def hinted_launch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> sqlite3.Connection:
+SWEEP = """
+spec_version: 2
+bucket: b
+region: us-east-1
+defaults:
+  reps: 1
+  timeout_s: 3600
+  vcpus: 2
+  memory_gb: 8
+tools:
+  s3-fast-list:
+    cases:
+      - {mode: list-hinted, concurrency: 8, segments: 8}
+      - {mode: list-hinted, concurrency: 8, segments: 16}
+      - {mode: list}
+"""
+"""Two hinted cells and the unhinted arm they can be paid by — with the consumers
+written first, because plan row order is exactly what must not decide this."""
+
+
+def hinted_launch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    body: str = HINTED,
+    con: sqlite3.Connection | None = None,
+    group_id: str = "g20260817-000000",
+) -> sqlite3.Connection:
     monkeypatch.setattr(batch_client, "ensure_job", lambda *a, **k: ("SUBMITTED", None))
-    plan = hinted_plan(tmp_path)
-    con = ledger.open_ledger(str(tmp_path / "campaign.db"), suite=SUITE)
-    launch = campaign.Launch(
-        con, SUITE, "g20260817-000000", plan, image_set(tmp_path), "results", options()
-    )
+    plan = hinted_plan(tmp_path, body)
+    con = con or ledger.open_ledger(str(tmp_path / "campaign.db"), suite=SUITE)
+    launch = campaign.Launch(con, SUITE, group_id, plan, image_set(tmp_path), "results", options())
     launch.run(campaign.expand_launch(plan.cases, plan.adapters))
     return con
 
@@ -947,7 +977,7 @@ def test_a_slot_resolves_once_however_many_passes_see_it(
     monkeypatch.setattr(gcs, "download_bytes", evidence.download)
     listing = ledger.Attempt.from_row(attempt_row(con, "list"))
     evidence.publish(listing.result_prefix, "keyspace.ks", b"a/\nb/\n")
-    stale = campaign.blocked_slots(con, listing.attempt_id)[0]
+    stale = ledger.blocked_slots(con, listing.group_id)[0]
 
     ledger.set_state(con, listing.attempt_id, "SUCCEEDED")
     campaign.settle_dependents(con, listing, "SUCCEEDED", suite=SUITE)
@@ -1013,3 +1043,184 @@ def attempt_row(
     ).fetchone()
     assert row is not None, f"no {mode} attempt in {group_id}"
     return cast(sqlite3.Row, row)
+
+
+def test_a_retry_pays_the_slot_its_failed_producer_left_owed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A slot survives its producer's failure so that a retry can still pay it —
+    which is what `settle_dependents` promises and what nominating one attempt id
+    cannot deliver: the retry settles under a new ordinal the slot never named.
+    """
+    con = hinted_launch(tmp_path, monkeypatch)
+    evidence = Evidence()
+    monkeypatch.setattr(gcs, "download_bytes", evidence.download)
+    failed = attempt_row(con, "list")
+    ledger.set_state(con, failed["attempt_id"], "FAILED", "preempted")
+    campaign.settle_dependents(con, ledger.Attempt.from_row(failed), "FAILED", suite=SUITE)
+    assert ledger.pending_rows(con)[0]["state"] == "BLOCKED"
+
+    replacement = campaign.retry_attempt(
+        con,
+        failed,
+        suite=SUITE,
+        image_set=image_set(tmp_path),
+        results_bucket="results",
+        options=options(),
+    )
+    keyspace = evidence.publish(replacement.result_prefix, "keyspace.ks", b"a/\nb/\n")
+    ledger.set_state(con, replacement.attempt_id, "SUCCEEDED")
+    campaign.settle_dependents(con, replacement, "SUCCEEDED", suite=SUITE)
+
+    hinted = ledger.Attempt.from_row(attempt_row(con, "list-hinted"))
+    slot = ledger.pending_rows(con)[0]
+    assert (slot["state"], slot["became"]) == ("RESOLVED", hinted.attempt_id)
+    assert (hinted.input_artifact_sha256, hinted.produced_by) == (
+        keyspace,
+        replacement.attempt_id,
+    )
+
+
+def test_a_sweep_binds_the_measurement_arm_and_lists_the_bucket_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The unhinted arm publishes exactly the artifact the hinted chain needs, so
+    no standalone preparation is minted and both cells of the sweep bind that one
+    producer — one corpus snapshot, one listing, and a measurement is still a
+    measurement.
+    """
+    plan = hinted_plan(tmp_path, SWEEP)
+    steps = campaign.expand_launch(plan.cases, plan.adapters)
+    # The producer runs first though the plan writes it last: a launch dying
+    # between booking a slot and journaling its candidate must not leave a slot
+    # nothing in its group can pay.
+    assert [(step.case.mode, step.case.purpose, step.waits_for) for step in steps] == [
+        ("list", "measurement", None),
+        ("list-hinted", "measurement", 0),
+        ("list-hinted", "measurement", 0),
+    ]
+
+    con = hinted_launch(tmp_path, monkeypatch, body=SWEEP)
+    evidence = Evidence()
+    monkeypatch.setattr(gcs, "download_bytes", evidence.download)
+    listing = ledger.Attempt.from_row(attempt_row(con, "list"))
+    keyspace = evidence.publish(listing.result_prefix, "keyspace.ks", b"a/\nb/\n")
+    ledger.set_state(con, listing.attempt_id, "SUCCEEDED")
+    campaign.settle_dependents(con, listing, "SUCCEEDED", suite=SUITE)
+
+    slots = ledger.pending_rows(con)
+    assert [slot["state"] for slot in slots] == ["RESOLVED", "RESOLVED"]
+    hinted = [ledger.Attempt.from_row(row) for row in ledger.attempt_rows(con)][1:]
+    assert {attempt.produced_by for attempt in hinted} == {listing.attempt_id}
+    assert {attempt.input_artifact_sha256 for attempt in hinted} == {keyspace}
+    # The producer was measured, not prepared: its purpose and its state are
+    # untouched by having also paid two slots.
+    assert (listing.purpose, attempt_row(con, "list")["state"]) == ("measurement", "SUCCEEDED")
+
+
+def test_a_slot_is_not_paid_by_a_producer_from_another_group(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unscoped spec would bind an earlier launch's hours-old bytes silently,
+    which is the decision `--reuse-preparations` exists to force an operator to
+    make. So the match carries the slot's own group, and the later launch waits
+    for its own preparation.
+    """
+    con = hinted_launch(tmp_path, monkeypatch, body=SWEEP, group_id="g20260817-000000")
+    evidence = Evidence()
+    monkeypatch.setattr(gcs, "download_bytes", evidence.download)
+    listing = ledger.Attempt.from_row(attempt_row(con, "list"))
+    evidence.publish(listing.result_prefix, "keyspace.ks", b"a/\nb/\n")
+    ledger.set_state(con, listing.attempt_id, "SUCCEEDED")
+    campaign.settle_dependents(con, listing, "SUCCEEDED", suite=SUITE)
+
+    hinted_launch(tmp_path, monkeypatch, con=con, group_id="g20260817-000001")
+    campaign.resolve_blocked_slots(con, "g20260817-000001", suite=SUITE)
+    later = ledger.pending_rows(con, group_id="g20260817-000001")[0]
+    assert later["state"] == "BLOCKED"
+    # Nothing is owed: its own preparation is live, so it is waiting rather than
+    # unsatisfiable.
+    assert ledger.slot_owed_reason(con, later) is None
+
+    own = ledger.Attempt.from_row(attempt_row(con, "list", group_id="g20260817-000001"))
+    assert own.purpose == "preparation"
+    evidence.publish(own.result_prefix, "keyspace.ks", b"c/\nd/\n")
+    ledger.set_state(con, own.attempt_id, "SUCCEEDED")
+    campaign.settle_dependents(con, own, "SUCCEEDED", suite=SUITE)
+    paid = ledger.pending_rows(con, group_id="g20260817-000001")[0]
+    assert paid["state"] == "RESOLVED"
+    assert (
+        ledger.Attempt.from_row(
+            attempt_row(con, "list-hinted", group_id="g20260817-000001")
+        ).produced_by
+        == own.attempt_id
+    )
+
+
+def test_a_succeeded_producer_that_published_nothing_usable_leaves_the_slot_loudly_owed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A measurement's timing number is honest whatever its sink holds, so an
+    unusable artifact disqualifies the candidate against the slot and never flips
+    the producer to FAILED. What must not happen is the slot blocking quietly
+    forever: with every candidate settled and none usable, it says so.
+    """
+    con = hinted_launch(tmp_path, monkeypatch, body=SWEEP)
+    evidence = Evidence()
+    monkeypatch.setattr(gcs, "download_bytes", evidence.download)
+    listing = ledger.Attempt.from_row(attempt_row(con, "list"))
+    evidence.publish(listing.result_prefix, "listing.parquet", b"PAR1")
+    ledger.set_state(con, listing.attempt_id, "SUCCEEDED")
+    campaign.settle_dependents(con, listing, "SUCCEEDED", suite=SUITE)
+
+    settled = attempt_row(con, "list")
+    assert (settled["state"], settled["state_detail"]) == ("SUCCEEDED", None)
+    slots = ledger.pending_rows(con)
+    assert [slot["state"] for slot in slots] == ["BLOCKED", "BLOCKED"]
+    for slot in slots:
+        assert listing.attempt_id in json.loads(slot["disqualified"])
+        reason = ledger.slot_owed_reason(con, slot)
+        assert reason is not None and "keyspace.ks" in reason
+    assert report.slot_note(con, slots[0]).count("UNSATISFIABLE") == 1
+
+    campaign.cmd_status(
+        argparse.Namespace(state=str(tmp_path / "campaign.db"), group=None, case=None)
+    )
+    assert capsys.readouterr().out.count("OWED, nothing can pay it") == 2
+
+
+REPEATED = """
+spec_version: 2
+bucket: b
+region: us-east-1
+defaults:
+  reps: 2
+  timeout_s: 3600
+  vcpus: 2
+  memory_gb: 8
+tools:
+  s3-fast-list:
+    cases:
+      - {mode: list-hinted, concurrency: 8, segments: 16}
+      - {mode: list}
+"""
+"""Two attempts of one producer shape, so exhaustion is a question with an
+answer other than "the one attempt someone named"."""
+
+
+def test_a_slot_abandons_only_once_every_candidate_is_gone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Accepting one failure does not owe the measurement while another attempt of
+    the same shape is still live — a slot is owed by a shape, so exhaustion is
+    per slot rather than off the attempt id someone accepted."""
+    con = hinted_launch(tmp_path, monkeypatch, body=REPEATED)
+    state = str(tmp_path / "campaign.db")
+    first, second = ledger.attempt_rows(con, case_id=attempt_row(con, "list")["case_id"])
+    ledger.set_state(con, first["attempt_id"], "FAILED", "preempted")
+    campaign.cmd_accept_failure(argparse.Namespace(state=state, attempt=first["attempt_id"]))
+    assert [slot["state"] for slot in ledger.pending_rows(con)] == ["BLOCKED", "BLOCKED"]
+
+    ledger.set_state(con, second["attempt_id"], "FAILED", "preempted")
+    campaign.cmd_accept_failure(argparse.Namespace(state=state, attempt=second["attempt_id"]))
+    assert [slot["state"] for slot in ledger.pending_rows(con)] == ["ABANDONED", "ABANDONED"]

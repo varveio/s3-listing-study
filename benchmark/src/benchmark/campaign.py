@@ -45,12 +45,16 @@ from benchmark.ledger import (
     CampaignError,
     _now,
     attempt_rows,
+    blocked_slots,
     journal_intent,
     ledger_suite,
     mint_group_id,
     open_ledger,
     pending_rows,
+    producer_summary,
     set_state,
+    slot_candidates,
+    slot_owed_reason,
     validate_suite,
 )
 from benchmark.plan import Case, Plan
@@ -338,18 +342,21 @@ class Inbound:
 
     A mintable inbound completes an identity: the content digest is a hash input
     (`identity.md`), so the consumer can be hashed and submitted now. One that is
-    still `awaiting` is why slots exist — the launch knows what it intends and
-    cannot yet name it.
+    not is why slots exist — the launch knows what it intends and cannot yet name
+    it. It says so two ways: `producer` is the *shape* an acceptable root
+    producer has, and `awaiting` is the mid-chain slot that has yet to become an
+    attempt at all.
     """
 
     artifact_sha256: str | None = None
     produced_by: str | None = None
     artifact_uri: str | None = None
     awaiting: str | None = None
+    producer: str | None = None
 
     @property
     def mintable(self) -> bool:
-        return self.awaiting is None
+        return self.awaiting is None and self.producer is None
 
 
 CONSUMES_NOTHING = Inbound()
@@ -847,6 +854,16 @@ class Step:
     waits_for: int | None
 
 
+def producer_key(case: Case) -> str:
+    """What a slot's producer spec comes to for a case of this launch.
+
+    The spec's other fields — target, tool slice, platform slice — are one
+    launch's constants, so within an expansion two cases produce the same
+    artifact exactly when their tool and their resolved config agree.
+    """
+    return _canonical({"tool": case.tool, "config": dict(case.config)})
+
+
 def expand_launch(
     cases: Iterable[Case], adapters: Mapping[str, LoadedCommandAdapter]
 ) -> tuple[Step, ...]:
@@ -856,28 +873,56 @@ def expand_launch(
     preparation's identity carries neither the machine nor the consumer's config,
     so a sweep of three concurrencies names one preparation and does not build
     hints at three parallelisms (`identity.md` § *Two identities, two questions*).
+
+    **A plan row that already runs what a prerequisite asks for is that
+    prerequisite.** A slot is paid by any successful attempt of its producer's
+    shape, so a plan carrying both `list` and `list-hinted` books one slot and no
+    preparation, and lists the bucket once instead of twice with byte-identical
+    argv. A plan with only hinted rows still mints its own preparation.
+
+    Producer steps are emitted before the slots that consume them, whatever order
+    the plan lists its rows in: a launch that died between booking a slot and
+    journaling its candidate would otherwise leave a slot nothing in its group
+    can ever pay.
     """
-    steps: list[Step] = []
-    shared: dict[str, int] = {}
-    for case in cases:
+    rows = list(cases)
+    chains: list[tuple[Case, ...]] = []
+    for case in rows:
         adapter = adapters.get(case.tool)
         if adapter is None:
             raise CampaignError(f"{case.tool}: a case cannot be expanded without its capsule")
-        links = bench.expand_requirements(case, adapter)
+        chains.append(bench.expand_requirements(case, adapter))
+    wanted = {producer_key(link) for chain in chains for link in chain[:-1]}
+    steps: list[Step] = []
+    shared: dict[str, int] = {}
+    candidates: dict[str, int] = {}
+    for case, links in sorted(
+        zip(rows, chains, strict=True), key=lambda pair: producer_key(pair[0]) not in wanted
+    ):
         previous: int | None = None
         for depth, link in enumerate(links[:-1]):
-            key = _canonical(
-                {
-                    "tool": case.tool,
-                    "chain": [[step.mode, dict(step.config)] for step in links[: depth + 1]],
-                }
-            )
-            index = shared.get(key)
+            # Only a root producer is matched by shape: a middle link's artifact
+            # depends on what it consumed, which its config does not state.
+            index = candidates.get(producer_key(link)) if depth == 0 else None
             if index is None:
-                index = len(steps)
-                steps.append(Step(link, previous))
-                shared[key] = index
+                key = _canonical(
+                    {
+                        "tool": case.tool,
+                        "chain": [[step.mode, dict(step.config)] for step in links[: depth + 1]],
+                    }
+                )
+                index = shared.get(key)
+                if index is None:
+                    index = len(steps)
+                    steps.append(Step(link, previous))
+                    shared[key] = index
+                    if depth == 0:
+                        candidates.setdefault(producer_key(link), index)
             previous = index
+        if len(links) == 1:
+            # A row consuming nothing is shape-matchable; one consuming an
+            # artifact is not, because its config does not state what it took.
+            candidates.setdefault(producer_key(case), len(steps))
         # `reps: N` is N attempts of the one measurement, each its own job on its
         # own fresh machine; the preparations behind them are built once.
         steps.extend(Step(links[-1], previous) for _ in range(case.reps))
@@ -948,20 +993,58 @@ def slot_reference(group_id: str, slot: int) -> str:
     return f"{group_id}/{slot}"
 
 
-def blocked_slots(con: sqlite3.Connection, awaiting: str) -> list[sqlite3.Row]:
-    """Which slots does this unblock — the question `awaiting` exists to answer."""
-    return con.execute(
-        "SELECT * FROM pending WHERE awaiting=? AND state='BLOCKED' ORDER BY slot", (awaiting,)
-    ).fetchall()
+def producer_spec(attempt: Attempt) -> str:
+    """The canonical document a slot stores to say what an acceptable producer is.
+
+    A shape, not a name. Any successful attempt of the same tool, mode, config,
+    target and slices publishes the same bytes, so a retry — which settles under
+    a new ordinal the slot never named — satisfies the slot its predecessor left
+    owed, and a measurement arm's own listing satisfies a hinted arm's chain.
+    Machine, vCPUs, memory, timeout, auth role and purpose are excluded: the
+    exclusions `preparation_environment` already makes, because the bytes do not
+    depend on them (`identity.md` § *Two identities, two questions*).
+
+    `config` is carried as the column's own bytes rather than as a nested object,
+    for the reason `case_inputs` is stored byte-exactly: the match is a string
+    comparison against what the producer's row holds, and re-encoding it here
+    would be a second answer to a settled question.
+    """
+    return _canonical(
+        {
+            "tool": attempt.tool,
+            "mode": str(json.loads(attempt.config)["mode"]),
+            "config": attempt.config,
+            "target_bucket": attempt.target_bucket,
+            "target_prefix": attempt.target_prefix,
+            "target_region": attempt.target_region,
+            "tool_slice_sha256": attempt.tool_slice_sha256,
+            "platform_sha256": attempt.platform_sha256,
+        }
+    )
 
 
-def book_slot(con: sqlite3.Connection, case: Case, context: LaunchContext, *, awaiting: str) -> int:
+def book_slot(
+    con: sqlite3.Connection,
+    case: Case,
+    context: LaunchContext,
+    *,
+    producer: str | None = None,
+    awaiting: str | None = None,
+) -> int:
     """Record a case the launch intends and cannot yet identify.
 
     `known_inputs` holds what has been resolved — the case, and the launch it
     belongs to. The identity document is not stored beside them because it is a
     pure function of the two, and a second answer to a settled question is how
     the two come to disagree.
+
+    What is owed is stated one of two ways. A root producer is described by its
+    spec, written here rather than derived when a poll pass rechecks the slot:
+    deriving it later would let a capsule edited between launch and poll silently
+    change what satisfies the slot, which is the frozen intent `LaunchContext`
+    exists to hold. A mid-chain link cannot be described by shape at all — its
+    own input digest is not knowable at booking — so it names the earlier slot
+    and waits for that to become an attempt.
     """
     known_inputs = _canonical({"case": _case_document(case), "launch": context.document()})
     con.execute("BEGIN IMMEDIATE")
@@ -971,9 +1054,18 @@ def book_slot(con: sqlite3.Connection, case: Case, context: LaunchContext, *, aw
         ).fetchone()["last"]
         slot = int(last or 0) + 1
         con.execute(
-            "INSERT INTO pending (group_id, slot, tool, purpose, known_inputs, awaiting, "
-            "state, recorded_at) VALUES (?, ?, ?, ?, ?, ?, 'BLOCKED', ?)",
-            (context.group_id, slot, case.tool, case.purpose, known_inputs, awaiting, _now()),
+            "INSERT INTO pending (group_id, slot, tool, purpose, known_inputs, producer, "
+            "awaiting, state, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'BLOCKED', ?)",
+            (
+                context.group_id,
+                slot,
+                case.tool,
+                case.purpose,
+                known_inputs,
+                producer,
+                awaiting,
+                _now(),
+            ),
         )
         con.execute("COMMIT")
     except BaseException:
@@ -1072,82 +1164,182 @@ def resolve_slot(
     return attempt
 
 
-def abandon_dependents(con: sqlite3.Connection, awaiting: str) -> list[str]:
-    """Record every slot below a failure someone declared final as absent.
+def abandon_dependents(con: sqlite3.Connection, group_id: str) -> list[tuple[str, str]]:
+    """Record every slot nothing can pay any more as absent, with why.
 
     `ABANDONED` is what `ACCEPTED` says about an attempt, applied to a
     measurement that never got to exist — and it propagates, because a chain
     whose first link is gone owes every link after it.
+
+    Exhaustion is evaluated per slot rather than off the one attempt id someone
+    accepted: a slot is owed by a *shape*, so it abandons only once every
+    candidate of that shape has failed, been accepted, or published nothing
+    usable.
     """
-    abandoned: list[str] = []
-    frontier = [awaiting]
-    while frontier:
-        for slot in blocked_slots(con, frontier.pop()):
-            reference = slot_reference(str(slot["group_id"]), int(slot["slot"]))
+    abandoned: list[tuple[str, str]] = []
+    progressed = True
+    while progressed:
+        progressed = False
+        for slot in blocked_slots(con, group_id):
+            reason = slot_owed_reason(con, slot)
+            if reason is None:
+                continue
             con.execute(
                 "UPDATE pending SET state='ABANDONED', settled_at=? WHERE group_id=? AND slot=?",
                 (_now(), slot["group_id"], slot["slot"]),
             )
-            abandoned.append(reference)
-            frontier.append(reference)
+            abandoned.append((slot_reference(str(slot["group_id"]), int(slot["slot"])), reason))
+            progressed = True
     return abandoned
+
+
+def _candidate_artifact(con: sqlite3.Connection, candidate: Attempt) -> Inbound | str:
+    """What a successful attempt published for its consumers, or why it is unusable.
+
+    The digest is recorded on the producer's row as it is read: `artifact_sha256`
+    is what that attempt made, and it is what a consumer's `input_artifact_sha256`
+    is copied from (`model.md`).
+    """
+    mode = str(json.loads(candidate.config)["mode"])
+    try:
+        uri, digest = produced_artifact(candidate.result_prefix, candidate.tool, mode)
+    except CampaignError as exc:
+        return str(exc)
+    con.execute(
+        "UPDATE attempts SET artifact_sha256=?, updated_at=? WHERE attempt_id=?",
+        (digest, _now(), candidate.attempt_id),
+    )
+    try:
+        validate_artifact(candidate.tool, mode, uri)
+    except CampaignError as exc:
+        return str(exc)
+    return Inbound(artifact_sha256=digest, produced_by=candidate.attempt_id, artifact_uri=uri)
+
+
+def _disqualify(
+    con: sqlite3.Connection, slot: sqlite3.Row, candidate: Attempt, reason: str
+) -> None:
+    """Record against the slot why a settled candidate cannot pay it.
+
+    Against the slot, never against the producer, when the producer is a
+    measurement: it measured what it measured, and flipping an honest timing to
+    FAILED to express an artifact complaint would falsify the number to make the
+    bookkeeping tidy. A preparation is the other case — publishing the artifact
+    is the whole of what it was for — so its refusal is its own, and FAILED keeps
+    it retryable and abandonable.
+    """
+    if candidate.purpose == "preparation":
+        set_state(con, candidate.attempt_id, "FAILED", reason[:500])
+    recorded = con.execute(
+        "SELECT disqualified FROM pending WHERE group_id=? AND slot=?",
+        (slot["group_id"], slot["slot"]),
+    ).fetchone()["disqualified"]
+    against = json.loads(recorded) if recorded else {}
+    if against.get(candidate.attempt_id) == reason[:200]:
+        # Every poll pass re-examines the candidate, in case what was unreadable
+        # was the bucket rather than the artifact. Saying so once is enough.
+        return
+    against[candidate.attempt_id] = reason[:200]
+    con.execute(
+        "UPDATE pending SET disqualified=? WHERE group_id=? AND slot=?",
+        (_canonical(against), slot["group_id"], slot["slot"]),
+    )
+    print(
+        f"campaign: {candidate.attempt_id} cannot pay slot "
+        f"{slot['group_id']}/{slot['slot']}: {reason}",
+        file=sys.stderr,
+    )
+
+
+def _slot_inbound(
+    con: sqlite3.Connection, slot: sqlite3.Row, digested: dict[str, Inbound | str]
+) -> Inbound | None:
+    """The artifact a blocked slot may now consume, or `None` while it has none.
+
+    The earliest-settled candidate wins. One that succeeded but published nothing
+    usable is disqualified and stepped over rather than left to wedge the slot
+    forever, which is the quiet failure a slot exists to prevent. `digested`
+    carries one pass's answers, so a sweep of six sibling slots reads one
+    producer's evidence once.
+    """
+    for row in slot_candidates(con, slot, state="SUCCEEDED"):
+        candidate = Attempt.from_row(row)
+        if candidate.attempt_id not in digested:
+            digested[candidate.attempt_id] = _candidate_artifact(con, candidate)
+        outcome = digested[candidate.attempt_id]
+        if isinstance(outcome, Inbound):
+            return outcome
+        _disqualify(con, slot, candidate, outcome)
+    return None
+
+
+def resolve_blocked_slots(
+    con: sqlite3.Connection,
+    group_id: str,
+    *,
+    suite: str,
+    digested: dict[str, Inbound | str] | None = None,
+) -> None:
+    """Ask every slot this group still owes whether an attempt now satisfies it.
+
+    Slot-driven, not attempt-driven: the question is "does a satisfying attempt
+    exist", not "which slots does this one attempt unblock". Nomination by
+    attempt id could not answer the first, which is why a retry — settling under
+    an ordinal nothing named — used to orphan its slot permanently.
+
+    The sweep repeats while it makes progress, because a slot that resolves into
+    an attempt which had already settled leaves whatever waited on *it* payable
+    in the same pass.
+    """
+    answers: dict[str, Inbound | str] = {} if digested is None else digested
+    progressed = True
+    while progressed:
+        progressed = False
+        for slot in blocked_slots(con, group_id):
+            reference = slot_reference(str(slot["group_id"]), int(slot["slot"]))
+            inbound = _slot_inbound(con, slot, answers)
+            if inbound is None:
+                continue
+            try:
+                resolved = resolve_slot(con, slot, inbound, suite=suite)
+            except (CampaignError, GoogleAPIError) as exc:
+                # The slot stays owed, which is what a slot is for.
+                print(f"campaign: slot {reference} could not be resolved: {exc}", file=sys.stderr)
+                continue
+            if resolved is None:
+                continue
+            progressed = True
+            print(f"campaign: slot {reference} -> {resolved.attempt_id} {resolved.job_name}")
 
 
 def settle_dependents(con: sqlite3.Connection, attempt: Attempt, state: str, *, suite: str) -> None:
     """Resolve or abandon whatever waited on an attempt that has just settled.
 
     A settled failure leaves its slots `BLOCKED`, because a retry may still pay
-    them; `accept-failure` is what declares the measurement absent.
+    them — and now genuinely can, since what a slot waits for is a shape rather
+    than an ordinal. `accept-failure` is what declares the measurement absent.
     """
     if state == "ACCEPTED":
-        for reference in abandon_dependents(con, attempt.attempt_id):
-            print(f"campaign: slot {reference} ABANDONED")
+        for reference, reason in abandon_dependents(con, attempt.group_id):
+            print(f"campaign: slot {reference} ABANDONED: {reason}")
         return
-    # A preparation is digested and validated whether or not anything is waiting:
-    # `artifact_sha256` is what this attempt made, written when it settled, and a
-    # validator's verdict does not depend on who asked.
-    if state != "SUCCEEDED" or attempt.purpose != "preparation":
+    if state != "SUCCEEDED":
         return
-    waiting = blocked_slots(con, attempt.attempt_id)
-    mode = str(json.loads(attempt.config)["mode"])
-    try:
-        uri, digest = produced_artifact(attempt.result_prefix, attempt.tool, mode)
-    except CampaignError as exc:
-        set_state(con, attempt.attempt_id, "FAILED", str(exc)[:500])
-        print(
-            f"campaign: {attempt.attempt_id} produced no consumable artifact: {exc}",
-            file=sys.stderr,
-        )
-        return
-    con.execute(
-        "UPDATE attempts SET artifact_sha256=?, updated_at=? WHERE attempt_id=?",
-        (digest, _now(), attempt.attempt_id),
-    )
-    try:
-        validate_artifact(attempt.tool, mode, uri)
-    except CampaignError as exc:
-        set_state(con, attempt.attempt_id, "FAILED", str(exc)[:500])
-        print(f"campaign: {attempt.attempt_id} failed artifact validation: {exc}", file=sys.stderr)
-        return
-    inbound = Inbound(artifact_sha256=digest, produced_by=attempt.attempt_id, artifact_uri=uri)
-    for slot in waiting:
-        reference = slot_reference(str(slot["group_id"]), int(slot["slot"]))
-        try:
-            resolved = resolve_slot(con, slot, inbound, suite=suite)
-        except (CampaignError, GoogleAPIError) as exc:
-            # The slot stays owed, which is what a slot is for.
-            print(f"campaign: slot {reference} could not be resolved: {exc}", file=sys.stderr)
-            continue
-        if resolved is None:
-            continue
-        print(f"campaign: slot {reference} -> {resolved.attempt_id} {resolved.job_name}")
-        bound = con.execute(
-            "SELECT state FROM attempts WHERE attempt_id=?", (resolved.attempt_id,)
-        ).fetchone()
-        if bound is not None and bound["state"] == "SUCCEEDED":
-            # The slot bound an attempt that had already settled, so nothing will
-            # settle later to unblock whatever waits behind it.
-            settle_dependents(con, resolved, "SUCCEEDED", suite=suite)
+    digested: dict[str, Inbound | str] = {}
+    if attempt.purpose == "preparation":
+        # A preparation is digested and validated whether or not anything is
+        # waiting: `artifact_sha256` is what it made, written when it settled,
+        # and a validator's verdict does not depend on who asked.
+        outcome = _candidate_artifact(con, attempt)
+        if isinstance(outcome, str):
+            set_state(con, attempt.attempt_id, "FAILED", outcome[:500])
+            print(
+                f"campaign: {attempt.attempt_id} published no usable artifact: {outcome}",
+                file=sys.stderr,
+            )
+            return
+        digested[attempt.attempt_id] = outcome
+    resolve_blocked_slots(con, attempt.group_id, suite=suite, digested=digested)
 
 
 @dataclass
@@ -1192,13 +1384,12 @@ class Launch:
         """Submit one step, or book it, and say what the next step consumes."""
         context = self.context_for(case.tool)
         if not inbound.mintable:
-            assert inbound.awaiting is not None
-            slot = book_slot(self.con, case, context, awaiting=inbound.awaiting)
-            self.booked += 1
-            print(
-                f"campaign: slot {self.group_id}/{slot} {case.tool} {case.mode} "
-                f"awaiting {inbound.awaiting}"
+            slot = book_slot(
+                self.con, case, context, producer=inbound.producer, awaiting=inbound.awaiting
             )
+            self.booked += 1
+            owed = inbound.awaiting or producer_summary(str(inbound.producer))
+            print(f"campaign: slot {self.group_id}/{slot} {case.tool} {case.mode} awaiting {owed}")
             return Inbound(awaiting=slot_reference(self.group_id, slot))
         reused = self.reuse(case, context, inbound)
         if reused is not None:
@@ -1206,7 +1397,9 @@ class Launch:
             return reused
         attempt = submit_case(self.con, case, context, inbound=inbound, repeat=self.repeat)
         print(f"campaign: {attempt.attempt_id} {attempt.job_name}")
-        return Inbound(awaiting=attempt.attempt_id)
+        # What the next step waits for is this attempt's shape, not its name: a
+        # retry of it, or any other attempt of the same shape, pays that slot too.
+        return Inbound(producer=producer_spec(attempt))
 
     def reuse(self, case: Case, context: LaunchContext, inbound: Inbound) -> Inbound | None:
         """Bind an artifact a successful attempt of this exact case already made.
@@ -1257,12 +1450,12 @@ def render_launch(
     so it prints its place in the chain instead, and a reviewer sees that a plan
     yields twenty-two attempts rather than eleven before anything is submitted.
     """
+    expanded = list(steps)
     lines: list[str] = []
-    produced: dict[int, str] = {}
+    booked: dict[int, str] = {}
     slot = 0
-    for index, step in enumerate(steps):
-        awaiting = None if step.waits_for is None else produced[step.waits_for]
-        if awaiting is None:
+    for index, step in enumerate(expanded):
+        if step.waits_for is None:
             context = LaunchContext.for_tool(
                 step.case.tool,
                 suite=suite,
@@ -1275,14 +1468,21 @@ def render_launch(
             _, _, build = planned_attempt(step.case, context)
             attempt, request = build(1)
             lines.append(f"{attempt.attempt_id} {attempt.job_name} {request}")
-            produced[index] = attempt.attempt_id
-        else:
-            slot += 1
-            lines.append(
-                f"slot {group_id}/{slot} {step.case.tool} {step.case.mode} "
-                f"{step.case.purpose} awaiting {awaiting}"
-            )
-            produced[index] = slot_reference(group_id, slot)
+            continue
+        slot += 1
+        producer = expanded[step.waits_for]
+        # Which step pays this slot, printed before anything is submitted: an
+        # axis stated on a knob the producing mode ignores would otherwise
+        # disqualify the candidate silently and duplicate the listing again.
+        owed = booked.get(
+            step.waits_for,
+            f"step {step.waits_for + 1} ({producer.case.tool} {producer.case.mode})",
+        )
+        lines.append(
+            f"slot {group_id}/{slot} {step.case.tool} {step.case.mode} "
+            f"{step.case.purpose} awaiting {owed}"
+        )
+        booked[index] = slot_reference(group_id, slot)
     return lines
 
 
@@ -1439,10 +1639,17 @@ def cmd_status(args: argparse.Namespace) -> int:
         # A group is not understood from its rows alone while it still owes a
         # measurement it cannot yet identify.
         for slot in pending_rows(con, group_id=args.group):
-            print(
+            owed = slot["awaiting"] or producer_summary(str(slot["producer"]))
+            line = (
                 f"slot {slot['group_id']}/{slot['slot']:<8} {slot['state']:<12} "
-                f"{slot['purpose']:<12} awaiting {slot['awaiting']}"
+                f"{slot['purpose']:<12} awaiting {owed}"
             )
+            # A slot nothing can pay is a measurement quietly absent, which is
+            # the failure a slot exists to prevent: it says so here.
+            reason = slot_owed_reason(con, slot)
+            if reason is not None:
+                line += f" -- OWED, nothing can pay it: {reason}"
+            print(line)
     finally:
         con.close()
     return 0

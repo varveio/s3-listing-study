@@ -12,6 +12,7 @@ without reading the submission lifecycle that drives it.
 
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
 from collections.abc import Callable
@@ -25,7 +26,7 @@ STATE_FILENAME = "campaign.db"
 # Bumped whenever a file written by an older reader would be misread by this
 # one. There is no migration: an unrecognised version is refused, so a command
 # either fully understands the file it opened or does not open it.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 RETRYABLE_STATES = {"FAILED", "NOT_CREATED"}
 TERMINAL_STATES = {"SUCCEEDED", "FAILED", "NOT_CREATED", "CANCELLED", "ACCEPTED"}
@@ -105,12 +106,15 @@ CREATE TABLE pending (
     purpose       TEXT NOT NULL
         CHECK (purpose IN ('measurement', 'preparation', 'canary', 'diagnostic')),
     known_inputs  TEXT NOT NULL,
-    awaiting      TEXT NOT NULL,
+    producer      TEXT,
+    awaiting      TEXT,
+    disqualified  TEXT,
     state         TEXT NOT NULL CHECK (state IN ('BLOCKED', 'RESOLVED', 'ABANDONED')),
     became        TEXT,
     recorded_at   TEXT NOT NULL,
     settled_at    TEXT,
 
+    CHECK ((producer IS NULL) <> (awaiting IS NULL)),
     PRIMARY KEY (group_id, slot)
 );
 """
@@ -283,6 +287,124 @@ def pending_rows(con: sqlite3.Connection, *, group_id: str | None = None) -> lis
     clause = " WHERE group_id = ?" if group_id is not None else ""
     values = [group_id] if group_id is not None else []
     return con.execute(f"SELECT * FROM pending{clause} ORDER BY group_id, slot", values).fetchall()
+
+
+def blocked_slots(con: sqlite3.Connection, group_id: str) -> list[sqlite3.Row]:
+    """Every slot one group still owes, in booking order."""
+    return con.execute(
+        "SELECT * FROM pending WHERE group_id=? AND state='BLOCKED' ORDER BY slot", (group_id,)
+    ).fetchall()
+
+
+# Every key of a slot's producer spec is a column of `attempts`, so the document
+# a slot stored is exactly what the satisfaction query compares: a field cannot
+# be written into the spec and then quietly left out of the match.
+PRODUCER_SPEC_COLUMNS = (
+    "tool",
+    "mode",
+    "config",
+    "target_bucket",
+    "target_prefix",
+    "target_region",
+    "tool_slice_sha256",
+    "platform_sha256",
+)
+
+
+def producer_summary(producer: str) -> str:
+    """A slot's producer spec, as one line an operator reads.
+
+    The spec is matched byte-exactly and printed by shape: what an operator needs
+    from `status` is which run would pay this slot, not the digests that make two
+    of them the same run.
+    """
+    spec = json.loads(producer)
+    return f"any {spec['tool']} {spec['mode']} of this group"
+
+
+def slot_candidates(
+    con: sqlite3.Connection, slot: sqlite3.Row, *, state: str | None = None
+) -> list[sqlite3.Row]:
+    """Every attempt that could pay this slot, earliest-settled first.
+
+    **Scoped to the slot's own group**, and that is load-bearing: an unscoped
+    spec matches any launch in the file, so a second campaign would silently bind
+    the first one's hours-old bytes — the decision `--reuse-preparations` exists
+    to make an operator take. Every legitimate candidate is journaled in the
+    slot's own group at launch time, so scoping costs nothing.
+
+    Ordered by `(settled_at, attempt_id)`, because earliest-settled is
+    *monotone-stable*: `settled_at` only ever appends later values, so once any
+    candidate settles the winner never changes and every sibling slot of a sweep
+    binds the same producer — one corpus snapshot across the whole sweep. The
+    `attempt_id` tiebreak is what makes it a total order; millisecond ties are
+    real.
+    """
+    where = ["group_id = ?"]
+    values: list[object] = [slot["group_id"]]
+    if slot["producer"] is not None:
+        spec = json.loads(slot["producer"])
+        if not isinstance(spec, dict) or set(spec) != set(PRODUCER_SPEC_COLUMNS):
+            raise CampaignError(
+                f"slot {slot['group_id']}/{slot['slot']}: producer spec is not one this code "
+                "understands"
+            )
+        for column in PRODUCER_SPEC_COLUMNS:
+            where.append(f"{column} = ?")
+            values.append(spec[column])
+    elif "/" in str(slot["awaiting"]):
+        # A slot, not an attempt: nothing can match until it resolves into one.
+        return []
+    else:
+        where.append("attempt_id = ?")
+        values.append(slot["awaiting"])
+    if state is not None:
+        where.append("state = ?")
+        values.append(state)
+    return con.execute(
+        f"SELECT * FROM attempts WHERE {' AND '.join(where)} ORDER BY settled_at, attempt_id",
+        values,
+    ).fetchall()
+
+
+def slot_owed_reason(con: sqlite3.Connection, slot: sqlite3.Row) -> str | None:
+    """Why nothing can ever pay this slot, or `None` while something still might.
+
+    A slot that can never be paid is the failure a slot exists to prevent — a
+    measurement quietly absent — so this is what makes it loud in `status` and
+    `report`, and what `accept-failure` abandons on. The candidate set is closed
+    only because the spec is group-scoped: "no matching attempt in this group is
+    live, payable by retry, or usable".
+    """
+    if slot["state"] != "BLOCKED":
+        return None
+    awaiting = slot["awaiting"]
+    if awaiting is not None and "/" in str(awaiting):
+        group, _, ordinal = str(awaiting).partition("/")
+        upstream = con.execute(
+            "SELECT state FROM pending WHERE group_id=? AND slot=?", (group, ordinal)
+        ).fetchone()
+        if upstream is None or upstream["state"] == "ABANDONED":
+            return f"the slot it waits on ({awaiting}) will not produce an attempt"
+        return None
+    candidates = slot_candidates(con, slot)
+    if any(
+        row["state"] not in TERMINAL_STATES or row["state"] in RETRYABLE_STATES
+        for row in candidates
+    ):
+        return None
+    disqualified = json.loads(slot["disqualified"]) if slot["disqualified"] else {}
+    if any(
+        row["state"] == "SUCCEEDED" and row["attempt_id"] not in disqualified for row in candidates
+    ):
+        return None
+    if not candidates:
+        return "no attempt in this group produces what it consumes"
+    settled = ", ".join(
+        f"{row['attempt_id']} {disqualified.get(row['attempt_id']) or row['state']}"
+        for row in candidates
+    )
+    return f"every candidate is settled and none published a usable artifact: {settled}"
 
 
 # The insert's column list and its named parameters are both rendered from this
