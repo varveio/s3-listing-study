@@ -12,6 +12,7 @@ import argparse
 import hashlib
 import json
 import sqlite3
+import time
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -1154,6 +1155,67 @@ def test_a_slot_whose_case_was_already_prepared_binds_it_rather_than_deadlocking
     # No second attempt of a case that has already succeeded: the slot bound the
     # one that exists rather than asking the ledger for a run it refuses.
     assert len(ledger.attempt_rows(con, case_id=hinted.case_id)) == 1
+
+
+def test_skip_measured_binds_an_existing_success_instead_of_refusing_the_launch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A plan file that grows over many sessions must be resubmittable whole:
+    a case already measured (in any group) is skipped, not a refusal that
+    aborts every row after it."""
+    monkeypatch.setattr(batch_client, "ensure_job", lambda *a, **k: ("SUBMITTED", None))
+    plan = loaded_plan()
+    case = any_case(plan)
+    images = image_set(tmp_path)
+    con = ledger.open_ledger(str(tmp_path / "campaign.db"), suite=SUITE)
+    first = submit(con, plan, case, images, group_id="g1")
+    ledger.set_state(con, first.attempt_id, "SUCCEEDED")
+
+    launch = campaign.Launch(
+        con, SUITE, "g2", plan, images, "results", options(), skip_measured=True
+    )
+    launch.run(campaign.expand_launch([case], plan.adapters))
+
+    # No second attempt of the same case -- the launch bound the one that
+    # exists, exactly as a slot would, rather than raising.
+    assert [row["attempt_id"] for row in ledger.attempt_rows(con, case_id=first.case_id)] == [
+        first.attempt_id
+    ]
+
+
+def test_skip_measured_and_repeat_are_refused_together(tmp_path: Path) -> None:
+    """--repeat forces a new attempt; --skip-measured avoids one. Contradictory
+    intents, refused before either does anything."""
+    args = argparse.Namespace(
+        repeat=True,
+        skip_measured=True,
+        suite=SUITE,
+        plan=str(PLAN_PATH),
+        state=str(tmp_path / "campaign.db"),
+    )
+    with pytest.raises(ledger.CampaignError, match="pick one"):
+        campaign.cmd_submit(args)
+
+
+def test_stagger_seconds_sleeps_between_submissions_but_not_before_the_first(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A fan-out plan must not converge every subject on one bucket within the
+    same instant: staggering delays every submission after the first, and the
+    first pays no wait at all."""
+    monkeypatch.setattr(batch_client, "ensure_job", lambda *a, **k: ("SUBMITTED", None))
+    slept: list[float] = []
+    monkeypatch.setattr(time, "sleep", slept.append)
+    plan = loaded_plan()
+    cases = [case for case in plan.cases if case.tool != "s3-fast-list"][:3]
+    images = image_set(tmp_path)
+    con = ledger.open_ledger(str(tmp_path / "campaign.db"), suite=SUITE)
+    launch = campaign.Launch(
+        con, SUITE, "g1", plan, images, "results", options(), stagger_seconds=5.0
+    )
+    launch.run(campaign.expand_launch(cases, plan.adapters))
+    assert slept == [5.0, 5.0]
+    assert launch.submitted == 3
 
 
 def attempt_row(

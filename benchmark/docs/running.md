@@ -130,9 +130,25 @@ Two flags change what a repeated `submit` does with what it finds:
   consumer of one preparation step shares it — but reuse across launches is a
   decision, because the digest cannot tell you the corpus moved
   ([`identity.md`](identity.md) § *What identity cannot cover*).
+- **`--skip-measured`** binds an existing SUCCEEDED attempt of a case *from any
+  group*, instead of refusing the whole launch. This is what makes one
+  checked-in plan file the single source of truth across many sessions: add a
+  case to the file and resubmit it whole, and only the new rows book or
+  submit — everything already measured is skipped, not re-run. Refused
+  together with `--repeat`: one forces a new attempt, the other avoids one.
 
 Defaults worth knowing: `--provisioning` is `SPOT`, so preemption is expected
 rather than exceptional. `--network`/`--subnetwork` must be supplied together.
+
+**`--stagger-seconds`** sleeps that long before each submission after the
+launch's first. A plan with several fan-out subjects — several
+64-to-256-way parallel listers among them — otherwise converges all of them on
+one bucket within the same few seconds of wall clock, which is enough
+aggregate request rate to draw an S3 SlowDown even from a bucket no single
+tool would trouble alone. Submission-side only: it cannot control Batch's own
+queueing or Spot provisioning delay, only the one variable this harness does
+control. Zero by default; use it for any bucket where a first pass shows self-
+induced throttling.
 
 The controller **records intent before it creates a job** — a row is journaled
 `SUBMITTING` inside the same transaction that allocates its ordinal, before the

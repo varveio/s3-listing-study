@@ -1470,9 +1470,26 @@ class Launch:
     options: BatchOptions
     repeat: bool = False
     reuse_preparations: bool = False
+    skip_measured: bool = False
+    """Bind an existing SUCCEEDED attempt of a case instead of refusing the
+    launch, so a plan file that grows over many sessions can be resubmitted as
+    a whole: cases already measured (in any group) are skipped and only the
+    new rows book or submit. Off by default -- the ordinary refusal is what
+    catches a plan whose case identity moved out from under an operator who
+    expected a repeat.
+    """
+    stagger_seconds: float = 0.0
+    """Sleep this long before each submission after the launch's first, so a
+    plan with many fan-out subjects does not converge all of them on one
+    bucket within the same few seconds of wall clock. Submission-side only --
+    it cannot control Batch's own queueing or Spot provisioning delay, but it
+    is the one variable this harness does control.
+    """
     bound: dict[int, Inbound] = field(default_factory=dict)
     booked: int = 0
     """Slots this pass actually opened — what the launch still owes."""
+    submitted: int = 0
+    """Cases actually submitted this pass — what `stagger_seconds` counts from."""
 
     def context_for(self, tool: str) -> LaunchContext:
         return LaunchContext.for_tool(
@@ -1505,7 +1522,19 @@ class Launch:
         if reused is not None:
             print(f"campaign: {case.tool} {case.mode} binds the artifact {reused.produced_by} made")
             return reused
+        if self.skip_measured and not self.repeat:
+            case_id, _, _ = planned_attempt(case, context, inbound=inbound)
+            existing = _already_attempted(self.con, case_id, case)
+            if existing is not None:
+                print(
+                    f"campaign: {case.tool} {case.mode} already measured as "
+                    f"{existing.attempt_id} -- skipping"
+                )
+                return Inbound(producer=producer_spec(existing))
+        if self.submitted > 0 and self.stagger_seconds > 0:
+            time.sleep(self.stagger_seconds)
         attempt = submit_case(self.con, case, context, inbound=inbound, repeat=self.repeat)
+        self.submitted += 1
         print(f"campaign: {attempt.attempt_id} {attempt.job_name}")
         # What the next step waits for is this attempt's shape, not its name: a
         # retry of it, or any other attempt of the same shape, pays that slot too.
@@ -1656,6 +1685,10 @@ def _options(args: argparse.Namespace) -> BatchOptions:
 
 
 def cmd_submit(args: argparse.Namespace) -> int:
+    if args.repeat and args.skip_measured:
+        raise CampaignError(
+            "--repeat forces a new attempt and --skip-measured avoids one; pick one"
+        )
     suite = validate_suite(args.suite)
     loaded = Plan.load(Path(args.plan))
     image_set = load_image_set(args.image_set, {case.tool for case in loaded.cases})
@@ -1695,6 +1728,8 @@ def cmd_submit(args: argparse.Namespace) -> int:
             options,
             repeat=args.repeat,
             reuse_preparations=args.reuse_preparations,
+            skip_measured=args.skip_measured,
+            stagger_seconds=args.stagger_seconds,
         )
         launch.run(steps)
         _announce_shape(loaded.cases, steps, slots=launch.booked)
@@ -1903,6 +1938,20 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="bind an artifact an earlier launch already produced, instead of "
         "refusing: free within one launch, a decision across them, because a "
         "digest cannot tell you the corpus moved",
+    )
+    submit.add_argument(
+        "--skip-measured",
+        action="store_true",
+        help="skip a case that already has a successful attempt in any group of this "
+        "ledger, instead of refusing the whole launch -- so a plan file that grows over "
+        "many sessions can be resubmitted as a whole and only its new rows run",
+    )
+    submit.add_argument(
+        "--stagger-seconds",
+        type=float,
+        default=0.0,
+        help="sleep this long before each submission after the first, so a fan-out plan "
+        "does not converge every subject on one bucket within the same few seconds",
     )
     submit.add_argument("--dry-run", action="store_true")
     submit.set_defaults(func=cmd_submit)
