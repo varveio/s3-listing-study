@@ -449,6 +449,13 @@ got.
 its own `input_artifact_sha256` is not knowable at booking. It names the earlier
 slot, and is rewritten to the attempt that slot became.
 
+So *"a retry pays its slot"* holds for a **root** producer, which is where the
+orphan was and where every shipped chain ends. It does not hold mid-chain: that
+rewrite names one ordinal, and a retry of the attempt a middle slot resolved into
+settles under another. Deliberately, because the spec is root-only for the reason
+above — no shipped capsule declares a chain two links deep, and the day one does,
+this is the paragraph to come back to.
+
 ### A slot nothing can pay says so
 
 A candidate may succeed and still publish nothing the chain can use. Two rules
@@ -476,6 +483,26 @@ the same group stays owed. And when the disqualified candidate is `SUCCEEDED`
 there is no failure to accept at all, so `accept-failure --slot <group>/<n>`
 names the slot itself — refused unless the slot is `BLOCKED` and nothing can pay
 it. See [`running.md`](running.md) § *`accept-failure`*.
+
+### Where a chain refuses
+
+Four questions a chain could answer by guessing, and does not. Each was a real
+silent failure before it was a refusal.
+
+| Refused | When | What it prevents |
+| --- | --- | --- |
+| A `REQUIRES` entry naming a bare mode, an artifact the producing mode does not declare, a producing mode declaring none, or two consumers wanting different artifacts of one mode | load | *"the manifest holds one file, take it"* — which stages a 131 MB listing where a 679 KB hints file belongs the day a mode publishes two, under a digest that checks out |
+| A measured mode naming no `product_artifact`, a `preparation`-capped one naming a product, or a `product_channel` the worker does not know | load | A product whose location is inferred from whatever the sink happens to hold, which routed every `s3-fast-list` listing into a normalizer that refuses it |
+| A subject that exits clean and wrote nothing at the declared path | worker | A timing published over a listing nobody made |
+| A producer spec whose keys are not the ones this code compares; a candidate outside the slot's own group; a candidate whose evidence does not hold the named artifact, or holds one a validator refuses | poll | A slot paid by bytes nothing checked — including another launch's hours-old bytes, which is the decision `--reuse-preparations` exists to force |
+| `accept-failure --slot` on a slot that is not `BLOCKED` or that something could still pay | operator | Declaring a measurement absent while it is merely slow |
+
+Two of those are worth stating as positives, because they are what the shape
+buys. A **disqualified candidate never changes state**: a measurement's timing is
+honest whatever its sink holds, so the complaint lands on the slot. And
+**producer steps are expanded ahead of the slots that consume them**, whatever
+order the plan lists its rows in, so a launch that dies mid-expansion cannot
+leave a slot with no candidate in its group at all.
 
 A slot is scaffolding rather than evidence, so it is the one structure here that
 may be deleted once a group is long settled. `became` points at the attempt it

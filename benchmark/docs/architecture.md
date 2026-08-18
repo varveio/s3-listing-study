@@ -130,9 +130,12 @@ the key distribution its hints are cut from.
 The dependency is **declared by the capsule**, because "this mode needs that
 mode first" is a fact about the tool, exactly like which modes exist. The plan
 says nothing; a row asking for the hinted mode is asking for whatever that mode
-requires. The declaration is static, so `plan_cli` can still show a reviewer
-that a plan yields twenty-two attempts rather than eleven without running
-anything.
+requires. `REQUIRES` names an ordered list of `(mode, artifact)` pairs — the mode
+that must run first *and* which of the files it publishes the consumer takes,
+because a listing that writes its product to a file publishes two
+([`capsule-contract.md`](capsule-contract.md) § *Declaring a prerequisite*). The
+declaration is static, so `plan_cli` can still show a reviewer that a plan
+yields twenty-two attempts rather than eleven without running anything.
 
 What keeps this honest is **what the consumer takes**: the artifact's *content
 digest*, never the producing attempt's ID. Two preparations yielding identical
@@ -198,6 +201,11 @@ Booking it durably buys two things, and the second is why it exists:
   that looks fine and is not, which is the failure this whole design is built
   against.
 
+What a slot stores — the frozen `known_inputs`, the producer spec it matches by,
+and the candidates it has already disqualified — and why every one of those is
+scoped to the slot's own group, is
+[`model.md`](model.md) § *What a slot waits for is a shape, not a name*.
+
 ## Refuse rather than guess
 
 The harness refuses in preference to guessing, everywhere, because every silent
@@ -207,11 +215,16 @@ fallback this study has hit produced evidence that looked correct:
   first campaign recorded `authenticated` and ran unsigned.
 - An undeclared config key is refused, not dropped. A misspelled knob would
   otherwise produce a sweep whose cells are all identical.
-- A ledger whose `schema_version` is unrecognised is refused, never silently
-  upgraded.
+- A ledger whose `schema_version` is unrecognised is refused for writing, never
+  silently upgraded. A superseded version this code still knows how to read
+  opens read-only, so bumping the schema does not lock away settled evidence.
 - A Dockerfile the slice rules cannot fully attribute is a build error.
 - Submitting a case that already has a successful attempt is refused, rather
   than being treated as a no-op or an implicit repeat.
+- A chain refuses at every point it could guess instead: which artifact a
+  consumer takes, where a product landed, which attempt may pay a slot, and
+  when a slot may be declared absent. The four are gathered in
+  [`model.md`](model.md) § *Where a chain refuses*.
 
 The pattern: a refusal costs an operator a minute, and a silent fallback costs a
 campaign — usually discovered long after the numbers have been quoted.

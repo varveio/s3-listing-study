@@ -395,6 +395,10 @@ The refusals, all at load:
   question is how evidence comes to disagree with itself. No capsule declares
   that shape; the column has to grow a name before one can.
 
+Those are the load-time half. What a chain refuses at the worker, at a poll pass
+and at the operator's hand is gathered beside them in
+[`model.md`](model.md) § *Where a chain refuses*.
+
 Every capsule declares artifacts, because every measured mode publishes its
 product as one. `s3-fast-list` is the only one that publishes two: `list` and
 `list-hinted` publish `listing` beside `keyspace`, and only `keyspace` is
