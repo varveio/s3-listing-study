@@ -43,6 +43,104 @@ DEFAULT_REGION = "us-west-2"
 PORT = 19090
 METRICS_PORT = 19192
 
+# What the run could not answer about itself until now.
+#
+# Every "is the server saturated?" question this rig has raised was settled by
+# inferring CPU from throughput x service time, because the server's own usage
+# was never recorded. It cannot be read from the server's cgroup -- that is a
+# different container and /sys/fs/cgroup is namespaced -- but /proc/stat is NOT
+# namespaced, and the two runnables are pinned to disjoint cpusets, so per-CPU
+# lines for the server's cores ARE the server's usage.
+#
+# Sampled as a time series rather than a before/after pair: a mean hides the
+# thing that matters. A run that saturates only after the client's fan-out ramps
+# looks identical, at the endpoints, to one that was saturated throughout, and
+# an environmental outlier (a noisy neighbour, a cold page cache) looks identical
+# to a load response. Both distinctions have already cost this study a wrong
+# diagnosis.
+SAMPLER = r"""
+import json, sys, time
+
+server_cpus = sys.argv[1]
+subject_cpus = sys.argv[2]
+interval = float(sys.argv[3])
+
+
+def expand(spec):
+    out = []
+    for part in spec.split(","):
+        if "-" in part:
+            lo, hi = part.split("-")
+            out.extend(range(int(lo), int(hi) + 1))
+        else:
+            out.append(int(part))
+    return out
+
+
+def cpu_jiffies(wanted):
+    # (busy, total) jiffies summed over `wanted` CPUs, read from the HOST's
+    # /proc/stat -- which, unlike /sys/fs/cgroup, is not namespaced per container.
+    busy = total = 0
+    with open("/proc/stat") as handle:
+        for line in handle:
+            if not line.startswith("cpu") or line.startswith("cpu "):
+                continue
+            name, _, rest = line.partition(" ")
+            try:
+                index = int(name[3:])
+            except ValueError:
+                continue
+            if index not in wanted:
+                continue
+            fields = [int(v) for v in rest.split()]
+            idle = fields[3] + (fields[4] if len(fields) > 4 else 0)
+            total += sum(fields)
+            busy += sum(fields) - idle
+    return busy, total
+
+
+def meminfo():
+    values = {}
+    with open("/proc/meminfo") as handle:
+        for line in handle:
+            key, _, rest = line.partition(":")
+            values[key] = int(rest.split()[0])
+    return values
+
+
+srv, sub = set(expand(server_cpus)), set(expand(subject_cpus))
+prev_srv, prev_sub = cpu_jiffies(srv), cpu_jiffies(sub)
+started = time.monotonic()
+while True:
+    time.sleep(interval)
+    now_srv, now_sub = cpu_jiffies(srv), cpu_jiffies(sub)
+
+    srv_busy = (now_srv[0] - prev_srv[0]) / (now_srv[1] - prev_srv[1]) if now_srv[1] != prev_srv[1] else 0.0
+    sub_busy = (now_sub[0] - prev_sub[0]) / (now_sub[1] - prev_sub[1]) if now_sub[1] != prev_sub[1] else 0.0
+    mem = meminfo()
+    with open("/proc/loadavg") as handle:
+        load1 = handle.read().split()[0]
+    print(
+        "replay_sample "
+        + json.dumps(
+            {
+                "t_s": round(time.monotonic() - started, 1),
+                "srv_cores_used": round(srv_busy * len(srv), 2),
+                "srv_util": round(srv_busy, 4),
+                "srv_cores": len(srv),
+                "subj_cores_used": round(sub_busy * len(sub), 2),
+                "subj_util": round(sub_busy, 4),
+                "subj_cores": len(sub),
+                "load1": float(load1),
+                "mem_avail_gb": round(mem.get("MemAvailable", 0) / 1048576, 2),
+            },
+            separators=(",", ":"),
+        ),
+        flush=True,
+    )
+    prev_srv, prev_sub = now_srv, now_sub
+"""
+
 # The subject's side of the run, as a script rather than as argv: it has to
 # wait for a server that is still deriving its index, and it has to scrape the
 # meters on both sides of the listing. Both are the worker's job in the real
@@ -92,6 +190,15 @@ report_cgroup
 wait_ready "http://127.0.0.1:__METRICS_PORT__/healthz" 600 || exit 1
 scrape before "http://127.0.0.1:__METRICS_PORT__/metrics"
 
+# Started after readiness so the series covers the measured window and not the
+# index derive, and killed by PID -- `pkill -f` matches this script's own
+# command line on some runners.
+cat >/tmp/sampler.py <<'SAMPLERPY'
+__SAMPLER__
+SAMPLERPY
+/usr/bin/python3 /tmp/sampler.py "__SERVER_CPUSET__" "__SUBJECT_CPUSET__" 10 &
+sampler_pid=$!
+
 start=$(date +%s.%N)
 /opt/java/openjdk/bin/java -jar /opt/swath/swath.jar \
   -v --color never list "s3://__BUCKET__" \
@@ -114,6 +221,7 @@ tail -40 /tmp/swath.log
 echo "--- swath report ---"
 cat /tmp/swath-summary.json 2>/dev/null || echo "(no report)"
 
+kill "$sampler_pid" 2>/dev/null
 scrape after "http://127.0.0.1:__METRICS_PORT__/metrics"
 exit "$status"
 """
@@ -175,6 +283,9 @@ def render(args: argparse.Namespace) -> dict:
         .replace("__BUCKET__", args.bucket)
         .replace("__REGION__", args.region)
         .replace("__CONCURRENCY__", str(args.concurrency))
+        .replace("__SERVER_CPUSET__", args.server_cpuset)
+        .replace("__SUBJECT_CPUSET__", args.subject_cpuset)
+        .replace("__SAMPLER__", SAMPLER.strip("\n"))
     )
 
     def options(cpuset: str, memory_gb: int) -> str:
