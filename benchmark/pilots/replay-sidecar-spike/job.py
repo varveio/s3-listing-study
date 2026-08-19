@@ -102,11 +102,11 @@ start=$(date +%s.%N)
   --checkpoint none \
   --format tsv \
   --report /tmp/swath-summary.json \
-  > /tmp/listing.tsv 2>/tmp/swath.log
-status=$?
+  __SINK__ 2>/tmp/swath.log
+status=${PIPESTATUS[0]:-$?}
 end=$(date +%s.%N)
 
-rows=$(wc -l < /tmp/listing.tsv)
+rows=$(cat /tmp/rowcount 2>/dev/null || wc -l < /tmp/listing.tsv)
 printf 'subject_result exit=%s rows=%s wall_s=%s\n' "$status" "$rows" \
   "$(awk -v a="$start" -v b="$end" 'BEGIN{printf "%.1f", b-a}')"
 echo "--- swath stderr (tail) ---"
@@ -154,8 +154,23 @@ def render(args: argparse.Namespace) -> dict:
     if args.warm_fixture:
         server_env["REPLAY_WARM_FIXTURE"] = "1"
 
+    # Where the listing lands. Writing it to a file is the faithful thing when a
+    # deadline is what bounds the run: the subject does the work a real one does.
+    # It is the WRONG thing for a ceiling probe. With no injected latency the
+    # server answers in single-digit milliseconds, so a subject that sustains a
+    # thousand pages a second is writing well over a hundred megabytes a second
+    # of text to a container filesystem -- and what gets measured is the boot
+    # disk, not the listing engine. Counting the rows as they stream keeps the
+    # completeness check (a listing that dropped keys is not a fast listing) and
+    # pays no disk for it.
+    sink = (
+        "| wc -l > /tmp/rowcount"
+        if args.discard_output
+        else "> /tmp/listing.tsv"
+    )
     subject_script = (
-        SUBJECT_SCRIPT.replace("__METRICS_PORT__", str(METRICS_PORT))
+        SUBJECT_SCRIPT.replace("__SINK__", sink)
+        .replace("__METRICS_PORT__", str(METRICS_PORT))
         .replace("__PORT__", str(PORT))
         .replace("__BUCKET__", BUCKET)
         .replace("__REGION__", REGION)
@@ -253,6 +268,12 @@ def main() -> int:
     parser.add_argument("--inject-latency", default="prod-commoncrawl")
     parser.add_argument("--latency-scale", type=float, default=1.0)
     parser.add_argument("--prefetch", action="store_true")
+    parser.add_argument(
+        "--discard-output",
+        action="store_true",
+        help="count the listing as it streams instead of landing it on disk; for a "
+        "ceiling probe, where the subject's own output writes would be the limit",
+    )
     parser.add_argument(
         "--warm-fixture",
         action="store_true",
