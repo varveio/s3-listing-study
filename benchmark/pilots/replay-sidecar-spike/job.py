@@ -38,8 +38,8 @@ SUBNETWORK = f"projects/{PROJECT}/regions/{LOCATION}/subnetworks/s3-listing-stud
 WORKER_SA = f"s3-listing-study-worker@{PROJECT}.iam.gserviceaccount.com"
 N4_BOOT_DISK = {"type": "hyperdisk-balanced", "image": "batch-cos"}
 
-BUCKET = "sorel-20m"
-REGION = "us-west-2"
+DEFAULT_BUCKET = "sorel-20m"
+DEFAULT_REGION = "us-west-2"
 PORT = 19090
 METRICS_PORT = 19192
 
@@ -123,9 +123,9 @@ def render(args: argparse.Namespace) -> dict:
     server_command = [
         "serve",
         "--fixture",
-        f"/fixtures/{BUCKET}",
+        f"/fixtures/{args.bucket}",
         "--bucket",
-        BUCKET,
+        args.bucket,
         "--host",
         "127.0.0.1",
         "--port",
@@ -172,8 +172,8 @@ def render(args: argparse.Namespace) -> dict:
         SUBJECT_SCRIPT.replace("__SINK__", sink)
         .replace("__METRICS_PORT__", str(METRICS_PORT))
         .replace("__PORT__", str(PORT))
-        .replace("__BUCKET__", BUCKET)
-        .replace("__REGION__", REGION)
+        .replace("__BUCKET__", args.bucket)
+        .replace("__REGION__", args.region)
         .replace("__CONCURRENCY__", str(args.concurrency))
     )
 
@@ -215,8 +215,8 @@ def render(args: argparse.Namespace) -> dict:
                             "environment": {
                                 "variables": {
                                     "JAVA_TOOL_OPTIONS": f"-XX:MaxRAMPercentage={args.heap_percent}",
-                                    "AWS_REGION": REGION,
-                                    "AWS_DEFAULT_REGION": REGION,
+                                    "AWS_REGION": args.region,
+                                    "AWS_DEFAULT_REGION": args.region,
                                     "AWS_EC2_METADATA_DISABLED": "true",
                                 }
                             },
@@ -255,6 +255,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--server-image", required=True)
     parser.add_argument("--toolbox-image", required=True)
+    parser.add_argument("--bucket", default=DEFAULT_BUCKET)
+    parser.add_argument("--region", default=DEFAULT_REGION)
     parser.add_argument("--machine-type", default="n4-standard-4")
     parser.add_argument("--vcpus", type=int, default=4)
     parser.add_argument("--memory-gb", type=int, default=16)
