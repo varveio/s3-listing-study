@@ -868,6 +868,12 @@ def test_every_key_a_row_may_state_changes_the_case_it_resolves_to(tmp_path: Pat
         "vcpus": (2, 4),
         "memory_gb": (8, 16),
         "container_memory_gb": (4, 8),
+        # The replay backend's own allocation. Two cases against differently
+        # sized servers are two measurements, so these have to reach the case
+        # exactly as the subject's own allocation does.
+        "replay_vcpus": (1, 2),
+        "replay_memory_gb": (2, 4),
+        "replay_parquet_connections": (64, 128),
     }
     assert set(pairs) == set(bench.ROW_FIELDS), "a row key with no coverage here"
 
@@ -895,15 +901,34 @@ def test_every_key_a_row_may_state_changes_the_case_it_resolves_to(tmp_path: Pat
         "swath": fixture_capsule("swath", unsigned=True, signed=True, modes=modes),
     }
 
+    # Every plan here carries a replay backend, so the `replay_*` rows have one
+    # to size. It changes nothing for the other keys: a backend the rows do not
+    # vary is a constant, exactly like the bucket.
+    replay_block = (
+        "replay:\n"
+        "  fixture_uri: example/replay-server:fixture\n"
+        f"  fixture_sha256: {'a' * 64}\n"
+        "  serving_mode: sorted\n"
+        "  inject_latency: {worker_page: 247ms}\n"
+    )
+    replay_defaults = (
+        "  replay_vcpus: 1\n  replay_memory_gb: 2\n  replay_parquet_connections: 64\n"
+    )
+
     def case(field: str, value: object, index: int) -> bench.Case:
         directory = tmp_path / f"{field}-{index}"
         directory.mkdir()
         path = directory / "b.yaml"
         row = {"mode": "recursive-tsv"} | {field: value}
+        # A server's share is carved out of the box, so a row sweeping the
+        # server's size needs a box with room to sweep it in.
+        if field in bench.REPLAY_FIELDS:
+            row |= {"vcpus": 4, "memory_gb": 16}
         body = "swath:\n  cases:\n    - {" + ", ".join(f"{k}: {v}" for k, v in row.items()) + "}\n"
+        document = MINIMAL.format(bucket="b", tools=textwrap.indent(body, "  "))
+        document = document.replace("tools:\n", replay_defaults + "tools:\n", 1)
         path.write_text(
-            "auth_role: fixture-role\n"
-            + MINIMAL.format(bucket="b", tools=textwrap.indent(body, "  ")),
+            "auth_role: fixture-role\n" + replay_block + document,
             encoding="utf-8",
         )
         return load(path, adapters=adapters).cases[0]
@@ -1088,8 +1113,13 @@ def test_a_tool_body_is_the_defaults_vocabulary_plus_its_rows() -> None:
     assert not set(bench.ROW_FIELDS) & set(bench.SCHEDULE_FIELDS)
     assert "mode" not in bench.LAYER_FIELDS
     # The overlap is what a case is *and* can sensibly be defaulted: the
-    # allocation, and which stratum it ran in.
-    assert set(bench.ROW_FIELDS) & set(bench.LAYER_FIELDS) == {*bench.RESOURCE_FIELDS, "signed"}
+    # allocation -- the subject's and, where there is one, the replay backend's --
+    # and which stratum it ran in.
+    assert set(bench.ROW_FIELDS) & set(bench.LAYER_FIELDS) == {
+        *bench.RESOURCE_FIELDS,
+        *bench.REPLAY_FIELDS,
+        "signed",
+    }
 
 
 def test_incomplete_defaults_are_refused(tmp_path: Path) -> None:

@@ -49,6 +49,36 @@ READY_LINE = re.compile(r"replay_ready wait_ms=(\d+)")
 RESULT_LINE = re.compile(r"subject_result exit=(\S+) rows=(\d+) wall_s=(\S+)")
 
 
+def subject_report(raw: str) -> dict:
+    """swath's own run report, as the subject script cat'd it into the log.
+
+    The server's meters answer "did the backend keep out of the way". They say
+    nothing about how fast the subject went, which is the question the whole
+    exercise exists to answer -- so both halves are read out of the same run and
+    printed together. A rung that improves throughput while the server stays
+    invisible is progress; one that improves throughput because the server
+    started overrunning is not a result at all.
+    """
+    start = raw.rfind('{\n  "schema_version"')
+    if start < 0:
+        marker = raw.find('"schema_version"')
+        if marker < 0:
+            return {}
+        start = raw.rfind("{", 0, marker)
+    depth = 0
+    for index in range(start, len(raw)):
+        if raw[index] == "{":
+            depth += 1
+        elif raw[index] == "}":
+            depth -= 1
+            if depth == 0:
+                try:
+                    return json.loads(raw[start : index + 1])
+                except ValueError:
+                    return {}
+    return {}
+
+
 def meters(document: dict) -> dict[tuple[str, str], dict]:
     """Every meter keyed by (name, shape-tag); an untagged meter keys on ""."""
     table: dict[tuple[str, str], dict] = {}
@@ -110,6 +140,36 @@ def evaluate(after: dict, *, profile: dict[str, float], rows_expected: int, obse
         print(f"index derive + readiness: {observed['ready_ms'] / 1000:.1f} s")
     if observed.get("wall_s"):
         print(f"subject wall: {observed['wall_s']} s, rows {observed.get('rows')}")
+    report = observed.get("report") or {}
+    if report:
+        efficiency = report.get("efficiency", {})
+        engine = report.get("engine", {})
+        print(
+            f"subject: {efficiency.get('keys_per_sec', 0):,.0f} keys/s over "
+            f"{report.get('duration_ms', 0) / 1000:.1f} s, "
+            f"{engine.get('pages', 0):,} pages "
+            f"({engine.get('pages', 0) / max(report.get('duration_ms', 1) / 1000, 1e-9):,.0f}/s), "
+            f"in-flight avg {engine.get('avg_in_flight', 0):.1f} of peak "
+            f"{engine.get('peak_in_flight', 0)}, "
+            f"cpu {efficiency.get('cpu_seconds', 0):.0f}s "
+            f"(x{efficiency.get('cpu_efficiency', 0):.2f} cores)"
+        )
+        # How long the engine took to reach its widest fan-out, against how long
+        # the run lasted. swath's concurrency is an AIMD limit, not a fixed
+        # width: it starts at min(4, N) permits and climbs. On a bucket small
+        # enough to finish before it has climbed, the number measured is the ramp
+        # and not the ceiling -- so a rung whose ramp is a large fraction of its
+        # duration has outgrown the fixture, and the next rung needs a bigger
+        # bucket rather than a bigger machine.
+        ramp = engine.get("time_to_peak_in_flight_ms")
+        duration = report.get("duration_ms") or 0
+        if ramp is not None and duration:
+            share = ramp / duration
+            note = "  <-- ramp dominates; fixture too small for this width" if share > 0.5 else ""
+            print(
+                f"         reached peak fan-out after {ramp / 1000:.1f} s "
+                f"of a {duration / 1000:.1f} s run ({share:.0%}){note}"
+            )
 
     print()
     if voids:
@@ -149,7 +209,9 @@ def main() -> int:
 
     scrapes: dict[str, dict] = {}
     observed: dict = {"cgroups": {}}
-    for line in args.log:
+    raw = args.log.read()
+    observed["report"] = subject_report(raw)
+    for line in raw.splitlines():
         if match := METRICS_LINE.search(line):
             scrapes[match.group(1)] = json.loads(match.group(2))
         elif match := CGROUP_LINE.search(line):

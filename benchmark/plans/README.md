@@ -73,6 +73,59 @@ keeps `timeout_s` out of one: it is in the fingerprint but not the ID, so two
 rows differing only there would render one ID and two fingerprints — two
 non-comparable runs filed into one case directory.
 
+### A plan may state the backend it measures against
+
+A plan whose target is a real bucket says nothing about a backend: the backend is
+S3. A plan served by the swath replay server states one, because the server *is*
+what every case here is measured against, and two runs against differently
+configured servers are two measurements rather than one.
+
+It splits by what varies. The plan-level `replay:` block holds what does not:
+
+```yaml
+replay:
+  fixture_uri: <the server image carrying the fixture>
+  fixture_sha256: <64 hex, over the served parts in key order>
+  serving_mode: sorted            # or duckdb; always stated, never inferred
+  inject_latency: {worker_page: 107ms, pivot_probe: 41ms, structure_probe: 49ms}
+```
+
+`inject_latency` is a **measurement, not a preference**. A swath run report carries
+a `probe_latency` block whose call classes are exactly the replay server's shape
+classifier, so the honest profile for a bucket is a fact its own fixture arrives
+with. Read it from there rather than picking one — and note the direction the dial
+moves: demand on the server scales inversely with the profile, so a profile chosen
+because the server can meet it is a profile that hides an undersized server.
+
+What *does* vary per case is how much machine the server gets, so those are
+ordinary row fields, prefixed `replay_` and resolving through the same three
+layers as every other allocation:
+
+```yaml
+defaults:
+  vcpus: 16                        # the box, as always
+  memory_gb: 64
+  replay_vcpus: 8                  # carved out of the box
+  replay_memory_gb: 16
+  replay_parquet_connections: 640
+```
+
+`vcpus`/`memory_gb` keep meaning **the box** — the pair `instances.yaml` resolves a
+machine type from. The server's share is carved out of it and the subject gets the
+remainder, which is how the two containers are actually pinned: disjoint cpusets
+over one machine's cores. A row that leaves the subject no cores, or no memory, is
+refused while it is still a file.
+
+`replay_parquet_connections` is the store's pooled-reader count and its read-permit
+count both. Set it above the widest fan-out any subject in the plan drives — below
+that, the server's own cost starts varying with the client's concurrency, which is
+the very axis the study exists to rank. A `delimiter=/` rollup holds two slots, so
+doubling the fan-out is the safe reading.
+
+A `replay_*` key in a plan with no `replay:` block is refused, and so is a
+`replay:` block whose defaults do not size a server: a plan states its backend
+completely or not at all.
+
 ### `config` is the one nested map
 
 Everything else a row states is a flat scalar. A row may also carry `config`, a

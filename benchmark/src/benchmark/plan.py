@@ -86,7 +86,16 @@ if TYPE_CHECKING:
 # refused rather than reinterpreted.
 SPEC_VERSION = 2
 
-TOP_LEVEL = ("spec_version", "bucket", "region", "auth_role", "defaults", "tools", "exclude")
+TOP_LEVEL = (
+    "spec_version",
+    "bucket",
+    "region",
+    "auth_role",
+    "replay",
+    "defaults",
+    "tools",
+    "exclude",
+)
 
 # What a box is, in the terms a plan states it: shape, not product name. The
 # machine type is resolved from the pair through benchmark/plans/instances.yaml, so a plan
@@ -100,6 +109,31 @@ BOX_FIELDS = ("vcpus", "memory_gb")
 # container sees the whole box. Unlike a heap share, this means something to
 # every tool.
 PROCESS_FIELDS = ("container_memory_gb",)
+
+# What the replay backend gets, when a plan has one. Prefixed rather than nested
+# so a row states them the way it states every other allocation -- a flat scalar
+# per key, resolving through the same three layers -- while still reading, at a
+# glance, as belonging to the server and not to the subject. `vcpus` and
+# `replay_vcpus` in one row are two allocations on one box, and the prefix is
+# what keeps that legible.
+#
+# These are row fields, not plan-level ones, because the server's shape is part
+# of what a case measures against: the same subject arm against a two-core server
+# and against an eight-core one are two different measurements, and a schema that
+# could not tell them apart would file both into one case. The invariants that do
+# NOT vary per case -- which fixture, which bucket, which serving mode, which
+# injected profile -- live in the plan's `replay` block instead.
+#
+# `replay_parquet_connections` is the store's pooled-reader count and its
+# read-permit count both. It belongs in a plan rather than in a default because a
+# run must set it above the widest fan-out its subject will drive, or the server's
+# own cost starts varying with the client's concurrency -- which is the very axis
+# a comparative run exists to rank.
+REPLAY_FIELDS = (
+    "replay_vcpus",
+    "replay_memory_gb",
+    "replay_parquet_connections",
+)
 
 # Required once resolved: a case that did not say how much memory it wanted
 # cannot be compared against one that did. The container ceiling is the
@@ -150,6 +184,7 @@ ROW_FIELDS = (
     "concurrency",
     "segments",
     *RESOURCE_FIELDS,
+    *REPLAY_FIELDS,
 )
 
 # The row axes resolution lifts into the config blob; `mode` travels separately
@@ -172,9 +207,11 @@ STATISTICS = ("timing", "rate")
 # What a layer may state: what every case under it inherits. No `mode` — eleven
 # tools have eleven mode vocabularies, so nothing above a row has one to state.
 # `signed` is here as well as in a row, for a roster swept as one stratum.
-LAYER_FIELDS = ("signed", *RESOURCE_FIELDS, *SCHEDULE_FIELDS)
+LAYER_FIELDS = ("signed", *RESOURCE_FIELDS, *SCHEDULE_FIELDS, *REPLAY_FIELDS)
 
 TOOL_FIELDS = ("cases", *LAYER_FIELDS)
+
+HEX64_RE = re.compile(r"[0-9a-f]{64}")
 
 # Anchored with ``\Z`` and applied with ``fullmatch``: ``$`` also matches before
 # a trailing newline, and a label is printed and grepped.
@@ -235,6 +272,57 @@ class Resources:
 
 
 @dataclass(frozen=True)
+class ReplayBackend:
+    """What every case in a plan is measured *against*, when the backend is a replay server.
+
+    A plan-level block, because none of it varies per case: one fixture, one
+    bucket, one serving mode, one injected latency profile. What does vary — how
+    much machine the server gets — is stated per row through ``replay_*``.
+
+    The profile is per-shape and is a *measurement*, not a preference. swath's own
+    run report carries a ``probe_latency`` block whose call classes are exactly the
+    server's shape classifier, so the honest profile for a bucket is a fact the
+    fixture arrives with rather than a number anyone picks.
+    """
+
+    fixture_uri: str
+    """Where the served bytes come from. An image reference today, because the
+    fixture rides a layer of the server's own image and its digest is therefore
+    already part of what the attempt records."""
+    fixture_sha256: str
+    """A digest over the served parts, in key order. The exact analogue of
+    ``input_artifact_sha256``: what a case hashed, so a misfiled fixture cannot
+    survive into a comparison."""
+    serving_mode: str
+    """``sorted`` or ``duckdb``, always stated. There used to be an ``auto`` that
+    chose; it was removed upstream precisely because a backend that quietly becomes
+    a different backend cannot be compared against itself."""
+    inject_latency: tuple[tuple[str, str], ...]
+    """Per-shape injected delay, key-sorted. The delay is a *deadline*, not a
+    surcharge — a client observes ``max(server_cost, profile)`` — so this is what
+    every subject sees for as long as the server stays faster than it."""
+
+    @property
+    def profile_spec(self) -> str:
+        """The profile as the server's own ``--inject-latency`` spells it."""
+        return ",".join(f"{shape}={delay}" for shape, delay in self.inject_latency)
+
+
+@dataclass(frozen=True)
+class ReplayServer:
+    """The machine one case gives its replay server, beside the subject's own."""
+
+    vcpus: int
+    memory_gb: int
+    parquet_connections: int
+
+    @property
+    def docker_options(self) -> tuple[str, ...]:
+        """`docker run` flags for the sidecar, matching :meth:`Resources.docker_options`."""
+        return (f"--memory={self.memory_gb}g", f"--memory-swap={self.memory_gb}g")
+
+
+@dataclass(frozen=True)
 class Case:
     """One resolved row of a tool's ``cases`` — the unit a campaign submits."""
 
@@ -267,6 +355,14 @@ class Case:
     # declared default the capsule fills in when a row leaves an axis silent.
     # Key-sorted, matching what is hashed.
     config: tuple[tuple[str, object], ...]
+    replay: ReplayServer | None = None
+    """The sidecar's shape, when this plan measures against a replay server.
+
+    ``None`` for a plan that lists a real bucket, which is every plan that
+    predates the replay backend — hence the default, so a case built without one
+    still means what it always meant. Carried beside ``resources`` rather than
+    inside it because they are two allocations on one box, and a reader comparing
+    cases needs to see which of the two a row moved."""
 
 
 @dataclass(frozen=True)
@@ -287,6 +383,9 @@ class Plan:
     region: str
     cases: tuple[Case, ...]
     exclusions: tuple[Exclusion, ...]
+    replay: ReplayBackend | None
+    """The backend every case here is measured against, when it is not a real
+    bucket. ``None`` for a plan that lists S3 directly."""
     # The capsules this plan resolved against. Carried because a launch expands
     # each row's declared prerequisites (:func:`expand_requirements`) from the
     # same loaded capsule the case was resolved with, rather than reloading one
@@ -480,6 +579,17 @@ def _load(
     _reject_mode(defaults, "[defaults]", path)
     _reject_unknown(defaults, LAYER_FIELDS, "[defaults]", path)
     base_resources = _resources(defaults, "defaults", path, complete=True)
+    replay_backend = _replay_backend(doc, path)
+    # Sized in defaults when there is a backend at all, so every row resolves a
+    # server without each one restating it; a row still overrides to sweep it.
+    base_replay = _replay_shape(
+        defaults, "defaults", path, complete=replay_backend is not None
+    )
+    if replay_backend is None and base_replay:
+        raise PlanError(
+            f"'[defaults]' in {path} sizes a replay server "
+            f"({', '.join(sorted(base_replay))}) but the plan declares no [replay] block"
+        )
     base_schedule = _schedule(defaults, "defaults", path, complete=True)
     base_signed = _signed(defaults, "defaults", path, complete=True)
 
@@ -499,7 +609,7 @@ def _load(
         region=region,
         cases=_cases(
             doc,
-            {**base_resources, **base_signed},
+            {**base_resources, **base_replay, **base_signed},
             base_schedule,
             modes,
             _Context(
@@ -509,10 +619,12 @@ def _load(
                 heap=heap_config,
                 adapters=resolved_adapters,
                 auth_role=auth_role,
+                replay=replay_backend,
                 path=path,
             ),
         ),
         exclusions=_exclusions(doc, path),
+        replay=replay_backend,
         adapters=resolved_adapters,
     )
     _reject_overlap(plan, path)
@@ -574,6 +686,69 @@ def _resources(
     return {
         field: _positive_int(table[field], field, where, path)
         for field in RESOURCE_FIELDS
+        if field in table
+    }
+
+
+REPLAY_BLOCK_FIELDS = ("fixture_uri", "fixture_sha256", "serving_mode", "inject_latency")
+SERVING_MODES = ("sorted", "duckdb")
+INJECT_SHAPES = ("worker_page", "pivot_probe", "structure_probe")
+
+
+def _replay_backend(doc: Mapping[str, Any], path: Path) -> ReplayBackend | None:
+    """The plan's ``replay`` block, or ``None`` for a plan that lists a real bucket."""
+    if "replay" not in doc:
+        return None
+    block = _table(doc, "replay", "replay", path)
+    _reject_unknown(block, REPLAY_BLOCK_FIELDS, "[replay]", path)
+    missing = sorted(set(REPLAY_BLOCK_FIELDS) - set(block))
+    if missing:
+        raise PlanError(
+            f"'[replay]' in {path} is missing {', '.join(missing)} — a replay backend "
+            "states every part of what it serves, so a receipt describes itself"
+        )
+    serving_mode = str(block["serving_mode"])
+    if serving_mode not in SERVING_MODES:
+        raise PlanError(
+            f"'[replay].serving_mode' in {path} is {serving_mode!r}; "
+            f"expected one of {', '.join(SERVING_MODES)}"
+        )
+    digest = str(block["fixture_sha256"])
+    if not HEX64_RE.fullmatch(digest):
+        raise PlanError(f"'[replay].fixture_sha256' in {path} is not a sha256 digest")
+    profile = block["inject_latency"]
+    if not isinstance(profile, Mapping) or not profile:
+        raise PlanError(
+            f"'[replay].inject_latency' in {path} must be a non-empty mapping of "
+            f"shape to delay ({', '.join(INJECT_SHAPES)})"
+        )
+    unknown = sorted(set(map(str, profile)) - set(INJECT_SHAPES))
+    if unknown:
+        raise PlanError(
+            f"'[replay].inject_latency' in {path} names unknown shapes: {', '.join(unknown)}"
+        )
+    return ReplayBackend(
+        fixture_uri=str(block["fixture_uri"]),
+        fixture_sha256=digest,
+        serving_mode=serving_mode,
+        inject_latency=tuple(sorted((str(k), str(v)) for k, v in profile.items())),
+    )
+
+
+def _replay_shape(
+    table: Mapping[str, Any], where: str, path: Path, *, complete: bool
+) -> dict[str, Any]:
+    """The ``replay_*`` keys ``table`` states, flat, like :func:`_resources`."""
+    if complete:
+        missing = sorted(set(REPLAY_FIELDS) - set(table))
+        if missing:
+            raise PlanError(
+                f"'{where}' in {path} is missing {', '.join(missing)} — a plan with a "
+                "replay backend sizes it in defaults, so every case resolves one"
+            )
+    return {
+        field: _positive_int(table[field], field, where, path)
+        for field in REPLAY_FIELDS
         if field in table
     }
 
@@ -879,6 +1054,7 @@ class _Context:
     heap: HeapConfig
     adapters: Mapping[str, LoadedCommandAdapter]
     auth_role: str | None
+    replay: ReplayBackend | None
     path: Path
 
 
@@ -1270,6 +1446,7 @@ def _case(
         machine_type=machine_type,
         container_memory_gb=container_memory_gb,
     )
+    resolved_replay = _case_replay(tool, resolved, shape, context, path)
     chosen = tuple(
         (key, auth_role is not None) if key == "signed" else (key, value) for key, value in chosen
     )
@@ -1292,9 +1469,61 @@ def _case(
         heap_percent=context.heap.percent,
         axes=chosen,
         config=tuple(config.items()),
+        replay=resolved_replay,
     )
     _compile_inline(case, adapter, path)
     return case
+
+
+def _case_replay(
+    tool: str,
+    resolved: Mapping[str, Any],
+    shape: tuple[int, int],
+    context: _Context,
+    path: Path,
+) -> ReplayServer | None:
+    """The sidecar this case gives its replay server, checked against the box.
+
+    Two allocations share one machine, so they are checked against it together:
+    a plan that hands eight cores to the subject and eight to the server on an
+    eight-core box has written something that cannot run, and it should be told
+    so while it is still a file rather than after a VM has booted.
+    """
+    if context.replay is None:
+        stated = sorted(field for field in REPLAY_FIELDS if field in resolved)
+        if stated:
+            raise PlanError(
+                f"'tools.{tool}' in {path} sizes a replay server ({', '.join(stated)}) "
+                "but the plan declares no [replay] block"
+            )
+        return None
+
+    server = ReplayServer(
+        vcpus=int(resolved["replay_vcpus"]),
+        memory_gb=int(resolved["replay_memory_gb"]),
+        parquet_connections=int(resolved["replay_parquet_connections"]),
+    )
+    box_vcpus, box_memory_gb = shape
+
+    # `vcpus`/`memory_gb` keep meaning THE BOX, as they always have -- it is the
+    # pair instances.yaml resolves a machine type from, and changing that under a
+    # reader would silently re-point every existing plan. The server's share is
+    # therefore carved out of the box and the subject gets the remainder, which
+    # is also how the two containers are actually pinned: disjoint cpusets over
+    # one machine's cores.
+    if server.vcpus >= box_vcpus:
+        raise PlanError(
+            f"'tools.{tool}' in {path} gives the replay server {server.vcpus} of "
+            f"{box_vcpus} vCPU, leaving the subject {box_vcpus - server.vcpus} — the "
+            "server's share is carved out of the box, so it must leave the subject at "
+            "least one core"
+        )
+    if server.memory_gb >= box_memory_gb:
+        raise PlanError(
+            f"'tools.{tool}' in {path} gives the replay server {server.memory_gb} GB of "
+            f"a {box_memory_gb} GB box, leaving the subject none"
+        )
+    return server
 
 
 def _purpose(
