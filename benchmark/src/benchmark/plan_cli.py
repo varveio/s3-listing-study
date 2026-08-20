@@ -68,14 +68,12 @@ def _replay_projection(
         container_memory_gb=case.resources.container_memory_gb,
     )
     backend, allocation = config.backend, config.allocation
-    manifest = backend.reference_manifest_sha256 or "-"
     image = backend.server_image_uri.rsplit("@sha256:", 1)
     image_summary = f"{image[0].rsplit('/', 1)[-1]}@sha256:{image[1][:12]}…"
     latency = ",".join(f"{shape}={delay}ms" for shape, delay in backend.latency_deadlines_ms)
     compact = (
         f"{config.capacity_status.upper()} server={image_summary} "
         f"fixture={backend.fixture_sha256[:12]}… "
-        f"manifest={manifest[:12]}{'…' if manifest != '-' else ''} "
         f"{backend.serving_mode} profile={latency} "
         f"scale={backend.latency_scale} jitter={backend.latency_jitter} "
         f"server={allocation.replay_vcpus}vCPU/{allocation.replay_memory_gb}GiB "

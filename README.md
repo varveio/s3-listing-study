@@ -161,8 +161,10 @@ sees the same captured listing, declared latency treatment, and controlled
 backend. That lets the study eliminate clearly slower candidates without making
 many high-fan-out tools contend for the same live S3 key ranges. The replay
 server is part of the measuring instrument, so every attempt must carry exact
-fixture identity, correctness verification, server identity, and evidence that
-the server was not the bottleneck. Replay results are labeled synthetic.
+fixture and server identity plus evidence that the server was not the
+bottleneck. The worker records row count after timing and retains the raw
+product; routine reporting reads only `result.json`. Replay results are labeled
+synthetic.
 
 **Real S3 validates the finalists.** Once replay has narrowed each tool to its
 strongest configuration or small candidate set, a few fresh-VM runs execute one

@@ -21,7 +21,7 @@ Four groups of inputs go into the hash:
 | Group | What it covers |
 | --- | --- |
 | **Environment** | The values the harness acts on: auth role, target bucket/region/prefix, location, machine type, vCPUs, memory, container ceiling, output target, timeout — and, for a case that consumes an artifact, the artifact's content digest (`model.md` makes `input_artifact_sha256` a hash input; a case consuming nothing omits the key) |
-| **Replay** | When present, the complete resolved replay document: pinned server implementation, fixture and reference-manifest bindings, serving and latency treatment, capacity status, and every independent subject/server allocation and control |
+| **Replay** | When present, the complete resolved replay document: pinned server implementation, fixture binding, serving and latency treatment, capacity status, and every independent subject/server allocation and control |
 | **Config** | The capsule's own keys, `{}` when empty |
 | **What ran it** | The tool slice and the platform slice |
 

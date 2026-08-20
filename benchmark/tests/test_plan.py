@@ -921,8 +921,6 @@ def test_every_key_a_row_may_state_changes_the_case_it_resolves_to(tmp_path: Pat
         "  capacity_status: calibrated\n"
         f"  server_image_uri: example/replay-server@sha256:{'b' * 64}\n"
         f"  fixture_sha256: {'a' * 64}\n"
-        "  reference_manifest_uri: gs://example/reference.tsv.gz\n"
-        f"  reference_manifest_sha256: {'c' * 64}\n"
         "  serving_mode: sorted\n"
         "  latency_model:\n"
         "    deadlines_ms: {worker_page: 247, pivot_probe: 41, structure_probe: 49}\n"

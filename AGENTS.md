@@ -24,8 +24,9 @@ amd64 through the now-retired groundwork attempt engine — `aws-cli`, `s5cmd`, 
 `minio-mc`, `s3-fast-list` and Swath anonymously, and `s3p`, `s3kor`, `s4cmd`
 and `ps3` with a credential, which previously blocked them. Running is not
 verifying: those retired-engine attempts carry no verdict and were never bound
-to the current verifier. The comparative harness now has a manifest-backed
-replay oracle, but no campaign has exercised it. Per-tool status:
+to the current verifier. The replay harness now retains each raw product and
+reports the row count measured inside the worker, but no campaign has exercised
+that path. Per-tool status:
 `tools/README.md`.
 
 ## Project principles

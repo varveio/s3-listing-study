@@ -272,8 +272,6 @@ def replay_document(
         "backend": {
             "server_image_uri": "registry/replay@sha256:" + "1" * 64,
             "fixture_sha256": "2" * 64,
-            "reference_manifest_uri": str(manifest),
-            "reference_manifest_sha256": digest,
             "serving_mode": "sorted",
             "latency_model": {
                 "deadlines_ms": {
@@ -381,291 +379,26 @@ def test_agreement_within_one_bucket_passes(tmp_path: Path) -> None:
     assert [stratum["verdict"] for stratum in report["buckets"][0]["strata"]] == ["PASS"]
 
 
-def test_one_replay_subject_passes_against_its_bound_manifest(tmp_path: Path) -> None:
-    manifest = tmp_path / "manifest.tsv.gz"
-    replay = replay_document(manifest, write_manifest(manifest))
+def test_replay_content_verification_is_refused_without_reading_raw_products(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    replay = replay_document(tmp_path / "unused.tsv.gz", "0" * 64)
     con = fixture_ledger(tmp_path)
     attempt = record(con, tmp_path, tool="alpha", digest="aaaa", replay=replay)
     write_evidence(attempt, **replay_evidence(replay))
+    monkeypatch.setattr(
+        verify,
+        "stage_evidence",
+        lambda *_args, **_kwargs: pytest.fail("replay verifier must not stage raw evidence"),
+    )
 
     code, report = verify.verify_group(
         con, "g1", adapter_root=adapter_root(tmp_path, "alpha"), write_record=True
     )
-    comparison = report["buckets"][0]["strata"][0]["comparisons"][0]
-    assert (code, report["verdict"], comparison["verdict"]) == (0, "PASS", "PASS")
-    assert comparison["replay_diagnostics"]["request_count_before"] == 0
-    assert comparison["replay_diagnostics"]["request_count_after"] == 2
-    written = json.loads((Path(attempt.result_prefix) / "verify.json").read_text())
-    assert written["reference_manifest_sha256"] == sha256_of(manifest)
-    assert "reference_attempt_id" not in written
 
-
-@pytest.mark.parametrize(
-    ("listing", "difference"),
-    [
-        pytest.param(("a/one 1",), "missing", id="missing"),
-        pytest.param((*LISTING, "z/extra 3"), "extra", id="extra"),
-        pytest.param((*LISTING, "a/two 2"), "duplicates", id="duplicate"),
-    ],
-)
-def test_replay_missing_extra_or_duplicate_fails(
-    tmp_path: Path, listing: tuple[str, ...], difference: str
-) -> None:
-    manifest = tmp_path / "manifest.tsv.gz"
-    replay = replay_document(manifest, write_manifest(manifest))
-    con = fixture_ledger(tmp_path)
-    attempt = record(con, tmp_path, tool="alpha", digest="aaaa", replay=replay)
-    write_evidence(attempt, listing=listing, **replay_evidence(replay))
-    _code, report = verify.verify_group(
-        con, "g1", adapter_root=adapter_root(tmp_path, "alpha"), write_record=False
-    )
-    comparison = report["buckets"][0]["strata"][0]["comparisons"][0]
-    assert comparison["verdict"] == "FAIL"
-    assert comparison["diff"][difference]
-
-
-def test_two_wrong_but_agreeing_replay_tools_cannot_pass(tmp_path: Path) -> None:
-    manifest = tmp_path / "manifest.tsv.gz"
-    replay = replay_document(manifest, write_manifest(manifest))
-    con = fixture_ledger(tmp_path)
-    for tool, digest in (("alpha", "aaaa"), ("beta", "bbbb")):
-        attempt = record(con, tmp_path, tool=tool, digest=digest, replay=replay)
-        write_evidence(attempt, listing=("wrong 1",), **replay_evidence(replay))
-    _code, report = verify.verify_group(
-        con, "g1", adapter_root=adapter_root(tmp_path, "alpha", "beta"), write_record=False
-    )
-    comparisons = report["buckets"][0]["strata"][0]["comparisons"]
-    assert [comparison["verdict"] for comparison in comparisons] == ["FAIL", "FAIL"]
-
-
-def test_replay_manifest_digest_mismatch_is_incomplete(tmp_path: Path) -> None:
-    manifest = tmp_path / "manifest.tsv.gz"
-    write_manifest(manifest)
-    replay = replay_document(manifest, "0" * 64)
-    con = fixture_ledger(tmp_path)
-    attempt = record(con, tmp_path, tool="alpha", digest="aaaa", replay=replay)
-    write_evidence(attempt, **replay_evidence(replay))
-    code, report = verify.verify_group(
-        con, "g1", adapter_root=adapter_root(tmp_path, "alpha"), write_record=False
-    )
     assert code == EXIT_INCOMPLETE_GROUP
-    assert report["buckets"][0]["gaps"][0]["reason"] == "manifest"
-
-
-def test_missing_replay_observation_is_a_gap(tmp_path: Path) -> None:
-    manifest = tmp_path / "manifest.tsv.gz"
-    replay = replay_document(manifest, write_manifest(manifest))
-    con = fixture_ledger(tmp_path)
-    attempt = record(con, tmp_path, tool="alpha", digest="aaaa", replay=replay)
-    write_evidence(attempt, replay=replay, replay_evidence=None)
-    _code, report = verify.verify_group(
-        con, "g1", adapter_root=adapter_root(tmp_path, "alpha"), write_record=False
-    )
-    assert report["verdict"] == "INCOMPLETE"
-    assert report["buckets"][0]["gaps"][0]["reason"] == "replay-evidence"
-
-
-@pytest.mark.parametrize("purpose", ("diagnostic", "canary"))
-def test_uncalibrated_replay_diagnostic_is_verified_without_becoming_a_measurement(
-    tmp_path: Path, purpose: str
-) -> None:
-    """A real ledger row plus result and manifest produces only evidence output."""
-    manifest = tmp_path / "manifest.tsv.gz"
-    replay = replay_document(manifest, write_manifest(manifest), capacity_status="uncalibrated")
-    con = fixture_ledger(tmp_path)
-    attempt = record(con, tmp_path, tool="alpha", digest="aaaa", purpose=purpose, replay=replay)
-    write_evidence(attempt, **replay_evidence(replay))
-
-    code, report = verify.verify_group(
-        con, "g1", adapter_root=adapter_root(tmp_path, "alpha"), write_record=True
-    )
-
-    assert (code, report["subjects"], report["diagnostic_subjects"], report["verdict"]) == (
-        0,
-        0,
-        1,
-        "PASS",
-    )
-    assert report["buckets"] == []
-    diagnostic = report["diagnostics"][0]
-    assert diagnostic["verification"]["verdict"] == "PASS"
-    assert diagnostic["capacity_status"] == "uncalibrated"
-    record_json = json.loads((Path(attempt.result_prefix) / "verify.json").read_text())
-    assert record_json["reference_manifest_sha256"] == sha256_of(manifest)
-
-
-def test_same_bucket_replay_diagnostics_stage_their_manifest_independently(tmp_path: Path) -> None:
-    manifest = tmp_path / "manifest.tsv.gz"
-    replay = replay_document(manifest, write_manifest(manifest), capacity_status="uncalibrated")
-    con = fixture_ledger(tmp_path)
-    attempts = [
-        record(
-            con,
-            tmp_path,
-            tool="alpha",
-            digest="aaaa",
-            purpose="diagnostic",
-            replay=replay,
-        )
-        for _ in range(2)
-    ]
-    for attempt in attempts:
-        write_evidence(attempt, **replay_evidence(replay))
-
-    code, report = verify.verify_group(
-        con, "g1", adapter_root=adapter_root(tmp_path, "alpha"), write_record=True
-    )
-
-    assert (code, report["diagnostic_subjects"], report["diagnostic_verdict"]) == (0, 2, "PASS")
-    assert all((Path(attempt.result_prefix) / "verify.json").is_file() for attempt in attempts)
-
-
-@pytest.mark.parametrize(
-    ("counter", "after_count", "detail"),
-    [
-        pytest.param(
-            "swath.replay.http.requests",
-            0,
-            "request counter did not increase",
-            id="no-request-activity",
-        ),
-        pytest.param(
-            "swath.replay.http.errors",
-            1,
-            "error counter increased",
-            id="server-errors",
-        ),
-    ],
-)
-def test_replay_evidence_requires_request_activity_without_server_errors(
-    tmp_path: Path, counter: str, after_count: int, detail: str
-) -> None:
-    manifest = tmp_path / "manifest.tsv.gz"
-    replay = replay_document(manifest, write_manifest(manifest), capacity_status="uncalibrated")
-    con = fixture_ledger(tmp_path)
-    attempt = record(
-        con,
-        tmp_path,
-        tool="alpha",
-        digest="aaaa",
-        purpose="diagnostic",
-        replay=replay,
-    )
-    evidence = replay_evidence(replay)
-    after = evidence["replay_evidence"]["after"]
-    assert isinstance(after, dict)
-    meters = after["metrics"]["meters"]
-    assert isinstance(meters, list)
-    for meter in meters:
-        if meter["name"] == counter:
-            meter["count"] = after_count
-    write_evidence(attempt, **evidence)
-
-    _code, report = verify.verify_group(
-        con, "g1", adapter_root=adapter_root(tmp_path, "alpha"), write_record=False
-    )
-
-    gap = report["diagnostics"][0]["gaps"][0]
-    assert gap["reason"] == "replay-evidence"
-    assert detail in gap["detail"]
-
-
-@pytest.mark.parametrize(
-    ("field", "detail"),
-    [
-        pytest.param("samples", "no interval metrics sample", id="no-interval-metrics"),
-        pytest.param("resource_samples", "no resource sample", id="no-resource-sample"),
-    ],
-)
-def test_calibrated_replay_requires_interval_and_resource_samples(
-    tmp_path: Path, field: str, detail: str
-) -> None:
-    manifest = tmp_path / "manifest.tsv.gz"
-    replay = replay_document(manifest, write_manifest(manifest))
-    con = fixture_ledger(tmp_path)
-    attempt = record(con, tmp_path, tool="alpha", digest="aaaa", replay=replay)
-    evidence = replay_evidence(replay)
-    evidence["replay_evidence"][field] = []
-    write_evidence(attempt, **evidence)
-
-    _code, report = verify.verify_group(
-        con, "g1", adapter_root=adapter_root(tmp_path, "alpha"), write_record=False
-    )
-
-    gap = report["buckets"][0]["gaps"][0]
-    assert gap["reason"] == "replay-evidence"
-    assert detail in gap["detail"]
-
-
-def test_replay_diagnostic_group_with_an_owed_slot_is_incomplete(tmp_path: Path) -> None:
-    manifest = tmp_path / "manifest.tsv.gz"
-    replay = replay_document(manifest, write_manifest(manifest), capacity_status="uncalibrated")
-    con = fixture_ledger(tmp_path)
-    attempt = record(
-        con,
-        tmp_path,
-        tool="alpha",
-        digest="aaaa",
-        purpose="diagnostic",
-        replay=replay,
-    )
-    write_evidence(attempt, **replay_evidence(replay))
-    add_slot(con, state="BLOCKED")
-
-    code, report = verify.verify_group(
-        con, "g1", adapter_root=adapter_root(tmp_path, "alpha"), write_record=False
-    )
-
-    assert (code, report["complete"], report["verdict"]) == (
-        EXIT_INCOMPLETE_GROUP,
-        False,
-        "INCOMPLETE",
-    )
-
-
-def test_uncalibrated_replay_measurement_is_refused(tmp_path: Path) -> None:
-    manifest = tmp_path / "manifest.tsv.gz"
-    replay = replay_document(manifest, write_manifest(manifest), capacity_status="uncalibrated")
-    con = fixture_ledger(tmp_path)
-    attempt = record(con, tmp_path, tool="alpha", digest="aaaa", replay=replay)
-    write_evidence(attempt, **replay_evidence(replay))
-
-    code, report = verify.verify_group(
-        con, "g1", adapter_root=adapter_root(tmp_path, "alpha"), write_record=True
-    )
-
-    assert (code, report["verdict"]) == (EXIT_INCOMPLETE_GROUP, "INCOMPLETE")
-    assert report["buckets"][0]["gaps"][0]["reason"] == "uncalibrated-capacity"
+    assert report["buckets"][0]["gaps"][0]["reason"] == "replay-row-count-only"
     assert not (Path(attempt.result_prefix) / "verify.json").exists()
-
-
-def test_replay_mtime_mismatch_is_fail_not_drift() -> None:
-    diff = {
-        "missing": [],
-        "extra": [],
-        "duplicates": [],
-        "reference_duplicates": [],
-        "mismatches": [{"key": "a", "field": "mtime", "tool": "later", "reference": "fixed"}],
-    }
-    assert verify.verdict_for(diff) == "DRIFT"
-    assert verify.replay_verdict_for(diff) == "FAIL"
-
-
-def test_successful_replay_rate_counts_only_after_oracle_pass(tmp_path: Path) -> None:
-    manifest = tmp_path / "manifest.tsv.gz"
-    replay = replay_document(manifest, write_manifest(manifest))
-    con = fixture_ledger(tmp_path)
-    good = record(con, tmp_path, tool="alpha", digest="aaaa", statistic="rate", replay=replay)
-    write_evidence(good, **replay_evidence(replay))
-    bad = record(con, tmp_path, tool="beta", digest="bbbb", statistic="rate", replay=replay)
-    write_evidence(bad, listing=("wrong 1",), **replay_evidence(replay))
-    _code, report = verify.verify_group(
-        con, "g1", adapter_root=adapter_root(tmp_path, "alpha", "beta"), write_record=False
-    )
-    assert [(rate["tool"], rate["successes"]) for rate in report["buckets"][0]["rates"]] == [
-        ("alpha", 1),
-        ("beta", 0),
-    ]
 
 
 def test_a_product_published_compressed_is_compared_as_its_bytes(tmp_path: Path) -> None:

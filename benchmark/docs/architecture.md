@@ -16,7 +16,7 @@ which one is not a matter of taste:
 | Place | Holds | Read by |
 | --- | --- | --- |
 | **The ledger** — one SQLite file | What was submitted, under what identity, where its evidence went, and how it settled | The controller, and anyone asking what happened |
-| **The object store** | The evidence itself: the listing, the logs, the measurement | `verify` and `report`, on demand |
+| **The object store** | The evidence itself: the listing, the logs, the measurement | `report` reads `result.json`; explicit real-S3 verification may read retained products |
 | **The subject's argv** | Everything about *how the tool was asked to list* | Only the tool |
 
 The boundaries are one-way. The ledger never holds evidence; the object store
@@ -49,9 +49,8 @@ environment, where the evidence was written, the provider request that was
 frozen, and the state that request reached.
 
 It does **not** hold results, metrics, or verdicts. Those live in the evidence
-objects and are recomputed by `verify` and `report` every time. A stored verdict
-is a second answer to a settled question, and the two can disagree — at which
-point you have to decide which to believe, with nothing to decide it on.
+objects. Routine reporting binds the stored `result.json`; replay listings are
+not fetched, normalized, or compared.
 
 The same rule appears everywhere in this design, so it is worth naming once:
 **never store a second answer to a settled question.** `attempt_id` is generated

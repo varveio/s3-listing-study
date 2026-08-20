@@ -66,28 +66,12 @@ tool enforces for you; a missing item surfaces as a provider error mid-campaign.
    the campaign would refuse fails here instead. The revision must be clean and
    `HEAD`, exactly as for the build. Shape is in
    [`../README.md`](../README.md) § *Campaign image set*.
-5. **Replay manifest built and published**, for a replay measurement. Build it
-   from the exact sorted Parquet parts that the pinned server image serves:
-
-   ```sh
-   uv run python -m benchmark.replay_manifest /secure/fixture-parts \
-     --fixture-sha256 <the plan's 64-hex fixture digest> \
-     --output /secure/idc-open-data.reference.tsv.gz \
-     --upload gs://my-results/reference/idc-open-data.tsv.gz \
-     --descriptor /secure/idc-open-data.reference.json
-   ```
-
-   The builder reads parts in lexical path order, refuses schema drift,
-   duplicate/out-of-order or unframeable keys, writes reproducible gzip bytes,
-   and publishes with a create-only precondition. Copy the descriptor's
-   `reference_manifest_uri` and `manifest_sha256` into the plan together. A
-   replay `measurement` row without both is a load-time refusal. A diagnostic
-   may omit them only for endpoint/evidence collection: verification then stays
-   incomplete and writes no `verify.json`. Even a manifest-bound diagnostic
-   cannot create a comparative timing/rate result, advance, or eliminate a
-   candidate. Its plan must remain `replay.capacity_status: uncalibrated` until
-   a real manifest-bound diagnostic capacity canary has a committed receipt;
-   only then may a plan state `calibrated` and admit replay measurement rows.
+5. **Replay fixture identity pinned.** The replay server image and fixture digest
+   in the plan bind what is served. No correctness manifest is generated or
+   bound. The worker counts rows inside the container after timing, uploads raw
+   products for manual investigation, and publishes `result.json` last. Keep
+   `replay.capacity_status: uncalibrated` until a real diagnostic capacity
+   canary has a committed receipt.
 6. **Credential secret**, if any case signs: one
    `projects/<p>/secrets/<s>/versions/<v>` resource whose payload is the
    `KEY=VALUE` lines described in
@@ -339,16 +323,12 @@ reads that group from the recorded rows — never a re-resolved plan
 compares every `purpose = 'measurement'` attempt within a stratum — one
 target bucket, one `(product, fields)`. For real S3, attempts are compared with
 the other subjects in that stratum: `PASS` means agreement over a live corpus,
-not independent ground truth. For replay, each successful attempt is compared
-directly with the immutable manifest bound into its ledger row. Agreement
-between replay subjects is never the oracle, and immutable mtime mismatches are
-`FAIL`, not `DRIFT`. Read [`../README.md`](../README.md) § *S3 agreement and
-replay ground truth are different verdicts* before quoting either.
+not independent ground truth. Replay is outside this content-verification path:
+`verify` refuses it without staging raw products, while routine replay reporting
+uses the row count in bound `result.json`.
 
 A `statistic: rate` case is reported as successes over attempts and takes no
-part in real-S3 cross-tool agreement. A replay attempt counts as a success only
-after its output passes the bound manifest; a clean process exit with the wrong
-listing remains a failed trial.
+part in real-S3 cross-tool agreement.
 
 Exit code is worst-wins across the whole group:
 

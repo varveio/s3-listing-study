@@ -45,10 +45,10 @@ facts under `tools/<tool>/build/`.
   - `campaign.py` creates and manages benchmark-owned Batch jobs in `campaign.db`.
   - `measure.py` runs exactly one selected subject and captures its raw outputs
     and metrics. It is the image entrypoint.
-  - `replay_manifest.py` deterministically derives the replay correctness oracle
-    from the exact sorted Parquet fixture before that fixture is used by a plan.
-  - `verify.py` compares normalized outputs; `report.py` binds results to
-    controller state and renders analysis.
+  - `verify.py` is the explicit real-S3 content-comparison path; replay is
+    row-count-only and is refused there without staging raw products.
+  - `report.py` binds `result.json` summaries to controller state and renders
+    row counts, timing, RSS, and replay-server evidence without reading listings.
   - `runtime/` is the contract layer the eleven capsule adapters import
     (`benchmark.runtime.*`); it runs both inside the image and orchestrator-side
     during verification.
@@ -134,35 +134,32 @@ uv run python benchmark/src/benchmark/campaign.py submit \
   --secret-resource projects/varve-oss/secrets/s3-listing-study-aws-credentials/versions/latest
 
 uv run python benchmark/src/benchmark/campaign.py poll --watch
-uv run python benchmark/src/benchmark/verify.py --state campaign.db --group g20260816-000000
 uv run python benchmark/src/benchmark/report.py --state campaign.db --group g20260816-000000
 ```
 
 The controller records intent before creating a job. A retry receives a fresh
 ordinal, job name, and result prefix; no code adopts a job or image from a
-different launch. A result marker is uploaded last, and `verify`/`report`
-refuse unbound or inconsistent results. The full operator runbook — submit,
-poll, retry, cancel, verify, report — is
+different launch. A result marker is uploaded last, and `report` refuses
+unbound or inconsistent results. The full operator runbook — submit, poll,
+retry, cancel, report, and explicit real-S3 verification — is
 [`docs/running.md`](docs/running.md).
 
 ## Minimum rigor and deliberate limitations
 
 The harness preserves raw output, binds every result to the recorded job request
 and immutable toolbox identity, scans all retained bytes for credential material,
-and publishes `result.json` only after the other attempt artifacts. Verification
-refuses incomplete, failed, malformed, or unbound evidence instead of turning it
-into a comparison verdict. These controls make an attempt auditable, but they do
-not provide the stronger guarantees below.
+and publishes `result.json` only after the other attempt artifacts. Routine
+replay reporting reads that marker only. These controls make an attempt
+auditable; row count is not a content-correctness verdict.
 
 ### Attempt evidence is create-only
 
 The worker uploads attempt artifacts and the final `result.json` marker with
 `ifGenerationMatch=0`. A second execution cannot merge with or replace a
-deterministic attempt prefix. `verify.json` is derived analysis and may be
-regenerated; the report binds it to the immutable result and normalized hashes
-before accepting its verdict.
+deterministic attempt prefix. Raw listing products remain retained under that
+prefix for manual investigation, but routine replay reporting does not fetch them.
 
-### S3 agreement and replay ground truth are different verdicts
+### Replay reporting is row-count-only
 
 For real S3, verification compares completed attempts with one another. A
 `PASS` means their exposed fields agree; it does not prove either listing is
@@ -170,21 +167,19 @@ complete against an independently sealed manifest. The source bucket can change
 between attempts, so `mtime`-only differences are `DRIFT` and other differences
 remain `FAIL` because the verifier cannot infer their cause.
 
-For replay, every successful measurement attempt is compared independently
-with the immutable contract-v2 manifest whose URI and compressed-byte digest
-are in the case. Missing, extra, duplicate, or field-mismatched rows are `FAIL`,
-including mtime: a fixed fixture has no drift exception. Two wrong replay
-subjects agreeing with one another cannot pass.
+Replay records the worker's in-container `row_count` after the timed child exits.
+The worker uploads the untouched product and logs, then uploads `result.json`
+last. Campaign reporting binds and reads only that summary: it does not generate
+or require a correctness manifest, normalize rows, or issue a content verdict.
 
 ### Replay qualification precedes replay measurement
 
-A manifest-bound replay diagnostic canary validates the recorded backend
-binding, readiness, server evidence, and result/verification path. It receives
-a verdict and a `verify.json`, but it produces neither comparative timing nor rate data. Replay
+A replay diagnostic canary validates the recorded backend binding, readiness,
+server evidence, in-container row count, raw upload, and result/report path. It
+produces neither comparative timing nor rate data. Replay
 capacity is **UNCALIBRATED** while the plan's `replay.capacity_status` says
 `uncalibrated`; no replay measurement row is eligible. Set it to `calibrated`
-only after a real, manifest-bound diagnostic capacity canary has a committed
-receipt.
+only after a real diagnostic capacity canary has a committed receipt.
 
 ### Malformed or partial evidence is refused
 

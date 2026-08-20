@@ -70,8 +70,6 @@ def replay_document() -> dict[str, object]:
         "backend": {
             "server_image_uri": "registry/replay@sha256:" + "f" * 64,
             "fixture_sha256": "1" * 64,
-            "reference_manifest_uri": None,
-            "reference_manifest_sha256": None,
             "serving_mode": "sorted",
             "latency_model": {
                 "deadlines_ms": {

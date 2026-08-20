@@ -11,9 +11,9 @@ carry per-run wall-clock and RSS, but never as a comparison). All eleven
 subjects have now run at smoke on amd64 through the attempt engine: seven
 anonymously and `s3p`, `s3kor`, `s4cmd`, and `ps3` with a scoped credential.
 Those attempts establish that the retired groundwork path worked, not
-correctness: none is bound to the current comparative verifier. The current
-harness can compare replay attempts against a digest-bound reference manifest,
-but no campaign has exercised that path. See `../tools/README.md` for per-tool
+correctness: none is bound to the current comparative verifier. The replay path
+records in-container row counts and retains raw products, but no campaign has
+exercised it. See `../tools/README.md` for per-tool
 status and `smoke-bucket.md` for the historical reference snapshot.
 
 **Protocol note.** The comparative measurement plan predates comparative
@@ -47,8 +47,8 @@ while every worker-container execution mints its own attempt UUID below that
 prefix. The benchmark controller discovers only immediate UUID children with a
 delimiter listing and reads their exact `result.json` summaries, which the
 worker uploads last as completion markers. Raw listings remain in the same GCS
-attempt trees and are fetched only for
-correctness verification or investigation. Multiple current-submission UUID
+attempt trees. Replay reporting never fetches them; explicit real-S3 correctness
+work or manual investigation may. Multiple current-submission UUID
 children under one run are duplicate executions; reporting surfaces all and
 selects none as canonical. Historical retry leaves remain visible without
 competing with current-submission evidence.
@@ -365,8 +365,9 @@ Replay supplies four observations that the wide real-S3 search could not isolate
 The server is part of the measuring instrument and must earn trust for every
 screening attempt. Before a replay result can advance or eliminate a candidate:
 
-1. the fixture has an immutable content identity and a reference manifest;
-2. the subject's native result passes completeness and duplicate verification;
+1. the fixture has an immutable content identity;
+2. the worker records an in-container row count after timing and retains the
+   untouched native product;
 3. the complete server image, serving mode, latency treatment, and allocation
    are part of case identity and the receipt;
 4. the attempt retains server meters and interval-aligned cpuset-utilization
@@ -375,9 +376,9 @@ screening attempt. Before a replay result can advance or eliminate a candidate:
 5. any known protocol divergence affecting that subject's request pattern is
    fixed or makes the attempt ineligible for comparison.
 
-A diagnostic canary checks the endpoint, backend binding, replay evidence, and
-verification/reporting path, but creates no comparative timing or rate result.
-Replay capacity is **UNCALIBRATED** until a manifest-bound diagnostic capacity
+A diagnostic canary checks the endpoint, backend binding, replay evidence,
+row-count, upload, and result/report path, but creates no comparative timing or
+rate result. Replay capacity is **UNCALIBRATED** until a diagnostic capacity
 canary has a committed receipt. A plan states that condition explicitly as
 `replay.capacity_status: uncalibrated`; no replay measurement is eligible before
 the status is changed to `calibrated`.
@@ -454,8 +455,7 @@ what they need to rebuild the run.
 
 ## Execution order
 
-1. Build and validate the benchmark toolbox, measurement worker, and correctness
-   verifier once.
+1. Build and validate the benchmark toolbox and measurement worker once.
 2. At smoke scale, work per tool: read its docs and source, select or build its
    pinned image, then execute every supported listing mode. Reading and smoke
    necessarily interleave within a tool because its invocation cannot be
@@ -467,7 +467,7 @@ what they need to rebuild the run.
    subject touches them.
 5. **Qualify replay before measuring it.** A diagnostic canary first shows that
    the endpoint, backend binding, campaign configuration, runner, and reporter
-   work together without producing a comparison. That manifest-bound diagnostic
+   work together without producing a comparison. That diagnostic
    capacity canary receives a committed receipt before its plan is marked
    `calibrated` and scale spending begins.
 6. Run the replay screening and configuration sweeps under their predeclared

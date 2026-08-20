@@ -21,8 +21,8 @@ auth_role: public-read
 
 # The backend, stated once because none of it varies per case.
 replay:
-  # This manifest-bound diagnostic can complete correctness verification, but
-  # cannot make a comparative measurement or calibrate replay capacity.
+  # This diagnostic proves the provider, replay, row-count, and result-summary
+  # path. It cannot make a comparative measurement or calibrate replay capacity.
   capacity_status: uncalibrated
   # The fixture rides a layer of the server's own image, so the bytes served are
   # already part of an identity the attempt records. `fixture_sha256` is a digest
@@ -31,8 +31,6 @@ replay:
   # comparison.
   server_image_uri: us-east1-docker.pkg.dev/varve-oss/s3-listing-study/replay-server@sha256:78a22c71cb25792a5f28af3e1e43afeab766f5161d939004bed4c8b50e97ca91
   fixture_sha256: 943786a189afa827cb78a74ff0f0cc9f08ae13b5dbd547d3a19f60e0a3de304c
-  reference_manifest_uri: gs://s3-listing-study-results-29c02004/reference/idc-open-data/fixture-943786a189afa827/contract-v2.tsv.gz
-  reference_manifest_sha256: fae4b5685bc07d53a34e2087817023012c3716e241bb793ec7000d2f8da69fa9
   # Stated, never inferred. There used to be an `auto` that chose between sorted
   # and DuckDB serving; it was removed upstream precisely because a backend that
   # quietly becomes a different backend cannot be compared against itself.
@@ -82,8 +80,8 @@ defaults:
 
 tools:
   # Swath first and, for now, alone. These rows calibrate the subject-resource
-  # and server-validity instrument; purpose=diagnostic means they validate
-  # evidence but cannot rank or eliminate a candidate. The replay block's
+  # and server-validity instrument; purpose=diagnostic means they validate the
+  # result-summary path but cannot rank or eliminate a candidate. The replay block's
   # capacity_status remains uncalibrated until a receipted canary permits a
   # separate measurement plan.
   swath:

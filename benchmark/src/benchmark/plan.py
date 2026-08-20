@@ -1462,17 +1462,11 @@ def _case_replay(
     purpose = _purpose(
         tool, resolved.get("purpose"), str(resolved["mode"]), context.adapters[tool], path
     )
-    if purpose == "measurement":
-        if replay.capacity_status != "calibrated":
-            raise PlanError(
-                f"'tools.{tool}' in {path} is a replay measurement while capacity_status is "
-                f"{replay.capacity_status!r}; replay capacity is not calibrated"
-            )
-        if context.replay.backend.reference_manifest_uri is None:
-            raise PlanError(
-                f"'tools.{tool}' in {path} is a replay measurement without a "
-                "reference_manifest_uri and reference_manifest_sha256"
-            )
+    if purpose == "measurement" and replay.capacity_status != "calibrated":
+        raise PlanError(
+            f"'tools.{tool}' in {path} is a replay measurement while capacity_status is "
+            f"{replay.capacity_status!r}; replay capacity is not calibrated"
+        )
     return replay
 
 

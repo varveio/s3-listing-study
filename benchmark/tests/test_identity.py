@@ -47,8 +47,6 @@ def test_every_replay_fact_changes_identity() -> None:
             "backend": {
                 "server_image_uri": f"registry/replay@sha256:{'1' * 64}",
                 "fixture_sha256": "2" * 64,
-                "reference_manifest_uri": "gs://reference/manifest",
-                "reference_manifest_sha256": "3" * 64,
                 "serving_mode": "sorted",
                 "latency_model": {
                     "deadlines_ms": {
@@ -77,8 +75,6 @@ def test_every_replay_fact_changes_identity() -> None:
     mutations = (
         ("backend.server_image_uri", f"registry/replay@sha256:{'4' * 64}"),
         ("backend.fixture_sha256", "5" * 64),
-        ("backend.reference_manifest_uri", "gs://reference/other"),
-        ("backend.reference_manifest_sha256", "6" * 64),
         ("backend.serving_mode", "duckdb"),
         ("backend.latency_model.deadlines_ms.worker_page", 108),
         ("backend.latency_model.scale", 0.5),

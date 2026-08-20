@@ -61,9 +61,8 @@ records what an attempt was for:
 | `diagnostic` | no | Reproduces a failure or probes a limit. `s4cmd` hitting a 3600s timeout is worth re-running under observation; it is not worth publishing as a timing. |
 
 `report` considers only `measurement` rows for comparative timing and rates.
-`verify` uses that same comparison population, but it may separately validate a
-replay canary or diagnostic against its manifest and write `verify.json`. Those
-rows remain outside every comparison.
+Replay canaries and diagnostics remain outside every comparison. Routine report
+binds their `result.json` summaries and does not consume their retained products.
 
 **A preparation is measured even though it is not compared.** If s3-fast-list
 needs 40 seconds of `ks-tool` to list in 60, then publishing 60 against another
@@ -708,7 +707,7 @@ One file accumulates every group, and several groups may be in flight at once.
 | `status` | Optional `--group` / `--case` filters; unfiltered prints the whole history, which is the point of accumulating. Blocked slots are shown alongside attempts — a group is not understood from its rows alone while it still owes one. |
 | `retry` | One group. Rows from other groups are skipped, not refused. |
 | `cancel` | Requires `--group`; without one it refuses rather than cancelling the file. |
-| `verify` | One group. Measurements form the comparison population; replay canaries and diagnostics are validated separately and never become measurements. |
+| `verify` | One group. Explicit real-S3 content comparison; replay is refused without staging raw products. |
 | `prune` | Deletes evidence objects for attempts that settled unsuccessfully, leaving every row. Requires `--group`, for the same reason `cancel` does: an unscoped delete over an accumulating file is the one mistake with no undo. |
 
 ### What verify binds against
@@ -752,9 +751,9 @@ not a comparison — so `verify` reports per bucket within the group it was give
 
 ## What is deliberately absent
 
-No results, metrics, or verdicts. Those live in the evidence objects and are
-recomputed by `verify` and `report` on demand — a cached verdict is a second
-answer to a settled question, and the two can disagree.
+No results, metrics, or verdicts. Those live in the evidence objects. Routine
+reporting reads bound `result.json` summaries; explicit real-S3 verification may
+derive a separate content verdict.
 
 Back the ledger up. Losing it does not destroy the evidence, but it costs the
 binding: `report` refuses results it cannot tie back to a recorded row.

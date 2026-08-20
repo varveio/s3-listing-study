@@ -87,8 +87,6 @@ replay:
   capacity_status: uncalibrated
   server_image_uri: registry/replay@sha256:<64 hex>
   fixture_sha256: <64 hex, over the served parts in key order>
-  reference_manifest_uri: gs://bucket/reference.tsv.gz
-  reference_manifest_sha256: <64 hex>
   serving_mode: sorted            # or duckdb; always stated, never inferred
   latency_model:
     deadlines_ms: {worker_page: 107, pivot_probe: 41, structure_probe: 49}
@@ -130,19 +128,10 @@ Reader-pool size and request-admission width are separate fields, and
 
 `capacity_status` is a simple plan fact, not another control surface:
 `uncalibrated` permits diagnostic replay work only, while `calibrated` permits
-manifest-bound replay measurements. Set it to `calibrated` only after a real,
-manifest-bound diagnostic capacity canary has a committed receipt for this
-backend and allocation family.
-
-`reference_manifest_*` may be absent only for non-measurement work such as a
-diagnostic or prerequisite preparation. Without them a diagnostic may exercise
-the endpoint and collect attempt evidence, but verification stays incomplete
-and writes no `verify.json`. A manifest-bound diagnostic validates that evidence
-without producing a comparative measurement; replay capacity stays
-**UNCALIBRATED** until a diagnostic capacity canary has a receipt. A
-replay-backed measurement without that binding is refused. The server image and
-fixture digest remain distinct identity facts even when fixture bytes happen to
-ride in the image.
+replay measurements. Set it to `calibrated` only after a real diagnostic
+capacity canary has a committed receipt for this backend and allocation family.
+Replay plans carry no correctness manifest: the worker counts rows in-container,
+retains raw products, and routine reporting reads `result.json` only.
 
 A `replay_*` key in a plan with no `replay:` block is refused, and so is a
 `replay:` block whose defaults do not size a server: a plan states its backend

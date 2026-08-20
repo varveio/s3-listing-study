@@ -208,15 +208,15 @@ def test_replay_case_slot_attempt_and_request_keep_one_canonical_document(
             "--serving-mode",
             "sorted",
             "--parquet-connections",
-            "40",
+            "20",
             "--max-concurrent-requests",
-            "1024",
+            "64",
             "--inject-latency",
             "worker_page=107ms,pivot_probe=41ms,structure_probe=49ms",
             "--latency-scale",
             "1.0",
         ],
-        "options": "--network host --cpuset-cpus=0-19 --memory=8g --memory-swap=8g",
+        "options": "--network host --cpuset-cpus=0-1 --memory=4g --memory-swap=4g",
     }
     assert server["environment"] == {
         "variables": {
@@ -231,7 +231,7 @@ def test_replay_case_slot_attempt_and_request_keep_one_canonical_document(
         expected,
     ]
     assert subject["container"]["options"] == (
-        "--network host --cpuset-cpus=20-27 --memory=8g --memory-swap=8g"
+        "--network host --cpuset-cpus=2-2 --memory=4g --memory-swap=4g"
     )
     assert attempt.secret_resource is None
     assert "environment" not in subject
@@ -244,7 +244,7 @@ def test_replay_case_slot_attempt_and_request_keep_one_canonical_document(
     assert "environment" not in signed_task
     assert "secretVariables" not in signed_server["environment"]
     assert signed_subject["environment"] == {"secretVariables": {CREDENTIAL_ENV_VAR: AUTH_SECRET}}
-    assert task["computeResource"] == {"cpuMilli": "32000", "memoryMib": "65536"}
+    assert task["computeResource"] == {"cpuMilli": "4000", "memoryMib": "16384"}
     assert task["maxRunDuration"] == "4805s"
     retried = campaign.retry_request_document(
         request,

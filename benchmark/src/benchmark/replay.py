@@ -1,9 +1,4 @@
-"""The one resolved replay contract shared by plan, provider, worker, and reports.
-
-This module owns values that change a replay case.  It intentionally does not
-own fixture-manifest contents or verdicts: the former is independently derived
-from fixture bytes and the latter belongs to replay verification.
-"""
+"""The one resolved replay contract shared by plan, provider, worker, and reports."""
 
 from __future__ import annotations
 
@@ -17,8 +12,6 @@ REPLAY_SPEC_VERSION = 3
 REPLAY_BLOCK_FIELDS = (
     "server_image_uri",
     "fixture_sha256",
-    "reference_manifest_uri",
-    "reference_manifest_sha256",
     "serving_mode",
     "latency_model",
 )
@@ -62,8 +55,6 @@ class ReplayBackend:
 
     server_image_uri: str
     fixture_sha256: str
-    reference_manifest_uri: str | None
-    reference_manifest_sha256: str | None
     serving_mode: str
     latency_deadlines_ms: tuple[tuple[str, int], ...]
     latency_scale: float
@@ -77,8 +68,6 @@ class ReplayBackend:
         return {
             "server_image_uri": self.server_image_uri,
             "fixture_sha256": self.fixture_sha256,
-            "reference_manifest_uri": self.reference_manifest_uri,
-            "reference_manifest_sha256": self.reference_manifest_sha256,
             "serving_mode": self.serving_mode,
             "latency_model": {
                 "deadlines_ms": dict(self.latency_deadlines_ms),
@@ -147,11 +136,7 @@ def parse_backend(value: object) -> ReplayBackend:
     unknown = sorted(set(value) - set(REPLAY_BLOCK_FIELDS))
     if unknown:
         raise ReplayError(f"replay backend has unknown field(s): {', '.join(map(str, unknown))}")
-    missing = sorted(
-        set(REPLAY_BLOCK_FIELDS)
-        - {"reference_manifest_uri", "reference_manifest_sha256"}
-        - set(value)
-    )
+    missing = sorted(set(REPLAY_BLOCK_FIELDS) - set(value))
     if missing:
         raise ReplayError(f"replay backend is missing {', '.join(missing)}")
     image = value.get("server_image_uri")
@@ -160,15 +145,6 @@ def parse_backend(value: object) -> ReplayBackend:
     fixture = value.get("fixture_sha256")
     if not isinstance(fixture, str) or _HEX64_RE.fullmatch(fixture) is None:
         raise ReplayError("replay fixture_sha256 is not a sha256 digest")
-    manifest_uri = value.get("reference_manifest_uri")
-    manifest_sha256 = value.get("reference_manifest_sha256")
-    if (manifest_uri is None) != (manifest_sha256 is None):
-        raise ReplayError("replay reference manifest URI and digest must appear together")
-    if manifest_uri is not None:
-        if not isinstance(manifest_uri, str) or not manifest_uri:
-            raise ReplayError("replay reference_manifest_uri is not a non-empty string")
-        if not isinstance(manifest_sha256, str) or _HEX64_RE.fullmatch(manifest_sha256) is None:
-            raise ReplayError("replay reference_manifest_sha256 is not a sha256 digest")
     mode = value.get("serving_mode")
     if mode not in SERVING_MODES:
         raise ReplayError(f"replay serving_mode must be one of {', '.join(SERVING_MODES)}")
@@ -194,8 +170,6 @@ def parse_backend(value: object) -> ReplayBackend:
     return ReplayBackend(
         server_image_uri=image,
         fixture_sha256=fixture,
-        reference_manifest_uri=manifest_uri,
-        reference_manifest_sha256=manifest_sha256,
         serving_mode=mode,
         latency_deadlines_ms=deadlines,
         latency_scale=float(scale),
@@ -236,7 +210,7 @@ def parse_plan(value: object) -> ReplayPlan:
     if not isinstance(value, Mapping):
         raise ReplayError("replay plan block is not an object")
     allowed = {*REPLAY_BLOCK_FIELDS, "capacity_status"}
-    required = allowed - {"reference_manifest_uri", "reference_manifest_sha256"}
+    required = allowed
     if set(value) - allowed or required - set(value):
         unknown = sorted(set(value) - allowed)
         missing = sorted(required - set(value))

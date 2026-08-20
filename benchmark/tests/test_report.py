@@ -257,19 +257,12 @@ def verified_group(tmp_path: Path) -> tuple[sqlite3.Connection, str]:
     return con, root
 
 
-def replay_document(manifest: Path) -> str:
-    body = b"".join(
-        f"{key}\t{size}\te{size}\t2026-01-01T00:00:00Z\tSTANDARD\n".encode()
-        for key, size in (line.split(" ") for line in LISTING)
-    )
-    manifest.write_bytes(gzip.compress(body, mtime=0))
+def replay_document(_unused: Path) -> str:
     return json.dumps(
         {
             "backend": {
                 "server_image_uri": "registry/replay@sha256:" + "b" * 64,
                 "fixture_sha256": "a" * 64,
-                "reference_manifest_uri": str(manifest),
-                "reference_manifest_sha256": sha256_of(manifest),
                 "serving_mode": "sorted",
                 "latency_model": {
                     "deadlines_ms": {
@@ -353,12 +346,12 @@ def rows_of(con: sqlite3.Connection, root: str) -> list[dict[str, object]]:
     return report.report_rows(ledger.attempt_rows(con), adapter_root=root)
 
 
-def test_a_verified_group_reports_its_verdicts(tmp_path: Path) -> None:
+def test_report_reads_bound_results_without_consuming_verify_records(tmp_path: Path) -> None:
     con, root = verified_group(tmp_path)
     rows = rows_of(con, root)
-    assert {row["evidence_state"] for row in rows} == {"VERIFIED", "VERIFY_UNAVAILABLE"}
+    assert {row["evidence_state"] for row in rows} == {"RESULT_BOUND"}
     assert report.report_exit_code(rows, blocked=[]) == 0
-    assert "PASS" in report.render_markdown(rows, blocked=[])
+    assert "no content comparison" in report.render_markdown(rows, blocked=[])
 
 
 def test_result_replay_document_is_bound_exactly_to_the_ledger(tmp_path: Path) -> None:
@@ -376,7 +369,7 @@ def test_result_replay_document_is_bound_exactly_to_the_ledger(tmp_path: Path) -
     write_evidence(attempt, replay_evidence=complete)
     root = adapter_root(tmp_path, "alpha")
     row = rows_of(con, root)[0]
-    assert row["evidence_state"] == "VERIFY_UNAVAILABLE"
+    assert row["evidence_state"] == "RESULT_BOUND"
     assert row["replay_state"] == "COMPLETE"
 
     write_evidence(attempt, replay={"different": True})
@@ -396,20 +389,16 @@ def test_s3_result_must_bind_an_explicit_null_replay(tmp_path: Path) -> None:
     assert row["evidence_state"] == "RESULT_MISMATCH"
 
 
-def test_replay_verify_record_binds_manifest_shape_and_reports_pass(tmp_path: Path) -> None:
+def test_replay_report_uses_result_json_and_declared_allocations(tmp_path: Path) -> None:
     replay = replay_document(tmp_path / "manifest.tsv.gz")
     con = fixture_ledger(tmp_path)
     attempt = record(con, tmp_path, tool="alpha", digest="aaaa", replay=replay)
     write_evidence(attempt, **complete_replay_evidence(replay))
     root = adapter_root(tmp_path, "alpha")
 
-    code, verification = verify.verify_group(con, "g1", adapter_root=root, write_record=True)
-    assert (code, verification["verdict"]) == (0, "PASS")
     row = rows_of(con, root)[0]
-    assert (row["evidence_state"], row["replay_state"], row["verdict"]) == (
-        "VERIFIED",
-        "COMPLETE",
-        "PASS",
+    assert (row["evidence_state"], row["replay_state"], row["row_count"]) == (
+        "RESULT_BOUND", "COMPLETE", 2
     )
     assert row["declared_server_allocation"] == "cpus=0-3;memory=8GiB"
     assert row["declared_subject_allocation"] == "cpus=4-7;memory=8GiB"
@@ -433,20 +422,16 @@ def test_uncalibrated_replay_diagnostic_stays_out_of_publishable_rows(tmp_path: 
     write_evidence(attempt, **complete_replay_evidence(replay_raw))
     root = adapter_root(tmp_path, "alpha")
 
-    verify.verify_group(con, "g1", adapter_root=root, write_record=True)
     row = rows_of(con, root)[0]
 
-    assert (row["capacity_status"], row["purpose"], row["verdict"]) == (
-        "UNCALIBRATED",
-        "diagnostic",
-        "PASS",
+    assert (row["capacity_status"], row["purpose"], row["evidence_state"]) == (
+        "UNCALIBRATED", "diagnostic", "RESULT_BOUND"
     )
     assert not report.is_timing(row)
-    assert report.stratum_lines([row]) == []
-    assert "0 verified timing(s)" in report.summary_line([row])
+    assert "0 successful timing(s)" in report.summary_line([row])
 
 
-def test_replay_rate_counts_only_oracle_passes(tmp_path: Path) -> None:
+def test_replay_rate_counts_bound_successes_without_inspecting_products(tmp_path: Path) -> None:
     replay = replay_document(tmp_path / "manifest.tsv.gz")
     con = fixture_ledger(tmp_path)
     good = record(con, tmp_path, tool="alpha", digest="aaaa", statistic="rate", replay=replay)
@@ -458,11 +443,9 @@ def test_replay_rate_counts_only_oracle_passes(tmp_path: Path) -> None:
         **complete_replay_evidence(replay),
     )
     root = adapter_root(tmp_path, "alpha")
-    verify.verify_group(con, "g1", adapter_root=root, write_record=True)
-
     rows = rows_of(con, root)
     assert report.rate_lines(rows) == [
-        "- `alpha.aaaa` (alpha text-full): 1/2 succeeded, rate 0.5000 over 2 attempt(s)"
+        "- `alpha.aaaa` (alpha text-full): 2/2 succeeded, rate 1.0000 over 2 attempt(s)"
     ]
 
 
@@ -484,8 +467,18 @@ def test_a_rate_case_renders_a_rate_and_a_sample_size(tmp_path: Path) -> None:
     ]
     # A rate case's surviving attempt is not a verified timing: the statistic is
     # the rate, and a mean over the survivors would be a survivorship result.
-    assert "0 verified timing(s)" in report.summary_line(rows)
-    assert report.stratum_lines(rows) == []
+    assert "0 successful timing(s)" in report.summary_line(rows)
+
+
+def test_accepted_count_failure_is_not_a_successful_timing(tmp_path: Path) -> None:
+    con = fixture_ledger(tmp_path)
+    attempt = record(con, tmp_path, tool="alpha", digest="aaaa", state="ACCEPTED")
+    write_evidence(attempt, row_count=None, row_count_error="count failed")
+
+    rows = rows_of(con, adapter_root(tmp_path, "alpha"))
+
+    assert rows[0]["evidence_state"] == "RESULT_BOUND"
+    assert "0 successful timing(s)" in report.summary_line(rows)
 
 
 def test_a_preparations_cost_rides_with_the_timing_it_enabled(tmp_path: Path) -> None:
@@ -502,11 +495,6 @@ def test_a_preparations_cost_rides_with_the_timing_it_enabled(tmp_path: Path) ->
     assert report.preparation_lines(rows) == [
         f"- `{measurement.attempt_id}` ran behind {preparation.attempt_id} (40.0s of preparation)"
     ]
-    # The preparation is measured, never compared.
-    assert report.stratum_lines(rows) == [
-        "- **text** [key,size,etag,mtime,storage_class]: 1 attempt(s) -- alpha/text-full "
-        "-- verdicts -"
-    ]
 
 
 def test_a_preparation_from_another_group_is_a_cost_this_report_cannot_state(
@@ -521,42 +509,20 @@ def test_a_preparation_from_another_group_is_a_cost_this_report_cannot_state(
     assert "crosses a group boundary" in report.preparation_lines(rows)[0]
 
 
-def test_each_bucket_is_its_own_section_and_its_own_strata(tmp_path: Path) -> None:
+def test_each_bucket_is_its_own_section(tmp_path: Path) -> None:
     con = fixture_ledger(tmp_path)
     for bucket, tool in (("bucket-one", "alpha"), ("bucket-two", "beta")):
         write_evidence(record(con, tmp_path, tool=tool, digest=bucket[-3:], bucket=bucket))
     rows = rows_of(con, adapter_root(tmp_path, "alpha", "beta"))
     markdown = report.render_markdown(rows, blocked=[])
     assert markdown.count("## bucket-") == 2
-    for bucket, tool in (("bucket-one", "alpha"), ("bucket-two", "beta")):
-        section = [row for row in rows if row["bucket"] == bucket]
-        assert report.stratum_lines(section) == [
-            f"- **text** [key,size,etag,mtime,storage_class]: 1 attempt(s) -- {tool}/text-full "
-            "-- verdicts -"
-        ]
-
-
-def test_a_key_only_mode_is_not_ranked_against_a_five_field_one(tmp_path: Path) -> None:
-    con = fixture_ledger(tmp_path)
-    write_evidence(record(con, tmp_path, tool="alpha", digest="aaaa"))
-    write_evidence(record(con, tmp_path, tool="beta", digest="bbbb", mode="text-keys"))
-    rows = rows_of(con, adapter_root(tmp_path, "alpha", "beta"))
-    assert [line.split(":")[0] for line in report.stratum_lines(rows)] == [
-        "- **text** [key]",
-        "- **text** [key,size,etag,mtime,storage_class]",
-    ]
-
-
-def test_a_canary_is_not_a_comparison_subject(tmp_path: Path) -> None:
+def test_a_canary_is_reported_without_becoming_a_timing(tmp_path: Path) -> None:
     con = fixture_ledger(tmp_path)
     write_evidence(record(con, tmp_path, tool="alpha", digest="aaaa"))
     write_evidence(record(con, tmp_path, tool="alpha", digest="cccc", purpose="canary"))
     rows = rows_of(con, adapter_root(tmp_path, "alpha"))
     assert len(rows) == 2
-    assert report.stratum_lines(rows) == [
-        "- **text** [key,size,etag,mtime,storage_class]: 1 attempt(s) -- alpha/text-full "
-        "-- verdicts -"
-    ]
+    assert sum(report.is_timing(row) for row in rows) == 1
 
 
 def test_evidence_naming_another_attempt_is_refused(tmp_path: Path) -> None:
@@ -613,7 +579,7 @@ def test_a_subject_killed_before_its_product_reports_its_failure_not_a_mismatch(
 
     rows = rows_of(con, adapter_root(tmp_path, "alpha"))
     assert report.result_semantic_errors(document) == []
-    assert rows[0]["evidence_state"] == "VERIFY_UNAVAILABLE"
+    assert rows[0]["evidence_state"] == "RESULT_BOUND"
     assert (rows[0]["exit"], rows[0]["max_rss_kb"]) == (137, 1024)
 
 
@@ -652,7 +618,7 @@ def test_a_setup_failure_reads_as_evidence_rather_than_a_broken_result(tmp_path:
     assert report.result_semantic_errors(document) == []
     assert verify.check_failed_subject(document) == f"subject exited {measure.EXIT_SETUP_FAILED}"
     rows = rows_of(con, adapter_root(tmp_path, "alpha"))
-    assert rows[0]["evidence_state"] == "VERIFY_UNAVAILABLE"
+    assert rows[0]["evidence_state"] == "RESULT_BOUND"
     # And the null is still load-bearing: a zero exit beside no execution is a
     # result that contradicts itself.
     assert report.result_semantic_errors({**document, "exit_code": 0}) == ["exit_code"]
@@ -691,17 +657,15 @@ def test_an_rss_figure_is_rendered_beside_the_floor_it_sits_on(tmp_path: Path) -
     assert "max_rss_floor_kb" in report.render_markdown(list(rows.values()), blocked=[])
 
 
-def test_a_verify_record_that_disagrees_with_its_own_diff_is_not_a_verdict(
+def test_report_ignores_a_verify_record_and_keeps_the_bound_result(
     tmp_path: Path,
 ) -> None:
     con, root = verified_group(tmp_path)
     rows = rows_of(con, root)
-    compared = next(row for row in rows if row["evidence_state"] == "VERIFIED")
+    compared = rows[0]
     path = Path(str(tmp_path / "evidence" / "bucket-one" / str(compared["attempt_id"])))
-    record_json = json.loads((path / "verify.json").read_text())
-    record_json["diff"]["missing"] = ["a/three"]
-    (path / "verify.json").write_text(json.dumps(record_json))
+    (path / "verify.json").write_text('{"untrusted": "derived content"}')
     rebuilt = rows_of(con, root)
     mismatched = next(row for row in rebuilt if row["attempt_id"] == compared["attempt_id"])
-    assert (mismatched["evidence_state"], mismatched["verdict"]) == ("VERIFY_MISMATCH", "-")
-    assert report.report_exit_code(rebuilt, blocked=[]) == 1
+    assert mismatched["evidence_state"] == "RESULT_BOUND"
+    assert report.report_exit_code(rebuilt, blocked=[]) == 0

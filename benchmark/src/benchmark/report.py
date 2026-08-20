@@ -8,20 +8,15 @@ to resolve -- and a row's evidence is refused unless the identity recorded in
 `result.json` agrees with the row and with the prefix it was found under
 (`verify.identity_errors`).
 
-Three columns never share one vocabulary: `state` is the ledger's own attempt
-state; `exit` is the subject's exit code from result.json; `verdict` is
-verify.json's, or "-" where no comparison has been run. What report does NOT do
-is re-normalize an attempt to re-derive a verdict: it binds verify.json's hashes
-to the evidence it read and recomputes the verdict from the recorded diff, which
-catches an edited record without re-running eleven capsules per report.
+`state` is the ledger's attempt state; `exit`, `row_count`, timing, and RSS come
+from the bound `result.json`. Routine reporting deliberately reads no raw
+listing and no derived `verify.json`: raw products are retained for manual
+investigation, not consumed by the campaign reporting path.
 
 What a comparison is scoped to, and what it is not:
 
 - **Per target bucket.** Listings of different corpora are not comparable, so
   attempts are sectioned by bucket and never pooled.
-- **Per stratum**, `(product, fields)` resolved from the capsule's mode
-  manifest, so a text listing is not ranked against a Parquet dataset and a
-  key-only mode is not ranked against one emitting five fields.
 - **`purpose = 'measurement'` only.** A preparation, canary or diagnostic is not
   in the population -- but a preparation's duration IS recorded, and every
   measurement it stands behind carries that cost, because publishing a 60-second
@@ -37,7 +32,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import math
 import sqlite3
@@ -57,13 +51,7 @@ from benchmark.ledger import (
     producer_summary,
     slot_owed_reason,
 )
-from benchmark.verify import (
-    has_result_marker,
-    identity_errors,
-    read_bytes_at,
-    replay_verdict_for,
-    verdict_for,
-)
+from benchmark.verify import has_result_marker, identity_errors, read_bytes_at
 
 COLUMNS = (
     "tool",
@@ -96,10 +84,9 @@ COLUMNS = (
     # or a procfs that refuses the write, and a contaminated RSS column that
     # says so is worth more than a clean-looking one that does not.
     "max_rss_floor_kb",
-    "verdict",
 )
 FINAL_REPORT_STATES = {"SUCCEEDED", "CANCELLED", "ACCEPTED"}
-BOUND_EVIDENCE_STATES = {"VERIFY_UNAVAILABLE", "VERIFIED"}
+BOUND_EVIDENCE_STATES = {"RESULT_BOUND"}
 HEX64 = set("0123456789abcdef")
 
 
@@ -109,9 +96,8 @@ def load_json_at(result_prefix: str, name: str) -> tuple[dict[str, object], byte
         value = json.loads(raw)
         return (value, raw) if isinstance(value, dict) else None
     except Exception:
-        # Missing is the common, expected case for verify.json (comparison not
-        # yet run); any other read failure degrades to "unavailable" the same
-        # way rather than crashing a summary over one bad prefix.
+        # Any read failure degrades to "unavailable" rather than crashing a
+        # summary over one bad prefix.
         return None
 
 
@@ -292,72 +278,6 @@ def _artifact_errors(block: object, *, digest_optional: bool = False) -> list[st
     return errors
 
 
-def verify_binding_errors(
-    verification: dict[str, object], row: sqlite3.Row, result_raw: bytes
-) -> list[str]:
-    """Where verify.json fails to bind to the attempt whose prefix it sits under."""
-    expected = {
-        "attempt_id": row["attempt_id"],
-        "tool": row["tool"],
-        "mode": row["mode"],
-        "actual_result_sha256": hashlib.sha256(result_raw).hexdigest(),
-    }
-    errors = [name for name, value in expected.items() if verification.get(name) != value]
-    replay: replay_contract.ReplayConfig | None = None
-    if row["replay"] is not None:
-        try:
-            replay = replay_contract.parse_document(str(row["replay"]))
-        except replay_contract.ReplayError:
-            errors.append("replay")
-
-    allowed_verdicts = {"PASS", "FAIL"} if replay is not None else {"PASS", "DRIFT", "FAIL"}
-    if verification.get("verdict") not in allowed_verdicts:
-        errors.append("verdict")
-    digest_fields = ["actual_tsv_sha256", "reference_tsv_sha256"]
-    if replay is None:
-        digest_fields.append("reference_result_sha256")
-    for name in digest_fields:
-        value = verification.get(name)
-        if not isinstance(value, str) or len(value) != 64 or set(value) - HEX64:
-            errors.append(name)
-    for name in ("product",):
-        if not isinstance(verification.get(name), str) or not verification[name]:
-            errors.append(name)
-    if replay is None:
-        for name in ("reference_attempt_id", "reference_tool", "reference_mode"):
-            if not isinstance(verification.get(name), str) or not verification[name]:
-                errors.append(name)
-    else:
-        for name in (
-            "fixture_sha256",
-            "reference_manifest_uri",
-            "reference_manifest_sha256",
-        ):
-            if verification.get(name) != getattr(replay.backend, name):
-                errors.append(name)
-        if not isinstance(verification.get("replay_diagnostics"), dict):
-            errors.append("replay_diagnostics")
-    fields = verification.get("fields")
-    if not isinstance(fields, list) or not all(isinstance(name, str) for name in fields):
-        errors.append("fields")
-    diff = verification.get("diff")
-    required_lists = ("missing", "extra", "duplicates", "reference_duplicates", "mismatches")
-    if (
-        not isinstance(diff, dict)
-        or set(diff) != set(required_lists)
-        or not all(isinstance(diff.get(name), list) for name in required_lists)
-    ):
-        errors.append("diff")
-    else:
-        try:
-            derived = replay_verdict_for(diff) if replay is not None else verdict_for(diff)
-            if derived != verification.get("verdict"):
-                errors.append("verdict")
-        except (KeyError, TypeError):
-            errors.append("diff")
-    return errors
-
-
 def stratum_for(row: sqlite3.Row, adapter_root: str) -> tuple[str, str]:
     """`(product, fields)` from the capsule, which is where they are defined.
 
@@ -433,14 +353,13 @@ def row_for(row: sqlite3.Row, *, adapter_root: str) -> dict[str, Any]:
         "prep_seconds": "-",
         "max_rss_kb": "-",
         "max_rss_floor_kb": "-",
-        "verdict": "-",
     }
     if not has_result_marker(row["result_prefix"]):
         return {**base, "evidence_state": "MISSING_EVIDENCE"}
     loaded_result = load_json_at(row["result_prefix"], "result.json")
     if loaded_result is None:
         return {**base, "evidence_state": "RESULT_UNAVAILABLE"}
-    result, result_raw = loaded_result
+    result, _result_raw = loaded_result
     if identity_errors(
         result,
         attempt_id=row["attempt_id"],
@@ -482,17 +401,7 @@ def row_for(row: sqlite3.Row, *, adapter_root: str) -> dict[str, Any]:
             execution.get("max_rss_floor_kb", "-") if isinstance(execution, dict) else "-"
         ),
     }
-    loaded_verify = load_json_at(row["result_prefix"], "verify.json")
-    if loaded_verify is None:
-        return {**measured, "evidence_state": "VERIFY_UNAVAILABLE"}
-    verification, _raw = loaded_verify
-    if verify_binding_errors(verification, row, result_raw):
-        return {**measured, "evidence_state": "VERIFY_MISMATCH"}
-    return {
-        **measured,
-        "evidence_state": "VERIFIED",
-        "verdict": verification.get("verdict", "-"),
-    }
+    return {**measured, "evidence_state": "RESULT_BOUND"}
 
 
 def attach_preparations(rows: list[dict[str, Any]]) -> None:
@@ -559,34 +468,13 @@ def rate_lines(rows: list[dict[str, Any]]) -> list[str]:
         successes = sum(
             1
             for attempt in settled
-            if (
-                attempt["evidence_state"] == "VERIFIED" and attempt["verdict"] == "PASS"
-                if attempt["replay_state"] != "-"
-                else attempt["state"] == "SUCCEEDED"
-            )
+            if attempt["state"] == "SUCCEEDED" and attempt["evidence_state"] == "RESULT_BOUND"
         )
         rate = f"{successes / len(settled):.4f}" if settled else "-"
         first = attempts[0]
         lines.append(
             f"- `{case_id}` ({first['tool']} {first['mode']}): {successes}/{len(settled)} "
             f"succeeded, rate {rate} over {len(attempts)} attempt(s)"
-        )
-    return lines
-
-
-def stratum_lines(rows: list[dict[str, Any]]) -> list[str]:
-    """The comparison scopes within one bucket, and what each holds."""
-    strata: dict[tuple[str, str], list[dict[str, Any]]] = {}
-    for row in rows:
-        if is_timing(row) and row["product"] != "-":
-            strata.setdefault((row["product"], row["fields"]), []).append(row)
-    lines = []
-    for (product, fields), members in sorted(strata.items()):
-        subjects = ", ".join(sorted(f"{m['tool']}/{m['mode']}" for m in members))
-        verdicts = sorted({str(m["verdict"]) for m in members})
-        lines.append(
-            f"- **{product}** [{fields}]: {len(members)} attempt(s) -- {subjects} "
-            f"-- verdicts {', '.join(verdicts)}"
         )
     return lines
 
@@ -637,7 +525,6 @@ def render_markdown(rows: list[dict[str, Any]], *, blocked: list[str]) -> str:
         lines.extend([f"## {bucket}", "", header, separator])
         lines.extend("| " + " | ".join(str(row[c]) for c in COLUMNS) + " |" for row in members)
         for title, section in (
-            ("Comparison strata", stratum_lines(members)),
             ("Rate cases", rate_lines(members)),
             ("Preparations", preparation_lines(members)),
         ):
@@ -649,24 +536,22 @@ def render_markdown(rows: list[dict[str, Any]], *, blocked: list[str]) -> str:
 
 
 def summary_line(rows: list[dict[str, Any]]) -> str:
-    verdict_counts: dict[str, int] = {}
-    verified_timings = 0
-    for row in rows:
-        verdict = str(row["verdict"])
-        verdict_counts[verdict] = verdict_counts.get(verdict, 0) + 1
-        if (
-            is_timing(row)
-            and row["exit"] == 0
-            and row["verdict"] in ("PASS", "DRIFT")
-            and not isinstance(row["wall_seconds"], bool)
-            and isinstance(row["wall_seconds"], (int, float))
-            and math.isfinite(row["wall_seconds"])
-        ):
-            verified_timings += 1
-    counts = ", ".join(f"{verdict}={count}" for verdict, count in sorted(verdict_counts.items()))
+    successful_timings = sum(
+        1
+        for row in rows
+        if is_timing(row)
+        and row["state"] == "SUCCEEDED"
+        and row["evidence_state"] == "RESULT_BOUND"
+        and row["exit"] == 0
+        and not isinstance(row["row_count"], bool)
+        and isinstance(row["row_count"], int)
+        and not isinstance(row["wall_seconds"], bool)
+        and isinstance(row["wall_seconds"], (int, float))
+        and math.isfinite(row["wall_seconds"])
+    )
     return (
-        f"**{len(rows)} attempt(s)** -- {counts} -- {verified_timings} verified timing(s); "
-        "no cross-case timing aggregate"
+        f"**{len(rows)} attempt(s)** -- {successful_timings} successful timing(s); "
+        "row counts are reported from result.json; no content comparison"
     )
 
 

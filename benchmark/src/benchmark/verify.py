@@ -16,16 +16,14 @@ one emitting five fields, or a tool wins by emitting less.
 
 A real-S3 PASS means the subjects of a stratum AGREE: there is no sealed
 manifest, and agreement stands in for control over a corpus that grows
-underneath the study (`docs/identity.md` § *What identity cannot cover*). A
-replay PASS instead means that one subject independently matches the immutable
-reference manifest bound into its ledger row; agreement between replay subjects
-is never an oracle.
+underneath the study (`docs/identity.md` § *What identity cannot cover*).
+Replay campaigns are row-count-only: this explicit content verifier refuses
+them without downloading or normalizing their retained raw products.
 
 Two decisions this module makes where the docs are silent:
 
 - A real-S3 `statistic: rate` case is summarized as successes over attempts and
-  takes no part in cross-tool agreement. Replay counts a successful attempt only
-  after it matches the bound oracle; terminal failures remain denominator data.
+  takes no part in cross-tool agreement.
 - A stratum's reference is its lowest `attempt_id`. Agreement is symmetric, so
   the choice only fixes which side a diff is written from.
 
@@ -89,12 +87,6 @@ from benchmark.ledger import (
     pending_rows,
     producer_summary,
 )
-from benchmark.replay_verify import (
-    ManifestError,
-    replay_manifest_identity,
-    stage_replay_manifest,
-    validate_replay_evidence,
-)
 from benchmark.runtime.command_adapter import Mode
 
 _COLUMNS = (
@@ -129,8 +121,7 @@ GAP_EXIT_CODES = {
     "failed-subject": EXIT_FAILED_SUBJECT,
     "normalize": EXIT_NORMALIZE_FAILED,
     "malformed": EXIT_MALFORMED_INPUT,
-    "manifest": EXIT_BINDING_MISMATCH,
-    "replay-evidence": EXIT_MALFORMED_INPUT,
+    "replay-row-count-only": EXIT_INCOMPLETE_GROUP,
     "uncalibrated-capacity": EXIT_INCOMPLETE_GROUP,
     "mixed-backend": EXIT_BINDING_MISMATCH,
 }
@@ -204,17 +195,10 @@ class Prepared:
     tsv: Path
     product: str
     fields: tuple[str, ...]
-    replay_diagnostics: dict[str, object] | None = None
 
 
 def roster_for(con: sqlite3.Connection, group_id: str) -> Roster:
-    """Read comparison population and separately-verifiable replay diagnostics.
-
-    A diagnostic or canary gives evidence about the replay path, never a
-    comparative timing or rate.  It remains in the roster here only so its
-    identity, product, replay observations, and manifest binding can be
-    verified and recorded under its own prefix.
-    """
+    """Read the comparison population and replay diagnostics from recorded rows."""
     attempts = tuple(Subject.from_row(row) for row in attempt_rows(con, group_id=group_id))
     subjects = tuple(subject for subject in attempts if subject.purpose == "measurement")
     diagnostics = tuple(
@@ -407,11 +391,6 @@ def verdict_for(diff: Mapping[str, Any]) -> str:
     return "PASS"
 
 
-def replay_verdict_for(diff: Mapping[str, Any]) -> str:
-    """Replay is immutable ground truth, so mtime drift is an ordinary failure."""
-    return "PASS" if not any(diff[name] for name in diff) else "FAIL"
-
-
 def worst_verdict(verdicts: Iterable[str]) -> str:
     return max(verdicts, key=VERDICT_ORDER.index, default="UNCOMPARED")
 
@@ -574,12 +553,6 @@ def prepare_subject(
     failure = check_failed_subject(result)
     if failure:
         return None, _gap(subject, "failed-subject", failure)
-    replay_diagnostics = None
-    if subject.replay is not None:
-        try:
-            replay_diagnostics = validate_replay_evidence(result, subject.replay)
-        except ValueError as exc:
-            return None, _gap(subject, "replay-evidence", str(exc))
     staging = work_dir / subject.attempt_id
     tsv = work_dir / f"{subject.attempt_id}.tsv"
     try:
@@ -604,7 +577,6 @@ def prepare_subject(
             tsv=tsv,
             product=manifest.product,
             fields=manifest.fields,
-            replay_diagnostics=replay_diagnostics,
         ),
         None,
     )
@@ -621,216 +593,26 @@ def compare(reference: Prepared, actual: Prepared) -> dict[str, Any]:
         con.close()
 
 
-def verify_replay_bucket(
-    subjects: Sequence[Subject],
-    *,
-    adapter_root: str,
-    work_dir: Path,
-    write_record: bool,
-    require_calibration: bool = True,
-) -> dict[str, Any]:
-    """Verify replay attempts against an immutable oracle.
-
-    Comparative replay measurements need a declared calibrated capacity.  A
-    canary or diagnostic is instead evidence for reaching that state, so its
-    caller deliberately sets ``require_calibration`` false.
-    """
-    gaps: list[dict[str, object]] = []
-    if require_calibration:
-        for subject in subjects:
-            assert subject.replay is not None
-            if subject.replay.capacity_status != "calibrated":
-                gaps.append(
-                    _gap(
-                        subject,
-                        "uncalibrated-capacity",
-                        "replay capacity_status is UNCALIBRATED; measurement is refused",
-                    )
-                )
-    if gaps:
-        return {
-            "target_bucket": subjects[0].target_bucket,
-            "backend": "replay",
-            "complete": False,
-            "verdict": "INCOMPLETE",
-            "strata": [],
-            "rates": [],
-            "gaps": gaps,
-        }
-    identities: list[tuple[str, str, str]] = []
-    for subject in subjects:
-        try:
-            assert subject.replay is not None
-            identities.append(replay_manifest_identity(subject.replay))
-        except ManifestError as exc:
-            gaps.append(_gap(subject, "manifest", str(exc)))
-    distinct = set(identities)
-    if len(distinct) > 1:
-        gaps.append(
-            _gap(
-                subjects[0],
-                "manifest",
-                "replay subjects in one bucket bind different fixture/reference manifests",
-            )
+def replay_refusal(subjects: Sequence[Subject]) -> dict[str, Any]:
+    """Refuse replay content verification without reading retained raw products."""
+    first = subjects[0]
+    gaps = [
+        _gap(
+            subject,
+            "replay-row-count-only",
+            "replay campaigns report the worker's row_count from result.json; "
+            "raw products are retained for manual investigation only",
         )
-
-    manifest_tsv: Path | None = None
-    fixture_sha256 = manifest_uri = manifest_sha256 = ""
-    if not gaps and identities:
-        fixture_sha256, manifest_uri, manifest_sha256 = identities[0]
-        try:
-            bucket_key = hashlib.sha256(subjects[0].target_bucket.encode()).hexdigest()[:12]
-            # A group may verify the same bucket more than once for separate
-            # diagnostics. Hash this invocation's unique ledger IDs into one
-            # bounded path instead of sharing mutable staged files.
-            invocation_key = hashlib.sha256(
-                "\0".join(sorted(subject.attempt_id for subject in subjects)).encode()
-            ).hexdigest()
-            manifest_dir = work_dir / f"replay-manifest-{bucket_key}-{invocation_key}"
-            manifest_tsv = stage_replay_manifest(
-                manifest_uri,
-                manifest_sha256,
-                manifest_dir,
-            )
-        except Exception as exc:
-            # Provider/download errors are binding gaps too. A replay result may
-            # not fall back to cross-tool agreement because its oracle is down.
-            gaps.append(_gap(subjects[0], "manifest", str(exc)))
-
-    prepared: list[Prepared] = []
-    rate_cases: dict[str, list[Subject]] = {}
-    for subject in subjects:
-        if subject.statistic == "rate":
-            rate_cases.setdefault(subject.case_id, []).append(subject)
-        if subject.state not in TERMINAL_STATES:
-            gaps.append(_gap(subject, "unsettled", f"state {subject.state}"))
-            continue
-        if subject.state != "SUCCEEDED":
-            if subject.statistic != "rate":
-                gaps.append(_gap(subject, "absent", f"state {subject.state}"))
-            continue
-        ready, gap = prepare_subject(subject, adapter_root=adapter_root, work_dir=work_dir)
-        if gap is not None:
-            gaps.append(gap)
-        if ready is not None:
-            prepared.append(ready)
-
-    comparisons_by_stratum: dict[tuple[str, tuple[str, ...]], list[dict[str, Any]]] = {}
-    passed_attempts: set[str] = set()
-    if manifest_tsv is not None:
-        reference_sha256 = sha256_of(manifest_tsv)
-        for actual in sorted(prepared, key=lambda item: item.subject.attempt_id):
-            try:
-                reference = Prepared(
-                    subject=actual.subject,
-                    result_sha256=manifest_sha256,
-                    tsv=manifest_tsv,
-                    product="manifest",
-                    fields=("key", "size", "etag", "mtime", "storage_class"),
-                )
-                diff = compare(reference, actual)
-            except MalformedInputError as exc:
-                gaps.append(_gap(actual.subject, "malformed", str(exc)))
-                continue
-            verdict = replay_verdict_for(diff)
-            if verdict == "PASS":
-                passed_attempts.add(actual.subject.attempt_id)
-            record = {
-                "attempt_id": actual.subject.attempt_id,
-                "tool": actual.subject.tool,
-                "mode": actual.subject.mode,
-                "fixture_sha256": fixture_sha256,
-                "reference_manifest_uri": manifest_uri,
-                "reference_manifest_sha256": manifest_sha256,
-                "product": actual.product,
-                "fields": list(actual.fields),
-                "actual_result_sha256": actual.result_sha256,
-                "actual_tsv_sha256": sha256_of(actual.tsv),
-                "reference_tsv_sha256": reference_sha256,
-                "replay_diagnostics": actual.replay_diagnostics,
-                "verdict": verdict,
-                "diff": diff,
-            }
-            if write_record:
-                write_verify_json(actual.subject.result_prefix, record)
-            comparisons_by_stratum.setdefault((actual.product, actual.fields), []).append(record)
-
-    strata: list[dict[str, Any]] = []
-    for (product, fields), comparisons in sorted(comparisons_by_stratum.items()):
-        strata.append(
-            {
-                "product": product,
-                "fields": list(fields),
-                "reference": f"manifest:{manifest_sha256}",
-                "subjects": [record["attempt_id"] for record in comparisons],
-                "comparisons": comparisons,
-                "verdict": worst_verdict(record["verdict"] for record in comparisons),
-            }
-        )
-
-    rates: list[dict[str, object]] = []
-    for case_subjects in rate_cases.values():
-        settled = [subject for subject in case_subjects if subject.state in TERMINAL_STATES]
-        first = case_subjects[0]
-        successes = sum(subject.attempt_id in passed_attempts for subject in settled)
-        rates.append(
-            {
-                "case_id": first.case_id,
-                "tool": first.tool,
-                "mode": first.mode,
-                "attempts": len(settled),
-                "successes": successes,
-                "rate": round(successes / len(settled), 4) if settled else None,
-            }
-        )
-
-    complete = not gaps
-    verdict = worst_verdict(stratum["verdict"] for stratum in strata)
+        for subject in subjects
+    ]
     return {
-        "target_bucket": subjects[0].target_bucket,
+        "target_bucket": first.target_bucket,
         "backend": "replay",
-        "complete": complete,
-        "verdict": verdict if complete else "INCOMPLETE",
-        "strata": strata,
-        "rates": rates,
+        "complete": False,
+        "verdict": "INCOMPLETE",
+        "strata": [],
+        "rates": [],
         "gaps": gaps,
-    }
-
-
-def verify_replay_diagnostic(
-    subject: Subject,
-    *,
-    adapter_root: str,
-    work_dir: Path,
-    write_record: bool,
-) -> dict[str, Any]:
-    """Verify one non-comparative replay attempt without creating a timing row."""
-    result = verify_replay_bucket(
-        [subject],
-        adapter_root=adapter_root,
-        work_dir=work_dir,
-        write_record=write_record,
-        require_calibration=False,
-    )
-    comparison = next(
-        (
-            record
-            for stratum in result["strata"]
-            for record in stratum["comparisons"]
-            if record["attempt_id"] == subject.attempt_id
-        ),
-        None,
-    )
-    return {
-        "attempt_id": subject.attempt_id,
-        "tool": subject.tool,
-        "mode": subject.mode,
-        "purpose": subject.purpose,
-        "capacity_status": subject.replay.capacity_status if subject.replay is not None else "-",
-        "complete": result["complete"],
-        "verdict": result["verdict"],
-        "verification": comparison,
-        "gaps": result["gaps"],
     }
 
 
@@ -858,12 +640,7 @@ def verify_bucket(
             "gaps": [mixed_gap],
         }
     if replay_flags == {True}:
-        return verify_replay_bucket(
-            subjects,
-            adapter_root=adapter_root,
-            work_dir=work_dir,
-            write_record=write_record,
-        )
+        return replay_refusal(subjects)
     gaps: list[dict[str, object]] = []
     rates: list[dict[str, object]] = []
     prepared: list[Prepared] = []
@@ -987,12 +764,19 @@ def verify_group(
             )
         for subject in roster.diagnostics:
             diagnostics.append(
-                verify_replay_diagnostic(
-                    subject,
-                    adapter_root=adapter_root,
-                    work_dir=work_dir,
-                    write_record=write_record,
-                )
+                {
+                    "attempt_id": subject.attempt_id,
+                    "tool": subject.tool,
+                    "mode": subject.mode,
+                    "purpose": subject.purpose,
+                    "capacity_status": (
+                        subject.replay.capacity_status if subject.replay is not None else "-"
+                    ),
+                    "complete": False,
+                    "verdict": "INCOMPLETE",
+                    "verification": None,
+                    "gaps": replay_refusal([subject])["gaps"],
+                }
             )
         comparison_complete = (
             bool(roster.subjects)
