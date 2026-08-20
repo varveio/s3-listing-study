@@ -73,10 +73,15 @@ tools:
   # separate measurement plan.
   swath:
     cases:
-      # Constant-total CPU partition sweep: r10-s4, r8-s6, r6-s8, r4-s10.
-      # The first row inherits the defaults; the others override both shares.
+      # Constant-total CPU partition sweep. The original two-core ladder was
+      # r10-s4, r8-s6, r6-s8, r4-s10. Its first diagnostic pass put the maximum
+      # at r8-s6, so the dated follow-up adds only its missing one-core neighbors
+      # r9-s5 and r7-s7 before selecting the allocation. The first row inherits
+      # the defaults; the others override both shares.
       - {mode: recursive-tsv, concurrency: 1024, purpose: diagnostic}
+      - {mode: recursive-tsv, concurrency: 1024, purpose: diagnostic, replay_vcpus: 9, subject_vcpus: 5}
       - {mode: recursive-tsv, concurrency: 1024, purpose: diagnostic, replay_vcpus: 8, subject_vcpus: 6}
+      - {mode: recursive-tsv, concurrency: 1024, purpose: diagnostic, replay_vcpus: 7, subject_vcpus: 7}
       - {mode: recursive-tsv, concurrency: 1024, purpose: diagnostic, replay_vcpus: 6, subject_vcpus: 8}
       - {mode: recursive-tsv, concurrency: 1024, purpose: diagnostic, replay_vcpus: 4, subject_vcpus: 10}
 

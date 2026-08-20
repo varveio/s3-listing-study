@@ -182,16 +182,16 @@ def test_the_committed_plan_loads() -> None:
     assert constrained.heap_percent == 75
 
 
-def test_the_committed_idc_plan_is_the_four_cell_no_latency_partition_sweep() -> None:
+def test_the_committed_idc_plan_is_the_six_cell_no_latency_partition_sweep() -> None:
     """Guard the diagnostic matrix the operator reviewed, not just its syntax."""
     loaded = bench.Plan.load(bench.default_path("idc-open-data"))
     cases = loaded.cases_for("swath")
-    assert len(loaded.cases) == len(cases) == 4
+    assert len(loaded.cases) == len(cases) == 6
     assert [
         (case.replay.allocation.replay_vcpus, case.replay.allocation.subject_vcpus)
         for case in cases
         if case.replay is not None
-    ] == [(10, 4), (8, 6), (6, 8), (4, 10)]
+    ] == [(10, 4), (9, 5), (8, 6), (7, 7), (6, 8), (4, 10)]
     for case in cases:
         assert case.replay is not None
         allocation = case.replay.allocation

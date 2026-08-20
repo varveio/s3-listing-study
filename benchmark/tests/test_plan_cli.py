@@ -27,7 +27,7 @@ def test_resolve_plan_exposes_resolved_replay_contract(
         assert "S3" in capsys.readouterr().out
         return
 
-    assert len(rows) == 4
+    assert len(rows) == 6
     row = rows[0]
     replay = row["replay"]
     allocation = row["replay_allocation"]
@@ -64,11 +64,11 @@ def test_resolve_plan_exposes_resolved_replay_contract(
             candidate["replay"]["allocation"]["subject_vcpus"],
         )
         for candidate in rows
-    ] == [(10, 4), (8, 6), (6, 8), (4, 10)]
+    ] == [(10, 4), (9, 5), (8, 6), (7, 7), (6, 8), (4, 10)]
     assert all(candidate["replay_allocation"]["host_vcpus"] == 2 for candidate in rows)
     assert plan_cli.resolve_plan_main(["--bucket", bucket, "--skip-roster"]) == 0
     table = capsys.readouterr().out
     assert "UNCALIBRATED" in table
     assert "latency=none" in table
-    assert "4 cases, 4 attempts" in table
+    assert "6 cases, 6 attempts" in table
     assert "host=2vCPU/20GiB" in table
