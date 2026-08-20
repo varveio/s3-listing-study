@@ -94,12 +94,22 @@ replay:
     jitter: none
 ```
 
-The latency model is a **measurement, not a preference**. A swath run report carries
-a `probe_latency` block whose call classes are exactly the replay server's shape
-classifier, so the honest profile for a bucket is a fact its own fixture arrives
-with. Read it from there rather than picking one — and note the direction the dial
-moves: demand on the server scales inversely with the profile, so a profile chosen
-because the server can meet it is a profile that hides an undersized server.
+The other explicit treatment is no injection:
+
+```yaml
+  latency_model: none
+```
+
+The latency treatment is a **measurement, not a preference**. A fixed model
+adds the fixture's measured per-request latency profile; `none` measures the
+subject and replay server without that delay. They impose different demand on
+the server and therefore have different case identities. A swath run report
+carries a `probe_latency` block whose call classes are exactly the replay
+server's shape classifier, so when fixed injection is intended, read the honest
+profile from the fixture rather than picking one. Note the direction the dial
+moves: demand on the server scales inversely with the profile, so a profile
+chosen because the server can meet it is a profile that hides an undersized
+server. No other scalar or incomplete fixed mapping is accepted.
 
 What *does* vary per case is how much machine the server gets, so those are
 ordinary row fields, prefixed `replay_` and resolving through the same three

@@ -210,13 +210,9 @@ def test_replay_case_slot_attempt_and_request_keep_one_canonical_document(
             "--parquet-connections",
             "20",
             "--max-concurrent-requests",
-            "64",
-            "--inject-latency",
-            "worker_page=107ms,pivot_probe=41ms,structure_probe=49ms",
-            "--latency-scale",
-            "1.0",
+            "2048",
         ],
-        "options": "--network host --cpuset-cpus=0-1 --memory=4g --memory-swap=4g",
+        "options": "--network host --cpuset-cpus=0-9 --memory=8g --memory-swap=8g",
     }
     assert server["environment"] == {
         "variables": {
@@ -231,7 +227,7 @@ def test_replay_case_slot_attempt_and_request_keep_one_canonical_document(
         expected,
     ]
     assert subject["container"]["options"] == (
-        "--network host --cpuset-cpus=2-2 --memory=4g --memory-swap=4g"
+        "--network host --cpuset-cpus=10-13 --memory=4g --memory-swap=4g"
     )
     assert attempt.secret_resource is None
     assert "environment" not in subject
@@ -244,7 +240,7 @@ def test_replay_case_slot_attempt_and_request_keep_one_canonical_document(
     assert "environment" not in signed_task
     assert "secretVariables" not in signed_server["environment"]
     assert signed_subject["environment"] == {"secretVariables": {CREDENTIAL_ENV_VAR: AUTH_SECRET}}
-    assert task["computeResource"] == {"cpuMilli": "4000", "memoryMib": "16384"}
+    assert task["computeResource"] == {"cpuMilli": "16000", "memoryMib": "32768"}
     assert task["maxRunDuration"] == "4805s"
     retried = campaign.retry_request_document(
         request,
@@ -256,6 +252,24 @@ def test_replay_case_slot_attempt_and_request_keep_one_canonical_document(
     assert campaign.request_argument(retried, "--attempt-id") == "swath.retry.s2"
     assert campaign.request_argument(retried, "--destination") == "gs://results/retry/"
     assert json.loads(row["case_inputs"])["replay"] == case.replay.as_dict()
+
+
+def test_renderer_keeps_fixed_latency_flags(tmp_path: Path) -> None:
+    plan = Plan.load(ROOT / "benchmark/plans/canaries/sorel-20m.yaml")
+    case = plan.cases[0]
+    images = image_set(tmp_path)
+    launch = context(plan, case, images)
+    attempt = campaign.planned_attempt(case, launch)[2](1)[0]
+    request = campaign.render_batch_job(
+        attempt, images.image_for(case.tool), suite=SUITE, options=launch.options
+    )
+    commands = request["taskGroups"][0]["taskSpec"]["runnables"][0]["container"]["commands"]
+    assert commands[-4:] == [
+        "--inject-latency",
+        "worker_page=247ms,pivot_probe=105ms,structure_probe=92ms",
+        "--latency-scale",
+        "1.0",
+    ]
 
 
 @pytest.mark.parametrize(

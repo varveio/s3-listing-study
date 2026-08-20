@@ -56,24 +56,31 @@ class ReplayBackend:
     server_image_uri: str
     fixture_sha256: str
     serving_mode: str
-    latency_deadlines_ms: tuple[tuple[str, int], ...]
-    latency_scale: float
-    latency_jitter: str
+    latency_deadlines_ms: tuple[tuple[str, int], ...] | None
+    latency_scale: float | None
+    latency_jitter: str | None
 
     @property
-    def profile_spec(self) -> str:
+    def profile_spec(self) -> str | None:
+        if self.latency_deadlines_ms is None:
+            return None
         return ",".join(f"{shape}={delay}ms" for shape, delay in self.latency_deadlines_ms)
 
     def as_dict(self) -> dict[str, object]:
+        latency_model: object
+        if self.latency_deadlines_ms is None:
+            latency_model = "none"
+        else:
+            latency_model = {
+                "deadlines_ms": dict(self.latency_deadlines_ms),
+                "scale": self.latency_scale,
+                "jitter": self.latency_jitter,
+            }
         return {
             "server_image_uri": self.server_image_uri,
             "fixture_sha256": self.fixture_sha256,
             "serving_mode": self.serving_mode,
-            "latency_model": {
-                "deadlines_ms": dict(self.latency_deadlines_ms),
-                "scale": self.latency_scale,
-                "jitter": self.latency_jitter,
-            },
+            "latency_model": latency_model,
         }
 
 
@@ -149,6 +156,15 @@ def parse_backend(value: object) -> ReplayBackend:
     if mode not in SERVING_MODES:
         raise ReplayError(f"replay serving_mode must be one of {', '.join(SERVING_MODES)}")
     latency = value.get("latency_model")
+    if latency == "none":
+        return ReplayBackend(
+            server_image_uri=image,
+            fixture_sha256=fixture,
+            serving_mode=mode,
+            latency_deadlines_ms=None,
+            latency_scale=None,
+            latency_jitter=None,
+        )
     if not isinstance(latency, Mapping) or set(latency) != set(LATENCY_MODEL_FIELDS):
         raise ReplayError("replay latency_model has invalid fields")
     profile = latency.get("deadlines_ms")

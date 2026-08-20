@@ -70,12 +70,17 @@ def _replay_projection(
     backend, allocation = config.backend, config.allocation
     image = backend.server_image_uri.rsplit("@sha256:", 1)
     image_summary = f"{image[0].rsplit('/', 1)[-1]}@sha256:{image[1][:12]}…"
-    latency = ",".join(f"{shape}={delay}ms" for shape, delay in backend.latency_deadlines_ms)
+    if backend.latency_deadlines_ms is None:
+        latency = "none"
+    else:
+        profile = ",".join(
+            f"{shape}={delay}ms" for shape, delay in backend.latency_deadlines_ms
+        )
+        latency = f"{profile} scale={backend.latency_scale} jitter={backend.latency_jitter}"
     compact = (
         f"{config.capacity_status.upper()} server={image_summary} "
         f"fixture={backend.fixture_sha256[:12]}… "
-        f"{backend.serving_mode} profile={latency} "
-        f"scale={backend.latency_scale} jitter={backend.latency_jitter} "
+        f"{backend.serving_mode} latency={latency} "
         f"server={allocation.replay_vcpus}vCPU/{allocation.replay_memory_gb}GiB "
         f"subject={allocation.subject_vcpus}vCPU/{case.resources.container_memory_gb}GiB "
         f"host={summary.host_vcpus}vCPU/{summary.host_memory_headroom_gb}GiB"

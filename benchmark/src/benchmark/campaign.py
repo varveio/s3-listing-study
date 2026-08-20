@@ -638,11 +638,18 @@ def render_batch_job(
             str(allocation.replay_parquet_connections),
             "--max-concurrent-requests",
             str(allocation.replay_max_concurrent_requests),
-            "--inject-latency",
-            backend.profile_spec,
-            "--latency-scale",
-            str(backend.latency_scale),
         ]
+        profile_spec = backend.profile_spec
+        if profile_spec is not None:
+            assert backend.latency_scale is not None
+            server_commands.extend(
+                (
+                    "--inject-latency",
+                    profile_spec,
+                    "--latency-scale",
+                    str(backend.latency_scale),
+                )
+            )
         server_runnable = {
             "background": True,
             "container": {

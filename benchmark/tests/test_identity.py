@@ -97,6 +97,12 @@ def test_every_replay_fact_changes_identity() -> None:
         target[parts[-1]] = value
         assert case_hash(_measurement_env(), {}, TOOL_SLICE, PLATFORM, changed) != baseline, path
 
+    no_latency = copy.deepcopy(replay)
+    cast(dict[str, object], no_latency["backend"])["latency_model"] = "none"
+    resolved = parse_document(no_latency).as_dict()
+    assert cast(dict[str, object], resolved["backend"])["latency_model"] == "none"
+    assert case_hash(_measurement_env(), {}, TOOL_SLICE, PLATFORM, resolved) != baseline
+
 
 def test_case_hash_is_key_order_independent() -> None:
     config = {"mode": "recursive", "concurrency": 8}

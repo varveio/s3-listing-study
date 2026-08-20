@@ -27,6 +27,7 @@ def test_resolve_plan_exposes_resolved_replay_contract(
         assert "S3" in capsys.readouterr().out
         return
 
+    assert len(rows) == 4
     row = rows[0]
     replay = row["replay"]
     allocation = row["replay_allocation"]
@@ -38,30 +39,36 @@ def test_resolve_plan_exposes_resolved_replay_contract(
             ),
             "fixture_sha256": "943786a189afa827cb78a74ff0f0cc9f08ae13b5dbd547d3a19f60e0a3de304c",
             "serving_mode": "sorted",
-            "latency_model": {
-                "deadlines_ms": {"worker_page": 107, "pivot_probe": 41, "structure_probe": 49},
-                "scale": 1.0,
-                "jitter": "none",
-            },
+            "latency_model": "none",
         },
         "allocation": {
-            "subject_vcpus": 1,
-            "replay_vcpus": 2,
-            "replay_memory_gb": 4,
+            "subject_vcpus": 4,
+            "replay_vcpus": 10,
+            "replay_memory_gb": 8,
             "replay_parquet_connections": 20,
-            "replay_max_concurrent_requests": 64,
+            "replay_max_concurrent_requests": 2048,
             "replay_heap_percent": 75,
             "replay_prefetch": False,
         },
         "capacity_status": "uncalibrated",
     }
     assert allocation == {
-        "server_cpuset": "0-1",
-        "subject_cpuset": "2-2",
-        "host_vcpus": 1,
-        "host_memory_headroom_gb": 8,
+        "server_cpuset": "0-9",
+        "subject_cpuset": "10-13",
+        "host_vcpus": 2,
+        "host_memory_headroom_gb": 20,
     }
+    assert [
+        (
+            candidate["replay"]["allocation"]["replay_vcpus"],
+            candidate["replay"]["allocation"]["subject_vcpus"],
+        )
+        for candidate in rows
+    ] == [(10, 4), (8, 6), (6, 8), (4, 10)]
+    assert all(candidate["replay_allocation"]["host_vcpus"] == 2 for candidate in rows)
     assert plan_cli.resolve_plan_main(["--bucket", bucket, "--skip-roster"]) == 0
     table = capsys.readouterr().out
     assert "UNCALIBRATED" in table
-    assert "host=1vCPU/8GiB" in table
+    assert "latency=none" in table
+    assert "4 cases, 4 attempts" in table
+    assert "host=2vCPU/20GiB" in table

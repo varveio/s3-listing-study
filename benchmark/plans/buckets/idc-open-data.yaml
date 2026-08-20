@@ -8,10 +8,10 @@
 # it means anything.
 #
 # WHAT THIS PLAN MEASURES AGAINST IS NOT A BUCKET. Every case here runs beside a
-# replay server serving this bucket's own captured listing, with per-request
-# latency injected to the profile S3 actually gave that listing. A number from
-# this plan is peak throughput against a non-throttling backend at a stated
-# profile — never "speed against idc-open-data".
+# replay server serving this bucket's own captured listing, with no per-request
+# latency injected. A number from this plan is a diagnostic of the whole-box
+# replay/subject resource partition under maximum backend demand — never "speed
+# against idc-open-data" and never a comparative measurement.
 spec_version: 3
 
 bucket: idc-open-data
@@ -21,8 +21,9 @@ auth_role: public-read
 
 # The backend, stated once because none of it varies per case.
 replay:
-  # This diagnostic proves the provider, replay, row-count, and result-summary
-  # path. It cannot make a comparative measurement or calibrate replay capacity.
+  # This diagnostic locates a whole-box resource partition under maximum replay
+  # demand. It cannot make a comparative measurement or calibrate capacity by
+  # declaration; the four runs must first produce complete evidence.
   capacity_status: uncalibrated
   # The fixture rides a layer of the server's own image, so the bytes served are
   # already part of an identity the attempt records. `fixture_sha256` is a digest
@@ -35,25 +36,11 @@ replay:
   # and DuckDB serving; it was removed upstream precisely because a backend that
   # quietly becomes a different backend cannot be compared against itself.
   serving_mode: sorted
-  # MEASURED, not chosen. These are the p50s S3 itself returned while producing
-  # this very fixture, read from the run's own `probe_latency` block, whose call
-  # classes are exactly the replay server's shape classifier:
-  #
-  #   worker_page      n=61,598  p50=107ms  p90=149ms  p99=224ms
-  #   pivot_probe      n= 3,200  p50= 41ms  p90= 66ms  p99=150ms
-  #   structure_probe  n= 1,295  p50= 49ms  p90=100ms  p99=284ms
-  #
-  # Note this bucket is roughly twice as fast per page as sorel-20m (107 ms
-  # against 247 ms), which makes it the harder test of the two: demand on the
-  # server scales inversely with the profile, so the same subject fan-out asks
-  # for about twice the page rate here.
-  latency_model:
-    deadlines_ms:
-      worker_page: 107
-      pivot_probe: 41
-      structure_probe: 49
-    scale: 1.0
-    jitter: none
+  # Explicitly omit injected S3 latency. This is a distinct treatment and case
+  # identity from the fixture's measured fixed profile: it asks how much replay
+  # and subject CPU peak throughput needs when artificial waiting cannot hide a
+  # saturated sidecar.
+  latency_model: none
 
 defaults:
   reps: 1
@@ -61,20 +48,20 @@ defaults:
   # `vcpus`/`memory_gb` are the BOX, as everywhere else — the pair
   # instances.yaml resolves a machine type from. Server and subject allocations
   # leave derived positive host CPU and memory headroom.
-  # This first canary proves only the provider and evidence path. Keep it small;
-  # a later, separately receipted capacity experiment must derive any allocation
-  # eligible for comparative measurement.
-  vcpus: 4
-  memory_gb: 16
-  subject_vcpus: 1
+  # Keep the n4-highcpu-16 box fixed and assign 14 vCPU in every row, always
+  # leaving two for the host. The rows move those same CPUs between replay and
+  # Swath; no allocation is eligible for comparative measurement yet.
+  vcpus: 16
+  memory_gb: 32
+  subject_vcpus: 4
   container_memory_gb: 4
-  replay_vcpus: 2
-  replay_memory_gb: 4
+  replay_vcpus: 10
+  replay_memory_gb: 8
   # The preserved pilot showed that 640 eagerly decodes hundreds of footers and
-  # can OOM at startup. A reader is released before injected sleep, so this
-  # diagnostic does not need one reader per admitted request.
+  # can OOM at startup. Twenty readers avoid that eager-footer cost while the
+  # separate admission width remains high enough not to cap subject fan-out.
   replay_parquet_connections: 20
-  replay_max_concurrent_requests: 64
+  replay_max_concurrent_requests: 2048
   replay_prefetch: false
   replay_heap_percent: 75
 
@@ -86,9 +73,12 @@ tools:
   # separate measurement plan.
   swath:
     cases:
-      # Keep the checked-in canary to one row. A resource matrix is designed
-      # only after this path passes one real Batch canary.
-      - {mode: recursive-tsv, concurrency: 64, purpose: diagnostic}
+      # Constant-total CPU partition sweep: r10-s4, r8-s6, r6-s8, r4-s10.
+      # The first row inherits the defaults; the others override both shares.
+      - {mode: recursive-tsv, concurrency: 1024, purpose: diagnostic}
+      - {mode: recursive-tsv, concurrency: 1024, purpose: diagnostic, replay_vcpus: 8, subject_vcpus: 6}
+      - {mode: recursive-tsv, concurrency: 1024, purpose: diagnostic, replay_vcpus: 6, subject_vcpus: 8}
+      - {mode: recursive-tsv, concurrency: 1024, purpose: diagnostic, replay_vcpus: 4, subject_vcpus: 10}
 
 # The other tools are outside this Swath resource-calibration plan, not excluded
 # on merit. Endpoint wiring now exists for every compatible capsule; they join a
