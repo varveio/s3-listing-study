@@ -37,8 +37,13 @@ def test_resolve_plan_exposes_resolved_replay_contract(
                 "78a22c71cb25792a5f28af3e1e43afeab766f5161d939004bed4c8b50e97ca91"
             ),
             "fixture_sha256": "943786a189afa827cb78a74ff0f0cc9f08ae13b5dbd547d3a19f60e0a3de304c",
-            "reference_manifest_uri": None,
-            "reference_manifest_sha256": None,
+            "reference_manifest_uri": (
+                "gs://s3-listing-study-results-29c02004/reference/idc-open-data/"
+                "fixture-943786a189afa827/contract-v2.tsv.gz"
+            ),
+            "reference_manifest_sha256": (
+                "fae4b5685bc07d53a34e2087817023012c3716e241bb793ec7000d2f8da69fa9"
+            ),
             "serving_mode": "sorted",
             "latency_model": {
                 "deadlines_ms": {"worker_page": 107, "pivot_probe": 41, "structure_probe": 49},
@@ -47,23 +52,23 @@ def test_resolve_plan_exposes_resolved_replay_contract(
             },
         },
         "allocation": {
-            "subject_vcpus": 8,
-            "replay_vcpus": 20,
-            "replay_memory_gb": 8,
-            "replay_parquet_connections": 40,
-            "replay_max_concurrent_requests": 1024,
+            "subject_vcpus": 1,
+            "replay_vcpus": 2,
+            "replay_memory_gb": 4,
+            "replay_parquet_connections": 20,
+            "replay_max_concurrent_requests": 64,
             "replay_heap_percent": 75,
             "replay_prefetch": False,
         },
         "capacity_status": "uncalibrated",
     }
     assert allocation == {
-        "server_cpuset": "0-19",
-        "subject_cpuset": "20-27",
-        "host_vcpus": 4,
-        "host_memory_headroom_gb": 48,
+        "server_cpuset": "0-1",
+        "subject_cpuset": "2-2",
+        "host_vcpus": 1,
+        "host_memory_headroom_gb": 8,
     }
     assert plan_cli.resolve_plan_main(["--bucket", bucket, "--skip-roster"]) == 0
     table = capsys.readouterr().out
     assert "UNCALIBRATED" in table
-    assert "host=4vCPU/48GiB" in table
+    assert "host=1vCPU/8GiB" in table

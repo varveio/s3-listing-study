@@ -21,9 +21,8 @@ auth_role: public-read
 
 # The backend, stated once because none of it varies per case.
 replay:
-  # This diagnostic plan can exercise evidence capture, but it cannot complete
-  # verification until a reference manifest is bound, and cannot make a
-  # comparative measurement until a manifest-bound canary is receipted.
+  # This manifest-bound diagnostic can complete correctness verification, but
+  # cannot make a comparative measurement or calibrate replay capacity.
   capacity_status: uncalibrated
   # The fixture rides a layer of the server's own image, so the bytes served are
   # already part of an identity the attempt records. `fixture_sha256` is a digest
@@ -32,6 +31,8 @@ replay:
   # comparison.
   server_image_uri: us-east1-docker.pkg.dev/varve-oss/s3-listing-study/replay-server@sha256:78a22c71cb25792a5f28af3e1e43afeab766f5161d939004bed4c8b50e97ca91
   fixture_sha256: 943786a189afa827cb78a74ff0f0cc9f08ae13b5dbd547d3a19f60e0a3de304c
+  reference_manifest_uri: gs://s3-listing-study-results-29c02004/reference/idc-open-data/fixture-943786a189afa827/contract-v2.tsv.gz
+  reference_manifest_sha256: fae4b5685bc07d53a34e2087817023012c3716e241bb793ec7000d2f8da69fa9
   # Stated, never inferred. There used to be an `auto` that chose between sorted
   # and DuckDB serving; it was removed upstream precisely because a backend that
   # quietly becomes a different backend cannot be compared against itself.
@@ -62,20 +63,20 @@ defaults:
   # `vcpus`/`memory_gb` are the BOX, as everywhere else — the pair
   # instances.yaml resolves a machine type from. Server and subject allocations
   # leave derived positive host CPU and memory headroom.
-  # Calibration uses an intentionally wide server control. Subject CPU changes
-  # consume only the otherwise-idle host share, so the server and box stay
-  # fixed while the subject scale is measured.
-  vcpus: 32
-  memory_gb: 64
-  subject_vcpus: 8
-  container_memory_gb: 8
-  replay_vcpus: 20
-  replay_memory_gb: 8
+  # This first canary proves only the provider and evidence path. Keep it small;
+  # a later, separately receipted capacity experiment must derive any allocation
+  # eligible for comparative measurement.
+  vcpus: 4
+  memory_gb: 16
+  subject_vcpus: 1
+  container_memory_gb: 4
+  replay_vcpus: 2
+  replay_memory_gb: 4
   # The preserved pilot showed that 640 eagerly decodes hundreds of footers and
-  # can OOM at startup. A reader is released before injected sleep; 40 is held
-  # constant here while admission remains wide enough for the largest arm.
-  replay_parquet_connections: 40
-  replay_max_concurrent_requests: 1024
+  # can OOM at startup. A reader is released before injected sleep, so this
+  # diagnostic does not need one reader per admitted request.
+  replay_parquet_connections: 20
+  replay_max_concurrent_requests: 64
   replay_prefetch: false
   replay_heap_percent: 75
 
@@ -87,13 +88,9 @@ tools:
   # separate measurement plan.
   swath:
     cases:
-      # Keep the checked-in canary bounded. The resource matrix is frozen only
-      # after this path passes one real Batch canary and the manifest is bound.
+      # Keep the checked-in canary to one row. A resource matrix is designed
+      # only after this path passes one real Batch canary.
       - {mode: recursive-tsv, concurrency: 64, purpose: diagnostic}
-      - {mode: recursive-tsv, concurrency: 128, purpose: diagnostic}
-      - {mode: recursive-tsv, concurrency: 256, purpose: diagnostic}
-      - {mode: recursive-tsv, concurrency: 512, purpose: diagnostic}
-      - {mode: recursive-tsv, concurrency: 1024, purpose: diagnostic}
 
 # The other tools are outside this Swath resource-calibration plan, not excluded
 # on merit. Endpoint wiring now exists for every compatible capsule; they join a

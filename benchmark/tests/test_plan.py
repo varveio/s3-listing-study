@@ -995,9 +995,9 @@ def test_every_key_a_row_may_state_changes_the_case_it_resolves_to(tmp_path: Pat
 @pytest.mark.parametrize(
     ("before", "after"),
     (
-        ("subject_vcpus: 8", "subject_vcpus: 24"),
-        ("container_memory_gb: 8", "container_memory_gb: 57"),
-        ("  replay_max_concurrent_requests: 1024\n", ""),
+        ("subject_vcpus: 1", "subject_vcpus: 3"),
+        ("container_memory_gb: 4", "container_memory_gb: 13"),
+        ("  replay_max_concurrent_requests: 64\n", ""),
         ("replay_prefetch: false", "replay_prefetch: 1"),
     ),
 )
