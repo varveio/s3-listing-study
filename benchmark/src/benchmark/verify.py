@@ -56,21 +56,19 @@ import argparse
 import gzip
 import hashlib
 import json
-import math
 import shutil
 import sqlite3
 import sys
 import tempfile
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
-from typing import IO, Any, cast
-from urllib.parse import unquote, urlparse
+from typing import Any
 
 import duckdb
 
 from benchmark import adapters, gcs
+from benchmark import replay as replay_contract
 from benchmark.contract import (
     EXIT_BINDING_MISMATCH,
     EXIT_DRIFT,
@@ -91,8 +89,13 @@ from benchmark.ledger import (
     pending_rows,
     producer_summary,
 )
+from benchmark.replay_verify import (
+    ManifestError,
+    replay_manifest_identity,
+    stage_replay_manifest,
+    validate_replay_evidence,
+)
 from benchmark.runtime.command_adapter import Mode
-from benchmark.runtime.contract import ContractViolation, read_records
 
 _COLUMNS = (
     "{'key':'VARCHAR','size':'VARCHAR','etag':'VARCHAR',"
@@ -128,6 +131,7 @@ GAP_EXIT_CODES = {
     "malformed": EXIT_MALFORMED_INPUT,
     "manifest": EXIT_BINDING_MISMATCH,
     "replay-evidence": EXIT_MALFORMED_INPUT,
+    "uncalibrated-capacity": EXIT_INCOMPLETE_GROUP,
     "mixed-backend": EXIT_BINDING_MISMATCH,
 }
 
@@ -138,36 +142,39 @@ class MalformedInputError(Exception):
     """
 
 
-class ManifestError(Exception):
-    """A replay manifest cannot be bound, decompressed, or parsed safely."""
-
-
 @dataclass(frozen=True)
 class Subject:
-    """One measurement attempt of the roster, as the ledger recorded it."""
+    """One attempt of the roster, as the ledger recorded it."""
 
     attempt_id: str
     case_id: str
     tool: str
     mode: str
+    purpose: str
     statistic: str
     state: str
     target_bucket: str
     target_prefix: str
     result_prefix: str
     config: dict[str, object]
-    replay: dict[str, object] | None
+    replay: replay_contract.ReplayConfig | None
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> Subject:
-        replay = None if row["replay"] is None else json.loads(row["replay"])
-        if replay is not None and not isinstance(replay, dict):
-            raise ValueError(f"{row['attempt_id']} replay document is not an object")
+        try:
+            replay = (
+                None
+                if row["replay"] is None
+                else replay_contract.parse_document(str(row["replay"]))
+            )
+        except replay_contract.ReplayError as exc:
+            raise ValueError(f"{row['attempt_id']} replay document is invalid: {exc}") from exc
         return cls(
             attempt_id=row["attempt_id"],
             case_id=row["case_id"],
             tool=row["tool"],
             mode=row["mode"],
+            purpose=row["purpose"],
             statistic=row["statistic"],
             state=row["state"],
             target_bucket=row["target_bucket"],
@@ -180,9 +187,10 @@ class Subject:
 
 @dataclass(frozen=True)
 class Roster:
-    """A group's measurement attempts plus the slots it still owes."""
+    """A group's comparative attempts, replay diagnostics, and owed slots."""
 
     subjects: tuple[Subject, ...]
+    diagnostics: tuple[Subject, ...]
     blocked: tuple[str, ...]
     abandoned: tuple[str, ...]
 
@@ -200,20 +208,24 @@ class Prepared:
 
 
 def roster_for(con: sqlite3.Connection, group_id: str) -> Roster:
-    """The group's measurement attempts and its unresolved slots.
+    """Read comparison population and separately-verifiable replay diagnostics.
 
-    `purpose` other than `measurement` is not in the population at all: a canary
-    is not a stray row for completeness to complain about, and a preparation is
-    measured without being compared.
+    A diagnostic or canary gives evidence about the replay path, never a
+    comparative timing or rate.  It remains in the roster here only so its
+    identity, product, replay observations, and manifest binding can be
+    verified and recorded under its own prefix.
     """
-    subjects = tuple(
-        Subject.from_row(row)
-        for row in attempt_rows(con, group_id=group_id)
-        if row["purpose"] == "measurement"
+    attempts = tuple(Subject.from_row(row) for row in attempt_rows(con, group_id=group_id))
+    subjects = tuple(subject for subject in attempts if subject.purpose == "measurement")
+    diagnostics = tuple(
+        subject
+        for subject in attempts
+        if subject.purpose in {"canary", "diagnostic"} and subject.replay is not None
     )
     slots = pending_rows(con, group_id=group_id)
     return Roster(
         subjects=subjects,
+        diagnostics=diagnostics,
         blocked=tuple(_slot_label(row) for row in slots if row["state"] == "BLOCKED"),
         abandoned=tuple(_slot_label(row) for row in slots if row["state"] == "ABANDONED"),
     )
@@ -413,291 +425,6 @@ def stage_evidence(result_prefix: str, staging: Path) -> Path:
     return Path(result_prefix)
 
 
-def replay_manifest_identity(subject: Subject) -> tuple[str, str, str]:
-    """Return the fixture/manifest binding from a replay row, or refuse it."""
-    try:
-        assert subject.replay is not None
-        backend = subject.replay["backend"]
-        if not isinstance(backend, Mapping):
-            raise TypeError
-        fixture_sha256 = backend["fixture_sha256"]
-        uri = backend["reference_manifest_uri"]
-        digest = backend["reference_manifest_sha256"]
-        for value in (fixture_sha256, digest):
-            if (
-                not isinstance(value, str)
-                or len(value) != 64
-                or any(char not in "0123456789abcdef" for char in value)
-            ):
-                raise TypeError
-        if not isinstance(uri, str) or not uri:
-            raise TypeError
-    except (AssertionError, KeyError, TypeError):
-        raise ManifestError(
-            f"{subject.attempt_id} has no valid replay reference manifest URI and digest"
-        ) from None
-    return fixture_sha256, uri, digest
-
-
-def _local_uri_path(uri: str) -> Path:
-    if uri.startswith("file://"):
-        parsed = urlparse(uri)
-        if parsed.netloc not in ("", "localhost"):
-            raise ManifestError(f"unsupported local manifest URI authority: {uri}")
-        return Path(unquote(parsed.path))
-    return Path(uri)
-
-
-def stage_replay_manifest(uri: str, expected_sha256: str, work_dir: Path) -> Path:
-    """Bind compressed artifact bytes, then validate/decompress contract v2."""
-    work_dir.mkdir(parents=True, exist_ok=True)
-    compressed = work_dir / "reference-manifest.tsv.gz"
-    if uri.startswith("gs://"):
-        bucket_name, object_name = gcs.parse_gs_uri(uri)
-        gcs.client().bucket(bucket_name).blob(object_name).download_to_filename(str(compressed))
-    else:
-        source = _local_uri_path(uri)
-        if not source.is_file():
-            raise ManifestError(f"reference manifest does not exist: {uri}")
-        shutil.copyfile(source, compressed)
-    actual_sha256 = sha256_of(compressed)
-    if actual_sha256 != expected_sha256:
-        raise ManifestError(
-            f"reference manifest sha256 mismatch: expected {expected_sha256}, found {actual_sha256}"
-        )
-
-    plain = work_dir / "reference-manifest.tsv"
-    previous: bytes | None = None
-    rows = 0
-    try:
-        with gzip.open(compressed, "rb") as packed, plain.open("xb") as output:
-            for record in read_records(cast(IO[bytes], packed)):
-                if previous is not None and record.key <= previous:
-                    kind = "duplicate" if record.key == previous else "out-of-order"
-                    raise ManifestError(f"reference manifest has {kind} key: {record.key!r}")
-                output.write(record.to_line() + b"\n")
-                previous = record.key
-                rows += 1
-    except (gzip.BadGzipFile, EOFError, OSError, ContractViolation) as exc:
-        raise ManifestError(f"reference manifest is not valid contract-v2 gzip: {exc}") from exc
-    if rows == 0:
-        raise ManifestError("reference manifest contains no OBJECT rows")
-    return plain
-
-
-def _observation(
-    value: object, *, phase: str, with_elapsed: bool
-) -> tuple[datetime, tuple[str, ...]]:
-    expected = {"observed_at", "metrics"} | ({"elapsed_s"} if with_elapsed else set())
-    if not isinstance(value, Mapping) or set(value) != expected:
-        raise ValueError(f"replay {phase} observation has invalid fields")
-    observed_at = value["observed_at"]
-    metrics = value["metrics"]
-    if not isinstance(observed_at, str) or not isinstance(metrics, Mapping):
-        raise ValueError(f"replay {phase} observation is malformed")
-    try:
-        instant = datetime.fromisoformat(observed_at.replace("Z", "+00:00"))
-    except ValueError:
-        raise ValueError(f"replay {phase} observed_at is not ISO-8601") from None
-    if instant.tzinfo is None:
-        raise ValueError(f"replay {phase} observed_at has no timezone")
-    if with_elapsed:
-        elapsed = value["elapsed_s"]
-        if isinstance(elapsed, bool) or not isinstance(elapsed, int | float) or elapsed < 0:
-            raise ValueError(f"replay {phase} elapsed_s is invalid")
-    meters = metrics.get("meters")
-    if not isinstance(meters, list):
-        raise ValueError(f"replay {phase} metrics has no meters list")
-    names: set[str] = set()
-    for meter in meters:
-        if not isinstance(meter, Mapping) or not isinstance(meter.get("name"), str):
-            raise ValueError(f"replay {phase} metrics contains a malformed meter")
-        name = meter["name"]
-        if not name:
-            raise ValueError(f"replay {phase} metrics contains an empty meter name")
-        names.add(name)
-    return instant, tuple(sorted(names))
-
-
-def _result_instant(result: Mapping[str, object], name: str) -> datetime:
-    value = result.get(name)
-    if not isinstance(value, str):
-        raise ValueError(f"result {name} is missing for replay evidence")
-    try:
-        instant = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        raise ValueError(f"result {name} is not ISO-8601") from None
-    if instant.tzinfo is None:
-        raise ValueError(f"result {name} has no timezone")
-    return instant
-
-
-def _resource_instant(value: object) -> datetime:
-    if not isinstance(value, str):
-        raise ValueError("replay resource observed_at is missing")
-    try:
-        instant = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        raise ValueError("replay resource observed_at is not ISO-8601") from None
-    if instant.tzinfo is None:
-        raise ValueError("replay resource observed_at has no timezone")
-    return instant
-
-
-def _cpuset_string(start: object, count: object) -> str:
-    if (
-        isinstance(start, bool)
-        or not isinstance(start, int)
-        or isinstance(count, bool)
-        or not isinstance(count, int)
-        or start < 0
-        or count < 1
-    ):
-        raise ValueError("replay allocation has invalid cpuset sizes")
-    end = start + count - 1
-    return str(start) if start == end else f"{start}-{end}"
-
-
-def validate_replay_evidence(result: Mapping[str, object], subject: Subject) -> dict[str, object]:
-    """Validate the worker's replay protocol without judging capacity thresholds."""
-    if result.get("replay") != subject.replay:
-        raise ValueError("result replay config does not exactly match the ledger row")
-    evidence = result.get("replay_evidence")
-    expected = {"readiness", "before", "samples", "resource_samples", "after", "errors"}
-    if not isinstance(evidence, Mapping) or set(evidence) != expected:
-        raise ValueError("result replay_evidence is missing or malformed")
-    readiness = evidence["readiness"]
-    if not isinstance(readiness, Mapping) or set(readiness) != {
-        "state",
-        "wait_ms",
-        "attempts",
-        "last_error",
-    }:
-        raise ValueError("replay readiness evidence is malformed")
-    wait_ms = readiness["wait_ms"]
-    attempts = readiness["attempts"]
-    last_error = readiness["last_error"]
-    if (
-        readiness["state"] != "ready"
-        or isinstance(wait_ms, bool)
-        or not isinstance(wait_ms, int)
-        or wait_ms < 0
-        or isinstance(attempts, bool)
-        or not isinstance(attempts, int)
-        or attempts < 1
-        or (last_error is not None and not isinstance(last_error, str))
-    ):
-        raise ValueError("replay was not ready before subject timing")
-    errors = evidence["errors"]
-    if not isinstance(errors, list):
-        raise ValueError("replay errors evidence is not a list")
-    for error in errors:
-        if (
-            not isinstance(error, Mapping)
-            or set(error) != {"phase", "error"}
-            or error["phase"] not in {"readiness", "before", "sample", "resource-sample", "after"}
-            or not isinstance(error["error"], str)
-            or not error["error"]
-        ):
-            raise ValueError("replay errors evidence contains a malformed error")
-    if errors:
-        raise ValueError(f"replay evidence recorded {len(errors)} explicit error(s)")
-
-    before_at, before_names = _observation(evidence["before"], phase="before", with_elapsed=False)
-    after_at, after_names = _observation(evidence["after"], phase="after", with_elapsed=False)
-    started_at = _result_instant(result, "started_at")
-    finished_at = _result_instant(result, "finished_at")
-    if not before_at <= started_at <= finished_at <= after_at:
-        raise ValueError("replay before/after metrics do not bracket subject timing")
-    samples = evidence["samples"]
-    if not isinstance(samples, list):
-        raise ValueError("replay samples evidence is not a list")
-    sample_names: set[str] = set()
-    previous = before_at
-    for sample in samples:
-        observed_at, names = _observation(sample, phase="sample", with_elapsed=True)
-        if observed_at < previous or observed_at > after_at:
-            raise ValueError("replay sample metrics are out of observation order")
-        previous = observed_at
-        sample_names.update(names)
-    resource_samples = evidence["resource_samples"]
-    if not isinstance(resource_samples, list):
-        raise ValueError("replay resource_samples evidence is not a list")
-    allocation = subject.replay["allocation"] if subject.replay is not None else None
-    if not isinstance(allocation, Mapping):
-        raise ValueError("replay allocation evidence is malformed")
-    expected_server_cpuset = _cpuset_string(0, allocation.get("replay_vcpus"))
-    expected_subject_cpuset = _cpuset_string(
-        allocation.get("replay_vcpus"), allocation.get("subject_vcpus")
-    )
-    server_vcpus = allocation["replay_vcpus"]
-    subject_vcpus = allocation["subject_vcpus"]
-    assert isinstance(server_vcpus, int) and isinstance(subject_vcpus, int)
-    previous_resource = before_at
-    resource_fields = {
-        "observed_at",
-        "elapsed_s",
-        "interval_s",
-        "server_cpuset",
-        "subject_cpuset",
-        "server_cpuset_utilization",
-        "server_cores_used",
-        "subject_cpuset_utilization",
-        "subject_cores_used",
-        "host_mem_available_kb",
-        "host_load1",
-    }
-    for sample in resource_samples:
-        if not isinstance(sample, Mapping) or set(sample) != resource_fields:
-            raise ValueError("replay resource sample has invalid fields")
-        observed_at = _resource_instant(sample["observed_at"])
-        if observed_at < previous_resource or observed_at > after_at:
-            raise ValueError("replay resource samples are out of observation order")
-        previous_resource = observed_at
-        if (
-            sample["server_cpuset"] != expected_server_cpuset
-            or sample["subject_cpuset"] != expected_subject_cpuset
-        ):
-            raise ValueError("replay resource sample cpusets disagree with allocation")
-        for name in (
-            "elapsed_s",
-            "interval_s",
-            "server_cpuset_utilization",
-            "server_cores_used",
-            "subject_cpuset_utilization",
-            "subject_cores_used",
-            "host_load1",
-        ):
-            value = sample[name]
-            if (
-                isinstance(value, bool)
-                or not isinstance(value, int | float)
-                or not math.isfinite(value)
-                or value < 0
-            ):
-                raise ValueError(f"replay resource sample {name} is invalid")
-        if (
-            sample["server_cpuset_utilization"] > 1
-            or sample["subject_cpuset_utilization"] > 1
-            or sample["server_cores_used"] > server_vcpus
-            or sample["subject_cores_used"] > subject_vcpus
-            or sample["interval_s"] <= 0
-        ):
-            raise ValueError("replay resource sample exceeds its declared allocation")
-        available = sample["host_mem_available_kb"]
-        if isinstance(available, bool) or not isinstance(available, int) or available < 0:
-            raise ValueError("replay resource sample host_mem_available_kb is invalid")
-    return {
-        "readiness_attempts": attempts,
-        "readiness_wait_ms": wait_ms,
-        "before_metric_names": list(before_names),
-        "after_metric_names": list(after_names),
-        "sample_metric_names": sorted(sample_names),
-        "sample_count": len(samples),
-        "resource_sample_count": len(resource_samples),
-    }
-
-
 def _decompressed(source: Path, into: Path) -> Path:
     """Unpack a published product into the working directory the comparison reads.
 
@@ -850,7 +577,7 @@ def prepare_subject(
     replay_diagnostics = None
     if subject.replay is not None:
         try:
-            replay_diagnostics = validate_replay_evidence(result, subject)
+            replay_diagnostics = validate_replay_evidence(result, subject.replay)
         except ValueError as exc:
             return None, _gap(subject, "replay-evidence", str(exc))
     staging = work_dir / subject.attempt_id
@@ -900,13 +627,41 @@ def verify_replay_bucket(
     adapter_root: str,
     work_dir: Path,
     write_record: bool,
+    require_calibration: bool = True,
 ) -> dict[str, Any]:
-    """Compare every successful replay attempt to its immutable oracle."""
+    """Verify replay attempts against an immutable oracle.
+
+    Comparative replay measurements need a declared calibrated capacity.  A
+    canary or diagnostic is instead evidence for reaching that state, so its
+    caller deliberately sets ``require_calibration`` false.
+    """
     gaps: list[dict[str, object]] = []
+    if require_calibration:
+        for subject in subjects:
+            assert subject.replay is not None
+            if subject.replay.capacity_status != "calibrated":
+                gaps.append(
+                    _gap(
+                        subject,
+                        "uncalibrated-capacity",
+                        "replay capacity_status is UNCALIBRATED; measurement is refused",
+                    )
+                )
+    if gaps:
+        return {
+            "target_bucket": subjects[0].target_bucket,
+            "backend": "replay",
+            "complete": False,
+            "verdict": "INCOMPLETE",
+            "strata": [],
+            "rates": [],
+            "gaps": gaps,
+        }
     identities: list[tuple[str, str, str]] = []
     for subject in subjects:
         try:
-            identities.append(replay_manifest_identity(subject))
+            assert subject.replay is not None
+            identities.append(replay_manifest_identity(subject.replay))
         except ManifestError as exc:
             gaps.append(_gap(subject, "manifest", str(exc)))
     distinct = set(identities)
@@ -925,8 +680,17 @@ def verify_replay_bucket(
         fixture_sha256, manifest_uri, manifest_sha256 = identities[0]
         try:
             bucket_key = hashlib.sha256(subjects[0].target_bucket.encode()).hexdigest()[:12]
+            # A group may verify the same bucket more than once for separate
+            # diagnostics. Hash this invocation's unique ledger IDs into one
+            # bounded path instead of sharing mutable staged files.
+            invocation_key = hashlib.sha256(
+                "\0".join(sorted(subject.attempt_id for subject in subjects)).encode()
+            ).hexdigest()
+            manifest_dir = work_dir / f"replay-manifest-{bucket_key}-{invocation_key}"
             manifest_tsv = stage_replay_manifest(
-                manifest_uri, manifest_sha256, work_dir / f"replay-manifest-{bucket_key}"
+                manifest_uri,
+                manifest_sha256,
+                manifest_dir,
             )
         except Exception as exc:
             # Provider/download errors are binding gaps too. A replay result may
@@ -1030,6 +794,43 @@ def verify_replay_bucket(
         "strata": strata,
         "rates": rates,
         "gaps": gaps,
+    }
+
+
+def verify_replay_diagnostic(
+    subject: Subject,
+    *,
+    adapter_root: str,
+    work_dir: Path,
+    write_record: bool,
+) -> dict[str, Any]:
+    """Verify one non-comparative replay attempt without creating a timing row."""
+    result = verify_replay_bucket(
+        [subject],
+        adapter_root=adapter_root,
+        work_dir=work_dir,
+        write_record=write_record,
+        require_calibration=False,
+    )
+    comparison = next(
+        (
+            record
+            for stratum in result["strata"]
+            for record in stratum["comparisons"]
+            if record["attempt_id"] == subject.attempt_id
+        ),
+        None,
+    )
+    return {
+        "attempt_id": subject.attempt_id,
+        "tool": subject.tool,
+        "mode": subject.mode,
+        "purpose": subject.purpose,
+        "capacity_status": subject.replay.capacity_status if subject.replay is not None else "-",
+        "complete": result["complete"],
+        "verdict": result["verdict"],
+        "verification": comparison,
+        "gaps": result["gaps"],
     }
 
 
@@ -1172,6 +973,7 @@ def verify_group(
     """Verify one group against its recorded roster. Returns (exit_code, report)."""
     roster = roster_for(con, group_id)
     buckets: list[dict[str, Any]] = []
+    diagnostics: list[dict[str, Any]] = []
     with tempfile.TemporaryDirectory() as tmp:
         work_dir = Path(tmp)
         for bucket in sorted({s.target_bucket for s in roster.subjects}):
@@ -1183,13 +985,42 @@ def verify_group(
                     write_record=write_record,
                 )
             )
-        complete = (
+        for subject in roster.diagnostics:
+            diagnostics.append(
+                verify_replay_diagnostic(
+                    subject,
+                    adapter_root=adapter_root,
+                    work_dir=work_dir,
+                    write_record=write_record,
+                )
+            )
+        comparison_complete = (
             bool(roster.subjects)
             and not roster.blocked
             and not roster.abandoned
             and all(b["complete"] for b in buckets)
         )
-        verdict = "INCOMPLETE" if not complete else worst_verdict(b["verdict"] for b in buckets)
+        comparison_verdict = (
+            "INCOMPLETE"
+            if not comparison_complete
+            else worst_verdict(b["verdict"] for b in buckets)
+        )
+        diagnostics_complete = (
+            bool(diagnostics)
+            and not roster.blocked
+            and not roster.abandoned
+            and all(item["complete"] for item in diagnostics)
+        )
+        diagnostics_verdict = (
+            "INCOMPLETE"
+            if not diagnostics_complete
+            else worst_verdict(item["verdict"] for item in diagnostics)
+        )
+        # A diagnostic-only group has an evidence verdict, not a fictional
+        # comparison verdict.  In a mixed group diagnostics remain visible but
+        # do not promote, demote, or publish the comparison population.
+        complete = comparison_complete if roster.subjects else diagnostics_complete
+        verdict = comparison_verdict if roster.subjects else diagnostics_verdict
         report = {
             "group_id": group_id,
             "complete": complete,
@@ -1197,7 +1028,11 @@ def verify_group(
             "blocked": list(roster.blocked),
             "abandoned": list(roster.abandoned),
             "subjects": len(roster.subjects),
+            "diagnostic_subjects": len(roster.diagnostics),
+            "diagnostic_complete": diagnostics_complete,
+            "diagnostic_verdict": diagnostics_verdict,
             "buckets": buckets,
+            "diagnostics": diagnostics,
         }
     return GROUP_EXIT_CODES[verdict], report
 
@@ -1225,6 +1060,11 @@ def print_samples(diff: Mapping[str, Any]) -> None:
 
 def print_report(report: Mapping[str, Any]) -> None:
     print(f"group {report['group_id']}: {report['subjects']} measurement attempt(s)")
+    if report["diagnostic_subjects"]:
+        print(
+            f"  {report['diagnostic_subjects']} replay diagnostic/canary attempt(s): "
+            f"{report['diagnostic_verdict']}"
+        )
     for label in ("blocked", "abandoned"):
         for slot in report[label]:
             print(f"  {label}: {slot}")
@@ -1246,6 +1086,13 @@ def print_report(report: Mapping[str, Any]) -> None:
                 f"= {rate['rate']}"
             )
         for gap in bucket["gaps"]:
+            print(f"    gap {gap['attempt_id']} [{gap['reason']}]: {gap['detail']}")
+    for diagnostic in report["diagnostics"]:
+        print(
+            f"  diagnostic {diagnostic['attempt_id']} [{diagnostic['purpose']}]: "
+            f"{diagnostic['verdict']} (capacity {diagnostic['capacity_status']})"
+        )
+        for gap in diagnostic["gaps"]:
             print(f"    gap {gap['attempt_id']} [{gap['reason']}]: {gap['detail']}")
     print(f"verdict={report['verdict']}")
 

@@ -15,7 +15,6 @@ import argparse
 import copy
 import hashlib
 import json
-import math
 import re
 import shlex
 import sqlite3
@@ -35,6 +34,7 @@ from google.cloud import batch_v1
 
 from benchmark import batch_client, gcs, identity
 from benchmark import plan as bench
+from benchmark import replay as replay_contract
 from benchmark.contract import CREDENTIAL_ENV_VAR, TOOL_IMAGE_FIELDS, TOOLBOX_TOOLS
 from benchmark.ledger import (
     INSERT_COLUMNS,
@@ -528,103 +528,23 @@ def _runnable_options(cpuset: str, memory_gb: int) -> str:
     )
 
 
-def _replay_document(attempt: Attempt) -> dict[str, Any] | None:
-    """Decode the frozen resolved document and reject allocation drift."""
+def _replay_document(attempt: Attempt) -> replay_contract.ReplayConfig | None:
+    """Decode the one canonical replay document and validate its host projection."""
     if attempt.replay is None:
         return None
     try:
-        replay = json.loads(attempt.replay)
-        if not isinstance(replay, dict) or set(replay) != {"backend", "allocation"}:
-            raise ValueError
-        backend = replay["backend"]
-        allocation = replay["allocation"]
-        if (
-            not isinstance(backend, dict)
-            or set(backend) != set(bench.REPLAY_BLOCK_FIELDS)
-            or not isinstance(allocation, dict)
-        ):
-            raise ValueError
-        if set(allocation) != set(bench.REPLAY_FIELDS):
-            raise ValueError
-        for name in bench.REPLAY_INTEGER_FIELDS:
-            value = allocation[name]
-            minimum = 0 if name.startswith("host_reserved_") else 1
-            if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
-                raise ValueError
-        if not isinstance(allocation["replay_prefetch"], bool):
-            raise ValueError
-        if allocation["replay_heap_percent"] > 100:
-            raise ValueError
-        if (
-            allocation["replay_vcpus"]
-            + allocation["subject_vcpus"]
-            + allocation["host_reserved_vcpus"]
-            != attempt.vcpus
-        ):
-            raise ValueError
-        if (
-            allocation["replay_memory_gb"]
-            + allocation["subject_memory_gb"]
-            + allocation["host_reserved_memory_gb"]
-            > attempt.memory_gb
-        ):
-            raise ValueError
-        if attempt.container_memory_gb != allocation["subject_memory_gb"]:
-            raise ValueError
-        if PINNED_IMAGE_RE.fullmatch(backend["server_image_uri"]) is None:
-            raise ValueError
-        if HEX64_RE.fullmatch(backend["fixture_sha256"]) is None:
-            raise ValueError
-        manifest_uri = backend["reference_manifest_uri"]
-        manifest_sha256 = backend["reference_manifest_sha256"]
-        if (manifest_uri is None) != (manifest_sha256 is None):
-            raise ValueError
-        if manifest_uri is not None and (
-            not isinstance(manifest_uri, str)
-            or not manifest_uri
-            or not isinstance(manifest_sha256, str)
-            or HEX64_RE.fullmatch(manifest_sha256) is None
-        ):
-            raise ValueError
-        if backend["serving_mode"] not in bench.SERVING_MODES:
-            raise ValueError
-        latency = backend["latency_model"]
-        if (
-            not isinstance(latency, dict)
-            or set(latency) != set(bench.LATENCY_MODEL_FIELDS)
-            or not isinstance(latency["deadlines_ms"], dict)
-            or set(latency["deadlines_ms"]) != set(bench.INJECT_SHAPES)
-        ):
-            raise ValueError
-        if any(
-            isinstance(value, bool) or not isinstance(value, int) or value < 1
-            for value in latency["deadlines_ms"].values()
-        ):
-            raise ValueError
-        scale = latency["scale"]
-        if (
-            isinstance(scale, bool)
-            or not isinstance(scale, int | float)
-            or not math.isfinite(scale)
-            or scale <= 0
-            or latency["jitter"] != "none"
-        ):
-            raise ValueError
-        if any(
-            not isinstance(latency[name], str) or not latency[name]
-            for name in ("injector_version", "semantics_version")
-        ):
-            raise ValueError
-        protocol = backend["evidence_protocol_version"]
-        if not isinstance(protocol, str) or not protocol:
-            raise ValueError
-        if json.dumps(replay, sort_keys=True, separators=(",", ":")) != attempt.replay:
-            raise ValueError
-    except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+        resolved = replay_contract.parse_document(attempt.replay)
+        replay_contract.allocation_summary(
+            resolved,
+            box_vcpus=attempt.vcpus,
+            box_memory_gb=attempt.memory_gb,
+            container_memory_gb=attempt.container_memory_gb,
+        )
+    except replay_contract.ReplayError:
         raise CampaignError(
             f"{attempt.attempt_id} carries a malformed resolved replay document"
         ) from None
-    return replay
+    return resolved
 
 
 def render_batch_job(
@@ -690,14 +610,16 @@ def render_batch_job(
                 (f"--memory={container_memory}g", f"--memory-swap={container_memory}g")
             )
     else:
-        allocation = replay["allocation"]
-        replay_vcpus = allocation["replay_vcpus"]
-        subject_vcpus = allocation["subject_vcpus"]
-        replay_cpuset = _cpuset(0, replay_vcpus)
-        subject_cpuset = _cpuset(replay_vcpus, subject_vcpus)
-        container["options"] = _runnable_options(subject_cpuset, allocation["subject_memory_gb"])
-        backend = replay["backend"]
-        latency = backend["latency_model"]
+        allocation = replay.allocation
+        summary = replay_contract.allocation_summary(
+            replay,
+            box_vcpus=attempt.vcpus,
+            box_memory_gb=attempt.memory_gb,
+            container_memory_gb=container_memory,
+        )
+        assert container_memory is not None
+        container["options"] = _runnable_options(summary.subject_cpuset, container_memory)
+        backend = replay.backend
         server_commands = [
             "serve",
             "--fixture",
@@ -711,31 +633,29 @@ def render_batch_job(
             "--metrics-port",
             "19192",
             "--serving-mode",
-            backend["serving_mode"],
+            backend.serving_mode,
             "--parquet-connections",
-            str(allocation["replay_parquet_connections"]),
+            str(allocation.replay_parquet_connections),
             "--max-concurrent-requests",
-            str(allocation["replay_max_concurrent_requests"]),
+            str(allocation.replay_max_concurrent_requests),
             "--inject-latency",
-            ",".join(
-                f"{shape}={latency['deadlines_ms'][shape]}ms" for shape in bench.INJECT_SHAPES
-            ),
+            backend.profile_spec,
             "--latency-scale",
-            str(latency["scale"]),
+            str(backend.latency_scale),
         ]
         server_runnable = {
             "background": True,
             "container": {
-                "imageUri": backend["server_image_uri"],
+                "imageUri": backend.server_image_uri,
                 "commands": server_commands,
-                "options": _runnable_options(replay_cpuset, allocation["replay_memory_gb"]),
+                "options": _runnable_options(summary.server_cpuset, allocation.replay_memory_gb),
             },
             "environment": {
                 "variables": {
                     "JAVA_TOOL_OPTIONS": (
-                        f"-XX:MaxRAMPercentage={allocation['replay_heap_percent']} "
+                        f"-XX:MaxRAMPercentage={allocation.replay_heap_percent} "
                         "-Dswath.replay.prefetch.enabled="
-                        f"{'true' if allocation['replay_prefetch'] else 'false'}"
+                        f"{'true' if allocation.replay_prefetch else 'false'}"
                     )
                 }
             },
@@ -1033,27 +953,7 @@ def _case_from_document(document: Any) -> Case:
         replay_document = document.get("replay")
         replay = None
         if replay_document is not None:
-            backend_document = replay_document["backend"]
-            latency = backend_document["latency_model"]
-            allocation = replay_document["allocation"]
-            replay = bench.ReplayConfig(
-                backend=bench.ReplayBackend(
-                    server_image_uri=backend_document["server_image_uri"],
-                    fixture_sha256=backend_document["fixture_sha256"],
-                    reference_manifest_uri=backend_document["reference_manifest_uri"],
-                    reference_manifest_sha256=backend_document["reference_manifest_sha256"],
-                    serving_mode=backend_document["serving_mode"],
-                    latency_deadlines_ms=tuple(
-                        (shape, latency["deadlines_ms"][shape]) for shape in bench.INJECT_SHAPES
-                    ),
-                    latency_scale=latency["scale"],
-                    latency_jitter=latency["jitter"],
-                    latency_injector_version=latency["injector_version"],
-                    latency_semantics_version=latency["semantics_version"],
-                    evidence_protocol_version=backend_document["evidence_protocol_version"],
-                ),
-                **{field: allocation[field] for field in bench.REPLAY_FIELDS},
-            )
+            replay = replay_contract.parse_document(replay_contract.canonical_json(replay_document))
         return Case(
             **{
                 name: document[name]

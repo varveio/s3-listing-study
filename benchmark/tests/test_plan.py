@@ -7,11 +7,12 @@ import textwrap
 from collections.abc import Mapping
 from pathlib import Path
 from types import MappingProxyType
+from typing import TypedDict, Unpack
 
 import pytest
 
-from benchmark import plan as bench
-from benchmark import plan_cli as bench_cli
+import benchmark.plan as bench
+import benchmark.plan_cli as bench_cli
 from benchmark.runtime import command_adapter as capsule
 
 MINIMAL = """
@@ -140,12 +141,19 @@ CAPSULES = {
 }
 
 
-def load(path: Path, **kwargs: object) -> bench.Plan:
+class _LoadOverrides(TypedDict, total=False):
+    default_modes: Mapping[str, str]
+    instances: Mapping[tuple[int, int], str]
+    heap: bench.HeapConfig
+    adapters: Mapping[str, capsule.LoadedCommandAdapter]
+
+
+def load(path: Path, **kwargs: Unpack[_LoadOverrides]) -> bench.Plan:
     """``Plan.load`` with the fixture tables already supplied."""
     kwargs.setdefault("instances", INSTANCES)
     kwargs.setdefault("heap", HEAP)
     kwargs.setdefault("adapters", CAPSULES)
-    return bench.Plan.load(path, **kwargs)  # type: ignore[arg-type]
+    return bench.Plan.load(path, **kwargs)
 
 
 # ── the shipped plan ─────────────────────────────────────────────────────────
@@ -865,16 +873,13 @@ def test_every_key_a_row_may_state_changes_the_case_it_resolves_to(tmp_path: Pat
         "signed": (False, True),
         "concurrency": (4, 8),
         "segments": (16, 32),
-        "vcpus": (2, 4),
+        "vcpus": (3, 4),
         "memory_gb": (8, 16),
         "container_memory_gb": (4, 8),
         # The replay backend's own allocation. Two cases against differently
         # sized servers are two measurements, so these have to reach the case
         # exactly as the subject's own allocation does.
         "subject_vcpus": (1, 2),
-        "subject_memory_gb": (4, 8),
-        "host_reserved_vcpus": (0, 1),
-        "host_reserved_memory_gb": (0, 2),
         "replay_vcpus": (1, 2),
         "replay_memory_gb": (2, 4),
         "replay_parquet_connections": (64, 128),
@@ -913,6 +918,7 @@ def test_every_key_a_row_may_state_changes_the_case_it_resolves_to(tmp_path: Pat
     # vary is a constant, exactly like the bucket.
     replay_block = (
         "replay:\n"
+        "  capacity_status: calibrated\n"
         f"  server_image_uri: example/replay-server@sha256:{'b' * 64}\n"
         f"  fixture_sha256: {'a' * 64}\n"
         "  reference_manifest_uri: gs://example/reference.tsv.gz\n"
@@ -922,13 +928,9 @@ def test_every_key_a_row_may_state_changes_the_case_it_resolves_to(tmp_path: Pat
         "    deadlines_ms: {worker_page: 247, pivot_probe: 41, structure_probe: 49}\n"
         "    scale: 1.0\n"
         "    jitter: none\n"
-        "    injector_version: injector-v1\n"
-        "    semantics_version: deadline-floor-v1\n"
-        "  evidence_protocol_version: measurement-v1\n"
     )
     replay_defaults = (
-        "  subject_vcpus: 1\n  subject_memory_gb: 4\n"
-        "  host_reserved_vcpus: 0\n  host_reserved_memory_gb: 2\n"
+        "  subject_vcpus: 1\n"
         "  replay_vcpus: 1\n  replay_memory_gb: 2\n"
         "  replay_parquet_connections: 64\n  replay_max_concurrent_requests: 32\n"
         "  replay_prefetch: false\n  replay_heap_percent: 50\n"
@@ -936,6 +938,10 @@ def test_every_key_a_row_may_state_changes_the_case_it_resolves_to(tmp_path: Pat
     )
 
     def case(field: str, value: object, index: int) -> bench.Case:
+        def integer_value() -> int:
+            assert isinstance(value, int) and not isinstance(value, bool)
+            return value
+
         directory = tmp_path / f"{field}-{index}"
         directory.mkdir()
         path = directory / "b.yaml"
@@ -943,32 +949,20 @@ def test_every_key_a_row_may_state_changes_the_case_it_resolves_to(tmp_path: Pat
         # A server's share is carved out of the box, so a row sweeping the
         # server's size needs a box with room to sweep it in.
         if field in bench.REPLAY_FIELDS or field in {"container_memory_gb", "vcpus"}:
-            box_vcpus = int(value) if field == "vcpus" else 4
+            box_vcpus = integer_value() if field == "vcpus" else 4
             row |= {"vcpus": box_vcpus, "memory_gb": 16}
-            # Keep exact CPU allocation and non-overcommitted memory while the
-            # field under test changes. These companion values are authoring
-            # constraints, not assertions about one validator message.
-            subject_vcpus = int(value) if field == "subject_vcpus" else 1
-            host_vcpus = int(value) if field == "host_reserved_vcpus" else 0
-            replay_vcpus = int(value) if field == "replay_vcpus" else 1
-            if field == "replay_vcpus":
-                subject_vcpus = box_vcpus - host_vcpus - replay_vcpus
-            if subject_vcpus + host_vcpus + replay_vcpus > box_vcpus:
-                subject_vcpus = 1
-            subject_memory = (
-                int(value) if field in {"subject_memory_gb", "container_memory_gb"} else 4
-            )
-            replay_memory = int(value) if field == "replay_memory_gb" else 2
-            host_memory = int(value) if field == "host_reserved_memory_gb" else 0
+            # Keep positive derived host CPU and memory headroom while the
+            # independent server/subject allocation under test changes.
+            subject_vcpus = integer_value() if field == "subject_vcpus" else 1
+            replay_vcpus = integer_value() if field == "replay_vcpus" else 1
+            subject_memory = integer_value() if field == "container_memory_gb" else 4
+            replay_memory = integer_value() if field == "replay_memory_gb" else 2
             case_defaults = replay_defaults
             for name, setting in {
                 "subject_vcpus": subject_vcpus,
-                "host_reserved_vcpus": host_vcpus,
-                "replay_vcpus": box_vcpus - subject_vcpus - host_vcpus,
-                "subject_memory_gb": subject_memory,
+                "replay_vcpus": replay_vcpus,
                 "container_memory_gb": subject_memory,
                 "replay_memory_gb": replay_memory,
-                "host_reserved_memory_gb": host_memory,
             }.items():
                 case_defaults = (
                     "\n".join(
@@ -982,12 +976,15 @@ def test_every_key_a_row_may_state_changes_the_case_it_resolves_to(tmp_path: Pat
         body = "swath:\n  cases:\n    - {" + ", ".join(f"{k}: {v}" for k, v in row.items()) + "}\n"
         document = MINIMAL.format(bucket="b", tools=textwrap.indent(body, "  "))
         document = document.replace("spec_version: 2", "spec_version: 3")
+        document = document.replace("  vcpus: 2\n  memory_gb: 8\n", "  vcpus: 4\n  memory_gb: 16\n")
         document = document.replace("tools:\n", case_defaults + "tools:\n", 1)
         path.write_text(
             "auth_role: fixture-role\n" + replay_block + document,
             encoding="utf-8",
         )
-        return load(path, adapters=adapters).cases[0]
+        return load(path, adapters=adapters, instances={**INSTANCES, (3, 16): "three-vcpu"}).cases[
+            0
+        ]
 
     for field, (before, after) in pairs.items():
         first, second = case(field, before, 0), case(field, after, 1)
@@ -998,8 +995,8 @@ def test_every_key_a_row_may_state_changes_the_case_it_resolves_to(tmp_path: Pat
 @pytest.mark.parametrize(
     ("before", "after"),
     (
-        ("subject_vcpus: 8", "subject_vcpus: 9"),
-        ("subject_memory_gb: 8", "subject_memory_gb: 49"),
+        ("subject_vcpus: 8", "subject_vcpus: 24"),
+        ("container_memory_gb: 8", "container_memory_gb: 57"),
         ("  replay_max_concurrent_requests: 1024\n", ""),
         ("replay_prefetch: false", "replay_prefetch: 1"),
     ),
@@ -1013,6 +1010,15 @@ def test_replay_allocation_refuses_ambiguous_or_impossible_cases(
     path = tmp_path / source.name
     path.write_text(document, encoding="utf-8")
     with pytest.raises(bench.PlanError):
+        bench.Plan.load(path)
+
+
+def test_replay_measurement_refuses_uncalibrated_capacity(tmp_path: Path) -> None:
+    source = bench.default_path("idc-open-data")
+    path = tmp_path / source.name
+    source_text = source.read_text(encoding="utf-8")
+    path.write_text(source_text.replace("purpose: diagnostic", "purpose: measurement", 1))
+    with pytest.raises(bench.PlanError, match="capacity is not calibrated"):
         bench.Plan.load(path)
 
 

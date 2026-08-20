@@ -4,8 +4,13 @@ import gzip
 import json
 import sqlite3
 from pathlib import Path
+from typing import TypedDict
 
-from benchmark import campaign, ledger, measure, report, verify
+import benchmark.campaign as campaign
+import benchmark.ledger as ledger
+import benchmark.measure as measure
+import benchmark.report as report
+import benchmark.verify as verify
 from benchmark.contract import sha256_of
 
 COMMAND_PY = """
@@ -62,6 +67,32 @@ for line in source.read_text().splitlines():
 LISTING = ("a/one 1", "a/two 2")
 
 
+def replay_metrics(requests: int, errors: int = 0) -> dict[str, object]:
+    return {
+        "meters": [
+            {
+                "name": "swath.replay.http.requests",
+                "type": "counter",
+                "tags": {},
+                "count": float(requests),
+            },
+            {
+                "name": "swath.replay.http.errors",
+                "type": "counter",
+                "tags": {},
+                "count": float(errors),
+            },
+        ]
+    }
+
+
+class CompleteReplayEvidence(TypedDict):
+    replay: dict[str, object]
+    replay_evidence: dict[str, object]
+    started_at: str
+    finished_at: str
+
+
 def adapter_root(tmp_path: Path, *tools: str) -> str:
     root = tmp_path / "tools"
     for tool in tools:
@@ -106,9 +137,9 @@ def record(
                 executor=campaign.EXECUTOR,
                 location="us-east1",
                 machine_type="n4-standard-2",
-                vcpus=2,
-                memory_gb=8,
-                container_memory_gb=None,
+                vcpus=10,
+                memory_gb=32,
+                container_memory_gb=8,
                 heap_percent=75,
                 timeout_s=600,
                 target_bucket=bucket,
@@ -235,15 +266,23 @@ def replay_document(manifest: Path) -> str:
     return json.dumps(
         {
             "backend": {
+                "server_image_uri": "registry/replay@sha256:" + "b" * 64,
                 "fixture_sha256": "a" * 64,
                 "reference_manifest_uri": str(manifest),
                 "reference_manifest_sha256": sha256_of(manifest),
+                "serving_mode": "sorted",
+                "latency_model": {
+                    "deadlines_ms": {
+                        "worker_page": 1,
+                        "pivot_probe": 1,
+                        "structure_probe": 1,
+                    },
+                    "scale": 1.0,
+                    "jitter": "none",
+                },
             },
             "allocation": {
                 "subject_vcpus": 4,
-                "subject_memory_gb": 8,
-                "host_reserved_vcpus": 0,
-                "host_reserved_memory_gb": 0,
                 "replay_vcpus": 4,
                 "replay_memory_gb": 8,
                 "replay_parquet_connections": 20,
@@ -251,25 +290,58 @@ def replay_document(manifest: Path) -> str:
                 "replay_prefetch": False,
                 "replay_heap_percent": 75,
             },
+            "capacity_status": "calibrated",
         },
         sort_keys=True,
         separators=(",", ":"),
     )
 
 
-def complete_replay_evidence(replay: str) -> dict[str, object]:
-    observation = {
+def complete_replay_evidence(replay: str) -> CompleteReplayEvidence:
+    before = {
         "observed_at": "2026-01-01T00:00:00+00:00",
-        "metrics": {"meters": [{"name": "swath.replay.requests", "count": 1}]},
+        "metrics": replay_metrics(0),
     }
+    calibrated = json.loads(replay)["capacity_status"] == "calibrated"
     return {
         "replay": json.loads(replay),
         "replay_evidence": {
             "readiness": {"state": "ready", "wait_ms": 1, "attempts": 1, "last_error": None},
-            "before": observation,
-            "samples": [],
-            "resource_samples": [],
-            "after": {**observation, "observed_at": "2026-01-01T00:00:02+00:00"},
+            "before": before,
+            "samples": (
+                [
+                    {
+                        "observed_at": "2026-01-01T00:00:01+00:00",
+                        "elapsed_s": 1.0,
+                        "metrics": replay_metrics(1),
+                    }
+                ]
+                if calibrated
+                else []
+            ),
+            "resource_samples": (
+                [
+                    {
+                        "observed_at": "2026-01-01T00:00:01+00:00",
+                        "elapsed_s": 1.0,
+                        "interval_s": 1.0,
+                        "server_cpuset": "0-3",
+                        "subject_cpuset": "4-7",
+                        "server_cpuset_utilization": 0.25,
+                        "server_cores_used": 1.0,
+                        "subject_cpuset_utilization": 0.5,
+                        "subject_cores_used": 2.0,
+                        "host_mem_available_kb": 1024,
+                        "host_load1": 0.5,
+                    }
+                ]
+                if calibrated
+                else []
+            ),
+            "after": {
+                "observed_at": "2026-01-01T00:00:02+00:00",
+                "metrics": replay_metrics(2),
+            },
             "errors": [],
         },
         "started_at": "2026-01-01T00:00:00.500000+00:00",
@@ -291,11 +363,7 @@ def test_a_verified_group_reports_its_verdicts(tmp_path: Path) -> None:
 
 def test_result_replay_document_is_bound_exactly_to_the_ledger(tmp_path: Path) -> None:
     con = fixture_ledger(tmp_path)
-    replay = json.dumps(
-        {"backend": {"evidence_protocol_version": "v1"}, "allocation": {"replay_vcpus": 2}},
-        sort_keys=True,
-        separators=(",", ":"),
-    )
+    replay = replay_document(tmp_path / "manifest.tsv.gz")
     attempt = record(con, tmp_path, tool="alpha", digest="aaaa", replay=replay)
     complete = {
         "readiness": {"state": "ready", "wait_ms": 1, "attempts": 1, "last_error": None},
@@ -343,6 +411,39 @@ def test_replay_verify_record_binds_manifest_shape_and_reports_pass(tmp_path: Pa
         "COMPLETE",
         "PASS",
     )
+    assert row["declared_server_allocation"] == "cpus=0-3;memory=8GiB"
+    assert row["declared_subject_allocation"] == "cpus=4-7;memory=8GiB"
+    assert row["derived_host_headroom"] == "vcpus=2;memory=16GiB"
+    assert row["capacity_status"] == "CALIBRATED"
+
+
+def test_uncalibrated_replay_diagnostic_stays_out_of_publishable_rows(tmp_path: Path) -> None:
+    replay = json.loads(replay_document(tmp_path / "manifest.tsv.gz"))
+    replay["capacity_status"] = "uncalibrated"
+    replay_raw = json.dumps(replay, sort_keys=True, separators=(",", ":"))
+    con = fixture_ledger(tmp_path)
+    attempt = record(
+        con,
+        tmp_path,
+        tool="alpha",
+        digest="aaaa",
+        purpose="diagnostic",
+        replay=replay_raw,
+    )
+    write_evidence(attempt, **complete_replay_evidence(replay_raw))
+    root = adapter_root(tmp_path, "alpha")
+
+    verify.verify_group(con, "g1", adapter_root=root, write_record=True)
+    row = rows_of(con, root)[0]
+
+    assert (row["capacity_status"], row["purpose"], row["verdict"]) == (
+        "UNCALIBRATED",
+        "diagnostic",
+        "PASS",
+    )
+    assert not report.is_timing(row)
+    assert report.stratum_lines([row]) == []
+    assert "0 verified timing(s)" in report.summary_line([row])
 
 
 def test_replay_rate_counts_only_oracle_passes(tmp_path: Path) -> None:

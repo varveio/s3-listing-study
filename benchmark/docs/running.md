@@ -38,7 +38,7 @@ tool enforces for you; a missing item surfaces as a provider error mid-campaign.
    bucket, and both worker service accounts. See
    [`../../infra/terraform/modules/gcp/s3-listing-study/README.md`](../../infra/terraform/modules/gcp/s3-listing-study/README.md).
    Both worker identities hold `roles/storage.objectCreator` and nothing wider.
-2. **Toolbox built and smoked** at the exact revision you intend to attest:
+2. **Toolbox built and smoked** at the exact revision you intend to run:
 
    ```sh
    uv run python benchmark/src/benchmark/build_image.py \
@@ -81,8 +81,13 @@ tool enforces for you; a missing item surfaces as a provider error mid-campaign.
    duplicate/out-of-order or unframeable keys, writes reproducible gzip bytes,
    and publishes with a create-only precondition. Copy the descriptor's
    `reference_manifest_uri` and `manifest_sha256` into the plan together. A
-   replay `measurement` row without both is a load-time refusal; a diagnostic
-   may omit them but cannot advance or eliminate a candidate.
+   replay `measurement` row without both is a load-time refusal. A diagnostic
+   may omit them only for endpoint/evidence collection: verification then stays
+   incomplete and writes no `verify.json`. Even a manifest-bound diagnostic
+   cannot create a comparative timing/rate result, advance, or eliminate a
+   candidate. Its plan must remain `replay.capacity_status: uncalibrated` until
+   a real manifest-bound diagnostic capacity canary has a committed receipt;
+   only then may a plan state `calibrated` and admit replay measurement rows.
 6. **Credential secret**, if any case signs: one
    `projects/<p>/secrets/<s>/versions/<v>` resource whose payload is the
    `KEY=VALUE` lines described in

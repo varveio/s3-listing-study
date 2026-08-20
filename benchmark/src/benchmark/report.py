@@ -47,6 +47,7 @@ from pathlib import Path
 from typing import Any
 
 from benchmark import adapters
+from benchmark import replay as replay_contract
 from benchmark.ledger import (
     STATE_FILENAME,
     TERMINAL_STATES,
@@ -76,6 +77,10 @@ COLUMNS = (
     "vcpus",
     "memory_gb",
     "container_memory_gb",
+    "declared_server_allocation",
+    "declared_subject_allocation",
+    "derived_host_headroom",
+    "capacity_status",
     "purpose",
     "statistic",
     "state",
@@ -298,14 +303,11 @@ def verify_binding_errors(
         "actual_result_sha256": hashlib.sha256(result_raw).hexdigest(),
     }
     errors = [name for name, value in expected.items() if verification.get(name) != value]
-    replay: dict[str, object] | None = None
+    replay: replay_contract.ReplayConfig | None = None
     if row["replay"] is not None:
         try:
-            candidate = json.loads(row["replay"])
-            if not isinstance(candidate, dict) or not isinstance(candidate["backend"], dict):
-                raise ValueError
-            replay = candidate
-        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+            replay = replay_contract.parse_document(str(row["replay"]))
+        except replay_contract.ReplayError:
             errors.append("replay")
 
     allowed_verdicts = {"PASS", "FAIL"} if replay is not None else {"PASS", "DRIFT", "FAIL"}
@@ -326,14 +328,12 @@ def verify_binding_errors(
             if not isinstance(verification.get(name), str) or not verification[name]:
                 errors.append(name)
     else:
-        backend = replay["backend"]
-        assert isinstance(backend, dict)
         for name in (
             "fixture_sha256",
             "reference_manifest_uri",
             "reference_manifest_sha256",
         ):
-            if verification.get(name) != backend.get(name):
+            if verification.get(name) != getattr(replay.backend, name):
                 errors.append(name)
         if not isinstance(verification.get("replay_diagnostics"), dict):
             errors.append("replay_diagnostics")
@@ -374,8 +374,33 @@ def stratum_for(row: sqlite3.Row, adapter_root: str) -> tuple[str, str]:
     return manifest.product, ",".join(manifest.fields)
 
 
+def _declared_replay_allocations(row: sqlite3.Row) -> tuple[str, str, str, str]:
+    raw = row["replay"]
+    if raw is None:
+        return "-", "-", "-", "-"
+    try:
+        config = replay_contract.parse_document(str(raw))
+        summary = replay_contract.allocation_summary(
+            config,
+            box_vcpus=int(row["vcpus"]),
+            box_memory_gb=int(row["memory_gb"]),
+            container_memory_gb=row["container_memory_gb"],
+        )
+        return (
+            f"cpus={summary.server_cpuset};memory={config.allocation.replay_memory_gb}GiB",
+            f"cpus={summary.subject_cpuset};memory={row['container_memory_gb']}GiB",
+            f"vcpus={summary.host_vcpus};memory={summary.host_memory_headroom_gb}GiB",
+            config.capacity_status.upper(),
+        )
+    except (TypeError, ValueError, replay_contract.ReplayError):
+        return "malformed", "malformed", "malformed", "malformed"
+
+
 def row_for(row: sqlite3.Row, *, adapter_root: str) -> dict[str, Any]:
     product, fields = stratum_for(row, adapter_root)
+    declared_server, declared_subject, host_headroom, capacity_status = (
+        _declared_replay_allocations(row)
+    )
     base: dict[str, Any] = {
         "tool": row["tool"],
         "mode": row["mode"],
@@ -392,6 +417,10 @@ def row_for(row: sqlite3.Row, *, adapter_root: str) -> dict[str, Any]:
         "container_memory_gb": (
             "-" if row["container_memory_gb"] is None else row["container_memory_gb"]
         ),
+        "declared_server_allocation": declared_server,
+        "declared_subject_allocation": declared_subject,
+        "derived_host_headroom": host_headroom,
+        "capacity_status": capacity_status,
         "purpose": row["purpose"],
         "statistic": row["statistic"],
         "produced_by": row["produced_by"],
@@ -504,8 +533,13 @@ def report_rows(db_rows: list[sqlite3.Row], *, adapter_root: str) -> list[dict[s
     return rows
 
 
+def is_publishable_measurement(row: dict[str, Any]) -> bool:
+    """A replay measurement is publishable only after its capacity is calibrated."""
+    return bool(row["purpose"] == "measurement" and row["capacity_status"] != "UNCALIBRATED")
+
+
 def is_timing(row: dict[str, Any]) -> bool:
-    return bool(row["purpose"] == "measurement" and row["statistic"] == "timing")
+    return bool(is_publishable_measurement(row) and row["statistic"] == "timing")
 
 
 def rate_lines(rows: list[dict[str, Any]]) -> list[str]:
@@ -517,7 +551,7 @@ def rate_lines(rows: list[dict[str, Any]]) -> list[str]:
     """
     cases: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
-        if row["purpose"] == "measurement" and row["statistic"] == "rate":
+        if is_publishable_measurement(row) and row["statistic"] == "rate":
             cases.setdefault(row["case_id"], []).append(row)
     lines = []
     for case_id, attempts in sorted(cases.items()):

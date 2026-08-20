@@ -60,9 +60,10 @@ records what an attempt was for:
 | `canary` | no | Proves a path executes at all — a new signing route, a new executor, a machine shape nobody has run. |
 | `diagnostic` | no | Reproduces a failure or probes a limit. `s4cmd` hitting a 3600s timeout is worth re-running under observation; it is not worth publishing as a timing. |
 
-`verify` and `report` consider `measurement` rows only. A canary is not a stray
-row for completeness to complain about, and not a subject for a comparison to
-miss — it is simply not in the population.
+`report` considers only `measurement` rows for comparative timing and rates.
+`verify` uses that same comparison population, but it may separately validate a
+replay canary or diagnostic against its manifest and write `verify.json`. Those
+rows remain outside every comparison.
 
 **A preparation is measured even though it is not compared.** If s3-fast-list
 needs 40 seconds of `ks-tool` to list in 60, then publishing 60 against another
@@ -267,11 +268,25 @@ Two properties the prefix depends on, both argued in
 A replay result also carries the complete canonical `replay` document and a
 `replay_evidence` block. Readiness and the first server-metrics scrape complete
 before `started_at`; the last scrape follows `finished_at`. Long runs retain raw
-10-second meter snapshots plus host-observed utilization over the disjoint
-server and subject cpusets, available host memory, and load. Cpuset utilization
-is deliberately not called process CPU: host work scheduled on those CPUs is
-inside the observation. Missing or malformed replay evidence is a refusal, not
-a timing with an assumed healthy backend.
+10-second meter snapshots plus host-observed utilization over the declared,
+disjoint server and subject cpusets, available host memory, and load. Cpuset
+utilization is deliberately not called process CPU: host work scheduled on
+those CPUs is inside the observation. Missing or malformed replay evidence is
+a refusal, not a timing with an assumed healthy backend.
+
+Verification requires the replay server's untagged request counter to increase
+across the subject interval and its error counter not to increase. A calibrated
+measurement also requires at least one interval metrics sample and one matching
+cpuset-resource sample; a short uncalibrated diagnostic may have neither, but
+must still prove that its requests reached the server.
+
+The canonical replay document includes a simple capacity status. `uncalibrated`
+permits diagnostics but refuses replay measurements; it becomes `calibrated`
+only with a receipt-backed canary. The declared allocation is its execution
+contract. Host CPU remainder and memory headroom are derived from the box and
+container ceilings, not independently authored. A one-time provider canary may
+inspect effective limits, but recurring attempt evidence does not attest them
+and verification does not manufacture a second allocation protocol.
 
 ## The tables
 
@@ -693,7 +708,7 @@ One file accumulates every group, and several groups may be in flight at once.
 | `status` | Optional `--group` / `--case` filters; unfiltered prints the whole history, which is the point of accumulating. Blocked slots are shown alongside attempts — a group is not understood from its rows alone while it still owes one. |
 | `retry` | One group. Rows from other groups are skipped, not refused. |
 | `cancel` | Requires `--group`; without one it refuses rather than cancelling the file. |
-| `verify` | One group, `purpose = 'measurement'` only. |
+| `verify` | One group. Measurements form the comparison population; replay canaries and diagnostics are validated separately and never become measurements. |
 | `prune` | Deletes evidence objects for attempts that settled unsuccessfully, leaving every row. Requires `--group`, for the same reason `cancel` does: an unscoped delete over an accumulating file is the one mistake with no undo. |
 
 ### What verify binds against

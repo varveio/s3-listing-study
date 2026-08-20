@@ -3,6 +3,8 @@ measurement/preparation split (`benchmark/docs/identity.md`)."""
 
 from __future__ import annotations
 
+from typing import cast
+
 from benchmark.identity import (
     attempt_id,
     case_hash,
@@ -10,6 +12,7 @@ from benchmark.identity import (
     measurement_environment,
     preparation_environment,
 )
+from benchmark.replay import parse_document
 
 TOOL_SLICE = "a" * 64
 PLATFORM = "b" * 64
@@ -39,40 +42,38 @@ def test_case_hash_golden_value() -> None:
 
 
 def test_every_replay_fact_changes_identity() -> None:
-    replay = {
-        "backend": {
-            "server_image_uri": f"registry/replay@sha256:{'1' * 64}",
-            "fixture_sha256": "2" * 64,
-            "reference_manifest_uri": "gs://reference/manifest",
-            "reference_manifest_sha256": "3" * 64,
-            "serving_mode": "sorted",
-            "latency_model": {
-                "deadlines_ms": {
-                    "worker_page": 107,
-                    "pivot_probe": 41,
-                    "structure_probe": 49,
+    replay = parse_document(
+        {
+            "backend": {
+                "server_image_uri": f"registry/replay@sha256:{'1' * 64}",
+                "fixture_sha256": "2" * 64,
+                "reference_manifest_uri": "gs://reference/manifest",
+                "reference_manifest_sha256": "3" * 64,
+                "serving_mode": "sorted",
+                "latency_model": {
+                    "deadlines_ms": {
+                        "worker_page": 107,
+                        "pivot_probe": 41,
+                        "structure_probe": 49,
+                    },
+                    "scale": 1.0,
+                    "jitter": "none",
                 },
-                "scale": 1.0,
-                "jitter": "none",
-                "injector_version": "injector-v1",
-                "semantics_version": "deadline-floor-v1",
             },
-            "evidence_protocol_version": "measurement-v1",
-        },
-        "allocation": {
-            "subject_vcpus": 7,
-            "subject_memory_gb": 40,
-            "host_reserved_vcpus": 1,
-            "host_reserved_memory_gb": 8,
-            "replay_vcpus": 8,
-            "replay_memory_gb": 16,
-            "replay_parquet_connections": 640,
-            "replay_max_concurrent_requests": 512,
-            "replay_prefetch": False,
-            "replay_heap_percent": 75,
-        },
-    }
+            "allocation": {
+                "subject_vcpus": 7,
+                "replay_vcpus": 8,
+                "replay_memory_gb": 16,
+                "replay_parquet_connections": 640,
+                "replay_max_concurrent_requests": 512,
+                "replay_prefetch": False,
+                "replay_heap_percent": 75,
+            },
+            "capacity_status": "calibrated",
+        }
+    ).as_dict()
     baseline = case_hash(_measurement_env(), {}, TOOL_SLICE, PLATFORM, replay)
+    allocation = cast(dict[str, object], replay["allocation"])
     mutations = (
         ("backend.server_image_uri", f"registry/replay@sha256:{'4' * 64}"),
         ("backend.fixture_sha256", "5" * 64),
@@ -81,12 +82,10 @@ def test_every_replay_fact_changes_identity() -> None:
         ("backend.serving_mode", "duckdb"),
         ("backend.latency_model.deadlines_ms.worker_page", 108),
         ("backend.latency_model.scale", 0.5),
-        ("backend.latency_model.injector_version", "injector-v2"),
-        ("backend.latency_model.semantics_version", "deadline-floor-v2"),
-        ("backend.evidence_protocol_version", "measurement-v2"),
+        ("capacity_status", "uncalibrated"),
         *(
             (f"allocation.{key}", value + 1)
-            for key, value in replay["allocation"].items()
+            for key, value in allocation.items()
             if isinstance(value, int) and not isinstance(value, bool)
         ),
         ("allocation.replay_prefetch", True),
@@ -95,10 +94,10 @@ def test_every_replay_fact_changes_identity() -> None:
 
     for path, value in mutations:
         changed = copy.deepcopy(replay)
-        target = changed
+        target: dict[str, object] = changed
         parts = path.split(".")
         for part in parts[:-1]:
-            target = target[part]
+            target = cast(dict[str, object], target[part])
         target[parts[-1]] = value
         assert case_hash(_measurement_env(), {}, TOOL_SLICE, PLATFORM, changed) != baseline, path
 

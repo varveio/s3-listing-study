@@ -62,7 +62,6 @@ from __future__ import annotations
 
 import hashlib
 import itertools
-import math
 import re
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -70,6 +69,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import yaml
+
+from benchmark import replay as replay_contract
 
 if TYPE_CHECKING:
     # Not imported at runtime: most callers of this module never touch a
@@ -90,7 +91,7 @@ SPEC_VERSION = 2
 # image URI doubled as fixture identity and allocation was inferred). A replay
 # document is therefore accepted only at v3; ordinary S3 plans and the shared
 # tables remain honest v2 documents rather than receiving a cosmetic bump.
-REPLAY_SPEC_VERSION = 3
+REPLAY_SPEC_VERSION = replay_contract.REPLAY_SPEC_VERSION
 
 TOP_LEVEL = (
     "spec_version",
@@ -135,19 +136,12 @@ PROCESS_FIELDS = ("container_memory_gb",)
 # one number controlled stored-reader reuse while another controlled how many
 # requests could enter the server. Both are case identity and neither is derived
 # from a subject's requested concurrency.
-REPLAY_INTEGER_FIELDS = (
-    "subject_vcpus",
-    "subject_memory_gb",
-    "host_reserved_vcpus",
-    "host_reserved_memory_gb",
-    "replay_vcpus",
-    "replay_memory_gb",
-    "replay_parquet_connections",
-    "replay_max_concurrent_requests",
-    "replay_heap_percent",
-)
-REPLAY_BOOLEAN_FIELDS = ("replay_prefetch",)
-REPLAY_FIELDS = (*REPLAY_INTEGER_FIELDS, *REPLAY_BOOLEAN_FIELDS)
+REPLAY_INTEGER_FIELDS = replay_contract.REPLAY_INTEGER_FIELDS
+REPLAY_BOOLEAN_FIELDS = replay_contract.REPLAY_BOOLEAN_FIELDS
+REPLAY_FIELDS = replay_contract.REPLAY_FIELDS
+ReplayBackend = replay_contract.ReplayBackend
+ReplayPlan = replay_contract.ReplayPlan
+ReplayConfig = replay_contract.ReplayConfig
 
 # Required once resolved: a case that did not say how much memory it wanted
 # cannot be compared against one that did. The container ceiling is the
@@ -286,93 +280,6 @@ class Resources:
 
 
 @dataclass(frozen=True)
-class ReplayBackend:
-    """What every case in a plan is measured *against*, when the backend is a replay server.
-
-    A plan-level block, because none of it varies per case: one fixture, one
-    bucket, one serving mode, one injected latency profile. What does vary — how
-    much machine the server gets — is stated per row through ``replay_*``.
-
-    The profile is per-shape and is a *measurement*, not a preference. swath's own
-    run report carries a ``probe_latency`` block whose call classes are exactly the
-    server's shape classifier, so the honest profile for a bucket is a fact the
-    fixture arrives with rather than a number anyone picks.
-    """
-
-    server_image_uri: str
-    """Immutable implementation image. This is deliberately not fixture identity."""
-    fixture_sha256: str
-    """A digest over the served parts, in key order. The exact analogue of
-    ``input_artifact_sha256``: what a case hashed, so a misfiled fixture cannot
-    survive into a comparison."""
-    reference_manifest_uri: str | None
-    reference_manifest_sha256: str | None
-    serving_mode: str
-    """``sorted`` or ``duckdb``, always stated. There used to be an ``auto`` that
-    chose; it was removed upstream precisely because a backend that quietly becomes
-    a different backend cannot be compared against itself."""
-    latency_deadlines_ms: tuple[tuple[str, int], ...]
-    latency_scale: float
-    latency_jitter: str
-    latency_injector_version: str
-    latency_semantics_version: str
-    evidence_protocol_version: str
-
-    @property
-    def profile_spec(self) -> str:
-        """The profile as the server's own ``--inject-latency`` spells it."""
-        return ",".join(f"{shape}={delay}ms" for shape, delay in self.latency_deadlines_ms)
-
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "server_image_uri": self.server_image_uri,
-            "fixture_sha256": self.fixture_sha256,
-            "reference_manifest_uri": self.reference_manifest_uri,
-            "reference_manifest_sha256": self.reference_manifest_sha256,
-            "serving_mode": self.serving_mode,
-            "latency_model": {
-                "deadlines_ms": dict(self.latency_deadlines_ms),
-                "scale": self.latency_scale,
-                "jitter": self.latency_jitter,
-                "injector_version": self.latency_injector_version,
-                "semantics_version": self.latency_semantics_version,
-            },
-            "evidence_protocol_version": self.evidence_protocol_version,
-        }
-
-
-@dataclass(frozen=True)
-class ReplayConfig:
-    """The complete resolved replay backend and allocation for one case."""
-
-    backend: ReplayBackend
-    subject_vcpus: int
-    subject_memory_gb: int
-    host_reserved_vcpus: int
-    host_reserved_memory_gb: int
-    replay_vcpus: int
-    replay_memory_gb: int
-    replay_parquet_connections: int
-    replay_max_concurrent_requests: int
-    replay_prefetch: bool
-    replay_heap_percent: int
-
-    @property
-    def docker_options(self) -> tuple[str, ...]:
-        """`docker run` flags for the sidecar, matching :meth:`Resources.docker_options`."""
-        return (
-            f"--memory={self.replay_memory_gb}g",
-            f"--memory-swap={self.replay_memory_gb}g",
-        )
-
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "backend": self.backend.as_dict(),
-            "allocation": {field: getattr(self, field) for field in REPLAY_FIELDS},
-        }
-
-
-@dataclass(frozen=True)
 class Case:
     """One resolved row of a tool's ``cases`` — the unit a campaign submits."""
 
@@ -433,7 +340,7 @@ class Plan:
     region: str
     cases: tuple[Case, ...]
     exclusions: tuple[Exclusion, ...]
-    replay: ReplayBackend | None
+    replay: ReplayPlan | None
     """The backend every case here is measured against, when it is not a real
     bucket. ``None`` for a plan that lists S3 directly."""
     # The capsules this plan resolved against. Carried because a launch expands
@@ -725,12 +632,6 @@ def _positive_int(value: object, key: str, where: str, path: Path) -> int:
     return value
 
 
-def _nonnegative_int(value: object, key: str, where: str, path: Path) -> int:
-    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
-        raise PlanError(f"'{where}' '{key}' in {path} is not a non-negative integer: {value!r}")
-    return value
-
-
 def _resources(
     table: Mapping[str, Any], where: str, path: Path, *, complete: bool
 ) -> dict[str, Any]:
@@ -753,27 +654,10 @@ def _resources(
     }
 
 
-REPLAY_BLOCK_FIELDS = (
-    "server_image_uri",
-    "fixture_sha256",
-    "reference_manifest_uri",
-    "reference_manifest_sha256",
-    "serving_mode",
-    "latency_model",
-    "evidence_protocol_version",
-)
-SERVING_MODES = ("sorted", "duckdb")
-INJECT_SHAPES = ("worker_page", "pivot_probe", "structure_probe")
-LATENCY_MODEL_FIELDS = (
-    "deadlines_ms",
-    "scale",
-    "jitter",
-    "injector_version",
-    "semantics_version",
-)
+REPLAY_BLOCK_FIELDS = replay_contract.REPLAY_BLOCK_FIELDS
 
 
-def _replay_backend(doc: Mapping[str, Any], path: Path) -> ReplayBackend | None:
+def _replay_backend(doc: Mapping[str, Any], path: Path) -> ReplayPlan | None:
     """The plan's ``replay`` block, or ``None`` for a plan that lists a real bucket."""
     if "replay" not in doc:
         return None
@@ -783,90 +667,10 @@ def _replay_backend(doc: Mapping[str, Any], path: Path) -> ReplayBackend | None:
             f"replay requires {REPLAY_SPEC_VERSION} so the incomplete v2 fields cannot be misread"
         )
     block = _table(doc, "replay", "replay", path)
-    _reject_unknown(block, REPLAY_BLOCK_FIELDS, "[replay]", path)
-    required = set(REPLAY_BLOCK_FIELDS) - {
-        "reference_manifest_uri",
-        "reference_manifest_sha256",
-    }
-    missing = sorted(required - set(block))
-    if missing:
-        raise PlanError(
-            f"'[replay]' in {path} is missing {', '.join(missing)} — a replay backend "
-            "states every part of what it serves, so a receipt describes itself"
-        )
-    serving_mode = str(block["serving_mode"])
-    if serving_mode not in SERVING_MODES:
-        raise PlanError(
-            f"'[replay].serving_mode' in {path} is {serving_mode!r}; "
-            f"expected one of {', '.join(SERVING_MODES)}"
-        )
-    server_image_uri = _string(block, "server_image_uri", "[replay]", path)
-    if re.fullmatch(r"[^\s@]+@sha256:[0-9a-f]{64}", server_image_uri) is None:
-        raise PlanError(f"'[replay].server_image_uri' in {path} is not digest-pinned")
-    digest = str(block["fixture_sha256"])
-    if not HEX64_RE.fullmatch(digest):
-        raise PlanError(f"'[replay].fixture_sha256' in {path} is not a sha256 digest")
-    manifest_uri = block.get("reference_manifest_uri")
-    manifest_sha256 = block.get("reference_manifest_sha256")
-    if (manifest_uri is None) != (manifest_sha256 is None):
-        raise PlanError(
-            f"'[replay]' in {path} must state reference_manifest_uri and "
-            "reference_manifest_sha256 together"
-        )
-    if manifest_uri is not None:
-        manifest_uri = _string(block, "reference_manifest_uri", "[replay]", path)
-        if not HEX64_RE.fullmatch(str(manifest_sha256)):
-            raise PlanError(f"'[replay].reference_manifest_sha256' in {path} is not a digest")
-        manifest_sha256 = str(manifest_sha256)
-
-    latency = block["latency_model"]
-    if not isinstance(latency, Mapping):
-        raise PlanError(f"'[replay].latency_model' in {path} is not a mapping")
-    _reject_unknown(latency, LATENCY_MODEL_FIELDS, "[replay].latency_model", path)
-    missing_latency = sorted(set(LATENCY_MODEL_FIELDS) - set(latency))
-    if missing_latency:
-        raise PlanError(
-            f"'[replay].latency_model' in {path} is missing {', '.join(missing_latency)}"
-        )
-    profile = latency["deadlines_ms"]
-    if not isinstance(profile, Mapping) or not profile:
-        raise PlanError(f"'[replay].latency_model.deadlines_ms' in {path} must be a mapping")
-    if set(map(str, profile)) != set(INJECT_SHAPES):
-        raise PlanError(
-            f"'[replay].latency_model.deadlines_ms' in {path} must state exactly "
-            f"{', '.join(INJECT_SHAPES)}"
-        )
-    deadlines = tuple(
-        (shape, _positive_int(profile[shape], shape, "[replay].latency_model.deadlines_ms", path))
-        for shape in INJECT_SHAPES
-    )
-    scale = latency["scale"]
-    if (
-        isinstance(scale, bool)
-        or not isinstance(scale, int | float)
-        or not math.isfinite(scale)
-        or scale <= 0
-    ):
-        raise PlanError(f"'[replay].latency_model.scale' in {path} must be finite and positive")
-    if latency["jitter"] != "none":
-        raise PlanError(f"'[replay].latency_model.jitter' in {path} must be 'none'")
-    return ReplayBackend(
-        server_image_uri=server_image_uri,
-        fixture_sha256=digest,
-        reference_manifest_uri=manifest_uri,
-        reference_manifest_sha256=manifest_sha256,
-        serving_mode=serving_mode,
-        latency_deadlines_ms=deadlines,
-        latency_scale=float(scale),
-        latency_jitter="none",
-        latency_injector_version=_string(
-            latency, "injector_version", "[replay].latency_model", path
-        ),
-        latency_semantics_version=_string(
-            latency, "semantics_version", "[replay].latency_model", path
-        ),
-        evidence_protocol_version=_string(block, "evidence_protocol_version", "[replay]", path),
-    )
+    try:
+        return replay_contract.parse_plan(block)
+    except replay_contract.ReplayError as exc:
+        raise PlanError(f"'[replay]' in {path}: {exc}") from exc
 
 
 def _replay_shape(
@@ -884,10 +688,7 @@ def _replay_shape(
     for field in REPLAY_INTEGER_FIELDS:
         if field not in table:
             continue
-        if field.startswith("host_reserved_"):
-            resolved[field] = _nonnegative_int(table[field], field, where, path)
-        else:
-            resolved[field] = _positive_int(table[field], field, where, path)
+        resolved[field] = _positive_int(table[field], field, where, path)
     if "replay_prefetch" in table:
         value = table["replay_prefetch"]
         if not isinstance(value, bool):
@@ -1197,7 +998,7 @@ class _Context:
     heap: HeapConfig
     adapters: Mapping[str, LoadedCommandAdapter]
     auth_role: str | None
-    replay: ReplayBackend | None
+    replay: ReplayPlan | None
     path: Path
 
 
@@ -1386,8 +1187,6 @@ def _row_field_value(key: str, value: Any, label: str, path: Path) -> str | int:
         if not isinstance(value, bool):
             raise PlanError(f"'{label}' '{key}' in {path} is not a boolean: {value!r}")
         return value
-    if key.startswith("host_reserved_"):
-        return _nonnegative_int(value, key, label, path)
     return _positive_int(value, key, label, path)
 
 
@@ -1648,49 +1447,28 @@ def _case_replay(
             )
         return None
 
-    replay = ReplayConfig(
-        backend=context.replay,
-        **{field: resolved[field] for field in REPLAY_FIELDS},
+    try:
+        replay = replay_contract.make_config(
+            context.replay, {field: resolved[field] for field in REPLAY_FIELDS}
+        )
+        replay_contract.allocation_summary(
+            replay,
+            box_vcpus=shape[0],
+            box_memory_gb=shape[1],
+            container_memory_gb=resolved.get("container_memory_gb"),
+        )
+    except replay_contract.ReplayError as exc:
+        raise PlanError(f"'tools.{tool}' in {path}: {exc}") from exc
+    purpose = _purpose(
+        tool, resolved.get("purpose"), str(resolved["mode"]), context.adapters[tool], path
     )
-    box_vcpus, box_memory_gb = shape
-    allocated_vcpus = replay.replay_vcpus + replay.subject_vcpus + replay.host_reserved_vcpus
-    if allocated_vcpus != box_vcpus:
-        raise PlanError(
-            f"'tools.{tool}' in {path} allocates {allocated_vcpus} of {box_vcpus} vCPU; "
-            "box_vcpus must equal replay + subject + host reserve exactly"
-        )
-    allocated_memory_gb = (
-        replay.replay_memory_gb + replay.subject_memory_gb + replay.host_reserved_memory_gb
-    )
-    if allocated_memory_gb > box_memory_gb:
-        raise PlanError(
-            f"'tools.{tool}' in {path} allocates {allocated_memory_gb} GB on a "
-            f"{box_memory_gb} GB box; replay memory may not overcommit"
-        )
-    ceiling = resolved.get("container_memory_gb")
-    if ceiling != replay.subject_memory_gb:
-        raise PlanError(
-            f"'tools.{tool}' in {path} must set container_memory_gb equal to the replay "
-            f"subject_memory_gb ({replay.subject_memory_gb}); one subject allocation may "
-            "not have two answers"
-        )
-    if not 1 <= replay.replay_heap_percent <= 100:
-        raise PlanError(f"'tools.{tool}' in {path} replay_heap_percent must be between 1 and 100")
-    if context.replay.reference_manifest_uri is None and resolved.get("purpose") in (
-        None,
-        "measurement",
-    ):
-        # None ordinarily resolves to the mode's ceiling. In the shipped replay
-        # plan the rows are explicitly diagnostic; refusing the ambiguous default
-        # keeps a missing verifier binding out of measurements.
-        purpose = _purpose(
-            tool,
-            resolved.get("purpose"),
-            str(resolved["mode"]),
-            context.adapters[tool],
-            path,
-        )
-        if purpose == "measurement":
+    if purpose == "measurement":
+        if replay.capacity_status != "calibrated":
+            raise PlanError(
+                f"'tools.{tool}' in {path} is a replay measurement while capacity_status is "
+                f"{replay.capacity_status!r}; replay capacity is not calibrated"
+            )
+        if context.replay.backend.reference_manifest_uri is None:
             raise PlanError(
                 f"'tools.{tool}' in {path} is a replay measurement without a "
                 "reference_manifest_uri and reference_manifest_sha256"

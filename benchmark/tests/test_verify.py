@@ -5,11 +5,15 @@ import hashlib
 import json
 import sqlite3
 from pathlib import Path
+from typing import TypedDict
 
 import duckdb
 import pytest
 
-from benchmark import adapters, campaign, ledger, verify
+import benchmark.adapters as adapters
+import benchmark.campaign as campaign
+import benchmark.ledger as ledger
+import benchmark.verify as verify
 from benchmark.contract import EXIT_INCOMPLETE_GROUP, sha256_of
 
 COMMAND_PY = """
@@ -74,6 +78,30 @@ for line in source.read_text().splitlines():
 """
 
 LISTING = ("a/one 1", "a/two 2")
+
+
+def replay_metrics(requests: int, errors: int = 0) -> dict[str, object]:
+    return {
+        "meters": [
+            {
+                "name": "swath.replay.http.requests",
+                "type": "counter",
+                "tags": {},
+                "count": float(requests),
+            },
+            {
+                "name": "swath.replay.http.errors",
+                "type": "counter",
+                "tags": {},
+                "count": float(errors),
+            },
+        ]
+    }
+
+
+class ReplayEvidence(TypedDict):
+    replay: dict[str, object]
+    replay_evidence: dict[str, object]
 
 
 def adapter_root(tmp_path: Path, *tools: str) -> str:
@@ -237,7 +265,9 @@ def write_evidence(
     return prefix
 
 
-def replay_document(manifest: Path, digest: str) -> dict[str, object]:
+def replay_document(
+    manifest: Path, digest: str, *, capacity_status: str = "calibrated"
+) -> dict[str, object]:
     return {
         "backend": {
             "server_image_uri": "registry/replay@sha256:" + "1" * 64,
@@ -245,14 +275,18 @@ def replay_document(manifest: Path, digest: str) -> dict[str, object]:
             "reference_manifest_uri": str(manifest),
             "reference_manifest_sha256": digest,
             "serving_mode": "sorted",
-            "latency_model": {},
-            "evidence_protocol_version": "replay-evidence-v1",
+            "latency_model": {
+                "deadlines_ms": {
+                    "worker_page": 1,
+                    "pivot_probe": 1,
+                    "structure_probe": 1,
+                },
+                "scale": 1.0,
+                "jitter": "none",
+            },
         },
         "allocation": {
             "subject_vcpus": 4,
-            "subject_memory_gb": 8,
-            "host_reserved_vcpus": 0,
-            "host_reserved_memory_gb": 0,
             "replay_vcpus": 4,
             "replay_memory_gb": 8,
             "replay_parquet_connections": 20,
@@ -260,25 +294,55 @@ def replay_document(manifest: Path, digest: str) -> dict[str, object]:
             "replay_prefetch": False,
             "replay_heap_percent": 75,
         },
+        "capacity_status": capacity_status,
     }
 
 
-def replay_evidence(replay: dict[str, object]) -> dict[str, object]:
+def replay_evidence(replay: dict[str, object]) -> ReplayEvidence:
     before = "2026-01-01T00:00:00+00:00"
     after = "2026-01-01T00:00:02+00:00"
+    calibrated = replay["capacity_status"] == "calibrated"
     return {
         "replay": replay,
         "replay_evidence": {
             "readiness": {"state": "ready", "wait_ms": 2, "attempts": 1, "last_error": None},
             "before": {
                 "observed_at": before,
-                "metrics": {"meters": [{"name": "swath.replay.requests", "count": 0}]},
+                "metrics": replay_metrics(0),
             },
-            "samples": [],
-            "resource_samples": [],
+            "samples": (
+                [
+                    {
+                        "observed_at": "2026-01-01T00:00:01+00:00",
+                        "elapsed_s": 1.0,
+                        "metrics": replay_metrics(1),
+                    }
+                ]
+                if calibrated
+                else []
+            ),
+            "resource_samples": (
+                [
+                    {
+                        "observed_at": "2026-01-01T00:00:01+00:00",
+                        "elapsed_s": 1.0,
+                        "interval_s": 1.0,
+                        "server_cpuset": "0-3",
+                        "subject_cpuset": "4-7",
+                        "server_cpuset_utilization": 0.25,
+                        "server_cores_used": 1.0,
+                        "subject_cpuset_utilization": 0.5,
+                        "subject_cores_used": 2.0,
+                        "host_mem_available_kb": 1024,
+                        "host_load1": 0.5,
+                    }
+                ]
+                if calibrated
+                else []
+            ),
             "after": {
                 "observed_at": after,
-                "metrics": {"meters": [{"name": "swath.replay.requests", "count": 2}]},
+                "metrics": replay_metrics(2),
             },
             "errors": [],
         },
@@ -329,7 +393,8 @@ def test_one_replay_subject_passes_against_its_bound_manifest(tmp_path: Path) ->
     )
     comparison = report["buckets"][0]["strata"][0]["comparisons"][0]
     assert (code, report["verdict"], comparison["verdict"]) == (0, "PASS", "PASS")
-    assert comparison["replay_diagnostics"]["before_metric_names"] == ["swath.replay.requests"]
+    assert comparison["replay_diagnostics"]["request_count_before"] == 0
+    assert comparison["replay_diagnostics"]["request_count_after"] == 2
     written = json.loads((Path(attempt.result_prefix) / "verify.json").read_text())
     assert written["reference_manifest_sha256"] == sha256_of(manifest)
     assert "reference_attempt_id" not in written
@@ -398,6 +463,180 @@ def test_missing_replay_observation_is_a_gap(tmp_path: Path) -> None:
     )
     assert report["verdict"] == "INCOMPLETE"
     assert report["buckets"][0]["gaps"][0]["reason"] == "replay-evidence"
+
+
+@pytest.mark.parametrize("purpose", ("diagnostic", "canary"))
+def test_uncalibrated_replay_diagnostic_is_verified_without_becoming_a_measurement(
+    tmp_path: Path, purpose: str
+) -> None:
+    """A real ledger row plus result and manifest produces only evidence output."""
+    manifest = tmp_path / "manifest.tsv.gz"
+    replay = replay_document(manifest, write_manifest(manifest), capacity_status="uncalibrated")
+    con = fixture_ledger(tmp_path)
+    attempt = record(con, tmp_path, tool="alpha", digest="aaaa", purpose=purpose, replay=replay)
+    write_evidence(attempt, **replay_evidence(replay))
+
+    code, report = verify.verify_group(
+        con, "g1", adapter_root=adapter_root(tmp_path, "alpha"), write_record=True
+    )
+
+    assert (code, report["subjects"], report["diagnostic_subjects"], report["verdict"]) == (
+        0,
+        0,
+        1,
+        "PASS",
+    )
+    assert report["buckets"] == []
+    diagnostic = report["diagnostics"][0]
+    assert diagnostic["verification"]["verdict"] == "PASS"
+    assert diagnostic["capacity_status"] == "uncalibrated"
+    record_json = json.loads((Path(attempt.result_prefix) / "verify.json").read_text())
+    assert record_json["reference_manifest_sha256"] == sha256_of(manifest)
+
+
+def test_same_bucket_replay_diagnostics_stage_their_manifest_independently(tmp_path: Path) -> None:
+    manifest = tmp_path / "manifest.tsv.gz"
+    replay = replay_document(manifest, write_manifest(manifest), capacity_status="uncalibrated")
+    con = fixture_ledger(tmp_path)
+    attempts = [
+        record(
+            con,
+            tmp_path,
+            tool="alpha",
+            digest="aaaa",
+            purpose="diagnostic",
+            replay=replay,
+        )
+        for _ in range(2)
+    ]
+    for attempt in attempts:
+        write_evidence(attempt, **replay_evidence(replay))
+
+    code, report = verify.verify_group(
+        con, "g1", adapter_root=adapter_root(tmp_path, "alpha"), write_record=True
+    )
+
+    assert (code, report["diagnostic_subjects"], report["diagnostic_verdict"]) == (0, 2, "PASS")
+    assert all((Path(attempt.result_prefix) / "verify.json").is_file() for attempt in attempts)
+
+
+@pytest.mark.parametrize(
+    ("counter", "after_count", "detail"),
+    [
+        pytest.param(
+            "swath.replay.http.requests",
+            0,
+            "request counter did not increase",
+            id="no-request-activity",
+        ),
+        pytest.param(
+            "swath.replay.http.errors",
+            1,
+            "error counter increased",
+            id="server-errors",
+        ),
+    ],
+)
+def test_replay_evidence_requires_request_activity_without_server_errors(
+    tmp_path: Path, counter: str, after_count: int, detail: str
+) -> None:
+    manifest = tmp_path / "manifest.tsv.gz"
+    replay = replay_document(manifest, write_manifest(manifest), capacity_status="uncalibrated")
+    con = fixture_ledger(tmp_path)
+    attempt = record(
+        con,
+        tmp_path,
+        tool="alpha",
+        digest="aaaa",
+        purpose="diagnostic",
+        replay=replay,
+    )
+    evidence = replay_evidence(replay)
+    after = evidence["replay_evidence"]["after"]
+    assert isinstance(after, dict)
+    meters = after["metrics"]["meters"]
+    assert isinstance(meters, list)
+    for meter in meters:
+        if meter["name"] == counter:
+            meter["count"] = after_count
+    write_evidence(attempt, **evidence)
+
+    _code, report = verify.verify_group(
+        con, "g1", adapter_root=adapter_root(tmp_path, "alpha"), write_record=False
+    )
+
+    gap = report["diagnostics"][0]["gaps"][0]
+    assert gap["reason"] == "replay-evidence"
+    assert detail in gap["detail"]
+
+
+@pytest.mark.parametrize(
+    ("field", "detail"),
+    [
+        pytest.param("samples", "no interval metrics sample", id="no-interval-metrics"),
+        pytest.param("resource_samples", "no resource sample", id="no-resource-sample"),
+    ],
+)
+def test_calibrated_replay_requires_interval_and_resource_samples(
+    tmp_path: Path, field: str, detail: str
+) -> None:
+    manifest = tmp_path / "manifest.tsv.gz"
+    replay = replay_document(manifest, write_manifest(manifest))
+    con = fixture_ledger(tmp_path)
+    attempt = record(con, tmp_path, tool="alpha", digest="aaaa", replay=replay)
+    evidence = replay_evidence(replay)
+    evidence["replay_evidence"][field] = []
+    write_evidence(attempt, **evidence)
+
+    _code, report = verify.verify_group(
+        con, "g1", adapter_root=adapter_root(tmp_path, "alpha"), write_record=False
+    )
+
+    gap = report["buckets"][0]["gaps"][0]
+    assert gap["reason"] == "replay-evidence"
+    assert detail in gap["detail"]
+
+
+def test_replay_diagnostic_group_with_an_owed_slot_is_incomplete(tmp_path: Path) -> None:
+    manifest = tmp_path / "manifest.tsv.gz"
+    replay = replay_document(manifest, write_manifest(manifest), capacity_status="uncalibrated")
+    con = fixture_ledger(tmp_path)
+    attempt = record(
+        con,
+        tmp_path,
+        tool="alpha",
+        digest="aaaa",
+        purpose="diagnostic",
+        replay=replay,
+    )
+    write_evidence(attempt, **replay_evidence(replay))
+    add_slot(con, state="BLOCKED")
+
+    code, report = verify.verify_group(
+        con, "g1", adapter_root=adapter_root(tmp_path, "alpha"), write_record=False
+    )
+
+    assert (code, report["complete"], report["verdict"]) == (
+        EXIT_INCOMPLETE_GROUP,
+        False,
+        "INCOMPLETE",
+    )
+
+
+def test_uncalibrated_replay_measurement_is_refused(tmp_path: Path) -> None:
+    manifest = tmp_path / "manifest.tsv.gz"
+    replay = replay_document(manifest, write_manifest(manifest), capacity_status="uncalibrated")
+    con = fixture_ledger(tmp_path)
+    attempt = record(con, tmp_path, tool="alpha", digest="aaaa", replay=replay)
+    write_evidence(attempt, **replay_evidence(replay))
+
+    code, report = verify.verify_group(
+        con, "g1", adapter_root=adapter_root(tmp_path, "alpha"), write_record=True
+    )
+
+    assert (code, report["verdict"]) == (EXIT_INCOMPLETE_GROUP, "INCOMPLETE")
+    assert report["buckets"][0]["gaps"][0]["reason"] == "uncalibrated-capacity"
+    assert not (Path(attempt.result_prefix) / "verify.json").exists()
 
 
 def test_replay_mtime_mismatch_is_fail_not_drift() -> None:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import gzip
 from pathlib import Path
+from typing import IO, cast
 
 import duckdb
 import pytest
@@ -54,7 +55,7 @@ def test_manifest_bytes_are_deterministic_and_preserve_raw_keys(tmp_path: Path) 
     assert descriptor_one["manifest_sha256"] == sha256_of(one)
     assert descriptor_one["row_count"] == 3
     with gzip.open(one, "rb") as stream:
-        records = list(read_records(stream))
+        records = list(read_records(cast(IO[bytes], stream)))
     assert [record.key for record in records] == [b"a", b"raw-\xff", b"z"]
     assert records[0].mtime == "2026-01-02T03:04:05Z"
 

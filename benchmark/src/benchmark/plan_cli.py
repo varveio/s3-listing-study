@@ -15,9 +15,11 @@ import argparse
 import json
 import sys
 from collections.abc import Sequence
+from dataclasses import asdict
 from pathlib import Path
 
 from benchmark import plan as bench
+from benchmark import replay as replay_contract
 
 
 def repo_root() -> Path:
@@ -48,31 +50,74 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _replay_projection(
+    case: bench.Case,
+) -> tuple[dict[str, object] | None, dict[str, object] | None, str]:
+    """One review-oriented replay projection from the resolved contract.
+
+    `Plan.load` has already parsed and validated this value.  The CLI only
+    projects it, including the host remainder that the shared contract derives.
+    """
+    if case.replay is None:
+        return None, None, "S3"
+    config = case.replay
+    summary = replay_contract.allocation_summary(
+        config,
+        box_vcpus=case.resources.vcpus,
+        box_memory_gb=case.resources.memory_gb,
+        container_memory_gb=case.resources.container_memory_gb,
+    )
+    backend, allocation = config.backend, config.allocation
+    manifest = backend.reference_manifest_sha256 or "-"
+    image = backend.server_image_uri.rsplit("@sha256:", 1)
+    image_summary = f"{image[0].rsplit('/', 1)[-1]}@sha256:{image[1][:12]}…"
+    latency = ",".join(f"{shape}={delay}ms" for shape, delay in backend.latency_deadlines_ms)
+    compact = (
+        f"{config.capacity_status.upper()} server={image_summary} "
+        f"fixture={backend.fixture_sha256[:12]}… "
+        f"manifest={manifest[:12]}{'…' if manifest != '-' else ''} "
+        f"{backend.serving_mode} profile={latency} "
+        f"scale={backend.latency_scale} jitter={backend.latency_jitter} "
+        f"server={allocation.replay_vcpus}vCPU/{allocation.replay_memory_gb}GiB "
+        f"subject={allocation.subject_vcpus}vCPU/{case.resources.container_memory_gb}GiB "
+        f"host={summary.host_vcpus}vCPU/{summary.host_memory_headroom_gb}GiB"
+    )
+    return config.as_dict(), asdict(summary), compact
+
+
 def _rows(loaded: bench.Plan) -> list[dict[str, object]]:
-    return [
-        {
-            "tool": case.tool,
-            "case": case.label,
-            "mode": case.mode,
-            "purpose": case.purpose,
-            "statistic": case.statistic,
-            "vcpus": case.resources.vcpus,
-            "memory_gb": case.resources.memory_gb,
-            "machine_type": case.resources.machine_type,
-            "container_memory_gb": case.resources.container_memory_gb or "-",
-            "docker_options": list(case.resources.docker_options),
-            "config": dict(case.config),
-            # Derived, and carried because they are what a Batch job is told.
-            "memory_mib": case.resources.memory_mib,
-            "cpu_milli": case.resources.cpu_milli,
-            "reps": case.reps,
-            "timeout_s": case.timeout_s,
-            # The share, not the variable: the capsule renders the flag its own
-            # runtime reads, and nine of eleven tools read none.
-            "heap_percent": case.heap_percent,
-        }
-        for case in loaded.cases
-    ]
+    rows: list[dict[str, object]] = []
+    for case in loaded.cases:
+        replay, replay_allocation, replay_summary = _replay_projection(case)
+        rows.append(
+            {
+                "tool": case.tool,
+                "case": case.label,
+                "mode": case.mode,
+                "purpose": case.purpose,
+                "statistic": case.statistic,
+                "vcpus": case.resources.vcpus,
+                "memory_gb": case.resources.memory_gb,
+                "machine_type": case.resources.machine_type,
+                "container_memory_gb": case.resources.container_memory_gb or "-",
+                "docker_options": list(case.resources.docker_options),
+                "config": dict(case.config),
+                # Derived, and carried because they are what a Batch job is told.
+                "memory_mib": case.resources.memory_mib,
+                "cpu_milli": case.resources.cpu_milli,
+                "reps": case.reps,
+                "timeout_s": case.timeout_s,
+                # The share, not the variable: the capsule renders the flag its own
+                # runtime reads, and nine of eleven tools read none.
+                "heap_percent": case.heap_percent,
+                # Full canonical config plus the derived allocation in JSON; the
+                # table uses `replay_summary` so it stays scannable.
+                "replay": replay,
+                "replay_allocation": replay_allocation,
+                "replay_summary": replay_summary,
+            }
+        )
+    return rows
 
 
 def _render(loaded: bench.Plan, rows: Sequence[dict[str, object]]) -> str:
@@ -85,6 +130,7 @@ def _render(loaded: bench.Plan, rows: Sequence[dict[str, object]]) -> str:
         "heap_percent",
         "reps",
         "timeout_s",
+        "replay_summary",
     )
     widths = {c: max(len(c), *(len(str(r[c])) for r in rows)) for c in columns} if rows else {}
     lines = [

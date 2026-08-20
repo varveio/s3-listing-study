@@ -21,6 +21,10 @@ auth_role: public-read
 
 # The backend, stated once because none of it varies per case.
 replay:
+  # This diagnostic plan can exercise evidence capture, but it cannot complete
+  # verification until a reference manifest is bound, and cannot make a
+  # comparative measurement until a manifest-bound canary is receipted.
+  capacity_status: uncalibrated
   # The fixture rides a layer of the server's own image, so the bytes served are
   # already part of an identity the attempt records. `fixture_sha256` is a digest
   # over the parts in key order — the same binding `input_artifact_sha256` gives
@@ -51,29 +55,19 @@ replay:
       structure_probe: 49
     scale: 1.0
     jitter: none
-    injector_version: swath-replay-injector-v1
-    semantics_version: deadline-floor-v1
-  # No committed reference manifest exists for this fixture yet, so these rows
-  # are diagnostic rather than measurements. This version identifies how that
-  # diagnostic evidence is interpreted without claiming a calibrated capacity
-  # advancement rule.
-  evidence_protocol_version: replay-diagnostic-v1
 
 defaults:
   reps: 1
   timeout_s: 3600
   # `vcpus`/`memory_gb` are the BOX, as everywhere else — the pair
-  # instances.yaml resolves a machine type from. Every share below is explicit;
-  # CPU totals exactly and memory does not overcommit.
+  # instances.yaml resolves a machine type from. Server and subject allocations
+  # leave derived positive host CPU and memory headroom.
   # Calibration uses an intentionally wide server control. Subject CPU changes
   # consume only the otherwise-idle host share, so the server and box stay
   # fixed while the subject scale is measured.
   vcpus: 32
   memory_gb: 64
   subject_vcpus: 8
-  subject_memory_gb: 8
-  host_reserved_vcpus: 4
-  host_reserved_memory_gb: 8
   container_memory_gb: 8
   replay_vcpus: 20
   replay_memory_gb: 8
@@ -87,9 +81,10 @@ defaults:
 
 tools:
   # Swath first and, for now, alone. These rows calibrate the subject-resource
-  # and server-validity instrument; purpose=diagnostic means they cannot rank or
-  # eliminate a candidate. Once the manifest is bound and the paired-control
-  # rule is frozen, the selected matrix is promoted to measurement rows.
+  # and server-validity instrument; purpose=diagnostic means they validate
+  # evidence but cannot rank or eliminate a candidate. The replay block's
+  # capacity_status remains uncalibrated until a receipted canary permits a
+  # separate measurement plan.
   swath:
     cases:
       # Keep the checked-in canary bounded. The resource matrix is frozen only

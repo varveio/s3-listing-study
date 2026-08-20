@@ -84,6 +84,7 @@ It splits by what varies. The plan-level `replay:` block holds what does not:
 
 ```yaml
 replay:
+  capacity_status: uncalibrated
   server_image_uri: registry/replay@sha256:<64 hex>
   fixture_sha256: <64 hex, over the served parts in key order>
   reference_manifest_uri: gs://bucket/reference.tsv.gz
@@ -93,9 +94,6 @@ replay:
     deadlines_ms: {worker_page: 107, pivot_probe: 41, structure_probe: 49}
     scale: 1.0
     jitter: none
-    injector_version: injector-v1
-    semantics_version: deadline-floor-v1
-  evidence_protocol_version: measurement-v1
 ```
 
 The latency model is a **measurement, not a preference**. A swath run report carries
@@ -113,11 +111,8 @@ layers as every other allocation:
 defaults:
   vcpus: 16                        # the box, as always
   memory_gb: 64
+  container_memory_gb: 40          # subject cgroup ceiling
   subject_vcpus: 7
-  subject_memory_gb: 40
-  host_reserved_vcpus: 1
-  host_reserved_memory_gb: 8
-  container_memory_gb: 40          # exactly the replay subject allocation
   replay_vcpus: 8
   replay_memory_gb: 16
   replay_parquet_connections: 640
@@ -126,18 +121,28 @@ defaults:
   replay_heap_percent: 75
 ```
 
-`vcpus`/`memory_gb` keep meaning **the box**. Replay spec v3 never derives an
-allocation as a leftover: server, subject, and host reserve are all explicit.
-CPU must add up exactly; memory may leave slack but may not overcommit. The
-subject ceiling must equal `subject_memory_gb`, so there is one enforceable
-answer. Reader-pool size and request-admission width are separate fields, and
+`vcpus`/`memory_gb` keep meaning **the box**. `container_memory_gb` is the
+subject ceiling; `subject_vcpus` and the replay fields are the independent
+allocations. The remaining host CPU and memory are derived, and each must be
+positive — host reserves are not separately authored identity inputs.
+Reader-pool size and request-admission width are separate fields, and
 `replay_prefetch` is a YAML boolean rather than an integer shorthand.
 
+`capacity_status` is a simple plan fact, not another control surface:
+`uncalibrated` permits diagnostic replay work only, while `calibrated` permits
+manifest-bound replay measurements. Set it to `calibrated` only after a real,
+manifest-bound diagnostic capacity canary has a committed receipt for this
+backend and allocation family.
+
 `reference_manifest_*` may be absent only for non-measurement work such as a
-canary, diagnostic, or prerequisite preparation. A replay-backed measurement
-without that binding is refused. The
-server image and fixture digest remain distinct identity facts even when fixture
-bytes happen to ride in the image.
+diagnostic or prerequisite preparation. Without them a diagnostic may exercise
+the endpoint and collect attempt evidence, but verification stays incomplete
+and writes no `verify.json`. A manifest-bound diagnostic validates that evidence
+without producing a comparative measurement; replay capacity stays
+**UNCALIBRATED** until a diagnostic capacity canary has a receipt. A
+replay-backed measurement without that binding is refused. The server image and
+fixture digest remain distinct identity facts even when fixture bytes happen to
+ride in the image.
 
 A `replay_*` key in a plan with no `replay:` block is refused, and so is a
 `replay:` block whose defaults do not size a server: a plan states its backend

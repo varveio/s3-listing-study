@@ -652,18 +652,27 @@ def test_rclone_refuses_an_endpoint_that_breaks_its_quoted_connection_field(
 
 def test_s3_fast_list_local_split_does_not_receive_the_remote_endpoint() -> None:
     adapter = load_command_adapter(adapter_path("s3-fast-list"))
-    common = {
-        "tool": "s3-fast-list",
-        "config": {"segments": 8},
-        "sink_dir": SINK,
-        "artifact_path": ARTIFACT,
-    }
     ordinary = adapter.compile(
-        CommandRequest("ks-split", BUCKET, REGION, **common)  # type: ignore[arg-type]
+        CommandRequest(
+            "ks-split",
+            BUCKET,
+            REGION,
+            tool="s3-fast-list",
+            config={"segments": 8},
+            sink_dir=SINK,
+            artifact_path=ARTIFACT,
+        )
     )
     replay = adapter.compile(
-        CommandRequest(  # type: ignore[arg-type]
-            "ks-split", BUCKET, REGION, endpoint_url=ENDPOINT, **common
+        CommandRequest(
+            "ks-split",
+            BUCKET,
+            REGION,
+            tool="s3-fast-list",
+            config={"segments": 8},
+            sink_dir=SINK,
+            artifact_path=ARTIFACT,
+            endpoint_url=ENDPOINT,
         )
     )
     assert replay == ordinary

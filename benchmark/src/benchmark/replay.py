@@ -1,0 +1,290 @@
+"""The one resolved replay contract shared by plan, provider, worker, and reports.
+
+This module owns values that change a replay case.  It intentionally does not
+own fixture-manifest contents or verdicts: the former is independently derived
+from fixture bytes and the latter belongs to replay verification.
+"""
+
+from __future__ import annotations
+
+import json
+import math
+import re
+from collections.abc import Mapping
+from dataclasses import dataclass
+
+REPLAY_SPEC_VERSION = 3
+REPLAY_BLOCK_FIELDS = (
+    "server_image_uri",
+    "fixture_sha256",
+    "reference_manifest_uri",
+    "reference_manifest_sha256",
+    "serving_mode",
+    "latency_model",
+)
+LATENCY_MODEL_FIELDS = ("deadlines_ms", "scale", "jitter")
+INJECT_SHAPES = ("worker_page", "pivot_probe", "structure_probe")
+SERVING_MODES = ("sorted", "duckdb")
+REPLAY_INTEGER_FIELDS = (
+    "subject_vcpus",
+    "replay_vcpus",
+    "replay_memory_gb",
+    "replay_parquet_connections",
+    "replay_max_concurrent_requests",
+    "replay_heap_percent",
+)
+REPLAY_BOOLEAN_FIELDS = ("replay_prefetch",)
+REPLAY_FIELDS = (*REPLAY_INTEGER_FIELDS, *REPLAY_BOOLEAN_FIELDS)
+CAPACITY_STATUSES = ("uncalibrated", "calibrated")
+_HEX64_RE = re.compile(r"[0-9a-f]{64}")
+_PINNED_IMAGE_RE = re.compile(r"[^\s@]+@sha256:[0-9a-f]{64}")
+
+
+class ReplayError(ValueError):
+    """A replay document is incomplete, non-canonical, or cannot run."""
+
+
+def canonical_json(value: Mapping[str, object]) -> str:
+    return json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False
+    )
+
+
+def _positive(value: object, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ReplayError(f"{name} must be a positive integer")
+    return value
+
+
+@dataclass(frozen=True)
+class ReplayBackend:
+    """The plan-wide server implementation, fixture, and latency treatment."""
+
+    server_image_uri: str
+    fixture_sha256: str
+    reference_manifest_uri: str | None
+    reference_manifest_sha256: str | None
+    serving_mode: str
+    latency_deadlines_ms: tuple[tuple[str, int], ...]
+    latency_scale: float
+    latency_jitter: str
+
+    @property
+    def profile_spec(self) -> str:
+        return ",".join(f"{shape}={delay}ms" for shape, delay in self.latency_deadlines_ms)
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "server_image_uri": self.server_image_uri,
+            "fixture_sha256": self.fixture_sha256,
+            "reference_manifest_uri": self.reference_manifest_uri,
+            "reference_manifest_sha256": self.reference_manifest_sha256,
+            "serving_mode": self.serving_mode,
+            "latency_model": {
+                "deadlines_ms": dict(self.latency_deadlines_ms),
+                "scale": self.latency_scale,
+                "jitter": self.latency_jitter,
+            },
+        }
+
+
+@dataclass(frozen=True)
+class ReplayAllocation:
+    """The independent per-case server/subject execution controls."""
+
+    subject_vcpus: int
+    replay_vcpus: int
+    replay_memory_gb: int
+    replay_parquet_connections: int
+    replay_max_concurrent_requests: int
+    replay_heap_percent: int
+    replay_prefetch: bool
+
+    def as_dict(self) -> dict[str, object]:
+        return {field: getattr(self, field) for field in REPLAY_FIELDS}
+
+
+@dataclass(frozen=True)
+class ReplayPlan:
+    """The plan-wide backend and its explicitly declared capacity eligibility."""
+
+    backend: ReplayBackend
+    capacity_status: str
+
+
+@dataclass(frozen=True)
+class ReplayConfig:
+    """One complete resolved replay case, serializable at every boundary."""
+
+    backend: ReplayBackend
+    allocation: ReplayAllocation
+    capacity_status: str
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "backend": self.backend.as_dict(),
+            "allocation": self.allocation.as_dict(),
+            "capacity_status": self.capacity_status,
+        }
+
+    def canonical_json(self) -> str:
+        return canonical_json(self.as_dict())
+
+
+@dataclass(frozen=True)
+class ReplayAllocationSummary:
+    """Derived display and validation facts; never separate identity inputs."""
+
+    server_cpuset: str
+    subject_cpuset: str
+    host_vcpus: int
+    host_memory_headroom_gb: int
+
+
+def parse_backend(value: object) -> ReplayBackend:
+    if not isinstance(value, Mapping):
+        raise ReplayError("replay backend is not an object")
+    unknown = sorted(set(value) - set(REPLAY_BLOCK_FIELDS))
+    if unknown:
+        raise ReplayError(f"replay backend has unknown field(s): {', '.join(map(str, unknown))}")
+    missing = sorted(
+        set(REPLAY_BLOCK_FIELDS)
+        - {"reference_manifest_uri", "reference_manifest_sha256"}
+        - set(value)
+    )
+    if missing:
+        raise ReplayError(f"replay backend is missing {', '.join(missing)}")
+    image = value.get("server_image_uri")
+    if not isinstance(image, str) or _PINNED_IMAGE_RE.fullmatch(image) is None:
+        raise ReplayError("replay server_image_uri is not digest-pinned")
+    fixture = value.get("fixture_sha256")
+    if not isinstance(fixture, str) or _HEX64_RE.fullmatch(fixture) is None:
+        raise ReplayError("replay fixture_sha256 is not a sha256 digest")
+    manifest_uri = value.get("reference_manifest_uri")
+    manifest_sha256 = value.get("reference_manifest_sha256")
+    if (manifest_uri is None) != (manifest_sha256 is None):
+        raise ReplayError("replay reference manifest URI and digest must appear together")
+    if manifest_uri is not None:
+        if not isinstance(manifest_uri, str) or not manifest_uri:
+            raise ReplayError("replay reference_manifest_uri is not a non-empty string")
+        if not isinstance(manifest_sha256, str) or _HEX64_RE.fullmatch(manifest_sha256) is None:
+            raise ReplayError("replay reference_manifest_sha256 is not a sha256 digest")
+    mode = value.get("serving_mode")
+    if mode not in SERVING_MODES:
+        raise ReplayError(f"replay serving_mode must be one of {', '.join(SERVING_MODES)}")
+    latency = value.get("latency_model")
+    if not isinstance(latency, Mapping) or set(latency) != set(LATENCY_MODEL_FIELDS):
+        raise ReplayError("replay latency_model has invalid fields")
+    profile = latency.get("deadlines_ms")
+    if not isinstance(profile, Mapping) or set(map(str, profile)) != set(INJECT_SHAPES):
+        raise ReplayError("replay latency_model.deadlines_ms has invalid shapes")
+    deadlines = tuple(
+        (shape, _positive(profile[shape], f"latency deadline {shape}")) for shape in INJECT_SHAPES
+    )
+    scale = latency.get("scale")
+    if (
+        isinstance(scale, bool)
+        or not isinstance(scale, int | float)
+        or not math.isfinite(scale)
+        or scale <= 0
+    ):
+        raise ReplayError("replay latency_model.scale must be finite and positive")
+    if latency.get("jitter") != "none":
+        raise ReplayError("replay latency_model.jitter must be 'none'")
+    return ReplayBackend(
+        server_image_uri=image,
+        fixture_sha256=fixture,
+        reference_manifest_uri=manifest_uri,
+        reference_manifest_sha256=manifest_sha256,
+        serving_mode=mode,
+        latency_deadlines_ms=deadlines,
+        latency_scale=float(scale),
+        latency_jitter="none",
+    )
+
+
+def parse_allocation(value: object) -> ReplayAllocation:
+    if not isinstance(value, Mapping) or set(value) != set(REPLAY_FIELDS):
+        raise ReplayError("replay allocation has invalid fields")
+    integers = {field: _positive(value[field], field) for field in REPLAY_INTEGER_FIELDS}
+    if not isinstance(value["replay_prefetch"], bool):
+        raise ReplayError("replay_prefetch must be a boolean")
+    if integers["replay_heap_percent"] > 100:
+        raise ReplayError("replay_heap_percent must be between 1 and 100")
+    return ReplayAllocation(**integers, replay_prefetch=value["replay_prefetch"])
+
+
+def parse_document(raw: str | Mapping[str, object]) -> ReplayConfig:
+    try:
+        value: object = json.loads(raw) if isinstance(raw, str) else dict(raw)
+    except json.JSONDecodeError as exc:
+        raise ReplayError("replay document is not JSON") from exc
+    if not isinstance(value, Mapping) or set(value) != {"backend", "allocation", "capacity_status"}:
+        raise ReplayError("replay document has invalid fields")
+    capacity_status = value["capacity_status"]
+    if capacity_status not in CAPACITY_STATUSES:
+        raise ReplayError(f"replay capacity_status must be one of {', '.join(CAPACITY_STATUSES)}")
+    config = ReplayConfig(
+        parse_backend(value["backend"]), parse_allocation(value["allocation"]), capacity_status
+    )
+    if isinstance(raw, str) and raw != config.canonical_json():
+        raise ReplayError("replay document is not canonical JSON")
+    return config
+
+
+def parse_plan(value: object) -> ReplayPlan:
+    if not isinstance(value, Mapping):
+        raise ReplayError("replay plan block is not an object")
+    allowed = {*REPLAY_BLOCK_FIELDS, "capacity_status"}
+    required = allowed - {"reference_manifest_uri", "reference_manifest_sha256"}
+    if set(value) - allowed or required - set(value):
+        unknown = sorted(set(value) - allowed)
+        missing = sorted(required - set(value))
+        detail = []
+        if unknown:
+            detail.append(f"unknown field(s): {', '.join(map(str, unknown))}")
+        if missing:
+            detail.append(f"missing field(s): {', '.join(missing)}")
+        raise ReplayError("replay plan block has " + "; ".join(detail))
+    status = value["capacity_status"]
+    if status not in CAPACITY_STATUSES:
+        raise ReplayError(f"replay capacity_status must be one of {', '.join(CAPACITY_STATUSES)}")
+    return ReplayPlan(
+        parse_backend({field: value[field] for field in REPLAY_BLOCK_FIELDS if field in value}),
+        status,
+    )
+
+
+def make_config(plan: ReplayPlan, values: Mapping[str, object]) -> ReplayConfig:
+    return ReplayConfig(
+        backend=plan.backend,
+        allocation=parse_allocation(values),
+        capacity_status=plan.capacity_status,
+    )
+
+
+def allocation_summary(
+    config: ReplayConfig,
+    *,
+    box_vcpus: int,
+    box_memory_gb: int,
+    container_memory_gb: int | None,
+) -> ReplayAllocationSummary:
+    """Refuse impossible sidecar allocation and derive the unowned host remainder."""
+    allocation = config.allocation
+    host_vcpus = box_vcpus - allocation.replay_vcpus - allocation.subject_vcpus
+    if host_vcpus < 1:
+        raise ReplayError("replay and subject cpusets leave no host CPU remainder")
+    if container_memory_gb is None:
+        raise ReplayError("replay cases require a subject container_memory_gb ceiling")
+    host_memory = box_memory_gb - allocation.replay_memory_gb - container_memory_gb
+    if host_memory < 1:
+        raise ReplayError("replay and subject memory ceilings leave no host memory headroom")
+    return ReplayAllocationSummary(
+        server_cpuset=f"0-{allocation.replay_vcpus - 1}",
+        subject_cpuset=(
+            f"{allocation.replay_vcpus}-{allocation.replay_vcpus + allocation.subject_vcpus - 1}"
+        ),
+        host_vcpus=host_vcpus,
+        host_memory_headroom_gb=host_memory,
+    )

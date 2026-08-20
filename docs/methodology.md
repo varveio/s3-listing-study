@@ -367,13 +367,20 @@ screening attempt. Before a replay result can advance or eliminate a candidate:
 
 1. the fixture has an immutable content identity and a reference manifest;
 2. the subject's native result passes completeness and duplicate verification;
-3. the complete server image, serving mode, latency treatment, allocation, and
-   evidence-protocol version are part of case identity and the receipt;
+3. the complete server image, serving mode, latency treatment, and allocation
+   are part of case identity and the receipt;
 4. the attempt retains server meters and interval-aligned cpuset-utilization
    samples sufficient to compare a candidate server with an overprovisioned
    control; and
 5. any known protocol divergence affecting that subject's request pattern is
    fixed or makes the attempt ineligible for comparison.
+
+A diagnostic canary checks the endpoint, backend binding, replay evidence, and
+verification/reporting path, but creates no comparative timing or rate result.
+Replay capacity is **UNCALIBRATED** until a manifest-bound diagnostic capacity
+canary has a committed receipt. A plan states that condition explicitly as
+`replay.capacity_status: uncalibrated`; no replay measurement is eligible before
+the status is changed to `calibrated`.
 
 Latency injection is a declared experimental treatment. A fixed-latency profile
 is valid for a controlled screen when it is applied identically and reported as
@@ -458,9 +465,11 @@ what they need to rebuild the run.
 4. Before comparative work, settle the roster and output-work decisions, select
    the benchmark buckets, and record their shapes independently before any
    subject touches them.
-5. **Smoke the frozen replay measurement path first.** A small canary must show
-   that the endpoint, evidence protocol, campaign configuration, runner,
-   manifest oracle, and reporter work together before scale spending begins.
+5. **Qualify replay before measuring it.** A diagnostic canary first shows that
+   the endpoint, backend binding, campaign configuration, runner, and reporter
+   work together without producing a comparison. That manifest-bound diagnostic
+   capacity canary receives a committed receipt before its plan is marked
+   `calibrated` and scale spending begins.
 6. Run the replay screening and configuration sweeps under their predeclared
    advancement rules. Freeze the finalists before looking at the S3 validation
    results.

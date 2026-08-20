@@ -12,7 +12,11 @@ from typing import Any
 
 import pytest
 
-from benchmark import adapters, gcs, measure, procs
+import benchmark.adapters as adapters
+import benchmark.gcs as gcs
+import benchmark.measure as measure
+import benchmark.procs as procs
+import benchmark.replay_runtime as replay_runtime
 from benchmark.contract import CREDENTIAL_ENV_VAR, TOOLBOX_TOOLS, sha256_of
 from benchmark.runtime.command_adapter import HEAP_PERCENT
 
@@ -77,23 +81,18 @@ def replay_document() -> dict[str, object]:
                 },
                 "scale": 1.0,
                 "jitter": "none",
-                "injector_version": "injector-v1",
-                "semantics_version": "deadline-floor-v1",
             },
-            "evidence_protocol_version": "measurement-v1",
         },
         "allocation": {
-            "subject_vcpus": 2,
-            "subject_memory_gb": 4,
-            "host_reserved_vcpus": 0,
-            "host_reserved_memory_gb": 0,
+            "subject_vcpus": 1,
             "replay_vcpus": 2,
-            "replay_memory_gb": 4,
+            "replay_memory_gb": 2,
             "replay_parquet_connections": 64,
             "replay_max_concurrent_requests": 64,
             "replay_prefetch": False,
             "replay_heap_percent": 75,
         },
+        "capacity_status": "calibrated",
     }
 
 
@@ -775,7 +774,8 @@ def test_the_cases_config_and_heap_share_reach_the_capsule(
 def test_replay_flags_are_paired_canonical_and_reach_the_capsule() -> None:
     document = replay_document()
     raw = json.dumps(document, sort_keys=True, separators=(",", ":"))
-    assert measure.parse_replay_config(measure.REPLAY_ENDPOINT_URL, raw) == document
+    parsed = measure.parse_replay_config(measure.REPLAY_ENDPOINT_URL, raw)
+    assert parsed is not None and parsed.as_dict() == document
     with pytest.raises(ValueError, match="stated together"):
         measure.parse_replay_config(measure.REPLAY_ENDPOINT_URL, "")
     with pytest.raises(ValueError, match="canonical"):
@@ -793,14 +793,12 @@ def test_replay_readiness_precedes_timer_and_metrics_persist(
         return (sys.executable, "-c", "import time; time.sleep(.03); print('one')"), {}
 
     monkeypatch.setattr(adapters, "compile_command", compile_subject)
-    monkeypatch.setattr(
-        measure,
-        "wait_for_replay",
-        lambda: (
-            events.append("ready")
-            or {"state": "ready", "wait_ms": 1, "attempts": 1, "last_error": None}
-        ),
-    )
+
+    def replay_ready() -> dict[str, object]:
+        events.append("ready")
+        return {"state": "ready", "wait_ms": 1, "attempts": 1, "last_error": None}
+
+    monkeypatch.setattr(replay_runtime, "wait_for_replay", replay_ready)
 
     def scrape(
         evidence: dict[str, object], phase: str, *, elapsed_s: float | None = None
@@ -814,8 +812,8 @@ def test_replay_readiness_precedes_timer_and_metrics_persist(
             result["elapsed_s"] = elapsed_s
         return result
 
-    monkeypatch.setattr(measure, "scrape_replay_metrics", scrape)
-    monkeypatch.setattr(measure, "REPLAY_SAMPLE_INTERVAL_S", 0.005)
+    monkeypatch.setattr(replay_runtime, "scrape_metrics", scrape)
+    monkeypatch.setattr(replay_runtime, "REPLAY_SAMPLE_INTERVAL_S", 0.005)
     ticks: dict[frozenset[int], int] = {}
 
     def cpuset_jiffies(cpus: set[int], *_args: object) -> tuple[int, int]:
@@ -823,13 +821,32 @@ def test_replay_readiness_precedes_timer_and_metrics_persist(
         ticks[key] = ticks.get(key, 0) + 10
         return ticks[key] // 2, ticks[key]
 
-    monkeypatch.setattr(measure, "_cpuset_jiffies", cpuset_jiffies)
-    monkeypatch.setattr(measure, "_host_memory_and_load", lambda: (1024, 0.25))
+    monkeypatch.setattr(replay_runtime, "_cpuset_jiffies", cpuset_jiffies)
+    monkeypatch.setattr(replay_runtime, "_host_memory_and_load", lambda: (1024, 0.25))
     real_run_tool = measure.run_tool
 
-    def timed(*args: object, **kwargs: object) -> dict[str, object]:
+    def timed(
+        argv: tuple[str, ...],
+        attempt_dir: Path,
+        timeout: int,
+        term_grace: float,
+        env: dict[str, str],
+        *,
+        cwd: str | None = None,
+        reset_peak: bool = False,
+        stdout_path: Path | None = None,
+    ) -> dict[str, object]:
         events.append("timer")
-        return real_run_tool(*args, **kwargs)
+        return real_run_tool(
+            argv,
+            attempt_dir,
+            timeout,
+            term_grace,
+            env,
+            cwd=cwd,
+            reset_peak=reset_peak,
+            stdout_path=stdout_path,
+        )
 
     monkeypatch.setattr(measure, "run_tool", timed)
     monkeypatch.setattr(measure, "row_count_for", lambda *_args: (1, None))
@@ -858,7 +875,7 @@ def test_missing_replay_metrics_publish_an_explicit_refusal(
         lambda *_args, **_kwargs: ((sys.executable, "-c", "print('must not run')"), {}),
     )
     monkeypatch.setattr(
-        measure,
+        replay_runtime,
         "wait_for_replay",
         lambda: {"state": "ready", "wait_ms": 1, "attempts": 1, "last_error": None},
     )
@@ -869,7 +886,7 @@ def test_missing_replay_metrics_publish_an_explicit_refusal(
         errors.append({"phase": phase, "error": "metrics unavailable"})
         return None
 
-    monkeypatch.setattr(measure, "scrape_replay_metrics", missing)
+    monkeypatch.setattr(replay_runtime, "scrape_metrics", missing)
     monkeypatch.setattr(
         measure,
         "run_tool",
@@ -890,13 +907,13 @@ def test_missing_replay_metrics_publish_an_explicit_refusal(
     ]
 
 
-def test_worker_refuses_replay_allocation_that_disagrees_with_resource_flags(
+def test_worker_refuses_uncalibrated_replay_measurement(
     tmp_path: Path,
 ) -> None:
     argv = basic_worker_argv(tmp_path, replay=True)
     config_index = argv.index("--replay-config") + 1
     replay = json.loads(argv[config_index])
-    replay["allocation"]["host_reserved_vcpus"] = 1
+    replay["capacity_status"] = "uncalibrated"
     argv[config_index] = json.dumps(replay, sort_keys=True, separators=(",", ":"))
 
     assert measure.main(argv) == 2

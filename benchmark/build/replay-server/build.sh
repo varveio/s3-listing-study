@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Assemble the replay-server sidecar image's build context and build it.
+# Assemble a replay-server image's build context and build it.
 #
 # Neither input is in this repository: the server distribution is built from a
 # swath checkout, and the fixture is a listing capture the study does not commit.
-# This script is the record of how the two are put together, so a receipt can
-# name exactly what went in.
+# This script records how the two are put together, so a receipt can name
+# exactly what went in.
 #
 #   SWATH_REPO=~/workspaces/swath \
 #   FIXTURE_DIR=~/work/sorel-replay/sorted \
@@ -30,7 +30,7 @@ dist="$SWATH_REPO/swath-replay-server/build/install/swath-replay-server"
 commit=$(git -C "$SWATH_REPO" rev-parse HEAD)
 dirty=$(git -C "$SWATH_REPO" status --porcelain | wc -l)
 [[ $dirty -eq 0 ]] || {
-  echo "build.sh: swath checkout is dirty; a pilot image must name a commit that exists" >&2
+  echo "build.sh: swath checkout is dirty; a replay image must name a clean commit" >&2
   exit 1
 }
 

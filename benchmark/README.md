@@ -18,7 +18,9 @@ facts under `tools/<tool>/build/`.
 - `build/` holds the toolbox build inputs: `Dockerfile` builds one linux/amd64
   toolbox directly from the eleven checked-in capsule recipes (it consumes no
   parent image or retired image job), alongside its context policy and the
-  pinned worker requirements.
+  pinned worker requirements. `build/replay-server/` is the separate recipe for
+  a fixture-bearing replay-server image; its digest is a plan input, not a
+  toolbox build product.
 - `tests/` holds this component's test suite. Repository-wide gates stay in the
   top-level `tests/`.
 - `docs/` holds the design. Read `architecture.md` first; the other three are
@@ -173,6 +175,16 @@ with the immutable contract-v2 manifest whose URI and compressed-byte digest
 are in the case. Missing, extra, duplicate, or field-mismatched rows are `FAIL`,
 including mtime: a fixed fixture has no drift exception. Two wrong replay
 subjects agreeing with one another cannot pass.
+
+### Replay qualification precedes replay measurement
+
+A manifest-bound replay diagnostic canary validates the recorded backend
+binding, readiness, server evidence, and result/verification path. It receives
+a verdict and a `verify.json`, but it produces neither comparative timing nor rate data. Replay
+capacity is **UNCALIBRATED** while the plan's `replay.capacity_status` says
+`uncalibrated`; no replay measurement row is eligible. Set it to `calibrated`
+only after a real, manifest-bound diagnostic capacity canary has a committed
+receipt.
 
 ### Malformed or partial evidence is refused
 
