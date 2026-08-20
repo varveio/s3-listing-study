@@ -15,6 +15,7 @@ import argparse
 import copy
 import hashlib
 import json
+import math
 import re
 import shlex
 import sqlite3
@@ -82,6 +83,8 @@ its evidence — so this outer bound must never be the one that fires. It is a
 safety net rather than a measurement, which is why it is one flat figure and not
 a per-mode sum.
 """
+REPLAY_READINESS_TIMEOUT_S = 600
+"""Allowance for a replay server to derive its serving index before timing."""
 
 N4_BOOT_DISK = {"type": "hyperdisk-balanced", "image": "batch-cos"}
 PINNED_IMAGE_RE = re.compile(r"\A[^\s@]+@sha256:([0-9a-f]{64})\Z")
@@ -295,6 +298,7 @@ def case_identity(
     machine shapes would be claiming a comparability nobody asked for.
     """
     config = dict(case.config)
+    replay = None if case.replay is None else case.replay.as_dict()
     if case.purpose == "preparation":
         environment = identity.preparation_environment(
             target_bucket=target_bucket,
@@ -318,8 +322,8 @@ def case_identity(
             input_artifact_sha256=input_artifact_sha256,
         )
     return (
-        identity.case_id(case.tool, environment, config, tool_slice, platform),
-        identity.case_inputs_document(environment, config, tool_slice, platform),
+        identity.case_id(case.tool, environment, config, tool_slice, platform, replay),
+        identity.case_inputs_document(environment, config, tool_slice, platform, replay),
     )
 
 
@@ -459,11 +463,44 @@ def _artifact_pairs(attempt: Attempt, artifact_uri: str) -> tuple[tuple[str, str
 def request_argument(document: Mapping[str, Any], name: str) -> str:
     """One `--flag value` pair out of a frozen provider request, or `""`."""
     try:
-        commands = document["taskGroups"][0]["taskSpec"]["runnables"][0]["container"]["commands"]
-        pairs = dict(zip(commands[::2], commands[1::2], strict=True))
+        commands = _subject_commands(document)
+        pairs_list = list(zip(commands[::2], commands[1::2], strict=True))
+        if len({key for key, _value in pairs_list}) != len(pairs_list):
+            raise ValueError
+        pairs = dict(pairs_list)
     except (IndexError, KeyError, TypeError, ValueError):
         raise CampaignError("recorded provider request cannot be read back") from None
     return str(pairs.get(name, ""))
+
+
+def _subject_commands(document: Mapping[str, Any]) -> list[Any]:
+    """Find the one worker runnable without relying on provider runnable order."""
+    groups = document["taskGroups"]
+    if not isinstance(groups, list) or len(groups) != 1:
+        raise ValueError
+    runnables = groups[0]["taskSpec"]["runnables"]
+    if not isinstance(runnables, list) or not runnables:
+        raise ValueError
+    candidates: list[list[Any]] = []
+    for runnable in runnables:
+        commands = runnable["container"]["commands"]
+        if not isinstance(commands, list):
+            raise ValueError
+        if "--attempt-id" not in commands:
+            continue
+        if len(commands) % 2:
+            raise ValueError
+        flags = commands[::2]
+        if not all(isinstance(flag, str) and flag.startswith("--") for flag in flags):
+            raise ValueError
+        if len(set(flags)) != len(flags):
+            raise ValueError
+        if "--attempt-id" not in flags:
+            raise ValueError
+        candidates.append(commands)
+    if len(candidates) != 1:
+        raise ValueError
+    return candidates[0]
 
 
 def request_max_run_duration(document: Mapping[str, Any]) -> str:
@@ -472,6 +509,122 @@ def request_max_run_duration(document: Mapping[str, Any]) -> str:
         return str(document["taskGroups"][0]["taskSpec"]["maxRunDuration"])
     except (IndexError, KeyError, TypeError):
         raise CampaignError("recorded provider request cannot be read back") from None
+
+
+def _cpuset(start: int, count: int) -> str:
+    end = start + count - 1
+    return str(start) if end == start else f"{start}-{end}"
+
+
+def _runnable_options(cpuset: str, memory_gb: int) -> str:
+    return shlex.join(
+        (
+            "--network",
+            "host",
+            f"--cpuset-cpus={cpuset}",
+            f"--memory={memory_gb}g",
+            f"--memory-swap={memory_gb}g",
+        )
+    )
+
+
+def _replay_document(attempt: Attempt) -> dict[str, Any] | None:
+    """Decode the frozen resolved document and reject allocation drift."""
+    if attempt.replay is None:
+        return None
+    try:
+        replay = json.loads(attempt.replay)
+        if not isinstance(replay, dict) or set(replay) != {"backend", "allocation"}:
+            raise ValueError
+        backend = replay["backend"]
+        allocation = replay["allocation"]
+        if (
+            not isinstance(backend, dict)
+            or set(backend) != set(bench.REPLAY_BLOCK_FIELDS)
+            or not isinstance(allocation, dict)
+        ):
+            raise ValueError
+        if set(allocation) != set(bench.REPLAY_FIELDS):
+            raise ValueError
+        for name in bench.REPLAY_INTEGER_FIELDS:
+            value = allocation[name]
+            minimum = 0 if name.startswith("host_reserved_") else 1
+            if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+                raise ValueError
+        if not isinstance(allocation["replay_prefetch"], bool):
+            raise ValueError
+        if allocation["replay_heap_percent"] > 100:
+            raise ValueError
+        if (
+            allocation["replay_vcpus"]
+            + allocation["subject_vcpus"]
+            + allocation["host_reserved_vcpus"]
+            != attempt.vcpus
+        ):
+            raise ValueError
+        if (
+            allocation["replay_memory_gb"]
+            + allocation["subject_memory_gb"]
+            + allocation["host_reserved_memory_gb"]
+            > attempt.memory_gb
+        ):
+            raise ValueError
+        if attempt.container_memory_gb != allocation["subject_memory_gb"]:
+            raise ValueError
+        if PINNED_IMAGE_RE.fullmatch(backend["server_image_uri"]) is None:
+            raise ValueError
+        if HEX64_RE.fullmatch(backend["fixture_sha256"]) is None:
+            raise ValueError
+        manifest_uri = backend["reference_manifest_uri"]
+        manifest_sha256 = backend["reference_manifest_sha256"]
+        if (manifest_uri is None) != (manifest_sha256 is None):
+            raise ValueError
+        if manifest_uri is not None and (
+            not isinstance(manifest_uri, str)
+            or not manifest_uri
+            or not isinstance(manifest_sha256, str)
+            or HEX64_RE.fullmatch(manifest_sha256) is None
+        ):
+            raise ValueError
+        if backend["serving_mode"] not in bench.SERVING_MODES:
+            raise ValueError
+        latency = backend["latency_model"]
+        if (
+            not isinstance(latency, dict)
+            or set(latency) != set(bench.LATENCY_MODEL_FIELDS)
+            or not isinstance(latency["deadlines_ms"], dict)
+            or set(latency["deadlines_ms"]) != set(bench.INJECT_SHAPES)
+        ):
+            raise ValueError
+        if any(
+            isinstance(value, bool) or not isinstance(value, int) or value < 1
+            for value in latency["deadlines_ms"].values()
+        ):
+            raise ValueError
+        scale = latency["scale"]
+        if (
+            isinstance(scale, bool)
+            or not isinstance(scale, int | float)
+            or not math.isfinite(scale)
+            or scale <= 0
+            or latency["jitter"] != "none"
+        ):
+            raise ValueError
+        if any(
+            not isinstance(latency[name], str) or not latency[name]
+            for name in ("injector_version", "semantics_version")
+        ):
+            raise ValueError
+        protocol = backend["evidence_protocol_version"]
+        if not isinstance(protocol, str) or not protocol:
+            raise ValueError
+        if json.dumps(replay, sort_keys=True, separators=(",", ":")) != attempt.replay:
+            raise ValueError
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+        raise CampaignError(
+            f"{attempt.attempt_id} carries a malformed resolved replay document"
+        ) from None
+    return replay
 
 
 def render_batch_job(
@@ -520,44 +673,112 @@ def render_batch_job(
         ("--config", attempt.config),
         *_artifact_pairs(attempt, artifact_uri),
     )
+    replay = _replay_document(attempt)
+    if replay is not None:
+        pairs = (
+            *pairs,
+            ("--endpoint-url", "http://127.0.0.1:19090"),
+            ("--replay-config", attempt.replay),
+        )
     commands = [item for pair in pairs for item in pair]
     container: dict[str, Any] = {"imageUri": image["image_uri"], "commands": commands}
-    if container_memory is not None:
-        container["options"] = shlex.join(
-            (f"--memory={container_memory}g", f"--memory-swap={container_memory}g")
-        )
+    subject_runnable: dict[str, Any] = {"container": container}
+    runnables = [subject_runnable]
+    if replay is None:
+        if container_memory is not None:
+            container["options"] = shlex.join(
+                (f"--memory={container_memory}g", f"--memory-swap={container_memory}g")
+            )
+    else:
+        allocation = replay["allocation"]
+        replay_vcpus = allocation["replay_vcpus"]
+        subject_vcpus = allocation["subject_vcpus"]
+        replay_cpuset = _cpuset(0, replay_vcpus)
+        subject_cpuset = _cpuset(replay_vcpus, subject_vcpus)
+        container["options"] = _runnable_options(subject_cpuset, allocation["subject_memory_gb"])
+        backend = replay["backend"]
+        latency = backend["latency_model"]
+        server_commands = [
+            "serve",
+            "--fixture",
+            f"/fixtures/{attempt.target_bucket}",
+            "--bucket",
+            attempt.target_bucket,
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "19090",
+            "--metrics-port",
+            "19192",
+            "--serving-mode",
+            backend["serving_mode"],
+            "--parquet-connections",
+            str(allocation["replay_parquet_connections"]),
+            "--max-concurrent-requests",
+            str(allocation["replay_max_concurrent_requests"]),
+            "--inject-latency",
+            ",".join(
+                f"{shape}={latency['deadlines_ms'][shape]}ms" for shape in bench.INJECT_SHAPES
+            ),
+            "--latency-scale",
+            str(latency["scale"]),
+        ]
+        server_runnable = {
+            "background": True,
+            "container": {
+                "imageUri": backend["server_image_uri"],
+                "commands": server_commands,
+                "options": _runnable_options(replay_cpuset, allocation["replay_memory_gb"]),
+            },
+            "environment": {
+                "variables": {
+                    "JAVA_TOOL_OPTIONS": (
+                        f"-XX:MaxRAMPercentage={allocation['replay_heap_percent']} "
+                        "-Dswath.replay.prefetch.enabled="
+                        f"{'true' if allocation['replay_prefetch'] else 'false'}"
+                    )
+                }
+            },
+        }
+        runnables = [server_runnable, subject_runnable]
+    readiness_allowance = REPLAY_READINESS_TIMEOUT_S if replay is not None else 0
+    default_duration = (
+        attempt.timeout_s + int(options.term_grace) + DEADLINE_SLACK_S + readiness_allowance
+    )
     task_spec: dict[str, Any] = {
-        "runnables": [{"container": container}],
+        "runnables": runnables,
         "computeResource": {
             "cpuMilli": str(attempt.vcpus * 1000),
             "memoryMib": str(attempt.memory_gb * 1024),
         },
         "maxRetryCount": 0,
-        "maxRunDuration": max_run_duration
-        or f"{attempt.timeout_s + int(options.term_grace) + DEADLINE_SLACK_S}s",
+        "maxRunDuration": max_run_duration or f"{default_duration}s",
     }
     if attempt.secret_resource is not None:
         # One variable, whose payload the worker parses. A case that lists
         # unsigned has no environment block at all.
-        task_spec["environment"] = {
-            "secretVariables": {CREDENTIAL_ENV_VAR: attempt.secret_resource}
-        }
+        credential = {"secretVariables": {CREDENTIAL_ENV_VAR: attempt.secret_resource}}
+        if replay is None:
+            # Preserve the settled one-runnable request document byte-for-byte.
+            task_spec["environment"] = credential
+        else:
+            subject_runnable["environment"] = credential
     policy: dict[str, Any] = {
         "machineType": attempt.machine_type,
         "provisioningModel": options.provisioning,
     }
     if attempt.machine_type.startswith("n4-"):
         policy["bootDisk"] = dict(N4_BOOT_DISK)
-    allocation: dict[str, Any] = {
+    allocation_policy: dict[str, Any] = {
         "instances": [{"policy": policy}],
         "serviceAccount": {"email": attempt.service_account},
     }
     if options.zone:
-        allocation["location"] = {
+        allocation_policy["location"] = {
             "allowedLocations": [f"zones/{options.zone.removeprefix('zones/')}"]
         }
     if options.network and options.subnetwork:
-        allocation["network"] = {
+        allocation_policy["network"] = {
             "networkInterfaces": [{"network": options.network, "subnetwork": options.subnetwork}]
         }
     return {
@@ -565,7 +786,7 @@ def render_batch_job(
         # scanning a shared project for anything benchmark-shaped.
         "labels": {"suite": suite},
         "taskGroups": [{"taskCount": "1", "parallelism": "1", "taskSpec": task_spec}],
-        "allocationPolicy": allocation,
+        "allocationPolicy": allocation_policy,
         "logsPolicy": {"destination": "CLOUD_LOGGING"},
     }
 
@@ -576,9 +797,7 @@ def retry_request_document(
     """The frozen request with only the new attempt's identities rewritten."""
     document = copy.deepcopy(previous)
     try:
-        commands = document["taskGroups"][0]["taskSpec"]["runnables"][0]["container"]["commands"]
-        if not isinstance(commands, list):
-            raise TypeError
+        commands = _subject_commands(document)
         replacements = {
             "--job-name": job_name,
             "--destination": result_prefix,
@@ -683,6 +902,7 @@ def planned_attempt(
             purpose=case.purpose,
             statistic=case.statistic,
             origin="planned",
+            replay=None if case.replay is None else _canonical(case.replay.as_dict()),
         )
         return attempt, _canonical(
             render_batch_job(
@@ -804,11 +1024,36 @@ def _case_document(case: Case) -> dict[str, Any]:
         },
         "axes": [list(pair) for pair in case.axes],
         "config": [list(pair) for pair in case.config],
+        "replay": None if case.replay is None else case.replay.as_dict(),
     }
 
 
 def _case_from_document(document: Any) -> Case:
     try:
+        replay_document = document.get("replay")
+        replay = None
+        if replay_document is not None:
+            backend_document = replay_document["backend"]
+            latency = backend_document["latency_model"]
+            allocation = replay_document["allocation"]
+            replay = bench.ReplayConfig(
+                backend=bench.ReplayBackend(
+                    server_image_uri=backend_document["server_image_uri"],
+                    fixture_sha256=backend_document["fixture_sha256"],
+                    reference_manifest_uri=backend_document["reference_manifest_uri"],
+                    reference_manifest_sha256=backend_document["reference_manifest_sha256"],
+                    serving_mode=backend_document["serving_mode"],
+                    latency_deadlines_ms=tuple(
+                        (shape, latency["deadlines_ms"][shape]) for shape in bench.INJECT_SHAPES
+                    ),
+                    latency_scale=latency["scale"],
+                    latency_jitter=latency["jitter"],
+                    latency_injector_version=latency["injector_version"],
+                    latency_semantics_version=latency["semantics_version"],
+                    evidence_protocol_version=backend_document["evidence_protocol_version"],
+                ),
+                **{field: allocation[field] for field in bench.REPLAY_FIELDS},
+            )
         return Case(
             **{
                 name: document[name]
@@ -827,6 +1072,7 @@ def _case_from_document(document: Any) -> Case:
             resources=bench.Resources(**document["resources"]),
             axes=tuple((str(key), value) for key, value in document["axes"]),
             config=tuple((str(key), value) for key, value in document["config"]),
+            replay=replay,
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise CampaignError(f"recorded case is not one this code understands: {exc}") from None
@@ -1012,6 +1258,7 @@ def producer_spec(attempt: Attempt) -> str:
             "target_region": attempt.target_region,
             "tool_slice_sha256": attempt.tool_slice_sha256,
             "platform_sha256": attempt.platform_sha256,
+            "replay": attempt.replay,
         }
     )
 

@@ -23,8 +23,9 @@ but only as a fact about that one run). All eleven have now run at smoke on
 amd64 through the now-retired groundwork attempt engine — `aws-cli`, `s5cmd`, `s7cmd`, `rclone`,
 `minio-mc`, `s3-fast-list` and Swath anonymously, and `s3p`, `s3kor`, `s4cmd`
 and `ps3` with a credential, which previously blocked them. Running is not
-verifying: those engine attempts carry no verdict, because auditing one against
-a reference manifest is not implemented yet. Per-tool status:
+verifying: those retired-engine attempts carry no verdict and were never bound
+to the current verifier. The comparative harness now has a manifest-backed
+replay oracle, but no campaign has exercised it. Per-tool status:
 `tools/README.md`.
 
 ## Project principles

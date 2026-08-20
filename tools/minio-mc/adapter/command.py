@@ -110,7 +110,26 @@ MODES = {
 }
 
 
+def build_env(request: CommandRequest) -> dict[str, str]:
+    if not request.endpoint_url:
+        return dict(FUNCTIONAL_ENV)
+    # The replay probe established that mc needs both the endpoint-bearing
+    # alias and an explicit region; without MC_REGION it probes the endpoint's
+    # unsupported GetBucketLocation path and refuses the listing.
+    return {"MC_HOST_s3": request.endpoint_url, "MC_REGION": request.region}
+
+
 def _build_tail(request: CommandRequest) -> tuple[str, ...]:
+    if request.endpoint_url and request.mode == "versions-json":
+        raise CommandAdapterError(
+            f"{TOOL} mode {request.mode!r} requires ListObjectVersions, which the replay "
+            "endpoint does not serve"
+        )
+    if request.endpoint_url and request.mode in {"find", "find-json"} and not request.prefix:
+        raise CommandAdapterError(
+            f"{TOOL} mode {request.mode!r} at bucket root requires HeadBucket, which the "
+            "replay endpoint does not serve"
+        )
     prefix = request.prefix[1:] if request.prefix.startswith("/") else request.prefix
     target = f"s3/{request.bucket}/{prefix}"
     commands = {

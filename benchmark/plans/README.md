@@ -84,13 +84,21 @@ It splits by what varies. The plan-level `replay:` block holds what does not:
 
 ```yaml
 replay:
-  fixture_uri: <the server image carrying the fixture>
+  server_image_uri: registry/replay@sha256:<64 hex>
   fixture_sha256: <64 hex, over the served parts in key order>
+  reference_manifest_uri: gs://bucket/reference.tsv.gz
+  reference_manifest_sha256: <64 hex>
   serving_mode: sorted            # or duckdb; always stated, never inferred
-  inject_latency: {worker_page: 107ms, pivot_probe: 41ms, structure_probe: 49ms}
+  latency_model:
+    deadlines_ms: {worker_page: 107, pivot_probe: 41, structure_probe: 49}
+    scale: 1.0
+    jitter: none
+    injector_version: injector-v1
+    semantics_version: deadline-floor-v1
+  evidence_protocol_version: measurement-v1
 ```
 
-`inject_latency` is a **measurement, not a preference**. A swath run report carries
+The latency model is a **measurement, not a preference**. A swath run report carries
 a `probe_latency` block whose call classes are exactly the replay server's shape
 classifier, so the honest profile for a bucket is a fact its own fixture arrives
 with. Read it from there rather than picking one — and note the direction the dial
@@ -105,22 +113,31 @@ layers as every other allocation:
 defaults:
   vcpus: 16                        # the box, as always
   memory_gb: 64
-  replay_vcpus: 8                  # carved out of the box
+  subject_vcpus: 7
+  subject_memory_gb: 40
+  host_reserved_vcpus: 1
+  host_reserved_memory_gb: 8
+  container_memory_gb: 40          # exactly the replay subject allocation
+  replay_vcpus: 8
   replay_memory_gb: 16
   replay_parquet_connections: 640
+  replay_max_concurrent_requests: 512
+  replay_prefetch: false
+  replay_heap_percent: 75
 ```
 
-`vcpus`/`memory_gb` keep meaning **the box** — the pair `instances.yaml` resolves a
-machine type from. The server's share is carved out of it and the subject gets the
-remainder, which is how the two containers are actually pinned: disjoint cpusets
-over one machine's cores. A row that leaves the subject no cores, or no memory, is
-refused while it is still a file.
+`vcpus`/`memory_gb` keep meaning **the box**. Replay spec v3 never derives an
+allocation as a leftover: server, subject, and host reserve are all explicit.
+CPU must add up exactly; memory may leave slack but may not overcommit. The
+subject ceiling must equal `subject_memory_gb`, so there is one enforceable
+answer. Reader-pool size and request-admission width are separate fields, and
+`replay_prefetch` is a YAML boolean rather than an integer shorthand.
 
-`replay_parquet_connections` is the store's pooled-reader count and its read-permit
-count both. Set it above the widest fan-out any subject in the plan drives — below
-that, the server's own cost starts varying with the client's concurrency, which is
-the very axis the study exists to rank. A `delimiter=/` rollup holds two slots, so
-doubling the fan-out is the safe reading.
+`reference_manifest_*` may be absent only for non-measurement work such as a
+canary, diagnostic, or prerequisite preparation. A replay-backed measurement
+without that binding is refused. The
+server image and fixture digest remain distinct identity facts even when fixture
+bytes happen to ride in the image.
 
 A `replay_*` key in a plan with no `replay:` block is refused, and so is a
 `replay:` block whose defaults do not size a server: a plan states its backend
@@ -352,4 +369,4 @@ rules and their reasons are [`../docs/model.md`](../docs/model.md)
 § *Object layout*. Create-only writes refuse a second execution merging into
 a first; they do not seal evidence against replacement by credentials with
 broader permissions — see
-[`Evidence publication is not sealed`](../README.md#evidence-publication-is-not-sealed).
+[`Attempt evidence is create-only`](../README.md#attempt-evidence-is-create-only).

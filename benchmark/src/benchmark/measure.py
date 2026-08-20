@@ -3,8 +3,8 @@
 The worker validates campaign claims against immutable in-image metadata before
 exec, supervises the complete process group through TERM/KILL, retains stream
 and native-directory outputs, counts through the capsule, and uploads the
-result marker last. Create-only evidence sealing is not implemented; see
-README.md, "Evidence publication is not sealed".
+result marker last. Attempt uploads are create-only; the deterministic prefix
+cannot be merged with a second execution.
 
 Usage:
     measure.py --tool s5cmd --mode recursive --bucket some-bucket --region us-east-1 \\
@@ -18,6 +18,7 @@ import contextlib
 import gzip
 import hashlib
 import json
+import math
 import os
 import platform
 import re
@@ -27,7 +28,10 @@ import signal
 import stat
 import subprocess
 import sys
+import threading
 import time
+import urllib.error
+import urllib.request
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -68,6 +72,14 @@ exist and are not usable, wherever they came from: this one says the setup exec
 itself failed — nonzero, timed out, left a process behind, or published anything
 other than exactly one file.
 """
+EXIT_REPLAY_EVIDENCE_FAILED = 14
+"""The replay server did not provide the evidence protocol this attempt required."""
+REPLAY_ENDPOINT_URL = "http://127.0.0.1:19090"
+REPLAY_METRICS_URL = "http://127.0.0.1:19192"
+REPLAY_READINESS_TIMEOUT_S = 600
+REPLAY_HTTP_TIMEOUT_S = 5.0
+REPLAY_READINESS_POLL_S = 1.0
+REPLAY_SAMPLE_INTERVAL_S = 10.0
 SETUP_TIMEOUT_S = 300
 """The most an untimed setup exec gets, whatever the subject's deadline is.
 
@@ -300,6 +312,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         metavar="JSON",
         help="The case's effective capsule config blob (LoadedCommandAdapter.effective_config).",
     )
+    parser.add_argument("--endpoint-url", default="")
+    parser.add_argument("--replay-config", default="", metavar="JSON")
     parser.add_argument(
         "--input-artifact",
         default="",
@@ -315,6 +329,353 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--image-metadata", default="/opt/benchmark/image-metadata.json")
     return parser.parse_args(argv)
+
+
+REPLAY_BACKEND_FIELDS = {
+    "server_image_uri",
+    "fixture_sha256",
+    "reference_manifest_uri",
+    "reference_manifest_sha256",
+    "serving_mode",
+    "latency_model",
+    "evidence_protocol_version",
+}
+REPLAY_LATENCY_FIELDS = {
+    "deadlines_ms",
+    "scale",
+    "jitter",
+    "injector_version",
+    "semantics_version",
+}
+REPLAY_ALLOCATION_FIELDS = {
+    "subject_vcpus",
+    "subject_memory_gb",
+    "host_reserved_vcpus",
+    "host_reserved_memory_gb",
+    "replay_vcpus",
+    "replay_memory_gb",
+    "replay_parquet_connections",
+    "replay_max_concurrent_requests",
+    "replay_prefetch",
+    "replay_heap_percent",
+}
+
+
+def parse_replay_config(endpoint_url: str, raw: str) -> dict[str, object] | None:
+    """Validate the paired replay flags and return their exact canonical document."""
+    if not endpoint_url and not raw:
+        return None
+    if not endpoint_url or not raw:
+        raise ValueError("--endpoint-url and --replay-config must be stated together")
+    if endpoint_url != REPLAY_ENDPOINT_URL:
+        raise ValueError(f"replay endpoint must be {REPLAY_ENDPOINT_URL}")
+    try:
+        document = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"--replay-config is not valid JSON: {exc}") from None
+    try:
+        if not isinstance(document, dict) or set(document) != {"backend", "allocation"}:
+            raise ValueError
+        backend = document["backend"]
+        allocation = document["allocation"]
+        if (
+            not isinstance(backend, dict)
+            or set(backend) != REPLAY_BACKEND_FIELDS
+            or not isinstance(allocation, dict)
+            or set(allocation) != REPLAY_ALLOCATION_FIELDS
+        ):
+            raise ValueError
+        latency = backend["latency_model"]
+        if not isinstance(latency, dict) or set(latency) != REPLAY_LATENCY_FIELDS:
+            raise ValueError
+        deadlines = latency["deadlines_ms"]
+        if not isinstance(deadlines, dict) or set(deadlines) != {
+            "worker_page",
+            "pivot_probe",
+            "structure_probe",
+        }:
+            raise ValueError
+        if any(
+            isinstance(value, bool) or not isinstance(value, int) or value <= 0
+            for value in deadlines.values()
+        ):
+            raise ValueError
+        for name in REPLAY_ALLOCATION_FIELDS - {
+            "replay_prefetch",
+            "host_reserved_vcpus",
+            "host_reserved_memory_gb",
+        }:
+            value = allocation[name]
+            if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+                raise ValueError
+        for name in ("host_reserved_vcpus", "host_reserved_memory_gb"):
+            value = allocation[name]
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError
+        if not isinstance(allocation["replay_prefetch"], bool):
+            raise ValueError
+        scale = latency["scale"]
+        if (
+            isinstance(scale, bool)
+            or not isinstance(scale, int | float)
+            or not math.isfinite(scale)
+            or scale <= 0
+            or latency["jitter"] != "none"
+        ):
+            raise ValueError
+        if backend["serving_mode"] not in {"sorted", "duckdb"}:
+            raise ValueError
+        if (
+            not isinstance(backend["server_image_uri"], str)
+            or PINNED_IMAGE_RE.fullmatch(backend["server_image_uri"]) is None
+        ):
+            raise ValueError
+        if (
+            not isinstance(backend["fixture_sha256"], str)
+            or re.fullmatch(r"[0-9a-f]{64}", backend["fixture_sha256"]) is None
+        ):
+            raise ValueError
+        manifest_uri = backend["reference_manifest_uri"]
+        manifest_sha = backend["reference_manifest_sha256"]
+        if (manifest_uri is None) != (manifest_sha is None):
+            raise ValueError
+        if manifest_uri is not None and (
+            not isinstance(manifest_uri, str)
+            or not manifest_uri
+            or not isinstance(manifest_sha, str)
+            or re.fullmatch(r"[0-9a-f]{64}", manifest_sha) is None
+        ):
+            raise ValueError
+        if any(
+            not isinstance(latency[name], str) or not latency[name]
+            for name in ("injector_version", "semantics_version")
+        ):
+            raise ValueError
+        protocol = backend["evidence_protocol_version"]
+        if not isinstance(protocol, str) or not protocol:
+            raise ValueError
+    except (KeyError, TypeError, ValueError):
+        raise ValueError("--replay-config does not match the resolved replay schema") from None
+    if json.dumps(document, sort_keys=True, separators=(",", ":")) != raw:
+        raise ValueError("--replay-config is not canonical JSON")
+    return document
+
+
+def validate_replay_allocation(
+    replay: Mapping[str, object], *, vcpus: int, memory_gb: int, container_memory_gb: int | None
+) -> None:
+    """Bind the replay document to the resource flags the provider request stated."""
+    allocation = replay["allocation"]
+    assert isinstance(allocation, Mapping)
+    if (
+        int(allocation["replay_vcpus"])
+        + int(allocation["subject_vcpus"])
+        + int(allocation["host_reserved_vcpus"])
+        != vcpus
+    ):
+        raise ValueError("replay CPU allocation does not equal --vcpus")
+    if (
+        int(allocation["replay_memory_gb"])
+        + int(allocation["subject_memory_gb"])
+        + int(allocation["host_reserved_memory_gb"])
+        > memory_gb
+    ):
+        raise ValueError("replay memory allocation exceeds --memory-gb")
+    if allocation["subject_memory_gb"] != container_memory_gb:
+        raise ValueError("replay subject memory does not equal --container-memory-gb")
+
+
+def _http_get(url: str, *, expect_json: bool) -> dict[str, object] | None:
+    request = urllib.request.Request(url, headers={"Accept": "application/json"})
+    with urllib.request.urlopen(request, timeout=REPLAY_HTTP_TIMEOUT_S) as response:
+        if response.status != 200:
+            raise OSError(f"HTTP {response.status}")
+        if not expect_json:
+            response.read()
+            return None
+        document = json.load(response)
+    if not isinstance(document, dict):
+        raise ValueError("metrics response is not a JSON object")
+    return document
+
+
+def wait_for_replay() -> dict[str, object]:
+    """Wait for the sidecar before any subject clock starts."""
+    started = time.monotonic()
+    attempts = 0
+    last_error: str | None = None
+    while time.monotonic() - started < REPLAY_READINESS_TIMEOUT_S:
+        attempts += 1
+        try:
+            _http_get(f"{REPLAY_METRICS_URL}/healthz", expect_json=False)
+            return {
+                "state": "ready",
+                "wait_ms": round((time.monotonic() - started) * 1000),
+                "attempts": attempts,
+                "last_error": last_error,
+            }
+        except (OSError, ValueError, urllib.error.URLError) as exc:
+            last_error = str(exc)
+        remaining = REPLAY_READINESS_TIMEOUT_S - (time.monotonic() - started)
+        if remaining > 0:
+            time.sleep(min(REPLAY_READINESS_POLL_S, remaining))
+    return {
+        "state": "failed",
+        "wait_ms": round((time.monotonic() - started) * 1000),
+        "attempts": attempts,
+        "last_error": last_error,
+    }
+
+
+def scrape_replay_metrics(
+    evidence: dict[str, object], phase: str, *, elapsed_s: float | None = None
+) -> dict[str, object] | None:
+    """Retain the server's raw metrics, or an explicit protocol error."""
+    try:
+        metrics = _http_get(f"{REPLAY_METRICS_URL}/metrics", expect_json=True)
+    except (OSError, ValueError, urllib.error.URLError) as exc:
+        errors = evidence["errors"]
+        assert isinstance(errors, list)
+        errors.append({"phase": phase, "error": str(exc)})
+        return None
+    observation: dict[str, object] = {
+        "observed_at": datetime.now(UTC).isoformat(),
+        "metrics": metrics,
+    }
+    if elapsed_s is not None:
+        observation["elapsed_s"] = round(elapsed_s, 3)
+    return observation
+
+
+def _cpuset_jiffies(cpus: set[int], proc_stat: Path = Path("/proc/stat")) -> tuple[int, int]:
+    """Busy and total host jiffies on a declared runnable cpuset."""
+    busy = total = 0
+    found: set[int] = set()
+    for line in proc_stat.read_text().splitlines():
+        name, separator, rest = line.partition(" ")
+        if not separator or not name.startswith("cpu") or name == "cpu":
+            continue
+        try:
+            index = int(name.removeprefix("cpu"))
+        except ValueError:
+            continue
+        if index not in cpus:
+            continue
+        fields = [int(value) for value in rest.split()]
+        if len(fields) < 4:
+            raise ValueError(f"{proc_stat} has a short {name} row")
+        idle = fields[3] + (fields[4] if len(fields) > 4 else 0)
+        total += sum(fields)
+        busy += sum(fields) - idle
+        found.add(index)
+    if found != cpus:
+        raise ValueError(f"{proc_stat} has no rows for CPU(s) {sorted(cpus - found)}")
+    return busy, total
+
+
+def _host_memory_and_load(proc_root: Path = Path("/proc")) -> tuple[int, float]:
+    available_kb: int | None = None
+    for line in (proc_root / "meminfo").read_text().splitlines():
+        if line.startswith("MemAvailable:"):
+            available_kb = int(line.split()[1])
+            break
+    if available_kb is None:
+        raise ValueError(f"{proc_root / 'meminfo'} has no MemAvailable row")
+    load1 = float((proc_root / "loadavg").read_text().split()[0])
+    if not math.isfinite(load1) or load1 < 0:
+        raise ValueError(f"{proc_root / 'loadavg'} has an invalid one-minute load")
+    return available_kb, load1
+
+
+def _cpuset_string(start: int, count: int) -> str:
+    end = start + count - 1
+    return str(start) if start == end else f"{start}-{end}"
+
+
+def _resource_sample(
+    *,
+    server_cpus: set[int],
+    subject_cpus: set[int],
+    previous_server: tuple[int, int],
+    previous_subject: tuple[int, int],
+    interval_s: float,
+    elapsed_s: float,
+) -> tuple[dict[str, object], tuple[int, int], tuple[int, int]]:
+    """One interval of host-observed cpuset use, explicitly not process CPU."""
+    server = _cpuset_jiffies(server_cpus)
+    subject = _cpuset_jiffies(subject_cpus)
+    available_kb, load1 = _host_memory_and_load()
+
+    def utilization(now: tuple[int, int], before: tuple[int, int]) -> float:
+        total_delta = now[1] - before[1]
+        busy_delta = now[0] - before[0]
+        if total_delta <= 0 or busy_delta < 0:
+            raise ValueError("host CPU counters did not advance monotonically")
+        return busy_delta / total_delta
+
+    server_util = utilization(server, previous_server)
+    subject_util = utilization(subject, previous_subject)
+    sample: dict[str, object] = {
+        "observed_at": datetime.now(UTC).isoformat(),
+        "elapsed_s": round(elapsed_s, 3),
+        "interval_s": round(interval_s, 3),
+        "server_cpuset": _cpuset_string(0, len(server_cpus)),
+        "subject_cpuset": _cpuset_string(len(server_cpus), len(subject_cpus)),
+        "server_cpuset_utilization": round(server_util, 6),
+        "server_cores_used": round(server_util * len(server_cpus), 3),
+        "subject_cpuset_utilization": round(subject_util, 6),
+        "subject_cores_used": round(subject_util * len(subject_cpus), 3),
+        "host_mem_available_kb": available_kb,
+        "host_load1": load1,
+    }
+    return sample, server, subject
+
+
+def sample_replay_metrics(
+    evidence: dict[str, object], stop: threading.Event, replay: Mapping[str, object]
+) -> None:
+    """Poll independently so metrics and `/proc` I/O never enter the subject clock."""
+    started = time.monotonic()
+    previous_at = started
+    allocation = replay["allocation"]
+    assert isinstance(allocation, Mapping)
+    replay_vcpus = int(allocation["replay_vcpus"])
+    subject_vcpus = int(allocation["subject_vcpus"])
+    server_cpus = set(range(replay_vcpus))
+    subject_cpus = set(range(replay_vcpus, replay_vcpus + subject_vcpus))
+    try:
+        previous_server = _cpuset_jiffies(server_cpus)
+        previous_subject = _cpuset_jiffies(subject_cpus)
+    except (OSError, ValueError) as exc:
+        errors = evidence["errors"]
+        assert isinstance(errors, list)
+        errors.append({"phase": "resource-sample", "error": str(exc)})
+        return
+    while not stop.wait(REPLAY_SAMPLE_INTERVAL_S):
+        observed = time.monotonic()
+        try:
+            resource, previous_server, previous_subject = _resource_sample(
+                server_cpus=server_cpus,
+                subject_cpus=subject_cpus,
+                previous_server=previous_server,
+                previous_subject=previous_subject,
+                interval_s=observed - previous_at,
+                elapsed_s=observed - started,
+            )
+        except (OSError, ValueError) as exc:
+            errors = evidence["errors"]
+            assert isinstance(errors, list)
+            errors.append({"phase": "resource-sample", "error": str(exc)})
+            return
+        resource_samples = evidence["resource_samples"]
+        assert isinstance(resource_samples, list)
+        resource_samples.append(resource)
+        previous_at = observed
+        observation = scrape_replay_metrics(evidence, "sample", elapsed_s=observed - started)
+        if observation is not None:
+            samples = evidence["samples"]
+            assert isinstance(samples, list)
+            samples.append(observation)
 
 
 def stage_artifact(uri: str, expected_sha256: str, into: Path) -> Path:
@@ -742,6 +1103,7 @@ def run_inline_setup(
             artifact_path=artifact_path,
             visible_memory_gb=visible_memory_gb,
             heap_percent=HEAP_PERCENT,
+            endpoint_url=args.endpoint_url,
         )
         command = adapter.compile(request)
         functional_env = adapter.build_env(request)
@@ -1003,6 +1365,7 @@ def attempt_identity(
         "auth_role": args.auth_role,
         "destination": destination,
         "config": config,
+        "replay": getattr(args, "replay_document", None),
         # Lineage, beside the timing: which bytes this case consumed, and where
         # the harness staged them from.
         "input_artifact": args.input_artifact or None,
@@ -1035,6 +1398,40 @@ def attempt_identity(
     }
 
 
+def publish_replay_refusal(
+    args: argparse.Namespace,
+    *,
+    config: Mapping[str, object],
+    attempt_dir: Path,
+    destination: str,
+    evidence: Mapping[str, object],
+) -> int:
+    """Publish a replay protocol failure that occurred before subject timing."""
+    result = {
+        **attempt_identity(args, config, destination),
+        "replay_evidence": dict(evidence),
+        "argv": None,
+        "setup": None,
+        "exit_code": EXIT_REPLAY_EVIDENCE_FAILED,
+        "timed_out": False,
+        "execution": None,
+        "wall_seconds": None,
+        "max_rss_kb": None,
+        "row_count": None,
+        "row_count_error": None,
+        "started_at": None,
+        "finished_at": datetime.now(UTC).isoformat(),
+        "product": None,
+        "product_error": None,
+        "stdout": None,
+        "stderr": None,
+        "native_manifest": {},
+        "artifacts_size_bytes": 0,
+    }
+    write_result_atomic(attempt_dir / "result.json", result)
+    return EXIT_REPLAY_EVIDENCE_FAILED if upload(attempt_dir, destination) else 1
+
+
 def publish_setup_failure(
     args: argparse.Namespace,
     *,
@@ -1044,6 +1441,7 @@ def publish_setup_failure(
     setup: Mapping[str, object],
     exit_code: int,
     started_at: str,
+    replay_evidence: Mapping[str, object] | None = None,
 ) -> int:
     """Upload what the failed setup exec left behind, and return its ladder code.
 
@@ -1061,6 +1459,7 @@ def publish_setup_failure(
         return EXIT_SECRET_DETECTED
     result = {
         **attempt_identity(args, config, destination),
+        "replay_evidence": None if replay_evidence is None else dict(replay_evidence),
         "argv": None,
         "setup": dict(setup),
         "exit_code": exit_code,
@@ -1106,6 +1505,30 @@ def main(argv: list[str] | None = None) -> int:
     except (json.JSONDecodeError, ValueError) as exc:
         print(f"measure: --config is not valid JSON: {exc}", file=sys.stderr)
         return 2
+
+    try:
+        replay_document = parse_replay_config(args.endpoint_url, args.replay_config)
+        if replay_document is not None:
+            validate_replay_allocation(
+                replay_document,
+                vcpus=args.vcpus,
+                memory_gb=args.memory_gb,
+                container_memory_gb=args.container_memory_gb,
+            )
+    except ValueError as exc:
+        print(f"measure: {exc}", file=sys.stderr)
+        return 2
+    args.replay_document = replay_document
+    replay_evidence: dict[str, object] | None = None
+    if replay_document is not None:
+        replay_evidence = {
+            "readiness": None,
+            "before": None,
+            "samples": [],
+            "resource_samples": [],
+            "after": None,
+            "errors": [],
+        }
 
     # The config is the authority on what ran: `--mode` is the same answer
     # rendered twice into one request, and two answers that disagree are a
@@ -1187,6 +1610,7 @@ def main(argv: list[str] | None = None) -> int:
                 setup=exc.setup,
                 exit_code=exc.code,
                 started_at=setup_started_at,
+                replay_evidence=replay_evidence,
             )
 
     try:
@@ -1203,6 +1627,7 @@ def main(argv: list[str] | None = None) -> int:
             artifact_path=artifact_path,
             visible_memory_gb=visible_memory_gb,
             heap_percent=HEAP_PERCENT,
+            endpoint_url=args.endpoint_url,
         )
     except adapters.AdapterError as exc:
         print(f"measure: {exc}", file=sys.stderr)
@@ -1227,6 +1652,46 @@ def main(argv: list[str] | None = None) -> int:
     stdout_path = attempt_dir / "stdout.log"
     subject_stdout = product.path if product is not None and product.takes_stdout else stdout_path
 
+    sampler_stop: threading.Event | None = None
+    sampler_thread: threading.Thread | None = None
+    if replay_evidence is not None:
+        readiness = wait_for_replay()
+        replay_evidence["readiness"] = readiness
+        if readiness.get("state") != "ready":
+            errors = replay_evidence["errors"]
+            assert isinstance(errors, list)
+            errors.append(
+                {
+                    "phase": "readiness",
+                    "error": str(readiness.get("last_error") or "readiness deadline expired"),
+                }
+            )
+            return publish_replay_refusal(
+                args,
+                config=config,
+                attempt_dir=attempt_dir,
+                destination=attempt_destination,
+                evidence=replay_evidence,
+            )
+        replay_evidence["before"] = scrape_replay_metrics(replay_evidence, "before")
+        if replay_evidence["before"] is None:
+            return publish_replay_refusal(
+                args,
+                config=config,
+                attempt_dir=attempt_dir,
+                destination=attempt_destination,
+                evidence=replay_evidence,
+            )
+
+        sampler_stop = threading.Event()
+        sampler_thread = threading.Thread(
+            target=sample_replay_metrics,
+            args=(replay_evidence, sampler_stop, replay_document),
+            name="replay-metrics",
+            daemon=True,
+        )
+        sampler_thread.start()
+
     started_at = datetime.now(UTC).isoformat()
     execution = run_tool(
         command,
@@ -1246,6 +1711,16 @@ def main(argv: list[str] | None = None) -> int:
     exit_code = exit_value
     timed_out = bool(execution["timed_out"])
     finished_at = datetime.now(UTC).isoformat()
+    if replay_evidence is not None:
+        assert sampler_stop is not None and sampler_thread is not None
+        sampler_stop.set()
+        sampler_thread.join(REPLAY_HTTP_TIMEOUT_S + 1.0)
+        if sampler_thread.is_alive():
+            errors = replay_evidence["errors"]
+            assert isinstance(errors, list)
+            errors.append({"phase": "sample", "error": "metrics sampler did not stop"})
+        else:
+            replay_evidence["after"] = scrape_replay_metrics(replay_evidence, "after")
 
     if any(
         execution.get(field) is not True
@@ -1322,6 +1797,7 @@ def main(argv: list[str] | None = None) -> int:
 
     result = {
         **attempt_identity(args, config, attempt_destination),
+        "replay_evidence": replay_evidence,
         "argv": list(command),
         # The untimed pre-phase, when this mode declared one: what it ran, what
         # it made, and how long it took — beside the timing and never inside it.
@@ -1362,12 +1838,24 @@ def main(argv: list[str] | None = None) -> int:
         descendants_empty=bool(execution["descendants_empty"]),
         process_tree_clean=bool(execution["process_tree_clean"]),
     )
+    if replay_evidence is not None:
+        replay_errors = replay_evidence["errors"]
+        replay_samples = replay_evidence["samples"]
+        if (
+            replay_evidence["after"] is None
+            or not isinstance(replay_errors, list)
+            or replay_errors
+            or not isinstance(replay_samples, list)
+        ):
+            completion = EXIT_REPLAY_EVIDENCE_FAILED
     if exit_code != 0:
         print(f"measure: {args.tool} exited {exit_code}", file=sys.stderr)
     elif completion == EXIT_ARTIFACT_UNUSABLE:
         print("measure: the subject exited clean and published no product", file=sys.stderr)
     elif completion == EXIT_POSTPROCESSING_FAILED:
         print("measure: successful subject output could not be counted", file=sys.stderr)
+    elif completion == EXIT_REPLAY_EVIDENCE_FAILED:
+        print("measure: replay evidence protocol was incomplete", file=sys.stderr)
     elif completion != 0:
         print(
             "measure: subject process group or cgroup OOM evidence was not clean", file=sys.stderr

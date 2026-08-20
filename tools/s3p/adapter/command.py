@@ -115,7 +115,10 @@ def build_env(request: CommandRequest) -> dict[str, str]:
             f"{TOOL}: no visible memory ceiling to size --max-old-space-size from"
         )
     heap_mib = int(request.visible_memory_gb * 1024 * request.heap_percent / 100)
-    return {"NODE_OPTIONS": f"--max-old-space-size={heap_mib}"}
+    env = {"NODE_OPTIONS": f"--max-old-space-size={heap_mib}"}
+    if request.endpoint_url:
+        env["S3_ENDPOINT"] = request.endpoint_url
+    return env
 
 
 def _concurrency(request: CommandRequest) -> str:

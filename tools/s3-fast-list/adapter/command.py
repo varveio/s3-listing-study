@@ -170,6 +170,7 @@ def _list_tail(request: CommandRequest, hints: tuple[str, ...]) -> tuple[str, ..
     # could account for.
     argv = [
         *((), ("--no-sign-request",))[not request.signed],
+        *(("--endpoint-url", request.endpoint_url) if request.endpoint_url else ()),
         "--output-parquet-file",
         _sink_path(request, LISTING_NAME),
         "--output-ks-file",

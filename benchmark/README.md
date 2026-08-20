@@ -43,6 +43,8 @@ facts under `tools/<tool>/build/`.
   - `campaign.py` creates and manages benchmark-owned Batch jobs in `campaign.db`.
   - `measure.py` runs exactly one selected subject and captures its raw outputs
     and metrics. It is the image entrypoint.
+  - `replay_manifest.py` deterministically derives the replay correctness oracle
+    from the exact sorted Parquet fixture before that fixture is used by a plan.
   - `verify.py` compares normalized outputs; `report.py` binds results to
     controller state and renders analysis.
   - `runtime/` is the contract layer the eleven capsule adapters import
@@ -150,24 +152,27 @@ refuses incomplete, failed, malformed, or unbound evidence instead of turning it
 into a comparison verdict. These controls make an attempt auditable, but they do
 not provide the stronger guarantees below.
 
-### Evidence publication is not sealed
+### Attempt evidence is create-only
 
-GCS uploads use ordinary object writes and do not set the create-only
-`ifGenerationMatch=0` precondition. The deployed worker identities have only
-object-creation permission, destinations contain a fresh attempt UUID, and the
-result marker is written last, but the application itself does not seal an
-attempt against replacement when run with broader credentials. Treat bucket
-generation/versioning data as separate evidence when overwrite resistance is
-required.
+The worker uploads attempt artifacts and the final `result.json` marker with
+`ifGenerationMatch=0`. A second execution cannot merge with or replace a
+deterministic attempt prefix. `verify.json` is derived analysis and may be
+regenerated; the report binds it to the immutable result and normalized hashes
+before accepting its verdict.
 
-### Agreement is not ground truth
+### S3 agreement and replay ground truth are different verdicts
 
-Verification compares one completed attempt with another completed attempt. A
+For real S3, verification compares completed attempts with one another. A
 `PASS` means their exposed fields agree; it does not prove either listing is
-complete or correct against an independently sealed manifest. The source bucket
-can also change between attempts, so missing/extra rows or metadata differences
-may be cross-attempt drift. `mtime`-only differences are reported as `DRIFT`, but
-other changes remain `FAIL` because the verifier cannot infer their cause.
+complete against an independently sealed manifest. The source bucket can change
+between attempts, so `mtime`-only differences are `DRIFT` and other differences
+remain `FAIL` because the verifier cannot infer their cause.
+
+For replay, every successful measurement attempt is compared independently
+with the immutable contract-v2 manifest whose URI and compressed-byte digest
+are in the case. Missing, extra, duplicate, or field-mismatched rows are `FAIL`,
+including mtime: a fixed fixture has no drift exception. Two wrong replay
+subjects agreeing with one another cannot pass.
 
 ### Malformed or partial evidence is refused
 

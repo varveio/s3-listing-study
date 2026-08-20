@@ -102,6 +102,7 @@ def record(
     statistic: str = "timing",
     state: str = "SUCCEEDED",
     group_id: str = "g1",
+    replay: dict[str, object] | None = None,
 ) -> ledger.Attempt:
     """Journal one attempt through the ledger's own writer, then settle it."""
     case_id = f"{tool}.{digest}"
@@ -143,6 +144,11 @@ def record(
                 purpose=purpose,
                 statistic=statistic,
                 origin="planned",
+                replay=(
+                    None
+                    if replay is None
+                    else json.dumps(replay, sort_keys=True, separators=(",", ":"))
+                ),
             ),
             "{}",
         )
@@ -193,6 +199,8 @@ def write_evidence(
         "exit_code": 0,
         "timed_out": False,
         "wall_seconds": 1.5,
+        "started_at": "2026-01-01T00:00:00.500000+00:00",
+        "finished_at": "2026-01-01T00:00:01.500000+00:00",
         "max_rss_kb": 1024,
         "row_count": len(listing),
         "execution": {
@@ -229,6 +237,63 @@ def write_evidence(
     return prefix
 
 
+def replay_document(manifest: Path, digest: str) -> dict[str, object]:
+    return {
+        "backend": {
+            "server_image_uri": "registry/replay@sha256:" + "1" * 64,
+            "fixture_sha256": "2" * 64,
+            "reference_manifest_uri": str(manifest),
+            "reference_manifest_sha256": digest,
+            "serving_mode": "sorted",
+            "latency_model": {},
+            "evidence_protocol_version": "replay-evidence-v1",
+        },
+        "allocation": {
+            "subject_vcpus": 4,
+            "subject_memory_gb": 8,
+            "host_reserved_vcpus": 0,
+            "host_reserved_memory_gb": 0,
+            "replay_vcpus": 4,
+            "replay_memory_gb": 8,
+            "replay_parquet_connections": 20,
+            "replay_max_concurrent_requests": 256,
+            "replay_prefetch": False,
+            "replay_heap_percent": 75,
+        },
+    }
+
+
+def replay_evidence(replay: dict[str, object]) -> dict[str, object]:
+    before = "2026-01-01T00:00:00+00:00"
+    after = "2026-01-01T00:00:02+00:00"
+    return {
+        "replay": replay,
+        "replay_evidence": {
+            "readiness": {"state": "ready", "wait_ms": 2, "attempts": 1, "last_error": None},
+            "before": {
+                "observed_at": before,
+                "metrics": {"meters": [{"name": "swath.replay.requests", "count": 0}]},
+            },
+            "samples": [],
+            "resource_samples": [],
+            "after": {
+                "observed_at": after,
+                "metrics": {"meters": [{"name": "swath.replay.requests", "count": 2}]},
+            },
+            "errors": [],
+        },
+    }
+
+
+def write_manifest(path: Path, listing: tuple[str, ...] = LISTING) -> str:
+    rows = b"".join(
+        f"{key}\t{size}\te{size}\t2026-01-01T00:00:00Z\tSTANDARD\n".encode()
+        for key, size in (line.split(" ") for line in listing)
+    )
+    path.write_bytes(gzip.compress(rows, mtime=0))
+    return sha256_of(path)
+
+
 def add_slot(con: sqlite3.Connection, *, state: str, group_id: str = "g1", slot: int = 1) -> None:
     con.execute(
         "INSERT INTO pending (group_id, slot, tool, purpose, known_inputs, awaiting, state, "
@@ -250,6 +315,118 @@ def test_agreement_within_one_bucket_passes(tmp_path: Path) -> None:
     code, report = verify.verify_group(con, "g1", adapter_root=root, write_record=False)
     assert (report["verdict"], report["complete"], code) == ("PASS", True, 0)
     assert [stratum["verdict"] for stratum in report["buckets"][0]["strata"]] == ["PASS"]
+
+
+def test_one_replay_subject_passes_against_its_bound_manifest(tmp_path: Path) -> None:
+    manifest = tmp_path / "manifest.tsv.gz"
+    replay = replay_document(manifest, write_manifest(manifest))
+    con = fixture_ledger(tmp_path)
+    attempt = record(con, tmp_path, tool="alpha", digest="aaaa", replay=replay)
+    write_evidence(attempt, **replay_evidence(replay))
+
+    code, report = verify.verify_group(
+        con, "g1", adapter_root=adapter_root(tmp_path, "alpha"), write_record=True
+    )
+    comparison = report["buckets"][0]["strata"][0]["comparisons"][0]
+    assert (code, report["verdict"], comparison["verdict"]) == (0, "PASS", "PASS")
+    assert comparison["replay_diagnostics"]["before_metric_names"] == ["swath.replay.requests"]
+    written = json.loads((Path(attempt.result_prefix) / "verify.json").read_text())
+    assert written["reference_manifest_sha256"] == sha256_of(manifest)
+    assert "reference_attempt_id" not in written
+
+
+@pytest.mark.parametrize(
+    ("listing", "difference"),
+    [
+        pytest.param(("a/one 1",), "missing", id="missing"),
+        pytest.param((*LISTING, "z/extra 3"), "extra", id="extra"),
+        pytest.param((*LISTING, "a/two 2"), "duplicates", id="duplicate"),
+    ],
+)
+def test_replay_missing_extra_or_duplicate_fails(
+    tmp_path: Path, listing: tuple[str, ...], difference: str
+) -> None:
+    manifest = tmp_path / "manifest.tsv.gz"
+    replay = replay_document(manifest, write_manifest(manifest))
+    con = fixture_ledger(tmp_path)
+    attempt = record(con, tmp_path, tool="alpha", digest="aaaa", replay=replay)
+    write_evidence(attempt, listing=listing, **replay_evidence(replay))
+    _code, report = verify.verify_group(
+        con, "g1", adapter_root=adapter_root(tmp_path, "alpha"), write_record=False
+    )
+    comparison = report["buckets"][0]["strata"][0]["comparisons"][0]
+    assert comparison["verdict"] == "FAIL"
+    assert comparison["diff"][difference]
+
+
+def test_two_wrong_but_agreeing_replay_tools_cannot_pass(tmp_path: Path) -> None:
+    manifest = tmp_path / "manifest.tsv.gz"
+    replay = replay_document(manifest, write_manifest(manifest))
+    con = fixture_ledger(tmp_path)
+    for tool, digest in (("alpha", "aaaa"), ("beta", "bbbb")):
+        attempt = record(con, tmp_path, tool=tool, digest=digest, replay=replay)
+        write_evidence(attempt, listing=("wrong 1",), **replay_evidence(replay))
+    _code, report = verify.verify_group(
+        con, "g1", adapter_root=adapter_root(tmp_path, "alpha", "beta"), write_record=False
+    )
+    comparisons = report["buckets"][0]["strata"][0]["comparisons"]
+    assert [comparison["verdict"] for comparison in comparisons] == ["FAIL", "FAIL"]
+
+
+def test_replay_manifest_digest_mismatch_is_incomplete(tmp_path: Path) -> None:
+    manifest = tmp_path / "manifest.tsv.gz"
+    write_manifest(manifest)
+    replay = replay_document(manifest, "0" * 64)
+    con = fixture_ledger(tmp_path)
+    attempt = record(con, tmp_path, tool="alpha", digest="aaaa", replay=replay)
+    write_evidence(attempt, **replay_evidence(replay))
+    code, report = verify.verify_group(
+        con, "g1", adapter_root=adapter_root(tmp_path, "alpha"), write_record=False
+    )
+    assert code == EXIT_INCOMPLETE_GROUP
+    assert report["buckets"][0]["gaps"][0]["reason"] == "manifest"
+
+
+def test_missing_replay_observation_is_a_gap(tmp_path: Path) -> None:
+    manifest = tmp_path / "manifest.tsv.gz"
+    replay = replay_document(manifest, write_manifest(manifest))
+    con = fixture_ledger(tmp_path)
+    attempt = record(con, tmp_path, tool="alpha", digest="aaaa", replay=replay)
+    write_evidence(attempt, replay=replay, replay_evidence=None)
+    _code, report = verify.verify_group(
+        con, "g1", adapter_root=adapter_root(tmp_path, "alpha"), write_record=False
+    )
+    assert report["verdict"] == "INCOMPLETE"
+    assert report["buckets"][0]["gaps"][0]["reason"] == "replay-evidence"
+
+
+def test_replay_mtime_mismatch_is_fail_not_drift() -> None:
+    diff = {
+        "missing": [],
+        "extra": [],
+        "duplicates": [],
+        "reference_duplicates": [],
+        "mismatches": [{"key": "a", "field": "mtime", "tool": "later", "reference": "fixed"}],
+    }
+    assert verify.verdict_for(diff) == "DRIFT"
+    assert verify.replay_verdict_for(diff) == "FAIL"
+
+
+def test_successful_replay_rate_counts_only_after_oracle_pass(tmp_path: Path) -> None:
+    manifest = tmp_path / "manifest.tsv.gz"
+    replay = replay_document(manifest, write_manifest(manifest))
+    con = fixture_ledger(tmp_path)
+    good = record(con, tmp_path, tool="alpha", digest="aaaa", statistic="rate", replay=replay)
+    write_evidence(good, **replay_evidence(replay))
+    bad = record(con, tmp_path, tool="beta", digest="bbbb", statistic="rate", replay=replay)
+    write_evidence(bad, listing=("wrong 1",), **replay_evidence(replay))
+    _code, report = verify.verify_group(
+        con, "g1", adapter_root=adapter_root(tmp_path, "alpha", "beta"), write_record=False
+    )
+    assert [(rate["tool"], rate["successes"]) for rate in report["buckets"][0]["rates"]] == [
+        ("alpha", 1),
+        ("beta", 0),
+    ]
 
 
 def test_a_product_published_compressed_is_compared_as_its_bytes(tmp_path: Path) -> None:

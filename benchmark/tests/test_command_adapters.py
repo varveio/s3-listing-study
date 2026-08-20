@@ -10,6 +10,7 @@ from types import ModuleType
 
 import pytest
 
+from benchmark.adapters import compile_command
 from benchmark.runtime.build_selection import (
     BuildSelectionError,
     adapter_bundle_sha256,
@@ -52,6 +53,7 @@ BUCKET = "bucket-x"
 REGION = "region-y"
 SINK = "/sink"
 ARTIFACT = "/staged/artifact"
+ENDPOINT = "http://127.0.0.1:19090"
 """Where the engine staged the artifact a consuming mode reads — the inbound
 counterpart of :data:`SINK`. A consuming capsule refuses an empty one rather
 than inventing a path, so every consuming mode is driven with this."""
@@ -280,7 +282,13 @@ def _s7cmd(mode: str, prefix: str) -> tuple[str, ...]:
     target = f"s3://{BUCKET}/{prefix}"
     obs = ("-vv", "--disable-color-tracing")
     parallel = ("--max-parallel-listings", "64")
-    anon = ("--target-no-sign-request", "--target-region", REGION, "--connect-timeout-milliseconds", "15000")
+    anon = (
+        "--target-no-sign-request",
+        "--target-region",
+        REGION,
+        "--connect-timeout-milliseconds",
+        "15000",
+    )
     fields = ("--tsv", "--show-storage-class", "--show-etag")
     return {
         "recursive-tsv": ("ls", "-r", *obs, *fields, *parallel, *anon, target),
@@ -465,6 +473,231 @@ def test_every_mode_matches_the_frozen_subject_argv_contract(tool: str) -> None:
                     )
                     executable = MODE_EXECUTABLES.get((tool, mode), FIXED_PREFIXES[tool])
                     assert adapter.compile(request) == (*executable, *expected)
+
+
+@pytest.mark.parametrize("tool", TOOLS)
+def test_an_empty_endpoint_is_byte_identical_for_every_capsule_mode(tool: str) -> None:
+    """Adding the request field must not perturb ordinary S3 attempts."""
+    adapter = load_command_adapter(adapter_path(tool))
+    for mode in sorted(adapter.modes):
+        common = {
+            "tool": tool,
+            "signed": not adapter.supports_unsigned,
+            "config": REQUIRED_CONFIG.get((tool, mode), {}),
+            "sink_dir": SINK,
+            "artifact_path": ARTIFACT if mode in consuming_modes(adapter) else "",
+            "visible_memory_gb": 2.0,
+        }
+        ordinary = CommandRequest(mode, BUCKET, REGION, **common)  # type: ignore[arg-type]
+        explicit_empty = CommandRequest(
+            mode,
+            BUCKET,
+            REGION,
+            endpoint_url="",
+            **common,  # type: ignore[arg-type]
+        )
+        assert adapter.compile(explicit_empty) == adapter.compile(ordinary)
+        assert adapter.build_env(explicit_empty) == adapter.build_env(ordinary)
+
+
+@pytest.mark.parametrize(
+    ("tool", "mode", "prefix", "argv_fragment", "expected_env"),
+    [
+        ("aws-cli", "s3api-v2-text", "p/", ("--endpoint-url", ENDPOINT), {}),
+        (
+            "minio-mc",
+            "recursive",
+            "p/",
+            (),
+            {"MC_HOST_s3": ENDPOINT, "MC_REGION": REGION},
+        ),
+        ("ps3", "list", "", ("--endpoint-url", ENDPOINT), {}),
+        (
+            "rclone",
+            "recursive-fastlist",
+            "p/",
+            (
+                f':s3,provider=AWS,region={REGION},endpoint="{ENDPOINT}",'
+                f"force_path_style=true:{BUCKET}/p/",
+            ),
+            {},
+        ),
+        ("s3-fast-list", "list", "p/", ("--endpoint-url", ENDPOINT), {}),
+        ("s3kor", "list", "p/", ("--custom-endpoint-url", ENDPOINT), {}),
+        (
+            "s3p",
+            "ls",
+            "p/",
+            (),
+            {"NODE_OPTIONS": "--max-old-space-size=1536", "S3_ENDPOINT": ENDPOINT},
+        ),
+        ("s5cmd", "recursive", "p/", ("--endpoint-url", ENDPOINT), {}),
+        (
+            "s7cmd",
+            "recursive-tsv",
+            "p/",
+            ("--target-endpoint-url", ENDPOINT, "--target-force-path-style"),
+            {},
+        ),
+        (
+            "swath",
+            "recursive-tsv",
+            "p/",
+            ("--endpoint-url", ENDPOINT),
+            {"JAVA_TOOL_OPTIONS": f"-XX:MaxRAMPercentage={HEAP_PERCENT}"},
+        ),
+    ],
+)
+def test_compatible_capsules_render_the_receipted_endpoint_mechanism(
+    tool: str,
+    mode: str,
+    prefix: str,
+    argv_fragment: tuple[str, ...],
+    expected_env: dict[str, str],
+) -> None:
+    adapter = load_command_adapter(adapter_path(tool))
+    request = CommandRequest(
+        mode,
+        BUCKET,
+        REGION,
+        prefix,
+        tool=tool,
+        signed=not adapter.supports_unsigned,
+        sink_dir=SINK,
+        visible_memory_gb=2.0,
+        endpoint_url=ENDPOINT,
+    )
+    argv = adapter.compile(request)
+    assert not argv_fragment or any(
+        argv[index : index + len(argv_fragment)] == argv_fragment
+        for index in range(len(argv) - len(argv_fragment) + 1)
+    )
+    assert adapter.build_env(request) == expected_env
+
+
+@pytest.mark.parametrize(
+    ("tool", "mode", "prefix"),
+    [
+        ("aws-cli", "s3api-v1-text", "prefix/"),
+        ("aws-cli", "s3api-versions-text", "prefix/"),
+        ("minio-mc", "versions-json", "prefix/"),
+        ("minio-mc", "find", ""),
+        ("ps3", "list-versions", ""),
+        ("ps3", "head", ""),
+        ("rclone", "listv1", "prefix/"),
+        ("s3kor", "list-versions", "prefix/"),
+        ("s4cmd", "recursive", "prefix/"),
+        ("s5cmd", "listv1", "prefix/"),
+        ("s5cmd", "allversions", "prefix/"),
+        ("s7cmd", "all-versions", "prefix/"),
+        ("s7cmd", "bucket-list", ""),
+    ],
+)
+def test_a_non_v2_or_proven_incompatible_mode_refuses_the_replay_endpoint(
+    tool: str, mode: str, prefix: str
+) -> None:
+    adapter = load_command_adapter(adapter_path(tool))
+    request = CommandRequest(
+        mode,
+        BUCKET,
+        REGION,
+        prefix,
+        tool=tool,
+        signed=not adapter.supports_unsigned,
+        sink_dir=SINK,
+        visible_memory_gb=2.0,
+        endpoint_url=ENDPOINT,
+    )
+    with pytest.raises(CommandAdapterError, match="replay endpoint"):
+        adapter.compile(request)
+
+
+def test_aws_custom_endpoint_stays_inside_the_receipted_ip_literal_boundary() -> None:
+    adapter = load_command_adapter(adapter_path("aws-cli"))
+    with pytest.raises(CommandAdapterError, match="IP-literal"):
+        adapter.compile(
+            CommandRequest(
+                "s3api-v2-text",
+                BUCKET,
+                REGION,
+                tool="aws-cli",
+                endpoint_url="http://replay.internal:19090",
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    [
+        'http://127.0.0.1:19090/"quoted',
+        "http://127.0.0.1:19090/back\\slash",
+        "http://127.0.0.1:19090/path,field",
+    ],
+)
+def test_rclone_refuses_an_endpoint_that_breaks_its_quoted_connection_field(
+    endpoint: str,
+) -> None:
+    adapter = load_command_adapter(adapter_path("rclone"))
+    with pytest.raises(CommandAdapterError, match="quote, backslash, or comma"):
+        adapter.compile(
+            CommandRequest(
+                "recursive-fastlist",
+                BUCKET,
+                REGION,
+                tool="rclone",
+                endpoint_url=endpoint,
+            )
+        )
+
+
+def test_s3_fast_list_local_split_does_not_receive_the_remote_endpoint() -> None:
+    adapter = load_command_adapter(adapter_path("s3-fast-list"))
+    common = {
+        "tool": "s3-fast-list",
+        "config": {"segments": 8},
+        "sink_dir": SINK,
+        "artifact_path": ARTIFACT,
+    }
+    ordinary = adapter.compile(
+        CommandRequest("ks-split", BUCKET, REGION, **common)  # type: ignore[arg-type]
+    )
+    replay = adapter.compile(
+        CommandRequest(  # type: ignore[arg-type]
+            "ks-split", BUCKET, REGION, endpoint_url=ENDPOINT, **common
+        )
+    )
+    assert replay == ordinary
+    assert ENDPOINT not in replay
+
+
+def test_rclone_endpoint_preserves_the_signed_credential_branch() -> None:
+    adapter = load_command_adapter(adapter_path("rclone"))
+    request = CommandRequest(
+        "recursive-fastlist",
+        BUCKET,
+        REGION,
+        tool="rclone",
+        signed=True,
+        endpoint_url=ENDPOINT,
+    )
+    remote = adapter.compile(request)[-1]
+    assert "env_auth=true" in remote
+    assert f'endpoint="{ENDPOINT}",force_path_style=true' in remote
+
+
+def test_compile_command_forwards_endpoint_url_to_argv_and_environment() -> None:
+    argv, env = compile_command(
+        ROOT / "tools/s3p/adapter",
+        "s3p",
+        mode="ls",
+        bucket=BUCKET,
+        region=REGION,
+        signed=True,
+        visible_memory_gb=2.0,
+        endpoint_url=ENDPOINT,
+    )
+    assert argv[:2] == ("/usr/local/bin/s3p", "ls")
+    assert env == {"NODE_OPTIONS": "--max-old-space-size=1536", "S3_ENDPOINT": ENDPOINT}
 
 
 def consuming_modes(adapter: LoadedCommandAdapter) -> frozenset[str]:

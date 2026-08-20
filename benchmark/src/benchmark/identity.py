@@ -13,7 +13,7 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
-CASE_HASH_V1 = b"s3-listing-study-case-v1\0"
+CASE_HASH_V2 = b"s3-listing-study-case-v2\0"
 
 _HASH_HEX_DIGITS = 12
 
@@ -23,19 +23,23 @@ def case_inputs_document(
     config: Mapping[str, Any],
     tool_slice: str,
     platform: str,
+    replay: Mapping[str, Any] | None = None,
 ) -> str:
     """The exact canonical JSON `case_hash` is taken over.
 
     Stored byte-exactly as `case_inputs` (`model.md`): a hash collision is
     caught by comparing this document, not by trusting the digest.
     """
+    inputs: dict[str, Any] = {
+        "environment": environment,
+        "config": config,
+        "tool_slice_sha256": tool_slice,
+        "platform_sha256": platform,
+    }
+    if replay is not None:
+        inputs["replay"] = replay
     return json.dumps(
-        {
-            "environment": environment,
-            "config": config,
-            "tool_slice_sha256": tool_slice,
-            "platform_sha256": platform,
-        },
+        inputs,
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=True,
@@ -48,6 +52,7 @@ def case_hash(
     config: Mapping[str, Any],
     tool_slice: str,
     platform: str,
+    replay: Mapping[str, Any] | None = None,
 ) -> str:
     """Domain-separated sha256 of `case_inputs_document`, truncated to 12 hex digits.
 
@@ -55,8 +60,8 @@ def case_hash(
     tool prefixes `case_id` and the suite prefixes the path, neither is a hash
     input.
     """
-    document = case_inputs_document(environment, config, tool_slice, platform)
-    digest = hashlib.sha256(CASE_HASH_V1 + document.encode())
+    document = case_inputs_document(environment, config, tool_slice, platform, replay)
+    digest = hashlib.sha256(CASE_HASH_V2 + document.encode())
     return digest.hexdigest()[:_HASH_HEX_DIGITS]
 
 
@@ -66,9 +71,10 @@ def case_id(
     config: Mapping[str, Any],
     tool_slice: str,
     platform: str,
+    replay: Mapping[str, Any] | None = None,
 ) -> str:
     """`<tool>.<hash>` — `tool` prefixes the identifier without entering the hash."""
-    return f"{tool}.{case_hash(environment, config, tool_slice, platform)}"
+    return f"{tool}.{case_hash(environment, config, tool_slice, platform, replay)}"
 
 
 def attempt_id(case: str, attempt: int) -> str:

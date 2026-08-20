@@ -92,7 +92,13 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
         operation = operations[request.mode]
     except KeyError:
         raise CommandAdapterError(f"unknown mode: {request.mode}") from None
-    return operation, "--bucket", request.bucket, "--region", request.region
+    if request.endpoint_url and request.mode != "list":
+        raise CommandAdapterError(
+            f"{TOOL} mode {request.mode!r} cannot run against the replay endpoint because "
+            "it does not issue ListObjectsV2"
+        )
+    endpoint = ("--endpoint-url", request.endpoint_url) if request.endpoint_url else ()
+    return operation, "--bucket", request.bucket, "--region", request.region, *endpoint
 
 
 def build_command(request: CommandRequest) -> tuple[str, ...]:

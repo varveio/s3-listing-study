@@ -26,7 +26,7 @@ STATE_FILENAME = "campaign.db"
 # Bumped whenever a file written by an older reader would be misread by this
 # one. There is no migration: an unrecognised version is refused, so a command
 # either fully understands the file it opened or does not open it.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 RETRYABLE_STATES = {"FAILED", "NOT_CREATED"}
 TERMINAL_STATES = {"SUCCEEDED", "FAILED", "NOT_CREATED", "CANCELLED", "ACCEPTED"}
@@ -65,6 +65,8 @@ CREATE TABLE attempts (
     target_bucket       TEXT NOT NULL,
     target_region       TEXT NOT NULL,
     target_prefix       TEXT NOT NULL,
+
+    replay              TEXT,
 
     config              TEXT NOT NULL,
     mode                TEXT    GENERATED ALWAYS AS (json_extract(config, '$.mode')) VIRTUAL,
@@ -164,6 +166,7 @@ class Attempt:
     purpose: str
     statistic: str
     origin: str
+    replay: str | None = None
 
     @property
     def attempt_id(self) -> str:
@@ -192,12 +195,18 @@ def validate_suite(value: str) -> str:
 # What each superseded schema is missing, as the columns this code reads. A
 # read-only command projects them in so it can still be pointed at a settled
 # campaign; nothing here makes such a file writable.
-READONLY_COMPATIBLE: dict[object, str] = {
-    1: (
-        "SELECT group_id, slot, tool, purpose, known_inputs, "
-        "NULL AS producer, awaiting, NULL AS disqualified, "
-        "state, became, recorded_at, settled_at FROM main.pending"
-    )
+READONLY_COMPATIBLE: dict[object, dict[str, str]] = {
+    1: {
+        "attempts": "SELECT *, NULL AS replay FROM main.attempts",
+        "pending": (
+            "SELECT group_id, slot, tool, purpose, known_inputs, "
+            "NULL AS producer, awaiting, NULL AS disqualified, "
+            "state, became, recorded_at, settled_at FROM main.pending"
+        ),
+    },
+    2: {
+        "attempts": "SELECT *, NULL AS replay FROM main.attempts",
+    },
 }
 
 
@@ -248,7 +257,8 @@ def open_ledger(
     if superseded is not None:
         # A temp view shadows the table it stands in for, so every statement in
         # this module reads one shape whatever the file on disk holds.
-        con.execute(f"CREATE TEMP VIEW pending AS {superseded}")
+        for table, projection in superseded.items():
+            con.execute(f"CREATE TEMP VIEW {table} AS {projection}")
     if suite is not None and row["suite"] != suite:
         con.close()
         raise CampaignError(f"{path} is the {row['suite']!r} suite, not {suite!r}")
@@ -333,6 +343,7 @@ PRODUCER_SPEC_COLUMNS = (
     "target_region",
     "tool_slice_sha256",
     "platform_sha256",
+    "replay",
 )
 
 
@@ -386,7 +397,10 @@ def slot_candidates(
                 "understands"
             )
         for column in PRODUCER_SPEC_COLUMNS:
-            where.append(f"{column} = ?")
+            # `replay` is null for ordinary S3 attempts. SQLite `=` never
+            # matches null, while `IS` is byte-equality for non-null values and
+            # null-safe for that legitimate absence.
+            where.append(f"{column} IS ?")
             values.append(spec[column])
     elif "/" in str(slot["awaiting"]):
         # A slot, not an attempt: nothing can match until it resolves into one.

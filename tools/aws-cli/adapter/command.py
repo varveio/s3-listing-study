@@ -3,6 +3,9 @@
 
 from __future__ import annotations
 
+from ipaddress import ip_address
+from urllib.parse import urlsplit
+
 from benchmark.runtime.command_adapter import (
     CommandAdapterError,
     CommandRequest,
@@ -118,6 +121,33 @@ def _auth_flags(request: CommandRequest) -> tuple[str, ...]:
     return ("--no-sign-request",) if not request.signed else ()
 
 
+def _endpoint_flags(request: CommandRequest) -> tuple[str, ...]:
+    if not request.endpoint_url:
+        return ()
+    try:
+        parsed = urlsplit(request.endpoint_url)
+        if parsed.scheme not in {"http", "https"} or parsed.hostname is None:
+            raise ValueError
+        ip_address(parsed.hostname)
+    except ValueError:
+        # The pilot proved that botocore selects path-style addressing for an
+        # IP-literal endpoint.  This capsule cannot supply a contained AWS
+        # config file to force the same behavior for a DNS name, so keep the
+        # observed boundary fail-closed.
+        raise CommandAdapterError(
+            f"{TOOL} custom endpoints must be HTTP(S) IP-literal URLs: {request.endpoint_url!r}"
+        ) from None
+    return "--endpoint-url", request.endpoint_url
+
+
+def _refuse_unsupported_endpoint_mode(request: CommandRequest) -> None:
+    if request.endpoint_url and request.mode in {"s3api-v1-text", "s3api-versions-text"}:
+        raise CommandAdapterError(
+            f"{TOOL} mode {request.mode!r} does not use ListObjectsV2 and cannot run "
+            "against the replay endpoint"
+        )
+
+
 def _s3api(request: CommandRequest, operation: str) -> list[str]:
     argv = [
         "s3api",
@@ -127,6 +157,7 @@ def _s3api(request: CommandRequest, operation: str) -> list[str]:
         "--region",
         request.region,
         *_auth_flags(request),
+        *_endpoint_flags(request),
     ]
     if request.prefix:
         argv.extend(("--prefix", request.prefix))
@@ -144,6 +175,7 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
             "--region",
             request.region,
             *_auth_flags(request),
+            *_endpoint_flags(request),
             "--delimiter",
             "/",
             "--query",
@@ -156,7 +188,7 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
         argv = ["s3", "ls", target]
         if mode == "s3-ls-recursive":
             argv.append("--recursive")
-        argv.extend(("--region", request.region, *_auth_flags(request)))
+        argv.extend(("--region", request.region, *_auth_flags(request), *_endpoint_flags(request)))
         return tuple(argv)
 
     operations = {
@@ -180,6 +212,7 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
             "--region",
             request.region,
             *_auth_flags(request),
+            *_endpoint_flags(request),
             "--delimiter",
             "/",
         ]
@@ -194,6 +227,7 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
 
 
 def build_command(request: CommandRequest) -> tuple[str, ...]:
+    _refuse_unsupported_endpoint_mode(request)
     return *AWS.argv, *_build_tail(request)
 
 

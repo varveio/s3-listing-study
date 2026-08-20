@@ -211,6 +211,19 @@ def test_the_merged_blob_round_trips_through_compile(tmp_path: Path) -> None:
     assert adapter.compile(request) == (*ARGV, "list")
 
 
+def test_endpoint_is_a_tool_neutral_request_input_and_defaults_to_ordinary_s3() -> None:
+    ordinary = CommandRequest("list", "bucket", "region", tool="fixture")
+    replay = CommandRequest(
+        "list",
+        "bucket",
+        "region",
+        tool="fixture",
+        endpoint_url="http://127.0.0.1:19090",
+    )
+    assert ordinary.endpoint_url == ""
+    assert replay.endpoint_url == "http://127.0.0.1:19090"
+
+
 def test_an_axis_is_declared_once_in_the_manifest_and_not_again_in_config_keys(
     tmp_path: Path,
 ) -> None:

@@ -88,6 +88,7 @@ def record(
     statistic: str = "timing",
     state: str = "SUCCEEDED",
     produced_by: str | None = None,
+    replay: str | None = None,
 ) -> ledger.Attempt:
     case_id = f"{tool}.{digest}"
     config = json.dumps({"mode": mode}, sort_keys=True, separators=(",", ":"))
@@ -128,6 +129,7 @@ def record(
                 purpose=purpose,
                 statistic=statistic,
                 origin="planned",
+                replay=replay,
             ),
             "{}",
         )
@@ -168,6 +170,8 @@ def write_evidence(
         "image": attempt.image_uri,
         "image_set_sha256": attempt.image_set_sha256,
         "config": json.loads(attempt.config),
+        "replay": None if attempt.replay is None else json.loads(attempt.replay),
+        "replay_evidence": None,
         "declared_resources": {
             "machine_type": attempt.machine_type,
             "vcpus": attempt.vcpus,
@@ -222,6 +226,57 @@ def verified_group(tmp_path: Path) -> tuple[sqlite3.Connection, str]:
     return con, root
 
 
+def replay_document(manifest: Path) -> str:
+    body = b"".join(
+        f"{key}\t{size}\te{size}\t2026-01-01T00:00:00Z\tSTANDARD\n".encode()
+        for key, size in (line.split(" ") for line in LISTING)
+    )
+    manifest.write_bytes(gzip.compress(body, mtime=0))
+    return json.dumps(
+        {
+            "backend": {
+                "fixture_sha256": "a" * 64,
+                "reference_manifest_uri": str(manifest),
+                "reference_manifest_sha256": sha256_of(manifest),
+            },
+            "allocation": {
+                "subject_vcpus": 4,
+                "subject_memory_gb": 8,
+                "host_reserved_vcpus": 0,
+                "host_reserved_memory_gb": 0,
+                "replay_vcpus": 4,
+                "replay_memory_gb": 8,
+                "replay_parquet_connections": 20,
+                "replay_max_concurrent_requests": 256,
+                "replay_prefetch": False,
+                "replay_heap_percent": 75,
+            },
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def complete_replay_evidence(replay: str) -> dict[str, object]:
+    observation = {
+        "observed_at": "2026-01-01T00:00:00+00:00",
+        "metrics": {"meters": [{"name": "swath.replay.requests", "count": 1}]},
+    }
+    return {
+        "replay": json.loads(replay),
+        "replay_evidence": {
+            "readiness": {"state": "ready", "wait_ms": 1, "attempts": 1, "last_error": None},
+            "before": observation,
+            "samples": [],
+            "resource_samples": [],
+            "after": {**observation, "observed_at": "2026-01-01T00:00:02+00:00"},
+            "errors": [],
+        },
+        "started_at": "2026-01-01T00:00:00.500000+00:00",
+        "finished_at": "2026-01-01T00:00:01.500000+00:00",
+    }
+
+
 def rows_of(con: sqlite3.Connection, root: str) -> list[dict[str, object]]:
     return report.report_rows(ledger.attempt_rows(con), adapter_root=root)
 
@@ -232,6 +287,82 @@ def test_a_verified_group_reports_its_verdicts(tmp_path: Path) -> None:
     assert {row["evidence_state"] for row in rows} == {"VERIFIED", "VERIFY_UNAVAILABLE"}
     assert report.report_exit_code(rows, blocked=[]) == 0
     assert "PASS" in report.render_markdown(rows, blocked=[])
+
+
+def test_result_replay_document_is_bound_exactly_to_the_ledger(tmp_path: Path) -> None:
+    con = fixture_ledger(tmp_path)
+    replay = json.dumps(
+        {"backend": {"evidence_protocol_version": "v1"}, "allocation": {"replay_vcpus": 2}},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    attempt = record(con, tmp_path, tool="alpha", digest="aaaa", replay=replay)
+    complete = {
+        "readiness": {"state": "ready", "wait_ms": 1, "attempts": 1, "last_error": None},
+        "before": {"observed_at": "now", "metrics": {"requests": 0}},
+        "samples": [{"observed_at": "now", "elapsed_s": 0.1, "metrics": {"requests": 1}}],
+        "resource_samples": [],
+        "after": {"observed_at": "now", "metrics": {"requests": 1}},
+        "errors": [],
+    }
+    write_evidence(attempt, replay_evidence=complete)
+    root = adapter_root(tmp_path, "alpha")
+    row = rows_of(con, root)[0]
+    assert row["evidence_state"] == "VERIFY_UNAVAILABLE"
+    assert row["replay_state"] == "COMPLETE"
+
+    write_evidence(attempt, replay={"different": True})
+    row = rows_of(con, root)[0]
+    assert row["evidence_state"] == "RESULT_MISMATCH"
+
+
+def test_s3_result_must_bind_an_explicit_null_replay(tmp_path: Path) -> None:
+    con = fixture_ledger(tmp_path)
+    attempt = record(con, tmp_path, tool="alpha", digest="aaaa")
+    prefix = write_evidence(attempt)
+    result_path = prefix / "result.json"
+    result = json.loads(result_path.read_text())
+    del result["replay"]
+    result_path.write_text(json.dumps(result))
+    row = rows_of(con, adapter_root(tmp_path, "alpha"))[0]
+    assert row["evidence_state"] == "RESULT_MISMATCH"
+
+
+def test_replay_verify_record_binds_manifest_shape_and_reports_pass(tmp_path: Path) -> None:
+    replay = replay_document(tmp_path / "manifest.tsv.gz")
+    con = fixture_ledger(tmp_path)
+    attempt = record(con, tmp_path, tool="alpha", digest="aaaa", replay=replay)
+    write_evidence(attempt, **complete_replay_evidence(replay))
+    root = adapter_root(tmp_path, "alpha")
+
+    code, verification = verify.verify_group(con, "g1", adapter_root=root, write_record=True)
+    assert (code, verification["verdict"]) == (0, "PASS")
+    row = rows_of(con, root)[0]
+    assert (row["evidence_state"], row["replay_state"], row["verdict"]) == (
+        "VERIFIED",
+        "COMPLETE",
+        "PASS",
+    )
+
+
+def test_replay_rate_counts_only_oracle_passes(tmp_path: Path) -> None:
+    replay = replay_document(tmp_path / "manifest.tsv.gz")
+    con = fixture_ledger(tmp_path)
+    good = record(con, tmp_path, tool="alpha", digest="aaaa", statistic="rate", replay=replay)
+    write_evidence(good, **complete_replay_evidence(replay))
+    wrong = record(con, tmp_path, tool="alpha", digest="aaaa", statistic="rate", replay=replay)
+    write_evidence(
+        wrong,
+        listing=("wrong 1",),
+        **complete_replay_evidence(replay),
+    )
+    root = adapter_root(tmp_path, "alpha")
+    verify.verify_group(con, "g1", adapter_root=root, write_record=True)
+
+    rows = rows_of(con, root)
+    assert report.rate_lines(rows) == [
+        "- `alpha.aaaa` (alpha text-full): 1/2 succeeded, rate 0.5000 over 2 attempt(s)"
+    ]
 
 
 def test_a_blocked_slot_keeps_the_report_from_being_final(tmp_path: Path) -> None:

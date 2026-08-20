@@ -61,6 +61,116 @@ def image_metadata(workdir: str | None = None) -> dict[str, object]:
     }
 
 
+def replay_document() -> dict[str, object]:
+    return {
+        "backend": {
+            "server_image_uri": "registry/replay@sha256:" + "f" * 64,
+            "fixture_sha256": "1" * 64,
+            "reference_manifest_uri": None,
+            "reference_manifest_sha256": None,
+            "serving_mode": "sorted",
+            "latency_model": {
+                "deadlines_ms": {
+                    "worker_page": 107,
+                    "pivot_probe": 41,
+                    "structure_probe": 49,
+                },
+                "scale": 1.0,
+                "jitter": "none",
+                "injector_version": "injector-v1",
+                "semantics_version": "deadline-floor-v1",
+            },
+            "evidence_protocol_version": "measurement-v1",
+        },
+        "allocation": {
+            "subject_vcpus": 2,
+            "subject_memory_gb": 4,
+            "host_reserved_vcpus": 0,
+            "host_reserved_memory_gb": 0,
+            "replay_vcpus": 2,
+            "replay_memory_gb": 4,
+            "replay_parquet_connections": 64,
+            "replay_max_concurrent_requests": 64,
+            "replay_prefetch": False,
+            "replay_heap_percent": 75,
+        },
+    }
+
+
+def basic_worker_argv(tmp_path: Path, *, replay: bool = False) -> list[str]:
+    metadata = image_metadata()
+    tools = metadata["tools"]
+    assert isinstance(tools, dict)
+    selected = tools["aws-cli"]
+    assert isinstance(selected, dict)
+    metadata_path = tmp_path / "image-metadata.json"
+    metadata_path.write_text(json.dumps(metadata))
+    argv = [
+        "--tool",
+        "aws-cli",
+        "--mode",
+        "recursive",
+        "--purpose",
+        "measurement",
+        "--bucket",
+        "bucket",
+        "--region",
+        "region",
+        "--output",
+        str(tmp_path / "attempt"),
+        "--destination",
+        "gs://results/job/",
+        "--image",
+        "registry/derived@sha256:" + "a" * 64,
+        "--toolbox-manifest-sha256",
+        str(metadata["toolbox_manifest_sha256"]),
+        "--toolbox-recipe-sha256",
+        str(metadata["toolbox_recipe_sha256"]),
+        "--tool-recipe-sha256",
+        str(selected["recipe_sha256"]),
+        "--tool-build-inputs-sha256",
+        str(selected["build_inputs_sha256"]),
+        "--tool-version",
+        str(selected["tool_version"]),
+        "--tool-build-sha256",
+        str(selected["tool_build_sha256"]),
+        "--adapter-bundle-sha256",
+        str(selected["adapter_bundle_sha256"]),
+        "--harness-revision",
+        str(metadata["harness_revision"]),
+        "--subject-workdir",
+        str(selected["subject_workdir"]),
+        "--group-id",
+        "g20260816-000000",
+        "--job-name",
+        "suite-aws-cli-9f300cc4d2b1-s1",
+        "--case-id",
+        "aws-cli.9f300cc4d2b1",
+        "--attempt-id",
+        "aws-cli.9f300cc4d2b1.s1",
+        "--image-set-sha256",
+        "1" * 64,
+        "--machine-type",
+        "machine",
+        "--vcpus",
+        "4" if replay else "2",
+        "--memory-gb",
+        "8" if replay else "4",
+        "--container-memory-gb",
+        "4" if replay else "none",
+        "--config",
+        '{"mode":"recursive"}',
+        "--adapter-root",
+        str(ROOT / "tools"),
+        "--image-metadata",
+        str(metadata_path),
+    ]
+    if replay:
+        raw = json.dumps(replay_document(), sort_keys=True, separators=(",", ":"))
+        argv.extend(["--endpoint-url", measure.REPLAY_ENDPOINT_URL, "--replay-config", raw])
+    return argv
+
+
 def test_worker_requirement_versions_match_repository_lock() -> None:
     locked = {
         package["name"].lower(): package["version"]
@@ -660,6 +770,136 @@ def test_the_cases_config_and_heap_share_reach_the_capsule(
     assert argv[2:4] == ["--mode", "recursive"]
     assert measure.main([*argv[:3], "recursive-jsonl", *argv[4:]]) == 2
     assert len(calls) == 1
+
+
+def test_replay_flags_are_paired_canonical_and_reach_the_capsule() -> None:
+    document = replay_document()
+    raw = json.dumps(document, sort_keys=True, separators=(",", ":"))
+    assert measure.parse_replay_config(measure.REPLAY_ENDPOINT_URL, raw) == document
+    with pytest.raises(ValueError, match="stated together"):
+        measure.parse_replay_config(measure.REPLAY_ENDPOINT_URL, "")
+    with pytest.raises(ValueError, match="canonical"):
+        measure.parse_replay_config(measure.REPLAY_ENDPOINT_URL, json.dumps(document))
+
+
+def test_replay_readiness_precedes_timer_and_metrics_persist(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    events: list[str] = []
+    compiled: list[dict[str, object]] = []
+
+    def compile_subject(*_args: object, **kwargs: object) -> tuple[tuple[str, ...], dict[str, str]]:
+        compiled.append(kwargs)
+        return (sys.executable, "-c", "import time; time.sleep(.03); print('one')"), {}
+
+    monkeypatch.setattr(adapters, "compile_command", compile_subject)
+    monkeypatch.setattr(
+        measure,
+        "wait_for_replay",
+        lambda: (
+            events.append("ready")
+            or {"state": "ready", "wait_ms": 1, "attempts": 1, "last_error": None}
+        ),
+    )
+
+    def scrape(
+        evidence: dict[str, object], phase: str, *, elapsed_s: float | None = None
+    ) -> dict[str, object]:
+        events.append(phase)
+        result: dict[str, object] = {
+            "observed_at": "2026-08-20T00:00:00+00:00",
+            "metrics": {"server": {"jvm": {"heap_bytes": 7}}, "requests": 3},
+        }
+        if elapsed_s is not None:
+            result["elapsed_s"] = elapsed_s
+        return result
+
+    monkeypatch.setattr(measure, "scrape_replay_metrics", scrape)
+    monkeypatch.setattr(measure, "REPLAY_SAMPLE_INTERVAL_S", 0.005)
+    ticks: dict[frozenset[int], int] = {}
+
+    def cpuset_jiffies(cpus: set[int], *_args: object) -> tuple[int, int]:
+        key = frozenset(cpus)
+        ticks[key] = ticks.get(key, 0) + 10
+        return ticks[key] // 2, ticks[key]
+
+    monkeypatch.setattr(measure, "_cpuset_jiffies", cpuset_jiffies)
+    monkeypatch.setattr(measure, "_host_memory_and_load", lambda: (1024, 0.25))
+    real_run_tool = measure.run_tool
+
+    def timed(*args: object, **kwargs: object) -> dict[str, object]:
+        events.append("timer")
+        return real_run_tool(*args, **kwargs)
+
+    monkeypatch.setattr(measure, "run_tool", timed)
+    monkeypatch.setattr(measure, "row_count_for", lambda *_args: (1, None))
+    monkeypatch.setattr(gcs, "upload_file", lambda *_args, **_kwargs: None)
+
+    assert measure.main(basic_worker_argv(tmp_path, replay=True)) == 0
+    assert events[:3] == ["ready", "before", "timer"]
+    assert events[-1] == "after"
+    assert compiled[0]["endpoint_url"] == measure.REPLAY_ENDPOINT_URL
+    result = json.loads((tmp_path / "attempt/result.json").read_text())
+    assert result["replay"] == replay_document()
+    assert result["replay_evidence"]["readiness"]["state"] == "ready"
+    assert result["replay_evidence"]["before"]["metrics"]["requests"] == 3
+    assert result["replay_evidence"]["samples"]
+    assert result["replay_evidence"]["resource_samples"]
+    assert result["replay_evidence"]["after"]["metrics"]["server"]["jvm"] == {"heap_bytes": 7}
+    assert result["replay_evidence"]["errors"] == []
+
+
+def test_missing_replay_metrics_publish_an_explicit_refusal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        adapters,
+        "compile_command",
+        lambda *_args, **_kwargs: ((sys.executable, "-c", "print('must not run')"), {}),
+    )
+    monkeypatch.setattr(
+        measure,
+        "wait_for_replay",
+        lambda: {"state": "ready", "wait_ms": 1, "attempts": 1, "last_error": None},
+    )
+
+    def missing(evidence: dict[str, object], phase: str, **_kwargs: object) -> None:
+        errors = evidence["errors"]
+        assert isinstance(errors, list)
+        errors.append({"phase": phase, "error": "metrics unavailable"})
+        return None
+
+    monkeypatch.setattr(measure, "scrape_replay_metrics", missing)
+    monkeypatch.setattr(
+        measure,
+        "run_tool",
+        lambda *_args, **_kwargs: pytest.fail("missing before evidence must precede timing"),
+    )
+    monkeypatch.setattr(gcs, "upload_file", lambda *_args, **_kwargs: None)
+
+    assert (
+        measure.main(basic_worker_argv(tmp_path, replay=True))
+        == measure.EXIT_REPLAY_EVIDENCE_FAILED
+    )
+    result = json.loads((tmp_path / "attempt/result.json").read_text())
+    assert result["execution"] is None
+    assert result["wall_seconds"] is None
+    assert result["replay_evidence"]["before"] is None
+    assert result["replay_evidence"]["errors"] == [
+        {"phase": "before", "error": "metrics unavailable"}
+    ]
+
+
+def test_worker_refuses_replay_allocation_that_disagrees_with_resource_flags(
+    tmp_path: Path,
+) -> None:
+    argv = basic_worker_argv(tmp_path, replay=True)
+    config_index = argv.index("--replay-config") + 1
+    replay = json.loads(argv[config_index])
+    replay["allocation"]["host_reserved_vcpus"] = 1
+    argv[config_index] = json.dumps(replay, sort_keys=True, separators=(",", ":"))
+
+    assert measure.main(argv) == 2
 
 
 def test_missing_credential_fails_before_adapter_or_subject(

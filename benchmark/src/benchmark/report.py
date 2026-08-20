@@ -60,6 +60,7 @@ from benchmark.verify import (
     has_result_marker,
     identity_errors,
     read_bytes_at,
+    replay_verdict_for,
     verdict_for,
 )
 
@@ -79,6 +80,7 @@ COLUMNS = (
     "statistic",
     "state",
     "evidence_state",
+    "replay_state",
     "exit",
     "row_count",
     "wall_seconds",
@@ -124,6 +126,7 @@ def result_binding_errors(row: sqlite3.Row, result: dict[str, object]) -> list[s
         "image": row["image_uri"],
         "image_set_sha256": row["image_set_sha256"],
         "config": json.loads(row["config"]),
+        "replay": None if row["replay"] is None else json.loads(row["replay"]),
         "declared_resources": {
             "machine_type": row["machine_type"],
             "vcpus": row["vcpus"],
@@ -131,7 +134,9 @@ def result_binding_errors(row: sqlite3.Row, result: dict[str, object]) -> list[s
             "container_memory_gb": row["container_memory_gb"],
         },
     }
-    errors = [name for name, value in expected.items() if result.get(name) != value]
+    errors = [
+        name for name, value in expected.items() if name not in result or result.get(name) != value
+    ]
     errors.extend(result_semantic_errors(result))
     return errors
 
@@ -157,7 +162,13 @@ def result_semantic_errors(result: dict[str, object]) -> list[str]:
         # The subject never ran: an inline setup exec failed ahead of it, and
         # the setup block is the account of why. Nothing here to check, and
         # every measured field must be absent rather than a zero.
-        if not isinstance(result.get("setup"), dict):
+        replay_evidence = result.get("replay_evidence")
+        replay_refusal = (
+            isinstance(result.get("replay"), dict)
+            and isinstance(replay_evidence, dict)
+            and bool(replay_evidence.get("errors"))
+        )
+        if not isinstance(result.get("setup"), dict) and not replay_refusal:
             errors.append("setup")
         if exit_code == 0:
             errors.append("exit_code")
@@ -287,15 +298,45 @@ def verify_binding_errors(
         "actual_result_sha256": hashlib.sha256(result_raw).hexdigest(),
     }
     errors = [name for name, value in expected.items() if verification.get(name) != value]
-    if verification.get("verdict") not in {"PASS", "DRIFT", "FAIL"}:
+    replay: dict[str, object] | None = None
+    if row["replay"] is not None:
+        try:
+            candidate = json.loads(row["replay"])
+            if not isinstance(candidate, dict) or not isinstance(candidate["backend"], dict):
+                raise ValueError
+            replay = candidate
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+            errors.append("replay")
+
+    allowed_verdicts = {"PASS", "FAIL"} if replay is not None else {"PASS", "DRIFT", "FAIL"}
+    if verification.get("verdict") not in allowed_verdicts:
         errors.append("verdict")
-    for name in ("actual_tsv_sha256", "reference_tsv_sha256", "reference_result_sha256"):
+    digest_fields = ["actual_tsv_sha256", "reference_tsv_sha256"]
+    if replay is None:
+        digest_fields.append("reference_result_sha256")
+    for name in digest_fields:
         value = verification.get(name)
         if not isinstance(value, str) or len(value) != 64 or set(value) - HEX64:
             errors.append(name)
-    for name in ("reference_attempt_id", "reference_tool", "reference_mode", "product"):
+    for name in ("product",):
         if not isinstance(verification.get(name), str) or not verification[name]:
             errors.append(name)
+    if replay is None:
+        for name in ("reference_attempt_id", "reference_tool", "reference_mode"):
+            if not isinstance(verification.get(name), str) or not verification[name]:
+                errors.append(name)
+    else:
+        backend = replay["backend"]
+        assert isinstance(backend, dict)
+        for name in (
+            "fixture_sha256",
+            "reference_manifest_uri",
+            "reference_manifest_sha256",
+        ):
+            if verification.get(name) != backend.get(name):
+                errors.append(name)
+        if not isinstance(verification.get("replay_diagnostics"), dict):
+            errors.append("replay_diagnostics")
     fields = verification.get("fields")
     if not isinstance(fields, list) or not all(isinstance(name, str) for name in fields):
         errors.append("fields")
@@ -309,7 +350,8 @@ def verify_binding_errors(
         errors.append("diff")
     else:
         try:
-            if verdict_for(diff) != verification.get("verdict"):
+            derived = replay_verdict_for(diff) if replay is not None else verdict_for(diff)
+            if derived != verification.get("verdict"):
                 errors.append("verdict")
         except (KeyError, TypeError):
             errors.append("diff")
@@ -355,6 +397,7 @@ def row_for(row: sqlite3.Row, *, adapter_root: str) -> dict[str, Any]:
         "produced_by": row["produced_by"],
         "state": row["state"],
         "evidence_state": "UNAVAILABLE",
+        "replay_state": "-",
         "exit": "-",
         "row_count": "-",
         "wall_seconds": "-",
@@ -379,8 +422,26 @@ def row_for(row: sqlite3.Row, *, adapter_root: str) -> dict[str, Any]:
     if result_binding_errors(row, result):
         return {**base, "evidence_state": "RESULT_MISMATCH"}
     execution = result.get("execution")
+    replay_evidence = result.get("replay_evidence")
+    replay_state = "-"
+    if row["replay"] is not None:
+        if not isinstance(replay_evidence, dict):
+            replay_state = "MISSING"
+        elif replay_evidence.get("errors"):
+            replay_state = "REFUSED"
+        elif (
+            isinstance(replay_evidence.get("readiness"), dict)
+            and replay_evidence["readiness"].get("state") == "ready"
+            and replay_evidence.get("before") is not None
+            and replay_evidence.get("after") is not None
+            and isinstance(replay_evidence.get("samples"), list)
+        ):
+            replay_state = "COMPLETE"
+        else:
+            replay_state = "INCOMPLETE"
     measured = {
         **base,
+        "replay_state": replay_state,
         "exit": result.get("exit_code", "-"),
         "row_count": result.get("row_count", "-"),
         "wall_seconds": result.get("wall_seconds", "-"),
@@ -461,7 +522,15 @@ def rate_lines(rows: list[dict[str, Any]]) -> list[str]:
     lines = []
     for case_id, attempts in sorted(cases.items()):
         settled = [a for a in attempts if a["state"] in TERMINAL_STATES]
-        successes = sum(1 for a in settled if a["state"] == "SUCCEEDED")
+        successes = sum(
+            1
+            for attempt in settled
+            if (
+                attempt["evidence_state"] == "VERIFIED" and attempt["verdict"] == "PASS"
+                if attempt["replay_state"] != "-"
+                else attempt["state"] == "SUCCEEDED"
+            )
+        )
         rate = f"{successes / len(settled):.4f}" if settled else "-"
         first = attempts[0]
         lines.append(

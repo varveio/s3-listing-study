@@ -14,17 +14,18 @@ fields)` resolved from the capsule's own mode manifest. A text listing is not
 compared against a Parquet dataset, and a key-only mode is not ranked against
 one emitting five fields, or a tool wins by emitting less.
 
-A PASS means the subjects of a stratum AGREE, not that any of them is correct:
-there is no manifest, and agreement is what stands in for control over a corpus
-that grows underneath the study (`docs/identity.md` § *What identity cannot
-cover*).
+A real-S3 PASS means the subjects of a stratum AGREE: there is no sealed
+manifest, and agreement stands in for control over a corpus that grows
+underneath the study (`docs/identity.md` § *What identity cannot cover*). A
+replay PASS instead means that one subject independently matches the immutable
+reference manifest bound into its ledger row; agreement between replay subjects
+is never an oracle.
 
 Two decisions this module makes where the docs are silent:
 
-- A `statistic: rate` case is summarized as successes over attempts and takes no
-  part in cross-tool agreement. Its finding is the rate; feeding twenty repeats
-  of one case into a comparison would be resampling, and a mean over the
-  survivors is the survivorship result `report` is forbidden to print.
+- A real-S3 `statistic: rate` case is summarized as successes over attempts and
+  takes no part in cross-tool agreement. Replay counts a successful attempt only
+  after it matches the bound oracle; terminal failures remain denominator data.
 - A stratum's reference is its lowest `attempt_id`. Agreement is symmetric, so
   the choice only fixes which side a diff is written from.
 
@@ -55,14 +56,17 @@ import argparse
 import gzip
 import hashlib
 import json
+import math
 import shutil
 import sqlite3
 import sys
 import tempfile
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import IO, Any, cast
+from urllib.parse import unquote, urlparse
 
 import duckdb
 
@@ -88,6 +92,7 @@ from benchmark.ledger import (
     producer_summary,
 )
 from benchmark.runtime.command_adapter import Mode
+from benchmark.runtime.contract import ContractViolation, read_records
 
 _COLUMNS = (
     "{'key':'VARCHAR','size':'VARCHAR','etag':'VARCHAR',"
@@ -121,6 +126,9 @@ GAP_EXIT_CODES = {
     "failed-subject": EXIT_FAILED_SUBJECT,
     "normalize": EXIT_NORMALIZE_FAILED,
     "malformed": EXIT_MALFORMED_INPUT,
+    "manifest": EXIT_BINDING_MISMATCH,
+    "replay-evidence": EXIT_MALFORMED_INPUT,
+    "mixed-backend": EXIT_BINDING_MISMATCH,
 }
 
 
@@ -128,6 +136,10 @@ class MalformedInputError(Exception):
     """A normalized TSV has a NULL field -- an anti-join over it would be
     NULL-blind and silently under-report every discrepancy list.
     """
+
+
+class ManifestError(Exception):
+    """A replay manifest cannot be bound, decompressed, or parsed safely."""
 
 
 @dataclass(frozen=True)
@@ -144,9 +156,13 @@ class Subject:
     target_prefix: str
     result_prefix: str
     config: dict[str, object]
+    replay: dict[str, object] | None
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> Subject:
+        replay = None if row["replay"] is None else json.loads(row["replay"])
+        if replay is not None and not isinstance(replay, dict):
+            raise ValueError(f"{row['attempt_id']} replay document is not an object")
         return cls(
             attempt_id=row["attempt_id"],
             case_id=row["case_id"],
@@ -158,6 +174,7 @@ class Subject:
             target_prefix=row["target_prefix"],
             result_prefix=row["result_prefix"],
             config=json.loads(row["config"]),
+            replay=replay,
         )
 
 
@@ -179,6 +196,7 @@ class Prepared:
     tsv: Path
     product: str
     fields: tuple[str, ...]
+    replay_diagnostics: dict[str, object] | None = None
 
 
 def roster_for(con: sqlite3.Connection, group_id: str) -> Roster:
@@ -377,6 +395,11 @@ def verdict_for(diff: Mapping[str, Any]) -> str:
     return "PASS"
 
 
+def replay_verdict_for(diff: Mapping[str, Any]) -> str:
+    """Replay is immutable ground truth, so mtime drift is an ordinary failure."""
+    return "PASS" if not any(diff[name] for name in diff) else "FAIL"
+
+
 def worst_verdict(verdicts: Iterable[str]) -> str:
     return max(verdicts, key=VERDICT_ORDER.index, default="UNCOMPARED")
 
@@ -388,6 +411,291 @@ def stage_evidence(result_prefix: str, staging: Path) -> Path:
         gcs.download_tree(result_prefix, staging)
         return staging
     return Path(result_prefix)
+
+
+def replay_manifest_identity(subject: Subject) -> tuple[str, str, str]:
+    """Return the fixture/manifest binding from a replay row, or refuse it."""
+    try:
+        assert subject.replay is not None
+        backend = subject.replay["backend"]
+        if not isinstance(backend, Mapping):
+            raise TypeError
+        fixture_sha256 = backend["fixture_sha256"]
+        uri = backend["reference_manifest_uri"]
+        digest = backend["reference_manifest_sha256"]
+        for value in (fixture_sha256, digest):
+            if (
+                not isinstance(value, str)
+                or len(value) != 64
+                or any(char not in "0123456789abcdef" for char in value)
+            ):
+                raise TypeError
+        if not isinstance(uri, str) or not uri:
+            raise TypeError
+    except (AssertionError, KeyError, TypeError):
+        raise ManifestError(
+            f"{subject.attempt_id} has no valid replay reference manifest URI and digest"
+        ) from None
+    return fixture_sha256, uri, digest
+
+
+def _local_uri_path(uri: str) -> Path:
+    if uri.startswith("file://"):
+        parsed = urlparse(uri)
+        if parsed.netloc not in ("", "localhost"):
+            raise ManifestError(f"unsupported local manifest URI authority: {uri}")
+        return Path(unquote(parsed.path))
+    return Path(uri)
+
+
+def stage_replay_manifest(uri: str, expected_sha256: str, work_dir: Path) -> Path:
+    """Bind compressed artifact bytes, then validate/decompress contract v2."""
+    work_dir.mkdir(parents=True, exist_ok=True)
+    compressed = work_dir / "reference-manifest.tsv.gz"
+    if uri.startswith("gs://"):
+        bucket_name, object_name = gcs.parse_gs_uri(uri)
+        gcs.client().bucket(bucket_name).blob(object_name).download_to_filename(str(compressed))
+    else:
+        source = _local_uri_path(uri)
+        if not source.is_file():
+            raise ManifestError(f"reference manifest does not exist: {uri}")
+        shutil.copyfile(source, compressed)
+    actual_sha256 = sha256_of(compressed)
+    if actual_sha256 != expected_sha256:
+        raise ManifestError(
+            f"reference manifest sha256 mismatch: expected {expected_sha256}, found {actual_sha256}"
+        )
+
+    plain = work_dir / "reference-manifest.tsv"
+    previous: bytes | None = None
+    rows = 0
+    try:
+        with gzip.open(compressed, "rb") as packed, plain.open("xb") as output:
+            for record in read_records(cast(IO[bytes], packed)):
+                if previous is not None and record.key <= previous:
+                    kind = "duplicate" if record.key == previous else "out-of-order"
+                    raise ManifestError(f"reference manifest has {kind} key: {record.key!r}")
+                output.write(record.to_line() + b"\n")
+                previous = record.key
+                rows += 1
+    except (gzip.BadGzipFile, EOFError, OSError, ContractViolation) as exc:
+        raise ManifestError(f"reference manifest is not valid contract-v2 gzip: {exc}") from exc
+    if rows == 0:
+        raise ManifestError("reference manifest contains no OBJECT rows")
+    return plain
+
+
+def _observation(
+    value: object, *, phase: str, with_elapsed: bool
+) -> tuple[datetime, tuple[str, ...]]:
+    expected = {"observed_at", "metrics"} | ({"elapsed_s"} if with_elapsed else set())
+    if not isinstance(value, Mapping) or set(value) != expected:
+        raise ValueError(f"replay {phase} observation has invalid fields")
+    observed_at = value["observed_at"]
+    metrics = value["metrics"]
+    if not isinstance(observed_at, str) or not isinstance(metrics, Mapping):
+        raise ValueError(f"replay {phase} observation is malformed")
+    try:
+        instant = datetime.fromisoformat(observed_at.replace("Z", "+00:00"))
+    except ValueError:
+        raise ValueError(f"replay {phase} observed_at is not ISO-8601") from None
+    if instant.tzinfo is None:
+        raise ValueError(f"replay {phase} observed_at has no timezone")
+    if with_elapsed:
+        elapsed = value["elapsed_s"]
+        if isinstance(elapsed, bool) or not isinstance(elapsed, int | float) or elapsed < 0:
+            raise ValueError(f"replay {phase} elapsed_s is invalid")
+    meters = metrics.get("meters")
+    if not isinstance(meters, list):
+        raise ValueError(f"replay {phase} metrics has no meters list")
+    names: set[str] = set()
+    for meter in meters:
+        if not isinstance(meter, Mapping) or not isinstance(meter.get("name"), str):
+            raise ValueError(f"replay {phase} metrics contains a malformed meter")
+        name = meter["name"]
+        if not name:
+            raise ValueError(f"replay {phase} metrics contains an empty meter name")
+        names.add(name)
+    return instant, tuple(sorted(names))
+
+
+def _result_instant(result: Mapping[str, object], name: str) -> datetime:
+    value = result.get(name)
+    if not isinstance(value, str):
+        raise ValueError(f"result {name} is missing for replay evidence")
+    try:
+        instant = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        raise ValueError(f"result {name} is not ISO-8601") from None
+    if instant.tzinfo is None:
+        raise ValueError(f"result {name} has no timezone")
+    return instant
+
+
+def _resource_instant(value: object) -> datetime:
+    if not isinstance(value, str):
+        raise ValueError("replay resource observed_at is missing")
+    try:
+        instant = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        raise ValueError("replay resource observed_at is not ISO-8601") from None
+    if instant.tzinfo is None:
+        raise ValueError("replay resource observed_at has no timezone")
+    return instant
+
+
+def _cpuset_string(start: object, count: object) -> str:
+    if (
+        isinstance(start, bool)
+        or not isinstance(start, int)
+        or isinstance(count, bool)
+        or not isinstance(count, int)
+        or start < 0
+        or count < 1
+    ):
+        raise ValueError("replay allocation has invalid cpuset sizes")
+    end = start + count - 1
+    return str(start) if start == end else f"{start}-{end}"
+
+
+def validate_replay_evidence(result: Mapping[str, object], subject: Subject) -> dict[str, object]:
+    """Validate the worker's replay protocol without judging capacity thresholds."""
+    if result.get("replay") != subject.replay:
+        raise ValueError("result replay config does not exactly match the ledger row")
+    evidence = result.get("replay_evidence")
+    expected = {"readiness", "before", "samples", "resource_samples", "after", "errors"}
+    if not isinstance(evidence, Mapping) or set(evidence) != expected:
+        raise ValueError("result replay_evidence is missing or malformed")
+    readiness = evidence["readiness"]
+    if not isinstance(readiness, Mapping) or set(readiness) != {
+        "state",
+        "wait_ms",
+        "attempts",
+        "last_error",
+    }:
+        raise ValueError("replay readiness evidence is malformed")
+    wait_ms = readiness["wait_ms"]
+    attempts = readiness["attempts"]
+    last_error = readiness["last_error"]
+    if (
+        readiness["state"] != "ready"
+        or isinstance(wait_ms, bool)
+        or not isinstance(wait_ms, int)
+        or wait_ms < 0
+        or isinstance(attempts, bool)
+        or not isinstance(attempts, int)
+        or attempts < 1
+        or (last_error is not None and not isinstance(last_error, str))
+    ):
+        raise ValueError("replay was not ready before subject timing")
+    errors = evidence["errors"]
+    if not isinstance(errors, list):
+        raise ValueError("replay errors evidence is not a list")
+    for error in errors:
+        if (
+            not isinstance(error, Mapping)
+            or set(error) != {"phase", "error"}
+            or error["phase"] not in {"readiness", "before", "sample", "resource-sample", "after"}
+            or not isinstance(error["error"], str)
+            or not error["error"]
+        ):
+            raise ValueError("replay errors evidence contains a malformed error")
+    if errors:
+        raise ValueError(f"replay evidence recorded {len(errors)} explicit error(s)")
+
+    before_at, before_names = _observation(evidence["before"], phase="before", with_elapsed=False)
+    after_at, after_names = _observation(evidence["after"], phase="after", with_elapsed=False)
+    started_at = _result_instant(result, "started_at")
+    finished_at = _result_instant(result, "finished_at")
+    if not before_at <= started_at <= finished_at <= after_at:
+        raise ValueError("replay before/after metrics do not bracket subject timing")
+    samples = evidence["samples"]
+    if not isinstance(samples, list):
+        raise ValueError("replay samples evidence is not a list")
+    sample_names: set[str] = set()
+    previous = before_at
+    for sample in samples:
+        observed_at, names = _observation(sample, phase="sample", with_elapsed=True)
+        if observed_at < previous or observed_at > after_at:
+            raise ValueError("replay sample metrics are out of observation order")
+        previous = observed_at
+        sample_names.update(names)
+    resource_samples = evidence["resource_samples"]
+    if not isinstance(resource_samples, list):
+        raise ValueError("replay resource_samples evidence is not a list")
+    allocation = subject.replay["allocation"] if subject.replay is not None else None
+    if not isinstance(allocation, Mapping):
+        raise ValueError("replay allocation evidence is malformed")
+    expected_server_cpuset = _cpuset_string(0, allocation.get("replay_vcpus"))
+    expected_subject_cpuset = _cpuset_string(
+        allocation.get("replay_vcpus"), allocation.get("subject_vcpus")
+    )
+    server_vcpus = allocation["replay_vcpus"]
+    subject_vcpus = allocation["subject_vcpus"]
+    assert isinstance(server_vcpus, int) and isinstance(subject_vcpus, int)
+    previous_resource = before_at
+    resource_fields = {
+        "observed_at",
+        "elapsed_s",
+        "interval_s",
+        "server_cpuset",
+        "subject_cpuset",
+        "server_cpuset_utilization",
+        "server_cores_used",
+        "subject_cpuset_utilization",
+        "subject_cores_used",
+        "host_mem_available_kb",
+        "host_load1",
+    }
+    for sample in resource_samples:
+        if not isinstance(sample, Mapping) or set(sample) != resource_fields:
+            raise ValueError("replay resource sample has invalid fields")
+        observed_at = _resource_instant(sample["observed_at"])
+        if observed_at < previous_resource or observed_at > after_at:
+            raise ValueError("replay resource samples are out of observation order")
+        previous_resource = observed_at
+        if (
+            sample["server_cpuset"] != expected_server_cpuset
+            or sample["subject_cpuset"] != expected_subject_cpuset
+        ):
+            raise ValueError("replay resource sample cpusets disagree with allocation")
+        for name in (
+            "elapsed_s",
+            "interval_s",
+            "server_cpuset_utilization",
+            "server_cores_used",
+            "subject_cpuset_utilization",
+            "subject_cores_used",
+            "host_load1",
+        ):
+            value = sample[name]
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int | float)
+                or not math.isfinite(value)
+                or value < 0
+            ):
+                raise ValueError(f"replay resource sample {name} is invalid")
+        if (
+            sample["server_cpuset_utilization"] > 1
+            or sample["subject_cpuset_utilization"] > 1
+            or sample["server_cores_used"] > server_vcpus
+            or sample["subject_cores_used"] > subject_vcpus
+            or sample["interval_s"] <= 0
+        ):
+            raise ValueError("replay resource sample exceeds its declared allocation")
+        available = sample["host_mem_available_kb"]
+        if isinstance(available, bool) or not isinstance(available, int) or available < 0:
+            raise ValueError("replay resource sample host_mem_available_kb is invalid")
+    return {
+        "readiness_attempts": attempts,
+        "readiness_wait_ms": wait_ms,
+        "before_metric_names": list(before_names),
+        "after_metric_names": list(after_names),
+        "sample_metric_names": sorted(sample_names),
+        "sample_count": len(samples),
+        "resource_sample_count": len(resource_samples),
+    }
 
 
 def _decompressed(source: Path, into: Path) -> Path:
@@ -539,6 +847,12 @@ def prepare_subject(
     failure = check_failed_subject(result)
     if failure:
         return None, _gap(subject, "failed-subject", failure)
+    replay_diagnostics = None
+    if subject.replay is not None:
+        try:
+            replay_diagnostics = validate_replay_evidence(result, subject)
+        except ValueError as exc:
+            return None, _gap(subject, "replay-evidence", str(exc))
     staging = work_dir / subject.attempt_id
     tsv = work_dir / f"{subject.attempt_id}.tsv"
     try:
@@ -563,6 +877,7 @@ def prepare_subject(
             tsv=tsv,
             product=manifest.product,
             fields=manifest.fields,
+            replay_diagnostics=replay_diagnostics,
         ),
         None,
     )
@@ -579,6 +894,145 @@ def compare(reference: Prepared, actual: Prepared) -> dict[str, Any]:
         con.close()
 
 
+def verify_replay_bucket(
+    subjects: Sequence[Subject],
+    *,
+    adapter_root: str,
+    work_dir: Path,
+    write_record: bool,
+) -> dict[str, Any]:
+    """Compare every successful replay attempt to its immutable oracle."""
+    gaps: list[dict[str, object]] = []
+    identities: list[tuple[str, str, str]] = []
+    for subject in subjects:
+        try:
+            identities.append(replay_manifest_identity(subject))
+        except ManifestError as exc:
+            gaps.append(_gap(subject, "manifest", str(exc)))
+    distinct = set(identities)
+    if len(distinct) > 1:
+        gaps.append(
+            _gap(
+                subjects[0],
+                "manifest",
+                "replay subjects in one bucket bind different fixture/reference manifests",
+            )
+        )
+
+    manifest_tsv: Path | None = None
+    fixture_sha256 = manifest_uri = manifest_sha256 = ""
+    if not gaps and identities:
+        fixture_sha256, manifest_uri, manifest_sha256 = identities[0]
+        try:
+            bucket_key = hashlib.sha256(subjects[0].target_bucket.encode()).hexdigest()[:12]
+            manifest_tsv = stage_replay_manifest(
+                manifest_uri, manifest_sha256, work_dir / f"replay-manifest-{bucket_key}"
+            )
+        except Exception as exc:
+            # Provider/download errors are binding gaps too. A replay result may
+            # not fall back to cross-tool agreement because its oracle is down.
+            gaps.append(_gap(subjects[0], "manifest", str(exc)))
+
+    prepared: list[Prepared] = []
+    rate_cases: dict[str, list[Subject]] = {}
+    for subject in subjects:
+        if subject.statistic == "rate":
+            rate_cases.setdefault(subject.case_id, []).append(subject)
+        if subject.state not in TERMINAL_STATES:
+            gaps.append(_gap(subject, "unsettled", f"state {subject.state}"))
+            continue
+        if subject.state != "SUCCEEDED":
+            if subject.statistic != "rate":
+                gaps.append(_gap(subject, "absent", f"state {subject.state}"))
+            continue
+        ready, gap = prepare_subject(subject, adapter_root=adapter_root, work_dir=work_dir)
+        if gap is not None:
+            gaps.append(gap)
+        if ready is not None:
+            prepared.append(ready)
+
+    comparisons_by_stratum: dict[tuple[str, tuple[str, ...]], list[dict[str, Any]]] = {}
+    passed_attempts: set[str] = set()
+    if manifest_tsv is not None:
+        reference_sha256 = sha256_of(manifest_tsv)
+        for actual in sorted(prepared, key=lambda item: item.subject.attempt_id):
+            try:
+                reference = Prepared(
+                    subject=actual.subject,
+                    result_sha256=manifest_sha256,
+                    tsv=manifest_tsv,
+                    product="manifest",
+                    fields=("key", "size", "etag", "mtime", "storage_class"),
+                )
+                diff = compare(reference, actual)
+            except MalformedInputError as exc:
+                gaps.append(_gap(actual.subject, "malformed", str(exc)))
+                continue
+            verdict = replay_verdict_for(diff)
+            if verdict == "PASS":
+                passed_attempts.add(actual.subject.attempt_id)
+            record = {
+                "attempt_id": actual.subject.attempt_id,
+                "tool": actual.subject.tool,
+                "mode": actual.subject.mode,
+                "fixture_sha256": fixture_sha256,
+                "reference_manifest_uri": manifest_uri,
+                "reference_manifest_sha256": manifest_sha256,
+                "product": actual.product,
+                "fields": list(actual.fields),
+                "actual_result_sha256": actual.result_sha256,
+                "actual_tsv_sha256": sha256_of(actual.tsv),
+                "reference_tsv_sha256": reference_sha256,
+                "replay_diagnostics": actual.replay_diagnostics,
+                "verdict": verdict,
+                "diff": diff,
+            }
+            if write_record:
+                write_verify_json(actual.subject.result_prefix, record)
+            comparisons_by_stratum.setdefault((actual.product, actual.fields), []).append(record)
+
+    strata: list[dict[str, Any]] = []
+    for (product, fields), comparisons in sorted(comparisons_by_stratum.items()):
+        strata.append(
+            {
+                "product": product,
+                "fields": list(fields),
+                "reference": f"manifest:{manifest_sha256}",
+                "subjects": [record["attempt_id"] for record in comparisons],
+                "comparisons": comparisons,
+                "verdict": worst_verdict(record["verdict"] for record in comparisons),
+            }
+        )
+
+    rates: list[dict[str, object]] = []
+    for case_subjects in rate_cases.values():
+        settled = [subject for subject in case_subjects if subject.state in TERMINAL_STATES]
+        first = case_subjects[0]
+        successes = sum(subject.attempt_id in passed_attempts for subject in settled)
+        rates.append(
+            {
+                "case_id": first.case_id,
+                "tool": first.tool,
+                "mode": first.mode,
+                "attempts": len(settled),
+                "successes": successes,
+                "rate": round(successes / len(settled), 4) if settled else None,
+            }
+        )
+
+    complete = not gaps
+    verdict = worst_verdict(stratum["verdict"] for stratum in strata)
+    return {
+        "target_bucket": subjects[0].target_bucket,
+        "backend": "replay",
+        "complete": complete,
+        "verdict": verdict if complete else "INCOMPLETE",
+        "strata": strata,
+        "rates": rates,
+        "gaps": gaps,
+    }
+
+
 def verify_bucket(
     subjects: Sequence[Subject],
     *,
@@ -587,6 +1041,28 @@ def verify_bucket(
     write_record: bool,
 ) -> dict[str, Any]:
     """One target bucket's strata, rate cases, and the gaps in between."""
+    replay_flags = {subject.replay is not None for subject in subjects}
+    if len(replay_flags) > 1:
+        mixed_gap = _gap(
+            subjects[0],
+            "mixed-backend",
+            "one target-bucket comparison mixes replay and real-S3 attempts",
+        )
+        return {
+            "target_bucket": subjects[0].target_bucket,
+            "complete": False,
+            "verdict": "INCOMPLETE",
+            "strata": [],
+            "rates": [],
+            "gaps": [mixed_gap],
+        }
+    if replay_flags == {True}:
+        return verify_replay_bucket(
+            subjects,
+            adapter_root=adapter_root,
+            work_dir=work_dir,
+            write_record=write_record,
+        )
     gaps: list[dict[str, object]] = []
     rates: list[dict[str, object]] = []
     prepared: list[Prepared] = []

@@ -264,6 +264,15 @@ Two properties the prefix depends on, both argued in
   refuses evidence whose recorded identity disagrees with the prefix it was
   found under.
 
+A replay result also carries the complete canonical `replay` document and a
+`replay_evidence` block. Readiness and the first server-metrics scrape complete
+before `started_at`; the last scrape follows `finished_at`. Long runs retain raw
+10-second meter snapshots plus host-observed utilization over the disjoint
+server and subject cpusets, available host memory, and load. Cpuset utilization
+is deliberately not called process CPU: host work scheduled on those CPUs is
+inside the observation. Missing or malformed replay evidence is a refusal, not
+a timing with an assumed healthy backend.
+
 ## The tables
 
 ```sql
@@ -309,6 +318,8 @@ CREATE TABLE attempts (
     target_bucket       TEXT NOT NULL,
     target_region       TEXT NOT NULL,
     target_prefix       TEXT NOT NULL,
+
+    replay              TEXT,               -- canonical resolved replay JSON; null for S3
 
     -- configuration: forwarded to the capsule, opaque here
     config              TEXT NOT NULL,      -- canonical JSON; holds mode and every tool knob
@@ -358,6 +369,12 @@ claim one job — not as an access path.
 **A row is one attempt, not one case.** Nothing is overwritten and no row is
 deleted, so the table is the study's full run history even after failed evidence
 is pruned from the bucket.
+
+Schema 3 adds `replay`. Schema-2 attempts remain readable through a read-only
+projection where it is null; neither schema 1 nor 2 is writable by the current
+controller. The canonical document is identity and rendering input, not a
+metric or verdict. A delayed slot carries the same document inside its resolved
+case, so it never reloads the plan.
 
 The three dependency columns split by role, which is the distinction
 [`identity.md`](identity.md) turns on: `input_artifact_sha256` is content and
@@ -410,14 +427,16 @@ producer is:
 
 ```
 {tool, mode, config, target_bucket, target_prefix, target_region,
- tool_slice_sha256, platform_sha256}
+ tool_slice_sha256, platform_sha256, replay}
 ```
 
 Machine, vCPUs, memory, timeout, auth role and purpose are excluded — the
 exclusions [`identity.md`](identity.md) § *Two identities, two questions* already
-makes for a preparation, because the bytes do not depend on them. Every key is a
-column of `attempts`, so the document a slot stored is exactly what the
-satisfaction query compares.
+makes for a preparation, because the bytes do not depend on them. `replay` is
+null for S3 and the complete resolved document when the producer talks to replay;
+those bytes can depend on the frozen fixture even though they do not depend on
+the machine executing the producer. Every key is a column of `attempts`, so the
+document a slot stored is exactly what the satisfaction query compares.
 
 Naming one attempt id instead does not survive a retry: the replacement settles
 under a new ordinal, nothing rewrites `awaiting`, and the slot blocks forever

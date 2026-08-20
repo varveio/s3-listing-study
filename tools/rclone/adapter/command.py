@@ -133,6 +133,11 @@ def _checkers(request: CommandRequest) -> str:
 
 
 def _build_tail(request: CommandRequest) -> tuple[str, ...]:
+    if request.endpoint_url and request.mode == "listv1":
+        raise CommandAdapterError(
+            f"{TOOL} mode {request.mode!r} uses ListObjects v1, which the replay endpoint "
+            "does not serve"
+        )
     backend = f"s3,provider=AWS,region={request.region}"
     if request.mode == "listv1":
         backend += ",list_version=1"
@@ -142,6 +147,15 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
         # tells it to actually read AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY
         # from the process environment the engine already populated.
         backend += ",env_auth=true"
+    if request.endpoint_url:
+        if any(character in request.endpoint_url for character in ('"', "\\", ",")):
+            raise CommandAdapterError(
+                f"{TOOL} endpoint cannot contain a quote, backslash, or comma inside its "
+                f"connection string: {request.endpoint_url!r}"
+            )
+        # rclone's connection-string parser treats the URL's colons as field
+        # delimiters unless the value itself is quoted.
+        backend += f',endpoint="{request.endpoint_url}",force_path_style=true'
     remote = f":{backend}:{request.bucket}"
     if request.prefix:
         remote += f"/{request.prefix}"

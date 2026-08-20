@@ -12,7 +12,7 @@
 # latency injected to the profile S3 actually gave that listing. A number from
 # this plan is peak throughput against a non-throttling backend at a stated
 # profile — never "speed against idc-open-data".
-spec_version: 2
+spec_version: 3
 
 bucket: idc-open-data
 region: us-east-1
@@ -26,7 +26,7 @@ replay:
   # over the parts in key order — the same binding `input_artifact_sha256` gives
   # a consumed artifact, and the reason a misfiled fixture cannot survive into a
   # comparison.
-  fixture_uri: us-east1-docker.pkg.dev/varve-oss/s3-listing-study/replay-server@sha256:78a22c71cb25792a5f28af3e1e43afeab766f5161d939004bed4c8b50e97ca91
+  server_image_uri: us-east1-docker.pkg.dev/varve-oss/s3-listing-study/replay-server@sha256:78a22c71cb25792a5f28af3e1e43afeab766f5161d939004bed4c8b50e97ca91
   fixture_sha256: 943786a189afa827cb78a74ff0f0cc9f08ae13b5dbd547d3a19f60e0a3de304c
   # Stated, never inferred. There used to be an `auto` that chose between sorted
   # and DuckDB serving; it was removed upstream precisely because a backend that
@@ -44,91 +44,84 @@ replay:
   # against 247 ms), which makes it the harder test of the two: demand on the
   # server scales inversely with the profile, so the same subject fan-out asks
   # for about twice the page rate here.
-  inject_latency:
-    worker_page: 107ms
-    pivot_probe: 41ms
-    structure_probe: 49ms
+  latency_model:
+    deadlines_ms:
+      worker_page: 107
+      pivot_probe: 41
+      structure_probe: 49
+    scale: 1.0
+    jitter: none
+    injector_version: swath-replay-injector-v1
+    semantics_version: deadline-floor-v1
+  # No committed reference manifest exists for this fixture yet, so these rows
+  # are diagnostic rather than measurements. This version identifies how that
+  # diagnostic evidence is interpreted without claiming a calibrated capacity
+  # advancement rule.
+  evidence_protocol_version: replay-diagnostic-v1
 
 defaults:
   reps: 1
   timeout_s: 3600
   # `vcpus`/`memory_gb` are the BOX, as everywhere else — the pair
-  # instances.yaml resolves a machine type from. The server's share below is
-  # carved out of it and the subject gets the remainder, which is how the two
-  # containers are actually pinned: disjoint cpusets over one machine's cores.
-  vcpus: 16
+  # instances.yaml resolves a machine type from. Every share below is explicit;
+  # CPU totals exactly and memory does not overcommit.
+  # Calibration uses an intentionally wide server control. Subject CPU changes
+  # consume only the otherwise-idle host share, so the server and box stay
+  # fixed while the subject scale is measured.
+  vcpus: 32
   memory_gb: 64
-  replay_vcpus: 8
-  replay_memory_gb: 16
-  # Above the widest fan-out any case here drives, and doubled because a
-  # delimiter rollup holds a row-group reader and a range reader at once. Below
-  # that, the server's cost starts varying with the client's concurrency — which
-  # is the very axis this study exists to rank.
-  replay_parquet_connections: 640
+  subject_vcpus: 8
+  subject_memory_gb: 8
+  host_reserved_vcpus: 4
+  host_reserved_memory_gb: 8
+  container_memory_gb: 8
+  replay_vcpus: 20
+  replay_memory_gb: 8
+  # The preserved pilot showed that 640 eagerly decodes hundreds of footers and
+  # can OOM at startup. A reader is released before injected sleep; 40 is held
+  # constant here while admission remains wide enough for the largest arm.
+  replay_parquet_connections: 40
+  replay_max_concurrent_requests: 1024
+  replay_prefetch: false
+  replay_heap_percent: 75
 
 tools:
-  # swath first and, for now, alone: the sizing ladder that established this
-  # topology ran against it, so a discrepancy here is legible from both ends.
-  # The other ten join once their endpoint wiring lands; the compat receipt
-  # already proved each one can speak to this server.
+  # Swath first and, for now, alone. These rows calibrate the subject-resource
+  # and server-validity instrument; purpose=diagnostic means they cannot rank or
+  # eliminate a candidate. Once the manifest is bound and the paired-control
+  # rule is frozen, the selected matrix is promoted to measurement rows.
   swath:
     cases:
-      # The ramp. What is being looked for is the rung where throughput stops
-      # rising while the server's `inject.overrun` counters stay at zero — that
-      # is swath's own ceiling. A rung where throughput rises *and* the server
-      # starts overrunning is not a result: it measured the server.
-      #
-      # On sorel this plateaued at ~250k keys/s with swath reaching only ~74
-      # in-flight of a requested 256, on 3.9 of 8 cores — neither CPU-bound nor
-      # holding its requested width. Whether that is swath's controller or an
-      # unfinished ramp is exactly what a bucket this size answers.
-      - {mode: recursive-tsv, concurrency: 64}
-      - {mode: recursive-tsv, concurrency: 128}
-      - {mode: recursive-tsv, concurrency: 256}
-      - {mode: recursive-tsv, concurrency: 512}
+      # Keep the checked-in canary bounded. The resource matrix is frozen only
+      # after this path passes one real Batch canary and the manifest is bound.
+      - {mode: recursive-tsv, concurrency: 64, purpose: diagnostic}
+      - {mode: recursive-tsv, concurrency: 128, purpose: diagnostic}
+      - {mode: recursive-tsv, concurrency: 256, purpose: diagnostic}
+      - {mode: recursive-tsv, concurrency: 512, purpose: diagnostic}
+      - {mode: recursive-tsv, concurrency: 1024, purpose: diagnostic}
 
-# The other ten are not excluded on their merits — the compat receipt proved
-# every one of them can list correctly against this server, and each one's
-# endpoint flag is already known. They are excluded because the harness has no
-# endpoint concept yet, so there is nothing to thread that flag through. This is
-# a scaffolding gap, not a finding about any tool, and each line says so.
+# The other tools are outside this Swath resource-calibration plan, not excluded
+# on merit. Endpoint wiring now exists for every compatible capsule; they join a
+# later replay screening plan after the rig-validity rule is calibrated here.
 exclude:
   - tool: aws-cli
-    reason: the harness has no endpoint concept yet, so there is nothing to thread
-      --endpoint-url through; the replay compat receipt already proved this tool lists
-      correctly against the server
+    reason: outside the Swath-only replay resource-calibration scope
   - tool: minio-mc
-    reason: the harness has no endpoint concept yet, so there is nothing to thread
-      MC_HOST_s3 + MC_REGION through; the replay compat receipt already proved this tool lists
-      correctly against the server
+    reason: outside the Swath-only replay resource-calibration scope
   - tool: ps3
-    reason: the harness has no endpoint concept yet, so there is nothing to thread
-      --endpoint-url through; the replay compat receipt already proved this tool lists
-      correctly against the server
+    reason: outside the Swath-only replay resource-calibration scope
   - tool: rclone
-    reason: the harness has no endpoint concept yet, so there is nothing to thread
-      a quoted endpoint= in its connection string through; the replay compat receipt already proved this tool lists
-      correctly against the server
+    reason: outside the Swath-only replay resource-calibration scope
   - tool: s3-fast-list
-    reason: the harness has no endpoint concept yet, so there is nothing to thread
-      --endpoint-url through; the replay compat receipt already proved this tool lists
-      correctly against the server
+    reason: outside the Swath-only replay resource-calibration scope
   - tool: s3kor
-    reason: the harness has no endpoint concept yet, so there is nothing to thread
-      --custom-endpoint-url through; the replay compat receipt already proved this tool lists
-      correctly against the server
+    reason: outside the Swath-only replay resource-calibration scope
   - tool: s3p
-    reason: the harness has no endpoint concept yet, so there is nothing to thread
-      the S3_ENDPOINT environment variable through; the replay compat receipt already proved this tool lists
-      correctly against the server
+    reason: outside the Swath-only replay resource-calibration scope
   - tool: s5cmd
-    reason: the harness has no endpoint concept yet, so there is nothing to thread
-      --endpoint-url through; the replay compat receipt already proved this tool lists
-      correctly against the server
+    reason: outside the Swath-only replay resource-calibration scope
   - tool: s7cmd
-    reason: the harness has no endpoint concept yet, so there is nothing to thread
-      --target-endpoint-url through; the replay compat receipt already proved this tool lists
-      correctly against the server
+    reason: outside the Swath-only replay resource-calibration scope
   - tool: s4cmd
     reason: server scope — s4cmd speaks only v1 ListObjects, which the replay server
       does not implement; observed, not inferred

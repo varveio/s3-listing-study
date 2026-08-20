@@ -66,13 +66,30 @@ tool enforces for you; a missing item surfaces as a provider error mid-campaign.
    the campaign would refuse fails here instead. The revision must be clean and
    `HEAD`, exactly as for the build. Shape is in
    [`../README.md`](../README.md) § *Campaign image set*.
-5. **Credential secret**, if any case signs: one
+5. **Replay manifest built and published**, for a replay measurement. Build it
+   from the exact sorted Parquet parts that the pinned server image serves:
+
+   ```sh
+   uv run python -m benchmark.replay_manifest /secure/fixture-parts \
+     --fixture-sha256 <the plan's 64-hex fixture digest> \
+     --output /secure/idc-open-data.reference.tsv.gz \
+     --upload gs://my-results/reference/idc-open-data.tsv.gz \
+     --descriptor /secure/idc-open-data.reference.json
+   ```
+
+   The builder reads parts in lexical path order, refuses schema drift,
+   duplicate/out-of-order or unframeable keys, writes reproducible gzip bytes,
+   and publishes with a create-only precondition. Copy the descriptor's
+   `reference_manifest_uri` and `manifest_sha256` into the plan together. A
+   replay `measurement` row without both is a load-time refusal; a diagnostic
+   may omit them but cannot advance or eliminate a candidate.
+6. **Credential secret**, if any case signs: one
    `projects/<p>/secrets/<s>/versions/<v>` resource whose payload is the
    `KEY=VALUE` lines described in
    [`../../infra/terraform/modules/gcp/s3-listing-study/aws-credentials.tf`](../../infra/terraform/modules/gcp/s3-listing-study/aws-credentials.tf).
    Only a signing case's job carries it, and only the authenticated worker
    identity can read it.
-6. **A `--suite` name.** It is the results-bucket path prefix, the job label a
+7. **A `--suite` name.** It is the results-bucket path prefix, the job label a
    polling pass filters on, and the job-name prefix — constant for the life of
    a ledger, so it is chosen once, not per launch. `--group` is optional:
    leave it unset and `submit` mints `gYYYYMMDD-HHMMSS`, or name one yourself
@@ -149,6 +166,13 @@ tool would trouble alone. Submission-side only: it cannot control Batch's own
 queueing or Spot provisioning delay, only the one variable this harness does
 control. Zero by default; use it for any bucket where a first pass shows self-
 induced throttling.
+
+Staggering is an operational guard, not the isolation rule for the real-S3
+validation stage. Batch controls VM start time, so spaced submissions can still
+overlap. Finalist validation runs one subject at a time: wait until the current
+subject has stopped driving the bucket before submitting the next validation
+case. A wide real-S3 launch is diagnostic only and cannot produce the study's
+comparative S3 result.
 
 The controller **records intent before it creates a job** — a row is journaled
 `SUBMITTING` inside the same transaction that allocates its ordinal, before the
@@ -308,16 +332,18 @@ group at a time via `--group` (required) and the same `--state` ledger. It
 reads that group from the recorded rows — never a re-resolved plan
 ([`model.md`](model.md) § *What verify binds against*). It
 compares every `purpose = 'measurement'` attempt within a stratum — one
-target bucket, one `(product, fields)` — against the others in that stratum. A
-`PASS` means the subjects **agree**, not that any one of them is correct:
-there is no sealed manifest, and agreement is what stands in for control over
-a corpus that keeps growing. Read
-[`../README.md`](../README.md) § *Agreement is not ground truth* before
-quoting a verdict.
+target bucket, one `(product, fields)`. For real S3, attempts are compared with
+the other subjects in that stratum: `PASS` means agreement over a live corpus,
+not independent ground truth. For replay, each successful attempt is compared
+directly with the immutable manifest bound into its ledger row. Agreement
+between replay subjects is never the oracle, and immutable mtime mismatches are
+`FAIL`, not `DRIFT`. Read [`../README.md`](../README.md) § *S3 agreement and
+replay ground truth are different verdicts* before quoting either.
 
 A `statistic: rate` case is reported as successes over attempts and takes no
-part in cross-tool agreement — its finding is the rate itself, printed
-alongside the group's verdict rather than folded into it.
+part in real-S3 cross-tool agreement. A replay attempt counts as a success only
+after its output passes the bound manifest; a clean process exit with the wrong
+listing remains a failed trial.
 
 Exit code is worst-wins across the whole group:
 

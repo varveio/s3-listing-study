@@ -172,6 +172,7 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
         *((), ("--no-sign-request",))[not request.signed],
         "--concurrency",
         _concurrency(request),
+        *(("--endpoint-url", request.endpoint_url) if request.endpoint_url else ()),
     )
     # Every mode but the sorted one is a single ephemeral shot, so it keeps no
     # durable state. Sorting is the exception: it tracks sort segments across the

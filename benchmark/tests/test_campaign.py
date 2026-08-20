@@ -164,6 +164,131 @@ def test_a_row_carries_the_document_its_case_id_was_hashed_from(
     assert row["result_prefix"] == (f"gs://results/{SUITE}/{plan.bucket}/{row['attempt_id']}/")
 
 
+def test_replay_case_slot_attempt_and_request_keep_one_canonical_document(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(batch_client, "ensure_job", lambda *a, **k: ("SUBMITTED", None))
+    plan = Plan.load(bench.default_path("idc-open-data"))
+    case = plan.cases[0]
+    assert case.replay is not None
+    images = image_set(tmp_path)
+    launch = context(plan, case, images)
+    con = ledger.open_ledger(str(tmp_path / "campaign.db"), suite=SUITE)
+
+    restored = campaign._case_from_document(campaign._case_document(case))
+    assert restored == case
+    slot_number = campaign.book_slot(con, case, launch, awaiting="producer.abcdef012345.s1")
+    slot = ledger.pending_rows(con, group_id=launch.group_id)[0]
+    assert slot_number == 1
+    assert campaign._case_from_document(json.loads(slot["known_inputs"])["case"]) == case
+
+    attempt = campaign.submit_case(con, case, launch)
+    row = con.execute("SELECT * FROM attempts WHERE attempt_id=?", (attempt.attempt_id,)).fetchone()
+    expected = json.dumps(case.replay.as_dict(), sort_keys=True, separators=(",", ":"))
+    assert ledger.Attempt.from_row(row).replay == expected
+    request = json.loads(row["request_json"])
+    task = request["taskGroups"][0]["taskSpec"]
+    assert "environment" not in task
+    server, subject = task["runnables"]
+    assert server["background"] is True
+    assert server["container"] == {
+        "imageUri": case.replay.backend.server_image_uri,
+        "commands": [
+            "serve",
+            "--fixture",
+            "/fixtures/idc-open-data",
+            "--bucket",
+            "idc-open-data",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "19090",
+            "--metrics-port",
+            "19192",
+            "--serving-mode",
+            "sorted",
+            "--parquet-connections",
+            "40",
+            "--max-concurrent-requests",
+            "1024",
+            "--inject-latency",
+            "worker_page=107ms,pivot_probe=41ms,structure_probe=49ms",
+            "--latency-scale",
+            "1.0",
+        ],
+        "options": "--network host --cpuset-cpus=0-19 --memory=8g --memory-swap=8g",
+    }
+    assert server["environment"] == {
+        "variables": {
+            "JAVA_TOOL_OPTIONS": ("-XX:MaxRAMPercentage=75 -Dswath.replay.prefetch.enabled=false")
+        }
+    }
+    subject_commands = subject["container"]["commands"]
+    assert subject_commands[-4:] == [
+        "--endpoint-url",
+        "http://127.0.0.1:19090",
+        "--replay-config",
+        expected,
+    ]
+    assert subject["container"]["options"] == (
+        "--network host --cpuset-cpus=20-27 --memory=8g --memory-swap=8g"
+    )
+    assert attempt.secret_resource is None
+    assert "environment" not in subject
+    signed = replace(attempt, auth_role="public-read", secret_resource=AUTH_SECRET)
+    signed_request = campaign.render_batch_job(
+        signed, images.image_for(case.tool), suite=SUITE, options=launch.options
+    )
+    signed_task = signed_request["taskGroups"][0]["taskSpec"]
+    signed_server, signed_subject = signed_task["runnables"]
+    assert "environment" not in signed_task
+    assert "secretVariables" not in signed_server["environment"]
+    assert signed_subject["environment"] == {"secretVariables": {CREDENTIAL_ENV_VAR: AUTH_SECRET}}
+    assert task["computeResource"] == {"cpuMilli": "32000", "memoryMib": "65536"}
+    assert task["maxRunDuration"] == "4805s"
+    retried = campaign.retry_request_document(
+        request,
+        job_name="retry-job",
+        result_prefix="gs://results/retry/",
+        attempt_id="swath.retry.s2",
+    )
+    assert retried["taskGroups"][0]["taskSpec"]["runnables"][0] == server
+    assert campaign.request_argument(retried, "--attempt-id") == "swath.retry.s2"
+    assert campaign.request_argument(retried, "--destination") == "gs://results/retry/"
+    assert json.loads(row["case_inputs"])["replay"] == case.replay.as_dict()
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        pytest.param("replay_parquet_connections", 0, id="zero-reader-pool"),
+        pytest.param("replay_max_concurrent_requests", 0, id="zero-admission"),
+        pytest.param("replay_heap_percent", 101, id="invalid-heap-share"),
+    ],
+)
+def test_renderer_refuses_malformed_frozen_replay_allocation(
+    tmp_path: Path, field: str, value: int
+) -> None:
+    plan = Plan.load(bench.default_path("idc-open-data"))
+    case = plan.cases[0]
+    images = image_set(tmp_path)
+    attempt = campaign.planned_attempt(
+        case,
+        context(plan, case, images),
+    )[2](1)[0]
+    replay = json.loads(attempt.replay or "null")
+    replay["allocation"][field] = value
+    malformed = replace(attempt, replay=json.dumps(replay, sort_keys=True, separators=(",", ":")))
+
+    with pytest.raises(ledger.CampaignError, match="malformed resolved replay"):
+        campaign.render_batch_job(
+            malformed,
+            images.image_for(case.tool),
+            suite=SUITE,
+            options=context(plan, case, images).options,
+        )
+
+
 def test_two_cases_hashing_to_one_case_id_are_refused(
     submitted: tuple[sqlite3.Connection, Plan, Case, campaign.ImageSet],
 ) -> None:
@@ -461,6 +586,28 @@ def test_a_superseded_ledger_still_opens_for_reading_and_never_for_writing(
     assert ledger.slot_owed_reason(reading, slot) == (
         "no attempt in this group produces what it consumes"
     )
+    reading.close()
+
+
+def test_schema_two_attempts_are_read_only_with_replay_null(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(batch_client, "ensure_job", lambda *a, **k: ("SUBMITTED", None))
+    path = tmp_path / "campaign.db"
+    con = ledger.open_ledger(str(path), suite=SUITE)
+    plan = loaded_plan()
+    submit(con, plan, any_case(plan), image_set(tmp_path))
+    con.close()
+    old = sqlite3.connect(path)
+    old.execute("ALTER TABLE attempts DROP COLUMN replay")
+    old.execute("UPDATE meta SET schema_version = 2")
+    old.commit()
+    old.close()
+
+    with pytest.raises(ledger.CampaignError, match="does not migrate"):
+        ledger.open_ledger(str(path))
+    reading = ledger.open_ledger(str(path), readonly=True)
+    assert ledger.Attempt.from_row(ledger.attempt_rows(reading)[0]).replay is None
     reading.close()
 
 

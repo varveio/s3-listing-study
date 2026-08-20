@@ -16,11 +16,12 @@ measurement**:
 aws-cli.9f300cc4d2b1
 ```
 
-Three groups of inputs go into the hash:
+Four groups of inputs go into the hash:
 
 | Group | What it covers |
 | --- | --- |
 | **Environment** | The values the harness acts on: auth role, target bucket/region/prefix, location, machine type, vCPUs, memory, container ceiling, output target, timeout — and, for a case that consumes an artifact, the artifact's content digest (`model.md` makes `input_artifact_sha256` a hash input; a case consuming nothing omits the key) |
+| **Replay** | When present, the complete resolved replay document: pinned server implementation, fixture and reference-manifest bindings, serving and latency semantics, evidence protocol, and every subject/server/host allocation and control |
 | **Config** | The capsule's own keys, `{}` when empty |
 | **What ran it** | The tool slice and the platform slice |
 
@@ -40,23 +41,27 @@ from them.
 An unspecified encoding will be re-derived differently by the next reader, so:
 
 ```python
-CASE_HASH_V1 = b"s3-listing-study-case-v1\0"
+CASE_HASH_V2 = b"s3-listing-study-case-v2\0"
 
 
-def case_hash(environment: dict, config: dict, tool_slice: str, platform: str) -> str:
+def case_hash(environment: dict, config: dict, tool_slice: str, platform: str,
+              replay: dict | None = None) -> str:
+    inputs = {
+        "environment": environment,  # the table above, absent keys omitted
+        "config": config,  # the capsule's blob, as an object
+        "tool_slice_sha256": tool_slice,
+        "platform_sha256": platform,
+    }
+    if replay is not None:
+        inputs["replay"] = replay
     document = json.dumps(
-        {
-            "environment": environment,  # the table above, absent keys omitted
-            "config": config,  # the capsule's blob, as an object
-            "tool_slice_sha256": tool_slice,
-            "platform_sha256": platform,
-        },
+        inputs,
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=True,
         allow_nan=False,
     ).encode()
-    return hashlib.sha256(CASE_HASH_V1 + document).hexdigest()[:12]
+    return hashlib.sha256(CASE_HASH_V2 + document).hexdigest()[:12]
 ```
 
 - **Domain separation and version** lead the input, as `_input_digest` does for
@@ -87,7 +92,7 @@ def case_hash(environment: dict, config: dict, tool_slice: str, platform: str) -
 
 **Changing the input list re-identifies everything.** That is the intended
 behaviour, not a hazard: a case measured under a different set of inputs is a
-different case. `CASE_HASH_V1` is bumped alongside the change, so a hash always
+different case. `CASE_HASH_V2` is bumped alongside the change, so a hash always
 states which input list produced it.
 
 ## Two identities, two questions
@@ -101,6 +106,7 @@ asymmetry is deliberate rather than a special case.
 | The capsule's own config | yes | yes — **its own**, plus the consumer's value for an axis this mode itself declares |
 | Tool slice, platform slice | yes | yes |
 | Machine type, vCPUs, memory, container ceiling, timeout | yes | **no** — recorded, not hashed |
+| Resolved replay document | yes, when replay-backed | yes, when the preparation talks to replay |
 | `auth_role` | yes | **no** — recorded, not hashed |
 | Output target | yes | **no** — a preparation's artifact is its output |
 
@@ -112,9 +118,10 @@ stays out of its hash — the same treatment `image_uri` gets for every case.
 
 **A slot's producer spec makes the same exclusions.** What a dependent case
 waits for is `{tool, mode, config, target_bucket, target_prefix, target_region,
-tool_slice_sha256, platform_sha256}` — this table's preparation column, minus
-nothing and plus nothing — because that is exactly the set the produced bytes
-depend on. Purpose is excluded too, which is what lets a plan's own `list`
+tool_slice_sha256, platform_sha256, replay}` — with `replay` null for S3 and the
+complete resolved document for a replay-backed producer. This is the table's
+preparation column, minus nothing and plus nothing, because that is exactly the
+set the produced bytes depend on. Purpose is excluded too, which is what lets a plan's own `list`
 *measurement* pay a hinted row's slot: the artifact does not know what the run
 that made it was called. The spec is matched inside one group only
 ([`model.md`](model.md) § *What a slot waits for is a shape, not a name*), so

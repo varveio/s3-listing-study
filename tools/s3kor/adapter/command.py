@@ -51,10 +51,16 @@ MODES = {
 
 def _build_tail(request: CommandRequest) -> tuple[str, ...]:
     uri = f"s3://{request.bucket}" + (f"/{request.prefix}" if request.prefix else "")
+    if request.endpoint_url and request.mode == "list-versions":
+        raise CommandAdapterError(
+            f"{TOOL} mode {request.mode!r} requires ListObjectVersions, which the replay "
+            "endpoint does not serve"
+        )
+    endpoint = ("--custom-endpoint-url", request.endpoint_url) if request.endpoint_url else ()
     if request.mode == "list":
-        return "ls", "--region", request.region, uri
+        return "ls", "--region", request.region, *endpoint, uri
     if request.mode == "list-versions":
-        return "ls", "--all-versions", "--region", request.region, uri
+        return "ls", "--all-versions", "--region", request.region, *endpoint, uri
     raise CommandAdapterError(f"unknown mode: {request.mode}")
 
 

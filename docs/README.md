@@ -9,8 +9,9 @@ kept in internal notes that are not published in this repository.
 For anyone evaluating what this study is, how credible it is, and what it found.
 
 - [`methodology.md`](methodology.md) — how the study is run: the five decisions
-  that shape everything, the Phase 1 / Phase 2 split, and the run-record
-  requirements. The measurement plan, written down before comparative runs.
+  that shape everything, the replay-screening → real-S3-validation funnel, and
+  the run-record requirements. The measurement plan, written down before
+  comparative runs and carrying dated material changes.
 - [`s3-reference.md`](s3-reference.md) — the documented `ListObjectsV2` contract
   the tools drive: lexicographical ordering, `prefix`/`delimiter`/`CommonPrefixes`,
   `StartAfter`, pagination, key encoding, and the Express One Zone differences.
