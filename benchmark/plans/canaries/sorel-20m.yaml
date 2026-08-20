@@ -1,0 +1,51 @@
+# Small replay integration canary. This is row-count evidence, not a capacity
+# result or a comparative measurement.
+spec_version: 3
+
+bucket: sorel-20m
+region: us-west-2
+auth_role: public-read
+
+replay:
+  capacity_status: uncalibrated
+  server_image_uri: us-east1-docker.pkg.dev/varve-oss/s3-listing-study/replay-server@sha256:c76ab9ef8b7ac3e7bff207394fa60bdbecfe79d90228f1abe61819a923bc6d1d
+  fixture_sha256: 5e86c54452e9ffc63c4591cc241529c2853e65fa47abc369fdde8b619bd23015
+  serving_mode: sorted
+  latency_model:
+    deadlines_ms:
+      worker_page: 247
+      pivot_probe: 105
+      structure_probe: 92
+    scale: 1.0
+    jitter: none
+
+defaults:
+  reps: 1
+  timeout_s: 900
+  vcpus: 8
+  memory_gb: 16
+  subject_vcpus: 3
+  container_memory_gb: 4
+  replay_vcpus: 4
+  replay_memory_gb: 4
+  replay_parquet_connections: 20
+  replay_max_concurrent_requests: 64
+  replay_prefetch: false
+  replay_heap_percent: 75
+
+tools:
+  swath:
+    cases:
+      - {mode: recursive-tsv, concurrency: 64, purpose: diagnostic}
+
+exclude:
+  - {tool: aws-cli, reason: outside the Swath-only integration canary}
+  - {tool: minio-mc, reason: outside the Swath-only integration canary}
+  - {tool: ps3, reason: outside the Swath-only integration canary}
+  - {tool: rclone, reason: outside the Swath-only integration canary}
+  - {tool: s3-fast-list, reason: outside the Swath-only integration canary}
+  - {tool: s3kor, reason: outside the Swath-only integration canary}
+  - {tool: s3p, reason: outside the Swath-only integration canary}
+  - {tool: s4cmd, reason: outside the Swath-only integration canary}
+  - {tool: s5cmd, reason: outside the Swath-only integration canary}
+  - {tool: s7cmd, reason: outside the Swath-only integration canary}
