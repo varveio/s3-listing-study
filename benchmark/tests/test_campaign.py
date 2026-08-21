@@ -295,7 +295,7 @@ def test_uri_fixture_is_staged_before_the_server_and_never_put_in_its_image(
         "/fixtures/source/",
     ]
     assert stage["container"]["options"] == (
-        "--volume=/mnt/disks/replay-fixture:/fixtures/source"
+        "--volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
     )
     assert stage["environment"] == {
         "variables": {
@@ -307,7 +307,10 @@ def test_uri_fixture_is_staged_before_the_server_and_never_put_in_its_image(
     assert server["background"] is True
     fixture_index = server["container"]["commands"].index("--fixture")
     assert server["container"]["commands"][fixture_index + 1] == "/fixtures/source"
-    assert "--volume=/mnt/disks/replay-fixture:/fixtures/source" in server["container"]["options"]
+    assert (
+        "--volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
+        in server["container"]["options"]
+    )
     assert "--volume" not in subject["container"]["options"]
     assert request["allocationPolicy"]["instances"][0]["policy"]["bootDisk"] == {
         "type": "hyperdisk-balanced",

@@ -91,7 +91,9 @@ REPLAY_STAGING_IMAGE = (
     "gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:"
     "cf72dd63b7643c117ef53378a41bef6db6a01fa3d561f2b456d7abd8bbeb9ba6"
 )
-REPLAY_FIXTURE_HOST_DIR = "/mnt/disks/replay-fixture"
+# COS mounts /mnt/disks as a small tmpfs until a separate disk is attached.
+# The enlarged boot disk's writable capacity is /mnt/stateful_partition.
+REPLAY_FIXTURE_HOST_DIR = "/mnt/stateful_partition/replay-fixture"
 REPLAY_FIXTURE_CONTAINER_DIR = "/fixtures/source"
 PINNED_IMAGE_RE = re.compile(r"\A[^\s@]+@sha256:([0-9a-f]{64})\Z")
 SECRET_RE = re.compile(r"\Aprojects/[^/]+/secrets/[^/]+/versions/[^/]+\Z")
