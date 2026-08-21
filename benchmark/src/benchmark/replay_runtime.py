@@ -11,6 +11,7 @@ import urllib.request
 from datetime import UTC, datetime
 from pathlib import Path
 
+from benchmark import gcs
 from benchmark.replay import ReplayConfig
 
 REPLAY_ENDPOINT_URL = "http://127.0.0.1:19090"
@@ -19,6 +20,7 @@ REPLAY_READINESS_TIMEOUT_S = 600
 REPLAY_HTTP_TIMEOUT_S = 5.0
 REPLAY_READINESS_POLL_S = 1.0
 REPLAY_SAMPLE_INTERVAL_S = 10.0
+REPLAY_HEARTBEAT_INTERVAL_S = 60.0
 
 
 def evidence() -> dict[str, object]:
@@ -177,7 +179,10 @@ def _resource_sample(
 
 
 def sample_metrics(
-    evidence: dict[str, object], stop: threading.Event, replay: ReplayConfig
+    evidence: dict[str, object],
+    stop: threading.Event,
+    replay: ReplayConfig,
+    heartbeat_destination: str | None = None,
 ) -> None:
     """Poll outside the subject clock; record raw observations and no verdict."""
     started = previous_at = time.monotonic()
@@ -196,6 +201,8 @@ def sample_metrics(
         assert isinstance(errors, list)
         errors.append({"phase": "resource-sample", "error": str(exc)})
         return
+    heartbeat_sequence = 0
+    next_heartbeat_s = REPLAY_HEARTBEAT_INTERVAL_S
     while not stop.wait(REPLAY_SAMPLE_INTERVAL_S):
         observed = time.monotonic()
         try:
@@ -221,3 +228,30 @@ def sample_metrics(
             samples = evidence["samples"]
             assert isinstance(samples, list)
             samples.append(observation)
+        elapsed_s = observed - started
+        if heartbeat_destination is not None and elapsed_s >= next_heartbeat_s:
+            heartbeat_sequence += 1
+            document = {
+                "schema_version": 1,
+                "sequence": heartbeat_sequence,
+                "observed_at": datetime.now(UTC).isoformat(),
+                "elapsed_s": round(elapsed_s, 3),
+                "resource_sample": resource,
+                "replay_sample": observation,
+            }
+            uri = (
+                heartbeat_destination.rstrip("/")
+                + f"/live/replay-{heartbeat_sequence:06d}.json"
+            )
+            try:
+                gcs.upload_bytes(
+                    (json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n").encode(),
+                    uri,
+                    content_type="application/json",
+                    create_only=True,
+                )
+            except Exception as exc:
+                errors = evidence["errors"]
+                assert isinstance(errors, list)
+                errors.append({"phase": "heartbeat-upload", "uri": uri, "error": str(exc)})
+            next_heartbeat_s += REPLAY_HEARTBEAT_INTERVAL_S

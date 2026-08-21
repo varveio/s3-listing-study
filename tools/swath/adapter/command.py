@@ -46,6 +46,9 @@ ALIGNED_FIELDS = ("key", "size", "mtime")
 AXES = {"concurrency": CONCURRENCY, "heap_percent": Fixed(HEAP_PERCENT)}
 """Swath is a JVM, so every mode feels the heap share; every mode takes the flag."""
 
+CONFIG_KEYS = frozenset({"parquet_writers"})
+"""Exact Parquet directory writer-pool width when a plan chooses to tune it."""
+
 LISTING = "listing"
 """The logical name every mode here publishes its listing under."""
 
@@ -157,6 +160,17 @@ def _concurrency(request: CommandRequest) -> str:
     return str(value)
 
 
+def _parquet_writers(request: CommandRequest) -> tuple[str, ...]:
+    value = request.config.get("parquet_writers")
+    if value is None:
+        return ()
+    if isinstance(value, bool) or not isinstance(value, int) or not 2 <= value <= 4:
+        raise CommandAdapterError(
+            f"{TOOL} parquet_writers must be an integer from 2 through 4; got: {value!r}"
+        )
+    return "--tune", f"parquet.writers={value}"
+
+
 def _build_tail(request: CommandRequest) -> tuple[str, ...]:
     uri = f"s3://{request.bucket}" + (f"/{request.prefix}" if request.prefix else "")
     # --color replaces v0.2.0's --disable-color-tracing, which no longer exists:
@@ -185,7 +199,7 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
             )
         dataset = f"{request.sink_dir.rstrip('/')}/{DATASET_NAME}"
         if request.mode == "recursive-parquet":
-            return (*common, "--format", "parquet", "-o", dataset)
+            return (*common, "--format", "parquet", "-o", dataset, *_parquet_writers(request))
         # sort.ignore-disk-check keeps the run from refusing on a container
         # filesystem whose free space it cannot size.
         return (

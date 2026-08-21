@@ -1363,7 +1363,7 @@ def main(argv: list[str] | None = None) -> int:
         sampler_stop = threading.Event()
         sampler_thread = threading.Thread(
             target=replay_runtime.sample_metrics,
-            args=(replay_evidence, sampler_stop, replay_config),
+            args=(replay_evidence, sampler_stop, replay_config, attempt_destination),
             name="replay-metrics",
             daemon=True,
         )
