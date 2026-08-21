@@ -678,7 +678,17 @@ def render_batch_job(
                         f"{REPLAY_FIXTURE_CONTAINER_DIR}/",
                     ],
                     "options": volume,
-                }
+                },
+                # Batch injects /usr/bin/python3, which the slim Cloud CLI
+                # image does not contain. Pin its own bundled interpreter.
+                "environment": {
+                    "variables": {
+                        "CLOUDSDK_PYTHON": (
+                            "/usr/lib/google-cloud-sdk/platform/"
+                            "bundledpythonunix/bin/python3"
+                        )
+                    }
+                },
             }
         server_runnable = {
             "background": True,
