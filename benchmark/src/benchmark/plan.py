@@ -677,14 +677,17 @@ def _replay_shape(
     table: Mapping[str, Any], where: str, path: Path, *, complete: bool
 ) -> dict[str, Any]:
     """The ``replay_*`` keys ``table`` states, flat, like :func:`_resources`."""
+    optional_defaults = {"replay_prefetch_max_windows": 96}
     if complete:
-        missing = sorted(set(REPLAY_FIELDS) - set(table))
+        missing = sorted(set(REPLAY_FIELDS) - set(table) - set(optional_defaults))
         if missing:
             raise PlanError(
                 f"'{where}' in {path} is missing {', '.join(missing)} — a plan with a "
                 "replay backend sizes it in defaults, so every case resolves one"
             )
     resolved: dict[str, Any] = {}
+    if complete:
+        resolved.update(optional_defaults)
     for field in REPLAY_INTEGER_FIELDS:
         if field not in table:
             continue

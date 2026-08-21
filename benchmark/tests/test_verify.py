@@ -290,6 +290,7 @@ def replay_document(
             "replay_parquet_connections": 20,
             "replay_max_concurrent_requests": 256,
             "replay_prefetch": False,
+            "replay_prefetch_max_windows": 96,
             "replay_heap_percent": 75,
         },
         "capacity_status": capacity_status,

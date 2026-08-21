@@ -704,7 +704,9 @@ def render_batch_job(
                     "JAVA_TOOL_OPTIONS": (
                         f"-XX:MaxRAMPercentage={allocation.replay_heap_percent} "
                         "-Dswath.replay.prefetch.enabled="
-                        f"{'true' if allocation.replay_prefetch else 'false'}"
+                        f"{'true' if allocation.replay_prefetch else 'false'} "
+                        "-Dswath.replay.prefetch.max-windows="
+                        f"{allocation.replay_prefetch_max_windows}"
                     )
                 }
             },

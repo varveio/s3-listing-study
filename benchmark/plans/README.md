@@ -126,6 +126,7 @@ defaults:
   replay_parquet_connections: 640
   replay_max_concurrent_requests: 512
   replay_prefetch: false
+  replay_prefetch_max_windows: 96 # response-window cache capacity
   replay_heap_percent: 75
 ```
 
@@ -135,6 +136,8 @@ allocations. The remaining host CPU and memory are derived, and each must be
 positive — host reserves are not separately authored identity inputs.
 Reader-pool size and request-admission width are separate fields, and
 `replay_prefetch` is a YAML boolean rather than an integer shorthand.
+`replay_prefetch_max_windows` defaults to 96 when omitted; state it explicitly
+when a diagnostic varies cache capacity.
 
 `capacity_status` is a simple plan fact, not another control surface:
 `uncalibrated` permits diagnostic replay work only, while `calibrated` permits

@@ -49,6 +49,7 @@ def test_resolve_plan_exposes_resolved_replay_contract(
             "replay_max_concurrent_requests": 2048,
             "replay_heap_percent": 75,
             "replay_prefetch": False,
+            "replay_prefetch_max_windows": 96,
         },
         "capacity_status": "uncalibrated",
     }

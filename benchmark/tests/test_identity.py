@@ -65,6 +65,7 @@ def test_every_replay_fact_changes_identity() -> None:
                 "replay_parquet_connections": 640,
                 "replay_max_concurrent_requests": 512,
                 "replay_prefetch": False,
+                "replay_prefetch_max_windows": 96,
                 "replay_heap_percent": 75,
             },
             "capacity_status": "calibrated",

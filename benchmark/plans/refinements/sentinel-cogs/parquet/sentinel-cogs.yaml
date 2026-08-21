@@ -25,6 +25,7 @@ defaults:
   replay_parquet_connections: 32
   replay_max_concurrent_requests: 4096
   replay_prefetch: true
+  replay_prefetch_max_windows: 1024
   replay_heap_percent: 75
 
 tools:

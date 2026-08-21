@@ -25,6 +25,7 @@ REPLAY_INTEGER_FIELDS = (
     "replay_parquet_connections",
     "replay_max_concurrent_requests",
     "replay_heap_percent",
+    "replay_prefetch_max_windows",
 )
 REPLAY_BOOLEAN_FIELDS = ("replay_prefetch",)
 REPLAY_FIELDS = (*REPLAY_INTEGER_FIELDS, *REPLAY_BOOLEAN_FIELDS)
@@ -100,6 +101,7 @@ class ReplayAllocation:
     replay_parquet_connections: int
     replay_max_concurrent_requests: int
     replay_heap_percent: int
+    replay_prefetch_max_windows: int
     replay_prefetch: bool
 
     def as_dict(self) -> dict[str, object]:

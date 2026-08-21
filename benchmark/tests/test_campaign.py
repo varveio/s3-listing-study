@@ -216,7 +216,10 @@ def test_replay_case_slot_attempt_and_request_keep_one_canonical_document(
     }
     assert server["environment"] == {
         "variables": {
-            "JAVA_TOOL_OPTIONS": ("-XX:MaxRAMPercentage=75 -Dswath.replay.prefetch.enabled=false")
+            "JAVA_TOOL_OPTIONS": (
+                "-XX:MaxRAMPercentage=75 -Dswath.replay.prefetch.enabled=false "
+                "-Dswath.replay.prefetch.max-windows=96"
+            )
         }
     }
     subject_commands = subject["container"]["commands"]

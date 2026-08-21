@@ -933,6 +933,7 @@ def test_every_key_a_row_may_state_changes_the_case_it_resolves_to(tmp_path: Pat
         "replay_parquet_connections": (64, 128),
         "replay_max_concurrent_requests": (32, 64),
         "replay_prefetch": (False, True),
+        "replay_prefetch_max_windows": (96, 1024),
         "replay_heap_percent": (50, 75),
     }
     assert set(pairs) == set(bench.ROW_FIELDS), "a row key with no coverage here"

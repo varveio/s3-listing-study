@@ -88,6 +88,7 @@ def replay_document() -> dict[str, object]:
             "replay_parquet_connections": 64,
             "replay_max_concurrent_requests": 64,
             "replay_prefetch": False,
+            "replay_prefetch_max_windows": 96,
             "replay_heap_percent": 75,
         },
         "capacity_status": "calibrated",
