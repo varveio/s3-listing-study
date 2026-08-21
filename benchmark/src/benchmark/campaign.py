@@ -746,7 +746,7 @@ def render_batch_job(
         if replay is not None and replay.backend.fixture_uri is not None:
             # The staged fixture, raw TSV product, container layers, and upload
             # spool share this disk. This is setup/output capacity, not memory.
-            policy["bootDisk"]["sizeGb"] = "600"
+            policy["bootDisk"]["sizeGb"] = "100"
     allocation_policy: dict[str, Any] = {
         "instances": [{"policy": policy}],
         "serviceAccount": {"email": attempt.service_account},
