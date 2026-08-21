@@ -32,7 +32,8 @@ tools:
     cases:
       - mode: recursive-parquet
         concurrency: 1024
-        parquet_writers: 4
+        config:
+          parquet_writers: 4
         purpose: diagnostic
 
 exclude:
