@@ -87,6 +87,12 @@ REPLAY_READINESS_TIMEOUT_S = 600
 """Allowance for a replay server to derive its serving index before timing."""
 
 N4_BOOT_DISK = {"type": "hyperdisk-balanced", "image": "batch-cos"}
+REPLAY_STAGING_IMAGE = (
+    "gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:"
+    "cf72dd63b7643c117ef53378a41bef6db6a01fa3d561f2b456d7abd8bbeb9ba6"
+)
+REPLAY_FIXTURE_HOST_DIR = "/mnt/disks/replay-fixture"
+REPLAY_FIXTURE_CONTAINER_DIR = "/fixtures/source"
 PINNED_IMAGE_RE = re.compile(r"\A[^\s@]+@sha256:([0-9a-f]{64})\Z")
 SECRET_RE = re.compile(r"\Aprojects/[^/]+/secrets/[^/]+/versions/[^/]+\Z")
 HEX64_RE = re.compile(r"\A[0-9a-f]{64}\Z")
@@ -620,10 +626,15 @@ def render_batch_job(
         assert container_memory is not None
         container["options"] = _runnable_options(summary.subject_cpuset, container_memory)
         backend = replay.backend
+        fixture_path = (
+            REPLAY_FIXTURE_CONTAINER_DIR
+            if backend.fixture_uri is not None
+            else f"/fixtures/{attempt.target_bucket}"
+        )
         server_commands = [
             "serve",
             "--fixture",
-            f"/fixtures/{attempt.target_bucket}",
+            fixture_path,
             "--bucket",
             attempt.target_bucket,
             "--host",
@@ -650,12 +661,31 @@ def render_batch_job(
                     str(backend.latency_scale),
                 )
             )
+        server_options = _runnable_options(summary.server_cpuset, allocation.replay_memory_gb)
+        subject_options = _runnable_options(summary.subject_cpuset, container_memory)
+        staging_runnable = None
+        if backend.fixture_uri is not None:
+            volume = f"--volume={REPLAY_FIXTURE_HOST_DIR}:{REPLAY_FIXTURE_CONTAINER_DIR}"
+            server_options = f"{server_options} {volume}"
+            staging_runnable = {
+                "container": {
+                    "imageUri": REPLAY_STAGING_IMAGE,
+                    "commands": [
+                        "gcloud",
+                        "storage",
+                        "cp",
+                        backend.fixture_uri,
+                        f"{REPLAY_FIXTURE_CONTAINER_DIR}/",
+                    ],
+                    "options": volume,
+                }
+            }
         server_runnable = {
             "background": True,
             "container": {
                 "imageUri": backend.server_image_uri,
                 "commands": server_commands,
-                "options": _runnable_options(summary.server_cpuset, allocation.replay_memory_gb),
+                "options": server_options,
             },
             "environment": {
                 "variables": {
@@ -667,7 +697,10 @@ def render_batch_job(
                 }
             },
         }
+        container["options"] = subject_options
         runnables = [server_runnable, subject_runnable]
+        if staging_runnable is not None:
+            runnables.insert(0, staging_runnable)
     readiness_allowance = REPLAY_READINESS_TIMEOUT_S if replay is not None else 0
     default_duration = (
         attempt.timeout_s + int(options.term_grace) + DEADLINE_SLACK_S + readiness_allowance
@@ -696,6 +729,10 @@ def render_batch_job(
     }
     if attempt.machine_type.startswith("n4-"):
         policy["bootDisk"] = dict(N4_BOOT_DISK)
+        if replay is not None and replay.backend.fixture_uri is not None:
+            # The staged fixture, raw TSV product, container layers, and upload
+            # spool share this disk. This is setup/output capacity, not memory.
+            policy["bootDisk"]["sizeGb"] = "600"
     allocation_policy: dict[str, Any] = {
         "instances": [{"policy": policy}],
         "serviceAccount": {"email": attempt.service_account},

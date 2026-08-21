@@ -11,10 +11,10 @@ from dataclasses import dataclass
 REPLAY_SPEC_VERSION = 3
 REPLAY_BLOCK_FIELDS = (
     "server_image_uri",
-    "fixture_sha256",
     "serving_mode",
     "latency_model",
 )
+REPLAY_FIXTURE_FIELDS = ("fixture_sha256", "fixture_uri")
 LATENCY_MODEL_FIELDS = ("deadlines_ms", "scale", "jitter")
 INJECT_SHAPES = ("worker_page", "pivot_probe", "structure_probe")
 SERVING_MODES = ("sorted", "duckdb")
@@ -54,7 +54,8 @@ class ReplayBackend:
     """The plan-wide server implementation, fixture, and latency treatment."""
 
     server_image_uri: str
-    fixture_sha256: str
+    fixture_sha256: str | None
+    fixture_uri: str | None
     serving_mode: str
     latency_deadlines_ms: tuple[tuple[str, int], ...] | None
     latency_scale: float | None
@@ -76,12 +77,17 @@ class ReplayBackend:
                 "scale": self.latency_scale,
                 "jitter": self.latency_jitter,
             }
-        return {
+        document = {
             "server_image_uri": self.server_image_uri,
-            "fixture_sha256": self.fixture_sha256,
             "serving_mode": self.serving_mode,
             "latency_model": latency_model,
         }
+        if self.fixture_uri is not None:
+            document["fixture_uri"] = self.fixture_uri
+        else:
+            assert self.fixture_sha256 is not None
+            document["fixture_sha256"] = self.fixture_sha256
+        return document
 
 
 @dataclass(frozen=True)
@@ -140,7 +146,8 @@ class ReplayAllocationSummary:
 def parse_backend(value: object) -> ReplayBackend:
     if not isinstance(value, Mapping):
         raise ReplayError("replay backend is not an object")
-    unknown = sorted(set(value) - set(REPLAY_BLOCK_FIELDS))
+    allowed = {*REPLAY_BLOCK_FIELDS, *REPLAY_FIXTURE_FIELDS}
+    unknown = sorted(set(value) - allowed)
     if unknown:
         raise ReplayError(f"replay backend has unknown field(s): {', '.join(map(str, unknown))}")
     missing = sorted(set(REPLAY_BLOCK_FIELDS) - set(value))
@@ -149,9 +156,21 @@ def parse_backend(value: object) -> ReplayBackend:
     image = value.get("server_image_uri")
     if not isinstance(image, str) or _PINNED_IMAGE_RE.fullmatch(image) is None:
         raise ReplayError("replay server_image_uri is not digest-pinned")
-    fixture = value.get("fixture_sha256")
-    if not isinstance(fixture, str) or _HEX64_RE.fullmatch(fixture) is None:
+    fixture_sha256 = value.get("fixture_sha256")
+    fixture_uri = value.get("fixture_uri")
+    if (fixture_sha256 is None) == (fixture_uri is None):
+        raise ReplayError("replay requires exactly one of fixture_sha256 or fixture_uri")
+    if fixture_sha256 is not None and (
+        not isinstance(fixture_sha256, str) or _HEX64_RE.fullmatch(fixture_sha256) is None
+    ):
         raise ReplayError("replay fixture_sha256 is not a sha256 digest")
+    if fixture_uri is not None and (
+        not isinstance(fixture_uri, str)
+        or not fixture_uri.startswith("gs://")
+        or not fixture_uri.endswith("/*.parquet")
+        or any(character.isspace() for character in fixture_uri)
+    ):
+        raise ReplayError("replay fixture_uri must be a gs:// URI ending in /*.parquet")
     mode = value.get("serving_mode")
     if mode not in SERVING_MODES:
         raise ReplayError(f"replay serving_mode must be one of {', '.join(SERVING_MODES)}")
@@ -159,7 +178,8 @@ def parse_backend(value: object) -> ReplayBackend:
     if latency == "none":
         return ReplayBackend(
             server_image_uri=image,
-            fixture_sha256=fixture,
+            fixture_sha256=fixture_sha256,
+            fixture_uri=fixture_uri,
             serving_mode=mode,
             latency_deadlines_ms=None,
             latency_scale=None,
@@ -185,7 +205,8 @@ def parse_backend(value: object) -> ReplayBackend:
         raise ReplayError("replay latency_model.jitter must be 'none'")
     return ReplayBackend(
         server_image_uri=image,
-        fixture_sha256=fixture,
+        fixture_sha256=fixture_sha256,
+        fixture_uri=fixture_uri,
         serving_mode=mode,
         latency_deadlines_ms=deadlines,
         latency_scale=float(scale),
@@ -225,8 +246,8 @@ def parse_document(raw: str | Mapping[str, object]) -> ReplayConfig:
 def parse_plan(value: object) -> ReplayPlan:
     if not isinstance(value, Mapping):
         raise ReplayError("replay plan block is not an object")
-    allowed = {*REPLAY_BLOCK_FIELDS, "capacity_status"}
-    required = allowed
+    allowed = {*REPLAY_BLOCK_FIELDS, *REPLAY_FIXTURE_FIELDS, "capacity_status"}
+    required = {*REPLAY_BLOCK_FIELDS, "capacity_status"}
     if set(value) - allowed or required - set(value):
         unknown = sorted(set(value) - allowed)
         missing = sorted(required - set(value))
@@ -240,7 +261,13 @@ def parse_plan(value: object) -> ReplayPlan:
     if status not in CAPACITY_STATUSES:
         raise ReplayError(f"replay capacity_status must be one of {', '.join(CAPACITY_STATUSES)}")
     return ReplayPlan(
-        parse_backend({field: value[field] for field in REPLAY_BLOCK_FIELDS if field in value}),
+        parse_backend(
+            {
+                field: value[field]
+                for field in allowed
+                if field in value and field != "capacity_status"
+            }
+        ),
         status,
     )
 

@@ -272,6 +272,43 @@ def test_renderer_keeps_fixed_latency_flags(tmp_path: Path) -> None:
     ]
 
 
+def test_uri_fixture_is_staged_before_the_server_and_never_put_in_its_image(
+    tmp_path: Path,
+) -> None:
+    plan = Plan.load(ROOT / "benchmark/plans/refinements/sentinel-cogs/sentinel-cogs.yaml")
+    case = plan.cases[0]
+    images = image_set(tmp_path)
+    attempt = campaign.planned_attempt(case, context(plan, case, images))[2](1)[0]
+    request = campaign.render_batch_job(
+        attempt,
+        images.image_for(case.tool),
+        suite=SUITE,
+        options=context(plan, case, images).options,
+    )
+
+    stage, server, subject = request["taskGroups"][0]["taskSpec"]["runnables"]
+    assert stage["container"]["commands"] == [
+        "gcloud",
+        "storage",
+        "cp",
+        case.replay.backend.fixture_uri,
+        "/fixtures/source/",
+    ]
+    assert stage["container"]["options"] == (
+        "--volume=/mnt/disks/replay-fixture:/fixtures/source"
+    )
+    assert server["background"] is True
+    fixture_index = server["container"]["commands"].index("--fixture")
+    assert server["container"]["commands"][fixture_index + 1] == "/fixtures/source"
+    assert "--volume=/mnt/disks/replay-fixture:/fixtures/source" in server["container"]["options"]
+    assert "--volume" not in subject["container"]["options"]
+    assert request["allocationPolicy"]["instances"][0]["policy"]["bootDisk"] == {
+        "type": "hyperdisk-balanced",
+        "image": "batch-cos",
+        "sizeGb": "600",
+    }
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [

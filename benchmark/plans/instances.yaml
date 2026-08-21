@@ -54,3 +54,8 @@ instances:
   - { vcpus: 32, memory_gb: 64, machine_type: n4-highcpu-32 }
   - { vcpus: 32, memory_gb: 128, machine_type: n4-standard-32 }
   - { vcpus: 32, memory_gb: 256, machine_type: n4-highmem-32 }
+
+  # Custom 34-vCPU shapes let two 16-vCPU containers coexist with only two
+  # CPUs left to the Batch agent and host, instead of jumping to a 48-vCPU box.
+  - { vcpus: 34, memory_gb: 68, machine_type: n4-custom-34-69632 }
+  - { vcpus: 34, memory_gb: 136, machine_type: n4-custom-34-139264 }

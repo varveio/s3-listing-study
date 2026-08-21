@@ -1,21 +1,15 @@
 #!/usr/bin/env bash
 # Assemble a replay-server image's build context and build it.
 #
-# Neither input is in this repository: the server distribution is built from a
-# swath checkout, and the fixture is a listing capture the study does not commit.
-# This script records how the two are put together, so a receipt can name
-# exactly what went in.
+# The server distribution is built from a Swath checkout. Fixture data is not a
+# build input and must never be copied into this image.
 #
 #   SWATH_REPO=~/workspaces/swath \
-#   FIXTURE_DIR=~/work/sorel-replay/sorted \
-#   FIXTURE_BUCKET=sorel-20m \
-#   ./build.sh us-east1-docker.pkg.dev/varve-oss/s3-listing-study/replay-server:sorel-20m
+#   ./build.sh us-east1-docker.pkg.dev/varve-oss/s3-listing-study/replay-server:code-only
 set -euo pipefail
 
 TAG=${1:?usage: build.sh <image-tag>}
 SWATH_REPO=${SWATH_REPO:?set SWATH_REPO to a swath checkout}
-FIXTURE_DIR=${FIXTURE_DIR:?set FIXTURE_DIR to a directory of sorted *.parquet parts}
-FIXTURE_BUCKET=${FIXTURE_BUCKET:?set FIXTURE_BUCKET to the bucket name the server should answer for}
 
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 context=$(mktemp -d)
@@ -34,23 +28,15 @@ dirty=$(git -C "$SWATH_REPO" status --porcelain | wc -l)
   exit 1
 }
 
-mkdir -p "$context/dist" "$context/fixture/$FIXTURE_BUCKET"
+mkdir -p "$context/dist"
 cp -a "$dist/." "$context/dist/"
-cp -a "$FIXTURE_DIR"/*.parquet "$context/fixture/$FIXTURE_BUCKET/"
 cp "$here/entrypoint.sh" "$context/entrypoint.sh"
 chmod +x "$context/entrypoint.sh"
 
-# One digest over the served bytes, in the parts' sorted order: what the server
-# answered from, independent of how many files it took to say it.
-fixture_sha=$(find "$context/fixture/$FIXTURE_BUCKET" -name '*.parquet' -print0 \
-  | sort -z | xargs -0 cat | sha256sum | cut -d' ' -f1)
-
-echo "build.sh: swath=$commit fixture_sha256=$fixture_sha bucket=$FIXTURE_BUCKET"
+echo "build.sh: swath=$commit fixture=external"
 
 docker build \
   --file "$here/Dockerfile" \
   --build-arg "SWATH_COMMIT=$commit" \
-  --build-arg "FIXTURE_SHA256=$fixture_sha" \
-  --build-arg "FIXTURE_BUCKET=$FIXTURE_BUCKET" \
   --tag "$TAG" \
   "$context"
