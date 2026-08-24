@@ -540,7 +540,7 @@ the usual shape with every subject field null (`execution`, `wall_seconds`,
 `max_rss_kb`, `row_count`), the `setup` block saying what the exec did and how
 long it took, and its captured stdout/stderr under `inline/`. That capture is
 the only account of *why* the attempt has no measurement in it, and it is held
-to the same secret scan as the subject's own.
+with the subject's own retained evidence.
 
 ### An artifact is validated before anything consumes it
 

@@ -982,6 +982,14 @@ def test_swath_tsv_dataset_count_and_normalize_stream_parts(tmp_path: Path) -> N
     adapter = load_adapter(REPO, "swath")
     assert adapter.count_rows(b"", "recursive-tsv-zstd", native_root=str(native)) == 2
 
+    (dataset / "data/part-w2-00000.tsv.zst").write_bytes(
+        zstandard.ZstdCompressor().compress(
+            header + b"ambiguous\\x0akey\t3\t2026-03-16T14:41:52Z\te3\tSTANDARD\tOBJECT\n"
+        )
+    )
+    with pytest.raises(ContractViolation, match="ambiguous"):
+        adapter.count_rows(b"", "recursive-tsv-zstd", native_root=str(native))
+
 
 def test_count_rows_preserves_malformed_and_row_filter_semantics() -> None:
     import duckdb

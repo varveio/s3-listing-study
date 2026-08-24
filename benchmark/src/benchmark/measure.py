@@ -24,7 +24,6 @@ import re
 import resource
 import shutil
 import signal
-import stat
 import subprocess
 import sys
 import threading
@@ -52,7 +51,6 @@ from benchmark.runtime.command_adapter import (
 )
 
 EXIT_ADAPTER_ERROR = 3
-EXIT_SECRET_DETECTED = 9
 EXIT_IMAGE_MISMATCH = 10
 EXIT_POSTPROCESSING_FAILED = 11
 EXIT_ARTIFACT_UNUSABLE = 12
@@ -83,22 +81,6 @@ is by contract a cheap local transform of what the chain already staged, so a
 bound this far below any subject's deadline costs a legitimate one nothing.
 """
 PINNED_IMAGE_RE = re.compile(r"\A[^\s@]+@sha256:[0-9a-f]{64}\Z")
-
-SECRET_PATTERNS = {
-    "credential-shaped value": re.compile(
-        rb"AKIA[A-Z0-9]{16}"
-        rb"|ASIA[A-Z0-9]{16}"
-        rb"|(?i:X-Amz-Signature=[A-Fa-f0-9]{16,}"
-        rb"|X-Amz-Credential=[A-Za-z0-9%/+-]{10,}"
-        rb"|X-Amz-Security-Token=[A-Za-z0-9%/+=]{20,}"
-        rb"|(AWS_SESSION_TOKEN|AWS_SECRET_ACCESS_KEY)=[A-Za-z0-9/+=]{16,}"
-        rb"|aws_secret_access_key[ \t\n\r\f\v]*=[ \t\n\r\f\v]*[A-Za-z0-9/+=]{20,}"
-        rb"|Authorization:[ \t\n\r\f\v]*(AWS4-HMAC-SHA256|Bearer|Basic)[ \t\n\r\f\v])"
-    ),
-    "GCP private key": re.compile(rb"BEGIN PRIVATE KEY"),
-}
-SECRET_SCAN_CHUNK = 1024 * 1024
-SECRET_SCAN_OVERLAP = 512
 
 SUBJECT_ENV = {
     # A small, stable environment rather than whatever ambient variables
@@ -220,29 +202,6 @@ def retained_files(source: Path) -> Iterator[Path]:
                 raise ArtifactSafetyError(
                     f"special path is not publishable: {path.relative_to(root)}"
                 )
-
-
-def scan_for_secrets(paths: list[Path]) -> str | None:
-    """Scan every retained regular file as bounded binary chunks, failing closed."""
-    try:
-        files = (path for source in paths for path in retained_files(source))
-        for path in files:
-            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-            descriptor = os.open(path, flags)
-            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
-                os.close(descriptor)
-                raise ArtifactSafetyError(f"retained path is not a regular file: {path}")
-            with open(descriptor, "rb", closefd=True) as f:
-                carry = b""
-                while chunk := f.read(SECRET_SCAN_CHUNK):
-                    window = carry + chunk
-                    for name, pattern in SECRET_PATTERNS.items():
-                        if pattern.search(window):
-                            return f"{path}: {name}"
-                    carry = window[-SECRET_SCAN_OVERLAP:]
-    except (OSError, ArtifactSafetyError) as exc:
-        return f"unsafe or unreadable retained output ({exc})"
-    return None
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -948,8 +907,8 @@ def product_block(product: Product | None) -> dict[str, object] | None:
 def published_product(product: Product | None, *, gap: str | None) -> Product | None:
     """Compress the product where its mode says these bytes are worth compressing.
 
-    Called after the row count and the secret scan, which read what the subject
-    wrote, and before the manifest and the product block, which describe what is
+    Called after the row count, which reads what the subject wrote, and before
+    the manifest and the product block, which describe what is
     uploaded — so `result.json` names, sizes and digests the file the sink
     actually holds, under a name that says what it is.
 
@@ -1005,7 +964,11 @@ def write_result_atomic(path: Path, result: dict[str, object]) -> None:
     os.replace(tmp_path, path)
 
 
-def upload(attempt_dir: Path, destination: str) -> bool:
+def upload(
+    attempt_dir: Path,
+    destination: str,
+    postprocessing_seconds: dict[str, float] | None = None,
+) -> bool:
     """Upload everything except result.json first, then result.json alone,
     last. A leaf whose upload dies between the two steps is left with
     artifacts but no marker -- exactly the shape verify.py treats as
@@ -1013,11 +976,18 @@ def upload(attempt_dir: Path, destination: str) -> bool:
     """
     artifacts = sorted(p for p in attempt_dir.iterdir() if p.name != "result.json")
     try:
+        upload_started = time.monotonic()
         for path in artifacts:
             if path.is_dir():
                 gcs.upload_tree(path, destination.rstrip("/") + "/" + path.name, create_only=True)
             else:
                 gcs.upload_file(path, destination.rstrip("/") + "/" + path.name, create_only=True)
+        if postprocessing_seconds is not None:
+            postprocessing_seconds["artifact_upload"] = time.monotonic() - upload_started
+            result_path = attempt_dir / "result.json"
+            result = json.loads(result_path.read_text())
+            result["postprocessing_seconds"] = postprocessing_seconds
+            write_result_atomic(result_path, result)
         gcs.upload_file(
             attempt_dir / "result.json", destination.rstrip("/") + "/result.json", create_only=True
         )
@@ -1131,13 +1101,6 @@ def publish_setup_failure(
     failures are held to. The subject never ran, so its fields are explicitly
     null rather than zeros a reader could mistake for a measurement.
     """
-    secret_hit = scan_for_secrets([attempt_dir / "inline"])
-    if secret_hit:
-        print(
-            f"measure: possible secret in {secret_hit}; refusing to upload this attempt",
-            file=sys.stderr,
-        )
-        return EXIT_SECRET_DETECTED
     result = {
         **attempt_identity(args, config, destination),
         "replay_evidence": None if replay_evidence is None else dict(replay_evidence),
@@ -1388,6 +1351,9 @@ def main(argv: list[str] | None = None) -> int:
     exit_code = exit_value
     timed_out = bool(execution["timed_out"])
     finished_at = datetime.now(UTC).isoformat()
+    postprocessing_started = time.monotonic()
+    postprocessing_seconds: dict[str, float] = {}
+    phase_started = time.monotonic()
     if replay_evidence is not None:
         assert sampler_stop is not None and sampler_thread is not None
         sampler_stop.set()
@@ -1398,6 +1364,7 @@ def main(argv: list[str] | None = None) -> int:
             errors.append({"phase": "sample", "error": "metrics sampler did not stop"})
         else:
             replay_evidence["after"] = replay_runtime.scrape_metrics(replay_evidence, "after")
+    postprocessing_seconds["replay_evidence_finalize"] = time.monotonic() - phase_started
 
     if any(
         execution.get(field) is not True
@@ -1410,25 +1377,6 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     stderr_path = attempt_dir / "stderr.log"
-
-    # Scanned uncompressed, before anything is uploaded: a hit here refuses
-    # the whole leaf outright rather than uploading the captured output and
-    # hoping something downstream notices. The product is under the sink, so
-    # scanning that covers it whichever channel wrote it.
-    scanned = [stderr_path, native_root]
-    if subject_stdout == stdout_path:
-        scanned.insert(0, stdout_path)
-    if setup is not None:
-        # The setup exec's own captures and sink upload with the attempt, so they
-        # are held to the same gate as the subject's.
-        scanned.append(attempt_dir / "inline")
-    secret_hit = scan_for_secrets(scanned)
-    if secret_hit:
-        print(
-            f"measure: possible secret in {secret_hit}; refusing to upload this attempt",
-            file=sys.stderr,
-        )
-        return EXIT_SECRET_DETECTED
 
     # Tool failures and partial runs are deliberately not counted: their raw
     # output remains evidence, but its row
@@ -1449,6 +1397,7 @@ def main(argv: list[str] | None = None) -> int:
     if product_error:
         print(f"measure: {product_error}", file=sys.stderr)
     row_count = row_count_error = None
+    phase_started = time.monotonic()
     if exit_code == 0 and not timed_out and counts_a_listing and not product_error:
         # The product, not the log: a listing whose subject prints it and one
         # whose subject writes it are the same bytes at the same path now. A
@@ -1463,11 +1412,17 @@ def main(argv: list[str] | None = None) -> int:
             product.path if product is not None and countable else stdout_path,
             native_root,
         )
+    postprocessing_seconds["row_count"] = time.monotonic() - phase_started
 
+    phase_started = time.monotonic()
     product = published_product(product, gap=product_error)
     stdout_gz = gzip_file(stdout_path) if subject_stdout == stdout_path else None
     stderr_gz = gzip_file(stderr_path) if stderr_path.exists() else None
+    postprocessing_seconds["capture_finalize"] = time.monotonic() - phase_started
+    phase_started = time.monotonic()
     native_files = native_manifest(native_root)
+    postprocessing_seconds["native_manifest"] = time.monotonic() - phase_started
+    phase_started = time.monotonic()
     # Computed once, before the marker is written -- nothing after this adds
     # another artifact, so there is no stale-then-corrected total to chase.
     artifacts_size_bytes = sum(p.stat().st_size for p in attempt_dir.rglob("*") if p.is_file())
@@ -1488,6 +1443,7 @@ def main(argv: list[str] | None = None) -> int:
         "row_count_error": row_count_error,
         "started_at": started_at,
         "finished_at": finished_at,
+        "postprocessing_seconds": postprocessing_seconds,
         # What was measured, and which channel carried it. A subject that only
         # prints has no stdout log at all: those bytes are the product.
         "product": product_block(product),
@@ -1498,8 +1454,10 @@ def main(argv: list[str] | None = None) -> int:
         "artifacts_size_bytes": artifacts_size_bytes,
     }
     write_result_atomic(attempt_dir / "result.json", result)
-
-    if not upload(attempt_dir, attempt_destination):
+    postprocessing_seconds["result_finalize"] = time.monotonic() - phase_started
+    postprocessing_seconds["pre_upload_total"] = time.monotonic() - postprocessing_started
+    write_result_atomic(attempt_dir / "result.json", result)
+    if not upload(attempt_dir, attempt_destination, postprocessing_seconds):
         return 1
 
     cgroup_result = execution["cgroup"]

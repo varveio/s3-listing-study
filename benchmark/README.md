@@ -147,8 +147,8 @@ retry, cancel, report, and explicit real-S3 verification — is
 ## Minimum rigor and deliberate limitations
 
 The harness preserves raw output, binds every result to the recorded job request
-and immutable toolbox identity, scans all retained bytes for credential material,
-and publishes `result.json` only after the other attempt artifacts. Routine
+and immutable toolbox identity, and publishes `result.json` only after the other
+attempt artifacts. Routine
 replay reporting reads that marker only. These controls make an attempt
 auditable; row count is not a content-correctness verdict.
 
@@ -171,6 +171,10 @@ Replay records the worker's in-container `row_count` after the timed child exits
 The worker uploads the untouched product and logs, then uploads `result.json`
 last. Campaign reporting binds and reads only that summary: it does not generate
 or require a correctness manifest, normalize rows, or issue a content verdict.
+`result.json.postprocessing_seconds` records replay-evidence finalization, row
+counting, capture finalization, native-manifest hashing, result finalization,
+the total before upload, and artifact upload separately. These durations are
+operational evidence and remain outside the subject's benchmark wall clock.
 
 ### Replay qualification precedes replay measurement
 

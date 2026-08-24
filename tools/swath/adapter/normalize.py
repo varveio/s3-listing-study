@@ -187,6 +187,23 @@ PARQUET_COUNT_QUERY = """
     WHERE coalesce("row_type", 'OBJECT') = 'OBJECT'
 """
 
+TSV_DATASET_COUNT_QUERY = f"""
+    SELECT count(*) FILTER (
+               WHERE coalesce("row_type", '') IN ('', 'OBJECT')
+                 AND NOT ("key" = 'key' AND "size" = 'size'
+                          AND "last_modified" = 'last_modified')
+           ),
+           count(*) FILTER (
+               WHERE coalesce("row_type", '') IN ('', 'OBJECT')
+                 AND NOT ("key" = 'key' AND "size" = 'size'
+                          AND "last_modified" = 'last_modified')
+                 AND regexp_matches("key", $control_escape)
+           )
+    FROM read_csv($glob, delim = '\t', quote = '', escape = '', header = false,
+                  auto_detect = false, columns = {SWATH_TSV_COLUMNS},
+                  compression = 'auto', strict_mode = true)
+"""
+
 
 def _dataset_root(dataset: str) -> Path:
     """Accept either Swath's dataset root or the native parent containing it."""
@@ -209,33 +226,6 @@ def _dataset_parts(dataset: str, pattern: str, description: str) -> tuple[Path, 
     if not parts:
         raise ValueError(f"no {description} parts under {root / 'data'}")
     return root, parts
-
-
-def _count_tsv_rows(source: IO[bytes]) -> int:
-    """Count native object rows with memory bounded by one physical TSV line."""
-    count = 0
-    for number, line in enumerate(iter_lf_lines(source), 1):
-        if not line:
-            continue
-        fields = line.split(b"\t")
-        if fields[:3] == [b"key", b"size", b"last_modified"]:
-            continue
-        if len(fields) != 6:
-            raise ContractViolation(
-                f"native TSV line {number} has {len(fields)} fields, expected 6; "
-                "a TAB in a key is unrepresentable",
-                field="key",
-            )
-        if fields[5] not in (b"", b"OBJECT"):
-            continue
-        if CONTROL_ESCAPE.search(fields[0]):
-            raise ContractViolation(
-                "text-sink key carries an ambiguous swath \\xHH control escape; "
-                "use recursive-jsonl",
-                field="key",
-            )
-        count += 1
-    return count
 
 
 @contextmanager
@@ -279,11 +269,31 @@ def count_rows(data: bytes, mode: str, prefix: str = "", native_root: str = "") 
         return row[0]
     if mode in TSV_DATASET_MODES:
         _root, parts = _tsv_dataset_parts(native_root)
-        count = 0
-        for part in parts:
-            with _open_tsv_part(part) as source:
-                count += _count_tsv_rows(source)
-        return count
+        import duckdb
+
+        try:
+            row = (
+                connect()
+                .execute(
+                    TSV_DATASET_COUNT_QUERY,
+                    {
+                        "glob": [str(part) for part in parts],
+                        "control_escape": r"\\x[0-9a-fA-F]{2}",
+                    },
+                )
+                .fetchone()
+            )
+        except duckdb.Error as exc:
+            raise ValueError(f"dataset is not countable TSV: {exc}") from exc
+        if row is None or not isinstance(row[0], int):  # pragma: no cover - DuckDB invariant
+            raise RuntimeError("DuckDB count query returned no integer row")
+        if row[1]:
+            raise ContractViolation(
+                "text-sink key carries an ambiguous swath \\xHH control escape; "
+                "use recursive-jsonl",
+                field="key",
+            )
+        return row[0]
     if mode == "recursive-table":
         count = 0
         for number, line in enumerate(iter_lf_lines(data), 1):
