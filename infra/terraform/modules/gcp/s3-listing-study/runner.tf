@@ -177,7 +177,10 @@ resource "google_compute_instance" "runner" {
   boot_disk {
     auto_delete = true
     initialize_params {
-      image = local.runner.image
+      # A supplied snapshot restores the hand-provisioned runner disk during a
+      # deliberate replacement; otherwise the runner starts from its image.
+      image    = var.runner_boot_snapshot == null ? local.runner.image : null
+      snapshot = var.runner_boot_snapshot
       # Sized for the multi-stage toolbox build, downloaded tool closures, and
       # reusable Docker build cache.
       size = local.runner.disk_gb
@@ -238,6 +241,7 @@ resource "google_compute_instance" "runner" {
     ignore_changes = [
       metadata["ssh-keys"],
       boot_disk[0].initialize_params[0].image,
+      boot_disk[0].initialize_params[0].snapshot,
     ]
   }
 

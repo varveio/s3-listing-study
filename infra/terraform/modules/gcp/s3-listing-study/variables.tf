@@ -88,6 +88,13 @@ variable "runner_image" {
   default     = "projects/ubuntu-os-cloud/global/images/family/ubuntu-2404-lts-amd64"
 }
 
+variable "runner_boot_snapshot" {
+  description = "Optional Compute Engine snapshot self link to restore the runner boot volume during a deliberate replacement. The restored disk retains runner_disk_gb and runner_disk_type settings; leave null to initialize from runner_image."
+  type        = string
+  default     = null
+  nullable    = true
+}
+
 variable "runner_disk_gb" {
   description = "Runner boot disk size for the multi-stage toolbox, downloaded tool closures, and Docker build cache."
   type        = number
