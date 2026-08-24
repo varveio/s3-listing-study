@@ -30,9 +30,9 @@ defaults:
 tools:
   swath:
     cases:
-      - mode: recursive-tsv-dataset
+      - mode: recursive-tsv-zstd
         concurrency: 1024
-        config: {text_writers: 8, compression: zstd}
+        config: {text_writers: 8}
         purpose: diagnostic
 
 exclude:

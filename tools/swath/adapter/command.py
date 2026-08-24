@@ -46,7 +46,7 @@ ALIGNED_FIELDS = ("key", "size", "mtime")
 AXES = {"concurrency": CONCURRENCY, "heap_percent": Fixed(HEAP_PERCENT)}
 """Swath is a JVM, so every mode feels the heap share; every mode takes the flag."""
 
-CONFIG_KEYS = frozenset({"compression", "parquet_writers", "text_writers"})
+CONFIG_KEYS = frozenset({"parquet_writers", "text_writers"})
 """Exact directory writer-pool widths when a diagnostic chooses to tune them."""
 
 LISTING = "listing"
@@ -88,6 +88,16 @@ MODES = {
         product_artifact=LISTING,
     ),
     "recursive-tsv-dataset": Mode(
+        product="text",
+        fields=TEXT_FIELDS,
+        axes=AXES,
+        purpose_ceiling="diagnostic",
+        executable=SWATH.name,
+        artifacts=DATASET,
+        product_artifact=LISTING,
+        product_channel="dataset",
+    ),
+    "recursive-tsv-zstd": Mode(
         product="text",
         fields=TEXT_FIELDS,
         axes=AXES,
@@ -190,15 +200,6 @@ def _text_writers(request: CommandRequest) -> str:
     return str(value)
 
 
-def _text_compression(request: CommandRequest) -> str:
-    value = request.config.get("compression", "none")
-    if value not in {"none", "gzip", "zstd"}:
-        raise CommandAdapterError(
-            f"{TOOL} compression must be one of none, gzip, or zstd; got: {value!r}"
-        )
-    return str(value)
-
-
 def _build_tail(request: CommandRequest) -> tuple[str, ...]:
     uri = f"s3://{request.bucket}" + (f"/{request.prefix}" if request.prefix else "")
     # --color replaces v0.2.0's --disable-color-tracing, which no longer exists:
@@ -226,7 +227,7 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
                 f"mode {request.mode!r} writes a directory dataset and requires a sink directory"
             )
         dataset = f"{request.sink_dir.rstrip('/')}/{DATASET_NAME}"
-        if request.mode == "recursive-tsv-dataset":
+        if request.mode in {"recursive-tsv-dataset", "recursive-tsv-zstd"}:
             return (
                 *common,
                 "--format",
@@ -238,7 +239,7 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
                 "--text-writers",
                 _text_writers(request),
                 "--compression",
-                _text_compression(request),
+                "zstd" if request.mode == "recursive-tsv-zstd" else "none",
             )
         if request.mode == "recursive-parquet":
             return (*common, "--format", "parquet", "-o", dataset, *_parquet_writers(request))

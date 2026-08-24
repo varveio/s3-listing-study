@@ -65,7 +65,7 @@ UNREADABLE_EXIT = 1
 # Declared rather than inferred, so the equivalence harness can name a mode no
 # committed payload exercises — untested by construction, and invisible otherwise.
 STREAM_TSV_MODES = frozenset({"recursive-tsv", "seed-none"})
-TSV_DATASET_MODES = frozenset({"recursive-tsv-dataset"})
+TSV_DATASET_MODES = frozenset({"recursive-tsv-dataset", "recursive-tsv-zstd"})
 TSV_MODES = STREAM_TSV_MODES | TSV_DATASET_MODES
 
 PARQUET_MODES = frozenset({"recursive-parquet", "recursive-parquet-sorted"})

@@ -65,6 +65,7 @@ DATASET_MODES = {
     ("swath", "recursive-parquet"),
     ("swath", "recursive-parquet-sorted"),
     ("swath", "recursive-tsv-dataset"),
+    ("swath", "recursive-tsv-zstd"),
 }
 
 UNEXERCISED = {
@@ -84,6 +85,7 @@ UNEXERCISED = {
         "recursive-parquet",
         "recursive-parquet-sorted",
         "recursive-tsv-dataset",
+        "recursive-tsv-zstd",
     },
 }
 
@@ -968,7 +970,7 @@ def test_swath_tsv_dataset_count_and_normalize_stream_parts(tmp_path: Path) -> N
     done = subprocess.run(
         [
             str(adapter_path("swath")),
-            "recursive-tsv-dataset",
+            "recursive-tsv-zstd",
             "--dataset",
             str(native),
         ],
@@ -978,7 +980,7 @@ def test_swath_tsv_dataset_count_and_normalize_stream_parts(tmp_path: Path) -> N
     assert done.returncode == 0, done.stderr
     assert [line.split(b"\t", 1)[0] for line in done.stdout.splitlines()] == [b"a", b"b"]
     adapter = load_adapter(REPO, "swath")
-    assert adapter.count_rows(b"", "recursive-tsv-dataset", native_root=str(native)) == 2
+    assert adapter.count_rows(b"", "recursive-tsv-zstd", native_root=str(native)) == 2
 
 
 def test_count_rows_preserves_malformed_and_row_filter_semantics() -> None:
