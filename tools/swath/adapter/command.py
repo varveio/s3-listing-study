@@ -46,7 +46,7 @@ ALIGNED_FIELDS = ("key", "size", "mtime")
 AXES = {"concurrency": CONCURRENCY, "heap_percent": Fixed(HEAP_PERCENT)}
 """Swath is a JVM, so every mode feels the heap share; every mode takes the flag."""
 
-CONFIG_KEYS = frozenset({"parquet_writers", "text_writers"})
+CONFIG_KEYS = frozenset({"compression", "parquet_writers", "text_writers"})
 """Exact directory writer-pool widths when a diagnostic chooses to tune them."""
 
 LISTING = "listing"
@@ -190,6 +190,15 @@ def _text_writers(request: CommandRequest) -> str:
     return str(value)
 
 
+def _text_compression(request: CommandRequest) -> str:
+    value = request.config.get("compression", "none")
+    if value not in {"none", "gzip", "zstd"}:
+        raise CommandAdapterError(
+            f"{TOOL} compression must be one of none, gzip, or zstd; got: {value!r}"
+        )
+    return str(value)
+
+
 def _build_tail(request: CommandRequest) -> tuple[str, ...]:
     uri = f"s3://{request.bucket}" + (f"/{request.prefix}" if request.prefix else "")
     # --color replaces v0.2.0's --disable-color-tracing, which no longer exists:
@@ -228,6 +237,8 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
                 dataset,
                 "--text-writers",
                 _text_writers(request),
+                "--compression",
+                _text_compression(request),
             )
         if request.mode == "recursive-parquet":
             return (*common, "--format", "parquet", "-o", dataset, *_parquet_writers(request))

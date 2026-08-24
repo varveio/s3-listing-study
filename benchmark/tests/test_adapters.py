@@ -946,6 +946,8 @@ def test_swath_dataset_count_and_normalize_accept_native_parent(
 
 
 def test_swath_tsv_dataset_count_and_normalize_stream_parts(tmp_path: Path) -> None:
+    import zstandard
+
     native = tmp_path / "native"
     dataset = native / "listing"
     (dataset / "data").mkdir(parents=True)
@@ -953,10 +955,13 @@ def test_swath_tsv_dataset_count_and_normalize_stream_parts(tmp_path: Path) -> N
     (dataset / "data/part-w0-00000.tsv").write_bytes(
         header + b"a\t1\t2026-03-16T14:41:50Z\te1\tSTANDARD\tOBJECT\n"
     )
-    (dataset / "data/part-w1-00000.tsv").write_bytes(
+    compressed = (
         header
         + b"prefix/\t\t\t\t\tCOMMON_PREFIX\n"
         + b"b\t2\t2026-03-16T14:41:51Z\te2\tSTANDARD\tOBJECT\n"
+    )
+    (dataset / "data/part-w1-00000.tsv.zst").write_bytes(
+        zstandard.ZstdCompressor().compress(compressed)
     )
     (dataset / "_SUCCESS").touch()
 

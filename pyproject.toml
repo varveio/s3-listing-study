@@ -25,6 +25,9 @@ dependencies = [
     # the same way a bare `python3` does; the oracle preflight also refuses to
     # judge without it rather than reporting a missing import as a port bug.
     "pyyaml>=6.0",
+    # Swath can compress parallel TSV dataset parts with Zstandard. The worker
+    # independently streams those parts after timing to count and validate rows.
+    "zstandard>=0.23",
 ]
 
 [project.scripts]

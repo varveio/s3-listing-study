@@ -32,7 +32,7 @@ tools:
     cases:
       - mode: recursive-tsv-dataset
         concurrency: 1024
-        config: {text_writers: 8}
+        config: {text_writers: 8, compression: zstd}
         purpose: diagnostic
 
 exclude:

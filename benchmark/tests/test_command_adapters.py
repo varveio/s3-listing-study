@@ -333,6 +333,8 @@ def _swath(mode: str, prefix: str) -> tuple[str, ...]:
             dataset,
             "--text-writers",
             "3",
+            "--compression",
+            "none",
         ),
         "recursive-table": (*common, "--format", "table"),
         "seed-none": (*common, "--format", "tsv", "--tune", "seed.mode=none"),

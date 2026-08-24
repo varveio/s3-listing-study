@@ -42,11 +42,14 @@ from __future__ import annotations
 
 import re
 import sys
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from pathlib import Path
 from typing import IO
 
-from benchmark.runtime.contract import ContractViolation
+import zstandard
+
+from benchmark.runtime.contract import ContractViolation, emit
 from benchmark.runtime.duckdb_adapter import (
     connect,
     count_query,
@@ -235,6 +238,29 @@ def _count_tsv_rows(source: IO[bytes]) -> int:
     return count
 
 
+@contextmanager
+def _open_tsv_part(part: Path) -> Iterator[IO[bytes]]:
+    """Open an uncompressed or Zstandard-compressed TSV part as a byte stream."""
+    with part.open("rb") as source:
+        if part.suffix == ".zst":
+            with zstandard.ZstdDecompressor().stream_reader(source) as decoded:
+                yield decoded
+        else:
+            yield source
+
+
+def _tsv_dataset_parts(dataset: str) -> tuple[Path, list[Path]]:
+    root = _dataset_root(dataset)
+    if not (root / "_SUCCESS").is_file():
+        raise ValueError(
+            f"dataset has no _SUCCESS marker under {root}; the swath run did not finish writing it"
+        )
+    parts = sorted((*root.glob("data/*.tsv"), *root.glob("data/*.tsv.zst")))
+    if not parts:
+        raise ValueError(f"no TSV or TSV.zst parts under {root / 'data'}")
+    return root, parts
+
+
 def count_rows(data: bytes, mode: str, prefix: str = "", native_root: str = "") -> int:
     if mode in PARQUET_MODES:
         import duckdb
@@ -252,10 +278,10 @@ def count_rows(data: bytes, mode: str, prefix: str = "", native_root: str = "") 
             raise RuntimeError("DuckDB count query returned no integer row")
         return row[0]
     if mode in TSV_DATASET_MODES:
-        _root, parts = _dataset_parts(native_root, "*.tsv", "TSV")
+        _root, parts = _tsv_dataset_parts(native_root)
         count = 0
         for part in parts:
-            with part.open("rb") as source:
+            with _open_tsv_part(part) as source:
                 count += _count_tsv_rows(source)
         return count
     if mode == "recursive-table":
@@ -310,12 +336,12 @@ def _normalize_parquet_dataset(out: IO[bytes], mode: str, dataset: str) -> int:
 
 def _normalize_tsv_dataset(out: IO[bytes], dataset: str) -> int:
     try:
-        _root, parts = _dataset_parts(dataset, "*.tsv", "TSV")
+        _root, parts = _tsv_dataset_parts(dataset)
     except ValueError as exc:
         print(f"normalize.py: {exc}", file=sys.stderr)
         return UNREADABLE_EXIT
     for part in parts:
-        with part.open("rb") as source:
+        with _open_tsv_part(part) as source:
             for number, line in enumerate(iter_lf_lines(source), 1):
                 if not line:
                     continue
@@ -334,12 +360,23 @@ def _normalize_tsv_dataset(out: IO[bytes], dataset: str) -> int:
                         "use recursive-jsonl",
                         field="key",
                     )
-        try:
-            result = connect().execute(QUERIES["tsv"], {"path": str(part)})
-        except Exception as exc:
-            print(f"normalize.py: dataset is not readable TSV: {exc}", file=sys.stderr)
-            return UNREADABLE_EXIT
-        emit_result(out, result)
+        with _open_tsv_part(part) as source:
+            for line in iter_lf_lines(source):
+                if not line:
+                    continue
+                fields = line.split(b"\t")
+                if fields[:3] == [b"key", b"size", b"last_modified"]:
+                    continue
+                if fields[5] not in (b"", b"OBJECT"):
+                    continue
+                emit(
+                    out,
+                    fields[0],
+                    size=fields[1].decode("ascii"),
+                    etag=fields[3].decode("ascii") or None,
+                    mtime=re.sub(rb"\.[0-9]+Z$", b"Z", fields[2]).decode("ascii"),
+                    storage_class=fields[4].decode("ascii") or None,
+                )
     return 0
 
 
