@@ -130,7 +130,7 @@ RUN install -d -o 10001 -g 10001 /aws /data /home/s3study
 COPY benchmark/build/requirements-worker.txt /tmp/requirements-worker.txt
 RUN /usr/bin/python3 -m pip install --break-system-packages --no-cache-dir -r /tmp/requirements-worker.txt \
     && /usr/bin/python3 -m pip check \
-    && /usr/bin/python3 -c 'import duckdb, ijson, google.cloud.storage'
+    && /usr/bin/python3 -c 'import duckdb, ijson, google.cloud.storage, zstandard'
 
 # Only the importable package. Plans, tests, build inputs, and the README sit
 # outside src/, so the worker image cannot pick up orchestrator-side code.
