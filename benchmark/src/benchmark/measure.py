@@ -870,18 +870,24 @@ def product_gap(product: Product) -> str | None:
     return None
 
 
-def capture_block(path: Path | None) -> dict[str, object] | None:
-    """Name, size and digest of one uploaded capture, or ``None`` when there is none.
+def capture_block(path: Path | None, *, hash_content: bool = True) -> dict[str, object] | None:
+    """Name and size of one uploaded capture, plus its digest when requested.
 
     ``None`` is the honest record for a subject that only prints: fd 1 carried
     the product, so no stdout log exists to describe.
     """
     if path is None or not path.is_file():
         return None
-    return {"name": path.name, "size_bytes": path.stat().st_size, "sha256": sha256_of(path)}
+    return {
+        "name": path.name,
+        "size_bytes": path.stat().st_size,
+        "sha256": sha256_of(path) if hash_content else None,
+    }
 
 
-def product_block(product: Product | None) -> dict[str, object] | None:
+def product_block(
+    product: Product | None, *, hash_content: bool = True
+) -> dict[str, object] | None:
     """What the attempt published as its product, and which channel carried it.
 
     ``None`` where nothing landed at the declared path -- a subject killed before
@@ -900,7 +906,11 @@ def product_block(product: Product | None) -> dict[str, object] | None:
         "name": f"native/{product.name}",
         "channel": product.channel,
         "size_bytes": sum(path.stat().st_size for path in retained_files(product.path)),
-        "sha256": None if product.channel == "dataset" else sha256_of(product.path),
+        "sha256": (
+            sha256_of(product.path)
+            if hash_content and product.channel != "dataset"
+            else None
+        ),
     }
 
 
@@ -932,6 +942,14 @@ def native_manifest(native_root: Path) -> dict[str, str]:
     """Content hashes for every native-output file, keyed by relative path."""
     return {
         path.relative_to(native_root).as_posix(): sha256_of(path)
+        for path in sorted(retained_files(native_root))
+    }
+
+
+def native_inventory(native_root: Path) -> dict[str, int]:
+    """File sizes for minimal replay evidence, keyed by relative path."""
+    return {
+        path.relative_to(native_root).as_posix(): path.stat().st_size
         for path in sorted(retained_files(native_root))
     }
 
@@ -1166,6 +1184,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     replay_document = None if replay_config is None else replay_config.as_dict()
     args.replay_document = replay_document
+    minimal_evidence = replay_document is not None and args.purpose == "diagnostic"
     replay_evidence: dict[str, object] | None = None
     if replay_document is not None:
         replay_evidence = replay_runtime.evidence()
@@ -1420,8 +1439,11 @@ def main(argv: list[str] | None = None) -> int:
     stderr_gz = gzip_file(stderr_path) if stderr_path.exists() else None
     postprocessing_seconds["capture_finalize"] = time.monotonic() - phase_started
     phase_started = time.monotonic()
-    native_files = native_manifest(native_root)
-    postprocessing_seconds["native_manifest"] = time.monotonic() - phase_started
+    native_files = {} if minimal_evidence else native_manifest(native_root)
+    native_sizes = native_inventory(native_root) if minimal_evidence else None
+    postprocessing_seconds[
+        "native_inventory" if minimal_evidence else "native_manifest"
+    ] = time.monotonic() - phase_started
     phase_started = time.monotonic()
     # Computed once, before the marker is written -- nothing after this adds
     # another artifact, so there is no stale-then-corrected total to chase.
@@ -1443,14 +1465,16 @@ def main(argv: list[str] | None = None) -> int:
         "row_count_error": row_count_error,
         "started_at": started_at,
         "finished_at": finished_at,
+        "evidence_profile": "minimal-replay" if minimal_evidence else "full",
         "postprocessing_seconds": postprocessing_seconds,
         # What was measured, and which channel carried it. A subject that only
         # prints has no stdout log at all: those bytes are the product.
-        "product": product_block(product),
+        "product": product_block(product, hash_content=not minimal_evidence),
         "product_error": product_error,
-        "stdout": capture_block(stdout_gz),
-        "stderr": capture_block(stderr_gz),
+        "stdout": capture_block(stdout_gz, hash_content=not minimal_evidence),
+        "stderr": capture_block(stderr_gz, hash_content=not minimal_evidence),
         "native_manifest": native_files,
+        "native_files": native_sizes,
         "artifacts_size_bytes": artifacts_size_bytes,
     }
     write_result_atomic(attempt_dir / "result.json", result)

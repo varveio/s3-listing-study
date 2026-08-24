@@ -17,6 +17,7 @@ import benchmark.gcs as gcs
 import benchmark.measure as measure
 import benchmark.procs as procs
 import benchmark.replay_runtime as replay_runtime
+import benchmark.report as report
 from benchmark.contract import CREDENTIAL_ENV_VAR, TOOLBOX_TOOLS, sha256_of
 from benchmark.runtime.command_adapter import HEAP_PERCENT
 
@@ -813,7 +814,9 @@ def test_replay_readiness_precedes_timer_and_metrics_persist(
     monkeypatch.setattr(measure, "row_count_for", lambda *_args: (1, None))
     monkeypatch.setattr(gcs, "upload_file", lambda *_args, **_kwargs: None)
 
-    assert measure.main(basic_worker_argv(tmp_path, replay=True)) == 0
+    argv = basic_worker_argv(tmp_path, replay=True)
+    argv[argv.index("--purpose") + 1] = "diagnostic"
+    assert measure.main(argv) == 0
     assert events[:3] == ["ready", "before", "timer"]
     assert events[-1] == "after"
     assert compiled[0]["endpoint_url"] == measure.REPLAY_ENDPOINT_URL
@@ -825,6 +828,14 @@ def test_replay_readiness_precedes_timer_and_metrics_persist(
     assert result["replay_evidence"]["resource_samples"]
     assert result["replay_evidence"]["after"]["metrics"]["server"]["jvm"] == {"heap_bytes": 7}
     assert result["replay_evidence"]["errors"] == []
+    assert result["evidence_profile"] == "minimal-replay"
+    assert result["product"] is None
+    assert result["stderr"]["sha256"] is None
+    assert result["native_manifest"] == {}
+    assert result["native_files"] == {}
+    assert "native_inventory" in result["postprocessing_seconds"]
+    assert "native_manifest" not in result["postprocessing_seconds"]
+    assert report.result_semantic_errors(result) == []
 
 
 def test_missing_replay_metrics_publish_an_explicit_refusal(

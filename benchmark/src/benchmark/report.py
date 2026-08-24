@@ -241,9 +241,13 @@ def result_capture_errors(result: dict[str, object]) -> list[str]:
     second thing to log. Anything else absent is a marker that cannot be read.
     """
     errors: list[str] = []
+    minimal = result.get("evidence_profile") == "minimal-replay"
     product = result.get("product")
     if product is not None:
-        errors.extend(f"product.{name}" for name in _artifact_errors(product, digest_optional=True))
+        errors.extend(
+            f"product.{name}"
+            for name in _artifact_errors(product, digest_optional=True, minimal=minimal)
+        )
     product_error = result.get("product_error")
     if product_error is not None and not isinstance(product_error, str):
         errors.append("product_error")
@@ -253,11 +257,15 @@ def result_capture_errors(result: dict[str, object]) -> list[str]:
             if stem == "stderr" or product is None:
                 errors.append(stem)
             continue
-        errors.extend(f"{stem}.{name}" for name in _artifact_errors(capture))
+        errors.extend(
+            f"{stem}.{name}" for name in _artifact_errors(capture, minimal=minimal)
+        )
     return errors
 
 
-def _artifact_errors(block: object, *, digest_optional: bool = False) -> list[str]:
+def _artifact_errors(
+    block: object, *, digest_optional: bool = False, minimal: bool = False
+) -> list[str]:
     """The name/size/digest every published artifact is recorded by."""
     if not isinstance(block, dict):
         return ["shape"]
@@ -270,8 +278,7 @@ def _artifact_errors(block: object, *, digest_optional: bool = False) -> list[st
         errors.append("size_bytes")
     digest = block.get("sha256")
     if digest is None:
-        # A dataset is many files with no one digest; native_manifest binds each.
-        if not digest_optional or block.get("channel") != "dataset":
+        if not minimal and (not digest_optional or block.get("channel") != "dataset"):
             errors.append("sha256")
     elif not isinstance(digest, str) or len(digest) != 64 or set(digest) - HEX64:
         errors.append("sha256")
