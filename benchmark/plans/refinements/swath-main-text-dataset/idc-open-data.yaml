@@ -8,8 +8,8 @@ auth_role: public-read
 
 replay:
   capacity_status: uncalibrated
-  server_image_uri: us-east1-docker.pkg.dev/varve-oss/s3-listing-study/replay-server@sha256:78a22c71cb25792a5f28af3e1e43afeab766f5161d939004bed4c8b50e97ca91
-  fixture_sha256: 943786a189afa827cb78a74ff0f0cc9f08ae13b5dbd547d3a19f60e0a3de304c
+  server_image_uri: ghcr.io/varveio/swath-replay@sha256:a54dc2cf7b4035e4f57e3f5c1f4434292e2a31076bab557bafee3c00637716e0
+  fixture_uri: gs://outcrop-listings-7764300e/buckets/ten_d9p0tui2ggqcmlg369eg/bk_d9pr0k1qkks4dto51im0/bk_inv_d9qhek79duh1l3v0pd4g/20260806T232400Z_47503a/data/*.parquet
   serving_mode: sorted
   latency_model: none
 
