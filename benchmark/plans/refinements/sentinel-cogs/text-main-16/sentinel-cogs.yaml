@@ -1,0 +1,48 @@
+# Repeat the receipted 16+16 sentinel allocation with Swath main's parallel TSV sink.
+spec_version: 3
+
+bucket: sentinel-cogs
+region: us-west-2
+auth_role: public-read
+
+replay:
+  capacity_status: uncalibrated
+  server_image_uri: ghcr.io/varveio/swath-replay@sha256:a54dc2cf7b4035e4f57e3f5c1f4434292e2a31076bab557bafee3c00637716e0
+  fixture_uri: gs://outcrop-listings-7764300e/buckets/ten_d9p0tui2ggqcmlg369eg/bk_d9pq073uljvf1ns08e7g/bk_inv_d9s5it6s7ju9ql951pig/20260809T105457Z_9a0760/data/*.parquet
+  serving_mode: sorted
+  latency_model: none
+
+defaults:
+  reps: 1
+  timeout_s: 3600
+  vcpus: 34
+  memory_gb: 68
+  subject_vcpus: 16
+  container_memory_gb: 32
+  replay_vcpus: 16
+  replay_memory_gb: 24
+  replay_parquet_connections: 32
+  replay_max_concurrent_requests: 4096
+  replay_prefetch: true
+  replay_prefetch_max_windows: 1024
+  replay_heap_percent: 75
+
+tools:
+  swath:
+    cases:
+      - mode: recursive-tsv-dataset
+        concurrency: 1024
+        config: {text_writers: 8}
+        purpose: diagnostic
+
+exclude:
+  - {tool: aws-cli, reason: outside this Swath main text diagnostic}
+  - {tool: minio-mc, reason: outside this Swath main text diagnostic}
+  - {tool: ps3, reason: outside this Swath main text diagnostic}
+  - {tool: rclone, reason: outside this Swath main text diagnostic}
+  - {tool: s3-fast-list, reason: outside this Swath main text diagnostic}
+  - {tool: s3kor, reason: outside this Swath main text diagnostic}
+  - {tool: s3p, reason: outside this Swath main text diagnostic}
+  - {tool: s4cmd, reason: outside this Swath main text diagnostic}
+  - {tool: s5cmd, reason: outside this Swath main text diagnostic}
+  - {tool: s7cmd, reason: outside this Swath main text diagnostic}
