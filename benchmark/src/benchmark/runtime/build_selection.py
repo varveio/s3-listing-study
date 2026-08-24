@@ -146,7 +146,13 @@ def load_staged_selection(
     if not isinstance(artifact, dict) or set(artifact) != {"kind", "locator", "sha256"}:
         raise BuildSelectionError("tool_artifact must contain exactly kind, locator, and sha256")
     kind, locator, artifact_sha = artifact["kind"], artifact["locator"], artifact["sha256"]
-    if kind not in {"release-archive", "release-binary", "npm-package", "source-archive"}:
+    if kind not in {
+        "container-image",
+        "release-archive",
+        "release-binary",
+        "npm-package",
+        "source-archive",
+    }:
         raise BuildSelectionError("tool_artifact kind is unsupported")
     if not isinstance(locator, str) or not locator or any(c.isspace() for c in locator):
         raise BuildSelectionError("tool_artifact locator must be a non-empty token")

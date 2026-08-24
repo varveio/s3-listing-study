@@ -46,8 +46,8 @@ ALIGNED_FIELDS = ("key", "size", "mtime")
 AXES = {"concurrency": CONCURRENCY, "heap_percent": Fixed(HEAP_PERCENT)}
 """Swath is a JVM, so every mode feels the heap share; every mode takes the flag."""
 
-CONFIG_KEYS = frozenset({"parquet_writers"})
-"""Exact Parquet directory writer-pool width when a plan chooses to tune it."""
+CONFIG_KEYS = frozenset({"parquet_writers", "text_writers"})
+"""Exact directory writer-pool widths when a diagnostic chooses to tune them."""
 
 LISTING = "listing"
 """The logical name every mode here publishes its listing under."""
@@ -86,6 +86,16 @@ MODES = {
         executable=SWATH.name,
         artifacts=JSONL,
         product_artifact=LISTING,
+    ),
+    "recursive-tsv-dataset": Mode(
+        product="text",
+        fields=TEXT_FIELDS,
+        axes=AXES,
+        purpose_ceiling="diagnostic",
+        executable=SWATH.name,
+        artifacts=DATASET,
+        product_artifact=LISTING,
+        product_channel="dataset",
     ),
     # Aligned text discards etag and storage_class, so it cannot be verified on
     # the same fields as the modes it would be ranked against.
@@ -171,6 +181,15 @@ def _parquet_writers(request: CommandRequest) -> tuple[str, ...]:
     return "--tune", f"parquet.writers={value}"
 
 
+def _text_writers(request: CommandRequest) -> str:
+    value = request.config.get("text_writers", 3)
+    if isinstance(value, bool) or not isinstance(value, int) or not 2 <= value <= 64:
+        raise CommandAdapterError(
+            f"{TOOL} text_writers must be an integer from 2 through 64; got: {value!r}"
+        )
+    return str(value)
+
+
 def _build_tail(request: CommandRequest) -> tuple[str, ...]:
     uri = f"s3://{request.bucket}" + (f"/{request.prefix}" if request.prefix else "")
     # --color replaces v0.2.0's --disable-color-tracing, which no longer exists:
@@ -195,9 +214,21 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
     if request.mode in SINK_MODES:
         if not request.sink_dir:
             raise CommandAdapterError(
-                f"mode {request.mode!r} writes a Parquet dataset and requires a sink directory"
+                f"mode {request.mode!r} writes a directory dataset and requires a sink directory"
             )
         dataset = f"{request.sink_dir.rstrip('/')}/{DATASET_NAME}"
+        if request.mode == "recursive-tsv-dataset":
+            return (
+                *common,
+                "--format",
+                "tsv",
+                "--output-type",
+                "dir",
+                "-o",
+                dataset,
+                "--text-writers",
+                _text_writers(request),
+            )
         if request.mode == "recursive-parquet":
             return (*common, "--format", "parquet", "-o", dataset, *_parquet_writers(request))
         # sort.ignore-disk-check keeps the run from refusing on a container

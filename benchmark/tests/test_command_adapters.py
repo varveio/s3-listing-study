@@ -323,6 +323,17 @@ def _swath(mode: str, prefix: str) -> tuple[str, ...]:
     return {
         "recursive-tsv": (*common, "--format", "tsv"),
         "recursive-jsonl": (*common, "--format", "jsonl"),
+        "recursive-tsv-dataset": (
+            *common,
+            "--format",
+            "tsv",
+            "--output-type",
+            "dir",
+            "-o",
+            dataset,
+            "--text-writers",
+            "3",
+        ),
         "recursive-table": (*common, "--format", "table"),
         "seed-none": (*common, "--format", "tsv", "--tune", "seed.mode=none"),
         "recursive-parquet": (*common, "--format", "parquet", "-o", dataset),
@@ -418,6 +429,7 @@ EXPECTED_MODES = {
     "swath": {
         "recursive-tsv",
         "recursive-jsonl",
+        "recursive-tsv-dataset",
         "recursive-table",
         "seed-none",
         "recursive-parquet",
@@ -823,6 +835,7 @@ def test_swath_declares_what_each_mode_produces_and_what_it_asked_for() -> None:
     assert {mode: manifest.product for mode, manifest in adapter.modes.items()} == {
         "recursive-tsv": "text",
         "recursive-jsonl": "text",
+        "recursive-tsv-dataset": "text",
         "recursive-table": "text",
         "seed-none": "text",
         "recursive-parquet": "parquet",

@@ -61,7 +61,11 @@ PORTED = (
 # Modes whose output is a DIRECTORY dataset, not a stream. They take no stdin,
 # so the stdin-payload fixture harness cannot express them; they are exercised
 # through a published native/ directory instead.
-DATASET_MODES = {("swath", "recursive-parquet"), ("swath", "recursive-parquet-sorted")}
+DATASET_MODES = {
+    ("swath", "recursive-parquet"),
+    ("swath", "recursive-parquet-sorted"),
+    ("swath", "recursive-tsv-dataset"),
+}
 
 UNEXERCISED = {
     "ps3": {"list-versions"},
@@ -79,6 +83,7 @@ UNEXERCISED = {
         "seed-none",
         "recursive-parquet",
         "recursive-parquet-sorted",
+        "recursive-tsv-dataset",
     },
 }
 
@@ -938,6 +943,37 @@ def test_swath_dataset_count_and_normalize_accept_native_parent(
     monkeypatch.setattr(duckdb_adapter, "Record", forbidden)
     monkeypatch.setattr(adapter, "emit_result", forbidden)
     assert adapter.count_rows(b"", mode, native_root=str(native)) == 1
+
+
+def test_swath_tsv_dataset_count_and_normalize_stream_parts(tmp_path: Path) -> None:
+    native = tmp_path / "native"
+    dataset = native / "listing"
+    (dataset / "data").mkdir(parents=True)
+    header = b"key\tsize\tlast_modified\tetag\tstorage_class\trow_type\n"
+    (dataset / "data/part-w0-00000.tsv").write_bytes(
+        header + b"a\t1\t2026-03-16T14:41:50Z\te1\tSTANDARD\tOBJECT\n"
+    )
+    (dataset / "data/part-w1-00000.tsv").write_bytes(
+        header
+        + b"prefix/\t\t\t\t\tCOMMON_PREFIX\n"
+        + b"b\t2\t2026-03-16T14:41:51Z\te2\tSTANDARD\tOBJECT\n"
+    )
+    (dataset / "_SUCCESS").touch()
+
+    done = subprocess.run(
+        [
+            str(adapter_path("swath")),
+            "recursive-tsv-dataset",
+            "--dataset",
+            str(native),
+        ],
+        capture_output=True,
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr
+    assert [line.split(b"\t", 1)[0] for line in done.stdout.splitlines()] == [b"a", b"b"]
+    adapter = load_adapter(REPO, "swath")
+    assert adapter.count_rows(b"", "recursive-tsv-dataset", native_root=str(native)) == 2
 
 
 def test_count_rows_preserves_malformed_and_row_filter_semantics() -> None:
