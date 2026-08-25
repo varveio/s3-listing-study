@@ -302,6 +302,40 @@ def test_the_page_cache_screen_changes_only_the_subject_memory_ceiling() -> None
     }
 
 
+def test_the_workstation_topology_screen_preserves_the_tuned_case() -> None:
+    """Guard the 16+16-vCPU reproduction before paying for the larger VM."""
+    root = Path(__file__).resolve().parents[2]
+    baseline = bench.Plan.load(
+        root
+        / "benchmark/plans/refinements/swath-main-current-geometry-mem16/"
+        "idc-open-data.yaml"
+    ).cases[0]
+    matched = bench.Plan.load(
+        root
+        / "benchmark/plans/refinements/swath-main-workstation-topology/"
+        "idc-open-data.yaml"
+    ).cases[0]
+    assert matched.tool == baseline.tool
+    assert matched.mode == baseline.mode
+    assert matched.purpose == baseline.purpose
+    assert matched.config == baseline.config
+    assert matched.resources.as_dict() == {
+        **baseline.resources.as_dict(),
+        "vcpus": 34,
+        "memory_gb": 68,
+        "machine_type": "n4-custom-34-69632",
+    }
+    assert matched.replay is not None
+    assert baseline.replay is not None
+    assert matched.replay.backend == baseline.replay.backend
+    assert matched.replay.capacity_status == baseline.replay.capacity_status
+    assert matched.replay.allocation.as_dict() == {
+        **baseline.replay.allocation.as_dict(),
+        "replay_vcpus": 16,
+        "subject_vcpus": 16,
+    }
+
+
 @pytest.mark.parametrize(
     "malformed",
     ("fixed", "false", "null", "{}"),

@@ -353,7 +353,7 @@ CREATE TABLE attempts (
     image_set_sha256    TEXT NOT NULL,
 
     -- context: recorded, not hashed
-    executor_env        TEXT NOT NULL,      -- canonical JSON: project, provisioning, boot disk, network
+    executor_env        TEXT NOT NULL,      -- canonical JSON: project, provisioning, boot-disk type/size, network
     service_account     TEXT NOT NULL,      -- what auth_role resolved to
     secret_resource     TEXT,               -- the credential version, when a role was used
     job_name            TEXT NOT NULL UNIQUE,

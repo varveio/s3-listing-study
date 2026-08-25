@@ -155,7 +155,7 @@ Two things follow:
 
 | Value | Why it is not identity |
 | --- | --- |
-| `executor_env` (project, provisioning, boot disk, network) | Estate detail. Moving projects does not change how fast a bucket lists, and re-identifying every case because an account was reorganised is over-invalidation with no measurement behind it. |
+| `executor_env` (project, provisioning, boot-disk type and size, network) | Estate detail. Moving projects does not change how fast a bucket lists, and re-identifying every case because an account was reorganised is over-invalidation with no measurement behind it. |
 | Provisioning model | SPOT changes how likely an attempt is to survive, not what it measures. A preemption is a failed attempt, not a different case. |
 | `service_account`, `secret_resource` | What `auth_role` resolved to; the role name carries the meaning. |
 | `image_uri`, `image_set_sha256` | You need to know exactly what ran and be able to reproduce it, but the slices identify it. Two attempts of one case may have run on different images, and the row says which. |

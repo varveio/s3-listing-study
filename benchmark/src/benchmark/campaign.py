@@ -86,7 +86,11 @@ a per-mode sum.
 REPLAY_READINESS_TIMEOUT_S = 600
 """Allowance for a replay server to derive its serving index before timing."""
 
-N4_BOOT_DISK = {"type": "hyperdisk-balanced", "image": "batch-cos"}
+N4_BOOT_DISK = {
+    "type": "hyperdisk-balanced",
+    "image": "batch-cos",
+    "sizeGb": "300",
+}
 REPLAY_STAGING_IMAGE = (
     "gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:"
     "cf72dd63b7643c117ef53378a41bef6db6a01fa3d561f2b456d7abd8bbeb9ba6"
@@ -167,7 +171,10 @@ class BatchOptions:
             {
                 "project": self.project,
                 "provisioning": self.provisioning,
-                "boot_disk": "n4-hyperdisk-balanced",
+                "boot_disk": {
+                    "type": "n4-hyperdisk-balanced",
+                    "size_gb": 300,
+                },
                 "network": self.network,
                 "subnetwork": self.subnetwork,
                 "zone": self.zone,
@@ -743,10 +750,6 @@ def render_batch_job(
     }
     if attempt.machine_type.startswith("n4-"):
         policy["bootDisk"] = dict(N4_BOOT_DISK)
-        if replay is not None and replay.backend.fixture_uri is not None:
-            # The staged fixture, raw TSV product, container layers, and upload
-            # spool share this disk. This is setup/output capacity, not memory.
-            policy["bootDisk"]["sizeGb"] = "100"
     allocation_policy: dict[str, Any] = {
         "instances": [{"policy": policy}],
         "serviceAccount": {"email": attempt.service_account},

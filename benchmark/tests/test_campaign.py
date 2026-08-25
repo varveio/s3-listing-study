@@ -318,7 +318,7 @@ def test_uri_fixture_is_staged_before_the_server_and_never_put_in_its_image(
     assert request["allocationPolicy"]["instances"][0]["policy"]["bootDisk"] == {
         "type": "hyperdisk-balanced",
         "image": "batch-cos",
-        "sizeGb": "100",
+        "sizeGb": "300",
     }
 
 
