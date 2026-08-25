@@ -241,6 +241,17 @@ def test_replay_case_slot_attempt_and_request_keep_one_canonical_document(
         "--network host --cpuset-cpus=10-13 --memory=4g --memory-swap=4g "
         "--volume=/mnt/stateful_partition/attempt:/tmp/attempt"
     )
+    uncapped = replace(attempt, container_memory_gb=None)
+    uncapped_request = campaign.render_batch_job(
+        uncapped, images.image_for(case.tool), suite=SUITE, options=launch.options
+    )
+    uncapped_subject = uncapped_request["taskGroups"][0]["taskSpec"]["runnables"][-1]
+    assert uncapped_subject["container"]["options"] == (
+        "--network host --cpuset-cpus=10-13 "
+        "--volume=/mnt/stateful_partition/attempt:/tmp/attempt"
+    )
+    uncapped_commands = uncapped_subject["container"]["commands"]
+    assert uncapped_commands[uncapped_commands.index("--container-memory-gb") + 1] == "none"
     assert attempt.secret_resource is None
     assert "environment" not in subject
     signed = replace(attempt, auth_role="public-read", secret_resource=AUTH_SECRET)
@@ -342,7 +353,7 @@ def test_uri_fixture_is_staged_before_the_server_and_never_put_in_its_image(
             "campaign/idc-open-data.yaml", "c4-highcpu-32", "16", id="c4"
         ),
         pytest.param(
-            "c4-64/sentinel-cogs.yaml", "c4d-highcpu-64", "80", id="c4d"
+            "c4-64/sentinel-cogs.yaml", "c4d-highcpu-64", "none", id="c4d"
         ),
     ],
 )

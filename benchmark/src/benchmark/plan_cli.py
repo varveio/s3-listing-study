@@ -82,13 +82,23 @@ def _replay_projection(
         if backend.fixture_sha256 is not None
         else backend.fixture_uri
     )
+    subject_memory = (
+        "uncapped"
+        if case.resources.container_memory_gb is None
+        else f"{case.resources.container_memory_gb}GiB"
+    )
+    host_memory = (
+        "unreserved"
+        if summary.host_memory_headroom_gb is None
+        else f"{summary.host_memory_headroom_gb}GiB"
+    )
     compact = (
         f"{config.capacity_status.upper()} server={image_summary} "
         f"fixture={fixture} "
         f"{backend.serving_mode} latency={latency} "
         f"server={allocation.replay_vcpus}vCPU/{allocation.replay_memory_gb}GiB "
-        f"subject={allocation.subject_vcpus}vCPU/{case.resources.container_memory_gb}GiB "
-        f"host={summary.host_vcpus}vCPU/{summary.host_memory_headroom_gb}GiB"
+        f"subject={allocation.subject_vcpus}vCPU/{subject_memory} "
+        f"host={summary.host_vcpus}vCPU/{host_memory}"
     )
     return config.as_dict(), asdict(summary), compact
 

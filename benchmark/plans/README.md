@@ -132,8 +132,12 @@ defaults:
 
 `vcpus`/`memory_gb` keep meaning **the box**. `container_memory_gb` is the
 subject ceiling; `subject_vcpus` and the replay fields are the independent
-allocations. The remaining host CPU and memory are derived, and each must be
-positive — host reserves are not separately authored identity inputs.
+allocations. When the subject has a ceiling, the remaining host CPU and memory
+are derived and each must be positive — host reserves are not separately
+authored identity inputs. Omitting `container_memory_gb` also omits the subject
+cgroup limit for a replay diagnostic. The CPU remainder is still derived, but
+there is then no guaranteed host memory headroom; resolved plans and reports
+label it `unreserved` rather than inventing a reservation.
 Reader-pool size and request-admission width are separate fields, and
 `replay_prefetch` is a YAML boolean rather than an integer shorthand.
 `replay_prefetch_max_windows` defaults to 96 when omitted; state it explicitly

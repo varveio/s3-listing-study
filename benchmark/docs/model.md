@@ -282,8 +282,10 @@ must still prove that its requests reached the server.
 The canonical replay document includes a simple capacity status. `uncalibrated`
 permits diagnostics but refuses replay measurements; it becomes `calibrated`
 only with a receipt-backed canary. The declared allocation is its execution
-contract. Host CPU remainder and memory headroom are derived from the box and
-container ceilings, not independently authored. A one-time provider canary may
+contract. Host CPU remainder and, when the subject is capped, memory headroom
+are derived from the box and container ceilings, not independently authored.
+An uncapped subject has no guaranteed host memory headroom and is reported as
+`unreserved`. A one-time provider canary may
 inspect effective limits, but recurring attempt evidence does not attest them
 and verification does not manufacture a second allocation protocol.
 

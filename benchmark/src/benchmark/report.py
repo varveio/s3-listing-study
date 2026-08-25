@@ -313,10 +313,20 @@ def _declared_replay_allocations(row: sqlite3.Row) -> tuple[str, str, str, str]:
             box_memory_gb=int(row["memory_gb"]),
             container_memory_gb=row["container_memory_gb"],
         )
+        subject_memory = (
+            "uncapped"
+            if row["container_memory_gb"] is None
+            else f"{row['container_memory_gb']}GiB"
+        )
+        host_memory = (
+            "unreserved"
+            if summary.host_memory_headroom_gb is None
+            else f"{summary.host_memory_headroom_gb}GiB"
+        )
         return (
             f"cpus={summary.server_cpuset};memory={config.allocation.replay_memory_gb}GiB",
-            f"cpus={summary.subject_cpuset};memory={row['container_memory_gb']}GiB",
-            f"vcpus={summary.host_vcpus};memory={summary.host_memory_headroom_gb}GiB",
+            f"cpus={summary.subject_cpuset};memory={subject_memory}",
+            f"vcpus={summary.host_vcpus};memory={host_memory}",
             config.capacity_status.upper(),
         )
     except (TypeError, ValueError, replay_contract.ReplayError):

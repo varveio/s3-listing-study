@@ -142,7 +142,7 @@ class ReplayAllocationSummary:
     server_cpuset: str
     subject_cpuset: str
     host_vcpus: int
-    host_memory_headroom_gb: int
+    host_memory_headroom_gb: int | None
 
 
 def parse_backend(value: object) -> ReplayBackend:
@@ -294,10 +294,15 @@ def allocation_summary(
     host_vcpus = box_vcpus - allocation.replay_vcpus - allocation.subject_vcpus
     if host_vcpus < 1:
         raise ReplayError("replay and subject cpusets leave no host CPU remainder")
-    if container_memory_gb is None:
-        raise ReplayError("replay cases require a subject container_memory_gb ceiling")
-    host_memory = box_memory_gb - allocation.replay_memory_gb - container_memory_gb
-    if host_memory < 1:
+    memory_outside_replay = box_memory_gb - allocation.replay_memory_gb
+    if memory_outside_replay < 1:
+        raise ReplayError("replay memory ceiling leaves no memory outside the sidecar")
+    host_memory = (
+        None
+        if container_memory_gb is None
+        else memory_outside_replay - container_memory_gb
+    )
+    if host_memory is not None and host_memory < 1:
         raise ReplayError("replay and subject memory ceilings leave no host memory headroom")
     return ReplayAllocationSummary(
         server_cpuset=f"0-{allocation.replay_vcpus - 1}",

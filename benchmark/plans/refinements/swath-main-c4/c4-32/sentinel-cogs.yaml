@@ -1,9 +1,9 @@
 # Measure current Swath and replay on Sentinel on the same C4-32 shape used by
 # the smaller-bucket diagnostics. Swath receives slightly more CPU than replay,
-# following the prior Sentinel CPU evidence. The 40/20/4-GiB memory split and
-# explicit 4-GiB JVM maximum leave the subject cgroup available to the retained
-# product's page cache; the first 32/24/8-GiB attempt reached 965M replay rows
-# before its 75%-heap subject was killed at the cgroup limit. Zstandard keeps
+# following the prior Sentinel CPU evidence. The subject cgroup ceiling is
+# deliberately omitted after a capped attempt reached 965M replay rows and then
+# exited 137 while the host still had ample free memory. The 20-GiB replay cap
+# remains; the explicit 4-GiB JVM maximum bounds Swath's heap. Zstandard keeps
 # fixture plus product within the unchanged 100-GiB boot disk.
 spec_version: 3
 
@@ -24,7 +24,6 @@ defaults:
   vcpus: 32
   memory_gb: 64
   subject_vcpus: 16
-  container_memory_gb: 40
   replay_vcpus: 14
   replay_memory_gb: 20
   replay_parquet_connections: 32

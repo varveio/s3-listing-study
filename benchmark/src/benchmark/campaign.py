@@ -533,16 +533,11 @@ def _cpuset(start: int, count: int) -> str:
     return str(start) if end == start else f"{start}-{end}"
 
 
-def _runnable_options(cpuset: str, memory_gb: int) -> str:
-    return shlex.join(
-        (
-            "--network",
-            "host",
-            f"--cpuset-cpus={cpuset}",
-            f"--memory={memory_gb}g",
-            f"--memory-swap={memory_gb}g",
-        )
-    )
+def _runnable_options(cpuset: str, memory_gb: int | None) -> str:
+    options = ["--network", "host", f"--cpuset-cpus={cpuset}"]
+    if memory_gb is not None:
+        options.extend((f"--memory={memory_gb}g", f"--memory-swap={memory_gb}g"))
+    return shlex.join(options)
 
 
 def _replay_document(attempt: Attempt) -> replay_contract.ReplayConfig | None:
@@ -646,7 +641,6 @@ def render_batch_job(
             box_memory_gb=attempt.memory_gb,
             container_memory_gb=container_memory,
         )
-        assert container_memory is not None
         container["options"] = _runnable_options(summary.subject_cpuset, container_memory)
         backend = replay.backend
         fixture_path = (
