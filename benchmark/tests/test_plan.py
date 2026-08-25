@@ -213,6 +213,41 @@ def test_the_committed_idc_plan_is_the_six_cell_no_latency_partition_sweep() -> 
         assert allocation.replay_heap_percent == 75
 
 
+def test_the_current_swath_main_rerun_stays_one_bounded_idc_diagnostic() -> None:
+    """Guard the reviewed first rung, including every identity-bearing output control."""
+    path = (
+        Path(__file__).resolve().parents[2]
+        / "benchmark/plans/refinements/swath-main-rerun/idc-open-data.yaml"
+    )
+    loaded = bench.Plan.load(path)
+    assert len(loaded.cases) == 1
+    case = loaded.cases[0]
+    assert case.tool == "swath"
+    assert case.mode == "recursive-tsv-dataset"
+    assert case.purpose == "diagnostic"
+    assert case.resources.machine_type == "n4-highcpu-16"
+    assert case.resources.container_memory_gb == 8
+    assert dict(case.config) == {
+        "concurrency": 16,
+        "heap_percent": 75,
+        "mode": "recursive-tsv-dataset",
+        "part_rotation_interval": "0",
+        "part_rotation_max_rows": 0,
+        "text_part_size": "1gb",
+        "text_writers": 3,
+        "writeback_size": "32mb",
+    }
+    assert case.replay is not None
+    allocation = case.replay.allocation
+    assert (allocation.replay_vcpus, allocation.subject_vcpus) == (6, 8)
+    assert allocation.replay_memory_gb == 6
+    assert allocation.replay_parquet_connections == 8
+    assert allocation.replay_max_concurrent_requests == 512
+    assert allocation.replay_prefetch is True
+    assert allocation.replay_prefetch_max_windows == 24
+    assert allocation.replay_heap_percent == 67
+
+
 @pytest.mark.parametrize(
     "malformed",
     ("fixed", "false", "null", "{}"),
