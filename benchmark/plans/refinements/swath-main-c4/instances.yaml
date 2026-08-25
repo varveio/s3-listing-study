@@ -1,7 +1,8 @@
-# This diagnostic deliberately selects C4 without Local SSD. The IDC payload
-# fits the existing boot disk, and changing the CPU family and storage class in
-# one cell would leave a faster result uninterpretable.
+# These diagnostics deliberately select C4 without Local SSD. The retained
+# compressed Sentinel product and fixture fit the existing boot disk, and the
+# 64-vCPU row doubles CPU and memory without changing the storage class.
 spec_version: 2
 
 instances:
   - { vcpus: 32, memory_gb: 64, machine_type: c4-highcpu-32 }
+  - { vcpus: 64, memory_gb: 128, machine_type: c4-highcpu-64 }
