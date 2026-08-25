@@ -248,6 +248,37 @@ def test_the_current_swath_main_rerun_stays_one_bounded_idc_diagnostic() -> None
     assert allocation.replay_heap_percent == 67
 
 
+def test_the_current_geometry_rerun_changes_only_the_replay_fixture() -> None:
+    """Keep the fixture-geometry attribution screen one-dimensional."""
+    root = Path(__file__).resolve().parents[2]
+    coarse = bench.Plan.load(
+        root / "benchmark/plans/refinements/swath-main-rerun/idc-open-data.yaml"
+    ).cases[0]
+    current = bench.Plan.load(
+        root
+        / "benchmark/plans/refinements/swath-main-current-geometry/idc-open-data.yaml"
+    ).cases[0]
+    assert current.tool == coarse.tool
+    assert current.mode == coarse.mode
+    assert current.purpose == coarse.purpose
+    assert current.resources == coarse.resources
+    assert current.config == coarse.config
+    assert current.replay is not None
+    assert coarse.replay is not None
+    assert current.replay != coarse.replay
+    assert current.replay.allocation == coarse.replay.allocation
+    assert current.replay.backend.server_image_uri == coarse.replay.backend.server_image_uri
+    assert current.replay.backend.serving_mode == coarse.replay.backend.serving_mode
+    assert (
+        current.replay.backend.as_dict()["latency_model"]
+        == coarse.replay.backend.as_dict()["latency_model"]
+    )
+    assert current.replay.backend.fixture_uri == (
+        "gs://s3-listing-study-results-29c02004/fixtures/swath-replay/"
+        "idc-open-data/current-geometry-20260824/*.parquet"
+    )
+
+
 @pytest.mark.parametrize(
     "malformed",
     ("fixed", "false", "null", "{}"),
