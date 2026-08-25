@@ -2,7 +2,7 @@
 ARG SHARED_BASE_IMAGE
 # The official main image, pinned by immutable index digest. Its tested jar and
 # JRE are copied onto the common study base without recompiling Swath.
-FROM ghcr.io/varveio/swath@sha256:5528ac5c238d5d0ca51bd221e43c398b3a0ac5464dcb30bef9691c94d10fa735 AS upstream
+FROM ghcr.io/varveio/swath@sha256:a13adef049de8c11c053861918005aaaae6c8576797df48867d1c5efdbcfc88b AS upstream
 
 FROM ${SHARED_BASE_IMAGE}
 USER root

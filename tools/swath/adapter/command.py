@@ -46,8 +46,19 @@ ALIGNED_FIELDS = ("key", "size", "mtime")
 AXES = {"concurrency": CONCURRENCY, "heap_percent": Fixed(HEAP_PERCENT)}
 """Swath is a JVM, so every mode feels the heap share; every mode takes the flag."""
 
-CONFIG_KEYS = frozenset({"parquet_writers", "text_writers"})
-"""Exact directory writer-pool widths when a diagnostic chooses to tune them."""
+CONFIG_KEYS = frozenset(
+    {
+        "parquet_part_size",
+        "parquet_writers",
+        "part_rotation_interval",
+        "part_rotation_max_rows",
+        "sort_merge_parallelism",
+        "text_part_size",
+        "text_writers",
+        "writeback_size",
+    }
+)
+"""Output controls whose retained values must remain visible in case identity."""
 
 LISTING = "listing"
 """The logical name every mode here publishes its listing under."""
@@ -184,9 +195,9 @@ def _parquet_writers(request: CommandRequest) -> tuple[str, ...]:
     value = request.config.get("parquet_writers")
     if value is None:
         return ()
-    if isinstance(value, bool) or not isinstance(value, int) or not 2 <= value <= 4:
+    if isinstance(value, bool) or not isinstance(value, int) or not 2 <= value <= 64:
         raise CommandAdapterError(
-            f"{TOOL} parquet_writers must be an integer from 2 through 4; got: {value!r}"
+            f"{TOOL} parquet_writers must be an integer from 2 through 64; got: {value!r}"
         )
     return "--tune", f"parquet.writers={value}"
 
@@ -198,6 +209,57 @@ def _text_writers(request: CommandRequest) -> str:
             f"{TOOL} text_writers must be an integer from 2 through 64; got: {value!r}"
         )
     return str(value)
+
+
+def _mode_config(request: CommandRequest, allowed: frozenset[str]) -> None:
+    """Refuse a declared Swath knob on a mode that would otherwise ignore it."""
+    unused = sorted((set(request.config) & CONFIG_KEYS) - allowed)
+    if unused:
+        raise CommandAdapterError(
+            f"{TOOL} mode {request.mode!r} does not use config key(s): {', '.join(unused)}"
+        )
+
+
+def _size_option(request: CommandRequest, key: str, option: str) -> tuple[str, ...]:
+    value = request.config.get(key)
+    if value is None:
+        return ()
+    if not isinstance(value, str) or not value or any(character.isspace() for character in value):
+        raise CommandAdapterError(f"{TOOL} {key} must be one non-empty size token; got: {value!r}")
+    return option, value
+
+
+def _rotation_options(request: CommandRequest) -> tuple[str, ...]:
+    interval = request.config.get("part_rotation_interval")
+    rows = request.config.get("part_rotation_max_rows")
+    rendered: list[str] = []
+    if interval is not None:
+        if not isinstance(interval, str) or not interval or any(
+            character.isspace() for character in interval
+        ):
+            raise CommandAdapterError(
+                f"{TOOL} part_rotation_interval must be one non-empty duration token; "
+                f"got: {interval!r}"
+            )
+        rendered.extend(("--part-rotation-interval", interval))
+    if rows is not None:
+        if isinstance(rows, bool) or not isinstance(rows, int) or rows < 0:
+            raise CommandAdapterError(
+                f"{TOOL} part_rotation_max_rows must be a non-negative integer; got: {rows!r}"
+            )
+        rendered.extend(("--part-rotation-max-rows", str(rows)))
+    return tuple(rendered)
+
+
+def _sort_merge_parallelism(request: CommandRequest) -> tuple[str, ...]:
+    value = request.config.get("sort_merge_parallelism")
+    if value is None:
+        return ()
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 16:
+        raise CommandAdapterError(
+            f"{TOOL} sort_merge_parallelism must be an integer from 1 through 16; got: {value!r}"
+        )
+    return "--tune", f"sort.merge-parallelism={value}"
 
 
 def _build_tail(request: CommandRequest) -> tuple[str, ...]:
@@ -228,6 +290,18 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
             )
         dataset = f"{request.sink_dir.rstrip('/')}/{DATASET_NAME}"
         if request.mode in {"recursive-tsv-dataset", "recursive-tsv-zstd"}:
+            _mode_config(
+                request,
+                frozenset(
+                    {
+                        "part_rotation_interval",
+                        "part_rotation_max_rows",
+                        "text_part_size",
+                        "text_writers",
+                        "writeback_size",
+                    }
+                ),
+            )
             return (
                 *common,
                 "--format",
@@ -240,11 +314,40 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
                 _text_writers(request),
                 "--compression",
                 "zstd" if request.mode == "recursive-tsv-zstd" else "none",
+                *_size_option(request, "text_part_size", "--text-part-size"),
+                *_size_option(request, "writeback_size", "--writeback-size"),
+                *_rotation_options(request),
             )
         if request.mode == "recursive-parquet":
-            return (*common, "--format", "parquet", "-o", dataset, *_parquet_writers(request))
+            _mode_config(
+                request,
+                frozenset(
+                    {
+                        "parquet_part_size",
+                        "parquet_writers",
+                        "part_rotation_interval",
+                        "part_rotation_max_rows",
+                        "writeback_size",
+                    }
+                ),
+            )
+            return (
+                *common,
+                "--format",
+                "parquet",
+                "-o",
+                dataset,
+                *_parquet_writers(request),
+                *_size_option(request, "parquet_part_size", "--parquet-part-size"),
+                *_size_option(request, "writeback_size", "--writeback-size"),
+                *_rotation_options(request),
+            )
         # sort.ignore-disk-check keeps the run from refusing on a container
         # filesystem whose free space it cannot size.
+        _mode_config(
+            request,
+            frozenset({"parquet_part_size", "sort_merge_parallelism", "writeback_size"}),
+        )
         return (
             *head,
             "--checkpoint",
@@ -256,8 +359,12 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
             "--sort",
             "--tune",
             "sort.ignore-disk-check=on",
+            *_sort_merge_parallelism(request),
+            *_size_option(request, "parquet_part_size", "--parquet-part-size"),
+            *_size_option(request, "writeback_size", "--writeback-size"),
         )
 
+    _mode_config(request, frozenset())
     commands = {
         "recursive-tsv": (*common, "--format", "tsv"),
         "recursive-jsonl": (*common, "--format", "jsonl"),

@@ -877,6 +877,53 @@ def test_swath_declares_what_each_mode_produces_and_what_it_asked_for() -> None:
     }
 
 
+def test_swath_renders_retained_output_controls_and_refuses_the_wrong_mode() -> None:
+    adapter = load_command_adapter(adapter_path("swath"))
+    argv = adapter.compile(
+        CommandRequest(
+            "recursive-tsv-dataset",
+            BUCKET,
+            REGION,
+            tool="swath",
+            sink_dir=SINK,
+            config={
+                "concurrency": 16,
+                "text_writers": 3,
+                "text_part_size": "1gb",
+                "writeback_size": "32mb",
+                "part_rotation_interval": "0",
+                "part_rotation_max_rows": 0,
+            },
+        )
+    )
+    assert argv[-12:] == (
+        "--text-writers",
+        "3",
+        "--compression",
+        "none",
+        "--text-part-size",
+        "1gb",
+        "--writeback-size",
+        "32mb",
+        "--part-rotation-interval",
+        "0",
+        "--part-rotation-max-rows",
+        "0",
+    )
+
+    with pytest.raises(CommandAdapterError, match=r"does not use config key.*text_writers"):
+        adapter.compile(
+            CommandRequest(
+                "recursive-parquet",
+                BUCKET,
+                REGION,
+                tool="swath",
+                sink_dir=SINK,
+                config={"text_writers": 3},
+            )
+        )
+
+
 def test_one_rule_decides_what_a_producing_mode_inherits() -> None:
     """A chain link and an inline setup exec inherit by the same rule.
 
