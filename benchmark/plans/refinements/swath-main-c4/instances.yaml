@@ -1,0 +1,7 @@
+# This diagnostic deliberately selects C4 without Local SSD. The IDC payload
+# fits the existing boot disk, and changing the CPU family and storage class in
+# one cell would leave a faster result uninterpretable.
+spec_version: 2
+
+instances:
+  - { vcpus: 16, memory_gb: 32, machine_type: c4-highcpu-16 }

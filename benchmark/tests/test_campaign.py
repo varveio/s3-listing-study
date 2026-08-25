@@ -326,6 +326,41 @@ def test_uri_fixture_is_staged_before_the_server_and_never_put_in_its_image(
     }
 
 
+def test_c4_diagnostic_keeps_the_fixed_boot_disk_and_direct_output_mount(
+    tmp_path: Path,
+) -> None:
+    plan = Plan.load(
+        ROOT
+        / "benchmark/plans/refinements/swath-main-c4/campaign/idc-open-data.yaml"
+    )
+    case = plan.cases[0]
+    images = image_set(tmp_path)
+    attempt = campaign.planned_attempt(
+        case, context(plan, case, images)
+    )[2](1)[0]
+    request = campaign.render_batch_job(
+        attempt,
+        images.image_for(case.tool),
+        suite=SUITE,
+        options=context(plan, case, images).options,
+    )
+
+    policy = request["allocationPolicy"]["instances"][0]["policy"]
+    assert policy == {
+        "machineType": "c4-highcpu-16",
+        "provisioningModel": "SPOT",
+        "bootDisk": {
+            "type": "hyperdisk-balanced",
+            "image": "batch-cos",
+            "sizeGb": "100",
+        },
+    }
+    subject = request["taskGroups"][0]["taskSpec"]["runnables"][-1]
+    assert "--volume=/mnt/stateful_partition/attempt:/tmp/attempt" in subject[
+        "container"
+    ]["options"]
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [

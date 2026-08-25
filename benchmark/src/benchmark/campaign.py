@@ -86,7 +86,7 @@ a per-mode sum.
 REPLAY_READINESS_TIMEOUT_S = 600
 """Allowance for a replay server to derive its serving index before timing."""
 
-N4_BOOT_DISK = {
+HYPERDISK_BOOT_DISK = {
     "type": "hyperdisk-balanced",
     "image": "batch-cos",
     "sizeGb": "100",
@@ -174,7 +174,7 @@ class BatchOptions:
                 "project": self.project,
                 "provisioning": self.provisioning,
                 "boot_disk": {
-                    "type": "n4-hyperdisk-balanced",
+                    "type": "hyperdisk-balanced",
                     "size_gb": 100,
                 },
                 "network": self.network,
@@ -755,8 +755,8 @@ def render_batch_job(
         "machineType": attempt.machine_type,
         "provisioningModel": options.provisioning,
     }
-    if attempt.machine_type.startswith("n4-"):
-        policy["bootDisk"] = dict(N4_BOOT_DISK)
+    if attempt.machine_type.startswith(("n4-", "c4-")):
+        policy["bootDisk"] = dict(HYPERDISK_BOOT_DISK)
     allocation_policy: dict[str, Any] = {
         "instances": [{"policy": policy}],
         "serviceAccount": {"email": attempt.service_account},
