@@ -620,8 +620,17 @@ def render_batch_job(
     commands = [item for pair in pairs for item in pair]
     container: dict[str, Any] = {"imageUri": image["image_uri"], "commands": commands}
     subject_runnable: dict[str, Any] = {"container": container}
-    runnables = [subject_runnable]
     output_volume = f"--volume={SUBJECT_OUTPUT_HOST_DIR}:{SUBJECT_OUTPUT_CONTAINER_DIR}"
+    output_initializer = {
+        "container": {
+            "imageUri": image["image_uri"],
+            "commands": ["10001:10001", SUBJECT_OUTPUT_CONTAINER_DIR],
+            "options": shlex.join(
+                ("--user", "0:0", "--entrypoint", "/bin/chown", output_volume)
+            ),
+        }
+    }
+    runnables = [output_initializer, subject_runnable]
     if replay is None:
         plain_subject_options = [output_volume]
         if container_memory is not None:
@@ -726,7 +735,7 @@ def render_batch_job(
             },
         }
         container["options"] = subject_options
-        runnables = [server_runnable, subject_runnable]
+        runnables = [output_initializer, server_runnable, subject_runnable]
         if staging_runnable is not None:
             runnables.insert(0, staging_runnable)
     readiness_allowance = REPLAY_READINESS_TIMEOUT_S if replay is not None else 0

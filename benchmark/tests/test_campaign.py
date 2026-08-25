@@ -189,7 +189,15 @@ def test_replay_case_slot_attempt_and_request_keep_one_canonical_document(
     request = json.loads(row["request_json"])
     task = request["taskGroups"][0]["taskSpec"]
     assert "environment" not in task
-    server, subject = task["runnables"]
+    initializer, server, subject = task["runnables"]
+    assert initializer["container"] == {
+        "imageUri": images.image_for(case.tool)["image_uri"],
+        "commands": ["10001:10001", "/tmp/attempt"],
+        "options": (
+            "--user 0:0 --entrypoint /bin/chown "
+            "--volume=/mnt/stateful_partition/attempt:/tmp/attempt"
+        ),
+    }
     assert server["background"] is True
     assert server["container"] == {
         "imageUri": case.replay.backend.server_image_uri,
@@ -240,7 +248,7 @@ def test_replay_case_slot_attempt_and_request_keep_one_canonical_document(
         signed, images.image_for(case.tool), suite=SUITE, options=launch.options
     )
     signed_task = signed_request["taskGroups"][0]["taskSpec"]
-    signed_server, signed_subject = signed_task["runnables"]
+    _, signed_server, signed_subject = signed_task["runnables"]
     assert "environment" not in signed_task
     assert "secretVariables" not in signed_server["environment"]
     assert signed_subject["environment"] == {"secretVariables": {CREDENTIAL_ENV_VAR: AUTH_SECRET}}
@@ -252,7 +260,7 @@ def test_replay_case_slot_attempt_and_request_keep_one_canonical_document(
         result_prefix="gs://results/retry/",
         attempt_id="swath.retry.s2",
     )
-    assert retried["taskGroups"][0]["taskSpec"]["runnables"][0] == server
+    assert retried["taskGroups"][0]["taskSpec"]["runnables"][1] == server
     assert campaign.request_argument(retried, "--attempt-id") == "swath.retry.s2"
     assert campaign.request_argument(retried, "--destination") == "gs://results/retry/"
     assert json.loads(row["case_inputs"])["replay"] == case.replay.as_dict()
@@ -267,7 +275,7 @@ def test_renderer_keeps_fixed_latency_flags(tmp_path: Path) -> None:
     request = campaign.render_batch_job(
         attempt, images.image_for(case.tool), suite=SUITE, options=launch.options
     )
-    commands = request["taskGroups"][0]["taskSpec"]["runnables"][0]["container"]["commands"]
+    commands = request["taskGroups"][0]["taskSpec"]["runnables"][1]["container"]["commands"]
     assert commands[-4:] == [
         "--inject-latency",
         "worker_page=247ms,pivot_probe=105ms,structure_probe=92ms",
@@ -290,7 +298,7 @@ def test_uri_fixture_is_staged_before_the_server_and_never_put_in_its_image(
         options=context(plan, case, images).options,
     )
 
-    stage, server, subject = request["taskGroups"][0]["taskSpec"]["runnables"]
+    stage, initializer, server, subject = request["taskGroups"][0]["taskSpec"]["runnables"]
     assert stage["container"]["commands"] == [
         "gcloud",
         "storage",
@@ -308,6 +316,7 @@ def test_uri_fixture_is_staged_before_the_server_and_never_put_in_its_image(
             )
         }
     }
+    assert initializer["container"]["commands"] == ["10001:10001", "/tmp/attempt"]
     assert server["background"] is True
     fixture_index = server["container"]["commands"].index("--fixture")
     assert server["container"]["commands"][fixture_index + 1] == "/fixtures/source"
@@ -609,7 +618,7 @@ def test_a_refused_creation_is_not_created(tmp_path: Path) -> None:
 def test_the_rendered_job_carries_the_attempt_identity_and_its_prefix(tmp_path: Path) -> None:
     """The worker is told which row it is, so `result.json` can name it back."""
     attempt, request = rendered_request(tmp_path)
-    commands = request["taskGroups"][0]["taskSpec"]["runnables"][0]["container"]["commands"]
+    commands = request["taskGroups"][0]["taskSpec"]["runnables"][-1]["container"]["commands"]
     pairs = dict(zip(commands[::2], commands[1::2], strict=True))
     assert pairs["--attempt-id"] == attempt.attempt_id
     assert pairs["--case-id"] == attempt.case_id
@@ -1236,7 +1245,8 @@ def test_a_swath_job_names_its_heap_variable_once_and_the_worker_takes_it(
     images = image_set(tmp_path)
     _, _, build = campaign.planned_attempt(case, context(plan, case, images))
     _, request = build(1)
-    argv = json.loads(request)["taskGroups"][0]["taskSpec"]["runnables"][0]["container"]["commands"]
+    subject = json.loads(request)["taskGroups"][0]["taskSpec"]["runnables"][-1]
+    argv = subject["container"]["commands"]
 
     args = measure.parse_args(argv)
     # The capsule the image would carry, read from the tree it is built from.
