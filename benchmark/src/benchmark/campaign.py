@@ -764,7 +764,7 @@ def render_batch_job(
         "machineType": attempt.machine_type,
         "provisioningModel": options.provisioning,
     }
-    if attempt.machine_type.startswith(("n4-", "c4-")):
+    if attempt.machine_type.startswith(("n4-", "c4-", "c4d-")):
         policy["bootDisk"] = dict(HYPERDISK_BOOT_DISK)
     allocation_policy: dict[str, Any] = {
         "instances": [{"policy": policy}],

@@ -335,12 +335,27 @@ def test_uri_fixture_is_staged_before_the_server_and_never_put_in_its_image(
     }
 
 
-def test_c4_diagnostic_keeps_the_fixed_boot_disk_and_direct_output_mount(
+@pytest.mark.parametrize(
+    ("relative_plan", "machine_type", "container_memory_gb"),
+    [
+        pytest.param(
+            "campaign/idc-open-data.yaml", "c4-highcpu-32", "16", id="c4"
+        ),
+        pytest.param(
+            "c4-64/sentinel-cogs.yaml", "c4d-highcpu-64", "60", id="c4d"
+        ),
+    ],
+)
+def test_c4_diagnostics_keep_the_fixed_boot_disk_and_direct_output_mount(
     tmp_path: Path,
+    relative_plan: str,
+    machine_type: str,
+    container_memory_gb: str,
 ) -> None:
     plan = Plan.load(
         ROOT
-        / "benchmark/plans/refinements/swath-main-c4/campaign/idc-open-data.yaml"
+        / "benchmark/plans/refinements/swath-main-c4"
+        / relative_plan
     )
     case = plan.cases[0]
     images = image_set(tmp_path)
@@ -356,7 +371,7 @@ def test_c4_diagnostic_keeps_the_fixed_boot_disk_and_direct_output_mount(
 
     policy = request["allocationPolicy"]["instances"][0]["policy"]
     assert policy == {
-        "machineType": "c4-highcpu-32",
+        "machineType": machine_type,
         "provisioningModel": "SPOT",
         "bootDisk": {
             "type": "hyperdisk-balanced",
@@ -369,7 +384,7 @@ def test_c4_diagnostic_keeps_the_fixed_boot_disk_and_direct_output_mount(
         "container"
     ]["options"]
     commands = subject["container"]["commands"]
-    assert commands[commands.index("--container-memory-gb") + 1] == "16"
+    assert commands[commands.index("--container-memory-gb") + 1] == container_memory_gb
 
 
 @pytest.mark.parametrize(
