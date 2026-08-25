@@ -1,7 +1,9 @@
 # Re-run the current-main IDC gate on C4 after reproducing the retained local
-# result. Keep the current fixture, TSV controls, memory ceilings, and 8/6/2
-# subject/replay/host allocation fixed from the earlier 16-vCPU cloud cell.
-# This remains a diagnostic, not a comparative benchmark.
+# result. The workstation exposed 32 logical CPUs and pinned eight physical
+# cores apiece to Swath and replay. C4 has no 34-vCPU predefined shape, so use
+# 32 vCPUs and reserve two for the host: 16 for Swath and 14 for replay. Keep
+# the current fixture, TSV controls, and the already pressure-free 16-GiB
+# subject ceiling. This remains a diagnostic, not a comparative benchmark.
 spec_version: 3
 
 bucket: idc-open-data
@@ -18,11 +20,11 @@ replay:
 defaults:
   reps: 1
   timeout_s: 3600
-  vcpus: 16
-  memory_gb: 32
-  subject_vcpus: 8
+  vcpus: 32
+  memory_gb: 64
+  subject_vcpus: 16
   container_memory_gb: 16
-  replay_vcpus: 6
+  replay_vcpus: 14
   replay_memory_gb: 6
   replay_parquet_connections: 8
   replay_max_concurrent_requests: 512

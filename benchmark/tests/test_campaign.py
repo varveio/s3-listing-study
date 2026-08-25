@@ -347,7 +347,7 @@ def test_c4_diagnostic_keeps_the_fixed_boot_disk_and_direct_output_mount(
 
     policy = request["allocationPolicy"]["instances"][0]["policy"]
     assert policy == {
-        "machineType": "c4-highcpu-16",
+        "machineType": "c4-highcpu-32",
         "provisioningModel": "SPOT",
         "bootDisk": {
             "type": "hyperdisk-balanced",
@@ -359,6 +359,8 @@ def test_c4_diagnostic_keeps_the_fixed_boot_disk_and_direct_output_mount(
     assert "--volume=/mnt/stateful_partition/attempt:/tmp/attempt" in subject[
         "container"
     ]["options"]
+    commands = subject["container"]["commands"]
+    assert commands[commands.index("--container-memory-gb") + 1] == "16"
 
 
 @pytest.mark.parametrize(
