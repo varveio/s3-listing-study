@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Compile Swath listing parameters into exact in-image argv."""
 
+import re
+
 from benchmark.runtime.command_adapter import (
     HEAP_PERCENT,
     Ceiling,
@@ -48,6 +50,7 @@ AXES = {"concurrency": CONCURRENCY, "heap_percent": Fixed(HEAP_PERCENT)}
 
 CONFIG_KEYS = frozenset(
     {
+        "jvm_max_heap",
         "parquet_part_size",
         "parquet_writers",
         "part_rotation_interval",
@@ -59,6 +62,8 @@ CONFIG_KEYS = frozenset(
     }
 )
 """Output controls whose retained values must remain visible in case identity."""
+
+JVM_MAX_HEAP_RE = re.compile(r"\A[1-9][0-9]*[kKmMgG]\Z")
 
 LISTING = "listing"
 """The logical name every mode here publishes its listing under."""
@@ -180,7 +185,15 @@ def build_env(request: CommandRequest) -> dict[str, str]:
     that Swath is a JVM told through ``JAVA_TOOL_OPTIONS`` is this capsule's
     knowledge and lives nowhere else.
     """
-    return {"JAVA_TOOL_OPTIONS": f"-XX:MaxRAMPercentage={request.heap_percent}"}
+    options = f"-XX:MaxRAMPercentage={request.heap_percent}"
+    maximum = request.config.get("jvm_max_heap")
+    if maximum is not None:
+        if not isinstance(maximum, str) or JVM_MAX_HEAP_RE.fullmatch(maximum) is None:
+            raise CommandAdapterError(
+                f"{TOOL} jvm_max_heap must be a positive JVM size such as '4g'; got: {maximum!r}"
+            )
+        options = f"{options} -Xmx{maximum}"
+    return {"JAVA_TOOL_OPTIONS": options}
 
 
 def _concurrency(request: CommandRequest) -> str:
@@ -234,8 +247,10 @@ def _rotation_options(request: CommandRequest) -> tuple[str, ...]:
     rows = request.config.get("part_rotation_max_rows")
     rendered: list[str] = []
     if interval is not None:
-        if not isinstance(interval, str) or not interval or any(
-            character.isspace() for character in interval
+        if (
+            not isinstance(interval, str)
+            or not interval
+            or any(character.isspace() for character in interval)
         ):
             raise CommandAdapterError(
                 f"{TOOL} part_rotation_interval must be one non-empty duration token; "
@@ -294,6 +309,7 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
                 request,
                 frozenset(
                     {
+                        "jvm_max_heap",
                         "part_rotation_interval",
                         "part_rotation_max_rows",
                         "text_part_size",

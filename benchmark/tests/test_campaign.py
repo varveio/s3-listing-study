@@ -342,7 +342,7 @@ def test_uri_fixture_is_staged_before_the_server_and_never_put_in_its_image(
             "campaign/idc-open-data.yaml", "c4-highcpu-32", "16", id="c4"
         ),
         pytest.param(
-            "c4-64/sentinel-cogs.yaml", "c4d-highcpu-64", "60", id="c4d"
+            "c4-64/sentinel-cogs.yaml", "c4d-highcpu-64", "80", id="c4d"
         ),
     ],
 )

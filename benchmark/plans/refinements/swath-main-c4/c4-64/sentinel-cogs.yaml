@@ -1,8 +1,9 @@
 # Double every C4-32 Sentinel CPU partition. Intel C4 has no 64-vCPU shape, so
-# this exact two-times CPU cell uses x86 C4D and divides its native 120 GiB as
-# 60/45/15 GiB for Swath/replay/host. The Swath request ceiling, replay
-# admission width, and Parquet reader count also double so the larger machine
-# is not put behind the smaller machine's service limits.
+# this exact two-times CPU cell uses x86 C4D. Its 80/32/8-GiB memory split
+# doubles subject and host cgroups while following the replay server's observed
+# live heap. Both machine sizes use the same explicit 4-GiB Swath heap. The
+# request ceiling, replay admission width, and Parquet reader count also double
+# so the larger machine is not put behind the smaller machine's service limits.
 spec_version: 3
 
 bucket: sentinel-cogs
@@ -22,9 +23,9 @@ defaults:
   vcpus: 64
   memory_gb: 120
   subject_vcpus: 32
-  container_memory_gb: 60
+  container_memory_gb: 80
   replay_vcpus: 28
-  replay_memory_gb: 45
+  replay_memory_gb: 32
   replay_parquet_connections: 64
   replay_max_concurrent_requests: 1024
   replay_prefetch: true
@@ -38,6 +39,7 @@ tools:
         purpose: diagnostic
         concurrency: 256
         config:
+          jvm_max_heap: 4g
           text_writers: 8
           text_part_size: 1gb
           writeback_size: 32mb
