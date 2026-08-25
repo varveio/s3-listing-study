@@ -27,11 +27,14 @@
 # pd-balanced. Set it to `hyperdisk-balanced` explicitly. Not pd-ssd — N4 does
 # not take that either, and Batch's own disk-type field does not list a
 # Hyperdisk value, so this needs checking against the API it actually accepts.
-# The controller provisions 300 GiB for every N4 job. Replay fixture, retained
-# native product, container layers, and upload staging share that boot disk; the
-# full Sentinel TSV product is about 156 GiB and its fixture about 28 GiB. The
-# size is recorded in executor_env rather than the case hash, per the settled
-# identity contract.
+# The controller currently provisions 200 GiB for every N4 job and bind-mounts
+# the subject's attempt directory from /mnt/stateful_partition so retained
+# output does not traverse the container overlay. Replay fixture, native
+# product, container layers, and upload staging share the boot disk. This size
+# is sufficient for the IDC reproduction; Sentinel remains gated on a separate
+# explicit capacity decision because its TSV product plus fixture exceeds this
+# safe envelope. The size is recorded in executor_env rather than the case
+# hash, per the settled identity contract.
 
 spec_version: 2
 

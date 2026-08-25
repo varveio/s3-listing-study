@@ -230,7 +230,8 @@ def test_replay_case_slot_attempt_and_request_keep_one_canonical_document(
         expected,
     ]
     assert subject["container"]["options"] == (
-        "--network host --cpuset-cpus=10-13 --memory=4g --memory-swap=4g"
+        "--network host --cpuset-cpus=10-13 --memory=4g --memory-swap=4g "
+        "--volume=/mnt/stateful_partition/attempt:/tmp/attempt"
     )
     assert attempt.secret_resource is None
     assert "environment" not in subject
@@ -314,11 +315,14 @@ def test_uri_fixture_is_staged_before_the_server_and_never_put_in_its_image(
         "--volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
         in server["container"]["options"]
     )
-    assert "--volume" not in subject["container"]["options"]
+    assert (
+        "--volume=/mnt/stateful_partition/attempt:/tmp/attempt"
+        in subject["container"]["options"]
+    )
     assert request["allocationPolicy"]["instances"][0]["policy"]["bootDisk"] == {
         "type": "hyperdisk-balanced",
         "image": "batch-cos",
-        "sizeGb": "300",
+        "sizeGb": "200",
     }
 
 

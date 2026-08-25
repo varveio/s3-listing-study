@@ -89,7 +89,7 @@ REPLAY_READINESS_TIMEOUT_S = 600
 N4_BOOT_DISK = {
     "type": "hyperdisk-balanced",
     "image": "batch-cos",
-    "sizeGb": "300",
+    "sizeGb": "200",
 }
 REPLAY_STAGING_IMAGE = (
     "gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:"
@@ -99,6 +99,8 @@ REPLAY_STAGING_IMAGE = (
 # The enlarged boot disk's writable capacity is /mnt/stateful_partition.
 REPLAY_FIXTURE_HOST_DIR = "/mnt/stateful_partition/replay-fixture"
 REPLAY_FIXTURE_CONTAINER_DIR = "/fixtures/source"
+SUBJECT_OUTPUT_HOST_DIR = "/mnt/stateful_partition/attempt"
+SUBJECT_OUTPUT_CONTAINER_DIR = "/tmp/attempt"
 PINNED_IMAGE_RE = re.compile(r"\A[^\s@]+@sha256:([0-9a-f]{64})\Z")
 SECRET_RE = re.compile(r"\Aprojects/[^/]+/secrets/[^/]+/versions/[^/]+\Z")
 HEX64_RE = re.compile(r"\A[0-9a-f]{64}\Z")
@@ -173,7 +175,7 @@ class BatchOptions:
                 "provisioning": self.provisioning,
                 "boot_disk": {
                     "type": "n4-hyperdisk-balanced",
-                    "size_gb": 300,
+                    "size_gb": 200,
                 },
                 "network": self.network,
                 "subnetwork": self.subnetwork,
@@ -582,7 +584,7 @@ def render_batch_job(
         ("--region", attempt.target_region),
         *(() if attempt.auth_role is None else (("--auth-role", attempt.auth_role),)),
         ("--prefix", attempt.target_prefix),
-        ("--output", "/tmp/attempt"),
+        ("--output", SUBJECT_OUTPUT_CONTAINER_DIR),
         ("--destination", attempt.result_prefix),
         ("--timeout", str(attempt.timeout_s)),
         ("--term-grace", str(options.term_grace)),
@@ -619,11 +621,14 @@ def render_batch_job(
     container: dict[str, Any] = {"imageUri": image["image_uri"], "commands": commands}
     subject_runnable: dict[str, Any] = {"container": container}
     runnables = [subject_runnable]
+    output_volume = f"--volume={SUBJECT_OUTPUT_HOST_DIR}:{SUBJECT_OUTPUT_CONTAINER_DIR}"
     if replay is None:
+        plain_subject_options = [output_volume]
         if container_memory is not None:
-            container["options"] = shlex.join(
+            plain_subject_options.extend(
                 (f"--memory={container_memory}g", f"--memory-swap={container_memory}g")
             )
+        container["options"] = shlex.join(plain_subject_options)
     else:
         allocation = replay.allocation
         summary = replay_contract.allocation_summary(
@@ -671,7 +676,9 @@ def render_batch_job(
                 )
             )
         server_options = _runnable_options(summary.server_cpuset, allocation.replay_memory_gb)
-        subject_options = _runnable_options(summary.subject_cpuset, container_memory)
+        subject_options = (
+            f"{_runnable_options(summary.subject_cpuset, container_memory)} {output_volume}"
+        )
         staging_runnable = None
         if backend.fixture_uri is not None:
             volume = f"--volume={REPLAY_FIXTURE_HOST_DIR}:{REPLAY_FIXTURE_CONTAINER_DIR}"
