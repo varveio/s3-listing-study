@@ -279,6 +279,29 @@ def test_the_current_geometry_rerun_changes_only_the_replay_fixture() -> None:
     )
 
 
+def test_the_page_cache_screen_changes_only_the_subject_memory_ceiling() -> None:
+    """Keep the observed cgroup-pressure diagnostic one-dimensional."""
+    root = Path(__file__).resolve().parents[2]
+    constrained = bench.Plan.load(
+        root
+        / "benchmark/plans/refinements/swath-main-current-geometry/idc-open-data.yaml"
+    ).cases[0]
+    roomy = bench.Plan.load(
+        root
+        / "benchmark/plans/refinements/swath-main-current-geometry-mem16/"
+        "idc-open-data.yaml"
+    ).cases[0]
+    assert roomy.tool == constrained.tool
+    assert roomy.mode == constrained.mode
+    assert roomy.purpose == constrained.purpose
+    assert roomy.config == constrained.config
+    assert roomy.replay == constrained.replay
+    assert roomy.resources.as_dict() == {
+        **constrained.resources.as_dict(),
+        "container_memory_gb": 16,
+    }
+
+
 @pytest.mark.parametrize(
     "malformed",
     ("fixed", "false", "null", "{}"),
