@@ -89,7 +89,7 @@ REPLAY_READINESS_TIMEOUT_S = 600
 N4_BOOT_DISK = {
     "type": "hyperdisk-balanced",
     "image": "batch-cos",
-    "sizeGb": "200",
+    "sizeGb": "100",
 }
 REPLAY_STAGING_IMAGE = (
     "gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:"
@@ -175,7 +175,7 @@ class BatchOptions:
                 "provisioning": self.provisioning,
                 "boot_disk": {
                     "type": "n4-hyperdisk-balanced",
-                    "size_gb": 200,
+                    "size_gb": 100,
                 },
                 "network": self.network,
                 "subnetwork": self.subnetwork,
