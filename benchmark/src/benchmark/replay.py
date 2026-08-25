@@ -78,7 +78,7 @@ class ReplayBackend:
                 "scale": self.latency_scale,
                 "jitter": self.latency_jitter,
             }
-        document = {
+        document: dict[str, object] = {
             "server_image_uri": self.server_image_uri,
             "serving_mode": self.serving_mode,
             "latency_model": latency_model,
