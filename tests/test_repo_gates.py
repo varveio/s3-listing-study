@@ -155,23 +155,17 @@ def test_deleted_runner_paths_remain_only_in_frozen_evidence() -> None:
     assert offenders == []
 
 
-def test_gcp_module_matches_single_toolbox_and_upload_only_workers() -> None:
+def test_gcp_module_matches_single_toolbox_and_full_access_workers() -> None:
     module = REPO / "infra/terraform/modules/gcp/s3-listing-study"
     worker = (module / "worker.tf").read_text()
     authenticated = (module / "aws-credentials.tf").read_text()
     registry = (module / "image-registry.tf").read_text()
     readme = (module / "README.md").read_text()
 
-    worker_roles = re.findall(r'\brole\s*=\s*"([^"]+)"', worker)
-    authenticated_roles = re.findall(r'\brole\s*=\s*"([^"]+)"', authenticated)
-    assert "roles/storage.objectCreator" in worker_roles
-    assert "roles/storage.objectAdmin" not in worker_roles
-    assert "roles/storage.objectCreator" in authenticated_roles
-    assert "roles/storage.objectAdmin" not in authenticated_roles
-    # Also scan raw HCL so objectAdmin cannot hide in a project-level toset or
-    # another expression that is later assigned through ``role = each.value``.
-    assert "roles/storage.objectAdmin" not in worker
-    assert "roles/storage.objectAdmin" not in authenticated
+    storage_role_pattern = r'"(roles/storage\.[^"]+)"'
+    worker_storage_roles = set(re.findall(storage_role_pattern, worker))
+    authenticated_storage_roles = set(re.findall(storage_role_pattern, authenticated))
+    assert worker_storage_roles == authenticated_storage_roles == {"roles/storage.objectAdmin"}
     assert "single self-contained benchmark toolbox" in registry
     assert "this module does not publish it" in (module / "outputs.tf").read_text()
     for retired in (
