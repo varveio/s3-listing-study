@@ -1,0 +1,4986 @@
+{
+  "attempts": [
+    {
+      "attempt_id": "s3-fast-list.90992fe12168.s1",
+      "case_id": "s3-fast-list.90992fe12168",
+      "evidence": {
+        "argv": [
+          "/usr/bin/s3-fast-list",
+          "--no-sign-request",
+          "--endpoint-url",
+          "http://127.0.0.1:19090",
+          "--output-parquet-file",
+          "/tmp/attempt/native/listing.parquet",
+          "--output-ks-file",
+          "/tmp/attempt/native/keyspace.ks",
+          "list",
+          "--region",
+          "us-east-1",
+          "--bucket",
+          "runner-replay-canary"
+        ],
+        "binding_errors": [],
+        "replay": {
+          "after": {
+            "metrics": {
+              "meters": [
+                {
+                  "name": "jvm.buffer.count",
+                  "tags": {
+                    "id": "direct"
+                  },
+                  "type": "gauge",
+                  "value": 2.0
+                },
+                {
+                  "name": "jvm.buffer.count",
+                  "tags": {
+                    "id": "mapped - 'non-volatile memory'"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.buffer.count",
+                  "tags": {
+                    "id": "mapped"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.buffer.memory.used",
+                  "tags": {
+                    "id": "direct"
+                  },
+                  "type": "gauge",
+                  "value": 16384.0
+                },
+                {
+                  "name": "jvm.buffer.memory.used",
+                  "tags": {
+                    "id": "mapped - 'non-volatile memory'"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.buffer.memory.used",
+                  "tags": {
+                    "id": "mapped"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.buffer.total.capacity",
+                  "tags": {
+                    "id": "direct"
+                  },
+                  "type": "gauge",
+                  "value": 16384.0
+                },
+                {
+                  "name": "jvm.buffer.total.capacity",
+                  "tags": {
+                    "id": "mapped - 'non-volatile memory'"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.buffer.total.capacity",
+                  "tags": {
+                    "id": "mapped"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.gc.live.data.size",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.gc.max.data.size",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 1610612736.0
+                },
+                {
+                  "count": 12582912.0,
+                  "name": "jvm.gc.memory.allocated",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "count": 1920856.0,
+                  "name": "jvm.gc.memory.promoted",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "name": "jvm.gc.overhead",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 0.000992
+                },
+                {
+                  "count": 1,
+                  "max_ms": 6.0,
+                  "mean_ms": 6.0,
+                  "name": "jvm.gc.pause",
+                  "p50_ms": null,
+                  "p99_ms": null,
+                  "sum_ms": 6.0,
+                  "tags": {
+                    "action": "end of minor GC",
+                    "cause": "G1 Evacuation Pause",
+                    "gc": "G1 Young Generation"
+                  },
+                  "type": "timer"
+                },
+                {
+                  "name": "jvm.memory.committed",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Eden Space"
+                  },
+                  "type": "gauge",
+                  "value": 12582912.0
+                },
+                {
+                  "name": "jvm.memory.committed",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Old Gen"
+                  },
+                  "type": "gauge",
+                  "value": 20971520.0
+                },
+                {
+                  "name": "jvm.memory.committed",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Survivor Space"
+                  },
+                  "type": "gauge",
+                  "value": 2097152.0
+                },
+                {
+                  "name": "jvm.memory.committed",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'non-nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 2555904.0
+                },
+                {
+                  "name": "jvm.memory.committed",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'non-profiled nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 2555904.0
+                },
+                {
+                  "name": "jvm.memory.committed",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'profiled nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 3735552.0
+                },
+                {
+                  "name": "jvm.memory.committed",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "Compressed Class Space"
+                  },
+                  "type": "gauge",
+                  "value": 2162688.0
+                },
+                {
+                  "name": "jvm.memory.committed",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "Metaspace"
+                  },
+                  "type": "gauge",
+                  "value": 16449536.0
+                },
+                {
+                  "name": "jvm.memory.max",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Eden Space"
+                  },
+                  "type": "gauge",
+                  "value": -1.0
+                },
+                {
+                  "name": "jvm.memory.max",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Old Gen"
+                  },
+                  "type": "gauge",
+                  "value": 1610612736.0
+                },
+                {
+                  "name": "jvm.memory.max",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Survivor Space"
+                  },
+                  "type": "gauge",
+                  "value": -1.0
+                },
+                {
+                  "name": "jvm.memory.max",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'non-nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 5828608.0
+                },
+                {
+                  "name": "jvm.memory.max",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'non-profiled nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 122916864.0
+                },
+                {
+                  "name": "jvm.memory.max",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'profiled nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 122916864.0
+                },
+                {
+                  "name": "jvm.memory.max",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "Compressed Class Space"
+                  },
+                  "type": "gauge",
+                  "value": 1073741824.0
+                },
+                {
+                  "name": "jvm.memory.max",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "Metaspace"
+                  },
+                  "type": "gauge",
+                  "value": -1.0
+                },
+                {
+                  "name": "jvm.memory.usage.after.gc",
+                  "tags": {
+                    "area": "heap",
+                    "pool": "long-lived"
+                  },
+                  "type": "gauge",
+                  "value": 0.007094
+                },
+                {
+                  "name": "jvm.memory.used",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Eden Space"
+                  },
+                  "type": "gauge",
+                  "value": 1048576.0
+                },
+                {
+                  "name": "jvm.memory.used",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Old Gen"
+                  },
+                  "type": "gauge",
+                  "value": 11425400.0
+                },
+                {
+                  "name": "jvm.memory.used",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Survivor Space"
+                  },
+                  "type": "gauge",
+                  "value": 1715968.0
+                },
+                {
+                  "name": "jvm.memory.used",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'non-nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 1755136.0
+                },
+                {
+                  "name": "jvm.memory.used",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'non-profiled nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 820864.0
+                },
+                {
+                  "name": "jvm.memory.used",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'profiled nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 3691136.0
+                },
+                {
+                  "name": "jvm.memory.used",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "Compressed Class Space"
+                  },
+                  "type": "gauge",
+                  "value": 2027408.0
+                },
+                {
+                  "name": "jvm.memory.used",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "Metaspace"
+                  },
+                  "type": "gauge",
+                  "value": 16173496.0
+                },
+                {
+                  "name": "jvm.threads.daemon",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 5.0
+                },
+                {
+                  "name": "jvm.threads.live",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 20.0
+                },
+                {
+                  "name": "jvm.threads.peak",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 20.0
+                },
+                {
+                  "name": "jvm.threads.states",
+                  "tags": {
+                    "state": "blocked"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.threads.states",
+                  "tags": {
+                    "state": "new"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.threads.states",
+                  "tags": {
+                    "state": "runnable"
+                  },
+                  "type": "gauge",
+                  "value": 8.0
+                },
+                {
+                  "name": "jvm.threads.states",
+                  "tags": {
+                    "state": "terminated"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.threads.states",
+                  "tags": {
+                    "state": "timed-waiting"
+                  },
+                  "type": "gauge",
+                  "value": 10.0
+                },
+                {
+                  "name": "jvm.threads.states",
+                  "tags": {
+                    "state": "waiting"
+                  },
+                  "type": "gauge",
+                  "value": 2.0
+                },
+                {
+                  "name": "process.cpu.usage",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 0.034791
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.delimiter.reader_pool.open.latency",
+                  "p50_ms": 0.0,
+                  "p99_ms": 0.0,
+                  "sum_ms": 0.0,
+                  "tags": {},
+                  "type": "timer"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.delimiter.skipscan.row_group_opens",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.delimiter.skipscan.whole_group_shortcuts",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "count": 3,
+                  "max_ms": 59.201581,
+                  "mean_ms": 26.376895,
+                  "name": "swath.replay.fixture.list.latency",
+                  "p50_ms": 13.369344,
+                  "p99_ms": 60.555264,
+                  "sum_ms": 79.130685,
+                  "tags": {},
+                  "type": "timer"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.http.errors",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "count": 3,
+                  "max_ms": 88.854047,
+                  "mean_ms": 43.878321,
+                  "name": "swath.replay.http.request.latency",
+                  "p50_ms": 35.38944,
+                  "p99_ms": 92.012544,
+                  "sum_ms": 131.634964,
+                  "tags": {},
+                  "type": "timer"
+                },
+                {
+                  "count": 3.0,
+                  "name": "swath.replay.http.requests",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "count": 0,
+                  "max": 0.0,
+                  "mean": 0.0,
+                  "name": "swath.replay.index.entries",
+                  "tags": {},
+                  "total": 0.0,
+                  "type": "distribution"
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.index.load.latency",
+                  "p50_ms": null,
+                  "p99_ms": null,
+                  "sum_ms": 0.0,
+                  "tags": {
+                    "source": "derived"
+                  },
+                  "type": "timer"
+                },
+                {
+                  "count": 3,
+                  "max_ms": 52.268241,
+                  "mean_ms": 22.91727,
+                  "name": "swath.replay.page.read.latency",
+                  "p50_ms": 12.45184,
+                  "p99_ms": 52.297728,
+                  "sum_ms": 68.751811,
+                  "tags": {},
+                  "type": "timer"
+                },
+                {
+                  "name": "swath.replay.parquet.queries.in_flight",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "swath.replay.parquet.queries.peak",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 1.0
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.parquet.query.errors",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "count": 3,
+                  "max_ms": 34.264596,
+                  "mean_ms": 16.605391,
+                  "name": "swath.replay.parquet.query.latency",
+                  "p50_ms": 11.927552,
+                  "p99_ms": 35.520512,
+                  "sum_ms": 49.816172,
+                  "tags": {},
+                  "type": "timer"
+                },
+                {
+                  "count": 3,
+                  "max": 1001.0,
+                  "mean": 683.333333,
+                  "name": "swath.replay.parquet.query.rows",
+                  "tags": {},
+                  "total": 2050.0,
+                  "type": "distribution"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.prefetch.anchor",
+                  "tags": {
+                    "event": "claimed"
+                  },
+                  "type": "counter"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.prefetch.anchor",
+                  "tags": {
+                    "event": "evicted_before_claim"
+                  },
+                  "type": "counter"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.prefetch.anchor",
+                  "tags": {
+                    "event": "registered"
+                  },
+                  "type": "counter"
+                },
+                {
+                  "count": 0,
+                  "max": 0.0,
+                  "mean": 0.0,
+                  "name": "swath.replay.prefetch.fill.rows",
+                  "tags": {},
+                  "total": 0.0,
+                  "type": "distribution"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.prefetch.window.eviction",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.prefetch.window.fill",
+                  "p50_ms": 0.0,
+                  "p99_ms": 0.0,
+                  "sum_ms": 0.0,
+                  "tags": {},
+                  "type": "timer"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.prefetch.window.hit",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.request.latency",
+                  "p50_ms": 0.0,
+                  "p99_ms": 0.0,
+                  "sum_ms": 0.0,
+                  "tags": {
+                    "shape": "pivot_probe"
+                  },
+                  "type": "timer"
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.request.latency",
+                  "p50_ms": 0.0,
+                  "p99_ms": 0.0,
+                  "sum_ms": 0.0,
+                  "tags": {
+                    "shape": "structure_probe"
+                  },
+                  "type": "timer"
+                },
+                {
+                  "count": 3,
+                  "max_ms": 60.381328,
+                  "mean_ms": 26.846785,
+                  "name": "swath.replay.request.latency",
+                  "p50_ms": 13.369344,
+                  "p99_ms": 60.555264,
+                  "sum_ms": 80.540356,
+                  "tags": {
+                    "shape": "worker_page"
+                  },
+                  "type": "timer"
+                },
+                {
+                  "count": 3.0,
+                  "name": "swath.replay.serving.path",
+                  "tags": {
+                    "mode": "duckdb"
+                  },
+                  "type": "counter"
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.sortfixture.build.latency",
+                  "p50_ms": null,
+                  "p99_ms": null,
+                  "sum_ms": 0.0,
+                  "tags": {},
+                  "type": "timer"
+                },
+                {
+                  "count": 0,
+                  "max": 0.0,
+                  "mean": 0.0,
+                  "name": "swath.replay.sortfixture.output.bytes",
+                  "tags": {},
+                  "total": 0.0,
+                  "type": "distribution"
+                },
+                {
+                  "name": "system.cpu.count",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 2.0
+                },
+                {
+                  "name": "system.cpu.usage",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 0.037583
+                },
+                {
+                  "name": "system.load.average.1m",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 1.300781
+                }
+              ],
+              "sampled_at_epoch_ms": 1787744983262,
+              "schema_version": 1,
+              "serving_mode": "DUCKDB",
+              "uptime_ms": 7157
+            },
+            "observed_at": "2026-08-26T11:49:43.272674+00:00"
+          },
+          "before": {
+            "metrics": {
+              "meters": [
+                {
+                  "name": "jvm.buffer.count",
+                  "tags": {
+                    "id": "direct"
+                  },
+                  "type": "gauge",
+                  "value": 1.0
+                },
+                {
+                  "name": "jvm.buffer.count",
+                  "tags": {
+                    "id": "mapped - 'non-volatile memory'"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.buffer.count",
+                  "tags": {
+                    "id": "mapped"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.buffer.memory.used",
+                  "tags": {
+                    "id": "direct"
+                  },
+                  "type": "gauge",
+                  "value": 8192.0
+                },
+                {
+                  "name": "jvm.buffer.memory.used",
+                  "tags": {
+                    "id": "mapped - 'non-volatile memory'"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.buffer.memory.used",
+                  "tags": {
+                    "id": "mapped"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.buffer.total.capacity",
+                  "tags": {
+                    "id": "direct"
+                  },
+                  "type": "gauge",
+                  "value": 8192.0
+                },
+                {
+                  "name": "jvm.buffer.total.capacity",
+                  "tags": {
+                    "id": "mapped - 'non-volatile memory'"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.buffer.total.capacity",
+                  "tags": {
+                    "id": "mapped"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.gc.live.data.size",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.gc.max.data.size",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 1610612736.0
+                },
+                {
+                  "count": 0.0,
+                  "name": "jvm.gc.memory.allocated",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "count": 0.0,
+                  "name": "jvm.gc.memory.promoted",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "name": "jvm.gc.overhead",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.memory.committed",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Eden Space"
+                  },
+                  "type": "gauge",
+                  "value": 13631488.0
+                },
+                {
+                  "name": "jvm.memory.committed",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Old Gen"
+                  },
+                  "type": "gauge",
+                  "value": 19922944.0
+                },
+                {
+                  "name": "jvm.memory.committed",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Survivor Space"
+                  },
+                  "type": "gauge",
+                  "value": 2097152.0
+                },
+                {
+                  "name": "jvm.memory.committed",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'non-nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 2555904.0
+                },
+                {
+                  "name": "jvm.memory.committed",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'non-profiled nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 2555904.0
+                },
+                {
+                  "name": "jvm.memory.committed",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'profiled nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 3276800.0
+                },
+                {
+                  "name": "jvm.memory.committed",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "Compressed Class Space"
+                  },
+                  "type": "gauge",
+                  "value": 2097152.0
+                },
+                {
+                  "name": "jvm.memory.committed",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "Metaspace"
+                  },
+                  "type": "gauge",
+                  "value": 15990784.0
+                },
+                {
+                  "name": "jvm.memory.max",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Eden Space"
+                  },
+                  "type": "gauge",
+                  "value": -1.0
+                },
+                {
+                  "name": "jvm.memory.max",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Old Gen"
+                  },
+                  "type": "gauge",
+                  "value": 1610612736.0
+                },
+                {
+                  "name": "jvm.memory.max",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Survivor Space"
+                  },
+                  "type": "gauge",
+                  "value": -1.0
+                },
+                {
+                  "name": "jvm.memory.max",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'non-nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 5828608.0
+                },
+                {
+                  "name": "jvm.memory.max",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'non-profiled nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 122916864.0
+                },
+                {
+                  "name": "jvm.memory.max",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'profiled nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 122916864.0
+                },
+                {
+                  "name": "jvm.memory.max",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "Compressed Class Space"
+                  },
+                  "type": "gauge",
+                  "value": 1073741824.0
+                },
+                {
+                  "name": "jvm.memory.max",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "Metaspace"
+                  },
+                  "type": "gauge",
+                  "value": -1.0
+                },
+                {
+                  "name": "jvm.memory.usage.after.gc",
+                  "tags": {
+                    "area": "heap",
+                    "pool": "long-lived"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.memory.used",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Eden Space"
+                  },
+                  "type": "gauge",
+                  "value": 8388608.0
+                },
+                {
+                  "name": "jvm.memory.used",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Old Gen"
+                  },
+                  "type": "gauge",
+                  "value": 9504544.0
+                },
+                {
+                  "name": "jvm.memory.used",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Survivor Space"
+                  },
+                  "type": "gauge",
+                  "value": 1937816.0
+                },
+                {
+                  "name": "jvm.memory.used",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'non-nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 1749504.0
+                },
+                {
+                  "name": "jvm.memory.used",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'non-profiled nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 711424.0
+                },
+                {
+                  "name": "jvm.memory.used",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'profiled nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 3225856.0
+                },
+                {
+                  "name": "jvm.memory.used",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "Compressed Class Space"
+                  },
+                  "type": "gauge",
+                  "value": 1986648.0
+                },
+                {
+                  "name": "jvm.memory.used",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "Metaspace"
+                  },
+                  "type": "gauge",
+                  "value": 15701144.0
+                },
+                {
+                  "name": "jvm.threads.daemon",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 5.0
+                },
+                {
+                  "name": "jvm.threads.live",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 19.0
+                },
+                {
+                  "name": "jvm.threads.peak",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 19.0
+                },
+                {
+                  "name": "jvm.threads.states",
+                  "tags": {
+                    "state": "blocked"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.threads.states",
+                  "tags": {
+                    "state": "new"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.threads.states",
+                  "tags": {
+                    "state": "runnable"
+                  },
+                  "type": "gauge",
+                  "value": 8.0
+                },
+                {
+                  "name": "jvm.threads.states",
+                  "tags": {
+                    "state": "terminated"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.threads.states",
+                  "tags": {
+                    "state": "timed-waiting"
+                  },
+                  "type": "gauge",
+                  "value": 9.0
+                },
+                {
+                  "name": "jvm.threads.states",
+                  "tags": {
+                    "state": "waiting"
+                  },
+                  "type": "gauge",
+                  "value": 2.0
+                },
+                {
+                  "name": "process.cpu.usage",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.delimiter.reader_pool.open.latency",
+                  "p50_ms": 0.0,
+                  "p99_ms": 0.0,
+                  "sum_ms": 0.0,
+                  "tags": {},
+                  "type": "timer"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.delimiter.skipscan.row_group_opens",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.delimiter.skipscan.whole_group_shortcuts",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.fixture.list.latency",
+                  "p50_ms": 0.0,
+                  "p99_ms": 0.0,
+                  "sum_ms": 0.0,
+                  "tags": {},
+                  "type": "timer"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.http.errors",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.http.request.latency",
+                  "p50_ms": 0.0,
+                  "p99_ms": 0.0,
+                  "sum_ms": 0.0,
+                  "tags": {},
+                  "type": "timer"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.http.requests",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "count": 0,
+                  "max": 0.0,
+                  "mean": 0.0,
+                  "name": "swath.replay.index.entries",
+                  "tags": {},
+                  "total": 0.0,
+                  "type": "distribution"
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.index.load.latency",
+                  "p50_ms": null,
+                  "p99_ms": null,
+                  "sum_ms": 0.0,
+                  "tags": {
+                    "source": "derived"
+                  },
+                  "type": "timer"
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.page.read.latency",
+                  "p50_ms": 0.0,
+                  "p99_ms": 0.0,
+                  "sum_ms": 0.0,
+                  "tags": {},
+                  "type": "timer"
+                },
+                {
+                  "name": "swath.replay.parquet.queries.in_flight",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "swath.replay.parquet.queries.peak",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.parquet.query.errors",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.parquet.query.latency",
+                  "p50_ms": 0.0,
+                  "p99_ms": 0.0,
+                  "sum_ms": 0.0,
+                  "tags": {},
+                  "type": "timer"
+                },
+                {
+                  "count": 0,
+                  "max": 0.0,
+                  "mean": 0.0,
+                  "name": "swath.replay.parquet.query.rows",
+                  "tags": {},
+                  "total": 0.0,
+                  "type": "distribution"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.prefetch.anchor",
+                  "tags": {
+                    "event": "claimed"
+                  },
+                  "type": "counter"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.prefetch.anchor",
+                  "tags": {
+                    "event": "evicted_before_claim"
+                  },
+                  "type": "counter"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.prefetch.anchor",
+                  "tags": {
+                    "event": "registered"
+                  },
+                  "type": "counter"
+                },
+                {
+                  "count": 0,
+                  "max": 0.0,
+                  "mean": 0.0,
+                  "name": "swath.replay.prefetch.fill.rows",
+                  "tags": {},
+                  "total": 0.0,
+                  "type": "distribution"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.prefetch.window.eviction",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.prefetch.window.fill",
+                  "p50_ms": 0.0,
+                  "p99_ms": 0.0,
+                  "sum_ms": 0.0,
+                  "tags": {},
+                  "type": "timer"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.prefetch.window.hit",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.request.latency",
+                  "p50_ms": 0.0,
+                  "p99_ms": 0.0,
+                  "sum_ms": 0.0,
+                  "tags": {
+                    "shape": "pivot_probe"
+                  },
+                  "type": "timer"
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.request.latency",
+                  "p50_ms": 0.0,
+                  "p99_ms": 0.0,
+                  "sum_ms": 0.0,
+                  "tags": {
+                    "shape": "structure_probe"
+                  },
+                  "type": "timer"
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.request.latency",
+                  "p50_ms": 0.0,
+                  "p99_ms": 0.0,
+                  "sum_ms": 0.0,
+                  "tags": {
+                    "shape": "worker_page"
+                  },
+                  "type": "timer"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.serving.path",
+                  "tags": {
+                    "mode": "duckdb"
+                  },
+                  "type": "counter"
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.sortfixture.build.latency",
+                  "p50_ms": null,
+                  "p99_ms": null,
+                  "sum_ms": 0.0,
+                  "tags": {},
+                  "type": "timer"
+                },
+                {
+                  "count": 0,
+                  "max": 0.0,
+                  "mean": 0.0,
+                  "name": "swath.replay.sortfixture.output.bytes",
+                  "tags": {},
+                  "total": 0.0,
+                  "type": "distribution"
+                },
+                {
+                  "name": "system.cpu.count",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 2.0
+                },
+                {
+                  "name": "system.cpu.usage",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 0.5
+                },
+                {
+                  "name": "system.load.average.1m",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 1.327148
+                }
+              ],
+              "sampled_at_epoch_ms": 1787744978206,
+              "schema_version": 1,
+              "serving_mode": "DUCKDB",
+              "uptime_ms": 2101
+            },
+            "observed_at": "2026-08-26T11:49:38.224303+00:00"
+          },
+          "refusals": [],
+          "resource_sample_count": 0,
+          "sample_count": 0,
+          "state": "COMPLETE"
+        },
+        "result": {
+          "artifacts_size_bytes": 30277,
+          "exit_code": 0,
+          "finished_at": "2026-08-26T11:49:43.260228+00:00",
+          "max_rss_kb": 50048,
+          "product": {
+            "artifact": "listing",
+            "channel": "file",
+            "name": "native/listing.parquet",
+            "sha256": "23e2ff7e266923b37a9cf28ac9e6d9932ed867fa264d21bb78ae883934ee1ed9",
+            "size_bytes": 29534
+          },
+          "product_error": null,
+          "row_count": 2048,
+          "row_count_error": null,
+          "started_at": "2026-08-26T11:49:38.224887+00:00",
+          "stderr": {
+            "name": "stderr.log.gz",
+            "sha256": "165e115f690686e58576c25bdeef2c61bc63952246e0a3471f481a8a8bcb8e23",
+            "size_bytes": 440
+          },
+          "stdout": {
+            "name": "stdout.log.gz",
+            "sha256": "566d86bc8df007f7d12b35fc1f832d4428f0a6d83578fe348b71b439b3e24778",
+            "size_bytes": 31
+          },
+          "timed_out": false,
+          "wall_seconds": 5.033424,
+          "worker_exit_code": 0
+        },
+        "result_sha256": "c5a615f22de7b2bdc7c2ea252b084cf7cb6c569ad124296eaf0bbe75e1ce211b",
+        "result_uri": "gs://s3-listing-study-results-29c02004/runner-replay-canary/runner-replay-canary/s3-fast-list.90992fe12168.s1/result.json",
+        "state": "BOUND",
+        "verification": null
+      },
+      "group_id": "replay-canary-current-20260826",
+      "mode": "list",
+      "origin": "planned",
+      "purpose": "canary",
+      "recorded_at": "2026-08-26T11:48:29.691285+00:00",
+      "request": {
+        "allocationPolicy": {
+          "instances": [
+            {
+              "policy": {
+                "bootDisk": {
+                  "image": "batch-cos",
+                  "sizeGb": "100",
+                  "type": "hyperdisk-balanced"
+                },
+                "machineType": "n4-highcpu-4",
+                "provisioningModel": "STANDARD"
+              }
+            }
+          ],
+          "location": {
+            "allowedLocations": [
+              "zones/us-east1-b"
+            ]
+          },
+          "network": {
+            "networkInterfaces": [
+              {
+                "network": "projects/varve-oss/global/networks/s3-listing-study",
+                "subnetwork": "projects/varve-oss/regions/us-east1/subnetworks/s3-listing-study-us-east1"
+              }
+            ]
+          },
+          "serviceAccount": {
+            "email": "s3-listing-study-worker@varve-oss.iam.gserviceaccount.com"
+          }
+        },
+        "labels": {
+          "suite": "runner-replay-canary"
+        },
+        "logsPolicy": {
+          "destination": "CLOUD_LOGGING"
+        },
+        "taskGroups": [
+          {
+            "parallelism": "1",
+            "taskCount": "1",
+            "taskSpec": {
+              "computeResource": {
+                "cpuMilli": "4000",
+                "memoryMib": "8192"
+              },
+              "maxRetryCount": 0,
+              "maxRunDuration": "1505s",
+              "runnables": [
+                {
+                  "container": {
+                    "commands": [
+                      "10001:10001",
+                      "/tmp/attempt"
+                    ],
+                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:7489a5884836181cf06cd72068118b9210516dbc18f466f484825030ee18d29a",
+                    "options": "--user 0:0 --entrypoint /bin/chown --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
+                  }
+                },
+                {
+                  "background": true,
+                  "container": {
+                    "commands": [
+                      "serve",
+                      "--fixture",
+                      "/fixtures/runner-replay-canary",
+                      "--bucket",
+                      "runner-replay-canary",
+                      "--host",
+                      "127.0.0.1",
+                      "--port",
+                      "19090",
+                      "--metrics-port",
+                      "19192",
+                      "--serving-mode",
+                      "duckdb",
+                      "--parquet-connections",
+                      "4",
+                      "--max-concurrent-requests",
+                      "16"
+                    ],
+                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/replay-canary@sha256:015c272bb6fb2c1f719644d5d8122297814d502dc3820abd94953bb00fafbc3a",
+                    "options": "--network host --cpuset-cpus=0-1 --memory=2g --memory-swap=2g"
+                  },
+                  "environment": {
+                    "variables": {
+                      "JAVA_TOOL_OPTIONS": "-XX:MaxRAMPercentage=75 -Dswath.replay.prefetch.enabled=false -Dswath.replay.prefetch.max-windows=96"
+                    }
+                  }
+                },
+                {
+                  "container": {
+                    "commands": [
+                      "--tool",
+                      "s3-fast-list",
+                      "--mode",
+                      "list",
+                      "--purpose",
+                      "canary",
+                      "--bucket",
+                      "runner-replay-canary",
+                      "--region",
+                      "us-east-1",
+                      "--prefix",
+                      "",
+                      "--output",
+                      "/tmp/attempt",
+                      "--destination",
+                      "gs://s3-listing-study-results-29c02004/runner-replay-canary/runner-replay-canary/s3-fast-list.90992fe12168.s1/",
+                      "--timeout",
+                      "300",
+                      "--term-grace",
+                      "5.0",
+                      "--image",
+                      "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:7489a5884836181cf06cd72068118b9210516dbc18f466f484825030ee18d29a",
+                      "--toolbox-manifest-sha256",
+                      "aa0f2f1c4024a85eb55dc7648542d0b541d3502934b3a134543db3bd31e1857a",
+                      "--toolbox-recipe-sha256",
+                      "e7a9b52a00722230f8a06747ad5eee9a77e4f459c4da058b88ee95b9177cc66c",
+                      "--tool-recipe-sha256",
+                      "6d83668fc2b8672733535b1d9992db4c7ab3a1f82dea36b7ba7001d94d2f9726",
+                      "--tool-build-inputs-sha256",
+                      "cb0289c44055053665626fba147dcd0e25a1cec612baea32d0ab0562ee9c86f9",
+                      "--tool-version",
+                      "1.1.0",
+                      "--tool-build-sha256",
+                      "299ddc5399d26f2506a833eaff6c6ac7a78be5424ea1fc8a13809ab3473e152d",
+                      "--adapter-bundle-sha256",
+                      "715ddf1988228e68b1fcbc5101c4d8f1c043aae02bd0d83c70869a9daab6ea4d",
+                      "--harness-revision",
+                      "65b6660a867c8b857992893bde943dfc3facf501",
+                      "--subject-workdir",
+                      "/",
+                      "--image-set-sha256",
+                      "1d371c078171e9c52ec1e006fa8426aeae5348b059367a9abdab3fce280e062b",
+                      "--group-id",
+                      "replay-canary-current-20260826",
+                      "--job-name",
+                      "runner-replay-canary-s3-fast-list-90992fe12168-s1",
+                      "--case-id",
+                      "s3-fast-list.90992fe12168",
+                      "--attempt-id",
+                      "s3-fast-list.90992fe12168.s1",
+                      "--machine-type",
+                      "n4-highcpu-4",
+                      "--vcpus",
+                      "4",
+                      "--memory-gb",
+                      "8",
+                      "--container-memory-gb",
+                      "2",
+                      "--config",
+                      "{\"mode\":\"list\"}",
+                      "--endpoint-url",
+                      "http://127.0.0.1:19090",
+                      "--replay-config",
+                      "{\"allocation\":{\"replay_heap_percent\":75,\"replay_max_concurrent_requests\":16,\"replay_memory_gb\":2,\"replay_parquet_connections\":4,\"replay_prefetch\":false,\"replay_prefetch_max_windows\":96,\"replay_vcpus\":2,\"subject_vcpus\":1},\"backend\":{\"fixture_sha256\":\"6e1c2d47a92bbd1062469fb323f95b1d0f127b4e601b93f0d94576ab16d7c8b4\",\"latency_model\":\"none\",\"server_image_uri\":\"us-east1-docker.pkg.dev/varve-oss/s3-listing-study/replay-canary@sha256:015c272bb6fb2c1f719644d5d8122297814d502dc3820abd94953bb00fafbc3a\",\"serving_mode\":\"duckdb\"},\"capacity_status\":\"uncalibrated\"}"
+                    ],
+                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:7489a5884836181cf06cd72068118b9210516dbc18f466f484825030ee18d29a",
+                    "options": "--network host --cpuset-cpus=2 --memory=2g --memory-swap=2g --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "result_prefix": "gs://s3-listing-study-results-29c02004/runner-replay-canary/runner-replay-canary/s3-fast-list.90992fe12168.s1/",
+      "settled_at": "2026-08-26T11:50:04.629972+00:00",
+      "state": "SUCCEEDED",
+      "state_detail": null,
+      "statistic": "timing",
+      "tool": "s3-fast-list"
+    },
+    {
+      "attempt_id": "s3p.276aea2ef416.s1",
+      "case_id": "s3p.276aea2ef416",
+      "evidence": {
+        "argv": [
+          "/usr/local/bin/s3p",
+          "ls",
+          "--bucket",
+          "runner-replay-canary",
+          "--region",
+          "us-east-1",
+          "--list-concurrency",
+          "100"
+        ],
+        "binding_errors": [],
+        "replay": {
+          "after": {
+            "metrics": {
+              "meters": [
+                {
+                  "name": "jvm.buffer.count",
+                  "tags": {
+                    "id": "direct"
+                  },
+                  "type": "gauge",
+                  "value": 3.0
+                },
+                {
+                  "name": "jvm.buffer.count",
+                  "tags": {
+                    "id": "mapped - 'non-volatile memory'"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.buffer.count",
+                  "tags": {
+                    "id": "mapped"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.buffer.memory.used",
+                  "tags": {
+                    "id": "direct"
+                  },
+                  "type": "gauge",
+                  "value": 24576.0
+                },
+                {
+                  "name": "jvm.buffer.memory.used",
+                  "tags": {
+                    "id": "mapped - 'non-volatile memory'"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.buffer.memory.used",
+                  "tags": {
+                    "id": "mapped"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.buffer.total.capacity",
+                  "tags": {
+                    "id": "direct"
+                  },
+                  "type": "gauge",
+                  "value": 24576.0
+                },
+                {
+                  "name": "jvm.buffer.total.capacity",
+                  "tags": {
+                    "id": "mapped - 'non-volatile memory'"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.buffer.total.capacity",
+                  "tags": {
+                    "id": "mapped"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.gc.live.data.size",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.gc.max.data.size",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 1610612736.0
+                },
+                {
+                  "count": 11534336.0,
+                  "name": "jvm.gc.memory.allocated",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "count": 1948480.0,
+                  "name": "jvm.gc.memory.promoted",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "name": "jvm.gc.overhead",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 0.005546
+                },
+                {
+                  "count": 1,
+                  "max_ms": 5.0,
+                  "mean_ms": 5.0,
+                  "name": "jvm.gc.pause",
+                  "p50_ms": null,
+                  "p99_ms": null,
+                  "sum_ms": 5.0,
+                  "tags": {
+                    "action": "end of minor GC",
+                    "cause": "G1 Evacuation Pause",
+                    "gc": "G1 Young Generation"
+                  },
+                  "type": "timer"
+                },
+                {
+                  "name": "jvm.memory.committed",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Eden Space"
+                  },
+                  "type": "gauge",
+                  "value": 12582912.0
+                },
+                {
+                  "name": "jvm.memory.committed",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Old Gen"
+                  },
+                  "type": "gauge",
+                  "value": 20971520.0
+                },
+                {
+                  "name": "jvm.memory.committed",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Survivor Space"
+                  },
+                  "type": "gauge",
+                  "value": 2097152.0
+                },
+                {
+                  "name": "jvm.memory.committed",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'non-nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 2555904.0
+                },
+                {
+                  "name": "jvm.memory.committed",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'non-profiled nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 2555904.0
+                },
+                {
+                  "name": "jvm.memory.committed",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'profiled nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 3801088.0
+                },
+                {
+                  "name": "jvm.memory.committed",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "Compressed Class Space"
+                  },
+                  "type": "gauge",
+                  "value": 2162688.0
+                },
+                {
+                  "name": "jvm.memory.committed",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "Metaspace"
+                  },
+                  "type": "gauge",
+                  "value": 16449536.0
+                },
+                {
+                  "name": "jvm.memory.max",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Eden Space"
+                  },
+                  "type": "gauge",
+                  "value": -1.0
+                },
+                {
+                  "name": "jvm.memory.max",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Old Gen"
+                  },
+                  "type": "gauge",
+                  "value": 1610612736.0
+                },
+                {
+                  "name": "jvm.memory.max",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Survivor Space"
+                  },
+                  "type": "gauge",
+                  "value": -1.0
+                },
+                {
+                  "name": "jvm.memory.max",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'non-nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 5828608.0
+                },
+                {
+                  "name": "jvm.memory.max",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'non-profiled nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 122916864.0
+                },
+                {
+                  "name": "jvm.memory.max",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'profiled nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 122916864.0
+                },
+                {
+                  "name": "jvm.memory.max",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "Compressed Class Space"
+                  },
+                  "type": "gauge",
+                  "value": 1073741824.0
+                },
+                {
+                  "name": "jvm.memory.max",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "Metaspace"
+                  },
+                  "type": "gauge",
+                  "value": -1.0
+                },
+                {
+                  "name": "jvm.memory.usage.after.gc",
+                  "tags": {
+                    "area": "heap",
+                    "pool": "long-lived"
+                  },
+                  "type": "gauge",
+                  "value": 0.007198
+                },
+                {
+                  "name": "jvm.memory.used",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Eden Space"
+                  },
+                  "type": "gauge",
+                  "value": 4194304.0
+                },
+                {
+                  "name": "jvm.memory.used",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Old Gen"
+                  },
+                  "type": "gauge",
+                  "value": 11593184.0
+                },
+                {
+                  "name": "jvm.memory.used",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Survivor Space"
+                  },
+                  "type": "gauge",
+                  "value": 1559536.0
+                },
+                {
+                  "name": "jvm.memory.used",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'non-nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 1753344.0
+                },
+                {
+                  "name": "jvm.memory.used",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'non-profiled nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 831488.0
+                },
+                {
+                  "name": "jvm.memory.used",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'profiled nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 3792512.0
+                },
+                {
+                  "name": "jvm.memory.used",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "Compressed Class Space"
+                  },
+                  "type": "gauge",
+                  "value": 2026840.0
+                },
+                {
+                  "name": "jvm.memory.used",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "Metaspace"
+                  },
+                  "type": "gauge",
+                  "value": 16178312.0
+                },
+                {
+                  "name": "jvm.threads.daemon",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 5.0
+                },
+                {
+                  "name": "jvm.threads.live",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 20.0
+                },
+                {
+                  "name": "jvm.threads.peak",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 20.0
+                },
+                {
+                  "name": "jvm.threads.states",
+                  "tags": {
+                    "state": "blocked"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.threads.states",
+                  "tags": {
+                    "state": "new"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.threads.states",
+                  "tags": {
+                    "state": "runnable"
+                  },
+                  "type": "gauge",
+                  "value": 8.0
+                },
+                {
+                  "name": "jvm.threads.states",
+                  "tags": {
+                    "state": "terminated"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.threads.states",
+                  "tags": {
+                    "state": "timed-waiting"
+                  },
+                  "type": "gauge",
+                  "value": 10.0
+                },
+                {
+                  "name": "jvm.threads.states",
+                  "tags": {
+                    "state": "waiting"
+                  },
+                  "type": "gauge",
+                  "value": 2.0
+                },
+                {
+                  "name": "process.cpu.usage",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 0.214765
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.delimiter.reader_pool.open.latency",
+                  "p50_ms": 0.0,
+                  "p99_ms": 0.0,
+                  "sum_ms": 0.0,
+                  "tags": {},
+                  "type": "timer"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.delimiter.skipscan.row_group_opens",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.delimiter.skipscan.whole_group_shortcuts",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "count": 6,
+                  "max_ms": 50.180447,
+                  "mean_ms": 20.379799,
+                  "name": "swath.replay.fixture.list.latency",
+                  "p50_ms": 8.257536,
+                  "p99_ms": 50.200576,
+                  "sum_ms": 122.278792,
+                  "tags": {},
+                  "type": "timer"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.http.errors",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "count": 6,
+                  "max_ms": 91.716649,
+                  "mean_ms": 34.189385,
+                  "name": "swath.replay.http.request.latency",
+                  "p50_ms": 9.306112,
+                  "p99_ms": 92.143616,
+                  "sum_ms": 205.136312,
+                  "tags": {},
+                  "type": "timer"
+                },
+                {
+                  "count": 6.0,
+                  "name": "swath.replay.http.requests",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "count": 0,
+                  "max": 0.0,
+                  "mean": 0.0,
+                  "name": "swath.replay.index.entries",
+                  "tags": {},
+                  "total": 0.0,
+                  "type": "distribution"
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.index.load.latency",
+                  "p50_ms": null,
+                  "p99_ms": null,
+                  "sum_ms": 0.0,
+                  "tags": {
+                    "source": "derived"
+                  },
+                  "type": "timer"
+                },
+                {
+                  "count": 6,
+                  "max_ms": 46.246617,
+                  "mean_ms": 18.951922,
+                  "name": "swath.replay.page.read.latency",
+                  "p50_ms": 8.257536,
+                  "p99_ms": 48.103424,
+                  "sum_ms": 113.711534,
+                  "tags": {},
+                  "type": "timer"
+                },
+                {
+                  "name": "swath.replay.parquet.queries.in_flight",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "swath.replay.parquet.queries.peak",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 2.0
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.parquet.query.errors",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "count": 6,
+                  "max_ms": 37.916693,
+                  "mean_ms": 15.337758,
+                  "name": "swath.replay.parquet.query.latency",
+                  "p50_ms": 8.323072,
+                  "p99_ms": 39.780352,
+                  "sum_ms": 92.026546,
+                  "tags": {},
+                  "type": "timer"
+                },
+                {
+                  "count": 6,
+                  "max": 1001.0,
+                  "mean": 508.5,
+                  "name": "swath.replay.parquet.query.rows",
+                  "tags": {},
+                  "total": 3051.0,
+                  "type": "distribution"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.prefetch.anchor",
+                  "tags": {
+                    "event": "claimed"
+                  },
+                  "type": "counter"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.prefetch.anchor",
+                  "tags": {
+                    "event": "evicted_before_claim"
+                  },
+                  "type": "counter"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.prefetch.anchor",
+                  "tags": {
+                    "event": "registered"
+                  },
+                  "type": "counter"
+                },
+                {
+                  "count": 0,
+                  "max": 0.0,
+                  "mean": 0.0,
+                  "name": "swath.replay.prefetch.fill.rows",
+                  "tags": {},
+                  "total": 0.0,
+                  "type": "distribution"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.prefetch.window.eviction",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.prefetch.window.fill",
+                  "p50_ms": 0.0,
+                  "p99_ms": 0.0,
+                  "sum_ms": 0.0,
+                  "tags": {},
+                  "type": "timer"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.prefetch.window.hit",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.request.latency",
+                  "p50_ms": 0.0,
+                  "p99_ms": 0.0,
+                  "sum_ms": 0.0,
+                  "tags": {
+                    "shape": "pivot_probe"
+                  },
+                  "type": "timer"
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.request.latency",
+                  "p50_ms": 0.0,
+                  "p99_ms": 0.0,
+                  "sum_ms": 0.0,
+                  "tags": {
+                    "shape": "structure_probe"
+                  },
+                  "type": "timer"
+                },
+                {
+                  "count": 6,
+                  "max_ms": 58.278757,
+                  "mean_ms": 21.817745,
+                  "name": "swath.replay.request.latency",
+                  "p50_ms": 8.257536,
+                  "p99_ms": 58.589184,
+                  "sum_ms": 130.906472,
+                  "tags": {
+                    "shape": "worker_page"
+                  },
+                  "type": "timer"
+                },
+                {
+                  "count": 6.0,
+                  "name": "swath.replay.serving.path",
+                  "tags": {
+                    "mode": "duckdb"
+                  },
+                  "type": "counter"
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.sortfixture.build.latency",
+                  "p50_ms": null,
+                  "p99_ms": null,
+                  "sum_ms": 0.0,
+                  "tags": {},
+                  "type": "timer"
+                },
+                {
+                  "count": 0,
+                  "max": 0.0,
+                  "mean": 0.0,
+                  "name": "swath.replay.sortfixture.output.bytes",
+                  "tags": {},
+                  "total": 0.0,
+                  "type": "distribution"
+                },
+                {
+                  "name": "system.cpu.count",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 2.0
+                },
+                {
+                  "name": "system.cpu.usage",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 0.221441
+                },
+                {
+                  "name": "system.load.average.1m",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 1.016113
+                }
+              ],
+              "sampled_at_epoch_ms": 1787744971418,
+              "schema_version": 1,
+              "serving_mode": "DUCKDB",
+              "uptime_ms": 1946
+            },
+            "observed_at": "2026-08-26T11:49:31.426508+00:00"
+          },
+          "before": {
+            "metrics": {
+              "meters": [
+                {
+                  "name": "jvm.buffer.count",
+                  "tags": {
+                    "id": "direct"
+                  },
+                  "type": "gauge",
+                  "value": 1.0
+                },
+                {
+                  "name": "jvm.buffer.count",
+                  "tags": {
+                    "id": "mapped - 'non-volatile memory'"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.buffer.count",
+                  "tags": {
+                    "id": "mapped"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.buffer.memory.used",
+                  "tags": {
+                    "id": "direct"
+                  },
+                  "type": "gauge",
+                  "value": 8192.0
+                },
+                {
+                  "name": "jvm.buffer.memory.used",
+                  "tags": {
+                    "id": "mapped - 'non-volatile memory'"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.buffer.memory.used",
+                  "tags": {
+                    "id": "mapped"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.buffer.total.capacity",
+                  "tags": {
+                    "id": "direct"
+                  },
+                  "type": "gauge",
+                  "value": 8192.0
+                },
+                {
+                  "name": "jvm.buffer.total.capacity",
+                  "tags": {
+                    "id": "mapped - 'non-volatile memory'"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.buffer.total.capacity",
+                  "tags": {
+                    "id": "mapped"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.gc.live.data.size",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.gc.max.data.size",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 1610612736.0
+                },
+                {
+                  "count": 0.0,
+                  "name": "jvm.gc.memory.allocated",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "count": 0.0,
+                  "name": "jvm.gc.memory.promoted",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "name": "jvm.gc.overhead",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.memory.committed",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Eden Space"
+                  },
+                  "type": "gauge",
+                  "value": 12582912.0
+                },
+                {
+                  "name": "jvm.memory.committed",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Old Gen"
+                  },
+                  "type": "gauge",
+                  "value": 20971520.0
+                },
+                {
+                  "name": "jvm.memory.committed",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Survivor Space"
+                  },
+                  "type": "gauge",
+                  "value": 2097152.0
+                },
+                {
+                  "name": "jvm.memory.committed",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'non-nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 2555904.0
+                },
+                {
+                  "name": "jvm.memory.committed",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'non-profiled nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 2555904.0
+                },
+                {
+                  "name": "jvm.memory.committed",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'profiled nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 3276800.0
+                },
+                {
+                  "name": "jvm.memory.committed",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "Compressed Class Space"
+                  },
+                  "type": "gauge",
+                  "value": 2097152.0
+                },
+                {
+                  "name": "jvm.memory.committed",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "Metaspace"
+                  },
+                  "type": "gauge",
+                  "value": 15990784.0
+                },
+                {
+                  "name": "jvm.memory.max",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Eden Space"
+                  },
+                  "type": "gauge",
+                  "value": -1.0
+                },
+                {
+                  "name": "jvm.memory.max",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Old Gen"
+                  },
+                  "type": "gauge",
+                  "value": 1610612736.0
+                },
+                {
+                  "name": "jvm.memory.max",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Survivor Space"
+                  },
+                  "type": "gauge",
+                  "value": -1.0
+                },
+                {
+                  "name": "jvm.memory.max",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'non-nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 5828608.0
+                },
+                {
+                  "name": "jvm.memory.max",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'non-profiled nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 122916864.0
+                },
+                {
+                  "name": "jvm.memory.max",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'profiled nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 122916864.0
+                },
+                {
+                  "name": "jvm.memory.max",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "Compressed Class Space"
+                  },
+                  "type": "gauge",
+                  "value": 1073741824.0
+                },
+                {
+                  "name": "jvm.memory.max",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "Metaspace"
+                  },
+                  "type": "gauge",
+                  "value": -1.0
+                },
+                {
+                  "name": "jvm.memory.usage.after.gc",
+                  "tags": {
+                    "area": "heap",
+                    "pool": "long-lived"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.memory.used",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Eden Space"
+                  },
+                  "type": "gauge",
+                  "value": 8388608.0
+                },
+                {
+                  "name": "jvm.memory.used",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Old Gen"
+                  },
+                  "type": "gauge",
+                  "value": 9644704.0
+                },
+                {
+                  "name": "jvm.memory.used",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Survivor Space"
+                  },
+                  "type": "gauge",
+                  "value": 1935976.0
+                },
+                {
+                  "name": "jvm.memory.used",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'non-nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 1749120.0
+                },
+                {
+                  "name": "jvm.memory.used",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'non-profiled nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 725504.0
+                },
+                {
+                  "name": "jvm.memory.used",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'profiled nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 3225728.0
+                },
+                {
+                  "name": "jvm.memory.used",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "Compressed Class Space"
+                  },
+                  "type": "gauge",
+                  "value": 1986648.0
+                },
+                {
+                  "name": "jvm.memory.used",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "Metaspace"
+                  },
+                  "type": "gauge",
+                  "value": 15706888.0
+                },
+                {
+                  "name": "jvm.threads.daemon",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 5.0
+                },
+                {
+                  "name": "jvm.threads.live",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 19.0
+                },
+                {
+                  "name": "jvm.threads.peak",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 19.0
+                },
+                {
+                  "name": "jvm.threads.states",
+                  "tags": {
+                    "state": "blocked"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.threads.states",
+                  "tags": {
+                    "state": "new"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.threads.states",
+                  "tags": {
+                    "state": "runnable"
+                  },
+                  "type": "gauge",
+                  "value": 8.0
+                },
+                {
+                  "name": "jvm.threads.states",
+                  "tags": {
+                    "state": "terminated"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.threads.states",
+                  "tags": {
+                    "state": "timed-waiting"
+                  },
+                  "type": "gauge",
+                  "value": 9.0
+                },
+                {
+                  "name": "jvm.threads.states",
+                  "tags": {
+                    "state": "waiting"
+                  },
+                  "type": "gauge",
+                  "value": 2.0
+                },
+                {
+                  "name": "process.cpu.usage",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.delimiter.reader_pool.open.latency",
+                  "p50_ms": 0.0,
+                  "p99_ms": 0.0,
+                  "sum_ms": 0.0,
+                  "tags": {},
+                  "type": "timer"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.delimiter.skipscan.row_group_opens",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.delimiter.skipscan.whole_group_shortcuts",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.fixture.list.latency",
+                  "p50_ms": 0.0,
+                  "p99_ms": 0.0,
+                  "sum_ms": 0.0,
+                  "tags": {},
+                  "type": "timer"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.http.errors",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.http.request.latency",
+                  "p50_ms": 0.0,
+                  "p99_ms": 0.0,
+                  "sum_ms": 0.0,
+                  "tags": {},
+                  "type": "timer"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.http.requests",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "count": 0,
+                  "max": 0.0,
+                  "mean": 0.0,
+                  "name": "swath.replay.index.entries",
+                  "tags": {},
+                  "total": 0.0,
+                  "type": "distribution"
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.index.load.latency",
+                  "p50_ms": null,
+                  "p99_ms": null,
+                  "sum_ms": 0.0,
+                  "tags": {
+                    "source": "derived"
+                  },
+                  "type": "timer"
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.page.read.latency",
+                  "p50_ms": 0.0,
+                  "p99_ms": 0.0,
+                  "sum_ms": 0.0,
+                  "tags": {},
+                  "type": "timer"
+                },
+                {
+                  "name": "swath.replay.parquet.queries.in_flight",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "swath.replay.parquet.queries.peak",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.parquet.query.errors",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.parquet.query.latency",
+                  "p50_ms": 0.0,
+                  "p99_ms": 0.0,
+                  "sum_ms": 0.0,
+                  "tags": {},
+                  "type": "timer"
+                },
+                {
+                  "count": 0,
+                  "max": 0.0,
+                  "mean": 0.0,
+                  "name": "swath.replay.parquet.query.rows",
+                  "tags": {},
+                  "total": 0.0,
+                  "type": "distribution"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.prefetch.anchor",
+                  "tags": {
+                    "event": "claimed"
+                  },
+                  "type": "counter"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.prefetch.anchor",
+                  "tags": {
+                    "event": "evicted_before_claim"
+                  },
+                  "type": "counter"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.prefetch.anchor",
+                  "tags": {
+                    "event": "registered"
+                  },
+                  "type": "counter"
+                },
+                {
+                  "count": 0,
+                  "max": 0.0,
+                  "mean": 0.0,
+                  "name": "swath.replay.prefetch.fill.rows",
+                  "tags": {},
+                  "total": 0.0,
+                  "type": "distribution"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.prefetch.window.eviction",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.prefetch.window.fill",
+                  "p50_ms": 0.0,
+                  "p99_ms": 0.0,
+                  "sum_ms": 0.0,
+                  "tags": {},
+                  "type": "timer"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.prefetch.window.hit",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.request.latency",
+                  "p50_ms": 0.0,
+                  "p99_ms": 0.0,
+                  "sum_ms": 0.0,
+                  "tags": {
+                    "shape": "pivot_probe"
+                  },
+                  "type": "timer"
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.request.latency",
+                  "p50_ms": 0.0,
+                  "p99_ms": 0.0,
+                  "sum_ms": 0.0,
+                  "tags": {
+                    "shape": "structure_probe"
+                  },
+                  "type": "timer"
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.request.latency",
+                  "p50_ms": 0.0,
+                  "p99_ms": 0.0,
+                  "sum_ms": 0.0,
+                  "tags": {
+                    "shape": "worker_page"
+                  },
+                  "type": "timer"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.serving.path",
+                  "tags": {
+                    "mode": "duckdb"
+                  },
+                  "type": "counter"
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.sortfixture.build.latency",
+                  "p50_ms": null,
+                  "p99_ms": null,
+                  "sum_ms": 0.0,
+                  "tags": {},
+                  "type": "timer"
+                },
+                {
+                  "count": 0,
+                  "max": 0.0,
+                  "mean": 0.0,
+                  "name": "swath.replay.sortfixture.output.bytes",
+                  "tags": {},
+                  "total": 0.0,
+                  "type": "distribution"
+                },
+                {
+                  "name": "system.cpu.count",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 2.0
+                },
+                {
+                  "name": "system.cpu.usage",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 0.5
+                },
+                {
+                  "name": "system.load.average.1m",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 0.930176
+                }
+              ],
+              "sampled_at_epoch_ms": 1787744970664,
+              "schema_version": 1,
+              "serving_mode": "DUCKDB",
+              "uptime_ms": 1192
+            },
+            "observed_at": "2026-08-26T11:49:30.681127+00:00"
+          },
+          "refusals": [],
+          "resource_sample_count": 0,
+          "sample_count": 0,
+          "state": "COMPLETE"
+        },
+        "result": {
+          "artifacts_size_bytes": 4590,
+          "exit_code": 0,
+          "finished_at": "2026-08-26T11:49:31.417312+00:00",
+          "max_rss_kb": 88484,
+          "product": {
+            "artifact": "listing",
+            "channel": "stdout",
+            "name": "native/listing.txt.gz",
+            "sha256": "71f356ca9f016f8f19099f5820166faaad905bc1abd19381e6b74e59d7c66574",
+            "size_bytes": 4267
+          },
+          "product_error": null,
+          "row_count": 2048,
+          "row_count_error": null,
+          "started_at": "2026-08-26T11:49:30.681587+00:00",
+          "stderr": {
+            "name": "stderr.log.gz",
+            "sha256": "eefeb47afda080e23e421999924eb7162b8d960b187421d09d544c1738de9fa7",
+            "size_bytes": 323
+          },
+          "stdout": null,
+          "timed_out": false,
+          "wall_seconds": 0.734464,
+          "worker_exit_code": 0
+        },
+        "result_sha256": "367241c4fc102b5cc0f661643263b65e68a3d72a1589fdff5ebb5b8a23e2c1c1",
+        "result_uri": "gs://s3-listing-study-results-29c02004/runner-replay-canary/runner-replay-canary/s3p.276aea2ef416.s1/result.json",
+        "state": "BOUND",
+        "verification": null
+      },
+      "group_id": "replay-canary-current-20260826",
+      "mode": "ls",
+      "origin": "planned",
+      "purpose": "canary",
+      "recorded_at": "2026-08-26T11:48:29.926542+00:00",
+      "request": {
+        "allocationPolicy": {
+          "instances": [
+            {
+              "policy": {
+                "bootDisk": {
+                  "image": "batch-cos",
+                  "sizeGb": "100",
+                  "type": "hyperdisk-balanced"
+                },
+                "machineType": "n4-highcpu-4",
+                "provisioningModel": "STANDARD"
+              }
+            }
+          ],
+          "location": {
+            "allowedLocations": [
+              "zones/us-east1-b"
+            ]
+          },
+          "network": {
+            "networkInterfaces": [
+              {
+                "network": "projects/varve-oss/global/networks/s3-listing-study",
+                "subnetwork": "projects/varve-oss/regions/us-east1/subnetworks/s3-listing-study-us-east1"
+              }
+            ]
+          },
+          "serviceAccount": {
+            "email": "s3-listing-study-auth-worker@varve-oss.iam.gserviceaccount.com"
+          }
+        },
+        "labels": {
+          "suite": "runner-replay-canary"
+        },
+        "logsPolicy": {
+          "destination": "CLOUD_LOGGING"
+        },
+        "taskGroups": [
+          {
+            "parallelism": "1",
+            "taskCount": "1",
+            "taskSpec": {
+              "computeResource": {
+                "cpuMilli": "4000",
+                "memoryMib": "8192"
+              },
+              "maxRetryCount": 0,
+              "maxRunDuration": "1505s",
+              "runnables": [
+                {
+                  "container": {
+                    "commands": [
+                      "10001:10001",
+                      "/tmp/attempt"
+                    ],
+                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:7489a5884836181cf06cd72068118b9210516dbc18f466f484825030ee18d29a",
+                    "options": "--user 0:0 --entrypoint /bin/chown --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
+                  }
+                },
+                {
+                  "background": true,
+                  "container": {
+                    "commands": [
+                      "serve",
+                      "--fixture",
+                      "/fixtures/runner-replay-canary",
+                      "--bucket",
+                      "runner-replay-canary",
+                      "--host",
+                      "127.0.0.1",
+                      "--port",
+                      "19090",
+                      "--metrics-port",
+                      "19192",
+                      "--serving-mode",
+                      "duckdb",
+                      "--parquet-connections",
+                      "4",
+                      "--max-concurrent-requests",
+                      "16"
+                    ],
+                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/replay-canary@sha256:015c272bb6fb2c1f719644d5d8122297814d502dc3820abd94953bb00fafbc3a",
+                    "options": "--network host --cpuset-cpus=0-1 --memory=2g --memory-swap=2g"
+                  },
+                  "environment": {
+                    "variables": {
+                      "JAVA_TOOL_OPTIONS": "-XX:MaxRAMPercentage=75 -Dswath.replay.prefetch.enabled=false -Dswath.replay.prefetch.max-windows=96"
+                    }
+                  }
+                },
+                {
+                  "container": {
+                    "commands": [
+                      "--tool",
+                      "s3p",
+                      "--mode",
+                      "ls",
+                      "--purpose",
+                      "canary",
+                      "--bucket",
+                      "runner-replay-canary",
+                      "--region",
+                      "us-east-1",
+                      "--auth-role",
+                      "public-read",
+                      "--prefix",
+                      "",
+                      "--output",
+                      "/tmp/attempt",
+                      "--destination",
+                      "gs://s3-listing-study-results-29c02004/runner-replay-canary/runner-replay-canary/s3p.276aea2ef416.s1/",
+                      "--timeout",
+                      "300",
+                      "--term-grace",
+                      "5.0",
+                      "--image",
+                      "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:7489a5884836181cf06cd72068118b9210516dbc18f466f484825030ee18d29a",
+                      "--toolbox-manifest-sha256",
+                      "aa0f2f1c4024a85eb55dc7648542d0b541d3502934b3a134543db3bd31e1857a",
+                      "--toolbox-recipe-sha256",
+                      "e7a9b52a00722230f8a06747ad5eee9a77e4f459c4da058b88ee95b9177cc66c",
+                      "--tool-recipe-sha256",
+                      "850161233fb9d25946c667168f62f46b52807808f40a167f2a8ed558bb929093",
+                      "--tool-build-inputs-sha256",
+                      "25c05c02ad8d59400cce366ecc74c56c018ff6cfbdc452b2ba628ae8e2405d7d",
+                      "--tool-version",
+                      "3.7.2",
+                      "--tool-build-sha256",
+                      "53b6055d27f1b9577df8e741874bddb5d5f4df9a2386a4cf7a2e6553fd9078ce",
+                      "--adapter-bundle-sha256",
+                      "3bc0bc712862106556261fd7965ea055b17ea8965dfca326b95b48d0be0dd070",
+                      "--harness-revision",
+                      "65b6660a867c8b857992893bde943dfc3facf501",
+                      "--subject-workdir",
+                      "/",
+                      "--image-set-sha256",
+                      "1d371c078171e9c52ec1e006fa8426aeae5348b059367a9abdab3fce280e062b",
+                      "--group-id",
+                      "replay-canary-current-20260826",
+                      "--job-name",
+                      "runner-replay-canary-s3p-276aea2ef416-s1",
+                      "--case-id",
+                      "s3p.276aea2ef416",
+                      "--attempt-id",
+                      "s3p.276aea2ef416.s1",
+                      "--machine-type",
+                      "n4-highcpu-4",
+                      "--vcpus",
+                      "4",
+                      "--memory-gb",
+                      "8",
+                      "--container-memory-gb",
+                      "2",
+                      "--config",
+                      "{\"concurrency\":100,\"heap_percent\":75,\"mode\":\"ls\"}",
+                      "--endpoint-url",
+                      "http://127.0.0.1:19090",
+                      "--replay-config",
+                      "{\"allocation\":{\"replay_heap_percent\":75,\"replay_max_concurrent_requests\":16,\"replay_memory_gb\":2,\"replay_parquet_connections\":4,\"replay_prefetch\":false,\"replay_prefetch_max_windows\":96,\"replay_vcpus\":2,\"subject_vcpus\":1},\"backend\":{\"fixture_sha256\":\"6e1c2d47a92bbd1062469fb323f95b1d0f127b4e601b93f0d94576ab16d7c8b4\",\"latency_model\":\"none\",\"server_image_uri\":\"us-east1-docker.pkg.dev/varve-oss/s3-listing-study/replay-canary@sha256:015c272bb6fb2c1f719644d5d8122297814d502dc3820abd94953bb00fafbc3a\",\"serving_mode\":\"duckdb\"},\"capacity_status\":\"uncalibrated\"}"
+                    ],
+                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:7489a5884836181cf06cd72068118b9210516dbc18f466f484825030ee18d29a",
+                    "options": "--network host --cpuset-cpus=2 --memory=2g --memory-swap=2g --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
+                  },
+                  "environment": {
+                    "secretVariables": {
+                      "S3_STUDY_AWS_CREDENTIAL": "projects/varve-oss/secrets/s3-listing-study-aws-credentials/versions/latest"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "result_prefix": "gs://s3-listing-study-results-29c02004/runner-replay-canary/runner-replay-canary/s3p.276aea2ef416.s1/",
+      "settled_at": "2026-08-26T11:49:54.440691+00:00",
+      "state": "SUCCEEDED",
+      "state_detail": null,
+      "statistic": "timing",
+      "tool": "s3p"
+    },
+    {
+      "attempt_id": "s7cmd.ee7094a12693.s1",
+      "case_id": "s7cmd.ee7094a12693",
+      "evidence": {
+        "argv": [
+          "/usr/local/bin/s7cmd",
+          "ls",
+          "-r",
+          "-vv",
+          "--disable-color-tracing",
+          "--tsv",
+          "--show-storage-class",
+          "--show-etag",
+          "--max-parallel-listings",
+          "64",
+          "--target-no-sign-request",
+          "--target-region",
+          "us-east-1",
+          "--target-endpoint-url",
+          "http://127.0.0.1:19090",
+          "--target-force-path-style",
+          "--connect-timeout-milliseconds",
+          "15000",
+          "s3://runner-replay-canary/"
+        ],
+        "binding_errors": [],
+        "replay": {
+          "after": {
+            "metrics": {
+              "meters": [
+                {
+                  "name": "jvm.buffer.count",
+                  "tags": {
+                    "id": "direct"
+                  },
+                  "type": "gauge",
+                  "value": 3.0
+                },
+                {
+                  "name": "jvm.buffer.count",
+                  "tags": {
+                    "id": "mapped - 'non-volatile memory'"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.buffer.count",
+                  "tags": {
+                    "id": "mapped"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.buffer.memory.used",
+                  "tags": {
+                    "id": "direct"
+                  },
+                  "type": "gauge",
+                  "value": 24576.0
+                },
+                {
+                  "name": "jvm.buffer.memory.used",
+                  "tags": {
+                    "id": "mapped - 'non-volatile memory'"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.buffer.memory.used",
+                  "tags": {
+                    "id": "mapped"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.buffer.total.capacity",
+                  "tags": {
+                    "id": "direct"
+                  },
+                  "type": "gauge",
+                  "value": 24576.0
+                },
+                {
+                  "name": "jvm.buffer.total.capacity",
+                  "tags": {
+                    "id": "mapped - 'non-volatile memory'"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.buffer.total.capacity",
+                  "tags": {
+                    "id": "mapped"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.gc.live.data.size",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.gc.max.data.size",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 1610612736.0
+                },
+                {
+                  "count": 25165824.0,
+                  "name": "jvm.gc.memory.allocated",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "count": 2831448.0,
+                  "name": "jvm.gc.memory.promoted",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "name": "jvm.gc.overhead",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 0.016976
+                },
+                {
+                  "count": 2,
+                  "max_ms": 4.0,
+                  "mean_ms": 3.0,
+                  "name": "jvm.gc.pause",
+                  "p50_ms": null,
+                  "p99_ms": null,
+                  "sum_ms": 6.0,
+                  "tags": {
+                    "action": "end of minor GC",
+                    "cause": "G1 Evacuation Pause",
+                    "gc": "G1 Young Generation"
+                  },
+                  "type": "timer"
+                },
+                {
+                  "name": "jvm.memory.committed",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Eden Space"
+                  },
+                  "type": "gauge",
+                  "value": 13631488.0
+                },
+                {
+                  "name": "jvm.memory.committed",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Old Gen"
+                  },
+                  "type": "gauge",
+                  "value": 20971520.0
+                },
+                {
+                  "name": "jvm.memory.committed",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Survivor Space"
+                  },
+                  "type": "gauge",
+                  "value": 1048576.0
+                },
+                {
+                  "name": "jvm.memory.committed",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'non-nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 2555904.0
+                },
+                {
+                  "name": "jvm.memory.committed",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'non-profiled nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 2555904.0
+                },
+                {
+                  "name": "jvm.memory.committed",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'profiled nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 3735552.0
+                },
+                {
+                  "name": "jvm.memory.committed",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "Compressed Class Space"
+                  },
+                  "type": "gauge",
+                  "value": 2162688.0
+                },
+                {
+                  "name": "jvm.memory.committed",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "Metaspace"
+                  },
+                  "type": "gauge",
+                  "value": 16515072.0
+                },
+                {
+                  "name": "jvm.memory.max",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Eden Space"
+                  },
+                  "type": "gauge",
+                  "value": -1.0
+                },
+                {
+                  "name": "jvm.memory.max",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Old Gen"
+                  },
+                  "type": "gauge",
+                  "value": 1610612736.0
+                },
+                {
+                  "name": "jvm.memory.max",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Survivor Space"
+                  },
+                  "type": "gauge",
+                  "value": -1.0
+                },
+                {
+                  "name": "jvm.memory.max",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'non-nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 5828608.0
+                },
+                {
+                  "name": "jvm.memory.max",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'non-profiled nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 122916864.0
+                },
+                {
+                  "name": "jvm.memory.max",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'profiled nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 122916864.0
+                },
+                {
+                  "name": "jvm.memory.max",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "Compressed Class Space"
+                  },
+                  "type": "gauge",
+                  "value": 1073741824.0
+                },
+                {
+                  "name": "jvm.memory.max",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "Metaspace"
+                  },
+                  "type": "gauge",
+                  "value": -1.0
+                },
+                {
+                  "name": "jvm.memory.usage.after.gc",
+                  "tags": {
+                    "area": "heap",
+                    "pool": "long-lived"
+                  },
+                  "type": "gauge",
+                  "value": 0.007641
+                },
+                {
+                  "name": "jvm.memory.used",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Eden Space"
+                  },
+                  "type": "gauge",
+                  "value": 5242880.0
+                },
+                {
+                  "name": "jvm.memory.used",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Old Gen"
+                  },
+                  "type": "gauge",
+                  "value": 12306280.0
+                },
+                {
+                  "name": "jvm.memory.used",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Survivor Space"
+                  },
+                  "type": "gauge",
+                  "value": 376832.0
+                },
+                {
+                  "name": "jvm.memory.used",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'non-nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 1748736.0
+                },
+                {
+                  "name": "jvm.memory.used",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'non-profiled nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 822144.0
+                },
+                {
+                  "name": "jvm.memory.used",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'profiled nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 3712512.0
+                },
+                {
+                  "name": "jvm.memory.used",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "Compressed Class Space"
+                  },
+                  "type": "gauge",
+                  "value": 2025728.0
+                },
+                {
+                  "name": "jvm.memory.used",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "Metaspace"
+                  },
+                  "type": "gauge",
+                  "value": 16168856.0
+                },
+                {
+                  "name": "jvm.threads.daemon",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 5.0
+                },
+                {
+                  "name": "jvm.threads.live",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 28.0
+                },
+                {
+                  "name": "jvm.threads.peak",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 28.0
+                },
+                {
+                  "name": "jvm.threads.states",
+                  "tags": {
+                    "state": "blocked"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.threads.states",
+                  "tags": {
+                    "state": "new"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.threads.states",
+                  "tags": {
+                    "state": "runnable"
+                  },
+                  "type": "gauge",
+                  "value": 8.0
+                },
+                {
+                  "name": "jvm.threads.states",
+                  "tags": {
+                    "state": "terminated"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.threads.states",
+                  "tags": {
+                    "state": "timed-waiting"
+                  },
+                  "type": "gauge",
+                  "value": 18.0
+                },
+                {
+                  "name": "jvm.threads.states",
+                  "tags": {
+                    "state": "waiting"
+                  },
+                  "type": "gauge",
+                  "value": 2.0
+                },
+                {
+                  "name": "process.cpu.usage",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 0.918919
+                },
+                {
+                  "count": 17.0,
+                  "name": "swath.replay.delimiter.path",
+                  "tags": {
+                    "path": "walk"
+                  },
+                  "type": "counter"
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.delimiter.reader_pool.open.latency",
+                  "p50_ms": 0.0,
+                  "p99_ms": 0.0,
+                  "sum_ms": 0.0,
+                  "tags": {},
+                  "type": "timer"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.delimiter.skipscan.row_group_opens",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.delimiter.skipscan.whole_group_shortcuts",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "count": 17,
+                  "max_ms": 137.604528,
+                  "mean_ms": 24.389365,
+                  "name": "swath.replay.fixture.list.latency",
+                  "p50_ms": 17.69472,
+                  "p99_ms": 142.475264,
+                  "sum_ms": 414.619202,
+                  "tags": {},
+                  "type": "timer"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.http.errors",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "count": 17,
+                  "max_ms": 146.518488,
+                  "mean_ms": 49.055297,
+                  "name": "swath.replay.http.request.latency",
+                  "p50_ms": 45.088768,
+                  "p99_ms": 149.946368,
+                  "sum_ms": 833.940046,
+                  "tags": {},
+                  "type": "timer"
+                },
+                {
+                  "count": 17.0,
+                  "name": "swath.replay.http.requests",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "count": 0,
+                  "max": 0.0,
+                  "mean": 0.0,
+                  "name": "swath.replay.index.entries",
+                  "tags": {},
+                  "total": 0.0,
+                  "type": "distribution"
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.index.load.latency",
+                  "p50_ms": null,
+                  "p99_ms": null,
+                  "sum_ms": 0.0,
+                  "tags": {
+                    "source": "derived"
+                  },
+                  "type": "timer"
+                },
+                {
+                  "count": 49,
+                  "max_ms": 44.197289,
+                  "mean_ms": 8.137429,
+                  "name": "swath.replay.page.read.latency",
+                  "p50_ms": 4.685824,
+                  "p99_ms": 46.104576,
+                  "sum_ms": 398.733998,
+                  "tags": {},
+                  "type": "timer"
+                },
+                {
+                  "name": "swath.replay.parquet.queries.in_flight",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "swath.replay.parquet.queries.peak",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 4.0
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.parquet.query.errors",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "count": 49,
+                  "max_ms": 34.242379,
+                  "mean_ms": 7.879761,
+                  "name": "swath.replay.parquet.query.latency",
+                  "p50_ms": 4.42368,
+                  "p99_ms": 35.618816,
+                  "sum_ms": 386.108294,
+                  "tags": {},
+                  "type": "timer"
+                },
+                {
+                  "count": 49,
+                  "max": 2048.0,
+                  "mean": 397.061224,
+                  "name": "swath.replay.parquet.query.rows",
+                  "tags": {},
+                  "total": 19456.0,
+                  "type": "distribution"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.prefetch.anchor",
+                  "tags": {
+                    "event": "claimed"
+                  },
+                  "type": "counter"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.prefetch.anchor",
+                  "tags": {
+                    "event": "evicted_before_claim"
+                  },
+                  "type": "counter"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.prefetch.anchor",
+                  "tags": {
+                    "event": "registered"
+                  },
+                  "type": "counter"
+                },
+                {
+                  "count": 0,
+                  "max": 0.0,
+                  "mean": 0.0,
+                  "name": "swath.replay.prefetch.fill.rows",
+                  "tags": {},
+                  "total": 0.0,
+                  "type": "distribution"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.prefetch.window.eviction",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.prefetch.window.fill",
+                  "p50_ms": 0.0,
+                  "p99_ms": 0.0,
+                  "sum_ms": 0.0,
+                  "tags": {},
+                  "type": "timer"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.prefetch.window.hit",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.request.latency",
+                  "p50_ms": 0.0,
+                  "p99_ms": 0.0,
+                  "sum_ms": 0.0,
+                  "tags": {
+                    "shape": "pivot_probe"
+                  },
+                  "type": "timer"
+                },
+                {
+                  "count": 17,
+                  "max_ms": 138.523527,
+                  "mean_ms": 42.397014,
+                  "name": "swath.replay.request.latency",
+                  "p50_ms": 39.3216,
+                  "p99_ms": 142.082048,
+                  "sum_ms": 720.749234,
+                  "tags": {
+                    "shape": "structure_probe"
+                  },
+                  "type": "timer"
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.request.latency",
+                  "p50_ms": 0.0,
+                  "p99_ms": 0.0,
+                  "sum_ms": 0.0,
+                  "tags": {
+                    "shape": "worker_page"
+                  },
+                  "type": "timer"
+                },
+                {
+                  "count": 17.0,
+                  "name": "swath.replay.serving.path",
+                  "tags": {
+                    "mode": "duckdb"
+                  },
+                  "type": "counter"
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.sortfixture.build.latency",
+                  "p50_ms": null,
+                  "p99_ms": null,
+                  "sum_ms": 0.0,
+                  "tags": {},
+                  "type": "timer"
+                },
+                {
+                  "count": 0,
+                  "max": 0.0,
+                  "mean": 0.0,
+                  "name": "swath.replay.sortfixture.output.bytes",
+                  "tags": {},
+                  "total": 0.0,
+                  "type": "distribution"
+                },
+                {
+                  "name": "system.cpu.count",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 2.0
+                },
+                {
+                  "name": "system.cpu.usage",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 0.912562
+                },
+                {
+                  "name": "system.load.average.1m",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 1.469727
+                }
+              ],
+              "sampled_at_epoch_ms": 1787744972079,
+              "schema_version": 1,
+              "serving_mode": "DUCKDB",
+              "uptime_ms": 1337
+            },
+            "observed_at": "2026-08-26T11:49:32.094181+00:00"
+          },
+          "before": {
+            "metrics": {
+              "meters": [
+                {
+                  "name": "jvm.buffer.count",
+                  "tags": {
+                    "id": "direct"
+                  },
+                  "type": "gauge",
+                  "value": 1.0
+                },
+                {
+                  "name": "jvm.buffer.count",
+                  "tags": {
+                    "id": "mapped - 'non-volatile memory'"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.buffer.count",
+                  "tags": {
+                    "id": "mapped"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.buffer.memory.used",
+                  "tags": {
+                    "id": "direct"
+                  },
+                  "type": "gauge",
+                  "value": 8192.0
+                },
+                {
+                  "name": "jvm.buffer.memory.used",
+                  "tags": {
+                    "id": "mapped - 'non-volatile memory'"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.buffer.memory.used",
+                  "tags": {
+                    "id": "mapped"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.buffer.total.capacity",
+                  "tags": {
+                    "id": "direct"
+                  },
+                  "type": "gauge",
+                  "value": 8192.0
+                },
+                {
+                  "name": "jvm.buffer.total.capacity",
+                  "tags": {
+                    "id": "mapped - 'non-volatile memory'"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.buffer.total.capacity",
+                  "tags": {
+                    "id": "mapped"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.gc.live.data.size",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.gc.max.data.size",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 1610612736.0
+                },
+                {
+                  "count": 0.0,
+                  "name": "jvm.gc.memory.allocated",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "count": 0.0,
+                  "name": "jvm.gc.memory.promoted",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "name": "jvm.gc.overhead",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.memory.committed",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Eden Space"
+                  },
+                  "type": "gauge",
+                  "value": 13631488.0
+                },
+                {
+                  "name": "jvm.memory.committed",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Old Gen"
+                  },
+                  "type": "gauge",
+                  "value": 19922944.0
+                },
+                {
+                  "name": "jvm.memory.committed",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Survivor Space"
+                  },
+                  "type": "gauge",
+                  "value": 2097152.0
+                },
+                {
+                  "name": "jvm.memory.committed",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'non-nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 2555904.0
+                },
+                {
+                  "name": "jvm.memory.committed",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'non-profiled nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 2555904.0
+                },
+                {
+                  "name": "jvm.memory.committed",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'profiled nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 3276800.0
+                },
+                {
+                  "name": "jvm.memory.committed",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "Compressed Class Space"
+                  },
+                  "type": "gauge",
+                  "value": 2097152.0
+                },
+                {
+                  "name": "jvm.memory.committed",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "Metaspace"
+                  },
+                  "type": "gauge",
+                  "value": 15990784.0
+                },
+                {
+                  "name": "jvm.memory.max",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Eden Space"
+                  },
+                  "type": "gauge",
+                  "value": -1.0
+                },
+                {
+                  "name": "jvm.memory.max",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Old Gen"
+                  },
+                  "type": "gauge",
+                  "value": 1610612736.0
+                },
+                {
+                  "name": "jvm.memory.max",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Survivor Space"
+                  },
+                  "type": "gauge",
+                  "value": -1.0
+                },
+                {
+                  "name": "jvm.memory.max",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'non-nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 5828608.0
+                },
+                {
+                  "name": "jvm.memory.max",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'non-profiled nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 122916864.0
+                },
+                {
+                  "name": "jvm.memory.max",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'profiled nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 122916864.0
+                },
+                {
+                  "name": "jvm.memory.max",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "Compressed Class Space"
+                  },
+                  "type": "gauge",
+                  "value": 1073741824.0
+                },
+                {
+                  "name": "jvm.memory.max",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "Metaspace"
+                  },
+                  "type": "gauge",
+                  "value": -1.0
+                },
+                {
+                  "name": "jvm.memory.usage.after.gc",
+                  "tags": {
+                    "area": "heap",
+                    "pool": "long-lived"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.memory.used",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Eden Space"
+                  },
+                  "type": "gauge",
+                  "value": 6291456.0
+                },
+                {
+                  "name": "jvm.memory.used",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Old Gen"
+                  },
+                  "type": "gauge",
+                  "value": 9474832.0
+                },
+                {
+                  "name": "jvm.memory.used",
+                  "tags": {
+                    "area": "heap",
+                    "id": "G1 Survivor Space"
+                  },
+                  "type": "gauge",
+                  "value": 2097152.0
+                },
+                {
+                  "name": "jvm.memory.used",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'non-nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 1744512.0
+                },
+                {
+                  "name": "jvm.memory.used",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'non-profiled nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 700416.0
+                },
+                {
+                  "name": "jvm.memory.used",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "CodeHeap 'profiled nmethods'"
+                  },
+                  "type": "gauge",
+                  "value": 3230336.0
+                },
+                {
+                  "name": "jvm.memory.used",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "Compressed Class Space"
+                  },
+                  "type": "gauge",
+                  "value": 1986648.0
+                },
+                {
+                  "name": "jvm.memory.used",
+                  "tags": {
+                    "area": "nonheap",
+                    "id": "Metaspace"
+                  },
+                  "type": "gauge",
+                  "value": 15693432.0
+                },
+                {
+                  "name": "jvm.threads.daemon",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 5.0
+                },
+                {
+                  "name": "jvm.threads.live",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 19.0
+                },
+                {
+                  "name": "jvm.threads.peak",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 19.0
+                },
+                {
+                  "name": "jvm.threads.states",
+                  "tags": {
+                    "state": "blocked"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.threads.states",
+                  "tags": {
+                    "state": "new"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.threads.states",
+                  "tags": {
+                    "state": "runnable"
+                  },
+                  "type": "gauge",
+                  "value": 8.0
+                },
+                {
+                  "name": "jvm.threads.states",
+                  "tags": {
+                    "state": "terminated"
+                  },
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "jvm.threads.states",
+                  "tags": {
+                    "state": "timed-waiting"
+                  },
+                  "type": "gauge",
+                  "value": 9.0
+                },
+                {
+                  "name": "jvm.threads.states",
+                  "tags": {
+                    "state": "waiting"
+                  },
+                  "type": "gauge",
+                  "value": 2.0
+                },
+                {
+                  "name": "process.cpu.usage",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.delimiter.reader_pool.open.latency",
+                  "p50_ms": 0.0,
+                  "p99_ms": 0.0,
+                  "sum_ms": 0.0,
+                  "tags": {},
+                  "type": "timer"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.delimiter.skipscan.row_group_opens",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.delimiter.skipscan.whole_group_shortcuts",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.fixture.list.latency",
+                  "p50_ms": 0.0,
+                  "p99_ms": 0.0,
+                  "sum_ms": 0.0,
+                  "tags": {},
+                  "type": "timer"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.http.errors",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.http.request.latency",
+                  "p50_ms": 0.0,
+                  "p99_ms": 0.0,
+                  "sum_ms": 0.0,
+                  "tags": {},
+                  "type": "timer"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.http.requests",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "count": 0,
+                  "max": 0.0,
+                  "mean": 0.0,
+                  "name": "swath.replay.index.entries",
+                  "tags": {},
+                  "total": 0.0,
+                  "type": "distribution"
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.index.load.latency",
+                  "p50_ms": null,
+                  "p99_ms": null,
+                  "sum_ms": 0.0,
+                  "tags": {
+                    "source": "derived"
+                  },
+                  "type": "timer"
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.page.read.latency",
+                  "p50_ms": 0.0,
+                  "p99_ms": 0.0,
+                  "sum_ms": 0.0,
+                  "tags": {},
+                  "type": "timer"
+                },
+                {
+                  "name": "swath.replay.parquet.queries.in_flight",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "swath.replay.parquet.queries.peak",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.parquet.query.errors",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.parquet.query.latency",
+                  "p50_ms": 0.0,
+                  "p99_ms": 0.0,
+                  "sum_ms": 0.0,
+                  "tags": {},
+                  "type": "timer"
+                },
+                {
+                  "count": 0,
+                  "max": 0.0,
+                  "mean": 0.0,
+                  "name": "swath.replay.parquet.query.rows",
+                  "tags": {},
+                  "total": 0.0,
+                  "type": "distribution"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.prefetch.anchor",
+                  "tags": {
+                    "event": "claimed"
+                  },
+                  "type": "counter"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.prefetch.anchor",
+                  "tags": {
+                    "event": "evicted_before_claim"
+                  },
+                  "type": "counter"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.prefetch.anchor",
+                  "tags": {
+                    "event": "registered"
+                  },
+                  "type": "counter"
+                },
+                {
+                  "count": 0,
+                  "max": 0.0,
+                  "mean": 0.0,
+                  "name": "swath.replay.prefetch.fill.rows",
+                  "tags": {},
+                  "total": 0.0,
+                  "type": "distribution"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.prefetch.window.eviction",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.prefetch.window.fill",
+                  "p50_ms": 0.0,
+                  "p99_ms": 0.0,
+                  "sum_ms": 0.0,
+                  "tags": {},
+                  "type": "timer"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.prefetch.window.hit",
+                  "tags": {},
+                  "type": "counter"
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.request.latency",
+                  "p50_ms": 0.0,
+                  "p99_ms": 0.0,
+                  "sum_ms": 0.0,
+                  "tags": {
+                    "shape": "pivot_probe"
+                  },
+                  "type": "timer"
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.request.latency",
+                  "p50_ms": 0.0,
+                  "p99_ms": 0.0,
+                  "sum_ms": 0.0,
+                  "tags": {
+                    "shape": "structure_probe"
+                  },
+                  "type": "timer"
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.request.latency",
+                  "p50_ms": 0.0,
+                  "p99_ms": 0.0,
+                  "sum_ms": 0.0,
+                  "tags": {
+                    "shape": "worker_page"
+                  },
+                  "type": "timer"
+                },
+                {
+                  "count": 0.0,
+                  "name": "swath.replay.serving.path",
+                  "tags": {
+                    "mode": "duckdb"
+                  },
+                  "type": "counter"
+                },
+                {
+                  "count": 0,
+                  "max_ms": 0.0,
+                  "mean_ms": 0.0,
+                  "name": "swath.replay.sortfixture.build.latency",
+                  "p50_ms": null,
+                  "p99_ms": null,
+                  "sum_ms": 0.0,
+                  "tags": {},
+                  "type": "timer"
+                },
+                {
+                  "count": 0,
+                  "max": 0.0,
+                  "mean": 0.0,
+                  "name": "swath.replay.sortfixture.output.bytes",
+                  "tags": {},
+                  "total": 0.0,
+                  "type": "distribution"
+                },
+                {
+                  "name": "system.cpu.count",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 2.0
+                },
+                {
+                  "name": "system.cpu.usage",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 0.0
+                },
+                {
+                  "name": "system.load.average.1m",
+                  "tags": {},
+                  "type": "gauge",
+                  "value": 1.075195
+                }
+              ],
+              "sampled_at_epoch_ms": 1787744971794,
+              "schema_version": 1,
+              "serving_mode": "DUCKDB",
+              "uptime_ms": 1051
+            },
+            "observed_at": "2026-08-26T11:49:31.811963+00:00"
+          },
+          "refusals": [],
+          "resource_sample_count": 0,
+          "sample_count": 0,
+          "state": "COMPLETE"
+        },
+        "result": {
+          "artifacts_size_bytes": 22075,
+          "exit_code": 0,
+          "finished_at": "2026-08-26T11:49:32.078059+00:00",
+          "max_rss_kb": 50300,
+          "product": {
+            "artifact": "listing",
+            "channel": "stdout",
+            "name": "native/listing.tsv.gz",
+            "sha256": "fccdc3fd5c80ebe824b4828cb46c122ff7f35b062c41de7c6d0c7c26122fe034",
+            "size_bytes": 21683
+          },
+          "product_error": null,
+          "row_count": 2048,
+          "row_count_error": null,
+          "started_at": "2026-08-26T11:49:31.812442+00:00",
+          "stderr": {
+            "name": "stderr.log.gz",
+            "sha256": "0e91f86ad81c9d09313857015b07b9c102c9bec31e78f86ba4ecf0d8ccb0e338",
+            "size_bytes": 392
+          },
+          "stdout": null,
+          "timed_out": false,
+          "wall_seconds": 0.264072,
+          "worker_exit_code": 0
+        },
+        "result_sha256": "7599790cd1119db84bdbb20a886cfbb27ef6e66f2d466002956a7b87d38223fc",
+        "result_uri": "gs://s3-listing-study-results-29c02004/runner-replay-canary/runner-replay-canary/s7cmd.ee7094a12693.s1/result.json",
+        "state": "BOUND",
+        "verification": null
+      },
+      "group_id": "replay-canary-current-20260826",
+      "mode": "recursive-tsv",
+      "origin": "planned",
+      "purpose": "canary",
+      "recorded_at": "2026-08-26T11:48:30.152718+00:00",
+      "request": {
+        "allocationPolicy": {
+          "instances": [
+            {
+              "policy": {
+                "bootDisk": {
+                  "image": "batch-cos",
+                  "sizeGb": "100",
+                  "type": "hyperdisk-balanced"
+                },
+                "machineType": "n4-highcpu-4",
+                "provisioningModel": "STANDARD"
+              }
+            }
+          ],
+          "location": {
+            "allowedLocations": [
+              "zones/us-east1-b"
+            ]
+          },
+          "network": {
+            "networkInterfaces": [
+              {
+                "network": "projects/varve-oss/global/networks/s3-listing-study",
+                "subnetwork": "projects/varve-oss/regions/us-east1/subnetworks/s3-listing-study-us-east1"
+              }
+            ]
+          },
+          "serviceAccount": {
+            "email": "s3-listing-study-worker@varve-oss.iam.gserviceaccount.com"
+          }
+        },
+        "labels": {
+          "suite": "runner-replay-canary"
+        },
+        "logsPolicy": {
+          "destination": "CLOUD_LOGGING"
+        },
+        "taskGroups": [
+          {
+            "parallelism": "1",
+            "taskCount": "1",
+            "taskSpec": {
+              "computeResource": {
+                "cpuMilli": "4000",
+                "memoryMib": "8192"
+              },
+              "maxRetryCount": 0,
+              "maxRunDuration": "1505s",
+              "runnables": [
+                {
+                  "container": {
+                    "commands": [
+                      "10001:10001",
+                      "/tmp/attempt"
+                    ],
+                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:7489a5884836181cf06cd72068118b9210516dbc18f466f484825030ee18d29a",
+                    "options": "--user 0:0 --entrypoint /bin/chown --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
+                  }
+                },
+                {
+                  "background": true,
+                  "container": {
+                    "commands": [
+                      "serve",
+                      "--fixture",
+                      "/fixtures/runner-replay-canary",
+                      "--bucket",
+                      "runner-replay-canary",
+                      "--host",
+                      "127.0.0.1",
+                      "--port",
+                      "19090",
+                      "--metrics-port",
+                      "19192",
+                      "--serving-mode",
+                      "duckdb",
+                      "--parquet-connections",
+                      "4",
+                      "--max-concurrent-requests",
+                      "16"
+                    ],
+                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/replay-canary@sha256:015c272bb6fb2c1f719644d5d8122297814d502dc3820abd94953bb00fafbc3a",
+                    "options": "--network host --cpuset-cpus=0-1 --memory=2g --memory-swap=2g"
+                  },
+                  "environment": {
+                    "variables": {
+                      "JAVA_TOOL_OPTIONS": "-XX:MaxRAMPercentage=75 -Dswath.replay.prefetch.enabled=false -Dswath.replay.prefetch.max-windows=96"
+                    }
+                  }
+                },
+                {
+                  "container": {
+                    "commands": [
+                      "--tool",
+                      "s7cmd",
+                      "--mode",
+                      "recursive-tsv",
+                      "--purpose",
+                      "canary",
+                      "--bucket",
+                      "runner-replay-canary",
+                      "--region",
+                      "us-east-1",
+                      "--prefix",
+                      "",
+                      "--output",
+                      "/tmp/attempt",
+                      "--destination",
+                      "gs://s3-listing-study-results-29c02004/runner-replay-canary/runner-replay-canary/s7cmd.ee7094a12693.s1/",
+                      "--timeout",
+                      "300",
+                      "--term-grace",
+                      "5.0",
+                      "--image",
+                      "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:7489a5884836181cf06cd72068118b9210516dbc18f466f484825030ee18d29a",
+                      "--toolbox-manifest-sha256",
+                      "aa0f2f1c4024a85eb55dc7648542d0b541d3502934b3a134543db3bd31e1857a",
+                      "--toolbox-recipe-sha256",
+                      "e7a9b52a00722230f8a06747ad5eee9a77e4f459c4da058b88ee95b9177cc66c",
+                      "--tool-recipe-sha256",
+                      "b9659559aba674572f5339874f1d51ce1946590599250cd56d12aecd808b191e",
+                      "--tool-build-inputs-sha256",
+                      "cd12c236acbd3992f13ec8df3489c6111d1c84275844b64bbcfeb6fb8133e357",
+                      "--tool-version",
+                      "1.5.0",
+                      "--tool-build-sha256",
+                      "ec001c1dae71537eb8bc99359334b3be91c1bcaed1e7cca2271dede602f43d60",
+                      "--adapter-bundle-sha256",
+                      "7b91dc6ebfe5ef06f5cff7104e839c893ea9369855945640d3f195c6fc5bd484",
+                      "--harness-revision",
+                      "65b6660a867c8b857992893bde943dfc3facf501",
+                      "--subject-workdir",
+                      "/home/s7cmd",
+                      "--image-set-sha256",
+                      "1d371c078171e9c52ec1e006fa8426aeae5348b059367a9abdab3fce280e062b",
+                      "--group-id",
+                      "replay-canary-current-20260826",
+                      "--job-name",
+                      "runner-replay-canary-s7cmd-ee7094a12693-s1",
+                      "--case-id",
+                      "s7cmd.ee7094a12693",
+                      "--attempt-id",
+                      "s7cmd.ee7094a12693.s1",
+                      "--machine-type",
+                      "n4-highcpu-4",
+                      "--vcpus",
+                      "4",
+                      "--memory-gb",
+                      "8",
+                      "--container-memory-gb",
+                      "2",
+                      "--config",
+                      "{\"concurrency\":64,\"mode\":\"recursive-tsv\"}",
+                      "--endpoint-url",
+                      "http://127.0.0.1:19090",
+                      "--replay-config",
+                      "{\"allocation\":{\"replay_heap_percent\":75,\"replay_max_concurrent_requests\":16,\"replay_memory_gb\":2,\"replay_parquet_connections\":4,\"replay_prefetch\":false,\"replay_prefetch_max_windows\":96,\"replay_vcpus\":2,\"subject_vcpus\":1},\"backend\":{\"fixture_sha256\":\"6e1c2d47a92bbd1062469fb323f95b1d0f127b4e601b93f0d94576ab16d7c8b4\",\"latency_model\":\"none\",\"server_image_uri\":\"us-east1-docker.pkg.dev/varve-oss/s3-listing-study/replay-canary@sha256:015c272bb6fb2c1f719644d5d8122297814d502dc3820abd94953bb00fafbc3a\",\"serving_mode\":\"duckdb\"},\"capacity_status\":\"uncalibrated\"}"
+                    ],
+                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:7489a5884836181cf06cd72068118b9210516dbc18f466f484825030ee18d29a",
+                    "options": "--network host --cpuset-cpus=2 --memory=2g --memory-swap=2g --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "result_prefix": "gs://s3-listing-study-results-29c02004/runner-replay-canary/runner-replay-canary/s7cmd.ee7094a12693.s1/",
+      "settled_at": "2026-08-26T11:49:54.442694+00:00",
+      "state": "SUCCEEDED",
+      "state_detail": null,
+      "statistic": "timing",
+      "tool": "s7cmd"
+    }
+  ],
+  "group_id": "replay-canary-current-20260826",
+  "kind": "campaign-receipt-draft",
+  "ledger_created_at": "2026-08-26T11:48:29.689373+00:00",
+  "ledger_schema_version": 3,
+  "purposes": [
+    "canary"
+  ],
+  "resolved_cases": {
+    "s3-fast-list.90992fe12168": {
+      "config": {
+        "mode": "list"
+      },
+      "environment": {
+        "auth_role": null,
+        "container_memory_gb": 2,
+        "location": "us-east1",
+        "machine_type": "n4-highcpu-4",
+        "memory_gb": 8,
+        "output_target": "file",
+        "target_bucket": "runner-replay-canary",
+        "target_prefix": "",
+        "target_region": "us-east-1",
+        "timeout_s": 300,
+        "vcpus": 4
+      },
+      "platform_sha256": "7b944659650e38105aee7edb4fb01c6f341abc7a50ac718bb2f674e96b449482",
+      "replay": {
+        "allocation": {
+          "replay_heap_percent": 75,
+          "replay_max_concurrent_requests": 16,
+          "replay_memory_gb": 2,
+          "replay_parquet_connections": 4,
+          "replay_prefetch": false,
+          "replay_prefetch_max_windows": 96,
+          "replay_vcpus": 2,
+          "subject_vcpus": 1
+        },
+        "backend": {
+          "fixture_sha256": "6e1c2d47a92bbd1062469fb323f95b1d0f127b4e601b93f0d94576ab16d7c8b4",
+          "latency_model": "none",
+          "server_image_uri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/replay-canary@sha256:015c272bb6fb2c1f719644d5d8122297814d502dc3820abd94953bb00fafbc3a",
+          "serving_mode": "duckdb"
+        },
+        "capacity_status": "uncalibrated"
+      },
+      "tool_slice_sha256": "d7ef1284b6200434ce12a5f07e77bca53e4fb4fd063d38f253d43164985c5f91"
+    },
+    "s3p.276aea2ef416": {
+      "config": {
+        "concurrency": 100,
+        "heap_percent": 75,
+        "mode": "ls"
+      },
+      "environment": {
+        "auth_role": "public-read",
+        "container_memory_gb": 2,
+        "location": "us-east1",
+        "machine_type": "n4-highcpu-4",
+        "memory_gb": 8,
+        "output_target": "file",
+        "target_bucket": "runner-replay-canary",
+        "target_prefix": "",
+        "target_region": "us-east-1",
+        "timeout_s": 300,
+        "vcpus": 4
+      },
+      "platform_sha256": "7b944659650e38105aee7edb4fb01c6f341abc7a50ac718bb2f674e96b449482",
+      "replay": {
+        "allocation": {
+          "replay_heap_percent": 75,
+          "replay_max_concurrent_requests": 16,
+          "replay_memory_gb": 2,
+          "replay_parquet_connections": 4,
+          "replay_prefetch": false,
+          "replay_prefetch_max_windows": 96,
+          "replay_vcpus": 2,
+          "subject_vcpus": 1
+        },
+        "backend": {
+          "fixture_sha256": "6e1c2d47a92bbd1062469fb323f95b1d0f127b4e601b93f0d94576ab16d7c8b4",
+          "latency_model": "none",
+          "server_image_uri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/replay-canary@sha256:015c272bb6fb2c1f719644d5d8122297814d502dc3820abd94953bb00fafbc3a",
+          "serving_mode": "duckdb"
+        },
+        "capacity_status": "uncalibrated"
+      },
+      "tool_slice_sha256": "cc8eb73c94173df63ba7209994e4969b4c8b03eede222659d3f3e8350a1b1f09"
+    },
+    "s7cmd.ee7094a12693": {
+      "config": {
+        "concurrency": 64,
+        "mode": "recursive-tsv"
+      },
+      "environment": {
+        "auth_role": null,
+        "container_memory_gb": 2,
+        "location": "us-east1",
+        "machine_type": "n4-highcpu-4",
+        "memory_gb": 8,
+        "output_target": "file",
+        "target_bucket": "runner-replay-canary",
+        "target_prefix": "",
+        "target_region": "us-east-1",
+        "timeout_s": 300,
+        "vcpus": 4
+      },
+      "platform_sha256": "7b944659650e38105aee7edb4fb01c6f341abc7a50ac718bb2f674e96b449482",
+      "replay": {
+        "allocation": {
+          "replay_heap_percent": 75,
+          "replay_max_concurrent_requests": 16,
+          "replay_memory_gb": 2,
+          "replay_parquet_connections": 4,
+          "replay_prefetch": false,
+          "replay_prefetch_max_windows": 96,
+          "replay_vcpus": 2,
+          "subject_vcpus": 1
+        },
+        "backend": {
+          "fixture_sha256": "6e1c2d47a92bbd1062469fb323f95b1d0f127b4e601b93f0d94576ab16d7c8b4",
+          "latency_model": "none",
+          "server_image_uri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/replay-canary@sha256:015c272bb6fb2c1f719644d5d8122297814d502dc3820abd94953bb00fafbc3a",
+          "serving_mode": "duckdb"
+        },
+        "capacity_status": "uncalibrated"
+      },
+      "tool_slice_sha256": "62a22c888d7ce5e139efa61028a39cbff942a0557432de73ac66a540baae60ac"
+    }
+  },
+  "schema_version": 1,
+  "slots": [],
+  "suite": "runner-replay-canary"
+}

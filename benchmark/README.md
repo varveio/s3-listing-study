@@ -37,8 +37,9 @@ facts under `tools/<tool>/build/`.
     harness promises it. The Python boundary between `benchmark/` and `tools/`.
 - `docs/running.md` is the operator runbook: prerequisites, submission, the job
   state machine, monitoring, the recovery commands, verification, and reporting.
-  No committed campaign receipt has qualified that procedure, so it remains
-  `VERIFIED: no`; private diagnostic groups do not promote it.
+  A committed bounded replay canary qualifies submit, poll/status, report, and
+  receipt export; recovery, content verification, real-S3, and staged-fixture
+  paths remain `VERIFIED: no`.
 - `src/benchmark/` is the importable package — the only part of this directory
   the toolbox image contains:
   - `build_image.py` validates recipe, artifact, executable, and adapter

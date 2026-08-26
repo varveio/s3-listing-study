@@ -10,11 +10,12 @@ an ordered union"* sections are authoritative. This page does not restate either
 
 ## Status of this procedure: `VERIFIED: no`
 
-**No receipt-backed campaign has exercised this runbook.** Private diagnostic
-groups informed the replay implementation, but they are not committed run
-records and do not promote any step below. The procedure therefore remains
-unverified in exactly the sense [`../../AGENTS.md`](../../AGENTS.md) means it:
-running privately and source reading are not receipts.
+The committed [`replay-canary-current-20260826`](../../receipts/replay-canary-current-20260826/)
+receipt exercises the bounded replay path through submit, poll/status, report,
+and receipt export for three representative capsule shapes. It is not a
+benchmark, content verification, recovery exercise, staged-fixture test, or
+qualification of the remaining eight tools, so the whole procedure remains
+`VERIFIED: no`.
 
 Each section carries its own marker. Promote a marker to `VERIFIED: yes` only in
 the commit where a real run exercised that path, and say in the message which
@@ -23,10 +24,12 @@ group did it. Do not promote a step because a neighbouring step worked.
 | Step | Exercised against real Batch? |
 | --- | --- |
 | Toolbox build + eleven-tool smoke | **yes** — the `benchmark-toolbox` workflow, local Docker |
-| `submit` | no |
-| `poll` / `status` | no |
+| `submit` | **yes** — bounded three-tool bundled-fixture replay canary |
+| `poll` / `status` | **yes** — same canary |
 | `retry` / `cancel` / `accept-failure` | no |
-| `verify` / `report` | no |
+| `verify` | no — replay is deliberately outside its content-comparison path |
+| `report` | **yes** — same canary, including bound replay evidence and row counts |
+| receipt export | **yes** — same canary |
 
 ## Before you submit
 
@@ -96,7 +99,9 @@ the tables, their keys, and every state they record — is in
 
 ## Submit
 
-`VERIFIED: no`
+`VERIFIED: yes` — `replay-canary-current-20260826`, for a bundled-fixture
+replay canary with three independent case rows. Real-S3 and dependency-slot
+submission remain unverified.
 
 ```sh
 uv run python benchmark/src/benchmark/campaign.py submit \
@@ -179,7 +184,8 @@ rather than trusting the provider's view. `submit` also prints
 
 ## Watch it
 
-`VERIFIED: no`
+`VERIFIED: yes` — `replay-canary-current-20260826`, through `poll --watch` and
+the final read-only `status` view.
 
 ```sh
 # One pass, updates the ledger and exits.
@@ -354,7 +360,9 @@ writing `verify.json` back under each compared attempt's own result prefix.
 
 ## Report
 
-`VERIFIED: no`
+`VERIFIED: yes` — `replay-canary-current-20260826` exited 0 with three bound
+results, complete replay evidence, subject and worker exit 0, and 2,048 rows
+counted inside each worker.
 
 ```sh
 uv run python benchmark/src/benchmark/report.py --state campaign.db --group g20260817-120000
@@ -365,7 +373,9 @@ attempt's state and evidence binding, and exits nonzero if the scope still
 owes a `BLOCKED` slot, any row is non-terminal, any row's state is outside
 `SUCCEEDED`/`CANCELLED`/`ACCEPTED` (a settled `FAILED`/`NOT_CREATED` must be
 retried or accepted first), or any `SUCCEEDED` row's evidence is not bound —
-a report that exits `0` is a report whose inputs agree with the ledger.
+or, outside preparation and rate cases, its subject did not complete with exit
+0 and a row count. A report that exits `0` is a report whose inputs agree with
+the ledger and whose canary/diagnostic/timing subjects succeeded.
 
 For a replay attempt, `report` applies the same evidence acceptance rule as the
 worker: readiness, an increase in the untagged request counter, no increase in
@@ -375,7 +385,8 @@ postprocessing or replay evidence was refused is not shown as a clean worker.
 
 ## Export a receipt draft
 
-`VERIFIED: no`
+`VERIFIED: yes` — `replay-canary-current-20260826`; the committed draft is
+[`../../receipts/replay-canary-current-20260826/`](../../receipts/replay-canary-current-20260826/).
 
 ```sh
 uv run python -m benchmark.receipt \
