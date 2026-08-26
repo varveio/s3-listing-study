@@ -107,11 +107,11 @@ def test_committed_runner_fixture_is_small_paginated_and_digest_bound() -> None:
 
     parquet = fixture / "part-00000.parquet"
     with duckdb.connect() as connection:
-        count, first, last = connection.execute(
+        row = connection.execute(
             "SELECT count(*), min(decode(key)), max(decode(key)) FROM read_parquet(?)",
             [str(parquet)],
         ).fetchone()
-    assert (count, first, last) == (
+    assert row == (
         2048,
         "group-00/object-000000.dat",
         "group-15/object-002047.dat",

@@ -215,25 +215,21 @@ def test_the_committed_idc_plan_is_the_six_cell_no_latency_partition_sweep() -> 
 
 def test_runner_qualification_plans_keep_their_declared_rosters() -> None:
     root = Path(__file__).resolve().parents[2]
-    replay = bench.Plan.load(root / "benchmark/plans/canaries/sorel-20m.yaml")
+    replay = bench.Plan.load(root / "benchmark/plans/canaries/runner-replay-canary.yaml")
     real_s3 = bench.Plan.load(root / "benchmark/plans/canaries/noaa-ghcn-pds.yaml")
 
-    assert {case.tool for case in replay.cases} == {
-        "aws-cli",
-        "minio-mc",
-        "rclone",
-        "s3-fast-list",
-        "s5cmd",
-        "s7cmd",
-        "swath",
-    }
+    assert {case.tool for case in replay.cases} == {"s3-fast-list", "s3p", "s7cmd"}
+    assert replay.bucket == "runner-replay-canary"
+    assert all(case.purpose == "canary" for case in replay.cases)
+    assert all(case.replay is not None for case in replay.cases)
+    assert all(case.replay.backend.fixture_uri is None for case in replay.cases if case.replay)
     assert {case.tool for case in real_s3.cases} == {
         "aws-cli",
         "rclone",
         "s3-fast-list",
         "swath",
     }
-    assert all(case.purpose == "diagnostic" for case in (*replay.cases, *real_s3.cases))
+    assert all(case.purpose == "diagnostic" for case in real_s3.cases)
 
 
 @pytest.mark.parametrize(

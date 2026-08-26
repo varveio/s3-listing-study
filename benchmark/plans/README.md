@@ -2,8 +2,8 @@
 
 Reusable study plans live under [`buckets/`](buckets/), saying what to run
 against that bucket and on what box. [`canaries/`](canaries/) holds the two
-small runner qualifications: the compatible capsule roster against replay and
-representative capsule/output shapes against ordinary S3. A plan is execution
+small runner qualifications: signed stdout, unsigned stdout, and native-file
+capsule paths against replay, plus representative shapes against ordinary S3. A plan is execution
 intent, not a history folder; superseded diagnostic rungs stay in Git and their
 receipts/notes rather than accumulating here.
 

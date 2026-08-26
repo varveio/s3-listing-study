@@ -1,0 +1,51 @@
+# Small replay integration canary over a synthetic, image-bundled fixture.
+# Three cases cover signed stdout, unsigned stdout, and a native Parquet sink;
+# they are runner-path evidence, not capacity or comparative measurements.
+spec_version: 3
+
+bucket: runner-replay-canary
+region: us-east-1
+auth_role: public-read
+
+replay:
+  capacity_status: uncalibrated
+  server_image_uri: us-east1-docker.pkg.dev/varve-oss/s3-listing-study/replay-canary@sha256:555778daa5286498411da90f3ae0df034de10ef89556a1036ff3ff7f27d463f3
+  fixture_sha256: 824ec0542f8fcab0102a2b8e9737b1a60acdad84a4c42e5629bd2d2eed38414c
+  serving_mode: duckdb
+  latency_model: none
+
+defaults:
+  reps: 1
+  timeout_s: 300
+  vcpus: 4
+  memory_gb: 8
+  subject_vcpus: 1
+  container_memory_gb: 2
+  replay_vcpus: 2
+  replay_memory_gb: 2
+  replay_parquet_connections: 4
+  replay_max_concurrent_requests: 16
+  replay_prefetch: false
+  replay_heap_percent: 75
+
+tools:
+  s3-fast-list:
+    cases:
+      - {mode: list, purpose: canary}
+  s3p:
+    cases:
+      - {mode: ls, purpose: canary}
+  s7cmd:
+    cases:
+      - {mode: recursive-tsv, purpose: canary}
+
+exclude:
+  - {tool: aws-cli, reason: signed stdout is covered by s3p}
+  - {tool: minio-mc, reason: stdout listing is covered by s3p and s7cmd}
+  - {tool: ps3, reason: signed stdout is covered by s3p}
+  - {tool: rclone, reason: stdout listing is covered by s3p and s7cmd}
+  - {tool: s3kor, reason: signed stdout is covered by s3p}
+  - tool: s4cmd
+    reason: server scope — s4cmd speaks only v1 ListObjects, which the replay server does not implement
+  - {tool: s5cmd, reason: stdout listing is covered by s3p and s7cmd}
+  - {tool: swath, reason: stdout listing is covered without making the runner canary Swath-specific}

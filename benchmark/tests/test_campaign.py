@@ -277,7 +277,7 @@ def test_replay_case_slot_attempt_and_request_keep_one_canonical_document(
 
 
 def test_runner_canary_disables_artificial_latency(tmp_path: Path) -> None:
-    plan = Plan.load(ROOT / "benchmark/plans/canaries/sorel-20m.yaml")
+    plan = Plan.load(ROOT / "benchmark/plans/canaries/runner-replay-canary.yaml")
     case = plan.cases[0]
     images = image_set(tmp_path)
     launch = context(plan, case, images)
@@ -294,7 +294,7 @@ def test_runner_canary_disables_artificial_latency(tmp_path: Path) -> None:
 def test_uri_fixture_is_staged_before_the_server_and_never_put_in_its_image(
     tmp_path: Path,
 ) -> None:
-    plan = Plan.load(ROOT / "benchmark/plans/canaries/sorel-20m.yaml")
+    plan = Plan.load(ROOT / "benchmark/plans/canaries/runner-replay-canary.yaml")
     base = plan.cases[0]
     assert base.replay is not None
     backend = replace(
