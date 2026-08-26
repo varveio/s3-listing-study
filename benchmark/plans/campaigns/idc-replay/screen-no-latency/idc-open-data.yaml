@@ -49,6 +49,10 @@ tools:
     cases:
       # One plain-list preparation publishes keyspace.ks for this hinted row.
       - {mode: list-hinted, concurrency: 100, segments: 16, purpose: diagnostic}
+      # Hold active width at 16 while increasing range granularity, then hold
+      # the 100-range split while allowing every range to run concurrently.
+      - {mode: list-hinted, concurrency: 16, segments: 100, purpose: diagnostic}
+      - {mode: list-hinted, concurrency: 100, segments: 100, purpose: diagnostic}
   s3kor:
     cases:
       - {mode: list, purpose: diagnostic}
@@ -64,3 +68,28 @@ tools:
   swath:
     cases:
       - {mode: recursive-parquet, concurrency: 64, purpose: diagnostic}
+      # Keep the screened request concurrency while applying the retained
+      # Parquet writer, part-size, writeback, heap, and rotation tune.
+      - mode: recursive-parquet
+        concurrency: 64
+        purpose: diagnostic
+        config:
+          jvm_max_heap: 4g
+          parquet_writers: 8
+          parquet_part_size: 1gb
+          writeback_size: 32mb
+          part_rotation_interval: "0"
+          part_rotation_max_rows: 0
+      # Retained parallel TSV-directory tune from Swath main. Keep the large
+      # final parts separate from the periodic writeback cadence so durability
+      # stalls do not force hundreds of small output objects.
+      - mode: recursive-tsv-dataset
+        concurrency: 16
+        purpose: diagnostic
+        config:
+          jvm_max_heap: 4g
+          text_writers: 3
+          text_part_size: 1gb
+          writeback_size: 32mb
+          part_rotation_interval: "0"
+          part_rotation_max_rows: 0
