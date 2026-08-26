@@ -17,7 +17,7 @@ import benchmark.gcs as gcs
 import benchmark.measure as measure
 import benchmark.procs as procs
 import benchmark.replay_runtime as replay_runtime
-import benchmark.report as report
+import benchmark.verify as verify
 from benchmark.contract import CREDENTIAL_ENV_VAR, TOOLBOX_TOOLS, sha256_of
 from benchmark.runtime.command_adapter import HEAP_PERCENT
 
@@ -853,7 +853,7 @@ def test_replay_readiness_precedes_timer_and_metrics_persist(
     assert result["native_files"] == {}
     assert "native_inventory" in result["postprocessing_seconds"]
     assert "native_manifest" not in result["postprocessing_seconds"]
-    assert report.result_semantic_errors(result) == []
+    assert verify.result_semantic_errors(result) == []
 
 
 def test_missing_replay_metrics_publish_an_explicit_refusal(

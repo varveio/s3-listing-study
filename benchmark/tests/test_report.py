@@ -609,7 +609,7 @@ def test_a_subject_killed_before_its_product_reports_its_failure_not_a_mismatch(
     (prefix / "native/listing.txt").unlink()
 
     rows = rows_of(con, adapter_root(tmp_path, "alpha"))
-    assert report.result_semantic_errors(document) == []
+    assert verify.result_semantic_errors(document) == []
     assert rows[0]["evidence_state"] == "RESULT_BOUND"
     assert (rows[0]["exit"], rows[0]["max_rss_kb"]) == (137, 1024)
 
@@ -646,13 +646,13 @@ def test_a_setup_failure_reads_as_evidence_rather_than_a_broken_result(tmp_path:
     document["wall_seconds"] = None
     (prefix / "result.json").write_text(json.dumps(document))
 
-    assert report.result_semantic_errors(document) == []
+    assert verify.result_semantic_errors(document) == []
     assert verify.check_failed_subject(document) == f"subject exited {measure.EXIT_SETUP_FAILED}"
     rows = rows_of(con, adapter_root(tmp_path, "alpha"))
     assert rows[0]["evidence_state"] == "RESULT_BOUND"
     # And the null is still load-bearing: a zero exit beside no execution is a
     # result that contradicts itself.
-    assert report.result_semantic_errors({**document, "exit_code": 0}) == ["exit_code"]
+    assert verify.result_semantic_errors({**document, "exit_code": 0}) == ["exit_code"]
 
 
 def test_an_rss_figure_is_rendered_beside_the_floor_it_sits_on(tmp_path: Path) -> None:

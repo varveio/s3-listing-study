@@ -51,7 +51,13 @@ from benchmark.ledger import (
     producer_summary,
     slot_owed_reason,
 )
-from benchmark.verify import has_result_marker, identity_errors, read_bytes_at
+from benchmark.verify import (
+    expected_result_binding,
+    has_result_marker,
+    identity_errors,
+    read_bytes_at,
+    result_binding_errors,
+)
 
 COLUMNS = (
     "tool",
@@ -88,7 +94,6 @@ COLUMNS = (
 )
 FINAL_REPORT_STATES = {"SUCCEEDED", "CANCELLED", "ACCEPTED"}
 BOUND_EVIDENCE_STATES = {"RESULT_BOUND"}
-HEX64 = set("0123456789abcdef")
 
 
 def load_json_at(result_prefix: str, name: str) -> tuple[dict[str, object], bytes] | None:
@@ -100,191 +105,6 @@ def load_json_at(result_prefix: str, name: str) -> tuple[dict[str, object], byte
         # Any read failure degrades to "unavailable" rather than crashing a
         # summary over one bad prefix.
         return None
-
-
-def result_binding_errors(row: sqlite3.Row, result: dict[str, object]) -> list[str]:
-    """Where evidence disagrees with the row that launched it."""
-    expected: dict[str, object] = {
-        "group_id": row["group_id"],
-        "job_name": row["job_name"],
-        "case_id": row["case_id"],
-        "attempt_id": row["attempt_id"],
-        "tool": row["tool"],
-        "mode": row["mode"],
-        "bucket": row["target_bucket"],
-        "region": row["target_region"],
-        "prefix": row["target_prefix"],
-        "auth_role": row["auth_role"],
-        "image": row["image_uri"],
-        "image_set_sha256": row["image_set_sha256"],
-        "config": json.loads(row["config"]),
-        "replay": None if row["replay"] is None else json.loads(row["replay"]),
-        "declared_resources": {
-            "machine_type": row["machine_type"],
-            "vcpus": row["vcpus"],
-            "memory_gb": row["memory_gb"],
-            "container_memory_gb": row["container_memory_gb"],
-        },
-    }
-    errors = [
-        name for name, value in expected.items() if name not in result or result.get(name) != value
-    ]
-    errors.extend(result_semantic_errors(result))
-    return errors
-
-
-def result_semantic_errors(result: dict[str, object]) -> list[str]:
-    errors: list[str] = []
-    exit_code = result.get("exit_code")
-    worker_exit_code = result.get("worker_exit_code")
-    timed_out = result.get("timed_out")
-    row_count = result.get("row_count")
-    row_count_error = result.get("row_count_error")
-    execution = result.get("execution")
-    if isinstance(exit_code, bool) or not isinstance(exit_code, int):
-        errors.append("exit_code")
-    if isinstance(worker_exit_code, bool) or not isinstance(worker_exit_code, int):
-        errors.append("worker_exit_code")
-    if not isinstance(timed_out, bool):
-        errors.append("timed_out")
-    if row_count is not None and (
-        isinstance(row_count, bool) or not isinstance(row_count, int) or row_count < 0
-    ):
-        errors.append("row_count")
-    if row_count_error is not None and not isinstance(row_count_error, str):
-        errors.append("row_count_error")
-    if execution is None:
-        # The subject never ran: an inline setup exec failed ahead of it, and
-        # the setup block is the account of why. Nothing here to check, and
-        # every measured field must be absent rather than a zero.
-        replay_evidence = result.get("replay_evidence")
-        replay_refusal = (
-            isinstance(result.get("replay"), dict)
-            and isinstance(replay_evidence, dict)
-            and bool(replay_evidence.get("errors"))
-        )
-        if not isinstance(result.get("setup"), dict) and not replay_refusal:
-            errors.append("setup")
-        if exit_code == 0:
-            errors.append("exit_code")
-        errors.extend(
-            name
-            for name in (
-                "wall_seconds",
-                "max_rss_kb",
-                "row_count",
-                "row_count_error",
-                "product",
-                "product_error",
-            )
-            if result.get(name) is not None
-        )
-        return errors
-    if not isinstance(execution, dict):
-        return [*errors, "execution"]
-    max_rss_kb = result.get("max_rss_kb")
-    execution_rss = execution.get("max_rss_kb")
-    if (
-        isinstance(max_rss_kb, bool)
-        or not isinstance(max_rss_kb, int)
-        or max_rss_kb < 0
-        or max_rss_kb != execution_rss
-    ):
-        errors.append("max_rss_kb")
-    elapsed_ns = execution.get("elapsed_ns")
-    wall_seconds = result.get("wall_seconds")
-    if isinstance(elapsed_ns, bool) or not isinstance(elapsed_ns, int) or elapsed_ns < 0:
-        errors.append("execution.elapsed_ns")
-    if (
-        isinstance(wall_seconds, bool)
-        or not isinstance(wall_seconds, (int, float))
-        or not math.isfinite(wall_seconds)
-    ):
-        errors.append("wall_seconds")
-    elif (
-        isinstance(elapsed_ns, int)
-        and not isinstance(elapsed_ns, bool)
-        and wall_seconds != round(elapsed_ns / 1_000_000_000, 6)
-    ):
-        errors.append("wall_seconds/elapsed_ns")
-    for name in (
-        "timed_out",
-        "process_group_empty",
-        "descendants_empty",
-        "process_tree_clean",
-        "subreaper_enabled",
-    ):
-        if not isinstance(execution.get(name), bool):
-            errors.append(f"execution.{name}")
-    if execution.get("timed_out") != timed_out:
-        errors.append("execution.timed_out")
-    cgroup = execution.get("cgroup")
-    if not isinstance(cgroup, dict):
-        errors.append("execution.cgroup")
-    else:
-        for name in ("oom_delta", "oom_kill_delta"):
-            value = cgroup.get(name)
-            if value is not None and (
-                isinstance(value, bool) or not isinstance(value, int) or value < 0
-            ):
-                errors.append(f"execution.cgroup.{name}")
-    errors.extend(result_capture_errors(result))
-    counted = exit_code == 0 and timed_out is False and result.get("product_error") is None
-    if counted and row_count_error is None and row_count is None:
-        errors.append("row_count")
-    if not counted and row_count is not None:
-        errors.append("row_count")
-    return errors
-
-
-def result_capture_errors(result: dict[str, object]) -> list[str]:
-    """Where the marker fails to say what this attempt published, and how.
-
-    A stdout capture may be absent, and only for the one reason: the mode's
-    product travels on fd 1, so those bytes are the product and there is no
-    second thing to log. Anything else absent is a marker that cannot be read.
-    """
-    errors: list[str] = []
-    minimal = result.get("evidence_profile") == "minimal-replay"
-    product = result.get("product")
-    if product is not None:
-        errors.extend(
-            f"product.{name}"
-            for name in _artifact_errors(product, digest_optional=True, minimal=minimal)
-        )
-    product_error = result.get("product_error")
-    if product_error is not None and not isinstance(product_error, str):
-        errors.append("product_error")
-    for stem in ("stdout", "stderr"):
-        capture = result.get(stem)
-        if capture is None:
-            if stem == "stderr" or product is None:
-                errors.append(stem)
-            continue
-        errors.extend(f"{stem}.{name}" for name in _artifact_errors(capture, minimal=minimal))
-    return errors
-
-
-def _artifact_errors(
-    block: object, *, digest_optional: bool = False, minimal: bool = False
-) -> list[str]:
-    """The name/size/digest every published artifact is recorded by."""
-    if not isinstance(block, dict):
-        return ["shape"]
-    errors: list[str] = []
-    name = block.get("name")
-    if not isinstance(name, str) or not name:
-        errors.append("name")
-    size = block.get("size_bytes")
-    if isinstance(size, bool) or not isinstance(size, int) or size < 0:
-        errors.append("size_bytes")
-    digest = block.get("sha256")
-    if digest is None:
-        if not minimal and (not digest_optional or block.get("channel") != "dataset"):
-            errors.append("sha256")
-    elif not isinstance(digest, str) or len(digest) != 64 or set(digest) - HEX64:
-        errors.append("sha256")
-    return errors
 
 
 def stratum_for(row: sqlite3.Row, adapter_root: str) -> tuple[str, str]:
@@ -385,7 +205,7 @@ def row_for(row: sqlite3.Row, *, adapter_root: str) -> dict[str, Any]:
         result_prefix=row["result_prefix"],
     ):
         return {**base, "evidence_state": "IDENTITY_MISMATCH"}
-    if result_binding_errors(row, result):
+    if result_binding_errors(expected_result_binding(row), result):
         return {**base, "evidence_state": "RESULT_MISMATCH"}
     execution = result.get("execution")
     replay_evidence = result.get("replay_evidence")

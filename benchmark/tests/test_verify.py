@@ -220,10 +220,26 @@ def write_evidence(
     published = sorted(path for path in native.rglob("*") if path.is_file())
     product = native / product_name
     result: dict[str, object] = {
+        "group_id": attempt.group_id,
+        "job_name": attempt.job_name,
         "attempt_id": attempt.attempt_id,
         "case_id": attempt.case_id,
         "tool": attempt.tool,
         "mode": json.loads(attempt.config)["mode"],
+        "bucket": attempt.target_bucket,
+        "region": attempt.target_region,
+        "prefix": attempt.target_prefix,
+        "auth_role": attempt.auth_role,
+        "image": attempt.image_uri,
+        "image_set_sha256": attempt.image_set_sha256,
+        "config": json.loads(attempt.config),
+        "replay": None if attempt.replay is None else json.loads(attempt.replay),
+        "declared_resources": {
+            "machine_type": attempt.machine_type,
+            "vcpus": attempt.vcpus,
+            "memory_gb": attempt.memory_gb,
+            "container_memory_gb": attempt.container_memory_gb,
+        },
         "exit_code": 0,
         "worker_exit_code": 0,
         "timed_out": False,
@@ -543,6 +559,21 @@ def test_provider_success_does_not_hide_a_failed_rate_subject(tmp_path: Path) ->
         "successes": 0,
         "rate": 0.0,
     }
+
+
+@pytest.mark.parametrize("malformation", ("wrong-binding", "missing-capture"))
+def test_rate_success_requires_fully_bound_evidence(tmp_path: Path, malformation: str) -> None:
+    con = fixture_ledger(tmp_path)
+    attempt = record(con, tmp_path, tool="alpha", digest="aaaa", statistic="rate")
+    if malformation == "wrong-binding":
+        write_evidence(attempt, tool="wrong")
+    else:
+        write_evidence(attempt, stderr=None)
+    root = adapter_root(tmp_path, "alpha")
+
+    _code, report = verify.verify_group(con, "g1", adapter_root=root, write_record=False)
+
+    assert report["buckets"][0]["rates"][0]["successes"] == 0
 
 
 def test_a_mode_is_only_compared_within_its_product_and_field_set(tmp_path: Path) -> None:
