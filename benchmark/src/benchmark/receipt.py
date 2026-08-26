@@ -122,7 +122,9 @@ def _evidence(row: sqlite3.Row) -> dict[str, object]:
         result_uri = f"{str(row['result_prefix']).rstrip('/')}/result.json"
         return {"state": "MISSING", "result_uri": result_uri}
     result, raw = loaded
-    binding_errors = result_binding_errors(expected_result_binding(row), result)
+    binding_errors = result_binding_errors(
+        expected_result_binding(row), result, purpose=str(row["purpose"])
+    )
     result_sha256 = _digest(raw)
     return {
         "state": "BOUND" if not binding_errors else "REFUSED",

@@ -513,7 +513,7 @@ def test_accepted_count_failure_is_not_a_successful_timing(tmp_path: Path) -> No
 def test_a_preparations_cost_rides_with_the_timing_it_enabled(tmp_path: Path) -> None:
     con = fixture_ledger(tmp_path)
     preparation = record(con, tmp_path, tool="alpha", digest="prep", purpose="preparation")
-    write_evidence(preparation, wall_seconds=40.0)
+    write_evidence(preparation, wall_seconds=40.0, row_count=None)
     measurement = record(
         con, tmp_path, tool="alpha", digest="aaaa", produced_by=preparation.attempt_id
     )
@@ -524,6 +524,17 @@ def test_a_preparations_cost_rides_with_the_timing_it_enabled(tmp_path: Path) ->
     assert report.preparation_lines(rows) == [
         f"- `{measurement.attempt_id}` ran behind {preparation.attempt_id} (40.0s of preparation)"
     ]
+
+
+def test_a_preparation_binds_without_a_row_count(tmp_path: Path) -> None:
+    con = fixture_ledger(tmp_path)
+    preparation = record(con, tmp_path, tool="alpha", digest="prep", purpose="preparation")
+    write_evidence(preparation, row_count=None, row_count_error=None)
+
+    row = rows_of(con, adapter_root(tmp_path, "alpha"))[0]
+
+    assert row["evidence_state"] == "RESULT_BOUND"
+    assert row["row_count"] is None
 
 
 def test_a_preparation_from_another_group_is_a_cost_this_report_cannot_state(

@@ -155,16 +155,20 @@ def expected_result_binding(row: sqlite3.Row) -> dict[str, object]:
     }
 
 
-def result_binding_errors(expected: Mapping[str, object], result: dict[str, object]) -> list[str]:
+def result_binding_errors(
+    expected: Mapping[str, object], result: dict[str, object], *, purpose: str | None = None
+) -> list[str]:
     """Where result evidence disagrees with frozen intent or its marker contract."""
     errors = [
         name for name, value in expected.items() if name not in result or result.get(name) != value
     ]
-    errors.extend(result_semantic_errors(result))
+    errors.extend(result_semantic_errors(result, purpose=purpose))
     return errors
 
 
-def result_semantic_errors(result: dict[str, object]) -> list[str]:
+def result_semantic_errors(
+    result: dict[str, object], *, purpose: str | None = None
+) -> list[str]:
     errors: list[str] = []
     exit_code = result.get("exit_code")
     worker_exit_code = result.get("worker_exit_code")
@@ -257,7 +261,12 @@ def result_semantic_errors(result: dict[str, object]) -> list[str]:
             ):
                 errors.append(f"execution.cgroup.{name}")
     errors.extend(result_capture_errors(result))
-    counted = exit_code == 0 and timed_out is False and result.get("product_error") is None
+    counted = (
+        purpose != "preparation"
+        and exit_code == 0
+        and timed_out is False
+        and result.get("product_error") is None
+    )
     if counted and row_count_error is None and row_count is None:
         errors.append("row_count")
     if not counted and row_count is not None:
@@ -705,7 +714,7 @@ def rate_subject_succeeded(subject: Subject) -> bool:
         result = json.loads(read_bytes_at(subject.result_prefix, "result.json"))
         if (
             not isinstance(result, dict)
-            or result_binding_errors(subject.result_binding, result)
+            or result_binding_errors(subject.result_binding, result, purpose=subject.purpose)
             or check_failed_subject(result) is not None
         ):
             return False
