@@ -233,6 +233,8 @@ def test_fourcast_capacity_treatments_keep_one_shared_shape() -> None:
         "pivot_probe": 35,
         "structure_probe": 37,
     }
+    expected_replay = no_latency.cases[0].replay
+    assert expected_replay is not None
     assert {
         (
             case.resources.vcpus,
@@ -244,7 +246,7 @@ def test_fourcast_capacity_treatments_keep_one_shared_shape() -> None:
         (
             16,
             32,
-            no_latency.cases[0].replay.allocation,
+            expected_replay.allocation,
         )
     }
 
