@@ -1,0 +1,65 @@
+# Broad diagnostic screen over the 56,311,145-row IDC fixture.
+# It repeats the FourCast screen unchanged except for fixture and timeout.
+# Replay capacity remains uncalibrated, so these rows cannot rank or eliminate.
+spec_version: 3
+
+bucket: idc-open-data
+region: us-east-1
+auth_role: public-read
+
+replay:
+  capacity_status: uncalibrated
+  server_image_uri: ghcr.io/varveio/swath-replay@sha256:c5f4239abbce7772faa2d58c661192bd6a890e460158b5e56fcb8c51b573cb63
+  fixture_uri: gs://s3-listing-study-results-29c02004/fixtures/idc-open-data/443059c01686d123a60505c70219527815324786d6863e75aaf694bb644188da/part-00000.parquet
+  fixture_sha256: 443059c01686d123a60505c70219527815324786d6863e75aaf694bb644188da
+  serving_mode: sorted
+  latency_model: none
+
+defaults:
+  reps: 1
+  timeout_s: 5400
+  vcpus: 16
+  memory_gb: 32
+  subject_vcpus: 6
+  container_memory_gb: 16
+  replay_vcpus: 8
+  replay_memory_gb: 8
+  replay_parquet_connections: 8
+  replay_max_concurrent_requests: 4096
+  replay_prefetch: true
+  replay_prefetch_max_windows: 256
+  replay_heap_percent: 75
+
+# Modes come from the single active-roster mapping in benchmark/plans/tools.yaml.
+# Diagnostic purpose must be stated per row; it is intentionally not a layer.
+tools:
+  aws-cli:
+    cases:
+      - {purpose: diagnostic}
+  minio-mc:
+    cases:
+      - {purpose: diagnostic}
+  ps3:
+    cases:
+      - {purpose: diagnostic}
+  rclone:
+    cases:
+      - {purpose: diagnostic}
+  s3-fast-list:
+    cases:
+      - {purpose: diagnostic}
+  s3kor:
+    cases:
+      - {purpose: diagnostic}
+  s3p:
+    cases:
+      - {purpose: diagnostic}
+  s5cmd:
+    cases:
+      - {purpose: diagnostic}
+  s7cmd:
+    cases:
+      - {purpose: diagnostic}
+  swath:
+    cases:
+      - {purpose: diagnostic}
