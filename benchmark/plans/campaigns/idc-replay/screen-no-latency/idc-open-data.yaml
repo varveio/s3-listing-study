@@ -1,5 +1,5 @@
-# Broad diagnostic screen over the 56,311,145-row IDC fixture.
-# It repeats the FourCast screen unchanged except for fixture and timeout.
+# Broad representative-mode diagnostic over the 56,311,145-row IDC fixture.
+# The eight-part source is already stamped and globally sorted; do not rewrite it.
 # Replay capacity remains uncalibrated, so these rows cannot rank or eliminate.
 spec_version: 3
 
@@ -9,15 +9,15 @@ auth_role: public-read
 
 replay:
   capacity_status: uncalibrated
-  server_image_uri: ghcr.io/varveio/swath-replay@sha256:c5f4239abbce7772faa2d58c661192bd6a890e460158b5e56fcb8c51b573cb63
-  fixture_uri: gs://s3-listing-study-results-29c02004/fixtures/idc-open-data/443059c01686d123a60505c70219527815324786d6863e75aaf694bb644188da/part-00000.parquet
-  fixture_sha256: 443059c01686d123a60505c70219527815324786d6863e75aaf694bb644188da
+  server_image_uri: us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:ace5350d99c217bf5919b795fc53ed955d1dc2fb6bef1eecf36e8a90e9732f07
+  fixture_uri: gs://s3-listing-study-results-29c02004/fixtures/swath-replay/idc-open-data/current-geometry-20260824/part-*.parquet
+  fixture_sha256: 8a83fdc88000d6a1f4e3563eb3151407a91b6ca319713b08cff3e72442608ebe
   serving_mode: sorted
   latency_model: none
 
 defaults:
   reps: 1
-  timeout_s: 5400
+  timeout_s: 7200
   vcpus: 16
   memory_gb: 32
   subject_vcpus: 6
@@ -30,36 +30,37 @@ defaults:
   replay_prefetch_max_windows: 256
   replay_heap_percent: 75
 
-# Modes come from the single active-roster mapping in benchmark/plans/tools.yaml.
-# Diagnostic purpose must be stated per row; it is intentionally not a layer.
+# One best-supported representative mode per active tool. Diagnostic purpose
+# must be stated per row; it is intentionally not a layer.
 tools:
   aws-cli:
     cases:
-      - {purpose: diagnostic}
+      - {mode: s3api-v2-text, purpose: diagnostic}
   minio-mc:
     cases:
-      - {purpose: diagnostic}
+      - {mode: recursive-json, purpose: diagnostic}
   ps3:
     cases:
-      - {purpose: diagnostic}
+      - {mode: list, purpose: diagnostic}
   rclone:
     cases:
-      - {purpose: diagnostic}
+      - {mode: recursive-walk, concurrency: 8, purpose: diagnostic}
   s3-fast-list:
     cases:
-      - {purpose: diagnostic}
+      # One plain-list preparation publishes keyspace.ks for this hinted row.
+      - {mode: list-hinted, concurrency: 100, segments: 16, purpose: diagnostic}
   s3kor:
     cases:
-      - {purpose: diagnostic}
+      - {mode: list, purpose: diagnostic}
   s3p:
     cases:
-      - {purpose: diagnostic}
+      - {mode: ls, concurrency: 100, purpose: diagnostic}
   s5cmd:
     cases:
-      - {purpose: diagnostic}
+      - {mode: recursive, purpose: diagnostic}
   s7cmd:
     cases:
-      - {purpose: diagnostic}
+      - {mode: recursive-tsv-nosort, concurrency: 64, purpose: diagnostic}
   swath:
     cases:
-      - {purpose: diagnostic}
+      - {mode: recursive-parquet, concurrency: 64, purpose: diagnostic}

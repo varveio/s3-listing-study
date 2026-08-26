@@ -32,6 +32,7 @@ REPLAY_FIELDS = (*REPLAY_INTEGER_FIELDS, *REPLAY_BOOLEAN_FIELDS)
 CAPACITY_STATUSES = ("uncalibrated", "calibrated")
 _HEX64_RE = re.compile(r"[0-9a-f]{64}")
 _PINNED_IMAGE_RE = re.compile(r"[^\s@]+@sha256:[0-9a-f]{64}")
+_GCS_PATTERN_META = frozenset("*?[]")
 REQUEST_COUNTER = "swath.replay.http.requests"
 ERROR_COUNTER = "swath.replay.http.errors"
 
@@ -240,14 +241,25 @@ def parse_backend(value: object) -> ReplayBackend:
     fixture_uri = value.get("fixture_uri")
     if not isinstance(fixture_sha256, str) or _HEX64_RE.fullmatch(fixture_sha256) is None:
         raise ReplayError("replay fixture_sha256 is not a sha256 digest")
-    if fixture_uri is not None and (
-        not isinstance(fixture_uri, str)
-        or not fixture_uri.startswith("gs://")
-        or not fixture_uri.endswith(".parquet")
-        or "*" in fixture_uri
-        or any(character.isspace() for character in fixture_uri)
-    ):
-        raise ReplayError("replay fixture_uri must name one exact gs://*.parquet object")
+    if fixture_uri is not None:
+        valid_uri = (
+            isinstance(fixture_uri, str)
+            and fixture_uri.startswith("gs://")
+            and fixture_uri.endswith(".parquet")
+            and not any(character.isspace() for character in fixture_uri)
+        )
+        if valid_uri:
+            pattern_meta = {character for character in fixture_uri if character in _GCS_PATTERN_META}
+            valid_uri = not pattern_meta or (
+                pattern_meta == {"*"}
+                and fixture_uri.count("*") == 1
+                and fixture_uri.endswith("/part-*.parquet")
+            )
+        if not valid_uri:
+            raise ReplayError(
+                "replay fixture_uri must name one exact gs://*.parquet object or one "
+                "bounded gs://.../part-*.parquet set"
+            )
     mode = value.get("serving_mode")
     if mode not in SERVING_MODES:
         raise ReplayError(f"replay serving_mode must be one of {', '.join(SERVING_MODES)}")
