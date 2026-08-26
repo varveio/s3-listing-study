@@ -30,12 +30,16 @@ defaults:
   replay_prefetch_max_windows: 256
   replay_heap_percent: 75
 
-# One best-supported representative mode per active tool. Diagnostic purpose
-# must be stated per row; it is intentionally not a layer.
+# Keep each best-supported representative and add narrowly chosen uncertainty
+# arms where source review or the first IDC result left a real configuration
+# question. Diagnostic purpose must be stated per row; it is not a layer.
 tools:
   aws-cli:
     cases:
       - {mode: s3api-v2-text, purpose: diagnostic}
+      # Native high-level streaming formatter; JSON buffers the full result and
+      # yaml-stream is a fidelity fallback, not a throughput candidate.
+      - {mode: s3-ls-recursive, purpose: diagnostic}
   minio-mc:
     cases:
       - {mode: recursive-json, purpose: diagnostic}
@@ -45,6 +49,12 @@ tools:
   rclone:
     cases:
       - {mode: recursive-walk, concurrency: 8, purpose: diagnostic}
+      # Flat ListR is one undelimited continuation chain. The c16 walk tests
+      # directory fan-out above the upstream default without changing request
+      # semantics; the with-dirs arm tests exact trailing-slash completeness.
+      - {mode: recursive-fastlist, purpose: diagnostic}
+      - {mode: recursive-walk, concurrency: 16, purpose: diagnostic}
+      - {mode: recursive-walk-with-dirs, concurrency: 8, purpose: diagnostic}
   s3-fast-list:
     cases:
       # One plain-list preparation publishes keyspace.ks for this hinted row.
@@ -53,15 +63,27 @@ tools:
       # the 100-range split while allowing every range to run concurrently.
       - {mode: list-hinted, concurrency: 16, segments: 100, purpose: diagnostic}
       - {mode: list-hinted, concurrency: 100, segments: 100, purpose: diagnostic}
+      # Hold width at 100 and test whether finer range balance helps. The same
+      # SQLite preparation is reusable: only this split/list pair is new.
+      - {mode: list-hinted, concurrency: 100, segments: 1000, purpose: diagnostic}
   s3kor:
     cases:
       - {mode: list, purpose: diagnostic}
   s3p:
     cases:
       - {mode: ls, concurrency: 100, purpose: diagnostic}
+      # The first screen used upstream's default 100. Sweep the current design
+      # note's lower widths because Node parsing/output can become CPU-bound.
+      - {mode: ls, concurrency: 1, purpose: diagnostic}
+      - {mode: ls, concurrency: 8, purpose: diagnostic}
+      - {mode: ls, concurrency: 25, purpose: diagnostic}
+      - {mode: ls, concurrency: 50, purpose: diagnostic}
   s5cmd:
     cases:
       - {mode: recursive, purpose: diagnostic}
+      # Same delimiter-free LIST and raw output, but retain s5cmd DIR rows so
+      # exact verification covers the fixture's trailing-slash objects.
+      - {mode: recursive-with-dirs, purpose: diagnostic}
   s7cmd:
     cases:
       - {mode: recursive-tsv-nosort, concurrency: 64, purpose: diagnostic}
