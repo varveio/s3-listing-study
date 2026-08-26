@@ -13,13 +13,7 @@ replay:
   fixture_uri: gs://s3-listing-study-results-29c02004/c-2026-08-18-study/sorel-20m/swath.44573b83a6d6.s1/native/listing/data/*.parquet
   fixture_sha256: 4cbcde031212ea0bf7091b7d1bf68e805185cabe55b02239217d3859dd2ddc59
   serving_mode: sorted
-  latency_model:
-    deadlines_ms:
-      worker_page: 247
-      pivot_probe: 105
-      structure_probe: 92
-    scale: 1.0
-    jitter: none
+  latency_model: none
 
 defaults:
   reps: 1
@@ -42,21 +36,12 @@ tools:
   minio-mc:
     cases:
       - {mode: recursive, purpose: diagnostic}
-  ps3:
-    cases:
-      - {mode: list, purpose: diagnostic}
   rclone:
     cases:
       - {mode: recursive-fastlist, purpose: diagnostic}
   s3-fast-list:
     cases:
       - {mode: list, purpose: diagnostic}
-  s3kor:
-    cases:
-      - {mode: list, purpose: diagnostic}
-  s3p:
-    cases:
-      - {mode: ls, purpose: diagnostic}
   s5cmd:
     cases:
       - {mode: recursive, purpose: diagnostic}
@@ -68,6 +53,15 @@ tools:
       - {mode: recursive-tsv, concurrency: 64, purpose: diagnostic}
 
 exclude:
+  - tool: ps3
+    reason: estate scope — this credentialed capsule uses the authenticated worker,
+      which intentionally cannot read the private staged fixture
+  - tool: s3kor
+    reason: estate scope — this credentialed capsule uses the authenticated worker,
+      which intentionally cannot read the private staged fixture
+  - tool: s3p
+    reason: estate scope — this credentialed capsule uses the authenticated worker,
+      which intentionally cannot read the private staged fixture
   - tool: s4cmd
     reason: server scope — s4cmd speaks only v1 ListObjects, which the replay server
       does not implement; observed, not inferred

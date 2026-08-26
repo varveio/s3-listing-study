@@ -276,7 +276,7 @@ def test_replay_case_slot_attempt_and_request_keep_one_canonical_document(
     assert json.loads(row["case_inputs"])["replay"] == case.replay.as_dict()
 
 
-def test_renderer_keeps_fixed_latency_flags(tmp_path: Path) -> None:
+def test_runner_canary_disables_artificial_latency(tmp_path: Path) -> None:
     plan = Plan.load(ROOT / "benchmark/plans/canaries/sorel-20m.yaml")
     case = plan.cases[0]
     images = image_set(tmp_path)
@@ -288,12 +288,7 @@ def test_renderer_keeps_fixed_latency_flags(tmp_path: Path) -> None:
     runnables = request["taskGroups"][0]["taskSpec"]["runnables"]
     server = next(runnable for runnable in runnables if runnable.get("background") is True)
     commands = server["container"]["commands"]
-    assert commands[-4:] == [
-        "--inject-latency",
-        "worker_page=247ms,pivot_probe=105ms,structure_probe=92ms",
-        "--latency-scale",
-        "1.0",
-    ]
+    assert "--inject-latency" not in commands
 
 
 def test_uri_fixture_is_staged_before_the_server_and_never_put_in_its_image(

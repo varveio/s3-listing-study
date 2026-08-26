@@ -221,11 +221,8 @@ def test_runner_qualification_plans_keep_their_declared_rosters() -> None:
     assert {case.tool for case in replay.cases} == {
         "aws-cli",
         "minio-mc",
-        "ps3",
         "rclone",
         "s3-fast-list",
-        "s3kor",
-        "s3p",
         "s5cmd",
         "s7cmd",
         "swath",
