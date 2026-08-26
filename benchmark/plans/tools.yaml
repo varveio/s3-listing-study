@@ -34,7 +34,7 @@ exclude:
 # Tools whose runtime must be told how much of its memory it may use as heap.
 #
 # Only a managed runtime appears here, which is why this is not a plan's
-# business: nine of the eleven tools have no heap to size, so a per-bucket
+# business: nine of the ten active tools have no heap to size, so a per-bucket
 # `heap_percent` would have been a knob that most cases ignored and every plan
 # restated. Go, Rust and Python tools take what they take.
 #

@@ -174,8 +174,8 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
     commands = {
         "recursive": (*endpoint, *auth, "ls", "-e", "-s", recursive),
         # The command is deliberately identical to recursive: the distinction
-        # is evidence semantics. This mode retains s5cmd's DIR-classified rows
-        # instead of dropping trailing-slash objects in normalization.
+        # is evidence semantics. This mode retains any raw DIR rows; exact
+        # verification determines whether they reconstruct trailing-slash keys.
         "recursive-with-dirs": (*endpoint, *auth, "ls", "-e", "-s", recursive),
         "delimiter": (*endpoint, *auth, "ls", "-e", "-s", target),
         "rootkeys": (*endpoint, *auth, "ls", "-e", "-s", target),

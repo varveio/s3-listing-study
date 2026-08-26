@@ -9,7 +9,7 @@ This study's groundwork is complete; no benchmark comparison has been run.
 | Question | Current answer |
 | --- | --- |
 | Tested subject | Upstream s5cmd `v2.3.0` (commit `991c9fb`), run anonymously from upstream's own published image `peakcom/s5cmd:v2.3.0` pinned by digest. Full canonical identity is in [`data/tool.json`](data/tool.json). |
-| Exercised coverage | Every listing mode smoked: recursive, delimiter, JSON, ListObjects v1, all-versions, full-path, and the hand-built per-prefix fan-out. Transfers (`cp`/`sync`) are out of scope. |
+| Exercised coverage | Every previously registered listing mode was smoked: recursive, delimiter, JSON, ListObjects v1, all-versions, full-path, and the hand-built per-prefix fan-out. The newer directory-preserving and integrated-fan-out modes have parser coverage but no campaign receipt. Transfers (`cp`/`sync`) are out of scope. |
 | Correctness | The verifier PASSed all ten smoke receipts with 0 duplicates/missing/extra in each; the full-bucket modes and the fan-out union each matched all 148,917 manifest keys, and the scoped runs matched their smaller scopes. A newer recursive normalizer that retains `DIR` rows has parser coverage but no run receipt yet. See [`docs/running.md`](docs/running.md). |
 | Smoke observation | A receipted recursive full-bucket run listed 148,917 keys and exited 0 in 16.96 s at a 40.3 MB peak RSS. This is a single groundwork run, not a benchmark result. |
 | Results | No benchmark or comparative result exists. Smoke timing and memory values describe individual groundwork runs only. |

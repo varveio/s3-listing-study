@@ -71,7 +71,7 @@ A **row** — one entry in a tool's `cases` — states what one case *is*: `mode
 
 A **layer** — `defaults`, or a tool's own body — states what every case under it
 *inherits*: `signed` and the allocation again, plus the schedule (`reps`,
-`timeout_s`). Never `mode`: eleven tools have eleven mode vocabularies, so
+`timeout_s`). Never `mode`: ten active tools have ten mode vocabularies, so
 nothing above a row has a mode to state. A tool body is therefore `defaults`
 plus `cases`.
 

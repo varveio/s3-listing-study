@@ -35,7 +35,7 @@ Upstream mode surface and this study's actual coverage are shown separately.
 | --- | --- | --- |
 | Flat `ListR` (`lsjson --fast-list -R` or plain `lsjson -R`) | Recursively list a bucket/prefix as one undelimited ListObjectsV2 chain. | Run and traced against the smoke bucket in a full scope and two prefixes; verified PASS. |
 | Hierarchical walk (`lsjson --disable ListR -R`) | List directory-by-directory with `Delimiter=/`, fanning children across `--checkers`. | Forced and run; PASS 9841/9841. A separate header probe traced 13 `delimiter=%2F` page requests across four directory chains. |
-| Directory-preserving hierarchical walk | The same walk without `--files-only`, retaining `IsDir` entries. | Capsule and parser fixture added after a scale diagnostic found that `--files-only` omitted trailing-slash objects. Not yet receipt-backed; exact verification must detect any synthesized directory extras. |
+| Directory-preserving hierarchical walk | The same walk without `--files-only`, retaining `IsDir` entries. | Capsule and parser fixture only. Not yet receipt-backed; exact verification must establish whether it restores trailing-slash objects, adds synthesized directory extras, or both. |
 | Delimiter-shallow (`lsjson`/`lsf`/`lsd`, no `-R`) | One delimiter level: objects plus `CommonPrefixes`. | Run and verified. |
 | Legacy v1 (`--s3-list-version 1`) | `ListObjects` v1 with `Marker` paging. | Run and verified PASS on 2,549 keys. |
 | `ListObjectVersions` (`--s3-versions`) | List object versions. | Not run; the smoke bucket is unversioned. |
