@@ -55,7 +55,6 @@ TOOLBOX_TOOLS = frozenset(
         "s3-fast-list",
         "s3kor",
         "s3p",
-        "s4cmd",
         "s5cmd",
         "s7cmd",
         "swath",

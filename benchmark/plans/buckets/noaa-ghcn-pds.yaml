@@ -43,8 +43,8 @@ defaults:
   memory_gb: 4
 
 # Every registered tool must appear here or under `exclude`; a tool that is
-# simply absent is a validation error rather than a silent skip. All eleven run
-# against this bucket, so there is nothing to exclude yet.
+# simply absent is a validation error rather than a silent skip. Shared owner
+# exclusions live once in benchmark/plans/tools.yaml.
 #
 # An empty tool runs once, at the mode benchmark/plans/tools.yaml records for it, on the
 # allocation above. Writing the name and stopping is the whole declaration.
@@ -66,7 +66,6 @@ tools:
       - {mode: list}
       - {mode: list-hinted, segments: 16}
   s3kor:
-  s4cmd:
   s3p:
   ps3:
 

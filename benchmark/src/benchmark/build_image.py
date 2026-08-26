@@ -28,7 +28,6 @@ TOOLBOX_RECIPE_LABEL = "io.varve.s3-listing-study.toolbox-recipe-sha256"
 SUPPORT_INPUTS = {
     "s3-fast-list": ("tools/s3-fast-list/build/Cargo.lock",),
     "s3p": ("tools/s3p/build/package.json", "tools/s3p/build/package-lock.json"),
-    "s4cmd": ("tools/s4cmd/build/requirements.txt",),
 }
 TOOL_STAGES = {
     "aws-cli": "aws_cli_install",
@@ -38,7 +37,6 @@ TOOL_STAGES = {
     "s3-fast-list": "s3_fast_list_build",
     "s3kor": "s3kor_install",
     "s3p": "s3p_install",
-    "s4cmd": "s4cmd_install",
     "s5cmd": "s5cmd_install",
     "s7cmd": "s7cmd_install",
     "swath": "swath_install",
@@ -278,11 +276,12 @@ def assert_clean_revision(root: Path, revision: str) -> None:
 
 
 def registered_selections(root: Path) -> dict[str, BuildSelection]:
-    tools = sorted(path.parent.parent.name for path in (root / "tools").glob("*/build/image.json"))
-    if set(tools) != TOOLBOX_TOOLS:
-        missing = sorted(TOOLBOX_TOOLS - set(tools))
-        extra = sorted(set(tools) - TOOLBOX_TOOLS)
-        raise BuildError(f"registered toolbox roster changed (missing={missing}, extra={extra})")
+    """Load the active toolbox roster; retired capsules may remain as history."""
+    tools = sorted(TOOLBOX_TOOLS)
+    if set(TOOL_STAGES) != TOOLBOX_TOOLS:
+        missing = sorted(TOOLBOX_TOOLS - set(TOOL_STAGES))
+        extra = sorted(set(TOOL_STAGES) - TOOLBOX_TOOLS)
+        raise BuildError(f"toolbox recipe roster changed (missing={missing}, extra={extra})")
     return {tool: load_registered_selection(root, tool) for tool in tools}
 
 

@@ -74,7 +74,7 @@ def test_dockerfile_is_self_contained_and_checksum_pinned() -> None:
     source = (ROOT / "benchmark/build/Dockerfile").read_text()
     assert "_PARENT" not in source
     assert "SHARED_BASE" not in source
-    assert source.count("ADD --checksum=sha256:") == 10
+    assert source.count("ADD --checksum=sha256:") == 9
     assert (
         "FROM ghcr.io/varveio/swath@sha256:"
         "a13adef049de8c11c053861918005aaaae6c8576797df48867d1c5efdbcfc88b "
@@ -88,7 +88,6 @@ def test_dockerfile_is_self_contained_and_checksum_pinned() -> None:
         "s3_fast_list_build",
         "s3kor_install",
         "s3p_install",
-        "s4cmd_install",
         "s5cmd_install",
         "s7cmd_install",
         "swath_install",
@@ -116,8 +115,8 @@ def test_toolbox_context_contains_only_runtime_adapters_and_exact_build_inputs()
         "!tools/s3p/build/",
         "!tools/s3p/build/package.json",
         "!tools/s3p/build/package-lock.json",
-        "!tools/s4cmd/build/",
-        "!tools/s4cmd/build/requirements.txt",
+        "# Retired capsules stay in the repository but do not enter the active toolbox.",
+        "tools/s4cmd/",
         "**/__pycache__",
         "**/*.pyc",
     ]
@@ -125,7 +124,6 @@ def test_toolbox_context_contains_only_runtime_adapters_and_exact_build_inputs()
         "tools/s3-fast-list/build/Cargo.lock",
         "tools/s3p/build/package.json",
         "tools/s3p/build/package-lock.json",
-        "tools/s4cmd/build/requirements.txt",
     }
     assert all((ROOT / path).is_file() for path in required_inputs)
     assert all((ROOT / "tools" / tool / "adapter").is_dir() for tool in TOOLBOX_TOOLS)

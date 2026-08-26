@@ -161,7 +161,7 @@ Two things follow:
 | `image_uri`, `image_set_sha256` | You need to know exactly what ran and be able to reproduce it, but the slices identify it. Two attempts of one case may have run on different images, and the row says which. |
 | `produced_by` | Which attempt made the artifact a case consumed. The artifact's content digest is what identifies it; *which run* produced those bytes is a debugging question. |
 | `signed`, `visible_memory_gb` | Derived from `auth_role` and the ceiling, both already hashed. A derived value is not a second input. |
-| `heap_percent` | A methodology constant nine of eleven subjects cannot feel. Hashing it globally would re-identify every Go, Rust and Python case when a share they ignore is changed, which is the law — *a field either changes the identity or it is not an input* — read backwards. It enters identity exactly where it changes the measurement: a managed-runtime capsule declares `heap_percent` as a `Fixed` axis carrying the constant, and the loader merges it into that capsule's `config` before hashing, like any declared value. See [`capsule-contract.md`](capsule-contract.md) § *The ceiling, and the share of it*. |
+| `heap_percent` | A methodology constant most subjects cannot feel. Hashing it globally would re-identify every Go, Rust and Python case when a share they ignore is changed, which is the law — *a field either changes the identity or it is not an input* — read backwards. It enters identity exactly where it changes the measurement: a managed-runtime capsule declares `heap_percent` as a `Fixed` axis carrying the constant, and the loader merges it into that capsule's `config` before hashing, like any declared value. See [`capsule-contract.md`](capsule-contract.md) § *The ceiling, and the share of it*. |
 | `executor` | One executor exists. Recorded so a second one is distinguishable when it arrives; hashed then, not before. |
 
 `network` and `subnetwork` are arguable — an egress path could matter — but they
@@ -234,9 +234,9 @@ obviously right within one launch, explicit across launches.
 
 ## The tool and platform slices
 
-The toolbox is one image holding all eleven tools, so its digest is the wrong
+The toolbox is one image holding all ten active tools, so its digest is the wrong
 granularity: bump rclone, rebuild, and every tool's hash would change — new
-prefixes and lost comparability for ten tools that did not change.
+prefixes and lost comparability for nine tools that did not change.
 
 Two digests carry that instead. **Both are defined over stage closures, not
 stage bodies**, because the pinned base of a stage is part of what ran:
@@ -257,8 +257,8 @@ reaches swath through a second stage, `swath_jre`. A JRE bump would then change
 nothing about swath's identity, which is the unrepairable direction of error.
 
 **Attribution is what keeps the roster additive.** Hash the final stage whole
-and every tool's install line lands in the platform, so adding a twelfth tool
-re-identifies all eleven. With per-tool lines attributed to their own slices,
+and every tool's install line lands in the platform, so adding an eleventh tool
+re-identifies all ten. With per-tool lines attributed to their own slices,
 adding a tool leaves the platform digest and every existing slice
 byte-identical.
 

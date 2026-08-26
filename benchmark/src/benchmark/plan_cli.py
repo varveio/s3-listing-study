@@ -122,7 +122,7 @@ def _rows(loaded: bench.Plan) -> list[dict[str, object]]:
                 "reps": case.reps,
                 "timeout_s": case.timeout_s,
                 # The share, not the variable: the capsule renders the flag its own
-                # runtime reads, and nine of eleven tools read none.
+                # runtime reads; only managed-runtime capsules use it.
                 "heap_percent": case.heap_percent,
                 # Full canonical config plus the derived allocation in JSON; the
                 # table uses `replay_summary` so it stays scannable.

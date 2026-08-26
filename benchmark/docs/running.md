@@ -23,7 +23,7 @@ group did it. Do not promote a step because a neighbouring step worked.
 
 | Step | Exercised against real Batch? |
 | --- | --- |
-| Toolbox build + eleven-tool smoke | **yes** — the `benchmark-toolbox` workflow, local Docker |
+| Toolbox build + active ten-tool smoke | **yes** — the `benchmark-toolbox` workflow, local Docker |
 | `submit` | **yes** — historical bounded three-tool bundled-fixture replay canary; current staged-fixture plan no |
 | `poll` / `status` | **yes** — same canary |
 | `retry` / `cancel` / `accept-failure` | no |
@@ -68,7 +68,7 @@ tool enforces for you; a missing item surfaces as a provider error mid-campaign.
    ```
 
    It is emitted rather than written by hand: the set is the image's own
-   metadata projected to the eleven identity fields the controller accepts, and
+   metadata projected to the per-tool identity fields the controller accepts, and
    the emitted document is validated by the loader that will read it, so a set
    the campaign would refuse fails here instead. The revision must be clean and
    `HEAD`, exactly as for the build. Shape is in

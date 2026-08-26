@@ -2,7 +2,7 @@
 #
 # Shared by every bucket plan, because a tool's representative mode is a fact
 # about the tool and not about any one bucket. Restating it per plan would mean
-# eleven lines of the same thing in each, drifting apart one edit at a time.
+# the same active-roster lines in each, drifting apart one edit at a time.
 #
 # Not in tools/<tool>/build/image.json: that file is an exact-field-set contract
 # for building the toolbox, and which mode a benchmark samples is not a
@@ -21,10 +21,15 @@ default_modes:
   s3-fast-list: list
   s3kor: list
   s3p: ls
-  s4cmd: recursive
   s5cmd: recursive
   s7cmd: recursive-tsv
   swath: recursive-tsv
+
+# One owner decision applies to every future plan here. The capsule and its
+# historical receipts remain in the repository; only benchmark/diagnostic
+# participation is retired.
+exclude:
+  - {tool: s4cmd, reason: owner decision — dropped from all future benchmark and diagnostic runs}
 
 # Tools whose runtime must be told how much of its memory it may use as heap.
 #

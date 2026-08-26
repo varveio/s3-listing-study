@@ -72,17 +72,6 @@ if (actual !== expected) throw new Error('s3p tarball disagrees with package-loc
 JS
 RUN npm ci --ignore-scripts && npm cache clean --force
 
-FROM runtime_base AS s4cmd_install
-ADD --checksum=sha256:42566058a74d3e1e553351966efaaffa08e4b6ac28a19e72a51be21151ea9534 \
-    https://files.pythonhosted.org/packages/42/b4/0061f4930958cd790098738659c1c39f8feaf688e698142435eedaa4ae34/s4cmd-2.1.0.tar.gz /tmp/s4cmd.tar.gz
-COPY tools/s4cmd/build/requirements.txt /tmp/requirements.txt
-RUN /usr/bin/python3 -m venv /opt/s4cmd-venv \
-    && /opt/s4cmd-venv/bin/pip install --require-hashes --no-deps -r /tmp/requirements.txt \
-    && mkdir -p /opt/s4cmd \
-    && tar xzf /tmp/s4cmd.tar.gz -C /opt/s4cmd --strip-components=1 s4cmd-2.1.0/s4cmd.py \
-    && printf '#!/bin/sh\nexec /opt/s4cmd-venv/bin/python /opt/s4cmd/s4cmd.py "$@"\n' > /usr/local/bin/s4cmd \
-    && chmod 0755 /usr/local/bin/s4cmd
-
 FROM runtime_base AS s5cmd_install
 ADD --checksum=sha256:de0fdbfa3aceae55e069ba81a0fc17b2026567637603734a387b2fca06c299b4 \
     https://github.com/peak/s5cmd/releases/download/v2.3.0/s5cmd_2.3.0_Linux-64bit.tar.gz /tmp/s5cmd.tar.gz
@@ -107,9 +96,6 @@ COPY --from=s3_fast_list_build /usr/src/app/target/release/ks-tool /usr/bin/ks-t
 COPY --from=s3kor_install /usr/local/bin/s3kor /usr/local/bin/s3kor
 COPY --from=s3p_install /usr/local/bin/node /usr/local/bin/node
 COPY --from=s3p_install /build/node_modules/ /opt/s3p/node_modules/
-COPY --from=s4cmd_install /opt/s4cmd-venv/ /opt/s4cmd-venv/
-COPY --from=s4cmd_install /opt/s4cmd/ /opt/s4cmd/
-COPY --from=s4cmd_install /usr/local/bin/s4cmd /usr/local/bin/s4cmd
 COPY --from=s5cmd_install /s5cmd /s5cmd
 COPY --from=s7cmd_install /usr/local/bin/s7cmd /usr/local/bin/s7cmd
 COPY --from=swath_install /opt/java/openjdk/ /opt/java/openjdk/
@@ -151,12 +137,13 @@ RUN TOOLBOX_MANIFEST_SHA256="${TOOLBOX_MANIFEST_SHA256}" \
 import hashlib
 import json
 import os
+import sys
 from pathlib import Path, PurePosixPath
 
-expected_tools = {
-    "aws-cli", "minio-mc", "ps3", "rclone", "s3-fast-list", "s3kor",
-    "s3p", "s4cmd", "s5cmd", "s7cmd", "swath",
-}
+sys.path.insert(0, "/opt/benchmark")
+from benchmark.contract import TOOLBOX_TOOLS
+
+expected_tools = set(TOOLBOX_TOOLS)
 metadata_path = Path("/opt/benchmark/image-metadata.json")
 metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
 if set(metadata) != {

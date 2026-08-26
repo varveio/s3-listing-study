@@ -146,6 +146,7 @@ CAPSULES = {
 
 class _LoadOverrides(TypedDict, total=False):
     default_modes: Mapping[str, str]
+    default_exclusions: tuple[bench.Exclusion, ...]
     instances: Mapping[tuple[int, int], str]
     heap: bench.HeapConfig
     adapters: Mapping[str, capsule.LoadedCommandAdapter]
@@ -156,6 +157,7 @@ def load(path: Path, **kwargs: Unpack[_LoadOverrides]) -> bench.Plan:
     kwargs.setdefault("instances", INSTANCES)
     kwargs.setdefault("heap", HEAP)
     kwargs.setdefault("adapters", CAPSULES)
+    kwargs.setdefault("default_exclusions", ())
     return bench.Plan.load(path, **kwargs)
 
 
@@ -167,10 +169,16 @@ def test_the_committed_plan_loads() -> None:
     loaded = bench.Plan.load(bench.default_path("noaa-ghcn-pds"))
     assert loaded.bucket == "noaa-ghcn-pds"
     assert loaded.region == "us-east-1"
-    assert len(loaded.tools()) == 11
+    assert len(loaded.tools()) == 10
     # Nine bare tools, plus s3-fast-list's two rows and swath's four: 2
     # streaming modes at one ceiling and the sorted mode at two.
-    assert len(loaded.cases) == 15
+    assert len(loaded.cases) == 14
+    assert loaded.exclusions == (
+        bench.Exclusion(
+            tool="s4cmd",
+            reason="owner decision — dropped from all future benchmark and diagnostic runs",
+        ),
+    )
     assert len(loaded.cases_for("swath")) == 4
 
     # The sweep is the container ceiling; the box does not move, so nothing but
@@ -208,6 +216,37 @@ def test_runner_qualification_plans_keep_their_declared_rosters() -> None:
         "swath",
     }
     assert all(case.purpose == "diagnostic" for case in real_s3.cases)
+
+
+def test_fourcast_capacity_treatments_keep_one_shared_shape() -> None:
+    base = ROOT / "benchmark/plans/campaigns/fourcast-replay"
+    no_latency = bench.Plan.load(base / "capacity-no-latency" / "noaa-nws-fourcastnetgfs-pds.yaml")
+    s3_latency = bench.Plan.load(base / "capacity-s3-latency" / "noaa-nws-fourcastnetgfs-pds.yaml")
+
+    assert {case.tool for case in no_latency.cases} == {"ps3", "swath"}
+    assert {case.tool for case in s3_latency.cases} == {"ps3", "swath"}
+    assert no_latency.replay is not None
+    assert s3_latency.replay is not None
+    assert no_latency.replay.backend.latency_deadlines_ms is None
+    assert dict(s3_latency.replay.backend.latency_deadlines_ms or ()) == {
+        "worker_page": 85,
+        "pivot_probe": 35,
+        "structure_probe": 37,
+    }
+    assert {
+        (
+            case.resources.vcpus,
+            case.resources.memory_gb,
+            case.replay.allocation if case.replay is not None else None,
+        )
+        for case in (*no_latency.cases, *s3_latency.cases)
+    } == {
+        (
+            16,
+            32,
+            no_latency.cases[0].replay.allocation,
+        )
+    }
 
 
 @pytest.mark.parametrize(
@@ -603,9 +642,9 @@ def test_duplicate_values_on_an_independent_axis_are_refused_as_one_case(
 
 
 @pytest.mark.parametrize("bucket", ["noaa-rtma-pds", "sorel-20m"])
-def test_large_bucket_campaign_plans_resolve_eighteen_cases(bucket: str) -> None:
+def test_large_bucket_campaign_plans_resolve_seventeen_cases(bucket: str) -> None:
     loaded = bench.Plan.load(bench.default_path(bucket))
-    assert len(loaded.cases) == 18
+    assert len(loaded.cases) == 17
     assert len(loaded.cases_for("swath")) == 7
 
 
@@ -1324,7 +1363,7 @@ def test_a_mode_the_adapter_lacks_is_refused(tmp_path: Path) -> None:
 def test_resolve_plan_expands_the_committed_plan(capsys: pytest.CaptureFixture[str]) -> None:
     assert bench_cli.resolve_plan_main(["--bucket", "noaa-ghcn-pds"]) == 0
     out = capsys.readouterr().out
-    assert "15 cases, 15 attempts" in out
+    assert "14 cases, 14 attempts" in out
     assert "recursive-parquet-sorted.container_memory_gb-2" in out
 
 
@@ -1333,7 +1372,7 @@ def test_resolve_plan_emits_machine_readable_cases(
 ) -> None:
     assert bench_cli.resolve_plan_main(["--bucket", "noaa-ghcn-pds", "--json"]) == 0
     payload = json.loads(capsys.readouterr().out)
-    assert len(payload["cases"]) == 15
+    assert len(payload["cases"]) == 14
     # The plan digest travels with the resolution so a submission can cite the
     # exact bytes it expanded.
     assert len(payload["plan_sha256"]) == 64

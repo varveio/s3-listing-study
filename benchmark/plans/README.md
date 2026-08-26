@@ -3,9 +3,12 @@
 Reusable study plans live under [`buckets/`](buckets/), saying what to run
 against that bucket and on what box. [`canaries/`](canaries/) holds the two
 small runner qualifications: signed stdout, unsigned stdout, and native-file
-capsule paths against replay, plus representative shapes against ordinary S3. A plan is execution
-intent, not a history folder; superseded diagnostic rungs stay in Git and their
-receipts/notes rather than accumulating here.
+capsule paths against replay, plus representative shapes against ordinary S3.
+[`campaigns/`](campaigns/) holds the capacity, tuning, and measurement plans
+that make up an actual campaign; treatment and stage directories allow one
+bucket to have multiple plans without weakening the filename-to-bucket guard.
+A plan is execution intent, not a history folder; superseded diagnostic rungs
+stay in Git and their receipts/notes rather than accumulating here.
 
 ```
 python -m benchmark.plan_cli --bucket noaa-ghcn-pds
@@ -51,7 +54,7 @@ tools:
 
 The mode each one runs lives in [`tools.yaml`](tools.yaml), because a tool's
 representative mode is a fact about the tool rather than about any one bucket.
-Restating it per plan would mean the same eleven lines in every file, drifting
+Restating it per plan would mean the same active-roster lines in every file, drifting
 apart one edit at a time. A test checks each default against the adapter that
 implements it, so an adapter rename cannot leave it stale.
 
@@ -350,8 +353,11 @@ runtime own heuristic the independent variable rather than the memory the case
 asked for.
 
 Every tool with a `build/image.json` must appear under `tools` or `exclude`
-with a reason. A tool that is simply absent is a validation error — registering
-a subject and forgetting a bucket should not look like a decision to skip it.
+with a reason. A tool retired from every future benchmark belongs in the shared
+`exclude` list in [`tools.yaml`](tools.yaml), not repeated in every bucket. A
+plan may still exclude an active tool for a plan-specific reason. A tool that is
+simply absent from both layers is a validation error — registering a subject and
+forgetting a bucket should not look like a decision to skip it.
 
 ## A row has a label; identity is minted at submit
 

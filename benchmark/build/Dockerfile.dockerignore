@@ -11,7 +11,7 @@
 !tools/s3p/build/
 !tools/s3p/build/package.json
 !tools/s3p/build/package-lock.json
-!tools/s4cmd/build/
-!tools/s4cmd/build/requirements.txt
+# Retired capsules stay in the repository but do not enter the active toolbox.
+tools/s4cmd/
 **/__pycache__
 **/*.pyc

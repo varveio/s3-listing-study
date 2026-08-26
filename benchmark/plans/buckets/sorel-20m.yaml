@@ -33,7 +33,6 @@ tools:
       - {mode: list-hinted, segments: 16}
 
   s3kor:
-  s4cmd:
   s3p:
   ps3:
 
