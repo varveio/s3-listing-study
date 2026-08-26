@@ -166,9 +166,7 @@ def result_binding_errors(
     return errors
 
 
-def result_semantic_errors(
-    result: dict[str, object], *, purpose: str | None = None
-) -> list[str]:
+def result_semantic_errors(result: dict[str, object], *, purpose: str | None = None) -> list[str]:
     errors: list[str] = []
     exit_code = result.get("exit_code")
     worker_exit_code = result.get("worker_exit_code")

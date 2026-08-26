@@ -205,9 +205,7 @@ def row_for(row: sqlite3.Row, *, adapter_root: str) -> dict[str, Any]:
         result_prefix=row["result_prefix"],
     ):
         return {**base, "evidence_state": "IDENTITY_MISMATCH"}
-    if result_binding_errors(
-        expected_result_binding(row), result, purpose=str(row["purpose"])
-    ):
+    if result_binding_errors(expected_result_binding(row), result, purpose=str(row["purpose"])):
         return {**base, "evidence_state": "RESULT_MISMATCH"}
     execution = result.get("execution")
     replay_evidence = result.get("replay_evidence")
