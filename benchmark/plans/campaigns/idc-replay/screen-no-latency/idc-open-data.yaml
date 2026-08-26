@@ -54,6 +54,8 @@ tools:
       # semantics; the with-dirs arm tests exact trailing-slash completeness.
       - {mode: recursive-fastlist, purpose: diagnostic}
       - {mode: recursive-walk, concurrency: 16, purpose: diagnostic}
+      # c16 still left subject CPU headroom and materially improved over c8.
+      - {mode: recursive-walk, concurrency: 32, purpose: diagnostic}
       - {mode: recursive-walk-with-dirs, concurrency: 8, purpose: diagnostic}
   s3-fast-list:
     cases:
@@ -66,6 +68,8 @@ tools:
       # Hold width at 100 and test whether finer range balance helps. The same
       # SQLite preparation is reusable: only this split/list pair is new.
       - {mode: list-hinted, concurrency: 100, segments: 1000, purpose: diagnostic}
+      - {mode: list-hinted, concurrency: 100, segments: 2000, purpose: diagnostic}
+      - {mode: list-hinted, concurrency: 100, segments: 5000, purpose: diagnostic}
   s3kor:
     cases:
       - {mode: list, purpose: diagnostic}
@@ -76,7 +80,10 @@ tools:
       # note's lower widths because Node parsing/output can become CPU-bound.
       - {mode: ls, concurrency: 1, purpose: diagnostic}
       - {mode: ls, concurrency: 8, purpose: diagnostic}
+      # Bracket the c25 minimum observed between c8 and the regressing c50 arm.
+      - {mode: ls, concurrency: 16, purpose: diagnostic}
       - {mode: ls, concurrency: 25, purpose: diagnostic}
+      - {mode: ls, concurrency: 32, purpose: diagnostic}
       - {mode: ls, concurrency: 50, purpose: diagnostic}
   s5cmd:
     cases:
