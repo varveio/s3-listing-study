@@ -958,6 +958,22 @@ def test_swath_renders_retained_output_controls_and_refuses_the_wrong_mode() -> 
         "JAVA_TOOL_OPTIONS": f"-XX:MaxRAMPercentage={HEAP_PERCENT} -Xmx4g"
     }
 
+    # Heap is an environment control, not a formatter flag. Every Swath mode
+    # consumes it even when that mode's argv-specific allowlist is empty.
+    for mode in ("recursive-tsv", "recursive-parquet", "recursive-parquet-sorted"):
+        heap_only = CommandRequest(
+            mode,
+            BUCKET,
+            REGION,
+            tool="swath",
+            sink_dir=SINK,
+            config={"jvm_max_heap": "4g"},
+        )
+        adapter.compile(heap_only)
+        assert adapter.build_env(heap_only) == {
+            "JAVA_TOOL_OPTIONS": f"-XX:MaxRAMPercentage={HEAP_PERCENT} -Xmx4g"
+        }
+
     with pytest.raises(CommandAdapterError, match=r"does not use config key.*text_writers"):
         adapter.compile(
             CommandRequest(

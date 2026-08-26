@@ -63,6 +63,9 @@ CONFIG_KEYS = frozenset(
 )
 """Output controls whose retained values must remain visible in case identity."""
 
+ENV_CONFIG_KEYS = frozenset({"jvm_max_heap"})
+"""Declared controls consumed by :func:`build_env`, independent of output mode."""
+
 JVM_MAX_HEAP_RE = re.compile(r"\A[1-9][0-9]*[kKmMgG]\Z")
 
 LISTING = "listing"
@@ -225,8 +228,8 @@ def _text_writers(request: CommandRequest) -> str:
 
 
 def _mode_config(request: CommandRequest, allowed: frozenset[str]) -> None:
-    """Refuse a declared Swath knob on a mode that would otherwise ignore it."""
-    unused = sorted((set(request.config) & CONFIG_KEYS) - allowed)
+    """Refuse a declared Swath knob neither the mode argv nor environment consumes."""
+    unused = sorted((set(request.config) & CONFIG_KEYS) - allowed - ENV_CONFIG_KEYS)
     if unused:
         raise CommandAdapterError(
             f"{TOOL} mode {request.mode!r} does not use config key(s): {', '.join(unused)}"
@@ -309,7 +312,6 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
                 request,
                 frozenset(
                     {
-                        "jvm_max_heap",
                         "part_rotation_interval",
                         "part_rotation_max_rows",
                         "text_part_size",
