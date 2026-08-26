@@ -18,9 +18,9 @@ facts under `tools/<tool>/build/`.
 - `build/` holds the toolbox build inputs: `Dockerfile` builds one linux/amd64
   toolbox directly from the eleven checked-in capsule recipes (it consumes no
   parent image or retired image job), alongside its context policy and the
-  pinned worker requirements. `build/replay-server/` is the separate code-only
-  replay-server recipe; fixtures are immutable staged inputs rather than image
-  layers, and both identities are plan inputs.
+  pinned worker requirements. The replay server is an external digest-pinned
+  plan input rather than an image this repository rebuilds; fixture bytes are
+  separate immutable staged inputs.
 - `tests/` holds this component's test suite. Repository-wide gates stay in the
   top-level `tests/`.
 - `docs/` holds the design. Read `architecture.md` first; the other three are

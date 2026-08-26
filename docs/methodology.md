@@ -356,6 +356,9 @@ value here is control: every candidate sees the same immutable fixture, latency
 treatment, backend state, and declared machine allocation without competing for
 a live S3 key-range budget.
 
+The initial cross-tool endpoint observations and reproducer are retained in the
+[`replay-endpoint-compat` receipt](../benchmark/pilots/replay-endpoint-compat/RECEIPT.md).
+
 Replay supplies four observations that the wide real-S3 search could not isolate:
 
 - **Configuration and concurrency search** — compare a tool's supported modes
