@@ -171,6 +171,7 @@ observation, not a scale claim (`unverified` above 148,917 keys — claim
 | Mode | Request | Output contract |
 | --- | --- | --- |
 | `recursive` (`ls "s3://b/*"`) | ListObjectsV2, `Delimiter=""`, client-side filter | Text columns (with `-e -s`): `date time storage-class etag size relkey` — format string `"2006/01/02 15:04:05"` then storage-class/etag/size/relative-path [SRC `command/ls.go:248,258-311` @ 991c9fb]; paths are **relative to the query prefix** [SRC `command/ls.go:285,301` @ 991c9fb] |
+| `recursive-with-dirs` (same request and raw output) | ListObjectsV2, `Delimiter=""`, client-side filter | Retains `DIR` rows as key-only records. Because the request is undelimited, these are not CommonPrefixes; the mode remains unverified until exact comparison against a fixture containing trailing-slash objects. |
 | `delimiter` (`ls "s3://b/"`, no glob) | ListObjectsV2, `Delimiter="/"` | Same text columns for object rows; DIR rows print `DIR <prefix/>` with metadata columns blank [RUN `../receipts/smoke/delimiter`] |
 | `json` (`--json ls "s3://b/*"`) | Same request as recursive | One object per line: `{"key":"s3://bucket/key","etag":…,"last_modified":"…Z","type":"file","size":N,"storage_class":…}` — `strutil.JSON(l.Object)` of the `storage.Object` struct [SRC `command/ls.go:316-318` @ 991c9fb]. Observed: `key` is the **absolute** `s3://bucket/key` URL, `last_modified` already RFC3339 `…Z` [RUN `../receipts/smoke/json`] |
 | `listv1` (`--use-list-objects-v1`) | Legacy **ListObjects (v1)** | Same text contract as recursive |

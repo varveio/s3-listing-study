@@ -10,7 +10,7 @@ This study's groundwork is complete; no benchmark comparison has been run.
 | --- | --- |
 | Tested subject | Upstream's own published image `rclone/rclone@sha256:c619…dc4a1` (tag `1.74.4`), **unpatched**, tool self-reporting `rclone v1.74.4`, source pinned at commit `5bc93a2a7`, run anonymously. Full canonical identity is in [`data/tool.json`](data/tool.json). |
 | Exercised coverage | Every S3 request pattern that changes the wire shape: flat `ListR`, the genuine hierarchical walk (`--disable ListR`), delimiter-shallow, legacy v1, and `lsf`. The `ListObjectVersions` API was not smoked (bucket unversioned); scale behaviour was not exercised. |
-| Correctness | Every verifier-checked mode PASSed (0 duplicates / missing / extra / field mismatches) and the full bucket re-listed byte-exact against the manifest of 148,917 keys. See [`docs/running.md`](docs/running.md#every-smoked-mode) and claim `smoke-listing-correct-all-modes`. |
+| Correctness | Every smoke-era verifier-checked mode PASSed (0 duplicates / missing / extra / field mismatches) and the full bucket re-listed byte-exact against the manifest of 148,917 keys. The newer directory-preserving benchmark arm has parser coverage but no run receipt yet. See [`docs/running.md`](docs/running.md#every-smoked-mode) and claim `smoke-listing-correct-all-modes`. |
 | Smoke observation | A receipted full-bucket run listed all 148,917 keys, exited 0 in 16.95 s, and peaked at 69.6 MB RSS. These are facts of single groundwork runs, not benchmark results. |
 | Results | No benchmark or comparative result exists. Smoke timing and memory values describe individual groundwork runs only. |
 
@@ -35,6 +35,7 @@ Upstream mode surface and this study's actual coverage are shown separately.
 | --- | --- | --- |
 | Flat `ListR` (`lsjson --fast-list -R` or plain `lsjson -R`) | Recursively list a bucket/prefix as one undelimited ListObjectsV2 chain. | Run and traced against the smoke bucket in a full scope and two prefixes; verified PASS. |
 | Hierarchical walk (`lsjson --disable ListR -R`) | List directory-by-directory with `Delimiter=/`, fanning children across `--checkers`. | Forced and run; PASS 9841/9841. A separate header probe traced 13 `delimiter=%2F` page requests across four directory chains. |
+| Directory-preserving hierarchical walk | The same walk without `--files-only`, retaining `IsDir` entries. | Capsule and parser fixture added after a scale diagnostic found that `--files-only` omitted trailing-slash objects. Not yet receipt-backed; exact verification must detect any synthesized directory extras. |
 | Delimiter-shallow (`lsjson`/`lsf`/`lsd`, no `-R`) | One delimiter level: objects plus `CommonPrefixes`. | Run and verified. |
 | Legacy v1 (`--s3-list-version 1`) | `ListObjects` v1 with `Marker` paging. | Run and verified PASS on 2,549 keys. |
 | `ListObjectVersions` (`--s3-versions`) | List object versions. | Not run; the smoke bucket is unversioned. |
@@ -92,6 +93,9 @@ resolve in [`data/claims.json`](data/claims.json).
   `EDGE_BUCKET=none` defers unicode / weird-key / multipart-ETag fidelity.
 - Only one non-default `--checkers` value and only the default `--s3-list-chunk`
   ran; neither was swept.
+- The directory-preserving recursive arm is unverified. Rclone's `IsDir` output
+  does not by itself distinguish a real trailing-slash object from synthesized
+  hierarchy, so the mode is useful only with exact missing/extra verification.
 
 ### Harness and verifier notes
 

@@ -148,7 +148,7 @@ shell or NUL transport; execution, capture, timeout, and measurement belong to
 the benchmark worker. Each immutable receipt retains its exact original
 invocation.
 
-Swap `--mode` for any mode declared by `command.py` (`recursive`,
+Swap `--mode` for any mode declared by `command.py` (`recursive`, `recursive-with-dirs`,
 `delimiter`, `rootkeys`, `json`, `listv1`, `allversions`, `fullpath`) and add
 `--prefix <p>` for a scoped listing (e.g. `normals-hourly/`). The fan-out mode
 is not a single wrapper invocation — it is the wrapper run once per shard
@@ -161,6 +161,11 @@ commands file (one `ls` line per shard) read-only into the container and
 invoking `s5cmd --no-sign-request run /work/cmds.txt` directly — it is not a
 standard wrapper-era receipt because `run` needs a file mounted into the container,
 which the wrapper does not provide for this tool.
+
+`recursive-with-dirs` postdates the smoke corpus and has no receipt above. It
+runs the same delimiter-free recursive command as `recursive`, but its
+normalizer retains raw `DIR` lines as slash-terminated, key-only records. Exact
+verification is required before treating it as a complete listing mode.
 
 `../adapter/command.py` and `../adapter/normalize.py` are living integration code
 and changed for the typed Python cutover. Everything under `../research/` and
