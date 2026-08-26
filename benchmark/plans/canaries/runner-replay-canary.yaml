@@ -9,8 +9,8 @@ auth_role: public-read
 
 replay:
   capacity_status: uncalibrated
-  server_image_uri: us-east1-docker.pkg.dev/varve-oss/s3-listing-study/replay-canary@sha256:555778daa5286498411da90f3ae0df034de10ef89556a1036ff3ff7f27d463f3
-  fixture_sha256: 824ec0542f8fcab0102a2b8e9737b1a60acdad84a4c42e5629bd2d2eed38414c
+  server_image_uri: us-east1-docker.pkg.dev/varve-oss/s3-listing-study/replay-canary@sha256:015c272bb6fb2c1f719644d5d8122297814d502dc3820abd94953bb00fafbc3a
+  fixture_sha256: 6e1c2d47a92bbd1062469fb323f95b1d0f127b4e601b93f0d94576ab16d7c8b4
   serving_mode: duckdb
   latency_model: none
 
