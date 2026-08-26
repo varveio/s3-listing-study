@@ -37,10 +37,17 @@ input. If no, the capsule owns it and the harness forwards it without looking.
 arrives there as a **pass-through**: `adapters.normalize_to_path(adapter_dir,
 tool, mode, …)` hands the value on without the harness ever branching on it.
 
-The config blob must reach **both** capsule entry points, `command.py` and
-`normalize.py`. Today `normalize.py` is given only `(mode, prefix)`, so a
-capsule whose output shape depends on a config key cannot parse its own output —
-a gap to close alongside the blob's plumbing, not after it.
+The complete resolved config blob reaches **both** capsule entry points,
+`command.py` and `normalize.py`, and is recorded with the final argv. The runner
+does not define a least-common-denominator flag set. Each capsule may expose its
+tool's full supported tuning surface through `CONFIG_KEYS`, validate those
+values, and translate them into argv or functional environment. Swath currently
+uses this capacity more deeply than the other subjects; the mechanism is not
+Swath-specific, and another tool adds an argument without adding a runner
+branch.
+
+Opaque does not mean unrecorded shell text. A plan supplies typed JSON values,
+the capsule compiles argv, and both inputs and result argv remain bound evidence.
 
 ## What a capsule declares
 
@@ -58,7 +65,7 @@ and a capsule could be altered without anything noticing.
 | `build_command(request)` | yes | Compiles the complete subject argv |
 | `SUPPORTS_UNSIGNED` | yes | Whether the subject can list without a credential |
 | `SUPPORTS_SIGNED` | no, defaults true | False only where the *harness* cannot yet deliver a credential this subject would accept |
-| `CONFIG_KEYS` | no, defaults empty | The config keys this capsule accepts; anything else is refused |
+| `CONFIG_KEYS` | no, defaults empty | The tool-specific config keys this capsule accepts; anything else is refused |
 | `FUNCTIONAL_ENV` | no, defaults empty | Non-secret environment the subject structurally needs |
 | `build_env(request)` | no, defaults to `FUNCTIONAL_ENV` | Environment derived from the request — heap flags, and nothing else so far |
 | `REQUIRES` | no, defaults empty | The chain of this capsule's own modes that must run before a mode, in order, each naming the artifact taken from it |
@@ -188,6 +195,20 @@ because signing is also an argv decision inside six capsules: `--no-sign-request
 in aws-cli, s5cmd, s3-fast-list and swath, `--target-no-sign-request` in s7cmd,
 and a branch in rclone. *Which* identity signs stays the harness's business and
 never reaches the subject.
+
+## A custom endpoint is a request, not a global redirect
+
+`CommandRequest.endpoint_url` is empty for ordinary S3 and contains the exact
+S3-compatible URL for replay. A capsule translates it through the mechanism its
+subject actually supports: an argv flag for most tools, a functional environment
+variable for s3p and minio-mc, and a quoted connection-string field for rclone.
+The worker passes the value to both an inline setup exec and the measured exec.
+
+Empty must leave argv and functional environment byte-identical. A non-empty
+endpoint must either be rendered explicitly or refused. In particular, a
+capsule refuses a v1, versions, or mandatory-probe mode the ListObjectsV2-only
+replay endpoint cannot serve; it never silently falls back to real S3. Endpoint
+selection is not a credential and must not be placed in the credential payload.
 
 ## Configuration is opaque, and its key names are not
 
@@ -526,7 +547,7 @@ the usual shape with every subject field null (`execution`, `wall_seconds`,
 `max_rss_kb`, `row_count`), the `setup` block saying what the exec did and how
 long it took, and its captured stdout/stderr under `inline/`. That capture is
 the only account of *why* the attempt has no measurement in it, and it is held
-to the same secret scan as the subject's own.
+with the subject's own retained evidence.
 
 ### An artifact is validated before anything consumes it
 

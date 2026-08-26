@@ -109,6 +109,19 @@ resource "google_storage_bucket_iam_member" "authenticated_worker_write" {
   member = "serviceAccount:${google_service_account.authenticated_worker[0].email}"
 }
 
+resource "google_storage_bucket_iam_member" "authenticated_worker_fixture_read" {
+  count  = var.create_aws_credentials_secret ? 1 : 0
+  bucket = google_storage_bucket.results.name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.authenticated_worker[0].email}"
+
+  condition {
+    title       = "replay-fixtures-only"
+    description = "Read only immutable staged replay fixtures"
+    expression  = "resource.type == \"storage.googleapis.com/Object\" && resource.name.startsWith(\"projects/_/buckets/${google_storage_bucket.results.name}/objects/fixtures/\")"
+  }
+}
+
 # The grant that defines the stratum. On the secret, not at project scope, and on
 # this identity alone.
 resource "google_secret_manager_secret_iam_member" "authenticated_worker_access" {

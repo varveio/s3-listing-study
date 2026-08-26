@@ -544,6 +544,15 @@ class CommandRequest:
     reached its ``config`` and its identity.
     """
 
+    endpoint_url: str = ""
+    """Optional S3-compatible endpoint selected by the harness.
+
+    Empty means the ordinary service endpoint and must leave a capsule's argv
+    and environment unchanged.  A non-empty value is forwarded as a distinct
+    request input because each subject spells endpoint selection differently;
+    capsules may refuse modes their custom endpoint cannot represent.
+    """
+
 
 class CommandBuilder(Protocol):
     """The importable function every capsule's ``command.py`` exports."""
@@ -1059,6 +1068,7 @@ def build_parser(prog: str) -> argparse.ArgumentParser:
     parser.add_argument("region")
     parser.add_argument("prefix", nargs="?", default="")
     parser.add_argument("--signed", action="store_true")
+    parser.add_argument("--endpoint-url", default="")
     parser.add_argument("--config", default="{}", metavar="JSON")
     return parser
 
@@ -1083,6 +1093,7 @@ def command_adapter_main(
                 args.prefix,
                 signed=args.signed,
                 config=config,
+                endpoint_url=args.endpoint_url,
             )
         )
     except json.JSONDecodeError as exc:

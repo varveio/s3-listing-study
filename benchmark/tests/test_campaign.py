@@ -19,7 +19,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-from google.api_core.exceptions import AlreadyExists, BadRequest, GoogleAPIError
+from google.api_core.exceptions import AlreadyExists, BadRequest, GoogleAPIError, NotFound
 from google.cloud import batch_v1
 
 from benchmark import adapters, batch_client, campaign, gcs, identity, ledger, measure, report
@@ -30,6 +30,7 @@ from benchmark.runtime.command_adapter import HEAP_PERCENT
 
 ROOT = Path(__file__).parents[2]
 PLAN_PATH = ROOT / "benchmark/plans/buckets/noaa-ghcn-pds.yaml"
+REPLAY_CANARY = ROOT / "benchmark/plans/canaries/runner-replay-canary.yaml"
 DIGEST = "a" * 64
 PLATFORM = "9" * 64
 AUTH_SECRET = "projects/p/secrets/aws-credentials/versions/1"
@@ -162,6 +163,225 @@ def test_a_row_carries_the_document_its_case_id_was_hashed_from(
     assert row["mode"] == case.mode
     assert row["config"] == json.dumps(dict(case.config), sort_keys=True, separators=(",", ":"))
     assert row["result_prefix"] == (f"gs://results/{SUITE}/{plan.bucket}/{row['attempt_id']}/")
+
+
+def test_replay_case_slot_attempt_and_request_keep_one_canonical_document(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(batch_client, "ensure_job", lambda *a, **k: ("SUBMITTED", None))
+    plan = Plan.load(REPLAY_CANARY)
+    case = plan.cases[0]
+    assert case.replay is not None
+    images = image_set(tmp_path)
+    launch = context(plan, case, images)
+    con = ledger.open_ledger(str(tmp_path / "campaign.db"), suite=SUITE)
+
+    restored = campaign._case_from_document(campaign._case_document(case))
+    assert restored == case
+    slot_number = campaign.book_slot(con, case, launch, awaiting="producer.abcdef012345.s1")
+    slot = ledger.pending_rows(con, group_id=launch.group_id)[0]
+    assert slot_number == 1
+    assert campaign._case_from_document(json.loads(slot["known_inputs"])["case"]) == case
+
+    attempt = campaign.submit_case(con, case, launch)
+    row = con.execute("SELECT * FROM attempts WHERE attempt_id=?", (attempt.attempt_id,)).fetchone()
+    expected = json.dumps(case.replay.as_dict(), sort_keys=True, separators=(",", ":"))
+    assert ledger.Attempt.from_row(row).replay == expected
+    request = json.loads(row["request_json"])
+    task = request["taskGroups"][0]["taskSpec"]
+    assert "environment" not in task
+    stage, initializer, server, subject = task["runnables"]
+    assert stage["container"]["commands"][0] == "-ceu"
+    assert (
+        "gs://s3-listing-study-results-29c02004/fixtures/runner-replay-canary/"
+        "6e1c2d47a92bbd1062469fb323f95b1d0f127b4e601b93f0d94576ab16d7c8b4/"
+        "part-00000.parquet" in stage["container"]["commands"][1]
+    )
+    assert initializer["container"] == {
+        "imageUri": images.image_for(case.tool)["image_uri"],
+        "commands": ["10001:10001", "/tmp/attempt"],
+        "options": (
+            "--user 0:0 --entrypoint /bin/chown "
+            "--volume=/mnt/stateful_partition/attempt:/tmp/attempt"
+        ),
+    }
+    assert server["background"] is True
+    assert server["container"] == {
+        "imageUri": case.replay.backend.server_image_uri,
+        "commands": [
+            "serve",
+            "--fixture",
+            "/fixtures/source",
+            "--bucket",
+            "runner-replay-canary",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "19090",
+            "--metrics-port",
+            "19192",
+            "--serving-mode",
+            "duckdb",
+            "--parquet-connections",
+            "4",
+            "--max-concurrent-requests",
+            "16",
+        ],
+        "options": (
+            "--network host --cpuset-cpus=0-1 --memory=2g --memory-swap=2g "
+            "--volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
+        ),
+    }
+    assert server["environment"] == {
+        "variables": {
+            "JAVA_TOOL_OPTIONS": (
+                "-XX:MaxRAMPercentage=75 -Dswath.replay.prefetch.enabled=false "
+                "-Dswath.replay.prefetch.max-windows=96"
+            )
+        }
+    }
+    subject_commands = subject["container"]["commands"]
+    assert subject_commands[-4:] == [
+        "--endpoint-url",
+        "http://127.0.0.1:19090",
+        "--replay-config",
+        expected,
+    ]
+    assert subject["container"]["options"] == (
+        "--network host --cpuset-cpus=2 --memory=2g --memory-swap=2g "
+        "--volume=/mnt/stateful_partition/attempt:/tmp/attempt"
+    )
+    uncapped = replace(attempt, container_memory_gb=None)
+    uncapped_request = campaign.render_batch_job(
+        uncapped, images.image_for(case.tool), suite=SUITE, options=launch.options
+    )
+    uncapped_subject = uncapped_request["taskGroups"][0]["taskSpec"]["runnables"][-1]
+    assert uncapped_subject["container"]["options"] == (
+        "--network host --cpuset-cpus=2 --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
+    )
+    uncapped_commands = uncapped_subject["container"]["commands"]
+    assert uncapped_commands[uncapped_commands.index("--container-memory-gb") + 1] == "none"
+    assert attempt.secret_resource is None
+    assert "environment" not in subject
+    signed = replace(attempt, auth_role="public-read", secret_resource=AUTH_SECRET)
+    signed_request = campaign.render_batch_job(
+        signed, images.image_for(case.tool), suite=SUITE, options=launch.options
+    )
+    signed_task = signed_request["taskGroups"][0]["taskSpec"]
+    _, _, signed_server, signed_subject = signed_task["runnables"]
+    assert "environment" not in signed_task
+    assert "secretVariables" not in signed_server["environment"]
+    assert signed_subject["environment"] == {"secretVariables": {CREDENTIAL_ENV_VAR: AUTH_SECRET}}
+    assert task["computeResource"] == {"cpuMilli": "4000", "memoryMib": "8192"}
+    assert task["maxRunDuration"] == "1505s"
+    retried = campaign.retry_request_document(
+        request,
+        job_name="retry-job",
+        result_prefix="gs://results/retry/",
+        attempt_id="swath.retry.s2",
+    )
+    assert retried["taskGroups"][0]["taskSpec"]["runnables"][2] == server
+    assert campaign.request_argument(retried, "--attempt-id") == "swath.retry.s2"
+    assert campaign.request_argument(retried, "--destination") == "gs://results/retry/"
+    assert json.loads(row["case_inputs"])["replay"] == case.replay.as_dict()
+
+
+def test_runner_canary_disables_artificial_latency(tmp_path: Path) -> None:
+    plan = Plan.load(ROOT / "benchmark/plans/canaries/runner-replay-canary.yaml")
+    case = plan.cases[0]
+    images = image_set(tmp_path)
+    launch = context(plan, case, images)
+    attempt = campaign.planned_attempt(case, launch)[2](1)[0]
+    request = campaign.render_batch_job(
+        attempt, images.image_for(case.tool), suite=SUITE, options=launch.options
+    )
+    runnables = request["taskGroups"][0]["taskSpec"]["runnables"]
+    server = next(runnable for runnable in runnables if runnable.get("background") is True)
+    commands = server["container"]["commands"]
+    assert "--inject-latency" not in commands
+
+
+def test_uri_fixture_is_staged_before_the_server_and_never_put_in_its_image(
+    tmp_path: Path,
+) -> None:
+    plan = Plan.load(ROOT / "benchmark/plans/canaries/runner-replay-canary.yaml")
+    base = plan.cases[0]
+    assert base.replay is not None
+    backend = replace(
+        base.replay.backend,
+        fixture_uri="gs://fixtures/sorel/part-00000.parquet",
+        fixture_sha256="e" * 64,
+    )
+    case = replace(base, replay=replace(base.replay, backend=backend))
+    images = image_set(tmp_path)
+    attempt = campaign.planned_attempt(case, context(plan, case, images))[2](1)[0]
+    request = campaign.render_batch_job(
+        attempt,
+        images.image_for(case.tool),
+        suite=SUITE,
+        options=context(plan, case, images).options,
+    )
+
+    stage, initializer, server, subject = request["taskGroups"][0]["taskSpec"]["runnables"]
+    assert stage["container"]["commands"][0] == "-ceu"
+    script = stage["container"]["commands"][1]
+    assert "gcloud storage cp gs://fixtures/sorel/part-00000.parquet /fixtures/source/" in script
+    assert '[[ "$actual" == ' + "e" * 64 + " ]]" in script
+    assert stage["container"]["options"] == (
+        "--entrypoint /bin/bash --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
+    )
+    assert stage["environment"] == {
+        "variables": {
+            "CLOUDSDK_PYTHON": ("/usr/lib/google-cloud-sdk/platform/bundledpythonunix/bin/python3")
+        }
+    }
+    assert initializer["container"]["commands"] == ["10001:10001", "/tmp/attempt"]
+    assert server["background"] is True
+    fixture_index = server["container"]["commands"].index("--fixture")
+    assert server["container"]["commands"][fixture_index + 1] == "/fixtures/source"
+    assert (
+        "--volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
+        in server["container"]["options"]
+    )
+    assert (
+        "--volume=/mnt/stateful_partition/attempt:/tmp/attempt" in subject["container"]["options"]
+    )
+    assert request["allocationPolicy"]["instances"][0]["policy"]["bootDisk"] == {
+        "type": "hyperdisk-balanced",
+        "image": "batch-cos",
+        "sizeGb": "100",
+    }
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        pytest.param("replay_parquet_connections", 0, id="zero-reader-pool"),
+        pytest.param("replay_max_concurrent_requests", 0, id="zero-admission"),
+        pytest.param("replay_heap_percent", 101, id="invalid-heap-share"),
+    ],
+)
+def test_renderer_refuses_malformed_frozen_replay_allocation(
+    tmp_path: Path, field: str, value: int
+) -> None:
+    plan = Plan.load(REPLAY_CANARY)
+    case = plan.cases[0]
+    images = image_set(tmp_path)
+    attempt = campaign.planned_attempt(
+        case,
+        context(plan, case, images),
+    )[2](1)[0]
+    replay = json.loads(attempt.replay or "null")
+    replay["allocation"][field] = value
+    malformed = replace(attempt, replay=json.dumps(replay, sort_keys=True, separators=(",", ":")))
+
+    with pytest.raises(ledger.CampaignError, match="malformed resolved replay"):
+        campaign.render_batch_job(
+            malformed,
+            images.image_for(case.tool),
+            suite=SUITE,
+            options=context(plan, case, images).options,
+        )
 
 
 def test_two_cases_hashing_to_one_case_id_are_refused(
@@ -379,7 +599,7 @@ def test_a_refused_creation_is_not_created(tmp_path: Path) -> None:
 def test_the_rendered_job_carries_the_attempt_identity_and_its_prefix(tmp_path: Path) -> None:
     """The worker is told which row it is, so `result.json` can name it back."""
     attempt, request = rendered_request(tmp_path)
-    commands = request["taskGroups"][0]["taskSpec"]["runnables"][0]["container"]["commands"]
+    commands = request["taskGroups"][0]["taskSpec"]["runnables"][-1]["container"]["commands"]
     pairs = dict(zip(commands[::2], commands[1::2], strict=True))
     assert pairs["--attempt-id"] == attempt.attempt_id
     assert pairs["--case-id"] == attempt.case_id
@@ -461,6 +681,28 @@ def test_a_superseded_ledger_still_opens_for_reading_and_never_for_writing(
     assert ledger.slot_owed_reason(reading, slot) == (
         "no attempt in this group produces what it consumes"
     )
+    reading.close()
+
+
+def test_schema_two_attempts_are_read_only_with_replay_null(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(batch_client, "ensure_job", lambda *a, **k: ("SUBMITTED", None))
+    path = tmp_path / "campaign.db"
+    con = ledger.open_ledger(str(path), suite=SUITE)
+    plan = loaded_plan()
+    submit(con, plan, any_case(plan), image_set(tmp_path))
+    con.close()
+    old = sqlite3.connect(path)
+    old.execute("ALTER TABLE attempts DROP COLUMN replay")
+    old.execute("UPDATE meta SET schema_version = 2")
+    old.commit()
+    old.close()
+
+    with pytest.raises(ledger.CampaignError, match="does not migrate"):
+        ledger.open_ledger(str(path))
+    reading = ledger.open_ledger(str(path), readonly=True)
+    assert ledger.Attempt.from_row(ledger.attempt_rows(reading)[0]).replay is None
     reading.close()
 
 
@@ -730,6 +972,19 @@ def test_the_suite_filter_quotes_its_value() -> None:
     )
 
 
+def test_cancel_is_idempotent_after_provider_deletion() -> None:
+    class Client:
+        def delete_job(self, **_kwargs: object) -> None:
+            raise NotFound("already deleted")  # type: ignore[no-untyped-call]
+
+    batch_client.cancel_job(
+        "p",
+        "us-east1",
+        "gone",
+        client=Client(),  # type: ignore[arg-type]
+    )
+
+
 class Evidence:
     """The results bucket, as much of it as a settling preparation is read from."""
 
@@ -984,7 +1239,8 @@ def test_a_swath_job_names_its_heap_variable_once_and_the_worker_takes_it(
     images = image_set(tmp_path)
     _, _, build = campaign.planned_attempt(case, context(plan, case, images))
     _, request = build(1)
-    argv = json.loads(request)["taskGroups"][0]["taskSpec"]["runnables"][0]["container"]["commands"]
+    subject = json.loads(request)["taskGroups"][0]["taskSpec"]["runnables"][-1]
+    argv = subject["container"]["commands"]
 
     args = measure.parse_args(argv)
     # The capsule the image would carry, read from the tree it is built from.

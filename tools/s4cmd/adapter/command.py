@@ -113,6 +113,11 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
 
 
 def build_command(request: CommandRequest) -> tuple[str, ...]:
+    if request.endpoint_url:
+        raise CommandAdapterError(
+            f"{TOOL} uses ListObjects v1 and cannot run against the ListObjectsV2-only "
+            "replay endpoint"
+        )
     return *S4CMD.argv, *_build_tail(request)
 
 

@@ -74,7 +74,12 @@ def test_dockerfile_is_self_contained_and_checksum_pinned() -> None:
     source = (ROOT / "benchmark/build/Dockerfile").read_text()
     assert "_PARENT" not in source
     assert "SHARED_BASE" not in source
-    assert source.count("ADD --checksum=sha256:") == 11
+    assert source.count("ADD --checksum=sha256:") == 10
+    assert (
+        "FROM ghcr.io/varveio/swath@sha256:"
+        "a13adef049de8c11c053861918005aaaae6c8576797df48867d1c5efdbcfc88b "
+        "AS swath_install"
+    ) in source
     for stage in (
         "aws_cli_install",
         "minio_mc_install",
@@ -187,15 +192,22 @@ def test_declared_artifact_must_appear_in_executed_stage() -> None:
     with pytest.raises(build_image.BuildError, match="aws-cli"):
         build_image.validate_executed_sources(selections, ROOT, broken)
 
+    broken_swath = source.replace(
+        selections["swath"].tool_artifact_sha256,
+        "0" * 64,
+    )
+    with pytest.raises(build_image.BuildError, match="swath"):
+        build_image.validate_executed_sources(selections, ROOT, broken_swath)
+
 
 def test_closure_follows_from_edges_past_the_first_hop() -> None:
     recipe = build_image.attribute_recipe(RECIPE)
-    assert set(recipe.tool_stages["swath"]) == {"swath_install", "swath_jre"}
-    assert "eclipse-temurin" in recipe.tool_stages["swath"]["swath_jre"]
+    assert set(recipe.tool_stages["swath"]) == {"swath_install"}
+    assert "ghcr.io/varveio/swath@sha256:" in recipe.tool_stages["swath"]["swath_install"]
 
 
 def test_a_pinned_base_digest_moves_only_the_slice_that_reaches_it() -> None:
-    match = re.search(r"^FROM (?P<base>\S+) AS swath_jre$", RECIPE, re.MULTILINE)
+    match = re.search(r"^FROM (?P<base>\S+) AS swath_install$", RECIPE, re.MULTILINE)
     assert match is not None
     base = match.group("base")
     bumped = RECIPE.replace(base, f"{base.split('@')[0]}@sha256:{'0' * 64}")

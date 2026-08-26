@@ -34,6 +34,7 @@ from google.cloud import batch_v1
 
 from benchmark import batch_client, gcs, identity
 from benchmark import plan as bench
+from benchmark import replay as replay_contract
 from benchmark.contract import CREDENTIAL_ENV_VAR, TOOL_IMAGE_FIELDS, TOOLBOX_TOOLS
 from benchmark.ledger import (
     INSERT_COLUMNS,
@@ -82,8 +83,24 @@ its evidence — so this outer bound must never be the one that fires. It is a
 safety net rather than a measurement, which is why it is one flat figure and not
 a per-mode sum.
 """
+REPLAY_READINESS_TIMEOUT_S = 600
+"""Allowance for a replay server to derive its serving index before timing."""
 
-N4_BOOT_DISK = {"type": "hyperdisk-balanced", "image": "batch-cos"}
+HYPERDISK_BOOT_DISK = {
+    "type": "hyperdisk-balanced",
+    "image": "batch-cos",
+    "sizeGb": "100",
+}
+REPLAY_STAGING_IMAGE = (
+    "gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:"
+    "cf72dd63b7643c117ef53378a41bef6db6a01fa3d561f2b456d7abd8bbeb9ba6"
+)
+# COS mounts /mnt/disks as a small tmpfs until a separate disk is attached.
+# The enlarged boot disk's writable capacity is /mnt/stateful_partition.
+REPLAY_FIXTURE_HOST_DIR = "/mnt/stateful_partition/replay-fixture"
+REPLAY_FIXTURE_CONTAINER_DIR = "/fixtures/source"
+SUBJECT_OUTPUT_HOST_DIR = "/mnt/stateful_partition/attempt"
+SUBJECT_OUTPUT_CONTAINER_DIR = "/tmp/attempt"
 PINNED_IMAGE_RE = re.compile(r"\A[^\s@]+@sha256:([0-9a-f]{64})\Z")
 SECRET_RE = re.compile(r"\Aprojects/[^/]+/secrets/[^/]+/versions/[^/]+\Z")
 HEX64_RE = re.compile(r"\A[0-9a-f]{64}\Z")
@@ -156,7 +173,10 @@ class BatchOptions:
             {
                 "project": self.project,
                 "provisioning": self.provisioning,
-                "boot_disk": "n4-hyperdisk-balanced",
+                "boot_disk": {
+                    "type": "hyperdisk-balanced",
+                    "size_gb": 100,
+                },
                 "network": self.network,
                 "subnetwork": self.subnetwork,
                 "zone": self.zone,
@@ -295,6 +315,7 @@ def case_identity(
     machine shapes would be claiming a comparability nobody asked for.
     """
     config = dict(case.config)
+    replay = None if case.replay is None else case.replay.as_dict()
     if case.purpose == "preparation":
         environment = identity.preparation_environment(
             target_bucket=target_bucket,
@@ -318,8 +339,8 @@ def case_identity(
             input_artifact_sha256=input_artifact_sha256,
         )
     return (
-        identity.case_id(case.tool, environment, config, tool_slice, platform),
-        identity.case_inputs_document(environment, config, tool_slice, platform),
+        identity.case_id(case.tool, environment, config, tool_slice, platform, replay),
+        identity.case_inputs_document(environment, config, tool_slice, platform, replay),
     )
 
 
@@ -459,11 +480,44 @@ def _artifact_pairs(attempt: Attempt, artifact_uri: str) -> tuple[tuple[str, str
 def request_argument(document: Mapping[str, Any], name: str) -> str:
     """One `--flag value` pair out of a frozen provider request, or `""`."""
     try:
-        commands = document["taskGroups"][0]["taskSpec"]["runnables"][0]["container"]["commands"]
-        pairs = dict(zip(commands[::2], commands[1::2], strict=True))
+        commands = _subject_commands(document)
+        pairs_list = list(zip(commands[::2], commands[1::2], strict=True))
+        if len({key for key, _value in pairs_list}) != len(pairs_list):
+            raise ValueError
+        pairs = dict(pairs_list)
     except (IndexError, KeyError, TypeError, ValueError):
         raise CampaignError("recorded provider request cannot be read back") from None
     return str(pairs.get(name, ""))
+
+
+def _subject_commands(document: Mapping[str, Any]) -> list[Any]:
+    """Find the one worker runnable without relying on provider runnable order."""
+    groups = document["taskGroups"]
+    if not isinstance(groups, list) or len(groups) != 1:
+        raise ValueError
+    runnables = groups[0]["taskSpec"]["runnables"]
+    if not isinstance(runnables, list) or not runnables:
+        raise ValueError
+    candidates: list[list[Any]] = []
+    for runnable in runnables:
+        commands = runnable["container"]["commands"]
+        if not isinstance(commands, list):
+            raise ValueError
+        if "--attempt-id" not in commands:
+            continue
+        if len(commands) % 2:
+            raise ValueError
+        flags = commands[::2]
+        if not all(isinstance(flag, str) and flag.startswith("--") for flag in flags):
+            raise ValueError
+        if len(set(flags)) != len(flags):
+            raise ValueError
+        if "--attempt-id" not in flags:
+            raise ValueError
+        candidates.append(commands)
+    if len(candidates) != 1:
+        raise ValueError
+    return candidates[0]
 
 
 def request_max_run_duration(document: Mapping[str, Any]) -> str:
@@ -472,6 +526,68 @@ def request_max_run_duration(document: Mapping[str, Any]) -> str:
         return str(document["taskGroups"][0]["taskSpec"]["maxRunDuration"])
     except (IndexError, KeyError, TypeError):
         raise CampaignError("recorded provider request cannot be read back") from None
+
+
+def _cpuset(start: int, count: int) -> str:
+    end = start + count - 1
+    return str(start) if end == start else f"{start}-{end}"
+
+
+def _runnable_options(cpuset: str, memory_gb: int | None) -> str:
+    options = ["--network", "host", f"--cpuset-cpus={cpuset}"]
+    if memory_gb is not None:
+        options.extend((f"--memory={memory_gb}g", f"--memory-swap={memory_gb}g"))
+    return shlex.join(options)
+
+
+def _replay_document(attempt: Attempt) -> replay_contract.ReplayConfig | None:
+    """Decode the one canonical replay document and validate its host projection."""
+    if attempt.replay is None:
+        return None
+    try:
+        resolved = replay_contract.parse_document(attempt.replay)
+        replay_contract.allocation_summary(
+            resolved,
+            box_vcpus=attempt.vcpus,
+            box_memory_gb=attempt.memory_gb,
+            container_memory_gb=attempt.container_memory_gb,
+        )
+    except replay_contract.ReplayError:
+        raise CampaignError(
+            f"{attempt.attempt_id} carries a malformed resolved replay document"
+        ) from None
+    return resolved
+
+
+def _fixture_staging_script(uri: str, expected_sha256: str) -> str:
+    """Download a staged fixture and refuse bytes outside its recorded identity.
+
+    The digest is over sorted ``name<TAB>size<TAB>sha256<NL>`` rows for the
+    immediate ``*.parquet`` children. The check runs before the replay server
+    starts, so mutable storage can serve only the bytes the case named.
+    """
+    destination = shlex.quote(REPLAY_FIXTURE_CONTAINER_DIR)
+    source = shlex.quote(uri)
+    expected = shlex.quote(expected_sha256)
+    return "\n".join(
+        (
+            "set -o pipefail",
+            f"mkdir -p {destination}",
+            f"gcloud storage cp {source} {destination}/",
+            'manifest="$(mktemp)"',
+            f"files=({destination}/*.parquet)",
+            '[[ -f "${files[0]}" ]] || { echo "no staged parquet files" >&2; exit 1; }',
+            'for file in "${files[@]}"; do',
+            '  digest="$(sha256sum "$file")"; digest="${digest%% *}"',
+            '  size="$(stat -c %s "$file")"',
+            '  printf \'%s\\t%s\\t%s\\n\' "${file##*/}" "$size" "$digest"',
+            'done | LC_ALL=C sort > "$manifest"',
+            'actual="$(sha256sum "$manifest")"; actual="${actual%% *}"',
+            f'[[ "$actual" == {expected} ]] || '
+            '{ echo "fixture digest mismatch: $actual" >&2; exit 1; }',
+            'rm -f "$manifest"',
+        )
+    )
 
 
 def render_batch_job(
@@ -494,7 +610,7 @@ def render_batch_job(
         ("--region", attempt.target_region),
         *(() if attempt.auth_role is None else (("--auth-role", attempt.auth_role),)),
         ("--prefix", attempt.target_prefix),
-        ("--output", "/tmp/attempt"),
+        ("--output", SUBJECT_OUTPUT_CONTAINER_DIR),
         ("--destination", attempt.result_prefix),
         ("--timeout", str(attempt.timeout_s)),
         ("--term-grace", str(options.term_grace)),
@@ -520,44 +636,165 @@ def render_batch_job(
         ("--config", attempt.config),
         *_artifact_pairs(attempt, artifact_uri),
     )
+    replay = _replay_document(attempt)
+    if replay is not None:
+        pairs = (
+            *pairs,
+            ("--endpoint-url", "http://127.0.0.1:19090"),
+            ("--replay-config", attempt.replay),
+        )
     commands = [item for pair in pairs for item in pair]
     container: dict[str, Any] = {"imageUri": image["image_uri"], "commands": commands}
-    if container_memory is not None:
-        container["options"] = shlex.join(
-            (f"--memory={container_memory}g", f"--memory-swap={container_memory}g")
+    subject_runnable: dict[str, Any] = {"container": container}
+    output_volume = f"--volume={SUBJECT_OUTPUT_HOST_DIR}:{SUBJECT_OUTPUT_CONTAINER_DIR}"
+    output_initializer = {
+        "container": {
+            "imageUri": image["image_uri"],
+            "commands": ["10001:10001", SUBJECT_OUTPUT_CONTAINER_DIR],
+            "options": shlex.join(("--user", "0:0", "--entrypoint", "/bin/chown", output_volume)),
+        }
+    }
+    runnables = [output_initializer, subject_runnable]
+    if replay is None:
+        plain_subject_options = [output_volume]
+        if container_memory is not None:
+            plain_subject_options.extend(
+                (f"--memory={container_memory}g", f"--memory-swap={container_memory}g")
+            )
+        container["options"] = shlex.join(plain_subject_options)
+    else:
+        allocation = replay.allocation
+        summary = replay_contract.allocation_summary(
+            replay,
+            box_vcpus=attempt.vcpus,
+            box_memory_gb=attempt.memory_gb,
+            container_memory_gb=container_memory,
         )
+        container["options"] = _runnable_options(summary.subject_cpuset, container_memory)
+        backend = replay.backend
+        fixture_path = (
+            REPLAY_FIXTURE_CONTAINER_DIR
+            if backend.fixture_uri is not None
+            else f"/fixtures/{attempt.target_bucket}"
+        )
+        server_commands = [
+            "serve",
+            "--fixture",
+            fixture_path,
+            "--bucket",
+            attempt.target_bucket,
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "19090",
+            "--metrics-port",
+            "19192",
+            "--serving-mode",
+            backend.serving_mode,
+            "--parquet-connections",
+            str(allocation.replay_parquet_connections),
+            "--max-concurrent-requests",
+            str(allocation.replay_max_concurrent_requests),
+        ]
+        profile_spec = backend.profile_spec
+        if profile_spec is not None:
+            assert backend.latency_scale is not None
+            server_commands.extend(
+                (
+                    "--inject-latency",
+                    profile_spec,
+                    "--latency-scale",
+                    str(backend.latency_scale),
+                )
+            )
+        server_options = _runnable_options(summary.server_cpuset, allocation.replay_memory_gb)
+        subject_options = (
+            f"{_runnable_options(summary.subject_cpuset, container_memory)} {output_volume}"
+        )
+        staging_runnable = None
+        if backend.fixture_uri is not None:
+            volume = f"--volume={REPLAY_FIXTURE_HOST_DIR}:{REPLAY_FIXTURE_CONTAINER_DIR}"
+            server_options = f"{server_options} {volume}"
+            staging_runnable = {
+                "container": {
+                    "imageUri": REPLAY_STAGING_IMAGE,
+                    "commands": [
+                        "-ceu",
+                        _fixture_staging_script(backend.fixture_uri, backend.fixture_sha256),
+                    ],
+                    "options": shlex.join(("--entrypoint", "/bin/bash", volume)),
+                },
+                # Batch injects /usr/bin/python3, which the slim Cloud CLI
+                # image does not contain. Pin its own bundled interpreter.
+                "environment": {
+                    "variables": {
+                        "CLOUDSDK_PYTHON": (
+                            "/usr/lib/google-cloud-sdk/platform/bundledpythonunix/bin/python3"
+                        )
+                    }
+                },
+            }
+        server_runnable = {
+            "background": True,
+            "container": {
+                "imageUri": backend.server_image_uri,
+                "commands": server_commands,
+                "options": server_options,
+            },
+            "environment": {
+                "variables": {
+                    "JAVA_TOOL_OPTIONS": (
+                        f"-XX:MaxRAMPercentage={allocation.replay_heap_percent} "
+                        "-Dswath.replay.prefetch.enabled="
+                        f"{'true' if allocation.replay_prefetch else 'false'} "
+                        "-Dswath.replay.prefetch.max-windows="
+                        f"{allocation.replay_prefetch_max_windows}"
+                    )
+                }
+            },
+        }
+        container["options"] = subject_options
+        runnables = [output_initializer, server_runnable, subject_runnable]
+        if staging_runnable is not None:
+            runnables.insert(0, staging_runnable)
+    readiness_allowance = REPLAY_READINESS_TIMEOUT_S if replay is not None else 0
+    default_duration = (
+        attempt.timeout_s + int(options.term_grace) + DEADLINE_SLACK_S + readiness_allowance
+    )
     task_spec: dict[str, Any] = {
-        "runnables": [{"container": container}],
+        "runnables": runnables,
         "computeResource": {
             "cpuMilli": str(attempt.vcpus * 1000),
             "memoryMib": str(attempt.memory_gb * 1024),
         },
         "maxRetryCount": 0,
-        "maxRunDuration": max_run_duration
-        or f"{attempt.timeout_s + int(options.term_grace) + DEADLINE_SLACK_S}s",
+        "maxRunDuration": max_run_duration or f"{default_duration}s",
     }
     if attempt.secret_resource is not None:
         # One variable, whose payload the worker parses. A case that lists
         # unsigned has no environment block at all.
-        task_spec["environment"] = {
-            "secretVariables": {CREDENTIAL_ENV_VAR: attempt.secret_resource}
-        }
+        credential = {"secretVariables": {CREDENTIAL_ENV_VAR: attempt.secret_resource}}
+        if replay is None:
+            # Preserve the settled one-runnable request document byte-for-byte.
+            task_spec["environment"] = credential
+        else:
+            subject_runnable["environment"] = credential
     policy: dict[str, Any] = {
         "machineType": attempt.machine_type,
         "provisioningModel": options.provisioning,
     }
-    if attempt.machine_type.startswith("n4-"):
-        policy["bootDisk"] = dict(N4_BOOT_DISK)
-    allocation: dict[str, Any] = {
+    if attempt.machine_type.startswith(("n4-", "c4-", "c4d-")):
+        policy["bootDisk"] = dict(HYPERDISK_BOOT_DISK)
+    allocation_policy: dict[str, Any] = {
         "instances": [{"policy": policy}],
         "serviceAccount": {"email": attempt.service_account},
     }
     if options.zone:
-        allocation["location"] = {
+        allocation_policy["location"] = {
             "allowedLocations": [f"zones/{options.zone.removeprefix('zones/')}"]
         }
     if options.network and options.subnetwork:
-        allocation["network"] = {
+        allocation_policy["network"] = {
             "networkInterfaces": [{"network": options.network, "subnetwork": options.subnetwork}]
         }
     return {
@@ -565,7 +802,7 @@ def render_batch_job(
         # scanning a shared project for anything benchmark-shaped.
         "labels": {"suite": suite},
         "taskGroups": [{"taskCount": "1", "parallelism": "1", "taskSpec": task_spec}],
-        "allocationPolicy": allocation,
+        "allocationPolicy": allocation_policy,
         "logsPolicy": {"destination": "CLOUD_LOGGING"},
     }
 
@@ -576,9 +813,7 @@ def retry_request_document(
     """The frozen request with only the new attempt's identities rewritten."""
     document = copy.deepcopy(previous)
     try:
-        commands = document["taskGroups"][0]["taskSpec"]["runnables"][0]["container"]["commands"]
-        if not isinstance(commands, list):
-            raise TypeError
+        commands = _subject_commands(document)
         replacements = {
             "--job-name": job_name,
             "--destination": result_prefix,
@@ -683,6 +918,7 @@ def planned_attempt(
             purpose=case.purpose,
             statistic=case.statistic,
             origin="planned",
+            replay=None if case.replay is None else _canonical(case.replay.as_dict()),
         )
         return attempt, _canonical(
             render_batch_job(
@@ -804,11 +1040,16 @@ def _case_document(case: Case) -> dict[str, Any]:
         },
         "axes": [list(pair) for pair in case.axes],
         "config": [list(pair) for pair in case.config],
+        "replay": None if case.replay is None else case.replay.as_dict(),
     }
 
 
 def _case_from_document(document: Any) -> Case:
     try:
+        replay_document = document.get("replay")
+        replay = None
+        if replay_document is not None:
+            replay = replay_contract.parse_document(replay_contract.canonical_json(replay_document))
         return Case(
             **{
                 name: document[name]
@@ -827,6 +1068,7 @@ def _case_from_document(document: Any) -> Case:
             resources=bench.Resources(**document["resources"]),
             axes=tuple((str(key), value) for key, value in document["axes"]),
             config=tuple((str(key), value) for key, value in document["config"]),
+            replay=replay,
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise CampaignError(f"recorded case is not one this code understands: {exc}") from None
@@ -1012,6 +1254,7 @@ def producer_spec(attempt: Attempt) -> str:
             "target_region": attempt.target_region,
             "tool_slice_sha256": attempt.tool_slice_sha256,
             "platform_sha256": attempt.platform_sha256,
+            "replay": attempt.replay,
         }
     )
 

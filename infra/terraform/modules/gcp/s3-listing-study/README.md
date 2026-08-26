@@ -87,13 +87,16 @@ all either needs. SSH ingress is restricted to IAP's forwarding range regardless
 port 22 to the internet, and an estate that wants IAP-only SSH must delete that
 rule itself. This module will not touch a shared network's pre-existing rules.
 
-**Both workers get bucket-level `objectCreator`.** `benchmark/src/benchmark/measure.py` uploads
-new artifacts into a fresh UUID attempt leaf and never reads, overwrites, or
-deletes GCS objects. It uploads `result.json` last as the completion marker. The
-SDK calls do not set a create-only generation precondition; IAM is the actual
-overwrite boundary here. Campaign verification and reporting use the separate
-orchestrator identity, which retains the read/manage access those operations
-need.
+**Both workers get bucket-level `objectCreator`, plus fixture-prefix read.**
+`benchmark/src/benchmark/measure.py` uploads new artifacts into a fresh UUID
+attempt leaf and never reads, overwrites, or deletes campaign objects. The only
+read grant is a conditional `objectViewer` binding whose resource name must
+start with `objects/fixtures/`; it lets the staging runnable download immutable,
+content-addressed replay inputs without exposing any result tree. Plans use an
+exact object URI, so staging does not require bucket listing permission. The
+worker uploads `result.json` last as the completion marker. Campaign
+verification and reporting use the separate orchestrator identity, which
+retains the broader read/manage access those operations need.
 
 **Batch metadata access is intentional.** The in-worker uploader obtains its
 OAuth token from the VM metadata server. The subjects are cooperative software,

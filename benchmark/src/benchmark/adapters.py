@@ -94,6 +94,7 @@ def compile_command(
     artifact_path: str = "",
     visible_memory_gb: float | None = None,
     heap_percent: int = HEAP_PERCENT,
+    endpoint_url: str = "",
 ) -> tuple[tuple[str, ...], dict[str, str]]:
     """Load ``<adapter_dir>/command.py`` and compile this case's exact subject argv.
 
@@ -116,6 +117,7 @@ def compile_command(
             artifact_path=artifact_path,
             visible_memory_gb=visible_memory_gb,
             heap_percent=heap_percent,
+            endpoint_url=endpoint_url,
         )
         return adapter.compile(request), adapter.build_env(request)
     except Exception as exc:

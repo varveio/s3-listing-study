@@ -60,9 +60,9 @@ records what an attempt was for:
 | `canary` | no | Proves a path executes at all — a new signing route, a new executor, a machine shape nobody has run. |
 | `diagnostic` | no | Reproduces a failure or probes a limit. `s4cmd` hitting a 3600s timeout is worth re-running under observation; it is not worth publishing as a timing. |
 
-`verify` and `report` consider `measurement` rows only. A canary is not a stray
-row for completeness to complain about, and not a subject for a comparison to
-miss — it is simply not in the population.
+`report` considers only `measurement` rows for comparative timing and rates.
+Replay canaries and diagnostics remain outside every comparison. Routine report
+binds their `result.json` summaries and does not consume their retained products.
 
 **A preparation is measured even though it is not compared.** If s3-fast-list
 needs 40 seconds of `ks-tool` to list in 60, then publishing 60 against another
@@ -97,6 +97,12 @@ gs://<results-bucket>/<suite>/<target-bucket>/<tool>.<hash>.s<attempt>/
   stdout.log.gz        -- only when stdout is a log
   native/listing.txt   -- the product, named for what is in it
 ```
+
+`result.json` records `exit_code` for the subject and `worker_exit_code` for the
+worker's final acceptance after counting, artifact checks, cgroup inspection,
+and replay-evidence validation. Both are decided before the marker is created.
+A subject that exits zero can therefore still have an explicitly refused worker
+completion without publishing a misleading success marker.
 
 **The product is a file the mode declares, and stdout is a log**
 ([`capsule-contract.md`](capsule-contract.md) § *The product travels on a
@@ -264,6 +270,36 @@ Two properties the prefix depends on, both argued in
   refuses evidence whose recorded identity disagrees with the prefix it was
   found under.
 
+A replay result also carries the complete canonical `replay` document and a
+`replay_evidence` block. Readiness and the first server-metrics scrape complete
+before `started_at`; the last scrape follows `finished_at`. Long runs retain raw
+10-second meter snapshots plus host-observed utilization over the declared,
+disjoint server and subject cpusets, available host memory, and load. Cpuset
+utilization is deliberately not called process CPU: host work scheduled on
+those CPUs is inside the observation. Missing or malformed replay evidence is
+a refusal, not a timing with an assumed healthy backend.
+
+When a replay fixture is staged from `fixture_uri`, `fixture_sha256` binds the
+sorted manifest of downloaded Parquet names, sizes, and content digests. The
+staging runnable recomputes that digest before the background server runnable
+starts. The URI locates bytes; it does not identify them.
+
+Verification requires the replay server's untagged request counter to increase
+across the subject interval and its error counter not to increase. A calibrated
+measurement also requires at least one interval metrics sample and one matching
+cpuset-resource sample; a short uncalibrated diagnostic may have neither, but
+must still prove that its requests reached the server.
+
+The canonical replay document includes a simple capacity status. `uncalibrated`
+permits diagnostics but refuses replay measurements; it becomes `calibrated`
+only with a receipt-backed canary. The declared allocation is its execution
+contract. Host CPU remainder and, when the subject is capped, memory headroom
+are derived from the box and container ceilings, not independently authored.
+An uncapped subject has no guaranteed host memory headroom and is reported as
+`unreserved`. A one-time provider canary may
+inspect effective limits, but recurring attempt evidence does not attest them
+and verification does not manufacture a second allocation protocol.
+
 ## The tables
 
 ```sql
@@ -310,6 +346,8 @@ CREATE TABLE attempts (
     target_region       TEXT NOT NULL,
     target_prefix       TEXT NOT NULL,
 
+    replay              TEXT,               -- canonical resolved replay JSON; null for S3
+
     -- configuration: forwarded to the capsule, opaque here
     config              TEXT NOT NULL,      -- canonical JSON; holds mode and every tool knob
     -- ...except its reserved axis names, projected out for querying
@@ -328,7 +366,7 @@ CREATE TABLE attempts (
     image_set_sha256    TEXT NOT NULL,
 
     -- context: recorded, not hashed
-    executor_env        TEXT NOT NULL,      -- canonical JSON: project, provisioning, boot disk, network
+    executor_env        TEXT NOT NULL,      -- canonical JSON: project, provisioning, boot-disk type/size, network
     service_account     TEXT NOT NULL,      -- what auth_role resolved to
     secret_resource     TEXT,               -- the credential version, when a role was used
     job_name            TEXT NOT NULL UNIQUE,
@@ -358,6 +396,12 @@ claim one job — not as an access path.
 **A row is one attempt, not one case.** Nothing is overwritten and no row is
 deleted, so the table is the study's full run history even after failed evidence
 is pruned from the bucket.
+
+Schema 3 adds `replay`. Schema-2 attempts remain readable through a read-only
+projection where it is null; neither schema 1 nor 2 is writable by the current
+controller. The canonical document is identity and rendering input, not a
+metric or verdict. A delayed slot carries the same document inside its resolved
+case, so it never reloads the plan.
 
 The three dependency columns split by role, which is the distinction
 [`identity.md`](identity.md) turns on: `input_artifact_sha256` is content and
@@ -410,14 +454,16 @@ producer is:
 
 ```
 {tool, mode, config, target_bucket, target_prefix, target_region,
- tool_slice_sha256, platform_sha256}
+ tool_slice_sha256, platform_sha256, replay}
 ```
 
 Machine, vCPUs, memory, timeout, auth role and purpose are excluded — the
 exclusions [`identity.md`](identity.md) § *Two identities, two questions* already
-makes for a preparation, because the bytes do not depend on them. Every key is a
-column of `attempts`, so the document a slot stored is exactly what the
-satisfaction query compares.
+makes for a preparation, because the bytes do not depend on them. `replay` is
+null for S3 and the complete resolved document when the producer talks to replay;
+those bytes can depend on the frozen fixture even though they do not depend on
+the machine executing the producer. Every key is a column of `attempts`, so the
+document a slot stored is exactly what the satisfaction query compares.
 
 Naming one attempt id instead does not survive a retry: the replacement settles
 under a new ordinal, nothing rewrites `awaiting`, and the slot blocks forever
@@ -674,7 +720,7 @@ One file accumulates every group, and several groups may be in flight at once.
 | `status` | Optional `--group` / `--case` filters; unfiltered prints the whole history, which is the point of accumulating. Blocked slots are shown alongside attempts — a group is not understood from its rows alone while it still owes one. |
 | `retry` | One group. Rows from other groups are skipped, not refused. |
 | `cancel` | Requires `--group`; without one it refuses rather than cancelling the file. |
-| `verify` | One group, `purpose = 'measurement'` only. |
+| `verify` | One group. Explicit real-S3 content comparison; replay is refused without staging raw products. |
 | `prune` | Deletes evidence objects for attempts that settled unsuccessfully, leaving every row. Requires `--group`, for the same reason `cancel` does: an unscoped delete over an accumulating file is the one mistake with no undo. |
 
 ### What verify binds against
@@ -718,9 +764,9 @@ not a comparison — so `verify` reports per bucket within the group it was give
 
 ## What is deliberately absent
 
-No results, metrics, or verdicts. Those live in the evidence objects and are
-recomputed by `verify` and `report` on demand — a cached verdict is a second
-answer to a settled question, and the two can disagree.
+No results, metrics, or verdicts. Those live in the evidence objects. Routine
+reporting reads bound `result.json` summaries; explicit real-S3 verification may
+derive a separate content verdict.
 
 Back the ledger up. Losing it does not destroy the evidence, but it costs the
 binding: `report` refuses results it cannot tie back to a recorded row.

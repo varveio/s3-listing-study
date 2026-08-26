@@ -3,6 +3,8 @@ measurement/preparation split (`benchmark/docs/identity.md`)."""
 
 from __future__ import annotations
 
+from typing import cast
+
 from benchmark.identity import (
     attempt_id,
     case_hash,
@@ -10,6 +12,7 @@ from benchmark.identity import (
     measurement_environment,
     preparation_environment,
 )
+from benchmark.replay import parse_document
 
 TOOL_SLICE = "a" * 64
 PLATFORM = "b" * 64
@@ -35,7 +38,71 @@ def _measurement_env(input_artifact_sha256: str | None = None) -> dict[str, obje
 def test_case_hash_golden_value() -> None:
     """Pinned so a change to the encoding is caught here rather than in the ledger."""
     config = {"mode": "recursive", "concurrency": 8}
-    assert case_hash(_measurement_env(), config, TOOL_SLICE, PLATFORM) == "99abbeca2763"
+    assert case_hash(_measurement_env(), config, TOOL_SLICE, PLATFORM) == "4ca988b33945"
+
+
+def test_every_replay_fact_changes_identity() -> None:
+    replay = parse_document(
+        {
+            "backend": {
+                "server_image_uri": f"registry/replay@sha256:{'1' * 64}",
+                "fixture_sha256": "2" * 64,
+                "serving_mode": "sorted",
+                "latency_model": {
+                    "deadlines_ms": {
+                        "worker_page": 107,
+                        "pivot_probe": 41,
+                        "structure_probe": 49,
+                    },
+                    "scale": 1.0,
+                    "jitter": "none",
+                },
+            },
+            "allocation": {
+                "subject_vcpus": 7,
+                "replay_vcpus": 8,
+                "replay_memory_gb": 16,
+                "replay_parquet_connections": 640,
+                "replay_max_concurrent_requests": 512,
+                "replay_prefetch": False,
+                "replay_prefetch_max_windows": 96,
+                "replay_heap_percent": 75,
+            },
+            "capacity_status": "calibrated",
+        }
+    ).as_dict()
+    baseline = case_hash(_measurement_env(), {}, TOOL_SLICE, PLATFORM, replay)
+    allocation = cast(dict[str, object], replay["allocation"])
+    mutations = (
+        ("backend.server_image_uri", f"registry/replay@sha256:{'4' * 64}"),
+        ("backend.fixture_sha256", "5" * 64),
+        ("backend.serving_mode", "duckdb"),
+        ("backend.latency_model.deadlines_ms.worker_page", 108),
+        ("backend.latency_model.scale", 0.5),
+        ("capacity_status", "uncalibrated"),
+        *(
+            (f"allocation.{key}", value + 1)
+            for key, value in allocation.items()
+            if isinstance(value, int) and not isinstance(value, bool)
+        ),
+        ("allocation.replay_prefetch", True),
+    )
+    import copy
+
+    for path, value in mutations:
+        changed = copy.deepcopy(replay)
+        target: dict[str, object] = changed
+        parts = path.split(".")
+        for part in parts[:-1]:
+            target = cast(dict[str, object], target[part])
+        target[parts[-1]] = value
+        assert case_hash(_measurement_env(), {}, TOOL_SLICE, PLATFORM, changed) != baseline, path
+
+    no_latency = copy.deepcopy(replay)
+    cast(dict[str, object], no_latency["backend"])["latency_model"] = "none"
+    resolved = parse_document(no_latency).as_dict()
+    assert cast(dict[str, object], resolved["backend"])["latency_model"] == "none"
+    assert case_hash(_measurement_env(), {}, TOOL_SLICE, PLATFORM, resolved) != baseline
 
 
 def test_case_hash_is_key_order_independent() -> None:

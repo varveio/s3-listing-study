@@ -151,6 +151,11 @@ def _concurrency(request: CommandRequest) -> str:
 
 
 def _build_tail(request: CommandRequest) -> tuple[str, ...]:
+    if request.endpoint_url and request.mode in {"all-versions", "bucket-list"}:
+        raise CommandAdapterError(
+            f"{TOOL} mode {request.mode!r} cannot run against the replay endpoint because "
+            "it does not issue ListObjectsV2"
+        )
     target = f"s3://{request.bucket}/{request.prefix}"
     obs = ("-vv", "--disable-color-tracing")
     parallel = (
@@ -170,7 +175,12 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
     # this harness's own contention, not a methodology axis, so every mode
     # gets it regardless of what a plan asks for.
     resilient = ("--connect-timeout-milliseconds", "15000")
-    anonymous = (*stratum, "--target-region", request.region, *resilient)
+    endpoint = (
+        ("--target-endpoint-url", request.endpoint_url, "--target-force-path-style")
+        if request.endpoint_url
+        else ()
+    )
+    anonymous = (*stratum, "--target-region", request.region, *endpoint, *resilient)
     tsv = ("--tsv", "--show-storage-class", "--show-etag")
     commands = {
         "recursive-tsv": ("ls", "-r", *obs, *tsv, *parallel, *anonymous, target),

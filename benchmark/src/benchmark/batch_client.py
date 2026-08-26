@@ -156,7 +156,11 @@ def list_job_states(
 def cancel_job(
     project: str, location: str, job_name: str, *, client: batch_v1.BatchServiceClient
 ) -> None:
-    operation = client.delete_job(
-        name=f"projects/{project}/locations/{location}/jobs/{job_name}", retry=None, timeout=20
-    )
-    operation.result(timeout=60)  # type: ignore[no-untyped-call]
+    try:
+        client.delete_job(
+            name=f"projects/{project}/locations/{location}/jobs/{job_name}",
+            retry=None,
+            timeout=20,
+        )
+    except NotFound:
+        return

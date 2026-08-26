@@ -8,20 +8,15 @@ to resolve -- and a row's evidence is refused unless the identity recorded in
 `result.json` agrees with the row and with the prefix it was found under
 (`verify.identity_errors`).
 
-Three columns never share one vocabulary: `state` is the ledger's own attempt
-state; `exit` is the subject's exit code from result.json; `verdict` is
-verify.json's, or "-" where no comparison has been run. What report does NOT do
-is re-normalize an attempt to re-derive a verdict: it binds verify.json's hashes
-to the evidence it read and recomputes the verdict from the recorded diff, which
-catches an edited record without re-running eleven capsules per report.
+`state` is the ledger's attempt state; `exit`, `row_count`, timing, and RSS come
+from the bound `result.json`. Routine reporting deliberately reads no raw
+listing and no derived `verify.json`: raw products are retained for manual
+investigation, not consumed by the campaign reporting path.
 
 What a comparison is scoped to, and what it is not:
 
 - **Per target bucket.** Listings of different corpora are not comparable, so
   attempts are sectioned by bucket and never pooled.
-- **Per stratum**, `(product, fields)` resolved from the capsule's mode
-  manifest, so a text listing is not ranked against a Parquet dataset and a
-  key-only mode is not ranked against one emitting five fields.
 - **`purpose = 'measurement'` only.** A preparation, canary or diagnostic is not
   in the population -- but a preparation's duration IS recorded, and every
   measurement it stands behind carries that cost, because publishing a 60-second
@@ -37,7 +32,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import math
 import sqlite3
@@ -47,6 +41,7 @@ from pathlib import Path
 from typing import Any
 
 from benchmark import adapters
+from benchmark import replay as replay_contract
 from benchmark.ledger import (
     STATE_FILENAME,
     TERMINAL_STATES,
@@ -57,10 +52,11 @@ from benchmark.ledger import (
     slot_owed_reason,
 )
 from benchmark.verify import (
+    expected_result_binding,
     has_result_marker,
     identity_errors,
     read_bytes_at,
-    verdict_for,
+    result_binding_errors,
 )
 
 COLUMNS = (
@@ -75,11 +71,17 @@ COLUMNS = (
     "vcpus",
     "memory_gb",
     "container_memory_gb",
+    "declared_server_allocation",
+    "declared_subject_allocation",
+    "derived_host_headroom",
+    "capacity_status",
     "purpose",
     "statistic",
     "state",
     "evidence_state",
+    "replay_state",
     "exit",
+    "worker_exit",
     "row_count",
     "wall_seconds",
     "prep_seconds",
@@ -89,11 +91,9 @@ COLUMNS = (
     # or a procfs that refuses the write, and a contaminated RSS column that
     # says so is worth more than a clean-looking one that does not.
     "max_rss_floor_kb",
-    "verdict",
 )
 FINAL_REPORT_STATES = {"SUCCEEDED", "CANCELLED", "ACCEPTED"}
-BOUND_EVIDENCE_STATES = {"VERIFY_UNAVAILABLE", "VERIFIED"}
-HEX64 = set("0123456789abcdef")
+BOUND_EVIDENCE_STATES = {"RESULT_BOUND"}
 
 
 def load_json_at(result_prefix: str, name: str) -> tuple[dict[str, object], bytes] | None:
@@ -102,218 +102,9 @@ def load_json_at(result_prefix: str, name: str) -> tuple[dict[str, object], byte
         value = json.loads(raw)
         return (value, raw) if isinstance(value, dict) else None
     except Exception:
-        # Missing is the common, expected case for verify.json (comparison not
-        # yet run); any other read failure degrades to "unavailable" the same
-        # way rather than crashing a summary over one bad prefix.
+        # Any read failure degrades to "unavailable" rather than crashing a
+        # summary over one bad prefix.
         return None
-
-
-def result_binding_errors(row: sqlite3.Row, result: dict[str, object]) -> list[str]:
-    """Where evidence disagrees with the row that launched it."""
-    expected: dict[str, object] = {
-        "group_id": row["group_id"],
-        "job_name": row["job_name"],
-        "case_id": row["case_id"],
-        "attempt_id": row["attempt_id"],
-        "tool": row["tool"],
-        "mode": row["mode"],
-        "bucket": row["target_bucket"],
-        "region": row["target_region"],
-        "prefix": row["target_prefix"],
-        "auth_role": row["auth_role"],
-        "image": row["image_uri"],
-        "image_set_sha256": row["image_set_sha256"],
-        "config": json.loads(row["config"]),
-        "declared_resources": {
-            "machine_type": row["machine_type"],
-            "vcpus": row["vcpus"],
-            "memory_gb": row["memory_gb"],
-            "container_memory_gb": row["container_memory_gb"],
-        },
-    }
-    errors = [name for name, value in expected.items() if result.get(name) != value]
-    errors.extend(result_semantic_errors(result))
-    return errors
-
-
-def result_semantic_errors(result: dict[str, object]) -> list[str]:
-    errors: list[str] = []
-    exit_code = result.get("exit_code")
-    timed_out = result.get("timed_out")
-    row_count = result.get("row_count")
-    row_count_error = result.get("row_count_error")
-    execution = result.get("execution")
-    if isinstance(exit_code, bool) or not isinstance(exit_code, int):
-        errors.append("exit_code")
-    if not isinstance(timed_out, bool):
-        errors.append("timed_out")
-    if row_count is not None and (
-        isinstance(row_count, bool) or not isinstance(row_count, int) or row_count < 0
-    ):
-        errors.append("row_count")
-    if row_count_error is not None and not isinstance(row_count_error, str):
-        errors.append("row_count_error")
-    if execution is None:
-        # The subject never ran: an inline setup exec failed ahead of it, and
-        # the setup block is the account of why. Nothing here to check, and
-        # every measured field must be absent rather than a zero.
-        if not isinstance(result.get("setup"), dict):
-            errors.append("setup")
-        if exit_code == 0:
-            errors.append("exit_code")
-        errors.extend(
-            name
-            for name in (
-                "wall_seconds",
-                "max_rss_kb",
-                "row_count",
-                "row_count_error",
-                "product",
-                "product_error",
-            )
-            if result.get(name) is not None
-        )
-        return errors
-    if not isinstance(execution, dict):
-        return [*errors, "execution"]
-    max_rss_kb = result.get("max_rss_kb")
-    execution_rss = execution.get("max_rss_kb")
-    if (
-        isinstance(max_rss_kb, bool)
-        or not isinstance(max_rss_kb, int)
-        or max_rss_kb < 0
-        or max_rss_kb != execution_rss
-    ):
-        errors.append("max_rss_kb")
-    elapsed_ns = execution.get("elapsed_ns")
-    wall_seconds = result.get("wall_seconds")
-    if isinstance(elapsed_ns, bool) or not isinstance(elapsed_ns, int) or elapsed_ns < 0:
-        errors.append("execution.elapsed_ns")
-    if (
-        isinstance(wall_seconds, bool)
-        or not isinstance(wall_seconds, (int, float))
-        or not math.isfinite(wall_seconds)
-    ):
-        errors.append("wall_seconds")
-    elif (
-        isinstance(elapsed_ns, int)
-        and not isinstance(elapsed_ns, bool)
-        and wall_seconds != round(elapsed_ns / 1_000_000_000, 6)
-    ):
-        errors.append("wall_seconds/elapsed_ns")
-    for name in (
-        "timed_out",
-        "process_group_empty",
-        "descendants_empty",
-        "process_tree_clean",
-        "subreaper_enabled",
-    ):
-        if not isinstance(execution.get(name), bool):
-            errors.append(f"execution.{name}")
-    if execution.get("timed_out") != timed_out:
-        errors.append("execution.timed_out")
-    cgroup = execution.get("cgroup")
-    if not isinstance(cgroup, dict):
-        errors.append("execution.cgroup")
-    else:
-        for name in ("oom_delta", "oom_kill_delta"):
-            value = cgroup.get(name)
-            if value is not None and (
-                isinstance(value, bool) or not isinstance(value, int) or value < 0
-            ):
-                errors.append(f"execution.cgroup.{name}")
-    errors.extend(result_capture_errors(result))
-    counted = exit_code == 0 and timed_out is False and result.get("product_error") is None
-    if counted and row_count_error is None and row_count is None:
-        errors.append("row_count")
-    if not counted and row_count is not None:
-        errors.append("row_count")
-    return errors
-
-
-def result_capture_errors(result: dict[str, object]) -> list[str]:
-    """Where the marker fails to say what this attempt published, and how.
-
-    A stdout capture may be absent, and only for the one reason: the mode's
-    product travels on fd 1, so those bytes are the product and there is no
-    second thing to log. Anything else absent is a marker that cannot be read.
-    """
-    errors: list[str] = []
-    product = result.get("product")
-    if product is not None:
-        errors.extend(f"product.{name}" for name in _artifact_errors(product, digest_optional=True))
-    product_error = result.get("product_error")
-    if product_error is not None and not isinstance(product_error, str):
-        errors.append("product_error")
-    for stem in ("stdout", "stderr"):
-        capture = result.get(stem)
-        if capture is None:
-            if stem == "stderr" or product is None:
-                errors.append(stem)
-            continue
-        errors.extend(f"{stem}.{name}" for name in _artifact_errors(capture))
-    return errors
-
-
-def _artifact_errors(block: object, *, digest_optional: bool = False) -> list[str]:
-    """The name/size/digest every published artifact is recorded by."""
-    if not isinstance(block, dict):
-        return ["shape"]
-    errors: list[str] = []
-    name = block.get("name")
-    if not isinstance(name, str) or not name:
-        errors.append("name")
-    size = block.get("size_bytes")
-    if isinstance(size, bool) or not isinstance(size, int) or size < 0:
-        errors.append("size_bytes")
-    digest = block.get("sha256")
-    if digest is None:
-        # A dataset is many files with no one digest; native_manifest binds each.
-        if not digest_optional or block.get("channel") != "dataset":
-            errors.append("sha256")
-    elif not isinstance(digest, str) or len(digest) != 64 or set(digest) - HEX64:
-        errors.append("sha256")
-    return errors
-
-
-def verify_binding_errors(
-    verification: dict[str, object], row: sqlite3.Row, result_raw: bytes
-) -> list[str]:
-    """Where verify.json fails to bind to the attempt whose prefix it sits under."""
-    expected = {
-        "attempt_id": row["attempt_id"],
-        "tool": row["tool"],
-        "mode": row["mode"],
-        "actual_result_sha256": hashlib.sha256(result_raw).hexdigest(),
-    }
-    errors = [name for name, value in expected.items() if verification.get(name) != value]
-    if verification.get("verdict") not in {"PASS", "DRIFT", "FAIL"}:
-        errors.append("verdict")
-    for name in ("actual_tsv_sha256", "reference_tsv_sha256", "reference_result_sha256"):
-        value = verification.get(name)
-        if not isinstance(value, str) or len(value) != 64 or set(value) - HEX64:
-            errors.append(name)
-    for name in ("reference_attempt_id", "reference_tool", "reference_mode", "product"):
-        if not isinstance(verification.get(name), str) or not verification[name]:
-            errors.append(name)
-    fields = verification.get("fields")
-    if not isinstance(fields, list) or not all(isinstance(name, str) for name in fields):
-        errors.append("fields")
-    diff = verification.get("diff")
-    required_lists = ("missing", "extra", "duplicates", "reference_duplicates", "mismatches")
-    if (
-        not isinstance(diff, dict)
-        or set(diff) != set(required_lists)
-        or not all(isinstance(diff.get(name), list) for name in required_lists)
-    ):
-        errors.append("diff")
-    else:
-        try:
-            if verdict_for(diff) != verification.get("verdict"):
-                errors.append("verdict")
-        except (KeyError, TypeError):
-            errors.append("diff")
-    return errors
 
 
 def stratum_for(row: sqlite3.Row, adapter_root: str) -> tuple[str, str]:
@@ -332,8 +123,41 @@ def stratum_for(row: sqlite3.Row, adapter_root: str) -> tuple[str, str]:
     return manifest.product, ",".join(manifest.fields)
 
 
+def _declared_replay_allocations(row: sqlite3.Row) -> tuple[str, str, str, str]:
+    raw = row["replay"]
+    if raw is None:
+        return "-", "-", "-", "-"
+    try:
+        config = replay_contract.parse_document(str(raw))
+        summary = replay_contract.allocation_summary(
+            config,
+            box_vcpus=int(row["vcpus"]),
+            box_memory_gb=int(row["memory_gb"]),
+            container_memory_gb=row["container_memory_gb"],
+        )
+        subject_memory = (
+            "uncapped" if row["container_memory_gb"] is None else f"{row['container_memory_gb']}GiB"
+        )
+        host_memory = (
+            "unreserved"
+            if summary.host_memory_headroom_gb is None
+            else f"{summary.host_memory_headroom_gb}GiB"
+        )
+        return (
+            f"cpus={summary.server_cpuset};memory={config.allocation.replay_memory_gb}GiB",
+            f"cpus={summary.subject_cpuset};memory={subject_memory}",
+            f"vcpus={summary.host_vcpus};memory={host_memory}",
+            config.capacity_status.upper(),
+        )
+    except (TypeError, ValueError, replay_contract.ReplayError):
+        return "malformed", "malformed", "malformed", "malformed"
+
+
 def row_for(row: sqlite3.Row, *, adapter_root: str) -> dict[str, Any]:
     product, fields = stratum_for(row, adapter_root)
+    declared_server, declared_subject, host_headroom, capacity_status = (
+        _declared_replay_allocations(row)
+    )
     base: dict[str, Any] = {
         "tool": row["tool"],
         "mode": row["mode"],
@@ -350,25 +174,30 @@ def row_for(row: sqlite3.Row, *, adapter_root: str) -> dict[str, Any]:
         "container_memory_gb": (
             "-" if row["container_memory_gb"] is None else row["container_memory_gb"]
         ),
+        "declared_server_allocation": declared_server,
+        "declared_subject_allocation": declared_subject,
+        "derived_host_headroom": host_headroom,
+        "capacity_status": capacity_status,
         "purpose": row["purpose"],
         "statistic": row["statistic"],
         "produced_by": row["produced_by"],
         "state": row["state"],
         "evidence_state": "UNAVAILABLE",
+        "replay_state": "-",
         "exit": "-",
+        "worker_exit": "-",
         "row_count": "-",
         "wall_seconds": "-",
         "prep_seconds": "-",
         "max_rss_kb": "-",
         "max_rss_floor_kb": "-",
-        "verdict": "-",
     }
     if not has_result_marker(row["result_prefix"]):
         return {**base, "evidence_state": "MISSING_EVIDENCE"}
     loaded_result = load_json_at(row["result_prefix"], "result.json")
     if loaded_result is None:
         return {**base, "evidence_state": "RESULT_UNAVAILABLE"}
-    result, result_raw = loaded_result
+    result, _result_raw = loaded_result
     if identity_errors(
         result,
         attempt_id=row["attempt_id"],
@@ -376,12 +205,25 @@ def row_for(row: sqlite3.Row, *, adapter_root: str) -> dict[str, Any]:
         result_prefix=row["result_prefix"],
     ):
         return {**base, "evidence_state": "IDENTITY_MISMATCH"}
-    if result_binding_errors(row, result):
+    if result_binding_errors(expected_result_binding(row), result):
         return {**base, "evidence_state": "RESULT_MISMATCH"}
     execution = result.get("execution")
+    replay_evidence = result.get("replay_evidence")
+    replay_state = "-"
+    if row["replay"] is not None:
+        try:
+            replay_config = replay_contract.parse_document(row["replay"])
+            replay_refusals = replay_contract.evidence_errors(
+                replay_config, replay_evidence, purpose=str(row["purpose"])
+            )
+        except replay_contract.ReplayError:
+            replay_refusals = ("recorded replay document is malformed",)
+        replay_state = "REFUSED" if replay_refusals else "COMPLETE"
     measured = {
         **base,
+        "replay_state": replay_state,
         "exit": result.get("exit_code", "-"),
+        "worker_exit": result.get("worker_exit_code", "-"),
         "row_count": result.get("row_count", "-"),
         "wall_seconds": result.get("wall_seconds", "-"),
         "max_rss_kb": result.get("max_rss_kb", "-"),
@@ -392,17 +234,7 @@ def row_for(row: sqlite3.Row, *, adapter_root: str) -> dict[str, Any]:
             execution.get("max_rss_floor_kb", "-") if isinstance(execution, dict) else "-"
         ),
     }
-    loaded_verify = load_json_at(row["result_prefix"], "verify.json")
-    if loaded_verify is None:
-        return {**measured, "evidence_state": "VERIFY_UNAVAILABLE"}
-    verification, _raw = loaded_verify
-    if verify_binding_errors(verification, row, result_raw):
-        return {**measured, "evidence_state": "VERIFY_MISMATCH"}
-    return {
-        **measured,
-        "evidence_state": "VERIFIED",
-        "verdict": verification.get("verdict", "-"),
-    }
+    return {**measured, "evidence_state": "RESULT_BOUND"}
 
 
 def attach_preparations(rows: list[dict[str, Any]]) -> None:
@@ -443,8 +275,26 @@ def report_rows(db_rows: list[sqlite3.Row], *, adapter_root: str) -> list[dict[s
     return rows
 
 
+def is_publishable_measurement(row: dict[str, Any]) -> bool:
+    """A replay measurement is publishable only after its capacity is calibrated."""
+    return bool(row["purpose"] == "measurement" and row["capacity_status"] != "UNCALIBRATED")
+
+
 def is_timing(row: dict[str, Any]) -> bool:
-    return bool(row["purpose"] == "measurement" and row["statistic"] == "timing")
+    return bool(is_publishable_measurement(row) and row["statistic"] == "timing")
+
+
+def subject_succeeded(row: dict[str, Any]) -> bool:
+    """Whether a settled listing produced one complete, accepted result."""
+    return bool(
+        row["state"] == "SUCCEEDED"
+        and row["evidence_state"] == "RESULT_BOUND"
+        and row["exit"] == 0
+        and row["worker_exit"] == 0
+        and row["replay_state"] in {"-", "COMPLETE"}
+        and not isinstance(row["row_count"], bool)
+        and isinstance(row["row_count"], int)
+    )
 
 
 def rate_lines(rows: list[dict[str, Any]]) -> list[str]:
@@ -456,34 +306,17 @@ def rate_lines(rows: list[dict[str, Any]]) -> list[str]:
     """
     cases: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
-        if row["purpose"] == "measurement" and row["statistic"] == "rate":
+        if is_publishable_measurement(row) and row["statistic"] == "rate":
             cases.setdefault(row["case_id"], []).append(row)
     lines = []
     for case_id, attempts in sorted(cases.items()):
         settled = [a for a in attempts if a["state"] in TERMINAL_STATES]
-        successes = sum(1 for a in settled if a["state"] == "SUCCEEDED")
+        successes = sum(subject_succeeded(attempt) for attempt in settled)
         rate = f"{successes / len(settled):.4f}" if settled else "-"
         first = attempts[0]
         lines.append(
             f"- `{case_id}` ({first['tool']} {first['mode']}): {successes}/{len(settled)} "
             f"succeeded, rate {rate} over {len(attempts)} attempt(s)"
-        )
-    return lines
-
-
-def stratum_lines(rows: list[dict[str, Any]]) -> list[str]:
-    """The comparison scopes within one bucket, and what each holds."""
-    strata: dict[tuple[str, str], list[dict[str, Any]]] = {}
-    for row in rows:
-        if is_timing(row) and row["product"] != "-":
-            strata.setdefault((row["product"], row["fields"]), []).append(row)
-    lines = []
-    for (product, fields), members in sorted(strata.items()):
-        subjects = ", ".join(sorted(f"{m['tool']}/{m['mode']}" for m in members))
-        verdicts = sorted({str(m["verdict"]) for m in members})
-        lines.append(
-            f"- **{product}** [{fields}]: {len(members)} attempt(s) -- {subjects} "
-            f"-- verdicts {', '.join(verdicts)}"
         )
     return lines
 
@@ -534,7 +367,6 @@ def render_markdown(rows: list[dict[str, Any]], *, blocked: list[str]) -> str:
         lines.extend([f"## {bucket}", "", header, separator])
         lines.extend("| " + " | ".join(str(row[c]) for c in COLUMNS) + " |" for row in members)
         for title, section in (
-            ("Comparison strata", stratum_lines(members)),
             ("Rate cases", rate_lines(members)),
             ("Preparations", preparation_lines(members)),
         ):
@@ -546,24 +378,18 @@ def render_markdown(rows: list[dict[str, Any]], *, blocked: list[str]) -> str:
 
 
 def summary_line(rows: list[dict[str, Any]]) -> str:
-    verdict_counts: dict[str, int] = {}
-    verified_timings = 0
-    for row in rows:
-        verdict = str(row["verdict"])
-        verdict_counts[verdict] = verdict_counts.get(verdict, 0) + 1
-        if (
-            is_timing(row)
-            and row["exit"] == 0
-            and row["verdict"] in ("PASS", "DRIFT")
-            and not isinstance(row["wall_seconds"], bool)
-            and isinstance(row["wall_seconds"], (int, float))
-            and math.isfinite(row["wall_seconds"])
-        ):
-            verified_timings += 1
-    counts = ", ".join(f"{verdict}={count}" for verdict, count in sorted(verdict_counts.items()))
+    successful_timings = sum(
+        1
+        for row in rows
+        if is_timing(row)
+        and subject_succeeded(row)
+        and not isinstance(row["wall_seconds"], bool)
+        and isinstance(row["wall_seconds"], (int, float))
+        and math.isfinite(row["wall_seconds"])
+    )
     return (
-        f"**{len(rows)} attempt(s)** -- {counts} -- {verified_timings} verified timing(s); "
-        "no cross-case timing aggregate"
+        f"**{len(rows)} attempt(s)** -- {successful_timings} successful timing(s); "
+        "row counts are reported from result.json; no content comparison"
     )
 
 
@@ -577,6 +403,20 @@ def report_exit_code(rows: list[dict[str, Any]], *, blocked: list[str]) -> int:
         return 1
     if any(
         row["state"] == "SUCCEEDED" and row["evidence_state"] not in BOUND_EVIDENCE_STATES
+        for row in rows
+    ):
+        return 1
+    if any(
+        row["state"] == "SUCCEEDED"
+        and (row["worker_exit"] != 0 or row["replay_state"] not in {"-", "COMPLETE"})
+        for row in rows
+    ):
+        return 1
+    if any(
+        row["state"] == "SUCCEEDED"
+        and row["purpose"] != "preparation"
+        and row["statistic"] != "rate"
+        and not subject_succeeded(row)
         for row in rows
     ):
         return 1

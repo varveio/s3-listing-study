@@ -42,11 +42,14 @@ from __future__ import annotations
 
 import re
 import sys
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from pathlib import Path
 from typing import IO
 
-from benchmark.runtime.contract import ContractViolation
+import zstandard
+
+from benchmark.runtime.contract import ContractViolation, emit
 from benchmark.runtime.duckdb_adapter import (
     connect,
     count_query,
@@ -61,7 +64,9 @@ UNREADABLE_EXIT = 1
 
 # Declared rather than inferred, so the equivalence harness can name a mode no
 # committed payload exercises — untested by construction, and invisible otherwise.
-TSV_MODES = frozenset({"recursive-tsv", "seed-none"})
+STREAM_TSV_MODES = frozenset({"recursive-tsv", "seed-none"})
+TSV_DATASET_MODES = frozenset({"recursive-tsv-dataset", "recursive-tsv-zstd"})
+TSV_MODES = STREAM_TSV_MODES | TSV_DATASET_MODES
 
 PARQUET_MODES = frozenset({"recursive-parquet", "recursive-parquet-sorted"})
 """Modes read from the published dataset directory rather than from stdin.
@@ -71,6 +76,7 @@ their output is the ``native/`` directory the attempt engine collected. Parts
 live under ``data/``; the run's sidecars sit beside it and are not listing rows.
 """
 
+DATASET_MODES = TSV_DATASET_MODES | PARQUET_MODES
 MODES = TSV_MODES | {"recursive-jsonl", "recursive-table"} | PARQUET_MODES
 
 CONTROL_ESCAPE = re.compile(rb"\\x[0-9a-fA-F]{2}")
@@ -181,6 +187,23 @@ PARQUET_COUNT_QUERY = """
     WHERE coalesce("row_type", 'OBJECT') = 'OBJECT'
 """
 
+TSV_DATASET_COUNT_QUERY = f"""
+    SELECT count(*) FILTER (
+               WHERE coalesce("row_type", '') IN ('', 'OBJECT')
+                 AND NOT ("key" = 'key' AND "size" = 'size'
+                          AND "last_modified" = 'last_modified')
+           ),
+           count(*) FILTER (
+               WHERE coalesce("row_type", '') IN ('', 'OBJECT')
+                 AND NOT ("key" = 'key' AND "size" = 'size'
+                          AND "last_modified" = 'last_modified')
+                 AND regexp_matches("key", $control_escape)
+           )
+    FROM read_csv($glob, delim = '\t', quote = '', escape = '', header = false,
+                  auto_detect = false, columns = {SWATH_TSV_COLUMNS},
+                  compression = 'auto', strict_mode = true)
+"""
+
 
 def _dataset_root(dataset: str) -> Path:
     """Accept either Swath's dataset root or the native parent containing it."""
@@ -193,15 +216,38 @@ def _dataset_root(dataset: str) -> Path:
     return root
 
 
-def _dataset_parts(dataset: str) -> tuple[Path, list[Path]]:
+def _dataset_parts(dataset: str, pattern: str, description: str) -> tuple[Path, list[Path]]:
     root = _dataset_root(dataset)
     if not (root / "_SUCCESS").is_file():
         raise ValueError(
             f"dataset has no _SUCCESS marker under {root}; the swath run did not finish writing it"
         )
-    parts = sorted(root.glob("data/*.parquet"))
+    parts = sorted(root.glob(f"data/{pattern}"))
     if not parts:
-        raise ValueError(f"no Parquet parts under {root / 'data'}")
+        raise ValueError(f"no {description} parts under {root / 'data'}")
+    return root, parts
+
+
+@contextmanager
+def _open_tsv_part(part: Path) -> Iterator[IO[bytes]]:
+    """Open an uncompressed or Zstandard-compressed TSV part as a byte stream."""
+    with part.open("rb") as source:
+        if part.suffix == ".zst":
+            with zstandard.ZstdDecompressor().stream_reader(source) as decoded:
+                yield decoded
+        else:
+            yield source
+
+
+def _tsv_dataset_parts(dataset: str) -> tuple[Path, list[Path]]:
+    root = _dataset_root(dataset)
+    if not (root / "_SUCCESS").is_file():
+        raise ValueError(
+            f"dataset has no _SUCCESS marker under {root}; the swath run did not finish writing it"
+        )
+    parts = sorted((*root.glob("data/*.tsv"), *root.glob("data/*.tsv.zst")))
+    if not parts:
+        raise ValueError(f"no TSV or TSV.zst parts under {root / 'data'}")
     return root, parts
 
 
@@ -210,7 +256,7 @@ def count_rows(data: bytes, mode: str, prefix: str = "", native_root: str = "") 
         import duckdb
 
         try:
-            _root, parts = _dataset_parts(native_root)
+            _root, parts = _dataset_parts(native_root, "*.parquet", "Parquet")
             row = (
                 connect()
                 .execute(PARQUET_COUNT_QUERY, {"glob": [str(part) for part in parts]})
@@ -220,6 +266,33 @@ def count_rows(data: bytes, mode: str, prefix: str = "", native_root: str = "") 
             raise ValueError(f"dataset is not countable Parquet: {exc}") from exc
         if row is None or not isinstance(row[0], int):  # pragma: no cover - DuckDB invariant
             raise RuntimeError("DuckDB count query returned no integer row")
+        return row[0]
+    if mode in TSV_DATASET_MODES:
+        _root, parts = _tsv_dataset_parts(native_root)
+        import duckdb
+
+        try:
+            row = (
+                connect()
+                .execute(
+                    TSV_DATASET_COUNT_QUERY,
+                    {
+                        "glob": [str(part) for part in parts],
+                        "control_escape": r"\\x[0-9a-fA-F]{2}",
+                    },
+                )
+                .fetchone()
+            )
+        except duckdb.Error as exc:
+            raise ValueError(f"dataset is not countable TSV: {exc}") from exc
+        if row is None or not isinstance(row[0], int):  # pragma: no cover - DuckDB invariant
+            raise RuntimeError("DuckDB count query returned no integer row")
+        if row[1]:
+            raise ContractViolation(
+                "text-sink key carries an ambiguous swath \\xHH control escape; "
+                "use recursive-jsonl",
+                field="key",
+            )
         return row[0]
     if mode == "recursive-table":
         count = 0
@@ -251,14 +324,14 @@ def count_rows(data: bytes, mode: str, prefix: str = "", native_root: str = "") 
         return count_query(connect(), sql, {"path": path})
 
 
-def _normalize_dataset(out: IO[bytes], mode: str, dataset: str) -> int:
+def _normalize_parquet_dataset(out: IO[bytes], mode: str, dataset: str) -> int:
     import duckdb
 
     # swath writes _SUCCESS last, after the manifest (v0.2.2). Without it the
     # dataset is a killed run's valid-but-short parts, which would normalize
     # cleanly into a short listing the verifier would blame on the tool.
     try:
-        _root, parts = _dataset_parts(dataset)
+        _root, parts = _dataset_parts(dataset, "*.parquet", "Parquet")
     except ValueError as exc:
         print(f"normalize.py: {exc}", file=sys.stderr)
         return UNREADABLE_EXIT
@@ -271,6 +344,52 @@ def _normalize_dataset(out: IO[bytes], mode: str, dataset: str) -> int:
     return 0
 
 
+def _normalize_tsv_dataset(out: IO[bytes], dataset: str) -> int:
+    try:
+        _root, parts = _tsv_dataset_parts(dataset)
+    except ValueError as exc:
+        print(f"normalize.py: {exc}", file=sys.stderr)
+        return UNREADABLE_EXIT
+    for part in parts:
+        with _open_tsv_part(part) as source:
+            for number, line in enumerate(iter_lf_lines(source), 1):
+                if not line:
+                    continue
+                fields = line.split(b"\t")
+                if fields[:3] == [b"key", b"size", b"last_modified"]:
+                    continue
+                if len(fields) != 6:
+                    raise ContractViolation(
+                        f"native TSV line {number} has {len(fields)} fields, expected 6; "
+                        "a TAB in a key is unrepresentable",
+                        field="key",
+                    )
+                if fields[5] in (b"", b"OBJECT") and CONTROL_ESCAPE.search(fields[0]):
+                    raise ContractViolation(
+                        "text-sink key carries an ambiguous swath \\xHH control escape; "
+                        "use recursive-jsonl",
+                        field="key",
+                    )
+        with _open_tsv_part(part) as source:
+            for line in iter_lf_lines(source):
+                if not line:
+                    continue
+                fields = line.split(b"\t")
+                if fields[:3] == [b"key", b"size", b"last_modified"]:
+                    continue
+                if fields[5] not in (b"", b"OBJECT"):
+                    continue
+                emit(
+                    out,
+                    fields[0],
+                    size=fields[1].decode("ascii"),
+                    etag=fields[3].decode("ascii") or None,
+                    mtime=re.sub(rb"\.[0-9]+Z$", b"Z", fields[2]).decode("ascii"),
+                    storage_class=fields[4].decode("ascii") or None,
+                )
+    return 0
+
+
 def normalize(
     out: IO[bytes],
     data: bytes,
@@ -280,8 +399,10 @@ def normalize(
     config: Mapping[str, object] | None = None,
 ) -> int:
     if mode in PARQUET_MODES:
-        return _normalize_dataset(out, mode, dataset)
-    if mode in TSV_MODES:
+        return _normalize_parquet_dataset(out, mode, dataset)
+    if mode in TSV_DATASET_MODES:
+        return _normalize_tsv_dataset(out, dataset)
+    if mode in STREAM_TSV_MODES:
         sql = QUERIES["tsv"]
     elif mode in QUERIES:
         sql = QUERIES[mode]
@@ -298,7 +419,7 @@ def main(argv: list[str] | None = None) -> int:
     return normalizer_main(
         normalize,
         modes=MODES,
-        dataset_modes=PARQUET_MODES,
+        dataset_modes=DATASET_MODES,
         prog="swath normalize",
         argv=argv,
         broken_pipe_is_success=True,

@@ -7,12 +7,16 @@ import textwrap
 from collections.abc import Mapping
 from pathlib import Path
 from types import MappingProxyType
+from typing import TypedDict, Unpack
 
 import pytest
 
-from benchmark import plan as bench
-from benchmark import plan_cli as bench_cli
+import benchmark.plan as bench
+import benchmark.plan_cli as bench_cli
 from benchmark.runtime import command_adapter as capsule
+
+ROOT = Path(__file__).parents[2]
+REPLAY_CANARY = ROOT / "benchmark/plans/canaries/runner-replay-canary.yaml"
 
 MINIMAL = """
 spec_version: 2
@@ -140,12 +144,19 @@ CAPSULES = {
 }
 
 
-def load(path: Path, **kwargs: object) -> bench.Plan:
+class _LoadOverrides(TypedDict, total=False):
+    default_modes: Mapping[str, str]
+    instances: Mapping[tuple[int, int], str]
+    heap: bench.HeapConfig
+    adapters: Mapping[str, capsule.LoadedCommandAdapter]
+
+
+def load(path: Path, **kwargs: Unpack[_LoadOverrides]) -> bench.Plan:
     """``Plan.load`` with the fixture tables already supplied."""
     kwargs.setdefault("instances", INSTANCES)
     kwargs.setdefault("heap", HEAP)
     kwargs.setdefault("adapters", CAPSULES)
-    return bench.Plan.load(path, **kwargs)  # type: ignore[arg-type]
+    return bench.Plan.load(path, **kwargs)
 
 
 # ── the shipped plan ─────────────────────────────────────────────────────────
@@ -172,6 +183,48 @@ def test_the_committed_plan_loads() -> None:
     constrained = next(c for c in sorted_cases if c.resources.container_memory_gb == 2)
     assert constrained.resources.docker_options == ("--memory=2g", "--memory-swap=2g")
     assert constrained.heap_percent == 75
+
+
+def test_runner_qualification_plans_keep_their_declared_rosters() -> None:
+    root = Path(__file__).resolve().parents[2]
+    replay = bench.Plan.load(root / "benchmark/plans/canaries/runner-replay-canary.yaml")
+    real_s3 = bench.Plan.load(root / "benchmark/plans/canaries/noaa-ghcn-pds.yaml")
+
+    assert {case.tool for case in replay.cases} == {"s3-fast-list", "s3p", "s7cmd"}
+    assert replay.bucket == "runner-replay-canary"
+    assert all(case.purpose == "canary" for case in replay.cases)
+    assert all(case.replay is not None for case in replay.cases)
+    assert {
+        case.replay.backend.fixture_uri for case in replay.cases if case.replay is not None
+    } == {
+        "gs://s3-listing-study-results-29c02004/fixtures/runner-replay-canary/"
+        "6e1c2d47a92bbd1062469fb323f95b1d0f127b4e601b93f0d94576ab16d7c8b4/"
+        "part-00000.parquet"
+    }
+    assert {case.tool for case in real_s3.cases} == {
+        "aws-cli",
+        "rclone",
+        "s3-fast-list",
+        "swath",
+    }
+    assert all(case.purpose == "diagnostic" for case in real_s3.cases)
+
+
+@pytest.mark.parametrize(
+    "malformed",
+    ("fixed", "false", "null", "{}"),
+)
+def test_replay_latency_model_refuses_other_scalars_and_malformed_mappings(
+    tmp_path: Path, malformed: str
+) -> None:
+    source = REPLAY_CANARY
+    document = source.read_text(encoding="utf-8").replace(
+        "latency_model: none", f"latency_model: {malformed}", 1
+    )
+    path = tmp_path / source.name
+    path.write_text(document, encoding="utf-8")
+    with pytest.raises(bench.PlanError, match="latency_model"):
+        bench.Plan.load(path)
 
 
 def test_the_committed_plan_matches_the_registered_tools() -> None:
@@ -865,9 +918,20 @@ def test_every_key_a_row_may_state_changes_the_case_it_resolves_to(tmp_path: Pat
         "signed": (False, True),
         "concurrency": (4, 8),
         "segments": (16, 32),
-        "vcpus": (2, 4),
+        "vcpus": (3, 4),
         "memory_gb": (8, 16),
         "container_memory_gb": (4, 8),
+        # The replay backend's own allocation. Two cases against differently
+        # sized servers are two measurements, so these have to reach the case
+        # exactly as the subject's own allocation does.
+        "subject_vcpus": (1, 2),
+        "replay_vcpus": (1, 2),
+        "replay_memory_gb": (2, 4),
+        "replay_parquet_connections": (64, 128),
+        "replay_max_concurrent_requests": (32, 64),
+        "replay_prefetch": (False, True),
+        "replay_prefetch_max_windows": (96, 1024),
+        "replay_heap_percent": (50, 75),
     }
     assert set(pairs) == set(bench.ROW_FIELDS), "a row key with no coverage here"
 
@@ -895,23 +959,111 @@ def test_every_key_a_row_may_state_changes_the_case_it_resolves_to(tmp_path: Pat
         "swath": fixture_capsule("swath", unsigned=True, signed=True, modes=modes),
     }
 
+    # Every plan here carries a replay backend, so the `replay_*` rows have one
+    # to size. It changes nothing for the other keys: a backend the rows do not
+    # vary is a constant, exactly like the bucket.
+    replay_block = (
+        "replay:\n"
+        "  capacity_status: calibrated\n"
+        f"  server_image_uri: example/replay-server@sha256:{'b' * 64}\n"
+        f"  fixture_sha256: {'a' * 64}\n"
+        "  serving_mode: sorted\n"
+        "  latency_model:\n"
+        "    deadlines_ms: {worker_page: 247, pivot_probe: 41, structure_probe: 49}\n"
+        "    scale: 1.0\n"
+        "    jitter: none\n"
+    )
+    replay_defaults = (
+        "  subject_vcpus: 1\n"
+        "  replay_vcpus: 1\n  replay_memory_gb: 2\n"
+        "  replay_parquet_connections: 64\n  replay_max_concurrent_requests: 32\n"
+        "  replay_prefetch: false\n  replay_heap_percent: 50\n"
+        "  container_memory_gb: 4\n"
+    )
+
     def case(field: str, value: object, index: int) -> bench.Case:
+        def integer_value() -> int:
+            assert isinstance(value, int) and not isinstance(value, bool)
+            return value
+
         directory = tmp_path / f"{field}-{index}"
         directory.mkdir()
         path = directory / "b.yaml"
         row = {"mode": "recursive-tsv"} | {field: value}
+        # A server's share is carved out of the box, so a row sweeping the
+        # server's size needs a box with room to sweep it in.
+        if field in bench.REPLAY_FIELDS or field in {"container_memory_gb", "vcpus"}:
+            box_vcpus = integer_value() if field == "vcpus" else 4
+            row |= {"vcpus": box_vcpus, "memory_gb": 16}
+            # Keep positive derived host CPU and memory headroom while the
+            # independent server/subject allocation under test changes.
+            subject_vcpus = integer_value() if field == "subject_vcpus" else 1
+            replay_vcpus = integer_value() if field == "replay_vcpus" else 1
+            subject_memory = integer_value() if field == "container_memory_gb" else 4
+            replay_memory = integer_value() if field == "replay_memory_gb" else 2
+            case_defaults = replay_defaults
+            for name, setting in {
+                "subject_vcpus": subject_vcpus,
+                "replay_vcpus": replay_vcpus,
+                "container_memory_gb": subject_memory,
+                "replay_memory_gb": replay_memory,
+            }.items():
+                case_defaults = (
+                    "\n".join(
+                        f"  {name}: {setting}" if line.startswith(f"  {name}:") else line
+                        for line in case_defaults.splitlines()
+                    )
+                    + "\n"
+                )
+        else:
+            case_defaults = replay_defaults
         body = "swath:\n  cases:\n    - {" + ", ".join(f"{k}: {v}" for k, v in row.items()) + "}\n"
+        document = MINIMAL.format(bucket="b", tools=textwrap.indent(body, "  "))
+        document = document.replace("spec_version: 2", "spec_version: 3")
+        document = document.replace("  vcpus: 2\n  memory_gb: 8\n", "  vcpus: 4\n  memory_gb: 16\n")
+        document = document.replace("tools:\n", case_defaults + "tools:\n", 1)
         path.write_text(
-            "auth_role: fixture-role\n"
-            + MINIMAL.format(bucket="b", tools=textwrap.indent(body, "  ")),
+            "auth_role: fixture-role\n" + replay_block + document,
             encoding="utf-8",
         )
-        return load(path, adapters=adapters).cases[0]
+        return load(path, adapters=adapters, instances={**INSTANCES, (3, 16): "three-vcpu"}).cases[
+            0
+        ]
 
     for field, (before, after) in pairs.items():
         first, second = case(field, before, 0), case(field, after, 1)
         assert first.label != second.label, f"{field} does not reach the label"
         assert first != second, f"{field} does not reach the resolved case"
+
+
+@pytest.mark.parametrize(
+    ("before", "after"),
+    (
+        ("subject_vcpus: 1", "subject_vcpus: 2"),
+        ("container_memory_gb: 2", "container_memory_gb: 7"),
+        ("  replay_max_concurrent_requests: 16\n", ""),
+        ("replay_prefetch: false", "replay_prefetch: 1"),
+    ),
+)
+def test_replay_allocation_refuses_ambiguous_or_impossible_cases(
+    tmp_path: Path, before: str, after: str
+) -> None:
+    """Protect exact allocation, non-overcommit, separate admission, and bool typing."""
+    source = REPLAY_CANARY
+    document = source.read_text(encoding="utf-8").replace(before, after, 1)
+    path = tmp_path / source.name
+    path.write_text(document, encoding="utf-8")
+    with pytest.raises(bench.PlanError):
+        bench.Plan.load(path)
+
+
+def test_replay_measurement_refuses_uncalibrated_capacity(tmp_path: Path) -> None:
+    source = REPLAY_CANARY
+    path = tmp_path / source.name
+    source_text = source.read_text(encoding="utf-8")
+    path.write_text(source_text.replace("purpose: canary", "purpose: measurement", 1))
+    with pytest.raises(bench.PlanError, match="capacity is not calibrated"):
+        bench.Plan.load(path)
 
 
 def test_a_row_may_demote_a_mode_below_its_ceiling_and_never_promote_it(
@@ -1088,8 +1240,13 @@ def test_a_tool_body_is_the_defaults_vocabulary_plus_its_rows() -> None:
     assert not set(bench.ROW_FIELDS) & set(bench.SCHEDULE_FIELDS)
     assert "mode" not in bench.LAYER_FIELDS
     # The overlap is what a case is *and* can sensibly be defaulted: the
-    # allocation, and which stratum it ran in.
-    assert set(bench.ROW_FIELDS) & set(bench.LAYER_FIELDS) == {*bench.RESOURCE_FIELDS, "signed"}
+    # allocation -- the subject's and, where there is one, the replay backend's --
+    # and which stratum it ran in.
+    assert set(bench.ROW_FIELDS) & set(bench.LAYER_FIELDS) == {
+        *bench.RESOURCE_FIELDS,
+        *bench.REPLAY_FIELDS,
+        "signed",
+    }
 
 
 def test_incomplete_defaults_are_refused(tmp_path: Path) -> None:

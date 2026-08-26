@@ -5,11 +5,15 @@ import hashlib
 import json
 import sqlite3
 from pathlib import Path
+from typing import TypedDict
 
 import duckdb
 import pytest
 
-from benchmark import adapters, campaign, ledger, verify
+import benchmark.adapters as adapters
+import benchmark.campaign as campaign
+import benchmark.ledger as ledger
+import benchmark.verify as verify
 from benchmark.contract import EXIT_INCOMPLETE_GROUP, sha256_of
 
 COMMAND_PY = """
@@ -76,6 +80,30 @@ for line in source.read_text().splitlines():
 LISTING = ("a/one 1", "a/two 2")
 
 
+def replay_metrics(requests: int, errors: int = 0) -> dict[str, object]:
+    return {
+        "meters": [
+            {
+                "name": "swath.replay.http.requests",
+                "type": "counter",
+                "tags": {},
+                "count": float(requests),
+            },
+            {
+                "name": "swath.replay.http.errors",
+                "type": "counter",
+                "tags": {},
+                "count": float(errors),
+            },
+        ]
+    }
+
+
+class ReplayEvidence(TypedDict):
+    replay: dict[str, object]
+    replay_evidence: dict[str, object]
+
+
 def adapter_root(tmp_path: Path, *tools: str) -> str:
     root = tmp_path / "tools"
     for tool in tools:
@@ -102,6 +130,7 @@ def record(
     statistic: str = "timing",
     state: str = "SUCCEEDED",
     group_id: str = "g1",
+    replay: dict[str, object] | None = None,
 ) -> ledger.Attempt:
     """Journal one attempt through the ledger's own writer, then settle it."""
     case_id = f"{tool}.{digest}"
@@ -143,6 +172,11 @@ def record(
                 purpose=purpose,
                 statistic=statistic,
                 origin="planned",
+                replay=(
+                    None
+                    if replay is None
+                    else json.dumps(replay, sort_keys=True, separators=(",", ":"))
+                ),
             ),
             "{}",
         )
@@ -186,13 +220,32 @@ def write_evidence(
     published = sorted(path for path in native.rglob("*") if path.is_file())
     product = native / product_name
     result: dict[str, object] = {
+        "group_id": attempt.group_id,
+        "job_name": attempt.job_name,
         "attempt_id": attempt.attempt_id,
         "case_id": attempt.case_id,
         "tool": attempt.tool,
         "mode": json.loads(attempt.config)["mode"],
+        "bucket": attempt.target_bucket,
+        "region": attempt.target_region,
+        "prefix": attempt.target_prefix,
+        "auth_role": attempt.auth_role,
+        "image": attempt.image_uri,
+        "image_set_sha256": attempt.image_set_sha256,
+        "config": json.loads(attempt.config),
+        "replay": None if attempt.replay is None else json.loads(attempt.replay),
+        "declared_resources": {
+            "machine_type": attempt.machine_type,
+            "vcpus": attempt.vcpus,
+            "memory_gb": attempt.memory_gb,
+            "container_memory_gb": attempt.container_memory_gb,
+        },
         "exit_code": 0,
+        "worker_exit_code": 0,
         "timed_out": False,
         "wall_seconds": 1.5,
+        "started_at": "2026-01-01T00:00:00.500000+00:00",
+        "finished_at": "2026-01-01T00:00:01.500000+00:00",
         "max_rss_kb": 1024,
         "row_count": len(listing),
         "execution": {
@@ -229,6 +282,98 @@ def write_evidence(
     return prefix
 
 
+def replay_document(
+    manifest: Path, digest: str, *, capacity_status: str = "calibrated"
+) -> dict[str, object]:
+    return {
+        "backend": {
+            "server_image_uri": "registry/replay@sha256:" + "1" * 64,
+            "fixture_sha256": "2" * 64,
+            "serving_mode": "sorted",
+            "latency_model": {
+                "deadlines_ms": {
+                    "worker_page": 1,
+                    "pivot_probe": 1,
+                    "structure_probe": 1,
+                },
+                "scale": 1.0,
+                "jitter": "none",
+            },
+        },
+        "allocation": {
+            "subject_vcpus": 4,
+            "replay_vcpus": 4,
+            "replay_memory_gb": 8,
+            "replay_parquet_connections": 20,
+            "replay_max_concurrent_requests": 256,
+            "replay_prefetch": False,
+            "replay_prefetch_max_windows": 96,
+            "replay_heap_percent": 75,
+        },
+        "capacity_status": capacity_status,
+    }
+
+
+def replay_evidence(replay: dict[str, object]) -> ReplayEvidence:
+    before = "2026-01-01T00:00:00+00:00"
+    after = "2026-01-01T00:00:02+00:00"
+    calibrated = replay["capacity_status"] == "calibrated"
+    return {
+        "replay": replay,
+        "replay_evidence": {
+            "readiness": {"state": "ready", "wait_ms": 2, "attempts": 1, "last_error": None},
+            "before": {
+                "observed_at": before,
+                "metrics": replay_metrics(0),
+            },
+            "samples": (
+                [
+                    {
+                        "observed_at": "2026-01-01T00:00:01+00:00",
+                        "elapsed_s": 1.0,
+                        "metrics": replay_metrics(1),
+                    }
+                ]
+                if calibrated
+                else []
+            ),
+            "resource_samples": (
+                [
+                    {
+                        "observed_at": "2026-01-01T00:00:01+00:00",
+                        "elapsed_s": 1.0,
+                        "interval_s": 1.0,
+                        "server_cpuset": "0-3",
+                        "subject_cpuset": "4-7",
+                        "server_cpuset_utilization": 0.25,
+                        "server_cores_used": 1.0,
+                        "subject_cpuset_utilization": 0.5,
+                        "subject_cores_used": 2.0,
+                        "host_mem_available_kb": 1024,
+                        "host_load1": 0.5,
+                    }
+                ]
+                if calibrated
+                else []
+            ),
+            "after": {
+                "observed_at": after,
+                "metrics": replay_metrics(2),
+            },
+            "errors": [],
+        },
+    }
+
+
+def write_manifest(path: Path, listing: tuple[str, ...] = LISTING) -> str:
+    rows = b"".join(
+        f"{key}\t{size}\te{size}\t2026-01-01T00:00:00Z\tSTANDARD\n".encode()
+        for key, size in (line.split(" ") for line in listing)
+    )
+    path.write_bytes(gzip.compress(rows, mtime=0))
+    return sha256_of(path)
+
+
 def add_slot(con: sqlite3.Connection, *, state: str, group_id: str = "g1", slot: int = 1) -> None:
     con.execute(
         "INSERT INTO pending (group_id, slot, tool, purpose, known_inputs, awaiting, state, "
@@ -250,6 +395,29 @@ def test_agreement_within_one_bucket_passes(tmp_path: Path) -> None:
     code, report = verify.verify_group(con, "g1", adapter_root=root, write_record=False)
     assert (report["verdict"], report["complete"], code) == ("PASS", True, 0)
     assert [stratum["verdict"] for stratum in report["buckets"][0]["strata"]] == ["PASS"]
+
+
+def test_replay_content_verification_is_refused_without_reading_raw_products(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    replay = replay_document(tmp_path / "unused.tsv.gz", "0" * 64)
+    con = fixture_ledger(tmp_path)
+    attempt = record(con, tmp_path, tool="alpha", digest="aaaa", replay=replay)
+    write_evidence(attempt, **replay_evidence(replay))
+    monkeypatch.setattr(
+        verify,
+        "stage_evidence",
+        lambda *_args, **_kwargs: pytest.fail("replay verifier must not stage raw evidence"),
+    )
+
+    code, report = verify.verify_group(
+        con, "g1", adapter_root=adapter_root(tmp_path, "alpha"), write_record=True
+    )
+
+    assert code == EXIT_INCOMPLETE_GROUP
+    assert "row-count-only" in report["refusal"]
+    assert report["replay_attempts"] == [attempt.attempt_id]
+    assert not (Path(attempt.result_prefix) / "verify.json").exists()
 
 
 def test_a_product_published_compressed_is_compared_as_its_bytes(tmp_path: Path) -> None:
@@ -373,6 +541,39 @@ def test_rate_case_failures_are_data_points(tmp_path: Path) -> None:
         }
     ]
     assert report["complete"] is True
+
+
+def test_provider_success_does_not_hide_a_failed_rate_subject(tmp_path: Path) -> None:
+    con = fixture_ledger(tmp_path)
+    attempt = record(con, tmp_path, tool="alpha", digest="aaaa", statistic="rate")
+    write_evidence(attempt, exit_code=124, row_count=None)
+    root = adapter_root(tmp_path, "alpha")
+
+    _code, report = verify.verify_group(con, "g1", adapter_root=root, write_record=False)
+
+    assert report["buckets"][0]["rates"][0] == {
+        "case_id": "alpha.aaaa",
+        "tool": "alpha",
+        "mode": "text-full",
+        "attempts": 1,
+        "successes": 0,
+        "rate": 0.0,
+    }
+
+
+@pytest.mark.parametrize("malformation", ("wrong-binding", "missing-capture"))
+def test_rate_success_requires_fully_bound_evidence(tmp_path: Path, malformation: str) -> None:
+    con = fixture_ledger(tmp_path)
+    attempt = record(con, tmp_path, tool="alpha", digest="aaaa", statistic="rate")
+    if malformation == "wrong-binding":
+        write_evidence(attempt, tool="wrong")
+    else:
+        write_evidence(attempt, stderr=None)
+    root = adapter_root(tmp_path, "alpha")
+
+    _code, report = verify.verify_group(con, "g1", adapter_root=root, write_record=False)
+
+    assert report["buckets"][0]["rates"][0]["successes"] == 0
 
 
 def test_a_mode_is_only_compared_within_its_product_and_field_set(tmp_path: Path) -> None:

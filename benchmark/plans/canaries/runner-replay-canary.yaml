@@ -1,0 +1,52 @@
+# Small replay integration canary over a synthetic, content-addressed fixture.
+# Three cases cover signed stdout, unsigned stdout, and a native Parquet sink;
+# they are runner-path evidence, not capacity or comparative measurements.
+spec_version: 3
+
+bucket: runner-replay-canary
+region: us-east-1
+auth_role: public-read
+
+replay:
+  capacity_status: uncalibrated
+  server_image_uri: ghcr.io/varveio/swath-replay@sha256:c5f4239abbce7772faa2d58c661192bd6a890e460158b5e56fcb8c51b573cb63
+  fixture_uri: gs://s3-listing-study-results-29c02004/fixtures/runner-replay-canary/6e1c2d47a92bbd1062469fb323f95b1d0f127b4e601b93f0d94576ab16d7c8b4/part-00000.parquet
+  fixture_sha256: 6e1c2d47a92bbd1062469fb323f95b1d0f127b4e601b93f0d94576ab16d7c8b4
+  serving_mode: duckdb
+  latency_model: none
+
+defaults:
+  reps: 1
+  timeout_s: 300
+  vcpus: 4
+  memory_gb: 8
+  subject_vcpus: 1
+  container_memory_gb: 2
+  replay_vcpus: 2
+  replay_memory_gb: 2
+  replay_parquet_connections: 4
+  replay_max_concurrent_requests: 16
+  replay_prefetch: false
+  replay_heap_percent: 75
+
+tools:
+  s3-fast-list:
+    cases:
+      - {mode: list, purpose: canary}
+  s3p:
+    cases:
+      - {mode: ls, purpose: canary}
+  s7cmd:
+    cases:
+      - {mode: recursive-tsv, purpose: canary}
+
+exclude:
+  - {tool: aws-cli, reason: signed stdout is covered by s3p}
+  - {tool: minio-mc, reason: stdout listing is covered by s3p and s7cmd}
+  - {tool: ps3, reason: signed stdout is covered by s3p}
+  - {tool: rclone, reason: stdout listing is covered by s3p and s7cmd}
+  - {tool: s3kor, reason: signed stdout is covered by s3p}
+  - tool: s4cmd
+    reason: server scope — s4cmd speaks only v1 ListObjects, which the replay server does not implement
+  - {tool: s5cmd, reason: stdout listing is covered by s3p and s7cmd}
+  - {tool: swath, reason: stdout listing is covered without making the runner canary Swath-specific}

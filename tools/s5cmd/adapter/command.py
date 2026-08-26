@@ -97,17 +97,23 @@ def _auth_flags(request: CommandRequest) -> tuple[str, ...]:
 
 
 def _build_tail(request: CommandRequest) -> tuple[str, ...]:
+    if request.endpoint_url and request.mode in {"listv1", "allversions"}:
+        raise CommandAdapterError(
+            f"{TOOL} mode {request.mode!r} cannot run against the replay endpoint because "
+            "it does not issue ListObjectsV2"
+        )
     target = f"s3://{request.bucket}/{request.prefix}"
     recursive = target + "*"
     auth = _auth_flags(request)
+    endpoint = ("--endpoint-url", request.endpoint_url) if request.endpoint_url else ()
     commands = {
-        "recursive": (*auth, "ls", "-e", "-s", recursive),
-        "delimiter": (*auth, "ls", "-e", "-s", target),
-        "rootkeys": (*auth, "ls", "-e", "-s", target),
-        "json": ("--json", *auth, "ls", recursive),
-        "listv1": (*auth, "--use-list-objects-v1", "ls", "-e", "-s", recursive),
-        "allversions": (*auth, "ls", "--all-versions", "-e", "-s", recursive),
-        "fullpath": (*auth, "ls", "--show-fullpath", recursive),
+        "recursive": (*endpoint, *auth, "ls", "-e", "-s", recursive),
+        "delimiter": (*endpoint, *auth, "ls", "-e", "-s", target),
+        "rootkeys": (*endpoint, *auth, "ls", "-e", "-s", target),
+        "json": ("--json", *endpoint, *auth, "ls", recursive),
+        "listv1": (*endpoint, *auth, "--use-list-objects-v1", "ls", "-e", "-s", recursive),
+        "allversions": (*endpoint, *auth, "ls", "--all-versions", "-e", "-s", recursive),
+        "fullpath": (*endpoint, *auth, "ls", "--show-fullpath", recursive),
     }
     try:
         return commands[request.mode]

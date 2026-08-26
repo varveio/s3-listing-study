@@ -1,0 +1,37 @@
+# Small real-S3 runner qualification. These diagnostics exercise representative
+# capsule/output shapes and the ordinary no-sidecar output mount. They are not
+# comparative measurements and publish no performance conclusion.
+spec_version: 2
+
+bucket: noaa-ghcn-pds
+region: us-east-1
+auth_role: public-read
+
+defaults:
+  reps: 1
+  timeout_s: 900
+  vcpus: 2
+  memory_gb: 4
+
+tools:
+  aws-cli:
+    cases:
+      - {mode: s3api-v2-text, purpose: diagnostic}
+  rclone:
+    cases:
+      - {mode: recursive-fastlist, purpose: diagnostic}
+  s3-fast-list:
+    cases:
+      - {mode: list, purpose: diagnostic}
+  swath:
+    cases:
+      - {mode: recursive-tsv, concurrency: 64, purpose: diagnostic}
+
+exclude:
+  - {tool: minio-mc, reason: representative runner canary already covers stdout and file subjects}
+  - {tool: ps3, reason: representative runner canary already covers stdout and file subjects}
+  - {tool: s3kor, reason: representative runner canary already covers stdout and file subjects}
+  - {tool: s3p, reason: representative runner canary already covers stdout and file subjects}
+  - {tool: s4cmd, reason: representative runner canary already covers stdout and file subjects}
+  - {tool: s5cmd, reason: representative runner canary already covers stdout and file subjects}
+  - {tool: s7cmd, reason: representative runner canary already covers stdout and file subjects}

@@ -18,7 +18,9 @@ facts under `tools/<tool>/build/`.
 - `build/` holds the toolbox build inputs: `Dockerfile` builds one linux/amd64
   toolbox directly from the eleven checked-in capsule recipes (it consumes no
   parent image or retired image job), alongside its context policy and the
-  pinned worker requirements.
+  pinned worker requirements. The replay server is an external digest-pinned
+  plan input rather than an image this repository rebuilds; fixture bytes are
+  separate immutable staged inputs.
 - `tests/` holds this component's test suite. Repository-wide gates stay in the
   top-level `tests/`.
 - `docs/` holds the design. Read `architecture.md` first; the other three are
@@ -35,7 +37,9 @@ facts under `tools/<tool>/build/`.
     harness promises it. The Python boundary between `benchmark/` and `tools/`.
 - `docs/running.md` is the operator runbook: prerequisites, submission, the job
   state machine, monitoring, the recovery commands, verification, and reporting.
-  No campaign has run yet, so that procedure is `VERIFIED: no`.
+  A committed bounded bundled-fixture replay canary qualifies submit,
+  poll/status, report, and receipt export. The current plan's staged-fixture
+  path, recovery, content verification, and real-S3 remain `VERIFIED: no`.
 - `src/benchmark/` is the importable package — the only part of this directory
   the toolbox image contains:
   - `build_image.py` validates recipe, artifact, executable, and adapter
@@ -43,8 +47,14 @@ facts under `tools/<tool>/build/`.
   - `campaign.py` creates and manages benchmark-owned Batch jobs in `campaign.db`.
   - `measure.py` runs exactly one selected subject and captures its raw outputs
     and metrics. It is the image entrypoint.
-  - `verify.py` compares normalized outputs; `report.py` binds results to
-    controller state and renders analysis.
+  - `verify.py` is the explicit real-S3 content-comparison path; replay is
+    row-count-only and is refused there without staging raw products.
+  - `report.py` binds `result.json` summaries to controller state and renders
+    row counts, timing, RSS, and replay-server evidence without reading listings.
+  - `receipt.py` exports one settled group as a deterministic factual draft,
+    including frozen requests and bound result/verification identities.
+  - `replay_fixture.py` generates the small synthetic canary fixture outside the
+    checkout and computes the content identity required by staged Parquet.
   - `runtime/` is the contract layer the eleven capsule adapters import
     (`benchmark.runtime.*`); it runs both inside the image and orchestrator-side
     during verification.
@@ -130,50 +140,67 @@ uv run python benchmark/src/benchmark/campaign.py submit \
   --secret-resource projects/varve-oss/secrets/s3-listing-study-aws-credentials/versions/latest
 
 uv run python benchmark/src/benchmark/campaign.py poll --watch
-uv run python benchmark/src/benchmark/verify.py --state campaign.db --group g20260816-000000
 uv run python benchmark/src/benchmark/report.py --state campaign.db --group g20260816-000000
 ```
 
 The controller records intent before creating a job. A retry receives a fresh
 ordinal, job name, and result prefix; no code adopts a job or image from a
-different launch. A result marker is uploaded last, and `verify`/`report`
-refuse unbound or inconsistent results. The full operator runbook — submit,
-poll, retry, cancel, verify, report — is
+different launch. A result marker is uploaded last, and `report` refuses
+unbound or inconsistent results. The full operator runbook — submit, poll,
+retry, cancel, report, and explicit real-S3 verification — is
 [`docs/running.md`](docs/running.md).
 
 ## Minimum rigor and deliberate limitations
 
 The harness preserves raw output, binds every result to the recorded job request
-and immutable toolbox identity, scans all retained bytes for credential material,
-and publishes `result.json` only after the other attempt artifacts. Verification
-refuses incomplete, failed, malformed, or unbound evidence instead of turning it
-into a comparison verdict. These controls make an attempt auditable, but they do
-not provide the stronger guarantees below.
+and immutable toolbox identity, and publishes `result.json` only after the other
+attempt artifacts. Routine
+replay reporting reads that marker only. These controls make an attempt
+auditable; row count is not a content-correctness verdict.
 
-### Evidence publication is not sealed
+### Attempt evidence is create-only
 
-GCS uploads use ordinary object writes and do not set the create-only
-`ifGenerationMatch=0` precondition. The deployed worker identities have only
-object-creation permission, destinations contain a fresh attempt UUID, and the
-result marker is written last, but the application itself does not seal an
-attempt against replacement when run with broader credentials. Treat bucket
-generation/versioning data as separate evidence when overwrite resistance is
-required.
+The worker computes its final completion code, uploads attempt artifacts, and
+uploads the final `result.json` marker with
+`ifGenerationMatch=0`. A second execution cannot merge with or replace a
+deterministic attempt prefix. Raw listing products remain retained under that
+prefix for manual investigation, but routine replay reporting does not fetch them.
 
-### Agreement is not ground truth
+### Replay reporting is row-count-only
 
-Verification compares one completed attempt with another completed attempt. A
+For real S3, verification compares completed attempts with one another. A
 `PASS` means their exposed fields agree; it does not prove either listing is
-complete or correct against an independently sealed manifest. The source bucket
-can also change between attempts, so missing/extra rows or metadata differences
-may be cross-attempt drift. `mtime`-only differences are reported as `DRIFT`, but
-other changes remain `FAIL` because the verifier cannot infer their cause.
+complete against an independently sealed manifest. The source bucket can change
+between attempts, so `mtime`-only differences are `DRIFT` and other differences
+remain `FAIL` because the verifier cannot infer their cause.
+
+Replay records the worker's in-container `row_count` after the timed child exits.
+The worker uploads the untouched product and logs, then uploads `result.json`
+last. Campaign reporting binds and reads only that summary: it does not generate
+or require a correctness manifest, normalize rows, or issue a content verdict.
+Replay diagnostics use the `minimal-replay` evidence profile: retained products
+and captures are recorded by name and size, not content-hashed. Comparative and
+preparation attempts retain the stronger digest-bearing evidence needed by the
+verifier and dependency chain. `result.json.postprocessing_seconds` records
+each applicable phase separately; all remain outside the subject wall clock.
+
+### Replay qualification precedes replay measurement
+
+A replay diagnostic canary validates the recorded backend binding, readiness,
+server evidence, in-container row count, raw upload, and result/report path. It
+produces neither comparative timing nor rate data. Replay
+capacity is **UNCALIBRATED** while the plan's `replay.capacity_status` says
+`uncalibrated`; no replay measurement row is eligible. Set it to `calibrated`
+only after a real diagnostic capacity canary has a committed receipt.
 
 ### Malformed or partial evidence is refused
 
 The verifier rejects ambiguous attempt leaves, missing result markers, binding or
 artifact-hash mismatches, failed/timed-out/unclean subjects, normalizer failures,
-and normalized rows containing SQL `NULL`. Nullable object metadata uses the
+and normalized rows containing SQL `NULL`. Replay reporting separately refuses
+missing readiness, inactive request counters, increasing error counters, and
+missing calibrated interval/resource samples through the same validator the
+worker uses. Nullable object metadata uses the
 literal `-`; a field is compared only when both tools expose it. This avoids
 NULL-blind anti-joins and prevents a tool that cannot report a field from creating
 a false mismatch, while also making absence of that field non-evidence. Non-UTF-8

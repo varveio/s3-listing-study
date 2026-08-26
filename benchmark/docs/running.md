@@ -10,10 +10,12 @@ an ordered union"* sections are authoritative. This page does not restate either
 
 ## Status of this procedure: `VERIFIED: no`
 
-**No campaign has ever been run in this repository.** Every step below was
-derived from reading `campaign.py`, not from executing it against GCP Batch.
-That makes this an unverified procedure in exactly the sense
-[`../../AGENTS.md`](../../AGENTS.md) means it: source reading is not a receipt.
+The committed [`replay-canary-current-20260826`](../../receipts/replay-canary-current-20260826/)
+receipt exercises the bounded replay path through submit, poll/status, report,
+and receipt export for three representative capsule shapes. It is not a
+benchmark, content verification, recovery exercise, staged-fixture test, or
+qualification of the remaining eight tools, so the whole procedure remains
+`VERIFIED: no`.
 
 Each section carries its own marker. Promote a marker to `VERIFIED: yes` only in
 the commit where a real run exercised that path, and say in the message which
@@ -22,10 +24,12 @@ group did it. Do not promote a step because a neighbouring step worked.
 | Step | Exercised against real Batch? |
 | --- | --- |
 | Toolbox build + eleven-tool smoke | **yes** — the `benchmark-toolbox` workflow, local Docker |
-| `submit` | no |
-| `poll` / `status` | no |
+| `submit` | **yes** — historical bounded three-tool bundled-fixture replay canary; current staged-fixture plan no |
+| `poll` / `status` | **yes** — same canary |
 | `retry` / `cancel` / `accept-failure` | no |
-| `verify` / `report` | no |
+| `verify` | no — replay is deliberately outside its content-comparison path |
+| `report` | **yes** — same canary, including bound replay evidence and row counts |
+| receipt export | **yes** — same canary |
 
 ## Before you submit
 
@@ -37,8 +41,11 @@ tool enforces for you; a missing item surfaces as a provider error mid-campaign.
 1. **Infrastructure applied.** Project, region, network/subnetwork, results
    bucket, and both worker service accounts. See
    [`../../infra/terraform/modules/gcp/s3-listing-study/README.md`](../../infra/terraform/modules/gcp/s3-listing-study/README.md).
-   Both worker identities hold `roles/storage.objectCreator` and nothing wider.
-2. **Toolbox built and smoked** at the exact revision you intend to attest:
+   Both worker identities hold bucket-level `roles/storage.objectCreator` plus a
+   conditional `roles/storage.objectViewer` grant limited to the
+   `objects/fixtures/` prefix. Plans name an exact object and therefore need no
+   bucket listing permission; workers cannot read campaign results.
+2. **Toolbox built and smoked** at the exact revision you intend to run:
 
    ```sh
    uv run python benchmark/src/benchmark/build_image.py \
@@ -66,13 +73,23 @@ tool enforces for you; a missing item surfaces as a provider error mid-campaign.
    the campaign would refuse fails here instead. The revision must be clean and
    `HEAD`, exactly as for the build. Shape is in
    [`../README.md`](../README.md) § *Campaign image set*.
-5. **Credential secret**, if any case signs: one
+5. **Replay fixture identity pinned.** The replay server image and fixture digest
+   in the plan bind what is served. A staged `fixture_uri` also requires that
+   digest; staging recomputes it before the server starts. No correctness
+   manifest is generated or bound. The worker counts rows inside the container
+   after timing, uploads raw products for manual investigation, computes its
+   final completion code, and publishes `result.json` last. Keep
+   `replay.capacity_status: uncalibrated` until a real diagnostic capacity
+   canary has a committed receipt. The staged-fixture provider path separately
+   remains `VERIFIED: no` until a committed canary uses `fixture_uri`; a bundled
+   fixture canary does not qualify that download and manifest-check branch.
+6. **Credential secret**, if any case signs: one
    `projects/<p>/secrets/<s>/versions/<v>` resource whose payload is the
    `KEY=VALUE` lines described in
    [`../../infra/terraform/modules/gcp/s3-listing-study/aws-credentials.tf`](../../infra/terraform/modules/gcp/s3-listing-study/aws-credentials.tf).
    Only a signing case's job carries it, and only the authenticated worker
    identity can read it.
-6. **A `--suite` name.** It is the results-bucket path prefix, the job label a
+7. **A `--suite` name.** It is the results-bucket path prefix, the job label a
    polling pass filters on, and the job-name prefix — constant for the life of
    a ledger, so it is chosen once, not per launch. `--group` is optional:
    leave it unset and `submit` mints `gYYYYMMDD-HHMMSS`, or name one yourself
@@ -85,7 +102,9 @@ the tables, their keys, and every state they record — is in
 
 ## Submit
 
-`VERIFIED: no`
+`VERIFIED: yes` — `replay-canary-current-20260826`, for the historical
+bundled-fixture replay canary with three independent case rows. The current
+staged-fixture plan, real-S3, and dependency-slot submission remain unverified.
 
 ```sh
 uv run python benchmark/src/benchmark/campaign.py submit \
@@ -150,6 +169,13 @@ queueing or Spot provisioning delay, only the one variable this harness does
 control. Zero by default; use it for any bucket where a first pass shows self-
 induced throttling.
 
+Staggering is an operational guard, not the isolation rule for the real-S3
+validation stage. Batch controls VM start time, so spaced submissions can still
+overlap. Finalist validation runs one subject at a time: wait until the current
+subject has stopped driving the bucket before submitting the next validation
+case. A wide real-S3 launch is diagnostic only and cannot produce the study's
+comparative S3 result.
+
 The controller **records intent before it creates a job** — a row is journaled
 `SUBMITTING` inside the same transaction that allocates its ordinal, before the
 provider is ever called. If the process dies between those two steps, the
@@ -161,7 +187,8 @@ rather than trusting the provider's view. `submit` also prints
 
 ## Watch it
 
-`VERIFIED: no`
+`VERIFIED: yes` — `replay-canary-current-20260826`, through `poll --watch` and
+the final read-only `status` view.
 
 ```sh
 # One pass, updates the ledger and exits.
@@ -308,16 +335,14 @@ group at a time via `--group` (required) and the same `--state` ledger. It
 reads that group from the recorded rows — never a re-resolved plan
 ([`model.md`](model.md) § *What verify binds against*). It
 compares every `purpose = 'measurement'` attempt within a stratum — one
-target bucket, one `(product, fields)` — against the others in that stratum. A
-`PASS` means the subjects **agree**, not that any one of them is correct:
-there is no sealed manifest, and agreement is what stands in for control over
-a corpus that keeps growing. Read
-[`../README.md`](../README.md) § *Agreement is not ground truth* before
-quoting a verdict.
+target bucket, one `(product, fields)`. For real S3, attempts are compared with
+the other subjects in that stratum: `PASS` means agreement over a live corpus,
+not independent ground truth. Replay is outside this content-verification path:
+`verify` refuses it without staging raw products, while routine replay reporting
+uses the row count in bound `result.json`.
 
 A `statistic: rate` case is reported as successes over attempts and takes no
-part in cross-tool agreement — its finding is the rate itself, printed
-alongside the group's verdict rather than folded into it.
+part in real-S3 cross-tool agreement.
 
 Exit code is worst-wins across the whole group:
 
@@ -338,7 +363,9 @@ writing `verify.json` back under each compared attempt's own result prefix.
 
 ## Report
 
-`VERIFIED: no`
+`VERIFIED: yes` — `replay-canary-current-20260826` exited 0 with three bound
+results, complete replay evidence, subject and worker exit 0, and 2,048 rows
+counted inside each worker.
 
 ```sh
 uv run python benchmark/src/benchmark/report.py --state campaign.db --group g20260817-120000
@@ -349,7 +376,35 @@ attempt's state and evidence binding, and exits nonzero if the scope still
 owes a `BLOCKED` slot, any row is non-terminal, any row's state is outside
 `SUCCEEDED`/`CANCELLED`/`ACCEPTED` (a settled `FAILED`/`NOT_CREATED` must be
 retried or accepted first), or any `SUCCEEDED` row's evidence is not bound —
-a report that exits `0` is a report whose inputs agree with the ledger.
+or, outside preparation and rate cases, its subject did not complete with exit
+0 and a row count. A report that exits `0` is a report whose inputs agree with
+the ledger and whose canary/diagnostic/timing subjects succeeded.
+
+For a replay attempt, `report` applies the same evidence acceptance rule as the
+worker: readiness, an increase in the untagged request counter, no increase in
+the error counter, and interval/cpuset samples for a calibrated measurement. It
+also renders both the subject exit and `worker_exit`; a clean subject whose
+postprocessing or replay evidence was refused is not shown as a clean worker.
+
+## Export a receipt draft
+
+`VERIFIED: yes` — `replay-canary-current-20260826`; the committed draft is
+[`../../receipts/replay-canary-current-20260826/`](../../receipts/replay-canary-current-20260826/).
+
+```sh
+uv run python -m benchmark.receipt \
+  --state campaign.db \
+  --group g20260817-120000 \
+  --output receipts/g20260817-120000
+```
+
+The group must be settled and have no blocked slot. The command writes a
+deterministic `receipt.json` plus a compact `README.md`. It freezes the resolved
+case documents, provider requests, attempt states and locations, bound result
+digests, both exit codes, timing/RSS/row counts, replay evidence summary, and any
+existing verification record. It copies no listing product and makes no claim:
+the output is a factual draft for review and commit, with `diagnostic`, `canary`,
+`preparation`, and `measurement` labels left intact.
 
 ## Prune
 

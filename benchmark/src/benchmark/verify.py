@@ -14,17 +14,16 @@ fields)` resolved from the capsule's own mode manifest. A text listing is not
 compared against a Parquet dataset, and a key-only mode is not ranked against
 one emitting five fields, or a tool wins by emitting less.
 
-A PASS means the subjects of a stratum AGREE, not that any of them is correct:
-there is no manifest, and agreement is what stands in for control over a corpus
-that grows underneath the study (`docs/identity.md` § *What identity cannot
-cover*).
+A real-S3 PASS means the subjects of a stratum AGREE: there is no sealed
+manifest, and agreement stands in for control over a corpus that grows
+underneath the study (`docs/identity.md` § *What identity cannot cover*).
+Replay campaigns are row-count-only: this explicit content verifier refuses
+them without downloading or normalizing their retained raw products.
 
 Two decisions this module makes where the docs are silent:
 
-- A `statistic: rate` case is summarized as successes over attempts and takes no
-  part in cross-tool agreement. Its finding is the rate; feeding twenty repeats
-  of one case into a comparison would be resampling, and a mean over the
-  survivors is the survivorship result `report` is forbidden to print.
+- A real-S3 `statistic: rate` case is summarized as successes over attempts and
+  takes no part in cross-tool agreement.
 - A stratum's reference is its lowest `attempt_id`. Agreement is symmetric, so
   the choice only fixes which side a diff is written from.
 
@@ -55,6 +54,7 @@ import argparse
 import gzip
 import hashlib
 import json
+import math
 import shutil
 import sqlite3
 import sys
@@ -67,6 +67,7 @@ from typing import Any
 import duckdb
 
 from benchmark import adapters, gcs
+from benchmark import replay as replay_contract
 from benchmark.contract import (
     EXIT_BINDING_MISMATCH,
     EXIT_DRIFT,
@@ -101,6 +102,7 @@ _COLUMNS = (
 _READ_CSV_OPTS = "quote='', escape=''"
 MISMATCH_FIELDS = ("size", "etag", "mtime", "storage_class")
 SAMPLE_LIMIT = 5
+HEX64 = set("0123456789abcdef")
 
 # Group-level rungs on contract.py's refusal ladder, which is per comparison.
 VERDICT_ORDER = ("UNCOMPARED", "PASS", "DRIFT", "FAIL")
@@ -121,7 +123,191 @@ GAP_EXIT_CODES = {
     "failed-subject": EXIT_FAILED_SUBJECT,
     "normalize": EXIT_NORMALIZE_FAILED,
     "malformed": EXIT_MALFORMED_INPUT,
+    "replay-row-count-only": EXIT_INCOMPLETE_GROUP,
+    "uncalibrated-capacity": EXIT_INCOMPLETE_GROUP,
+    "mixed-backend": EXIT_BINDING_MISMATCH,
 }
+
+
+def expected_result_binding(row: sqlite3.Row) -> dict[str, object]:
+    """The result fields frozen by the ledger row that launched an attempt."""
+    return {
+        "group_id": row["group_id"],
+        "job_name": row["job_name"],
+        "case_id": row["case_id"],
+        "attempt_id": row["attempt_id"],
+        "tool": row["tool"],
+        "mode": row["mode"],
+        "bucket": row["target_bucket"],
+        "region": row["target_region"],
+        "prefix": row["target_prefix"],
+        "auth_role": row["auth_role"],
+        "image": row["image_uri"],
+        "image_set_sha256": row["image_set_sha256"],
+        "config": json.loads(row["config"]),
+        "replay": None if row["replay"] is None else json.loads(row["replay"]),
+        "declared_resources": {
+            "machine_type": row["machine_type"],
+            "vcpus": row["vcpus"],
+            "memory_gb": row["memory_gb"],
+            "container_memory_gb": row["container_memory_gb"],
+        },
+    }
+
+
+def result_binding_errors(expected: Mapping[str, object], result: dict[str, object]) -> list[str]:
+    """Where result evidence disagrees with frozen intent or its marker contract."""
+    errors = [
+        name for name, value in expected.items() if name not in result or result.get(name) != value
+    ]
+    errors.extend(result_semantic_errors(result))
+    return errors
+
+
+def result_semantic_errors(result: dict[str, object]) -> list[str]:
+    errors: list[str] = []
+    exit_code = result.get("exit_code")
+    worker_exit_code = result.get("worker_exit_code")
+    timed_out = result.get("timed_out")
+    row_count = result.get("row_count")
+    row_count_error = result.get("row_count_error")
+    execution = result.get("execution")
+    if isinstance(exit_code, bool) or not isinstance(exit_code, int):
+        errors.append("exit_code")
+    if isinstance(worker_exit_code, bool) or not isinstance(worker_exit_code, int):
+        errors.append("worker_exit_code")
+    if not isinstance(timed_out, bool):
+        errors.append("timed_out")
+    if row_count is not None and (
+        isinstance(row_count, bool) or not isinstance(row_count, int) or row_count < 0
+    ):
+        errors.append("row_count")
+    if row_count_error is not None and not isinstance(row_count_error, str):
+        errors.append("row_count_error")
+    if execution is None:
+        replay_evidence = result.get("replay_evidence")
+        replay_refusal = (
+            isinstance(result.get("replay"), dict)
+            and isinstance(replay_evidence, dict)
+            and bool(replay_evidence.get("errors"))
+        )
+        if not isinstance(result.get("setup"), dict) and not replay_refusal:
+            errors.append("setup")
+        if exit_code == 0:
+            errors.append("exit_code")
+        errors.extend(
+            name
+            for name in (
+                "wall_seconds",
+                "max_rss_kb",
+                "row_count",
+                "row_count_error",
+                "product",
+                "product_error",
+            )
+            if result.get(name) is not None
+        )
+        return errors
+    if not isinstance(execution, dict):
+        return [*errors, "execution"]
+    max_rss_kb = result.get("max_rss_kb")
+    execution_rss = execution.get("max_rss_kb")
+    if (
+        isinstance(max_rss_kb, bool)
+        or not isinstance(max_rss_kb, int)
+        or max_rss_kb < 0
+        or max_rss_kb != execution_rss
+    ):
+        errors.append("max_rss_kb")
+    elapsed_ns = execution.get("elapsed_ns")
+    wall_seconds = result.get("wall_seconds")
+    if isinstance(elapsed_ns, bool) or not isinstance(elapsed_ns, int) or elapsed_ns < 0:
+        errors.append("execution.elapsed_ns")
+    if (
+        isinstance(wall_seconds, bool)
+        or not isinstance(wall_seconds, (int, float))
+        or not math.isfinite(wall_seconds)
+    ):
+        errors.append("wall_seconds")
+    elif (
+        isinstance(elapsed_ns, int)
+        and not isinstance(elapsed_ns, bool)
+        and wall_seconds != round(elapsed_ns / 1_000_000_000, 6)
+    ):
+        errors.append("wall_seconds/elapsed_ns")
+    for name in (
+        "timed_out",
+        "process_group_empty",
+        "descendants_empty",
+        "process_tree_clean",
+        "subreaper_enabled",
+    ):
+        if not isinstance(execution.get(name), bool):
+            errors.append(f"execution.{name}")
+    if execution.get("timed_out") != timed_out:
+        errors.append("execution.timed_out")
+    cgroup = execution.get("cgroup")
+    if not isinstance(cgroup, dict):
+        errors.append("execution.cgroup")
+    else:
+        for name in ("oom_delta", "oom_kill_delta"):
+            value = cgroup.get(name)
+            if value is not None and (
+                isinstance(value, bool) or not isinstance(value, int) or value < 0
+            ):
+                errors.append(f"execution.cgroup.{name}")
+    errors.extend(result_capture_errors(result))
+    counted = exit_code == 0 and timed_out is False and result.get("product_error") is None
+    if counted and row_count_error is None and row_count is None:
+        errors.append("row_count")
+    if not counted and row_count is not None:
+        errors.append("row_count")
+    return errors
+
+
+def result_capture_errors(result: dict[str, object]) -> list[str]:
+    """Where the marker fails to say what this attempt published, and how."""
+    errors: list[str] = []
+    minimal = result.get("evidence_profile") == "minimal-replay"
+    product = result.get("product")
+    if product is not None:
+        errors.extend(
+            f"product.{name}"
+            for name in _artifact_errors(product, digest_optional=True, minimal=minimal)
+        )
+    product_error = result.get("product_error")
+    if product_error is not None and not isinstance(product_error, str):
+        errors.append("product_error")
+    for stem in ("stdout", "stderr"):
+        capture = result.get(stem)
+        if capture is None:
+            if stem == "stderr" or product is None:
+                errors.append(stem)
+            continue
+        errors.extend(f"{stem}.{name}" for name in _artifact_errors(capture, minimal=minimal))
+    return errors
+
+
+def _artifact_errors(
+    block: object, *, digest_optional: bool = False, minimal: bool = False
+) -> list[str]:
+    """The name/size/digest every published artifact is recorded by."""
+    if not isinstance(block, dict):
+        return ["shape"]
+    errors: list[str] = []
+    name = block.get("name")
+    if not isinstance(name, str) or not name:
+        errors.append("name")
+    size = block.get("size_bytes")
+    if isinstance(size, bool) or not isinstance(size, int) or size < 0:
+        errors.append("size_bytes")
+    digest = block.get("sha256")
+    if digest is None:
+        if not minimal and (not digest_optional or block.get("channel") != "dataset"):
+            errors.append("sha256")
+    elif not isinstance(digest, str) or len(digest) != 64 or set(digest) - HEX64:
+        errors.append("sha256")
+    return errors
 
 
 class MalformedInputError(Exception):
@@ -132,40 +318,55 @@ class MalformedInputError(Exception):
 
 @dataclass(frozen=True)
 class Subject:
-    """One measurement attempt of the roster, as the ledger recorded it."""
+    """One attempt of the roster, as the ledger recorded it."""
 
     attempt_id: str
     case_id: str
     tool: str
     mode: str
+    purpose: str
     statistic: str
     state: str
     target_bucket: str
     target_prefix: str
     result_prefix: str
     config: dict[str, object]
+    replay: replay_contract.ReplayConfig | None
+    result_binding: dict[str, object]
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> Subject:
+        try:
+            replay = (
+                None
+                if row["replay"] is None
+                else replay_contract.parse_document(str(row["replay"]))
+            )
+        except replay_contract.ReplayError as exc:
+            raise ValueError(f"{row['attempt_id']} replay document is invalid: {exc}") from exc
         return cls(
             attempt_id=row["attempt_id"],
             case_id=row["case_id"],
             tool=row["tool"],
             mode=row["mode"],
+            purpose=row["purpose"],
             statistic=row["statistic"],
             state=row["state"],
             target_bucket=row["target_bucket"],
             target_prefix=row["target_prefix"],
             result_prefix=row["result_prefix"],
             config=json.loads(row["config"]),
+            replay=replay,
+            result_binding=expected_result_binding(row),
         )
 
 
 @dataclass(frozen=True)
 class Roster:
-    """A group's measurement attempts plus the slots it still owes."""
+    """A group's comparative attempts, replay attempts, and owed slots."""
 
     subjects: tuple[Subject, ...]
+    replay_attempts: tuple[Subject, ...]
     blocked: tuple[str, ...]
     abandoned: tuple[str, ...]
 
@@ -182,20 +383,18 @@ class Prepared:
 
 
 def roster_for(con: sqlite3.Connection, group_id: str) -> Roster:
-    """The group's measurement attempts and its unresolved slots.
-
-    `purpose` other than `measurement` is not in the population at all: a canary
-    is not a stray row for completeness to complain about, and a preparation is
-    measured without being compared.
-    """
+    """Read the comparison population and replay refusal from recorded rows."""
+    attempts = tuple(Subject.from_row(row) for row in attempt_rows(con, group_id=group_id))
+    replay_attempts = tuple(subject for subject in attempts if subject.replay is not None)
     subjects = tuple(
-        Subject.from_row(row)
-        for row in attempt_rows(con, group_id=group_id)
-        if row["purpose"] == "measurement"
+        subject
+        for subject in attempts
+        if subject.purpose == "measurement" and subject.replay is None
     )
     slots = pending_rows(con, group_id=group_id)
     return Roster(
         subjects=subjects,
+        replay_attempts=replay_attempts,
         blocked=tuple(_slot_label(row) for row in slots if row["state"] == "BLOCKED"),
         abandoned=tuple(_slot_label(row) for row in slots if row["state"] == "ABANDONED"),
     )
@@ -498,6 +697,34 @@ def _gap(subject: Subject, reason: str, detail: str) -> dict[str, object]:
     }
 
 
+def rate_subject_succeeded(subject: Subject) -> bool:
+    """Whether one settled rate attempt has complete, successful evidence."""
+    if subject.state != "SUCCEEDED" or not has_result_marker(subject.result_prefix):
+        return False
+    try:
+        result = json.loads(read_bytes_at(subject.result_prefix, "result.json"))
+        if (
+            not isinstance(result, dict)
+            or result_binding_errors(subject.result_binding, result)
+            or check_failed_subject(result) is not None
+        ):
+            return False
+        row_count = result.get("row_count")
+        return bool(
+            result.get("worker_exit_code") == 0
+            and isinstance(row_count, int)
+            and not isinstance(row_count, bool)
+            and (
+                subject.replay is None
+                or not replay_contract.evidence_errors(
+                    subject.replay, result.get("replay_evidence"), purpose=subject.purpose
+                )
+            )
+        )
+    except (OSError, ValueError):
+        return False
+
+
 def rate_summary(subjects: Sequence[Subject]) -> dict[str, object]:
     """Successes over settled attempts of one rate case.
 
@@ -505,7 +732,7 @@ def rate_summary(subjects: Sequence[Subject]) -> dict[str, object]:
     cases the hangs and the panics ARE the measurement.
     """
     settled = [s for s in subjects if s.state in TERMINAL_STATES]
-    successes = sum(1 for s in settled if s.state == "SUCCEEDED")
+    successes = sum(rate_subject_succeeded(subject) for subject in settled)
     first = subjects[0]
     return {
         "case_id": first.case_id,
@@ -695,6 +922,18 @@ def verify_group(
 ) -> tuple[int, dict[str, Any]]:
     """Verify one group against its recorded roster. Returns (exit_code, report)."""
     roster = roster_for(con, group_id)
+    if roster.replay_attempts:
+        report = {
+            "group_id": group_id,
+            "complete": False,
+            "verdict": "INCOMPLETE",
+            "refusal": (
+                "replay groups are row-count-only and are reported from bound result.json; "
+                "content verification applies only to real-S3 groups"
+            ),
+            "replay_attempts": [subject.attempt_id for subject in roster.replay_attempts],
+        }
+        return GROUP_EXIT_CODES["INCOMPLETE"], report
     buckets: list[dict[str, Any]] = []
     with tempfile.TemporaryDirectory() as tmp:
         work_dir = Path(tmp)
@@ -707,23 +946,27 @@ def verify_group(
                     write_record=write_record,
                 )
             )
-        complete = (
+        comparison_complete = (
             bool(roster.subjects)
             and not roster.blocked
             and not roster.abandoned
             and all(b["complete"] for b in buckets)
         )
-        verdict = "INCOMPLETE" if not complete else worst_verdict(b["verdict"] for b in buckets)
+        comparison_verdict = (
+            "INCOMPLETE"
+            if not comparison_complete
+            else worst_verdict(b["verdict"] for b in buckets)
+        )
         report = {
             "group_id": group_id,
-            "complete": complete,
-            "verdict": verdict,
+            "complete": comparison_complete,
+            "verdict": comparison_verdict,
             "blocked": list(roster.blocked),
             "abandoned": list(roster.abandoned),
             "subjects": len(roster.subjects),
             "buckets": buckets,
         }
-    return GROUP_EXIT_CODES[verdict], report
+    return GROUP_EXIT_CODES[comparison_verdict], report
 
 
 def print_samples(diff: Mapping[str, Any]) -> None:
@@ -748,6 +991,13 @@ def print_samples(diff: Mapping[str, Any]) -> None:
 
 
 def print_report(report: Mapping[str, Any]) -> None:
+    if "refusal" in report:
+        print(f"group {report['group_id']}: INCOMPLETE")
+        print(f"  refused: {report['refusal']}")
+        for attempt_id in report["replay_attempts"]:
+            print(f"  replay attempt: {attempt_id}")
+        print("verdict=INCOMPLETE")
+        return
     print(f"group {report['group_id']}: {report['subjects']} measurement attempt(s)")
     for label in ("blocked", "abandoned"):
         for slot in report[label]:

@@ -103,6 +103,16 @@ def download_tree(uri: str, local_root: Path) -> None:
         blob.download_to_filename(str(target))
 
 
-def upload_bytes(data: bytes, uri: str, *, content_type: str = "application/octet-stream") -> None:
+def upload_bytes(
+    data: bytes,
+    uri: str,
+    *,
+    content_type: str = "application/octet-stream",
+    create_only: bool = False,
+) -> None:
     bucket_name, name = parse_gs_uri(uri)
-    client().bucket(bucket_name).blob(name).upload_from_string(data, content_type=content_type)
+    client().bucket(bucket_name).blob(name).upload_from_string(
+        data,
+        content_type=content_type,
+        if_generation_match=0 if create_only else None,
+    )

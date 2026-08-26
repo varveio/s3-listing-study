@@ -94,11 +94,7 @@ ADD --checksum=sha256:34ecf3a725e835e88ad115a73d6e7b3a324c95677439c43f5baec536d8
 RUN tar xzf /tmp/s7cmd.tar.gz -C /tmp \
     && install -m 0755 /tmp/s7cmd /usr/local/bin/s7cmd
 
-FROM eclipse-temurin:25-jre-noble@sha256:2f1da100788559b397bcf48c736169ea5b070bde84e55f203bbee8e83d87a175 AS swath_jre
-FROM swath_jre AS swath_install
-ADD --checksum=sha256:01a55d46a7173094f5e66959c24347f85e87f28edeeb4652a535795ac97f2b52 \
-    https://github.com/varveio/swath/releases/download/v0.2.4/swath-0.2.4.jar /opt/swath/swath.jar
-RUN chmod 0444 /opt/swath/swath.jar
+FROM ghcr.io/varveio/swath@sha256:a13adef049de8c11c053861918005aaaae6c8576797df48867d1c5efdbcfc88b AS swath_install
 
 # Only subject runtime binaries and closures cross into the final toolbox.
 FROM runtime_base AS toolbox
@@ -117,7 +113,7 @@ COPY --from=s4cmd_install /usr/local/bin/s4cmd /usr/local/bin/s4cmd
 COPY --from=s5cmd_install /s5cmd /s5cmd
 COPY --from=s7cmd_install /usr/local/bin/s7cmd /usr/local/bin/s7cmd
 COPY --from=swath_install /opt/java/openjdk/ /opt/java/openjdk/
-COPY --from=swath_install /opt/swath/ /opt/swath/
+COPY --from=swath_install /opt/swath/swath.jar /opt/swath/swath.jar
 # Per-tool work stays in its own instruction so a `# slice:` marker can attribute
 # it; an unmarked line is platform, which over-invalidates rather than hides.
 # slice: aws-cli
@@ -134,7 +130,7 @@ RUN install -d -o 10001 -g 10001 /aws /data /home/s3study
 COPY benchmark/build/requirements-worker.txt /tmp/requirements-worker.txt
 RUN /usr/bin/python3 -m pip install --break-system-packages --no-cache-dir -r /tmp/requirements-worker.txt \
     && /usr/bin/python3 -m pip check \
-    && /usr/bin/python3 -c 'import duckdb, ijson, google.cloud.storage'
+    && /usr/bin/python3 -c 'import duckdb, ijson, google.cloud.storage, zstandard'
 
 # Only the importable package. Plans, tests, build inputs, and the README sit
 # outside src/, so the worker image cannot pick up orchestrator-side code.

@@ -10,6 +10,7 @@ from types import ModuleType
 
 import pytest
 
+from benchmark.adapters import compile_command
 from benchmark.runtime.build_selection import (
     BuildSelectionError,
     adapter_bundle_sha256,
@@ -52,6 +53,7 @@ BUCKET = "bucket-x"
 REGION = "region-y"
 SINK = "/sink"
 ARTIFACT = "/staged/artifact"
+ENDPOINT = "http://127.0.0.1:19090"
 """Where the engine staged the artifact a consuming mode reads — the inbound
 counterpart of :data:`SINK`. A consuming capsule refuses an empty one rather
 than inventing a path, so every consuming mode is driven with this."""
@@ -280,7 +282,13 @@ def _s7cmd(mode: str, prefix: str) -> tuple[str, ...]:
     target = f"s3://{BUCKET}/{prefix}"
     obs = ("-vv", "--disable-color-tracing")
     parallel = ("--max-parallel-listings", "64")
-    anon = ("--target-no-sign-request", "--target-region", REGION, "--connect-timeout-milliseconds", "15000")
+    anon = (
+        "--target-no-sign-request",
+        "--target-region",
+        REGION,
+        "--connect-timeout-milliseconds",
+        "15000",
+    )
     fields = ("--tsv", "--show-storage-class", "--show-etag")
     return {
         "recursive-tsv": ("ls", "-r", *obs, *fields, *parallel, *anon, target),
@@ -315,6 +323,32 @@ def _swath(mode: str, prefix: str) -> tuple[str, ...]:
     return {
         "recursive-tsv": (*common, "--format", "tsv"),
         "recursive-jsonl": (*common, "--format", "jsonl"),
+        "recursive-tsv-dataset": (
+            *common,
+            "--format",
+            "tsv",
+            "--output-type",
+            "dir",
+            "-o",
+            dataset,
+            "--text-writers",
+            "3",
+            "--compression",
+            "none",
+        ),
+        "recursive-tsv-zstd": (
+            *common,
+            "--format",
+            "tsv",
+            "--output-type",
+            "dir",
+            "-o",
+            dataset,
+            "--text-writers",
+            "3",
+            "--compression",
+            "zstd",
+        ),
         "recursive-table": (*common, "--format", "table"),
         "seed-none": (*common, "--format", "tsv", "--tune", "seed.mode=none"),
         "recursive-parquet": (*common, "--format", "parquet", "-o", dataset),
@@ -410,6 +444,8 @@ EXPECTED_MODES = {
     "swath": {
         "recursive-tsv",
         "recursive-jsonl",
+        "recursive-tsv-dataset",
+        "recursive-tsv-zstd",
         "recursive-table",
         "seed-none",
         "recursive-parquet",
@@ -465,6 +501,240 @@ def test_every_mode_matches_the_frozen_subject_argv_contract(tool: str) -> None:
                     )
                     executable = MODE_EXECUTABLES.get((tool, mode), FIXED_PREFIXES[tool])
                     assert adapter.compile(request) == (*executable, *expected)
+
+
+@pytest.mark.parametrize("tool", TOOLS)
+def test_an_empty_endpoint_is_byte_identical_for_every_capsule_mode(tool: str) -> None:
+    """Adding the request field must not perturb ordinary S3 attempts."""
+    adapter = load_command_adapter(adapter_path(tool))
+    for mode in sorted(adapter.modes):
+        common = {
+            "tool": tool,
+            "signed": not adapter.supports_unsigned,
+            "config": REQUIRED_CONFIG.get((tool, mode), {}),
+            "sink_dir": SINK,
+            "artifact_path": ARTIFACT if mode in consuming_modes(adapter) else "",
+            "visible_memory_gb": 2.0,
+        }
+        ordinary = CommandRequest(mode, BUCKET, REGION, **common)  # type: ignore[arg-type]
+        explicit_empty = CommandRequest(
+            mode,
+            BUCKET,
+            REGION,
+            endpoint_url="",
+            **common,  # type: ignore[arg-type]
+        )
+        assert adapter.compile(explicit_empty) == adapter.compile(ordinary)
+        assert adapter.build_env(explicit_empty) == adapter.build_env(ordinary)
+
+
+@pytest.mark.parametrize(
+    ("tool", "mode", "prefix", "argv_fragment", "expected_env"),
+    [
+        ("aws-cli", "s3api-v2-text", "p/", ("--endpoint-url", ENDPOINT), {}),
+        (
+            "minio-mc",
+            "recursive",
+            "p/",
+            (),
+            {"MC_HOST_s3": ENDPOINT, "MC_REGION": REGION},
+        ),
+        ("ps3", "list", "", ("--endpoint-url", ENDPOINT), {}),
+        (
+            "rclone",
+            "recursive-fastlist",
+            "p/",
+            (
+                f':s3,provider=AWS,region={REGION},endpoint="{ENDPOINT}",'
+                f"force_path_style=true:{BUCKET}/p/",
+            ),
+            {},
+        ),
+        ("s3-fast-list", "list", "p/", ("--endpoint-url", ENDPOINT), {}),
+        ("s3kor", "list", "p/", ("--custom-endpoint-url", ENDPOINT), {}),
+        (
+            "s3p",
+            "ls",
+            "p/",
+            (),
+            {"NODE_OPTIONS": "--max-old-space-size=1536", "S3_ENDPOINT": ENDPOINT},
+        ),
+        ("s5cmd", "recursive", "p/", ("--endpoint-url", ENDPOINT), {}),
+        (
+            "s7cmd",
+            "recursive-tsv",
+            "p/",
+            ("--target-endpoint-url", ENDPOINT, "--target-force-path-style"),
+            {},
+        ),
+        (
+            "swath",
+            "recursive-tsv",
+            "p/",
+            ("--endpoint-url", ENDPOINT),
+            {"JAVA_TOOL_OPTIONS": f"-XX:MaxRAMPercentage={HEAP_PERCENT}"},
+        ),
+    ],
+)
+def test_compatible_capsules_render_the_receipted_endpoint_mechanism(
+    tool: str,
+    mode: str,
+    prefix: str,
+    argv_fragment: tuple[str, ...],
+    expected_env: dict[str, str],
+) -> None:
+    adapter = load_command_adapter(adapter_path(tool))
+    request = CommandRequest(
+        mode,
+        BUCKET,
+        REGION,
+        prefix,
+        tool=tool,
+        signed=not adapter.supports_unsigned,
+        sink_dir=SINK,
+        visible_memory_gb=2.0,
+        endpoint_url=ENDPOINT,
+    )
+    argv = adapter.compile(request)
+    assert not argv_fragment or any(
+        argv[index : index + len(argv_fragment)] == argv_fragment
+        for index in range(len(argv) - len(argv_fragment) + 1)
+    )
+    assert adapter.build_env(request) == expected_env
+
+
+@pytest.mark.parametrize(
+    ("tool", "mode", "prefix"),
+    [
+        ("aws-cli", "s3api-v1-text", "prefix/"),
+        ("aws-cli", "s3api-versions-text", "prefix/"),
+        ("minio-mc", "versions-json", "prefix/"),
+        ("minio-mc", "find", ""),
+        ("ps3", "list-versions", ""),
+        ("ps3", "head", ""),
+        ("rclone", "listv1", "prefix/"),
+        ("s3kor", "list-versions", "prefix/"),
+        ("s4cmd", "recursive", "prefix/"),
+        ("s5cmd", "listv1", "prefix/"),
+        ("s5cmd", "allversions", "prefix/"),
+        ("s7cmd", "all-versions", "prefix/"),
+        ("s7cmd", "bucket-list", ""),
+    ],
+)
+def test_a_non_v2_or_proven_incompatible_mode_refuses_the_replay_endpoint(
+    tool: str, mode: str, prefix: str
+) -> None:
+    adapter = load_command_adapter(adapter_path(tool))
+    request = CommandRequest(
+        mode,
+        BUCKET,
+        REGION,
+        prefix,
+        tool=tool,
+        signed=not adapter.supports_unsigned,
+        sink_dir=SINK,
+        visible_memory_gb=2.0,
+        endpoint_url=ENDPOINT,
+    )
+    with pytest.raises(CommandAdapterError, match="replay endpoint"):
+        adapter.compile(request)
+
+
+def test_aws_custom_endpoint_stays_inside_the_receipted_ip_literal_boundary() -> None:
+    adapter = load_command_adapter(adapter_path("aws-cli"))
+    with pytest.raises(CommandAdapterError, match="IP-literal"):
+        adapter.compile(
+            CommandRequest(
+                "s3api-v2-text",
+                BUCKET,
+                REGION,
+                tool="aws-cli",
+                endpoint_url="http://replay.internal:19090",
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    [
+        'http://127.0.0.1:19090/"quoted',
+        "http://127.0.0.1:19090/back\\slash",
+        "http://127.0.0.1:19090/path,field",
+    ],
+)
+def test_rclone_refuses_an_endpoint_that_breaks_its_quoted_connection_field(
+    endpoint: str,
+) -> None:
+    adapter = load_command_adapter(adapter_path("rclone"))
+    with pytest.raises(CommandAdapterError, match="quote, backslash, or comma"):
+        adapter.compile(
+            CommandRequest(
+                "recursive-fastlist",
+                BUCKET,
+                REGION,
+                tool="rclone",
+                endpoint_url=endpoint,
+            )
+        )
+
+
+def test_s3_fast_list_local_split_does_not_receive_the_remote_endpoint() -> None:
+    adapter = load_command_adapter(adapter_path("s3-fast-list"))
+    ordinary = adapter.compile(
+        CommandRequest(
+            "ks-split",
+            BUCKET,
+            REGION,
+            tool="s3-fast-list",
+            config={"segments": 8},
+            sink_dir=SINK,
+            artifact_path=ARTIFACT,
+        )
+    )
+    replay = adapter.compile(
+        CommandRequest(
+            "ks-split",
+            BUCKET,
+            REGION,
+            tool="s3-fast-list",
+            config={"segments": 8},
+            sink_dir=SINK,
+            artifact_path=ARTIFACT,
+            endpoint_url=ENDPOINT,
+        )
+    )
+    assert replay == ordinary
+    assert ENDPOINT not in replay
+
+
+def test_rclone_endpoint_preserves_the_signed_credential_branch() -> None:
+    adapter = load_command_adapter(adapter_path("rclone"))
+    request = CommandRequest(
+        "recursive-fastlist",
+        BUCKET,
+        REGION,
+        tool="rclone",
+        signed=True,
+        endpoint_url=ENDPOINT,
+    )
+    remote = adapter.compile(request)[-1]
+    assert "env_auth=true" in remote
+    assert f'endpoint="{ENDPOINT}",force_path_style=true' in remote
+
+
+def test_compile_command_forwards_endpoint_url_to_argv_and_environment() -> None:
+    argv, env = compile_command(
+        ROOT / "tools/s3p/adapter",
+        "s3p",
+        mode="ls",
+        bucket=BUCKET,
+        region=REGION,
+        signed=True,
+        visible_memory_gb=2.0,
+        endpoint_url=ENDPOINT,
+    )
+    assert argv[:2] == ("/usr/local/bin/s3p", "ls")
+    assert env == {"NODE_OPTIONS": "--max-old-space-size=1536", "S3_ENDPOINT": ENDPOINT}
 
 
 def consuming_modes(adapter: LoadedCommandAdapter) -> frozenset[str]:
@@ -581,6 +851,8 @@ def test_swath_declares_what_each_mode_produces_and_what_it_asked_for() -> None:
     assert {mode: manifest.product for mode, manifest in adapter.modes.items()} == {
         "recursive-tsv": "text",
         "recursive-jsonl": "text",
+        "recursive-tsv-dataset": "text",
+        "recursive-tsv-zstd": "text",
         "recursive-table": "text",
         "seed-none": "text",
         "recursive-parquet": "parquet",
@@ -603,6 +875,56 @@ def test_swath_declares_what_each_mode_produces_and_what_it_asked_for() -> None:
     assert adapter.build_env(request) == {
         "JAVA_TOOL_OPTIONS": f"-XX:MaxRAMPercentage={HEAP_PERCENT}"
     }
+
+
+def test_swath_renders_retained_output_controls_and_refuses_the_wrong_mode() -> None:
+    adapter = load_command_adapter(adapter_path("swath"))
+    request = CommandRequest(
+        "recursive-tsv-dataset",
+        BUCKET,
+        REGION,
+        tool="swath",
+        sink_dir=SINK,
+        config={
+            "concurrency": 16,
+            "jvm_max_heap": "4g",
+            "text_writers": 3,
+            "text_part_size": "1gb",
+            "writeback_size": "32mb",
+            "part_rotation_interval": "0",
+            "part_rotation_max_rows": 0,
+        },
+    )
+    argv = adapter.compile(request)
+    assert argv[-12:] == (
+        "--text-writers",
+        "3",
+        "--compression",
+        "none",
+        "--text-part-size",
+        "1gb",
+        "--writeback-size",
+        "32mb",
+        "--part-rotation-interval",
+        "0",
+        "--part-rotation-max-rows",
+        "0",
+    )
+    assert adapter.build_env(request) == {
+        "JAVA_TOOL_OPTIONS": f"-XX:MaxRAMPercentage={HEAP_PERCENT} -Xmx4g"
+    }
+
+    with pytest.raises(CommandAdapterError, match=r"does not use config key.*text_writers"):
+        adapter.compile(
+            CommandRequest(
+                "recursive-parquet",
+                BUCKET,
+                REGION,
+                tool="swath",
+                sink_dir=SINK,
+                config={"text_writers": 3},
+            )
+        )
 
 
 def test_one_rule_decides_what_a_producing_mode_inherits() -> None:

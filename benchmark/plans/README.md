@@ -1,7 +1,11 @@
 # Benchmark plans
 
-One file per bucket under [`buckets/`](buckets/), saying what to run against
-that bucket and on what box.
+Reusable study plans live under [`buckets/`](buckets/), saying what to run
+against that bucket and on what box. [`canaries/`](canaries/) holds the two
+small runner qualifications: signed stdout, unsigned stdout, and native-file
+capsule paths against replay, plus representative shapes against ordinary S3. A plan is execution
+intent, not a history folder; superseded diagnostic rungs stay in Git and their
+receipts/notes rather than accumulating here.
 
 ```
 python -m benchmark.plan_cli --bucket noaa-ghcn-pds
@@ -73,6 +77,104 @@ keeps `timeout_s` out of one: it is in the fingerprint but not the ID, so two
 rows differing only there would render one ID and two fingerprints — two
 non-comparable runs filed into one case directory.
 
+### A plan may state the backend it measures against
+
+A plan whose target is a real bucket says nothing about a backend: the backend is
+S3. A plan served by the swath replay server states one, because the server *is*
+what every case here is measured against, and two runs against differently
+configured servers are two measurements rather than one.
+
+It splits by what varies. The plan-level `replay:` block holds what does not:
+
+```yaml
+replay:
+  capacity_status: uncalibrated
+  server_image_uri: registry/replay@sha256:<64 hex>
+  fixture_sha256: <64 hex, over the served parts in key order>
+  serving_mode: sorted            # or duckdb; always stated, never inferred
+  latency_model:
+    deadlines_ms: {worker_page: 107, pivot_probe: 41, structure_probe: 49}
+    scale: 1.0
+    jitter: none
+```
+
+The other explicit treatment is no injection:
+
+```yaml
+  latency_model: none
+```
+
+The latency treatment is a **measurement, not a preference**. A fixed model
+adds the fixture's measured per-request latency profile; `none` measures the
+subject and replay server without that delay. They impose different demand on
+the server and therefore have different case identities. A swath run report
+carries a `probe_latency` block whose call classes are exactly the replay
+server's shape classifier, so when fixed injection is intended, read the honest
+profile from the fixture rather than picking one. Note the direction the dial
+moves: demand on the server scales inversely with the profile, so a profile
+chosen because the server can meet it is a profile that hides an undersized
+server. No other scalar or incomplete fixed mapping is accepted.
+
+What *does* vary per case is how much machine the server gets, so those are
+ordinary row fields, prefixed `replay_` and resolving through the same three
+layers as every other allocation:
+
+```yaml
+defaults:
+  vcpus: 16                        # the box, as always
+  memory_gb: 64
+  container_memory_gb: 40          # subject cgroup ceiling
+  subject_vcpus: 7
+  replay_vcpus: 8
+  replay_memory_gb: 16
+  replay_parquet_connections: 640
+  replay_max_concurrent_requests: 512
+  replay_prefetch: false
+  replay_prefetch_max_windows: 96 # response-window cache capacity
+  replay_heap_percent: 75
+```
+
+`vcpus`/`memory_gb` keep meaning **the box**. `container_memory_gb` is the
+subject ceiling; `subject_vcpus` and the replay fields are the independent
+allocations. When the subject has a ceiling, the remaining host CPU and memory
+are derived and each must be positive — host reserves are not separately
+authored identity inputs. Omitting `container_memory_gb` also omits the subject
+cgroup limit for a replay diagnostic. The CPU remainder is still derived, but
+there is then no guaranteed host memory headroom; resolved plans and reports
+label it `unreserved` rather than inventing a reservation.
+Reader-pool size and request-admission width are separate fields, and
+`replay_prefetch` is a YAML boolean rather than an integer shorthand.
+`replay_prefetch_max_windows` defaults to 96 when omitted; state it explicitly
+when a diagnostic varies cache capacity.
+
+`capacity_status` is a simple plan fact, not another control surface:
+`uncalibrated` permits diagnostic replay work only, while `calibrated` permits
+replay measurements. Set it to `calibrated` only after a real diagnostic
+capacity canary has a committed receipt for this backend and allocation family.
+Replay plans carry no correctness manifest: the worker counts rows in-container,
+retains raw products, and routine reporting reads `result.json` only.
+
+An image-bundled fixture states `fixture_sha256` alone. A staged fixture states
+both `fixture_uri` and `fixture_sha256`. `fixture_uri` names one exact Parquet
+object rather than a wildcard: the worker therefore needs object read but not
+bucket listing permission. The digest is over the UTF-8 bytes of the single
+`name<TAB>size<TAB>file-sha256<NEWLINE>` manifest row. The staging runnable
+recomputes it after download and before starting the replay server, so mutable
+storage cannot silently change a case. Generate the value from an already
+staged directory with:
+
+```sh
+uv run python -m benchmark.replay_fixture /path/to/fixture
+```
+
+The staged-fixture branch remains `VERIFIED: no`: its manifest contract has
+offline coverage, but no committed campaign receipt has exercised the provider
+download path. Do not treat an image-bundled replay canary as qualifying it.
+
+A `replay_*` key in a plan with no `replay:` block is refused, and so is a
+`replay:` block whose defaults do not size a server: a plan states its backend
+completely or not at all.
+
 ### `config` is the one nested map
 
 Everything else a row states is a flat scalar. A row may also carry `config`, a
@@ -95,6 +197,9 @@ s3-fast-list:
 ```
 
 `config` is for a knob that is one tool's own business and no axis describes.
+It is the common extension path for every capsule, not a Swath exception. A
+tool may expose one argument or twenty; tuning depth can differ while the runner
+continues to transport, hash, and record every tool's config identically.
 
 Its keys are folded into the case's config blob *before* the capsule sees it, so
 the capsule's own refusal still runs over them: a key it never declared in
@@ -299,4 +404,4 @@ rules and their reasons are [`../docs/model.md`](../docs/model.md)
 § *Object layout*. Create-only writes refuse a second execution merging into
 a first; they do not seal evidence against replacement by credentials with
 broader permissions — see
-[`Evidence publication is not sealed`](../README.md#evidence-publication-is-not-sealed).
+[`Attempt evidence is create-only`](../README.md#attempt-evidence-is-create-only).

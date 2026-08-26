@@ -10,10 +10,18 @@ benchmark has been run and no comparative performance result exists in this repo
 carry per-run wall-clock and RSS, but never as a comparison). All eleven
 subjects have now run at smoke on amd64 through the attempt engine: seven
 anonymously and `s3p`, `s3kor`, `s4cmd`, and `ps3` with a scoped credential.
-Those attempts establish that the execution path works, not correctness: none
-has a verifier verdict because auditing an attempt against a reference manifest
-is not implemented yet. See `../tools/README.md` for per-tool status and
-`smoke-bucket.md` for the historical reference snapshot.
+Those attempts establish that the retired groundwork path worked, not
+correctness: none is bound to the current comparative verifier. The replay path
+records in-container row counts and retains raw products. See
+`../tools/README.md` for per-tool status and `smoke-bucket.md` for the historical
+reference snapshot.
+
+**Qualification status — 2026-08-26.** A committed bounded three-tool replay
+canary now exercises submit, poll/status, summary reporting, worker-side row
+counting, raw-product retention, and receipt export for those exact capsule
+shapes. It is an uncalibrated 2,048-row integration canary, not a comparative
+benchmark, content-verification result, replay-capacity qualification,
+staged-fixture run, or qualification of the other eight capsules.
 
 **Protocol note.** The comparative measurement plan predates comparative
 results. The groundwork procedure was improved after the aws-cli and
@@ -46,8 +54,8 @@ while every worker-container execution mints its own attempt UUID below that
 prefix. The benchmark controller discovers only immediate UUID children with a
 delimiter listing and reads their exact `result.json` summaries, which the
 worker uploads last as completion markers. Raw listings remain in the same GCS
-attempt trees and are fetched only for
-correctness verification or investigation. Multiple current-submission UUID
+attempt trees. Replay reporting never fetches them; explicit real-S3 correctness
+work or manual investigation may. Multiple current-submission UUID
 children under one run are duplicate executions; reporting surfaces all and
 selects none as canonical. Historical retry leaves remain visible without
 competing with current-submission evidence.
@@ -58,6 +66,18 @@ every deterministic Batch effect is terminal, or a definitive create rejection
 proves `NOT_CREATED`; controller failure alone cannot authorize absent evidence.
 Finality and operational success are reported separately, so an explicitly
 accepted failure can produce a final report without being called successful.
+
+**Material experiment-order change — 2026-08-20.** Comparative work now starts
+with controlled screening and configuration search against the Swath replay
+server. The broad real-S3-first launch was not an isolating experiment: several
+high-fan-out subjects can converge on the same live key ranges and impose shared
+throttling on one another, while ambient S3 load remains outside the study's
+control. Replay therefore narrows the candidate set first; a small finalist set
+then runs against real S3, one subject at a time, to validate the selected
+configurations and the conclusions that will be stated about S3. Replay-only
+numbers remain synthetic and cannot by themselves support a claim about
+real-S3 performance. This supersedes the former real-S3 Phase 1 / replay Phase
+2 order; the detailed funnel and disagreement rule are recorded below.
 
 ## Evidence language
 
@@ -168,10 +188,10 @@ wall-clock measurements as like-for-like.
 
 Settled: **if a tool exposes its own call count, collect it.** Some do — `s3ls-rs`
 is claimed to keep an atomic counter and log it at end of run specifically for
-cost analysis. Where a tool doesn't expose one, we do **not** block on it in
-Phase 1. Externally instrumented call counting is deferred to Phase 2 (below),
-because the instrument for it is a piece of our own software that has to earn
-trust first.
+cost analysis. Where a tool doesn't expose one, we do **not** block groundwork
+smoke on it. The replay-screening stage supplies the external counter, after the
+endpoint has passed the protocol, correctness, identity, and capacity gates
+below.
 
 ### 2. The bucket sample
 
@@ -203,13 +223,18 @@ must be stated as a limitation or controlled by running in-region.
   Third-party published numbers (s3-fast-list's 3.1M/s, S3P's 35K/s, PS3's 94K/s)
   are **context, never comparison** — different hardware, different buckets,
   different years, mostly self-reported.
-- **Same bucket, same window.** Bucket contents drift; tools run against the same
-  bucket at wildly different times aren't comparable.
+- **Same fixture during replay; same bucket and a tight window during S3
+  validation.** Replay candidates use the same immutable fixture and latency
+  treatment. Finalists run against the same live bucket close together, but one
+  subject at a time so the study does not manufacture shared throttling.
 - **One fresh VM and one scheduled run per case.** `reps` is 1 and there are no
   cold/warm arms. VM/container boot is outside the timer; network setup performed
   by the subject remains part of the subject's own elapsed time.
-- **Concurrency swept, not fixed.** A single concurrency number is a choice that
-  can change the result. Sweep each tool across its range and report its best.
+- **Concurrency swept during screening, then validated.** A single concurrency
+  number is a choice that can change the result. Sweep each tool across its
+  declared replay range, select configurations under the advancement rule
+  below, and take the selected configuration — plus a nearby contender when
+  needed to validate the selection — to real S3.
 - **Large buckets amortize fixed launch cost.** `elapsed_ns` necessarily includes
   launching the subject process. The benchmark uses buckets large enough that
   this fixed cost is insignificant beside the listing.
@@ -315,61 +340,117 @@ The planned outputs are:
    to how we checked it.
 4. **Upstream issues** for reproducible problems we find.
 
-## Phase 1 (real S3) and Phase 2 (replay server)
+## Replay screening, then real-S3 validation
 
-**Phase 1 — real S3. Everything above.** Real buckets, real network, real
-failures. We start here because a result on real S3 does not depend on how
-closely a local endpoint reproduces the service.
+The comparative campaign is a funnel. Replay is the controlled search
+environment; real S3 validates the finalists. The two stages answer different
+questions and their results remain visibly separate.
 
-**Phase 2 — the replay server.** Deferred, and gated on Phase 1.
+### Stage 1 — controlled replay screening
 
 Swath ships a [replay server](https://github.com/varveio/swath/blob/main/docs/swath-replay-server.md)
-that serves a Parquet listing over HTTP as an S3 `ListObjectsV2` endpoint. It is
-not a general S3 emulator — path-style only, no auth or SigV4 validation, no
-`GetObject`/`PutObject`/versions, listing metadata only. But for this study it is
-useful for several kinds of observation because it sits *outside* the tool being run:
+that serves a captured Parquet listing over HTTP as an S3 `ListObjectsV2`
+endpoint. It is not a general S3 emulator — path-style only, no auth or SigV4
+validation, no `GetObject`/`PutObject`/versions, and listing metadata only. Its
+value here is control: every candidate sees the same immutable fixture, latency
+treatment, backend state, and declared machine allocation without competing for
+a live S3 key-range budget.
 
-- **Tool-agnostic API-call counting** — every request a tool makes, counted, with
-  no cooperation from the tool required. This is what makes S3P's ~50%
-  overlap-waste claim exactly measurable rather than estimable, and it works
-  identically for tools that expose no counter of their own.
-- **Request-shape capture** — not just how many calls, but what they *are*:
-  `start_after` values, `max-keys`, delimiters, prefixes. That reveals the
-  algorithm from the outside, independent of what the source says it does, and
-  independent of whether we read the source correctly.
-- **Deterministic fault injection** — 503s, slow pages, truncation weirdness,
-  stuck continuation tokens, on demand and reproducibly. Several inherited
-  claims (retry behaviour, 503 adaptation, the stuck-token defence) are hard to
-  test on real S3 precisely because real S3 mostly behaves.
-- **Purpose-built shapes on demand** — bucket layouts that would be expensive or
-  slow to build for real.
+The initial cross-tool endpoint observations and reproducer are retained in the
+[`replay-endpoint-compat` receipt](../benchmark/pilots/replay-endpoint-compat/RECEIPT.md).
 
-**Why it is Phase 2 and not Phase 1:** *the replay server is our own software.* Using it to
-measure other tools means our testing endpoint is our code. If it is subtly
-wrong — a divergence from real S3's pagination semantics, encoding, or ordering
-— we could describe another tool incorrectly even though the measurements look
-precise.
+Replay supplies four observations that the wide real-S3 search could not isolate:
 
-So Phase 2 has a firm prerequisite: **the replay server must first be shown to
-match real-S3 captures** on the same shapes we intend to test. And Phase 1 must
-already show the picture looks right on real S3, so
-Phase 2's numbers have something to be checked against rather than being the
-only evidence.
+- **Configuration and concurrency search** — compare a tool's supported modes
+  and tunings under one repeatable service envelope.
+- **Tool-agnostic API-call and request-shape capture** — count every request and
+  record `start_after`, `max-keys`, delimiters, and prefixes without requiring
+  cooperation from the subject.
+- **Purpose-built shapes** — run immutable layouts that would be costly or slow
+  to create repeatedly in S3.
+- **Deterministic fault injection** — exercise 503s, slow pages, malformed
+  pagination, and transport failures separately from the clean throughput
+  screen.
 
-Known frictions to resolve before Phase 2 (recorded now, not solved):
+The server is part of the measuring instrument and must earn trust for every
+screening attempt. Before a replay result can advance or eliminate a candidate:
 
-- **No auth/SigV4 validation** — some clients may refuse to talk to an
-  unauthenticated endpoint, or may require dummy credentials.
-- **Path-style only** — any tool that forces virtual-hosted-style addressing
-  can't be pointed at it. `s3-fast-list` is reported to *auto-enable*
-  force-path-style whenever `--endpoint` is set, with no override, which happens
-  to suit this endpoint.
-- **`ListObjectsV2` only** — a tool that probes with `HeadBucket`,
-  `GetBucketLocation`, or `ListObjectVersions` will break on it.
-- **Divergence from real S3 is the risk**, not fidelity of the data. The listing
-  content is real; the protocol surface is a reimplementation, and the inherited
-  conformance notes in [`open-questions.md`](open-questions.md) §6
-  are a catalogue of exactly how S3-compatible endpoints get this wrong.
+1. the fixture has an immutable content identity;
+2. the worker records an in-container row count after timing and retains the
+   untouched native product;
+3. the complete server image, serving mode, latency treatment, and allocation
+   are part of case identity and the receipt;
+4. the attempt retains server meters and interval-aligned cpuset-utilization
+   samples sufficient to compare a candidate server with an overprovisioned
+   control; and
+5. any known protocol divergence affecting that subject's request pattern is
+   fixed or makes the attempt ineligible for comparison.
+
+A diagnostic canary checks the endpoint, backend binding, replay evidence,
+row-count, upload, and result/report path, but creates no comparative timing or
+rate result. Replay capacity is **UNCALIBRATED** until a diagnostic capacity
+canary has a committed receipt. A plan states that condition explicitly as
+`replay.capacity_status: uncalibrated`; no replay measurement is eligible before
+the status is changed to `calibrated`.
+
+Latency injection is a declared experimental treatment. A fixed-latency profile
+is valid for a controlled screen when it is applied identically and reported as
+such; it is not described as reproducing S3's full latency distribution unless
+that stronger fidelity has separately been demonstrated.
+
+The plan fixes its advancement rule before the relevant replay results are
+examined. Capacity-calibration rows are diagnostics and cannot eliminate a
+candidate. Once paired controls establish the rule and its uncertainty, replay
+may remove clearly slower tool or configuration candidates from the expensive
+S3 stage. Close candidates advance together; the screen is not allowed to
+manufacture a precise podium from differences within its predeclared
+uncertainty or elimination boundary. Every replay number is labeled as
+synthetic throughput against the named replay fixture and latency treatment,
+never as “speed against bucket X.”
+
+### Stage 2 — focused real-S3 validation
+
+After replay identifies the strongest configuration or small candidate set for
+a tool, those finalists run against real S3. These runs are deliberately few,
+use fresh VMs and the public child-process wall-clock boundary, and execute one
+subject at a time. Submission staggering alone is not isolation because Batch
+startup time is uncontrolled; the next validation run starts only after the
+previous subject has stopped driving the bucket.
+
+At minimum, validate the selected configuration. When replay chose between
+nearby configurations or candidates and the study intends to rely on that
+choice, carry the closest contender or boundary candidate into the same S3
+validation set. A winner-only S3 run establishes that the winner operates on
+S3; it does not establish that replay selected the right winner.
+
+Real-S3 validation answers whether the selected configurations and the
+directional conclusions from replay survive the live service's latency,
+throttling, retry, and ambient-load behavior. It does not retroactively turn
+excluded candidates' replay numbers into S3 measurements. The receipt identifies
+the live snapshot window and any observable throttling; correctness verification
+remains mandatory.
+
+If replay and real S3 disagree materially, the S3 observation governs every
+claim about S3. The result is not averaged into a composite score: freeze the
+discrepancy, expand the validation set enough to distinguish variance from a
+systematic mismatch, and either revise the selected configuration or narrow the
+replay claim before publication.
+
+### Stage 3 — failure and congestion behavior
+
+Retry depth, congestion control, recovery, interruption, and malformed-response
+handling are separate workloads. Run them deterministically against the replay
+fault injector for finalists, with targeted real-S3 observations only where the
+service can be exercised safely and the behavior is observable. Do not fold
+failure survival into the clean-throughput number or treat a non-throttling
+replay winner as automatically best under S3 congestion.
+
+The replay endpoint's limited surface remains a study limitation. The committed
+compatibility receipt records which subjects can use it today; a subject that
+requires unsupported `ListObjects` v1 or off-protocol calls cannot be silently
+treated as a performance loser. The inherited conformance questions in
+[`open-questions.md`](open-questions.md) §6 remain the checklist for protocol
+risks.
 
 ## Run records (receipts)
 
@@ -384,8 +465,7 @@ what they need to rebuild the run.
 
 ## Execution order
 
-1. Build and validate the benchmark toolbox, measurement worker, and correctness
-   verifier once.
+1. Build and validate the benchmark toolbox and measurement worker once.
 2. At smoke scale, work per tool: read its docs and source, select or build its
    pinned image, then execute every supported listing mode. Reading and smoke
    necessarily interleave within a tool because its invocation cannot be
@@ -395,12 +475,20 @@ what they need to rebuild the run.
 4. Before comparative work, settle the roster and output-work decisions, select
    the benchmark buckets, and record their shapes independently before any
    subject touches them.
-5. **Smoke the frozen measurement path first.** A small canary must show that
-   the campaign configuration, runner, receipts, and verifier work together
-   before scale spending begins.
-6. Run the benchmark sweeps under the frozen campaign rules.
-7. Run limits-and-interruption scenarios under their separately declared
-   workloads and update the inventory from the resulting evidence.
+5. **Qualify replay before measuring it.** A diagnostic canary first shows that
+   the endpoint, backend binding, campaign configuration, runner, and reporter
+   work together without producing a comparison. That diagnostic
+   capacity canary receives a committed receipt before its plan is marked
+   `calibrated` and scale spending begins.
+6. Run the replay screening and configuration sweeps under their predeclared
+   advancement rules. Freeze the finalists before looking at the S3 validation
+   results.
+7. Run the small real-S3 validation set one subject at a time. Include a nearby
+   contender wherever the study needs to validate replay's selection rather
+   than merely the selected configuration's ability to run on S3. Reconcile
+   material disagreements before publishing a conclusion about S3.
+8. Run limits, congestion, and interruption scenarios under their separately
+   declared workloads and update the inventory from the resulting evidence.
 
 ## What this setup cannot tell us
 

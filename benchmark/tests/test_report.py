@@ -4,8 +4,13 @@ import gzip
 import json
 import sqlite3
 from pathlib import Path
+from typing import TypedDict
 
-from benchmark import campaign, ledger, measure, report, verify
+import benchmark.campaign as campaign
+import benchmark.ledger as ledger
+import benchmark.measure as measure
+import benchmark.report as report
+import benchmark.verify as verify
 from benchmark.contract import sha256_of
 
 COMMAND_PY = """
@@ -62,6 +67,32 @@ for line in source.read_text().splitlines():
 LISTING = ("a/one 1", "a/two 2")
 
 
+def replay_metrics(requests: int, errors: int = 0) -> dict[str, object]:
+    return {
+        "meters": [
+            {
+                "name": "swath.replay.http.requests",
+                "type": "counter",
+                "tags": {},
+                "count": float(requests),
+            },
+            {
+                "name": "swath.replay.http.errors",
+                "type": "counter",
+                "tags": {},
+                "count": float(errors),
+            },
+        ]
+    }
+
+
+class CompleteReplayEvidence(TypedDict):
+    replay: dict[str, object]
+    replay_evidence: dict[str, object]
+    started_at: str
+    finished_at: str
+
+
 def adapter_root(tmp_path: Path, *tools: str) -> str:
     root = tmp_path / "tools"
     for tool in tools:
@@ -88,6 +119,7 @@ def record(
     statistic: str = "timing",
     state: str = "SUCCEEDED",
     produced_by: str | None = None,
+    replay: str | None = None,
 ) -> ledger.Attempt:
     case_id = f"{tool}.{digest}"
     config = json.dumps({"mode": mode}, sort_keys=True, separators=(",", ":"))
@@ -105,9 +137,9 @@ def record(
                 executor=campaign.EXECUTOR,
                 location="us-east1",
                 machine_type="n4-standard-2",
-                vcpus=2,
-                memory_gb=8,
-                container_memory_gb=None,
+                vcpus=10,
+                memory_gb=32,
+                container_memory_gb=8,
                 heap_percent=75,
                 timeout_s=600,
                 target_bucket=bucket,
@@ -128,6 +160,7 @@ def record(
                 purpose=purpose,
                 statistic=statistic,
                 origin="planned",
+                replay=replay,
             ),
             "{}",
         )
@@ -168,6 +201,8 @@ def write_evidence(
         "image": attempt.image_uri,
         "image_set_sha256": attempt.image_set_sha256,
         "config": json.loads(attempt.config),
+        "replay": None if attempt.replay is None else json.loads(attempt.replay),
+        "replay_evidence": None,
         "declared_resources": {
             "machine_type": attempt.machine_type,
             "vcpus": attempt.vcpus,
@@ -175,6 +210,7 @@ def write_evidence(
             "container_memory_gb": attempt.container_memory_gb,
         },
         "exit_code": 0,
+        "worker_exit_code": overrides.get("worker_exit_code", overrides.get("exit_code", 0)),
         "timed_out": False,
         "wall_seconds": wall_seconds,
         "max_rss_kb": 1024,
@@ -222,16 +258,224 @@ def verified_group(tmp_path: Path) -> tuple[sqlite3.Connection, str]:
     return con, root
 
 
+def replay_document(_unused: Path) -> str:
+    return json.dumps(
+        {
+            "backend": {
+                "server_image_uri": "registry/replay@sha256:" + "b" * 64,
+                "fixture_sha256": "a" * 64,
+                "serving_mode": "sorted",
+                "latency_model": {
+                    "deadlines_ms": {
+                        "worker_page": 1,
+                        "pivot_probe": 1,
+                        "structure_probe": 1,
+                    },
+                    "scale": 1.0,
+                    "jitter": "none",
+                },
+            },
+            "allocation": {
+                "subject_vcpus": 4,
+                "replay_vcpus": 4,
+                "replay_memory_gb": 8,
+                "replay_parquet_connections": 20,
+                "replay_max_concurrent_requests": 256,
+                "replay_prefetch": False,
+                "replay_prefetch_max_windows": 96,
+                "replay_heap_percent": 75,
+            },
+            "capacity_status": "calibrated",
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def complete_replay_evidence(replay: str) -> CompleteReplayEvidence:
+    before = {
+        "observed_at": "2026-01-01T00:00:00+00:00",
+        "metrics": replay_metrics(0),
+    }
+    calibrated = json.loads(replay)["capacity_status"] == "calibrated"
+    return {
+        "replay": json.loads(replay),
+        "replay_evidence": {
+            "readiness": {"state": "ready", "wait_ms": 1, "attempts": 1, "last_error": None},
+            "before": before,
+            "samples": (
+                [
+                    {
+                        "observed_at": "2026-01-01T00:00:01+00:00",
+                        "elapsed_s": 1.0,
+                        "metrics": replay_metrics(1),
+                    }
+                ]
+                if calibrated
+                else []
+            ),
+            "resource_samples": (
+                [
+                    {
+                        "observed_at": "2026-01-01T00:00:01+00:00",
+                        "elapsed_s": 1.0,
+                        "interval_s": 1.0,
+                        "server_cpuset": "0-3",
+                        "subject_cpuset": "4-7",
+                        "server_cpuset_utilization": 0.25,
+                        "server_cores_used": 1.0,
+                        "subject_cpuset_utilization": 0.5,
+                        "subject_cores_used": 2.0,
+                        "host_mem_available_kb": 1024,
+                        "host_load1": 0.5,
+                    }
+                ]
+                if calibrated
+                else []
+            ),
+            "after": {
+                "observed_at": "2026-01-01T00:00:02+00:00",
+                "metrics": replay_metrics(2),
+            },
+            "errors": [],
+        },
+        "started_at": "2026-01-01T00:00:00.500000+00:00",
+        "finished_at": "2026-01-01T00:00:01.500000+00:00",
+    }
+
+
 def rows_of(con: sqlite3.Connection, root: str) -> list[dict[str, object]]:
     return report.report_rows(ledger.attempt_rows(con), adapter_root=root)
 
 
-def test_a_verified_group_reports_its_verdicts(tmp_path: Path) -> None:
+def test_report_reads_bound_results_without_consuming_verify_records(tmp_path: Path) -> None:
     con, root = verified_group(tmp_path)
     rows = rows_of(con, root)
-    assert {row["evidence_state"] for row in rows} == {"VERIFIED", "VERIFY_UNAVAILABLE"}
+    assert {row["evidence_state"] for row in rows} == {"RESULT_BOUND"}
     assert report.report_exit_code(rows, blocked=[]) == 0
-    assert "PASS" in report.render_markdown(rows, blocked=[])
+    assert "no content comparison" in report.render_markdown(rows, blocked=[])
+
+
+def test_result_replay_document_is_bound_exactly_to_the_ledger(tmp_path: Path) -> None:
+    con = fixture_ledger(tmp_path)
+    replay = replay_document(tmp_path / "manifest.tsv.gz")
+    attempt = record(con, tmp_path, tool="alpha", digest="aaaa", replay=replay)
+    complete = {
+        "readiness": {"state": "ready", "wait_ms": 1, "attempts": 1, "last_error": None},
+        "before": {"observed_at": "now", "metrics": replay_metrics(0)},
+        "samples": [{"observed_at": "now", "elapsed_s": 0.1, "metrics": replay_metrics(1)}],
+        "resource_samples": [{"server_cpuset": "0-3", "subject_cpuset": "4-7"}],
+        "after": {"observed_at": "now", "metrics": replay_metrics(1)},
+        "errors": [],
+    }
+    write_evidence(attempt, replay_evidence=complete)
+    root = adapter_root(tmp_path, "alpha")
+    row = rows_of(con, root)[0]
+    assert row["evidence_state"] == "RESULT_BOUND"
+    assert row["replay_state"] == "COMPLETE"
+
+    write_evidence(attempt, replay={"different": True})
+    row = rows_of(con, root)[0]
+    assert row["evidence_state"] == "RESULT_MISMATCH"
+
+
+def test_s3_result_must_bind_an_explicit_null_replay(tmp_path: Path) -> None:
+    con = fixture_ledger(tmp_path)
+    attempt = record(con, tmp_path, tool="alpha", digest="aaaa")
+    prefix = write_evidence(attempt)
+    result_path = prefix / "result.json"
+    result = json.loads(result_path.read_text())
+    del result["replay"]
+    result_path.write_text(json.dumps(result))
+    row = rows_of(con, adapter_root(tmp_path, "alpha"))[0]
+    assert row["evidence_state"] == "RESULT_MISMATCH"
+
+
+def test_replay_report_uses_result_json_and_declared_allocations(tmp_path: Path) -> None:
+    replay = replay_document(tmp_path / "manifest.tsv.gz")
+    con = fixture_ledger(tmp_path)
+    attempt = record(con, tmp_path, tool="alpha", digest="aaaa", replay=replay)
+    write_evidence(attempt, **complete_replay_evidence(replay))
+    root = adapter_root(tmp_path, "alpha")
+
+    row = rows_of(con, root)[0]
+    assert (row["evidence_state"], row["replay_state"], row["row_count"]) == (
+        "RESULT_BOUND",
+        "COMPLETE",
+        2,
+    )
+    assert row["declared_server_allocation"] == "cpus=0-3;memory=8GiB"
+    assert row["declared_subject_allocation"] == "cpus=4-7;memory=8GiB"
+    assert row["derived_host_headroom"] == "vcpus=2;memory=16GiB"
+    assert row["capacity_status"] == "CALIBRATED"
+
+
+def test_uncalibrated_replay_diagnostic_stays_out_of_publishable_rows(tmp_path: Path) -> None:
+    replay = json.loads(replay_document(tmp_path / "manifest.tsv.gz"))
+    replay["capacity_status"] = "uncalibrated"
+    replay_raw = json.dumps(replay, sort_keys=True, separators=(",", ":"))
+    con = fixture_ledger(tmp_path)
+    attempt = record(
+        con,
+        tmp_path,
+        tool="alpha",
+        digest="aaaa",
+        purpose="diagnostic",
+        replay=replay_raw,
+    )
+    write_evidence(attempt, **complete_replay_evidence(replay_raw))
+    root = adapter_root(tmp_path, "alpha")
+
+    row = rows_of(con, root)[0]
+
+    assert (row["capacity_status"], row["purpose"], row["evidence_state"]) == (
+        "UNCALIBRATED",
+        "diagnostic",
+        "RESULT_BOUND",
+    )
+    assert not report.is_timing(row)
+    assert "0 successful timing(s)" in report.summary_line([row])
+
+
+def test_replay_rate_counts_bound_successes_without_inspecting_products(tmp_path: Path) -> None:
+    replay = replay_document(tmp_path / "manifest.tsv.gz")
+    con = fixture_ledger(tmp_path)
+    good = record(con, tmp_path, tool="alpha", digest="aaaa", statistic="rate", replay=replay)
+    write_evidence(good, **complete_replay_evidence(replay))
+    wrong = record(con, tmp_path, tool="alpha", digest="aaaa", statistic="rate", replay=replay)
+    write_evidence(
+        wrong,
+        listing=("wrong 1",),
+        **complete_replay_evidence(replay),
+    )
+    failed = record(con, tmp_path, tool="alpha", digest="aaaa", statistic="rate", replay=replay)
+    write_evidence(
+        failed,
+        exit_code=2,
+        row_count=None,
+        **complete_replay_evidence(replay),
+    )
+    root = adapter_root(tmp_path, "alpha")
+    rows = rows_of(con, root)
+    assert report.rate_lines(rows) == [
+        "- `alpha.aaaa` (alpha text-full): 2/3 succeeded, rate 0.6667 over 3 attempt(s)"
+    ]
+
+
+def test_a_failed_canary_subject_keeps_the_report_incomplete(tmp_path: Path) -> None:
+    con = fixture_ledger(tmp_path)
+    attempt = record(con, tmp_path, tool="alpha", digest="aaaa", purpose="canary")
+    write_evidence(attempt, exit_code=124, worker_exit_code=0, row_count=None)
+
+    rows = rows_of(con, adapter_root(tmp_path, "alpha"))
+
+    assert rows[0]["evidence_state"] == "RESULT_BOUND"
+    assert (rows[0]["state"], rows[0]["exit"], rows[0]["worker_exit"]) == (
+        "SUCCEEDED",
+        124,
+        0,
+    )
+    assert report.report_exit_code(rows, blocked=[]) == 1
 
 
 def test_a_blocked_slot_keeps_the_report_from_being_final(tmp_path: Path) -> None:
@@ -252,8 +496,18 @@ def test_a_rate_case_renders_a_rate_and_a_sample_size(tmp_path: Path) -> None:
     ]
     # A rate case's surviving attempt is not a verified timing: the statistic is
     # the rate, and a mean over the survivors would be a survivorship result.
-    assert "0 verified timing(s)" in report.summary_line(rows)
-    assert report.stratum_lines(rows) == []
+    assert "0 successful timing(s)" in report.summary_line(rows)
+
+
+def test_accepted_count_failure_is_not_a_successful_timing(tmp_path: Path) -> None:
+    con = fixture_ledger(tmp_path)
+    attempt = record(con, tmp_path, tool="alpha", digest="aaaa", state="ACCEPTED")
+    write_evidence(attempt, row_count=None, row_count_error="count failed")
+
+    rows = rows_of(con, adapter_root(tmp_path, "alpha"))
+
+    assert rows[0]["evidence_state"] == "RESULT_BOUND"
+    assert "0 successful timing(s)" in report.summary_line(rows)
 
 
 def test_a_preparations_cost_rides_with_the_timing_it_enabled(tmp_path: Path) -> None:
@@ -270,11 +524,6 @@ def test_a_preparations_cost_rides_with_the_timing_it_enabled(tmp_path: Path) ->
     assert report.preparation_lines(rows) == [
         f"- `{measurement.attempt_id}` ran behind {preparation.attempt_id} (40.0s of preparation)"
     ]
-    # The preparation is measured, never compared.
-    assert report.stratum_lines(rows) == [
-        "- **text** [key,size,etag,mtime,storage_class]: 1 attempt(s) -- alpha/text-full "
-        "-- verdicts -"
-    ]
 
 
 def test_a_preparation_from_another_group_is_a_cost_this_report_cannot_state(
@@ -289,42 +538,22 @@ def test_a_preparation_from_another_group_is_a_cost_this_report_cannot_state(
     assert "crosses a group boundary" in report.preparation_lines(rows)[0]
 
 
-def test_each_bucket_is_its_own_section_and_its_own_strata(tmp_path: Path) -> None:
+def test_each_bucket_is_its_own_section(tmp_path: Path) -> None:
     con = fixture_ledger(tmp_path)
     for bucket, tool in (("bucket-one", "alpha"), ("bucket-two", "beta")):
         write_evidence(record(con, tmp_path, tool=tool, digest=bucket[-3:], bucket=bucket))
     rows = rows_of(con, adapter_root(tmp_path, "alpha", "beta"))
     markdown = report.render_markdown(rows, blocked=[])
     assert markdown.count("## bucket-") == 2
-    for bucket, tool in (("bucket-one", "alpha"), ("bucket-two", "beta")):
-        section = [row for row in rows if row["bucket"] == bucket]
-        assert report.stratum_lines(section) == [
-            f"- **text** [key,size,etag,mtime,storage_class]: 1 attempt(s) -- {tool}/text-full "
-            "-- verdicts -"
-        ]
 
 
-def test_a_key_only_mode_is_not_ranked_against_a_five_field_one(tmp_path: Path) -> None:
-    con = fixture_ledger(tmp_path)
-    write_evidence(record(con, tmp_path, tool="alpha", digest="aaaa"))
-    write_evidence(record(con, tmp_path, tool="beta", digest="bbbb", mode="text-keys"))
-    rows = rows_of(con, adapter_root(tmp_path, "alpha", "beta"))
-    assert [line.split(":")[0] for line in report.stratum_lines(rows)] == [
-        "- **text** [key]",
-        "- **text** [key,size,etag,mtime,storage_class]",
-    ]
-
-
-def test_a_canary_is_not_a_comparison_subject(tmp_path: Path) -> None:
+def test_a_canary_is_reported_without_becoming_a_timing(tmp_path: Path) -> None:
     con = fixture_ledger(tmp_path)
     write_evidence(record(con, tmp_path, tool="alpha", digest="aaaa"))
     write_evidence(record(con, tmp_path, tool="alpha", digest="cccc", purpose="canary"))
     rows = rows_of(con, adapter_root(tmp_path, "alpha"))
     assert len(rows) == 2
-    assert report.stratum_lines(rows) == [
-        "- **text** [key,size,etag,mtime,storage_class]: 1 attempt(s) -- alpha/text-full "
-        "-- verdicts -"
-    ]
+    assert sum(report.is_timing(row) for row in rows) == 1
 
 
 def test_evidence_naming_another_attempt_is_refused(tmp_path: Path) -> None:
@@ -380,8 +609,8 @@ def test_a_subject_killed_before_its_product_reports_its_failure_not_a_mismatch(
     (prefix / "native/listing.txt").unlink()
 
     rows = rows_of(con, adapter_root(tmp_path, "alpha"))
-    assert report.result_semantic_errors(document) == []
-    assert rows[0]["evidence_state"] == "VERIFY_UNAVAILABLE"
+    assert verify.result_semantic_errors(document) == []
+    assert rows[0]["evidence_state"] == "RESULT_BOUND"
     assert (rows[0]["exit"], rows[0]["max_rss_kb"]) == (137, 1024)
 
 
@@ -417,13 +646,13 @@ def test_a_setup_failure_reads_as_evidence_rather_than_a_broken_result(tmp_path:
     document["wall_seconds"] = None
     (prefix / "result.json").write_text(json.dumps(document))
 
-    assert report.result_semantic_errors(document) == []
+    assert verify.result_semantic_errors(document) == []
     assert verify.check_failed_subject(document) == f"subject exited {measure.EXIT_SETUP_FAILED}"
     rows = rows_of(con, adapter_root(tmp_path, "alpha"))
-    assert rows[0]["evidence_state"] == "VERIFY_UNAVAILABLE"
+    assert rows[0]["evidence_state"] == "RESULT_BOUND"
     # And the null is still load-bearing: a zero exit beside no execution is a
     # result that contradicts itself.
-    assert report.result_semantic_errors({**document, "exit_code": 0}) == ["exit_code"]
+    assert verify.result_semantic_errors({**document, "exit_code": 0}) == ["exit_code"]
 
 
 def test_an_rss_figure_is_rendered_beside_the_floor_it_sits_on(tmp_path: Path) -> None:
@@ -459,17 +688,15 @@ def test_an_rss_figure_is_rendered_beside_the_floor_it_sits_on(tmp_path: Path) -
     assert "max_rss_floor_kb" in report.render_markdown(list(rows.values()), blocked=[])
 
 
-def test_a_verify_record_that_disagrees_with_its_own_diff_is_not_a_verdict(
+def test_report_ignores_a_verify_record_and_keeps_the_bound_result(
     tmp_path: Path,
 ) -> None:
     con, root = verified_group(tmp_path)
     rows = rows_of(con, root)
-    compared = next(row for row in rows if row["evidence_state"] == "VERIFIED")
+    compared = rows[0]
     path = Path(str(tmp_path / "evidence" / "bucket-one" / str(compared["attempt_id"])))
-    record_json = json.loads((path / "verify.json").read_text())
-    record_json["diff"]["missing"] = ["a/three"]
-    (path / "verify.json").write_text(json.dumps(record_json))
+    (path / "verify.json").write_text('{"untrusted": "derived content"}')
     rebuilt = rows_of(con, root)
     mismatched = next(row for row in rebuilt if row["attempt_id"] == compared["attempt_id"])
-    assert (mismatched["evidence_state"], mismatched["verdict"]) == ("VERIFY_MISMATCH", "-")
-    assert report.report_exit_code(rebuilt, blocked=[]) == 1
+    assert mismatched["evidence_state"] == "RESULT_BOUND"
+    assert report.report_exit_code(rebuilt, blocked=[]) == 0

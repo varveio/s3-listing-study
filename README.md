@@ -154,17 +154,25 @@ support a description or explain a question, but executable behavior is not a
 project result until a committed run checks it. We expect some of the starting
 notes to be wrong; finding and fixing those is part of the work.
 
-## Two phases
+## Screening and validation
 
-**Phase 1 is real S3:** real buckets, real networks, and real failures.
-Credibility is established there first, because a real-S3 result needs no
-argument about whether the environment was faithful.
+**Replay comes first for screening and configuration search.** Every candidate
+sees the same captured listing, declared latency treatment, and controlled
+backend. That lets the study eliminate clearly slower candidates without making
+many high-fan-out tools contend for the same live S3 key ranges. The replay
+server is part of the measuring instrument, so every attempt must carry exact
+fixture and server identity plus evidence that the server was not the
+bottleneck. The worker records row count after timing and retains the raw
+product; routine reporting reads only `result.json`. Replay results are labeled
+synthetic.
 
-**Phase 2 adds Swath's replay endpoint:** a captured listing served as an S3
-`ListObjectsV2` endpoint for deterministic request counting, request-shape
-capture, and fault injection. Because the endpoint is part of Swath, it must be
-checked against real-S3 captures before it is used to describe other tools. It
-reports observations; it does not decide correctness by itself.
+**Real S3 validates the finalists.** Once replay has narrowed each tool to its
+strongest configuration or small candidate set, a few fresh-VM runs execute one
+subject at a time against real S3. A nearby contender is included when the goal
+is to validate replay's selection, not merely show that the selected
+configuration works. Real-S3 observations govern claims about S3; disagreement
+triggers investigation rather than a composite score. Failure and congestion
+behavior remain a separate workload.
 
 ## Running the checks in this repo
 

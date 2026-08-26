@@ -13,7 +13,8 @@ Capsule contributors should read [`tool-structure.md`](tool-structure.md),
 [`capsule-authoring.md`](capsule-authoring.md). Operators should start at the
 benchmark README, then work from
 [`../../benchmark/docs/running.md`](../../benchmark/docs/running.md) — the
-campaign runbook, whose procedure stays `VERIFIED: no` until a real campaign
-exercises it. [`artifact-availability.md`](artifact-availability.md) records
+campaign runbook, whose per-step markers distinguish the committed bounded
+replay canary from the still-unverified recovery, verification, real-S3, and
+staged-fixture paths. [`artifact-availability.md`](artifact-availability.md) records
 which historical capsule artifacts remain retrievable; those old receipts are
 evidence and are never rewritten to match the current harness.

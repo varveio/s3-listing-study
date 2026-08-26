@@ -70,6 +70,8 @@ from typing import TYPE_CHECKING, Any
 
 import yaml
 
+from benchmark import replay as replay_contract
+
 if TYPE_CHECKING:
     # Not imported at runtime: most callers of this module never touch a
     # capsule at all, and the adapter loader pulls in the runtime contract.
@@ -85,8 +87,22 @@ if TYPE_CHECKING:
 # `product` key rather than misreading the generator as a row. A v1 plan is
 # refused rather than reinterpreted.
 SPEC_VERSION = 2
+# Replay's first draft used spec 2 names whose meanings were incomplete (the
+# image URI doubled as fixture identity and allocation was inferred). A replay
+# document is therefore accepted only at v3; ordinary S3 plans and the shared
+# tables remain honest v2 documents rather than receiving a cosmetic bump.
+REPLAY_SPEC_VERSION = replay_contract.REPLAY_SPEC_VERSION
 
-TOP_LEVEL = ("spec_version", "bucket", "region", "auth_role", "defaults", "tools", "exclude")
+TOP_LEVEL = (
+    "spec_version",
+    "bucket",
+    "region",
+    "auth_role",
+    "replay",
+    "defaults",
+    "tools",
+    "exclude",
+)
 
 # What a box is, in the terms a plan states it: shape, not product name. The
 # machine type is resolved from the pair through benchmark/plans/instances.yaml, so a plan
@@ -100,6 +116,32 @@ BOX_FIELDS = ("vcpus", "memory_gb")
 # container sees the whole box. Unlike a heap share, this means something to
 # every tool.
 PROCESS_FIELDS = ("container_memory_gb",)
+
+# What the replay backend gets, when a plan has one. Prefixed rather than nested
+# so a row states them the way it states every other allocation -- a flat scalar
+# per key, resolving through the same three layers -- while still reading, at a
+# glance, as belonging to the server and not to the subject. `vcpus` and
+# `replay_vcpus` in one row are two allocations on one box, and the prefix is
+# what keeps that legible.
+#
+# These are row fields, not plan-level ones, because the server's shape is part
+# of what a case measures against: the same subject arm against a two-core server
+# and against an eight-core one are two different measurements, and a schema that
+# could not tell them apart would file both into one case. The invariants that do
+# NOT vary per case -- which fixture, which bucket, which serving mode, which
+# injected profile -- live in the plan's `replay` block instead.
+#
+# Reader-pool width and HTTP admission are deliberately separate fields. The
+# pilot changed both together, which made a CPU rung impossible to interpret:
+# one number controlled stored-reader reuse while another controlled how many
+# requests could enter the server. Both are case identity and neither is derived
+# from a subject's requested concurrency.
+REPLAY_INTEGER_FIELDS = replay_contract.REPLAY_INTEGER_FIELDS
+REPLAY_BOOLEAN_FIELDS = replay_contract.REPLAY_BOOLEAN_FIELDS
+REPLAY_FIELDS = replay_contract.REPLAY_FIELDS
+ReplayBackend = replay_contract.ReplayBackend
+ReplayPlan = replay_contract.ReplayPlan
+ReplayConfig = replay_contract.ReplayConfig
 
 # Required once resolved: a case that did not say how much memory it wanted
 # cannot be compared against one that did. The container ceiling is the
@@ -150,6 +192,7 @@ ROW_FIELDS = (
     "concurrency",
     "segments",
     *RESOURCE_FIELDS,
+    *REPLAY_FIELDS,
 )
 
 # The row axes resolution lifts into the config blob; `mode` travels separately
@@ -172,13 +215,15 @@ STATISTICS = ("timing", "rate")
 # What a layer may state: what every case under it inherits. No `mode` — eleven
 # tools have eleven mode vocabularies, so nothing above a row has one to state.
 # `signed` is here as well as in a row, for a roster swept as one stratum.
-LAYER_FIELDS = ("signed", *RESOURCE_FIELDS, *SCHEDULE_FIELDS)
+LAYER_FIELDS = ("signed", *RESOURCE_FIELDS, *SCHEDULE_FIELDS, *REPLAY_FIELDS)
 
 TOOL_FIELDS = ("cases", *LAYER_FIELDS)
 
+HEX64_RE = re.compile(r"[0-9a-f]{64}")
+
 # Anchored with ``\Z`` and applied with ``fullmatch``: ``$`` also matches before
 # a trailing newline, and a label is printed and grepped.
-CASE_LABEL_RE = re.compile(r"\A[a-z0-9][a-z0-9._-]{0,80}\Z")
+CASE_LABEL_RE = re.compile(r"\A[a-z0-9][a-z0-9._-]{0,254}\Z")
 TOOL_RE = re.compile(r"\A[a-z0-9][a-z0-9-]{0,40}\Z")
 
 
@@ -267,6 +312,14 @@ class Case:
     # declared default the capsule fills in when a row leaves an axis silent.
     # Key-sorted, matching what is hashed.
     config: tuple[tuple[str, object], ...]
+    replay: ReplayConfig | None = None
+    """The sidecar's shape, when this plan measures against a replay server.
+
+    ``None`` for a plan that lists a real bucket, which is every plan that
+    predates the replay backend — hence the default, so a case built without one
+    still means what it always meant. Carried beside ``resources`` rather than
+    inside it because they are two allocations on one box, and a reader comparing
+    cases needs to see which of the two a row moved."""
 
 
 @dataclass(frozen=True)
@@ -287,6 +340,9 @@ class Plan:
     region: str
     cases: tuple[Case, ...]
     exclusions: tuple[Exclusion, ...]
+    replay: ReplayPlan | None
+    """The backend every case here is measured against, when it is not a real
+    bucket. ``None`` for a plan that lists S3 directly."""
     # The capsules this plan resolved against. Carried because a launch expands
     # each row's declared prerequisites (:func:`expand_requirements`) from the
     # same loaded capsule the case was resolved with, rather than reloading one
@@ -461,7 +517,16 @@ def _load(
     raw, doc = _read_yaml_mapping(path, "plan")
 
     _reject_unknown(doc, TOP_LEVEL, "plan", path)
-    _require_spec_version(doc, "plan", path)
+    if doc.get("spec_version") not in {SPEC_VERSION, REPLAY_SPEC_VERSION}:
+        raise PlanError(
+            f"plan {path} has spec_version {doc.get('spec_version')!r}, this reader supports "
+            f"{SPEC_VERSION} (S3) and {REPLAY_SPEC_VERSION} (replay)"
+        )
+    if doc.get("spec_version") == REPLAY_SPEC_VERSION and "replay" not in doc:
+        raise PlanError(
+            f"plan {path} uses replay-only spec_version {REPLAY_SPEC_VERSION} without "
+            "a replay backend"
+        )
 
     bucket = _string(doc, "bucket", "plan", path)
     # The filename is the bucket's name, so a plan that disagrees with its own
@@ -480,6 +545,15 @@ def _load(
     _reject_mode(defaults, "[defaults]", path)
     _reject_unknown(defaults, LAYER_FIELDS, "[defaults]", path)
     base_resources = _resources(defaults, "defaults", path, complete=True)
+    replay_backend = _replay_backend(doc, path)
+    # Sized in defaults when there is a backend at all, so every row resolves a
+    # server without each one restating it; a row still overrides to sweep it.
+    base_replay = _replay_shape(defaults, "defaults", path, complete=replay_backend is not None)
+    if replay_backend is None and base_replay:
+        raise PlanError(
+            f"'[defaults]' in {path} sizes a replay server "
+            f"({', '.join(sorted(base_replay))}) but the plan declares no [replay] block"
+        )
     base_schedule = _schedule(defaults, "defaults", path, complete=True)
     base_signed = _signed(defaults, "defaults", path, complete=True)
 
@@ -499,7 +573,7 @@ def _load(
         region=region,
         cases=_cases(
             doc,
-            {**base_resources, **base_signed},
+            {**base_resources, **base_replay, **base_signed},
             base_schedule,
             modes,
             _Context(
@@ -509,10 +583,12 @@ def _load(
                 heap=heap_config,
                 adapters=resolved_adapters,
                 auth_role=auth_role,
+                replay=replay_backend,
                 path=path,
             ),
         ),
         exclusions=_exclusions(doc, path),
+        replay=replay_backend,
         adapters=resolved_adapters,
     )
     _reject_overlap(plan, path)
@@ -576,6 +652,52 @@ def _resources(
         for field in RESOURCE_FIELDS
         if field in table
     }
+
+
+REPLAY_BLOCK_FIELDS = replay_contract.REPLAY_BLOCK_FIELDS
+
+
+def _replay_backend(doc: Mapping[str, Any], path: Path) -> ReplayPlan | None:
+    """The plan's ``replay`` block, or ``None`` for a plan that lists a real bucket."""
+    if "replay" not in doc:
+        return None
+    if doc.get("spec_version") != REPLAY_SPEC_VERSION:
+        raise PlanError(
+            f"plan {path} uses a replay backend under spec_version {doc.get('spec_version')!r}; "
+            f"replay requires {REPLAY_SPEC_VERSION} so the incomplete v2 fields cannot be misread"
+        )
+    block = _table(doc, "replay", "replay", path)
+    try:
+        return replay_contract.parse_plan(block)
+    except replay_contract.ReplayError as exc:
+        raise PlanError(f"'[replay]' in {path}: {exc}") from exc
+
+
+def _replay_shape(
+    table: Mapping[str, Any], where: str, path: Path, *, complete: bool
+) -> dict[str, Any]:
+    """The ``replay_*`` keys ``table`` states, flat, like :func:`_resources`."""
+    optional_defaults = {"replay_prefetch_max_windows": 96}
+    if complete:
+        missing = sorted(set(REPLAY_FIELDS) - set(table) - set(optional_defaults))
+        if missing:
+            raise PlanError(
+                f"'{where}' in {path} is missing {', '.join(missing)} — a plan with a "
+                "replay backend sizes it in defaults, so every case resolves one"
+            )
+    resolved: dict[str, Any] = {}
+    if complete:
+        resolved.update(optional_defaults)
+    for field in REPLAY_INTEGER_FIELDS:
+        if field not in table:
+            continue
+        resolved[field] = _positive_int(table[field], field, where, path)
+    if "replay_prefetch" in table:
+        value = table["replay_prefetch"]
+        if not isinstance(value, bool):
+            raise PlanError(f"'{where}' 'replay_prefetch' in {path} is not a boolean: {value!r}")
+        resolved["replay_prefetch"] = value
+    return resolved
 
 
 def _reject_mode(table: Mapping[str, Any], where: str, path: Path) -> None:
@@ -879,6 +1001,7 @@ class _Context:
     heap: HeapConfig
     adapters: Mapping[str, LoadedCommandAdapter]
     auth_role: str | None
+    replay: ReplayPlan | None
     path: Path
 
 
@@ -928,6 +1051,7 @@ def _tool_cases(
     settings = {
         **base_resources,
         **_resources(table, where, path, complete=False),
+        **_replay_shape(table, where, path, complete=False),
         **_signed(table, where, path, complete=False),
     }
     schedule = {**base_schedule, **_schedule(table, where, path, complete=False)}
@@ -1062,6 +1186,10 @@ def _row_field_value(key: str, value: Any, label: str, path: Path) -> str | int:
         return str(value)
     if key == "signed":
         return _signed({key: value}, label, path, complete=False)[key]
+    if key == "replay_prefetch":
+        if not isinstance(value, bool):
+            raise PlanError(f"'{label}' '{key}' in {path} is not a boolean: {value!r}")
+        return value
     return _positive_int(value, key, label, path)
 
 
@@ -1270,6 +1398,7 @@ def _case(
         machine_type=machine_type,
         container_memory_gb=container_memory_gb,
     )
+    resolved_replay = _case_replay(tool, resolved, shape, context, path)
     chosen = tuple(
         (key, auth_role is not None) if key == "signed" else (key, value) for key, value in chosen
     )
@@ -1277,7 +1406,8 @@ def _case(
     if not CASE_LABEL_RE.fullmatch(label):
         raise PlanError(
             f"'tools.{tool}' in {path} generates the unusable case label {label!r} "
-            "(axis values must be lowercase, digits, '.', '_' or '-')"
+            "(axis values must be lowercase, digits, '.', '_' or '-', and the label must be "
+            "at most 255 characters)"
         )
     case = Case(
         tool=tool,
@@ -1292,9 +1422,56 @@ def _case(
         heap_percent=context.heap.percent,
         axes=chosen,
         config=tuple(config.items()),
+        replay=resolved_replay,
     )
     _compile_inline(case, adapter, path)
     return case
+
+
+def _case_replay(
+    tool: str,
+    resolved: Mapping[str, Any],
+    shape: tuple[int, int],
+    context: _Context,
+    path: Path,
+) -> ReplayConfig | None:
+    """The sidecar this case gives its replay server, checked against the box.
+
+    Two allocations share one machine, so they are checked against it together:
+    a plan that hands eight cores to the subject and eight to the server on an
+    eight-core box has written something that cannot run, and it should be told
+    so while it is still a file rather than after a VM has booted.
+    """
+    if context.replay is None:
+        stated = sorted(field for field in REPLAY_FIELDS if field in resolved)
+        if stated:
+            raise PlanError(
+                f"'tools.{tool}' in {path} sizes a replay server ({', '.join(stated)}) "
+                "but the plan declares no [replay] block"
+            )
+        return None
+
+    try:
+        replay = replay_contract.make_config(
+            context.replay, {field: resolved[field] for field in REPLAY_FIELDS}
+        )
+        replay_contract.allocation_summary(
+            replay,
+            box_vcpus=shape[0],
+            box_memory_gb=shape[1],
+            container_memory_gb=resolved.get("container_memory_gb"),
+        )
+    except replay_contract.ReplayError as exc:
+        raise PlanError(f"'tools.{tool}' in {path}: {exc}") from exc
+    purpose = _purpose(
+        tool, resolved.get("purpose"), str(resolved["mode"]), context.adapters[tool], path
+    )
+    if purpose == "measurement" and replay.capacity_status != "calibrated":
+        raise PlanError(
+            f"'tools.{tool}' in {path} is a replay measurement while capacity_status is "
+            f"{replay.capacity_status!r}; replay capacity is not calibrated"
+        )
+    return replay
 
 
 def _purpose(

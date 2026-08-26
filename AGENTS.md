@@ -23,8 +23,14 @@ but only as a fact about that one run). All eleven have now run at smoke on
 amd64 through the now-retired groundwork attempt engine — `aws-cli`, `s5cmd`, `s7cmd`, `rclone`,
 `minio-mc`, `s3-fast-list` and Swath anonymously, and `s3p`, `s3kor`, `s4cmd`
 and `ps3` with a credential, which previously blocked them. Running is not
-verifying: those engine attempts carry no verdict, because auditing one against
-a reference manifest is not implemented yet. Per-tool status:
+verifying: those retired-engine attempts carry no verdict and were never bound
+to the current verifier. The replay harness now retains each raw product and
+reports the row count measured inside the worker. A committed bounded
+three-tool canary qualifies replay submit, poll/status, reporting, and receipt
+export for those exact capsule shapes. It is not a benchmark, content or
+capacity qualification, staged-fixture run, or qualification of the other eight
+capsules.
+Per-tool status:
 `tools/README.md`.
 
 ## Project principles

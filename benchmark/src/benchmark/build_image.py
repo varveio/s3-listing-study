@@ -309,6 +309,14 @@ def validate_executed_sources(
         if match is None:
             raise BuildError(f"{tool}: toolbox recipe has no isolated build stage")
         stage = match.group("body")
+        if selection.tool_artifact_kind == "container-image":
+            pinned_parent = (
+                f"FROM {selection.tool_artifact_locator}"
+                f"@sha256:{selection.tool_artifact_sha256} AS {stage_name}"
+            )
+            if pinned_parent not in match.group(0):
+                raise BuildError(f"{tool}: toolbox stage does not use the declared image digest")
+            continue
         checksum = f"--checksum=sha256:{selection.tool_artifact_sha256}"
         if checksum not in stage or selection.tool_artifact_locator not in stage:
             raise BuildError(f"{tool}: toolbox stage does not use the declared artifact")
