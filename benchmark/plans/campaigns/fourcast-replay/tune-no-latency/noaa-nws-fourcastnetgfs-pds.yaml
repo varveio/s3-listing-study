@@ -1,7 +1,8 @@
 # Focused correction for s3-fast-list on the 4,081,170-row FourCast fixture.
-# The plain row produces the tool-native keyspace distribution; the hinted row
-# splits it into 16 ranges and lists those ranges with the upstream default
-# concurrency ceiling of 100. No injected latency isolates the mode correction.
+# The hinted row makes the planner create a preparation-only plain listing that
+# publishes the tool-native keyspace distribution with a bound digest. It then
+# splits 16 ranges and lists them with the upstream concurrency ceiling of 100.
+# No injected latency isolates the mode correction.
 spec_version: 3
 
 bucket: noaa-nws-fourcastnetgfs-pds
@@ -34,8 +35,7 @@ defaults:
 tools:
   s3-fast-list:
     cases:
-      - {mode: list, purpose: diagnostic}
-      - {mode: list-hinted, segments: 16, purpose: diagnostic}
+      - {mode: list-hinted, concurrency: 100, segments: 16, purpose: diagnostic}
 
 # This is a scoped two-arm mode correction, not the full-roster panel. s4cmd's
 # owner exclusion remains central in tools.yaml and is intentionally not repeated.

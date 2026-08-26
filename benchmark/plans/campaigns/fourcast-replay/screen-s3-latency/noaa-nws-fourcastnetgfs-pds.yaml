@@ -55,7 +55,8 @@ tools:
       - {mode: recursive-walk, concurrency: 8, purpose: diagnostic}
   s3-fast-list:
     cases:
-      - {mode: list, purpose: diagnostic}
+      # The planner creates the plain listing as a digest-bound preparation;
+      # the representative timed row is the hinted listing.
       - {mode: list-hinted, concurrency: 100, segments: 16, purpose: diagnostic}
   s3kor:
     cases:
