@@ -3,7 +3,7 @@ COPY (
     encode(printf('group-%02d/object-%06d.dat', i // 128, i)) AS key,
     (1024 + i)::BIGINT AS size,
     TIMESTAMP '2026-01-01 00:00:00' + i * INTERVAL 1 SECOND AS last_modified,
-    printf('\"%032x\"', i) AS etag,
+    printf('%032x', i) AS etag,
     'STANDARD'::VARCHAR AS storage_class,
     NULL::VARCHAR AS version_id,
     NULL::BOOLEAN AS is_latest,

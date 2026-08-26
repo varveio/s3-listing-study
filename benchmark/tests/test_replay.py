@@ -102,17 +102,20 @@ def test_fixture_manifest_binds_names_sizes_and_bytes(tmp_path: Path) -> None:
 def test_committed_runner_fixture_is_small_paginated_and_digest_bound() -> None:
     fixture = Path(__file__).parents[2] / "benchmark/fixtures/replay-canary"
     digest, rows = replay_fixture.fixture_manifest(fixture)
-    assert digest == "824ec0542f8fcab0102a2b8e9737b1a60acdad84a4c42e5629bd2d2eed38414c"
+    assert digest == "6e1c2d47a92bbd1062469fb323f95b1d0f127b4e601b93f0d94576ab16d7c8b4"
     assert len(rows) == 1
 
     parquet = fixture / "part-00000.parquet"
     with duckdb.connect() as connection:
         row = connection.execute(
-            "SELECT count(*), min(decode(key)), max(decode(key)) FROM read_parquet(?)",
+            "SELECT count(*), min(decode(key)), max(decode(key)), min(etag), max(etag) "
+            "FROM read_parquet(?)",
             [str(parquet)],
         ).fetchone()
     assert row == (
         2048,
         "group-00/object-000000.dat",
         "group-15/object-002047.dat",
+        "00000000000000000000000000000000",
+        "000000000000000000000000000007ff",
     )
