@@ -1934,11 +1934,12 @@ def cmd_submit(args: argparse.Namespace) -> int:
         )
     suite = validate_suite(args.suite)
     loaded = Plan.load(Path(args.plan))
+    cases = _selected_cases(loaded.cases, args.case)
     image_set = load_image_set(args.image_set, {case.tool for case in loaded.cases})
     options = _options(args)
     # The capsules declare the chains, so what a plan comes to is knowable before
     # anything is contacted: N rows, M attempts, K slots.
-    steps = expand_launch(loaded.cases, loaded.adapters)
+    steps = expand_launch(cases, loaded.adapters)
     if args.dry_run:
         # Nothing is journaled and nothing is created, so every case renders at
         # the ordinal a first launch would give it.
@@ -1954,7 +1955,7 @@ def cmd_submit(args: argparse.Namespace) -> int:
         for line in rendered:
             print(line)
         _announce_shape(
-            loaded.cases,
+            cases,
             steps,
             slots=sum(1 for step in steps if step.waits_for is not None),
         )
@@ -1975,11 +1976,37 @@ def cmd_submit(args: argparse.Namespace) -> int:
             stagger_seconds=args.stagger_seconds,
         )
         launch.run(steps)
-        _announce_shape(loaded.cases, steps, slots=launch.booked)
+        _announce_shape(cases, steps, slots=launch.booked)
         print(f"campaign: group {launch.group_id}")
     finally:
         con.close()
     return 0
+
+
+def _selected_cases(cases: tuple[Case, ...], selectors: list[str] | None) -> tuple[Case, ...]:
+    """Select exact resolved plan rows without weakening full-plan validation.
+
+    A label is the human-readable, deterministic row name emitted by
+    ``resolve-plan``. Pair it with the tool because labels are unique only
+    within one capsule. Selection happens after :meth:`Plan.load`, so an
+    invalid unselected row still refuses the launch rather than escaping review.
+    """
+    if not selectors:
+        return cases
+    wanted: set[tuple[str, str]] = set()
+    for selector in selectors:
+        tool, separator, label = selector.partition(":")
+        if not separator or not tool or not label:
+            raise CampaignError("--case must be TOOL:LABEL as emitted by resolve-plan")
+        key = (tool, label)
+        if key in wanted:
+            raise CampaignError(f"--case selects {selector!r} more than once")
+        wanted.add(key)
+    available = {(case.tool, case.label): case for case in cases}
+    missing = sorted(f"{tool}:{label}" for tool, label in wanted - set(available))
+    if missing:
+        raise CampaignError(f"--case does not match a resolved plan row: {', '.join(missing)}")
+    return tuple(case for case in cases if (case.tool, case.label) in wanted)
 
 
 def _announce_shape(cases: Iterable[Case], steps: Iterable[Step], *, slots: int) -> None:
@@ -2169,6 +2196,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     provider(submit)
     submit.add_argument("--suite", required=True)
     submit.add_argument("--plan", required=True)
+    submit.add_argument(
+        "--case",
+        action="append",
+        metavar="TOOL:LABEL",
+        help="submit only this exact resolved plan row; repeat for more rows. LABEL is the "
+        "case value emitted by resolve-plan, and the full plan is still validated",
+    )
     submit.add_argument("--group", help="name this launch instead of minting a timestamp")
     submit.add_argument(
         "--repeat",

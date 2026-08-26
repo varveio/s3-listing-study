@@ -558,6 +558,89 @@ def test_a_dry_run_renders_every_planned_attempt_and_writes_nothing(
     assert not state.exists()
 
 
+def test_submit_case_selector_names_one_fully_validated_plan_row(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    image_set(tmp_path)
+    plan = loaded_plan()
+    case = next(case for case in plan.cases if case.tool == "aws-cli")
+    assert (
+        campaign.main(
+            [
+                "--state",
+                str(tmp_path / "campaign.db"),
+                "submit",
+                "--suite",
+                SUITE,
+                "--plan",
+                str(PLAN_PATH),
+                "--case",
+                f"{case.tool}:{case.label}",
+                "--project",
+                "p",
+                "--location",
+                "us-east1",
+                "--results-bucket",
+                "results",
+                "--image-set",
+                str(tmp_path / "images.json"),
+                "--secret-resource",
+                AUTH_SECRET,
+                "--anonymous-worker-sa",
+                "anon@example.test",
+                "--authenticated-worker-sa",
+                "auth@example.test",
+                "--dry-run",
+            ]
+        )
+        == 0
+    )
+    rendered = capsys.readouterr().out.splitlines()
+    assert len(rendered) == 2
+    assert rendered[0].startswith("aws-cli.")
+    assert rendered[1] == "campaign: 1 plan row(s) expand to 1 attempt(s) and 0 slot(s)"
+
+
+@pytest.mark.parametrize("selector", ["aws-cli", "aws-cli:not-a-case"])
+def test_submit_case_selector_refuses_malformed_or_unknown_rows(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], selector: str
+) -> None:
+    image_set(tmp_path)
+    assert (
+        campaign.main(
+            [
+                "--state",
+                str(tmp_path / "campaign.db"),
+                "submit",
+                "--suite",
+                SUITE,
+                "--plan",
+                str(PLAN_PATH),
+                "--case",
+                selector,
+                "--project",
+                "p",
+                "--location",
+                "us-east1",
+                "--results-bucket",
+                "results",
+                "--image-set",
+                str(tmp_path / "images.json"),
+                "--secret-resource",
+                AUTH_SECRET,
+                "--anonymous-worker-sa",
+                "anon@example.test",
+                "--authenticated-worker-sa",
+                "auth@example.test",
+                "--dry-run",
+            ]
+        )
+        == 1
+    )
+    assert "campaign: --case" in capsys.readouterr().err
+    assert not (tmp_path / "campaign.db").exists()
+
+
 def test_an_existing_job_is_submitted_only_when_it_matches_recorded_intent(
     tmp_path: Path,
 ) -> None:

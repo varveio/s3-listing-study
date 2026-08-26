@@ -139,6 +139,20 @@ they name the step that will pay each slot, which is where a plan that states a
 knob the producing mode ignores shows up as an extra bootstrap listing rather
 than as a silent duplicate hours later.
 
+To submit only an exact resolved row from the same plan, copy its `case` value
+from `resolve-plan --json` and pair it with the tool:
+
+```sh
+uv run python benchmark/src/benchmark/campaign.py submit \
+  ... \
+  --case 'swath:recursive-parquet.purpose-diagnostic.concurrency-64...'
+```
+
+Repeat `--case TOOL:LABEL` to select more than one row. Selection happens only
+after the complete plan has loaded and validated; it is an operational filter,
+not a way to hide an invalid row or create a second plan file. Always dry-run
+the filtered submission before creating jobs.
+
 Two flags change what a repeated `submit` does with what it finds:
 
 - **`--repeat`** submits a case that already has a successful attempt.
