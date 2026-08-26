@@ -30,6 +30,7 @@ from benchmark.runtime.command_adapter import HEAP_PERCENT
 
 ROOT = Path(__file__).parents[2]
 PLAN_PATH = ROOT / "benchmark/plans/buckets/noaa-ghcn-pds.yaml"
+REPLAY_CANARY = ROOT / "benchmark/plans/canaries/runner-replay-canary.yaml"
 DIGEST = "a" * 64
 PLATFORM = "9" * 64
 AUTH_SECRET = "projects/p/secrets/aws-credentials/versions/1"
@@ -168,7 +169,7 @@ def test_replay_case_slot_attempt_and_request_keep_one_canonical_document(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(batch_client, "ensure_job", lambda *a, **k: ("SUBMITTED", None))
-    plan = Plan.load(bench.default_path("idc-open-data"))
+    plan = Plan.load(REPLAY_CANARY)
     case = plan.cases[0]
     assert case.replay is not None
     images = image_set(tmp_path)
@@ -204,9 +205,9 @@ def test_replay_case_slot_attempt_and_request_keep_one_canonical_document(
         "commands": [
             "serve",
             "--fixture",
-            "/fixtures/idc-open-data",
+            "/fixtures/runner-replay-canary",
             "--bucket",
-            "idc-open-data",
+            "runner-replay-canary",
             "--host",
             "127.0.0.1",
             "--port",
@@ -214,13 +215,13 @@ def test_replay_case_slot_attempt_and_request_keep_one_canonical_document(
             "--metrics-port",
             "19192",
             "--serving-mode",
-            "sorted",
+            "duckdb",
             "--parquet-connections",
-            "20",
+            "4",
             "--max-concurrent-requests",
-            "2048",
+            "16",
         ],
-        "options": "--network host --cpuset-cpus=0-9 --memory=8g --memory-swap=8g",
+        "options": "--network host --cpuset-cpus=0-1 --memory=2g --memory-swap=2g",
     }
     assert server["environment"] == {
         "variables": {
@@ -238,7 +239,7 @@ def test_replay_case_slot_attempt_and_request_keep_one_canonical_document(
         expected,
     ]
     assert subject["container"]["options"] == (
-        "--network host --cpuset-cpus=10-13 --memory=4g --memory-swap=4g "
+        "--network host --cpuset-cpus=2 --memory=2g --memory-swap=2g "
         "--volume=/mnt/stateful_partition/attempt:/tmp/attempt"
     )
     uncapped = replace(attempt, container_memory_gb=None)
@@ -247,7 +248,7 @@ def test_replay_case_slot_attempt_and_request_keep_one_canonical_document(
     )
     uncapped_subject = uncapped_request["taskGroups"][0]["taskSpec"]["runnables"][-1]
     assert uncapped_subject["container"]["options"] == (
-        "--network host --cpuset-cpus=10-13 --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
+        "--network host --cpuset-cpus=2 --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
     )
     uncapped_commands = uncapped_subject["container"]["commands"]
     assert uncapped_commands[uncapped_commands.index("--container-memory-gb") + 1] == "none"
@@ -262,8 +263,8 @@ def test_replay_case_slot_attempt_and_request_keep_one_canonical_document(
     assert "environment" not in signed_task
     assert "secretVariables" not in signed_server["environment"]
     assert signed_subject["environment"] == {"secretVariables": {CREDENTIAL_ENV_VAR: AUTH_SECRET}}
-    assert task["computeResource"] == {"cpuMilli": "16000", "memoryMib": "32768"}
-    assert task["maxRunDuration"] == "4805s"
+    assert task["computeResource"] == {"cpuMilli": "4000", "memoryMib": "8192"}
+    assert task["maxRunDuration"] == "1505s"
     retried = campaign.retry_request_document(
         request,
         job_name="retry-job",
@@ -354,7 +355,7 @@ def test_uri_fixture_is_staged_before_the_server_and_never_put_in_its_image(
 def test_renderer_refuses_malformed_frozen_replay_allocation(
     tmp_path: Path, field: str, value: int
 ) -> None:
-    plan = Plan.load(bench.default_path("idc-open-data"))
+    plan = Plan.load(REPLAY_CANARY)
     case = plan.cases[0]
     images = image_set(tmp_path)
     attempt = campaign.planned_attempt(

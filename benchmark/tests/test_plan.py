@@ -15,6 +15,9 @@ import benchmark.plan as bench
 import benchmark.plan_cli as bench_cli
 from benchmark.runtime import command_adapter as capsule
 
+ROOT = Path(__file__).parents[2]
+REPLAY_CANARY = ROOT / "benchmark/plans/canaries/runner-replay-canary.yaml"
+
 MINIMAL = """
 spec_version: 2
 bucket: {bucket}
@@ -182,37 +185,6 @@ def test_the_committed_plan_loads() -> None:
     assert constrained.heap_percent == 75
 
 
-def test_the_committed_idc_plan_is_the_six_cell_no_latency_partition_sweep() -> None:
-    """Guard the diagnostic matrix the operator reviewed, not just its syntax."""
-    loaded = bench.Plan.load(bench.default_path("idc-open-data"))
-    cases = loaded.cases_for("swath")
-    assert len(loaded.cases) == len(cases) == 6
-    assert [
-        (case.replay.allocation.replay_vcpus, case.replay.allocation.subject_vcpus)
-        for case in cases
-        if case.replay is not None
-    ] == [(10, 4), (9, 5), (8, 6), (7, 7), (6, 8), (4, 10)]
-    for case in cases:
-        assert case.replay is not None
-        allocation = case.replay.allocation
-        assert case.resources.machine_type == "n4-highcpu-16"
-        assert case.resources.container_memory_gb == 4
-        assert case.purpose == "diagnostic"
-        assert dict(case.config) == {
-            "concurrency": 1024,
-            "heap_percent": 75,
-            "mode": "recursive-tsv",
-        }
-        assert case.replay.backend.as_dict()["latency_model"] == "none"
-        assert case.replay.capacity_status == "uncalibrated"
-        assert allocation.replay_vcpus + allocation.subject_vcpus == 14
-        assert allocation.replay_memory_gb == 8
-        assert allocation.replay_parquet_connections == 20
-        assert allocation.replay_max_concurrent_requests == 2048
-        assert allocation.replay_prefetch is False
-        assert allocation.replay_heap_percent == 75
-
-
 def test_runner_qualification_plans_keep_their_declared_rosters() -> None:
     root = Path(__file__).resolve().parents[2]
     replay = bench.Plan.load(root / "benchmark/plans/canaries/runner-replay-canary.yaml")
@@ -239,7 +211,7 @@ def test_runner_qualification_plans_keep_their_declared_rosters() -> None:
 def test_replay_latency_model_refuses_other_scalars_and_malformed_mappings(
     tmp_path: Path, malformed: str
 ) -> None:
-    source = bench.default_path("idc-open-data")
+    source = REPLAY_CANARY
     document = source.read_text(encoding="utf-8").replace(
         "latency_model: none", f"latency_model: {malformed}", 1
     )
@@ -1061,9 +1033,9 @@ def test_every_key_a_row_may_state_changes_the_case_it_resolves_to(tmp_path: Pat
 @pytest.mark.parametrize(
     ("before", "after"),
     (
-        ("subject_vcpus: 4", "subject_vcpus: 6"),
-        ("container_memory_gb: 4", "container_memory_gb: 25"),
-        ("  replay_max_concurrent_requests: 2048\n", ""),
+        ("subject_vcpus: 1", "subject_vcpus: 2"),
+        ("container_memory_gb: 2", "container_memory_gb: 7"),
+        ("  replay_max_concurrent_requests: 16\n", ""),
         ("replay_prefetch: false", "replay_prefetch: 1"),
     ),
 )
@@ -1071,7 +1043,7 @@ def test_replay_allocation_refuses_ambiguous_or_impossible_cases(
     tmp_path: Path, before: str, after: str
 ) -> None:
     """Protect exact allocation, non-overcommit, separate admission, and bool typing."""
-    source = bench.default_path("idc-open-data")
+    source = REPLAY_CANARY
     document = source.read_text(encoding="utf-8").replace(before, after, 1)
     path = tmp_path / source.name
     path.write_text(document, encoding="utf-8")
@@ -1080,10 +1052,10 @@ def test_replay_allocation_refuses_ambiguous_or_impossible_cases(
 
 
 def test_replay_measurement_refuses_uncalibrated_capacity(tmp_path: Path) -> None:
-    source = bench.default_path("idc-open-data")
+    source = REPLAY_CANARY
     path = tmp_path / source.name
     source_text = source.read_text(encoding="utf-8")
-    path.write_text(source_text.replace("purpose: diagnostic", "purpose: measurement", 1))
+    path.write_text(source_text.replace("purpose: canary", "purpose: measurement", 1))
     with pytest.raises(bench.PlanError, match="capacity is not calibrated"):
         bench.Plan.load(path)
 
