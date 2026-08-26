@@ -564,7 +564,7 @@ def _fixture_staging_script(uri: str, expected_sha256: str) -> str:
 
     The digest is over sorted ``name<TAB>size<TAB>sha256<NL>`` rows for the
     immediate ``*.parquet`` children. The check runs before the replay server
-    starts, so a mutable wildcard can select only the bytes the case named.
+    starts, so mutable storage can serve only the bytes the case named.
     """
     destination = shlex.quote(REPLAY_FIXTURE_CONTAINER_DIR)
     source = shlex.quote(uri)

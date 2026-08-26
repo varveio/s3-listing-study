@@ -22,6 +22,8 @@ results/raw/
 # docs/smoke-bucket.md and the receipts. Safety net:
 harness/manifests/
 *.tsv.gz
+# Replay fixtures are generated once and published as immutable staged inputs.
+benchmark/fixtures/replay-canary/*.parquet
 
 # Scratch
 out/

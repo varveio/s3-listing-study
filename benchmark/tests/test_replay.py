@@ -4,6 +4,7 @@ import hashlib
 from pathlib import Path
 
 import duckdb
+import pytest
 
 from benchmark import replay, replay_fixture
 
@@ -99,13 +100,25 @@ def test_fixture_manifest_binds_names_sizes_and_bytes(tmp_path: Path) -> None:
     assert digest == hashlib.sha256("".join(rows).encode()).hexdigest()
 
 
-def test_committed_runner_fixture_is_small_paginated_and_digest_bound() -> None:
-    fixture = Path(__file__).parents[2] / "benchmark/fixtures/replay-canary"
+def test_staged_fixture_refuses_a_wildcard_that_would_require_bucket_listing() -> None:
+    document = config().as_dict()
+    backend = document["backend"]
+    assert isinstance(backend, dict)
+    backend["fixture_uri"] = "gs://fixtures/case/*.parquet"
+    with pytest.raises(replay.ReplayError, match="one exact"):
+        replay.parse_document(document)
+
+
+def test_generated_runner_fixture_is_small_paginated_and_digest_bound(tmp_path: Path) -> None:
+    source = Path(__file__).parents[2] / "benchmark/fixtures/replay-canary"
+    assert list(source.glob("*.parquet")) == []
+    fixture = tmp_path / "fixture"
+    parquet = fixture / "part-00000.parquet"
+    replay_fixture.generate_parquet(source / "generate.sql", parquet)
     digest, rows = replay_fixture.fixture_manifest(fixture)
     assert digest == "6e1c2d47a92bbd1062469fb323f95b1d0f127b4e601b93f0d94576ab16d7c8b4"
     assert len(rows) == 1
 
-    parquet = fixture / "part-00000.parquet"
     with duckdb.connect() as connection:
         row = connection.execute(
             "SELECT count(*), min(decode(key)), max(decode(key)), min(etag), max(etag) "

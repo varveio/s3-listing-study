@@ -18,9 +18,9 @@ facts under `tools/<tool>/build/`.
 - `build/` holds the toolbox build inputs: `Dockerfile` builds one linux/amd64
   toolbox directly from the eleven checked-in capsule recipes (it consumes no
   parent image or retired image job), alongside its context policy and the
-  pinned worker requirements. `build/replay-server/` is the separate recipe for
-  a fixture-bearing replay-server image; its digest is a plan input, not a
-  toolbox build product.
+  pinned worker requirements. `build/replay-server/` is the separate code-only
+  replay-server recipe; fixtures are immutable staged inputs rather than image
+  layers, and both identities are plan inputs.
 - `tests/` holds this component's test suite. Repository-wide gates stay in the
   top-level `tests/`.
 - `docs/` holds the design. Read `architecture.md` first; the other three are
@@ -37,9 +37,9 @@ facts under `tools/<tool>/build/`.
     harness promises it. The Python boundary between `benchmark/` and `tools/`.
 - `docs/running.md` is the operator runbook: prerequisites, submission, the job
   state machine, monitoring, the recovery commands, verification, and reporting.
-  A committed bounded replay canary qualifies submit, poll/status, report, and
-  receipt export; recovery, content verification, real-S3, and staged-fixture
-  paths remain `VERIFIED: no`.
+  A committed bounded bundled-fixture replay canary qualifies submit,
+  poll/status, report, and receipt export. The current plan's staged-fixture
+  path, recovery, content verification, and real-S3 remain `VERIFIED: no`.
 - `src/benchmark/` is the importable package — the only part of this directory
   the toolbox image contains:
   - `build_image.py` validates recipe, artifact, executable, and adapter
@@ -53,8 +53,8 @@ facts under `tools/<tool>/build/`.
     row counts, timing, RSS, and replay-server evidence without reading listings.
   - `receipt.py` exports one settled group as a deterministic factual draft,
     including frozen requests and bound result/verification identities.
-  - `replay_fixture.py` computes the content identity required by a staged
-    Parquet fixture.
+  - `replay_fixture.py` generates the small synthetic canary fixture outside the
+    checkout and computes the content identity required by staged Parquet.
   - `runtime/` is the contract layer the eleven capsule adapters import
     (`benchmark.runtime.*`); it runs both inside the image and orchestrator-side
     during verification.

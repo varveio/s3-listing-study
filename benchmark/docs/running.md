@@ -24,7 +24,7 @@ group did it. Do not promote a step because a neighbouring step worked.
 | Step | Exercised against real Batch? |
 | --- | --- |
 | Toolbox build + eleven-tool smoke | **yes** — the `benchmark-toolbox` workflow, local Docker |
-| `submit` | **yes** — bounded three-tool bundled-fixture replay canary |
+| `submit` | **yes** — historical bounded three-tool bundled-fixture replay canary; current staged-fixture plan no |
 | `poll` / `status` | **yes** — same canary |
 | `retry` / `cancel` / `accept-failure` | no |
 | `verify` | no — replay is deliberately outside its content-comparison path |
@@ -41,7 +41,10 @@ tool enforces for you; a missing item surfaces as a provider error mid-campaign.
 1. **Infrastructure applied.** Project, region, network/subnetwork, results
    bucket, and both worker service accounts. See
    [`../../infra/terraform/modules/gcp/s3-listing-study/README.md`](../../infra/terraform/modules/gcp/s3-listing-study/README.md).
-   Both worker identities hold `roles/storage.objectCreator` and nothing wider.
+   Both worker identities hold bucket-level `roles/storage.objectCreator` plus a
+   conditional `roles/storage.objectViewer` grant limited to the
+   `objects/fixtures/` prefix. Plans name an exact object and therefore need no
+   bucket listing permission; workers cannot read campaign results.
 2. **Toolbox built and smoked** at the exact revision you intend to run:
 
    ```sh
@@ -99,9 +102,9 @@ the tables, their keys, and every state they record — is in
 
 ## Submit
 
-`VERIFIED: yes` — `replay-canary-current-20260826`, for a bundled-fixture
-replay canary with three independent case rows. Real-S3 and dependency-slot
-submission remain unverified.
+`VERIFIED: yes` — `replay-canary-current-20260826`, for the historical
+bundled-fixture replay canary with three independent case rows. The current
+staged-fixture plan, real-S3, and dependency-slot submission remain unverified.
 
 ```sh
 uv run python benchmark/src/benchmark/campaign.py submit \

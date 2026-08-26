@@ -40,8 +40,13 @@ def test_resolve_plan_exposes_resolved_replay_contract(
     assert replay == {
         "backend": {
             "server_image_uri": (
-                "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/replay-canary@sha256:"
-                "015c272bb6fb2c1f719644d5d8122297814d502dc3820abd94953bb00fafbc3a"
+                "ghcr.io/varveio/swath-replay@sha256:"
+                "c5f4239abbce7772faa2d58c661192bd6a890e460158b5e56fcb8c51b573cb63"
+            ),
+            "fixture_uri": (
+                "gs://s3-listing-study-results-29c02004/fixtures/runner-replay-canary/"
+                "6e1c2d47a92bbd1062469fb323f95b1d0f127b4e601b93f0d94576ab16d7c8b4/"
+                "part-00000.parquet"
             ),
             "fixture_sha256": "6e1c2d47a92bbd1062469fb323f95b1d0f127b4e601b93f0d94576ab16d7c8b4",
             "serving_mode": "duckdb",

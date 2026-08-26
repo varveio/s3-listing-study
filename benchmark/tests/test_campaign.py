@@ -190,7 +190,13 @@ def test_replay_case_slot_attempt_and_request_keep_one_canonical_document(
     request = json.loads(row["request_json"])
     task = request["taskGroups"][0]["taskSpec"]
     assert "environment" not in task
-    initializer, server, subject = task["runnables"]
+    stage, initializer, server, subject = task["runnables"]
+    assert stage["container"]["commands"][0] == "-ceu"
+    assert (
+        "gs://s3-listing-study-results-29c02004/fixtures/runner-replay-canary/"
+        "6e1c2d47a92bbd1062469fb323f95b1d0f127b4e601b93f0d94576ab16d7c8b4/"
+        "part-00000.parquet" in stage["container"]["commands"][1]
+    )
     assert initializer["container"] == {
         "imageUri": images.image_for(case.tool)["image_uri"],
         "commands": ["10001:10001", "/tmp/attempt"],
@@ -205,7 +211,7 @@ def test_replay_case_slot_attempt_and_request_keep_one_canonical_document(
         "commands": [
             "serve",
             "--fixture",
-            "/fixtures/runner-replay-canary",
+            "/fixtures/source",
             "--bucket",
             "runner-replay-canary",
             "--host",
@@ -221,7 +227,10 @@ def test_replay_case_slot_attempt_and_request_keep_one_canonical_document(
             "--max-concurrent-requests",
             "16",
         ],
-        "options": "--network host --cpuset-cpus=0-1 --memory=2g --memory-swap=2g",
+        "options": (
+            "--network host --cpuset-cpus=0-1 --memory=2g --memory-swap=2g "
+            "--volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
+        ),
     }
     assert server["environment"] == {
         "variables": {
@@ -259,7 +268,7 @@ def test_replay_case_slot_attempt_and_request_keep_one_canonical_document(
         signed, images.image_for(case.tool), suite=SUITE, options=launch.options
     )
     signed_task = signed_request["taskGroups"][0]["taskSpec"]
-    _, signed_server, signed_subject = signed_task["runnables"]
+    _, _, signed_server, signed_subject = signed_task["runnables"]
     assert "environment" not in signed_task
     assert "secretVariables" not in signed_server["environment"]
     assert signed_subject["environment"] == {"secretVariables": {CREDENTIAL_ENV_VAR: AUTH_SECRET}}
@@ -271,7 +280,7 @@ def test_replay_case_slot_attempt_and_request_keep_one_canonical_document(
         result_prefix="gs://results/retry/",
         attempt_id="swath.retry.s2",
     )
-    assert retried["taskGroups"][0]["taskSpec"]["runnables"][1] == server
+    assert retried["taskGroups"][0]["taskSpec"]["runnables"][2] == server
     assert campaign.request_argument(retried, "--attempt-id") == "swath.retry.s2"
     assert campaign.request_argument(retried, "--destination") == "gs://results/retry/"
     assert json.loads(row["case_inputs"])["replay"] == case.replay.as_dict()
@@ -300,7 +309,7 @@ def test_uri_fixture_is_staged_before_the_server_and_never_put_in_its_image(
     assert base.replay is not None
     backend = replace(
         base.replay.backend,
-        fixture_uri="gs://fixtures/sorel/*.parquet",
+        fixture_uri="gs://fixtures/sorel/part-00000.parquet",
         fixture_sha256="e" * 64,
     )
     case = replace(base, replay=replace(base.replay, backend=backend))
@@ -316,7 +325,7 @@ def test_uri_fixture_is_staged_before_the_server_and_never_put_in_its_image(
     stage, initializer, server, subject = request["taskGroups"][0]["taskSpec"]["runnables"]
     assert stage["container"]["commands"][0] == "-ceu"
     script = stage["container"]["commands"][1]
-    assert "gcloud storage cp 'gs://fixtures/sorel/*.parquet' /fixtures/source/" in script
+    assert "gcloud storage cp gs://fixtures/sorel/part-00000.parquet /fixtures/source/" in script
     assert '[[ "$actual" == ' + "e" * 64 + " ]]" in script
     assert stage["container"]["options"] == (
         "--entrypoint /bin/bash --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"

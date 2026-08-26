@@ -243,10 +243,11 @@ def parse_backend(value: object) -> ReplayBackend:
     if fixture_uri is not None and (
         not isinstance(fixture_uri, str)
         or not fixture_uri.startswith("gs://")
-        or not fixture_uri.endswith("/*.parquet")
+        or not fixture_uri.endswith(".parquet")
+        or "*" in fixture_uri
         or any(character.isspace() for character in fixture_uri)
     ):
-        raise ReplayError("replay fixture_uri must be a gs:// URI ending in /*.parquet")
+        raise ReplayError("replay fixture_uri must name one exact gs://*.parquet object")
     mode = value.get("serving_mode")
     if mode not in SERVING_MODES:
         raise ReplayError(f"replay serving_mode must be one of {', '.join(SERVING_MODES)}")

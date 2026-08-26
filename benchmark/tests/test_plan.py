@@ -194,7 +194,13 @@ def test_runner_qualification_plans_keep_their_declared_rosters() -> None:
     assert replay.bucket == "runner-replay-canary"
     assert all(case.purpose == "canary" for case in replay.cases)
     assert all(case.replay is not None for case in replay.cases)
-    assert all(case.replay.backend.fixture_uri is None for case in replay.cases if case.replay)
+    assert {
+        case.replay.backend.fixture_uri for case in replay.cases if case.replay is not None
+    } == {
+        "gs://s3-listing-study-results-29c02004/fixtures/runner-replay-canary/"
+        "6e1c2d47a92bbd1062469fb323f95b1d0f127b4e601b93f0d94576ab16d7c8b4/"
+        "part-00000.parquet"
+    }
     assert {case.tool for case in real_s3.cases} == {
         "aws-cli",
         "rclone",

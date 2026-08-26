@@ -43,3 +43,17 @@ resource "google_storage_bucket_iam_member" "worker_write" {
   role   = "roles/storage.objectCreator"
   member = "serviceAccount:${google_service_account.worker.email}"
 }
+
+# Replay fixtures are immutable, content-addressed inputs under one prefix.
+# Reading them does not imply read access to any campaign result or receipt.
+resource "google_storage_bucket_iam_member" "worker_fixture_read" {
+  bucket = google_storage_bucket.results.name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.worker.email}"
+
+  condition {
+    title       = "replay-fixtures-only"
+    description = "Read only immutable staged replay fixtures"
+    expression  = "resource.type == \"storage.googleapis.com/Object\" && resource.name.startsWith(\"projects/_/buckets/${google_storage_bucket.results.name}/objects/fixtures/\")"
+  }
+}
