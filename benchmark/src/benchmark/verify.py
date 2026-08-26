@@ -512,6 +512,39 @@ def _gap(subject: Subject, reason: str, detail: str) -> dict[str, object]:
     }
 
 
+def rate_subject_succeeded(subject: Subject) -> bool:
+    """Whether one settled rate attempt has complete, successful evidence."""
+    if subject.state != "SUCCEEDED" or not has_result_marker(subject.result_prefix):
+        return False
+    try:
+        result = json.loads(read_bytes_at(subject.result_prefix, "result.json"))
+        if (
+            not isinstance(result, dict)
+            or identity_errors(
+                result,
+                attempt_id=subject.attempt_id,
+                case_id=subject.case_id,
+                result_prefix=subject.result_prefix,
+            )
+            or check_failed_subject(result) is not None
+        ):
+            return False
+        row_count = result.get("row_count")
+        return bool(
+            result.get("worker_exit_code") == 0
+            and isinstance(row_count, int)
+            and not isinstance(row_count, bool)
+            and (
+                subject.replay is None
+                or not replay_contract.evidence_errors(
+                    subject.replay, result.get("replay_evidence"), purpose=subject.purpose
+                )
+            )
+        )
+    except (OSError, ValueError):
+        return False
+
+
 def rate_summary(subjects: Sequence[Subject]) -> dict[str, object]:
     """Successes over settled attempts of one rate case.
 
@@ -519,7 +552,7 @@ def rate_summary(subjects: Sequence[Subject]) -> dict[str, object]:
     cases the hangs and the panics ARE the measurement.
     """
     settled = [s for s in subjects if s.state in TERMINAL_STATES]
-    successes = sum(1 for s in settled if s.state == "SUCCEEDED")
+    successes = sum(rate_subject_succeeded(subject) for subject in settled)
     first = subjects[0]
     return {
         "case_id": first.case_id,

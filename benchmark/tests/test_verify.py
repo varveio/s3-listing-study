@@ -225,6 +225,7 @@ def write_evidence(
         "tool": attempt.tool,
         "mode": json.loads(attempt.config)["mode"],
         "exit_code": 0,
+        "worker_exit_code": 0,
         "timed_out": False,
         "wall_seconds": 1.5,
         "started_at": "2026-01-01T00:00:00.500000+00:00",
@@ -524,6 +525,24 @@ def test_rate_case_failures_are_data_points(tmp_path: Path) -> None:
         }
     ]
     assert report["complete"] is True
+
+
+def test_provider_success_does_not_hide_a_failed_rate_subject(tmp_path: Path) -> None:
+    con = fixture_ledger(tmp_path)
+    attempt = record(con, tmp_path, tool="alpha", digest="aaaa", statistic="rate")
+    write_evidence(attempt, exit_code=124, row_count=None)
+    root = adapter_root(tmp_path, "alpha")
+
+    _code, report = verify.verify_group(con, "g1", adapter_root=root, write_record=False)
+
+    assert report["buckets"][0]["rates"][0] == {
+        "case_id": "alpha.aaaa",
+        "tool": "alpha",
+        "mode": "text-full",
+        "attempts": 1,
+        "successes": 0,
+        "rate": 0.0,
+    }
 
 
 def test_a_mode_is_only_compared_within_its_product_and_field_set(tmp_path: Path) -> None:
