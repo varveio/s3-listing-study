@@ -1956,7 +1956,7 @@ def cmd_submit(args: argparse.Namespace) -> int:
             print(line)
         _announce_shape(
             cases,
-            steps,
+            attempts=len(steps) - sum(1 for step in steps if step.waits_for is not None),
             slots=sum(1 for step in steps if step.waits_for is not None),
         )
         return 0
@@ -1976,7 +1976,7 @@ def cmd_submit(args: argparse.Namespace) -> int:
             stagger_seconds=args.stagger_seconds,
         )
         launch.run(steps)
-        _announce_shape(cases, steps, slots=launch.booked)
+        _announce_shape(cases, attempts=launch.submitted, slots=launch.booked)
         print(f"campaign: group {launch.group_id}")
     finally:
         con.close()
@@ -2009,17 +2009,17 @@ def _selected_cases(cases: tuple[Case, ...], selectors: list[str] | None) -> tup
     return tuple(case for case in cases if (case.tool, case.label) in wanted)
 
 
-def _announce_shape(cases: Iterable[Case], steps: Iterable[Step], *, slots: int) -> None:
-    """What the launch came to: rows in, and the attempts and slots they became.
+def _announce_shape(cases: Iterable[Case], *, attempts: int, slots: int) -> None:
+    """What the launch came to: rows in, and attempts submitted or rendered.
 
-    `slots` is what was actually booked, not what declared a prerequisite: a step
-    whose preparation was bound from an earlier attempt is identifiable now and
-    is submitted rather than owed.
+    For a dry run, ``attempts`` is every resolvable rendered step. For a real
+    launch it is what was actually submitted, excluding successful measurements
+    skipped and preparations reused from the ledger. ``slots`` follows the same
+    rule: rendered dependencies offline, newly booked dependencies live.
     """
-    expanded = list(steps)
     print(
-        f"campaign: {len(list(cases))} plan row(s) expand to {len(expanded) - slots} "
-        f"attempt(s) and {slots} slot(s)"
+        f"campaign: {len(list(cases))} plan row(s) expand to {attempts} attempt(s) "
+        f"and {slots} slot(s)"
     )
 
 
