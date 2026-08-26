@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
+import duckdb
+
 from benchmark import replay, replay_fixture
 
 
@@ -95,3 +97,22 @@ def test_fixture_manifest_binds_names_sizes_and_bytes(tmp_path: Path) -> None:
     digest, actual_rows = replay_fixture.fixture_manifest(tmp_path)
     assert actual_rows == rows
     assert digest == hashlib.sha256("".join(rows).encode()).hexdigest()
+
+
+def test_committed_runner_fixture_is_small_paginated_and_digest_bound() -> None:
+    fixture = Path(__file__).parents[2] / "benchmark/fixtures/replay-canary"
+    digest, rows = replay_fixture.fixture_manifest(fixture)
+    assert digest == "824ec0542f8fcab0102a2b8e9737b1a60acdad84a4c42e5629bd2d2eed38414c"
+    assert len(rows) == 1
+
+    parquet = fixture / "part-00000.parquet"
+    with duckdb.connect() as connection:
+        count, first, last = connection.execute(
+            "SELECT count(*), min(decode(key)), max(decode(key)) FROM read_parquet(?)",
+            [str(parquet)],
+        ).fetchone()
+    assert (count, first, last) == (
+        2048,
+        "group-00/object-000000.dat",
+        "group-15/object-002047.dat",
+    )
