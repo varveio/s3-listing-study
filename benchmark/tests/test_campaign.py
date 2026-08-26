@@ -285,7 +285,9 @@ def test_renderer_keeps_fixed_latency_flags(tmp_path: Path) -> None:
     request = campaign.render_batch_job(
         attempt, images.image_for(case.tool), suite=SUITE, options=launch.options
     )
-    commands = request["taskGroups"][0]["taskSpec"]["runnables"][1]["container"]["commands"]
+    runnables = request["taskGroups"][0]["taskSpec"]["runnables"]
+    server = next(runnable for runnable in runnables if runnable.get("background") is True)
+    commands = server["container"]["commands"]
     assert commands[-4:] == [
         "--inject-latency",
         "worker_page=247ms,pivot_probe=105ms,structure_probe=92ms",
