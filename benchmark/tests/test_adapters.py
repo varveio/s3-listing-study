@@ -1187,6 +1187,29 @@ def test_s3kor_list_refuses_a_panic_whose_frames_are_tab_indented() -> None:
     assert rb"key contains b'\t'" in done.stderr
 
 
+@pytest.mark.parametrize(
+    ("mode", "rows"),
+    [
+        ("list", b"first-key\nUsing custom endpoint [literal-key] on region [still-a-key]\n"),
+        (
+            "list-versions",
+            b"null first-key\nnull Using custom endpoint [literal-key] on region [still-a-key]\n",
+        ),
+    ],
+)
+def test_s3kor_discards_only_the_leading_custom_endpoint_notice(mode: str, rows: bytes) -> None:
+    notice = b"Using custom endpoint [http://127.0.0.1:19090] on region [us-east-1]\n"
+    adapter = load_adapter(REPO, "s3kor")
+    payload = notice + rows
+    done = run("s3kor", mode, "", payload)
+    assert done.returncode == 0, done.stderr
+    assert [record.key for record in read_records(io.BytesIO(done.stdout))] == [
+        b"first-key",
+        b"Using custom endpoint [literal-key] on region [still-a-key]",
+    ]
+    assert adapter.count_rows(payload, mode) == 2
+
+
 @pytest.mark.parametrize("tool", PORTED)
 def test_the_modes_no_committed_payload_reaches_are_the_known_ones(tool: str) -> None:
     """Pins today's coverage, per tool — see ``UNEXERCISED``.

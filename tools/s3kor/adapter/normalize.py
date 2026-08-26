@@ -14,6 +14,15 @@ s3kor's ``ls`` output contract (v0.0.37, ``list.go printAllObjects``)::
     list           one line per object: the FULL object key, nothing else.
     list-versions  one line per version: "<versionId> <key>", one space between.
 
+When ``--custom-endpoint-url`` is set, s3kor writes one informational line to
+the same stdout stream before the keys::
+
+    Using custom endpoint [<url>] on region [<region>]
+
+Only a matching first physical line is discarded. Later lines with those bytes
+remain keys: the stream is otherwise one key per line, so broad filtering would
+silently make such an object unverifiable.
+
 Neither mode exposes size, etag, mtime or storage_class — every one of them is
 `-`. In ``list-versions`` the version id is dropped (contract v2 has no version
 axis) by taking everything after the FIRST space, so a key containing spaces
@@ -74,25 +83,55 @@ UNKNOWN_MODE_EXIT = 2
 # committed payload exercises — untested by construction, and invisible otherwise.
 MODES = frozenset({"list", "list-versions"})
 
-LINES = "(SELECT unnest(str_split(content, chr(10))) AS line FROM read_text($path))"
+LINES = """(
+    SELECT line, ordinality
+    FROM read_text($path),
+         UNNEST(str_split(content, chr(10))) WITH ORDINALITY AS split(line, ordinality)
+)"""
+
+CUSTOM_ENDPOINT_NOTICE_SQL = """(
+    ordinality = 1
+    AND starts_with(line, 'Using custom endpoint [')
+    AND contains(line, '] on region [')
+    AND ends_with(line, ']')
+)"""
 
 QUERIES = {
     "list": f"""
-        SELECT line, NULL, NULL, NULL, NULL FROM {LINES} WHERE line <> ''
+        SELECT line, NULL, NULL, NULL, NULL
+        FROM {LINES}
+        WHERE line <> '' AND NOT {CUSTOM_ENDPOINT_NOTICE_SQL}
+        ORDER BY ordinality
     """,
     "list-versions": f"""
         SELECT substr(line, position(' ' IN line) + 1), NULL, NULL, NULL, NULL
-        FROM {LINES} WHERE position(' ' IN line) > 0
+        FROM {LINES}
+        WHERE position(' ' IN line) > 0 AND NOT {CUSTOM_ENDPOINT_NOTICE_SQL}
+        ORDER BY ordinality
     """,
 }
+
+
+def _custom_endpoint_notice(line: bytes) -> bool:
+    return (
+        line.startswith(b"Using custom endpoint [")
+        and b"] on region [" in line
+        and line.endswith(b"]")
+    )
 
 
 def count_rows(data: bytes, mode: str, prefix: str = "", native_root: str = "") -> int:
     if mode not in QUERIES:
         raise ValueError(f"unknown mode: {mode}")
-    if mode == "list":
-        return count_lf_lines(data, bool)
-    return count_lf_lines(data, lambda line: b" " in line)
+    first = True
+
+    def selected(line: bytes) -> bool:
+        nonlocal first
+        notice = first and _custom_endpoint_notice(line)
+        first = False
+        return bool(line) and not notice and (mode == "list" or b" " in line)
+
+    return count_lf_lines(data, selected)
 
 
 def normalize(
