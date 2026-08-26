@@ -63,7 +63,7 @@ UNKNOWN_MODE_EXIT = 2
 # union's remainder is verified against the manifest's unprefixed keys, so a DIR
 # pseudo-key would read as an out-of-scope extra.
 RECURSIVE_MODES = frozenset({"recursive", "listv1", "rootkeys"})
-DIRECTORY_RECURSIVE_MODES = frozenset({"recursive-with-dirs"})
+DIRECTORY_RECURSIVE_MODES = frozenset({"recursive-with-dirs", "fanout-with-dirs"})
 
 # Declared rather than inferred, so the equivalence harness can name a mode no
 # committed payload exercises — untested by construction, and invisible otherwise.

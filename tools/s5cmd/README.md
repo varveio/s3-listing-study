@@ -37,7 +37,7 @@ coverage are shown in separate columns.
 | Recursive `ls` retaining `DIR` rows | Preserve trailing-slash objects that s5cmd classifies as directories during an undelimited listing. | Capsule and parser fixture added after a scale diagnostic; not yet receipt-backed. |
 | `ls --json` | Emit one JSON object per key. | Smoked; same key set as recursive, output-only difference. |
 | `ls --use-list-objects-v1` / `ls --all-versions` | List through the legacy ListObjects v1 API or ListObjectVersions. | Both smoked and PASSed; all-versions validates the request/output contract only, on a non-versioned bucket. |
-| `run <file>` + `--numworkers` | Execute a batch of commands in parallel through the worker pool. | Used to fan out per-prefix `ls` lines; completeness verified, speed not measured. |
+| `run <file>` + `--numworkers` | Execute a batch of commands in parallel through the worker pool. | The smoke-era hand-built union was complete. The current `fanout-with-dirs` capsule drives the same mechanism in one measured process, but has no campaign receipt yet. |
 | `cp` / `sync` (transfer) | Parallel object transfer — the tool's headline feature. | Not run: out of listing scope and mutating. |
 
 Detailed mode and source coverage is in
@@ -95,6 +95,10 @@ resolve in [`data/claims.json`](data/claims.json).
 - The directory-preserving recursive mode has no committed run yet. Its
   delimiter-free request cannot produce CommonPrefixes, but exact verification
   still decides whether its retained `DIR` rows reconstruct the fixture.
+- The integrated `fanout-with-dirs` mode also has no committed campaign run.
+  Its plan must state disjoint, complete first-character shards; the adapter
+  refuses duplicates, while exact verification remains responsible
+  for detecting a shard set that omits part of a fixture.
 
 ### Benchmark questions
 

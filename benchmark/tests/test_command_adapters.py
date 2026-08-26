@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
@@ -63,12 +64,17 @@ REQUIRED_CONFIG: dict[tuple[str, str], dict[str, object]] = {
     # is no axis and carries no declared default: the plan states it or the
     # preparation refuses.
     ("s3-fast-list", "ks-split"): {"segments": 1000},
+    ("s5cmd", "fanout-with-dirs"): {"shard_initials": ".0"},
 }
 """Config a mode structurally cannot compile without, stated here rather than
 defaulted in a capsule."""
 
 MODE_EXECUTABLES: dict[tuple[str, str], tuple[str, ...]] = {
     ("s3-fast-list", "ks-split"): ("/usr/bin/ks-tool",),
+    ("s5cmd", "fanout-with-dirs"): (
+        "/usr/bin/python3",
+        "/opt/benchmark/tools/s5cmd/adapter/fanout.py",
+    ),
 }
 """Modes that run a capsule's *second* executable. Written out here, not read
 from the capsule, so the binary a mode runs stays an independent expectation --
@@ -281,6 +287,21 @@ def _s5cmd(mode: str, prefix: str) -> tuple[str, ...]:
     return {
         "recursive": ("--no-sign-request", "ls", "-e", "-s", recursive),
         "recursive-with-dirs": ("--no-sign-request", "ls", "-e", "-s", recursive),
+        "fanout-with-dirs": (
+            "--s5cmd",
+            "/s5cmd",
+            "--bucket",
+            BUCKET,
+            "--prefix",
+            prefix,
+            "--shard",
+            ".",
+            "--shard",
+            "0",
+            "--numworkers",
+            "256",
+            "--unsigned",
+        ),
         "delimiter": ("--no-sign-request", "ls", "-e", "-s", target),
         "rootkeys": ("--no-sign-request", "ls", "-e", "-s", target),
         "json": ("--json", "--no-sign-request", "ls", recursive),
@@ -445,6 +466,7 @@ EXPECTED_MODES = {
     "s5cmd": {
         "recursive",
         "recursive-with-dirs",
+        "fanout-with-dirs",
         "delimiter",
         "rootkeys",
         "json",
@@ -997,6 +1019,73 @@ def test_commands_compile_exact_subject_argv() -> None:
     swath = load_command_adapter(ROOT / "tools/swath/adapter/command.py")
     argv = swath.compile(CommandRequest("recursive-tsv", "bucket", "us-east-1", tool="swath"))
     assert argv[:3] == ("/opt/java/openjdk/bin/java", "-jar", "/opt/swath/swath.jar")
+
+
+def test_s5cmd_fanout_execs_with_an_inherited_commands_file(tmp_path: Path) -> None:
+    """Exercise the real Linux memfd/exec boundary without making an S3 request."""
+    fake = tmp_path / "fake-s5cmd"
+    fake.write_text(
+        "#!/usr/bin/python3\n"
+        "import json, sys\n"
+        "with open(sys.argv[-1], encoding='utf-8') as source:\n"
+        "    print(json.dumps({'argv': sys.argv[1:-1], 'commands': source.read()}))\n",
+        encoding="utf-8",
+    )
+    fake.chmod(0o755)
+    wrapper = ROOT / "tools/s5cmd/adapter/fanout.py"
+    done = subprocess.run(
+        [
+            "/usr/bin/python3",
+            str(wrapper),
+            "--s5cmd",
+            str(fake),
+            "--bucket",
+            BUCKET,
+            "--prefix",
+            "p x/雪/",
+            "--shard",
+            ".",
+            "--shard",
+            "0",
+            "--numworkers",
+            "8",
+            "--endpoint-url",
+            ENDPOINT,
+            "--unsigned",
+        ],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    assert done.returncode == 0, done.stderr
+    observed = json.loads(done.stdout)
+    assert observed["argv"] == [
+        "--endpoint-url",
+        ENDPOINT,
+        "--no-sign-request",
+        "--numworkers",
+        "8",
+        "run",
+    ]
+    assert observed["commands"].splitlines() == [
+        "ls -e -s 's3://bucket-x/p x/雪/.*'",
+        "ls -e -s 's3://bucket-x/p x/雪/0*'",
+    ]
+
+
+@pytest.mark.parametrize("shards", ["00", "a,a", "a*", "", "雪"])
+def test_s5cmd_fanout_refuses_ambiguous_shards(shards: str) -> None:
+    adapter = load_command_adapter(adapter_path("s5cmd"))
+    with pytest.raises(CommandAdapterError, match="shard_initials"):
+        adapter.compile(
+            CommandRequest(
+                "fanout-with-dirs",
+                BUCKET,
+                REGION,
+                tool="s5cmd",
+                config={"shard_initials": shards},
+            )
+        )
 
 
 @pytest.mark.parametrize("tool", TOOLS)

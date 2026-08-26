@@ -149,7 +149,8 @@ the benchmark worker. Each immutable receipt retains its exact original
 invocation.
 
 Swap `--mode` for any mode declared by `command.py` (`recursive`, `recursive-with-dirs`,
-`delimiter`, `rootkeys`, `json`, `listv1`, `allversions`, `fullpath`) and add
+`fanout-with-dirs`, `delimiter`, `rootkeys`, `json`, `listv1`, `allversions`,
+`fullpath`) and add
 `--prefix <p>` for a scoped listing (e.g. `normals-hourly/`). The fan-out mode
 is not a single wrapper invocation — it is the wrapper run once per shard
 (four `recursive`-mode calls with different `--prefix` values, plus one
@@ -159,13 +160,21 @@ produce `union-verify.md`. The in-process `s5cmd run <file>` capability probe
 in `../receipts/smoke/_capability/run-fanout/` is reproduced by mounting a
 commands file (one `ls` line per shard) read-only into the container and
 invoking `s5cmd --no-sign-request run /work/cmds.txt` directly — it is not a
-standard wrapper-era receipt because `run` needs a file mounted into the container,
-which the wrapper does not provide for this tool.
+standard wrapper-era receipt because the retired wrapper could not supply the
+commands file. The current campaign capsule's `fanout-with-dirs` driver closes
+that integration gap: it creates an inherited Linux memory file from the
+plan-recorded shard prefixes and immediately execs s5cmd `run` against it.
 
 `recursive-with-dirs` postdates the smoke corpus and has no receipt above. It
 runs the same delimiter-free recursive command as `recursive`, but its
 normalizer retains raw `DIR` lines as slash-terminated, key-only records. Exact
 verification is required before treating it as a complete listing mode.
+
+`fanout-with-dirs` likewise has no campaign receipt. A bounded live check using
+the pinned toolbox drove one `index.html` shard through the memory-file wrapper
+and returned that one real-S3 object with exit 0; this checks the exec/file
+mechanism, not full-bucket completeness or performance. A campaign plan must
+record disjoint shard prefixes and pass exact fixture verification.
 
 `../adapter/command.py` and `../adapter/normalize.py` are living integration code
 and changed for the typed Python cutover. Everything under `../research/` and

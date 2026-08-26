@@ -94,6 +94,16 @@ fan-out against the smoke bucket; the fan-out's *speed* relative to a native
 parallel lister is `unverified` — claim `fanout-speed-vs-native-unverified`, a
 benchmark-phase question.
 
+The current capsule's `fanout-with-dirs` mode makes this one measurable process.
+The plan states distinct first-character shard prefixes and a concurrency; the
+adapter renders one recursive `ls -e -s` line per shard. A tiny Python driver
+writes those reviewed bytes to a Linux memory file and immediately `exec`s
+`/s5cmd --numworkers N run /proc/self/fd/...`. The benchmark therefore measures
+s5cmd itself without a shell, stdin feeder, mounted mutable file, or supervising
+process. The driver retains `DIR` rows in normalization. It refuses duplicate
+initials, but only exact verification can prove that a
+plan's declared set covers the target fixture.
+
 ## Retry model
 
 A `customRetryer` wraps the SDK `DefaultRetryer`; `NumMaxRetries` comes from
@@ -178,6 +188,7 @@ observation, not a scale claim (`unverified` above 148,917 keys — claim
 | `allversions` (`--all-versions`) | **ListObjectVersions** | Same text contract plus a trailing versionID token (`null` on a non-versioned bucket) |
 | `fullpath` (`--show-fullpath`) | Same ListObjectsV2 request as recursive | Absolute `s3://bucket/key` paths only — no size/etag/mtime/storage-class columns [SRC `ls.go:93,253`] |
 | `fanout` (N per-prefix `ls`, unioned or via `run <file>`) | N independent serial ListObjectsV2 chains | Same text contract as `recursive`/`delimiter` per shard; the union's remainder adapter drops DIR common-prefix rows |
+| `fanout-with-dirs` (`--numworkers N run <memory-file>`) | N plan-declared, disjoint recursive ListObjectsV2 chains | Same text contract as `recursive-with-dirs`; `DIR` rows are retained and no delimiter remainder is used. Unverified until an exact campaign run. |
 
 The output flags `-e`, `-H`, and `--json` change only the printed format, not
 the request or listing mechanism (claim `output-flags-are-formatting-only`).

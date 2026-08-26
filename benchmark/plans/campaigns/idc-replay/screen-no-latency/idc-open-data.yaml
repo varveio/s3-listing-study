@@ -84,6 +84,15 @@ tools:
       # Same delimiter-free LIST and raw output, but retain s5cmd DIR rows so
       # exact verification covers the fixture's trailing-slash objects.
       - {mode: recursive-with-dirs, purpose: diagnostic}
+      # s5cmd's real listing parallelism is `run` over independent commands,
+      # not --numworkers on one `ls`. A bounded scan of this sealed fixture saw
+      # only these 17 first bytes; their disjoint shards cover all 56,311,145
+      # rows without a root-delimiter remainder or CommonPrefix ambiguity.
+      - mode: fanout-with-dirs
+        concurrency: 17
+        purpose: diagnostic
+        config:
+          shard_initials: .0123456789abcdef
   s7cmd:
     cases:
       - {mode: recursive-tsv-nosort, concurrency: 64, purpose: diagnostic}
