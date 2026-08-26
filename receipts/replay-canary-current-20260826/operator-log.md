@@ -5,16 +5,20 @@ target named `runner-replay-canary` is the 2,048-row synthetic fixture served by
 the replay sidecar; no AWS bucket was contacted. Exit codes were recorded by the
 command executor.
 
+Host-local paths are normalized below as `$STATE_ROOT`; the recorded ledger,
+resolved cases, image identities, and provider requests remain bound in the
+receipt.
+
 ## Submit
 
 ```sh
 uv run python benchmark/src/benchmark/campaign.py \
-  --state /home/sagi_varve_io/s3-listing-study-state/2026-08-26-runner-qualification/replay-canary-current.db \
+  --state "$STATE_ROOT/replay-canary-current.db" \
   submit --suite runner-replay-canary \
   --plan benchmark/plans/canaries/runner-replay-canary.yaml \
   --project varve-oss --location us-east1 \
   --results-bucket s3-listing-study-results-29c02004 \
-  --image-set /home/sagi_varve_io/s3-listing-study-state/2026-08-26-runner-qualification/images.json \
+  --image-set "$STATE_ROOT/images.json" \
   --anonymous-worker-sa s3-listing-study-worker@varve-oss.iam.gserviceaccount.com \
   --authenticated-worker-sa s3-listing-study-auth-worker@varve-oss.iam.gserviceaccount.com \
   --secret-resource projects/varve-oss/secrets/s3-listing-study-aws-credentials/versions/latest \
@@ -38,7 +42,7 @@ campaign: group replay-canary-current-20260826
 
 ```sh
 uv run python benchmark/src/benchmark/campaign.py \
-  --state /home/sagi_varve_io/s3-listing-study-state/2026-08-26-runner-qualification/replay-canary-current.db \
+  --state "$STATE_ROOT/replay-canary-current.db" \
   poll --watch --interval 10
 ```
 
@@ -48,7 +52,7 @@ Exit `0`; no stdout or stderr.
 
 ```sh
 uv run python benchmark/src/benchmark/campaign.py \
-  --state /home/sagi_varve_io/s3-listing-study-state/2026-08-26-runner-qualification/replay-canary-current.db \
+  --state "$STATE_ROOT/replay-canary-current.db" \
   status --group replay-canary-current-20260826
 ```
 
@@ -64,7 +68,7 @@ s7cmd.ee7094a12693.s1            SUCCEEDED    canary       replay-canary-current
 
 ```sh
 uv run python benchmark/src/benchmark/report.py \
-  --state /home/sagi_varve_io/s3-listing-study-state/2026-08-26-runner-qualification/replay-canary-current.db \
+  --state "$STATE_ROOT/replay-canary-current.db" \
   --group replay-canary-current-20260826
 ```
 
@@ -88,7 +92,7 @@ Exit `0`:
 
 ```sh
 uv run python benchmark/src/benchmark/receipt.py \
-  --state /home/sagi_varve_io/s3-listing-study-state/2026-08-26-runner-qualification/replay-canary-current.db \
+  --state "$STATE_ROOT/replay-canary-current.db" \
   --group replay-canary-current-20260826 \
   --output receipts/replay-canary-current-20260826
 ```

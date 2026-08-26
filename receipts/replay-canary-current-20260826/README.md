@@ -13,5 +13,5 @@
 
 > Draft only: this is a factual export of recorded state and bound evidence. It does not promote a claim or turn diagnostics into measurements.
 
-The exact submit, poll, status, report, and export commands and their recorded
-outputs are in [`operator-log.md`](operator-log.md).
+The submit, poll, status, report, and export commands and their recorded outputs
+are in [`operator-log.md`](operator-log.md), with host-local paths normalized.

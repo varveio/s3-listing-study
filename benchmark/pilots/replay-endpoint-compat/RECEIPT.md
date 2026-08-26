@@ -23,7 +23,7 @@ Fixture      : `swath list s3://noaa-ghcn-pds/parquet/by_station/` (0.2.4,
                `swath-replay-server sort-fixture` → 1 part, 21,212,292 bytes
 Scope        : prefix `parquet/by_station/STATION=ACW00011604/` — **11 objects**,
                ground truth read off the fixture itself
-Credentials  : dummy static SigV4 (`AKIAIOSFODNN7EXAMPLE`/…`EXAMPLEKEY`),
+Credentials  : replay-only dummy static SigV4 values,
                `AWS_EC2_METADATA_DISABLED=true`; no AWS-directed traffic
 
 ## What the server answers

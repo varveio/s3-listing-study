@@ -20,7 +20,7 @@ B=noaa-ghcn-pds
 R=us-east-1
 P='parquet/by_station/STATION=ACW00011604/'
 OUT=/tmp/replay-pilot/compat
-DUMMY="-e AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE -e AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY -e AWS_DEFAULT_REGION=$R -e AWS_REGION=$R -e AWS_EC2_METADATA_DISABLED=true"
+DUMMY="-e AWS_ACCESS_KEY_ID=REPLAYDUMMYACCESSKEY -e AWS_SECRET_ACCESS_KEY=replay-only-dummy-secret-not-a-credential -e AWS_DEFAULT_REGION=$R -e AWS_REGION=$R -e AWS_EC2_METADATA_DISABLED=true"
 
 run() { # name, then docker args
   local name="$1"; shift

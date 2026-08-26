@@ -81,7 +81,7 @@ committed run evidence specified by
 produced and bound through the current execution, verification, and reporting
 path in [`benchmark/README.md`](../../../benchmark/README.md). A verifier `PASS`
 establishes cross-attempt agreement, not independent ground truth, as documented
-under [`Agreement is not ground truth`](../../../benchmark/README.md#agreement-is-not-ground-truth).
+under [`Replay reporting is row-count-only`](../../../benchmark/README.md#replay-reporting-is-row-count-only).
 
 ## What the verifier could not check
 
