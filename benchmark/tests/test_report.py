@@ -448,11 +448,34 @@ def test_replay_rate_counts_bound_successes_without_inspecting_products(tmp_path
         listing=("wrong 1",),
         **complete_replay_evidence(replay),
     )
+    failed = record(con, tmp_path, tool="alpha", digest="aaaa", statistic="rate", replay=replay)
+    write_evidence(
+        failed,
+        exit_code=2,
+        row_count=None,
+        **complete_replay_evidence(replay),
+    )
     root = adapter_root(tmp_path, "alpha")
     rows = rows_of(con, root)
     assert report.rate_lines(rows) == [
-        "- `alpha.aaaa` (alpha text-full): 2/2 succeeded, rate 1.0000 over 2 attempt(s)"
+        "- `alpha.aaaa` (alpha text-full): 2/3 succeeded, rate 0.6667 over 3 attempt(s)"
     ]
+
+
+def test_a_failed_canary_subject_keeps_the_report_incomplete(tmp_path: Path) -> None:
+    con = fixture_ledger(tmp_path)
+    attempt = record(con, tmp_path, tool="alpha", digest="aaaa", purpose="canary")
+    write_evidence(attempt, exit_code=124, worker_exit_code=0, row_count=None)
+
+    rows = rows_of(con, adapter_root(tmp_path, "alpha"))
+
+    assert rows[0]["evidence_state"] == "RESULT_BOUND"
+    assert (rows[0]["state"], rows[0]["exit"], rows[0]["worker_exit"]) == (
+        "SUCCEEDED",
+        124,
+        0,
+    )
+    assert report.report_exit_code(rows, blocked=[]) == 1
 
 
 def test_a_blocked_slot_keeps_the_report_from_being_final(tmp_path: Path) -> None:

@@ -464,6 +464,19 @@ def is_timing(row: dict[str, Any]) -> bool:
     return bool(is_publishable_measurement(row) and row["statistic"] == "timing")
 
 
+def subject_succeeded(row: dict[str, Any]) -> bool:
+    """Whether a settled listing produced one complete, accepted result."""
+    return bool(
+        row["state"] == "SUCCEEDED"
+        and row["evidence_state"] == "RESULT_BOUND"
+        and row["exit"] == 0
+        and row["worker_exit"] == 0
+        and row["replay_state"] in {"-", "COMPLETE"}
+        and not isinstance(row["row_count"], bool)
+        and isinstance(row["row_count"], int)
+    )
+
+
 def rate_lines(rows: list[dict[str, Any]]) -> list[str]:
     """One line per rate case: successes over settled attempts, and the size.
 
@@ -478,11 +491,7 @@ def rate_lines(rows: list[dict[str, Any]]) -> list[str]:
     lines = []
     for case_id, attempts in sorted(cases.items()):
         settled = [a for a in attempts if a["state"] in TERMINAL_STATES]
-        successes = sum(
-            1
-            for attempt in settled
-            if attempt["state"] == "SUCCEEDED" and attempt["evidence_state"] == "RESULT_BOUND"
-        )
+        successes = sum(subject_succeeded(attempt) for attempt in settled)
         rate = f"{successes / len(settled):.4f}" if settled else "-"
         first = attempts[0]
         lines.append(
@@ -553,13 +562,7 @@ def summary_line(rows: list[dict[str, Any]]) -> str:
         1
         for row in rows
         if is_timing(row)
-        and row["state"] == "SUCCEEDED"
-        and row["evidence_state"] == "RESULT_BOUND"
-        and row["exit"] == 0
-        and row["worker_exit"] == 0
-        and row["replay_state"] in {"-", "COMPLETE"}
-        and not isinstance(row["row_count"], bool)
-        and isinstance(row["row_count"], int)
+        and subject_succeeded(row)
         and not isinstance(row["wall_seconds"], bool)
         and isinstance(row["wall_seconds"], (int, float))
         and math.isfinite(row["wall_seconds"])
@@ -586,6 +589,14 @@ def report_exit_code(rows: list[dict[str, Any]], *, blocked: list[str]) -> int:
     if any(
         row["state"] == "SUCCEEDED"
         and (row["worker_exit"] != 0 or row["replay_state"] not in {"-", "COMPLETE"})
+        for row in rows
+    ):
+        return 1
+    if any(
+        row["state"] == "SUCCEEDED"
+        and row["purpose"] != "preparation"
+        and row["statistic"] != "rate"
+        and not subject_succeeded(row)
         for row in rows
     ):
         return 1
