@@ -559,6 +559,37 @@ def _replay_document(attempt: Attempt) -> replay_contract.ReplayConfig | None:
     return resolved
 
 
+def _fixture_staging_script(uri: str, expected_sha256: str) -> str:
+    """Download a staged fixture and refuse bytes outside its recorded identity.
+
+    The digest is over sorted ``name<TAB>size<TAB>sha256<NL>`` rows for the
+    immediate ``*.parquet`` children. The check runs before the replay server
+    starts, so a mutable wildcard can select only the bytes the case named.
+    """
+    destination = shlex.quote(REPLAY_FIXTURE_CONTAINER_DIR)
+    source = shlex.quote(uri)
+    expected = shlex.quote(expected_sha256)
+    return "\n".join(
+        (
+            "set -o pipefail",
+            f"mkdir -p {destination}",
+            f"gcloud storage cp {source} {destination}/",
+            'manifest="$(mktemp)"',
+            f"files=({destination}/*.parquet)",
+            '[[ -f "${files[0]}" ]] || { echo "no staged parquet files" >&2; exit 1; }',
+            'for file in "${files[@]}"; do',
+            '  digest="$(sha256sum "$file")"; digest="${digest%% *}"',
+            '  size="$(stat -c %s "$file")"',
+            '  printf \'%s\\t%s\\t%s\\n\' "${file##*/}" "$size" "$digest"',
+            'done | LC_ALL=C sort > "$manifest"',
+            'actual="$(sha256sum "$manifest")"; actual="${actual%% *}"',
+            f'[[ "$actual" == {expected} ]] || '
+            '{ echo "fixture digest mismatch: $actual" >&2; exit 1; }',
+            'rm -f "$manifest"',
+        )
+    )
+
+
 def render_batch_job(
     attempt: Attempt,
     image: Mapping[str, str],
@@ -620,9 +651,7 @@ def render_batch_job(
         "container": {
             "imageUri": image["image_uri"],
             "commands": ["10001:10001", SUBJECT_OUTPUT_CONTAINER_DIR],
-            "options": shlex.join(
-                ("--user", "0:0", "--entrypoint", "/bin/chown", output_volume)
-            ),
+            "options": shlex.join(("--user", "0:0", "--entrypoint", "/bin/chown", output_volume)),
         }
     }
     runnables = [output_initializer, subject_runnable]
@@ -690,21 +719,17 @@ def render_batch_job(
                 "container": {
                     "imageUri": REPLAY_STAGING_IMAGE,
                     "commands": [
-                        "gcloud",
-                        "storage",
-                        "cp",
-                        backend.fixture_uri,
-                        f"{REPLAY_FIXTURE_CONTAINER_DIR}/",
+                        "-ceu",
+                        _fixture_staging_script(backend.fixture_uri, backend.fixture_sha256),
                     ],
-                    "options": volume,
+                    "options": shlex.join(("--entrypoint", "/bin/bash", volume)),
                 },
                 # Batch injects /usr/bin/python3, which the slim Cloud CLI
                 # image does not contain. Pin its own bundled interpreter.
                 "environment": {
                     "variables": {
                         "CLOUDSDK_PYTHON": (
-                            "/usr/lib/google-cloud-sdk/platform/"
-                            "bundledpythonunix/bin/python3"
+                            "/usr/lib/google-cloud-sdk/platform/bundledpythonunix/bin/python3"
                         )
                     }
                 },

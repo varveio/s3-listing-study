@@ -1,7 +1,11 @@
 # Benchmark plans
 
-One file per bucket under [`buckets/`](buckets/), saying what to run against
-that bucket and on what box.
+Reusable study plans live under [`buckets/`](buckets/), saying what to run
+against that bucket and on what box. [`canaries/`](canaries/) holds the two
+small runner qualifications: the compatible capsule roster against replay and
+representative capsule/output shapes against ordinary S3. A plan is execution
+intent, not a history folder; superseded diagnostic rungs stay in Git and their
+receipts/notes rather than accumulating here.
 
 ```
 python -m benchmark.plan_cli --bucket noaa-ghcn-pds
@@ -150,6 +154,22 @@ capacity canary has a committed receipt for this backend and allocation family.
 Replay plans carry no correctness manifest: the worker counts rows in-container,
 retains raw products, and routine reporting reads `result.json` only.
 
+An image-bundled fixture states `fixture_sha256` alone. A staged fixture states
+both `fixture_uri` and `fixture_sha256`. For staged Parquet, the digest is over
+the UTF-8 bytes of sorted
+`name<TAB>size<TAB>file-sha256<NEWLINE>` rows for the immediate `*.parquet`
+children. The staging runnable recomputes it after download and before starting
+the replay server, so a mutable wildcard cannot silently change a case. Generate
+the value from an already staged directory with:
+
+```sh
+uv run python -m benchmark.replay_fixture /path/to/fixture
+```
+
+The staged-fixture branch remains `VERIFIED: no`: its manifest contract has
+offline coverage, but no committed campaign receipt has exercised the provider
+download path. Do not treat an image-bundled replay canary as qualifying it.
+
 A `replay_*` key in a plan with no `replay:` block is refused, and so is a
 `replay:` block whose defaults do not size a server: a plan states its backend
 completely or not at all.
@@ -176,6 +196,9 @@ s3-fast-list:
 ```
 
 `config` is for a knob that is one tool's own business and no axis describes.
+It is the common extension path for every capsule, not a Swath exception. A
+tool may expose one argument or twenty; tuning depth can differ while the runner
+continues to transport, hash, and record every tool's config identically.
 
 Its keys are folded into the case's config blob *before* the capsule sees it, so
 the capsule's own refusal still runs over them: a key it never declared in

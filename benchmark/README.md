@@ -37,7 +37,8 @@ facts under `tools/<tool>/build/`.
     harness promises it. The Python boundary between `benchmark/` and `tools/`.
 - `docs/running.md` is the operator runbook: prerequisites, submission, the job
   state machine, monitoring, the recovery commands, verification, and reporting.
-  No campaign has run yet, so that procedure is `VERIFIED: no`.
+  No committed campaign receipt has qualified that procedure, so it remains
+  `VERIFIED: no`; private diagnostic groups do not promote it.
 - `src/benchmark/` is the importable package — the only part of this directory
   the toolbox image contains:
   - `build_image.py` validates recipe, artifact, executable, and adapter
@@ -49,6 +50,10 @@ facts under `tools/<tool>/build/`.
     row-count-only and is refused there without staging raw products.
   - `report.py` binds `result.json` summaries to controller state and renders
     row counts, timing, RSS, and replay-server evidence without reading listings.
+  - `receipt.py` exports one settled group as a deterministic factual draft,
+    including frozen requests and bound result/verification identities.
+  - `replay_fixture.py` computes the content identity required by a staged
+    Parquet fixture.
   - `runtime/` is the contract layer the eleven capsule adapters import
     (`benchmark.runtime.*`); it runs both inside the image and orchestrator-side
     during verification.
@@ -154,7 +159,8 @@ auditable; row count is not a content-correctness verdict.
 
 ### Attempt evidence is create-only
 
-The worker uploads attempt artifacts and the final `result.json` marker with
+The worker computes its final completion code, uploads attempt artifacts, and
+uploads the final `result.json` marker with
 `ifGenerationMatch=0`. A second execution cannot merge with or replace a
 deterministic attempt prefix. Raw listing products remain retained under that
 prefix for manual investigation, but routine replay reporting does not fetch them.
@@ -190,7 +196,10 @@ only after a real diagnostic capacity canary has a committed receipt.
 
 The verifier rejects ambiguous attempt leaves, missing result markers, binding or
 artifact-hash mismatches, failed/timed-out/unclean subjects, normalizer failures,
-and normalized rows containing SQL `NULL`. Nullable object metadata uses the
+and normalized rows containing SQL `NULL`. Replay reporting separately refuses
+missing readiness, inactive request counters, increasing error counters, and
+missing calibrated interval/resource samples through the same validator the
+worker uses. Nullable object metadata uses the
 literal `-`; a field is compared only when both tools expose it. This avoids
 NULL-blind anti-joins and prevents a tool that cannot report a field from creating
 a false mismatch, while also making absence of that field non-evidence. Non-UTF-8

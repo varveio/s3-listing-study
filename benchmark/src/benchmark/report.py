@@ -75,6 +75,7 @@ COLUMNS = (
     "evidence_state",
     "replay_state",
     "exit",
+    "worker_exit",
     "row_count",
     "wall_seconds",
     "prep_seconds",
@@ -135,12 +136,15 @@ def result_binding_errors(row: sqlite3.Row, result: dict[str, object]) -> list[s
 def result_semantic_errors(result: dict[str, object]) -> list[str]:
     errors: list[str] = []
     exit_code = result.get("exit_code")
+    worker_exit_code = result.get("worker_exit_code")
     timed_out = result.get("timed_out")
     row_count = result.get("row_count")
     row_count_error = result.get("row_count_error")
     execution = result.get("execution")
     if isinstance(exit_code, bool) or not isinstance(exit_code, int):
         errors.append("exit_code")
+    if isinstance(worker_exit_code, bool) or not isinstance(worker_exit_code, int):
+        errors.append("worker_exit_code")
     if not isinstance(timed_out, bool):
         errors.append("timed_out")
     if row_count is not None and (
@@ -257,9 +261,7 @@ def result_capture_errors(result: dict[str, object]) -> list[str]:
             if stem == "stderr" or product is None:
                 errors.append(stem)
             continue
-        errors.extend(
-            f"{stem}.{name}" for name in _artifact_errors(capture, minimal=minimal)
-        )
+        errors.extend(f"{stem}.{name}" for name in _artifact_errors(capture, minimal=minimal))
     return errors
 
 
@@ -314,9 +316,7 @@ def _declared_replay_allocations(row: sqlite3.Row) -> tuple[str, str, str, str]:
             container_memory_gb=row["container_memory_gb"],
         )
         subject_memory = (
-            "uncapped"
-            if row["container_memory_gb"] is None
-            else f"{row['container_memory_gb']}GiB"
+            "uncapped" if row["container_memory_gb"] is None else f"{row['container_memory_gb']}GiB"
         )
         host_memory = (
             "unreserved"
@@ -365,6 +365,7 @@ def row_for(row: sqlite3.Row, *, adapter_root: str) -> dict[str, Any]:
         "evidence_state": "UNAVAILABLE",
         "replay_state": "-",
         "exit": "-",
+        "worker_exit": "-",
         "row_count": "-",
         "wall_seconds": "-",
         "prep_seconds": "-",
@@ -390,24 +391,19 @@ def row_for(row: sqlite3.Row, *, adapter_root: str) -> dict[str, Any]:
     replay_evidence = result.get("replay_evidence")
     replay_state = "-"
     if row["replay"] is not None:
-        if not isinstance(replay_evidence, dict):
-            replay_state = "MISSING"
-        elif replay_evidence.get("errors"):
-            replay_state = "REFUSED"
-        elif (
-            isinstance(replay_evidence.get("readiness"), dict)
-            and replay_evidence["readiness"].get("state") == "ready"
-            and replay_evidence.get("before") is not None
-            and replay_evidence.get("after") is not None
-            and isinstance(replay_evidence.get("samples"), list)
-        ):
-            replay_state = "COMPLETE"
-        else:
-            replay_state = "INCOMPLETE"
+        try:
+            replay_config = replay_contract.parse_document(row["replay"])
+            replay_refusals = replay_contract.evidence_errors(
+                replay_config, replay_evidence, purpose=str(row["purpose"])
+            )
+        except replay_contract.ReplayError:
+            replay_refusals = ("recorded replay document is malformed",)
+        replay_state = "REFUSED" if replay_refusals else "COMPLETE"
     measured = {
         **base,
         "replay_state": replay_state,
         "exit": result.get("exit_code", "-"),
+        "worker_exit": result.get("worker_exit_code", "-"),
         "row_count": result.get("row_count", "-"),
         "wall_seconds": result.get("wall_seconds", "-"),
         "max_rss_kb": result.get("max_rss_kb", "-"),
@@ -560,6 +556,8 @@ def summary_line(rows: list[dict[str, Any]]) -> str:
         and row["state"] == "SUCCEEDED"
         and row["evidence_state"] == "RESULT_BOUND"
         and row["exit"] == 0
+        and row["worker_exit"] == 0
+        and row["replay_state"] in {"-", "COMPLETE"}
         and not isinstance(row["row_count"], bool)
         and isinstance(row["row_count"], int)
         and not isinstance(row["wall_seconds"], bool)
@@ -582,6 +580,12 @@ def report_exit_code(rows: list[dict[str, Any]], *, blocked: list[str]) -> int:
         return 1
     if any(
         row["state"] == "SUCCEEDED" and row["evidence_state"] not in BOUND_EVIDENCE_STATES
+        for row in rows
+    ):
+        return 1
+    if any(
+        row["state"] == "SUCCEEDED"
+        and (row["worker_exit"] != 0 or row["replay_state"] not in {"-", "COMPLETE"})
         for row in rows
     ):
         return 1

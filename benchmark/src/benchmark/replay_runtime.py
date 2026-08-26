@@ -239,10 +239,7 @@ def sample_metrics(
                 "resource_sample": resource,
                 "replay_sample": observation,
             }
-            uri = (
-                heartbeat_destination.rstrip("/")
-                + f"/live/replay-{heartbeat_sequence:06d}.json"
-            )
+            uri = heartbeat_destination.rstrip("/") + f"/live/replay-{heartbeat_sequence:06d}.json"
             try:
                 gcs.upload_bytes(
                     (json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n").encode(),

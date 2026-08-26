@@ -12,8 +12,9 @@ subjects have now run at smoke on amd64 through the attempt engine: seven
 anonymously and `s3p`, `s3kor`, `s4cmd`, and `ps3` with a scoped credential.
 Those attempts establish that the retired groundwork path worked, not
 correctness: none is bound to the current comparative verifier. The replay path
-records in-container row counts and retains raw products, but no campaign has
-exercised it. See `../tools/README.md` for per-tool
+records in-container row counts and retains raw products. Private diagnostic
+groups have exercised it, but no committed campaign receipt qualifies it. See
+`../tools/README.md` for per-tool
 status and `smoke-bucket.md` for the historical reference snapshot.
 
 **Protocol note.** The comparative measurement plan predates comparative

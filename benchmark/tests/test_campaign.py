@@ -247,8 +247,7 @@ def test_replay_case_slot_attempt_and_request_keep_one_canonical_document(
     )
     uncapped_subject = uncapped_request["taskGroups"][0]["taskSpec"]["runnables"][-1]
     assert uncapped_subject["container"]["options"] == (
-        "--network host --cpuset-cpus=10-13 "
-        "--volume=/mnt/stateful_partition/attempt:/tmp/attempt"
+        "--network host --cpuset-cpus=10-13 --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
     )
     uncapped_commands = uncapped_subject["container"]["commands"]
     assert uncapped_commands[uncapped_commands.index("--container-memory-gb") + 1] == "none"
@@ -298,8 +297,15 @@ def test_renderer_keeps_fixed_latency_flags(tmp_path: Path) -> None:
 def test_uri_fixture_is_staged_before_the_server_and_never_put_in_its_image(
     tmp_path: Path,
 ) -> None:
-    plan = Plan.load(ROOT / "benchmark/plans/refinements/sentinel-cogs/sentinel-cogs.yaml")
-    case = plan.cases[0]
+    plan = Plan.load(ROOT / "benchmark/plans/canaries/sorel-20m.yaml")
+    base = plan.cases[0]
+    assert base.replay is not None
+    backend = replace(
+        base.replay.backend,
+        fixture_uri="gs://fixtures/sorel/*.parquet",
+        fixture_sha256="e" * 64,
+    )
+    case = replace(base, replay=replace(base.replay, backend=backend))
     images = image_set(tmp_path)
     attempt = campaign.planned_attempt(case, context(plan, case, images))[2](1)[0]
     request = campaign.render_batch_job(
@@ -310,21 +316,16 @@ def test_uri_fixture_is_staged_before_the_server_and_never_put_in_its_image(
     )
 
     stage, initializer, server, subject = request["taskGroups"][0]["taskSpec"]["runnables"]
-    assert stage["container"]["commands"] == [
-        "gcloud",
-        "storage",
-        "cp",
-        case.replay.backend.fixture_uri,
-        "/fixtures/source/",
-    ]
+    assert stage["container"]["commands"][0] == "-ceu"
+    script = stage["container"]["commands"][1]
+    assert "gcloud storage cp 'gs://fixtures/sorel/*.parquet' /fixtures/source/" in script
+    assert '[[ "$actual" == ' + "e" * 64 + " ]]" in script
     assert stage["container"]["options"] == (
-        "--volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
+        "--entrypoint /bin/bash --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
     )
     assert stage["environment"] == {
         "variables": {
-            "CLOUDSDK_PYTHON": (
-                "/usr/lib/google-cloud-sdk/platform/bundledpythonunix/bin/python3"
-            )
+            "CLOUDSDK_PYTHON": ("/usr/lib/google-cloud-sdk/platform/bundledpythonunix/bin/python3")
         }
     }
     assert initializer["container"]["commands"] == ["10001:10001", "/tmp/attempt"]
@@ -336,66 +337,13 @@ def test_uri_fixture_is_staged_before_the_server_and_never_put_in_its_image(
         in server["container"]["options"]
     )
     assert (
-        "--volume=/mnt/stateful_partition/attempt:/tmp/attempt"
-        in subject["container"]["options"]
+        "--volume=/mnt/stateful_partition/attempt:/tmp/attempt" in subject["container"]["options"]
     )
     assert request["allocationPolicy"]["instances"][0]["policy"]["bootDisk"] == {
         "type": "hyperdisk-balanced",
         "image": "batch-cos",
         "sizeGb": "100",
     }
-
-
-@pytest.mark.parametrize(
-    ("relative_plan", "machine_type", "container_memory_gb"),
-    [
-        pytest.param(
-            "campaign/idc-open-data.yaml", "c4-highcpu-32", "16", id="c4"
-        ),
-        pytest.param(
-            "c4-64/sentinel-cogs.yaml", "c4d-highcpu-64", "none", id="c4d"
-        ),
-    ],
-)
-def test_c4_diagnostics_keep_the_fixed_boot_disk_and_direct_output_mount(
-    tmp_path: Path,
-    relative_plan: str,
-    machine_type: str,
-    container_memory_gb: str,
-) -> None:
-    plan = Plan.load(
-        ROOT
-        / "benchmark/plans/refinements/swath-main-c4"
-        / relative_plan
-    )
-    case = plan.cases[0]
-    images = image_set(tmp_path)
-    attempt = campaign.planned_attempt(
-        case, context(plan, case, images)
-    )[2](1)[0]
-    request = campaign.render_batch_job(
-        attempt,
-        images.image_for(case.tool),
-        suite=SUITE,
-        options=context(plan, case, images).options,
-    )
-
-    policy = request["allocationPolicy"]["instances"][0]["policy"]
-    assert policy == {
-        "machineType": machine_type,
-        "provisioningModel": "SPOT",
-        "bootDisk": {
-            "type": "hyperdisk-balanced",
-            "image": "batch-cos",
-            "sizeGb": "100",
-        },
-    }
-    subject = request["taskGroups"][0]["taskSpec"]["runnables"][-1]
-    assert "--volume=/mnt/stateful_partition/attempt:/tmp/attempt" in subject[
-        "container"
-    ]["options"]
-    commands = subject["container"]["commands"]
-    assert commands[commands.index("--container-memory-gb") + 1] == container_memory_gb
 
 
 @pytest.mark.parametrize(

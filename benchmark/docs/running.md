@@ -10,10 +10,11 @@ an ordered union"* sections are authoritative. This page does not restate either
 
 ## Status of this procedure: `VERIFIED: no`
 
-**No campaign has ever been run in this repository.** Every step below was
-derived from reading `campaign.py`, not from executing it against GCP Batch.
-That makes this an unverified procedure in exactly the sense
-[`../../AGENTS.md`](../../AGENTS.md) means it: source reading is not a receipt.
+**No receipt-backed campaign has exercised this runbook.** Private diagnostic
+groups informed the replay implementation, but they are not committed run
+records and do not promote any step below. The procedure therefore remains
+unverified in exactly the sense [`../../AGENTS.md`](../../AGENTS.md) means it:
+running privately and source reading are not receipts.
 
 Each section carries its own marker. Promote a marker to `VERIFIED: yes` only in
 the commit where a real run exercised that path, and say in the message which
@@ -67,11 +68,15 @@ tool enforces for you; a missing item surfaces as a provider error mid-campaign.
    `HEAD`, exactly as for the build. Shape is in
    [`../README.md`](../README.md) § *Campaign image set*.
 5. **Replay fixture identity pinned.** The replay server image and fixture digest
-   in the plan bind what is served. No correctness manifest is generated or
-   bound. The worker counts rows inside the container after timing, uploads raw
-   products for manual investigation, and publishes `result.json` last. Keep
+   in the plan bind what is served. A staged `fixture_uri` also requires that
+   digest; staging recomputes it before the server starts. No correctness
+   manifest is generated or bound. The worker counts rows inside the container
+   after timing, uploads raw products for manual investigation, computes its
+   final completion code, and publishes `result.json` last. Keep
    `replay.capacity_status: uncalibrated` until a real diagnostic capacity
-   canary has a committed receipt.
+   canary has a committed receipt. The staged-fixture provider path separately
+   remains `VERIFIED: no` until a committed canary uses `fixture_uri`; a bundled
+   fixture canary does not qualify that download and manifest-check branch.
 6. **Credential secret**, if any case signs: one
    `projects/<p>/secrets/<s>/versions/<v>` resource whose payload is the
    `KEY=VALUE` lines described in
@@ -361,6 +366,31 @@ owes a `BLOCKED` slot, any row is non-terminal, any row's state is outside
 `SUCCEEDED`/`CANCELLED`/`ACCEPTED` (a settled `FAILED`/`NOT_CREATED` must be
 retried or accepted first), or any `SUCCEEDED` row's evidence is not bound —
 a report that exits `0` is a report whose inputs agree with the ledger.
+
+For a replay attempt, `report` applies the same evidence acceptance rule as the
+worker: readiness, an increase in the untagged request counter, no increase in
+the error counter, and interval/cpuset samples for a calibrated measurement. It
+also renders both the subject exit and `worker_exit`; a clean subject whose
+postprocessing or replay evidence was refused is not shown as a clean worker.
+
+## Export a receipt draft
+
+`VERIFIED: no`
+
+```sh
+uv run python -m benchmark.receipt \
+  --state campaign.db \
+  --group g20260817-120000 \
+  --output receipts/g20260817-120000
+```
+
+The group must be settled and have no blocked slot. The command writes a
+deterministic `receipt.json` plus a compact `README.md`. It freezes the resolved
+case documents, provider requests, attempt states and locations, bound result
+digests, both exit codes, timing/RSS/row counts, replay evidence summary, and any
+existing verification record. It copies no listing product and makes no claim:
+the output is a factual draft for review and commit, with `diagnostic`, `canary`,
+`preparation`, and `measurement` labels left intact.
 
 ## Prune
 

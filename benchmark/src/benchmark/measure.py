@@ -907,9 +907,7 @@ def product_block(
         "channel": product.channel,
         "size_bytes": sum(path.stat().st_size for path in retained_files(product.path)),
         "sha256": (
-            sha256_of(product.path)
-            if hash_content and product.channel != "dataset"
-            else None
+            sha256_of(product.path) if hash_content and product.channel != "dataset" else None
         ),
     }
 
@@ -1067,64 +1065,25 @@ def attempt_identity(
     }
 
 
-def publish_replay_refusal(
+def publish_pre_subject_failure(
     args: argparse.Namespace,
     *,
     config: Mapping[str, object],
     attempt_dir: Path,
     destination: str,
-    evidence: Mapping[str, object],
-) -> int:
-    """Publish a replay protocol failure that occurred before subject timing."""
-    result = {
-        **attempt_identity(args, config, destination),
-        "replay_evidence": dict(evidence),
-        "argv": None,
-        "setup": None,
-        "exit_code": EXIT_REPLAY_EVIDENCE_FAILED,
-        "timed_out": False,
-        "execution": None,
-        "wall_seconds": None,
-        "max_rss_kb": None,
-        "row_count": None,
-        "row_count_error": None,
-        "started_at": None,
-        "finished_at": datetime.now(UTC).isoformat(),
-        "product": None,
-        "product_error": None,
-        "stdout": None,
-        "stderr": None,
-        "native_manifest": {},
-        "artifacts_size_bytes": 0,
-    }
-    write_result_atomic(attempt_dir / "result.json", result)
-    return EXIT_REPLAY_EVIDENCE_FAILED if upload(attempt_dir, destination) else 1
-
-
-def publish_setup_failure(
-    args: argparse.Namespace,
-    *,
-    config: Mapping[str, object],
-    attempt_dir: Path,
-    destination: str,
-    setup: Mapping[str, object],
     exit_code: int,
-    started_at: str,
-    replay_evidence: Mapping[str, object] | None = None,
+    setup: Mapping[str, object] | None,
+    started_at: str | None,
+    replay_evidence: Mapping[str, object] | None,
 ) -> int:
-    """Upload what the failed setup exec left behind, and return its ladder code.
-
-    The exec ran, captured output, and that capture is the only account of why
-    this attempt has no measurement in it — the same rule the subject's own
-    failures are held to. The subject never ran, so its fields are explicitly
-    null rather than zeros a reader could mistake for a measurement.
-    """
+    """Publish why an attempt failed before the subject could run."""
     result = {
         **attempt_identity(args, config, destination),
-        "replay_evidence": None if replay_evidence is None else dict(replay_evidence),
+        "replay_evidence": (None if replay_evidence is None else dict(replay_evidence)),
         "argv": None,
-        "setup": dict(setup),
+        "setup": None if setup is None else dict(setup),
         "exit_code": exit_code,
+        "worker_exit_code": exit_code,
         "timed_out": False,
         "execution": None,
         "wall_seconds": None,
@@ -1261,7 +1220,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         except SetupFailed as exc:
             print(f"measure: {exc}", file=sys.stderr)
-            return publish_setup_failure(
+            return publish_pre_subject_failure(
                 args,
                 config=config,
                 attempt_dir=attempt_dir,
@@ -1325,21 +1284,27 @@ def main(argv: list[str] | None = None) -> int:
                     "error": str(readiness.get("last_error") or "readiness deadline expired"),
                 }
             )
-            return publish_replay_refusal(
+            return publish_pre_subject_failure(
                 args,
                 config=config,
                 attempt_dir=attempt_dir,
                 destination=attempt_destination,
-                evidence=replay_evidence,
+                exit_code=EXIT_REPLAY_EVIDENCE_FAILED,
+                setup=None,
+                started_at=None,
+                replay_evidence=replay_evidence,
             )
         replay_evidence["before"] = replay_runtime.scrape_metrics(replay_evidence, "before")
         if replay_evidence["before"] is None:
-            return publish_replay_refusal(
+            return publish_pre_subject_failure(
                 args,
                 config=config,
                 attempt_dir=attempt_dir,
                 destination=attempt_destination,
-                evidence=replay_evidence,
+                exit_code=EXIT_REPLAY_EVIDENCE_FAILED,
+                setup=None,
+                started_at=None,
+                replay_evidence=replay_evidence,
             )
 
         sampler_stop = threading.Event()
@@ -1441,13 +1406,34 @@ def main(argv: list[str] | None = None) -> int:
     phase_started = time.monotonic()
     native_files = {} if minimal_evidence else native_manifest(native_root)
     native_sizes = native_inventory(native_root) if minimal_evidence else None
-    postprocessing_seconds[
-        "native_inventory" if minimal_evidence else "native_manifest"
-    ] = time.monotonic() - phase_started
-    phase_started = time.monotonic()
+    postprocessing_seconds["native_inventory" if minimal_evidence else "native_manifest"] = (
+        time.monotonic() - phase_started
+    )
     # Computed once, before the marker is written -- nothing after this adds
     # another artifact, so there is no stale-then-corrected total to chase.
     artifacts_size_bytes = sum(p.stat().st_size for p in attempt_dir.rglob("*") if p.is_file())
+
+    cgroup_result = execution["cgroup"]
+    assert isinstance(cgroup_result, dict)
+    oom_kill_delta = cgroup_result.get("oom_kill_delta")
+    completion = final_exit_code(
+        exit_code,
+        timed_out,
+        row_count_error,
+        product_error=product_error,
+        oom_kill_delta=oom_kill_delta if isinstance(oom_kill_delta, int) else None,
+        process_group_empty=bool(execution["process_group_empty"]),
+        descendants_empty=bool(execution["descendants_empty"]),
+        process_tree_clean=bool(execution["process_tree_clean"]),
+    )
+    replay_refusals: tuple[str, ...] = ()
+    if replay_config is not None:
+        replay_refusals = replay.evidence_errors(
+            replay_config, replay_evidence, purpose=args.purpose
+        )
+        if replay_refusals:
+            completion = EXIT_REPLAY_EVIDENCE_FAILED
+    postprocessing_seconds["pre_upload_total"] = time.monotonic() - postprocessing_started
 
     result = {
         **attempt_identity(args, config, attempt_destination),
@@ -1457,6 +1443,10 @@ def main(argv: list[str] | None = None) -> int:
         # it made, and how long it took — beside the timing and never inside it.
         "setup": setup,
         "exit_code": exit_code,
+        # The subject's exit and the worker's acceptance are different facts.
+        # This value is final before the marker exists, so a reader never sees a
+        # subject exit 0 in a marker the worker later rejects.
+        "worker_exit_code": completion,
         "timed_out": timed_out,
         "execution": execution,
         "wall_seconds": execution["wall_seconds"],
@@ -1478,35 +1468,8 @@ def main(argv: list[str] | None = None) -> int:
         "artifacts_size_bytes": artifacts_size_bytes,
     }
     write_result_atomic(attempt_dir / "result.json", result)
-    postprocessing_seconds["result_finalize"] = time.monotonic() - phase_started
-    postprocessing_seconds["pre_upload_total"] = time.monotonic() - postprocessing_started
-    write_result_atomic(attempt_dir / "result.json", result)
     if not upload(attempt_dir, attempt_destination, postprocessing_seconds):
         return 1
-
-    cgroup_result = execution["cgroup"]
-    assert isinstance(cgroup_result, dict)
-    oom_kill_delta = cgroup_result.get("oom_kill_delta")
-    completion = final_exit_code(
-        exit_code,
-        timed_out,
-        row_count_error,
-        product_error=product_error,
-        oom_kill_delta=oom_kill_delta if isinstance(oom_kill_delta, int) else None,
-        process_group_empty=bool(execution["process_group_empty"]),
-        descendants_empty=bool(execution["descendants_empty"]),
-        process_tree_clean=bool(execution["process_tree_clean"]),
-    )
-    if replay_evidence is not None:
-        replay_errors = replay_evidence["errors"]
-        replay_samples = replay_evidence["samples"]
-        if (
-            replay_evidence["after"] is None
-            or not isinstance(replay_errors, list)
-            or replay_errors
-            or not isinstance(replay_samples, list)
-        ):
-            completion = EXIT_REPLAY_EVIDENCE_FAILED
     if exit_code != 0:
         print(f"measure: {args.tool} exited {exit_code}", file=sys.stderr)
     elif completion == EXIT_ARTIFACT_UNUSABLE:
@@ -1514,7 +1477,10 @@ def main(argv: list[str] | None = None) -> int:
     elif completion == EXIT_POSTPROCESSING_FAILED:
         print("measure: successful subject output could not be counted", file=sys.stderr)
     elif completion == EXIT_REPLAY_EVIDENCE_FAILED:
-        print("measure: replay evidence protocol was incomplete", file=sys.stderr)
+        print(
+            "measure: replay evidence protocol was refused: " + "; ".join(replay_refusals),
+            file=sys.stderr,
+        )
     elif completion != 0:
         print(
             "measure: subject process group or cgroup OOM evidence was not clean", file=sys.stderr

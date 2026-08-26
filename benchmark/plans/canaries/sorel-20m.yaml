@@ -1,5 +1,5 @@
-# Small replay integration canary. This is row-count evidence, not a capacity
-# result or a comparative measurement.
+# Small multi-tool replay integration canary. This is row-count and runner-path
+# evidence, not a capacity result or a comparative measurement.
 spec_version: 3
 
 bucket: sorel-20m
@@ -34,18 +34,38 @@ defaults:
   replay_heap_percent: 75
 
 tools:
+  aws-cli:
+    cases:
+      - {mode: s3api-v2-text, purpose: diagnostic}
+  minio-mc:
+    cases:
+      - {mode: recursive, purpose: diagnostic}
+  ps3:
+    cases:
+      - {mode: list, purpose: diagnostic}
+  rclone:
+    cases:
+      - {mode: recursive-fastlist, purpose: diagnostic}
+  s3-fast-list:
+    cases:
+      - {mode: list, purpose: diagnostic}
+  s3kor:
+    cases:
+      - {mode: list, purpose: diagnostic}
+  s3p:
+    cases:
+      - {mode: ls, purpose: diagnostic}
+  s5cmd:
+    cases:
+      - {mode: recursive, purpose: diagnostic}
+  s7cmd:
+    cases:
+      - {mode: recursive-tsv, purpose: diagnostic}
   swath:
     cases:
       - {mode: recursive-tsv, concurrency: 64, purpose: diagnostic}
 
 exclude:
-  - {tool: aws-cli, reason: outside the Swath-only integration canary}
-  - {tool: minio-mc, reason: outside the Swath-only integration canary}
-  - {tool: ps3, reason: outside the Swath-only integration canary}
-  - {tool: rclone, reason: outside the Swath-only integration canary}
-  - {tool: s3-fast-list, reason: outside the Swath-only integration canary}
-  - {tool: s3kor, reason: outside the Swath-only integration canary}
-  - {tool: s3p, reason: outside the Swath-only integration canary}
-  - {tool: s4cmd, reason: outside the Swath-only integration canary}
-  - {tool: s5cmd, reason: outside the Swath-only integration canary}
-  - {tool: s7cmd, reason: outside the Swath-only integration canary}
+  - tool: s4cmd
+    reason: server scope — s4cmd speaks only v1 ListObjects, which the replay server
+      does not implement; observed, not inferred

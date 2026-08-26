@@ -398,7 +398,8 @@ def test_replay_content_verification_is_refused_without_reading_raw_products(
     )
 
     assert code == EXIT_INCOMPLETE_GROUP
-    assert report["buckets"][0]["gaps"][0]["reason"] == "replay-row-count-only"
+    assert "row-count-only" in report["refusal"]
+    assert report["replay_attempts"] == [attempt.attempt_id]
     assert not (Path(attempt.result_prefix) / "verify.json").exists()
 
 

@@ -210,6 +210,7 @@ def write_evidence(
             "container_memory_gb": attempt.container_memory_gb,
         },
         "exit_code": 0,
+        "worker_exit_code": overrides.get("worker_exit_code", overrides.get("exit_code", 0)),
         "timed_out": False,
         "wall_seconds": wall_seconds,
         "max_rss_kb": 1024,
@@ -361,10 +362,10 @@ def test_result_replay_document_is_bound_exactly_to_the_ledger(tmp_path: Path) -
     attempt = record(con, tmp_path, tool="alpha", digest="aaaa", replay=replay)
     complete = {
         "readiness": {"state": "ready", "wait_ms": 1, "attempts": 1, "last_error": None},
-        "before": {"observed_at": "now", "metrics": {"requests": 0}},
-        "samples": [{"observed_at": "now", "elapsed_s": 0.1, "metrics": {"requests": 1}}],
-        "resource_samples": [],
-        "after": {"observed_at": "now", "metrics": {"requests": 1}},
+        "before": {"observed_at": "now", "metrics": replay_metrics(0)},
+        "samples": [{"observed_at": "now", "elapsed_s": 0.1, "metrics": replay_metrics(1)}],
+        "resource_samples": [{"server_cpuset": "0-3", "subject_cpuset": "4-7"}],
+        "after": {"observed_at": "now", "metrics": replay_metrics(1)},
         "errors": [],
     }
     write_evidence(attempt, replay_evidence=complete)
@@ -399,7 +400,9 @@ def test_replay_report_uses_result_json_and_declared_allocations(tmp_path: Path)
 
     row = rows_of(con, root)[0]
     assert (row["evidence_state"], row["replay_state"], row["row_count"]) == (
-        "RESULT_BOUND", "COMPLETE", 2
+        "RESULT_BOUND",
+        "COMPLETE",
+        2,
     )
     assert row["declared_server_allocation"] == "cpus=0-3;memory=8GiB"
     assert row["declared_subject_allocation"] == "cpus=4-7;memory=8GiB"
@@ -426,7 +429,9 @@ def test_uncalibrated_replay_diagnostic_stays_out_of_publishable_rows(tmp_path: 
     row = rows_of(con, root)[0]
 
     assert (row["capacity_status"], row["purpose"], row["evidence_state"]) == (
-        "UNCALIBRATED", "diagnostic", "RESULT_BOUND"
+        "UNCALIBRATED",
+        "diagnostic",
+        "RESULT_BOUND",
     )
     assert not report.is_timing(row)
     assert "0 successful timing(s)" in report.summary_line([row])
@@ -517,6 +522,8 @@ def test_each_bucket_is_its_own_section(tmp_path: Path) -> None:
     rows = rows_of(con, adapter_root(tmp_path, "alpha", "beta"))
     markdown = report.render_markdown(rows, blocked=[])
     assert markdown.count("## bucket-") == 2
+
+
 def test_a_canary_is_reported_without_becoming_a_timing(tmp_path: Path) -> None:
     con = fixture_ledger(tmp_path)
     write_evidence(record(con, tmp_path, tool="alpha", digest="aaaa"))

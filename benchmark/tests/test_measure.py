@@ -766,9 +766,26 @@ def test_replay_readiness_precedes_timer_and_metrics_persist(
         evidence: dict[str, object], phase: str, *, elapsed_s: float | None = None
     ) -> dict[str, object]:
         events.append(phase)
+        requests = 3 if phase == "before" else 4
         result: dict[str, object] = {
             "observed_at": "2026-08-20T00:00:00+00:00",
-            "metrics": {"server": {"jvm": {"heap_bytes": 7}}, "requests": 3},
+            "metrics": {
+                "server": {"jvm": {"heap_bytes": 7}},
+                "meters": [
+                    {
+                        "name": "swath.replay.http.requests",
+                        "type": "counter",
+                        "tags": {},
+                        "count": requests,
+                    },
+                    {
+                        "name": "swath.replay.http.errors",
+                        "type": "counter",
+                        "tags": {},
+                        "count": 0,
+                    },
+                ],
+            },
         }
         if elapsed_s is not None:
             result["elapsed_s"] = elapsed_s
@@ -823,11 +840,12 @@ def test_replay_readiness_precedes_timer_and_metrics_persist(
     result = json.loads((tmp_path / "attempt/result.json").read_text())
     assert result["replay"] == replay_document()
     assert result["replay_evidence"]["readiness"]["state"] == "ready"
-    assert result["replay_evidence"]["before"]["metrics"]["requests"] == 3
+    assert result["replay_evidence"]["before"]["metrics"]["meters"][0]["count"] == 3
     assert result["replay_evidence"]["samples"]
     assert result["replay_evidence"]["resource_samples"]
     assert result["replay_evidence"]["after"]["metrics"]["server"]["jvm"] == {"heap_bytes": 7}
     assert result["replay_evidence"]["errors"] == []
+    assert result["worker_exit_code"] == 0
     assert result["evidence_profile"] == "minimal-replay"
     assert result["product"] is None
     assert result["stderr"]["sha256"] is None
@@ -1473,7 +1491,6 @@ def test_a_product_lands_under_its_declared_name_whichever_channel_carries_it(
         "row_count",
         "capture_finalize",
         "native_manifest",
-        "result_finalize",
         "pre_upload_total",
         "artifact_upload",
     }

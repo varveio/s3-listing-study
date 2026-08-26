@@ -25,8 +25,9 @@ amd64 through the now-retired groundwork attempt engine — `aws-cli`, `s5cmd`, 
 and `ps3` with a credential, which previously blocked them. Running is not
 verifying: those retired-engine attempts carry no verdict and were never bound
 to the current verifier. The replay harness now retains each raw product and
-reports the row count measured inside the worker, but no campaign has exercised
-that path. Per-tool status:
+reports the row count measured inside the worker. Private diagnostic groups
+have exercised that path, but no committed campaign receipt qualifies it.
+Per-tool status:
 `tools/README.md`.
 
 ## Project principles

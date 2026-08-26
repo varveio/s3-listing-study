@@ -98,6 +98,12 @@ gs://<results-bucket>/<suite>/<target-bucket>/<tool>.<hash>.s<attempt>/
   native/listing.txt   -- the product, named for what is in it
 ```
 
+`result.json` records `exit_code` for the subject and `worker_exit_code` for the
+worker's final acceptance after counting, artifact checks, cgroup inspection,
+and replay-evidence validation. Both are decided before the marker is created.
+A subject that exits zero can therefore still have an explicitly refused worker
+completion without publishing a misleading success marker.
+
 **The product is a file the mode declares, and stdout is a log**
 ([`capsule-contract.md`](capsule-contract.md) § *The product travels on a
 declared file*). It lands in the sink under its declared name, so
@@ -272,6 +278,11 @@ disjoint server and subject cpusets, available host memory, and load. Cpuset
 utilization is deliberately not called process CPU: host work scheduled on
 those CPUs is inside the observation. Missing or malformed replay evidence is
 a refusal, not a timing with an assumed healthy backend.
+
+When a replay fixture is staged from `fixture_uri`, `fixture_sha256` binds the
+sorted manifest of downloaded Parquet names, sizes, and content digests. The
+staging runnable recomputes that digest before the background server runnable
+starts. The URI locates bytes; it does not identify them.
 
 Verification requires the replay server's untagged request counter to increase
 across the subject interval and its error counter not to increase. A calibrated

@@ -1,9 +1,0 @@
-# These diagnostics deliberately select C4 without Local SSD. The retained
-# compressed Sentinel product and fixture fit the existing boot disk. Intel C4
-# has no 64-vCPU shape, so the exact two-times CPU row uses the x86 C4D shape
-# and its native 120-GiB memory while keeping the storage class unchanged.
-spec_version: 2
-
-instances:
-  - { vcpus: 32, memory_gb: 64, machine_type: c4-highcpu-32 }
-  - { vcpus: 64, memory_gb: 120, machine_type: c4d-highcpu-64 }

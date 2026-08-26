@@ -178,10 +178,10 @@ class Subject:
 
 @dataclass(frozen=True)
 class Roster:
-    """A group's comparative attempts, replay diagnostics, and owed slots."""
+    """A group's comparative attempts, replay attempts, and owed slots."""
 
     subjects: tuple[Subject, ...]
-    diagnostics: tuple[Subject, ...]
+    replay_attempts: tuple[Subject, ...]
     blocked: tuple[str, ...]
     abandoned: tuple[str, ...]
 
@@ -198,18 +198,18 @@ class Prepared:
 
 
 def roster_for(con: sqlite3.Connection, group_id: str) -> Roster:
-    """Read the comparison population and replay diagnostics from recorded rows."""
+    """Read the comparison population and replay refusal from recorded rows."""
     attempts = tuple(Subject.from_row(row) for row in attempt_rows(con, group_id=group_id))
-    subjects = tuple(subject for subject in attempts if subject.purpose == "measurement")
-    diagnostics = tuple(
+    replay_attempts = tuple(subject for subject in attempts if subject.replay is not None)
+    subjects = tuple(
         subject
         for subject in attempts
-        if subject.purpose in {"canary", "diagnostic"} and subject.replay is not None
+        if subject.purpose == "measurement" and subject.replay is None
     )
     slots = pending_rows(con, group_id=group_id)
     return Roster(
         subjects=subjects,
-        diagnostics=diagnostics,
+        replay_attempts=replay_attempts,
         blocked=tuple(_slot_label(row) for row in slots if row["state"] == "BLOCKED"),
         abandoned=tuple(_slot_label(row) for row in slots if row["state"] == "ABANDONED"),
     )
@@ -593,29 +593,6 @@ def compare(reference: Prepared, actual: Prepared) -> dict[str, Any]:
         con.close()
 
 
-def replay_refusal(subjects: Sequence[Subject]) -> dict[str, Any]:
-    """Refuse replay content verification without reading retained raw products."""
-    first = subjects[0]
-    gaps = [
-        _gap(
-            subject,
-            "replay-row-count-only",
-            "replay campaigns report the worker's row_count from result.json; "
-            "raw products are retained for manual investigation only",
-        )
-        for subject in subjects
-    ]
-    return {
-        "target_bucket": first.target_bucket,
-        "backend": "replay",
-        "complete": False,
-        "verdict": "INCOMPLETE",
-        "strata": [],
-        "rates": [],
-        "gaps": gaps,
-    }
-
-
 def verify_bucket(
     subjects: Sequence[Subject],
     *,
@@ -624,23 +601,6 @@ def verify_bucket(
     write_record: bool,
 ) -> dict[str, Any]:
     """One target bucket's strata, rate cases, and the gaps in between."""
-    replay_flags = {subject.replay is not None for subject in subjects}
-    if len(replay_flags) > 1:
-        mixed_gap = _gap(
-            subjects[0],
-            "mixed-backend",
-            "one target-bucket comparison mixes replay and real-S3 attempts",
-        )
-        return {
-            "target_bucket": subjects[0].target_bucket,
-            "complete": False,
-            "verdict": "INCOMPLETE",
-            "strata": [],
-            "rates": [],
-            "gaps": [mixed_gap],
-        }
-    if replay_flags == {True}:
-        return replay_refusal(subjects)
     gaps: list[dict[str, object]] = []
     rates: list[dict[str, object]] = []
     prepared: list[Prepared] = []
@@ -749,8 +709,19 @@ def verify_group(
 ) -> tuple[int, dict[str, Any]]:
     """Verify one group against its recorded roster. Returns (exit_code, report)."""
     roster = roster_for(con, group_id)
+    if roster.replay_attempts:
+        report = {
+            "group_id": group_id,
+            "complete": False,
+            "verdict": "INCOMPLETE",
+            "refusal": (
+                "replay groups are row-count-only and are reported from bound result.json; "
+                "content verification applies only to real-S3 groups"
+            ),
+            "replay_attempts": [subject.attempt_id for subject in roster.replay_attempts],
+        }
+        return GROUP_EXIT_CODES["INCOMPLETE"], report
     buckets: list[dict[str, Any]] = []
-    diagnostics: list[dict[str, Any]] = []
     with tempfile.TemporaryDirectory() as tmp:
         work_dir = Path(tmp)
         for bucket in sorted({s.target_bucket for s in roster.subjects}):
@@ -761,22 +732,6 @@ def verify_group(
                     work_dir=work_dir,
                     write_record=write_record,
                 )
-            )
-        for subject in roster.diagnostics:
-            diagnostics.append(
-                {
-                    "attempt_id": subject.attempt_id,
-                    "tool": subject.tool,
-                    "mode": subject.mode,
-                    "purpose": subject.purpose,
-                    "capacity_status": (
-                        subject.replay.capacity_status if subject.replay is not None else "-"
-                    ),
-                    "complete": False,
-                    "verdict": "INCOMPLETE",
-                    "verification": None,
-                    "gaps": replay_refusal([subject])["gaps"],
-                }
             )
         comparison_complete = (
             bool(roster.subjects)
@@ -789,36 +744,16 @@ def verify_group(
             if not comparison_complete
             else worst_verdict(b["verdict"] for b in buckets)
         )
-        diagnostics_complete = (
-            bool(diagnostics)
-            and not roster.blocked
-            and not roster.abandoned
-            and all(item["complete"] for item in diagnostics)
-        )
-        diagnostics_verdict = (
-            "INCOMPLETE"
-            if not diagnostics_complete
-            else worst_verdict(item["verdict"] for item in diagnostics)
-        )
-        # A diagnostic-only group has an evidence verdict, not a fictional
-        # comparison verdict.  In a mixed group diagnostics remain visible but
-        # do not promote, demote, or publish the comparison population.
-        complete = comparison_complete if roster.subjects else diagnostics_complete
-        verdict = comparison_verdict if roster.subjects else diagnostics_verdict
         report = {
             "group_id": group_id,
-            "complete": complete,
-            "verdict": verdict,
+            "complete": comparison_complete,
+            "verdict": comparison_verdict,
             "blocked": list(roster.blocked),
             "abandoned": list(roster.abandoned),
             "subjects": len(roster.subjects),
-            "diagnostic_subjects": len(roster.diagnostics),
-            "diagnostic_complete": diagnostics_complete,
-            "diagnostic_verdict": diagnostics_verdict,
             "buckets": buckets,
-            "diagnostics": diagnostics,
         }
-    return GROUP_EXIT_CODES[verdict], report
+    return GROUP_EXIT_CODES[comparison_verdict], report
 
 
 def print_samples(diff: Mapping[str, Any]) -> None:
@@ -843,12 +778,14 @@ def print_samples(diff: Mapping[str, Any]) -> None:
 
 
 def print_report(report: Mapping[str, Any]) -> None:
+    if "refusal" in report:
+        print(f"group {report['group_id']}: INCOMPLETE")
+        print(f"  refused: {report['refusal']}")
+        for attempt_id in report["replay_attempts"]:
+            print(f"  replay attempt: {attempt_id}")
+        print("verdict=INCOMPLETE")
+        return
     print(f"group {report['group_id']}: {report['subjects']} measurement attempt(s)")
-    if report["diagnostic_subjects"]:
-        print(
-            f"  {report['diagnostic_subjects']} replay diagnostic/canary attempt(s): "
-            f"{report['diagnostic_verdict']}"
-        )
     for label in ("blocked", "abandoned"):
         for slot in report[label]:
             print(f"  {label}: {slot}")
@@ -870,13 +807,6 @@ def print_report(report: Mapping[str, Any]) -> None:
                 f"= {rate['rate']}"
             )
         for gap in bucket["gaps"]:
-            print(f"    gap {gap['attempt_id']} [{gap['reason']}]: {gap['detail']}")
-    for diagnostic in report["diagnostics"]:
-        print(
-            f"  diagnostic {diagnostic['attempt_id']} [{diagnostic['purpose']}]: "
-            f"{diagnostic['verdict']} (capacity {diagnostic['capacity_status']})"
-        )
-        for gap in diagnostic["gaps"]:
             print(f"    gap {gap['attempt_id']} [{gap['reason']}]: {gap['detail']}")
     print(f"verdict={report['verdict']}")
 

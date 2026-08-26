@@ -213,127 +213,30 @@ def test_the_committed_idc_plan_is_the_six_cell_no_latency_partition_sweep() -> 
         assert allocation.replay_heap_percent == 75
 
 
-def test_the_current_swath_main_rerun_stays_one_bounded_idc_diagnostic() -> None:
-    """Guard the reviewed first rung, including every identity-bearing output control."""
-    path = (
-        Path(__file__).resolve().parents[2]
-        / "benchmark/plans/refinements/swath-main-rerun/idc-open-data.yaml"
-    )
-    loaded = bench.Plan.load(path)
-    assert len(loaded.cases) == 1
-    case = loaded.cases[0]
-    assert case.tool == "swath"
-    assert case.mode == "recursive-tsv-dataset"
-    assert case.purpose == "diagnostic"
-    assert case.resources.machine_type == "n4-highcpu-16"
-    assert case.resources.container_memory_gb == 8
-    assert dict(case.config) == {
-        "concurrency": 16,
-        "heap_percent": 75,
-        "mode": "recursive-tsv-dataset",
-        "part_rotation_interval": "0",
-        "part_rotation_max_rows": 0,
-        "text_part_size": "1gb",
-        "text_writers": 3,
-        "writeback_size": "32mb",
-    }
-    assert case.replay is not None
-    allocation = case.replay.allocation
-    assert (allocation.replay_vcpus, allocation.subject_vcpus) == (6, 8)
-    assert allocation.replay_memory_gb == 6
-    assert allocation.replay_parquet_connections == 8
-    assert allocation.replay_max_concurrent_requests == 512
-    assert allocation.replay_prefetch is True
-    assert allocation.replay_prefetch_max_windows == 24
-    assert allocation.replay_heap_percent == 67
-
-
-def test_the_current_geometry_rerun_changes_only_the_replay_fixture() -> None:
-    """Keep the fixture-geometry attribution screen one-dimensional."""
+def test_runner_qualification_plans_keep_their_declared_rosters() -> None:
     root = Path(__file__).resolve().parents[2]
-    coarse = bench.Plan.load(
-        root / "benchmark/plans/refinements/swath-main-rerun/idc-open-data.yaml"
-    ).cases[0]
-    current = bench.Plan.load(
-        root
-        / "benchmark/plans/refinements/swath-main-current-geometry/idc-open-data.yaml"
-    ).cases[0]
-    assert current.tool == coarse.tool
-    assert current.mode == coarse.mode
-    assert current.purpose == coarse.purpose
-    assert current.resources == coarse.resources
-    assert current.config == coarse.config
-    assert current.replay is not None
-    assert coarse.replay is not None
-    assert current.replay != coarse.replay
-    assert current.replay.allocation == coarse.replay.allocation
-    assert current.replay.backend.server_image_uri == coarse.replay.backend.server_image_uri
-    assert current.replay.backend.serving_mode == coarse.replay.backend.serving_mode
-    assert (
-        current.replay.backend.as_dict()["latency_model"]
-        == coarse.replay.backend.as_dict()["latency_model"]
-    )
-    assert current.replay.backend.fixture_uri == (
-        "gs://s3-listing-study-results-29c02004/fixtures/swath-replay/"
-        "idc-open-data/current-geometry-20260824/*.parquet"
-    )
+    replay = bench.Plan.load(root / "benchmark/plans/canaries/sorel-20m.yaml")
+    real_s3 = bench.Plan.load(root / "benchmark/plans/canaries/noaa-ghcn-pds.yaml")
 
-
-def test_the_page_cache_screen_changes_only_the_subject_memory_ceiling() -> None:
-    """Keep the observed cgroup-pressure diagnostic one-dimensional."""
-    root = Path(__file__).resolve().parents[2]
-    constrained = bench.Plan.load(
-        root
-        / "benchmark/plans/refinements/swath-main-current-geometry/idc-open-data.yaml"
-    ).cases[0]
-    roomy = bench.Plan.load(
-        root
-        / "benchmark/plans/refinements/swath-main-current-geometry-mem16/"
-        "idc-open-data.yaml"
-    ).cases[0]
-    assert roomy.tool == constrained.tool
-    assert roomy.mode == constrained.mode
-    assert roomy.purpose == constrained.purpose
-    assert roomy.config == constrained.config
-    assert roomy.replay == constrained.replay
-    assert roomy.resources.as_dict() == {
-        **constrained.resources.as_dict(),
-        "container_memory_gb": 16,
+    assert {case.tool for case in replay.cases} == {
+        "aws-cli",
+        "minio-mc",
+        "ps3",
+        "rclone",
+        "s3-fast-list",
+        "s3kor",
+        "s3p",
+        "s5cmd",
+        "s7cmd",
+        "swath",
     }
-
-
-def test_the_workstation_topology_screen_preserves_the_tuned_case() -> None:
-    """Guard the 16+16-vCPU reproduction before paying for the larger VM."""
-    root = Path(__file__).resolve().parents[2]
-    baseline = bench.Plan.load(
-        root
-        / "benchmark/plans/refinements/swath-main-current-geometry-mem16/"
-        "idc-open-data.yaml"
-    ).cases[0]
-    matched = bench.Plan.load(
-        root
-        / "benchmark/plans/refinements/swath-main-workstation-topology/"
-        "idc-open-data.yaml"
-    ).cases[0]
-    assert matched.tool == baseline.tool
-    assert matched.mode == baseline.mode
-    assert matched.purpose == baseline.purpose
-    assert matched.config == baseline.config
-    assert matched.resources.as_dict() == {
-        **baseline.resources.as_dict(),
-        "vcpus": 34,
-        "memory_gb": 68,
-        "machine_type": "n4-custom-34-69632",
+    assert {case.tool for case in real_s3.cases} == {
+        "aws-cli",
+        "rclone",
+        "s3-fast-list",
+        "swath",
     }
-    assert matched.replay is not None
-    assert baseline.replay is not None
-    assert matched.replay.backend == baseline.replay.backend
-    assert matched.replay.capacity_status == baseline.replay.capacity_status
-    assert matched.replay.allocation.as_dict() == {
-        **baseline.replay.allocation.as_dict(),
-        "replay_vcpus": 16,
-        "subject_vcpus": 16,
-    }
+    assert all(case.purpose == "diagnostic" for case in (*replay.cases, *real_s3.cases))
 
 
 @pytest.mark.parametrize(
