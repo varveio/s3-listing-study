@@ -72,8 +72,8 @@ resource "google_secret_manager_secret" "aws_credentials" {
 
 # ── The authenticated worker ──────────────────────────────────────────────────
 # Identical to the anonymous worker in every respect except that it, and only it,
-# can read the credential. Same least-privilege shape: pull its image, report
-# task state, write its own attempt, read nothing back.
+# can read the credential. Both identities have the same full object access to
+# the results bucket.
 
 resource "google_service_account" "authenticated_worker" {
   count        = var.create_aws_credentials_secret ? 1 : 0
@@ -105,21 +105,8 @@ resource "google_artifact_registry_repository_iam_member" "authenticated_worker_
 resource "google_storage_bucket_iam_member" "authenticated_worker_write" {
   count  = var.create_aws_credentials_secret ? 1 : 0
   bucket = google_storage_bucket.results.name
-  role   = "roles/storage.objectCreator"
+  role   = "roles/storage.objectAdmin"
   member = "serviceAccount:${google_service_account.authenticated_worker[0].email}"
-}
-
-resource "google_storage_bucket_iam_member" "authenticated_worker_fixture_read" {
-  count  = var.create_aws_credentials_secret ? 1 : 0
-  bucket = google_storage_bucket.results.name
-  role   = "roles/storage.objectViewer"
-  member = "serviceAccount:${google_service_account.authenticated_worker[0].email}"
-
-  condition {
-    title       = "replay-fixtures-only"
-    description = "Read only immutable staged replay fixtures"
-    expression  = "resource.type == \"storage.googleapis.com/Object\" && resource.name.startsWith(\"projects/_/buckets/${google_storage_bucket.results.name}/objects/fixtures/\")"
-  }
 }
 
 # The grant that defines the stratum. On the secret, not at project scope, and on

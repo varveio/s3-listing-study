@@ -15,7 +15,7 @@
 #
 # Additive google_*_iam_member throughout, never authoritative _iam_binding or
 # _iam_policy: an authoritative grant on the bucket would clobber the worker's
-# objectCreator on the same resource.
+# objectAdmin on the same resource.
 
 locals {
   manager_project_roles = [

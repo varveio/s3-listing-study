@@ -41,10 +41,10 @@ tool enforces for you; a missing item surfaces as a provider error mid-campaign.
 1. **Infrastructure applied.** Project, region, network/subnetwork, results
    bucket, and both worker service accounts. See
    [`../../infra/terraform/modules/gcp/s3-listing-study/README.md`](../../infra/terraform/modules/gcp/s3-listing-study/README.md).
-   Both worker identities hold bucket-level `roles/storage.objectCreator` plus a
-   conditional `roles/storage.objectViewer` grant limited to the
-   `objects/fixtures/` prefix. Plans name an exact object and therefore need no
-   bucket listing permission; workers cannot read campaign results.
+   Both worker identities hold bucket-level `roles/storage.objectAdmin`: either
+   can list, read, create, overwrite, or delete fixtures, campaign results, and
+   receipts. Their bucket access is identical; only the authenticated worker can
+   read the AWS credential secret.
 2. **Toolbox built and smoked** at the exact revision you intend to run:
 
    ```sh

@@ -2,8 +2,8 @@
 #
 # The bounded identity each cooperative Cloud Batch attempt uses. Metadata
 # access is intentional: the in-worker uploader obtains this identity's token
-# there. Its narrow grants limit mistakes without treating the subject as
-# hostile software.
+# there. Its results-bucket grant is deliberately broad: every worker may read
+# and manage every object in the shared benchmark evidence store.
 #
 # The benchmark lists public buckets anonymously, so this identity holds no
 # credentials for any object store under test. "Anonymous" describes the S3
@@ -35,25 +35,11 @@ resource "google_artifact_registry_repository_iam_member" "worker_pull" {
   member     = "serviceAccount:${google_service_account.worker.email}"
 }
 
-# The measurement worker only creates objects in its fresh UUID attempt leaf.
-# Campaign management, verification, and reporting read through the separate
-# orchestrator identity; neither worker needs read, overwrite, or delete access.
+# Both worker identities have the same full object access to the results bucket.
+# Their only capability difference is outside this bucket: the authenticated
+# worker may read the AWS credential secret.
 resource "google_storage_bucket_iam_member" "worker_write" {
   bucket = google_storage_bucket.results.name
-  role   = "roles/storage.objectCreator"
+  role   = "roles/storage.objectAdmin"
   member = "serviceAccount:${google_service_account.worker.email}"
-}
-
-# Replay fixtures are immutable, content-addressed inputs under one prefix.
-# Reading them does not imply read access to any campaign result or receipt.
-resource "google_storage_bucket_iam_member" "worker_fixture_read" {
-  bucket = google_storage_bucket.results.name
-  role   = "roles/storage.objectViewer"
-  member = "serviceAccount:${google_service_account.worker.email}"
-
-  condition {
-    title       = "replay-fixtures-only"
-    description = "Read only immutable staged replay fixtures"
-    expression  = "resource.type == \"storage.googleapis.com/Object\" && resource.name.startsWith(\"projects/_/buckets/${google_storage_bucket.results.name}/objects/fixtures/\")"
-  }
 }

@@ -162,8 +162,9 @@ both `fixture_uri` and `fixture_sha256`. `fixture_uri` names either one exact
 Parquet object or the bounded multipart shape `gs://.../part-*.parquet`; broader
 wildcards are refused. An exact object needs `storage.objects.get`; expanding
 the bounded part set also needs `storage.objects.list` plus
-`storage.objects.get` for its matches. The digest is over the UTF-8 bytes of the sorted
-`name<TAB>size<TAB>file-sha256<NEWLINE>` manifest rows. The staging runnable
+`storage.objects.get` for its matches. Worker IAM currently grants broader
+bucket-wide object administration. The digest is over the UTF-8 bytes of the
+sorted `name<TAB>size<TAB>file-sha256<NEWLINE>` manifest rows. The staging runnable
 recomputes it after download and before starting the replay server, so mutable
 storage cannot silently change a case. Generate the value from an already
 staged directory with:

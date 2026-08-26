@@ -6,9 +6,9 @@
 # written last.
 #
 # Versioning is on because the study's rule is that an attempt is never
-# overwritten and a retry is always a new attempt. Versioning does not enforce
-# that — the worker's objectCreator grant in worker.tf does — it makes a
-# violation recoverable instead of silent.
+# overwritten and a retry is always a new attempt. Worker IAM allows overwrite
+# and delete, so versioning makes an accidental violation recoverable instead of
+# silent.
 #
 # prevent_destroy guards recorded evidence: force_destroy = false alone still
 # lets `tofu destroy` drop an emptied bucket.
