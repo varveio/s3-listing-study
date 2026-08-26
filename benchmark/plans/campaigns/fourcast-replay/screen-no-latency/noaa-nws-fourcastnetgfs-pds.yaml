@@ -48,6 +48,11 @@ tools:
   s3-fast-list:
     cases:
       - {purpose: diagnostic}
+      # The representative path uses the plain listing's keyspace artifact to
+      # split 16 ranges, then lists those ranges concurrently. The plain row is
+      # retained because it is both the serial baseline and the required hints
+      # producer; the planner binds it without launching a duplicate producer.
+      - {mode: list-hinted, segments: 16, purpose: diagnostic}
   s3kor:
     cases:
       - {purpose: diagnostic}
