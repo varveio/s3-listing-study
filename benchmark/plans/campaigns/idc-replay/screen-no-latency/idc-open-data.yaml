@@ -9,7 +9,7 @@ auth_role: public-read
 
 replay:
   capacity_status: uncalibrated
-  server_image_uri: us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:ace5350d99c217bf5919b795fc53ed955d1dc2fb6bef1eecf36e8a90e9732f07
+  server_image_uri: ghcr.io/varveio/swath-replay@sha256:abef7d76f9d40857dc8c7ab4e64c47d26531c8aa8a26bf16aaf2cae8ca3fe06d
   fixture_uri: gs://s3-listing-study-results-29c02004/fixtures/swath-replay/idc-open-data/current-geometry-20260824/part-*.parquet
   fixture_sha256: 8a83fdc88000d6a1f4e3563eb3151407a91b6ca319713b08cff3e72442608ebe
   serving_mode: sorted
