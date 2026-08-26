@@ -24,7 +24,7 @@ defaults:
   container_memory_gb: 16
   replay_vcpus: 8
   replay_memory_gb: 8
-  replay_parquet_connections: 32
+  replay_parquet_connections: 8
   replay_max_concurrent_requests: 4096
   replay_prefetch: true
   replay_prefetch_max_windows: 256
