@@ -365,7 +365,12 @@ Four constraints:
 - **The prerequisite does not inherit the consumer's config.** It takes whatever
   config the capsule says it takes, which is what lets one preparation serve a
   whole sweep. See [`identity.md`](identity.md) § *Two identities, two
-  questions*.
+  questions*. For example, several s3-fast-list `list-hinted` rows may vary
+  hinted concurrency or segment count while sharing one plain-`list`
+  `keyspace.ks` preparation: those consumer-only axes do not multiply the
+  producer. Sharing is automatic inside one launch; a later launch can bind the
+  same producer from the same `campaign.db` only through the operator's explicit
+  `--reuse-preparations` choice.
 
 - **The prerequisite names the artifact, not just the mode.** The pair is
   required and the bare mode is refused; see below.

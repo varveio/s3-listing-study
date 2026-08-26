@@ -148,7 +148,13 @@ Two flags change what a repeated `submit` does with what it finds:
   produced instead of refusing. Reuse within one launch is always free — every
   consumer of one preparation step shares it — but reuse across launches is a
   decision, because the digest cannot tell you the corpus moved
-  ([`identity.md`](identity.md) § *What identity cannot cover*).
+  ([`identity.md`](identity.md) § *What identity cannot cover*). Cross-launch
+  reuse also requires the same `campaign.db`: the ledger is what discovers and
+  binds the earlier successful producer; this flag does not search GCS or import
+  evidence from another ledger. Keep using the campaign's SQLite file and pass
+  the flag when reuse is intended. The producer case must still be identical —
+  changing its fixture, replay image or latency treatment mints a different
+  producer even when an operator expects the resulting artifact bytes to match.
 - **`--skip-measured`** binds an existing SUCCEEDED attempt of a case *from any
   group*, instead of refusing the whole launch. This is what makes one
   checked-in plan file the single source of truth across many sessions: add a
