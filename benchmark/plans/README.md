@@ -156,8 +156,9 @@ retains raw products, and routine reporting reads `result.json` only.
 
 An image-bundled fixture states `fixture_sha256` alone. A staged fixture states
 both `fixture_uri` and `fixture_sha256`. `fixture_uri` names one exact Parquet
-object rather than a wildcard: the worker therefore needs object read but not
-bucket listing permission. The digest is over the UTF-8 bytes of the single
+object rather than a wildcard: the staging operation itself needs object read but
+not bucket listing, although worker IAM intentionally grants broader bucket-wide
+object administration. The digest is over the UTF-8 bytes of the single
 `name<TAB>size<TAB>file-sha256<NEWLINE>` manifest row. The staging runnable
 recomputes it after download and before starting the replay server, so mutable
 storage cannot silently change a case. Generate the value from an already

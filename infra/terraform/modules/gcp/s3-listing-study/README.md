@@ -87,24 +87,19 @@ all either needs. SSH ingress is restricted to IAP's forwarding range regardless
 port 22 to the internet, and an estate that wants IAP-only SSH must delete that
 rule itself. This module will not touch a shared network's pre-existing rules.
 
-**Both workers get bucket-level `objectCreator`, plus fixture-prefix read.**
-`benchmark/src/benchmark/measure.py` uploads new artifacts into a fresh UUID
-attempt leaf and never reads, overwrites, or deletes campaign objects. The only
-read grant is a conditional `objectViewer` binding whose resource name must
-start with `objects/fixtures/`; it lets the staging runnable download immutable,
-content-addressed replay inputs without exposing any result tree. Plans use an
-exact object URI, so staging does not require bucket listing permission. The
-worker uploads `result.json` last as the completion marker. Campaign
-verification and reporting use the separate orchestrator identity, which
-retains the broader read/manage access those operations need.
+**Both workers get bucket-level `objectAdmin`.** They can list, read, create,
+overwrite, and delete every object in the results bucket, including replay
+fixtures, campaign evidence, and receipts. Their bucket access is intentionally
+identical; the authenticated worker differs only through its separate AWS
+credential-secret grant. The worker still uploads `result.json` last as the
+completion marker, and bucket versioning makes accidental overwrites recoverable.
 
 **Batch metadata access is intentional.** The in-worker uploader obtains its
 OAuth token from the VM metadata server. The subjects are cooperative software,
-not treated as hostile; the primary anonymous identity can create result objects
-and is otherwise limited to Artifact Registry reads and Batch/log reporting. Each
-attempt has a fresh VM with one task in an otherwise disposable benchmark
-project. This module does not claim a local metadata-denial sandbox. The runtime
-job renderer sets `maxRetryCount: 0`; duplicate execution is
+not treated as hostile; both worker identities can manage every object in the
+results bucket. Each attempt has a fresh VM with one task in an otherwise
+disposable benchmark project. This module does not claim a local metadata-denial
+sandbox. The runtime job renderer sets `maxRetryCount: 0`; duplicate execution is
 still detected through multiple worker UUIDs beneath one `run-<n>` prefix.
 
 **The anonymous worker holds no credentials for the object stores under test.**
@@ -146,7 +141,7 @@ Raw listings are read for requested correctness verification or investigation;
 no Terraform resource performs that collection.
 
 **Grants are additive (`google_*_iam_member`), never authoritative.** An
-authoritative binding on the bucket would clobber the workers' `objectCreator` on
+authoritative binding on the bucket would clobber the workers' `objectAdmin` on
 the same resource.
 
 ## Inputs and outputs
