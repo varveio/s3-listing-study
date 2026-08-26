@@ -249,7 +249,9 @@ def parse_backend(value: object) -> ReplayBackend:
             and not any(character.isspace() for character in fixture_uri)
         )
         if valid_uri:
-            pattern_meta = {character for character in fixture_uri if character in _GCS_PATTERN_META}
+            pattern_meta = {
+                character for character in fixture_uri if character in _GCS_PATTERN_META
+            }
             valid_uri = not pattern_meta or (
                 pattern_meta == {"*"}
                 and fixture_uri.count("*") == 1
