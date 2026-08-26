@@ -24,6 +24,7 @@ import re
 import resource
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import threading
@@ -51,6 +52,7 @@ from benchmark.runtime.command_adapter import (
 )
 
 EXIT_ADAPTER_ERROR = 3
+EXIT_SECRET_DETECTED = 9
 EXIT_IMAGE_MISMATCH = 10
 EXIT_POSTPROCESSING_FAILED = 11
 EXIT_ARTIFACT_UNUSABLE = 12
@@ -81,6 +83,22 @@ is by contract a cheap local transform of what the chain already staged, so a
 bound this far below any subject's deadline costs a legitimate one nothing.
 """
 PINNED_IMAGE_RE = re.compile(r"\A[^\s@]+@sha256:[0-9a-f]{64}\Z")
+
+SECRET_PATTERNS = {
+    "credential-shaped value": re.compile(
+        rb"AKIA[A-Z0-9]{16}"
+        rb"|ASIA[A-Z0-9]{16}"
+        rb"|(?i:X-Amz-Signature=[A-Fa-f0-9]{16,}"
+        rb"|X-Amz-Credential=[A-Za-z0-9%/+-]{10,}"
+        rb"|X-Amz-Security-Token=[A-Za-z0-9%/+=]{20,}"
+        rb"|(AWS_SESSION_TOKEN|AWS_SECRET_ACCESS_KEY)=[A-Za-z0-9/+=]{16,}"
+        rb"|aws_secret_access_key[ \t\n\r\f\v]*=[ \t\n\r\f\v]*[A-Za-z0-9/+=]{20,}"
+        rb"|Authorization:[ \t\n\r\f\v]*(AWS4-HMAC-SHA256|Bearer|Basic)[ \t\n\r\f\v])"
+    ),
+    "GCP private key": re.compile(rb"BEGIN PRIVATE KEY"),
+}
+SECRET_SCAN_CHUNK = 1024 * 1024
+SECRET_SCAN_OVERLAP = 512
 
 SUBJECT_ENV = {
     # A small, stable environment rather than whatever ambient variables
@@ -202,6 +220,29 @@ def retained_files(source: Path) -> Iterator[Path]:
                 raise ArtifactSafetyError(
                     f"special path is not publishable: {path.relative_to(root)}"
                 )
+
+
+def scan_for_secrets(paths: list[Path]) -> str | None:
+    """Scan every retained regular file as bounded binary chunks, failing closed."""
+    try:
+        files = (path for source in paths for path in retained_files(source))
+        for path in files:
+            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+            descriptor = os.open(path, flags)
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                os.close(descriptor)
+                raise ArtifactSafetyError(f"retained path is not a regular file: {path}")
+            with open(descriptor, "rb", closefd=True) as source:
+                carry = b""
+                while chunk := source.read(SECRET_SCAN_CHUNK):
+                    window = carry + chunk
+                    for name, pattern in SECRET_PATTERNS.items():
+                        if pattern.search(window):
+                            return f"{path}: {name}"
+                    carry = window[-SECRET_SCAN_OVERLAP:]
+    except (OSError, ArtifactSafetyError) as exc:
+        return f"unsafe or unreadable retained output ({exc})"
+    return None
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -1077,6 +1118,14 @@ def publish_pre_subject_failure(
     replay_evidence: Mapping[str, object] | None,
 ) -> int:
     """Publish why an attempt failed before the subject could run."""
+    if setup is not None:
+        secret_hit = scan_for_secrets([attempt_dir / "inline"])
+        if secret_hit:
+            print(
+                f"measure: possible secret in {secret_hit}; refusing to upload this attempt",
+                file=sys.stderr,
+            )
+            return EXIT_SECRET_DETECTED
     result = {
         **attempt_identity(args, config, destination),
         "replay_evidence": (None if replay_evidence is None else dict(replay_evidence)),
@@ -1361,6 +1410,24 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     stderr_path = attempt_dir / "stderr.log"
+
+    # Scan the uncompressed captures before any upload. A retained credential
+    # turns the whole attempt into a refusal rather than public evidence that a
+    # later reader is expected to notice and clean up.
+    phase_started = time.monotonic()
+    scanned = [stderr_path, native_root]
+    if subject_stdout == stdout_path:
+        scanned.insert(0, stdout_path)
+    if setup is not None:
+        scanned.append(attempt_dir / "inline")
+    secret_hit = scan_for_secrets(scanned)
+    postprocessing_seconds["secret_scan"] = time.monotonic() - phase_started
+    if secret_hit:
+        print(
+            f"measure: possible secret in {secret_hit}; refusing to upload this attempt",
+            file=sys.stderr,
+        )
+        return EXIT_SECRET_DETECTED
 
     # Tool failures and partial runs are deliberately not counted: their raw
     # output remains evidence, but its row

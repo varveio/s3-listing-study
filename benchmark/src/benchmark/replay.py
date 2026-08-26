@@ -145,7 +145,7 @@ class ReplayAllocationSummary:
     host_memory_headroom_gb: int | None
 
 
-def _counter(observation: object, name: str) -> float | None:
+def counter_value(observation: object, name: str) -> float | None:
     """Read one untagged replay counter from a raw metrics observation."""
     if not isinstance(observation, Mapping):
         return None
@@ -192,15 +192,15 @@ def evidence_errors(config: ReplayConfig, evidence: object, *, purpose: str) -> 
     elif recorded_errors:
         errors.append("replay evidence records collection errors")
 
-    before_requests = _counter(evidence.get("before"), REQUEST_COUNTER)
-    after_requests = _counter(evidence.get("after"), REQUEST_COUNTER)
+    before_requests = counter_value(evidence.get("before"), REQUEST_COUNTER)
+    after_requests = counter_value(evidence.get("after"), REQUEST_COUNTER)
     if before_requests is None or after_requests is None:
         errors.append("replay request counter is missing or ambiguous")
     elif after_requests <= before_requests:
         errors.append("replay request counter did not increase during the subject interval")
 
-    before_errors = _counter(evidence.get("before"), ERROR_COUNTER)
-    after_errors = _counter(evidence.get("after"), ERROR_COUNTER)
+    before_errors = counter_value(evidence.get("before"), ERROR_COUNTER)
+    after_errors = counter_value(evidence.get("after"), ERROR_COUNTER)
     if before_errors is None or after_errors is None:
         errors.append("replay error counter is missing or ambiguous")
     elif after_errors != before_errors:

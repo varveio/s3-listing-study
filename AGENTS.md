@@ -25,8 +25,11 @@ amd64 through the now-retired groundwork attempt engine — `aws-cli`, `s5cmd`, 
 and `ps3` with a credential, which previously blocked them. Running is not
 verifying: those retired-engine attempts carry no verdict and were never bound
 to the current verifier. The replay harness now retains each raw product and
-reports the row count measured inside the worker. Private diagnostic groups
-have exercised that path, but no committed campaign receipt qualifies it.
+reports the row count measured inside the worker. A committed bounded
+three-tool canary qualifies replay submit, poll/status, reporting, and receipt
+export for those exact capsule shapes. It is not a benchmark, content or
+capacity qualification, staged-fixture run, or qualification of the other eight
+capsules.
 Per-tool status:
 `tools/README.md`.
 

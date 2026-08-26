@@ -12,10 +12,16 @@ subjects have now run at smoke on amd64 through the attempt engine: seven
 anonymously and `s3p`, `s3kor`, `s4cmd`, and `ps3` with a scoped credential.
 Those attempts establish that the retired groundwork path worked, not
 correctness: none is bound to the current comparative verifier. The replay path
-records in-container row counts and retains raw products. Private diagnostic
-groups have exercised it, but no committed campaign receipt qualifies it. See
-`../tools/README.md` for per-tool
-status and `smoke-bucket.md` for the historical reference snapshot.
+records in-container row counts and retains raw products. See
+`../tools/README.md` for per-tool status and `smoke-bucket.md` for the historical
+reference snapshot.
+
+**Qualification status — 2026-08-26.** A committed bounded three-tool replay
+canary now exercises submit, poll/status, summary reporting, worker-side row
+counting, raw-product retention, and receipt export for those exact capsule
+shapes. It is an uncalibrated 2,048-row integration canary, not a comparative
+benchmark, content-verification result, replay-capacity qualification,
+staged-fixture run, or qualification of the other eight capsules.
 
 **Protocol note.** The comparative measurement plan predates comparative
 results. The groundwork procedure was improved after the aws-cli and
@@ -390,13 +396,13 @@ such; it is not described as reproducing S3's full latency distribution unless
 that stronger fidelity has separately been demonstrated.
 
 The plan fixes its advancement rule before the relevant replay results are
-examined. The current IDC rows are diagnostics for calibrating that rule and
-cannot eliminate a candidate. Once paired controls establish the rule and its
-uncertainty, replay may remove clearly slower tool or configuration candidates
-from the expensive S3 stage. Close candidates advance together; the screen is
-not allowed to manufacture a precise podium from differences within its
-predeclared uncertainty or elimination boundary. Every replay number is labeled
-as synthetic throughput against the named replay fixture and latency treatment,
+examined. Capacity-calibration rows are diagnostics and cannot eliminate a
+candidate. Once paired controls establish the rule and its uncertainty, replay
+may remove clearly slower tool or configuration candidates from the expensive
+S3 stage. Close candidates advance together; the screen is not allowed to
+manufacture a precise podium from differences within its predeclared
+uncertainty or elimination boundary. Every replay number is labeled as
+synthetic throughput against the named replay fixture and latency treatment,
 never as “speed against bucket X.”
 
 ### Stage 2 — focused real-S3 validation

@@ -58,13 +58,29 @@ def _replay_summary(row: sqlite3.Row, result: Mapping[str, object]) -> dict[str,
         return {"state": "REFUSED", "refusals": list(refusals)}
     samples = evidence.get("samples")
     resources = evidence.get("resource_samples")
+    readiness = evidence.get("readiness")
     return {
         "state": "REFUSED" if refusals else "COMPLETE",
         "refusals": list(refusals),
+        "readiness": readiness.get("state") if isinstance(readiness, Mapping) else None,
         "sample_count": len(samples) if isinstance(samples, list) else None,
         "resource_sample_count": len(resources) if isinstance(resources, list) else None,
-        "before": evidence.get("before"),
-        "after": evidence.get("after"),
+        "requests": {
+            "before": replay_contract.counter_value(
+                evidence.get("before"), replay_contract.REQUEST_COUNTER
+            ),
+            "after": replay_contract.counter_value(
+                evidence.get("after"), replay_contract.REQUEST_COUNTER
+            ),
+        },
+        "errors": {
+            "before": replay_contract.counter_value(
+                evidence.get("before"), replay_contract.ERROR_COUNTER
+            ),
+            "after": replay_contract.counter_value(
+                evidence.get("after"), replay_contract.ERROR_COUNTER
+            ),
+        },
     }
 
 
