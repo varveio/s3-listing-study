@@ -19,7 +19,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-from google.api_core.exceptions import AlreadyExists, BadRequest, GoogleAPIError
+from google.api_core.exceptions import AlreadyExists, BadRequest, GoogleAPIError, NotFound
 from google.cloud import batch_v1
 
 from benchmark import adapters, batch_client, campaign, gcs, identity, ledger, measure, report
@@ -959,6 +959,19 @@ def test_the_suite_filter_quotes_its_value() -> None:
             client=Client(),  # type: ignore[arg-type]
         )
         == {}
+    )
+
+
+def test_cancel_is_idempotent_after_provider_deletion() -> None:
+    class Client:
+        def delete_job(self, **_kwargs: object) -> None:
+            raise NotFound("already deleted")  # type: ignore[no-untyped-call]
+
+    batch_client.cancel_job(
+        "p",
+        "us-east1",
+        "gone",
+        client=Client(),  # type: ignore[arg-type]
     )
 
 
