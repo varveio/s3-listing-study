@@ -41,6 +41,13 @@ MODES = {
         artifacts=TEXT,
         product_artifact=LISTING,
     ),
+    "recursive-with-dirs": Mode(
+        product="text",
+        fields=FULL_FIELDS,
+        executable=S5CMD.name,
+        artifacts=TEXT,
+        product_artifact=LISTING,
+    ),
     "delimiter": Mode(
         product="text",
         fields=FULL_FIELDS,
@@ -108,6 +115,10 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
     endpoint = ("--endpoint-url", request.endpoint_url) if request.endpoint_url else ()
     commands = {
         "recursive": (*endpoint, *auth, "ls", "-e", "-s", recursive),
+        # The command is deliberately identical to recursive: the distinction
+        # is evidence semantics. This mode retains s5cmd's DIR-classified rows
+        # instead of dropping trailing-slash objects in normalization.
+        "recursive-with-dirs": (*endpoint, *auth, "ls", "-e", "-s", recursive),
         "delimiter": (*endpoint, *auth, "ls", "-e", "-s", target),
         "rootkeys": (*endpoint, *auth, "ls", "-e", "-s", target),
         "json": ("--json", *endpoint, *auth, "ls", recursive),

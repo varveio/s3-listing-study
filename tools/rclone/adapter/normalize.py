@@ -53,10 +53,11 @@ UNKNOWN_MODE_EXIT = 3
 RECURSIVE_MODES = frozenset(
     {"recursive-fastlist", "recursive-hierarchical", "recursive-walk", "listv1"}
 )
+DIRECTORY_RECURSIVE_MODES = frozenset({"recursive-walk-with-dirs"})
 
 # Declared rather than inferred, so the equivalence harness can name a mode no
 # committed payload exercises — untested by construction, and invisible otherwise.
-MODES = RECURSIVE_MODES | {"delimiter-shallow", "lsf"}
+MODES = RECURSIVE_MODES | DIRECTORY_RECURSIVE_MODES | {"delimiter-shallow", "lsf"}
 
 # `lsjson` writes one JSON array of entry objects. Columns are declared, not
 # sniffed: a payload where no entry carries `Tier` (nothing but CommonPrefixes)
@@ -79,6 +80,20 @@ QUERIES = {
     # prefix, `Tier` the storage class.
     "recursive": f"""
         SELECT $pfx || "Path", CAST("Size" AS VARCHAR), NULL, {MTIME}, nullif("Tier", '')
+        FROM {LSJSON}
+    """,
+    # Recursive walk without --files-only. IsDir is rclone's classification,
+    # not proof that the row came from S3 Contents: normalize it as key-only and
+    # let exact verification expose synthesized hierarchy as extras. rtrim keeps
+    # the contract stable whether rclone prints the directory path with '/' or
+    # without it.
+    "recursive-with-dirs": f"""
+        SELECT $pfx || CASE WHEN "IsDir" THEN rtrim("Path", '/') || '/'
+                            ELSE "Path" END,
+               CASE WHEN NOT "IsDir" THEN CAST("Size" AS VARCHAR) END,
+               NULL,
+               CASE WHEN NOT "IsDir" THEN {MTIME} END,
+               CASE WHEN NOT "IsDir" THEN nullif("Tier", '') END
         FROM {LSJSON}
     """,
     # Non-recursive (a single delimiter level): files AND directories. A directory
@@ -112,6 +127,8 @@ def count_rows(data: bytes, mode: str, prefix: str = "", native_root: str = "") 
         return count_lf_lines(data, lambda line: b";" in line)
     if mode in RECURSIVE_MODES:
         sql = QUERIES["recursive"]
+    elif mode in DIRECTORY_RECURSIVE_MODES:
+        sql = QUERIES["recursive-with-dirs"]
     elif mode in QUERIES:
         sql = QUERIES[mode]
     else:
@@ -125,6 +142,8 @@ def normalize(
 ) -> int:
     if mode in RECURSIVE_MODES:
         sql = QUERIES["recursive"]
+    elif mode in DIRECTORY_RECURSIVE_MODES:
+        sql = QUERIES["recursive-with-dirs"]
     elif mode in QUERIES:
         sql = QUERIES[mode]
     else:

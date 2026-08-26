@@ -82,6 +82,13 @@ MODES = {
         artifacts=JSON,
         product_artifact=LISTING,
     ),
+    "recursive-walk-with-dirs": Mode(
+        product="text",
+        fields=LSJSON_FIELDS,
+        axes=WALK_AXES,
+        artifacts=JSON,
+        product_artifact=LISTING,
+    ),
     "delimiter-shallow": Mode(
         product="text",
         fields=LSJSON_FIELDS,
@@ -165,6 +172,18 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
         "recursive-fastlist": ("lsjson", "--fast-list", *standard, "-R", remote),
         "recursive-hierarchical": ("lsjson", *standard, "-R", remote),
         "recursive-walk": ("lsjson", *standard, *walk, "-R", remote),
+        # rclone classifies zero-byte keys ending in '/' as directories. The
+        # ordinary benchmark mode deliberately asks for files only; this arm
+        # retains IsDir entries so the verifier can determine whether they are
+        # real marker objects, synthesized hierarchy, or both.
+        "recursive-walk-with-dirs": (
+            "lsjson",
+            "--use-server-modtime",
+            "--no-mimetype",
+            *walk,
+            "-R",
+            remote,
+        ),
         "delimiter-shallow": ("lsjson", "--use-server-modtime", "--no-mimetype", remote),
         "listv1": ("lsjson", "--fast-list", *standard, "-R", remote),
         "lsf": (

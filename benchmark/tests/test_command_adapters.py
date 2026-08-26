@@ -180,6 +180,17 @@ def _rclone(mode: str, prefix: str) -> tuple[str, ...]:
             "-R",
             remote,
         ),
+        "recursive-walk-with-dirs": (
+            "lsjson",
+            "--use-server-modtime",
+            "--no-mimetype",
+            "--disable",
+            "ListR",
+            "--checkers",
+            "8",
+            "-R",
+            remote,
+        ),
         "delimiter-shallow": ("lsjson", "--use-server-modtime", "--no-mimetype", remote),
         "listv1": ("lsjson", "--fast-list", *standard, "-R", remote),
         "lsf": (
@@ -269,6 +280,7 @@ def _s5cmd(mode: str, prefix: str) -> tuple[str, ...]:
     target, recursive = f"s3://{BUCKET}/{prefix}", f"s3://{BUCKET}/{prefix}*"
     return {
         "recursive": ("--no-sign-request", "ls", "-e", "-s", recursive),
+        "recursive-with-dirs": ("--no-sign-request", "ls", "-e", "-s", recursive),
         "delimiter": ("--no-sign-request", "ls", "-e", "-s", target),
         "rootkeys": ("--no-sign-request", "ls", "-e", "-s", target),
         "json": ("--json", "--no-sign-request", "ls", recursive),
@@ -419,6 +431,7 @@ EXPECTED_MODES = {
         "recursive-fastlist",
         "recursive-hierarchical",
         "recursive-walk",
+        "recursive-walk-with-dirs",
         "delimiter-shallow",
         "listv1",
         "lsf",
@@ -429,7 +442,16 @@ EXPECTED_MODES = {
     "s3kor": {"list", "list-versions"},
     "s3p": {"ls", "ls-long", "ls-raw", "summarize"},
     "s4cmd": {"recursive", "shallow", "show-directory", "du"},
-    "s5cmd": {"recursive", "delimiter", "rootkeys", "json", "listv1", "allversions", "fullpath"},
+    "s5cmd": {
+        "recursive",
+        "recursive-with-dirs",
+        "delimiter",
+        "rootkeys",
+        "json",
+        "listv1",
+        "allversions",
+        "fullpath",
+    },
     "s7cmd": {
         "recursive-tsv",
         "recursive-tsv-nosort",

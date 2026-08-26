@@ -74,7 +74,11 @@ UNEXERCISED = {
     # postdates the committed corpus; no committed payload reaches it yet.
     "s3-fast-list": {"list-hinted"},
     "s3p": {"ls-long"},
+    # These modes were added from the IDC directory-marker diagnosis and have
+    # parser fixtures below, but no committed raw campaign product yet.
+    "rclone": {"recursive-walk-with-dirs"},
     "s4cmd": {"du", "shallow", "show-directory"},
+    "s5cmd": {"recursive-with-dirs"},
     # v0.1.0 receipts were retired with that subject; v0.2.0 currently has
     # observations only, so no mode has a replayable committed payload yet.
     "swath": {
@@ -183,6 +187,14 @@ FIXTURES: dict[tuple[str, str], tuple[bytes, str, list[bytes]]] = {
         "normals-hourly/",
         [b"normals-hourly/access/A.csv"],
     ),
+    ("rclone", "recursive-walk-with-dirs"): (
+        b'[\n{"Path":"access/A.csv","Size":18410,'
+        b'"ModTime":"2026-03-16T15:01:21.000000000Z","IsDir":false,"Tier":"STANDARD"},\n'
+        b'{"Path":"markers/empty","Size":0,'
+        b'"ModTime":"2026-03-16T15:01:22.000000000Z","IsDir":true}\n]\n',
+        "normals-hourly/",
+        [b"normals-hourly/access/A.csv", b"normals-hourly/markers/empty/"],
+    ),
     ("rclone", "listv1"): (
         b'[\n{"Path":"access/A.csv","Size":18410,'
         b'"ModTime":"2026-03-16T15:01:21.000000000Z","IsDir":false,"Tier":"STANDARD"}\n]\n',
@@ -255,6 +267,12 @@ FIXTURES: dict[tuple[str, str], tuple[bytes, str, list[bytes]]] = {
         b"2026/03/16 14:05:58 STANDARD ff41               4196  1981-2010/access/A.csv\n",
         "normals-hourly/",
         [b"normals-hourly/1981-2010/access/A.csv"],
+    ),
+    ("s5cmd", "recursive-with-dirs"): (
+        b"                                       DIR  markers/empty/\n"
+        b"2026/03/16 14:05:58 STANDARD ff41               4196  1981-2010/access/A.csv\n",
+        "normals-hourly/",
+        [b"normals-hourly/markers/empty/", b"normals-hourly/1981-2010/access/A.csv"],
     ),
     ("s5cmd", "listv1"): (
         b"2026/03/16 14:05:58 STANDARD ff41               4196  1981-2010/access/A.csv\n",

@@ -63,10 +63,16 @@ UNKNOWN_MODE_EXIT = 2
 # union's remainder is verified against the manifest's unprefixed keys, so a DIR
 # pseudo-key would read as an out-of-scope extra.
 RECURSIVE_MODES = frozenset({"recursive", "listv1", "rootkeys"})
+DIRECTORY_RECURSIVE_MODES = frozenset({"recursive-with-dirs"})
 
 # Declared rather than inferred, so the equivalence harness can name a mode no
 # committed payload exercises — untested by construction, and invisible otherwise.
-MODES = RECURSIVE_MODES | {"allversions", "delimiter", "fullpath", "json"}
+MODES = RECURSIVE_MODES | DIRECTORY_RECURSIVE_MODES | {
+    "allversions",
+    "delimiter",
+    "fullpath",
+    "json",
+}
 
 LINES = "(SELECT unnest(str_split(content, chr(10))) AS line FROM read_text($path))"
 
@@ -101,6 +107,20 @@ def object_row(last: str) -> str:
 
 QUERIES = {
     "recursive": object_row("len(f)"),
+    # The delimiter-free recursive request has no CommonPrefixes. A DIR line in
+    # this mode is s5cmd's representation of a trailing-slash Contents object,
+    # so preserve it as key-only evidence rather than filtering it out.
+    "recursive-with-dirs": f"""
+        SELECT $pfx || CASE WHEN f[1] = 'DIR'
+                            THEN array_to_string(list_slice(f, 2, len(f)), ' ')
+                            ELSE array_to_string(list_slice(f, 6, len(f)), ' ') END,
+               CASE WHEN f[1] <> 'DIR' THEN f[5] END,
+               CASE WHEN f[1] <> 'DIR' THEN replace(f[4], '"', '') END,
+               CASE WHEN f[1] <> 'DIR'
+                    THEN replace(f[1], '/', '-') || 'T' || f[2] || 'Z' END,
+               CASE WHEN f[1] <> 'DIR' THEN f[3] END
+        FROM {FIELDS}
+    """,
     "allversions": object_row("len(f) - 1"),
     # Delimiter listing: CommonPrefixes as DIR rows interleaved with objects, in
     # the order s5cmd printed them. A DIR row carries no size, etag, mtime or
@@ -138,7 +158,7 @@ QUERIES = {
 def count_rows(data: bytes, mode: str, prefix: str = "", native_root: str = "") -> int:
     if mode == "fullpath":
         return count_lf_lines(data, bool)
-    if mode in RECURSIVE_MODES | {"allversions", "delimiter"}:
+    if mode in RECURSIVE_MODES | DIRECTORY_RECURSIVE_MODES | {"allversions", "delimiter"}:
         fields = re.compile(rb"[ \t]+")
 
         def selected(line: bytes) -> bool:
@@ -146,7 +166,7 @@ def count_rows(data: bytes, mode: str, prefix: str = "", native_root: str = "") 
             if not stripped:
                 return False
             first = fields.split(stripped, maxsplit=1)[0]
-            return mode == "delimiter" or first != b"DIR"
+            return mode in DIRECTORY_RECURSIVE_MODES | {"delimiter"} or first != b"DIR"
 
         return count_lf_lines(data, selected)
     if mode != "json":
@@ -160,6 +180,8 @@ def normalize(
 ) -> int:
     if mode in RECURSIVE_MODES:
         sql = QUERIES["recursive"]
+    elif mode in DIRECTORY_RECURSIVE_MODES:
+        sql = QUERIES["recursive-with-dirs"]
     elif mode in QUERIES:
         sql = QUERIES[mode]
     else:
