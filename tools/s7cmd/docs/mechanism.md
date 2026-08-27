@@ -185,6 +185,11 @@ interleaved across parallel ops)
 study's verifier is order-insensitive, so both sorted and `--no-sort` output
 were accepted in smoke.
 
+The current capsule keeps output shape and buffering as separate mode facts:
+`recursive-one` is the default sorted key-only output, while
+`recursive-one-nosort` combines `-1` with `--no-sort` for streaming key-only
+enumeration. Both normalize the same native line format.
+
 Parallel sort (`rayon::par_sort_by`) kicks in only past
 `--parallel-sort-threshold` (default 1,000,000 — declared in
 [SRC s3ls-rs config/args/mod.rs:26,523 @ bf42067], switch implemented in

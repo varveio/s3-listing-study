@@ -79,6 +79,9 @@ UNEXERCISED = {
     "rclone": {"recursive-walk-with-dirs"},
     "s4cmd": {"du", "shallow", "show-directory"},
     "s5cmd": {"recursive-with-dirs", "fanout-with-dirs"},
+    # Streaming one-line output is new campaign coverage and has no committed
+    # raw product in the capsule's immutable groundwork corpus yet.
+    "s7cmd": {"recursive-one-nosort"},
     # v0.1.0 receipts were retired with that subject; v0.2.0 currently has
     # observations only, so no mode has a replayable committed payload yet.
     "swath": {
@@ -358,6 +361,11 @@ FIXTURES: dict[tuple[str, str], tuple[bytes, str, list[bytes]]] = {
         "normals-hourly/",
         [b"normals-hourly/access/A.csv"],
     ),
+    ("s7cmd", "recursive-one-nosort"): (
+        b"normals-hourly/access/A.csv\n",
+        "normals-hourly/",
+        [b"normals-hourly/access/A.csv"],
+    ),
     # swath emits FULL keys, so no fixture here reconstructs one. The TSV sink
     # writes a header line, which the row_type filter drops.
     ("swath", "recursive-tsv"): (
@@ -611,6 +619,7 @@ def test_binary_line_iterator_preserves_split_framing_across_chunks(
         ("s3p", "ls", b"a\x00b\n"),
         ("rclone", "lsf", b"a\x00b;1\n"),
         ("s7cmd", "recursive-one", b"a\x00b\n"),
+        ("s7cmd", "recursive-one-nosort", b"a\x00b\n"),
     ],
 )
 def test_binary_line_counts_match_normalization_for_nul_keys(

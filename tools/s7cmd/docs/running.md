@@ -113,8 +113,9 @@ NUL transport; the benchmark worker owns execution, capture, timeout, and
 measurement. Each immutable receipt retains its exact original invocation.
 
 `<mode>` is one of `recursive-tsv`, `recursive-tsv-nosort`,
-`recursive-aligned`, `recursive-json`, `recursive-one`, `all-versions`,
-`max-depth`, `shallow-tsv`, `bucket-list` — see
+`recursive-aligned`, `recursive-json`, `recursive-one`,
+`recursive-one-nosort`, `all-versions`, `max-depth`, `shallow-tsv`,
+`bucket-list` — see
 `tools/s7cmd/adapter/command.py` for the exact flags each maps
 to. Rebuilding the image first
 requires the pinned `s7cmd` checkout at `d589df7ce691edbede05fc9a691ab1787cdb6b9e`

@@ -115,7 +115,7 @@ tools:
       - {mode: recursive-tsv-nosort, concurrency: 64, purpose: diagnostic}
       # Native key-only streaming output is the matching enumeration arm for
       # the richer no-sort TSV product above.
-      - {mode: recursive-one, concurrency: 64, purpose: diagnostic}
+      - {mode: recursive-one-nosort, concurrency: 64, purpose: diagnostic}
   swath:
     cases:
       - {mode: recursive-parquet, concurrency: 64, purpose: diagnostic}

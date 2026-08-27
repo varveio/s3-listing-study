@@ -22,9 +22,9 @@ full bucket key. The adapter runs on the HOST, AFTER the wrapper's clock stops.
 Field exposure by mode — the TSV family (``--tsv --show-storage-class
 --show-etag``) carries all five. ``recursive-aligned`` is the default sink and
 prints date, size and key only, so etag and storage_class are `-`.
-``recursive-one`` (``-1``) prints the key alone. A CommonPrefix (``PRE``) row
-carries a key and nothing else; a delete marker (``DELETE``, versions listings)
-carries a key and its timestamp.
+``recursive-one`` and ``recursive-one-nosort`` (``-1``) print the key alone. A
+CommonPrefix (``PRE``) row carries a key and nothing else; a delete marker
+(``DELETE``, versions listings) carries a key and its timestamp.
 
 Versions: ``all-versions`` keys on the object KEY and DISCARDS VersionId and
 IsLatest, because the contract-v2 manifest and the verifier have no version axis.
@@ -63,10 +63,11 @@ UNKNOWN_MODE_EXIT = 3
 TSV_MODES = frozenset(
     {"recursive-tsv", "recursive-tsv-nosort", "all-versions", "max-depth", "shallow-tsv"}
 )
+ONE_MODES = frozenset({"recursive-one", "recursive-one-nosort"})
 
 # Declared rather than inferred, so the equivalence harness can name a mode no
 # committed payload exercises — untested by construction, and invisible otherwise.
-MODES = TSV_MODES | {"recursive-aligned", "recursive-json", "recursive-one"}
+MODES = TSV_MODES | ONE_MODES | {"recursive-aligned", "recursive-json"}
 
 LINES = "(SELECT unnest(str_split(content, chr(10))) AS line FROM read_text($path))"
 
@@ -132,7 +133,7 @@ QUERIES = {
 
 
 def count_rows(data: bytes, mode: str, prefix: str = "", native_root: str = "") -> int:
-    if mode in TSV_MODES or mode == "recursive-one":
+    if mode in TSV_MODES or mode in ONE_MODES:
         return count_lf_lines(data, bool)
     if mode == "recursive-aligned":
 
@@ -160,6 +161,8 @@ def normalize(
 ) -> int:
     if mode in TSV_MODES:
         sql = QUERIES["tsv"]
+    elif mode in ONE_MODES:
+        sql = QUERIES["recursive-one"]
     elif mode in QUERIES:
         sql = QUERIES[mode]
     else:
