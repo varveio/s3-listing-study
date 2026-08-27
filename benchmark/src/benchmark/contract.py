@@ -53,7 +53,6 @@ TOOLBOX_TOOLS = frozenset(
         "ps3",
         "rclone",
         "s3-fast-list",
-        "s4cmd",
         "s3kor",
         "s3p",
         "s5cmd",

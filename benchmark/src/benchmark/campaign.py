@@ -61,8 +61,8 @@ from benchmark.ledger import (
 from benchmark.plan import Case, Plan
 from benchmark.runtime.command_adapter import CommandAdapterError, LoadedCommandAdapter
 
-# The Batch executor's stable identity. `local_campaign.py` owns the second;
-# both enter a measurement's case hash (`identity.md`).
+# One executor exists. Recorded so a second one is distinguishable when it
+# arrives (`identity.md`: hashed then, not before).
 EXECUTOR = "gcp-batch"
 
 # Where the subject's output goes, as a hash input. `measure.py` redirects the
@@ -298,7 +298,6 @@ def result_prefix_for(results_bucket: str, suite: str, target_bucket: str, attem
 def case_identity(
     case: Case,
     *,
-    executor: str,
     auth_role: str | None,
     target_bucket: str,
     target_region: str,
@@ -326,7 +325,6 @@ def case_identity(
         )
     else:
         environment = identity.measurement_environment(
-            executor=executor,
             auth_role=auth_role,
             target_bucket=target_bucket,
             target_region=target_region,
@@ -561,62 +559,6 @@ def _replay_document(attempt: Attempt) -> replay_contract.ReplayConfig | None:
     return resolved
 
 
-def worker_argument_pairs(
-    attempt: Attempt,
-    image: Mapping[str, str],
-    *,
-    output: str,
-    destination: str,
-    term_grace: float,
-    artifact_uri: str = "",
-    endpoint_url: str = "http://127.0.0.1:19090",
-) -> tuple[tuple[str, str], ...]:
-    """Render the executor-independent worker request from one ledger row.
-
-    Batch and local Docker differ in how they start a container and where its
-    scratch directory lives. They must not differ in what they tell the shared
-    measurement worker about the subject, identity, resources, or evidence.
-    """
-    container_memory = attempt.container_memory_gb
-    pairs = (
-        ("--tool", attempt.tool),
-        ("--mode", str(json.loads(attempt.config)["mode"])),
-        ("--purpose", attempt.purpose),
-        ("--bucket", attempt.target_bucket),
-        ("--region", attempt.target_region),
-        *(() if attempt.auth_role is None else (("--auth-role", attempt.auth_role),)),
-        ("--prefix", attempt.target_prefix),
-        ("--output", output),
-        ("--destination", destination),
-        ("--timeout", str(attempt.timeout_s)),
-        ("--term-grace", str(term_grace)),
-        ("--image", image["image_uri"]),
-        ("--toolbox-manifest-sha256", image["toolbox_manifest_sha256"]),
-        ("--toolbox-recipe-sha256", image["toolbox_recipe_sha256"]),
-        ("--tool-recipe-sha256", image["recipe_sha256"]),
-        ("--tool-build-inputs-sha256", image["build_inputs_sha256"]),
-        ("--tool-version", image["tool_version"]),
-        ("--tool-build-sha256", image["tool_build_sha256"]),
-        ("--adapter-bundle-sha256", image["adapter_bundle_sha256"]),
-        ("--harness-revision", image["harness_revision"]),
-        ("--subject-workdir", image["subject_workdir"]),
-        ("--image-set-sha256", attempt.image_set_sha256),
-        ("--group-id", attempt.group_id),
-        ("--job-name", attempt.job_name),
-        ("--case-id", attempt.case_id),
-        ("--attempt-id", attempt.attempt_id),
-        ("--machine-type", attempt.machine_type),
-        ("--vcpus", str(attempt.vcpus)),
-        ("--memory-gb", str(attempt.memory_gb)),
-        ("--container-memory-gb", "none" if container_memory is None else str(container_memory)),
-        ("--config", attempt.config),
-        *_artifact_pairs(attempt, artifact_uri),
-    )
-    if _replay_document(attempt) is not None:
-        pairs = (*pairs, ("--endpoint-url", endpoint_url), ("--replay-config", str(attempt.replay)))
-    return pairs
-
-
 def _fixture_staging_script(uri: str, expected_sha256: str) -> str:
     """Download a staged fixture and refuse bytes outside its recorded identity.
 
@@ -660,15 +602,47 @@ def render_batch_job(
     """The provider request an attempt freezes, rendered from the row alone."""
     _validate_batch_options(options)
     container_memory = attempt.container_memory_gb
-    pairs = worker_argument_pairs(
-        attempt,
-        image,
-        output=SUBJECT_OUTPUT_CONTAINER_DIR,
-        destination=attempt.result_prefix,
-        term_grace=options.term_grace,
-        artifact_uri=artifact_uri,
+    pairs = (
+        ("--tool", attempt.tool),
+        ("--mode", str(json.loads(attempt.config)["mode"])),
+        ("--purpose", attempt.purpose),
+        ("--bucket", attempt.target_bucket),
+        ("--region", attempt.target_region),
+        *(() if attempt.auth_role is None else (("--auth-role", attempt.auth_role),)),
+        ("--prefix", attempt.target_prefix),
+        ("--output", SUBJECT_OUTPUT_CONTAINER_DIR),
+        ("--destination", attempt.result_prefix),
+        ("--timeout", str(attempt.timeout_s)),
+        ("--term-grace", str(options.term_grace)),
+        ("--image", image["image_uri"]),
+        ("--toolbox-manifest-sha256", image["toolbox_manifest_sha256"]),
+        ("--toolbox-recipe-sha256", image["toolbox_recipe_sha256"]),
+        ("--tool-recipe-sha256", image["recipe_sha256"]),
+        ("--tool-build-inputs-sha256", image["build_inputs_sha256"]),
+        ("--tool-version", image["tool_version"]),
+        ("--tool-build-sha256", image["tool_build_sha256"]),
+        ("--adapter-bundle-sha256", image["adapter_bundle_sha256"]),
+        ("--harness-revision", image["harness_revision"]),
+        ("--subject-workdir", image["subject_workdir"]),
+        ("--image-set-sha256", attempt.image_set_sha256),
+        ("--group-id", attempt.group_id),
+        ("--job-name", attempt.job_name),
+        ("--case-id", attempt.case_id),
+        ("--attempt-id", attempt.attempt_id),
+        ("--machine-type", attempt.machine_type),
+        ("--vcpus", str(attempt.vcpus)),
+        ("--memory-gb", str(attempt.memory_gb)),
+        ("--container-memory-gb", "none" if container_memory is None else str(container_memory)),
+        ("--config", attempt.config),
+        *_artifact_pairs(attempt, artifact_uri),
     )
     replay = _replay_document(attempt)
+    if replay is not None:
+        pairs = (
+            *pairs,
+            ("--endpoint-url", "http://127.0.0.1:19090"),
+            ("--replay-config", attempt.replay),
+        )
     commands = [item for pair in pairs for item in pair]
     container: dict[str, Any] = {"imageUri": image["image_uri"], "commands": commands}
     subject_runnable: dict[str, Any] = {"container": container}
@@ -895,7 +869,6 @@ def planned_attempt(
     image, options = context.image, context.options
     case_id, case_inputs = case_identity(
         case,
-        executor=EXECUTOR,
         auth_role=case.auth_role,
         target_bucket=context.target_bucket,
         target_region=context.target_region,

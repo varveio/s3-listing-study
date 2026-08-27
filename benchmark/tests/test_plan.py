@@ -174,10 +174,10 @@ def test_the_committed_plan_loads() -> None:
     # streaming modes at one ceiling and the sorted mode at two.
     assert len(loaded.cases) == 14
     assert loaded.exclusions == (
-            bench.Exclusion(
-                tool="s4cmd",
-                reason="owner decision — excluded from comparative and replay runs",
-            ),
+        bench.Exclusion(
+            tool="s4cmd",
+            reason="owner decision — dropped from all future benchmark and diagnostic runs",
+        ),
     )
     assert len(loaded.cases_for("swath")) == 4
 

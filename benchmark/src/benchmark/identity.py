@@ -13,7 +13,7 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
-CASE_HASH_V3 = b"s3-listing-study-case-v3\0"
+CASE_HASH_V2 = b"s3-listing-study-case-v2\0"
 
 _HASH_HEX_DIGITS = 12
 
@@ -61,7 +61,7 @@ def case_hash(
     input.
     """
     document = case_inputs_document(environment, config, tool_slice, platform, replay)
-    digest = hashlib.sha256(CASE_HASH_V3 + document.encode())
+    digest = hashlib.sha256(CASE_HASH_V2 + document.encode())
     return digest.hexdigest()[:_HASH_HEX_DIGITS]
 
 
@@ -84,7 +84,6 @@ def attempt_id(case: str, attempt: int) -> str:
 
 def measurement_environment(
     *,
-    executor: str,
     auth_role: str | None,
     target_bucket: str,
     target_region: str,
@@ -109,7 +108,6 @@ def measurement_environment(
     digest is a hash input (`model.md`), the path never is.
     """
     document: dict[str, Any] = {
-        "executor": executor,
         "auth_role": auth_role,
         "target_bucket": target_bucket,
         "target_region": target_region,

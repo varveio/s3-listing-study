@@ -20,7 +20,7 @@ Four groups of inputs go into the hash:
 
 | Group | What it covers |
 | --- | --- |
-| **Environment** | The values the harness acts on: executor, auth role, target bucket/region/prefix, location, machine type, vCPUs, memory, container ceiling, output target, timeout — and, for a case that consumes an artifact, the artifact's content digest (`model.md` makes `input_artifact_sha256` a hash input; a case consuming nothing omits the key) |
+| **Environment** | The values the harness acts on: auth role, target bucket/region/prefix, location, machine type, vCPUs, memory, container ceiling, output target, timeout — and, for a case that consumes an artifact, the artifact's content digest (`model.md` makes `input_artifact_sha256` a hash input; a case consuming nothing omits the key) |
 | **Replay** | When present, the complete resolved replay document: pinned server implementation, fixture binding, serving and latency treatment, capacity status, and every independent subject/server allocation and control |
 | **Config** | The capsule's own keys, `{}` when empty |
 | **What ran it** | The tool slice and the platform slice |
@@ -41,7 +41,7 @@ from them.
 An unspecified encoding will be re-derived differently by the next reader, so:
 
 ```python
-CASE_HASH_V3 = b"s3-listing-study-case-v3\0"
+CASE_HASH_V2 = b"s3-listing-study-case-v2\0"
 
 
 def case_hash(environment: dict, config: dict, tool_slice: str, platform: str,
@@ -61,7 +61,7 @@ def case_hash(environment: dict, config: dict, tool_slice: str, platform: str,
         ensure_ascii=True,
         allow_nan=False,
     ).encode()
-    return hashlib.sha256(CASE_HASH_V3 + document).hexdigest()[:12]
+    return hashlib.sha256(CASE_HASH_V2 + document).hexdigest()[:12]
 ```
 
 - **Domain separation and version** lead the input, as `_input_digest` does for
@@ -90,16 +90,9 @@ def case_hash(environment: dict, config: dict, tool_slice: str, platform: str,
   is identical either way, so one function serves both and the caller decides
   what it is identifying.
 
-**Material identity change — 2026-08-27.** `executor` entered a measurement's
-environment when `local-docker` became the second implementation beside
-`gcp-batch`; the domain is now `CASE_HASH_V3`. A nominally identical local and
-Batch allocation cannot share a case ID. Preparations continue to exclude the
-executor because their identity asks whether the content already exists, not
-where it was produced.
-
 **Changing the input list re-identifies everything.** That is the intended
 behaviour, not a hazard: a case measured under a different set of inputs is a
-different case. `CASE_HASH_V3` is bumped alongside the change, so a hash always
+different case. `CASE_HASH_V2` is bumped alongside the change, so a hash always
 states which input list produced it.
 
 ## Two identities, two questions
@@ -109,7 +102,6 @@ asymmetry is deliberate rather than a special case.
 
 | | Hashed for a measurement | Hashed for a preparation |
 | --- | --- | --- |
-| Executor | yes | no — recorded, not hashed |
 | Target bucket, region, prefix | yes | yes |
 | The capsule's own config | yes | yes — **its own**, plus the consumer's value for an axis this mode itself declares |
 | Tool slice, platform slice | yes | yes |
@@ -170,6 +162,7 @@ Two things follow:
 | `produced_by` | Which attempt made the artifact a case consumed. The artifact's content digest is what identifies it; *which run* produced those bytes is a debugging question. |
 | `signed`, `visible_memory_gb` | Derived from `auth_role` and the ceiling, both already hashed. A derived value is not a second input. |
 | `heap_percent` | A methodology constant most subjects cannot feel. Hashing it globally would re-identify every Go, Rust and Python case when a share they ignore is changed, which is the law — *a field either changes the identity or it is not an input* — read backwards. It enters identity exactly where it changes the measurement: a managed-runtime capsule declares `heap_percent` as a `Fixed` axis carrying the constant, and the loader merges it into that capsule's `config` before hashing, like any declared value. See [`capsule-contract.md`](capsule-contract.md) § *The ceiling, and the share of it*. |
+| `executor` | One executor exists. Recorded so a second one is distinguishable when it arrives; hashed then, not before. |
 
 `network` and `subnetwork` are arguable — an egress path could matter — but they
 follow from the executor's project and location, so they stay in `executor_env`
@@ -241,7 +234,7 @@ obviously right within one launch, explicit across launches.
 
 ## The tool and platform slices
 
-The toolbox is one image holding all eleven capsules, so its digest is the wrong
+The toolbox is one image holding all ten active tools, so its digest is the wrong
 granularity: bump rclone, rebuild, and every tool's hash would change — new
 prefixes and lost comparability for nine tools that did not change.
 
@@ -265,7 +258,7 @@ nothing about swath's identity, which is the unrepairable direction of error.
 
 **Attribution is what keeps the roster additive.** Hash the final stage whole
 and every tool's install line lands in the platform, so adding an eleventh tool
-re-identifies all eleven. With per-tool lines attributed to their own slices,
+re-identifies all ten. With per-tool lines attributed to their own slices,
 adding a tool leaves the platform digest and every existing slice
 byte-identical.
 
@@ -321,9 +314,10 @@ slice closes that.
 
 ## Open questions
 
-- **The `executor` vocabulary.** `gcp-batch` and `local-docker` are the two
-  current names. A third implementation must receive a new stable name rather
-  than masquerading as either existing execution contract.
+- **The `executor` vocabulary.** One executor exists, recorded on every row as
+  `gcp-batch`. What names exist beyond it, and how a name resolves to the code
+  that renders and submits a job, becomes an identity question — the column is
+  hashed then, not before — the day a second one arrives.
 - **Where the role table lives.** `auth_role` → service account + secret version
   is deployment configuration, not plan content. It is currently
   `--anonymous-worker-sa`, `--authenticated-worker-sa`, and `--secret-resource`

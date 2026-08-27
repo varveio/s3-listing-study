@@ -250,13 +250,6 @@ case hash.
 gs://<results-bucket>/<suite>/<target-bucket>/<tool>.<hash>.s<attempt>/
 ```
 
-The local Docker executor uses the identical suffix under an absolute local
-root:
-
-```
-<results-root>/<suite>/<target-bucket>/<tool>.<hash>.s<attempt>/
-```
-
 Deterministic, so evidence is computed from a row rather than discovered by
 listing. The worker writes `result.json` last; its presence is what makes an
 attempt complete, and checking it is one existence test on a known prefix rather
@@ -269,11 +262,10 @@ same reason `<suite>` leads. Every other segment identifies something the hash
 now covers, so no other segment exists.
 
 Two properties the prefix depends on, both argued in
-[`architecture.md`](architecture.md) § *What the evidence store holds*:
+[`architecture.md`](architecture.md) § *What the object store holds*:
 
-- **Writes are create-only** — `ifGenerationMatch=0` in GCS; a fresh-directory
-  creation locally. A deterministic prefix and overwrite semantics together
-  let a second execution merge into the first.
+- **Writes are create-only** — `ifGenerationMatch=0`. A deterministic prefix and
+  overwrite semantics together let a second execution merge into the first.
 - **`result.json` carries `attempt_id` and the `case_id` digest**, and `report`
   refuses evidence whose recorded identity disagrees with the prefix it was
   found under.
@@ -374,7 +366,7 @@ CREATE TABLE attempts (
     image_set_sha256    TEXT NOT NULL,
 
     -- context: recorded, not hashed
-    executor_env        TEXT NOT NULL,      -- canonical JSON: executor-specific estate and host detail
+    executor_env        TEXT NOT NULL,      -- canonical JSON: project, provisioning, boot-disk type/size, network
     service_account     TEXT NOT NULL,      -- what auth_role resolved to
     secret_resource     TEXT,               -- the credential version, when a role was used
     job_name            TEXT NOT NULL UNIQUE,

@@ -1046,34 +1046,6 @@ def test_recursive_upload_preserves_native_paths(
     assert json.loads(result_body)["postprocessing_seconds"] == timings
 
 
-def test_local_publish_is_create_only_and_lands_the_marker_last(tmp_path: Path) -> None:
-    attempt = tmp_path / "scratch"
-    (attempt / "native/listing").mkdir(parents=True)
-    (attempt / "native/listing/part.txt").write_text("one\n")
-    (attempt / "stderr.log.gz").write_bytes(b"log")
-    (attempt / "result.json").write_text('{"worker_exit_code": 0}\n')
-    destination = (tmp_path / "results/tool.abc.s1").resolve()
-    timings: dict[str, float] = {}
-
-    assert measure.upload(attempt, str(destination), timings)
-    assert (destination / "native/listing/part.txt").read_text() == "one\n"
-    assert (destination / "stderr.log.gz").read_bytes() == b"log"
-    marker = json.loads((destination / "result.json").read_text())
-    assert marker["postprocessing_seconds"] == timings
-
-    # A deterministic leaf may never absorb bytes from a second execution.
-    (attempt / "native/listing/part.txt").write_text("different\n")
-    assert not measure.upload(attempt, str(destination), {})
-    assert (destination / "native/listing/part.txt").read_text() == "one\n"
-
-
-def test_local_publish_refuses_a_relative_destination(tmp_path: Path) -> None:
-    attempt = tmp_path / "scratch"
-    attempt.mkdir()
-    (attempt / "result.json").write_text("{}\n")
-    assert not measure.upload(attempt, "relative/leaf")
-
-
 def test_a_staged_artifact_whose_digest_moved_is_refused(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
