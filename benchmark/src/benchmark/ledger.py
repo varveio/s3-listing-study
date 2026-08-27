@@ -15,7 +15,8 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -263,6 +264,17 @@ def open_ledger(
         con.close()
         raise CampaignError(f"{path} is the {row['suite']!r} suite, not {suite!r}")
     return con
+
+
+@contextmanager
+def ledger(
+    path: str, *, suite: str | None = None, readonly: bool = False
+) -> Iterator[sqlite3.Connection]:
+    con = open_ledger(path, suite=suite, readonly=readonly)
+    try:
+        yield con
+    finally:
+        con.close()
 
 
 def ledger_suite(con: sqlite3.Connection) -> str:

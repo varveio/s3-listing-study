@@ -42,8 +42,8 @@ from benchmark.ledger import (
     attempt_rows,
     blocked_slots,
     journal_intent,
+    ledger,
     mint_group_id,
-    open_ledger,
     pending_rows,
     producer_summary,
     set_state,
@@ -1486,8 +1486,7 @@ def cmd_submit(args: argparse.Namespace) -> int:
             slots=sum(1 for step in steps if step.waits_for is not None),
         )
         return 0
-    con = open_ledger(args.state, suite=suite)
-    try:
+    with ledger(args.state, suite=suite) as con:
         launch = Launch(
             con,
             suite,
@@ -1504,8 +1503,6 @@ def cmd_submit(args: argparse.Namespace) -> int:
         launch.run(steps)
         _announce_shape(cases, attempts=launch.submitted, slots=launch.booked)
         print(f"campaign: group {launch.group_id}")
-    finally:
-        con.close()
     return 0
 
 
@@ -1556,8 +1553,7 @@ def cmd_local_close(args: argparse.Namespace) -> int:
 
 
 def cmd_status(args: argparse.Namespace) -> int:
-    con = open_ledger(args.state, readonly=True)
-    try:
+    with ledger(args.state, readonly=True) as con:
         for row in attempt_rows(con, group_id=args.group, case_id=args.case):
             print(
                 f"{row['attempt_id']:<32} {row['state']:<12} {row['purpose']:<12} "
@@ -1577,22 +1573,17 @@ def cmd_status(args: argparse.Namespace) -> int:
             if reason is not None:
                 line += f" -- OWED, nothing can pay it: {reason}"
             print(line)
-    finally:
-        con.close()
     return 0
 
 
 def cmd_prune(args: argparse.Namespace) -> int:
     """Delete the evidence of attempts that settled unsuccessfully. Rows stay."""
-    con = open_ledger(args.state, readonly=True)
-    try:
+    with ledger(args.state, readonly=True) as con:
         rows = [
             row
             for row in attempt_rows(con, group_id=args.group)
             if row["state"] in UNSUCCESSFUL_STATES
         ]
-    finally:
-        con.close()
     for row in rows:
         deleted = gcs.delete_prefix(row["result_prefix"])
         print(f"campaign: pruned {deleted} object(s) under {row['result_prefix']}")

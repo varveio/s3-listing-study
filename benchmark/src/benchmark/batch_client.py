@@ -9,6 +9,8 @@ state column*).
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any, cast
 
 from google.api_core.exceptions import (
@@ -68,6 +70,15 @@ def _close_batch_client(client: batch_v1.BatchServiceClient) -> None:
         client.transport.close()  # type: ignore[no-untyped-call]
     except Exception as exc:
         raise CampaignError(f"could not close Batch client: {exc}") from exc
+
+
+@contextmanager
+def client_session() -> Iterator[batch_v1.BatchServiceClient]:
+    client = batch_v1.BatchServiceClient()
+    try:
+        yield client
+    finally:
+        _close_batch_client(client)
 
 
 def ensure_job(

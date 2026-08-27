@@ -29,8 +29,8 @@ from benchmark.ledger import (
     CampaignError,
     attempt_rows,
     journal_intent,
+    ledger,
     mint_group_id,
-    open_ledger,
     set_state,
     validate_suite,
 )
@@ -561,9 +561,8 @@ def cmd_submit(args: Any) -> int:
 
     results.mkdir(parents=True, exist_ok=True)
     state = results / STATE_FILENAME if args.state == STATE_FILENAME else Path(args.state).resolve()
-    con = open_ledger(str(state), suite=suite)
     failed = False
-    try:
+    with ledger(str(state), suite=suite) as con:
         group = mint_group_id(con, args.group)
         seen: set[str] = set()
         scheduled: list[tuple[Scheduled, str]] = []
@@ -656,8 +655,6 @@ def cmd_submit(args: Any) -> int:
                 success, detail = False, str(exc)
             set_state(con, attempt_id, "SUCCEEDED" if success else "FAILED", detail or None)
             failed |= not success
-    finally:
-        con.close()
     return int(failed)
 
 
@@ -666,8 +663,7 @@ def cmd_local_close(args: Any) -> int:
     reason = args.reason.strip()
     if not reason:
         raise CampaignError("local-close requires a non-empty --reason")
-    con = open_ledger(args.state)
-    try:
+    with ledger(args.state) as con:
         rows = attempt_rows(con, group_id=args.group)
         if not rows:
             raise CampaignError(f"no group {args.group} in this ledger")
@@ -715,6 +711,4 @@ def cmd_local_close(args: Any) -> int:
             print(f"campaign: {row['attempt_id']} settled {state} ({circumstance})")
         if not live:
             print(f"campaign: group {args.group} has no non-terminal Docker rows")
-    finally:
-        con.close()
     return 0

@@ -88,7 +88,7 @@ from benchmark.ledger import (
     STATE_FILENAME,
     TERMINAL_STATES,
     attempt_rows,
-    open_ledger,
+    ledger,
     pending_rows,
     producer_summary,
 )
@@ -1182,8 +1182,7 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return EXIT_NORMALIZE_FAILED
-    con = open_ledger(args.state, readonly=True)
-    try:
+    with ledger(args.state, readonly=True) as con:
         exit_code, report = verify_group(
             con,
             args.group,
@@ -1191,8 +1190,6 @@ def main(argv: list[str] | None = None) -> int:
             write_record=not args.no_write,
             include_docker_canaries=args.include_docker_canaries,
         )
-    finally:
-        con.close()
     print_report(report)
     return exit_code
 

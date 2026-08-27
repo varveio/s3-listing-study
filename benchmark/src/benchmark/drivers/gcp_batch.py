@@ -39,8 +39,8 @@ from benchmark.ledger import (
     CampaignError,
     attempt_rows,
     journal_intent,
+    ledger,
     ledger_suite,
-    open_ledger,
     set_state,
 )
 
@@ -591,34 +591,25 @@ def _options(args: argparse.Namespace) -> BatchOptions:
 
 
 def cmd_poll(args: argparse.Namespace) -> int:
-    con = open_ledger(args.state)
-    client: batch_v1.BatchServiceClient | None = None
-    try:
+    with ledger(args.state) as con:
         if not any(
             row["executor"] == EXECUTOR and row["state"] not in TERMINAL_STATES
             for row in attempt_rows(con)
         ):
             print("campaign: no gcp-batch attempts to poll")
             return 0
-        client = batch_v1.BatchServiceClient()
-        suite = ledger_suite(con)
-        if not args.watch:
-            poll_once(con, suite, client=client)
+        with batch_client.client_session() as client:
+            suite = ledger_suite(con)
+            if not args.watch:
+                poll_once(con, suite, client=client)
+                return 0
+            while not poll_once(con, suite, client=client):
+                time.sleep(args.interval)
             return 0
-        while not poll_once(con, suite, client=client):
-            time.sleep(args.interval)
-        return 0
-    finally:
-        try:
-            if client is not None:
-                batch_client._close_batch_client(client)
-        finally:
-            con.close()
 
 
 def cmd_retry(args: argparse.Namespace) -> int:
-    con = open_ledger(args.state)
-    try:
+    with ledger(args.state) as con:
         suite = ledger_suite(con)
         rows = attempt_rows(con, group_id=args.group)
         if any(row["executor"] != EXECUTOR for row in rows):
@@ -667,40 +658,29 @@ def cmd_retry(args: argparse.Namespace) -> int:
                 print(f"campaign: {row['attempt_id']} not retried: {exc}")
                 continue
             print(f"campaign: {row['attempt_id']} -> {attempt.attempt_id}")
-    finally:
-        con.close()
     return 0
 
 
 def cmd_cancel(args: argparse.Namespace) -> int:
-    con = open_ledger(args.state)
-    client: batch_v1.BatchServiceClient | None = None
-    try:
+    with ledger(args.state) as con:
         rows = attempt_rows(con, group_id=args.group)
         if any(row["executor"] != EXECUTOR for row in rows):
             raise CampaignError(
                 "cancel manages gcp-batch attempts only; Docker submit owns its foreground session"
             )
-        client = batch_v1.BatchServiceClient()
-        for row in rows:
-            if row["state"] in TERMINAL_STATES:
-                continue
-            attempt = Attempt.from_row(row)
-            project = str(json.loads(attempt.executor_env)["project"])
-            batch_client.cancel_job(project, attempt.location, attempt.job_name, client=client)
-            set_state(con, attempt.attempt_id, "CANCELLED", "cancelled by the operator")
-    finally:
-        try:
-            if client is not None:
-                batch_client._close_batch_client(client)
-        finally:
-            con.close()
+        with batch_client.client_session() as client:
+            for row in rows:
+                if row["state"] in TERMINAL_STATES:
+                    continue
+                attempt = Attempt.from_row(row)
+                project = str(json.loads(attempt.executor_env)["project"])
+                batch_client.cancel_job(project, attempt.location, attempt.job_name, client=client)
+                set_state(con, attempt.attempt_id, "CANCELLED", "cancelled by the operator")
     return 0
 
 
 def cmd_accept_failure(args: argparse.Namespace) -> int:
-    con = open_ledger(args.state)
-    try:
+    with ledger(args.state) as con:
         if args.slot is not None:
             for reference, reason in abandon_slot(con, args.slot):
                 print(f"campaign: slot {reference} ABANDONED: {reason}")
@@ -718,6 +698,4 @@ def cmd_accept_failure(args: argparse.Namespace) -> int:
         # A preparation nobody will retry owes every measurement behind it, and
         # the slot is what records that absence rather than losing it.
         settle_dependents(con, Attempt.from_row(row), "ACCEPTED", suite=ledger_suite(con))
-    finally:
-        con.close()
     return 0

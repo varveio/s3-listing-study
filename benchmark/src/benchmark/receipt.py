@@ -16,7 +16,7 @@ from benchmark.ledger import (
     STATE_FILENAME,
     TERMINAL_STATES,
     attempt_rows,
-    open_ledger,
+    ledger,
     pending_rows,
 )
 from benchmark.report import load_json_at
@@ -243,11 +243,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.output.exists() and any(args.output.iterdir()):
             raise ReceiptError(f"output directory {args.output} is not empty")
-        con = open_ledger(args.state, readonly=True)
-        try:
+        with ledger(args.state, readonly=True) as con:
             document = build_receipt(con, args.group)
-        finally:
-            con.close()
         args.output.mkdir(parents=True, exist_ok=True)
         payload = json.dumps(document, indent=2, sort_keys=True, ensure_ascii=True) + "\n"
         (args.output / "receipt.json").write_text(payload)

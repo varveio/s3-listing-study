@@ -46,7 +46,7 @@ from benchmark.ledger import (
     STATE_FILENAME,
     TERMINAL_STATES,
     attempt_rows,
-    open_ledger,
+    ledger,
     pending_rows,
     producer_summary,
     slot_owed_reason,
@@ -449,16 +449,13 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
-    con = open_ledger(args.state, readonly=True)
-    try:
+    with ledger(args.state, readonly=True) as con:
         rows = report_rows(attempt_rows(con, group_id=args.group), adapter_root=args.adapter_root)
         blocked = [
             slot_note(con, slot)
             for slot in pending_rows(con, group_id=args.group)
             if slot["state"] == "BLOCKED"
         ]
-    finally:
-        con.close()
 
     print(render_markdown(rows, blocked=blocked))
     return report_exit_code(rows, blocked=blocked)
