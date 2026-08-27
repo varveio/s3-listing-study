@@ -577,9 +577,9 @@ def test_count_rows_matches_explicit_normalization_without_constructing_records(
         raise AssertionError("count-only path crossed the contract emit boundary")
 
     monkeypatch.setattr(duckdb_adapter, "Record", forbidden)
-    monkeypatch.setattr(adapter, "emit_result", forbidden)
-    if hasattr(adapter, "emit"):
-        monkeypatch.setattr(adapter, "emit", forbidden)
+    for emit_name in ("emit_result", "emit"):
+        if hasattr(adapter, emit_name):
+            monkeypatch.setattr(adapter, emit_name, forbidden)
     assert adapter.count_rows(payload, mode, prefix=prefix) == expected
 
     raw = tmp_path / "stdout.raw"
@@ -592,6 +592,13 @@ def test_large_line_count_uses_the_binary_chunked_reader() -> None:
     rows = 250_000
     adapter = load_adapter(REPO, "s3kor")
     assert adapter.count_rows(b"object\n" * rows, "list") == rows
+
+
+def test_large_s3kor_listing_normalization_is_streaming() -> None:
+    rows = 250_000
+    done = run("s3kor", "list", "", b"object\n" * rows)
+    assert done.returncode == 0, done.stderr
+    assert done.stdout == b"object\t-\t-\t-\t-\n" * rows
 
 
 @pytest.mark.parametrize(

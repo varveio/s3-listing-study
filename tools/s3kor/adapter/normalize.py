@@ -6,8 +6,8 @@ record per line::
 
     key<TAB>size<TAB>etag<TAB>mtime<TAB>storage_class   (`-` where unexposed)
 
-Both modes are a line per entry, so both are a SELECT. Framing and validation
-stay in ``contract`` via ``emit_result``.
+Both modes are one physical line per entry. Framing and validation stay in the
+shared contract through ``emit``.
 
 s3kor's ``ls`` output contract (v0.0.37, ``list.go printAllObjects``)::
 
@@ -36,10 +36,8 @@ the current-object manifest lacks — a property of the mode, not a tool fault.
 
 ``prefix`` (argv[2]) is accepted per the adapter contract and unused: s3kor
 prints absolute keys. The adapter runs on the HOST, AFTER the wrapper's clock
-stops, so a DuckDB query is fair game here — never inside a timed window.
-
-Keys are compared as TEXT rather than as bytes under ``LC_ALL=C``; every key in
-every bucket the study lists is ASCII, so the two orderings agree.
+stops. It carries each key as the bytes the tool printed and keeps memory bounded
+by one input chunk plus the longest physical line.
 
 A line the framing cannot carry: refused, not emitted
 -----------------------------------------------------
@@ -65,16 +63,14 @@ same six records.
 
 from __future__ import annotations
 
+import shutil
 import sys
+import tempfile
 from collections.abc import Mapping
 from typing import IO
 
-from benchmark.runtime.duckdb_adapter import (
-    connect,
-    count_lf_lines,
-    emit_result,
-    staged,
-)
+from benchmark.runtime.contract import emit
+from benchmark.runtime.duckdb_adapter import count_lf_lines, iter_lf_lines
 from benchmark.runtime.normalizer_cli import normalizer_main
 
 UNKNOWN_MODE_EXIT = 2
@@ -82,35 +78,6 @@ UNKNOWN_MODE_EXIT = 2
 # Declared rather than inferred, so the equivalence harness can name a mode no
 # committed payload exercises — untested by construction, and invisible otherwise.
 MODES = frozenset({"list", "list-versions"})
-
-LINES = """(
-    SELECT line, ordinality
-    FROM read_text($path),
-         UNNEST(str_split(content, chr(10))) WITH ORDINALITY AS split(line, ordinality)
-)"""
-
-CUSTOM_ENDPOINT_NOTICE_SQL = """(
-    ordinality = 1
-    AND starts_with(line, 'Using custom endpoint [')
-    AND contains(line, '] on region [')
-    AND ends_with(line, ']')
-)"""
-
-QUERIES = {
-    "list": f"""
-        SELECT line, NULL, NULL, NULL, NULL
-        FROM {LINES}
-        WHERE line <> '' AND NOT {CUSTOM_ENDPOINT_NOTICE_SQL}
-        ORDER BY ordinality
-    """,
-    "list-versions": f"""
-        SELECT substr(line, position(' ' IN line) + 1), NULL, NULL, NULL, NULL
-        FROM {LINES}
-        WHERE position(' ' IN line) > 0 AND NOT {CUSTOM_ENDPOINT_NOTICE_SQL}
-        ORDER BY ordinality
-    """,
-}
-
 
 def _custom_endpoint_notice(line: bytes) -> bool:
     return (
@@ -121,7 +88,7 @@ def _custom_endpoint_notice(line: bytes) -> bool:
 
 
 def count_rows(data: bytes, mode: str, prefix: str = "", native_root: str = "") -> int:
-    if mode not in QUERIES:
+    if mode not in MODES:
         raise ValueError(f"unknown mode: {mode}")
     first = True
 
@@ -141,11 +108,23 @@ def normalize(
     prefix: str = "",
     config: Mapping[str, object] | None = None,
 ) -> int:
-    if mode not in QUERIES:
+    if mode not in MODES:
         print(f"normalize.py: unknown mode: {mode}", file=sys.stderr)
         return UNKNOWN_MODE_EXIT
-    with staged(data) as path:
-        emit_result(out, connect().execute(QUERIES[mode], {"path": path}))
+    with tempfile.TemporaryFile() as staged:
+        first = True
+        for line in iter_lf_lines(data):
+            notice = first and _custom_endpoint_notice(line)
+            first = False
+            if not line or notice:
+                continue
+            if mode == "list-versions":
+                _version, separator, line = line.partition(b" ")
+                if not separator:
+                    continue
+            emit(staged, line)
+        staged.seek(0)
+        shutil.copyfileobj(staged, out)
     return 0
 
 
