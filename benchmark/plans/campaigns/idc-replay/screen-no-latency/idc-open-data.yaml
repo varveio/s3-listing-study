@@ -116,6 +116,38 @@ tools:
   swath:
     cases:
       - {mode: recursive-parquet, concurrency: 64, purpose: diagnostic}
+      # The shared subject has six cores. Hold the durable-output tune fixed
+      # while bracketing its writer pool; the existing retained arm supplies w8.
+      - mode: recursive-parquet
+        concurrency: 64
+        purpose: diagnostic
+        config:
+          jvm_max_heap: 4g
+          parquet_writers: 3
+          parquet_part_size: 1gb
+          writeback_size: 32mb
+          part_rotation_interval: "0"
+          part_rotation_max_rows: 0
+      - mode: recursive-parquet
+        concurrency: 64
+        purpose: diagnostic
+        config:
+          jvm_max_heap: 4g
+          parquet_writers: 4
+          parquet_part_size: 1gb
+          writeback_size: 32mb
+          part_rotation_interval: "0"
+          part_rotation_max_rows: 0
+      - mode: recursive-parquet
+        concurrency: 64
+        purpose: diagnostic
+        config:
+          jvm_max_heap: 4g
+          parquet_writers: 6
+          parquet_part_size: 1gb
+          writeback_size: 32mb
+          part_rotation_interval: "0"
+          part_rotation_max_rows: 0
       # Keep the screened request concurrency while applying the retained
       # Parquet writer, part-size, writeback, heap, and rotation tune.
       - mode: recursive-parquet
