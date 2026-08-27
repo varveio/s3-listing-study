@@ -71,7 +71,7 @@ other than exactly one file.
 """
 EXIT_REPLAY_EVIDENCE_FAILED = 14
 """The replay server did not provide the evidence protocol this attempt required."""
-REPLAY_ENDPOINT_URL = replay_runtime.REPLAY_ENDPOINT_URL
+REPLAY_ENDPOINT_URL = replay.REPLAY_ENDPOINT_URL
 REPLAY_HTTP_TIMEOUT_S = replay_runtime.REPLAY_HTTP_TIMEOUT_S
 SETUP_TIMEOUT_S = 300
 """The most an untimed setup exec gets, whatever the subject's deadline is.

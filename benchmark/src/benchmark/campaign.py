@@ -436,7 +436,7 @@ def worker_argument_pairs(
     destination: str,
     term_grace: float,
     artifact_uri: str = "",
-    endpoint_url: str = "http://127.0.0.1:19090",
+    endpoint_url: str = replay_contract.REPLAY_ENDPOINT_URL,
 ) -> tuple[tuple[str, str], ...]:
     """Render one worker request independently of its container executor."""
     memory = attempt.container_memory_gb

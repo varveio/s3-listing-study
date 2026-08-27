@@ -9,6 +9,10 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 REPLAY_SPEC_VERSION = 3
+REPLAY_ENDPOINT_PORT = 19090
+REPLAY_METRICS_PORT = 19192
+REPLAY_ENDPOINT_URL = f"http://127.0.0.1:{REPLAY_ENDPOINT_PORT}"
+REPLAY_METRICS_URL = f"http://127.0.0.1:{REPLAY_METRICS_PORT}"
 REPLAY_BLOCK_FIELDS = (
     "server_image_uri",
     "serving_mode",
