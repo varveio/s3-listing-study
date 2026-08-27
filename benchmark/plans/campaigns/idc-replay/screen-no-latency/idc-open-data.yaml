@@ -59,6 +59,9 @@ tools:
       - {mode: recursive-walk, concurrency: 16, purpose: diagnostic}
       # c16 still left subject CPU headroom and materially improved over c8.
       - {mode: recursive-walk, concurrency: 32, purpose: diagnostic}
+      # c32 improved again and peaked at 5.03/6 subject cores; c64 closes the
+      # remaining scaling question before retaining the walk ceiling.
+      - {mode: recursive-walk, concurrency: 64, purpose: diagnostic}
       - {mode: recursive-walk-with-dirs, concurrency: 8, purpose: diagnostic}
   s3-fast-list:
     cases:
