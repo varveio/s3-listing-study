@@ -1721,4 +1721,8 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    # The documented entry point runs this file by path. The Batch driver
+    # imports ``benchmark.campaign``; alias the running module so the
+    # controller is initialised once rather than twice.
+    sys.modules.setdefault("benchmark.campaign", sys.modules[__name__])
     sys.exit(main())

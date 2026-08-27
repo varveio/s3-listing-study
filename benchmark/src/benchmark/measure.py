@@ -1616,7 +1616,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     replay_refusals: tuple[str, ...] = ()
     if replay_config is not None:
-        replay_refusals = replay.evidence_errors(
+        replay_refusals = replay.replay_refusals(
             replay_config, replay_evidence, purpose=args.purpose
         )
         if replay_refusals:

@@ -150,6 +150,9 @@ QUERIES = {
 
 
 def _sql_for(mode: str) -> str | None:
+    # Every mode that count_rows counts cheaply (without SQL) must still have
+    # a query here: count_rows resolves the query before choosing a counter, so
+    # a count-only mode with no query would be refused instead of counted.
     if mode in JSON_MODES:
         return QUERIES["json"]
     if mode in TEXT_MODES:
