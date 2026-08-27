@@ -1,8 +1,8 @@
 # Repeatability experiment plans
 
-These plans describe the experiment, not where it runs. Select Docker or GCP
-Batch with `campaign.py submit --executor ...`; do not fork the plan by
-executor.
+These plans describe the experiment, not where it runs; do not fork a plan by
+executor. The bounded Docker runner accepts only independent, non-replay,
+one-attempt real-S3 work. Repeated, replay, and dependent work runs on GCP Batch.
 
 `noaa-nws-rtofs-pds.yaml` is the one-shot real-S3 invocation canary. A bounded
 AWS CLI reconnaissance on 2026-08-27 observed 845,304 keys in 127.73 seconds
@@ -12,8 +12,8 @@ and do not interpret the single timings as comparative results. The 1,800-second
 subject timeout is over fourteen times that reconnaissance wall.
 
 The plan deliberately includes retired `s4cmd` for this one real-S3 canary.
-The executor requires an explicit exception flag and refuses that exception for
-replay or more than one attempt.
+The Docker runner requires an explicit exception flag and refuses that
+exception for replay or more than one attempt.
 
 Run the complete permutation once, retain every native product, then invoke the
 existing verifier with `--include-docker-canaries`. It compares every normalized

@@ -162,7 +162,7 @@ Two things follow:
 | `produced_by` | Which attempt made the artifact a case consumed. The artifact's content digest is what identifies it; *which run* produced those bytes is a debugging question. |
 | `signed`, `visible_memory_gb` | Derived from `auth_role` and the ceiling, both already hashed. A derived value is not a second input. |
 | `heap_percent` | A methodology constant most subjects cannot feel. Hashing it globally would re-identify every Go, Rust and Python case when a share they ignore is changed, which is the law — *a field either changes the identity or it is not an input* — read backwards. It enters identity exactly where it changes the measurement: a managed-runtime capsule declares `heap_percent` as a `Fixed` axis carrying the constant, and the loader merges it into that capsule's `config` before hashing, like any declared value. See [`capsule-contract.md`](capsule-contract.md) § *The ceiling, and the share of it*. |
-| `executor` | Provider mechanism, not logical case identity. Docker versus Batch is recorded on every attempt. A Docker campaign separately freezes the executor contract and host-session treatment; attempts are never pooled across executors merely because their case hashes agree. |
+| `executor` | Recorded on every attempt, but not hashed. Docker and Batch attempts of one plan row are nevertheless different cases: the local `docker-<arch>-<sha12 of hardware facts>` machine-family label is hashed into the environment, so their case hashes occupy disjoint strata. Attempts are never pooled across executors. |
 
 `network` and `subnetwork` are arguable — an egress path could matter — but they
 follow from the executor's project and location, so they stay in `executor_env`
@@ -312,13 +312,17 @@ outside the manifest — is exactly the edit that could otherwise change the
 subject's behaviour without changing anything the controller verifies. The tool
 slice closes that.
 
+## Executor strata
+
+Docker and Batch attempts of one plan row are not equivalent cases and are
+never pooled. The executor name itself is not hashed. The distinction comes
+from the local machine-family label,
+`docker-<arch>-<sha12 of hardware facts>`, which is hashed into the case
+environment and therefore gives the Docker attempt a different case identity
+and stratum from the Batch attempt.
+
 ## Open questions
 
-- **Executor equivalence.** `gcp-batch` owns a recoverable remote lifecycle;
-  `docker` currently owns only a synchronous serial session. A dry render plus
-  a real attempt qualifies the bounded contract each one actually claims. Any
-  backend fact that changes the measured work belongs in the case environment
-  or the frozen campaign/session treatment, not behind the executor label.
 - **Where the role table lives.** `auth_role` → service account + secret version
   is deployment configuration, not plan content. It is currently
   `--anonymous-worker-sa`, `--authenticated-worker-sa`, and `--secret-resource`

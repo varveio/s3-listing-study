@@ -104,15 +104,22 @@ is not interchangeable with attempt evidence. Back it up. What is inside it —
 the tables, their keys, and every state they record — is in
 [`model.md`](model.md).
 
-For Docker, use the same `campaign.py submit` command with `--executor docker`.
-The plan stays unchanged; `--image`, `--results-root`, `--location`, and
-`--seed` replace the Batch provider arguments. Docker execution is serial and
+For a bounded local session, `campaign.py submit --executor docker` invokes
+`docker_executor.py`. The plan stays unchanged; `--image`, `--results-root`,
+`--location`, and `--seed` supply the local session arguments. The runner
+accepts only independent, non-replay real-S3 cases, executes them serially, and
 stores the ledger, frozen schedule, logs, and attempt trees below the absolute
 results root. Submission remains in the foreground until the session settles.
-It currently refuses replay plans and prerequisite chains; `poll`, `retry`, and
-`cancel` remain Batch lifecycle commands. Re-run a settled Docker case with
-`submit --repeat`, which creates a new physical attempt rather than overwriting
-evidence.
+It shares plan compilation, case identity primitives, the measurement worker,
+the ledger schema, result evidence, verification, and reporting with Batch. It
+does not share Batch `poll`, `retry`, or `cancel`, prerequisite-slot resolution,
+artifact transport, or replay-sidecar lifecycle. Replay, repeated, and
+dependent work runs on GCP Batch and will not be added to the local runner.
+
+Docker and Batch attempts of one plan row occupy disjoint strata. The local
+`docker-<arch>-<sha12 of hardware facts>` machine-family label is hashed into
+case identity; the executor name itself is not. Attempts are never pooled
+across executors.
 
 If a crash leaves a Docker group unfinished, settle its frozen session before
 continuing: `uv run python benchmark/src/benchmark/campaign.py --state

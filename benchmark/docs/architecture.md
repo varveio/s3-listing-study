@@ -8,6 +8,22 @@ This is the page to read first. The three beside it are reference:
 [`model.md`](model.md) for the ledger, and
 [`capsule-contract.md`](capsule-contract.md) for what a capsule must declare.
 
+## The Batch controller and the local runner
+
+`campaign.py` is the Batch campaign controller. It owns the recoverable Batch
+submission, polling, retry, cancellation, prerequisite-slot resolution,
+artifact transport, and replay-sidecar lifecycles.
+
+`docker_executor.py` is a bounded local session runner, not a second provider
+implementation below one campaign interface. `campaign.py submit --executor
+docker` invokes it for a synchronous, serial session of independent, non-replay
+real-S3 cases, with evidence written to a local tree. The two paths share plan
+compilation, case identity primitives, the measurement worker, the ledger
+schema, result evidence, verification, and reporting. The local runner does not
+share or claim the Batch lifecycle features above. Replay, repeated, and
+dependent work runs on GCP Batch; those capabilities are outside the frozen
+local scope.
+
 ## Three places a fact can live
 
 Everything the harness knows about a run is in exactly one of three places, and
