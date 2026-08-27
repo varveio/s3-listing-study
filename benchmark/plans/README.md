@@ -173,6 +173,31 @@ staged directory with:
 uv run python -m benchmark.replay_fixture /path/to/fixture
 ```
 
+#### Fixture preparation and sorted eligibility
+
+Fixture identity and sorted-serving eligibility are separate checks.
+`fixture_sha256` proves which files were staged; it does not prove that the
+replay server may use its sorted path.
+
+For object-mode Parquet output produced by current Swath with `--sort`, use the
+completed dataset's `data/*.parquet` parts directly. With the same
+`swath.sort.*` settings (including the defaults), live `--sort` and
+`swath-replay sort-fixture` use the same final-file writer, so both produce the
+same replay-relevant order, page/dictionary geometry, and footer stamps. They
+are not promised to be byte-for-byte identical: part boundaries and compressed
+bytes may differ. A second sort adds no missing replay contract to fresh
+`--sort` output. This is also the rule stated by the
+[current Swath replay documentation](https://github.com/varveio/swath/blob/00886330fcd15ff5dad2430122e331e91a340c31/docs/swath-replay.md#sort-a-legacy-capture-sort-fixture).
+
+The `--sort` qualifier is load-bearing. Current Swath output produced without
+it, a DuckDB `ORDER BY`/`COPY` rewrite, foreign Parquet, or a legacy unstamped
+capture does not become sorted-eligible merely because a row scan finds keys in
+order. Transform such input once with `swath-replay sort-fixture`, or declare
+`serving_mode: duckdb`. Conversely, an older capture that already passes
+`--serving-mode sorted` does not need another sort for correctness. Sorted mode
+is the final gate: it requires every resolved part to be stamped object mode,
+pure `OBJECT`, strictly globally ordered, and a complete multipart sequence.
+
 The staged-fixture branch remains `VERIFIED: no`: its manifest contract has
 offline coverage, but no committed campaign receipt has exercised the provider
 download path. Do not treat an image-bundled replay canary as qualifying it.

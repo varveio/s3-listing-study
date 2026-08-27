@@ -82,7 +82,11 @@ tool enforces for you; a missing item surfaces as a provider error mid-campaign.
    `replay.capacity_status: uncalibrated` until a real diagnostic capacity
    canary has a committed receipt. The staged-fixture provider path separately
    remains `VERIFIED: no` until a committed canary uses `fixture_uri`; a bundled
-   fixture canary does not qualify that download and manifest-check branch.
+   fixture canary does not qualify that download and manifest-check branch. Before
+   hashing or uploading a fixture, apply the separate
+   [fixture-preparation and sorted-eligibility rule](../plans/README.md#fixture-preparation-and-sorted-eligibility):
+   current Swath `--sort` output is already prepared, while ordered-but-unstamped
+   Parquet is not.
 6. **Credential secret**, if any case signs: one
    `projects/<p>/secrets/<s>/versions/<v>` resource whose payload is the
    `KEY=VALUE` lines described in
