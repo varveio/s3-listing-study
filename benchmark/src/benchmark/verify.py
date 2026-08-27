@@ -17,6 +17,10 @@ one emitting five fields, or a tool wins by emitting less.
 A real-S3 PASS means the subjects of a stratum AGREE: there is no sealed
 manifest, and agreement stands in for control over a corpus that grows
 underneath the study (`docs/identity.md` § *What identity cannot cover*).
+For the explicit small Docker canary check, every saved listing is instead
+compared with the saved AWS CLI canary. Agreement is still not independent
+ground truth, and a disagreement may be bucket movement, a tool, or its
+normalizer.
 Replay campaigns are row-count-only: this explicit content verifier refuses
 them without downloading or normalizing their retained raw products.
 
@@ -389,14 +393,25 @@ class Prepared:
     fields: tuple[str, ...]
 
 
-def roster_for(con: sqlite3.Connection, group_id: str) -> Roster:
+def roster_for(
+    con: sqlite3.Connection, group_id: str, *, include_docker_canaries: bool = False
+) -> Roster:
     """Read the comparison population and replay refusal from recorded rows."""
-    attempts = tuple(Subject.from_row(row) for row in attempt_rows(con, group_id=group_id))
+    rows = tuple(attempt_rows(con, group_id=group_id))
+    attempts = tuple(Subject.from_row(row) for row in rows)
     replay_attempts = tuple(subject for subject in attempts if subject.replay is not None)
     subjects = tuple(
         subject
-        for subject in attempts
-        if subject.purpose == "measurement" and subject.replay is None
+        for row, subject in zip(rows, attempts, strict=True)
+        if row["replay"] is None
+        and (
+            row["purpose"] == "measurement"
+            or (
+                include_docker_canaries
+                and row["purpose"] == "canary"
+                and row["executor"] == "docker"
+            )
+        )
     )
     slots = pending_rows(con, group_id=group_id)
     return Roster(
@@ -819,6 +834,7 @@ def verify_bucket(
     adapter_root: str,
     work_dir: Path,
     write_record: bool,
+    reference_tool: str | None = None,
 ) -> dict[str, Any]:
     """One target bucket's strata, rate cases, and the gaps in between."""
     gaps: list[dict[str, object]] = []
@@ -851,12 +867,37 @@ def verify_bucket(
         )
 
     strata: list[dict[str, Any]] = []
-    for key in sorted({(p.product, p.fields) for p in prepared}):
-        product, fields = key
-        members = sorted(
-            (p for p in prepared if (p.product, p.fields) == key),
-            key=lambda p: p.subject.attempt_id,
-        )
+    if reference_tool is None:
+        groups = [
+            (
+                key[0],
+                key[1],
+                sorted(
+                    (p for p in prepared if (p.product, p.fields) == key),
+                    key=lambda p: p.subject.attempt_id,
+                ),
+            )
+            for key in sorted({(p.product, p.fields) for p in prepared})
+        ]
+    else:
+        references = [p for p in prepared if p.subject.tool == reference_tool]
+        groups = []
+        if len(references) == 1:
+            reference = references[0]
+            groups.append(
+                (
+                    reference.product,
+                    reference.fields,
+                    [
+                        reference,
+                        *sorted(
+                            (p for p in prepared if p is not reference),
+                            key=lambda p: p.subject.attempt_id,
+                        ),
+                    ],
+                )
+            )
+    for product, fields, members in groups:
         reference, others = members[0], members[1:]
         comparisons: list[dict[str, Any]] = []
         for actual in others:
@@ -865,7 +906,7 @@ def verify_bucket(
             except MalformedInputError as exc:
                 gaps.append(_gap(actual.subject, "malformed", str(exc)))
                 continue
-            record = {
+            record: dict[str, Any] = {
                 "attempt_id": actual.subject.attempt_id,
                 "tool": actual.subject.tool,
                 "mode": actual.subject.mode,
@@ -873,7 +914,7 @@ def verify_bucket(
                 "reference_tool": reference.subject.tool,
                 "reference_mode": reference.subject.mode,
                 "product": product,
-                "fields": list(fields),
+                "fields": list(actual.fields if reference_tool else fields),
                 "actual_result_sha256": actual.result_sha256,
                 "reference_result_sha256": reference.result_sha256,
                 "actual_tsv_sha256": sha256_of(actual.tsv),
@@ -881,6 +922,8 @@ def verify_bucket(
                 "verdict": verdict_for(diff),
                 "diff": diff,
             }
+            if reference_tool is not None:
+                record["reference_fields"] = list(reference.fields)
             if write_record:
                 write_verify_json(actual.subject.result_prefix, record)
             comparisons.append(record)
@@ -926,9 +969,12 @@ def verify_group(
     *,
     adapter_root: str,
     write_record: bool = True,
+    include_docker_canaries: bool = False,
 ) -> tuple[int, dict[str, Any]]:
     """Verify one group against its recorded roster. Returns (exit_code, report)."""
-    roster = roster_for(con, group_id)
+    roster = roster_for(
+        con, group_id, include_docker_canaries=include_docker_canaries
+    )
     if roster.replay_attempts:
         report = {
             "group_id": group_id,
@@ -941,6 +987,22 @@ def verify_group(
             "replay_attempts": [subject.attempt_id for subject in roster.replay_attempts],
         }
         return GROUP_EXIT_CODES["INCOMPLETE"], report
+    if include_docker_canaries and (
+        not roster.subjects
+        or any(subject.purpose != "canary" for subject in roster.subjects)
+        or sum(subject.tool == "aws-cli" for subject in roster.subjects) != 1
+    ):
+        report = {
+            "group_id": group_id,
+            "complete": False,
+            "verdict": "INCOMPLETE",
+            "refusal": (
+                "the small Docker canary check requires a Docker-only canary group "
+                "containing exactly one aws-cli result"
+            ),
+            "replay_attempts": [],
+        }
+        return GROUP_EXIT_CODES["INCOMPLETE"], report
     buckets: list[dict[str, Any]] = []
     with tempfile.TemporaryDirectory() as tmp:
         work_dir = Path(tmp)
@@ -951,6 +1013,7 @@ def verify_group(
                     adapter_root=adapter_root,
                     work_dir=work_dir,
                     write_record=write_record,
+                    reference_tool="aws-cli" if include_docker_canaries else None,
                 )
             )
         comparison_complete = (
@@ -972,6 +1035,11 @@ def verify_group(
             "abandoned": list(roster.abandoned),
             "subjects": len(roster.subjects),
             "buckets": buckets,
+            "caveat": (
+                "cross-tool agreement only; the real S3 bucket may change during the run"
+                if include_docker_canaries
+                else None
+            ),
         }
     return GROUP_EXIT_CODES[comparison_verdict], report
 
@@ -1028,6 +1096,8 @@ def print_report(report: Mapping[str, Any]) -> None:
             )
         for gap in bucket["gaps"]:
             print(f"    gap {gap['attempt_id']} [{gap['reason']}]: {gap['detail']}")
+    if report.get("caveat"):
+        print(f"  note: {report['caveat']}")
     print(f"verdict={report['verdict']}")
 
 
@@ -1044,6 +1114,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--state", default=STATE_FILENAME, help="campaign.db path (sqlite3).")
     parser.add_argument("--group", required=True, help="The group to verify; verify is one group.")
     parser.add_argument("--adapter-root", default=DEFAULT_ADAPTER_ROOT)
+    parser.add_argument(
+        "--include-docker-canaries",
+        action="store_true",
+        help="compare saved Docker canary listings to the AWS CLI canary",
+    )
     parser.add_argument(
         "--no-write",
         action="store_true",
@@ -1064,7 +1139,11 @@ def main(argv: list[str] | None = None) -> int:
     con = open_ledger(args.state, readonly=True)
     try:
         exit_code, report = verify_group(
-            con, args.group, adapter_root=args.adapter_root, write_record=not args.no_write
+            con,
+            args.group,
+            adapter_root=args.adapter_root,
+            write_record=not args.no_write,
+            include_docker_canaries=args.include_docker_canaries,
         )
     finally:
         con.close()

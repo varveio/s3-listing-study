@@ -2315,7 +2315,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     submit.add_argument(
         "--allow-retired-s4cmd-s3-canary",
         action="store_true",
-        help="allow exactly one s4cmd real-S3 canary; never replay or comparison",
+        help="allow exactly one s4cmd real-S3 canary; never replay or performance comparison",
     )
     submit.add_argument(
         "--repeat",

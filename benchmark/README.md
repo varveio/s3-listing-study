@@ -109,13 +109,32 @@ Docker path runs synchronously and serially and is currently qualified only for
 real-S3 cases. It shares plan compilation, the measurement worker, evidence,
 verification, and reporting with Batch; it does not claim Batch `poll`, `retry`,
 `cancel`, prerequisite, or replay-sidecar lifecycle parity. Replay on this host
-requires a separate architecture decision because a session-warm replay server
-is a different treatment from Batch's per-attempt sidecar.
+is the next increment and should reuse Batch's fresh per-attempt replay sidecar,
+not introduce a separate warm-session treatment.
 
-The complete eleven-tool RTOFS execution is deliberately refused after dry-run
-until the Phase-0 reference-manifest procedure can bracket every attempt. One
-selected canary may run to qualify the Docker provider/evidence path, but it is
-not the proposed experiment.
+Before a real run, provision the fixed `s3-listing-study-subjects` Docker bridge
+with inter-container communication disabled and a host firewall rule that blocks
+`169.254.169.254`. The executor checks the bridge, proves cloud metadata is
+unreachable from it, and proves public S3 remains reachable before starting a
+tool. Every subject also drops all Linux capabilities and enables Docker's
+no-new-privileges rule.
+
+```sh
+benchmark/setup-docker-network.sh
+```
+
+After the eleven one-shot canaries finish, compare their saved listings:
+
+```sh
+uv run python benchmark/src/benchmark/verify.py \
+  --state /absolute/path/to/results/campaign.db \
+  --group gYYYYMMDD-HHMMSS --include-docker-canaries
+```
+
+This reports cross-tool agreement, not independent correctness: the public
+bucket can change while the tools run, so any disagreement must be investigated
+before it is attributed. The option accepts Docker canaries only. Larger GCP
+benchmark reports continue to compare worker-recorded row counts only.
 
 ## Campaign image set
 

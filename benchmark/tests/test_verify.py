@@ -131,6 +131,7 @@ def record(
     state: str = "SUCCEEDED",
     group_id: str = "g1",
     replay: dict[str, object] | None = None,
+    executor: str = campaign.EXECUTOR,
 ) -> ledger.Attempt:
     """Journal one attempt through the ledger's own writer, then settle it."""
     case_id = f"{tool}.{digest}"
@@ -146,7 +147,7 @@ def record(
                 group_id=group_id,
                 tool=tool,
                 auth_role=None,
-                executor=campaign.EXECUTOR,
+                executor=executor,
                 location="us-east1",
                 machine_type="n4-standard-2",
                 vcpus=2,
@@ -395,6 +396,43 @@ def test_agreement_within_one_bucket_passes(tmp_path: Path) -> None:
     code, report = verify.verify_group(con, "g1", adapter_root=root, write_record=False)
     assert (report["verdict"], report["complete"], code) == ("PASS", True, 0)
     assert [stratum["verdict"] for stratum in report["buckets"][0]["strata"]] == ["PASS"]
+
+
+@pytest.mark.parametrize(
+    ("executor", "expected"),
+    [("docker", "PASS"), (campaign.EXECUTOR, "INCOMPLETE")],
+)
+def test_small_canary_content_check_is_docker_only(
+    tmp_path: Path, executor: str, expected: str
+) -> None:
+    con = fixture_ledger(tmp_path)
+    for tool, digest in (("aws-cli", "aaaa"), ("other", "bbbb")):
+        attempt = record(
+            con,
+            tmp_path,
+            tool=tool,
+            digest=digest,
+            purpose="canary",
+            executor=executor,
+        )
+        write_evidence(attempt)
+
+    code, report = verify.verify_group(
+        con,
+        "g1",
+        adapter_root=adapter_root(tmp_path, "aws-cli", "other"),
+        write_record=False,
+        include_docker_canaries=True,
+    )
+
+    assert report["verdict"] == expected
+    if expected == "PASS":
+        comparison = report["buckets"][0]["strata"][0]["comparisons"][0]
+        assert comparison["reference_tool"] == "aws-cli"
+        assert code == 0
+    else:
+        assert "Docker-only" in report["refusal"]
+        assert code == EXIT_INCOMPLETE_GROUP
 
 
 def test_replay_content_verification_is_refused_without_reading_raw_products(

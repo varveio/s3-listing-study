@@ -36,6 +36,7 @@ from benchmark.ledger import (
 
 EXECUTOR = "docker"
 WORKER = (10001, 10001)
+SUBJECT_NETWORK = "s3-listing-study-subjects"
 
 
 @dataclass(frozen=True)
@@ -65,9 +66,16 @@ class Host:
 
     def instances(self) -> dict[tuple[int, int], str]:
         logical = sum(len(core) for core in self.cores)
+        allocatable: list[int] = []
+        for vcpus in range(1, logical + 1):
+            try:
+                self.cpuset(vcpus)
+            except CampaignError:
+                continue
+            allocatable.append(vcpus)
         return {
             (vcpus, memory): f"{self.family}-{vcpus}vcpu-{memory}gb"
-            for vcpus in range(1, logical + 1)
+            for vcpus in allocatable
             for memory in range(1, self.memory_gb + 1)
         }
 
@@ -141,7 +149,20 @@ def inspect_host(results: Path) -> Host:
         "python_version": platform.python_version(),
         "memory_bytes": memory_bytes,
     }
-    signature = hashlib.sha256(_canonical(facts).encode()).hexdigest()[:12]
+    # This label identifies the local hardware treatment. Keep the fuller,
+    # transient environment (boot, kernel, Docker, filesystem source) in the
+    # attempt evidence without making a reboot mint a different machine type.
+    hardware = {
+        key: facts[key]
+        for key in (
+            "architecture",
+            "cpu_model",
+            "filesystem_type",
+            "memory_bytes",
+            "physical_cores",
+        )
+    }
+    signature = hashlib.sha256(_canonical(hardware).encode()).hexdigest()[:12]
     return Host(
         tuple(tuple(sorted(cpus)) for _key, cpus in sorted(by_core.items())),
         memory_bytes // (1024**3),
@@ -245,6 +266,51 @@ def attest_container_cpuset(image: str, cpuset: str) -> tuple[int, ...]:
     return tuple(observed)
 
 
+def check_subject_network(image: str, bucket: str, region: str) -> None:
+    """Refuse unless the old local-runner isolation boundary is effective."""
+    try:
+        network = json.loads(
+            _command(("docker", "network", "inspect", SUBJECT_NETWORK)).stdout
+        )[0]
+    except (IndexError, TypeError, json.JSONDecodeError):
+        raise CampaignError(f"cannot inspect Docker network {SUBJECT_NETWORK!r}") from None
+    options = network.get("Options")
+    if (
+        network.get("Driver") != "bridge"
+        or network.get("Internal") is not False
+        or network.get("EnableIPv6") is not False
+        or not isinstance(options, dict)
+        or options.get("com.docker.network.bridge.enable_icc") != "false"
+    ):
+        raise CampaignError(
+            f"Docker network {SUBJECT_NETWORK!r} is not the isolated local-runner bridge"
+        )
+    code = (
+        "import socket\n"
+        "import sys\n"
+        "try:\n socket.create_connection(('169.254.169.254',80),.5)\n"
+        "except OSError: pass\n"
+        "else: raise SystemExit('cloud metadata is reachable')\n"
+        "socket.create_connection((sys.argv[1],443),5).close()"
+    )
+    _command(
+        (
+            "docker",
+            "run",
+            "--rm",
+            "--pull=never",
+            f"--network={SUBJECT_NETWORK}",
+            "--cap-drop=ALL",
+            "--security-opt=no-new-privileges:true",
+            "--entrypoint=/usr/bin/python3",
+            image,
+            "-c",
+            code,
+            f"{bucket}.s3.{region}.amazonaws.com",
+        )
+    )
+
+
 def _attempt(
     ordinal: int,
     item: Scheduled,
@@ -303,7 +369,7 @@ def _attempt(
                 **host.facts,
                 "cpuset": cpuset,
                 "image_id": image.image_id,
-                "network_mode": "host",
+                "network_mode": SUBJECT_NETWORK,
             }
         ),
         service_account="docker-host-environment" if case.auth_role else "anonymous",
@@ -325,8 +391,11 @@ def _attempt(
         "docker",
         "run",
         "--rm",
+        "--pull=never",
         f"--name={record.job_name}",
-        "--network=host",
+        f"--network={SUBJECT_NETWORK}",
+        "--cap-drop=ALL",
+        "--security-opt=no-new-privileges:true",
         f"--cpuset-cpus={cpuset}",
         f"--volume={scratch}:{scratch}",
         f"--volume={publication}:{destination.parent}",
@@ -391,6 +460,7 @@ def _run(row: Any, image: str, results: Path) -> tuple[bool, str]:
     logs.mkdir(parents=True, exist_ok=True)
     completed: subprocess.CompletedProcess[bytes] | None = None
     timed_out = False
+    interrupted = False
     try:
         with (
             (logs / f"{row['attempt_id']}.stdout.log").open("xb") as stdout,
@@ -405,6 +475,9 @@ def _run(row: Any, image: str, results: Path) -> tuple[bool, str]:
     except subprocess.TimeoutExpired:
         subprocess.run(("docker", "stop", "--time=0", row["job_name"]), check=False)
         timed_out = True
+    except KeyboardInterrupt:
+        subprocess.run(("docker", "stop", "--time=0", row["job_name"]), check=False)
+        interrupted = True
     _chown(
         image,
         results,
@@ -416,6 +489,8 @@ def _run(row: Any, image: str, results: Path) -> tuple[bool, str]:
     if staged.exists():
         staged.replace(destination)
     publication.rmdir()
+    if interrupted:
+        raise KeyboardInterrupt
     if timed_out:
         return False, "Docker executor exceeded the worker deadline"
     assert completed is not None
@@ -470,13 +545,10 @@ def cmd_submit(args: Any) -> int:
     host = inspect_host(results)
     loaded = load_plan(Path(args.plan), host, allow_s4cmd=args.allow_retired_s4cmd_s3_canary)
     cases = campaign._selected_cases(loaded.cases, args.case)
-    if args.allow_retired_s4cmd_s3_canary and len(cases) > 1 and not args.dry_run:
-        raise CampaignError(
-            "the full eleven-tool Phase 0 is gated on reference-manifest bracketing; "
-            "only dry-run or one selected canary is currently qualified"
-        )
     ordered = schedule(cases, args.seed)
     image = load_image(args.image, set(loaded.tools()))
+    if not args.dry_run:
+        check_subject_network(image.image_id, loaded.bucket, loaded.region)
     cpuset_attestations = {
         cpuset: attest_container_cpuset(image.image_id, cpuset)
         for cpuset in sorted({host.cpuset(case.resources.vcpus) for case in cases})
@@ -577,7 +649,6 @@ def cmd_submit(args: Any) -> int:
             )
             seen.add(case_id)
             scheduled.append((item, attempt.attempt_id))
-            set_state(con, attempt.attempt_id, "SUBMITTED", "queued in seeded serial order")
         rows = {row["attempt_id"]: row for row in attempt_rows(con, group_id=group)}
         schedule_path = results / "schedules" / f"{group}.json"
         schedule_path.parent.mkdir(parents=True, exist_ok=True)
@@ -621,9 +692,13 @@ def cmd_submit(args: Any) -> int:
         for _item, attempt_id in scheduled:
             row = rows[attempt_id]
             print(f"campaign: [{attempt_id}] {row['tool']} {row['mode']}")
+            set_state(con, attempt_id, "SUBMITTED", "starting seeded serial invocation")
             set_state(con, attempt_id, "RUNNING")
             try:
                 success, detail = _run(row, image.image_id, results)
+            except KeyboardInterrupt:
+                set_state(con, attempt_id, "CANCELLED", "local operator interrupted the run")
+                raise
             except (CampaignError, OSError, subprocess.SubprocessError) as exc:
                 success, detail = False, str(exc)
             set_state(con, attempt_id, "SUCCEEDED" if success else "FAILED", detail or None)
