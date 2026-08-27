@@ -122,17 +122,20 @@ QUERIES = {
 }
 
 
+def _sql_for(mode: str) -> str | None:
+    if mode in RECURSIVE_MODES:
+        return QUERIES["recursive"]
+    if mode in DIRECTORY_RECURSIVE_MODES:
+        return QUERIES["recursive-with-dirs"]
+    return QUERIES.get(mode)
+
+
 def count_rows(data: bytes, mode: str, prefix: str = "", native_root: str = "") -> int:
+    sql = _sql_for(mode)
+    if sql is None:
+        raise ValueError(f"unknown mode: {mode}")
     if mode == "lsf":
         return count_lf_lines(data, lambda line: b";" in line)
-    if mode in RECURSIVE_MODES:
-        sql = QUERIES["recursive"]
-    elif mode in DIRECTORY_RECURSIVE_MODES:
-        sql = QUERIES["recursive-with-dirs"]
-    elif mode in QUERIES:
-        sql = QUERIES[mode]
-    else:
-        raise ValueError(f"unknown mode: {mode}")
     with staged(data) as path:
         return count_query(connect(), sql, {"path": path, "pfx": prefix})
 
@@ -140,13 +143,8 @@ def count_rows(data: bytes, mode: str, prefix: str = "", native_root: str = "") 
 def normalize(
     out: IO[bytes], data: bytes, mode: str, prefix: str, config: Mapping[str, object] | None = None
 ) -> int:
-    if mode in RECURSIVE_MODES:
-        sql = QUERIES["recursive"]
-    elif mode in DIRECTORY_RECURSIVE_MODES:
-        sql = QUERIES["recursive-with-dirs"]
-    elif mode in QUERIES:
-        sql = QUERIES[mode]
-    else:
+    sql = _sql_for(mode)
+    if sql is None:
         print(f"normalize.py: unknown mode {mode}", file=sys.stderr)
         return UNKNOWN_MODE_EXIT
     with staged(data) as path:

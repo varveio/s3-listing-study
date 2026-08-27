@@ -132,7 +132,18 @@ QUERIES = {
 }
 
 
+def _sql_for(mode: str) -> str | None:
+    if mode in TSV_MODES:
+        return QUERIES["tsv"]
+    if mode in ONE_MODES:
+        return QUERIES["recursive-one"]
+    return QUERIES.get(mode)
+
+
 def count_rows(data: bytes, mode: str, prefix: str = "", native_root: str = "") -> int:
+    sql = _sql_for(mode)
+    if sql is None:
+        raise ValueError(f"unknown mode: {mode}")
     if mode in TSV_MODES or mode in ONE_MODES:
         return count_lf_lines(data, bool)
     if mode == "recursive-aligned":
@@ -146,10 +157,8 @@ def count_rows(data: bytes, mode: str, prefix: str = "", native_root: str = "") 
             return bool(key) and (size_or_marker == b"PRE" or bool(date and size_or_marker))
 
         return count_lf_lines(data, selected)
-    if mode != "recursive-json":
-        raise ValueError(f"unknown mode: {mode}")
     with staged(data) as path:
-        return count_query(connect(), QUERIES["recursive-json"], {"path": path})
+        return count_query(connect(), sql, {"path": path})
 
 
 def normalize(
@@ -159,13 +168,8 @@ def normalize(
     prefix: str = "",
     config: Mapping[str, object] | None = None,
 ) -> int:
-    if mode in TSV_MODES:
-        sql = QUERIES["tsv"]
-    elif mode in ONE_MODES:
-        sql = QUERIES["recursive-one"]
-    elif mode in QUERIES:
-        sql = QUERIES[mode]
-    else:
+    sql = _sql_for(mode)
+    if sql is None:
         print(f"normalize.py: unknown mode {mode}", file=sys.stderr)
         return UNKNOWN_MODE_EXIT
     with staged(data) as path:

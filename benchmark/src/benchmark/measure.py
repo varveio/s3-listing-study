@@ -1002,8 +1002,8 @@ def row_count_for(
     native_root: Path,
 ) -> tuple[int | None, str | None]:
     """Return ``(row_count, error)`` from the tool capsule after timing.
-    bounded native counting, simplified to "run the normalizer, count its
-    output lines" rather than importing each capsule's own count_rows().
+
+    Delegate bounded native counting to the capsule's own ``count_rows()``.
     """
     try:
         count = adapters.count_rows(adapter_dir, tool, mode, prefix, stdout_path, native_root)
