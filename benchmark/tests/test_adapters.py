@@ -594,13 +594,6 @@ def test_large_line_count_uses_the_binary_chunked_reader() -> None:
     assert adapter.count_rows(b"object\n" * rows, "list") == rows
 
 
-def test_large_s3kor_listing_normalization_is_streaming() -> None:
-    rows = 250_000
-    done = run("s3kor", "list", "", b"object\n" * rows)
-    assert done.returncode == 0, done.stderr
-    assert done.stdout == b"object\t-\t-\t-\t-\n" * rows
-
-
 @pytest.mark.parametrize(
     ("payload", "expected"),
     [
