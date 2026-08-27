@@ -694,8 +694,8 @@ them.
 | `SUBMITTED` | submit | no | no | Created. Covers a job this run created and one of that name it found already matching the recorded request — the distinction changes nothing anyone does. |
 | *(provider states)* | poll | no | no | `QUEUED`, `SCHEDULED`, `RUNNING`, and the rest of the provider's lifecycle. |
 | `SUCCEEDED` | poll | yes | no | The job ran cleanly. Not a verdict about the listing — that is `verify`'s question. |
-| `FAILED` | poll | yes | **yes** | Settled failure. |
-| `NOT_CREATED` | submit | yes | **yes** | The provider refused creation, or a job of that name exists and does *not* match recorded intent. Either way nothing of ours ran. |
+| `FAILED` | poll, local-close | yes | **yes** | Settled failure. |
+| `NOT_CREATED` | submit, local-close | yes | **yes** | The provider refused creation, a job of that name exists and does *not* match recorded intent, or a Docker session closed before its container started. Either way nothing of ours ran. |
 | `CANCELLED` | cancel, or the provider | yes | no | One-way. |
 | `ACCEPTED` | accept-failure | yes | no | You declared a failure final. An absent measurement, never a passing one; `state_detail` says which failure it was. |
 
@@ -722,7 +722,7 @@ One file accumulates every group, and several groups may be in flight at once.
 | --- | --- |
 | `poll` | Everything non-terminal. One listing filtered by `labels.suite` covers every group in flight, so parallel launches need no extra machinery. A settled preparation also unblocks whatever slots awaited it. |
 | `status` | Optional `--group` / `--case` filters; unfiltered prints the whole history, which is the point of accumulating. Blocked slots are shown alongside attempts — a group is not understood from its rows alone while it still owes one. |
-| `retry` | One group. Rows from other groups are skipped, not refused. |
+| `retry` | One group of GCP Batch rows. Rows from other groups are skipped; Docker rows are refused because their bounded session has no retry lifecycle. |
 | `cancel` | Requires `--group`; without one it refuses rather than cancelling the file. |
 | `verify` | One group. Explicit real-S3 content comparison; replay is refused without staging raw products. |
 | `prune` | Deletes evidence objects for attempts that settled unsuccessfully, leaving every row. Requires `--group`, for the same reason `cancel` does: an unscoped delete over an accumulating file is the one mistake with no undo. |

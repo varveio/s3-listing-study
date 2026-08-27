@@ -2,7 +2,8 @@
 
 These plans describe the experiment, not where it runs; do not fork a plan by
 executor. The bounded Docker runner accepts only independent, non-replay,
-one-attempt real-S3 work. Repeated, replay, and dependent work runs on GCP Batch.
+real-S3 work, including seeded repeats. Replay and dependent work runs on GCP
+Batch.
 
 `noaa-nws-rtofs-pds.yaml` is the one-shot real-S3 invocation canary. A bounded
 AWS CLI reconnaissance on 2026-08-27 observed 845,304 keys in 127.73 seconds

@@ -113,8 +113,9 @@ results root. Submission remains in the foreground until the session settles.
 It shares plan compilation, case identity primitives, the measurement worker,
 the ledger schema, result evidence, verification, and reporting with Batch. It
 does not share Batch `poll`, `retry`, or `cancel`, prerequisite-slot resolution,
-artifact transport, or replay-sidecar lifecycle. Replay, repeated, and
-dependent work runs on GCP Batch and will not be added to the local runner.
+artifact transport, or replay-sidecar lifecycle. Seeded repeats of independent
+real-S3 cases are supported locally. Replay and dependent work runs on GCP
+Batch and will not be added to the local runner.
 
 Docker and Batch attempts of one plan row occupy disjoint strata. The local
 `docker-<arch>-<sha12 of hardware facts>` machine-family label is hashed into
@@ -126,6 +127,10 @@ continuing: `uv run python benchmark/src/benchmark/campaign.py --state
 /absolute/results/campaign.db local-close --group GROUP --reason 'host lost
 power'`. The command records the interrupted `RUNNING` row as `FAILED`, records
 containers that never started as `NOT_CREATED`, and leaves terminal rows alone.
+It refuses while any named subject container is still running and never stops
+one automatically. It also refuses to mark a `RUNNING` row failed when that
+row's `result.json` is already present; that completed evidence must be settled
+by the original session's settlement path or left unchanged.
 Replacement is a new group with a new seed, as predeclared in that group's
 frozen schedule; it is never a re-run within the old order.
 
@@ -286,16 +291,16 @@ Two vocabularies share the `state` column: the controller's own relationship
 with the provider, and the provider's lifecycle passed through as seen.
 Full rationale is [`model.md`](model.md) § *The state column*.
 
-| State | Terminal | Retryable | Meaning |
-| --- | --- | --- | --- |
-| `SUBMITTING` | no | no | Intent is durable; the provider has not been called yet. |
-| `SUBMITTED` | no | no | Created — by this run, or found already matching recorded intent. |
-| *(provider states)* | no | no | `QUEUED`, `SCHEDULED`, `RUNNING`, and the rest of Batch's own lifecycle. |
-| `SUCCEEDED` | yes | no | The job ran cleanly. Not a verdict about the listing — that is `verify`'s question. |
-| `FAILED` | yes | **yes** | Settled failure. |
-| `NOT_CREATED` | yes | **yes** | The provider refused creation, or a job of that name exists and does not match recorded intent. |
-| `CANCELLED` | yes | no | Set by `cancel`, or by the provider. One-way. |
-| `ACCEPTED` | yes | no | Set by `accept-failure`. An absent measurement, never a passing one. |
+| State | Written by | Terminal | Retryable | Meaning |
+| --- | --- | --- | --- | --- |
+| `SUBMITTING` | intent journaling | no | no | Intent is durable; the provider has not been called yet. |
+| `SUBMITTED` | submit | no | no | Created — by this run, or found already matching recorded intent. |
+| *(provider states)* | poll | no | no | `QUEUED`, `SCHEDULED`, `RUNNING`, and the rest of Batch's own lifecycle. |
+| `SUCCEEDED` | poll | yes | no | The job ran cleanly. Not a verdict about the listing — that is `verify`'s question. |
+| `FAILED` | poll, local-close | yes | **yes** | Settled failure. |
+| `NOT_CREATED` | submit, local-close | yes | **yes** | The provider refused creation, a job of that name exists and does not match recorded intent, or a Docker session closed before its container started. |
+| `CANCELLED` | cancel, or the provider | yes | no | One-way. |
+| `ACCEPTED` | accept-failure | yes | no | An absent measurement, never a passing one. |
 
 A describe failure during `poll` prints to stderr and leaves the row alone
 rather than inventing a state — the pass simply reports "not all terminal", so
@@ -323,7 +328,9 @@ others rather than refusing outright. It considers only each case's latest
 ordinal: a latest `FAILED` or `NOT_CREATED` row is retried once, while a live,
 successful, cancelled, or accepted latest row suppresses every older failure
 for that case. This prevents one sweep from launching a parallel job for every
-historical preemption. There is no per-attempt form. A row whose case declared
+historical preemption. `retry` applies only to GCP Batch rows and refuses a
+Docker group; the bounded local session has no retry lifecycle. There is no
+per-attempt form. A row whose case declared
 `statistic: rate` is left alone and reported as such — its
 failures are the finding, so retrying one would be resampling
 ([`model.md`](model.md) § *Sometimes the failures are the measurement*).

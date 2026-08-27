@@ -112,8 +112,9 @@ compilation, case identity primitives, the measurement worker, the ledger
 schema, result evidence, verification, and reporting with Batch. It does not
 share or claim the Batch `poll`, `retry`, or `cancel` lifecycle,
 prerequisite-slot resolution, artifact transport, or replay-sidecar lifecycle.
-Replay, repeated, and dependent work runs on GCP Batch; those capabilities will
-not be added to the local runner.
+Seeded repeats of independent real-S3 cases are supported locally. Replay and
+dependent work runs on GCP Batch; those capabilities will not be added to the
+local runner.
 
 A Docker attempt and a Batch attempt for the same plan row are different cases.
 The local `docker-<arch>-<sha12 of hardware facts>` machine-family label is
