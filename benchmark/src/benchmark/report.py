@@ -212,9 +212,8 @@ def row_for(row: sqlite3.Row, *, adapter_root: str) -> dict[str, Any]:
     replay_state = "-"
     if row["replay"] is not None:
         try:
-            replay_config = replay_contract.parse_document(row["replay"])
-            replay_refusals = replay_contract.evidence_errors(
-                replay_config, replay_evidence, purpose=str(row["purpose"])
+            replay_refusals = replay_contract.replay_refusals(
+                row["replay"], replay_evidence, purpose=str(row["purpose"])
             )
         except replay_contract.ReplayError:
             replay_refusals = ("recorded replay document is malformed",)

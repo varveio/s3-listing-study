@@ -224,6 +224,17 @@ def evidence_errors(config: ReplayConfig, evidence: object, *, purpose: str) -> 
     return tuple(errors)
 
 
+def replay_refusals(
+    document: str | Mapping[str, object] | ReplayConfig,
+    evidence: object,
+    *,
+    purpose: str,
+) -> tuple[str, ...]:
+    """Parse recorded replay intent and return its evidence refusals."""
+    config = document if isinstance(document, ReplayConfig) else parse_document(document)
+    return evidence_errors(config, evidence, purpose=purpose)
+
+
 def parse_backend(value: object) -> ReplayBackend:
     if not isinstance(value, Mapping):
         raise ReplayError("replay backend is not an object")

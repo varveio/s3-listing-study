@@ -191,31 +191,62 @@ def result_semantic_errors(result: dict[str, object], *, purpose: str | None = N
     if row_count_error is not None and not isinstance(row_count_error, str):
         errors.append("row_count_error")
     if execution is None:
-        replay_evidence = result.get("replay_evidence")
-        replay_refusal = (
-            isinstance(result.get("replay"), dict)
-            and isinstance(replay_evidence, dict)
-            and bool(replay_evidence.get("errors"))
-        )
-        if not isinstance(result.get("setup"), dict) and not replay_refusal:
-            errors.append("setup")
-        if exit_code == 0:
-            errors.append("exit_code")
-        errors.extend(
-            name
-            for name in (
-                "wall_seconds",
-                "max_rss_kb",
-                "row_count",
-                "row_count_error",
-                "product",
-                "product_error",
-            )
-            if result.get(name) is not None
-        )
+        errors.extend(_pre_subject_errors(result, exit_code=exit_code))
         return errors
+    errors.extend(
+        _execution_errors(
+            result,
+            execution,
+            exit_code=exit_code,
+            timed_out=timed_out,
+            row_count=row_count,
+            row_count_error=row_count_error,
+            purpose=purpose,
+        )
+    )
+    return errors
+
+
+def _pre_subject_errors(result: dict[str, object], *, exit_code: object) -> list[str]:
+    errors: list[str] = []
+    replay_evidence = result.get("replay_evidence")
+    replay_refusal = (
+        isinstance(result.get("replay"), dict)
+        and isinstance(replay_evidence, dict)
+        and bool(replay_evidence.get("errors"))
+    )
+    if not isinstance(result.get("setup"), dict) and not replay_refusal:
+        errors.append("setup")
+    if exit_code == 0:
+        errors.append("exit_code")
+    errors.extend(
+        name
+        for name in (
+            "wall_seconds",
+            "max_rss_kb",
+            "row_count",
+            "row_count_error",
+            "product",
+            "product_error",
+        )
+        if result.get(name) is not None
+    )
+    return errors
+
+
+def _execution_errors(
+    result: dict[str, object],
+    execution: object,
+    *,
+    exit_code: object,
+    timed_out: object,
+    row_count: object,
+    row_count_error: object,
+    purpose: str | None,
+) -> list[str]:
     if not isinstance(execution, dict):
-        return [*errors, "execution"]
+        return ["execution"]
+    errors: list[str] = []
     max_rss_kb = result.get("max_rss_kb")
     execution_rss = execution.get("max_rss_kb")
     if (
@@ -738,7 +769,7 @@ def rate_subject_succeeded(subject: Subject) -> bool:
             and not isinstance(row_count, bool)
             and (
                 subject.replay is None
-                or not replay_contract.evidence_errors(
+                or not replay_contract.replay_refusals(
                     subject.replay, result.get("replay_evidence"), purpose=subject.purpose
                 )
             )
@@ -828,19 +859,12 @@ def compare(reference: Prepared, actual: Prepared) -> dict[str, Any]:
         con.close()
 
 
-def verify_bucket(
-    subjects: Sequence[Subject],
-    *,
-    adapter_root: str,
-    work_dir: Path,
-    write_record: bool,
-    reference_tool: str | None = None,
-) -> dict[str, Any]:
-    """One target bucket's strata, rate cases, and the gaps in between."""
+def _triage(
+    subjects: Sequence[Subject], *, adapter_root: str, work_dir: Path
+) -> tuple[list[Prepared], list[dict[str, object]], list[dict[str, object]]]:
     gaps: list[dict[str, object]] = []
     rates: list[dict[str, object]] = []
     prepared: list[Prepared] = []
-
     rate_cases: dict[str, list[Subject]] = {}
     for subject in subjects:
         if subject.statistic == "rate":
@@ -865,10 +889,14 @@ def verify_bucket(
             for subject in case_subjects
             if subject.state not in TERMINAL_STATES
         )
+    return prepared, gaps, rates
 
-    strata: list[dict[str, Any]] = []
+
+def _strata_groups(
+    prepared: Sequence[Prepared], reference_tool: str | None
+) -> list[tuple[str, tuple[str, ...], list[Prepared]]]:
     if reference_tool is None:
-        groups = [
+        return [
             (
                 key[0],
                 key[1],
@@ -879,25 +907,38 @@ def verify_bucket(
             )
             for key in sorted({(p.product, p.fields) for p in prepared})
         ]
-    else:
-        references = [p for p in prepared if p.subject.tool == reference_tool]
-        groups = []
-        if len(references) == 1:
-            reference = references[0]
-            groups.append(
-                (
-                    reference.product,
-                    reference.fields,
-                    [
-                        reference,
-                        *sorted(
-                            (p for p in prepared if p is not reference),
-                            key=lambda p: p.subject.attempt_id,
-                        ),
-                    ],
-                )
-            )
-    for product, fields, members in groups:
+    references = [p for p in prepared if p.subject.tool == reference_tool]
+    if len(references) != 1:
+        return []
+    reference = references[0]
+    return [
+        (
+            reference.product,
+            reference.fields,
+            [
+                reference,
+                *sorted(
+                    (p for p in prepared if p is not reference),
+                    key=lambda p: p.subject.attempt_id,
+                ),
+            ],
+        )
+    ]
+
+
+def verify_bucket(
+    subjects: Sequence[Subject],
+    *,
+    adapter_root: str,
+    work_dir: Path,
+    write_record: bool,
+    reference_tool: str | None = None,
+) -> dict[str, Any]:
+    """One target bucket's strata, rate cases, and the gaps in between."""
+    prepared, gaps, rates = _triage(subjects, adapter_root=adapter_root, work_dir=work_dir)
+
+    strata: list[dict[str, Any]] = []
+    for product, fields, members in _strata_groups(prepared, reference_tool):
         reference, others = members[0], members[1:]
         comparisons: list[dict[str, Any]] = []
         for actual in others:
@@ -963,6 +1004,16 @@ def write_verify_json(result_prefix: str, record: Mapping[str, Any]) -> None:
         (Path(result_prefix) / "verify.json").write_bytes(data)
 
 
+def _refusal(group_id: str, message: str, replay_attempts: Sequence[str]) -> dict[str, object]:
+    return {
+        "group_id": group_id,
+        "complete": False,
+        "verdict": "INCOMPLETE",
+        "refusal": message,
+        "replay_attempts": list(replay_attempts),
+    }
+
+
 def verify_group(
     con: sqlite3.Connection,
     group_id: str,
@@ -972,36 +1023,30 @@ def verify_group(
     include_docker_canaries: bool = False,
 ) -> tuple[int, dict[str, Any]]:
     """Verify one group against its recorded roster. Returns (exit_code, report)."""
-    roster = roster_for(
-        con, group_id, include_docker_canaries=include_docker_canaries
-    )
+    roster = roster_for(con, group_id, include_docker_canaries=include_docker_canaries)
     if roster.replay_attempts:
-        report = {
-            "group_id": group_id,
-            "complete": False,
-            "verdict": "INCOMPLETE",
-            "refusal": (
+        report = _refusal(
+            group_id,
+            (
                 "replay groups are row-count-only and are reported from bound result.json; "
                 "content verification applies only to real-S3 groups"
             ),
-            "replay_attempts": [subject.attempt_id for subject in roster.replay_attempts],
-        }
+            [subject.attempt_id for subject in roster.replay_attempts],
+        )
         return GROUP_EXIT_CODES["INCOMPLETE"], report
     if include_docker_canaries and (
         not roster.subjects
         or any(subject.purpose != "canary" for subject in roster.subjects)
         or sum(subject.tool == "aws-cli" for subject in roster.subjects) != 1
     ):
-        report = {
-            "group_id": group_id,
-            "complete": False,
-            "verdict": "INCOMPLETE",
-            "refusal": (
+        report = _refusal(
+            group_id,
+            (
                 "the small Docker canary check requires a Docker-only canary group "
                 "containing exactly one aws-cli result"
             ),
-            "replay_attempts": [],
-        }
+            [],
+        )
         return GROUP_EXIT_CODES["INCOMPLETE"], report
     buckets: list[dict[str, Any]] = []
     with tempfile.TemporaryDirectory() as tmp:

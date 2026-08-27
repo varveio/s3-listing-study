@@ -51,9 +51,10 @@ def _digest(raw: bytes) -> str:
 def _replay_summary(row: sqlite3.Row, result: Mapping[str, object]) -> dict[str, object] | None:
     if row["replay"] is None:
         return None
-    config = replay_contract.parse_document(str(row["replay"]))
     evidence = result.get("replay_evidence")
-    refusals = replay_contract.evidence_errors(config, evidence, purpose=str(row["purpose"]))
+    refusals = replay_contract.replay_refusals(
+        str(row["replay"]), evidence, purpose=str(row["purpose"])
+    )
     if not isinstance(evidence, Mapping):
         return {"state": "REFUSED", "refusals": list(refusals)}
     samples = evidence.get("samples")
