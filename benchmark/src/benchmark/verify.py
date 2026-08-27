@@ -1034,6 +1034,7 @@ def verify_group(
             "blocked": list(roster.blocked),
             "abandoned": list(roster.abandoned),
             "subjects": len(roster.subjects),
+            "population": "Docker canary" if include_docker_canaries else "measurement",
             "buckets": buckets,
             "caveat": (
                 "cross-tool agreement only; the real S3 bucket may change during the run"
@@ -1073,7 +1074,7 @@ def print_report(report: Mapping[str, Any]) -> None:
             print(f"  replay attempt: {attempt_id}")
         print("verdict=INCOMPLETE")
         return
-    print(f"group {report['group_id']}: {report['subjects']} measurement attempt(s)")
+    print(f"group {report['group_id']}: {report['subjects']} {report['population']} attempt(s)")
     for label in ("blocked", "abandoned"):
         for slot in report[label]:
             print(f"  {label}: {slot}")

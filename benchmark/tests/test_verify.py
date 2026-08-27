@@ -427,6 +427,7 @@ def test_small_canary_content_check_is_docker_only(
 
     assert report["verdict"] == expected
     if expected == "PASS":
+        assert report["population"] == "Docker canary"
         comparison = report["buckets"][0]["strata"][0]["comparisons"][0]
         assert comparison["reference_tool"] == "aws-cli"
         assert code == 0
