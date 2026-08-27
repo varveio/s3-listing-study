@@ -2076,8 +2076,24 @@ def cmd_retry(args: argparse.Namespace) -> int:
         suite = ledger_suite(con)
         image_set = load_image_set(args.image_set, set())
         options = _options(args)
-        for row in attempt_rows(con, group_id=args.group):
+        rows = attempt_rows(con, group_id=args.group)
+        latest: dict[str, sqlite3.Row] = {}
+        retryable_cases: set[str] = set()
+        for row in rows:
+            case_id = str(row["case_id"])
+            if row["state"] in RETRYABLE_STATES:
+                retryable_cases.add(case_id)
+            current = latest.get(case_id)
+            if current is None or int(row["attempt"]) > int(current["attempt"]):
+                latest[case_id] = row
+
+        for case_id, row in latest.items():
             if row["state"] not in RETRYABLE_STATES:
+                if case_id in retryable_cases:
+                    print(
+                        f"campaign: {case_id} latest attempt {row['attempt_id']} is "
+                        f"{row['state']}; older failures not retried"
+                    )
                 continue
             # A rate case's failures are its data points; retrying one would be
             # resampling the statistic.

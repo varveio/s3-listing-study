@@ -280,9 +280,12 @@ uv run python benchmark/src/benchmark/campaign.py retry \
 ```
 
 `--group` is required — `retry` scopes to one group and skips rows from
-others rather than refusing outright. It sweeps every `FAILED` or
-`NOT_CREATED` row in that group; there is no per-attempt form. A row whose
-case declared `statistic: rate` is left alone and reported as such — its
+others rather than refusing outright. It considers only each case's latest
+ordinal: a latest `FAILED` or `NOT_CREATED` row is retried once, while a live,
+successful, cancelled, or accepted latest row suppresses every older failure
+for that case. This prevents one sweep from launching a parallel job for every
+historical preemption. There is no per-attempt form. A row whose case declared
+`statistic: rate` is left alone and reported as such — its
 failures are the finding, so retrying one would be resampling
 ([`model.md`](model.md) § *Sometimes the failures are the measurement*).
 

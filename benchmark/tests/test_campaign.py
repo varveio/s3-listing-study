@@ -876,6 +876,52 @@ def test_one_rows_retry_refusal_does_not_abort_the_sweep(
     assert retried == [preempted.attempt_id]
 
 
+def test_retry_uses_only_a_cases_latest_attempt_and_never_duplicates_a_live_retry(
+    submitted: tuple[sqlite3.Connection, Plan, Case, campaign.ImageSet],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One case is one owed measurement, however many failed ordinals it keeps.
+
+    Retrying every historical failure creates parallel duplicates. A live latest
+    ordinal also means the older failure already has its retry.
+    """
+    con, plan, case, images = submitted
+    first = submit(con, plan, case, images, group_id="mine")
+    ledger.set_state(con, first.attempt_id, "FAILED", "spot reclaimed the machine")
+    latest_failed = submit(con, plan, case, images, group_id="mine", repeat=True)
+    ledger.set_state(con, latest_failed.attempt_id, "FAILED", "spot reclaimed it again")
+
+    other = plan.cases[1]
+    older_failure = submit(con, plan, other, images, group_id="mine")
+    ledger.set_state(con, older_failure.attempt_id, "FAILED", "spot reclaimed the machine")
+    live_retry = submit(con, plan, other, images, group_id="mine", repeat=True)
+
+    retried: list[str] = []
+
+    def observe(con: sqlite3.Connection, row: sqlite3.Row, **kwargs: object) -> ledger.Attempt:
+        retried.append(row["attempt_id"])
+        return latest_failed
+
+    monkeypatch.setattr(campaign, "retry_attempt", observe)
+    monkeypatch.setattr(campaign, "load_image_set", lambda *a, **k: images)
+    campaign.cmd_retry(
+        cast(
+            argparse.Namespace,
+            SimpleNamespace(
+                state=str(tmp_path / "campaign.db"),
+                group="mine",
+                results_bucket="results",
+                image_set="unused",
+                **vars(_provider_namespace()),
+            ),
+        )
+    )
+
+    assert retried == [latest_failed.attempt_id]
+    assert live_retry.attempt_id not in retried
+
+
 def _provider_namespace() -> SimpleNamespace:
     return SimpleNamespace(
         project="p",
