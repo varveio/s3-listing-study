@@ -32,6 +32,7 @@ def read_records(stream: io.BytesIO) -> Iterator[Record]:
     for line_number, raw in enumerate(stream, start=1):
         yield parse_line(raw.removesuffix(b"\n"), line_number=line_number)
 
+
 CANON_MT_AWK = (
     r'function canon_mt(s){ sub(/(Z|\+00:00|\+0000)$/,"",s); '
     r'gsub(/[^0-9]/,"",s); return s }'

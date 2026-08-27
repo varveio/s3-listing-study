@@ -56,6 +56,7 @@ def read_records(stream: io.BytesIO) -> Iterator[Record]:
     for line_number, raw in enumerate(stream, start=1):
         yield parse_line(raw.removesuffix(b"\n"), line_number=line_number)
 
+
 # Modes an adapter declares that NO committed payload reaches. Pinned per tool
 # rather than asserted empty, because for four tools it is not empty and saying so
 # is the point: `unexercised_modes` names them, and the equivalence run says

@@ -1088,7 +1088,10 @@ def test_the_suite_filter_quotes_its_value() -> None:
             return []
 
     batch_client.list_job_states(
-        "p", "us-east1", "c-2026-08-17-x", client=Client()  # type: ignore[arg-type]
+        "p",
+        "us-east1",
+        "c-2026-08-17-x",
+        client=Client(),  # type: ignore[arg-type]
     )
 
 

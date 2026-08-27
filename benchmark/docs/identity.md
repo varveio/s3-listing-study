@@ -44,8 +44,9 @@ An unspecified encoding will be re-derived differently by the next reader, so:
 CASE_HASH_V2 = b"s3-listing-study-case-v2\0"
 
 
-def case_hash(environment: dict, config: dict, tool_slice: str, platform: str,
-              replay: dict | None = None) -> str:
+def case_hash(
+    environment: dict, config: dict, tool_slice: str, platform: str, replay: dict | None = None
+) -> str:
     inputs = {
         "environment": environment,  # the table above, absent keys omitted
         "config": config,  # the capsule's blob, as an object

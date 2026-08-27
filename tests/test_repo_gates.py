@@ -69,6 +69,8 @@ def test_gcp_workers_have_exactly_the_same_evidence_object_access() -> None:
     worker = (module / "worker.tf").read_text()
     authenticated = (module / "aws-credentials.tf").read_text()
     storage_role_pattern = r'"(roles/storage\.[^"]+)"'
-    assert set(re.findall(storage_role_pattern, worker)) == set(
-        re.findall(storage_role_pattern, authenticated)
-    ) == {"roles/storage.objectAdmin"}
+    assert (
+        set(re.findall(storage_role_pattern, worker))
+        == set(re.findall(storage_role_pattern, authenticated))
+        == {"roles/storage.objectAdmin"}
+    )
