@@ -42,6 +42,9 @@ tools:
       - {mode: s3-ls-recursive, purpose: diagnostic}
   minio-mc:
     cases:
+      # Keep both sides of the methodology's output-work distinction: text is
+      # mc's cheaper native enumeration output; JSON is its richest listing.
+      - {mode: recursive, purpose: diagnostic}
       - {mode: recursive-json, purpose: diagnostic}
   ps3:
     cases:
@@ -102,7 +105,14 @@ tools:
           shard_initials: .0123456789abcdef
   s7cmd:
     cases:
+      # c64 reached only 13 simultaneous replay queries and 3.93/6 subject
+      # cores, so bracket it at c16/c32 before retaining a listing ceiling.
+      - {mode: recursive-tsv-nosort, concurrency: 16, purpose: diagnostic}
+      - {mode: recursive-tsv-nosort, concurrency: 32, purpose: diagnostic}
       - {mode: recursive-tsv-nosort, concurrency: 64, purpose: diagnostic}
+      # Native key-only streaming output is the matching enumeration arm for
+      # the richer no-sort TSV product above.
+      - {mode: recursive-one, concurrency: 64, purpose: diagnostic}
   swath:
     cases:
       - {mode: recursive-parquet, concurrency: 64, purpose: diagnostic}
