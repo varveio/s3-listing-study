@@ -61,8 +61,8 @@ from benchmark.ledger import (
 from benchmark.plan import Case, Plan
 from benchmark.runtime.command_adapter import CommandAdapterError, LoadedCommandAdapter
 
-# One executor exists. Recorded so a second one is distinguishable when it
-# arrives (`identity.md`: hashed then, not before).
+# The Batch backend's recorded provenance name. Selecting Docker routes through
+# the same campaign interface; executor names are not case-identity inputs.
 EXECUTOR = "gcp-batch"
 
 # Where the subject's output goes, as a hash input. `measure.py` redirects the
@@ -272,6 +272,34 @@ def load_image_set(path: str | Path, required_tools: set[str]) -> ImageSet:
         tools,
         hashlib.sha256(canonical).hexdigest(),
     )
+
+
+def load_campaign_plan(
+    path: Path,
+    *,
+    allow_s4cmd_canary: bool = False,
+    instances: Mapping[tuple[int, int], str] | None = None,
+) -> Plan:
+    """Load an executor-neutral plan, with the narrow retired-tool exception."""
+    exclusions = None
+    if allow_s4cmd_canary:
+        exclusions = tuple(
+            item
+            for item in bench.load_default_exclusions(bench.bench_dir() / "tools.yaml")
+            if item.tool != "s4cmd"
+        )
+    loaded = Plan.load(path, default_exclusions=exclusions, instances=instances)
+    bench.check_roster(loaded, TOOLBOX_TOOLS)
+    if allow_s4cmd_canary:
+        rows = loaded.cases_for("s4cmd")
+        if (
+            loaded.replay is not None
+            or len(rows) != 1
+            or rows[0].reps != 1
+            or rows[0].purpose != "canary"
+        ):
+            raise CampaignError("the s4cmd exception is exactly one real-S3 canary")
+    return loaded
 
 
 def job_name_for(suite: str, case_id: str, attempt: int) -> str:
@@ -559,6 +587,57 @@ def _replay_document(attempt: Attempt) -> replay_contract.ReplayConfig | None:
     return resolved
 
 
+def worker_argument_pairs(
+    attempt: Attempt,
+    image: Mapping[str, str],
+    *,
+    output: str,
+    destination: str,
+    term_grace: float,
+    artifact_uri: str = "",
+    endpoint_url: str = "http://127.0.0.1:19090",
+) -> tuple[tuple[str, str], ...]:
+    """Render one worker request independently of its container executor."""
+    memory = attempt.container_memory_gb
+    pairs = (
+        ("--tool", attempt.tool),
+        ("--mode", str(json.loads(attempt.config)["mode"])),
+        ("--purpose", attempt.purpose),
+        ("--bucket", attempt.target_bucket),
+        ("--region", attempt.target_region),
+        *(() if attempt.auth_role is None else (("--auth-role", attempt.auth_role),)),
+        ("--prefix", attempt.target_prefix),
+        ("--output", output),
+        ("--destination", destination),
+        ("--timeout", str(attempt.timeout_s)),
+        ("--term-grace", str(term_grace)),
+        ("--image", image["image_uri"]),
+        ("--toolbox-manifest-sha256", image["toolbox_manifest_sha256"]),
+        ("--toolbox-recipe-sha256", image["toolbox_recipe_sha256"]),
+        ("--tool-recipe-sha256", image["recipe_sha256"]),
+        ("--tool-build-inputs-sha256", image["build_inputs_sha256"]),
+        ("--tool-version", image["tool_version"]),
+        ("--tool-build-sha256", image["tool_build_sha256"]),
+        ("--adapter-bundle-sha256", image["adapter_bundle_sha256"]),
+        ("--harness-revision", image["harness_revision"]),
+        ("--subject-workdir", image["subject_workdir"]),
+        ("--image-set-sha256", attempt.image_set_sha256),
+        ("--group-id", attempt.group_id),
+        ("--job-name", attempt.job_name),
+        ("--case-id", attempt.case_id),
+        ("--attempt-id", attempt.attempt_id),
+        ("--machine-type", attempt.machine_type),
+        ("--vcpus", str(attempt.vcpus)),
+        ("--memory-gb", str(attempt.memory_gb)),
+        ("--container-memory-gb", "none" if memory is None else str(memory)),
+        ("--config", attempt.config),
+        *_artifact_pairs(attempt, artifact_uri),
+    )
+    if _replay_document(attempt) is not None:
+        pairs = (*pairs, ("--endpoint-url", endpoint_url), ("--replay-config", str(attempt.replay)))
+    return pairs
+
+
 def _fixture_staging_script(uri: str, expected_sha256: str) -> str:
     """Download a staged fixture and refuse bytes outside its recorded identity.
 
@@ -602,47 +681,15 @@ def render_batch_job(
     """The provider request an attempt freezes, rendered from the row alone."""
     _validate_batch_options(options)
     container_memory = attempt.container_memory_gb
-    pairs = (
-        ("--tool", attempt.tool),
-        ("--mode", str(json.loads(attempt.config)["mode"])),
-        ("--purpose", attempt.purpose),
-        ("--bucket", attempt.target_bucket),
-        ("--region", attempt.target_region),
-        *(() if attempt.auth_role is None else (("--auth-role", attempt.auth_role),)),
-        ("--prefix", attempt.target_prefix),
-        ("--output", SUBJECT_OUTPUT_CONTAINER_DIR),
-        ("--destination", attempt.result_prefix),
-        ("--timeout", str(attempt.timeout_s)),
-        ("--term-grace", str(options.term_grace)),
-        ("--image", image["image_uri"]),
-        ("--toolbox-manifest-sha256", image["toolbox_manifest_sha256"]),
-        ("--toolbox-recipe-sha256", image["toolbox_recipe_sha256"]),
-        ("--tool-recipe-sha256", image["recipe_sha256"]),
-        ("--tool-build-inputs-sha256", image["build_inputs_sha256"]),
-        ("--tool-version", image["tool_version"]),
-        ("--tool-build-sha256", image["tool_build_sha256"]),
-        ("--adapter-bundle-sha256", image["adapter_bundle_sha256"]),
-        ("--harness-revision", image["harness_revision"]),
-        ("--subject-workdir", image["subject_workdir"]),
-        ("--image-set-sha256", attempt.image_set_sha256),
-        ("--group-id", attempt.group_id),
-        ("--job-name", attempt.job_name),
-        ("--case-id", attempt.case_id),
-        ("--attempt-id", attempt.attempt_id),
-        ("--machine-type", attempt.machine_type),
-        ("--vcpus", str(attempt.vcpus)),
-        ("--memory-gb", str(attempt.memory_gb)),
-        ("--container-memory-gb", "none" if container_memory is None else str(container_memory)),
-        ("--config", attempt.config),
-        *_artifact_pairs(attempt, artifact_uri),
+    pairs = worker_argument_pairs(
+        attempt,
+        image,
+        output=SUBJECT_OUTPUT_CONTAINER_DIR,
+        destination=attempt.result_prefix,
+        term_grace=options.term_grace,
+        artifact_uri=artifact_uri,
     )
     replay = _replay_document(attempt)
-    if replay is not None:
-        pairs = (
-            *pairs,
-            ("--endpoint-url", "http://127.0.0.1:19090"),
-            ("--replay-config", attempt.replay),
-        )
     commands = [item for pair in pairs for item in pair]
     container: dict[str, Any] = {"imageUri": image["image_uri"], "commands": commands}
     subject_runnable: dict[str, Any] = {"container": container}
@@ -1914,6 +1961,16 @@ def poll_once(con: sqlite3.Connection, suite: str, *, client: batch_v1.BatchServ
 
 
 def _options(args: argparse.Namespace) -> BatchOptions:
+    missing = [
+        name
+        for name in ("project", "location", "results_bucket", "image_set", "anonymous_worker_sa")
+        if not getattr(args, name, None)
+    ]
+    if missing:
+        raise CampaignError(
+            "the gcp-batch executor requires "
+            + ", ".join(f"--{name.replace('_', '-')}" for name in missing)
+        )
     return BatchOptions(
         args.anonymous_worker_sa,
         args.authenticated_worker_sa,
@@ -1928,15 +1985,30 @@ def _options(args: argparse.Namespace) -> BatchOptions:
 
 
 def cmd_submit(args: argparse.Namespace) -> int:
+    if getattr(args, "executor", "gcp-batch") == "docker":
+        from benchmark import docker_executor
+
+        return docker_executor.cmd_submit(args)
+    docker_only = [
+        name for name in ("image", "results_root", "seed") if getattr(args, name, None) is not None
+    ]
+    if docker_only:
+        raise CampaignError(
+            "the gcp-batch executor does not accept "
+            + ", ".join(f"--{name.replace('_', '-')}" for name in docker_only)
+        )
     if args.repeat and args.skip_measured:
         raise CampaignError(
             "--repeat forces a new attempt and --skip-measured avoids one; pick one"
         )
     suite = validate_suite(args.suite)
-    loaded = Plan.load(Path(args.plan))
+    loaded = load_campaign_plan(
+        Path(args.plan),
+        allow_s4cmd_canary=getattr(args, "allow_retired_s4cmd_s3_canary", False),
+    )
     cases = _selected_cases(loaded.cases, args.case)
-    image_set = load_image_set(args.image_set, {case.tool for case in loaded.cases})
     options = _options(args)
+    image_set = load_image_set(args.image_set, {case.tool for case in loaded.cases})
     # The capsules declare the chains, so what a plan comes to is knowable before
     # anything is contacted: N rows, M attempts, K slots.
     steps = expand_launch(cases, loaded.adapters)
@@ -2027,6 +2099,13 @@ def cmd_poll(args: argparse.Namespace) -> int:
     con = open_ledger(args.state)
     client: batch_v1.BatchServiceClient | None = None
     try:
+        if any(
+            row["executor"] != EXECUTOR and row["state"] not in TERMINAL_STATES
+            for row in attempt_rows(con)
+        ):
+            raise CampaignError(
+                "poll manages gcp-batch attempts only; Docker submit runs synchronously"
+            )
         client = batch_v1.BatchServiceClient()
         suite = ledger_suite(con)
         if not args.watch:
@@ -2074,9 +2153,13 @@ def cmd_retry(args: argparse.Namespace) -> int:
     con = open_ledger(args.state)
     try:
         suite = ledger_suite(con)
+        rows = attempt_rows(con, group_id=args.group)
+        if any(row["executor"] != EXECUTOR for row in rows):
+            raise CampaignError(
+                "retry manages gcp-batch attempts only; rerun a Docker case with submit --repeat"
+            )
         image_set = load_image_set(args.image_set, set())
         options = _options(args)
-        rows = attempt_rows(con, group_id=args.group)
         latest: dict[str, sqlite3.Row] = {}
         retryable_cases: set[str] = set()
         for row in rows:
@@ -2126,8 +2209,13 @@ def cmd_cancel(args: argparse.Namespace) -> int:
     con = open_ledger(args.state)
     client: batch_v1.BatchServiceClient | None = None
     try:
+        rows = attempt_rows(con, group_id=args.group)
+        if any(row["executor"] != EXECUTOR for row in rows):
+            raise CampaignError(
+                "cancel manages gcp-batch attempts only; Docker submit owns its foreground session"
+            )
         client = batch_v1.BatchServiceClient()
-        for row in attempt_rows(con, group_id=args.group):
+        for row in rows:
             if row["state"] in TERMINAL_STATES:
                 continue
             attempt = Attempt.from_row(row)
@@ -2190,18 +2278,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--state", default=STATE_FILENAME)
     sub = parser.add_subparsers(dest="command", required=True)
 
-    def provider(p: argparse.ArgumentParser) -> None:
-        p.add_argument("--project", required=True)
-        p.add_argument("--location", required=True)
-        p.add_argument("--results-bucket", required=True)
-        p.add_argument("--image-set", required=True)
+    def provider(p: argparse.ArgumentParser, *, required: bool = True) -> None:
+        p.add_argument("--project", required=required)
+        p.add_argument("--location", required=required)
+        p.add_argument("--results-bucket", required=required)
+        p.add_argument("--image-set", required=required)
         p.add_argument(
             "--secret-resource",
             metavar="projects/P/secrets/S/versions/V",
             help="Secret Manager version holding the authenticated stratum's "
             "KEY=VALUE credential payload. Required only when a case signs.",
         )
-        p.add_argument("--anonymous-worker-sa", required=True)
+        p.add_argument("--anonymous-worker-sa", required=required)
         p.add_argument("--authenticated-worker-sa")
         p.add_argument("--network")
         p.add_argument("--subnetwork")
@@ -2209,7 +2297,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         p.add_argument("--provisioning", choices=("SPOT", "STANDARD"), default="SPOT")
 
     submit = sub.add_parser("submit")
-    provider(submit)
+    provider(submit, required=False)
+    submit.add_argument("--executor", choices=("gcp-batch", "docker"), default="gcp-batch")
     submit.add_argument("--suite", required=True)
     submit.add_argument("--plan", required=True)
     submit.add_argument(
@@ -2220,6 +2309,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "case value emitted by resolve-plan, and the full plan is still validated",
     )
     submit.add_argument("--group", help="name this launch instead of minting a timestamp")
+    submit.add_argument("--image", help="local toolbox image for the Docker executor")
+    submit.add_argument("--results-root", help="absolute evidence directory for Docker")
+    submit.add_argument("--seed", type=int, help="seed for randomized complete-block order")
+    submit.add_argument(
+        "--allow-retired-s4cmd-s3-canary",
+        action="store_true",
+        help="allow exactly one s4cmd real-S3 canary; never replay or comparison",
+    )
     submit.add_argument(
         "--repeat",
         action="store_true",

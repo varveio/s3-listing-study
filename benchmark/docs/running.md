@@ -23,7 +23,7 @@ group did it. Do not promote a step because a neighbouring step worked.
 
 | Step | Exercised against real Batch? |
 | --- | --- |
-| Toolbox build + active ten-tool smoke | **yes** — the `benchmark-toolbox` workflow, local Docker |
+| Toolbox build + eleven-executable check | **yes** — the `benchmark-toolbox` workflow, Docker |
 | `submit` | **yes** — historical bounded three-tool bundled-fixture replay canary; current staged-fixture plan no |
 | `poll` / `status` | **yes** — same canary |
 | `retry` / `cancel` / `accept-failure` | no |
@@ -100,9 +100,19 @@ tool enforces for you; a missing item surfaces as a provider error mid-campaign.
    when you want a handle you chose rather than one you'll have to look up.
 
 Keep `campaign.db` — it is authoritative controller state, not a cache, and it
-is not interchangeable with the evidence in GCS. Back it up. What is inside it —
+is not interchangeable with attempt evidence. Back it up. What is inside it —
 the tables, their keys, and every state they record — is in
 [`model.md`](model.md).
+
+For Docker, use the same `campaign.py submit` command with `--executor docker`.
+The plan stays unchanged; `--image`, `--results-root`, `--location`, and
+`--seed` replace the Batch provider arguments. Docker execution is serial and
+stores the ledger, frozen schedule, logs, and attempt trees below the absolute
+results root. Submission remains in the foreground until the session settles.
+It currently refuses replay plans and prerequisite chains; `poll`, `retry`, and
+`cancel` remain Batch lifecycle commands. Re-run a settled Docker case with
+`submit --repeat`, which creates a new physical attempt rather than overwriting
+evidence.
 
 ## Submit
 

@@ -176,7 +176,7 @@ def test_the_committed_plan_loads() -> None:
     assert loaded.exclusions == (
         bench.Exclusion(
             tool="s4cmd",
-            reason="owner decision — dropped from all future benchmark and diagnostic runs",
+            reason="owner decision — excluded from comparative and replay runs",
         ),
     )
     assert len(loaded.cases_for("swath")) == 4
@@ -191,6 +191,20 @@ def test_the_committed_plan_loads() -> None:
     constrained = next(c for c in sorted_cases if c.resources.container_memory_gb == 2)
     assert constrained.resources.docker_options == ("--memory=2g", "--memory-swap=2g")
     assert constrained.heap_percent == 75
+
+
+def test_the_repeatability_canary_keeps_the_full_roster() -> None:
+    """The shipped exception is one canary row per registered capsule."""
+    path = ROOT / "benchmark/plans/experiments/repeatability/noaa-nws-rtofs-pds.yaml"
+    exclusions = tuple(
+        item
+        for item in bench.load_default_exclusions(ROOT / "benchmark/plans/tools.yaml")
+        if item.tool != "s4cmd"
+    )
+    loaded = bench.Plan.load(path, default_exclusions=exclusions)
+    bench.check_roster(loaded, bench_cli.registered_tools())
+    assert len(loaded.cases) == 11
+    assert all(case.reps == 1 and case.purpose == "canary" for case in loaded.cases)
 
 
 def test_runner_qualification_plans_keep_their_declared_rosters() -> None:

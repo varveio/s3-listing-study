@@ -32,6 +32,13 @@ input. If no, the capsule owns it and the harness forwards it without looking.
 | mode, concurrency, page size, output flags | Nothing — forwarded, never read | capsule |
 | managed-runtime heap flags | Nothing — the capsule renders the share into whatever its runtime reads | capsule |
 
+The executor label is the exception to the shorthand “harness-owned means case
+input.” It selects provider behavior, but the label is not itself a physical
+treatment. Case identity carries the resolved measurement environment; the
+campaign/session record separately freezes executor lifecycle, host state, and
+schedule. Matching case hashes therefore do not authorize pooling attempts
+across executors.
+
 `mode` looks like an exception and is not one. Verification does need it —
 `verify` normalizes both sides through a capsule's `normalize.py` — but it
 arrives there as a **pass-through**: `adapters.normalize_to_path(adapter_dir,

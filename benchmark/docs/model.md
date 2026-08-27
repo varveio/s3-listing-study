@@ -92,6 +92,8 @@ because the alternative is a subject timed against hints nobody made.
 
 ```text
 gs://<results-bucket>/<suite>/<target-bucket>/<tool>.<hash>.s<attempt>/
+# or, with the Docker executor:
+<absolute-results-root>/<suite>/<target-bucket>/<tool>.<hash>.s<attempt>/
   result.json
   stderr.log.gz
   stdout.log.gz        -- only when stdout is a log
@@ -244,10 +246,11 @@ benchmark-shaped. It is constant for the life of a file, so it lives in `meta`.
 object layout needs it, because everything a launch froze is already inside each
 case hash.
 
-## Object layout
+## Evidence layout
 
 ```
 gs://<results-bucket>/<suite>/<target-bucket>/<tool>.<hash>.s<attempt>/
+<absolute-results-root>/<suite>/<target-bucket>/<tool>.<hash>.s<attempt>/
 ```
 
 Deterministic, so evidence is computed from a row rather than discovered by
@@ -262,10 +265,11 @@ same reason `<suite>` leads. Every other segment identifies something the hash
 now covers, so no other segment exists.
 
 Two properties the prefix depends on, both argued in
-[`architecture.md`](architecture.md) § *What the object store holds*:
+[`architecture.md`](architecture.md) § *What the evidence store holds*:
 
-- **Writes are create-only** — `ifGenerationMatch=0`. A deterministic prefix and
-  overwrite semantics together let a second execution merge into the first.
+- **Writes are create-only** — `ifGenerationMatch=0` in GCS, or a fresh leaf on
+  disk. A deterministic prefix and overwrite semantics together let a second
+  execution merge into the first.
 - **`result.json` carries `attempt_id` and the `case_id` digest**, and `report`
   refuses evidence whose recorded identity disagrees with the prefix it was
   found under.

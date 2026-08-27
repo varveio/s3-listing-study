@@ -162,7 +162,7 @@ Two things follow:
 | `produced_by` | Which attempt made the artifact a case consumed. The artifact's content digest is what identifies it; *which run* produced those bytes is a debugging question. |
 | `signed`, `visible_memory_gb` | Derived from `auth_role` and the ceiling, both already hashed. A derived value is not a second input. |
 | `heap_percent` | A methodology constant most subjects cannot feel. Hashing it globally would re-identify every Go, Rust and Python case when a share they ignore is changed, which is the law — *a field either changes the identity or it is not an input* — read backwards. It enters identity exactly where it changes the measurement: a managed-runtime capsule declares `heap_percent` as a `Fixed` axis carrying the constant, and the loader merges it into that capsule's `config` before hashing, like any declared value. See [`capsule-contract.md`](capsule-contract.md) § *The ceiling, and the share of it*. |
-| `executor` | One executor exists. Recorded so a second one is distinguishable when it arrives; hashed then, not before. |
+| `executor` | Provider mechanism, not logical case identity. Docker versus Batch is recorded on every attempt. A Docker campaign separately freezes the executor contract and host-session treatment; attempts are never pooled across executors merely because their case hashes agree. |
 
 `network` and `subnetwork` are arguable — an egress path could matter — but they
 follow from the executor's project and location, so they stay in `executor_env`
@@ -314,10 +314,11 @@ slice closes that.
 
 ## Open questions
 
-- **The `executor` vocabulary.** One executor exists, recorded on every row as
-  `gcp-batch`. What names exist beyond it, and how a name resolves to the code
-  that renders and submits a job, becomes an identity question — the column is
-  hashed then, not before — the day a second one arrives.
+- **Executor equivalence.** `gcp-batch` owns a recoverable remote lifecycle;
+  `docker` currently owns only a synchronous serial session. A dry render plus
+  a real attempt qualifies the bounded contract each one actually claims. Any
+  backend fact that changes the measured work belongs in the case environment
+  or the frozen campaign/session treatment, not behind the executor label.
 - **Where the role table lives.** `auth_role` → service account + secret version
   is deployment configuration, not plan content. It is currently
   `--anonymous-worker-sa`, `--authenticated-worker-sa`, and `--secret-resource`

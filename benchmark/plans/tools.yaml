@@ -19,22 +19,23 @@ default_modes:
   ps3: list
   rclone: recursive-hierarchical
   s3-fast-list: list
+  s4cmd: recursive
   s3kor: list
   s3p: ls
   s5cmd: recursive
   s7cmd: recursive-tsv
   swath: recursive-tsv
 
-# One owner decision applies to every future plan here. The capsule and its
-# historical receipts remain in the repository; only benchmark/diagnostic
-# participation is retired.
+# s4cmd remains retired from comparative and replay work. The one-shot real-S3
+# capsule qualification has an explicit executor flag that removes only this
+# exclusion; it does not make s4cmd an active benchmark subject.
 exclude:
-  - {tool: s4cmd, reason: owner decision — dropped from all future benchmark and diagnostic runs}
+  - {tool: s4cmd, reason: owner decision — excluded from comparative and replay runs}
 
 # Tools whose runtime must be told how much of its memory it may use as heap.
 #
 # Only a managed runtime appears here, which is why this is not a plan's
-# business: nine of the ten active tools have no heap to size, so a per-bucket
+# business: ten of the eleven toolbox tools have no heap to size, so a per-bucket
 # `heap_percent` would have been a knob that most cases ignored and every plan
 # restated. Go, Rust and Python tools take what they take.
 #

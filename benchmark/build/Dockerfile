@@ -51,6 +51,19 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     cargo build --release --locked
 
+FROM runtime_base AS s4cmd_install
+ADD --checksum=sha256:42566058a74d3e1e553351966efaaffa08e4b6ac28a19e72a51be21151ea9534 \
+    https://files.pythonhosted.org/packages/42/b4/0061f4930958cd790098738659c1c39f8feaf688e698142435eedaa4ae34/s4cmd-2.1.0.tar.gz \
+    /tmp/s4cmd.tar.gz
+COPY tools/s4cmd/build/requirements.txt /tmp/s4cmd-requirements.txt
+RUN /usr/bin/python3 -m venv /opt/s4cmd-venv \
+    && /opt/s4cmd-venv/bin/python -m pip install \
+      --require-hashes --no-deps -r /tmp/s4cmd-requirements.txt \
+    && mkdir -p /opt/s4cmd \
+    && tar xzf /tmp/s4cmd.tar.gz -C /opt/s4cmd --strip-components=1 \
+      s4cmd-2.1.0/s4cmd.py \
+    && test -f /opt/s4cmd/s4cmd.py
+
 FROM runtime_base AS s3kor_install
 ADD --checksum=sha256:47047e8a40a84992914f02bb5c8dfc525abff0a42c3ed76a4ed042a8ef976103 \
     https://github.com/sethkor/s3kor/releases/download/v0.0.37/s3kor_0.0.37_Linux_amd64.tar.gz /tmp/s3kor.tar.gz
@@ -93,6 +106,8 @@ COPY --from=ps3_install /usr/local/bin/pS3 /usr/local/bin/pS3
 COPY --from=rclone_install /usr/local/bin/rclone /usr/local/bin/rclone
 COPY --from=s3_fast_list_build /usr/src/app/target/release/s3-fast-list /usr/bin/s3-fast-list
 COPY --from=s3_fast_list_build /usr/src/app/target/release/ks-tool /usr/bin/ks-tool
+COPY --from=s4cmd_install /opt/s4cmd-venv/ /opt/s4cmd-venv/
+COPY --from=s4cmd_install /opt/s4cmd/ /opt/s4cmd/
 COPY --from=s3kor_install /usr/local/bin/s3kor /usr/local/bin/s3kor
 COPY --from=s3p_install /usr/local/bin/node /usr/local/bin/node
 COPY --from=s3p_install /build/node_modules/ /opt/s3p/node_modules/
@@ -108,6 +123,9 @@ RUN ln -s /opt/aws-cli/v2/current/bin/aws /usr/local/bin/aws \
 # slice: s3p
 RUN printf '#!/bin/sh\nexec /usr/local/bin/node /opt/s3p/node_modules/s3p/bin/s3p "$@"\n' > /usr/local/bin/s3p \
     && chmod 0755 /usr/local/bin/s3p
+# slice: s4cmd
+RUN printf '#!/bin/sh\nexec /opt/s4cmd-venv/bin/python /opt/s4cmd/s4cmd.py "$@"\n' > /usr/local/bin/s4cmd \
+    && chmod 0755 /usr/local/bin/s4cmd
 # slice: s7cmd
 RUN install -d -o 10001 -g 10001 /home/s7cmd
 # /aws is subject_workdir for both aws-cli and s5cmd, so it is platform.

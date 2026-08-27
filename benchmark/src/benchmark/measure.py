@@ -1026,30 +1026,58 @@ def upload(
     destination: str,
     postprocessing_seconds: dict[str, float] | None = None,
 ) -> bool:
-    """Upload everything except result.json first, then result.json alone,
+    """Publish everything except result.json first, then result.json alone,
     last. A leaf whose upload dies between the two steps is left with
     artifacts but no marker -- exactly the shape verify.py treats as
     "incomplete", never as a passing (or failing) verdict.
+
+    A ``gs://`` destination uses the production uploader. An absolute local
+    destination gets the same create-only, marker-last contract so the Docker
+    executor does not need a second measurement worker.
     """
     artifacts = sorted(p for p in attempt_dir.iterdir() if p.name != "result.json")
     try:
         upload_started = time.monotonic()
-        for path in artifacts:
-            if path.is_dir():
-                gcs.upload_tree(path, destination.rstrip("/") + "/" + path.name, create_only=True)
-            else:
-                gcs.upload_file(path, destination.rstrip("/") + "/" + path.name, create_only=True)
+        local_destination: Path | None = None
+        if destination.startswith("gs://"):
+            for path in artifacts:
+                if path.is_dir():
+                    gcs.upload_tree(
+                        path, destination.rstrip("/") + "/" + path.name, create_only=True
+                    )
+                else:
+                    gcs.upload_file(
+                        path, destination.rstrip("/") + "/" + path.name, create_only=True
+                    )
+        else:
+            local_destination = Path(destination)
+            if not local_destination.is_absolute():
+                raise ValueError("local destination must be an absolute path")
+            local_destination.mkdir(parents=True, exist_ok=False)
+            for path in artifacts:
+                target = local_destination / path.name
+                if path.is_dir():
+                    shutil.copytree(path, target)
+                else:
+                    shutil.copy2(path, target)
         if postprocessing_seconds is not None:
             postprocessing_seconds["artifact_upload"] = time.monotonic() - upload_started
             result_path = attempt_dir / "result.json"
             result = json.loads(result_path.read_text())
             result["postprocessing_seconds"] = postprocessing_seconds
             write_result_atomic(result_path, result)
-        gcs.upload_file(
-            attempt_dir / "result.json", destination.rstrip("/") + "/result.json", create_only=True
-        )
+        if local_destination is None:
+            gcs.upload_file(
+                attempt_dir / "result.json",
+                destination.rstrip("/") + "/result.json",
+                create_only=True,
+            )
+        else:
+            pending = local_destination / ".result.json.pending"
+            shutil.copy2(attempt_dir / "result.json", pending)
+            os.replace(pending, local_destination / "result.json")
     except Exception as exc:
-        print(f"measure: upload failed: {exc}", file=sys.stderr)
+        print(f"measure: publish failed: {exc}", file=sys.stderr)
         return False
     return True
 

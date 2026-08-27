@@ -1046,6 +1046,20 @@ def test_recursive_upload_preserves_native_paths(
     assert json.loads(result_body)["postprocessing_seconds"] == timings
 
 
+def test_local_publication_is_create_only(tmp_path: Path) -> None:
+    """A second execution cannot merge with or replace a local evidence leaf."""
+    attempt = tmp_path / "attempt"
+    attempt.mkdir()
+    (attempt / "stdout.log.gz").write_bytes(b"first")
+    (attempt / "result.json").write_text("{}")
+    destination = tmp_path / "results" / "tool.case.s1"
+
+    assert measure.upload(attempt, str(destination))
+    assert (destination / "stdout.log.gz").read_bytes() == b"first"
+    assert not measure.upload(attempt, str(destination))
+    assert (destination / "stdout.log.gz").read_bytes() == b"first"
+
+
 def test_a_staged_artifact_whose_digest_moved_is_refused(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
