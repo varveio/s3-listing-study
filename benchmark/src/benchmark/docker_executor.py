@@ -24,6 +24,7 @@ from benchmark import plan as bench
 from benchmark.contract import CREDENTIAL_ENV_VAR, TOOL_IMAGE_FIELDS
 from benchmark.ledger import (
     STATE_FILENAME,
+    TERMINAL_STATES,
     Attempt,
     CampaignError,
     attempt_rows,
@@ -112,6 +113,7 @@ def inspect_host(results: Path) -> Host:
             raise CampaignError(f"cannot read CPU topology for logical CPU {cpu}: {exc}") from None
         by_core.setdefault(key, []).append(cpu)
     memory_bytes = os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE")
+    memory_gb = memory_bytes // (1024**3)
     cpu_model = next(
         (
             line.partition(":")[2].strip()
@@ -153,18 +155,13 @@ def inspect_host(results: Path) -> Host:
     # attempt evidence without making a reboot mint a different machine type.
     hardware = {
         key: facts[key]
-        for key in (
-            "architecture",
-            "cpu_model",
-            "filesystem_type",
-            "memory_bytes",
-            "physical_cores",
-        )
+        for key in ("architecture", "cpu_model", "filesystem_type", "physical_cores")
     }
+    hardware["memory_gb"] = memory_gb
     signature = hashlib.sha256(_canonical(hardware).encode()).hexdigest()[:12]
     return Host(
         tuple(tuple(sorted(cpus)) for _key, cpus in sorted(by_core.items())),
-        memory_bytes // (1024**3),
+        memory_gb,
         f"docker-{platform.machine().lower()}-{signature}",
         facts,
     )
@@ -497,7 +494,7 @@ def cmd_submit(args: Any) -> int:
     results = Path(args.results_root).resolve()
     host = inspect_host(results)
     loaded = load_plan(Path(args.plan), host, allow_s4cmd=args.allow_retired_s4cmd_s3_canary)
-    cases = campaign._selected_cases(loaded.cases, args.case)
+    cases = campaign.selected_cases(loaded.cases, args.case)
     ordered = schedule(cases, args.seed)
     image = load_image(args.image, set(loaded.tools()))
     cpuset_attestations = {
@@ -606,11 +603,17 @@ def cmd_submit(args: Any) -> int:
         with schedule_path.open("x") as output:
             json.dump(
                 {
-                    "schema_version": 1,
+                    "schema_version": 2,
                     "executor": EXECUTOR,
                     "executor_contract": "synchronous-serial-session-v1",
                     "group_id": group,
                     "seed": args.seed,
+                    "interruption_policy": {
+                        "interrupted_row_state": "FAILED",
+                        "unstarted_row_state": "NOT_CREATED",
+                        "replace_within_group": False,
+                        "replacement": "new group with a new seed",
+                    },
                     "schedule_derivation": (
                         "block_seed=SHA256(f'{seed}:{block}'); Python random.Random"
                         "(int.from_bytes(block_seed)); shuffle resolved-plan case order"
@@ -657,3 +660,30 @@ def cmd_submit(args: Any) -> int:
     finally:
         con.close()
     return int(failed)
+
+
+def cmd_local_close(args: Any) -> int:
+    """Settle the unfinished tail of one interrupted Docker session."""
+    reason = args.reason.strip()
+    if not reason:
+        raise CampaignError("local-close requires a non-empty --reason")
+    con = open_ledger(args.state)
+    try:
+        rows = attempt_rows(con, group_id=args.group)
+        if not rows:
+            raise CampaignError(f"no group {args.group} in this ledger")
+        if any(row["executor"] != EXECUTOR for row in rows):
+            raise CampaignError("local-close manages Docker groups only")
+        live = [row for row in rows if row["state"] not in TERMINAL_STATES]
+        for row in live:
+            interrupted = row["state"] == "RUNNING"
+            state = "FAILED" if interrupted else "NOT_CREATED"
+            circumstance = "interrupted while running" if interrupted else "container never started"
+            detail = f"local session closed: {circumstance}: {reason}"[:500]
+            set_state(con, row["attempt_id"], state, detail)
+            print(f"campaign: {row['attempt_id']} settled {state} ({circumstance})")
+        if not live:
+            print(f"campaign: group {args.group} has no non-terminal Docker rows")
+    finally:
+        con.close()
+    return 0

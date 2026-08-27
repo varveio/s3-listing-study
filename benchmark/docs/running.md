@@ -114,6 +114,14 @@ It currently refuses replay plans and prerequisite chains; `poll`, `retry`, and
 `submit --repeat`, which creates a new physical attempt rather than overwriting
 evidence.
 
+If a crash leaves a Docker group unfinished, settle its frozen session before
+continuing: `uv run python benchmark/src/benchmark/campaign.py --state
+/absolute/results/campaign.db local-close --group GROUP --reason 'host lost
+power'`. The command records the interrupted `RUNNING` row as `FAILED`, records
+containers that never started as `NOT_CREATED`, and leaves terminal rows alone.
+Replacement is a new group with a new seed, as predeclared in that group's
+frozen schedule; it is never a re-run within the old order.
+
 Real-S3 Docker runs use Docker's ordinary bridge networking. They do not require
 a host firewall change or a host-global network setup step. Subject containers
 still drop all Linux capabilities and enable Docker's no-new-privileges rule.

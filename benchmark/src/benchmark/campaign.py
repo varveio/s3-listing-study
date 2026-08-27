@@ -1921,7 +1921,11 @@ def poll_once(con: sqlite3.Connection, suite: str, *, client: batch_v1.BatchServ
     Polling never invents a state: a describe that fails leaves the row untouched
     and the pass reports "not all terminal".
     """
-    rows = [row for row in attempt_rows(con) if row["state"] not in TERMINAL_STATES]
+    rows = [
+        row
+        for row in attempt_rows(con)
+        if row["executor"] == EXECUTOR and row["state"] not in TERMINAL_STATES
+    ]
     if not rows:
         return True
     listed: dict[tuple[str, str], dict[str, str]] = {}
@@ -2006,7 +2010,7 @@ def cmd_submit(args: argparse.Namespace) -> int:
         Path(args.plan),
         allow_s4cmd_canary=getattr(args, "allow_retired_s4cmd_s3_canary", False),
     )
-    cases = _selected_cases(loaded.cases, args.case)
+    cases = selected_cases(loaded.cases, args.case)
     options = _options(args)
     image_set = load_image_set(args.image_set, {case.tool for case in loaded.cases})
     # The capsules declare the chains, so what a plan comes to is knowable before
@@ -2055,7 +2059,7 @@ def cmd_submit(args: argparse.Namespace) -> int:
     return 0
 
 
-def _selected_cases(cases: tuple[Case, ...], selectors: list[str] | None) -> tuple[Case, ...]:
+def selected_cases(cases: tuple[Case, ...], selectors: list[str] | None) -> tuple[Case, ...]:
     """Select exact resolved plan rows without weakening full-plan validation.
 
     A label is the human-readable, deterministic row name emitted by
@@ -2099,13 +2103,11 @@ def cmd_poll(args: argparse.Namespace) -> int:
     con = open_ledger(args.state)
     client: batch_v1.BatchServiceClient | None = None
     try:
-        if any(
-            row["executor"] != EXECUTOR and row["state"] not in TERMINAL_STATES
+        if not any(
+            row["executor"] == EXECUTOR and row["state"] not in TERMINAL_STATES
             for row in attempt_rows(con)
         ):
-            raise CampaignError(
-                "poll manages gcp-batch attempts only; Docker submit runs synchronously"
-            )
+            return 0
         client = batch_v1.BatchServiceClient()
         suite = ledger_suite(con)
         if not args.watch:
@@ -2120,6 +2122,12 @@ def cmd_poll(args: argparse.Namespace) -> int:
                 batch_client._close_batch_client(client)
         finally:
             con.close()
+
+
+def cmd_local_close(args: argparse.Namespace) -> int:
+    from benchmark import docker_executor
+
+    return docker_executor.cmd_local_close(args)
 
 
 def cmd_status(args: argparse.Namespace) -> int:
@@ -2355,6 +2363,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     poll.add_argument("--watch", action="store_true")
     poll.add_argument("--interval", type=int, default=30)
     poll.set_defaults(func=cmd_poll)
+
+    local_close = sub.add_parser("local-close")
+    local_close.add_argument("--group", required=True)
+    local_close.add_argument("--reason", required=True)
+    local_close.set_defaults(func=cmd_local_close)
 
     cancel = sub.add_parser("cancel")
     cancel.add_argument("--group", required=True)
