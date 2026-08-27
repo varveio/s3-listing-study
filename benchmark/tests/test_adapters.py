@@ -20,13 +20,14 @@ import io
 import subprocess
 import tempfile
 import time
+from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from benchmark.runtime import duckdb_adapter
-from benchmark.runtime.contract import FIELD_COUNT, MTIME_RE, ContractViolation, read_records
+from benchmark.runtime.contract import FIELD_COUNT, MTIME_RE, ContractViolation, Record, parse_line
 from benchmark.runtime.duckdb_adapter import emit_result, existing_input_path
 from benchmark.runtime.normalizer_cli import mapped_input
 from tests.adapters.equivalence import (
@@ -49,6 +50,11 @@ PORTED = (
     "s7cmd",
     "swath",
 )
+
+
+def read_records(stream: io.BytesIO) -> Iterator[Record]:
+    for line_number, raw in enumerate(stream, start=1):
+        yield parse_line(raw.removesuffix(b"\n"), line_number=line_number)
 
 # Modes an adapter declares that NO committed payload reaches. Pinned per tool
 # rather than asserted empty, because for four tools it is not empty and saying so

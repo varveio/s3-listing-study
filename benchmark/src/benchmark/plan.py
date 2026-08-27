@@ -1588,16 +1588,3 @@ def check_roster(plan: Plan, registered: Collection[str]) -> None:
             f"plan {plan.path} mentions unregistered tool(s) {', '.join(unknown)} "
             "(no build/image.json)"
         )
-
-
-def check_modes(plan: Plan, modes_by_tool: Mapping[str, Collection[str]]) -> None:
-    """Refuse a mode the tool's adapter does not implement, before submitting."""
-    for case in plan.cases:
-        known = modes_by_tool.get(case.tool)
-        if known is None:
-            raise PlanError(f"plan {plan.path} names {case.tool}, whose modes are unknown")
-        if case.mode not in known:
-            raise PlanError(
-                f"plan {plan.path}: {case.tool} has no mode {case.mode!r} "
-                f"({'|'.join(sorted(known))})"
-            )

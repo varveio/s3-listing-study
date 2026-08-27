@@ -192,11 +192,6 @@ def request_max_run_duration(document: Mapping[str, Any]) -> str:
         raise CampaignError("recorded provider request cannot be read back") from None
 
 
-def _cpuset(start: int, count: int) -> str:
-    end = start + count - 1
-    return str(start) if end == start else f"{start}-{end}"
-
-
 def _runnable_options(cpuset: str, memory_gb: int | None) -> str:
     options = ["--network", "host", f"--cpuset-cpus={cpuset}"]
     if memory_gb is not None:

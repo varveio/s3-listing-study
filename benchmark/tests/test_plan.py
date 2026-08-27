@@ -99,7 +99,7 @@ class _AnyMode(dict[str, capsule.Mode]):
     """A fixture capsule's mode vocabulary, when the test does not name one.
 
     These fixtures exist to exercise plan resolution -- cascade, IDs, signing --
-    never one tool's real mode vocabulary, which `check_modes` and the AST
+    never one tool's real mode vocabulary, which plan resolution and the AST
     reader already hold to the real capsules. Membership here is deliberately
     unchecked, and every name resolves to one manifest declaring nothing, so a
     test can spell any mode it likes.
@@ -1368,9 +1368,15 @@ def test_an_unregistered_tool_is_refused(tmp_path: Path) -> None:
 
 def test_a_mode_the_adapter_lacks_is_refused(tmp_path: Path) -> None:
     """Caught before submission rather than at Batch runtime."""
-    loaded = load(write(tmp_path, ONE_CASE))
+    adapters = dict(CAPSULES)
+    adapters["aws-cli"] = fixture_capsule(
+        "aws-cli",
+        unsigned=True,
+        signed=True,
+        modes={"s3-ls-recursive": _GENERIC_MODE},
+    )
     with pytest.raises(bench.PlanError):
-        bench.check_modes(loaded, {"aws-cli": {"s3-ls-recursive"}})
+        load(write(tmp_path, ONE_CASE), adapters=adapters)
 
 
 # ── the resolve-plan dry run ─────────────────────────────────────────────────

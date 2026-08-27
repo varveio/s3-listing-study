@@ -7,13 +7,18 @@ from pathlib import Path
 import pytest
 
 from benchmark.runtime.build_selection import (
+    BuildSelection,
     BuildSelectionError,
     adapter_bundle_sha256,
     load_registered_selection,
-    load_selection,
+    load_staged_selection,
 )
 
 ROOT = Path(__file__).parents[2]
+
+
+def load_fixture_selection(path: Path, *, expected_tool: str) -> BuildSelection:
+    return load_staged_selection(path, path.parents[1] / "adapter", expected_tool=expected_tool)
 
 
 def registered_fixture(tmp_path: Path) -> tuple[Path, Path, dict[str, object]]:
@@ -44,9 +49,9 @@ def registered_fixture(tmp_path: Path) -> tuple[Path, Path, dict[str, object]]:
     return root, metadata_path, metadata
 
 
-def test_unmutated_registered_fixture_loads_successfully(tmp_path: Path) -> None:
+def test_unmutated_staged_fixture_loads_successfully(tmp_path: Path) -> None:
     _, metadata_path, metadata = registered_fixture(tmp_path)
-    selected = load_selection(metadata_path, expected_tool="aws-cli")
+    selected = load_fixture_selection(metadata_path, expected_tool="aws-cli")
     assert selected.tool == metadata["tool"]
     assert selected.executable == ("/usr/local/bin/aws",)
     assert selected.adapter_bundle_sha256 == metadata["adapter_bundle_sha256"]
@@ -66,7 +71,7 @@ def test_selection_rejects_duplicate_json_keys(tmp_path: Path) -> None:
     payload = json.dumps(metadata)
     metadata_path.write_text(payload[:-1] + ',"tool":"aws-cli"}')
     with pytest.raises(BuildSelectionError, match="duplicate JSON key"):
-        load_selection(metadata_path, expected_tool="aws-cli")
+        load_fixture_selection(metadata_path, expected_tool="aws-cli")
 
 
 @pytest.mark.parametrize(
@@ -113,7 +118,7 @@ def test_selection_rejects_invalid_metadata_values(
     metadata[field] = value
     metadata_path.write_text(json.dumps(metadata))
     with pytest.raises(BuildSelectionError, match=message):
-        load_selection(metadata_path, expected_tool="aws-cli")
+        load_fixture_selection(metadata_path, expected_tool="aws-cli")
 
 
 @pytest.mark.parametrize("missing", ["tool", "tool_artifact", "adapter_bundle_sha256"])
@@ -122,7 +127,7 @@ def test_selection_rejects_missing_required_metadata_field(tmp_path: Path, missi
     del metadata[missing]
     metadata_path.write_text(json.dumps(metadata))
     with pytest.raises(BuildSelectionError, match="unexpected field set"):
-        load_selection(metadata_path, expected_tool="aws-cli")
+        load_fixture_selection(metadata_path, expected_tool="aws-cli")
 
 
 def test_selection_rejects_adapter_bundle_digest_mismatch(tmp_path: Path) -> None:
@@ -130,7 +135,7 @@ def test_selection_rejects_adapter_bundle_digest_mismatch(tmp_path: Path) -> Non
     normalizer = metadata_path.parents[1] / "adapter" / "normalize.py"
     normalizer.write_text(normalizer.read_text() + "\n# changed\n")
     with pytest.raises(BuildSelectionError, match="bundle digest"):
-        load_selection(metadata_path, expected_tool="aws-cli")
+        load_fixture_selection(metadata_path, expected_tool="aws-cli")
 
 
 def test_selection_rejects_adapter_component_symlink_escape(tmp_path: Path) -> None:
@@ -140,7 +145,7 @@ def test_selection_rejects_adapter_component_symlink_escape(tmp_path: Path) -> N
     normalizer.replace(outside)
     normalizer.symlink_to(outside)
     with pytest.raises(BuildSelectionError, match="escapes"):
-        load_selection(metadata_path, expected_tool="aws-cli")
+        load_fixture_selection(metadata_path, expected_tool="aws-cli")
 
 
 def test_selection_rejects_command_adapter_tool_or_executable_mismatch(tmp_path: Path) -> None:
@@ -150,11 +155,11 @@ def test_selection_rejects_command_adapter_tool_or_executable_mismatch(tmp_path:
     metadata["adapter_bundle_sha256"] = adapter_bundle_sha256(command.parent)
     metadata_path.write_text(json.dumps(metadata))
     with pytest.raises(BuildSelectionError, match="not requested tool"):
-        load_selection(metadata_path, expected_tool="aws-cli")
+        load_fixture_selection(metadata_path, expected_tool="aws-cli")
 
     command.write_text(command.read_text().replace('TOOL = "rclone"', 'TOOL = "aws-cli"'))
     metadata["adapter_bundle_sha256"] = adapter_bundle_sha256(command.parent)
     metadata["executable"] = ["/wrong/aws"]
     metadata_path.write_text(json.dumps(metadata))
     with pytest.raises(BuildSelectionError, match="registered executable"):
-        load_selection(metadata_path, expected_tool="aws-cli")
+        load_fixture_selection(metadata_path, expected_tool="aws-cli")

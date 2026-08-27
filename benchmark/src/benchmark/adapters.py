@@ -5,9 +5,8 @@ capsule's command adapter, bounded ``count_rows``, and file/dataset-backed
 normalizer through :mod:`benchmark.runtime`.
 
 A capsule's own emit boundary already refuses an unframeable key and emits
-canonical mtime (YYYY-MM-DDTHH:MM:SSZ). This module checks only the normalize
-subprocess's own exit code, plus one free structural sanity pass
-(_belt_check) that costs no extra I/O since the bytes are already in hand.
+canonical mtime (YYYY-MM-DDTHH:MM:SSZ). This module checks the normalize
+subprocess's own exit code and structurally validates its file-backed output.
 
 Two adapter-root conventions apply because execution and controller code sit in
 different places relative to a checkout:
@@ -18,8 +17,7 @@ different places relative to a checkout:
     the repository's ``tools/<tool>/adapter`` path.
 
 Dataset-sink modes (for example Swath's Parquet modes) use the file-backed
-``--dataset`` normalizer path. ``normalize_attempt`` is a small-fixture helper
-for stream-shaped inputs.
+``--dataset`` normalizer path.
 """
 
 from __future__ import annotations
@@ -124,19 +122,6 @@ def compile_command(
         raise AdapterError(f"{tool}: could not compile command: {exc}") from exc
 
 
-def _belt_check(tsv: bytes) -> None:
-    """Free structural sanity pass -- the capsule's emit boundary is authoritative.
-
-    Not a framing check (that already happened inside the capsule); this only
-    catches a normalizer that silently emitted a short/ragged row, which
-    would otherwise surface many fields later as a confusing DuckDB load
-    error or, worse, a load that succeeds with columns shifted.
-    """
-    for number, line in enumerate(tsv.split(b"\n"), start=1):
-        if line and line.count(b"\t") != 4:
-            raise AdapterError(f"normalize.py line {number} does not have 5 tab-separated fields")
-
-
 def _belt_check_path(path: Path) -> None:
     with path.open("rb") as source:
         for number, line in enumerate(source, start=1):
@@ -197,29 +182,6 @@ def normalize_to_path(
             f"{result.stderr.decode(errors='replace')[:500]}"
         )
     _belt_check_path(output_path)
-
-
-def normalize_attempt(
-    adapter_dir: Path | str,
-    tool: str,
-    mode: str,
-    prefix: str,
-    native: bytes,
-    *,
-    config: Mapping[str, object] | None = None,
-) -> bytes:
-    """Compatibility helper for small, stream-shaped fixtures."""
-    normalize_path = Path(adapter_dir) / "normalize.py"
-    blob = json.dumps(dict(config or {}), sort_keys=True, separators=(",", ":"))
-    command = [sys.executable, str(normalize_path), mode, prefix, "--config", blob]
-    result = subprocess.run(command, input=native, capture_output=True)
-    if result.returncode != 0:
-        raise AdapterError(
-            f"{tool} normalize.py ({mode}) exited {result.returncode}: "
-            f"{result.stderr.decode(errors='replace')[:500]}"
-        )
-    _belt_check(result.stdout)
-    return result.stdout
 
 
 def _load_normalizer(path: Path) -> ModuleType:

@@ -199,13 +199,6 @@ def load_staged_selection(
     )
 
 
-def load_selection(path: Path, *, expected_tool: str) -> BuildSelection:
-    capsule = path.parent.parent
-    if path != capsule / "build" / "image.json" or capsule.name != expected_tool:
-        raise BuildSelectionError("build metadata is not at the expected capsule location")
-    return load_staged_selection(path, capsule / "adapter", expected_tool=expected_tool)
-
-
 def load_registered_selection(repo_root: Path, tool: str) -> BuildSelection:
     validate_tool_slug(tool)
     root = repo_root.resolve(strict=True)
