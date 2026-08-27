@@ -37,6 +37,14 @@ from benchmark.ledger import (
 
 EXECUTOR = "docker"
 WORKER = (10001, 10001)
+INTERRUPTED_ROW_STATE = "FAILED"
+UNSTARTED_ROW_STATE = "NOT_CREATED"
+LOCAL_INTERRUPTION_POLICY = {
+    "interrupted_row_state": INTERRUPTED_ROW_STATE,
+    "unstarted_row_state": UNSTARTED_ROW_STATE,
+    "replace_within_group": False,
+    "replacement": "new group with a new seed",
+}
 
 
 @dataclass(frozen=True)
@@ -608,12 +616,7 @@ def cmd_submit(args: Any) -> int:
                     "executor_contract": "synchronous-serial-session-v1",
                     "group_id": group,
                     "seed": args.seed,
-                    "interruption_policy": {
-                        "interrupted_row_state": "FAILED",
-                        "unstarted_row_state": "NOT_CREATED",
-                        "replace_within_group": False,
-                        "replacement": "new group with a new seed",
-                    },
+                    "interruption_policy": LOCAL_INTERRUPTION_POLICY,
                     "schedule_derivation": (
                         "block_seed=SHA256(f'{seed}:{block}'); Python random.Random"
                         "(int.from_bytes(block_seed)); shuffle resolved-plan case order"
@@ -675,9 +678,41 @@ def cmd_local_close(args: Any) -> int:
         if any(row["executor"] != EXECUTOR for row in rows):
             raise CampaignError("local-close manages Docker groups only")
         live = [row for row in rows if row["state"] not in TERMINAL_STATES]
+        live_containers: list[str] = []
+        for row in live:
+            names = _command(
+                (
+                    "docker",
+                    "ps",
+                    "--filter",
+                    f"name={row['job_name']}",
+                    "--format",
+                    "{{.Names}}",
+                )
+            ).stdout.splitlines()
+            if row["job_name"] in names:
+                live_containers.append(row["job_name"])
+        if live_containers:
+            raise CampaignError(
+                "local-close refuses while Docker containers are still running: "
+                + ", ".join(live_containers)
+            )
+        complete = [
+            row["attempt_id"]
+            for row in live
+            if row["state"] == "RUNNING"
+            and (Path(row["result_prefix"]) / "result.json").is_file()
+        ]
+        if complete:
+            raise CampaignError(
+                "local-close refuses to mark complete evidence failed for "
+                + ", ".join(complete)
+                + "; evidence is complete; rerun submit is not needed; settle by re-running "
+                "the session's own settlement or leave as-is"
+            )
         for row in live:
             interrupted = row["state"] == "RUNNING"
-            state = "FAILED" if interrupted else "NOT_CREATED"
+            state = INTERRUPTED_ROW_STATE if interrupted else UNSTARTED_ROW_STATE
             circumstance = "interrupted while running" if interrupted else "container never started"
             detail = f"local session closed: {circumstance}: {reason}"[:500]
             set_state(con, row["attempt_id"], state, detail)

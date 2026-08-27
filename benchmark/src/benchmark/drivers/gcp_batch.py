@@ -604,6 +604,7 @@ def cmd_poll(args: argparse.Namespace) -> int:
             row["executor"] == EXECUTOR and row["state"] not in TERMINAL_STATES
             for row in attempt_rows(con)
         ):
+            print("campaign: no gcp-batch attempts to poll")
             return 0
         client = batch_v1.BatchServiceClient()
         suite = ledger_suite(con)

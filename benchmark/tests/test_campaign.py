@@ -1081,6 +1081,17 @@ def hinted_plan(tmp_path: Path, body: str = HINTED, *, tools: tuple[str, ...] = 
     )
 
 
+def test_the_suite_filter_quotes_its_value() -> None:
+    class Client:
+        def list_jobs(self, *, request: dict[str, str], **_kwargs: object) -> list[batch_v1.Job]:
+            assert request["filter"] == 'labels.suite="c-2026-08-17-x"'
+            return []
+
+    batch_client.list_job_states(
+        "p", "us-east1", "c-2026-08-17-x", client=Client()  # type: ignore[arg-type]
+    )
+
+
 def test_cancel_is_idempotent_after_provider_deletion() -> None:
     class Client:
         def delete_job(self, **_kwargs: object) -> None:

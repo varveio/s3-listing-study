@@ -129,6 +129,32 @@ def test_toolbox_context_contains_only_runtime_adapters_and_exact_build_inputs()
     assert all((ROOT / "tools" / tool / "adapter").is_dir() for tool in TOOLBOX_TOOLS)
 
 
+def test_consolidated_recipe_and_s3p_lock_are_manifest_inputs(tmp_path: Path) -> None:
+    selections = build_image.registered_selections(ROOT)
+    manifest, _ = build_image.toolbox_manifest(selections, ROOT, "e" * 40)
+    tools = manifest["tools"]
+    assert isinstance(tools, dict)
+    s3p = tools["s3p"]
+    assert isinstance(s3p, dict)
+    copied: list[Path] = []
+    for relative in (
+        "tools/s3p/build/image.json",
+        "tools/s3p/build/Dockerfile",
+        "tools/s3p/build/package.json",
+        "tools/s3p/build/package-lock.json",
+    ):
+        source = ROOT / relative
+        destination = tmp_path / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(source.read_bytes())
+        copied.append(destination)
+    before = build_image._input_digest(tmp_path, copied)
+    assert s3p["build_inputs_sha256"] == before
+    lock = copied[-1]
+    lock.write_bytes(lock.read_bytes() + b"\n")
+    assert build_image._input_digest(tmp_path, copied) != before
+
+
 def test_declared_artifact_must_appear_in_executed_stage() -> None:
     selections = build_image.registered_selections(ROOT)
     source = (ROOT / "benchmark/build/Dockerfile").read_text()
@@ -179,6 +205,27 @@ def test_a_tool_whose_stage_is_unreachable_is_refused(monkeypatch: pytest.Monkey
     monkeypatch.setitem(build_image.TOOL_STAGES, "s5cmd", "absent_stage")
     with pytest.raises(build_image.BuildError, match="unreachable"):
         build_image.attribute_recipe(RECIPE)
+
+
+def test_a_twelfth_tool_leaves_the_platform_and_every_slice_byte_identical(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    before, before_platform = slices(RECIPE)
+    extended = RECIPE.replace(
+        "FROM runtime_base AS toolbox",
+        "FROM runtime_base AS twelfth_install\n"
+        "RUN install -m 0755 /bin/true /usr/local/bin/twelfth\n\n"
+        "FROM runtime_base AS toolbox",
+    ).replace(
+        "COPY --from=aws_cli_install",
+        "COPY --from=twelfth_install /usr/local/bin/twelfth /usr/local/bin/twelfth\n"
+        "COPY --from=aws_cli_install",
+        1,
+    )
+    monkeypatch.setitem(build_image.TOOL_STAGES, "twelfth", "twelfth_install")
+    after, after_platform = slices(extended)
+    assert after_platform == before_platform
+    assert {tool: after[tool] for tool in before} == before
 
 
 def test_schema_5_image_set_round_trips_through_the_controller(

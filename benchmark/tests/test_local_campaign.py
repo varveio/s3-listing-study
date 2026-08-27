@@ -86,7 +86,12 @@ def test_host_memory_jitter_does_not_change_machine_or_case_identity(
 
 
 def _journal_attempt(
-    con: sqlite3.Connection, *, case_id: str, group: str, executor: str
+    con: sqlite3.Connection,
+    *,
+    case_id: str,
+    group: str,
+    executor: str,
+    result_prefix: str | None = None,
 ) -> ledger.Attempt:
     attempt = ledger.Attempt(
         case_id=case_id,
@@ -117,7 +122,7 @@ def _journal_attempt(
         service_account="anonymous",
         secret_resource=None,
         job_name=f"job-{case_id}",
-        result_prefix=f"/results/{case_id}",
+        result_prefix=result_prefix or f"/results/{case_id}",
         purpose="measurement",
         statistic="timing",
         origin="planned",
@@ -131,7 +136,9 @@ def _journal_attempt(
     return attempt
 
 
-def test_local_close_refuses_batch_and_preserves_terminal_docker_rows(tmp_path: Path) -> None:
+def test_local_close_refuses_batch_and_preserves_terminal_docker_rows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     state = tmp_path / "campaign.db"
     con = ledger.open_ledger(str(state), suite=SUITE)
     batch = _journal_attempt(con, case_id="batch-case", group="batch-group", executor="gcp-batch")
@@ -163,6 +170,25 @@ def test_local_close_refuses_batch_and_preserves_terminal_docker_rows(tmp_path: 
     )
     con.close()
 
+    running_containers = {running.job_name}
+
+    def command(argv: object) -> subprocess.CompletedProcess[str]:
+        tokens = cast(tuple[str, ...], argv)
+        assert tokens[:3] == ("docker", "ps", "--filter")
+        name = tokens[3].removeprefix("name=")
+        stdout = f"{name}\n" if name in running_containers else ""
+        return subprocess.CompletedProcess(tokens, 0, stdout, "")
+
+    monkeypatch.setattr(docker_executor, "_command", command)
+    with pytest.raises(ledger.CampaignError, match=running.job_name):
+        docker_executor.cmd_local_close(
+            cast(
+                argparse.Namespace,
+                SimpleNamespace(state=str(state), group="docker-group", reason="host crashed"),
+            )
+        )
+    running_containers.clear()
+
     docker_executor.cmd_local_close(
         cast(
             argparse.Namespace,
@@ -181,4 +207,41 @@ def test_local_close_refuses_batch_and_preserves_terminal_docker_rows(tmp_path: 
         "SUCCEEDED",
         "original detail",
     )
+    con.close()
+
+
+def test_local_close_refuses_to_fail_a_running_row_with_complete_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state = tmp_path / "campaign.db"
+    result = tmp_path / "results" / "attempt"
+    result.mkdir(parents=True)
+    (result / "result.json").write_text("{}")
+    con = ledger.open_ledger(str(state), suite=SUITE)
+    attempt = _journal_attempt(
+        con,
+        case_id="complete-case",
+        group="docker-group",
+        executor="docker",
+        result_prefix=str(result),
+    )
+    ledger.set_state(con, attempt.attempt_id, "RUNNING")
+    con.close()
+    monkeypatch.setattr(
+        docker_executor,
+        "_command",
+        lambda argv: subprocess.CompletedProcess(argv, 0, "", ""),
+    )
+
+    with pytest.raises(ledger.CampaignError, match="evidence is complete"):
+        docker_executor.cmd_local_close(
+            cast(
+                argparse.Namespace,
+                SimpleNamespace(state=str(state), group="docker-group", reason="host crashed"),
+            )
+        )
+
+    con = ledger.open_ledger(str(state), readonly=True)
+    row = ledger.attempt_rows(con, group_id="docker-group")[0]
+    assert row["state"] == "RUNNING"
     con.close()

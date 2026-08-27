@@ -64,12 +64,11 @@ def test_source_anchor_lines_are_coerced_from_canonical_json(tmp_path: Path) -> 
     assert anchors[0].lines == "7"
 
 
-def test_gcp_worker_can_manage_evidence_objects() -> None:
+def test_gcp_workers_have_exactly_the_same_evidence_object_access() -> None:
     module = REPO / "infra/terraform/modules/gcp/s3-listing-study"
     worker = (module / "worker.tf").read_text()
-    assert re.search(
-        r'resource "google_storage_bucket_iam_member" "worker_write" \{.*?'
-        r'role\s*=\s*"roles/storage\.objectAdmin"',
-        worker,
-        re.DOTALL,
-    )
+    authenticated = (module / "aws-credentials.tf").read_text()
+    storage_role_pattern = r'"(roles/storage\.[^"]+)"'
+    assert set(re.findall(storage_role_pattern, worker)) == set(
+        re.findall(storage_role_pattern, authenticated)
+    ) == {"roles/storage.objectAdmin"}
