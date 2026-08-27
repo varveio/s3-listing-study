@@ -24,6 +24,7 @@ from google.cloud import batch_v1
 from benchmark import adapters, batch_client, campaign, gcs, identity, ledger, measure, report
 from benchmark import plan as bench
 from benchmark.contract import CREDENTIAL_ENV_VAR, TOOLBOX_TOOLS
+from benchmark.drivers import gcp_batch
 from benchmark.plan import Case, Plan
 from benchmark.runtime.command_adapter import HEAP_PERCENT
 
@@ -72,7 +73,7 @@ def image_set(tmp_path: Path, document: dict[str, object] | None = None) -> camp
     return campaign.load_image_set(path, set())
 
 
-def options(**overrides: object) -> campaign.BatchOptions:
+def options(**overrides: object) -> gcp_batch.BatchOptions:
     values: dict[str, Any] = {
         "anonymous_worker_sa": "anon@example.test",
         "authenticated_worker_sa": "auth@example.test",
@@ -85,7 +86,7 @@ def options(**overrides: object) -> campaign.BatchOptions:
         "aws_credential_secret": AUTH_SECRET,
     }
     values.update(overrides)
-    return campaign.BatchOptions(**values)
+    return gcp_batch.BatchOptions(**values)
 
 
 def loaded_plan() -> Plan:
@@ -251,7 +252,7 @@ def test_replay_case_slot_attempt_and_request_keep_one_canonical_document(
         "--volume=/mnt/stateful_partition/attempt:/tmp/attempt"
     )
     uncapped = replace(attempt, container_memory_gb=None)
-    uncapped_request = campaign.render_batch_job(
+    uncapped_request = gcp_batch.render_batch_job(
         uncapped, images.image_for(case.tool), suite=SUITE, options=launch.options
     )
     uncapped_subject = uncapped_request["taskGroups"][0]["taskSpec"]["runnables"][-1]
@@ -263,7 +264,7 @@ def test_replay_case_slot_attempt_and_request_keep_one_canonical_document(
     assert attempt.secret_resource is None
     assert "environment" not in subject
     signed = replace(attempt, auth_role="public-read", secret_resource=AUTH_SECRET)
-    signed_request = campaign.render_batch_job(
+    signed_request = gcp_batch.render_batch_job(
         signed, images.image_for(case.tool), suite=SUITE, options=launch.options
     )
     signed_task = signed_request["taskGroups"][0]["taskSpec"]
@@ -273,15 +274,15 @@ def test_replay_case_slot_attempt_and_request_keep_one_canonical_document(
     assert signed_subject["environment"] == {"secretVariables": {CREDENTIAL_ENV_VAR: AUTH_SECRET}}
     assert task["computeResource"] == {"cpuMilli": "4000", "memoryMib": "8192"}
     assert task["maxRunDuration"] == "1505s"
-    retried = campaign.retry_request_document(
+    retried = gcp_batch.retry_request_document(
         request,
         job_name="retry-job",
         result_prefix="gs://results/retry/",
         attempt_id="swath.retry.s2",
     )
     assert retried["taskGroups"][0]["taskSpec"]["runnables"][2] == server
-    assert campaign.request_argument(retried, "--attempt-id") == "swath.retry.s2"
-    assert campaign.request_argument(retried, "--destination") == "gs://results/retry/"
+    assert gcp_batch.request_argument(retried, "--attempt-id") == "swath.retry.s2"
+    assert gcp_batch.request_argument(retried, "--destination") == "gs://results/retry/"
     assert json.loads(row["case_inputs"])["replay"] == case.replay.as_dict()
 
 
@@ -291,7 +292,7 @@ def test_runner_canary_disables_artificial_latency(tmp_path: Path) -> None:
     images = image_set(tmp_path)
     launch = context(plan, case, images)
     attempt = campaign.planned_attempt(case, launch)[2](1)[0]
-    request = campaign.render_batch_job(
+    request = gcp_batch.render_batch_job(
         attempt, images.image_for(case.tool), suite=SUITE, options=launch.options
     )
     runnables = request["taskGroups"][0]["taskSpec"]["runnables"]
@@ -314,7 +315,7 @@ def test_uri_fixture_is_staged_before_the_server_and_never_put_in_its_image(
     case = replace(base, replay=replace(base.replay, backend=backend))
     images = image_set(tmp_path)
     attempt = campaign.planned_attempt(case, context(plan, case, images))[2](1)[0]
-    request = campaign.render_batch_job(
+    request = gcp_batch.render_batch_job(
         attempt,
         images.image_for(case.tool),
         suite=SUITE,
@@ -375,7 +376,7 @@ def test_renderer_refuses_malformed_frozen_replay_allocation(
     malformed = replace(attempt, replay=json.dumps(replay, sort_keys=True, separators=(",", ":")))
 
     with pytest.raises(ledger.CampaignError, match="malformed resolved replay"):
-        campaign.render_batch_job(
+        gcp_batch.render_batch_job(
             malformed,
             images.image_for(case.tool),
             suite=SUITE,
@@ -820,9 +821,9 @@ def test_retry_leaves_other_groups_and_rate_cases_alone(
         retried.append(row["attempt_id"])
         return mine
 
-    monkeypatch.setattr(campaign, "retry_attempt", observe)
-    monkeypatch.setattr(campaign, "load_image_set", lambda *a, **k: images)
-    campaign.cmd_retry(
+    monkeypatch.setattr(gcp_batch, "retry_attempt", observe)
+    monkeypatch.setattr(gcp_batch, "load_image_set", lambda *a, **k: images)
+    gcp_batch.cmd_retry(
         cast(
             argparse.Namespace,
             SimpleNamespace(
@@ -858,9 +859,9 @@ def test_one_rows_retry_refusal_does_not_abort_the_sweep(
         retried.append(row["attempt_id"])
         return preempted
 
-    monkeypatch.setattr(campaign, "retry_attempt", observe)
-    monkeypatch.setattr(campaign, "load_image_set", lambda *a, **k: images)
-    campaign.cmd_retry(
+    monkeypatch.setattr(gcp_batch, "retry_attempt", observe)
+    monkeypatch.setattr(gcp_batch, "load_image_set", lambda *a, **k: images)
+    gcp_batch.cmd_retry(
         cast(
             argparse.Namespace,
             SimpleNamespace(
@@ -902,9 +903,9 @@ def test_retry_uses_only_a_cases_latest_attempt_and_never_duplicates_a_live_retr
         retried.append(row["attempt_id"])
         return latest_failed
 
-    monkeypatch.setattr(campaign, "retry_attempt", observe)
-    monkeypatch.setattr(campaign, "load_image_set", lambda *a, **k: images)
-    campaign.cmd_retry(
+    monkeypatch.setattr(gcp_batch, "retry_attempt", observe)
+    monkeypatch.setattr(gcp_batch, "load_image_set", lambda *a, **k: images)
+    gcp_batch.cmd_retry(
         cast(
             argparse.Namespace,
             SimpleNamespace(
@@ -948,7 +949,7 @@ def test_a_retry_that_would_change_the_frozen_request_is_refused(
     tools = cast(dict[str, dict[str, str]], moved["tools"])
     tools[case.tool]["tool_version"] = "2.0"
     with pytest.raises(ledger.CampaignError, match="new campaign, not a retry"):
-        campaign.retry_attempt(
+        gcp_batch.retry_attempt(
             con,
             row,
             suite=SUITE,
@@ -972,8 +973,8 @@ def test_a_retry_replays_the_deadline_its_ledger_was_frozen_under(
     ledger.set_state(con, attempt.attempt_id, "FAILED", "settled failure")
     stored = "SELECT request_json FROM attempts WHERE attempt_id=?"
     frozen = json.loads(con.execute(stored, (attempt.attempt_id,)).fetchone()[0])
-    assert campaign.request_max_run_duration(frozen) == (
-        f"{attempt.timeout_s + int(options().term_grace) + campaign.DEADLINE_SLACK_S}s"
+    assert gcp_batch.request_max_run_duration(frozen) == (
+        f"{attempt.timeout_s + int(options().term_grace) + gcp_batch.DEADLINE_SLACK_S}s"
     )
 
     # The same row as an older, narrower slack would have frozen it.
@@ -983,11 +984,11 @@ def test_a_retry_replays_the_deadline_its_ledger_was_frozen_under(
         (json.dumps(frozen), attempt.attempt_id),
     )
     row = con.execute("SELECT * FROM attempts WHERE attempt_id=?", (attempt.attempt_id,)).fetchone()
-    retried = campaign.retry_attempt(
+    retried = gcp_batch.retry_attempt(
         con, row, suite=SUITE, image_set=images, results_bucket="results", options=options()
     )
     replayed = json.loads(con.execute(stored, (retried.attempt_id,)).fetchone()[0])
-    assert campaign.request_max_run_duration(replayed) == "999s"
+    assert gcp_batch.request_max_run_duration(replayed) == "999s"
 
 
 def test_accept_failure_records_which_failure_was_accepted(
@@ -998,7 +999,7 @@ def test_accept_failure_records_which_failure_was_accepted(
     ledger.set_state(con, attempt.attempt_id, "NOT_CREATED", "Forbidden: no quota")
     con.close()
 
-    campaign.cmd_accept_failure(
+    gcp_batch.cmd_accept_failure(
         cast(
             argparse.Namespace,
             SimpleNamespace(
@@ -1243,10 +1244,10 @@ def test_a_settled_preparation_resolves_the_measurement_that_waited_on_it(
             "SELECT request_json FROM attempts WHERE attempt_id=?", (hinted.attempt_id,)
         ).fetchone()["request_json"]
     )
-    assert campaign.request_argument(request, "--input-artifact") == (
+    assert gcp_batch.request_argument(request, "--input-artifact") == (
         f"{listing.result_prefix}native/keyspace.ks"
     )
-    assert campaign.request_argument(request, "--input-artifact-sha256") == keyspace
+    assert gcp_batch.request_argument(request, "--input-artifact-sha256") == keyspace
 
 
 def test_an_artifact_is_validated_against_the_mode_that_produced_it(
@@ -1464,7 +1465,7 @@ def test_a_slot_whose_attempt_was_never_journaled_keeps_no_claim(
     def unrenderable(*args: object, **kwargs: object) -> dict[str, object]:
         raise ledger.CampaignError("the request cannot be rendered")
 
-    monkeypatch.setattr(campaign, "render_batch_job", unrenderable)
+    monkeypatch.setattr(gcp_batch, "render_batch_job", unrenderable)
     ledger.set_state(con, listing.attempt_id, "SUCCEEDED")
     campaign.settle_dependents(con, listing, "SUCCEEDED", suite=SUITE)
 
@@ -1592,7 +1593,7 @@ def test_a_retry_pays_the_slot_its_failed_producer_left_owed(
     campaign.settle_dependents(con, ledger.Attempt.from_row(failed), "FAILED", suite=SUITE)
     assert ledger.pending_rows(con)[0]["state"] == "BLOCKED"
 
-    replacement = campaign.retry_attempt(
+    replacement = gcp_batch.retry_attempt(
         con,
         failed,
         suite=SUITE,
@@ -1790,14 +1791,14 @@ def test_accepting_an_unrelated_failure_leaves_an_owed_slot_owed(
 
     unrelated = attempt_row(con, "s3api-v2-text", tool="aws-cli")
     ledger.set_state(con, unrelated["attempt_id"], "FAILED", "preempted")
-    campaign.cmd_accept_failure(
+    gcp_batch.cmd_accept_failure(
         argparse.Namespace(state=state, attempt=unrelated["attempt_id"], slot=None)
     )
     assert [slot["state"] for slot in ledger.pending_rows(con)] == ["BLOCKED", "BLOCKED"]
 
     # And the deliberate step is available: the producer SUCCEEDED, so there is
     # no failure to accept and the slot is named directly.
-    campaign.cmd_accept_failure(
+    gcp_batch.cmd_accept_failure(
         argparse.Namespace(state=state, attempt=None, slot="g20260817-000000/1")
     )
     assert [slot["state"] for slot in ledger.pending_rows(con)] == ["ABANDONED", "BLOCKED"]
@@ -1811,11 +1812,11 @@ def test_abandoning_a_slot_something_could_still_pay_is_refused(
     con = hinted_launch(tmp_path, monkeypatch, body=SWEEP)
     state = str(tmp_path / "campaign.db")
     with pytest.raises(ledger.CampaignError, match="can still be paid"):
-        campaign.cmd_accept_failure(
+        gcp_batch.cmd_accept_failure(
             argparse.Namespace(state=state, attempt=None, slot="g20260817-000000/1")
         )
     with pytest.raises(ledger.CampaignError, match="no slot"):
-        campaign.cmd_accept_failure(
+        gcp_batch.cmd_accept_failure(
             argparse.Namespace(state=state, attempt=None, slot="g20260817-000000/9")
         )
     assert [slot["state"] for slot in ledger.pending_rows(con)] == ["BLOCKED", "BLOCKED"]
@@ -1887,13 +1888,13 @@ def test_a_slot_abandons_only_once_every_candidate_is_gone(
     state = str(tmp_path / "campaign.db")
     first, second = ledger.attempt_rows(con, case_id=attempt_row(con, "list")["case_id"])
     ledger.set_state(con, first["attempt_id"], "FAILED", "preempted")
-    campaign.cmd_accept_failure(
+    gcp_batch.cmd_accept_failure(
         argparse.Namespace(state=state, attempt=first["attempt_id"], slot=None)
     )
     assert [slot["state"] for slot in ledger.pending_rows(con)] == ["BLOCKED", "BLOCKED"]
 
     ledger.set_state(con, second["attempt_id"], "FAILED", "preempted")
-    campaign.cmd_accept_failure(
+    gcp_batch.cmd_accept_failure(
         argparse.Namespace(state=state, attempt=second["attempt_id"], slot=None)
     )
     assert [slot["state"] for slot in ledger.pending_rows(con)] == ["ABANDONED", "ABANDONED"]

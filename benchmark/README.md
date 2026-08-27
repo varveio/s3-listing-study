@@ -44,9 +44,9 @@ facts under `tools/<tool>/build/`.
   the toolbox image contains:
   - `build_image.py` validates recipe, artifact, executable, and adapter
     identities before building the toolbox.
-  - `campaign.py` is the GCP Batch controller and records attempts in
-    `campaign.db`; `submit --executor docker` dispatches the current bounded
-    real-S3 experiment to the synchronous local runner.
+  - `campaign.py` records campaign intent and attempts in `campaign.db`;
+    `drivers/gcp_batch.py` owns GCP Batch rendering and lifecycle commands, while
+    `submit --executor docker` dispatches the current bounded real-S3 experiment.
   - `measure.py` runs exactly one selected subject and captures its raw outputs
     and metrics. It is the image entrypoint.
   - `verify.py` is the explicit real-S3 content-comparison path; replay is

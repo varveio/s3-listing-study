@@ -10,9 +10,9 @@ This is the page to read first. The three beside it are reference:
 
 ## The Batch controller and the local runner
 
-`campaign.py` is the Batch campaign controller. It owns the recoverable Batch
-submission, polling, retry, cancellation, prerequisite-slot resolution,
-artifact transport, and replay-sidecar lifecycles.
+`campaign.py` owns campaign planning, identity, slots, and launch bookkeeping.
+`drivers/gcp_batch.py` owns Batch request rendering, submission, polling, retry,
+cancellation, artifact transport, and replay-sidecar lifecycles.
 
 `docker_executor.py` is a bounded local session runner, not a second provider
 implementation below one campaign interface. `campaign.py submit --executor
