@@ -8,10 +8,10 @@
 !tools/*/adapter/*.py
 !tools/s3-fast-list/build/
 !tools/s3-fast-list/build/Cargo.lock
+!tools/s4cmd/build/
+!tools/s4cmd/build/requirements.txt
 !tools/s3p/build/
 !tools/s3p/build/package.json
 !tools/s3p/build/package-lock.json
-!tools/s4cmd/build/
-!tools/s4cmd/build/requirements.txt
 **/__pycache__
 **/*.pyc

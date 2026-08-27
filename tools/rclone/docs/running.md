@@ -184,11 +184,17 @@ s3-listing-study verify \
 ```
 
 Swap `--mode` for any mode declared by `../adapter/command.py`
-(`recursive-fastlist`, `recursive-walk`, `recursive-hierarchical`,
+(`recursive-fastlist`, `recursive-walk`, `recursive-walk-with-dirs`, `recursive-hierarchical`,
 `delimiter-shallow`, `listv1`, `lsf`) and adjust `--prefix`/`--scope-prefix`. The two
 capability probes use the `debug` and `walk-debug` modes and are **not** verified
 (they are `_capability/` request-shape probes). `../receipts/` and `../research/` are
 immutable inputs to this page; a rerun adds a new receipt rather than editing one.
+
+`recursive-walk-with-dirs` was added after the smoke corpus and therefore has no
+receipt in this section. It deliberately omits `--files-only`; its normalizer
+retains `IsDir` rows as slash-terminated keys with unknown metadata. A benchmark
+run must pass exact verification before the row can be interpreted as restoring
+real directory-marker objects rather than adding virtual directory entries.
 
 ## Deferred coverage
 

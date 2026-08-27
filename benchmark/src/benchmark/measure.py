@@ -29,7 +29,7 @@ import subprocess
 import sys
 import threading
 import time
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -40,6 +40,7 @@ from benchmark.contract import (
     AWS_CREDENTIAL_REQUIRED_ENV_KEYS,
     CREDENTIAL_ENV_VAR,
     TOOLBOX_TOOLS,
+    canonical_json,
     sha256_of,
 )
 from benchmark.runtime.command_adapter import (
@@ -71,7 +72,7 @@ other than exactly one file.
 """
 EXIT_REPLAY_EVIDENCE_FAILED = 14
 """The replay server did not provide the evidence protocol this attempt required."""
-REPLAY_ENDPOINT_URL = replay_runtime.REPLAY_ENDPOINT_URL
+REPLAY_ENDPOINT_URL = replay.REPLAY_ENDPOINT_URL
 REPLAY_HTTP_TIMEOUT_S = replay_runtime.REPLAY_HTTP_TIMEOUT_S
 SETUP_TIMEOUT_S = 300
 """The most an untimed setup exec gets, whatever the subject's deadline is.
@@ -429,7 +430,7 @@ def validate_image_metadata(args: argparse.Namespace) -> str | None:
             for tool, selected_tool in tools.items()
         },
     }
-    canonical = json.dumps(toolbox_projection, sort_keys=True, separators=(",", ":")).encode()
+    canonical = canonical_json(toolbox_projection).encode()
     computed_toolbox_sha256 = hashlib.sha256(canonical).hexdigest()
     if metadata.get("toolbox_manifest_sha256") != computed_toolbox_sha256:
         return "immutable image metadata has an invalid toolbox manifest hash"
@@ -1002,8 +1003,8 @@ def row_count_for(
     native_root: Path,
 ) -> tuple[int | None, str | None]:
     """Return ``(row_count, error)`` from the tool capsule after timing.
-    bounded native counting, simplified to "run the normalizer, count its
-    output lines" rather than importing each capsule's own count_rows().
+
+    Delegate bounded native counting to the capsule's own ``count_rows()``.
     """
     try:
         count = adapters.count_rows(adapter_dir, tool, mode, prefix, stdout_path, native_root)
@@ -1026,30 +1027,58 @@ def upload(
     destination: str,
     postprocessing_seconds: dict[str, float] | None = None,
 ) -> bool:
-    """Upload everything except result.json first, then result.json alone,
+    """Publish everything except result.json first, then result.json alone,
     last. A leaf whose upload dies between the two steps is left with
     artifacts but no marker -- exactly the shape verify.py treats as
     "incomplete", never as a passing (or failing) verdict.
+
+    A ``gs://`` destination uses the production uploader. An absolute local
+    destination gets the same create-only, marker-last contract so the Docker
+    executor does not need a second measurement worker.
     """
     artifacts = sorted(p for p in attempt_dir.iterdir() if p.name != "result.json")
     try:
         upload_started = time.monotonic()
-        for path in artifacts:
-            if path.is_dir():
-                gcs.upload_tree(path, destination.rstrip("/") + "/" + path.name, create_only=True)
-            else:
-                gcs.upload_file(path, destination.rstrip("/") + "/" + path.name, create_only=True)
+        local_destination: Path | None = None
+        if destination.startswith("gs://"):
+            for path in artifacts:
+                if path.is_dir():
+                    gcs.upload_tree(
+                        path, destination.rstrip("/") + "/" + path.name, create_only=True
+                    )
+                else:
+                    gcs.upload_file(
+                        path, destination.rstrip("/") + "/" + path.name, create_only=True
+                    )
+        else:
+            local_destination = Path(destination)
+            if not local_destination.is_absolute():
+                raise ValueError("local destination must be an absolute path")
+            local_destination.mkdir(parents=True, exist_ok=False)
+            for path in artifacts:
+                target = local_destination / path.name
+                if path.is_dir():
+                    shutil.copytree(path, target)
+                else:
+                    shutil.copy2(path, target)
         if postprocessing_seconds is not None:
             postprocessing_seconds["artifact_upload"] = time.monotonic() - upload_started
             result_path = attempt_dir / "result.json"
             result = json.loads(result_path.read_text())
             result["postprocessing_seconds"] = postprocessing_seconds
             write_result_atomic(result_path, result)
-        gcs.upload_file(
-            attempt_dir / "result.json", destination.rstrip("/") + "/result.json", create_only=True
-        )
+        if local_destination is None:
+            gcs.upload_file(
+                attempt_dir / "result.json",
+                destination.rstrip("/") + "/result.json",
+                create_only=True,
+            )
+        else:
+            pending = local_destination / ".result.json.pending"
+            shutil.copy2(attempt_dir / "result.json", pending)
+            os.replace(pending, local_destination / "result.json")
     except Exception as exc:
-        print(f"measure: upload failed: {exc}", file=sys.stderr)
+        print(f"measure: publish failed: {exc}", file=sys.stderr)
         return False
     return True
 
@@ -1154,6 +1183,173 @@ def publish_pre_subject_failure(
     return exit_code if upload(attempt_dir, destination) else 1
 
 
+@dataclass(frozen=True)
+class ResolvedInputs:
+    credential_env: dict[str, str]
+    config: dict[str, object]
+    replay_config: replay.ReplayConfig | None
+    replay_document: dict[str, object] | None
+    minimal_evidence: bool
+    replay_evidence: dict[str, object] | None
+
+
+def _resolve_inputs(args: argparse.Namespace) -> ResolvedInputs:
+    try:
+        credential_env = resolve_credential_env(args.auth_role, os.environ)
+    except ValueError as exc:
+        raise ValueError(str(exc)) from exc
+
+    try:
+        config = json.loads(args.config)
+        if not isinstance(config, dict):
+            raise ValueError("--config must be a JSON object")
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise ValueError(f"--config is not valid JSON: {exc}") from exc
+
+    replay_config = parse_replay_config(args.endpoint_url, args.replay_config)
+    if replay_config is not None:
+        validate_replay_allocation(
+            replay_config,
+            vcpus=args.vcpus,
+            memory_gb=args.memory_gb,
+            container_memory_gb=args.container_memory_gb,
+        )
+        if args.purpose == "measurement" and replay_config.capacity_status != "calibrated":
+            raise ValueError("replay measurement is refused while capacity is uncalibrated")
+    replay_document = None if replay_config is None else replay_config.as_dict()
+    args.replay_document = replay_document
+    minimal_evidence = replay_document is not None and args.purpose == "diagnostic"
+    replay_evidence = replay_runtime.evidence() if replay_document is not None else None
+
+    if args.mode != config.get("mode"):
+        raise ValueError(
+            f"--mode {args.mode!r} is not the {config.get('mode')!r} its config "
+            "states; the config is what the case hashed"
+        )
+    return ResolvedInputs(
+        credential_env=credential_env,
+        config=config,
+        replay_config=replay_config,
+        replay_document=replay_document,
+        minimal_evidence=minimal_evidence,
+        replay_evidence=replay_evidence,
+    )
+
+
+def _replay_phase(
+    replay_evidence: dict[str, object] | None,
+    replay_config: replay.ReplayConfig | None,
+    attempt_destination: str,
+    publish_failure: Callable[..., int],
+) -> tuple[int | None, Callable[[], None]]:
+    """Start replay evidence collection and return its matching finalizer."""
+    if replay_evidence is None:
+        return None, lambda: None
+    assert replay_config is not None
+    readiness = replay_runtime.wait_for_replay()
+    replay_evidence["readiness"] = readiness
+    if readiness.get("state") != "ready":
+        errors = replay_evidence["errors"]
+        assert isinstance(errors, list)
+        errors.append(
+            {
+                "phase": "readiness",
+                "error": str(readiness.get("last_error") or "readiness deadline expired"),
+            }
+        )
+        return (
+            publish_failure(exit_code=EXIT_REPLAY_EVIDENCE_FAILED, setup=None, started_at=None),
+            lambda: None,
+        )
+    replay_evidence["before"] = replay_runtime.scrape_metrics(replay_evidence, "before")
+    if replay_evidence["before"] is None:
+        return (
+            publish_failure(exit_code=EXIT_REPLAY_EVIDENCE_FAILED, setup=None, started_at=None),
+            lambda: None,
+        )
+
+    sampler_stop = threading.Event()
+    sampler_thread = threading.Thread(
+        target=replay_runtime.sample_metrics,
+        args=(replay_evidence, sampler_stop, replay_config, attempt_destination),
+        name="replay-metrics",
+        daemon=True,
+    )
+    sampler_thread.start()
+
+    def finalize() -> None:
+        sampler_stop.set()
+        sampler_thread.join(REPLAY_HTTP_TIMEOUT_S + 1.0)
+        if sampler_thread.is_alive():
+            errors = replay_evidence["errors"]
+            assert isinstance(errors, list)
+            errors.append({"phase": "sample", "error": "metrics sampler did not stop"})
+        else:
+            replay_evidence["after"] = replay_runtime.scrape_metrics(replay_evidence, "after")
+
+    return None, finalize
+
+
+def _result_document(
+    args: argparse.Namespace,
+    config: Mapping[str, object],
+    attempt_destination: str,
+    *,
+    replay_evidence: Mapping[str, object] | None,
+    command: Sequence[str],
+    setup: Mapping[str, object] | None,
+    exit_code: int,
+    completion: int,
+    timed_out: bool,
+    execution: Mapping[str, object],
+    row_count: int | None,
+    row_count_error: str | None,
+    started_at: str,
+    finished_at: str,
+    minimal_evidence: bool,
+    postprocessing_seconds: Mapping[str, float],
+    product: Product | None,
+    product_error: str | None,
+    stdout_gz: Path | None,
+    stderr_gz: Path | None,
+    native_files: Mapping[str, str],
+    native_sizes: Mapping[str, int] | None,
+    artifacts_size_bytes: int,
+) -> dict[str, object]:
+    return {
+        **attempt_identity(args, config, attempt_destination),
+        "replay_evidence": replay_evidence,
+        "argv": list(command),
+        # The untimed pre-phase, when this mode declared one: what it ran, what
+        # it made, and how long it took — beside the timing and never inside it.
+        "setup": setup,
+        "exit_code": exit_code,
+        # The subject's exit and the worker's acceptance are different facts.
+        # This value is final before the marker exists, so a reader never sees a
+        # subject exit 0 in a marker the worker later rejects.
+        "worker_exit_code": completion,
+        "timed_out": timed_out,
+        "execution": execution,
+        "wall_seconds": execution["wall_seconds"],
+        "max_rss_kb": execution["max_rss_kb"],
+        "row_count": row_count,
+        "row_count_error": row_count_error,
+        "started_at": started_at,
+        "finished_at": finished_at,
+        "evidence_profile": "minimal-replay" if minimal_evidence else "full",
+        "postprocessing_seconds": postprocessing_seconds,
+        # What was measured, and which channel carried it. A subject that only
+        # prints has no stdout log at all: those bytes are the product.
+        "product": product_block(product, hash_content=not minimal_evidence),
+        "product_error": product_error,
+        "stdout": capture_block(stdout_gz, hash_content=not minimal_evidence),
+        "stderr": capture_block(stderr_gz, hash_content=not minimal_evidence),
+        "native_manifest": native_files,
+        "native_files": native_sizes,
+        "artifacts_size_bytes": artifacts_size_bytes,
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
 
@@ -1163,50 +1359,15 @@ def main(argv: list[str] | None = None) -> int:
     attempt_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        credential_env = resolve_credential_env(args.auth_role, os.environ)
+        resolved = _resolve_inputs(args)
     except ValueError as exc:
         print(f"measure: {exc}", file=sys.stderr)
         return 2
-
-    try:
-        config = json.loads(args.config)
-        if not isinstance(config, dict):
-            raise ValueError("--config must be a JSON object")
-    except (json.JSONDecodeError, ValueError) as exc:
-        print(f"measure: --config is not valid JSON: {exc}", file=sys.stderr)
-        return 2
-
-    try:
-        replay_config = parse_replay_config(args.endpoint_url, args.replay_config)
-        if replay_config is not None:
-            validate_replay_allocation(
-                replay_config,
-                vcpus=args.vcpus,
-                memory_gb=args.memory_gb,
-                container_memory_gb=args.container_memory_gb,
-            )
-            if args.purpose == "measurement" and replay_config.capacity_status != "calibrated":
-                raise ValueError("replay measurement is refused while capacity is uncalibrated")
-    except ValueError as exc:
-        print(f"measure: {exc}", file=sys.stderr)
-        return 2
-    replay_document = None if replay_config is None else replay_config.as_dict()
-    args.replay_document = replay_document
-    minimal_evidence = replay_document is not None and args.purpose == "diagnostic"
-    replay_evidence: dict[str, object] | None = None
-    if replay_document is not None:
-        replay_evidence = replay_runtime.evidence()
-
-    # The config is the authority on what ran: `--mode` is the same answer
-    # rendered twice into one request, and two answers that disagree are a
-    # controller bug rather than something to pick a winner from.
-    if args.mode != config.get("mode"):
-        print(
-            f"measure: --mode {args.mode!r} is not the {config.get('mode')!r} its config "
-            "states; the config is what the case hashed",
-            file=sys.stderr,
-        )
-        return 2
+    credential_env = resolved.credential_env
+    config = resolved.config
+    replay_config = resolved.replay_config
+    minimal_evidence = resolved.minimal_evidence
+    replay_evidence = resolved.replay_evidence
 
     metadata_error = validate_image_metadata(args)
     if metadata_error:
@@ -1243,6 +1404,20 @@ def main(argv: list[str] | None = None) -> int:
     # attempt from merging into the first.
     attempt_destination = args.destination.rstrip("/") + "/"
 
+    def publish_failure(
+        *, exit_code: int, setup: Mapping[str, object] | None, started_at: str | None
+    ) -> int:
+        return publish_pre_subject_failure(
+            args,
+            config=config,
+            attempt_dir=attempt_dir,
+            destination=attempt_destination,
+            exit_code=exit_code,
+            setup=setup,
+            started_at=started_at,
+            replay_evidence=replay_evidence,
+        )
+
     # An untimed pre-phase, before the subject argv exists: what it publishes is
     # what the subject consumes, so it runs here rather than as its own attempt.
     setup: dict[str, object] | None = None
@@ -1269,15 +1444,10 @@ def main(argv: list[str] | None = None) -> int:
             )
         except SetupFailed as exc:
             print(f"measure: {exc}", file=sys.stderr)
-            return publish_pre_subject_failure(
-                args,
-                config=config,
-                attempt_dir=attempt_dir,
-                destination=attempt_destination,
+            return publish_failure(
                 setup=exc.setup,
                 exit_code=exc.code,
                 started_at=setup_started_at,
-                replay_evidence=replay_evidence,
             )
 
     try:
@@ -1319,51 +1489,11 @@ def main(argv: list[str] | None = None) -> int:
     stdout_path = attempt_dir / "stdout.log"
     subject_stdout = product.path if product is not None and product.takes_stdout else stdout_path
 
-    sampler_stop: threading.Event | None = None
-    sampler_thread: threading.Thread | None = None
-    if replay_evidence is not None:
-        readiness = replay_runtime.wait_for_replay()
-        replay_evidence["readiness"] = readiness
-        if readiness.get("state") != "ready":
-            errors = replay_evidence["errors"]
-            assert isinstance(errors, list)
-            errors.append(
-                {
-                    "phase": "readiness",
-                    "error": str(readiness.get("last_error") or "readiness deadline expired"),
-                }
-            )
-            return publish_pre_subject_failure(
-                args,
-                config=config,
-                attempt_dir=attempt_dir,
-                destination=attempt_destination,
-                exit_code=EXIT_REPLAY_EVIDENCE_FAILED,
-                setup=None,
-                started_at=None,
-                replay_evidence=replay_evidence,
-            )
-        replay_evidence["before"] = replay_runtime.scrape_metrics(replay_evidence, "before")
-        if replay_evidence["before"] is None:
-            return publish_pre_subject_failure(
-                args,
-                config=config,
-                attempt_dir=attempt_dir,
-                destination=attempt_destination,
-                exit_code=EXIT_REPLAY_EVIDENCE_FAILED,
-                setup=None,
-                started_at=None,
-                replay_evidence=replay_evidence,
-            )
-
-        sampler_stop = threading.Event()
-        sampler_thread = threading.Thread(
-            target=replay_runtime.sample_metrics,
-            args=(replay_evidence, sampler_stop, replay_config, attempt_destination),
-            name="replay-metrics",
-            daemon=True,
-        )
-        sampler_thread.start()
+    replay_failure, finish_replay = _replay_phase(
+        replay_evidence, replay_config, attempt_destination, publish_failure
+    )
+    if replay_failure is not None:
+        return replay_failure
 
     started_at = datetime.now(UTC).isoformat()
     execution = run_tool(
@@ -1387,16 +1517,7 @@ def main(argv: list[str] | None = None) -> int:
     postprocessing_started = time.monotonic()
     postprocessing_seconds: dict[str, float] = {}
     phase_started = time.monotonic()
-    if replay_evidence is not None:
-        assert sampler_stop is not None and sampler_thread is not None
-        sampler_stop.set()
-        sampler_thread.join(REPLAY_HTTP_TIMEOUT_S + 1.0)
-        if sampler_thread.is_alive():
-            errors = replay_evidence["errors"]
-            assert isinstance(errors, list)
-            errors.append({"phase": "sample", "error": "metrics sampler did not stop"})
-        else:
-            replay_evidence["after"] = replay_runtime.scrape_metrics(replay_evidence, "after")
+    finish_replay()
     postprocessing_seconds["replay_evidence_finalize"] = time.monotonic() - phase_started
 
     if any(
@@ -1495,45 +1616,38 @@ def main(argv: list[str] | None = None) -> int:
     )
     replay_refusals: tuple[str, ...] = ()
     if replay_config is not None:
-        replay_refusals = replay.evidence_errors(
+        replay_refusals = replay.replay_refusals(
             replay_config, replay_evidence, purpose=args.purpose
         )
         if replay_refusals:
             completion = EXIT_REPLAY_EVIDENCE_FAILED
     postprocessing_seconds["pre_upload_total"] = time.monotonic() - postprocessing_started
 
-    result = {
-        **attempt_identity(args, config, attempt_destination),
-        "replay_evidence": replay_evidence,
-        "argv": list(command),
-        # The untimed pre-phase, when this mode declared one: what it ran, what
-        # it made, and how long it took — beside the timing and never inside it.
-        "setup": setup,
-        "exit_code": exit_code,
-        # The subject's exit and the worker's acceptance are different facts.
-        # This value is final before the marker exists, so a reader never sees a
-        # subject exit 0 in a marker the worker later rejects.
-        "worker_exit_code": completion,
-        "timed_out": timed_out,
-        "execution": execution,
-        "wall_seconds": execution["wall_seconds"],
-        "max_rss_kb": execution["max_rss_kb"],
-        "row_count": row_count,
-        "row_count_error": row_count_error,
-        "started_at": started_at,
-        "finished_at": finished_at,
-        "evidence_profile": "minimal-replay" if minimal_evidence else "full",
-        "postprocessing_seconds": postprocessing_seconds,
-        # What was measured, and which channel carried it. A subject that only
-        # prints has no stdout log at all: those bytes are the product.
-        "product": product_block(product, hash_content=not minimal_evidence),
-        "product_error": product_error,
-        "stdout": capture_block(stdout_gz, hash_content=not minimal_evidence),
-        "stderr": capture_block(stderr_gz, hash_content=not minimal_evidence),
-        "native_manifest": native_files,
-        "native_files": native_sizes,
-        "artifacts_size_bytes": artifacts_size_bytes,
-    }
+    result = _result_document(
+        args,
+        config,
+        attempt_destination,
+        replay_evidence=replay_evidence,
+        command=command,
+        setup=setup,
+        exit_code=exit_code,
+        completion=completion,
+        timed_out=timed_out,
+        execution=execution,
+        row_count=row_count,
+        row_count_error=row_count_error,
+        started_at=started_at,
+        finished_at=finished_at,
+        minimal_evidence=minimal_evidence,
+        postprocessing_seconds=postprocessing_seconds,
+        product=product,
+        product_error=product_error,
+        stdout_gz=stdout_gz,
+        stderr_gz=stderr_gz,
+        native_files=native_files,
+        native_sizes=native_sizes,
+        artifacts_size_bytes=artifacts_size_bytes,
+    )
     write_result_atomic(attempt_dir / "result.json", result)
     if not upload(attempt_dir, attempt_destination, postprocessing_seconds):
         return 1

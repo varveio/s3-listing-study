@@ -8,6 +8,22 @@ This is the page to read first. The three beside it are reference:
 [`model.md`](model.md) for the ledger, and
 [`capsule-contract.md`](capsule-contract.md) for what a capsule must declare.
 
+## The Batch controller and the local runner
+
+`campaign.py` owns campaign planning, identity, slots, and launch bookkeeping.
+`drivers/gcp_batch.py` owns Batch request rendering, submission, polling, retry,
+cancellation, artifact transport, and replay-sidecar lifecycles.
+
+`docker_executor.py` is a bounded local session runner, not a second provider
+implementation below one campaign interface. `campaign.py submit --executor
+docker` invokes it for a synchronous, serial session of independent, non-replay
+real-S3 cases, with evidence written to a local tree. The two paths share plan
+compilation, case identity primitives, the measurement worker, the ledger
+schema, result evidence, verification, and reporting. The local runner does not
+share or claim the Batch lifecycle features above. Replay, repeated, and
+dependent work runs on GCP Batch; those capabilities are outside the frozen
+local scope.
+
 ## Three places a fact can live
 
 Everything the harness knows about a run is in exactly one of three places, and
@@ -16,10 +32,10 @@ which one is not a matter of taste:
 | Place | Holds | Read by |
 | --- | --- | --- |
 | **The ledger** — one SQLite file | What was submitted, under what identity, where its evidence went, and how it settled | The controller, and anyone asking what happened |
-| **The object store** | The evidence itself: the listing, the logs, the measurement | `report` reads `result.json`; explicit real-S3 verification may read retained products |
+| **The evidence store** — GCS or an absolute local tree | The evidence itself: the listing, the logs, the measurement | `report` reads `result.json`; explicit real-S3 verification may read retained products |
 | **The subject's argv** | Everything about *how the tool was asked to list* | Only the tool |
 
-The boundaries are one-way. The ledger never holds evidence; the object store
+The boundaries are one-way. The ledger never holds evidence; the evidence store
 never holds controller state; the argv holds nothing the ledger cannot
 reconstruct, because the `config` blob that produced it is a column.
 
@@ -62,14 +78,14 @@ The exceptions are deliberate and each has a stated reason: a value whose
 *derivation rule may change* is stored, because history outlives the code that
 wrote it. `job_name` and `result_prefix` are stored for exactly that reason.
 
-## What the object store holds
+## What the evidence store holds
 
 Evidence, under a prefix computed from a row rather than discovered by listing.
 Two properties matter:
 
 - **Writes are create-only.** A deterministic prefix plus overwrite semantics
-  means a second execution of one attempt silently merges into the first. An
-  `ifGenerationMatch=0` precondition turns that into a loud failure.
+  means a second execution of one attempt silently merges into the first. GCS
+  uses `ifGenerationMatch=0`; filesystem publication requires a fresh leaf.
 - **The evidence names itself.** The row says where the evidence is; the
   evidence says which row it belongs to. Either direction alone fails quietly —
   a misfiled object under a correct-looking prefix reads as a valid measurement

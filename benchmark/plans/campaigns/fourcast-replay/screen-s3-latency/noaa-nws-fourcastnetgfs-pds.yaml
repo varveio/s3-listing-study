@@ -1,0 +1,77 @@
+# Broad representative-mode diagnostic over the 4,081,170-row FourCast fixture.
+# Fixed 85/35/37 ms deadlines approximate the typical per-shape latency we saw
+# from real S3 in us-east-1 when called from the us-east1-b runner. This is a
+# deterministic p50-like treatment, not a model of S3 tail latency or throttling.
+spec_version: 3
+
+bucket: noaa-nws-fourcastnetgfs-pds
+region: us-east-1
+auth_role: public-read
+
+replay:
+  capacity_status: uncalibrated
+  server_image_uri: us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:ace5350d99c217bf5919b795fc53ed955d1dc2fb6bef1eecf36e8a90e9732f07
+  fixture_uri: gs://s3-listing-study-results-29c02004/fixtures/noaa-nws-fourcastnetgfs-pds/1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4/part-00000.parquet
+  fixture_sha256: 1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4
+  serving_mode: sorted
+  latency_model:
+    deadlines_ms:
+      worker_page: 85
+      pivot_probe: 35
+      structure_probe: 37
+    scale: 1.0
+    jitter: none
+
+defaults:
+  reps: 1
+  timeout_s: 1800
+  vcpus: 16
+  memory_gb: 32
+  subject_vcpus: 6
+  container_memory_gb: 16
+  replay_vcpus: 8
+  replay_memory_gb: 8
+  replay_parquet_connections: 8
+  replay_max_concurrent_requests: 4096
+  replay_prefetch: true
+  replay_prefetch_max_windows: 256
+  replay_heap_percent: 75
+
+# Each tool gets its best-supported representative mode. Qualification pairs
+# remain where the prior evidence does not justify silently replacing a mode.
+tools:
+  aws-cli:
+    cases:
+      - {mode: s3api-v2-text, purpose: diagnostic}
+  minio-mc:
+    cases:
+      - {mode: recursive-json, purpose: diagnostic}
+  ps3:
+    cases:
+      - {mode: list, purpose: diagnostic}
+  rclone:
+    cases:
+      - {mode: recursive-hierarchical, purpose: diagnostic}
+      - {mode: recursive-walk, concurrency: 8, purpose: diagnostic}
+  s3-fast-list:
+    cases:
+      # The planner creates the plain listing as a digest-bound preparation;
+      # the representative timed row is the hinted listing.
+      - {mode: list-hinted, concurrency: 100, segments: 16, purpose: diagnostic}
+  s3kor:
+    cases:
+      - {mode: list, purpose: diagnostic}
+  s3p:
+    cases:
+      - {mode: ls, concurrency: 100, purpose: diagnostic}
+  s5cmd:
+    cases:
+      - {mode: recursive, purpose: diagnostic}
+  s7cmd:
+    cases:
+      - {mode: recursive-tsv, concurrency: 64, purpose: diagnostic}
+      - {mode: recursive-tsv-nosort, concurrency: 64, purpose: diagnostic}
+  swath:
+    cases:
+      - {mode: recursive-tsv, concurrency: 64, purpose: diagnostic}
+      - {mode: recursive-parquet, concurrency: 64, purpose: diagnostic}

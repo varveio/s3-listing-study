@@ -17,6 +17,10 @@ one emitting five fields, or a tool wins by emitting less.
 A real-S3 PASS means the subjects of a stratum AGREE: there is no sealed
 manifest, and agreement stands in for control over a corpus that grows
 underneath the study (`docs/identity.md` § *What identity cannot cover*).
+For the explicit small Docker canary check, every saved listing is instead
+compared with the saved AWS CLI canary. Agreement is still not independent
+ground truth, and a disagreement may be bucket movement, a tool, or its
+normalizer.
 Replay campaigns are row-count-only: this explicit content verifier refuses
 them without downloading or normalizing their retained raw products.
 
@@ -84,7 +88,7 @@ from benchmark.ledger import (
     STATE_FILENAME,
     TERMINAL_STATES,
     attempt_rows,
-    open_ledger,
+    ledger,
     pending_rows,
     producer_summary,
 )
@@ -155,16 +159,18 @@ def expected_result_binding(row: sqlite3.Row) -> dict[str, object]:
     }
 
 
-def result_binding_errors(expected: Mapping[str, object], result: dict[str, object]) -> list[str]:
+def result_binding_errors(
+    expected: Mapping[str, object], result: dict[str, object], *, purpose: str | None = None
+) -> list[str]:
     """Where result evidence disagrees with frozen intent or its marker contract."""
     errors = [
         name for name, value in expected.items() if name not in result or result.get(name) != value
     ]
-    errors.extend(result_semantic_errors(result))
+    errors.extend(result_semantic_errors(result, purpose=purpose))
     return errors
 
 
-def result_semantic_errors(result: dict[str, object]) -> list[str]:
+def result_semantic_errors(result: dict[str, object], *, purpose: str | None = None) -> list[str]:
     errors: list[str] = []
     exit_code = result.get("exit_code")
     worker_exit_code = result.get("worker_exit_code")
@@ -185,31 +191,62 @@ def result_semantic_errors(result: dict[str, object]) -> list[str]:
     if row_count_error is not None and not isinstance(row_count_error, str):
         errors.append("row_count_error")
     if execution is None:
-        replay_evidence = result.get("replay_evidence")
-        replay_refusal = (
-            isinstance(result.get("replay"), dict)
-            and isinstance(replay_evidence, dict)
-            and bool(replay_evidence.get("errors"))
-        )
-        if not isinstance(result.get("setup"), dict) and not replay_refusal:
-            errors.append("setup")
-        if exit_code == 0:
-            errors.append("exit_code")
-        errors.extend(
-            name
-            for name in (
-                "wall_seconds",
-                "max_rss_kb",
-                "row_count",
-                "row_count_error",
-                "product",
-                "product_error",
-            )
-            if result.get(name) is not None
-        )
+        errors.extend(_pre_subject_errors(result, exit_code=exit_code))
         return errors
+    errors.extend(
+        _execution_errors(
+            result,
+            execution,
+            exit_code=exit_code,
+            timed_out=timed_out,
+            row_count=row_count,
+            row_count_error=row_count_error,
+            purpose=purpose,
+        )
+    )
+    return errors
+
+
+def _pre_subject_errors(result: dict[str, object], *, exit_code: object) -> list[str]:
+    errors: list[str] = []
+    replay_evidence = result.get("replay_evidence")
+    replay_refusal = (
+        isinstance(result.get("replay"), dict)
+        and isinstance(replay_evidence, dict)
+        and bool(replay_evidence.get("errors"))
+    )
+    if not isinstance(result.get("setup"), dict) and not replay_refusal:
+        errors.append("setup")
+    if exit_code == 0:
+        errors.append("exit_code")
+    errors.extend(
+        name
+        for name in (
+            "wall_seconds",
+            "max_rss_kb",
+            "row_count",
+            "row_count_error",
+            "product",
+            "product_error",
+        )
+        if result.get(name) is not None
+    )
+    return errors
+
+
+def _execution_errors(
+    result: dict[str, object],
+    execution: object,
+    *,
+    exit_code: object,
+    timed_out: object,
+    row_count: object,
+    row_count_error: object,
+    purpose: str | None,
+) -> list[str]:
     if not isinstance(execution, dict):
-        return [*errors, "execution"]
+        return ["execution"]
+    errors: list[str] = []
     max_rss_kb = result.get("max_rss_kb")
     execution_rss = execution.get("max_rss_kb")
     if (
@@ -257,7 +294,12 @@ def result_semantic_errors(result: dict[str, object]) -> list[str]:
             ):
                 errors.append(f"execution.cgroup.{name}")
     errors.extend(result_capture_errors(result))
-    counted = exit_code == 0 and timed_out is False and result.get("product_error") is None
+    counted = (
+        purpose != "preparation"
+        and exit_code == 0
+        and timed_out is False
+        and result.get("product_error") is None
+    )
     if counted and row_count_error is None and row_count is None:
         errors.append("row_count")
     if not counted and row_count is not None:
@@ -382,14 +424,25 @@ class Prepared:
     fields: tuple[str, ...]
 
 
-def roster_for(con: sqlite3.Connection, group_id: str) -> Roster:
+def roster_for(
+    con: sqlite3.Connection, group_id: str, *, include_docker_canaries: bool = False
+) -> Roster:
     """Read the comparison population and replay refusal from recorded rows."""
-    attempts = tuple(Subject.from_row(row) for row in attempt_rows(con, group_id=group_id))
+    rows = tuple(attempt_rows(con, group_id=group_id))
+    attempts = tuple(Subject.from_row(row) for row in rows)
     replay_attempts = tuple(subject for subject in attempts if subject.replay is not None)
     subjects = tuple(
         subject
-        for subject in attempts
-        if subject.purpose == "measurement" and subject.replay is None
+        for row, subject in zip(rows, attempts, strict=True)
+        if row["replay"] is None
+        and (
+            row["purpose"] == "measurement"
+            or (
+                include_docker_canaries
+                and row["purpose"] == "canary"
+                and row["executor"] == "docker"
+            )
+        )
     )
     slots = pending_rows(con, group_id=group_id)
     return Roster(
@@ -705,7 +758,7 @@ def rate_subject_succeeded(subject: Subject) -> bool:
         result = json.loads(read_bytes_at(subject.result_prefix, "result.json"))
         if (
             not isinstance(result, dict)
-            or result_binding_errors(subject.result_binding, result)
+            or result_binding_errors(subject.result_binding, result, purpose=subject.purpose)
             or check_failed_subject(result) is not None
         ):
             return False
@@ -716,7 +769,7 @@ def rate_subject_succeeded(subject: Subject) -> bool:
             and not isinstance(row_count, bool)
             and (
                 subject.replay is None
-                or not replay_contract.evidence_errors(
+                or not replay_contract.replay_refusals(
                     subject.replay, result.get("replay_evidence"), purpose=subject.purpose
                 )
             )
@@ -806,18 +859,12 @@ def compare(reference: Prepared, actual: Prepared) -> dict[str, Any]:
         con.close()
 
 
-def verify_bucket(
-    subjects: Sequence[Subject],
-    *,
-    adapter_root: str,
-    work_dir: Path,
-    write_record: bool,
-) -> dict[str, Any]:
-    """One target bucket's strata, rate cases, and the gaps in between."""
+def _triage(
+    subjects: Sequence[Subject], *, adapter_root: str, work_dir: Path
+) -> tuple[list[Prepared], list[dict[str, object]], list[dict[str, object]]]:
     gaps: list[dict[str, object]] = []
     rates: list[dict[str, object]] = []
     prepared: list[Prepared] = []
-
     rate_cases: dict[str, list[Subject]] = {}
     for subject in subjects:
         if subject.statistic == "rate":
@@ -842,14 +889,56 @@ def verify_bucket(
             for subject in case_subjects
             if subject.state not in TERMINAL_STATES
         )
+    return prepared, gaps, rates
+
+
+def _strata_groups(
+    prepared: Sequence[Prepared], reference_tool: str | None
+) -> list[tuple[str, tuple[str, ...], list[Prepared]]]:
+    if reference_tool is None:
+        return [
+            (
+                key[0],
+                key[1],
+                sorted(
+                    (p for p in prepared if (p.product, p.fields) == key),
+                    key=lambda p: p.subject.attempt_id,
+                ),
+            )
+            for key in sorted({(p.product, p.fields) for p in prepared})
+        ]
+    references = [p for p in prepared if p.subject.tool == reference_tool]
+    if len(references) != 1:
+        return []
+    reference = references[0]
+    return [
+        (
+            reference.product,
+            reference.fields,
+            [
+                reference,
+                *sorted(
+                    (p for p in prepared if p is not reference),
+                    key=lambda p: p.subject.attempt_id,
+                ),
+            ],
+        )
+    ]
+
+
+def verify_bucket(
+    subjects: Sequence[Subject],
+    *,
+    adapter_root: str,
+    work_dir: Path,
+    write_record: bool,
+    reference_tool: str | None = None,
+) -> dict[str, Any]:
+    """One target bucket's strata, rate cases, and the gaps in between."""
+    prepared, gaps, rates = _triage(subjects, adapter_root=adapter_root, work_dir=work_dir)
 
     strata: list[dict[str, Any]] = []
-    for key in sorted({(p.product, p.fields) for p in prepared}):
-        product, fields = key
-        members = sorted(
-            (p for p in prepared if (p.product, p.fields) == key),
-            key=lambda p: p.subject.attempt_id,
-        )
+    for product, fields, members in _strata_groups(prepared, reference_tool):
         reference, others = members[0], members[1:]
         comparisons: list[dict[str, Any]] = []
         for actual in others:
@@ -858,7 +947,7 @@ def verify_bucket(
             except MalformedInputError as exc:
                 gaps.append(_gap(actual.subject, "malformed", str(exc)))
                 continue
-            record = {
+            record: dict[str, Any] = {
                 "attempt_id": actual.subject.attempt_id,
                 "tool": actual.subject.tool,
                 "mode": actual.subject.mode,
@@ -866,7 +955,7 @@ def verify_bucket(
                 "reference_tool": reference.subject.tool,
                 "reference_mode": reference.subject.mode,
                 "product": product,
-                "fields": list(fields),
+                "fields": list(actual.fields if reference_tool else fields),
                 "actual_result_sha256": actual.result_sha256,
                 "reference_result_sha256": reference.result_sha256,
                 "actual_tsv_sha256": sha256_of(actual.tsv),
@@ -874,6 +963,8 @@ def verify_bucket(
                 "verdict": verdict_for(diff),
                 "diff": diff,
             }
+            if reference_tool is not None:
+                record["reference_fields"] = list(reference.fields)
             if write_record:
                 write_verify_json(actual.subject.result_prefix, record)
             comparisons.append(record)
@@ -913,26 +1004,49 @@ def write_verify_json(result_prefix: str, record: Mapping[str, Any]) -> None:
         (Path(result_prefix) / "verify.json").write_bytes(data)
 
 
+def _refusal(group_id: str, message: str, replay_attempts: Sequence[str]) -> dict[str, object]:
+    return {
+        "group_id": group_id,
+        "complete": False,
+        "verdict": "INCOMPLETE",
+        "refusal": message,
+        "replay_attempts": list(replay_attempts),
+    }
+
+
 def verify_group(
     con: sqlite3.Connection,
     group_id: str,
     *,
     adapter_root: str,
     write_record: bool = True,
+    include_docker_canaries: bool = False,
 ) -> tuple[int, dict[str, Any]]:
     """Verify one group against its recorded roster. Returns (exit_code, report)."""
-    roster = roster_for(con, group_id)
+    roster = roster_for(con, group_id, include_docker_canaries=include_docker_canaries)
     if roster.replay_attempts:
-        report = {
-            "group_id": group_id,
-            "complete": False,
-            "verdict": "INCOMPLETE",
-            "refusal": (
+        report = _refusal(
+            group_id,
+            (
                 "replay groups are row-count-only and are reported from bound result.json; "
                 "content verification applies only to real-S3 groups"
             ),
-            "replay_attempts": [subject.attempt_id for subject in roster.replay_attempts],
-        }
+            [subject.attempt_id for subject in roster.replay_attempts],
+        )
+        return GROUP_EXIT_CODES["INCOMPLETE"], report
+    if include_docker_canaries and (
+        not roster.subjects
+        or any(subject.purpose != "canary" for subject in roster.subjects)
+        or sum(subject.tool == "aws-cli" for subject in roster.subjects) != 1
+    ):
+        report = _refusal(
+            group_id,
+            (
+                "the small Docker canary check requires a Docker-only canary group "
+                "containing exactly one aws-cli result"
+            ),
+            [],
+        )
         return GROUP_EXIT_CODES["INCOMPLETE"], report
     buckets: list[dict[str, Any]] = []
     with tempfile.TemporaryDirectory() as tmp:
@@ -944,6 +1058,7 @@ def verify_group(
                     adapter_root=adapter_root,
                     work_dir=work_dir,
                     write_record=write_record,
+                    reference_tool="aws-cli" if include_docker_canaries else None,
                 )
             )
         comparison_complete = (
@@ -964,7 +1079,13 @@ def verify_group(
             "blocked": list(roster.blocked),
             "abandoned": list(roster.abandoned),
             "subjects": len(roster.subjects),
+            "population": "Docker canary" if include_docker_canaries else "measurement",
             "buckets": buckets,
+            "caveat": (
+                "cross-tool agreement only; the real S3 bucket may change during the run"
+                if include_docker_canaries
+                else None
+            ),
         }
     return GROUP_EXIT_CODES[comparison_verdict], report
 
@@ -998,7 +1119,7 @@ def print_report(report: Mapping[str, Any]) -> None:
             print(f"  replay attempt: {attempt_id}")
         print("verdict=INCOMPLETE")
         return
-    print(f"group {report['group_id']}: {report['subjects']} measurement attempt(s)")
+    print(f"group {report['group_id']}: {report['subjects']} {report['population']} attempt(s)")
     for label in ("blocked", "abandoned"):
         for slot in report[label]:
             print(f"  {label}: {slot}")
@@ -1021,6 +1142,8 @@ def print_report(report: Mapping[str, Any]) -> None:
             )
         for gap in bucket["gaps"]:
             print(f"    gap {gap['attempt_id']} [{gap['reason']}]: {gap['detail']}")
+    if report.get("caveat"):
+        print(f"  note: {report['caveat']}")
     print(f"verdict={report['verdict']}")
 
 
@@ -1038,6 +1161,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--group", required=True, help="The group to verify; verify is one group.")
     parser.add_argument("--adapter-root", default=DEFAULT_ADAPTER_ROOT)
     parser.add_argument(
+        "--include-docker-canaries",
+        action="store_true",
+        help="compare saved Docker canary listings to the AWS CLI canary",
+    )
+    parser.add_argument(
         "--no-write",
         action="store_true",
         help="Compare without writing verify.json back under each attempt's prefix.",
@@ -1054,13 +1182,14 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return EXIT_NORMALIZE_FAILED
-    con = open_ledger(args.state, readonly=True)
-    try:
+    with ledger(args.state, readonly=True) as con:
         exit_code, report = verify_group(
-            con, args.group, adapter_root=args.adapter_root, write_record=not args.no_write
+            con,
+            args.group,
+            adapter_root=args.adapter_root,
+            write_record=not args.no_write,
+            include_docker_canaries=args.include_docker_canaries,
         )
-    finally:
-        con.close()
     print_report(report)
     return exit_code
 

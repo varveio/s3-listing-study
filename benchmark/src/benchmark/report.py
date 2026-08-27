@@ -46,7 +46,7 @@ from benchmark.ledger import (
     STATE_FILENAME,
     TERMINAL_STATES,
     attempt_rows,
-    open_ledger,
+    ledger,
     pending_rows,
     producer_summary,
     slot_owed_reason,
@@ -205,16 +205,15 @@ def row_for(row: sqlite3.Row, *, adapter_root: str) -> dict[str, Any]:
         result_prefix=row["result_prefix"],
     ):
         return {**base, "evidence_state": "IDENTITY_MISMATCH"}
-    if result_binding_errors(expected_result_binding(row), result):
+    if result_binding_errors(expected_result_binding(row), result, purpose=str(row["purpose"])):
         return {**base, "evidence_state": "RESULT_MISMATCH"}
     execution = result.get("execution")
     replay_evidence = result.get("replay_evidence")
     replay_state = "-"
     if row["replay"] is not None:
         try:
-            replay_config = replay_contract.parse_document(row["replay"])
-            replay_refusals = replay_contract.evidence_errors(
-                replay_config, replay_evidence, purpose=str(row["purpose"])
+            replay_refusals = replay_contract.replay_refusals(
+                row["replay"], replay_evidence, purpose=str(row["purpose"])
             )
         except replay_contract.ReplayError:
             replay_refusals = ("recorded replay document is malformed",)
@@ -450,16 +449,13 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
-    con = open_ledger(args.state, readonly=True)
-    try:
+    with ledger(args.state, readonly=True) as con:
         rows = report_rows(attempt_rows(con, group_id=args.group), adapter_root=args.adapter_root)
         blocked = [
             slot_note(con, slot)
             for slot in pending_rows(con, group_id=args.group)
             if slot["state"] == "BLOCKED"
         ]
-    finally:
-        con.close()
 
     print(render_markdown(rows, blocked=blocked))
     return report_exit_code(rows, blocked=blocked)

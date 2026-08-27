@@ -44,8 +44,9 @@ An unspecified encoding will be re-derived differently by the next reader, so:
 CASE_HASH_V2 = b"s3-listing-study-case-v2\0"
 
 
-def case_hash(environment: dict, config: dict, tool_slice: str, platform: str,
-              replay: dict | None = None) -> str:
+def case_hash(
+    environment: dict, config: dict, tool_slice: str, platform: str, replay: dict | None = None
+) -> str:
     inputs = {
         "environment": environment,  # the table above, absent keys omitted
         "config": config,  # the capsule's blob, as an object
@@ -161,8 +162,8 @@ Two things follow:
 | `image_uri`, `image_set_sha256` | You need to know exactly what ran and be able to reproduce it, but the slices identify it. Two attempts of one case may have run on different images, and the row says which. |
 | `produced_by` | Which attempt made the artifact a case consumed. The artifact's content digest is what identifies it; *which run* produced those bytes is a debugging question. |
 | `signed`, `visible_memory_gb` | Derived from `auth_role` and the ceiling, both already hashed. A derived value is not a second input. |
-| `heap_percent` | A methodology constant nine of eleven subjects cannot feel. Hashing it globally would re-identify every Go, Rust and Python case when a share they ignore is changed, which is the law — *a field either changes the identity or it is not an input* — read backwards. It enters identity exactly where it changes the measurement: a managed-runtime capsule declares `heap_percent` as a `Fixed` axis carrying the constant, and the loader merges it into that capsule's `config` before hashing, like any declared value. See [`capsule-contract.md`](capsule-contract.md) § *The ceiling, and the share of it*. |
-| `executor` | One executor exists. Recorded so a second one is distinguishable when it arrives; hashed then, not before. |
+| `heap_percent` | A methodology constant most subjects cannot feel. Hashing it globally would re-identify every Go, Rust and Python case when a share they ignore is changed, which is the law — *a field either changes the identity or it is not an input* — read backwards. It enters identity exactly where it changes the measurement: a managed-runtime capsule declares `heap_percent` as a `Fixed` axis carrying the constant, and the loader merges it into that capsule's `config` before hashing, like any declared value. See [`capsule-contract.md`](capsule-contract.md) § *The ceiling, and the share of it*. |
+| `executor` | Recorded on every attempt, but not hashed. Docker and Batch attempts of one plan row are nevertheless different cases: the local `docker-<arch>-<sha12 of hardware facts>` machine-family label is hashed into the environment, so their case hashes occupy disjoint strata. Attempts are never pooled across executors. |
 
 `network` and `subnetwork` are arguable — an egress path could matter — but they
 follow from the executor's project and location, so they stay in `executor_env`
@@ -234,9 +235,9 @@ obviously right within one launch, explicit across launches.
 
 ## The tool and platform slices
 
-The toolbox is one image holding all eleven tools, so its digest is the wrong
+The toolbox is one image holding all ten active tools, so its digest is the wrong
 granularity: bump rclone, rebuild, and every tool's hash would change — new
-prefixes and lost comparability for ten tools that did not change.
+prefixes and lost comparability for nine tools that did not change.
 
 Two digests carry that instead. **Both are defined over stage closures, not
 stage bodies**, because the pinned base of a stage is part of what ran:
@@ -252,13 +253,14 @@ stage bodies**, because the pinned base of a stage is part of what ran:
 The closure requirement is load-bearing, and the obvious implementation misses
 it. Capturing a stage body *after* its `FROM` line would leave three externally
 pinned bases outside both slices: `rust@sha256:cf9dd0…` (s3-fast-list),
-`node@sha256:2cf067cf…` (s3p), and `eclipse-temurin@sha256:2f1da100…`, which
-reaches swath through a second stage, `swath_jre`. A JRE bump would then change
-nothing about swath's identity, which is the unrepairable direction of error.
+`node@sha256:2cf067cf…` (s3p), and
+`ghcr.io/varveio/swath@sha256:a13adef0…`, which is the direct base of the single
+`swath_install` stage. A Swath image bump would then change nothing about
+swath's identity, which is the unrepairable direction of error.
 
 **Attribution is what keeps the roster additive.** Hash the final stage whole
-and every tool's install line lands in the platform, so adding a twelfth tool
-re-identifies all eleven. With per-tool lines attributed to their own slices,
+and every tool's install line lands in the platform, so adding an eleventh tool
+re-identifies all ten. With per-tool lines attributed to their own slices,
 adding a tool leaves the platform digest and every existing slice
 byte-identical.
 
@@ -273,9 +275,10 @@ Three rules, and a refusal when they do not cover the file.
 **Build stages resolve by closure, not by table.** `TOOL_STAGES` names one stage
 per tool; the slice is that stage plus every stage reachable from it by `FROM`,
 including the `FROM` lines themselves. Following the edge is what picks up
-`swath_jre` without anyone remembering to list it. A stage reachable from more
-than one tool — `runtime_base`, which nine of them build on — belongs to the
-platform, because a change there really does affect all of them.
+the `rust` and `node` bases, while including the selected stage's own `FROM`
+line picks up Swath's digest-pinned image. A stage reachable from more than one
+tool — `runtime_base`, which nine of them build on — belongs to the platform,
+because a change there really does affect all of them.
 
 **In the final stage, `COPY --from=<stage>` attributes itself.** The stage names
 the tool. That covers most of the final stage mechanically, with nothing to keep
@@ -312,12 +315,17 @@ outside the manifest — is exactly the edit that could otherwise change the
 subject's behaviour without changing anything the controller verifies. The tool
 slice closes that.
 
+## Executor strata
+
+Docker and Batch attempts of one plan row are not equivalent cases and are
+never pooled. The executor name itself is not hashed. The distinction comes
+from the local machine-family label,
+`docker-<arch>-<sha12 of hardware facts>`, which is hashed into the case
+environment and therefore gives the Docker attempt a different case identity
+and stratum from the Batch attempt.
+
 ## Open questions
 
-- **The `executor` vocabulary.** One executor exists, recorded on every row as
-  `gcp-batch`. What names exist beyond it, and how a name resolves to the code
-  that renders and submits a job, becomes an identity question — the column is
-  hashed then, not before — the day a second one arrives.
 - **Where the role table lives.** `auth_role` → service account + secret version
   is deployment configuration, not plan content. It is currently
   `--anonymous-worker-sa`, `--authenticated-worker-sa`, and `--secret-resource`

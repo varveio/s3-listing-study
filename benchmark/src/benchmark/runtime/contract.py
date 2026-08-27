@@ -57,7 +57,6 @@ deliberate.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import IO
 
@@ -303,14 +302,3 @@ def parse_line(line: bytes, *, line_number: int | None = None) -> Record:
     except ContractViolation as exc:
         exc.line_number = line_number
         raise
-
-
-def read_records(stream: IO[bytes]) -> Iterator[Record]:
-    """Parse a contract-v2 stream, one record per line.
-
-    A final record without a trailing newline counts — undercounting it is how a
-    duplicate slips past a completeness check.
-    """
-    for line_number, raw in enumerate(stream, start=1):
-        line = raw[: -len(RECORD_SEPARATOR)] if raw.endswith(RECORD_SEPARATOR) else raw
-        yield parse_line(line, line_number=line_number)

@@ -69,9 +69,10 @@ MODES = {
         artifacts=TSV,
         product_artifact=LISTING,
     ),
-    # The one mode that reaches `--no-sort`: the Aggregator streams, so records
-    # arrive in listing order (lexicographic within one op, interleaved across
-    # parallel ops) and RSS stays near-constant instead of growing with the Vec.
+    # The full-fidelity mode that reaches `--no-sort`: the Aggregator streams,
+    # so records arrive in listing order (lexicographic within one op,
+    # interleaved across parallel ops) and RSS stays near-constant instead of
+    # growing with the Vec.
     "recursive-tsv-nosort": Mode(
         product="text",
         fields=ALL_FIELDS,
@@ -94,6 +95,16 @@ MODES = {
         product_artifact=LISTING,
     ),
     "recursive-one": Mode(
+        product="text",
+        fields=KEY_FIELDS,
+        axes=PARALLEL,
+        artifacts=TEXT,
+        product_artifact=LISTING,
+    ),
+    # The cheapest native enumeration product with the same streaming memory
+    # behavior as recursive-tsv-nosort. Keep the sorted `recursive-one`
+    # vocabulary separate: output shape alone does not make its buffering inert.
+    "recursive-one-nosort": Mode(
         product="text",
         fields=KEY_FIELDS,
         axes=PARALLEL,
@@ -197,6 +208,16 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
         "recursive-aligned": ("ls", "-r", *obs, *parallel, *anonymous, target),
         "recursive-json": ("ls", "-r", *obs, "--json", *parallel, *anonymous, target),
         "recursive-one": ("ls", "-r", *obs, "-1", *parallel, *anonymous, target),
+        "recursive-one-nosort": (
+            "ls",
+            "-r",
+            *obs,
+            "--no-sort",
+            "-1",
+            *parallel,
+            *anonymous,
+            target,
+        ),
         "all-versions": ("ls", "-r", *obs, "--all-versions", *tsv, *parallel, *anonymous, target),
         "max-depth": (
             "ls",

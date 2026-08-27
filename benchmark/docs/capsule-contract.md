@@ -32,6 +32,13 @@ input. If no, the capsule owns it and the harness forwards it without looking.
 | mode, concurrency, page size, output flags | Nothing — forwarded, never read | capsule |
 | managed-runtime heap flags | Nothing — the capsule renders the share into whatever its runtime reads | capsule |
 
+The executor label is the exception to the shorthand “harness-owned means case
+input.” It selects provider behavior, but the label is not itself a physical
+treatment. Case identity carries the resolved measurement environment; the
+campaign/session record separately freezes executor lifecycle, host state, and
+schedule. Matching case hashes therefore do not authorize pooling attempts
+across executors.
+
 `mode` looks like an exception and is not one. Verification does need it —
 `verify` normalizes both sides through a capsule's `normalize.py` — but it
 arrives there as a **pass-through**: `adapters.normalize_to_path(adapter_dir,
@@ -365,7 +372,12 @@ Four constraints:
 - **The prerequisite does not inherit the consumer's config.** It takes whatever
   config the capsule says it takes, which is what lets one preparation serve a
   whole sweep. See [`identity.md`](identity.md) § *Two identities, two
-  questions*.
+  questions*. For example, several s3-fast-list `list-hinted` rows may vary
+  hinted concurrency or segment count while sharing one plain-`list`
+  `keyspace.ks` preparation: those consumer-only axes do not multiply the
+  producer. Sharing is automatic inside one launch; a later launch can bind the
+  same producer from the same `campaign.db` only through the operator's explicit
+  `--reuse-preparations` choice.
 
 - **The prerequisite names the artifact, not just the mode.** The pair is
   required and the bare mode is refused; see below.

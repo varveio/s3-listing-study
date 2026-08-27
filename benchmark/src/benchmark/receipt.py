@@ -16,7 +16,7 @@ from benchmark.ledger import (
     STATE_FILENAME,
     TERMINAL_STATES,
     attempt_rows,
-    open_ledger,
+    ledger,
     pending_rows,
 )
 from benchmark.report import load_json_at
@@ -51,9 +51,10 @@ def _digest(raw: bytes) -> str:
 def _replay_summary(row: sqlite3.Row, result: Mapping[str, object]) -> dict[str, object] | None:
     if row["replay"] is None:
         return None
-    config = replay_contract.parse_document(str(row["replay"]))
     evidence = result.get("replay_evidence")
-    refusals = replay_contract.evidence_errors(config, evidence, purpose=str(row["purpose"]))
+    refusals = replay_contract.replay_refusals(
+        str(row["replay"]), evidence, purpose=str(row["purpose"])
+    )
     if not isinstance(evidence, Mapping):
         return {"state": "REFUSED", "refusals": list(refusals)}
     samples = evidence.get("samples")
@@ -122,7 +123,9 @@ def _evidence(row: sqlite3.Row) -> dict[str, object]:
         result_uri = f"{str(row['result_prefix']).rstrip('/')}/result.json"
         return {"state": "MISSING", "result_uri": result_uri}
     result, raw = loaded
-    binding_errors = result_binding_errors(expected_result_binding(row), result)
+    binding_errors = result_binding_errors(
+        expected_result_binding(row), result, purpose=str(row["purpose"])
+    )
     result_sha256 = _digest(raw)
     return {
         "state": "BOUND" if not binding_errors else "REFUSED",
@@ -240,11 +243,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.output.exists() and any(args.output.iterdir()):
             raise ReceiptError(f"output directory {args.output} is not empty")
-        con = open_ledger(args.state, readonly=True)
-        try:
+        with ledger(args.state, readonly=True) as con:
             document = build_receipt(con, args.group)
-        finally:
-            con.close()
         args.output.mkdir(parents=True, exist_ok=True)
         payload = json.dumps(document, indent=2, sort_keys=True, ensure_ascii=True) + "\n"
         (args.output / "receipt.json").write_text(payload)

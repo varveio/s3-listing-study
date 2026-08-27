@@ -8,7 +8,13 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
+from benchmark.contract import canonical_json
+
 REPLAY_SPEC_VERSION = 3
+REPLAY_ENDPOINT_PORT = 19090
+REPLAY_METRICS_PORT = 19192
+REPLAY_ENDPOINT_URL = f"http://127.0.0.1:{REPLAY_ENDPOINT_PORT}"
+REPLAY_METRICS_URL = f"http://127.0.0.1:{REPLAY_METRICS_PORT}"
 REPLAY_BLOCK_FIELDS = (
     "server_image_uri",
     "serving_mode",
@@ -32,18 +38,13 @@ REPLAY_FIELDS = (*REPLAY_INTEGER_FIELDS, *REPLAY_BOOLEAN_FIELDS)
 CAPACITY_STATUSES = ("uncalibrated", "calibrated")
 _HEX64_RE = re.compile(r"[0-9a-f]{64}")
 _PINNED_IMAGE_RE = re.compile(r"[^\s@]+@sha256:[0-9a-f]{64}")
+_GCS_PATTERN_META = frozenset("*?[]")
 REQUEST_COUNTER = "swath.replay.http.requests"
 ERROR_COUNTER = "swath.replay.http.errors"
 
 
 class ReplayError(ValueError):
     """A replay document is incomplete, non-canonical, or cannot run."""
-
-
-def canonical_json(value: Mapping[str, object]) -> str:
-    return json.dumps(
-        value, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False
-    )
 
 
 def _positive(value: object, name: str) -> int:
@@ -223,6 +224,17 @@ def evidence_errors(config: ReplayConfig, evidence: object, *, purpose: str) -> 
     return tuple(errors)
 
 
+def replay_refusals(
+    document: str | Mapping[str, object] | ReplayConfig,
+    evidence: object,
+    *,
+    purpose: str,
+) -> tuple[str, ...]:
+    """Parse recorded replay intent and return its evidence refusals."""
+    config = document if isinstance(document, ReplayConfig) else parse_document(document)
+    return evidence_errors(config, evidence, purpose=purpose)
+
+
 def parse_backend(value: object) -> ReplayBackend:
     if not isinstance(value, Mapping):
         raise ReplayError("replay backend is not an object")
@@ -240,14 +252,27 @@ def parse_backend(value: object) -> ReplayBackend:
     fixture_uri = value.get("fixture_uri")
     if not isinstance(fixture_sha256, str) or _HEX64_RE.fullmatch(fixture_sha256) is None:
         raise ReplayError("replay fixture_sha256 is not a sha256 digest")
-    if fixture_uri is not None and (
-        not isinstance(fixture_uri, str)
-        or not fixture_uri.startswith("gs://")
-        or not fixture_uri.endswith(".parquet")
-        or "*" in fixture_uri
-        or any(character.isspace() for character in fixture_uri)
-    ):
-        raise ReplayError("replay fixture_uri must name one exact gs://*.parquet object")
+    if fixture_uri is not None:
+        valid_uri = (
+            isinstance(fixture_uri, str)
+            and fixture_uri.startswith("gs://")
+            and fixture_uri.endswith(".parquet")
+            and not any(character.isspace() for character in fixture_uri)
+        )
+        if valid_uri:
+            pattern_meta = {
+                character for character in fixture_uri if character in _GCS_PATTERN_META
+            }
+            valid_uri = not pattern_meta or (
+                pattern_meta == {"*"}
+                and fixture_uri.count("*") == 1
+                and fixture_uri.endswith("/part-*.parquet")
+            )
+        if not valid_uri:
+            raise ReplayError(
+                "replay fixture_uri must name one exact gs://*.parquet object or one "
+                "bounded gs://.../part-*.parquet set"
+            )
     mode = value.get("serving_mode")
     if mode not in SERVING_MODES:
         raise ReplayError(f"replay serving_mode must be one of {', '.join(SERVING_MODES)}")

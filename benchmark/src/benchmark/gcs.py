@@ -35,18 +35,6 @@ def parse_gs_uri(uri: str) -> tuple[str, str]:
     return bucket, blob_prefix
 
 
-def list_child_prefixes(uri: str) -> list[str]:
-    """Immediate child "directories" under a gs:// prefix, as gs:// URIs."""
-    bucket_name, prefix = parse_gs_uri(uri)
-    if not prefix.endswith("/"):
-        prefix += "/"
-    iterator = client().bucket(bucket_name).list_blobs(prefix=prefix, delimiter="/")
-    prefixes: list[str] = []
-    for page in iterator.pages:
-        prefixes.extend(page.prefixes)
-    return [f"gs://{bucket_name}/{p}" for p in prefixes]
-
-
 def blob_exists(uri: str) -> bool:
     bucket_name, name = parse_gs_uri(uri)
     return cast(bool, client().bucket(bucket_name).blob(name).exists())

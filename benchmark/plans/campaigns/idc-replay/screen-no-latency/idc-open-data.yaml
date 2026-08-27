@@ -1,0 +1,178 @@
+# Broad representative-mode diagnostic over the 56,311,145-row IDC fixture.
+# The eight-part source is already stamped and globally sorted; do not rewrite it.
+# Replay capacity remains uncalibrated, so these rows cannot rank or eliminate.
+spec_version: 3
+
+bucket: idc-open-data
+region: us-east-1
+auth_role: public-read
+
+replay:
+  capacity_status: uncalibrated
+  server_image_uri: ghcr.io/varveio/swath-replay@sha256:abef7d76f9d40857dc8c7ab4e64c47d26531c8aa8a26bf16aaf2cae8ca3fe06d
+  fixture_uri: gs://s3-listing-study-results-29c02004/fixtures/swath-replay/idc-open-data/current-geometry-20260824/part-*.parquet
+  fixture_sha256: 8a83fdc88000d6a1f4e3563eb3151407a91b6ca319713b08cff3e72442608ebe
+  serving_mode: sorted
+  latency_model: none
+
+defaults:
+  reps: 1
+  timeout_s: 7200
+  vcpus: 16
+  memory_gb: 32
+  subject_vcpus: 6
+  container_memory_gb: 16
+  replay_vcpus: 8
+  replay_memory_gb: 8
+  replay_parquet_connections: 8
+  replay_max_concurrent_requests: 4096
+  replay_prefetch: true
+  replay_prefetch_max_windows: 256
+  replay_heap_percent: 75
+
+# Keep each best-supported representative and add narrowly chosen uncertainty
+# arms where source review or the first IDC result left a real configuration
+# question. Diagnostic purpose must be stated per row; it is not a layer.
+tools:
+  aws-cli:
+    cases:
+      - {mode: s3api-v2-text, purpose: diagnostic}
+      # Native high-level streaming formatter; JSON buffers the full result and
+      # yaml-stream is a fidelity fallback, not a throughput candidate.
+      - {mode: s3-ls-recursive, purpose: diagnostic}
+  minio-mc:
+    cases:
+      # Keep both sides of the methodology's output-work distinction: text is
+      # mc's cheaper native enumeration output; JSON is its richest listing.
+      - {mode: recursive, purpose: diagnostic}
+      - {mode: recursive-json, purpose: diagnostic}
+  ps3:
+    cases:
+      - {mode: list, purpose: diagnostic}
+  rclone:
+    cases:
+      - {mode: recursive-walk, concurrency: 8, purpose: diagnostic}
+      # Flat ListR is one undelimited continuation chain. The c16 walk tests
+      # directory fan-out above the upstream default without changing request
+      # semantics; the with-dirs arm tests exact trailing-slash completeness.
+      - {mode: recursive-fastlist, purpose: diagnostic}
+      - {mode: recursive-walk, concurrency: 16, purpose: diagnostic}
+      # c16 still left subject CPU headroom and materially improved over c8.
+      - {mode: recursive-walk, concurrency: 32, purpose: diagnostic}
+      # c32 improved again and peaked at 5.03/6 subject cores; c64 closes the
+      # remaining scaling question before retaining the walk ceiling.
+      - {mode: recursive-walk, concurrency: 64, purpose: diagnostic}
+      - {mode: recursive-walk-with-dirs, concurrency: 8, purpose: diagnostic}
+  s3-fast-list:
+    cases:
+      # One plain-list preparation publishes keyspace.ks for this hinted row.
+      - {mode: list-hinted, concurrency: 100, segments: 16, purpose: diagnostic}
+      # Hold active width at 16 while increasing range granularity, then hold
+      # the 100-range split while allowing every range to run concurrently.
+      - {mode: list-hinted, concurrency: 16, segments: 100, purpose: diagnostic}
+      - {mode: list-hinted, concurrency: 100, segments: 100, purpose: diagnostic}
+      # Hold width at 100 and test whether finer range balance helps. The same
+      # SQLite preparation is reusable: only this split/list pair is new.
+      - {mode: list-hinted, concurrency: 100, segments: 1000, purpose: diagnostic}
+      - {mode: list-hinted, concurrency: 100, segments: 2000, purpose: diagnostic}
+      - {mode: list-hinted, concurrency: 100, segments: 5000, purpose: diagnostic}
+  s3kor:
+    cases:
+      - {mode: list, purpose: diagnostic}
+  s3p:
+    cases:
+      - {mode: ls, concurrency: 100, purpose: diagnostic}
+      # The first screen used upstream's default 100. Sweep the current design
+      # note's lower widths because Node parsing/output can become CPU-bound.
+      - {mode: ls, concurrency: 1, purpose: diagnostic}
+      - {mode: ls, concurrency: 8, purpose: diagnostic}
+      # Bracket the c25 minimum observed between c8 and the regressing c50 arm.
+      - {mode: ls, concurrency: 16, purpose: diagnostic}
+      - {mode: ls, concurrency: 25, purpose: diagnostic}
+      - {mode: ls, concurrency: 32, purpose: diagnostic}
+      - {mode: ls, concurrency: 50, purpose: diagnostic}
+  s5cmd:
+    cases:
+      - {mode: recursive, purpose: diagnostic}
+      # Same delimiter-free LIST and raw output, but retain s5cmd DIR rows so
+      # exact verification covers the fixture's trailing-slash objects.
+      - {mode: recursive-with-dirs, purpose: diagnostic}
+      # s5cmd's real listing parallelism is `run` over independent commands,
+      # not --numworkers on one `ls`. A bounded scan of this sealed fixture saw
+      # only these 17 first bytes; their disjoint shards cover all 56,311,145
+      # rows without a root-delimiter remainder or CommonPrefix ambiguity.
+      - mode: fanout-with-dirs
+        concurrency: 17
+        purpose: diagnostic
+        config:
+          shard_initials: .0123456789abcdef
+  s7cmd:
+    cases:
+      # c64 reached only 13 simultaneous replay queries and 3.93/6 subject
+      # cores, so bracket it at c16/c32 before retaining a listing ceiling.
+      - {mode: recursive-tsv-nosort, concurrency: 16, purpose: diagnostic}
+      - {mode: recursive-tsv-nosort, concurrency: 32, purpose: diagnostic}
+      - {mode: recursive-tsv-nosort, concurrency: 64, purpose: diagnostic}
+      # Native key-only streaming output is the matching enumeration arm for
+      # the richer no-sort TSV product above.
+      - {mode: recursive-one-nosort, concurrency: 64, purpose: diagnostic}
+  swath:
+    cases:
+      - {mode: recursive-parquet, concurrency: 64, purpose: diagnostic}
+      # The shared subject has six cores. Hold the durable-output tune fixed
+      # while bracketing its writer pool; the existing retained arm supplies w8.
+      - mode: recursive-parquet
+        concurrency: 64
+        purpose: diagnostic
+        config:
+          jvm_max_heap: 4g
+          parquet_writers: 3
+          parquet_part_size: 1gb
+          writeback_size: 32mb
+          part_rotation_interval: "0"
+          part_rotation_max_rows: 0
+      - mode: recursive-parquet
+        concurrency: 64
+        purpose: diagnostic
+        config:
+          jvm_max_heap: 4g
+          parquet_writers: 4
+          parquet_part_size: 1gb
+          writeback_size: 32mb
+          part_rotation_interval: "0"
+          part_rotation_max_rows: 0
+      - mode: recursive-parquet
+        concurrency: 64
+        purpose: diagnostic
+        config:
+          jvm_max_heap: 4g
+          parquet_writers: 6
+          parquet_part_size: 1gb
+          writeback_size: 32mb
+          part_rotation_interval: "0"
+          part_rotation_max_rows: 0
+      # Keep the screened request concurrency while applying the retained
+      # Parquet writer, part-size, writeback, heap, and rotation tune.
+      - mode: recursive-parquet
+        concurrency: 64
+        purpose: diagnostic
+        config:
+          jvm_max_heap: 4g
+          parquet_writers: 8
+          parquet_part_size: 1gb
+          writeback_size: 32mb
+          part_rotation_interval: "0"
+          part_rotation_max_rows: 0
+      # Retained parallel TSV-directory tune from Swath main. Keep the large
+      # final parts separate from the periodic writeback cadence so durability
+      # stalls do not force hundreds of small output objects.
+      - mode: recursive-tsv-dataset
+        concurrency: 16
+        purpose: diagnostic
+        config:
+          jvm_max_heap: 4g
+          text_writers: 3
+          text_part_size: 1gb
+          writeback_size: 32mb
+          part_rotation_interval: "0"
+          part_rotation_max_rows: 0

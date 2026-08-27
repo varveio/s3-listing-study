@@ -1,0 +1,51 @@
+# Focused correction for s3-fast-list on the 4,081,170-row FourCast fixture.
+# The hinted row makes the planner create a preparation-only plain listing that
+# publishes the tool-native keyspace distribution with a bound digest. It then
+# splits 16 ranges and lists them with the upstream concurrency ceiling of 100.
+# No injected latency isolates the mode correction.
+spec_version: 3
+
+bucket: noaa-nws-fourcastnetgfs-pds
+region: us-east-1
+auth_role: public-read
+
+replay:
+  capacity_status: uncalibrated
+  server_image_uri: us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:ace5350d99c217bf5919b795fc53ed955d1dc2fb6bef1eecf36e8a90e9732f07
+  fixture_uri: gs://s3-listing-study-results-29c02004/fixtures/noaa-nws-fourcastnetgfs-pds/1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4/part-00000.parquet
+  fixture_sha256: 1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4
+  serving_mode: sorted
+  latency_model: none
+
+defaults:
+  reps: 1
+  timeout_s: 1800
+  vcpus: 16
+  memory_gb: 32
+  subject_vcpus: 6
+  container_memory_gb: 16
+  replay_vcpus: 8
+  replay_memory_gb: 8
+  replay_parquet_connections: 8
+  replay_max_concurrent_requests: 4096
+  replay_prefetch: true
+  replay_prefetch_max_windows: 256
+  replay_heap_percent: 75
+
+tools:
+  s3-fast-list:
+    cases:
+      - {mode: list-hinted, concurrency: 100, segments: 16, purpose: diagnostic}
+
+# This is a scoped two-arm mode correction, not the full-roster panel. s4cmd's
+# owner exclusion remains central in tools.yaml and is intentionally not repeated.
+exclude:
+  - {tool: aws-cli, reason: focused s3-fast-list mode correction}
+  - {tool: minio-mc, reason: focused s3-fast-list mode correction}
+  - {tool: ps3, reason: focused s3-fast-list mode correction}
+  - {tool: rclone, reason: focused s3-fast-list mode correction}
+  - {tool: s3kor, reason: focused s3-fast-list mode correction}
+  - {tool: s3p, reason: focused s3-fast-list mode correction}
+  - {tool: s5cmd, reason: focused s3-fast-list mode correction}
+  - {tool: s7cmd, reason: focused s3-fast-list mode correction}
+  - {tool: swath, reason: focused s3-fast-list mode correction}

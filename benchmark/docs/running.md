@@ -23,7 +23,7 @@ group did it. Do not promote a step because a neighbouring step worked.
 
 | Step | Exercised against real Batch? |
 | --- | --- |
-| Toolbox build + eleven-tool smoke | **yes** — the `benchmark-toolbox` workflow, local Docker |
+| Toolbox build + eleven-executable check | **yes** — the `benchmark-toolbox` workflow, Docker |
 | `submit` | **yes** — historical bounded three-tool bundled-fixture replay canary; current staged-fixture plan no |
 | `poll` / `status` | **yes** — same canary |
 | `retry` / `cancel` / `accept-failure` | no |
@@ -68,7 +68,7 @@ tool enforces for you; a missing item surfaces as a provider error mid-campaign.
    ```
 
    It is emitted rather than written by hand: the set is the image's own
-   metadata projected to the eleven identity fields the controller accepts, and
+   metadata projected to the per-tool identity fields the controller accepts, and
    the emitted document is validated by the loader that will read it, so a set
    the campaign would refuse fails here instead. The revision must be clean and
    `HEAD`, exactly as for the build. Shape is in
@@ -82,7 +82,11 @@ tool enforces for you; a missing item surfaces as a provider error mid-campaign.
    `replay.capacity_status: uncalibrated` until a real diagnostic capacity
    canary has a committed receipt. The staged-fixture provider path separately
    remains `VERIFIED: no` until a committed canary uses `fixture_uri`; a bundled
-   fixture canary does not qualify that download and manifest-check branch.
+   fixture canary does not qualify that download and manifest-check branch. Before
+   hashing or uploading a fixture, apply the separate
+   [fixture-preparation and sorted-eligibility rule](../plans/README.md#fixture-preparation-and-sorted-eligibility):
+   current Swath `--sort` output is already prepared, while ordered-but-unstamped
+   Parquet is not.
 6. **Credential secret**, if any case signs: one
    `projects/<p>/secrets/<s>/versions/<v>` resource whose payload is the
    `KEY=VALUE` lines described in
@@ -96,9 +100,53 @@ tool enforces for you; a missing item surfaces as a provider error mid-campaign.
    when you want a handle you chose rather than one you'll have to look up.
 
 Keep `campaign.db` — it is authoritative controller state, not a cache, and it
-is not interchangeable with the evidence in GCS. Back it up. What is inside it —
+is not interchangeable with attempt evidence. Back it up. What is inside it —
 the tables, their keys, and every state they record — is in
 [`model.md`](model.md).
+
+For a bounded local session, `campaign.py submit --executor docker` invokes
+`docker_executor.py`. The plan stays unchanged; `--image`, `--results-root`,
+`--location`, and `--seed` supply the local session arguments. The runner
+accepts only independent, non-replay real-S3 cases, executes them serially, and
+stores the ledger, frozen schedule, logs, and attempt trees below the absolute
+results root. Submission remains in the foreground until the session settles.
+It shares plan compilation, case identity primitives, the measurement worker,
+the ledger schema, result evidence, verification, and reporting with Batch. It
+does not share Batch `poll`, `retry`, or `cancel`, prerequisite-slot resolution,
+artifact transport, or replay-sidecar lifecycle. Seeded repeats of independent
+real-S3 cases are supported locally. Replay and dependent work runs on GCP
+Batch and will not be added to the local runner.
+
+Docker and Batch attempts of one plan row occupy disjoint strata. The local
+`docker-<arch>-<sha12 of hardware facts>` machine-family label is hashed into
+case identity; the executor name itself is not. Attempts are never pooled
+across executors.
+
+If a crash leaves a Docker group unfinished, settle its frozen session before
+continuing: `uv run python benchmark/src/benchmark/campaign.py --state
+/absolute/results/campaign.db local-close --group GROUP --reason 'host lost
+power'`. The command records the interrupted `RUNNING` row as `FAILED`, records
+containers that never started as `NOT_CREATED`, and leaves terminal rows alone.
+It refuses while any named subject container is still running and never stops
+one automatically. It also refuses to mark a `RUNNING` row failed when that
+row's `result.json` is already present: the worker wrote its marker last, so
+the evidence is complete even though the session died before recording it.
+Rerun with `--settle-complete` to record exactly those rows `SUCCEEDED` from
+their evidence; the row detail states that the Docker exit code is unknown.
+Until then the group cannot be receipted, because it still holds a
+non-terminal row.
+Replacement is a new group with a new seed, as predeclared in that group's
+frozen schedule; it is never a re-run within the old order.
+
+Real-S3 Docker runs use Docker's ordinary bridge networking. They do not require
+a host firewall change or a host-global network setup step. Subject containers
+still drop all Linux capabilities and enable Docker's no-new-privileges rule.
+
+For the small one-shot Docker canary only, pass `--include-docker-canaries` to
+`verify.py`. It compares every normalized saved output with the AWS CLI canary,
+checking keys plus fields both modes expose. This is an agreement result on a
+mutable bucket, not independent ground truth. The option excludes GCP canaries;
+large GCP benchmark reports remain row-count-only.
 
 ## Submit
 
@@ -139,6 +187,20 @@ they name the step that will pay each slot, which is where a plan that states a
 knob the producing mode ignores shows up as an extra bootstrap listing rather
 than as a silent duplicate hours later.
 
+To submit only an exact resolved row from the same plan, copy its `case` value
+from `resolve-plan --json` and pair it with the tool:
+
+```sh
+uv run python benchmark/src/benchmark/campaign.py submit \
+  ... \
+  --case 'swath:recursive-parquet.purpose-diagnostic.concurrency-64...'
+```
+
+Repeat `--case TOOL:LABEL` to select more than one row. Selection happens only
+after the complete plan has loaded and validated; it is an operational filter,
+not a way to hide an invalid row or create a second plan file. Always dry-run
+the filtered submission before creating jobs.
+
 Two flags change what a repeated `submit` does with what it finds:
 
 - **`--repeat`** submits a case that already has a successful attempt.
@@ -148,7 +210,13 @@ Two flags change what a repeated `submit` does with what it finds:
   produced instead of refusing. Reuse within one launch is always free — every
   consumer of one preparation step shares it — but reuse across launches is a
   decision, because the digest cannot tell you the corpus moved
-  ([`identity.md`](identity.md) § *What identity cannot cover*).
+  ([`identity.md`](identity.md) § *What identity cannot cover*). Cross-launch
+  reuse also requires the same `campaign.db`: the ledger is what discovers and
+  binds the earlier successful producer; this flag does not search GCS or import
+  evidence from another ledger. Keep using the campaign's SQLite file and pass
+  the flag when reuse is intended. The producer case must still be identical —
+  changing its fixture, replay image or latency treatment mints a different
+  producer even when an operator expects the resulting artifact bytes to match.
 - **`--skip-measured`** binds an existing SUCCEEDED attempt of a case *from any
   group*, instead of refusing the whole launch. This is what makes one
   checked-in plan file the single source of truth across many sessions: add a
@@ -227,16 +295,16 @@ Two vocabularies share the `state` column: the controller's own relationship
 with the provider, and the provider's lifecycle passed through as seen.
 Full rationale is [`model.md`](model.md) § *The state column*.
 
-| State | Terminal | Retryable | Meaning |
-| --- | --- | --- | --- |
-| `SUBMITTING` | no | no | Intent is durable; the provider has not been called yet. |
-| `SUBMITTED` | no | no | Created — by this run, or found already matching recorded intent. |
-| *(provider states)* | no | no | `QUEUED`, `SCHEDULED`, `RUNNING`, and the rest of Batch's own lifecycle. |
-| `SUCCEEDED` | yes | no | The job ran cleanly. Not a verdict about the listing — that is `verify`'s question. |
-| `FAILED` | yes | **yes** | Settled failure. |
-| `NOT_CREATED` | yes | **yes** | The provider refused creation, or a job of that name exists and does not match recorded intent. |
-| `CANCELLED` | yes | no | Set by `cancel`, or by the provider. One-way. |
-| `ACCEPTED` | yes | no | Set by `accept-failure`. An absent measurement, never a passing one. |
+| State | Written by | Terminal | Retryable | Meaning |
+| --- | --- | --- | --- | --- |
+| `SUBMITTING` | intent journaling | no | no | Intent is durable; the provider has not been called yet. |
+| `SUBMITTED` | submit | no | no | Created — by this run, or found already matching recorded intent. |
+| *(provider states)* | poll | no | no | `QUEUED`, `SCHEDULED`, `RUNNING`, and the rest of Batch's own lifecycle. |
+| `SUCCEEDED` | poll | yes | no | The job ran cleanly. Not a verdict about the listing — that is `verify`'s question. |
+| `FAILED` | poll, local-close | yes | **yes** | Settled failure. |
+| `NOT_CREATED` | submit, local-close | yes | **yes** | The provider refused creation, a job of that name exists and does not match recorded intent, or a Docker session closed before its container started. |
+| `CANCELLED` | cancel, or the provider | yes | no | One-way. |
+| `ACCEPTED` | accept-failure | yes | no | An absent measurement, never a passing one. |
 
 A describe failure during `poll` prints to stderr and leaves the row alone
 rather than inventing a state — the pass simply reports "not all terminal", so
@@ -260,9 +328,14 @@ uv run python benchmark/src/benchmark/campaign.py retry \
 ```
 
 `--group` is required — `retry` scopes to one group and skips rows from
-others rather than refusing outright. It sweeps every `FAILED` or
-`NOT_CREATED` row in that group; there is no per-attempt form. A row whose
-case declared `statistic: rate` is left alone and reported as such — its
+others rather than refusing outright. It considers only each case's latest
+ordinal: a latest `FAILED` or `NOT_CREATED` row is retried once, while a live,
+successful, cancelled, or accepted latest row suppresses every older failure
+for that case. This prevents one sweep from launching a parallel job for every
+historical preemption. `retry` applies only to GCP Batch rows and refuses a
+Docker group; the bounded local session has no retry lifecycle. There is no
+per-attempt form. A row whose case declared
+`statistic: rate` is left alone and reported as such — its
 failures are the finding, so retrying one would be resampling
 ([`model.md`](model.md) § *Sometimes the failures are the measurement*).
 

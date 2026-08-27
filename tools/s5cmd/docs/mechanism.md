@@ -94,6 +94,16 @@ fan-out against the smoke bucket; the fan-out's *speed* relative to a native
 parallel lister is `unverified` — claim `fanout-speed-vs-native-unverified`, a
 benchmark-phase question.
 
+The current capsule's `fanout-with-dirs` mode makes this one measurable process.
+The plan states distinct first-character shard prefixes and a concurrency; the
+adapter renders one recursive `ls -e -s` line per shard. A tiny Python driver
+writes those reviewed bytes to a Linux memory file and immediately `exec`s
+`/s5cmd --numworkers N run /proc/self/fd/...`. The benchmark therefore measures
+s5cmd itself without a shell, stdin feeder, mounted mutable file, or supervising
+process. The driver retains `DIR` rows in normalization. It refuses duplicate
+initials, but only exact verification can prove that a
+plan's declared set covers the target fixture.
+
 ## Retry model
 
 A `customRetryer` wraps the SDK `DefaultRetryer`; `NumMaxRetries` comes from
@@ -171,12 +181,14 @@ observation, not a scale claim (`unverified` above 148,917 keys — claim
 | Mode | Request | Output contract |
 | --- | --- | --- |
 | `recursive` (`ls "s3://b/*"`) | ListObjectsV2, `Delimiter=""`, client-side filter | Text columns (with `-e -s`): `date time storage-class etag size relkey` — format string `"2006/01/02 15:04:05"` then storage-class/etag/size/relative-path [SRC `command/ls.go:248,258-311` @ 991c9fb]; paths are **relative to the query prefix** [SRC `command/ls.go:285,301` @ 991c9fb] |
+| `recursive-with-dirs` (same request and raw output) | ListObjectsV2, `Delimiter=""`, client-side filter | Retains `DIR` rows as key-only records. Because the request is undelimited, these are not CommonPrefixes; the mode remains unverified until exact comparison against a fixture containing trailing-slash objects. |
 | `delimiter` (`ls "s3://b/"`, no glob) | ListObjectsV2, `Delimiter="/"` | Same text columns for object rows; DIR rows print `DIR <prefix/>` with metadata columns blank [RUN `../receipts/smoke/delimiter`] |
 | `json` (`--json ls "s3://b/*"`) | Same request as recursive | One object per line: `{"key":"s3://bucket/key","etag":…,"last_modified":"…Z","type":"file","size":N,"storage_class":…}` — `strutil.JSON(l.Object)` of the `storage.Object` struct [SRC `command/ls.go:316-318` @ 991c9fb]. Observed: `key` is the **absolute** `s3://bucket/key` URL, `last_modified` already RFC3339 `…Z` [RUN `../receipts/smoke/json`] |
 | `listv1` (`--use-list-objects-v1`) | Legacy **ListObjects (v1)** | Same text contract as recursive |
 | `allversions` (`--all-versions`) | **ListObjectVersions** | Same text contract plus a trailing versionID token (`null` on a non-versioned bucket) |
 | `fullpath` (`--show-fullpath`) | Same ListObjectsV2 request as recursive | Absolute `s3://bucket/key` paths only — no size/etag/mtime/storage-class columns [SRC `ls.go:93,253`] |
 | `fanout` (N per-prefix `ls`, unioned or via `run <file>`) | N independent serial ListObjectsV2 chains | Same text contract as `recursive`/`delimiter` per shard; the union's remainder adapter drops DIR common-prefix rows |
+| `fanout-with-dirs` (`--numworkers N run <memory-file>`) | N plan-declared, disjoint recursive ListObjectsV2 chains | Same text contract as `recursive-with-dirs`; `DIR` rows are retained and no delimiter remainder is used. Unverified until an exact campaign run. |
 
 The output flags `-e`, `-H`, and `--json` change only the printed format, not
 the request or listing mechanism (claim `output-flags-are-formatting-only`).

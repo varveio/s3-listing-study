@@ -46,7 +46,5 @@ exclude:
   - {tool: ps3, reason: signed stdout is covered by s3p}
   - {tool: rclone, reason: stdout listing is covered by s3p and s7cmd}
   - {tool: s3kor, reason: signed stdout is covered by s3p}
-  - tool: s4cmd
-    reason: server scope — s4cmd speaks only v1 ListObjects, which the replay server does not implement
   - {tool: s5cmd, reason: stdout listing is covered by s3p and s7cmd}
   - {tool: swath, reason: stdout listing is covered without making the runner canary Swath-specific}

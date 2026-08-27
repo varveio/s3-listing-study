@@ -51,6 +51,19 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     cargo build --release --locked
 
+FROM runtime_base AS s4cmd_install
+ADD --checksum=sha256:42566058a74d3e1e553351966efaaffa08e4b6ac28a19e72a51be21151ea9534 \
+    https://files.pythonhosted.org/packages/42/b4/0061f4930958cd790098738659c1c39f8feaf688e698142435eedaa4ae34/s4cmd-2.1.0.tar.gz \
+    /tmp/s4cmd.tar.gz
+COPY tools/s4cmd/build/requirements.txt /tmp/s4cmd-requirements.txt
+RUN /usr/bin/python3 -m venv /opt/s4cmd-venv \
+    && /opt/s4cmd-venv/bin/python -m pip install \
+      --require-hashes --no-deps -r /tmp/s4cmd-requirements.txt \
+    && mkdir -p /opt/s4cmd \
+    && tar xzf /tmp/s4cmd.tar.gz -C /opt/s4cmd --strip-components=1 \
+      s4cmd-2.1.0/s4cmd.py \
+    && test -f /opt/s4cmd/s4cmd.py
+
 FROM runtime_base AS s3kor_install
 ADD --checksum=sha256:47047e8a40a84992914f02bb5c8dfc525abff0a42c3ed76a4ed042a8ef976103 \
     https://github.com/sethkor/s3kor/releases/download/v0.0.37/s3kor_0.0.37_Linux_amd64.tar.gz /tmp/s3kor.tar.gz
@@ -71,17 +84,6 @@ const actual = 'sha512-' + crypto.createHash('sha512').update(fs.readFileSync('/
 if (actual !== expected) throw new Error('s3p tarball disagrees with package-lock integrity');
 JS
 RUN npm ci --ignore-scripts && npm cache clean --force
-
-FROM runtime_base AS s4cmd_install
-ADD --checksum=sha256:42566058a74d3e1e553351966efaaffa08e4b6ac28a19e72a51be21151ea9534 \
-    https://files.pythonhosted.org/packages/42/b4/0061f4930958cd790098738659c1c39f8feaf688e698142435eedaa4ae34/s4cmd-2.1.0.tar.gz /tmp/s4cmd.tar.gz
-COPY tools/s4cmd/build/requirements.txt /tmp/requirements.txt
-RUN /usr/bin/python3 -m venv /opt/s4cmd-venv \
-    && /opt/s4cmd-venv/bin/pip install --require-hashes --no-deps -r /tmp/requirements.txt \
-    && mkdir -p /opt/s4cmd \
-    && tar xzf /tmp/s4cmd.tar.gz -C /opt/s4cmd --strip-components=1 s4cmd-2.1.0/s4cmd.py \
-    && printf '#!/bin/sh\nexec /opt/s4cmd-venv/bin/python /opt/s4cmd/s4cmd.py "$@"\n' > /usr/local/bin/s4cmd \
-    && chmod 0755 /usr/local/bin/s4cmd
 
 FROM runtime_base AS s5cmd_install
 ADD --checksum=sha256:de0fdbfa3aceae55e069ba81a0fc17b2026567637603734a387b2fca06c299b4 \
@@ -104,12 +106,11 @@ COPY --from=ps3_install /usr/local/bin/pS3 /usr/local/bin/pS3
 COPY --from=rclone_install /usr/local/bin/rclone /usr/local/bin/rclone
 COPY --from=s3_fast_list_build /usr/src/app/target/release/s3-fast-list /usr/bin/s3-fast-list
 COPY --from=s3_fast_list_build /usr/src/app/target/release/ks-tool /usr/bin/ks-tool
+COPY --from=s4cmd_install /opt/s4cmd-venv/ /opt/s4cmd-venv/
+COPY --from=s4cmd_install /opt/s4cmd/ /opt/s4cmd/
 COPY --from=s3kor_install /usr/local/bin/s3kor /usr/local/bin/s3kor
 COPY --from=s3p_install /usr/local/bin/node /usr/local/bin/node
 COPY --from=s3p_install /build/node_modules/ /opt/s3p/node_modules/
-COPY --from=s4cmd_install /opt/s4cmd-venv/ /opt/s4cmd-venv/
-COPY --from=s4cmd_install /opt/s4cmd/ /opt/s4cmd/
-COPY --from=s4cmd_install /usr/local/bin/s4cmd /usr/local/bin/s4cmd
 COPY --from=s5cmd_install /s5cmd /s5cmd
 COPY --from=s7cmd_install /usr/local/bin/s7cmd /usr/local/bin/s7cmd
 COPY --from=swath_install /opt/java/openjdk/ /opt/java/openjdk/
@@ -122,6 +123,9 @@ RUN ln -s /opt/aws-cli/v2/current/bin/aws /usr/local/bin/aws \
 # slice: s3p
 RUN printf '#!/bin/sh\nexec /usr/local/bin/node /opt/s3p/node_modules/s3p/bin/s3p "$@"\n' > /usr/local/bin/s3p \
     && chmod 0755 /usr/local/bin/s3p
+# slice: s4cmd
+RUN printf '#!/bin/sh\nexec /opt/s4cmd-venv/bin/python /opt/s4cmd/s4cmd.py "$@"\n' > /usr/local/bin/s4cmd \
+    && chmod 0755 /usr/local/bin/s4cmd
 # slice: s7cmd
 RUN install -d -o 10001 -g 10001 /home/s7cmd
 # /aws is subject_workdir for both aws-cli and s5cmd, so it is platform.
@@ -151,12 +155,13 @@ RUN TOOLBOX_MANIFEST_SHA256="${TOOLBOX_MANIFEST_SHA256}" \
 import hashlib
 import json
 import os
+import sys
 from pathlib import Path, PurePosixPath
 
-expected_tools = {
-    "aws-cli", "minio-mc", "ps3", "rclone", "s3-fast-list", "s3kor",
-    "s3p", "s4cmd", "s5cmd", "s7cmd", "swath",
-}
+sys.path.insert(0, "/opt/benchmark")
+from benchmark.contract import TOOLBOX_TOOLS
+
+expected_tools = set(TOOLBOX_TOOLS)
 metadata_path = Path("/opt/benchmark/image-metadata.json")
 metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
 if set(metadata) != {

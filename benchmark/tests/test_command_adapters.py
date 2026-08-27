@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
@@ -63,12 +64,17 @@ REQUIRED_CONFIG: dict[tuple[str, str], dict[str, object]] = {
     # is no axis and carries no declared default: the plan states it or the
     # preparation refuses.
     ("s3-fast-list", "ks-split"): {"segments": 1000},
+    ("s5cmd", "fanout-with-dirs"): {"shard_initials": ".0"},
 }
 """Config a mode structurally cannot compile without, stated here rather than
 defaulted in a capsule."""
 
 MODE_EXECUTABLES: dict[tuple[str, str], tuple[str, ...]] = {
     ("s3-fast-list", "ks-split"): ("/usr/bin/ks-tool",),
+    ("s5cmd", "fanout-with-dirs"): (
+        "/usr/bin/python3",
+        "/opt/benchmark/tools/s5cmd/adapter/fanout.py",
+    ),
 }
 """Modes that run a capsule's *second* executable. Written out here, not read
 from the capsule, so the binary a mode runs stays an independent expectation --
@@ -180,6 +186,17 @@ def _rclone(mode: str, prefix: str) -> tuple[str, ...]:
             "-R",
             remote,
         ),
+        "recursive-walk-with-dirs": (
+            "lsjson",
+            "--use-server-modtime",
+            "--no-mimetype",
+            "--disable",
+            "ListR",
+            "--checkers",
+            "8",
+            "-R",
+            remote,
+        ),
         "delimiter-shallow": ("lsjson", "--use-server-modtime", "--no-mimetype", remote),
         "listv1": ("lsjson", "--fast-list", *standard, "-R", remote),
         "lsf": (
@@ -269,6 +286,22 @@ def _s5cmd(mode: str, prefix: str) -> tuple[str, ...]:
     target, recursive = f"s3://{BUCKET}/{prefix}", f"s3://{BUCKET}/{prefix}*"
     return {
         "recursive": ("--no-sign-request", "ls", "-e", "-s", recursive),
+        "recursive-with-dirs": ("--no-sign-request", "ls", "-e", "-s", recursive),
+        "fanout-with-dirs": (
+            "--s5cmd",
+            "/s5cmd",
+            "--bucket",
+            BUCKET,
+            "--prefix",
+            prefix,
+            "--shard",
+            ".",
+            "--shard",
+            "0",
+            "--numworkers",
+            "256",
+            "--unsigned",
+        ),
         "delimiter": ("--no-sign-request", "ls", "-e", "-s", target),
         "rootkeys": ("--no-sign-request", "ls", "-e", "-s", target),
         "json": ("--json", "--no-sign-request", "ls", recursive),
@@ -296,6 +329,16 @@ def _s7cmd(mode: str, prefix: str) -> tuple[str, ...]:
         "recursive-aligned": ("ls", "-r", *obs, *parallel, *anon, target),
         "recursive-json": ("ls", "-r", *obs, "--json", *parallel, *anon, target),
         "recursive-one": ("ls", "-r", *obs, "-1", *parallel, *anon, target),
+        "recursive-one-nosort": (
+            "ls",
+            "-r",
+            *obs,
+            "--no-sort",
+            "-1",
+            *parallel,
+            *anon,
+            target,
+        ),
         "all-versions": ("ls", "-r", *obs, "--all-versions", *fields, *parallel, *anon, target),
         "max-depth": ("ls", "-r", *obs, "--max-depth", "1", *fields, *parallel, *anon, target),
         "shallow-tsv": ("ls", *obs, *fields, *anon, target),
@@ -419,6 +462,7 @@ EXPECTED_MODES = {
         "recursive-fastlist",
         "recursive-hierarchical",
         "recursive-walk",
+        "recursive-walk-with-dirs",
         "delimiter-shallow",
         "listv1",
         "lsf",
@@ -429,13 +473,24 @@ EXPECTED_MODES = {
     "s3kor": {"list", "list-versions"},
     "s3p": {"ls", "ls-long", "ls-raw", "summarize"},
     "s4cmd": {"recursive", "shallow", "show-directory", "du"},
-    "s5cmd": {"recursive", "delimiter", "rootkeys", "json", "listv1", "allversions", "fullpath"},
+    "s5cmd": {
+        "recursive",
+        "recursive-with-dirs",
+        "fanout-with-dirs",
+        "delimiter",
+        "rootkeys",
+        "json",
+        "listv1",
+        "allversions",
+        "fullpath",
+    },
     "s7cmd": {
         "recursive-tsv",
         "recursive-tsv-nosort",
         "recursive-aligned",
         "recursive-json",
         "recursive-one",
+        "recursive-one-nosort",
         "all-versions",
         "max-depth",
         "shallow-tsv",
@@ -914,6 +969,22 @@ def test_swath_renders_retained_output_controls_and_refuses_the_wrong_mode() -> 
         "JAVA_TOOL_OPTIONS": f"-XX:MaxRAMPercentage={HEAP_PERCENT} -Xmx4g"
     }
 
+    # Heap is an environment control, not a formatter flag. Every Swath mode
+    # consumes it even when that mode's argv-specific allowlist is empty.
+    for mode in ("recursive-tsv", "recursive-parquet", "recursive-parquet-sorted"):
+        heap_only = CommandRequest(
+            mode,
+            BUCKET,
+            REGION,
+            tool="swath",
+            sink_dir=SINK,
+            config={"jvm_max_heap": "4g"},
+        )
+        adapter.compile(heap_only)
+        assert adapter.build_env(heap_only) == {
+            "JAVA_TOOL_OPTIONS": f"-XX:MaxRAMPercentage={HEAP_PERCENT} -Xmx4g"
+        }
+
     with pytest.raises(CommandAdapterError, match=r"does not use config key.*text_writers"):
         adapter.compile(
             CommandRequest(
@@ -975,6 +1046,73 @@ def test_commands_compile_exact_subject_argv() -> None:
     swath = load_command_adapter(ROOT / "tools/swath/adapter/command.py")
     argv = swath.compile(CommandRequest("recursive-tsv", "bucket", "us-east-1", tool="swath"))
     assert argv[:3] == ("/opt/java/openjdk/bin/java", "-jar", "/opt/swath/swath.jar")
+
+
+def test_s5cmd_fanout_execs_with_an_inherited_commands_file(tmp_path: Path) -> None:
+    """Exercise the real Linux memfd/exec boundary without making an S3 request."""
+    fake = tmp_path / "fake-s5cmd"
+    fake.write_text(
+        "#!/usr/bin/python3\n"
+        "import json, sys\n"
+        "with open(sys.argv[-1], encoding='utf-8') as source:\n"
+        "    print(json.dumps({'argv': sys.argv[1:-1], 'commands': source.read()}))\n",
+        encoding="utf-8",
+    )
+    fake.chmod(0o755)
+    wrapper = ROOT / "tools/s5cmd/adapter/fanout.py"
+    done = subprocess.run(
+        [
+            "/usr/bin/python3",
+            str(wrapper),
+            "--s5cmd",
+            str(fake),
+            "--bucket",
+            BUCKET,
+            "--prefix",
+            "p x/雪/",
+            "--shard",
+            ".",
+            "--shard",
+            "0",
+            "--numworkers",
+            "8",
+            "--endpoint-url",
+            ENDPOINT,
+            "--unsigned",
+        ],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    assert done.returncode == 0, done.stderr
+    observed = json.loads(done.stdout)
+    assert observed["argv"] == [
+        "--endpoint-url",
+        ENDPOINT,
+        "--no-sign-request",
+        "--numworkers",
+        "8",
+        "run",
+    ]
+    assert observed["commands"].splitlines() == [
+        "ls -e -s 's3://bucket-x/p x/雪/.*'",
+        "ls -e -s 's3://bucket-x/p x/雪/0*'",
+    ]
+
+
+@pytest.mark.parametrize("shards", ["00", "a,a", "a*", "", "雪"])
+def test_s5cmd_fanout_refuses_ambiguous_shards(shards: str) -> None:
+    adapter = load_command_adapter(adapter_path("s5cmd"))
+    with pytest.raises(CommandAdapterError, match="shard_initials"):
+        adapter.compile(
+            CommandRequest(
+                "fanout-with-dirs",
+                BUCKET,
+                REGION,
+                tool="s5cmd",
+                config={"shard_initials": shards},
+            )
+        )
 
 
 @pytest.mark.parametrize("tool", TOOLS)

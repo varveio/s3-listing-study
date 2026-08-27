@@ -9,9 +9,10 @@ caller already knows.
 from __future__ import annotations
 
 import hashlib
-import json
 from collections.abc import Mapping
 from typing import Any
+
+from benchmark.contract import canonical_json
 
 CASE_HASH_V2 = b"s3-listing-study-case-v2\0"
 
@@ -38,13 +39,7 @@ def case_inputs_document(
     }
     if replay is not None:
         inputs["replay"] = replay
-    return json.dumps(
-        inputs,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=True,
-        allow_nan=False,
-    )
+    return canonical_json(inputs)
 
 
 def case_hash(

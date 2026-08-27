@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from benchmark.contract import canonical_json
 from benchmark.runtime.command_adapter import CommandAdapterError, load_command_adapter
 
 SLUG_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
@@ -180,7 +181,7 @@ def load_staged_selection(
         raise BuildSelectionError(str(exc)) from exc
     if adapter.fixed_command_prefix != executable:
         raise BuildSelectionError("registered executable does not match command adapter")
-    canonical = json.dumps(raw, sort_keys=True, separators=(",", ":")).encode()
+    canonical = canonical_json(raw).encode()
     return BuildSelection(
         tool,
         version,
@@ -197,13 +198,6 @@ def load_staged_selection(
         metadata_path.resolve(strict=True),
         adapter_dir.resolve(strict=True),
     )
-
-
-def load_selection(path: Path, *, expected_tool: str) -> BuildSelection:
-    capsule = path.parent.parent
-    if path != capsule / "build" / "image.json" or capsule.name != expected_tool:
-        raise BuildSelectionError("build metadata is not at the expected capsule location")
-    return load_staged_selection(path, capsule / "adapter", expected_tool=expected_tool)
 
 
 def load_registered_selection(repo_root: Path, tool: str) -> BuildSelection:

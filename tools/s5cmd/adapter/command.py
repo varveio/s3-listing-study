@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Compile s5cmd listing parameters into exact in-image argv."""
 
+import re
+
 from benchmark.runtime.command_adapter import (
+    Ceiling,
     CommandAdapterError,
     CommandRequest,
     Executable,
@@ -11,7 +14,12 @@ from benchmark.runtime.command_adapter import (
 
 TOOL = "s5cmd"
 S5CMD = Executable(TOOL, ("/s5cmd",))
-EXECUTABLES = (S5CMD,)
+FANOUT = Executable(
+    "s5cmd-fanout",
+    ("/usr/bin/python3", "/opt/benchmark/tools/s5cmd/adapter/fanout.py"),
+)
+EXECUTABLES = (S5CMD, FANOUT)
+CONFIG_KEYS = frozenset({"shard_initials"})
 SUPPORTS_UNSIGNED = True
 """--no-sign-request lists anonymously; otherwise the credential in the
 environment signs."""
@@ -38,6 +46,21 @@ MODES = {
         product="text",
         fields=FULL_FIELDS,
         executable=S5CMD.name,
+        artifacts=TEXT,
+        product_artifact=LISTING,
+    ),
+    "recursive-with-dirs": Mode(
+        product="text",
+        fields=FULL_FIELDS,
+        executable=S5CMD.name,
+        artifacts=TEXT,
+        product_artifact=LISTING,
+    ),
+    "fanout-with-dirs": Mode(
+        product="text",
+        fields=FULL_FIELDS,
+        axes={"concurrency": Ceiling(256, "help")},
+        executable=FANOUT.name,
         artifacts=TEXT,
         product_artifact=LISTING,
     ),
@@ -96,6 +119,48 @@ def _auth_flags(request: CommandRequest) -> tuple[str, ...]:
     return ("--no-sign-request",) if not request.signed else ()
 
 
+SAFE_INITIALS = re.compile(r"[A-Za-z0-9._-]+")
+
+
+def _fanout_shards(request: CommandRequest) -> tuple[str, ...]:
+    raw = request.config.get("shard_initials")
+    if not isinstance(raw, str) or SAFE_INITIALS.fullmatch(raw) is None:
+        raise CommandAdapterError(
+            f"{TOOL} fanout shard_initials must be non-empty safe single-byte characters: {raw!r}"
+        )
+    shards = tuple(raw)
+    if len(set(shards)) != len(shards):
+        raise CommandAdapterError(f"{TOOL} fanout shard_initials repeat a shard: {raw!r}")
+    return shards
+
+
+def _fanout_workers(request: CommandRequest) -> str:
+    value = request.config.get("concurrency", 256)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise CommandAdapterError(f"{TOOL} concurrency must be a positive integer; got: {value!r}")
+    return str(value)
+
+
+def _fanout_command(request: CommandRequest) -> tuple[str, ...]:
+    endpoint = ("--endpoint-url", request.endpoint_url) if request.endpoint_url else ()
+    unsigned = ("--unsigned",) if not request.signed else ()
+    shards = tuple(token for shard in _fanout_shards(request) for token in ("--shard", shard))
+    return (
+        *FANOUT.argv,
+        "--s5cmd",
+        S5CMD.argv[0],
+        "--bucket",
+        request.bucket,
+        "--prefix",
+        request.prefix,
+        *shards,
+        "--numworkers",
+        _fanout_workers(request),
+        *endpoint,
+        *unsigned,
+    )
+
+
 def _build_tail(request: CommandRequest) -> tuple[str, ...]:
     if request.endpoint_url and request.mode in {"listv1", "allversions"}:
         raise CommandAdapterError(
@@ -108,6 +173,10 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
     endpoint = ("--endpoint-url", request.endpoint_url) if request.endpoint_url else ()
     commands = {
         "recursive": (*endpoint, *auth, "ls", "-e", "-s", recursive),
+        # The command is deliberately identical to recursive: the distinction
+        # is evidence semantics. This mode retains any raw DIR rows; exact
+        # verification determines whether they reconstruct trailing-slash keys.
+        "recursive-with-dirs": (*endpoint, *auth, "ls", "-e", "-s", recursive),
         "delimiter": (*endpoint, *auth, "ls", "-e", "-s", target),
         "rootkeys": (*endpoint, *auth, "ls", "-e", "-s", target),
         "json": ("--json", *endpoint, *auth, "ls", recursive),
@@ -122,6 +191,8 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
 
 
 def build_command(request: CommandRequest) -> tuple[str, ...]:
+    if request.mode == "fanout-with-dirs":
+        return _fanout_command(request)
     return *S5CMD.argv, *_build_tail(request)
 
 

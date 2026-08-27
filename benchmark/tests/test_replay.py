@@ -100,12 +100,34 @@ def test_fixture_manifest_binds_names_sizes_and_bytes(tmp_path: Path) -> None:
     assert digest == hashlib.sha256("".join(rows).encode()).hexdigest()
 
 
-def test_staged_fixture_refuses_a_wildcard_that_would_require_bucket_listing() -> None:
+def test_staged_fixture_accepts_one_bounded_part_set() -> None:
     document = config().as_dict()
     backend = document["backend"]
     assert isinstance(backend, dict)
-    backend["fixture_uri"] = "gs://fixtures/case/*.parquet"
-    with pytest.raises(replay.ReplayError, match="one exact"):
+    backend["fixture_uri"] = "gs://fixtures/case/part-*.parquet"
+
+    parsed = replay.parse_document(document)
+
+    assert parsed.backend.fixture_uri == "gs://fixtures/case/part-*.parquet"
+
+
+@pytest.mark.parametrize(
+    "uri",
+    (
+        "gs://fixtures/case/*.parquet",
+        "gs://fixtures/*/part-*.parquet",
+        "gs://fixtures/case/part-**.parquet",
+        "gs://fixtures/case/part-?.parquet",
+        "gs://fixtures/case/part-[0-9].parquet",
+        "gs://fixtures/case/data-*.parquet",
+    ),
+)
+def test_staged_fixture_refuses_unbounded_patterns(uri: str) -> None:
+    document = config().as_dict()
+    backend = document["backend"]
+    assert isinstance(backend, dict)
+    backend["fixture_uri"] = uri
+    with pytest.raises(replay.ReplayError, match="bounded"):
         replay.parse_document(document)
 
 

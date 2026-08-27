@@ -1,0 +1,40 @@
+# One current-worker, real-S3 canary for every capsule. This plan is portable:
+# the campaign CLI may execute it with Docker or GCP Batch. One observation per
+# tool qualifies the invocation and evidence path; it is not a performance
+# comparison or a variance estimate.
+spec_version: 2
+
+bucket: noaa-nws-rtofs-pds
+region: us-east-1
+auth_role: public-read
+
+defaults:
+  reps: 1
+  timeout_s: 1800
+  vcpus: 2
+  memory_gb: 4
+  container_memory_gb: 4
+
+tools:
+  aws-cli:
+    cases: [{purpose: canary}]
+  minio-mc:
+    cases: [{purpose: canary}]
+  ps3:
+    cases: [{purpose: canary}]
+  rclone:
+    cases: [{purpose: canary}]
+  s3-fast-list:
+    cases: [{purpose: canary}]
+  s4cmd:
+    cases: [{purpose: canary}]
+  s3kor:
+    cases: [{purpose: canary}]
+  s3p:
+    cases: [{purpose: canary}]
+  s5cmd:
+    cases: [{purpose: canary}]
+  s7cmd:
+    cases: [{purpose: canary}]
+  swath:
+    cases: [{purpose: canary}]

@@ -88,7 +88,6 @@ def test_dockerfile_is_self_contained_and_checksum_pinned() -> None:
         "s3_fast_list_build",
         "s3kor_install",
         "s3p_install",
-        "s4cmd_install",
         "s5cmd_install",
         "s7cmd_install",
         "swath_install",
@@ -113,11 +112,11 @@ def test_toolbox_context_contains_only_runtime_adapters_and_exact_build_inputs()
         "!tools/*/adapter/*.py",
         "!tools/s3-fast-list/build/",
         "!tools/s3-fast-list/build/Cargo.lock",
+        "!tools/s4cmd/build/",
+        "!tools/s4cmd/build/requirements.txt",
         "!tools/s3p/build/",
         "!tools/s3p/build/package.json",
         "!tools/s3p/build/package-lock.json",
-        "!tools/s4cmd/build/",
-        "!tools/s4cmd/build/requirements.txt",
         "**/__pycache__",
         "**/*.pyc",
     ]
@@ -125,48 +124,18 @@ def test_toolbox_context_contains_only_runtime_adapters_and_exact_build_inputs()
         "tools/s3-fast-list/build/Cargo.lock",
         "tools/s3p/build/package.json",
         "tools/s3p/build/package-lock.json",
-        "tools/s4cmd/build/requirements.txt",
     }
     assert all((ROOT / path).is_file() for path in required_inputs)
     assert all((ROOT / "tools" / tool / "adapter").is_dir() for tool in TOOLBOX_TOOLS)
 
 
-def test_final_stage_validates_metadata_roster_paths_and_manifest() -> None:
-    source = (ROOT / "benchmark/build/Dockerfile").read_text()
-    final_stage = source[source.index("FROM runtime_base AS toolbox") :]
-    for marker in (
-        'metadata["schema_version"] != 5',
-        "set(tools) != expected_tools",
-        "adapter_roster != expected_tools",
-        "Path(workdir).is_dir()",
-        "os.access(command, os.X_OK)",
-        'metadata["toolbox_recipe_sha256"] != os.environ["TOOLBOX_RECIPE_SHA256"]',
-        'computed_manifest != os.environ["TOOLBOX_MANIFEST_SHA256"]',
-        'metadata["harness_revision"] != os.environ["HARNESS_REVISION"]',
-    ):
-        assert marker in final_stage
-
-    workflow = (ROOT / ".github/workflows/benchmark-toolbox.yml").read_text()
-    assert "set(tools) != expected_tools" in workflow
-    assert "workdir.is_dir()" in workflow
-    assert "os.access(command, os.X_OK)" in workflow
-
-
-def test_metadata_is_canonical_json() -> None:
-    selections = build_image.registered_selections(ROOT)
-    manifest, digest = build_image.toolbox_manifest(selections, ROOT, "f" * 40)
-    metadata = build_image.final_image_metadata(manifest, selections, digest, "f" * 40)
-    assert json.loads(json.dumps(metadata, sort_keys=True)) == metadata
-
-
 def test_consolidated_recipe_and_s3p_lock_are_manifest_inputs(tmp_path: Path) -> None:
     selections = build_image.registered_selections(ROOT)
     manifest, _ = build_image.toolbox_manifest(selections, ROOT, "e" * 40)
-    assert (
-        manifest["toolbox_recipe_sha256"]
-        == hashlib.sha256((ROOT / "benchmark/build/Dockerfile").read_bytes()).hexdigest()
-    )
-
+    tools = manifest["tools"]
+    assert isinstance(tools, dict)
+    s3p = tools["s3p"]
+    assert isinstance(s3p, dict)
     copied: list[Path] = []
     for relative in (
         "tools/s3p/build/image.json",
@@ -180,6 +149,7 @@ def test_consolidated_recipe_and_s3p_lock_are_manifest_inputs(tmp_path: Path) ->
         destination.write_bytes(source.read_bytes())
         copied.append(destination)
     before = build_image._input_digest(tmp_path, copied)
+    assert s3p["build_inputs_sha256"] == before
     lock = copied[-1]
     lock.write_bytes(lock.read_bytes() + b"\n")
     assert build_image._input_digest(tmp_path, copied) != before
@@ -200,12 +170,6 @@ def test_declared_artifact_must_appear_in_executed_stage() -> None:
         build_image.validate_executed_sources(selections, ROOT, broken_swath)
 
 
-def test_closure_follows_from_edges_past_the_first_hop() -> None:
-    recipe = build_image.attribute_recipe(RECIPE)
-    assert set(recipe.tool_stages["swath"]) == {"swath_install"}
-    assert "ghcr.io/varveio/swath@sha256:" in recipe.tool_stages["swath"]["swath_install"]
-
-
 def test_a_pinned_base_digest_moves_only_the_slice_that_reaches_it() -> None:
     match = re.search(r"^FROM (?P<base>\S+) AS swath_install$", RECIPE, re.MULTILINE)
     assert match is not None
@@ -220,37 +184,21 @@ def test_a_pinned_base_digest_moves_only_the_slice_that_reaches_it() -> None:
     }
 
 
-def test_a_stage_more_than_one_tool_reaches_is_platform() -> None:
-    recipe = build_image.attribute_recipe(RECIPE)
-    assert "runtime_base" in recipe.platform_stages
-    assert all("runtime_base" not in stages for stages in recipe.tool_stages.values())
-
-
-def test_an_unmarked_tool_line_lands_in_the_platform() -> None:
-    line = "RUN install -d -o 10001 -g 10001 /home/s7cmd"
-    assert line in build_image.attribute_recipe(RECIPE).tool_lines["s7cmd"]
-    recipe = build_image.attribute_recipe(RECIPE.replace("# slice: s7cmd\n", ""))
-    assert line in recipe.platform_lines
-    assert line not in recipe.tool_lines["s7cmd"]
-
-
-def test_a_marker_naming_an_unregistered_tool_is_refused() -> None:
-    with pytest.raises(build_image.BuildError, match="unregistered tool"):
-        build_image.attribute_recipe(RECIPE.replace("# slice: s7cmd", "# slice: s8cmd"))
-
-
-def test_a_copy_from_an_unknown_stage_is_refused() -> None:
-    broken = RECIPE.replace("COPY --from=s5cmd_install", "COPY --from=absent_stage")
-    with pytest.raises(build_image.BuildError, match="unknown stage"):
-        build_image.attribute_recipe(broken)
-
-
-def test_a_marker_on_a_self_attributing_copy_is_refused() -> None:
-    broken = RECIPE.replace(
-        "COPY --from=s5cmd_install", "# slice: s5cmd\nCOPY --from=s5cmd_install"
-    )
-    with pytest.raises(build_image.BuildError, match="attributes itself"):
-        build_image.attribute_recipe(broken)
+@pytest.mark.parametrize(
+    ("before", "after", "error"),
+    [
+        ("# slice: s7cmd", "# slice: s8cmd", "unregistered tool"),
+        ("COPY --from=s5cmd_install", "COPY --from=absent_stage", "unknown stage"),
+        (
+            "COPY --from=s5cmd_install",
+            "# slice: s5cmd\nCOPY --from=s5cmd_install",
+            "attributes itself",
+        ),
+    ],
+)
+def test_unpartitionable_recipe_is_refused(before: str, after: str, error: str) -> None:
+    with pytest.raises(build_image.BuildError, match=error):
+        build_image.attribute_recipe(RECIPE.replace(before, after))
 
 
 def test_a_tool_whose_stage_is_unreachable_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:

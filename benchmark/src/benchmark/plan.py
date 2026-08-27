@@ -355,6 +355,7 @@ class Plan:
         path: Path,
         *,
         default_modes: Mapping[str, str] | None = None,
+        default_exclusions: Sequence[Exclusion] | None = None,
         instances: Mapping[tuple[int, int], str] | None = None,
         heap: HeapConfig | None = None,
         adapters: Mapping[str, LoadedCommandAdapter] | None = None,
@@ -366,7 +367,7 @@ class Plan:
         the real capsules under ``tools/``; a caller with no bucket to run
         against a real tree supplies fixtures instead.
         """
-        return _load(path, default_modes, instances, heap, adapters)
+        return _load(path, default_modes, default_exclusions, instances, heap, adapters)
 
     def tools(self) -> list[str]:
         """Every tool with at least one case, in plan order."""
@@ -470,7 +471,12 @@ def _tool_defaults_document(path: Path) -> dict[str, Any]:
     long as the plan being resolved happened to name every mode itself.
     """
     _, doc = _read_yaml_mapping(path, "tool defaults")
-    _reject_unknown(doc, ("spec_version", "default_modes", "heap"), "tool defaults", path)
+    _reject_unknown(
+        doc,
+        ("spec_version", "default_modes", "heap", "exclude"),
+        "tool defaults",
+        path,
+    )
     _require_spec_version(doc, "tool defaults", path)
     return doc
 
@@ -482,6 +488,11 @@ def load_default_modes(path: Path) -> dict[str, str]:
     if not table:
         raise PlanError(f"tool defaults {path} names no tools")
     return {tool: _string(table, tool, "default_modes", path) for tool in table}
+
+
+def load_default_exclusions(path: Path) -> tuple[Exclusion, ...]:
+    """Read tools intentionally absent from every current benchmark plan."""
+    return _exclusions(_tool_defaults_document(path), path, where="tool defaults")
 
 
 def _read_yaml_mapping(path: Path, what: str) -> tuple[bytes, dict[str, Any]]:
@@ -510,6 +521,7 @@ def _require_spec_version(doc: Mapping[str, Any], what: str, path: Path) -> None
 def _load(
     path: Path,
     default_modes: Mapping[str, str] | None,
+    default_exclusions: Sequence[Exclusion] | None,
     instances: Mapping[tuple[int, int], str] | None,
     heap: HeapConfig | None,
     adapters: Mapping[str, LoadedCommandAdapter] | None,
@@ -563,6 +575,11 @@ def _load(
     modes = default_modes if default_modes is not None else _sibling_default_modes(doc, path)
     catalogue = instances if instances is not None else load_instances(_sibling(path, "instances"))
     heap_config = heap if heap is not None else load_heap_config(_sibling(path, "tools"))
+    shared_exclusions = (
+        tuple(default_exclusions)
+        if default_exclusions is not None
+        else load_default_exclusions(_sibling(path, "tools"))
+    )
     resolved_adapters = adapters if adapters is not None else load_adapters(doc, path)
     auth_role = _auth_role(doc, path)
 
@@ -587,7 +604,7 @@ def _load(
                 path=path,
             ),
         ),
-        exclusions=_exclusions(doc, path),
+        exclusions=(*shared_exclusions, *_exclusions(doc, path)),
         replay=replay_backend,
         adapters=resolved_adapters,
     )
@@ -1517,17 +1534,19 @@ def case_label(chosen: Iterable[tuple[str, str | int | None]]) -> str:
     return ".".join(segments)
 
 
-def _exclusions(doc: Mapping[str, Any], path: Path) -> tuple[Exclusion, ...]:
+def _exclusions(
+    doc: Mapping[str, Any], path: Path, *, where: str = "plan"
+) -> tuple[Exclusion, ...]:
     raw = doc.get("exclude")
     if raw is None:
         return ()
     if not isinstance(raw, list):
-        raise PlanError(f"'exclude' in {path} is not a list")
+        raise PlanError(f"'exclude' in {where} {path} is not a list")
     exclusions: list[Exclusion] = []
     for entry in raw:
         if not isinstance(entry, dict):
-            raise PlanError(f"'exclude' in {path} has a non-mapping entry: {entry!r}")
-        _reject_unknown(entry, ("tool", "reason"), "'exclude' entry", path)
+            raise PlanError(f"'exclude' in {where} {path} has a non-mapping entry: {entry!r}")
+        _reject_unknown(entry, ("tool", "reason"), f"'{where}.exclude' entry", path)
         # A reason is required because the alternative is a roster that shrinks
         # over time with nobody able to say why any given tool left it.
         exclusions.append(
@@ -1569,16 +1588,3 @@ def check_roster(plan: Plan, registered: Collection[str]) -> None:
             f"plan {plan.path} mentions unregistered tool(s) {', '.join(unknown)} "
             "(no build/image.json)"
         )
-
-
-def check_modes(plan: Plan, modes_by_tool: Mapping[str, Collection[str]]) -> None:
-    """Refuse a mode the tool's adapter does not implement, before submitting."""
-    for case in plan.cases:
-        known = modes_by_tool.get(case.tool)
-        if known is None:
-            raise PlanError(f"plan {plan.path} names {case.tool}, whose modes are unknown")
-        if case.mode not in known:
-            raise PlanError(
-                f"plan {plan.path}: {case.tool} has no mode {case.mode!r} "
-                f"({'|'.join(sorted(known))})"
-            )

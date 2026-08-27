@@ -3,9 +3,12 @@
 Reusable study plans live under [`buckets/`](buckets/), saying what to run
 against that bucket and on what box. [`canaries/`](canaries/) holds the two
 small runner qualifications: signed stdout, unsigned stdout, and native-file
-capsule paths against replay, plus representative shapes against ordinary S3. A plan is execution
-intent, not a history folder; superseded diagnostic rungs stay in Git and their
-receipts/notes rather than accumulating here.
+capsule paths against replay, plus representative shapes against ordinary S3.
+[`campaigns/`](campaigns/) holds the capacity, tuning, and measurement plans
+that make up an actual campaign; treatment and stage directories allow one
+bucket to have multiple plans without weakening the filename-to-bucket guard.
+A plan is execution intent, not a history folder; superseded diagnostic rungs
+stay in Git and their receipts/notes rather than accumulating here.
 
 ```
 python -m benchmark.plan_cli --bucket noaa-ghcn-pds
@@ -51,7 +54,7 @@ tools:
 
 The mode each one runs lives in [`tools.yaml`](tools.yaml), because a tool's
 representative mode is a fact about the tool rather than about any one bucket.
-Restating it per plan would mean the same eleven lines in every file, drifting
+Restating it per plan would mean the same active-roster lines in every file, drifting
 apart one edit at a time. A test checks each default against the adapter that
 implements it, so an adapter rename cannot leave it stale.
 
@@ -68,7 +71,7 @@ A **row** — one entry in a tool's `cases` — states what one case *is*: `mode
 
 A **layer** — `defaults`, or a tool's own body — states what every case under it
 *inherits*: `signed` and the allocation again, plus the schedule (`reps`,
-`timeout_s`). Never `mode`: eleven tools have eleven mode vocabularies, so
+`timeout_s`). Never `mode`: ten active tools have ten mode vocabularies, so
 nothing above a row has a mode to state. A tool body is therefore `defaults`
 plus `cases`.
 
@@ -155,11 +158,13 @@ Replay plans carry no correctness manifest: the worker counts rows in-container,
 retains raw products, and routine reporting reads `result.json` only.
 
 An image-bundled fixture states `fixture_sha256` alone. A staged fixture states
-both `fixture_uri` and `fixture_sha256`. `fixture_uri` names one exact Parquet
-object rather than a wildcard: the staging operation itself needs object read but
-not bucket listing, although worker IAM intentionally grants broader bucket-wide
-object administration. The digest is over the UTF-8 bytes of the single
-`name<TAB>size<TAB>file-sha256<NEWLINE>` manifest row. The staging runnable
+both `fixture_uri` and `fixture_sha256`. `fixture_uri` names either one exact
+Parquet object or the bounded multipart shape `gs://.../part-*.parquet`; broader
+wildcards are refused. An exact object needs `storage.objects.get`; expanding
+the bounded part set also needs `storage.objects.list` plus
+`storage.objects.get` for its matches. Worker IAM currently grants broader
+bucket-wide object administration. The digest is over the UTF-8 bytes of the
+sorted `name<TAB>size<TAB>file-sha256<NEWLINE>` manifest rows. The staging runnable
 recomputes it after download and before starting the replay server, so mutable
 storage cannot silently change a case. Generate the value from an already
 staged directory with:
@@ -167,6 +172,31 @@ staged directory with:
 ```sh
 uv run python -m benchmark.replay_fixture /path/to/fixture
 ```
+
+#### Fixture preparation and sorted eligibility
+
+Fixture identity and sorted-serving eligibility are separate checks.
+`fixture_sha256` proves which files were staged; it does not prove that the
+replay server may use its sorted path.
+
+For object-mode Parquet output produced by current Swath with `--sort`, use the
+completed dataset's `data/*.parquet` parts directly. With the same
+`swath.sort.*` settings (including the defaults), live `--sort` and
+`swath-replay sort-fixture` use the same final-file writer, so both produce the
+same replay-relevant order, page/dictionary geometry, and footer stamps. They
+are not promised to be byte-for-byte identical: part boundaries and compressed
+bytes may differ. A second sort adds no missing replay contract to fresh
+`--sort` output. This is also the rule stated by the
+[current Swath replay documentation](https://github.com/varveio/swath/blob/00886330fcd15ff5dad2430122e331e91a340c31/docs/swath-replay.md#sort-a-legacy-capture-sort-fixture).
+
+The `--sort` qualifier is load-bearing. Current Swath output produced without
+it, a DuckDB `ORDER BY`/`COPY` rewrite, foreign Parquet, or a legacy unstamped
+capture does not become sorted-eligible merely because a row scan finds keys in
+order. Transform such input once with `swath-replay sort-fixture`, or declare
+`serving_mode: duckdb`. Conversely, an older capture that already passes
+`--serving-mode sorted` does not need another sort for correctness. Sorted mode
+is the final gate: it requires every resolved part to be stamped object mode,
+pure `OBJECT`, strictly globally ordered, and a complete multipart sequence.
 
 The staged-fixture branch remains `VERIFIED: no`: its manifest contract has
 offline coverage, but no committed campaign receipt has exercised the provider
@@ -351,8 +381,11 @@ runtime own heuristic the independent variable rather than the memory the case
 asked for.
 
 Every tool with a `build/image.json` must appear under `tools` or `exclude`
-with a reason. A tool that is simply absent is a validation error — registering
-a subject and forgetting a bucket should not look like a decision to skip it.
+with a reason. A tool retired from every future benchmark belongs in the shared
+`exclude` list in [`tools.yaml`](tools.yaml), not repeated in every bucket. A
+plan may still exclude an active tool for a plan-specific reason. A tool that is
+simply absent from both layers is a validation error — registering a subject and
+forgetting a bucket should not look like a decision to skip it.
 
 ## A row has a label; identity is minted at submit
 

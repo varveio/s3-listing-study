@@ -149,19 +149,27 @@ QUERIES = {
 }
 
 
+def _sql_for(mode: str) -> str | None:
+    # Every mode that count_rows counts cheaply (without SQL) must still have
+    # a query here: count_rows resolves the query before choosing a counter, so
+    # a count-only mode with no query would be refused instead of counted.
+    if mode in JSON_MODES:
+        return QUERIES["json"]
+    if mode in TEXT_MODES:
+        return QUERIES["text"]
+    return QUERIES.get(mode)
+
+
 def count_rows(data: bytes, mode: str, prefix: str = "", native_root: str = "") -> int:
+    sql = _sql_for(mode)
+    if sql is None:
+        raise ValueError(f"unknown mode: {mode}")
     if mode == "find":
         blank = re.compile(rb"^[ \t\r\v\f]*$")
         return count_lf_lines(data, lambda line: blank.match(line) is None)
     if mode in TEXT_MODES:
         row = re.compile(rb"^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC\]\s*\S+.*$")
         return count_lf_lines(data, lambda line: row.match(line) is not None)
-    if mode in JSON_MODES:
-        sql = QUERIES["json"]
-    elif mode in QUERIES:
-        sql = QUERIES[mode]
-    else:
-        raise ValueError(f"unknown mode: {mode}")
     with staged(data) as path:
         params = {"path": path} | ({"pfx": prefix.removeprefix("/")} if "$pfx" in sql else {})
         return count_query(connect(), sql, params)
@@ -170,13 +178,8 @@ def count_rows(data: bytes, mode: str, prefix: str = "", native_root: str = "") 
 def normalize(
     out: IO[bytes], data: bytes, mode: str, prefix: str, config: Mapping[str, object] | None = None
 ) -> int:
-    if mode in JSON_MODES:
-        sql = QUERIES["json"]
-    elif mode in TEXT_MODES:
-        sql = QUERIES["text"]
-    elif mode in QUERIES:
-        sql = QUERIES[mode]
-    else:
+    sql = _sql_for(mode)
+    if sql is None:
         print(f"normalize.py: unknown mode: {mode}", file=sys.stderr)
         return UNKNOWN_MODE_EXIT
     with staged(data) as path:

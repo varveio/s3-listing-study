@@ -11,6 +11,7 @@ from __future__ import annotations
 import io
 import shutil
 import subprocess
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -22,10 +23,15 @@ from benchmark.runtime.contract import (
     canon_mtime,
     emit,
     parse_line,
-    read_records,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def read_records(stream: io.BytesIO) -> Iterator[Record]:
+    for line_number, raw in enumerate(stream, start=1):
+        yield parse_line(raw.removesuffix(b"\n"), line_number=line_number)
+
 
 CANON_MT_AWK = (
     r'function canon_mt(s){ sub(/(Z|\+00:00|\+0000)$/,"",s); '

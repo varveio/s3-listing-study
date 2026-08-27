@@ -53,10 +53,11 @@ UNKNOWN_MODE_EXIT = 3
 RECURSIVE_MODES = frozenset(
     {"recursive-fastlist", "recursive-hierarchical", "recursive-walk", "listv1"}
 )
+DIRECTORY_RECURSIVE_MODES = frozenset({"recursive-walk-with-dirs"})
 
 # Declared rather than inferred, so the equivalence harness can name a mode no
 # committed payload exercises — untested by construction, and invisible otherwise.
-MODES = RECURSIVE_MODES | {"delimiter-shallow", "lsf"}
+MODES = RECURSIVE_MODES | DIRECTORY_RECURSIVE_MODES | {"delimiter-shallow", "lsf"}
 
 # `lsjson` writes one JSON array of entry objects. Columns are declared, not
 # sniffed: a payload where no entry carries `Tier` (nothing but CommonPrefixes)
@@ -79,6 +80,20 @@ QUERIES = {
     # prefix, `Tier` the storage class.
     "recursive": f"""
         SELECT $pfx || "Path", CAST("Size" AS VARCHAR), NULL, {MTIME}, nullif("Tier", '')
+        FROM {LSJSON}
+    """,
+    # Recursive walk without --files-only. IsDir is rclone's classification,
+    # not proof that the row came from S3 Contents: normalize it as key-only and
+    # let exact verification expose synthesized hierarchy as extras. rtrim keeps
+    # the contract stable whether rclone prints the directory path with '/' or
+    # without it.
+    "recursive-with-dirs": f"""
+        SELECT $pfx || CASE WHEN "IsDir" THEN rtrim("Path", '/') || '/'
+                            ELSE "Path" END,
+               CASE WHEN NOT "IsDir" THEN CAST("Size" AS VARCHAR) END,
+               NULL,
+               CASE WHEN NOT "IsDir" THEN {MTIME} END,
+               CASE WHEN NOT "IsDir" THEN nullif("Tier", '') END
         FROM {LSJSON}
     """,
     # Non-recursive (a single delimiter level): files AND directories. A directory
@@ -107,15 +122,23 @@ QUERIES = {
 }
 
 
+def _sql_for(mode: str) -> str | None:
+    # Every mode that count_rows counts cheaply (without SQL) must still have
+    # a query here: count_rows resolves the query before choosing a counter, so
+    # a count-only mode with no query would be refused instead of counted.
+    if mode in RECURSIVE_MODES:
+        return QUERIES["recursive"]
+    if mode in DIRECTORY_RECURSIVE_MODES:
+        return QUERIES["recursive-with-dirs"]
+    return QUERIES.get(mode)
+
+
 def count_rows(data: bytes, mode: str, prefix: str = "", native_root: str = "") -> int:
+    sql = _sql_for(mode)
+    if sql is None:
+        raise ValueError(f"unknown mode: {mode}")
     if mode == "lsf":
         return count_lf_lines(data, lambda line: b";" in line)
-    if mode in RECURSIVE_MODES:
-        sql = QUERIES["recursive"]
-    elif mode in QUERIES:
-        sql = QUERIES[mode]
-    else:
-        raise ValueError(f"unknown mode: {mode}")
     with staged(data) as path:
         return count_query(connect(), sql, {"path": path, "pfx": prefix})
 
@@ -123,11 +146,8 @@ def count_rows(data: bytes, mode: str, prefix: str = "", native_root: str = "") 
 def normalize(
     out: IO[bytes], data: bytes, mode: str, prefix: str, config: Mapping[str, object] | None = None
 ) -> int:
-    if mode in RECURSIVE_MODES:
-        sql = QUERIES["recursive"]
-    elif mode in QUERIES:
-        sql = QUERIES[mode]
-    else:
+    sql = _sql_for(mode)
+    if sql is None:
         print(f"normalize.py: unknown mode {mode}", file=sys.stderr)
         return UNKNOWN_MODE_EXIT
     with staged(data) as path:

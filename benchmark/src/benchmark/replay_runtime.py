@@ -12,10 +12,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from benchmark import gcs
-from benchmark.replay import ReplayConfig
+from benchmark.contract import canonical_json
+from benchmark.replay import REPLAY_METRICS_URL, ReplayConfig
 
-REPLAY_ENDPOINT_URL = "http://127.0.0.1:19090"
-REPLAY_METRICS_URL = "http://127.0.0.1:19192"
 REPLAY_READINESS_TIMEOUT_S = 600
 REPLAY_HTTP_TIMEOUT_S = 5.0
 REPLAY_READINESS_POLL_S = 1.0
@@ -242,7 +241,7 @@ def sample_metrics(
             uri = heartbeat_destination.rstrip("/") + f"/live/replay-{heartbeat_sequence:06d}.json"
             try:
                 gcs.upload_bytes(
-                    (json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n").encode(),
+                    (canonical_json(document) + "\n").encode(),
                     uri,
                     content_type="application/json",
                     create_only=True,

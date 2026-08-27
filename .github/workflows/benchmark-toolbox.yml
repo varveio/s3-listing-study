@@ -49,13 +49,11 @@ jobs:
           import os
           import subprocess
           from pathlib import Path
+          from benchmark.contract import TOOLBOX_TOOLS
 
           with open('/opt/benchmark/image-metadata.json', encoding='utf-8') as source:
               metadata = json.load(source)
-          expected_tools = {
-              'aws-cli', 'minio-mc', 'ps3', 'rclone', 's3-fast-list', 's3kor',
-              's3p', 's4cmd', 's5cmd', 's7cmd', 'swath',
-          }
+          expected_tools = set(TOOLBOX_TOOLS)
           tools = metadata['tools']
           if metadata['schema_version'] != 5 or set(tools) != expected_tools:
               raise SystemExit('toolbox metadata roster/schema mismatch')

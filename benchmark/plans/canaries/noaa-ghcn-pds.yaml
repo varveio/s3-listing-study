@@ -32,6 +32,5 @@ exclude:
   - {tool: ps3, reason: representative runner canary already covers stdout and file subjects}
   - {tool: s3kor, reason: representative runner canary already covers stdout and file subjects}
   - {tool: s3p, reason: representative runner canary already covers stdout and file subjects}
-  - {tool: s4cmd, reason: representative runner canary already covers stdout and file subjects}
   - {tool: s5cmd, reason: representative runner canary already covers stdout and file subjects}
   - {tool: s7cmd, reason: representative runner canary already covers stdout and file subjects}

@@ -221,6 +221,7 @@ claim `head-per-object-suppressed-at-smoke`).
 | --- | --- | --- |
 | `recursive-fastlist` (`lsjson --fast-list -R`) | Flat undelimited `ListObjectsV2`, serial paging (`--fast-list` inert — already `ListR`) | JSON array; per item `Path`, `Name`, `Size`, `ModTime`, `IsDir`, `Tier` [SRC `fs/operations/lsjson.go` @ 5bc93a2a7] |
 | `recursive-walk` (`lsjson --disable ListR -R`) | Per-directory `Delimiter=/` `ListObjectsV2`, children fanned across `--checkers` | Same JSON contract |
+| `recursive-walk-with-dirs` (same, without `--files-only`) | Same hierarchical walk | Retains `IsDir` rows as slash-terminated, key-only records. This may include synthesized hierarchy as well as real trailing-slash objects, so the mode remains unverified until exact comparison. |
 | `delimiter-shallow` (`lsjson`/`lsf`/`lsd`, no `-R`) | Single delimiter level; objects + `CommonPrefixes` (dir rows, `IsDir=true`) | JSON files carry size/mtime/tier; dir rows carry none |
 | `listv1` (`--s3-list-version 1`) | Legacy `ListObjects` (v1), `Marker` paging | Same JSON contract |
 | `versions` (`--s3-versions`/`--s3-version-at`) | `ListObjectVersions` | Distinct request + output — **not smoked** |

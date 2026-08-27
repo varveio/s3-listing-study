@@ -20,13 +20,14 @@ import io
 import subprocess
 import tempfile
 import time
+from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from benchmark.runtime import duckdb_adapter
-from benchmark.runtime.contract import FIELD_COUNT, MTIME_RE, ContractViolation, read_records
+from benchmark.runtime.contract import FIELD_COUNT, MTIME_RE, ContractViolation, Record, parse_line
 from benchmark.runtime.duckdb_adapter import emit_result, existing_input_path
 from benchmark.runtime.normalizer_cli import mapped_input
 from tests.adapters.equivalence import (
@@ -49,6 +50,12 @@ PORTED = (
     "s7cmd",
     "swath",
 )
+
+
+def read_records(stream: io.BytesIO) -> Iterator[Record]:
+    for line_number, raw in enumerate(stream, start=1):
+        yield parse_line(raw.removesuffix(b"\n"), line_number=line_number)
+
 
 # Modes an adapter declares that NO committed payload reaches. Pinned per tool
 # rather than asserted empty, because for four tools it is not empty and saying so
@@ -74,7 +81,14 @@ UNEXERCISED = {
     # postdates the committed corpus; no committed payload reaches it yet.
     "s3-fast-list": {"list-hinted"},
     "s3p": {"ls-long"},
+    # These modes were added from the IDC directory-marker diagnosis and have
+    # parser fixtures below, but no committed raw campaign product yet.
+    "rclone": {"recursive-walk-with-dirs"},
     "s4cmd": {"du", "shallow", "show-directory"},
+    "s5cmd": {"recursive-with-dirs", "fanout-with-dirs"},
+    # Streaming one-line output is new campaign coverage and has no committed
+    # raw product in the capsule's immutable groundwork corpus yet.
+    "s7cmd": {"recursive-one-nosort"},
     # v0.1.0 receipts were retired with that subject; v0.2.0 currently has
     # observations only, so no mode has a replayable committed payload yet.
     "swath": {
@@ -183,6 +197,14 @@ FIXTURES: dict[tuple[str, str], tuple[bytes, str, list[bytes]]] = {
         "normals-hourly/",
         [b"normals-hourly/access/A.csv"],
     ),
+    ("rclone", "recursive-walk-with-dirs"): (
+        b'[\n{"Path":"access/A.csv","Size":18410,'
+        b'"ModTime":"2026-03-16T15:01:21.000000000Z","IsDir":false,"Tier":"STANDARD"},\n'
+        b'{"Path":"markers/empty","Size":0,'
+        b'"ModTime":"2026-03-16T15:01:22.000000000Z","IsDir":true}\n]\n',
+        "normals-hourly/",
+        [b"normals-hourly/access/A.csv", b"normals-hourly/markers/empty/"],
+    ),
     ("rclone", "listv1"): (
         b'[\n{"Path":"access/A.csv","Size":18410,'
         b'"ModTime":"2026-03-16T15:01:21.000000000Z","IsDir":false,"Tier":"STANDARD"}\n]\n',
@@ -255,6 +277,18 @@ FIXTURES: dict[tuple[str, str], tuple[bytes, str, list[bytes]]] = {
         b"2026/03/16 14:05:58 STANDARD ff41               4196  1981-2010/access/A.csv\n",
         "normals-hourly/",
         [b"normals-hourly/1981-2010/access/A.csv"],
+    ),
+    ("s5cmd", "recursive-with-dirs"): (
+        b"                                       DIR  markers/empty/\n"
+        b"2026/03/16 14:05:58 STANDARD ff41               4196  1981-2010/access/A.csv\n",
+        "normals-hourly/",
+        [b"normals-hourly/markers/empty/", b"normals-hourly/1981-2010/access/A.csv"],
+    ),
+    ("s5cmd", "fanout-with-dirs"): (
+        b"                                       DIR  markers/empty/\n"
+        b"2026/03/16 14:05:58 STANDARD ff41               4196  1981-2010/access/A.csv\n",
+        "normals-hourly/",
+        [b"normals-hourly/markers/empty/", b"normals-hourly/1981-2010/access/A.csv"],
     ),
     ("s5cmd", "listv1"): (
         b"2026/03/16 14:05:58 STANDARD ff41               4196  1981-2010/access/A.csv\n",
@@ -330,6 +364,11 @@ FIXTURES: dict[tuple[str, str], tuple[bytes, str, list[bytes]]] = {
         [b"normals-hourly/access/A.csv", b"normals-hourly/1981-2010/"],
     ),
     ("s7cmd", "recursive-one"): (
+        b"normals-hourly/access/A.csv\n",
+        "normals-hourly/",
+        [b"normals-hourly/access/A.csv"],
+    ),
+    ("s7cmd", "recursive-one-nosort"): (
         b"normals-hourly/access/A.csv\n",
         "normals-hourly/",
         [b"normals-hourly/access/A.csv"],
@@ -545,9 +584,9 @@ def test_count_rows_matches_explicit_normalization_without_constructing_records(
         raise AssertionError("count-only path crossed the contract emit boundary")
 
     monkeypatch.setattr(duckdb_adapter, "Record", forbidden)
-    monkeypatch.setattr(adapter, "emit_result", forbidden)
-    if hasattr(adapter, "emit"):
-        monkeypatch.setattr(adapter, "emit", forbidden)
+    for emit_name in ("emit_result", "emit"):
+        if hasattr(adapter, emit_name):
+            monkeypatch.setattr(adapter, emit_name, forbidden)
     assert adapter.count_rows(payload, mode, prefix=prefix) == expected
 
     raw = tmp_path / "stdout.raw"
@@ -587,6 +626,7 @@ def test_binary_line_iterator_preserves_split_framing_across_chunks(
         ("s3p", "ls", b"a\x00b\n"),
         ("rclone", "lsf", b"a\x00b;1\n"),
         ("s7cmd", "recursive-one", b"a\x00b\n"),
+        ("s7cmd", "recursive-one-nosort", b"a\x00b\n"),
     ],
 )
 def test_binary_line_counts_match_normalization_for_nul_keys(
@@ -1161,6 +1201,29 @@ def test_s3kor_list_refuses_a_panic_whose_frames_are_tab_indented() -> None:
     assert done.stdout == b""
     assert b"ContractViolation" in done.stderr
     assert rb"key contains b'\t'" in done.stderr
+
+
+@pytest.mark.parametrize(
+    ("mode", "rows"),
+    [
+        ("list", b"first-key\nUsing custom endpoint [literal-key] on region [still-a-key]\n"),
+        (
+            "list-versions",
+            b"null first-key\nnull Using custom endpoint [literal-key] on region [still-a-key]\n",
+        ),
+    ],
+)
+def test_s3kor_discards_only_the_leading_custom_endpoint_notice(mode: str, rows: bytes) -> None:
+    notice = b"Using custom endpoint [http://127.0.0.1:19090] on region [us-east-1]\n"
+    adapter = load_adapter(REPO, "s3kor")
+    payload = notice + rows
+    done = run("s3kor", mode, "", payload)
+    assert done.returncode == 0, done.stderr
+    assert [record.key for record in read_records(io.BytesIO(done.stdout))] == [
+        b"first-key",
+        b"Using custom endpoint [literal-key] on region [still-a-key]",
+    ]
+    assert adapter.count_rows(payload, mode) == 2
 
 
 @pytest.mark.parametrize("tool", PORTED)
