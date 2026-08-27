@@ -114,12 +114,9 @@ It currently refuses replay plans and prerequisite chains; `poll`, `retry`, and
 `submit --repeat`, which creates a new physical attempt rather than overwriting
 evidence.
 
-Real-S3 Docker runs require the fixed `s3-listing-study-subjects` bridge used by
-the retired smoke runner: bridge networking, inter-container communication off,
-and a host firewall rule denying `169.254.169.254`. Before the first subject the
-executor checks that shape and probes both metadata denial and public-S3 access.
-Provision it idempotently with `benchmark/setup-docker-network.sh`; the script
-requires passwordless `sudo` for its narrowly scoped `iptables` calls.
+Real-S3 Docker runs use Docker's ordinary bridge networking. They do not require
+a host firewall change or a host-global network setup step. Subject containers
+still drop all Linux capabilities and enable Docker's no-new-privileges rule.
 
 For the small one-shot Docker canary only, pass `--include-docker-canaries` to
 `verify.py`. It compares every normalized saved output with the AWS CLI canary,

@@ -36,7 +36,6 @@ from benchmark.ledger import (
 
 EXECUTOR = "docker"
 WORKER = (10001, 10001)
-SUBJECT_NETWORK = "s3-listing-study-subjects"
 
 
 @dataclass(frozen=True)
@@ -266,51 +265,6 @@ def attest_container_cpuset(image: str, cpuset: str) -> tuple[int, ...]:
     return tuple(observed)
 
 
-def check_subject_network(image: str, bucket: str, region: str) -> None:
-    """Refuse unless the old local-runner isolation boundary is effective."""
-    try:
-        network = json.loads(
-            _command(("docker", "network", "inspect", SUBJECT_NETWORK)).stdout
-        )[0]
-    except (IndexError, TypeError, json.JSONDecodeError):
-        raise CampaignError(f"cannot inspect Docker network {SUBJECT_NETWORK!r}") from None
-    options = network.get("Options")
-    if (
-        network.get("Driver") != "bridge"
-        or network.get("Internal") is not False
-        or network.get("EnableIPv6") is not False
-        or not isinstance(options, dict)
-        or options.get("com.docker.network.bridge.enable_icc") != "false"
-    ):
-        raise CampaignError(
-            f"Docker network {SUBJECT_NETWORK!r} is not the isolated local-runner bridge"
-        )
-    code = (
-        "import socket\n"
-        "import sys\n"
-        "try:\n socket.create_connection(('169.254.169.254',80),.5)\n"
-        "except OSError: pass\n"
-        "else: raise SystemExit('cloud metadata is reachable')\n"
-        "socket.create_connection((sys.argv[1],443),5).close()"
-    )
-    _command(
-        (
-            "docker",
-            "run",
-            "--rm",
-            "--pull=never",
-            f"--network={SUBJECT_NETWORK}",
-            "--cap-drop=ALL",
-            "--security-opt=no-new-privileges:true",
-            "--entrypoint=/usr/bin/python3",
-            image,
-            "-c",
-            code,
-            f"{bucket}.s3.{region}.amazonaws.com",
-        )
-    )
-
-
 def _attempt(
     ordinal: int,
     item: Scheduled,
@@ -369,7 +323,7 @@ def _attempt(
                 **host.facts,
                 "cpuset": cpuset,
                 "image_id": image.image_id,
-                "network_mode": SUBJECT_NETWORK,
+                "network_mode": "default",
             }
         ),
         service_account="docker-host-environment" if case.auth_role else "anonymous",
@@ -393,7 +347,6 @@ def _attempt(
         "--rm",
         "--pull=never",
         f"--name={record.job_name}",
-        f"--network={SUBJECT_NETWORK}",
         "--cap-drop=ALL",
         "--security-opt=no-new-privileges:true",
         f"--cpuset-cpus={cpuset}",
@@ -547,8 +500,6 @@ def cmd_submit(args: Any) -> int:
     cases = campaign._selected_cases(loaded.cases, args.case)
     ordered = schedule(cases, args.seed)
     image = load_image(args.image, set(loaded.tools()))
-    if not args.dry_run:
-        check_subject_network(image.image_id, loaded.bucket, loaded.region)
     cpuset_attestations = {
         cpuset: attest_container_cpuset(image.image_id, cpuset)
         for cpuset in sorted({host.cpuset(case.resources.vcpus) for case in cases})

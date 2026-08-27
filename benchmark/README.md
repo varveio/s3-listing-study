@@ -112,16 +112,10 @@ verification, and reporting with Batch; it does not claim Batch `poll`, `retry`,
 is the next increment and should reuse Batch's fresh per-attempt replay sidecar,
 not introduce a separate warm-session treatment.
 
-Before a real run, provision the fixed `s3-listing-study-subjects` Docker bridge
-with inter-container communication disabled and a host firewall rule that blocks
-`169.254.169.254`. The executor checks the bridge, proves cloud metadata is
-unreachable from it, and proves public S3 remains reachable before starting a
-tool. Every subject also drops all Linux capabilities and enables Docker's
-no-new-privileges rule.
-
-```sh
-benchmark/setup-docker-network.sh
-```
+Real-S3 subjects use Docker's ordinary bridge networking. The executor does not
+provision a host firewall or require a host-global network setup step. Every
+subject drops all Linux capabilities and enables Docker's no-new-privileges
+rule.
 
 After the eleven one-shot canaries finish, compare their saved listings:
 
