@@ -39,12 +39,22 @@ EXECUTOR = "docker"
 WORKER = (10001, 10001)
 INTERRUPTED_ROW_STATE = "FAILED"
 UNSTARTED_ROW_STATE = "NOT_CREATED"
-LOCAL_INTERRUPTION_POLICY = {
-    "interrupted_row_state": INTERRUPTED_ROW_STATE,
-    "unstarted_row_state": UNSTARTED_ROW_STATE,
-    "replace_within_group": False,
-    "replacement": "new group with a new seed",
-}
+COMPLETE_ROW_STATE = "SUCCEEDED"
+
+
+def local_interruption_policy() -> dict[str, object]:
+    """The predeclared settlement rule frozen into every local schedule.
+
+    Built fresh on each call so the frozen document can never be mutated
+    through a shared module-level object.
+    """
+    return {
+        "interrupted_row_state": INTERRUPTED_ROW_STATE,
+        "unstarted_row_state": UNSTARTED_ROW_STATE,
+        "complete_row_state": COMPLETE_ROW_STATE,
+        "replace_within_group": False,
+        "replacement": "new group with a new seed",
+    }
 
 
 @dataclass(frozen=True)
@@ -611,7 +621,7 @@ def cmd_submit(args: Any) -> int:
                     "executor_contract": "synchronous-serial-session-v1",
                     "group_id": group,
                     "seed": args.seed,
-                    "interruption_policy": LOCAL_INTERRUPTION_POLICY,
+                    "interruption_policy": local_interruption_policy(),
                     "schedule_derivation": (
                         "block_seed=SHA256(f'{seed}:{block}'); Python random.Random"
                         "(int.from_bytes(block_seed)); shuffle resolved-plan case order"
@@ -670,39 +680,43 @@ def cmd_local_close(args: Any) -> int:
         if any(row["executor"] != EXECUTOR for row in rows):
             raise CampaignError("local-close manages Docker groups only")
         live = [row for row in rows if row["state"] not in TERMINAL_STATES]
-        live_containers: list[str] = []
-        for row in live:
-            names = _command(
-                (
-                    "docker",
-                    "ps",
-                    "--filter",
-                    f"name={row['job_name']}",
-                    "--format",
-                    "{{.Names}}",
-                )
-            ).stdout.splitlines()
-            if row["job_name"] in names:
-                live_containers.append(row["job_name"])
+        try:
+            running = set(_command(("docker", "ps", "--format", "{{.Names}}")).stdout.split())
+        except CampaignError as exc:
+            raise CampaignError(
+                f"local-close cannot confirm that no subject container is running: {exc}"
+            ) from None
+        live_containers = [row["job_name"] for row in live if row["job_name"] in running]
         if live_containers:
             raise CampaignError(
                 "local-close refuses while Docker containers are still running: "
                 + ", ".join(live_containers)
             )
-        complete = [
+        complete = {
             row["attempt_id"]
             for row in live
-            if row["state"] == "RUNNING"
-            and (Path(row["result_prefix"]) / "result.json").is_file()
-        ]
-        if complete:
+            if row["state"] == "RUNNING" and (Path(row["result_prefix"]) / "result.json").is_file()
+        }
+        if complete and not getattr(args, "settle_complete", False):
             raise CampaignError(
                 "local-close refuses to mark complete evidence failed for "
-                + ", ".join(complete)
-                + "; evidence is complete; rerun submit is not needed; settle by re-running "
-                "the session's own settlement or leave as-is"
+                + ", ".join(sorted(complete))
+                + "; evidence is complete (result.json is present), so rerun submit is not "
+                "needed; pass --settle-complete to record those rows SUCCEEDED from their "
+                "evidence, with the Docker exit code recorded as unknown"
             )
         for row in live:
+            if row["attempt_id"] in complete:
+                detail = (
+                    "local session closed: evidence complete before interruption; "
+                    f"Docker exit unknown: {reason}"
+                )[:500]
+                set_state(con, row["attempt_id"], COMPLETE_ROW_STATE, detail)
+                print(
+                    f"campaign: {row['attempt_id']} settled {COMPLETE_ROW_STATE} "
+                    "(evidence complete)"
+                )
+                continue
             interrupted = row["state"] == "RUNNING"
             state = INTERRUPTED_ROW_STATE if interrupted else UNSTARTED_ROW_STATE
             circumstance = "interrupted while running" if interrupted else "container never started"

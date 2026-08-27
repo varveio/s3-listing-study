@@ -174,9 +174,8 @@ def test_local_close_refuses_batch_and_preserves_terminal_docker_rows(
 
     def command(argv: object) -> subprocess.CompletedProcess[str]:
         tokens = cast(tuple[str, ...], argv)
-        assert tokens[:3] == ("docker", "ps", "--filter")
-        name = tokens[3].removeprefix("name=")
-        stdout = f"{name}\n" if name in running_containers else ""
+        assert tokens[:2] == ("docker", "ps")
+        stdout = "".join(f"{name}\n" for name in sorted(running_containers))
         return subprocess.CompletedProcess(tokens, 0, stdout, "")
 
     monkeypatch.setattr(docker_executor, "_command", command)
@@ -244,4 +243,18 @@ def test_local_close_refuses_to_fail_a_running_row_with_complete_evidence(
     con = ledger.open_ledger(str(state), readonly=True)
     row = ledger.attempt_rows(con, group_id="docker-group")[0]
     assert row["state"] == "RUNNING"
+    con.close()
+
+    docker_executor.cmd_local_close(
+        cast(
+            argparse.Namespace,
+            SimpleNamespace(
+                state=str(state), group="docker-group", reason="host crashed", settle_complete=True
+            ),
+        )
+    )
+    con = ledger.open_ledger(str(state), readonly=True)
+    row = ledger.attempt_rows(con, group_id="docker-group")[0]
+    assert row["state"] == "SUCCEEDED"
+    assert "Docker exit unknown" in row["state_detail"]
     con.close()

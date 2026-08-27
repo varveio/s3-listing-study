@@ -129,8 +129,12 @@ power'`. The command records the interrupted `RUNNING` row as `FAILED`, records
 containers that never started as `NOT_CREATED`, and leaves terminal rows alone.
 It refuses while any named subject container is still running and never stops
 one automatically. It also refuses to mark a `RUNNING` row failed when that
-row's `result.json` is already present; that completed evidence must be settled
-by the original session's settlement path or left unchanged.
+row's `result.json` is already present: the worker wrote its marker last, so
+the evidence is complete even though the session died before recording it.
+Rerun with `--settle-complete` to record exactly those rows `SUCCEEDED` from
+their evidence; the row detail states that the Docker exit code is unknown.
+Until then the group cannot be receipted, because it still holds a
+non-terminal row.
 Replacement is a new group with a new seed, as predeclared in that group's
 frozen schedule; it is never a re-run within the old order.
 

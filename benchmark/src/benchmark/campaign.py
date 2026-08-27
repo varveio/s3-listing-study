@@ -1683,6 +1683,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     local_close = sub.add_parser("local-close")
     local_close.add_argument("--group", required=True)
     local_close.add_argument("--reason", required=True)
+    local_close.add_argument(
+        "--settle-complete",
+        action="store_true",
+        help="record RUNNING rows whose result.json exists as SUCCEEDED from that evidence",
+    )
     local_close.set_defaults(func=cmd_local_close)
 
     cancel = sub.add_parser("cancel")
