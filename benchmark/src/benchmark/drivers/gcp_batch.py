@@ -22,7 +22,6 @@ from benchmark import replay as replay_contract
 from benchmark.campaign import (
     EXECUTOR,
     ImageSet,
-    _canonical,
     _replay_document,
     abandon_slot,
     job_name_for,
@@ -31,7 +30,7 @@ from benchmark.campaign import (
     settle_dependents,
     worker_argument_pairs,
 )
-from benchmark.contract import CREDENTIAL_ENV_VAR
+from benchmark.contract import CREDENTIAL_ENV_VAR, canonical_json
 from benchmark.ledger import (
     INSERT_COLUMNS,
     RETRYABLE_STATES,
@@ -112,7 +111,7 @@ class BatchOptions:
 
     def executor_env(self) -> str:
         """The estate detail a row records and identity deliberately ignores."""
-        return _canonical(
+        return canonical_json(
             {
                 "project": self.project,
                 "provisioning": self.provisioning,
@@ -509,7 +508,7 @@ def retry_attempt(
                 f"{attempt_id}: retry would change the frozen request — that is a new "
                 "campaign, not a retry"
             )
-        return attempt, _canonical(request)
+        return attempt, canonical_json(request)
 
     attempt, request = journal_intent(
         con, case_id=previous.case_id, case_inputs=previous.case_inputs, build=build

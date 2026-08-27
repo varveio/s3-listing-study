@@ -40,6 +40,7 @@ from benchmark.contract import (
     AWS_CREDENTIAL_REQUIRED_ENV_KEYS,
     CREDENTIAL_ENV_VAR,
     TOOLBOX_TOOLS,
+    canonical_json,
     sha256_of,
 )
 from benchmark.runtime.command_adapter import (
@@ -429,7 +430,7 @@ def validate_image_metadata(args: argparse.Namespace) -> str | None:
             for tool, selected_tool in tools.items()
         },
     }
-    canonical = json.dumps(toolbox_projection, sort_keys=True, separators=(",", ":")).encode()
+    canonical = canonical_json(toolbox_projection).encode()
     computed_toolbox_sha256 = hashlib.sha256(canonical).hexdigest()
     if metadata.get("toolbox_manifest_sha256") != computed_toolbox_sha256:
         return "immutable image metadata has an invalid toolbox manifest hash"

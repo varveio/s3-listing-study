@@ -8,6 +8,7 @@ by benchmark controller, worker, verifier, and report code.
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 
 # verify.py's refusal ladder: a distinct code per reason a comparison did not
@@ -74,6 +75,12 @@ AWS_CREDENTIAL_ENV_KEYS = frozenset(
     {"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"}
 )
 AWS_CREDENTIAL_REQUIRED_ENV_KEYS = frozenset({"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"})
+
+
+def canonical_json(value: object) -> str:
+    return json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False
+    )
 
 
 def sha256_of(path: Path) -> str:

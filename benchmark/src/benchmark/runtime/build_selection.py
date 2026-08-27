@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from benchmark.contract import canonical_json
 from benchmark.runtime.command_adapter import CommandAdapterError, load_command_adapter
 
 SLUG_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
@@ -180,7 +181,7 @@ def load_staged_selection(
         raise BuildSelectionError(str(exc)) from exc
     if adapter.fixed_command_prefix != executable:
         raise BuildSelectionError("registered executable does not match command adapter")
-    canonical = json.dumps(raw, sort_keys=True, separators=(",", ":")).encode()
+    canonical = canonical_json(raw).encode()
     return BuildSelection(
         tool,
         version,

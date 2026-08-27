@@ -32,7 +32,7 @@ from google.auth.exceptions import DefaultCredentialsError
 from benchmark import gcs, identity
 from benchmark import plan as bench
 from benchmark import replay as replay_contract
-from benchmark.contract import TOOL_IMAGE_FIELDS, TOOLBOX_TOOLS
+from benchmark.contract import TOOL_IMAGE_FIELDS, TOOLBOX_TOOLS, canonical_json
 from benchmark.ledger import (
     STATE_FILENAME,
     UNSUCCESSFUL_STATES,
@@ -98,10 +98,6 @@ class ImageSet:
             "harness_revision": self.harness_revision,
             **self.tools[tool],
         }
-
-
-def _canonical(document: Mapping[str, Any]) -> str:
-    return json.dumps(document, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
 
 
 def load_image_set(path: str | Path, required_tools: set[str]) -> ImageSet:
@@ -179,7 +175,7 @@ def load_image_set(path: str | Path, required_tools: set[str]) -> ImageSet:
     missing = sorted(required_tools - set(tools))
     if missing:
         raise CampaignError(f"image set is missing plan tool(s): {', '.join(missing)}")
-    canonical = json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
+    canonical = canonical_json(document).encode()
     return ImageSet(
         image_uri,
         toolbox_sha256,
@@ -508,7 +504,7 @@ def planned_attempt(
         platform=image["platform_sha256"],
         input_artifact_sha256=inbound.artifact_sha256,
     )
-    config = _canonical(dict(case.config))
+    config = canonical_json(dict(case.config))
 
     def build(ordinal: int) -> tuple[Attempt, str]:
         attempt = Attempt(
@@ -549,11 +545,11 @@ def planned_attempt(
             purpose=case.purpose,
             statistic=case.statistic,
             origin="planned",
-            replay=None if case.replay is None else _canonical(case.replay.as_dict()),
+            replay=None if case.replay is None else canonical_json(case.replay.as_dict()),
         )
         from benchmark.drivers.gcp_batch import render_batch_job
 
-        return attempt, _canonical(
+        return attempt, canonical_json(
             render_batch_job(
                 attempt,
                 image,
@@ -622,7 +618,7 @@ def _case_from_document(document: Any) -> Case:
         replay_document = document.get("replay")
         replay = None
         if replay_document is not None:
-            replay = replay_contract.parse_document(replay_contract.canonical_json(replay_document))
+            replay = replay_contract.parse_document(canonical_json(replay_document))
         return Case(
             **{
                 name: document[name]
@@ -669,7 +665,7 @@ def producer_key(case: Case) -> str:
     launch's constants, so within an expansion two cases produce the same
     artifact exactly when their tool and their resolved config agree.
     """
-    return _canonical({"tool": case.tool, "config": dict(case.config)})
+    return canonical_json({"tool": case.tool, "config": dict(case.config)})
 
 
 def expand_launch(
@@ -713,7 +709,7 @@ def expand_launch(
             # depends on what it consumed, which its config does not state.
             index = candidates.get(producer_key(link)) if depth == 0 else None
             if index is None:
-                key = _canonical(
+                key = canonical_json(
                     {
                         "tool": case.tool,
                         "chain": [[step.mode, dict(step.config)] for step in links[: depth + 1]],
@@ -817,7 +813,7 @@ def producer_spec(attempt: Attempt) -> str:
     comparison against what the producer's row holds, and re-encoding it here
     would be a second answer to a settled question.
     """
-    return _canonical(
+    return canonical_json(
         {
             "tool": attempt.tool,
             "mode": str(json.loads(attempt.config)["mode"]),
@@ -855,7 +851,7 @@ def book_slot(
     own input digest is not knowable at booking — so it names the earlier slot
     and waits for that to become an attempt.
     """
-    known_inputs = _canonical({"case": _case_document(case), "launch": context.document()})
+    known_inputs = canonical_json({"case": _case_document(case), "launch": context.document()})
     con.execute("BEGIN IMMEDIATE")
     try:
         last = con.execute(
@@ -1164,7 +1160,7 @@ def _disqualify(
     against[candidate.attempt_id] = reason[:200]
     con.execute(
         "UPDATE pending SET disqualified=? WHERE group_id=? AND slot=?",
-        (_canonical(against), slot["group_id"], slot["slot"]),
+        (canonical_json(against), slot["group_id"], slot["slot"]),
     )
     print(
         f"campaign: {candidate.attempt_id} cannot pay slot "

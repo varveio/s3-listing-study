@@ -8,6 +8,8 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
+from benchmark.contract import canonical_json
+
 REPLAY_SPEC_VERSION = 3
 REPLAY_ENDPOINT_PORT = 19090
 REPLAY_METRICS_PORT = 19192
@@ -43,12 +45,6 @@ ERROR_COUNTER = "swath.replay.http.errors"
 
 class ReplayError(ValueError):
     """A replay document is incomplete, non-canonical, or cannot run."""
-
-
-def canonical_json(value: Mapping[str, object]) -> str:
-    return json.dumps(
-        value, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False
-    )
 
 
 def _positive(value: object, name: str) -> int:

@@ -23,7 +23,6 @@ Dataset-sink modes (for example Swath's Parquet modes) use the file-backed
 from __future__ import annotations
 
 import importlib.util
-import json
 import subprocess
 import sys
 import uuid
@@ -32,6 +31,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
+from benchmark.contract import canonical_json
 from benchmark.runtime.command_adapter import (
     HEAP_PERCENT,
     CommandRequest,
@@ -149,7 +149,7 @@ def _normalizer_command(
     # Always present, never left to the CLI's own default: the same blob
     # command.py compiled argv from, so a capsule whose output shape depends
     # on a config key can parse its own output.
-    command.extend(("--config", json.dumps(dict(config), sort_keys=True, separators=(",", ":"))))
+    command.extend(("--config", canonical_json(dict(config))))
     return command
 
 

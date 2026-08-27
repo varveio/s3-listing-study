@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from benchmark.contract import TOOL_IMAGE_FIELDS, TOOLBOX_TOOLS
+from benchmark.contract import TOOL_IMAGE_FIELDS, TOOLBOX_TOOLS, canonical_json
 from benchmark.runtime.build_selection import (
     BuildSelection,
     BuildSelectionError,
@@ -221,9 +221,7 @@ def attribute_recipe(source: str) -> RecipeSlices:
 
 
 def _slice_digest(kind: str, document: Mapping[str, object]) -> str:
-    canonical = json.dumps(
-        document, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False
-    ).encode()
+    canonical = canonical_json(document).encode()
     return hashlib.sha256(SLICE_DOMAIN + kind.encode() + b"\0" + canonical).hexdigest()
 
 
@@ -382,7 +380,7 @@ def toolbox_manifest(
         "toolbox_recipe_sha256": hashlib.sha256(toolbox_recipe_bytes).hexdigest(),
         "tools": tools,
     }
-    canonical = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
+    canonical = canonical_json(manifest).encode()
     return manifest, hashlib.sha256(canonical).hexdigest()
 
 
@@ -440,9 +438,7 @@ def build_image(root: Path, revision: str, tag: str) -> str:
     manifest, manifest_sha256 = toolbox_manifest(selections, root, revision)
     recipe_sha256 = str(manifest["toolbox_recipe_sha256"])
     metadata = final_image_metadata(manifest, selections, manifest_sha256, revision)
-    encoded = base64.b64encode(
-        json.dumps(metadata, sort_keys=True, separators=(",", ":")).encode()
-    ).decode("ascii")
+    encoded = base64.b64encode(canonical_json(metadata).encode()).decode("ascii")
     command = [
         "docker",
         "build",

@@ -21,7 +21,7 @@ from typing import Any
 
 from benchmark import campaign, identity, measure
 from benchmark import plan as bench
-from benchmark.contract import CREDENTIAL_ENV_VAR, TOOL_IMAGE_FIELDS
+from benchmark.contract import CREDENTIAL_ENV_VAR, TOOL_IMAGE_FIELDS, canonical_json
 from benchmark.ledger import (
     STATE_FILENAME,
     TERMINAL_STATES,
@@ -95,10 +95,6 @@ class Scheduled:
     case: bench.Case
 
 
-def _canonical(value: object) -> str:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-
-
 def _command(argv: Sequence[str]) -> subprocess.CompletedProcess[str]:
     try:
         return subprocess.run(argv, check=True, text=True, capture_output=True)
@@ -166,7 +162,7 @@ def inspect_host(results: Path) -> Host:
         for key in ("architecture", "cpu_model", "filesystem_type", "physical_cores")
     }
     hardware["memory_gb"] = memory_gb
-    signature = hashlib.sha256(_canonical(hardware).encode()).hexdigest()[:12]
+    signature = hashlib.sha256(canonical_json(hardware).encode()).hexdigest()[:12]
     return Host(
         tuple(tuple(sorted(cpus)) for _key, cpus in sorted(by_core.items())),
         memory_gb,
@@ -316,14 +312,14 @@ def _attempt(
         target_bucket=plan.bucket,
         target_region=plan.region,
         target_prefix="",
-        config=_canonical(dict(case.config)),
+        config=canonical_json(dict(case.config)),
         input_artifact_sha256=None,
         produced_by=None,
         tool_slice_sha256=tool_image["tool_slice_sha256"],
         platform_sha256=tool_image["platform_sha256"],
         image_uri=tool_image["image_uri"],
         image_set_sha256=image.image_set.sha256,
-        executor_env=_canonical(
+        executor_env=canonical_json(
             {
                 **host.facts,
                 "cpuset": cpuset,
@@ -371,7 +367,7 @@ def _attempt(
         "block": item.block,
         "docker_argv": docker,
     }
-    return record, _canonical(request)
+    return record, canonical_json(request)
 
 
 def _chown(
