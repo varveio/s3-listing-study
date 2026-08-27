@@ -769,6 +769,16 @@ def produced_artifact(result_prefix: str, tool: str, mode: str) -> tuple[str, st
     return f"{result_prefix.rstrip('/')}/native/{filename}", digest
 
 
+def _bound_artifact(row: sqlite3.Row, tool: str, mode: str) -> Inbound:
+    uri, digest = produced_artifact(row["result_prefix"], tool, mode)
+    if row["artifact_sha256"] is not None and row["artifact_sha256"] != digest:
+        raise CampaignError(
+            f"{row['attempt_id']}: recorded artifact digest {row['artifact_sha256']} is not "
+            f"the {digest} its evidence carries"
+        )
+    return Inbound(artifact_sha256=digest, produced_by=str(row["attempt_id"]), artifact_uri=uri)
+
+
 def validate_artifact(tool: str, mode: str, uri: str) -> None:
     """Run the capsule's own structural check over the bytes this mode just produced.
 
@@ -971,12 +981,7 @@ def _already_attempted(con: sqlite3.Connection, case_id: str, case: Case) -> Att
     if row is None:
         return None
     if case.purpose == "preparation":
-        _, digest = produced_artifact(row["result_prefix"], case.tool, case.mode)
-        if row["artifact_sha256"] is not None and row["artifact_sha256"] != digest:
-            raise CampaignError(
-                f"{row['attempt_id']}: recorded artifact digest {row['artifact_sha256']} is not "
-                f"the {digest} its evidence carries"
-            )
+        _bound_artifact(row, case.tool, case.mode)
     return Attempt.from_row(row)
 
 
@@ -1376,13 +1381,7 @@ class Launch:
                 "preparation across launches is a decision, not a default — pass "
                 "--reuse-preparations, or --repeat to build it again"
             )
-        uri, digest = produced_artifact(row["result_prefix"], case.tool, case.mode)
-        if row["artifact_sha256"] is not None and row["artifact_sha256"] != digest:
-            raise CampaignError(
-                f"{row['attempt_id']}: recorded artifact digest {row['artifact_sha256']} is not "
-                f"the {digest} its evidence carries"
-            )
-        return Inbound(artifact_sha256=digest, produced_by=str(row["attempt_id"]), artifact_uri=uri)
+        return _bound_artifact(row, case.tool, case.mode)
 
 
 def render_launch(
