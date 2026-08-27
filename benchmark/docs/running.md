@@ -23,7 +23,8 @@ group did it. Do not promote a step because a neighbouring step worked.
 
 | Step | Exercised against real Batch? |
 | --- | --- |
-| Toolbox build + active ten-tool smoke | **yes** — the `benchmark-toolbox` workflow, local Docker |
+| Toolbox build + eleven-executable help smoke | **yes** — the `benchmark-toolbox` workflow, local Docker |
+| Serial local real-S3 canary | no — runner and plan exist; no committed current-worker receipt yet |
 | `submit` | **yes** — historical bounded three-tool bundled-fixture replay canary; current staged-fixture plan no |
 | `poll` / `status` | **yes** — same canary |
 | `retry` / `cancel` / `accept-failure` | no |
@@ -103,6 +104,63 @@ Keep `campaign.db` — it is authoritative controller state, not a cache, and it
 is not interchangeable with the evidence in GCS. Back it up. What is inside it —
 the tables, their keys, and every state they record — is in
 [`model.md`](model.md).
+
+## Local Docker real-S3 canary
+
+`VERIFIED: no`
+
+The local executor is an operational successor candidate for the retired smoke
+engine, not a rewrite of its receipts. Historical receipts remain immutable.
+Promotion requires a current-worker canary whose every attempt has bound local
+evidence and whose group passes explicit content verification where the emitted
+strata permit it.
+
+Build the toolbox from a clean commit, then freeze and inspect the exact order:
+
+```sh
+uv run python benchmark/src/benchmark/local_campaign.py run \
+  --plan benchmark/plans/local/s3-canary/noaa-nws-rtofs-pds.yaml \
+  --image benchmark-toolbox:local \
+  --results-root /absolute/path/to/results \
+  --suite local-rtofs-canary --group rtofs-s3-canary \
+  --location ACTUAL-HOST-LOCATION --seed 982451653 \
+  --allow-retired-s4cmd-s3-canary --dry-run
+```
+
+For the real run, export the one credential payload required by the four
+signed-only capsules, then remove `--dry-run`:
+
+```sh
+export S3_STUDY_AWS_CREDENTIAL="$(gcloud secrets versions access VERSION \
+  --secret SECRET --project PROJECT)"
+```
+
+The credential value never appears in Docker argv or the local ledger. Unset it
+after the campaign. The runner executes serially, pins whole physical-core
+sibling groups, caps memory and swap together, and writes these durable local
+records:
+
+- `campaign.db` — intent, exact Docker request, state, and evidence binding;
+- `schedules/<group>.json` — seed, plan/image/host identities, resolved order,
+  and request digests;
+- `<suite>/<bucket>/<attempt_id>/` — create-only worker evidence, with
+  `result.json` published last;
+- `logs/<group>/` — Docker/worker controller streams, outside attempt evidence.
+
+Run the existing readers directly over the local ledger and paths:
+
+```sh
+uv run python benchmark/src/benchmark/report.py \
+  --state /absolute/path/to/results/campaign.db --group rtofs-s3-canary
+uv run python benchmark/src/benchmark/verify.py \
+  --state /absolute/path/to/results/campaign.db --group rtofs-s3-canary
+```
+
+The RTOFS bucket is mutable. One pass is factual canary evidence only: do not
+rank durations or call disagreement a tool defect without first distinguishing
+corpus drift. Local replay orchestration remains an explicit refusal in this
+revision; implementing it must preserve this same worker, ledger, seeded order,
+and local evidence boundary.
 
 ## Submit
 

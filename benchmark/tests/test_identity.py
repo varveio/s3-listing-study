@@ -20,6 +20,7 @@ PLATFORM = "b" * 64
 
 def _measurement_env(input_artifact_sha256: str | None = None) -> dict[str, object]:
     return measurement_environment(
+        executor="gcp-batch",
         input_artifact_sha256=input_artifact_sha256,
         auth_role=None,
         target_bucket="noaa-ghcn-pds",
@@ -38,7 +39,13 @@ def _measurement_env(input_artifact_sha256: str | None = None) -> dict[str, obje
 def test_case_hash_golden_value() -> None:
     """Pinned so a change to the encoding is caught here rather than in the ledger."""
     config = {"mode": "recursive", "concurrency": 8}
-    assert case_hash(_measurement_env(), config, TOOL_SLICE, PLATFORM) == "4ca988b33945"
+    assert case_hash(_measurement_env(), config, TOOL_SLICE, PLATFORM) == "0210c8c7c42a"
+
+
+def test_executor_is_a_measurement_identity_input() -> None:
+    batch = _measurement_env()
+    local = {**batch, "executor": "local-docker"}
+    assert case_hash(batch, {}, TOOL_SLICE, PLATFORM) != case_hash(local, {}, TOOL_SLICE, PLATFORM)
 
 
 def test_every_replay_fact_changes_identity() -> None:

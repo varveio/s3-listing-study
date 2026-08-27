@@ -27,6 +27,7 @@ TOOLBOX_LABEL = "io.varve.s3-listing-study.toolbox-manifest-sha256"
 TOOLBOX_RECIPE_LABEL = "io.varve.s3-listing-study.toolbox-recipe-sha256"
 SUPPORT_INPUTS = {
     "s3-fast-list": ("tools/s3-fast-list/build/Cargo.lock",),
+    "s4cmd": ("tools/s4cmd/build/requirements.txt",),
     "s3p": ("tools/s3p/build/package.json", "tools/s3p/build/package-lock.json"),
 }
 TOOL_STAGES = {
@@ -35,6 +36,7 @@ TOOL_STAGES = {
     "ps3": "ps3_install",
     "rclone": "rclone_install",
     "s3-fast-list": "s3_fast_list_build",
+    "s4cmd": "s4cmd_install",
     "s3kor": "s3kor_install",
     "s3p": "s3p_install",
     "s5cmd": "s5cmd_install",

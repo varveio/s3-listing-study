@@ -16,10 +16,10 @@ which one is not a matter of taste:
 | Place | Holds | Read by |
 | --- | --- | --- |
 | **The ledger** — one SQLite file | What was submitted, under what identity, where its evidence went, and how it settled | The controller, and anyone asking what happened |
-| **The object store** | The evidence itself: the listing, the logs, the measurement | `report` reads `result.json`; explicit real-S3 verification may read retained products |
+| **The evidence store** — GCS for Batch, an absolute local tree for local Docker | The evidence itself: the listing, the logs, the measurement | `report` reads `result.json`; explicit real-S3 verification may read retained products |
 | **The subject's argv** | Everything about *how the tool was asked to list* | Only the tool |
 
-The boundaries are one-way. The ledger never holds evidence; the object store
+The boundaries are one-way. The ledger never holds evidence; the evidence store
 never holds controller state; the argv holds nothing the ledger cannot
 reconstruct, because the `config` blob that produced it is a column.
 
@@ -62,14 +62,15 @@ The exceptions are deliberate and each has a stated reason: a value whose
 *derivation rule may change* is stored, because history outlives the code that
 wrote it. `job_name` and `result_prefix` are stored for exactly that reason.
 
-## What the object store holds
+## What the evidence store holds
 
 Evidence, under a prefix computed from a row rather than discovered by listing.
 Two properties matter:
 
 - **Writes are create-only.** A deterministic prefix plus overwrite semantics
-  means a second execution of one attempt silently merges into the first. An
-  `ifGenerationMatch=0` precondition turns that into a loud failure.
+  means a second execution of one attempt silently merges into the first. GCS
+  uses `ifGenerationMatch=0`; local Docker creates a fresh attempt directory
+  and refuses one that already exists. Both publish `result.json` last.
 - **The evidence names itself.** The row says where the evidence is; the
   evidence says which row it belongs to. Either direction alone fails quietly —
   a misfiled object under a correct-looking prefix reads as a valid measurement

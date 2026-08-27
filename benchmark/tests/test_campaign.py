@@ -1202,6 +1202,7 @@ def test_a_preparation_is_identified_by_content_and_not_by_the_consumer(tmp_path
     images = image_set(tmp_path)
     minted, inputs = campaign.case_identity(
         preparation.case,
+        executor=campaign.EXECUTOR,
         auth_role=None,
         target_bucket=plan.bucket,
         target_region=plan.region,
@@ -1222,6 +1223,7 @@ def test_a_preparation_is_identified_by_content_and_not_by_the_consumer(tmp_path
     assert (
         campaign.case_identity(
             on_a_bigger_box,
+            executor=campaign.EXECUTOR,
             auth_role="fixture-role",
             target_bucket=plan.bucket,
             target_region=plan.region,

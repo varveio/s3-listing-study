@@ -79,6 +79,23 @@ numbers remain synthetic and cannot by themselves support a claim about
 real-S3 performance. This supersedes the former real-S3 Phase 1 / replay Phase
 2 order; the detailed funnel and disagreement rule are recorded below.
 
+**Material executor addition — 2026-08-27.** The toolbox may also run serially
+on one declared host through local Docker, using the same capsule compiler,
+measurement worker, case identity, ledger, verifier, and reporter as Batch.
+This path is for bounded canaries and explicitly labelled diagnostic
+repeatability/resource-response experiments. It does not change the rule that
+published head-to-head performance comparisons use fresh VMs of the same
+declared machine type. Local runs record the Docker image ID, host topology,
+physical-core cpuset, resource ceilings, randomized schedule seed and resolved
+order; `executor = local-docker` is a measurement identity input. A local
+duration is never silently pooled with `gcp-batch`.
+
+The first local real-S3 canary carries one narrow roster exception: s4cmd runs
+once against S3 because its signed `ListObjects` v1 path is supported there,
+while it remains excluded from comparative and replay campaigns. The local
+loader removes only s4cmd's shared exclusion and enforces one `purpose: canary`
+attempt; it cannot turn that override into a sweep or a replay case.
+
 ## Evidence language
 
 Current documents use one evidence-strength vocabulary:
