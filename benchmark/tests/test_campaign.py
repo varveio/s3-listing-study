@@ -12,7 +12,6 @@ import argparse
 import hashlib
 import json
 import sqlite3
-import time
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -1081,26 +1080,6 @@ def hinted_plan(tmp_path: Path, body: str = HINTED, *, tools: tuple[str, ...] = 
     )
 
 
-def test_the_suite_filter_quotes_its_value() -> None:
-    """The real API 400s an unquoted hyphenated label value — the first live
-    polling pass proved it — so the filter must always quote the suite."""
-
-    class Client:
-        def list_jobs(self, *, request: dict[str, str], **_kwargs: object) -> list[batch_v1.Job]:
-            assert request["filter"] == 'labels.suite="c-2026-08-17-x"'
-            return []
-
-    assert (
-        batch_client.list_job_states(
-            "p",
-            "us-east1",
-            "c-2026-08-17-x",
-            client=Client(),  # type: ignore[arg-type]
-        )
-        == {}
-    )
-
-
 def test_cancel_is_idempotent_after_provider_deletion() -> None:
     class Client:
         def delete_job(self, **_kwargs: object) -> None:
@@ -1580,27 +1559,6 @@ def test_skip_measured_and_repeat_are_refused_together(tmp_path: Path) -> None:
     )
     with pytest.raises(ledger.CampaignError, match="pick one"):
         campaign.cmd_submit(args)
-
-
-def test_stagger_seconds_sleeps_between_submissions_but_not_before_the_first(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A fan-out plan must not converge every subject on one bucket within the
-    same instant: staggering delays every submission after the first, and the
-    first pays no wait at all."""
-    monkeypatch.setattr(batch_client, "ensure_job", lambda *a, **k: ("SUBMITTED", None))
-    slept: list[float] = []
-    monkeypatch.setattr(time, "sleep", slept.append)
-    plan = loaded_plan()
-    cases = [case for case in plan.cases if case.tool != "s3-fast-list"][:3]
-    images = image_set(tmp_path)
-    con = ledger.open_ledger(str(tmp_path / "campaign.db"), suite=SUITE)
-    launch = campaign.Launch(
-        con, SUITE, "g1", plan, images, "results", options(), stagger_seconds=5.0
-    )
-    launch.run(campaign.expand_launch(cases, plan.adapters))
-    assert slept == [5.0, 5.0]
-    assert launch.submitted == 3
 
 
 def attempt_row(

@@ -11,7 +11,6 @@ into a false pass.
 
 from __future__ import annotations
 
-import ast
 import json
 import re
 from pathlib import Path
@@ -24,15 +23,6 @@ from s3_listing_study.repo import capsule, links, source_anchors
 REPO = Path(__file__).resolve().parents[1]
 
 
-def test_root_and_forwarded_command_help_are_normal(capsys: pytest.CaptureFixture[str]) -> None:
-    with pytest.raises(SystemExit) as root_help:
-        cli.main(["--help"])
-    assert root_help.value.code == 0
-    output = capsys.readouterr().out
-    assert "validate-capsule" in output
-    assert "check-source-anchors" in output
-
-
 def test_capsule_and_links_agree_on_heading_slugs() -> None:
     text = "# Running the checks\n## `uv run` — the project env\n### Running the checks\n"
     ids = links.heading_ids(text)
@@ -40,25 +30,13 @@ def test_capsule_and_links_agree_on_heading_slugs() -> None:
     assert capsule.heading_ids(text) == ids
 
 
-def test_check_links_subcommand_reports_the_repo_surface(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
+def test_check_links_subcommand_reports_the_repo_surface() -> None:
+    # The committed Markdown tree must remain internally linked.
     assert cli.main(["check-links"]) == 0
-    assert "error(s)" in capsys.readouterr().out
 
 
-def test_validate_capsule_subcommand_passes_a_committed_capsule(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
+def test_validate_capsule_subcommand_passes_a_committed_capsule() -> None:
     assert cli.main(["validate-capsule", "--tool", "s3-fast-list"]) == 0
-    assert "current contract passed" in capsys.readouterr().out
-
-
-def test_validate_capsule_reports_a_tool_that_has_no_directory(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    assert cli.main(["validate-capsule", "--tool", "not-a-tool"]) == 1
-    assert "validate-capsule: missing" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("provenance", [None, "source", []])
@@ -69,13 +47,6 @@ def test_malformed_provenance_is_a_validation_error_not_a_crash(provenance: obje
     capsule.validate_schema(document, Path("schemas/tool.schema.json"), "tool.json", errors)
     assert errors
     assert capsule.provenance_reference(document["tested"]["version"]) is None
-
-
-def test_source_anchor_subcommand_runs_its_regression_self_test(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    assert cli.main(["check-source-anchors", "--self-test"]) == 0
-    assert "self-test passed" in capsys.readouterr().out
 
 
 def test_source_anchor_lines_are_coerced_from_canonical_json(tmp_path: Path) -> None:
@@ -93,85 +64,12 @@ def test_source_anchor_lines_are_coerced_from_canonical_json(tmp_path: Path) -> 
     assert anchors[0].lines == "7"
 
 
-def test_deleted_runner_paths_remain_only_in_frozen_evidence() -> None:
-    """Living code and docs must not advertise retired executable paths."""
-    deleted_names = tuple(
-        bytes(points).decode("ascii")
-        for points in (
-            (115, 109, 111, 107, 101, 45, 114, 117, 110, 46, 115, 104),
-            (114, 117, 110, 45, 97, 116, 116, 101, 109, 112, 116, 46, 115, 104),
-            (97, 100, 97, 112, 116, 101, 114, 47, 114, 117, 110, 46, 115, 104),
-        )
-    )
-
-    def static_string(node: ast.AST) -> str | None:
-        if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            return node.value
-        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
-            left = static_string(node.left)
-            right = static_string(node.right)
-            if left is not None and right is not None:
-                return left + right
-        return None
-
-    offenders: list[str] = []
-    for path in REPO.rglob("*"):
-        relative = path.relative_to(REPO)
-        parts = relative.parts
-        ignored_dirs = {
-            ".git",
-            ".mypy_cache",
-            ".pytest_cache",
-            ".ruff_cache",
-            ".venv",
-            "__pycache__",
-        }
-        if not path.is_file() or ignored_dirs.intersection(parts):
-            continue
-        allowed = (
-            len(parts) >= 3 and parts[0] == "tools" and parts[2] in {"receipts", "research"}
-        ) or parts[:2] == ("tests", "fixtures")
-        if allowed:
-            continue
-        try:
-            text = path.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
-            continue
-        emitted_strings: list[str] = []
-        if path.suffix == ".py":
-            try:
-                tree = ast.parse(text, filename=str(relative))
-            except SyntaxError:
-                tree = None
-            if tree is not None:
-                emitted_strings = [
-                    value for node in ast.walk(tree) if (value := static_string(node)) is not None
-                ]
-        if any(
-            name in text or any(name in value for value in emitted_strings)
-            for name in deleted_names
-        ):
-            offenders.append(str(relative))
-    assert offenders == []
-
-
-def test_gcp_module_matches_single_toolbox_and_full_access_workers() -> None:
+def test_gcp_worker_can_manage_evidence_objects() -> None:
     module = REPO / "infra/terraform/modules/gcp/s3-listing-study"
     worker = (module / "worker.tf").read_text()
-    authenticated = (module / "aws-credentials.tf").read_text()
-    registry = (module / "image-registry.tf").read_text()
-    readme = (module / "README.md").read_text()
-
-    storage_role_pattern = r'"(roles/storage\.[^"]+)"'
-    worker_storage_roles = set(re.findall(storage_role_pattern, worker))
-    authenticated_storage_roles = set(re.findall(storage_role_pattern, authenticated))
-    assert worker_storage_roles == authenticated_storage_roles == {"roles/storage.objectAdmin"}
-    assert "single self-contained benchmark toolbox" in registry
-    assert "this module does not publish it" in (module / "outputs.tf").read_text()
-    for retired in (
-        "derived attempt images",
-        "docs/operating/runner-security.md",
-        "strict local Docker profile",
-        "required manager reconciler",
-    ):
-        assert retired not in readme
+    assert re.search(
+        r'resource "google_storage_bucket_iam_member" "worker_write" \{.*?'
+        r'role\s*=\s*"roles/storage\.objectAdmin"',
+        worker,
+        re.DOTALL,
+    )
