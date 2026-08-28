@@ -59,9 +59,7 @@ def evidence(*, after_requests: int = 1, after_errors: int = 0) -> dict[str, obj
         "readiness": {"state": "ready"},
         "before": metrics(0),
         "samples": [metrics(1)],
-        "resource_samples": [
-            {"box_vcpus": 6, "server_cpuset": "0,3", "subject_cpuset": "1,4"}
-        ],
+        "resource_samples": [{"box_vcpus": 6, "server_cpuset": "0,3", "subject_cpuset": "1,4"}],
         "after": metrics(after_requests, after_errors),
         "errors": [],
     }
@@ -83,9 +81,7 @@ def test_replay_evidence_accepts_canonical_single_cpu_sets() -> None:
     allocation["subject_vcpus"] = 1
     allocation["replay_vcpus"] = 1
     observed = evidence()
-    observed["resource_samples"] = [
-        {"box_vcpus": 4, "server_cpuset": "0", "subject_cpuset": "1"}
-    ]
+    observed["resource_samples"] = [{"box_vcpus": 4, "server_cpuset": "0", "subject_cpuset": "1"}]
     assert (
         replay.evidence_errors(replay.parse_document(document), observed, purpose="measurement")
         == ()

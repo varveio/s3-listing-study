@@ -1540,9 +1540,7 @@ def main(argv: list[str] | None = None) -> int:
     postprocessing_seconds["capture_finalize"] = time.monotonic() - phase_started
     phase_started = time.monotonic()
     retain_products = args.retain_products == "true"
-    native_files = (
-        {} if minimal_evidence or not retain_products else native_manifest(native_root)
-    )
+    native_files = {} if minimal_evidence or not retain_products else native_manifest(native_root)
     native_sizes = (
         native_inventory(native_root)
         if minimal_evidence and retain_products

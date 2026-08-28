@@ -207,9 +207,7 @@ def _subject_ulimit(tool: str) -> tuple[str, ...]:
     return ("--ulimit", S7CMD_NOFILE) if tool == "s7cmd" else ()
 
 
-def _fixture_staging_script(
-    uri: str, expected_sha256: str, *, hints_uri: str | None = None
-) -> str:
+def _fixture_staging_script(uri: str, expected_sha256: str, *, hints_uri: str | None = None) -> str:
     """Download a staged fixture and refuse bytes outside its recorded identity.
 
     The digest is over sorted ``name<TAB>size<TAB>sha256<NL>`` rows for the
@@ -220,21 +218,21 @@ def _fixture_staging_script(
     source = shlex.quote(uri)
     expected = shlex.quote(expected_sha256)
     commands = [
-            "set -o pipefail",
-            f"mkdir -p {destination}",
-            f"gcloud storage cp {source} {destination}/",
-            'manifest="$(mktemp)"',
-            f"files=({destination}/*.parquet)",
-            '[[ -f "${files[0]}" ]] || { echo "no staged parquet files" >&2; exit 1; }',
-            'for file in "${files[@]}"; do',
-            '  digest="$(sha256sum "$file")"; digest="${digest%% *}"',
-            '  size="$(stat -c %s "$file")"',
-            '  printf \'%s\\t%s\\t%s\\n\' "${file##*/}" "$size" "$digest"',
-            'done | LC_ALL=C sort > "$manifest"',
-            'actual="$(sha256sum "$manifest")"; actual="${actual%% *}"',
-            f'[[ "$actual" == {expected} ]] || '
-            '{ echo "fixture digest mismatch: $actual" >&2; exit 1; }',
-            'rm -f "$manifest"',
+        "set -o pipefail",
+        f"mkdir -p {destination}",
+        f"gcloud storage cp {source} {destination}/",
+        'manifest="$(mktemp)"',
+        f"files=({destination}/*.parquet)",
+        '[[ -f "${files[0]}" ]] || { echo "no staged parquet files" >&2; exit 1; }',
+        'for file in "${files[@]}"; do',
+        '  digest="$(sha256sum "$file")"; digest="${digest%% *}"',
+        '  size="$(stat -c %s "$file")"',
+        '  printf \'%s\\t%s\\t%s\\n\' "${file##*/}" "$size" "$digest"',
+        'done | LC_ALL=C sort > "$manifest"',
+        'actual="$(sha256sum "$manifest")"; actual="${actual%% *}"',
+        f'[[ "$actual" == {expected} ]] || '
+        '{ echo "fixture digest mismatch: $actual" >&2; exit 1; }',
+        'rm -f "$manifest"',
     ]
     if hints_uri is not None:
         hints_source = shlex.quote(hints_uri)
@@ -242,9 +240,9 @@ def _fixture_staging_script(
         commands.extend(
             (
                 f"gcloud storage cp {hints_source} {hints_path}",
-                f'[[ -s {hints_path} ]] || '
+                f"[[ -s {hints_path} ]] || "
                 '{ echo "fixture hints are missing or empty" >&2; exit 1; }',
-                f'IFS= read -r first_hint < {hints_path}',
+                f"IFS= read -r first_hint < {hints_path}",
                 '[[ -n "$first_hint" ]] || '
                 '{ echo "fixture hints begin with an empty cut point" >&2; exit 1; }',
             )

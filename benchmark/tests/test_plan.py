@@ -1081,9 +1081,7 @@ def test_every_key_a_row_may_state_changes_the_case_it_resolves_to(tmp_path: Pat
             "auth_role: fixture-role\n" + replay_block + document,
             encoding="utf-8",
         )
-        return load(path, adapters=adapters, instances={**INSTANCES, (6, 16): "six-vcpu"}).cases[
-            0
-        ]
+        return load(path, adapters=adapters, instances={**INSTANCES, (6, 16): "six-vcpu"}).cases[0]
 
     for field, (before, after) in pairs.items():
         first, second = case(field, before, 0), case(field, after, 1)
