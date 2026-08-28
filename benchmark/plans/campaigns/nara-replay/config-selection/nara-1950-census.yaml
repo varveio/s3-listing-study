@@ -33,7 +33,11 @@ defaults:
   replay_vcpus: 20
   replay_memory_gb: 20
   replay_parquet_connections: 64
-  replay_max_concurrent_requests: 4096
+  # The replay server maps this directly to Jetty's maximum platform-thread
+  # pool. The first s7cmd c64 probe proved 4096 is unsafe: the pool expanded to
+  # its ceiling and exhausted localhost ephemeral ports. The upstream replay
+  # default of 512 remains 8x wider than the largest c64 client in this plan.
+  replay_max_concurrent_requests: 512
   replay_prefetch: false
   replay_prefetch_max_windows: 96
   replay_heap_percent: 75

@@ -1,0 +1,77 @@
+# Bounded NARA configuration follow-up. Swath and s3p were inside the
+# predeclared 15% selection boundary, so both arms receive two more attempts.
+# s7cmd c64/replay4096 exhausted localhost ports; c16/c64 are retried as new
+# cases under the replay server's upstream 512-thread ceiling.
+spec_version: 3
+
+bucket: nara-1950-census
+region: us-east-2
+auth_role: public-read
+
+replay:
+  capacity_status: uncalibrated
+  server_image_uri: ghcr.io/varveio/swath-replay@sha256:8fb53a327f946f10db17d4fd082a7b2e06bc678a1e828a197a1ef5717473a46a
+  fixture_uri: gs://s3-listing-study-results-29c02004/fixtures/nara-1950-census/current-eba31d9/part-*.parquet
+  fixture_sha256: 48468b7c1ea8bf657fcb089dbcb1d940d3af62b748a7cb66f6dccc8876905db4
+  serving_mode: sorted
+  latency_model:
+    deadlines_ms:
+      worker_page: 86
+      pivot_probe: 44
+      structure_probe: 50
+    scale: 1.0
+    jitter: none
+
+defaults:
+  reps: 1
+  timeout_s: 1800
+  vcpus: 32
+  memory_gb: 64
+  container_memory_gb: 8
+  subject_vcpus: 8
+  replay_vcpus: 20
+  replay_memory_gb: 20
+  replay_parquet_connections: 64
+  replay_max_concurrent_requests: 512
+  replay_prefetch: false
+  replay_prefetch_max_windows: 96
+  replay_heap_percent: 75
+
+tools:
+  s3p:
+    reps: 2
+    cases:
+      - {mode: ls, concurrency: 16, purpose: diagnostic}
+      - {mode: ls, concurrency: 100, purpose: diagnostic}
+
+  s7cmd:
+    cases:
+      - {mode: recursive-one-nosort, concurrency: 16, purpose: diagnostic}
+      - {mode: recursive-one-nosort, concurrency: 64, purpose: diagnostic}
+
+  swath:
+    reps: 2
+    cases:
+      - mode: recursive-tsv-dataset
+        concurrency: 64
+        purpose: diagnostic
+        config: &swath_tsv
+          jvm_max_heap: 4g
+          text_writers: 3
+          text_part_size: 1gb
+          writeback_size: 32mb
+          part_rotation_interval: "0"
+          part_rotation_max_rows: 0
+      - mode: recursive-tsv-dataset
+        concurrency: 128
+        purpose: diagnostic
+        config: *swath_tsv
+
+exclude:
+  - {tool: aws-cli, reason: stopped after FourCast}
+  - {tool: minio-mc, reason: stopped after FourCast}
+  - {tool: ps3, reason: stopped after FourCast}
+  - {tool: rclone, reason: NARA c64 selected decisively over c32}
+  - {tool: s3-fast-list, reason: one strongest supported hinted configuration}
+  - {tool: s3kor, reason: stopped after FourCast}
+  - {tool: s5cmd, reason: one complete fixture-derived fanout configuration}

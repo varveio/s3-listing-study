@@ -297,6 +297,23 @@ def test_nara_configuration_selection_keeps_one_isolated_top_tier() -> None:
         )
         for case in plan.cases
     } == {(32, 8, 20)}
+    assert {
+        case.replay.allocation.replay_max_concurrent_requests
+        for case in plan.cases
+        if case.replay is not None
+    } == {512}
+
+    followup = bench.Plan.load(
+        ROOT / "benchmark/plans/campaigns/nara-replay/config-followup/nara-1950-census.yaml"
+    )
+    assert len(followup.cases) == 6
+    assert sum(case.reps for case in followup.cases) == 10
+    assert {case.tool for case in followup.cases} == {"s3p", "s7cmd", "swath"}
+    assert {
+        case.replay.allocation.replay_max_concurrent_requests
+        for case in followup.cases
+        if case.replay is not None
+    } == {512}
 
 
 @pytest.mark.parametrize(
