@@ -771,6 +771,27 @@ def test_s3_fast_list_local_split_does_not_receive_the_remote_endpoint() -> None
     assert ENDPOINT not in replay
 
 
+def test_s5cmd_fanout_accepts_disjoint_complete_prefixes() -> None:
+    adapter = load_command_adapter(adapter_path("s5cmd"))
+    command = adapter.compile(
+        CommandRequest(
+            "fanout-with-dirs",
+            BUCKET,
+            REGION,
+            tool="s5cmd",
+            config={
+                "concurrency": 8,
+                "shard_prefixes": "blend.2020_blend.2021_index.html",
+            },
+        )
+    )
+    assert command.count("--shard") == 3
+    assert "blend.2020" in command
+    assert "blend.2021" in command
+    assert "index.html" in command
+    assert command[command.index("--numworkers") + 1] == "8"
+
+
 def test_rclone_endpoint_preserves_the_signed_credential_branch() -> None:
     adapter = load_command_adapter(adapter_path("rclone"))
     request = CommandRequest(

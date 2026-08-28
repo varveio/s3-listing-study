@@ -19,7 +19,7 @@ FANOUT = Executable(
     ("/usr/bin/python3", "/opt/benchmark/tools/s5cmd/adapter/fanout.py"),
 )
 EXECUTABLES = (S5CMD, FANOUT)
-CONFIG_KEYS = frozenset({"shard_initials"})
+CONFIG_KEYS = frozenset({"shard_initials", "shard_prefixes"})
 SUPPORTS_UNSIGNED = True
 """--no-sign-request lists anonymously; otherwise the credential in the
 environment signs."""
@@ -120,10 +120,31 @@ def _auth_flags(request: CommandRequest) -> tuple[str, ...]:
 
 
 SAFE_INITIALS = re.compile(r"[A-Za-z0-9._-]+")
+SAFE_PREFIX = re.compile(r"[A-Za-z0-9._/-]+")
 
 
 def _fanout_shards(request: CommandRequest) -> tuple[str, ...]:
+    raw_prefixes = request.config.get("shard_prefixes")
     raw = request.config.get("shard_initials")
+    if raw_prefixes is not None:
+        if raw is not None:
+            raise CommandAdapterError(
+                f"{TOOL} fanout states both shard_initials and shard_prefixes"
+            )
+        if not isinstance(raw_prefixes, str):
+            raise CommandAdapterError(
+                f"{TOOL} shard_prefixes must be an underscore-separated string"
+            )
+        shards = tuple(raw_prefixes.split("_"))
+        if not shards or any(SAFE_PREFIX.fullmatch(shard) is None for shard in shards):
+            raise CommandAdapterError(
+                f"{TOOL} shard_prefixes must contain non-empty safe prefixes: {raw_prefixes!r}"
+            )
+        if len(set(shards)) != len(shards):
+            raise CommandAdapterError(
+                f"{TOOL} fanout shard_prefixes repeat a shard: {raw_prefixes!r}"
+            )
+        return shards
     if not isinstance(raw, str) or SAFE_INITIALS.fullmatch(raw) is None:
         raise CommandAdapterError(
             f"{TOOL} fanout shard_initials must be non-empty safe single-byte characters: {raw!r}"
