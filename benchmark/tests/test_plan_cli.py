@@ -65,8 +65,8 @@ def test_resolve_plan_exposes_resolved_replay_contract(
         "capacity_status": "uncalibrated",
     }
     assert allocation == {
-        "server_cpuset": "0-1",
-        "subject_cpuset": "2",
+        "server_cpuset": "0,2",
+        "subject_cpuset": "1",
         "host_vcpus": 1,
         "host_memory_headroom_gb": 4,
     }

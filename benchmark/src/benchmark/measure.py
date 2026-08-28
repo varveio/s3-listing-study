@@ -1239,6 +1239,7 @@ def _resolve_inputs(args: argparse.Namespace) -> ResolvedInputs:
 def _replay_phase(
     replay_evidence: dict[str, object] | None,
     replay_config: replay.ReplayConfig | None,
+    box_vcpus: int,
     attempt_destination: str,
     publish_failure: Callable[..., int],
 ) -> tuple[int | None, Callable[[], None]]:
@@ -1271,7 +1272,7 @@ def _replay_phase(
     sampler_stop = threading.Event()
     sampler_thread = threading.Thread(
         target=replay_runtime.sample_metrics,
-        args=(replay_evidence, sampler_stop, replay_config, attempt_destination),
+        args=(replay_evidence, sampler_stop, replay_config, box_vcpus, attempt_destination),
         name="replay-metrics",
         daemon=True,
     )
@@ -1490,7 +1491,7 @@ def main(argv: list[str] | None = None) -> int:
     subject_stdout = product.path if product is not None and product.takes_stdout else stdout_path
 
     replay_failure, finish_replay = _replay_phase(
-        replay_evidence, replay_config, attempt_destination, publish_failure
+        replay_evidence, replay_config, args.vcpus, attempt_destination, publish_failure
     )
     if replay_failure is not None:
         return replay_failure

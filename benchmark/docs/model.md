@@ -278,7 +278,11 @@ A replay result also carries the complete canonical `replay` document and a
 `replay_evidence` block. Readiness and the first server-metrics scrape complete
 before `started_at`; the last scrape follows `finished_at`. Long runs retain raw
 10-second meter snapshots plus host-observed utilization over the declared,
-disjoint server and subject cpusets, available host memory, and load. Cpuset
+disjoint server and subject cpusets, available host memory, and load. On the N4
+Batch estate, the allocator groups the lower/upper SMT siblings of each
+physical core into the same controlled cpuset; replay and subject therefore do
+not share a physical core. The retained resource sample records the box width
+and the exact non-contiguous cpusets used. Cpuset
 utilization is deliberately not called process CPU: host work scheduled on
 those CPUs is inside the observation. Missing or malformed replay evidence is
 a refusal, not a timing with an assumed healthy backend.

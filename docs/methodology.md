@@ -386,6 +386,14 @@ screening attempt. Before a replay result can advance or eliminate a candidate:
 5. any known protocol divergence affecting that subject's request pattern is
    fixed or makes the attempt ineligible for comparison.
 
+**CPU-isolation correction, 2026-08-28.** Disjoint logical CPU numbers are not
+enough on an SMT machine. An N4 topology receipt showed that the lower and upper
+halves are sibling threads of the same physical cores; the earlier contiguous
+replay/subject split therefore shared cores. Replay allocations now keep both
+sibling threads of a physical core in one controlled group, and replay and
+subject receive different physical-core sets. Results made under the earlier
+split remain diagnostics but cannot establish subject CPU response.
+
 A diagnostic canary checks the endpoint, backend binding, replay evidence,
 row-count, upload, and result/report path, but creates no comparative timing or
 rate result. Replay capacity is **UNCALIBRATED** until a diagnostic capacity

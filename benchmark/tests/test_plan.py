@@ -973,7 +973,7 @@ def test_every_key_a_row_may_state_changes_the_case_it_resolves_to(tmp_path: Pat
         "signed": (False, True),
         "concurrency": (4, 8),
         "segments": (16, 32),
-        "vcpus": (3, 4),
+        "vcpus": (4, 6),
         "memory_gb": (8, 16),
         "container_memory_gb": (4, 8),
         # The replay backend's own allocation. Two cases against differently
@@ -1081,7 +1081,7 @@ def test_every_key_a_row_may_state_changes_the_case_it_resolves_to(tmp_path: Pat
             "auth_role: fixture-role\n" + replay_block + document,
             encoding="utf-8",
         )
-        return load(path, adapters=adapters, instances={**INSTANCES, (3, 16): "three-vcpu"}).cases[
+        return load(path, adapters=adapters, instances={**INSTANCES, (6, 16): "six-vcpu"}).cases[
             0
         ]
 
