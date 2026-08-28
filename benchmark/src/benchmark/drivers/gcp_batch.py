@@ -70,6 +70,7 @@ REPLAY_STAGING_IMAGE = (
 REPLAY_FIXTURE_HOST_DIR = "/mnt/stateful_partition/replay-fixture"
 REPLAY_FIXTURE_CONTAINER_DIR = "/fixtures/source"
 REPLAY_FIXTURE_HINTS_NAME = "s3-fast-list-hints.input"
+S7CMD_NOFILE = "nofile=1048576:1048576"
 SUBJECT_OUTPUT_HOST_DIR = "/mnt/stateful_partition/attempt"
 SUBJECT_OUTPUT_CONTAINER_DIR = "/tmp/attempt"
 SECRET_RE = re.compile(r"\Aprojects/[^/]+/secrets/[^/]+/versions/[^/]+\Z")
@@ -199,6 +200,11 @@ def _runnable_options(cpuset: str, memory_gb: int | None) -> str:
     return shlex.join(options)
 
 
+def _subject_ulimit(tool: str) -> tuple[str, ...]:
+    """Fixed process headroom for s7cmd's wide prefix-discovery socket set."""
+    return ("--ulimit", S7CMD_NOFILE) if tool == "s7cmd" else ()
+
+
 def _fixture_staging_script(
     uri: str, expected_sha256: str, *, hints_uri: str | None = None
 ) -> str:
@@ -293,7 +299,7 @@ def render_batch_job(
             plain_subject_options.extend(
                 (f"--memory={container_memory}g", f"--memory-swap={container_memory}g")
             )
-        container["options"] = shlex.join(plain_subject_options)
+        container["options"] = shlex.join((*plain_subject_options, *_subject_ulimit(attempt.tool)))
     else:
         allocation = replay.allocation
         mode = json.loads(attempt.config).get("mode")
@@ -342,8 +348,14 @@ def render_batch_job(
                 )
             )
         server_options = _runnable_options(summary.server_cpuset, allocation.replay_memory_gb)
-        subject_options = (
-            f"{_runnable_options(summary.subject_cpuset, container_memory)} {output_volume}"
+        subject_options = " ".join(
+            part
+            for part in (
+                _runnable_options(summary.subject_cpuset, container_memory),
+                output_volume,
+                shlex.join(_subject_ulimit(attempt.tool)),
+            )
+            if part
         )
         staging_runnable = None
         if backend.fixture_uri is not None:

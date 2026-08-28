@@ -104,6 +104,9 @@ resolve in [`data/claims.json`](data/claims.json).
 
 - Anonymous `ListBuckets` is blocked (307, exit 1); canonical claim
   `bucket-listing-blocked-anonymously`.
+- The Batch renderer gives every s7cmd subject a fixed
+  `nofile=1048576:1048576` container limit. This is harness headroom for the
+  prefix-discovery socket set, not a plan tuning axis or an upstream default.
 - The adapter keys the `all-versions` normalized form on object key alone and
   discards `VersionId`/`IsLatest`, so it cannot validate genuine version collapse
   until a version-aware manifest exists; canonical claim
