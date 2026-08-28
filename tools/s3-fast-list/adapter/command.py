@@ -83,6 +83,9 @@ HINTS_NAME = "hints.input"
 own setup directory when it runs inline, an ordinary preparation sink when a plan
 names the mode directly."""
 
+FIXTURE_HINTS_PATH = "/fixtures/source/s3-fast-list-hints.input"
+"""The fixed companion path in a staged replay fixture bundle."""
+
 MODES = {
     # `-c` is accepted and statically inert here: with no hints file N=0, so
     # there is exactly one range pair and one flat-list task (`main.rs:191-218`).
@@ -115,6 +118,19 @@ MODES = {
         axes={"concurrency": CONCURRENCY, "segments": SEGMENTS},
         executable=S3_FAST_LIST.name,
         inline="ks-split",
+        artifacts={LISTING: LISTING_NAME, KEYSPACE: KS_NAME},
+        product_artifact=LISTING,
+        product_channel="file",
+    ),
+    # Replay fixture bundles may carry final, validated cut points beside their
+    # Parquet parts. This mode consumes that fixed companion directly: no remote
+    # bootstrap listing and no inline split. Keep the preparation-backed mode
+    # separate so real-S3 history and identity do not change meaning.
+    "list-hinted-fixture": Mode(
+        product="parquet",
+        fields=FIELDS,
+        axes={"concurrency": CONCURRENCY, "segments": SEGMENTS},
+        executable=S3_FAST_LIST.name,
         artifacts={LISTING: LISTING_NAME, KEYSPACE: KS_NAME},
         product_artifact=LISTING,
         product_channel="file",
@@ -218,6 +234,9 @@ def build_command(request: CommandRequest) -> tuple[str, ...]:
         return *S3_FAST_LIST.argv, *_list_tail(request, ())
     if request.mode == "list-hinted":
         hints = ("-c", _concurrency(request), "-k", _staged_artifact(request, "hints file"))
+        return *S3_FAST_LIST.argv, *_list_tail(request, hints)
+    if request.mode == "list-hinted-fixture":
+        hints = ("-c", _concurrency(request), "-k", FIXTURE_HINTS_PATH)
         return *S3_FAST_LIST.argv, *_list_tail(request, hints)
     if request.mode == "ks-split":
         return *KS_TOOL.argv, *_split_tail(request)

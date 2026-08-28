@@ -158,7 +158,7 @@ The original limitation remains documented in
 `../receipts/smoke/_capability/HARNESS-INCOMPATIBILITY.txt`; it describes the
 committed smoke evidence, not the current benchmark architecture.
 
-## Fixture-derived hints utility (not wired)
+## Fixture-derived hints utility and replay bundle
 
 [`fixture_hints.py`](../adapter/fixture_hints.py) can derive the final
 `hints.input` directly from a replay fixture without running `s3-fast-list` and
@@ -199,14 +199,24 @@ The helper refuses rather than manufacturing a usable-looking artifact when:
 - a generated cut equals a fixture object key, which the source-supported open
   range boundaries would omit from a hinted listing.
 
-This is preparation code, not a benchmark result or a new capsule mode. It is
-deliberately **not wired** into `command.py`, `REQUIRES`, plan resolution, the
-worker, fixture staging, or reporting, and the adapter identity still covers
-only `command.py` plus `normalize.py`. Before a campaign can consume these
-bytes, a later change must bind both the fixture digest and hints digest as an
-immutable supplied input and decide how fixture-seeded preparation is reported.
-The committed replay-canary fixture is only a deterministic parser and drift
-test; it is not run evidence for upstream `ks-tool` or hinted listing.
+The public [`benchmark.fixture_bundle`](../../../benchmark/README.md#preparing-a-replay-fixture-bundle)
+workflow runs this generator after a sorted capture and places the final bytes
+at the fixed companion name `s3-fast-list-hints.input` beside `part-*.parquet`.
+Its create-only upload carries `fixture.json` with the part and hints digests.
+
+`list-hinted-fixture` is the replay-only consumer. Batch stages the fixed
+companion from the same GCS directory as the digest-checked Parquet parts and
+mounts that directory read-only into the subject. The mode points `-k` directly
+at those final cut points, so it has neither the ordinary `list` prerequisite
+nor the inline `ks-tool split`; `segments` remains stated and hashed because it
+is how the fixture generator formed the ranges. The preparation-backed
+`list-hinted` mode remains unchanged for real S3.
+
+This is fixture construction, not a benchmark result. The fixture is generated
+once and its local capture/generation cost is retained as provenance rather than
+charged to every hinted timing. The committed replay-canary fixture remains a
+parser and drift test; it is not run evidence for upstream `ks-tool` or hinted
+listing, and the new replay-only mode has no committed receipt yet.
 
 ## Reproduction
 

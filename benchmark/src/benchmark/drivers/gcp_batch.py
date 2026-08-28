@@ -69,6 +69,7 @@ REPLAY_STAGING_IMAGE = (
 # The enlarged boot disk's writable capacity is /mnt/stateful_partition.
 REPLAY_FIXTURE_HOST_DIR = "/mnt/stateful_partition/replay-fixture"
 REPLAY_FIXTURE_CONTAINER_DIR = "/fixtures/source"
+REPLAY_FIXTURE_HINTS_NAME = "s3-fast-list-hints.input"
 SUBJECT_OUTPUT_HOST_DIR = "/mnt/stateful_partition/attempt"
 SUBJECT_OUTPUT_CONTAINER_DIR = "/tmp/attempt"
 SECRET_RE = re.compile(r"\Aprojects/[^/]+/secrets/[^/]+/versions/[^/]+\Z")
@@ -198,7 +199,9 @@ def _runnable_options(cpuset: str, memory_gb: int | None) -> str:
     return shlex.join(options)
 
 
-def _fixture_staging_script(uri: str, expected_sha256: str) -> str:
+def _fixture_staging_script(
+    uri: str, expected_sha256: str, *, hints_uri: str | None = None
+) -> str:
     """Download a staged fixture and refuse bytes outside its recorded identity.
 
     The digest is over sorted ``name<TAB>size<TAB>sha256<NL>`` rows for the
@@ -208,8 +211,7 @@ def _fixture_staging_script(uri: str, expected_sha256: str) -> str:
     destination = shlex.quote(REPLAY_FIXTURE_CONTAINER_DIR)
     source = shlex.quote(uri)
     expected = shlex.quote(expected_sha256)
-    return "\n".join(
-        (
+    commands = [
             "set -o pipefail",
             f"mkdir -p {destination}",
             f"gcloud storage cp {source} {destination}/",
@@ -225,8 +227,31 @@ def _fixture_staging_script(uri: str, expected_sha256: str) -> str:
             f'[[ "$actual" == {expected} ]] || '
             '{ echo "fixture digest mismatch: $actual" >&2; exit 1; }',
             'rm -f "$manifest"',
+    ]
+    if hints_uri is not None:
+        hints_source = shlex.quote(hints_uri)
+        hints_path = f"{destination}/{REPLAY_FIXTURE_HINTS_NAME}"
+        commands.extend(
+            (
+                f"gcloud storage cp {hints_source} {hints_path}",
+                f'[[ -s {hints_path} ]] || '
+                '{ echo "fixture hints are missing or empty" >&2; exit 1; }',
+                f'IFS= read -r first_hint < {hints_path}',
+                '[[ -n "$first_hint" ]] || '
+                '{ echo "fixture hints begin with an empty cut point" >&2; exit 1; }',
+            )
         )
-    )
+    return "\n".join(commands)
+
+
+def _fixture_hints_uri(uri: str) -> str:
+    """The fixed companion object beside a staged multipart fixture."""
+    parent, separator, leaf = uri.rpartition("/")
+    if not separator or leaf != "part-*.parquet":
+        raise CampaignError(
+            "fixture-backed s3-fast-list requires fixture_uri ending in part-*.parquet"
+        )
+    return f"{parent}/{REPLAY_FIXTURE_HINTS_NAME}"
 
 
 def render_batch_job(
@@ -271,6 +296,8 @@ def render_batch_job(
         container["options"] = shlex.join(plain_subject_options)
     else:
         allocation = replay.allocation
+        mode = json.loads(attempt.config).get("mode")
+        fixture_hints = attempt.tool == "s3-fast-list" and mode == "list-hinted-fixture"
         summary = replay_contract.allocation_summary(
             replay,
             box_vcpus=attempt.vcpus,
@@ -322,12 +349,19 @@ def render_batch_job(
         if backend.fixture_uri is not None:
             volume = f"--volume={REPLAY_FIXTURE_HOST_DIR}:{REPLAY_FIXTURE_CONTAINER_DIR}"
             server_options = f"{server_options} {volume}"
+            hints_uri = _fixture_hints_uri(backend.fixture_uri) if fixture_hints else None
+            if fixture_hints:
+                subject_options = f"{subject_options} {volume}:ro"
             staging_runnable = {
                 "container": {
                     "imageUri": REPLAY_STAGING_IMAGE,
                     "commands": [
                         "-ceu",
-                        _fixture_staging_script(backend.fixture_uri, backend.fixture_sha256),
+                        _fixture_staging_script(
+                            backend.fixture_uri,
+                            backend.fixture_sha256,
+                            hints_uri=hints_uri,
+                        ),
                     ],
                     "options": shlex.join(("--entrypoint", "/bin/bash", volume)),
                 },

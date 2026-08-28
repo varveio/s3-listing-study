@@ -57,6 +57,10 @@ facts under `tools/<tool>/build/`.
     including frozen requests and bound result/verification identities.
   - `replay_fixture.py` generates the small synthetic canary fixture outside the
     checkout and computes the content identity required by staged Parquet.
+  - `fixture_bundle.py` reproducibly captures a public bucket with an immutable
+    Swath image, writes sorted Parquet, derives s3-fast-list hints, measures
+    content and prefix shape, validates strict sorted replay startup, and can
+    upload the complete bundle with create-only GCS writes.
   - `runtime/` is the contract layer the eleven capsule adapters import
     (`benchmark.runtime.*`); it runs both inside the image and orchestrator-side
     during verification.
@@ -138,6 +142,45 @@ This reports cross-tool agreement, not independent correctness: the public
 bucket can change while the tools run, so any disagreement must be investigated
 before it is attributed. The option accepts Docker canaries only. Larger GCP
 benchmark reports continue to compare worker-recorded row counts only.
+
+## Preparing a replay fixture bundle
+
+Large replay fixtures use one public, repeatable command rather than a session's
+hand-written Docker and DuckDB invocations:
+
+```sh
+uv run python -m benchmark.fixture_bundle \
+  --bucket noaa-nbm-grib2-pds --region us-east-1 \
+  --output /absolute/evidence/noaa-nbm-grib2-pds-current \
+  --swath-image ghcr.io/varveio/swath@sha256:<digest> \
+  --replay-image registry.example/swath-replay@sha256:<digest> \
+  --cpuset 12,13,14,15,28,29,30,31 --memory-gb 16 \
+  --concurrency 128 --segments 1000 \
+  --gcs-prefix gs://RESULTS/fixtures/noaa-nbm-grib2-pds/current-REV
+```
+
+The output is create-once: an existing output directory or GCS object is a
+refusal, never an implicit resume or overwrite. The bundle's staged directory
+has a fixed contract:
+
+```text
+part-*.parquet
+s3-fast-list-hints.input
+fixture.json
+README.md
+```
+
+`fixture.json` retains the exact capture argv and image digests, Swath report,
+part manifest and replay fixture digest, row/distinct/duplicate/marker counts,
+prefix-depth shape, latency observations and fixed-p50 treatment, generated
+hint count/digest, host allocation, and sorted replay readiness. The uploader
+uses GCS generation precondition zero for every object. Replay plans continue to
+address only `part-*.parquet`; the replay-only s3-fast-list mode stages the fixed
+companion from the same directory and bypasses the serial bootstrap listing.
+
+This bundle construction is fixture provenance, not subject timing. It is run
+once per immutable fixture. Every benchmark VM still downloads and verifies the
+Parquet manifest before replay starts.
 
 ## Campaign image set
 

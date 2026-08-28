@@ -232,7 +232,11 @@ def _s3_fast_list(mode: str, prefix: str) -> tuple[str, ...]:
         return ("split", "-k", ARTIFACT, "-c", "1000", "-o", f"{SINK}/hints.input")
     # The hinted mode's whole point: cut points from the staged hints file, and
     # the width the capsule declares as the subject's own.
-    hinted = ("-c", "100", "-k", ARTIFACT) if mode == "list-hinted" else ()
+    hinted_paths = {
+        "list-hinted": ARTIFACT,
+        "list-hinted-fixture": "/fixtures/source/s3-fast-list-hints.input",
+    }
+    hinted = ("-c", "100", "-k", hinted_paths[mode]) if mode in hinted_paths else ()
     scoped = ("--prefix", prefix) if prefix else ()
     return (
         "--no-sign-request",
@@ -314,7 +318,12 @@ def _s5cmd(mode: str, prefix: str) -> tuple[str, ...]:
 def _s7cmd(mode: str, prefix: str) -> tuple[str, ...]:
     target = f"s3://{BUCKET}/{prefix}"
     obs = ("-vv", "--disable-color-tracing")
-    parallel = ("--max-parallel-listings", "64")
+    parallel = (
+        "--max-parallel-listings",
+        "64",
+        "--max-parallel-listing-max-depth",
+        "2",
+    )
     anon = (
         "--target-no-sign-request",
         "--target-region",
@@ -469,7 +478,7 @@ EXPECTED_MODES = {
         "debug",
         "walk-debug",
     },
-    "s3-fast-list": {"list", "ks-split", "list-hinted"},
+    "s3-fast-list": {"list", "ks-split", "list-hinted", "list-hinted-fixture"},
     "s3kor": {"list", "list-versions"},
     "s3p": {"ls", "ls-long", "ls-raw", "summarize"},
     "s4cmd": {"recursive", "shallow", "show-directory", "du"},
