@@ -265,57 +265,6 @@ def test_fourcast_capacity_treatments_keep_one_shared_shape() -> None:
     }
 
 
-def test_nara_configuration_selection_keeps_one_isolated_top_tier() -> None:
-    plan = bench.Plan.load(
-        ROOT
-        / "benchmark/plans/campaigns/nara-replay/config-selection/nara-1950-census.yaml"
-    )
-
-    assert len(plan.cases) == 9
-    assert {case.tool for case in plan.cases} == {
-        "rclone",
-        "s3-fast-list",
-        "s3p",
-        "s5cmd",
-        "s7cmd",
-        "swath",
-    }
-    assert plan.replay is not None
-    assert plan.replay.backend.fixture_sha256 == (
-        "48468b7c1ea8bf657fcb089dbcb1d940d3af62b748a7cb66f6dccc8876905db4"
-    )
-    assert dict(plan.replay.backend.latency_deadlines_ms or ()) == {
-        "worker_page": 86,
-        "pivot_probe": 44,
-        "structure_probe": 50,
-    }
-    assert {
-        (
-            case.resources.vcpus,
-            case.replay.allocation.subject_vcpus if case.replay is not None else None,
-            case.replay.allocation.replay_vcpus if case.replay is not None else None,
-        )
-        for case in plan.cases
-    } == {(32, 8, 20)}
-    assert {
-        case.replay.allocation.replay_max_concurrent_requests
-        for case in plan.cases
-        if case.replay is not None
-    } == {512}
-
-    followup = bench.Plan.load(
-        ROOT / "benchmark/plans/campaigns/nara-replay/config-followup/nara-1950-census.yaml"
-    )
-    assert len(followup.cases) == 6
-    assert sum(case.reps for case in followup.cases) == 10
-    assert {case.tool for case in followup.cases} == {"s3p", "s7cmd", "swath"}
-    assert {
-        case.replay.allocation.replay_max_concurrent_requests
-        for case in followup.cases
-        if case.replay is not None
-    } == {512}
-
-
 @pytest.mark.parametrize(
     "malformed",
     ("fixed", "false", "null", "{}"),

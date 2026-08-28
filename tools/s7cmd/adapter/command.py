@@ -14,6 +14,7 @@ from benchmark.runtime.command_adapter import (
 TOOL = "s7cmd"
 S7CMD = Executable("s7cmd", ("/usr/local/bin/s7cmd",))
 EXECUTABLES = (S7CMD,)
+CONFIG_KEYS = frozenset({"parallel_depth"})
 SUPPORTS_UNSIGNED = True
 """--target-no-sign-request lists anonymously. The signed path drops the flag
 and has not been exercised by a committed run."""
@@ -161,6 +162,16 @@ def _concurrency(request: CommandRequest) -> str:
     return str(value)
 
 
+def _parallel_depth(request: CommandRequest) -> str:
+    """Render the prefix-discovery depth when a plan makes it fixture-specific."""
+    value = request.config.get("parallel_depth", 2)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise CommandAdapterError(
+            f"{TOOL} parallel_depth must be a positive integer; got: {value!r}"
+        )
+    return str(value)
+
+
 def _build_tail(request: CommandRequest) -> tuple[str, ...]:
     if request.endpoint_url and request.mode in {"all-versions", "bucket-list"}:
         raise CommandAdapterError(
@@ -172,7 +183,12 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
     parallel = (
         ()
         if request.mode in SEQUENTIAL_MODES
-        else ("--max-parallel-listings", _concurrency(request))
+        else (
+            "--max-parallel-listings",
+            _concurrency(request),
+            "--max-parallel-listing-max-depth",
+            _parallel_depth(request),
+        )
     )
     stratum = () if request.signed else ("--target-no-sign-request",)
     # The SDK's own connect-timeout default proved too tight for this study's

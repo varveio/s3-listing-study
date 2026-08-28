@@ -932,6 +932,22 @@ def test_swath_declares_what_each_mode_produces_and_what_it_asked_for() -> None:
     }
 
 
+def test_s7cmd_renders_a_fixture_specific_parallel_discovery_depth() -> None:
+    adapter = load_command_adapter(adapter_path("s7cmd"))
+
+    argv = adapter.compile(
+        CommandRequest(
+            "recursive-one-nosort",
+            BUCKET,
+            REGION,
+            tool="s7cmd",
+            config={"concurrency": 64, "parallel_depth": 1},
+        )
+    )
+
+    assert argv[argv.index("--max-parallel-listing-max-depth") + 1] == "1"
+
+
 def test_swath_renders_retained_output_controls_and_refuses_the_wrong_mode() -> None:
     adapter = load_command_adapter(adapter_path("swath"))
     request = CommandRequest(
