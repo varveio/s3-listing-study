@@ -63,7 +63,7 @@ UNREADABLE_EXIT = 1
 # absence here failed the first live hinted attempt at postprocessing after a
 # perfect run. `ks-split` stays out: preparation-ceiling modes are never
 # row-counted (the worker skips them), and a cut-point file has no row count.
-MODES = frozenset({"list", "list-hinted"})
+MODES = frozenset({"list", "list-hinted", "list-hinted-fixture"})
 
 # make_timestamp() takes MICROseconds; the epoch is UTC and the timestamp is
 # tz-naive, so the formatted components are UTC by construction and the `Z` is
