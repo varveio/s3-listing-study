@@ -100,8 +100,8 @@ def test_replay_evidence_accepts_canonical_single_cpu_sets() -> None:
             32,
             16,
             8,
-            tuple((*range(0, 8), *range(16, 24))),
-            tuple((*range(8, 12), *range(24, 28))),
+            (*range(0, 8), *range(16, 24)),
+            (*range(8, 12), *range(24, 28)),
         ),
     ),
 )
