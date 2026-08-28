@@ -162,7 +162,7 @@ def generate_hints(
     fixture: Path, output: Path, *, segments: int, prefix: str = ""
 ) -> HintSummary:
     """Write safe cut points with the pinned upstream splitter's exact semantics."""
-    if isinstance(segments, bool) or segments < 1:
+    if isinstance(segments, bool) or not isinstance(segments, int) or segments < 1:
         raise FixtureHintsError(f"segments must be a positive integer; got {segments!r}")
     if output.exists():
         raise FixtureHintsError(f"refusing to overwrite existing output {output}")

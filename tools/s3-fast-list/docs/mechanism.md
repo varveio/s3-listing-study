@@ -198,17 +198,17 @@ untested (no endpoint receipt).
 
 ## `ks-tool` companion
 
-Two subcommands **exist** [SRC ks-tool/main.rs:15-39 @ 6c72f59]; neither has a
+Two subcommands **exist** [SRC ks-tool/src/main.rs:15-39 @ 6c72f59]; neither has a
 committed execution receipt, so their behavior on real inputs stays `unverified`
 (claim `ks-tool-input-generation-internals`). The `split` source is now audited
 for the fixture-derived helper:
 
 - `split -c N` reads the entire headerless `.ks` CSV through a 100 MiB-buffered
-  reader into `BTreeMap<prefix, count>` [SRC ks-tool/utils.rs:37-85 @ 6c72f59;
+  reader into `BTreeMap<prefix, count>` [SRC ks-tool/src/utils.rs:37-85 @ 6c72f59;
   claim `ks-tool-split-reader-buffer`]. It sets the integer target to
   `total_objects / N`, walks the sorted parents, and, when the running count is
   strictly greater than that target, emits the **previous** parent and resets
-  the count to zero [SRC ks-tool/utils.rs:87-118 @ 6c72f59]. Consequently `N`
+  the count to zero [SRC ks-tool/src/utils.rs:87-118 @ 6c72f59]. Consequently `N`
   is a target rather than a promised range count. A large first parent can emit
   an empty first cut, and resetting without carrying the crossing parent's
   count can produce materially fewer than `N-1` cuts.
