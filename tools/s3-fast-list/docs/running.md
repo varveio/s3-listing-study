@@ -151,13 +151,62 @@ verified through this adapter until it gains binary-safe framing.
 The retired wrapper could not capture binary Parquet safely and could not mount
 a hints file. The benchmark worker now captures stdout as bytes and retains
 native sink trees, so binary output is no longer a harness blocker. The current
-representative adapter declares only `list`; adding a hints-file case would
-require an explicit adapter and plan change rather than reuse of the historical
-wrapper command.
+adapter declares plain listing, inline `ks-tool split`, and hinted listing as an
+explicit artifact chain rather than reusing the historical wrapper command.
 
 The original limitation remains documented in
 `../receipts/smoke/_capability/HARNESS-INCOMPATIBILITY.txt`; it describes the
 committed smoke evidence, not the current benchmark architecture.
+
+## Fixture-derived hints utility (not wired)
+
+[`fixture_hints.py`](../adapter/fixture_hints.py) can derive the final
+`hints.input` directly from a replay fixture without running `s3-fast-list` and
+without materializing the intermediate `keyspace.ks`:
+
+```sh
+uv run python tools/s3-fast-list/adapter/fixture_hints.py \
+  --fixture /path/to/fixture \
+  --segments 1000 \
+  --output /path/to/hints.input
+```
+
+`--fixture` names a directory whose immediate `*.parquet` children use the
+replay schema. `--prefix` optionally applies the same UTF-8 key prefix as a
+scoped ListObjectsV2 request; `/` is normalized to the tool's empty whole-bucket
+prefix. The command refuses to replace an existing output and prints a JSON
+summary containing selected object rows, parent groups, requested segments,
+actual cut points/ranges, and the output SHA-256.
+
+DuckDB performs the data-scale work. It selects only `row_type='OBJECT'`, as the
+replay server does, decodes the `key` BLOB, applies the requested prefix, groups
+each key by everything before its final slash (`/` for a root object), counts
+each parent, and sorts the parent groups in binary order. Python streams only
+those grouped rows and applies the pinned `ks-tool split` loop exactly: integer
+`total / segments`, strict `>`, emit the previous parent, reset to zero. It then
+writes those parents directly as the newline-delimited hints file. No object
+listing and no `.ks` file is produced.
+
+The helper refuses rather than manufacturing a usable-looking artifact when:
+
+- there are no immediate Parquet parts, the replay columns have the wrong
+  types, the selection contains no objects or duplicate object keys, or the
+  requested segment count exceeds the object count;
+- a parent contains a quote or line break that the upstream hand-rendered `.ks`
+  CSV cannot represent faithfully;
+- the upstream loop yields no cut, an empty first cut, or unsorted/duplicate
+  cuts; or
+- a generated cut equals a fixture object key, which the source-supported open
+  range boundaries would omit from a hinted listing.
+
+This is preparation code, not a benchmark result or a new capsule mode. It is
+deliberately **not wired** into `command.py`, `REQUIRES`, plan resolution, the
+worker, fixture staging, or reporting, and the adapter identity still covers
+only `command.py` plus `normalize.py`. Before a campaign can consume these
+bytes, a later change must bind both the fixture digest and hints digest as an
+immutable supplied input and decide how fixture-seeded preparation is reported.
+The committed replay-canary fixture is only a deterministic parser and drift
+test; it is not run evidence for upstream `ks-tool` or hinted listing.
 
 ## Reproduction
 
