@@ -1,0 +1,55 @@
+# One rclone c64 confirmation against the replay query-decoding fix. The old
+# replay treated '+' as a literal plus, while Go's query encoder used it for a
+# space in seven NARA leaf prefixes; both c32/c64 products missed the same 190
+# image objects plus the four marker objects intentionally omitted by
+# --files-only. Expected product rows here: 13,540,306.
+spec_version: 3
+
+bucket: nara-1950-census
+region: us-east-2
+auth_role: public-read
+
+replay:
+  capacity_status: uncalibrated
+  server_image_uri: us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:f51c4d12ac0e1f52fd02f1a77a74e962d610d518e64ab8425635512370973612
+  fixture_uri: gs://s3-listing-study-results-29c02004/fixtures/nara-1950-census/current-eba31d9/part-*.parquet
+  fixture_sha256: 48468b7c1ea8bf657fcb089dbcb1d940d3af62b748a7cb66f6dccc8876905db4
+  serving_mode: sorted
+  latency_model:
+    deadlines_ms:
+      worker_page: 86
+      pivot_probe: 44
+      structure_probe: 50
+    scale: 1.0
+    jitter: none
+
+defaults:
+  reps: 1
+  timeout_s: 1800
+  vcpus: 32
+  memory_gb: 64
+  container_memory_gb: 8
+  subject_vcpus: 8
+  replay_vcpus: 20
+  replay_memory_gb: 20
+  replay_parquet_connections: 64
+  replay_max_concurrent_requests: 512
+  replay_prefetch: false
+  replay_prefetch_max_windows: 96
+  replay_heap_percent: 75
+
+tools:
+  rclone:
+    cases:
+      - {mode: recursive-walk, concurrency: 64, purpose: diagnostic}
+
+exclude:
+  - {tool: aws-cli, reason: stopped after FourCast}
+  - {tool: minio-mc, reason: stopped after FourCast}
+  - {tool: ps3, reason: stopped after FourCast}
+  - {tool: s3-fast-list, reason: selected separately}
+  - {tool: s3kor, reason: stopped after FourCast}
+  - {tool: s3p, reason: selected separately}
+  - {tool: s5cmd, reason: selected separately}
+  - {tool: s7cmd, reason: selected separately}
+  - {tool: swath, reason: selected separately}
