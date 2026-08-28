@@ -62,7 +62,7 @@ records what an attempt was for:
 
 `report` considers only `measurement` rows for comparative timing and rates.
 Replay canaries and diagnostics remain outside every comparison. Routine report
-binds their `result.json` summaries and does not consume their retained products.
+binds their `result.json` summaries and does not require an uploaded native product.
 
 **A preparation is measured even though it is not compared.** If s3-fast-list
 needs 40 seconds of `ks-tool` to list in 60, then publishing 60 against another

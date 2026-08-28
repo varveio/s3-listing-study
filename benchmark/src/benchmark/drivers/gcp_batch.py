@@ -91,6 +91,7 @@ class BatchOptions:
     # worker identity can read it.
     aws_credential_secret: str | None = None
     term_grace: float = 5.0
+    retain_products: bool = False
 
     def service_account_for(self, auth_role: str | None) -> str:
         if auth_role is None:
@@ -124,6 +125,7 @@ class BatchOptions:
                 "network": self.network,
                 "subnetwork": self.subnetwork,
                 "zone": self.zone,
+                "retain_products": self.retain_products,
             }
         )
 
@@ -279,6 +281,7 @@ def render_batch_job(
         destination=attempt.result_prefix,
         term_grace=options.term_grace,
         artifact_uri=artifact_uri,
+        retain_products=options.retain_products,
     )
     replay = _replay_document(attempt)
     commands = [item for pair in pairs for item in pair]
@@ -633,6 +636,7 @@ def _options(args: argparse.Namespace) -> BatchOptions:
         args.project,
         args.location,
         args.secret_resource,
+        retain_products=getattr(args, "retain_products", False),
     )
 
 

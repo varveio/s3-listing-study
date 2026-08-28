@@ -32,7 +32,7 @@ which one is not a matter of taste:
 | Place | Holds | Read by |
 | --- | --- | --- |
 | **The ledger** — one SQLite file | What was submitted, under what identity, where its evidence went, and how it settled | The controller, and anyone asking what happened |
-| **The evidence store** — GCS or an absolute local tree | The evidence itself: the listing, the logs, the measurement | `report` reads `result.json`; explicit real-S3 verification may read retained products |
+| **The evidence store** — GCS or an absolute local tree | The logs, measurement marker, and an optional retained listing | `report` reads `result.json`; explicit real-S3 verification requires retained products |
 | **The subject's argv** | Everything about *how the tool was asked to list* | Only the tool |
 
 The boundaries are one-way. The ledger never holds evidence; the evidence store

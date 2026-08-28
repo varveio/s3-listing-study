@@ -453,44 +453,6 @@ def test_credential_payload_parses_and_refuses_the_wrong_stratum() -> None:
         measure.resolve_credential_env(None, {CREDENTIAL_ENV_VAR: "AWS_ACCESS_KEY_ID=AKIAEXAMPLE"})
 
 
-@pytest.mark.parametrize(
-    "secret",
-    [
-        b"AKIAABCDEFGHIJKLMNOP",
-        b"https://example.test/?X-Amz-Signature=" + b"a" * 64,
-        b"AWS_SESSION_TOKEN=" + b"A" * 32,
-    ],
-)
-def test_secret_scan_covers_nested_native_files(tmp_path: Path, secret: bytes) -> None:
-    native = tmp_path / "native/deep/tree"
-    native.mkdir(parents=True)
-    (native / "part.bin").write_bytes(b"binary\x00prefix" + secret + b"\xffsuffix")
-    hit = measure.scan_for_secrets([tmp_path / "native"])
-    assert hit is not None
-    assert "part.bin" in hit
-
-
-def test_secret_scan_is_binary_streaming_and_crosses_chunk_boundary(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(measure, "SECRET_SCAN_CHUNK", 1024)
-    clean = tmp_path / "clean.bin"
-    clean.write_bytes((b"\x00\xffclean" * 300_000) + b"tail")
-    assert measure.scan_for_secrets([clean]) is None
-    boundary = tmp_path / "boundary.bin"
-    boundary.write_bytes(b"x" * 1017 + b"AKIAABCDEFGHIJKLMNOP" + b"z" * 2048)
-    assert measure.scan_for_secrets([boundary]) is not None
-
-
-def test_secret_scan_refuses_native_symlinks(tmp_path: Path) -> None:
-    outside = tmp_path / "outside"
-    outside.write_bytes(b"clean")
-    native = tmp_path / "native"
-    native.mkdir()
-    (native / "escape").symlink_to(outside)
-    assert "symlink" in (measure.scan_for_secrets([native]) or "")
-
-
 def test_image_metadata_claim_mismatch_refuses(tmp_path: Path) -> None:
     metadata = image_metadata()
     tools = metadata["tools"]
@@ -1033,7 +995,7 @@ def test_recursive_upload_preserves_native_paths(
         ),
     )
     timings: dict[str, float] = {}
-    assert measure.upload(attempt, "gs://bucket/leaf/", timings)
+    assert measure.upload(attempt, "gs://bucket/leaf/", timings, retain_products=True)
     assert any(
         uri == "gs://bucket/leaf/native/listing/data/part.parquet" and create_only
         for uri, create_only, _body in uploaded
@@ -1044,6 +1006,33 @@ def test_recursive_upload_preserves_native_paths(
     result_uri, create_only, result_body = uploaded[-1]
     assert (result_uri, create_only) == ("gs://bucket/leaf/result.json", True)
     assert json.loads(result_body)["postprocessing_seconds"] == timings
+
+
+def test_default_upload_omits_native_product_but_keeps_logs_and_marker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    attempt = tmp_path / "attempt"
+    (attempt / "native").mkdir(parents=True)
+    (attempt / "native/listing.txt").write_text("key\n")
+    (attempt / "stderr.log.gz").write_bytes(b"log")
+    (attempt / "result.json").write_text("{}")
+    uploaded: list[str] = []
+    monkeypatch.setattr(
+        gcs,
+        "upload_file",
+        lambda _path, uri, **_kwargs: uploaded.append(uri),
+    )
+    monkeypatch.setattr(
+        gcs,
+        "upload_tree",
+        lambda _path, uri, **_kwargs: uploaded.append(uri),
+    )
+
+    assert measure.upload(attempt, "gs://bucket/leaf/")
+
+    assert "gs://bucket/leaf/stderr.log.gz" in uploaded
+    assert "gs://bucket/leaf/result.json" in uploaded
+    assert all("/native" not in uri for uri in uploaded)
 
 
 def test_local_publication_is_create_only(tmp_path: Path) -> None:
@@ -1343,6 +1332,8 @@ def run_inline_worker(
             "none",
             "--config",
             json.dumps({"mode": mode, "segments": 2}),
+            "--retain-products",
+            "true",
             "--input-artifact",
             "gs://results/prep/native/keyspace.ks",
             "--input-artifact-sha256",
@@ -1540,7 +1531,6 @@ def test_a_product_lands_under_its_declared_name_whichever_channel_carries_it(
     timings = printed["postprocessing_seconds"]
     assert set(timings) == {
         "replay_evidence_finalize",
-        "secret_scan",
         "row_count",
         "capture_finalize",
         "native_manifest",

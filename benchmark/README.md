@@ -47,8 +47,9 @@ facts under `tools/<tool>/build/`.
   - `campaign.py` records campaign intent and attempts in `campaign.db`;
     `drivers/gcp_batch.py` owns GCP Batch rendering and lifecycle commands, while
     `submit --executor docker` dispatches the current bounded real-S3 experiment.
-  - `measure.py` runs exactly one selected subject and captures its raw outputs
-    and metrics. It is the image entrypoint.
+  - `measure.py` runs exactly one selected subject, counts its local output, and
+    captures logs and metrics. Native-product upload is opt-in. It is the image
+    entrypoint.
   - `verify.py` is the explicit real-S3 content-comparison path; replay is
     row-count-only and is refused there without staging raw products.
   - `report.py` binds `result.json` summaries to controller state and renders
@@ -249,8 +250,8 @@ retry, cancel, report, and explicit real-S3 verification — is
 
 ## Minimum rigor and deliberate limitations
 
-The harness preserves raw output, binds every result to the recorded job request
-and immutable toolbox identity, and publishes `result.json` only after the other
+The harness binds every result to the recorded job request and immutable toolbox
+identity, retains logs, and publishes `result.json` only after the other selected
 attempt artifacts. Routine
 replay reporting reads that marker only. These controls make an attempt
 auditable; row count is not a content-correctness verdict.
@@ -260,8 +261,9 @@ auditable; row count is not a content-correctness verdict.
 The worker computes its final completion code, uploads attempt artifacts, and
 uploads the final `result.json` marker with
 `ifGenerationMatch=0`. A second execution cannot merge with or replace a
-deterministic attempt prefix. Raw listing products remain retained under that
-prefix for manual investigation, but routine replay reporting does not fetch them.
+deterministic attempt prefix. Raw listing products are omitted by default; pass
+`campaign submit --retain-products` when manual content investigation or
+verification needs them.
 
 ### Replay reporting is row-count-only
 
@@ -272,13 +274,14 @@ between attempts, so `mtime`-only differences are `DRIFT` and other differences
 remain `FAIL` because the verifier cannot infer their cause.
 
 Replay records the worker's in-container `row_count` after the timed child exits.
-The worker uploads the untouched product and logs, then uploads `result.json`
-last. Campaign reporting binds and reads only that summary: it does not generate
+The worker uploads logs and then `result.json` last; native products are uploaded
+only when the operator opts in. Campaign reporting binds and reads only that
+summary: it does not generate
 or require a correctness manifest, normalize rows, or issue a content verdict.
-Replay diagnostics use the `minimal-replay` evidence profile: retained products
-and captures are recorded by name and size, not content-hashed. Comparative and
-preparation attempts retain the stronger digest-bearing evidence needed by the
-verifier and dependency chain. `result.json.postprocessing_seconds` records
+Replay diagnostics use the `minimal-replay` evidence profile. When products are
+retained, they and captures are recorded by name and size rather than
+content-hashed. Comparative verification requires an opt-in retained product;
+dependency artifacts remain digest-bound. `result.json.postprocessing_seconds` records
 each applicable phase separately; all remain outside the subject wall clock.
 
 ### Replay qualification precedes replay measurement
