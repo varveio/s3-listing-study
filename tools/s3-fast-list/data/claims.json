@@ -138,7 +138,7 @@
       "scope": "operability",
       "status": "supported",
       "disposition": "retained",
-      "qualification": "The input surfaces exist; the ks-tool algorithms were not independently audited.",
+      "qualification": "The input surfaces exist. The split loop is now source-audited; the inventory transformation remains unaudited and neither subcommand has a committed run receipt.",
       "legacy_origins": ["M5"],
       "evidence": [{"kind":"documentation","url":"https://github.com/aws-samples/s3-fast-list"}]
     },
@@ -148,9 +148,9 @@
       "scope": "runtime",
       "status": "unverified",
       "disposition": "retained",
-      "qualification": "The subcommands exist, but their internals were not read and neither mode was run.",
+      "qualification": "The split implementation is now source-audited, but inventory remains unaudited and neither mode has a committed run receipt.",
       "legacy_origins": ["M5", "MODE-7"],
-      "evidence": [{"kind":"none","reason":"No source audit or run covers the ks-tool algorithms."}]
+      "evidence": [{"kind":"none","reason":"No committed run covers either algorithm, and the inventory implementation remains outside the completed source audit."}]
     },
     {
       "id": "tokio-runtime-is-multithreaded",
@@ -592,11 +592,11 @@
       "id": "ks-tool-split-reader-buffer",
       "statement": "ks-tool split uses a one-hundred-MiB reader buffer.",
       "scope": "mechanism",
-      "status": "unverified",
+      "status": "supported",
       "disposition": "retained",
-      "qualification": "The split implementation was not independently read.",
+      "qualification": "The split implementation constructs a Tokio BufReader with a 100 MiB capacity before reading the input into memory.",
       "legacy_origins": ["NUMBER-5"],
-      "evidence": [{"kind":"none","reason":"The ks-tool split reader implementation was outside the completed source audit."}]
+      "evidence": [{"kind":"source","subject":"tested-variant","repository":"https://github.com/sagiba/s3-fast-list","commit":"6c72f59","path":"ks-tool/src/utils.rs","lines":"37-57"}]
     },
     {
       "id": "dependency-versions-are-unbounded-above",
