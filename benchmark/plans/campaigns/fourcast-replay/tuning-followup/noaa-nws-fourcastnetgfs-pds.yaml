@@ -1,0 +1,93 @@
+# Focused post-screen tuning checks. These do not replace the completed c64
+# Swath, c100 s3p, or c32 rclone CPU curves; they test the remaining
+# configuration questions those results left open.
+spec_version: 3
+
+bucket: noaa-nws-fourcastnetgfs-pds
+region: us-east-1
+auth_role: public-read
+
+replay:
+  capacity_status: uncalibrated
+  server_image_uri: ghcr.io/varveio/swath-replay@sha256:8fb53a327f946f10db17d4fd082a7b2e06bc678a1e828a197a1ef5717473a46a
+  fixture_uri: gs://s3-listing-study-results-29c02004/fixtures/noaa-nws-fourcastnetgfs-pds/current-eba31d9/part-00000.parquet
+  fixture_sha256: abc259e0e2e956f096c6aa0dc5e3532c608a4df4675e165a6560ae6d868374e2
+  serving_mode: sorted
+  latency_model:
+    deadlines_ms:
+      worker_page: 85
+      pivot_probe: 35
+      structure_probe: 37
+    scale: 1.0
+    jitter: none
+
+defaults:
+  reps: 1
+  timeout_s: 1800
+  vcpus: 16
+  memory_gb: 32
+  container_memory_gb: 8
+  subject_vcpus: 2
+  replay_vcpus: 8
+  replay_memory_gb: 8
+  replay_parquet_connections: 64
+  replay_max_concurrent_requests: 4096
+  replay_prefetch: false
+  replay_prefetch_max_windows: 96
+  replay_heap_percent: 75
+
+tools:
+  rclone:
+    cases:
+      - {mode: recursive-walk, concurrency: 64, purpose: diagnostic, vcpus: 32, memory_gb: 64, subject_vcpus: 8, replay_vcpus: 16, replay_memory_gb: 16}
+
+  s3p:
+    cases:
+      - {mode: ls, concurrency: 16, purpose: diagnostic, vcpus: 16, memory_gb: 32, subject_vcpus: 2, replay_vcpus: 8, replay_memory_gb: 8}
+      - {mode: ls, concurrency: 16, purpose: diagnostic, vcpus: 16, memory_gb: 32, subject_vcpus: 4, replay_vcpus: 8, replay_memory_gb: 8}
+      - {mode: ls, concurrency: 16, purpose: diagnostic, vcpus: 32, memory_gb: 64, subject_vcpus: 8, replay_vcpus: 16, replay_memory_gb: 16}
+
+  swath:
+    cases:
+      - mode: recursive-tsv-dataset
+        concurrency: 16
+        purpose: diagnostic
+        vcpus: 16
+        memory_gb: 32
+        subject_vcpus: 2
+        replay_vcpus: 8
+        replay_memory_gb: 8
+        config: &swath_tsv
+          jvm_max_heap: 4g
+          text_writers: 3
+          text_part_size: 1gb
+          writeback_size: 32mb
+          part_rotation_interval: "0"
+          part_rotation_max_rows: 0
+      - mode: recursive-tsv-dataset
+        concurrency: 16
+        purpose: diagnostic
+        vcpus: 16
+        memory_gb: 32
+        subject_vcpus: 4
+        replay_vcpus: 8
+        replay_memory_gb: 8
+        config: *swath_tsv
+      - mode: recursive-tsv-dataset
+        concurrency: 16
+        purpose: diagnostic
+        vcpus: 32
+        memory_gb: 64
+        subject_vcpus: 8
+        replay_vcpus: 16
+        replay_memory_gb: 16
+        config: *swath_tsv
+
+exclude:
+  - {tool: aws-cli, reason: focused tuning follow-up}
+  - {tool: minio-mc, reason: focused tuning follow-up}
+  - {tool: ps3, reason: focused tuning follow-up}
+  - {tool: s3-fast-list, reason: focused tuning follow-up}
+  - {tool: s3kor, reason: focused tuning follow-up}
+  - {tool: s5cmd, reason: focused tuning follow-up}
+  - {tool: s7cmd, reason: focused tuning follow-up}
