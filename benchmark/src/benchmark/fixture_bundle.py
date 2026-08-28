@@ -114,6 +114,29 @@ def _generator_path() -> Path:
     return path
 
 
+def _harness_revision() -> str:
+    root = Path(__file__).resolve().parents[3]
+    status = subprocess.run(
+        ("git", "status", "--porcelain"),
+        cwd=root,
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    if status.stdout:
+        raise FixtureBundleError("fixture capture requires a clean repository checkout")
+    revision = subprocess.run(
+        ("git", "rev-parse", "HEAD"),
+        cwd=root,
+        check=True,
+        text=True,
+        capture_output=True,
+    ).stdout.strip()
+    if re.fullmatch(r"[0-9a-f]{40}", revision) is None:
+        raise FixtureBundleError("could not resolve the fixture builder revision")
+    return revision
+
+
 def _generate_hints(data_dir: Path, segments: int) -> dict[str, object]:
     output = data_dir / HINTS_NAME
     done = subprocess.run(
@@ -386,6 +409,7 @@ not a benchmark result.
 - Replay latency deadlines: `{latency['deadlines_ms']}`
 - Swath image: `{capture['swath_image']}`
 - Replay validation image: `{capture['replay_image']}`
+- Fixture builder revision: `{capture['harness_revision']}`
 
 The hints are a deterministic companion input generated from the exact Parquet
 parts at the fixed segment count in `fixture.json`. Upload is create-only; a
@@ -395,6 +419,7 @@ s3-fast-list mode reads `{HINTS_NAME}` from the same staged directory.
 
 
 def build_bundle(args: argparse.Namespace) -> dict[str, object]:
+    harness_revision = _harness_revision()
     output = args.output.resolve()
     if output.exists():
         raise FixtureBundleError(f"refusing to reuse existing output directory {output}")
@@ -430,6 +455,7 @@ def build_bundle(args: argparse.Namespace) -> dict[str, object]:
         "capture": {
             "swath_image": args.swath_image,
             "replay_image": args.replay_image,
+            "harness_revision": harness_revision,
             "command": list(command),
             "cpuset": args.cpuset,
             "memory_gb": args.memory_gb,
