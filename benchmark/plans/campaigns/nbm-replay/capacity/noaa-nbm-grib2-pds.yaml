@@ -69,6 +69,10 @@ tools:
         concurrency: 4
         purpose: diagnostic
         config: {parallel_depth: 1}
+      - mode: recursive-one-nosort
+        concurrency: 16
+        purpose: diagnostic
+        config: {aws_max_attempts: 1, parallel_depth: 1}
 
   swath:
     cases:
