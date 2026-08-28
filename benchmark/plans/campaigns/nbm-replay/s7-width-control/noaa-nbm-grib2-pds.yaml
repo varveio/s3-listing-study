@@ -1,0 +1,52 @@
+# Control for the replay-local EADDRNOTAVAIL failure after a global nofile
+# increase did not change it. Lower only s7cmd's listing-task ceiling.
+spec_version: 3
+
+bucket: noaa-nbm-grib2-pds
+region: us-east-1
+auth_role: public-read
+
+replay:
+  capacity_status: uncalibrated
+  server_image_uri: us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:f51c4d12ac0e1f52fd02f1a77a74e962d610d518e64ab8425635512370973612
+  fixture_uri: gs://s3-listing-study-results-29c02004/fixtures/noaa-nbm-grib2-pds/current-eba31d9/part-*.parquet
+  fixture_sha256: de7e0487fe7237590b421299853ff7f88f27a006f5d8528ece23f3be26a2624a
+  serving_mode: sorted
+  latency_model:
+    deadlines_ms: {worker_page: 87, pivot_probe: 37, structure_probe: 51}
+    scale: 1.0
+    jitter: none
+
+defaults:
+  reps: 1
+  timeout_s: 7200
+  vcpus: 32
+  memory_gb: 64
+  container_memory_gb: 8
+  subject_vcpus: 8
+  replay_vcpus: 20
+  replay_memory_gb: 20
+  replay_parquet_connections: 64
+  replay_max_concurrent_requests: 512
+  replay_prefetch: false
+  replay_prefetch_max_windows: 96
+  replay_heap_percent: 75
+
+tools:
+  s7cmd:
+    cases:
+      - mode: recursive-one-nosort
+        concurrency: 4
+        purpose: diagnostic
+        config: {parallel_depth: 1}
+
+exclude:
+  - {tool: aws-cli, reason: stopped after FourCast}
+  - {tool: minio-mc, reason: stopped after FourCast}
+  - {tool: ps3, reason: stopped after FourCast}
+  - {tool: rclone, reason: not part of the s7cmd width control}
+  - {tool: s3-fast-list, reason: not part of the s7cmd width control}
+  - {tool: s3kor, reason: stopped after FourCast}
+  - {tool: s3p, reason: not part of the s7cmd width control}
+  - {tool: s5cmd, reason: not part of the s7cmd width control}
+  - {tool: swath, reason: not part of the s7cmd width control}
