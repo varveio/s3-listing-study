@@ -45,6 +45,7 @@ tools:
   s3-fast-list:
     cases:
       - {mode: list-hinted-fixture, concurrency: 100, segments: 1000, purpose: diagnostic}
+      - {mode: list-hinted-fixture, concurrency: 100, segments: 1000, purpose: diagnostic, container_memory_gb: 16}
 
   s3p:
     cases:
@@ -62,6 +63,10 @@ tools:
     cases:
       - mode: recursive-one-nosort
         concurrency: 16
+        purpose: diagnostic
+        config: {parallel_depth: 1}
+      - mode: recursive-one-nosort
+        concurrency: 4
         purpose: diagnostic
         config: {parallel_depth: 1}
 
