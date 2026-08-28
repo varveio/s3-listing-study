@@ -160,8 +160,8 @@ uv run python -m benchmark.fixture_bundle \
 ```
 
 The output is create-once: an existing output directory or GCS object is a
-refusal, never an implicit resume or overwrite. The bundle's staged directory
-has a fixed contract:
+refusal, never an implicit resume or overwrite. The uploaded bundle directory
+has a fixed contract (the local Parquet parts remain below `dataset/data/`):
 
 ```text
 part-*.parquet

@@ -57,7 +57,7 @@ def _run_stream(command: Sequence[str], log_path: Path) -> None:
         source = process.stdout
         if source is None:
             raise FixtureBundleError("capture process has no output pipe")
-        for chunk in iter(lambda: source.read(64 * 1024), b""):
+        for chunk in iter(source.readline, b""):
             sink.write(chunk)
             sink.flush()
             sys.stdout.buffer.write(chunk)
@@ -137,8 +137,7 @@ def _harness_revision() -> str:
     return revision
 
 
-def _generate_hints(data_dir: Path, segments: int) -> dict[str, object]:
-    output = data_dir / HINTS_NAME
+def _generate_hints(data_dir: Path, output: Path, segments: int) -> dict[str, object]:
     done = subprocess.run(
         (
             sys.executable,
@@ -441,7 +440,8 @@ def build_bundle(args: argparse.Namespace) -> dict[str, object]:
         raise FixtureBundleError(
             f"fixture has {analysis['rows']} rows but Swath reported {report.get('objects')}"
         )
-    hints = _generate_hints(data_dir, args.segments)
+    hints_path = output / HINTS_NAME
+    hints = _generate_hints(data_dir, hints_path, args.segments)
     latency = _latency_profile(report)
     validation = _validate_sorted(
         args, data_dir, latency, output / "sorted-validation.log"
@@ -480,14 +480,14 @@ def build_bundle(args: argparse.Namespace) -> dict[str, object]:
         "sorted_validation": validation,
         "gcs_prefix": gcs_prefix,
     }
-    summary_path = data_dir / SUMMARY_NAME
-    readme_path = data_dir / README_NAME
+    summary_path = output / SUMMARY_NAME
+    readme_path = output / README_NAME
     summary_path.write_text(canonical_json(summary) + "\n")
     readme_path.write_text(_render_readme(summary))
     if gcs_prefix is not None:
         _upload_bundle(
             gcs_prefix,
-            (*parquet_paths, data_dir / HINTS_NAME, summary_path, readme_path),
+            (*parquet_paths, hints_path, summary_path, readme_path),
         )
     return summary
 
