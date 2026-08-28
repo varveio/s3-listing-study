@@ -39,6 +39,7 @@ defaults:
 tools:
   rclone:
     cases:
+      - {mode: recursive-walk, concurrency: 32, purpose: diagnostic, vcpus: 32, memory_gb: 64, subject_vcpus: 8, replay_vcpus: 16, replay_memory_gb: 16}
       - {mode: recursive-walk, concurrency: 64, purpose: diagnostic, vcpus: 32, memory_gb: 64, subject_vcpus: 8, replay_vcpus: 16, replay_memory_gb: 16}
 
   s3p:
