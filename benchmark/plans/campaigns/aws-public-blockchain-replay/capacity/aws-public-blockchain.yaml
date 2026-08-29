@@ -38,6 +38,17 @@ tools:
     cases:
       - {mode: recursive-walk, concurrency: 64, purpose: diagnostic}
 
+  s3p:
+    cases:
+      - {mode: ls, concurrency: 16, purpose: diagnostic}
+
+  s7cmd:
+    cases:
+      - mode: recursive-one-nosort
+        concurrency: 16
+        purpose: diagnostic
+        config: {parallel_depth: 1}
+
   swath:
     cases:
       - mode: recursive-tsv-dataset
@@ -57,6 +68,4 @@ exclude:
   - {tool: ps3, reason: stopped after FourCast}
   - {tool: s3-fast-list, reason: stopped after NBM memory control}
   - {tool: s3kor, reason: stopped after FourCast}
-  - {tool: s3p, reason: stopped after NBM throughput screen}
   - {tool: s5cmd, reason: stopped after NBM throughput screen}
-  - {tool: s7cmd, reason: NBM replay transport interaction unresolved}
