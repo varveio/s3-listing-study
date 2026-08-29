@@ -55,3 +55,7 @@ instances:
   - { vcpus: 32, memory_gb: 64, machine_type: n4-highcpu-32 }
   - { vcpus: 32, memory_gb: 128, machine_type: n4-standard-32 }
   - { vcpus: 32, memory_gb: 256, machine_type: n4-highmem-32 }
+
+  - { vcpus: 48, memory_gb: 96, machine_type: n4-highcpu-48 }
+  - { vcpus: 48, memory_gb: 192, machine_type: n4-standard-48 }
+  - { vcpus: 48, memory_gb: 384, machine_type: n4-highmem-48 }

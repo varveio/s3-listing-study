@@ -103,6 +103,34 @@ tools:
           writeback_size: 32mb
           part_rotation_interval: "0"
           part_rotation_max_rows: 0
+      - mode: recursive-tsv-dataset
+        concurrency: 128
+        purpose: diagnostic
+        vcpus: 48
+        memory_gb: 96
+        replay_vcpus: 32
+        replay_parquet_connections: 128
+        config:
+          jvm_max_heap: 4g
+          text_writers: 3
+          text_part_size: 1gb
+          writeback_size: 32mb
+          part_rotation_interval: "0"
+          part_rotation_max_rows: 0
+      - mode: recursive-tsv-dataset
+        concurrency: 256
+        purpose: diagnostic
+        vcpus: 48
+        memory_gb: 96
+        replay_vcpus: 32
+        replay_parquet_connections: 128
+        config:
+          jvm_max_heap: 4g
+          text_writers: 3
+          text_part_size: 1gb
+          writeback_size: 32mb
+          part_rotation_interval: "0"
+          part_rotation_max_rows: 0
 
 exclude:
   - {tool: aws-cli, reason: stopped after FourCast}
