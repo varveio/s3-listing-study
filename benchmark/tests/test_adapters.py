@@ -85,7 +85,11 @@ UNEXERCISED = {
     # parser fixtures below, but no committed raw campaign product yet.
     "rclone": {"recursive-walk-with-dirs"},
     "s4cmd": {"du", "shallow", "show-directory"},
-    "s5cmd": {"recursive-with-dirs", "fanout-with-dirs"},
+    "s5cmd": {
+        "recursive-with-dirs",
+        "fanout-with-dirs",
+        "fanout-fixture-with-dirs",
+    },
     # Streaming one-line output is new campaign coverage and has no committed
     # raw product in the capsule's immutable groundwork corpus yet.
     "s7cmd": {"recursive-one-nosort"},
@@ -289,6 +293,12 @@ FIXTURES: dict[tuple[str, str], tuple[bytes, str, list[bytes]]] = {
         [b"normals-hourly/markers/empty/", b"normals-hourly/1981-2010/access/A.csv"],
     ),
     ("s5cmd", "fanout-with-dirs"): (
+        b"                                       DIR  markers/empty/\n"
+        b"2026/03/16 14:05:58 STANDARD ff41               4196  1981-2010/access/A.csv\n",
+        "normals-hourly/",
+        [b"normals-hourly/markers/empty/", b"normals-hourly/1981-2010/access/A.csv"],
+    ),
+    ("s5cmd", "fanout-fixture-with-dirs"): (
         b"                                       DIR  markers/empty/\n"
         b"2026/03/16 14:05:58 STANDARD ff41               4196  1981-2010/access/A.csv\n",
         "normals-hourly/",
