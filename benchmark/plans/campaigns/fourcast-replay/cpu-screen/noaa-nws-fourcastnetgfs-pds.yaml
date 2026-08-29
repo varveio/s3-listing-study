@@ -67,6 +67,7 @@ tools:
         subject_vcpus: 8
         replay_vcpus: 16
         replay_memory_gb: 16
+        replay_max_concurrent_requests: 512
         config: {prefix_count: 5000}
 
   rclone:
