@@ -139,4 +139,4 @@ exclude:
   - {tool: ps3, reason: stopped after FourCast}
   - {tool: s3-fast-list, reason: stopped after NBM memory control}
   - {tool: s3kor, reason: stopped after FourCast}
-  - {tool: s5cmd, reason: stopped after NBM throughput screen}
+  - {tool: s5cmd, reason: blockchain preceded the fair NBM c64 fanout; carry on next rung}
