@@ -75,6 +75,10 @@ MODE_EXECUTABLES: dict[tuple[str, str], tuple[str, ...]] = {
         "/usr/bin/python3",
         "/opt/benchmark/tools/s5cmd/adapter/fanout.py",
     ),
+    ("s5cmd", "fanout-fixture-with-dirs"): (
+        "/usr/bin/python3",
+        "/opt/benchmark/tools/s5cmd/adapter/fanout.py",
+    ),
 }
 """Modes that run a capsule's *second* executable. Written out here, not read
 from the capsule, so the binary a mode runs stays an independent expectation --
@@ -306,6 +310,19 @@ def _s5cmd(mode: str, prefix: str) -> tuple[str, ...]:
             "256",
             "--unsigned",
         ),
+        "fanout-fixture-with-dirs": (
+            "--s5cmd",
+            "/s5cmd",
+            "--bucket",
+            BUCKET,
+            "--prefix",
+            prefix,
+            "--shard-file",
+            "/fixtures/source/s5cmd-shards.input",
+            "--numworkers",
+            "256",
+            "--unsigned",
+        ),
         "delimiter": ("--no-sign-request", "ls", "-e", "-s", target),
         "rootkeys": ("--no-sign-request", "ls", "-e", "-s", target),
         "json": ("--json", "--no-sign-request", "ls", recursive),
@@ -486,6 +503,7 @@ EXPECTED_MODES = {
         "recursive",
         "recursive-with-dirs",
         "fanout-with-dirs",
+        "fanout-fixture-with-dirs",
         "delimiter",
         "rootkeys",
         "json",
@@ -790,6 +808,21 @@ def test_s5cmd_fanout_accepts_disjoint_complete_prefixes() -> None:
     assert "blend.2021" in command
     assert "index.html" in command
     assert command[command.index("--numworkers") + 1] == "8"
+
+
+def test_ps3_renders_the_prefix_discovery_cutoff() -> None:
+    adapter = load_command_adapter(adapter_path("ps3"))
+    command = adapter.compile(
+        CommandRequest(
+            "list",
+            BUCKET,
+            REGION,
+            tool="ps3",
+            signed=True,
+            config={"prefix_count": 5000},
+        )
+    )
+    assert command[command.index("--prefix-count") + 1] == "5000"
 
 
 def test_rclone_endpoint_preserves_the_signed_credential_branch() -> None:
@@ -1144,6 +1177,43 @@ def test_s5cmd_fanout_execs_with_an_inherited_commands_file(tmp_path: Path) -> N
     assert observed["commands"].splitlines() == [
         "ls -e -s 's3://bucket-x/p x/雪/.*'",
         "ls -e -s 's3://bucket-x/p x/雪/0*'",
+    ]
+
+
+def test_s5cmd_fanout_reads_fixture_shards(tmp_path: Path) -> None:
+    fake = tmp_path / "fake-s5cmd"
+    fake.write_text(
+        "#!/usr/bin/python3\n"
+        "import json, sys\n"
+        "with open(sys.argv[-1], encoding='utf-8') as source:\n"
+        "    print(json.dumps({'commands': source.read()}))\n",
+        encoding="utf-8",
+    )
+    fake.chmod(0o755)
+    shards = tmp_path / "s5cmd-shards.input"
+    shards.write_text("blend.20200101\nindex.html\n", encoding="utf-8")
+    wrapper = ROOT / "tools/s5cmd/adapter/fanout.py"
+    done = subprocess.run(
+        [
+            "/usr/bin/python3",
+            str(wrapper),
+            "--s5cmd",
+            str(fake),
+            "--bucket",
+            BUCKET,
+            "--shard-file",
+            str(shards),
+            "--numworkers",
+            "64",
+        ],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    assert done.returncode == 0, done.stderr
+    assert json.loads(done.stdout)["commands"].splitlines() == [
+        "ls -e -s 's3://bucket-x/blend.20200101*'",
+        "ls -e -s 's3://bucket-x/index.html*'",
     ]
 
 

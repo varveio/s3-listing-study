@@ -25,10 +25,12 @@ from benchmark.replay import ReplayError
 from benchmark.replay_fixture import fixture_manifest
 
 HINTS_NAME = "s3-fast-list-hints.input"
+S5CMD_SHARDS_NAME = "s5cmd-shards.input"
 SUMMARY_NAME = "fixture.json"
 README_NAME = "README.md"
 IMAGE_RE = re.compile(r"\A[^\s]+@sha256:[0-9a-f]{64}\Z")
 SAFE_BUCKET_RE = re.compile(r"\A[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]\Z")
+SAFE_S5CMD_SHARD_RE = re.compile(r"\A[A-Za-z0-9._/-]+\Z")
 DEFAULT_READY_TIMEOUT_S = 600
 
 
@@ -234,6 +236,26 @@ def _fixture_analysis(data_dir: Path) -> dict[str, object]:
     }
 
 
+def _generate_s5cmd_shards(data_dir: Path, output: Path) -> dict[str, object]:
+    """Write the complete disjoint top-level prefix union for native s5cmd fanout."""
+    paths = sorted(data_dir.glob("*.parquet"))
+    with duckdb.connect() as connection:
+        connection.from_parquet([str(path) for path in paths]).create_view("fixture_source")
+        shards = [
+            str(row[0])
+            for row in connection.execute(
+                """
+                SELECT DISTINCT split_part(decode(key), '/', 1)
+                FROM fixture_source ORDER BY 1
+                """
+            ).fetchall()
+        ]
+    if not shards or any(SAFE_S5CMD_SHARD_RE.fullmatch(shard) is None for shard in shards):
+        raise FixtureBundleError("fixture has an empty or unsafe s5cmd top-level shard")
+    output.write_text("".join(f"{shard}\n" for shard in shards))
+    return {"name": S5CMD_SHARDS_NAME, "shards": len(shards), "sha256": _sha256_file(output)}
+
+
 def _latency_profile(report: Mapping[str, object]) -> dict[str, object]:
     observations = report.get("probe_latency")
     if not isinstance(observations, list):
@@ -388,6 +410,7 @@ def _render_readme(summary: Mapping[str, object]) -> str:
     source = mapping("source")
     fixture = mapping("fixture")
     hints = mapping("s3_fast_list_hints")
+    s5cmd_shards = mapping("s5cmd_shards")
     latency = mapping("latency_model")
     capture = mapping("capture")
     return f"""# Replay fixture bundle
@@ -401,6 +424,8 @@ not a benchmark result.
 - Sorted Parquet: {fixture["files"]} part(s), {fixture["bytes"]:,} bytes
 - s3-fast-list hints: `{HINTS_NAME}`, {hints["cut_points"]} cuts / {hints["ranges"]} ranges,
   SHA-256 `{hints["sha256"]}`
+- s5cmd fanout: `{S5CMD_SHARDS_NAME}`, {s5cmd_shards["shards"]} disjoint top-level shards,
+  SHA-256 `{s5cmd_shards["sha256"]}`
 - Replay latency deadlines: `{latency["deadlines_ms"]}`
 - Swath image: `{capture["swath_image"]}`
 - Replay validation image: `{capture["replay_image"]}`
@@ -409,7 +434,8 @@ not a benchmark result.
 The hints are a deterministic companion input generated from the exact Parquet
 parts at the fixed segment count in `fixture.json`. Upload is create-only; a
 replay plan addresses the Parquet parts as `part-*.parquet` and the replay-only
-s3-fast-list mode reads `{HINTS_NAME}` from the same staged directory.
+s3-fast-list mode reads `{HINTS_NAME}` and the fixture-backed s5cmd mode reads
+`{S5CMD_SHARDS_NAME}` from the same staged directory.
 """
 
 
@@ -438,6 +464,8 @@ def build_bundle(args: argparse.Namespace) -> dict[str, object]:
         )
     hints_path = output / HINTS_NAME
     hints = _generate_hints(data_dir, hints_path, args.segments)
+    s5cmd_shards_path = output / S5CMD_SHARDS_NAME
+    s5cmd_shards = _generate_s5cmd_shards(data_dir, s5cmd_shards_path)
     latency = _latency_profile(report)
     validation = _validate_sorted(args, data_dir, latency, output / "sorted-validation.log")
     parquet_paths = sorted(data_dir.glob("*.parquet"))
@@ -470,6 +498,7 @@ def build_bundle(args: argparse.Namespace) -> dict[str, object]:
             "bytes": sum(path.stat().st_size for path in parquet_paths),
         },
         "s3_fast_list_hints": {**hints, "segments": args.segments, "name": HINTS_NAME},
+        "s5cmd_shards": s5cmd_shards,
         "latency_model": latency,
         "sorted_validation": validation,
         "gcs_prefix": gcs_prefix,
@@ -481,7 +510,7 @@ def build_bundle(args: argparse.Namespace) -> dict[str, object]:
     if gcs_prefix is not None:
         _upload_bundle(
             gcs_prefix,
-            (*parquet_paths, hints_path, summary_path, readme_path),
+            (*parquet_paths, hints_path, s5cmd_shards_path, summary_path, readme_path),
         )
     return summary
 

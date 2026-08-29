@@ -70,10 +70,12 @@ REPLAY_STAGING_IMAGE = (
 REPLAY_FIXTURE_HOST_DIR = "/mnt/stateful_partition/replay-fixture"
 REPLAY_FIXTURE_CONTAINER_DIR = "/fixtures/source"
 REPLAY_FIXTURE_HINTS_NAME = "s3-fast-list-hints.input"
+REPLAY_FIXTURE_S5CMD_SHARDS_NAME = "s5cmd-shards.input"
 S7CMD_NOFILE = "nofile=1048576:1048576"
 SUBJECT_OUTPUT_HOST_DIR = "/mnt/stateful_partition/attempt"
 SUBJECT_OUTPUT_CONTAINER_DIR = "/tmp/attempt"
 SECRET_RE = re.compile(r"\Aprojects/[^/]+/secrets/[^/]+/versions/[^/]+\Z")
+SHA256_RE = re.compile(r"\A[0-9a-f]{64}\Z")
 
 
 @dataclass(frozen=True)
@@ -207,7 +209,14 @@ def _subject_ulimit(tool: str) -> tuple[str, ...]:
     return ("--ulimit", S7CMD_NOFILE) if tool == "s7cmd" else ()
 
 
-def _fixture_staging_script(uri: str, expected_sha256: str, *, hints_uri: str | None = None) -> str:
+def _fixture_staging_script(
+    uri: str,
+    expected_sha256: str,
+    *,
+    hints_uri: str | None = None,
+    s5cmd_shards_uri: str | None = None,
+    s5cmd_shards_sha256: str | None = None,
+) -> str:
     """Download a staged fixture and refuse bytes outside its recorded identity.
 
     The digest is over sorted ``name<TAB>size<TAB>sha256<NL>`` rows for the
@@ -247,17 +256,37 @@ def _fixture_staging_script(uri: str, expected_sha256: str, *, hints_uri: str | 
                 '{ echo "fixture hints begin with an empty cut point" >&2; exit 1; }',
             )
         )
+    if s5cmd_shards_uri is not None:
+        assert s5cmd_shards_sha256 is not None
+        shards_source = shlex.quote(s5cmd_shards_uri)
+        shards_path = f"{destination}/{REPLAY_FIXTURE_S5CMD_SHARDS_NAME}"
+        shards_expected = shlex.quote(s5cmd_shards_sha256)
+        commands.extend(
+            (
+                f"gcloud storage cp {shards_source} {shards_path}",
+                f"[[ -s {shards_path} ]] || "
+                '{ echo "fixture s5cmd shards are missing or empty" >&2; exit 1; }',
+                f'actual="$(sha256sum {shards_path})"; actual="${{actual%% *}}"',
+                f'[[ "$actual" == {shards_expected} ]] || '
+                '{ echo "fixture s5cmd shard digest mismatch: $actual" >&2; exit 1; }',
+                f'while IFS= read -r shard; do [[ -n "$shard" ]] || exit 1; done < {shards_path}',
+            )
+        )
     return "\n".join(commands)
 
 
-def _fixture_hints_uri(uri: str) -> str:
+def _fixture_companion_uri(uri: str, name: str) -> str:
     """The fixed companion object beside a staged multipart fixture."""
     parent, separator, leaf = uri.rpartition("/")
     if not separator or leaf != "part-*.parquet":
         raise CampaignError(
-            "fixture-backed s3-fast-list requires fixture_uri ending in part-*.parquet"
+            "fixture-backed companion requires fixture_uri ending in part-*.parquet"
         )
-    return f"{parent}/{REPLAY_FIXTURE_HINTS_NAME}"
+    return f"{parent}/{name}"
+
+
+def _fixture_hints_uri(uri: str) -> str:
+    return _fixture_companion_uri(uri, REPLAY_FIXTURE_HINTS_NAME)
 
 
 def render_batch_job(
@@ -303,8 +332,16 @@ def render_batch_job(
         container["options"] = shlex.join((*plain_subject_options, *_subject_ulimit(attempt.tool)))
     else:
         allocation = replay.allocation
-        mode = json.loads(attempt.config).get("mode")
+        subject_config = json.loads(attempt.config)
+        mode = subject_config.get("mode")
         fixture_hints = attempt.tool == "s3-fast-list" and mode == "list-hinted-fixture"
+        fixture_s5cmd_shards = attempt.tool == "s5cmd" and mode == "fanout-fixture-with-dirs"
+        s5cmd_shards_sha256 = subject_config.get("shard_file_sha256")
+        if fixture_s5cmd_shards and (
+            not isinstance(s5cmd_shards_sha256, str)
+            or SHA256_RE.fullmatch(s5cmd_shards_sha256) is None
+        ):
+            raise CampaignError("fixture-backed s5cmd requires config.shard_file_sha256")
         summary = replay_contract.allocation_summary(
             replay,
             box_vcpus=attempt.vcpus,
@@ -363,7 +400,12 @@ def render_batch_job(
             volume = f"--volume={REPLAY_FIXTURE_HOST_DIR}:{REPLAY_FIXTURE_CONTAINER_DIR}"
             server_options = f"{server_options} {volume}"
             hints_uri = _fixture_hints_uri(backend.fixture_uri) if fixture_hints else None
-            if fixture_hints:
+            s5cmd_shards_uri = (
+                _fixture_companion_uri(backend.fixture_uri, REPLAY_FIXTURE_S5CMD_SHARDS_NAME)
+                if fixture_s5cmd_shards
+                else None
+            )
+            if fixture_hints or fixture_s5cmd_shards:
                 subject_options = f"{subject_options} {volume}:ro"
             staging_runnable = {
                 "container": {
@@ -374,6 +416,10 @@ def render_batch_job(
                             backend.fixture_uri,
                             backend.fixture_sha256,
                             hints_uri=hints_uri,
+                            s5cmd_shards_uri=s5cmd_shards_uri,
+                            s5cmd_shards_sha256=(
+                                s5cmd_shards_sha256 if fixture_s5cmd_shards else None
+                            ),
                         ),
                     ],
                     "options": shlex.join(("--entrypoint", "/bin/bash", volume)),

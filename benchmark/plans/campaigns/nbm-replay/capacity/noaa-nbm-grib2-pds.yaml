@@ -58,6 +58,11 @@ tools:
         purpose: diagnostic
         config:
           shard_prefixes: blend.2020_blend.2021_blend.2022_blend.2023_blend.2024_blend.2025_blend.2026_index.html
+      - mode: fanout-fixture-with-dirs
+        concurrency: 64
+        purpose: diagnostic
+        config:
+          shard_file_sha256: 38d9fcdb353f2ea3d6acf90eb01218dba7a50e3122fcc5bfc7632aa94162f98b
 
   s7cmd:
     cases:

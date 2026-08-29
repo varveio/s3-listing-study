@@ -37,6 +37,7 @@ tools:
   rclone:
     cases:
       - {mode: recursive-walk, concurrency: 64, purpose: diagnostic}
+      - {mode: recursive-walk, concurrency: 128, purpose: diagnostic}
 
   s3p:
     cases:

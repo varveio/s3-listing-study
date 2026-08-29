@@ -167,6 +167,7 @@ has a fixed contract (the local Parquet parts remain below `dataset/data/`):
 ```text
 part-*.parquet
 s3-fast-list-hints.input
+s5cmd-shards.input
 fixture.json
 README.md
 ```
@@ -174,10 +175,12 @@ README.md
 `fixture.json` retains the exact capture argv and image digests, Swath report,
 part manifest and replay fixture digest, row/distinct/duplicate/marker counts,
 prefix-depth shape, latency observations and fixed-p50 treatment, generated
-hint count/digest, host allocation, and sorted replay readiness. The uploader
+hint and s5cmd-shard counts/digests, host allocation, and sorted replay readiness. The uploader
 uses GCS generation precondition zero for every object. Replay plans continue to
-address only `part-*.parquet`; the replay-only s3-fast-list mode stages the fixed
-companion from the same directory and bypasses the serial bootstrap listing.
+address only `part-*.parquet`; fixture-backed s3-fast-list and s5cmd modes stage
+their fixed companions from the same directory. The former bypasses the serial
+bootstrap listing; the latter supplies a complete, disjoint top-level prefix
+union to native `s5cmd run` without embedding thousands of prefixes in YAML.
 
 This bundle construction is fixture provenance, not subject timing. It is run
 once per immutable fixture. Every benchmark VM still downloads and verifies the

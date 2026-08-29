@@ -60,6 +60,14 @@ tools:
       - {mode: list, purpose: diagnostic, vcpus: 16, memory_gb: 32, subject_vcpus: 2, replay_vcpus: 8, replay_memory_gb: 8}
       - {mode: list, purpose: diagnostic, vcpus: 16, memory_gb: 32, subject_vcpus: 4, replay_vcpus: 8, replay_memory_gb: 8}
       - {mode: list, purpose: diagnostic, vcpus: 32, memory_gb: 64, subject_vcpus: 8, replay_vcpus: 16, replay_memory_gb: 16}
+      - mode: list
+        purpose: diagnostic
+        vcpus: 32
+        memory_gb: 64
+        subject_vcpus: 8
+        replay_vcpus: 16
+        replay_memory_gb: 16
+        config: {prefix_count: 5000}
 
   rclone:
     cases:

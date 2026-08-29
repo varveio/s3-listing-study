@@ -13,7 +13,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--s5cmd", required=True)
     parser.add_argument("--bucket", required=True)
     parser.add_argument("--prefix", default="")
-    parser.add_argument("--shard", action="append", required=True)
+    parser.add_argument("--shard", action="append")
+    parser.add_argument("--shard-file")
     parser.add_argument("--numworkers", required=True, type=int)
     parser.add_argument("--endpoint-url", default="")
     parser.add_argument("--unsigned", action="store_true")
@@ -29,7 +30,16 @@ def commands(bucket: str, prefix: str, shards: list[str]) -> bytes:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    payload = commands(args.bucket, args.prefix, args.shard)
+    if bool(args.shard) == bool(args.shard_file):
+        raise SystemExit("state exactly one of --shard or --shard-file")
+    shards = args.shard
+    if args.shard_file:
+        with open(args.shard_file, encoding="utf-8") as source:
+            shards = [line.rstrip("\n") for line in source]
+        if not shards or any(not shard for shard in shards):
+            raise SystemExit("shard file must contain non-empty prefixes")
+    assert shards is not None
+    payload = commands(args.bucket, args.prefix, shards)
 
     # s5cmd accepts a positional commands file but the benchmark worker offers
     # stdin as DEVNULL. A Linux memfd gives it ordinary seekable file semantics
