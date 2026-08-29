@@ -1,6 +1,6 @@
 # Capacity continuation after NBM narrowed the active race to Swath and rclone.
-# One 8-vCPU cell each; later rows are appended here rather than split into
-# per-control plans.
+# The Swath width bracket holds its 8-vCPU/output treatment fixed; later rows
+# are appended here rather than split into per-control plans.
 spec_version: 3
 
 bucket: aws-public-blockchain
@@ -53,6 +53,26 @@ tools:
     cases:
       - mode: recursive-tsv-dataset
         concurrency: 64
+        purpose: diagnostic
+        config:
+          jvm_max_heap: 4g
+          text_writers: 3
+          text_part_size: 1gb
+          writeback_size: 32mb
+          part_rotation_interval: "0"
+          part_rotation_max_rows: 0
+      - mode: recursive-tsv-dataset
+        concurrency: 128
+        purpose: diagnostic
+        config:
+          jvm_max_heap: 4g
+          text_writers: 3
+          text_part_size: 1gb
+          writeback_size: 32mb
+          part_rotation_interval: "0"
+          part_rotation_max_rows: 0
+      - mode: recursive-tsv-dataset
+        concurrency: 256
         purpose: diagnostic
         config:
           jvm_max_heap: 4g
