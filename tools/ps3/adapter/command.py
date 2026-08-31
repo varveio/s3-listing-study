@@ -43,6 +43,8 @@ TEXT = {LISTING: "listing.txt"}
 """pS3 prints its listing and takes no output destination, so the worker lands
 fd 1 in the declared file."""
 
+CONFIG_KEYS = frozenset({"prefix_count"})
+
 MODES = {
     "list": Mode(
         product="text",
@@ -98,7 +100,23 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
             "it does not issue ListObjectsV2"
         )
     endpoint = ("--endpoint-url", request.endpoint_url) if request.endpoint_url else ()
-    return operation, "--bucket", request.bucket, "--region", request.region, *endpoint
+    prefix_count = request.config.get("prefix_count")
+    prefix_count_args: tuple[str, ...] = ()
+    if prefix_count is not None:
+        if isinstance(prefix_count, bool) or not isinstance(prefix_count, int) or prefix_count < 1:
+            raise CommandAdapterError(
+                f"{TOOL} prefix_count must be a positive integer; got: {prefix_count!r}"
+            )
+        prefix_count_args = ("--prefix-count", str(prefix_count))
+    return (
+        operation,
+        "--bucket",
+        request.bucket,
+        "--region",
+        request.region,
+        *prefix_count_args,
+        *endpoint,
+    )
 
 
 def build_command(request: CommandRequest) -> tuple[str, ...]:

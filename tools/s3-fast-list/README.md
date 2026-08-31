@@ -33,7 +33,7 @@ this study's actual coverage are shown in separate columns.
 | Mode | Upstream purpose | What this study exercised |
 | --- | --- | --- |
 | Plain `list` | Recursively list one bucket through ListObjectsV2 and write object metadata to Parquet plus a key-distribution CSV. | Built and smoked anonymously against one public bucket in a full scope and three prefixes. Source and run facts are recorded, but the standard correctness verifier was blocked. |
-| Hinted `list -k` | Convert supplied keyspace cut points into multiple concurrently listed ranges. Hints may be hand-written or prepared from earlier key-distribution data. | Not run through the study harness because the frozen wrapper cannot mount the required hints file. Its mechanism was read from source. |
+| Hinted `list -k` | Convert supplied keyspace cut points into multiple concurrently listed ranges. Hints may be hand-written or prepared from earlier key-distribution data. | The current capsule has a preparation-backed real-S3 mode and a replay-only fixture-companion mode. The latter removes the serial bootstrap from repeated replay cells; it has no committed receipt yet. |
 | `diff` | List two buckets and emit differing object records. | Not run; groundwork had no second bucket configured for this mode. |
 | `ks-tool split` | Turn a key-distribution file into hints for a chosen segment count. | Its split loop is now source-audited for the standalone fixture utility, but the upstream binary still has no committed run receipt. |
 | `ks-tool inventory` | Prepare keyspace information from S3 Inventory input. | The subcommand's existence is source-supported, but its internals were not independently audited and it was not run. |
@@ -139,7 +139,7 @@ resolve in [`data/claims.json`](data/claims.json).
 | Understand the listing, concurrency, memory, output, and error model | [`docs/mechanism.md`](docs/mechanism.md) |
 | Reproduce the image and understand exactly what smoke did or could not do | [`docs/running.md`](docs/running.md) |
 | Inspect canonical identity, tested-subject, eligibility, and claim status data | [`data/tool.json`](data/tool.json) and [`data/claims.json`](data/claims.json) |
-| Integrate the subject with the shared harness, or inspect the deliberately unwired fixture-to-hints utility | [`adapter/`](adapter/) and [its operating notes](docs/running.md#fixture-derived-hints-utility-not-wired) |
+| Integrate the subject with the shared harness or inspect fixture-derived hints | [`adapter/`](adapter/) and [its operating notes](docs/running.md#fixture-derived-hints-utility-and-replay-bundle) |
 | Build the local subject image | [`build/Dockerfile`](build/Dockerfile) |
 | Audit how every old ledger row and status-bearing prose claim became atomic current claims | [`research/claims-migration.md`](research/claims-migration.md) and the preserved reconciliation in [`research/`](research/) |
 | Read the historical pre-restructure landing page | [`research/tool-page.md`](research/tool-page.md) — frozen historical research, not the current entry point |

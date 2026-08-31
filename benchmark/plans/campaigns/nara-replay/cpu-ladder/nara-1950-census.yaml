@@ -1,0 +1,114 @@
+# NARA fixed-configuration CPU ladder after top-tier selection. One x32 box,
+# replay20, replay HTTP cap512, memory, fixture, latency and tool configuration
+# stay fixed; only subject_vcpus changes. The replay image includes form-style
+# '+' query decoding required by Go/rclone prefix walks over keys with spaces.
+spec_version: 3
+
+bucket: nara-1950-census
+region: us-east-2
+auth_role: public-read
+
+replay:
+  capacity_status: uncalibrated
+  server_image_uri: us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:f51c4d12ac0e1f52fd02f1a77a74e962d610d518e64ab8425635512370973612
+  fixture_uri: gs://s3-listing-study-results-29c02004/fixtures/nara-1950-census/current-eba31d9/part-*.parquet
+  fixture_sha256: 48468b7c1ea8bf657fcb089dbcb1d940d3af62b748a7cb66f6dccc8876905db4
+  serving_mode: sorted
+  latency_model:
+    deadlines_ms:
+      worker_page: 86
+      pivot_probe: 44
+      structure_probe: 50
+    scale: 1.0
+    jitter: none
+
+defaults:
+  reps: 1
+  timeout_s: 1800
+  vcpus: 32
+  memory_gb: 64
+  container_memory_gb: 8
+  subject_vcpus: 2
+  replay_vcpus: 20
+  replay_memory_gb: 20
+  replay_parquet_connections: 64
+  replay_max_concurrent_requests: 512
+  replay_prefetch: false
+  replay_prefetch_max_windows: 96
+  replay_heap_percent: 75
+
+tools:
+  rclone:
+    cases:
+      - {mode: recursive-walk, concurrency: 64, purpose: diagnostic, subject_vcpus: 2}
+      - {mode: recursive-walk, concurrency: 64, purpose: diagnostic, subject_vcpus: 4}
+      - {mode: recursive-walk, concurrency: 64, purpose: diagnostic, subject_vcpus: 8}
+
+  s3-fast-list:
+    cases:
+      - {mode: list-hinted, concurrency: 100, segments: 1000, purpose: diagnostic, subject_vcpus: 2}
+      - {mode: list-hinted, concurrency: 100, segments: 1000, purpose: diagnostic, subject_vcpus: 4}
+      - {mode: list-hinted, concurrency: 100, segments: 1000, purpose: diagnostic, subject_vcpus: 8}
+
+  s3p:
+    cases:
+      - {mode: ls, concurrency: 16, purpose: diagnostic, subject_vcpus: 2}
+      - {mode: ls, concurrency: 16, purpose: diagnostic, subject_vcpus: 4}
+      - {mode: ls, concurrency: 16, purpose: diagnostic, subject_vcpus: 8}
+
+  s5cmd:
+    cases:
+      - &s5-low
+        mode: fanout-with-dirs
+        concurrency: 5
+        purpose: diagnostic
+        subject_vcpus: 2
+        config: &s5_fanout {shard_initials: 1cmtz}
+      - <<: *s5-low
+        subject_vcpus: 4
+        config: *s5_fanout
+      - <<: *s5-low
+        subject_vcpus: 8
+        config: *s5_fanout
+
+  s7cmd:
+    cases:
+      - &s7-low
+        mode: recursive-one-nosort
+        concurrency: 16
+        purpose: diagnostic
+        subject_vcpus: 2
+        config: &s7_depth {parallel_depth: 1}
+      - <<: *s7-low
+        subject_vcpus: 4
+        config: *s7_depth
+      - <<: *s7-low
+        subject_vcpus: 8
+        config: *s7_depth
+
+  swath:
+    cases:
+      - &swath-low
+        mode: recursive-tsv-dataset
+        concurrency: 64
+        purpose: diagnostic
+        subject_vcpus: 2
+        config: &swath_tsv
+          jvm_max_heap: 4g
+          text_writers: 3
+          text_part_size: 1gb
+          writeback_size: 32mb
+          part_rotation_interval: "0"
+          part_rotation_max_rows: 0
+      - <<: *swath-low
+        subject_vcpus: 4
+        config: *swath_tsv
+      - <<: *swath-low
+        subject_vcpus: 8
+        config: *swath_tsv
+
+exclude:
+  - {tool: aws-cli, reason: stopped after FourCast}
+  - {tool: minio-mc, reason: stopped after FourCast}
+  - {tool: ps3, reason: stopped after FourCast}
+  - {tool: s3kor, reason: stopped after FourCast}

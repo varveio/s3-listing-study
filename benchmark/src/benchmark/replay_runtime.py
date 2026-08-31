@@ -13,7 +13,8 @@ from pathlib import Path
 
 from benchmark import gcs
 from benchmark.contract import canonical_json
-from benchmark.replay import REPLAY_METRICS_URL, ReplayConfig
+from benchmark.replay import REPLAY_METRICS_URL, ReplayConfig, allocation_cpu_sets
+from benchmark.replay import format_cpuset as format_cpuset
 
 REPLAY_READINESS_TIMEOUT_S = 600
 REPLAY_HTTP_TIMEOUT_S = 5.0
@@ -144,6 +145,7 @@ def _resource_sample(
     previous_subject: tuple[int, int],
     interval_s: float,
     elapsed_s: float,
+    box_vcpus: int,
 ) -> tuple[dict[str, object], tuple[int, int], tuple[int, int]]:
     server, subject = _cpuset_jiffies(server_cpus), _cpuset_jiffies(subject_cpus)
     available_kb, load1 = _host_memory_and_load()
@@ -163,8 +165,9 @@ def _resource_sample(
             "observed_at": datetime.now(UTC).isoformat(),
             "elapsed_s": round(elapsed_s, 3),
             "interval_s": round(interval_s, 3),
-            "server_cpuset": f"0-{len(server_cpus) - 1}",
-            "subject_cpuset": f"{len(server_cpus)}-{len(server_cpus) + len(subject_cpus) - 1}",
+            "box_vcpus": box_vcpus,
+            "server_cpuset": format_cpuset(server_cpus),
+            "subject_cpuset": format_cpuset(subject_cpus),
             "server_cpuset_utilization": round(server_util, 6),
             "server_cores_used": round(server_util * len(server_cpus), 3),
             "subject_cpuset_utilization": round(subject_util, 6),
@@ -181,15 +184,14 @@ def sample_metrics(
     evidence: dict[str, object],
     stop: threading.Event,
     replay: ReplayConfig,
+    box_vcpus: int,
     heartbeat_destination: str | None = None,
 ) -> None:
     """Poll outside the subject clock; record raw observations and no verdict."""
     started = previous_at = time.monotonic()
     allocation = replay.allocation
-    server_cpus = set(range(allocation.replay_vcpus))
-    subject_cpus = set(
-        range(allocation.replay_vcpus, allocation.replay_vcpus + allocation.subject_vcpus)
-    )
+    server_tuple, subject_tuple = allocation_cpu_sets(allocation, box_vcpus=box_vcpus)
+    server_cpus, subject_cpus = set(server_tuple), set(subject_tuple)
     try:
         previous_server, previous_subject = (
             _cpuset_jiffies(server_cpus),
@@ -212,6 +214,7 @@ def sample_metrics(
                 previous_subject=previous_subject,
                 interval_s=observed - previous_at,
                 elapsed_s=observed - started,
+                box_vcpus=box_vcpus,
             )
         except (OSError, ValueError) as exc:
             errors = evidence["errors"]

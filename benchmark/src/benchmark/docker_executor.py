@@ -287,6 +287,7 @@ def _attempt(
     image: DockerImage,
     host: Host,
     results: Path,
+    retain_products: bool,
 ) -> tuple[Attempt, str]:
     case = item.case
     tool_image = image.image_set.image_for(case.tool)
@@ -351,6 +352,7 @@ def _attempt(
         output=str(scratch),
         destination=str(destination),
         term_grace=5.0,
+        retain_products=retain_products,
     )
     docker = [
         "docker",
@@ -547,6 +549,7 @@ def cmd_submit(args: Any) -> int:
                 image=image,
                 host=host,
                 results=results,
+                retain_products=args.retain_products,
             )
             rendered.append(
                 {
@@ -599,6 +602,7 @@ def cmd_submit(args: Any) -> int:
                     image=image,
                     host=host,
                     results=results,
+                    retain_products=args.retain_products,
                 )
 
             attempt, _ = journal_intent(

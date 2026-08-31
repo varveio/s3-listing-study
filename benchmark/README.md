@@ -47,8 +47,9 @@ facts under `tools/<tool>/build/`.
   - `campaign.py` records campaign intent and attempts in `campaign.db`;
     `drivers/gcp_batch.py` owns GCP Batch rendering and lifecycle commands, while
     `submit --executor docker` dispatches the current bounded real-S3 experiment.
-  - `measure.py` runs exactly one selected subject and captures its raw outputs
-    and metrics. It is the image entrypoint.
+  - `measure.py` runs exactly one selected subject, counts its local output, and
+    captures logs and metrics. Native-product upload is opt-in. It is the image
+    entrypoint.
   - `verify.py` is the explicit real-S3 content-comparison path; replay is
     row-count-only and is refused there without staging raw products.
   - `report.py` binds `result.json` summaries to controller state and renders
@@ -57,6 +58,10 @@ facts under `tools/<tool>/build/`.
     including frozen requests and bound result/verification identities.
   - `replay_fixture.py` generates the small synthetic canary fixture outside the
     checkout and computes the content identity required by staged Parquet.
+  - `fixture_bundle.py` reproducibly captures a public bucket with an immutable
+    Swath image, writes sorted Parquet, derives s3-fast-list hints, measures
+    content and prefix shape, validates strict sorted replay startup, and can
+    upload the complete bundle with create-only GCS writes.
   - `runtime/` is the contract layer the eleven capsule adapters import
     (`benchmark.runtime.*`); it runs both inside the image and orchestrator-side
     during verification.
@@ -139,6 +144,48 @@ bucket can change while the tools run, so any disagreement must be investigated
 before it is attributed. The option accepts Docker canaries only. Larger GCP
 benchmark reports continue to compare worker-recorded row counts only.
 
+## Preparing a replay fixture bundle
+
+Large replay fixtures use one public, repeatable command rather than a session's
+hand-written Docker and DuckDB invocations:
+
+```sh
+uv run python -m benchmark.fixture_bundle \
+  --bucket noaa-nbm-grib2-pds --region us-east-1 \
+  --output /absolute/evidence/noaa-nbm-grib2-pds-current \
+  --swath-image ghcr.io/varveio/swath@sha256:<digest> \
+  --replay-image registry.example/swath-replay@sha256:<digest> \
+  --cpuset 12,13,14,15,28,29,30,31 --memory-gb 16 \
+  --concurrency 128 --segments 1000 \
+  --gcs-prefix gs://RESULTS/fixtures/noaa-nbm-grib2-pds/current-REV
+```
+
+The output is create-once: an existing output directory or GCS object is a
+refusal, never an implicit resume or overwrite. The uploaded bundle directory
+has a fixed contract (the local Parquet parts remain below `dataset/data/`):
+
+```text
+part-*.parquet
+s3-fast-list-hints.input
+s5cmd-shards.input
+fixture.json
+README.md
+```
+
+`fixture.json` retains the exact capture argv and image digests, Swath report,
+part manifest and replay fixture digest, row/distinct/duplicate/marker counts,
+prefix-depth shape, latency observations and fixed-p50 treatment, generated
+hint and s5cmd-shard counts/digests, host allocation, and sorted replay readiness. The uploader
+uses GCS generation precondition zero for every object. Replay plans continue to
+address only `part-*.parquet`; fixture-backed s3-fast-list and s5cmd modes stage
+their fixed companions from the same directory. The former bypasses the serial
+bootstrap listing; the latter supplies a complete, disjoint top-level prefix
+union to native `s5cmd run` without embedding thousands of prefixes in YAML.
+
+This bundle construction is fixture provenance, not subject timing. It is run
+once per immutable fixture. Every benchmark VM still downloads and verifies the
+Parquet manifest before replay starts.
+
 ## Campaign image set
 
 Before a campaign, publish the toolbox through an explicitly authorized registry
@@ -206,8 +253,8 @@ retry, cancel, report, and explicit real-S3 verification — is
 
 ## Minimum rigor and deliberate limitations
 
-The harness preserves raw output, binds every result to the recorded job request
-and immutable toolbox identity, and publishes `result.json` only after the other
+The harness binds every result to the recorded job request and immutable toolbox
+identity, retains logs, and publishes `result.json` only after the other selected
 attempt artifacts. Routine
 replay reporting reads that marker only. These controls make an attempt
 auditable; row count is not a content-correctness verdict.
@@ -217,8 +264,9 @@ auditable; row count is not a content-correctness verdict.
 The worker computes its final completion code, uploads attempt artifacts, and
 uploads the final `result.json` marker with
 `ifGenerationMatch=0`. A second execution cannot merge with or replace a
-deterministic attempt prefix. Raw listing products remain retained under that
-prefix for manual investigation, but routine replay reporting does not fetch them.
+deterministic attempt prefix. Raw listing products are omitted by default; pass
+`campaign submit --retain-products` when manual content investigation or
+verification needs them.
 
 ### Replay reporting is row-count-only
 
@@ -229,13 +277,14 @@ between attempts, so `mtime`-only differences are `DRIFT` and other differences
 remain `FAIL` because the verifier cannot infer their cause.
 
 Replay records the worker's in-container `row_count` after the timed child exits.
-The worker uploads the untouched product and logs, then uploads `result.json`
-last. Campaign reporting binds and reads only that summary: it does not generate
+The worker uploads logs and then `result.json` last; native products are uploaded
+only when the operator opts in. Campaign reporting binds and reads only that
+summary: it does not generate
 or require a correctness manifest, normalize rows, or issue a content verdict.
-Replay diagnostics use the `minimal-replay` evidence profile: retained products
-and captures are recorded by name and size, not content-hashed. Comparative and
-preparation attempts retain the stronger digest-bearing evidence needed by the
-verifier and dependency chain. `result.json.postprocessing_seconds` records
+Replay diagnostics use the `minimal-replay` evidence profile. When products are
+retained, they and captures are recorded by name and size rather than
+content-hashed. Comparative verification requires an opt-in retained product;
+dependency artifacts remain digest-bound. `result.json.postprocessing_seconds` records
 each applicable phase separately; all remain outside the subject wall clock.
 
 ### Replay qualification precedes replay measurement

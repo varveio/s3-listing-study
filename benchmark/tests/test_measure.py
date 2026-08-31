@@ -453,44 +453,6 @@ def test_credential_payload_parses_and_refuses_the_wrong_stratum() -> None:
         measure.resolve_credential_env(None, {CREDENTIAL_ENV_VAR: "AWS_ACCESS_KEY_ID=AKIAEXAMPLE"})
 
 
-@pytest.mark.parametrize(
-    "secret",
-    [
-        b"AKIAABCDEFGHIJKLMNOP",
-        b"https://example.test/?X-Amz-Signature=" + b"a" * 64,
-        b"AWS_SESSION_TOKEN=" + b"A" * 32,
-    ],
-)
-def test_secret_scan_covers_nested_native_files(tmp_path: Path, secret: bytes) -> None:
-    native = tmp_path / "native/deep/tree"
-    native.mkdir(parents=True)
-    (native / "part.bin").write_bytes(b"binary\x00prefix" + secret + b"\xffsuffix")
-    hit = measure.scan_for_secrets([tmp_path / "native"])
-    assert hit is not None
-    assert "part.bin" in hit
-
-
-def test_secret_scan_is_binary_streaming_and_crosses_chunk_boundary(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(measure, "SECRET_SCAN_CHUNK", 1024)
-    clean = tmp_path / "clean.bin"
-    clean.write_bytes((b"\x00\xffclean" * 300_000) + b"tail")
-    assert measure.scan_for_secrets([clean]) is None
-    boundary = tmp_path / "boundary.bin"
-    boundary.write_bytes(b"x" * 1017 + b"AKIAABCDEFGHIJKLMNOP" + b"z" * 2048)
-    assert measure.scan_for_secrets([boundary]) is not None
-
-
-def test_secret_scan_refuses_native_symlinks(tmp_path: Path) -> None:
-    outside = tmp_path / "outside"
-    outside.write_bytes(b"clean")
-    native = tmp_path / "native"
-    native.mkdir()
-    (native / "escape").symlink_to(outside)
-    assert "symlink" in (measure.scan_for_secrets([native]) or "")
-
-
 def test_image_metadata_claim_mismatch_refuses(tmp_path: Path) -> None:
     metadata = image_metadata()
     tools = metadata["tools"]
@@ -1033,7 +995,7 @@ def test_recursive_upload_preserves_native_paths(
         ),
     )
     timings: dict[str, float] = {}
-    assert measure.upload(attempt, "gs://bucket/leaf/", timings)
+    assert measure.upload(attempt, "gs://bucket/leaf/", timings, retain_products=True)
     assert any(
         uri == "gs://bucket/leaf/native/listing/data/part.parquet" and create_only
         for uri, create_only, _body in uploaded
@@ -1044,6 +1006,33 @@ def test_recursive_upload_preserves_native_paths(
     result_uri, create_only, result_body = uploaded[-1]
     assert (result_uri, create_only) == ("gs://bucket/leaf/result.json", True)
     assert json.loads(result_body)["postprocessing_seconds"] == timings
+
+
+def test_default_upload_omits_native_product_but_keeps_logs_and_marker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    attempt = tmp_path / "attempt"
+    (attempt / "native").mkdir(parents=True)
+    (attempt / "native/listing.txt").write_text("key\n")
+    (attempt / "stderr.log.gz").write_bytes(b"log")
+    (attempt / "result.json").write_text("{}")
+    uploaded: list[str] = []
+    monkeypatch.setattr(
+        gcs,
+        "upload_file",
+        lambda _path, uri, **_kwargs: uploaded.append(uri),
+    )
+    monkeypatch.setattr(
+        gcs,
+        "upload_tree",
+        lambda _path, uri, **_kwargs: uploaded.append(uri),
+    )
+
+    assert measure.upload(attempt, "gs://bucket/leaf/")
+
+    assert "gs://bucket/leaf/stderr.log.gz" in uploaded
+    assert "gs://bucket/leaf/result.json" in uploaded
+    assert all("/native" not in uri for uri in uploaded)
 
 
 def test_local_publication_is_create_only(tmp_path: Path) -> None:
@@ -1147,6 +1136,14 @@ MODES = {
         product_artifact="listing",
         product_channel="file",
     ),
+    "symlinks": Mode(
+        product="parquet",
+        fields=("key",),
+        axes={"segments": Stated()},
+        artifacts={"listing": "listing.parquet"},
+        product_artifact="listing",
+        product_channel="file",
+    ),
 }
 
 
@@ -1173,6 +1170,13 @@ def build_command(request: CommandRequest) -> tuple[str, ...]:
         return (sys.executable, "-c", "pass")
     if request.mode == "dies":
         return (sys.executable, "-c", "raise SystemExit(9)")
+    if request.mode == "symlinks":
+        return (
+            sys.executable,
+            str(here / "symlinks.py"),
+            request.artifact_path,
+            request.sink_dir + "/listing.parquet",
+        )
     return (sys.executable, str(here / "subject.py"), request.artifact_path, request.sink_dir)
 
 
@@ -1226,6 +1230,19 @@ Path(sys.argv[2]).write_text(Path(sys.argv[1]).read_text())
 print("wrote the listing")
 """
 
+SYMLINKS_SUBJECT = """\
+import sys
+from pathlib import Path
+
+# Writes its declared product like any other file-channel subject, then also
+# leaves a symlink beside it in native/ -- the shape a misbehaving (or hostile)
+# subject can leave behind that `retained_files` refuses to publish.
+product = Path(sys.argv[2])
+product.write_text(Path(sys.argv[1]).read_text())
+product.with_name("stray-link").symlink_to(product)
+print("wrote the listing")
+"""
+
 INLINE_SPLIT = (
     """\
 import sys
@@ -1249,6 +1266,7 @@ def inline_capsule(tmp_path: Path, split: str = INLINE_SPLIT) -> Path:
     (adapter / "split.py").write_text(split, encoding="utf-8")
     (adapter / "prints.py").write_text(PRINTS_SUBJECT, encoding="utf-8")
     (adapter / "writes.py").write_text(WRITES_SUBJECT, encoding="utf-8")
+    (adapter / "symlinks.py").write_text(SYMLINKS_SUBJECT, encoding="utf-8")
     return tmp_path / "tools"
 
 
@@ -1343,6 +1361,8 @@ def run_inline_worker(
             "none",
             "--config",
             json.dumps({"mode": mode, "segments": 2}),
+            "--retain-products",
+            "true",
             "--input-artifact",
             "gs://results/prep/native/keyspace.ks",
             "--input-artifact-sha256",
@@ -1560,6 +1580,41 @@ def test_a_product_lands_under_its_declared_name_whichever_channel_carries_it(
     # Its stdout is a genuine log, and is captured as one.
     assert written["stdout"]["name"] == "stdout.log.gz"
     assert (tmp_path / "writes/attempt/stdout.log.gz").exists()
+
+
+def test_a_symlink_left_in_native_refuses_cleanly_instead_of_crashing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`native_manifest`/`artifacts_size_bytes` walk retained_files after the timed
+    run, which raises ArtifactSafetyError on a symlink a subject left in native/.
+    Uncaught, that is a traceback after the run with no result.json published at
+    all; the worker must instead give the same classified refusal an unusable
+    product gets, on EXIT_ARTIFACT_UNUSABLE, with nothing uploaded.
+
+    The restored secret scan also walks native/ when products are retained and
+    would refuse this same symlink first (a real, and separately tested,
+    defense) -- disabled here to isolate the guard this test targets.
+    """
+    monkeypatch.setattr(measure, "scan_for_secrets", lambda _paths: None)
+    code = run_inline_worker(tmp_path, monkeypatch, mode="symlinks")
+    assert code == measure.EXIT_ARTIFACT_UNUSABLE
+    assert "measure: retained output is not publishable" in capsys.readouterr().err
+    # The marker-last contract: a refusal this late publishes nothing, rather
+    # than a marker describing bytes nothing proved safe.
+    assert not (tmp_path / "attempt/result.json").exists()
+
+
+def test_a_symlink_left_in_native_is_refused_by_the_secret_scan_first(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """With both guards live, the earlier secret scan is what a real run hits:
+    it also walks native/ under retain-products, fails closed on the same
+    unprovable symlink, and refuses before the run ever reaches
+    `native_manifest`/`artifacts_size_bytes`."""
+    code = run_inline_worker(tmp_path, monkeypatch, mode="symlinks")
+    assert code == measure.EXIT_SECRET_DETECTED
+    assert "measure: possible secret in" in capsys.readouterr().err
+    assert not (tmp_path / "attempt/result.json").exists()
 
 
 def test_a_preparation_publishes_no_measured_product_even_in_a_measuring_mode(

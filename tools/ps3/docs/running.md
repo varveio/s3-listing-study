@@ -104,6 +104,11 @@ authenticate anonymously, so it produces no listing to diff. Manifest digest
 coverage-gap and the embedded-newline adapter gap (`mechanism.md`) are exactly
 what an edge fixture would exercise.
 
+The current capsule exposes the pinned binary's `--prefix-count` discovery
+cutoff as `config.prefix_count`. Omitting it preserves upstream's default 500;
+an explicit positive integer is rendered on `list-objects-v2` and becomes part
+of case identity. It does not change the fixed 256-wide pager.
+
 ## Source-build failure
 
 `_build/` `[RUN]` records a build attempt (no verifier verdict — not a listing).

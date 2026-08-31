@@ -75,6 +75,10 @@ MODE_EXECUTABLES: dict[tuple[str, str], tuple[str, ...]] = {
         "/usr/bin/python3",
         "/opt/benchmark/tools/s5cmd/adapter/fanout.py",
     ),
+    ("s5cmd", "fanout-fixture-with-dirs"): (
+        "/usr/bin/python3",
+        "/opt/benchmark/tools/s5cmd/adapter/fanout.py",
+    ),
 }
 """Modes that run a capsule's *second* executable. Written out here, not read
 from the capsule, so the binary a mode runs stays an independent expectation --
@@ -232,7 +236,11 @@ def _s3_fast_list(mode: str, prefix: str) -> tuple[str, ...]:
         return ("split", "-k", ARTIFACT, "-c", "1000", "-o", f"{SINK}/hints.input")
     # The hinted mode's whole point: cut points from the staged hints file, and
     # the width the capsule declares as the subject's own.
-    hinted = ("-c", "100", "-k", ARTIFACT) if mode == "list-hinted" else ()
+    hinted_paths = {
+        "list-hinted": ARTIFACT,
+        "list-hinted-fixture": "/fixtures/source/s3-fast-list-hints.input",
+    }
+    hinted = ("-c", "100", "-k", hinted_paths[mode]) if mode in hinted_paths else ()
     scoped = ("--prefix", prefix) if prefix else ()
     return (
         "--no-sign-request",
@@ -302,6 +310,19 @@ def _s5cmd(mode: str, prefix: str) -> tuple[str, ...]:
             "256",
             "--unsigned",
         ),
+        "fanout-fixture-with-dirs": (
+            "--s5cmd",
+            "/s5cmd",
+            "--bucket",
+            BUCKET,
+            "--prefix",
+            prefix,
+            "--shard-file",
+            "/fixtures/source/s5cmd-shards.input",
+            "--numworkers",
+            "256",
+            "--unsigned",
+        ),
         "delimiter": ("--no-sign-request", "ls", "-e", "-s", target),
         "rootkeys": ("--no-sign-request", "ls", "-e", "-s", target),
         "json": ("--json", "--no-sign-request", "ls", recursive),
@@ -314,7 +335,12 @@ def _s5cmd(mode: str, prefix: str) -> tuple[str, ...]:
 def _s7cmd(mode: str, prefix: str) -> tuple[str, ...]:
     target = f"s3://{BUCKET}/{prefix}"
     obs = ("-vv", "--disable-color-tracing")
-    parallel = ("--max-parallel-listings", "64")
+    parallel = (
+        "--max-parallel-listings",
+        "64",
+        "--max-parallel-listing-max-depth",
+        "2",
+    )
     anon = (
         "--target-no-sign-request",
         "--target-region",
@@ -469,7 +495,7 @@ EXPECTED_MODES = {
         "debug",
         "walk-debug",
     },
-    "s3-fast-list": {"list", "ks-split", "list-hinted"},
+    "s3-fast-list": {"list", "ks-split", "list-hinted", "list-hinted-fixture"},
     "s3kor": {"list", "list-versions"},
     "s3p": {"ls", "ls-long", "ls-raw", "summarize"},
     "s4cmd": {"recursive", "shallow", "show-directory", "du"},
@@ -477,6 +503,7 @@ EXPECTED_MODES = {
         "recursive",
         "recursive-with-dirs",
         "fanout-with-dirs",
+        "fanout-fixture-with-dirs",
         "delimiter",
         "rootkeys",
         "json",
@@ -733,6 +760,35 @@ def test_rclone_refuses_an_endpoint_that_breaks_its_quoted_connection_field(
         )
 
 
+def test_s3_fast_list_fixture_hints_digest_is_a_declared_config_key() -> None:
+    """``hints_file_sha256`` binds the staged hints companion (gcp_batch), the
+    same way s5cmd declares ``shard_file_sha256`` for its fixture fanout: this
+    build never reads it, but a plan setting it must not be refused as an
+    unknown config key.
+    """
+    adapter = load_command_adapter(adapter_path("s3-fast-list"))
+    command = adapter.compile(
+        CommandRequest(
+            "list-hinted-fixture",
+            BUCKET,
+            REGION,
+            tool="s3-fast-list",
+            config={"concurrency": 100, "segments": 1000, "hints_file_sha256": "a" * 64},
+            sink_dir=SINK,
+        )
+    )
+    assert command == adapter.compile(
+        CommandRequest(
+            "list-hinted-fixture",
+            BUCKET,
+            REGION,
+            tool="s3-fast-list",
+            config={"concurrency": 100, "segments": 1000},
+            sink_dir=SINK,
+        )
+    )
+
+
 def test_s3_fast_list_local_split_does_not_receive_the_remote_endpoint() -> None:
     adapter = load_command_adapter(adapter_path("s3-fast-list"))
     ordinary = adapter.compile(
@@ -760,6 +816,61 @@ def test_s3_fast_list_local_split_does_not_receive_the_remote_endpoint() -> None
     )
     assert replay == ordinary
     assert ENDPOINT not in replay
+
+
+def test_s5cmd_fanout_accepts_disjoint_complete_prefixes() -> None:
+    adapter = load_command_adapter(adapter_path("s5cmd"))
+    command = adapter.compile(
+        CommandRequest(
+            "fanout-with-dirs",
+            BUCKET,
+            REGION,
+            tool="s5cmd",
+            config={
+                "concurrency": 8,
+                "shard_prefixes": "blend.2020,blend.2021,index.html",
+            },
+        )
+    )
+    assert command.count("--shard") == 3
+    assert "blend.2020" in command
+    assert "blend.2021" in command
+    assert "index.html" in command
+    assert command[command.index("--numworkers") + 1] == "8"
+
+
+def test_s5cmd_fanout_shard_prefixes_can_contain_underscores() -> None:
+    # SAFE_PREFIX admits '_', so the separator must not: a comma-separated
+    # list is the only encoding that keeps an underscore-bearing S3 key
+    # prefix (e.g. "index_blend") expressible as a single shard.
+    adapter = load_command_adapter(adapter_path("s5cmd"))
+    command = adapter.compile(
+        CommandRequest(
+            "fanout-with-dirs",
+            BUCKET,
+            REGION,
+            tool="s5cmd",
+            config={"shard_prefixes": "index_blend,blend.2020"},
+        )
+    )
+    assert command.count("--shard") == 2
+    assert "index_blend" in command
+    assert "blend.2020" in command
+
+
+def test_ps3_renders_the_prefix_discovery_cutoff() -> None:
+    adapter = load_command_adapter(adapter_path("ps3"))
+    command = adapter.compile(
+        CommandRequest(
+            "list",
+            BUCKET,
+            REGION,
+            tool="ps3",
+            signed=True,
+            config={"prefix_count": 5000},
+        )
+    )
+    assert command[command.index("--prefix-count") + 1] == "5000"
 
 
 def test_rclone_endpoint_preserves_the_signed_credential_branch() -> None:
@@ -932,6 +1043,23 @@ def test_swath_declares_what_each_mode_produces_and_what_it_asked_for() -> None:
     }
 
 
+def test_s7cmd_renders_fixture_specific_discovery_and_retry_controls() -> None:
+    adapter = load_command_adapter(adapter_path("s7cmd"))
+
+    argv = adapter.compile(
+        CommandRequest(
+            "recursive-one-nosort",
+            BUCKET,
+            REGION,
+            tool="s7cmd",
+            config={"aws_max_attempts": 1, "concurrency": 64, "parallel_depth": 1},
+        )
+    )
+
+    assert argv[argv.index("--max-parallel-listing-max-depth") + 1] == "1"
+    assert argv[argv.index("--aws-max-attempts") + 1] == "1"
+
+
 def test_swath_renders_retained_output_controls_and_refuses_the_wrong_mode() -> None:
     adapter = load_command_adapter(adapter_path("swath"))
     request = CommandRequest(
@@ -1098,6 +1226,120 @@ def test_s5cmd_fanout_execs_with_an_inherited_commands_file(tmp_path: Path) -> N
         "ls -e -s 's3://bucket-x/p x/雪/.*'",
         "ls -e -s 's3://bucket-x/p x/雪/0*'",
     ]
+
+
+def test_s5cmd_fanout_reads_fixture_shards(tmp_path: Path) -> None:
+    fake = tmp_path / "fake-s5cmd"
+    fake.write_text(
+        "#!/usr/bin/python3\n"
+        "import json, sys\n"
+        "with open(sys.argv[-1], encoding='utf-8') as source:\n"
+        "    print(json.dumps({'commands': source.read()}))\n",
+        encoding="utf-8",
+    )
+    fake.chmod(0o755)
+    shards = tmp_path / "s5cmd-shards.input"
+    shards.write_text("blend.20200101\nindex.html\n", encoding="utf-8")
+    wrapper = ROOT / "tools/s5cmd/adapter/fanout.py"
+    done = subprocess.run(
+        [
+            "/usr/bin/python3",
+            str(wrapper),
+            "--s5cmd",
+            str(fake),
+            "--bucket",
+            BUCKET,
+            "--shard-file",
+            str(shards),
+            "--numworkers",
+            "64",
+        ],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    assert done.returncode == 0, done.stderr
+    assert json.loads(done.stdout)["commands"].splitlines() == [
+        "ls -e -s 's3://bucket-x/blend.20200101*'",
+        "ls -e -s 's3://bucket-x/index.html*'",
+    ]
+
+
+def _run_fanout_shard_file(tmp_path: Path, contents: bytes) -> subprocess.CompletedProcess[str]:
+    shards = tmp_path / "s5cmd-shards.input"
+    shards.write_bytes(contents)
+    wrapper = ROOT / "tools/s5cmd/adapter/fanout.py"
+    return subprocess.run(
+        [
+            "/usr/bin/python3",
+            str(wrapper),
+            "--s5cmd",
+            "/bin/true",
+            "--bucket",
+            BUCKET,
+            "--shard-file",
+            str(shards),
+            "--numworkers",
+            "64",
+        ],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+
+def test_s5cmd_fanout_shard_file_refuses_duplicate_shards(tmp_path: Path) -> None:
+    done = _run_fanout_shard_file(tmp_path, b"blend.2020\nindex.html\nblend.2020\n")
+    assert done.returncode != 0
+    assert "repeat" in done.stderr
+
+
+def test_s5cmd_fanout_shard_file_tolerates_crlf_line_endings(tmp_path: Path) -> None:
+    # Text-mode universal-newline reading normalizes CRLF to '\n' before
+    # rstrip("\n") runs, so a CRLF-authored shard file compiles to clean
+    # prefixes rather than a glob with a trailing '\r' that would silently
+    # match nothing; SAFE_SHARD is the backstop for a '\r' that survives
+    # regardless (e.g. a future change to the read mode).
+    shards = tmp_path / "s5cmd-shards.input"
+    shards.write_bytes(b"blend.2020\r\nindex.html\r\n")
+    fake = tmp_path / "fake-s5cmd"
+    fake.write_text(
+        "#!/usr/bin/python3\n"
+        "import json, sys\n"
+        "with open(sys.argv[-1], encoding='utf-8') as source:\n"
+        "    print(json.dumps({'commands': source.read()}))\n",
+        encoding="utf-8",
+    )
+    fake.chmod(0o755)
+    wrapper = ROOT / "tools/s5cmd/adapter/fanout.py"
+    done = subprocess.run(
+        [
+            "/usr/bin/python3",
+            str(wrapper),
+            "--s5cmd",
+            str(fake),
+            "--bucket",
+            BUCKET,
+            "--shard-file",
+            str(shards),
+            "--numworkers",
+            "64",
+        ],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    assert done.returncode == 0, done.stderr
+    assert json.loads(done.stdout)["commands"].splitlines() == [
+        "ls -e -s 's3://bucket-x/blend.2020*'",
+        "ls -e -s 's3://bucket-x/index.html*'",
+    ]
+
+
+def test_s5cmd_fanout_shard_file_refuses_unsafe_characters(tmp_path: Path) -> None:
+    done = _run_fanout_shard_file(tmp_path, b"blend.2020\nin*dex\n")
+    assert done.returncode != 0
+    assert "safe prefixes" in done.stderr
 
 
 @pytest.mark.parametrize("shards", ["00", "a,a", "a*", "", "雪"])

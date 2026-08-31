@@ -309,6 +309,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--endpoint-url", default="")
     parser.add_argument("--replay-config", default="", metavar="JSON")
     parser.add_argument(
+        "--retain-products",
+        choices=("true", "false"),
+        default="false",
+        help="Upload native listing products. False retains logs and result.json only.",
+    )
+    parser.add_argument(
         "--input-artifact",
         default="",
         metavar="gs://...",
@@ -1026,6 +1032,8 @@ def upload(
     attempt_dir: Path,
     destination: str,
     postprocessing_seconds: dict[str, float] | None = None,
+    *,
+    retain_products: bool = False,
 ) -> bool:
     """Publish everything except result.json first, then result.json alone,
     last. A leaf whose upload dies between the two steps is left with
@@ -1036,7 +1044,11 @@ def upload(
     destination gets the same create-only, marker-last contract so the Docker
     executor does not need a second measurement worker.
     """
-    artifacts = sorted(p for p in attempt_dir.iterdir() if p.name != "result.json")
+    artifacts = sorted(
+        path
+        for path in attempt_dir.iterdir()
+        if path.name != "result.json" and (retain_products or path.name != "native")
+    )
     try:
         upload_started = time.monotonic()
         local_destination: Path | None = None
@@ -1239,6 +1251,7 @@ def _resolve_inputs(args: argparse.Namespace) -> ResolvedInputs:
 def _replay_phase(
     replay_evidence: dict[str, object] | None,
     replay_config: replay.ReplayConfig | None,
+    box_vcpus: int,
     attempt_destination: str,
     publish_failure: Callable[..., int],
 ) -> tuple[int | None, Callable[[], None]]:
@@ -1271,7 +1284,7 @@ def _replay_phase(
     sampler_stop = threading.Event()
     sampler_thread = threading.Thread(
         target=replay_runtime.sample_metrics,
-        args=(replay_evidence, sampler_stop, replay_config, attempt_destination),
+        args=(replay_evidence, sampler_stop, replay_config, box_vcpus, attempt_destination),
         name="replay-metrics",
         daemon=True,
     )
@@ -1337,6 +1350,7 @@ def _result_document(
         "started_at": started_at,
         "finished_at": finished_at,
         "evidence_profile": "minimal-replay" if minimal_evidence else "full",
+        "product_retained": args.retain_products == "true",
         "postprocessing_seconds": postprocessing_seconds,
         # What was measured, and which channel carried it. A subject that only
         # prints has no stdout log at all: those bytes are the product.
@@ -1490,7 +1504,7 @@ def main(argv: list[str] | None = None) -> int:
     subject_stdout = product.path if product is not None and product.takes_stdout else stdout_path
 
     replay_failure, finish_replay = _replay_phase(
-        replay_evidence, replay_config, attempt_destination, publish_failure
+        replay_evidence, replay_config, args.vcpus, attempt_destination, publish_failure
     )
     if replay_failure is not None:
         return replay_failure
@@ -1531,16 +1545,22 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     stderr_path = attempt_dir / "stderr.log"
+    retain_products = args.retain_products == "true"
 
     # Scan the uncompressed captures before any upload. A retained credential
     # turns the whole attempt into a refusal rather than public evidence that a
-    # later reader is expected to notice and clean up.
+    # later reader is expected to notice and clean up. Scoped to what
+    # `upload()` actually publishes: native/ only when this attempt retains
+    # its products -- a discarded native/ tree never reaches a reader, so
+    # scanning it would only cost time on bytes nobody will see.
     phase_started = time.monotonic()
-    scanned = [stderr_path, native_root]
+    scanned = [stderr_path]
     if subject_stdout == stdout_path:
         scanned.insert(0, stdout_path)
     if setup is not None:
         scanned.append(attempt_dir / "inline")
+    if retain_products:
+        scanned.append(native_root)
     secret_hit = scan_for_secrets(scanned)
     postprocessing_seconds["secret_scan"] = time.monotonic() - phase_started
     if secret_hit:
@@ -1592,14 +1612,37 @@ def main(argv: list[str] | None = None) -> int:
     stderr_gz = gzip_file(stderr_path) if stderr_path.exists() else None
     postprocessing_seconds["capture_finalize"] = time.monotonic() - phase_started
     phase_started = time.monotonic()
-    native_files = {} if minimal_evidence else native_manifest(native_root)
-    native_sizes = native_inventory(native_root) if minimal_evidence else None
-    postprocessing_seconds["native_inventory" if minimal_evidence else "native_manifest"] = (
-        time.monotonic() - phase_started
-    )
-    # Computed once, before the marker is written -- nothing after this adds
-    # another artifact, so there is no stale-then-corrected total to chase.
-    artifacts_size_bytes = sum(p.stat().st_size for p in attempt_dir.rglob("*") if p.is_file())
+    # A subject that leaves a symlink, FIFO, or other special file in its
+    # output tree fails `retained_files` (and so native_manifest/
+    # native_inventory, which walk the same tree) with ArtifactSafetyError --
+    # or OSError, for a path that vanishes mid-walk. The timed run already
+    # happened by this point, so a worker that let this propagate would crash
+    # with a traceback and publish no result.json at all; caught here, the
+    # verdict becomes the same refusal `product_gap` already gives a missing
+    # product, on the same exit code.
+    try:
+        native_files = (
+            {} if minimal_evidence or not retain_products else native_manifest(native_root)
+        )
+        native_sizes = (
+            native_inventory(native_root)
+            if minimal_evidence and retain_products
+            else ({} if minimal_evidence else None)
+        )
+        postprocessing_seconds["native_inventory" if minimal_evidence else "native_manifest"] = (
+            time.monotonic() - phase_started
+        )
+        # Computed once, before the marker is written -- nothing after this adds
+        # another artifact, so there is no stale-then-corrected total to chase.
+        artifacts_size_bytes = sum(
+            path.stat().st_size
+            for root in attempt_dir.iterdir()
+            if root.name != "native" or retain_products
+            for path in retained_files(root)
+        )
+    except (OSError, ArtifactSafetyError) as exc:
+        print(f"measure: retained output is not publishable: {exc}", file=sys.stderr)
+        return EXIT_ARTIFACT_UNUSABLE
 
     cgroup_result = execution["cgroup"]
     assert isinstance(cgroup_result, dict)
@@ -1649,7 +1692,12 @@ def main(argv: list[str] | None = None) -> int:
         artifacts_size_bytes=artifacts_size_bytes,
     )
     write_result_atomic(attempt_dir / "result.json", result)
-    if not upload(attempt_dir, attempt_destination, postprocessing_seconds):
+    if not upload(
+        attempt_dir,
+        attempt_destination,
+        postprocessing_seconds,
+        retain_products=retain_products,
+    ):
         return 1
     if exit_code != 0:
         print(f"measure: {args.tool} exited {exit_code}", file=sys.stderr)

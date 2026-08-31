@@ -433,9 +433,15 @@ def worker_argument_pairs(
     term_grace: float,
     artifact_uri: str = "",
     endpoint_url: str = replay_contract.REPLAY_ENDPOINT_URL,
+    retain_products: bool = False,
 ) -> tuple[tuple[str, str], ...]:
     """Render one worker request independently of its container executor."""
     memory = attempt.container_memory_gb
+    # A preparation's whole purpose is publishing native/ for a later case's
+    # REQUIRES chain (`produced_artifact` reads native_manifest); an operator's
+    # false default must not starve that chain of the artifact it exists to
+    # produce, so a preparation attempt always retains regardless of the flag.
+    retains = retain_products or attempt.purpose == "preparation"
     pairs = (
         ("--tool", attempt.tool),
         ("--mode", str(json.loads(attempt.config)["mode"])),
@@ -448,6 +454,7 @@ def worker_argument_pairs(
         ("--destination", destination),
         ("--timeout", str(attempt.timeout_s)),
         ("--term-grace", str(term_grace)),
+        ("--retain-products", "true" if retains else "false"),
         ("--image", image["image_uri"]),
         ("--toolbox-manifest-sha256", image["toolbox_manifest_sha256"]),
         ("--toolbox-recipe-sha256", image["toolbox_recipe_sha256"]),
@@ -1619,6 +1626,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         p.add_argument("--subnetwork")
         p.add_argument("--zone")
         p.add_argument("--provisioning", choices=("SPOT", "STANDARD"), default="SPOT")
+        p.add_argument(
+            "--retain-products",
+            action="store_true",
+            help="upload native listing products; off by default, while logs and "
+            "result.json remain",
+        )
 
     submit = sub.add_parser("submit")
     provider(submit, required=False)

@@ -14,6 +14,7 @@ from benchmark.runtime.command_adapter import (
 TOOL = "s7cmd"
 S7CMD = Executable("s7cmd", ("/usr/local/bin/s7cmd",))
 EXECUTABLES = (S7CMD,)
+CONFIG_KEYS = frozenset({"aws_max_attempts", "parallel_depth"})
 SUPPORTS_UNSIGNED = True
 """--target-no-sign-request lists anonymously. The signed path drops the flag
 and has not been exercised by a committed run."""
@@ -161,6 +162,27 @@ def _concurrency(request: CommandRequest) -> str:
     return str(value)
 
 
+def _parallel_depth(request: CommandRequest) -> str:
+    """Render the prefix-discovery depth when a plan makes it fixture-specific."""
+    value = request.config.get("parallel_depth", 2)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise CommandAdapterError(
+            f"{TOOL} parallel_depth must be a positive integer; got: {value!r}"
+        )
+    return str(value)
+
+
+def _retry_flags(request: CommandRequest) -> tuple[str, ...]:
+    value = request.config.get("aws_max_attempts")
+    if value is None:
+        return ()
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise CommandAdapterError(
+            f"{TOOL} aws_max_attempts must be a positive integer; got: {value!r}"
+        )
+    return "--aws-max-attempts", str(value)
+
+
 def _build_tail(request: CommandRequest) -> tuple[str, ...]:
     if request.endpoint_url and request.mode in {"all-versions", "bucket-list"}:
         raise CommandAdapterError(
@@ -172,7 +194,12 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
     parallel = (
         ()
         if request.mode in SEQUENTIAL_MODES
-        else ("--max-parallel-listings", _concurrency(request))
+        else (
+            "--max-parallel-listings",
+            _concurrency(request),
+            "--max-parallel-listing-max-depth",
+            _parallel_depth(request),
+        )
     )
     stratum = () if request.signed else ("--target-no-sign-request",)
     # The SDK's own connect-timeout default proved too tight for this study's
@@ -186,12 +213,13 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
     # this harness's own contention, not a methodology axis, so every mode
     # gets it regardless of what a plan asks for.
     resilient = ("--connect-timeout-milliseconds", "15000")
+    retry = _retry_flags(request)
     endpoint = (
         ("--target-endpoint-url", request.endpoint_url, "--target-force-path-style")
         if request.endpoint_url
         else ()
     )
-    anonymous = (*stratum, "--target-region", request.region, *endpoint, *resilient)
+    anonymous = (*stratum, "--target-region", request.region, *endpoint, *resilient, *retry)
     tsv = ("--tsv", "--show-storage-class", "--show-etag")
     commands = {
         "recursive-tsv": ("ls", "-r", *obs, *tsv, *parallel, *anonymous, target),

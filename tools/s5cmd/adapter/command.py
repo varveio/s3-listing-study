@@ -19,7 +19,7 @@ FANOUT = Executable(
     ("/usr/bin/python3", "/opt/benchmark/tools/s5cmd/adapter/fanout.py"),
 )
 EXECUTABLES = (S5CMD, FANOUT)
-CONFIG_KEYS = frozenset({"shard_initials"})
+CONFIG_KEYS = frozenset({"shard_file_sha256", "shard_initials", "shard_prefixes"})
 SUPPORTS_UNSIGNED = True
 """--no-sign-request lists anonymously; otherwise the credential in the
 environment signs."""
@@ -57,6 +57,14 @@ MODES = {
         product_artifact=LISTING,
     ),
     "fanout-with-dirs": Mode(
+        product="text",
+        fields=FULL_FIELDS,
+        axes={"concurrency": Ceiling(256, "help")},
+        executable=FANOUT.name,
+        artifacts=TEXT,
+        product_artifact=LISTING,
+    ),
+    "fanout-fixture-with-dirs": Mode(
         product="text",
         fields=FULL_FIELDS,
         axes={"concurrency": Ceiling(256, "help")},
@@ -120,10 +128,32 @@ def _auth_flags(request: CommandRequest) -> tuple[str, ...]:
 
 
 SAFE_INITIALS = re.compile(r"[A-Za-z0-9._-]+")
+SAFE_PREFIX = re.compile(r"[A-Za-z0-9._/-]+")
 
 
 def _fanout_shards(request: CommandRequest) -> tuple[str, ...]:
+    raw_prefixes = request.config.get("shard_prefixes")
     raw = request.config.get("shard_initials")
+    if raw_prefixes is not None:
+        if raw is not None:
+            raise CommandAdapterError(
+                f"{TOOL} fanout states both shard_initials and shard_prefixes"
+            )
+        if not isinstance(raw_prefixes, str):
+            raise CommandAdapterError(f"{TOOL} shard_prefixes must be a comma-separated string")
+        # ',' is not in SAFE_PREFIX, so a shard can never contain the
+        # separator itself -- unlike '_', which is a legal S3 key character
+        # and would make an underscore-bearing prefix inexpressible.
+        shards = tuple(raw_prefixes.split(","))
+        if not shards or any(SAFE_PREFIX.fullmatch(shard) is None for shard in shards):
+            raise CommandAdapterError(
+                f"{TOOL} shard_prefixes must contain non-empty safe prefixes: {raw_prefixes!r}"
+            )
+        if len(set(shards)) != len(shards):
+            raise CommandAdapterError(
+                f"{TOOL} fanout shard_prefixes repeat a shard: {raw_prefixes!r}"
+            )
+        return shards
     if not isinstance(raw, str) or SAFE_INITIALS.fullmatch(raw) is None:
         raise CommandAdapterError(
             f"{TOOL} fanout shard_initials must be non-empty safe single-byte characters: {raw!r}"
@@ -144,7 +174,11 @@ def _fanout_workers(request: CommandRequest) -> str:
 def _fanout_command(request: CommandRequest) -> tuple[str, ...]:
     endpoint = ("--endpoint-url", request.endpoint_url) if request.endpoint_url else ()
     unsigned = ("--unsigned",) if not request.signed else ()
-    shards = tuple(token for shard in _fanout_shards(request) for token in ("--shard", shard))
+    shards = (
+        ("--shard-file", "/fixtures/source/s5cmd-shards.input")
+        if request.mode == "fanout-fixture-with-dirs"
+        else tuple(token for shard in _fanout_shards(request) for token in ("--shard", shard))
+    )
     return (
         *FANOUT.argv,
         "--s5cmd",
@@ -191,7 +225,7 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
 
 
 def build_command(request: CommandRequest) -> tuple[str, ...]:
-    if request.mode == "fanout-with-dirs":
+    if request.mode in {"fanout-with-dirs", "fanout-fixture-with-dirs"}:
         return _fanout_command(request)
     return *S5CMD.argv, *_build_tail(request)
 

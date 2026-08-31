@@ -62,7 +62,7 @@ records what an attempt was for:
 
 `report` considers only `measurement` rows for comparative timing and rates.
 Replay canaries and diagnostics remain outside every comparison. Routine report
-binds their `result.json` summaries and does not consume their retained products.
+binds their `result.json` summaries and does not require an uploaded native product.
 
 **A preparation is measured even though it is not compared.** If s3-fast-list
 needs 40 seconds of `ks-tool` to list in 60, then publishing 60 against another
@@ -278,7 +278,11 @@ A replay result also carries the complete canonical `replay` document and a
 `replay_evidence` block. Readiness and the first server-metrics scrape complete
 before `started_at`; the last scrape follows `finished_at`. Long runs retain raw
 10-second meter snapshots plus host-observed utilization over the declared,
-disjoint server and subject cpusets, available host memory, and load. Cpuset
+disjoint server and subject cpusets, available host memory, and load. On the N4
+Batch estate, the allocator groups the lower/upper SMT siblings of each
+physical core into the same controlled cpuset; replay and subject therefore do
+not share a physical core. The retained resource sample records the box width
+and the exact non-contiguous cpusets used. Cpuset
 utilization is deliberately not called process CPU: host work scheduled on
 those CPUs is inside the observation. Missing or malformed replay evidence is
 a refusal, not a timing with an assumed healthy backend.

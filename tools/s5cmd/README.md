@@ -96,9 +96,9 @@ resolve in [`data/claims.json`](data/claims.json).
   delimiter-free request cannot produce CommonPrefixes, but exact verification
   still decides whether its retained `DIR` rows reconstruct the fixture.
 - The integrated `fanout-with-dirs` mode also has no committed campaign run.
-  Its plan must state disjoint, complete first-character shards; the adapter
-  refuses duplicates, while exact verification remains responsible
-  for detecting a shard set that omits part of a fixture.
+  Its plan must state disjoint, complete first-character shards or explicit
+  safe prefixes; the adapter refuses duplicates, while fixture analysis and
+  exact verification remain responsible for proving that the union is complete.
 
 ### Benchmark questions
 

@@ -404,8 +404,8 @@ def test_replay_report_uses_result_json_and_declared_allocations(tmp_path: Path)
         "COMPLETE",
         2,
     )
-    assert row["declared_server_allocation"] == "cpus=0-3;memory=8GiB"
-    assert row["declared_subject_allocation"] == "cpus=4-7;memory=8GiB"
+    assert row["declared_server_allocation"] == "cpus=0-1,5-6;memory=8GiB"
+    assert row["declared_subject_allocation"] == "cpus=2-3,7-8;memory=8GiB"
     assert row["derived_host_headroom"] == "vcpus=2;memory=16GiB"
     assert row["capacity_status"] == "CALIBRATED"
 

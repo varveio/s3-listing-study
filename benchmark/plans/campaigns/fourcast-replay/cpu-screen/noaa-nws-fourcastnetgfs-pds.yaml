@@ -1,0 +1,143 @@
+# First cloud CPU-response screen: one selected mode per active tool at 2, 4,
+# and 8 subject vCPU. One observation per cell initially; repeat only ambiguous
+# or invalid cells. Replay remains diagnostic and every attempt retains its
+# native product, row count, subject metrics, and replay evidence.
+spec_version: 3
+
+bucket: noaa-nws-fourcastnetgfs-pds
+region: us-east-1
+auth_role: public-read
+
+replay:
+  capacity_status: uncalibrated
+  server_image_uri: ghcr.io/varveio/swath-replay@sha256:8fb53a327f946f10db17d4fd082a7b2e06bc678a1e828a197a1ef5717473a46a
+  fixture_uri: gs://s3-listing-study-results-29c02004/fixtures/noaa-nws-fourcastnetgfs-pds/current-eba31d9/part-00000.parquet
+  fixture_sha256: abc259e0e2e956f096c6aa0dc5e3532c608a4df4675e165a6560ae6d868374e2
+  serving_mode: sorted
+  latency_model:
+    deadlines_ms:
+      worker_page: 85
+      pivot_probe: 35
+      structure_probe: 37
+    scale: 1.0
+    jitter: none
+
+defaults:
+  reps: 1
+  timeout_s: 1800
+  vcpus: 8
+  memory_gb: 16
+  container_memory_gb: 8
+  subject_vcpus: 2
+  replay_vcpus: 4
+  replay_memory_gb: 4
+  replay_parquet_connections: 64
+  replay_max_concurrent_requests: 4096
+  replay_prefetch: false
+  replay_prefetch_max_windows: 96
+  replay_heap_percent: 75
+
+# The three literal rows per tool are the same allocation tiers:
+# low:    n4-highcpu-16, subject 2c/8g, replay 8c/8g, host 6c/16g
+# middle: n4-highcpu-16, subject 4c/8g, replay 8c/8g, host 4c/16g
+# high:   n4-highcpu-32, subject 8c/8g, replay 16c/16g, host 8c/40g
+# Mode and concurrency stay fixed inside each tool so subject CPU is the axis.
+tools:
+  aws-cli:
+    cases:
+      - {mode: s3api-v2-text, purpose: diagnostic, vcpus: 16, memory_gb: 32, subject_vcpus: 2, replay_vcpus: 8, replay_memory_gb: 8}
+      - {mode: s3api-v2-text, purpose: diagnostic, vcpus: 16, memory_gb: 32, subject_vcpus: 4, replay_vcpus: 8, replay_memory_gb: 8}
+      - {mode: s3api-v2-text, purpose: diagnostic, vcpus: 32, memory_gb: 64, subject_vcpus: 8, replay_vcpus: 16, replay_memory_gb: 16}
+
+  minio-mc:
+    cases:
+      - {mode: recursive, purpose: diagnostic, vcpus: 16, memory_gb: 32, subject_vcpus: 2, replay_vcpus: 8, replay_memory_gb: 8}
+      - {mode: recursive, purpose: diagnostic, vcpus: 16, memory_gb: 32, subject_vcpus: 4, replay_vcpus: 8, replay_memory_gb: 8}
+      - {mode: recursive, purpose: diagnostic, vcpus: 32, memory_gb: 64, subject_vcpus: 8, replay_vcpus: 16, replay_memory_gb: 16}
+
+  ps3:
+    cases:
+      - {mode: list, purpose: diagnostic, vcpus: 16, memory_gb: 32, subject_vcpus: 2, replay_vcpus: 8, replay_memory_gb: 8}
+      - {mode: list, purpose: diagnostic, vcpus: 16, memory_gb: 32, subject_vcpus: 4, replay_vcpus: 8, replay_memory_gb: 8}
+      - {mode: list, purpose: diagnostic, vcpus: 32, memory_gb: 64, subject_vcpus: 8, replay_vcpus: 16, replay_memory_gb: 16}
+      - mode: list
+        purpose: diagnostic
+        vcpus: 32
+        memory_gb: 64
+        subject_vcpus: 8
+        replay_vcpus: 16
+        replay_memory_gb: 16
+        replay_max_concurrent_requests: 512
+        config: {prefix_count: 5000}
+
+  rclone:
+    cases:
+      - {mode: recursive-walk, concurrency: 32, purpose: diagnostic, vcpus: 16, memory_gb: 32, subject_vcpus: 2, replay_vcpus: 8, replay_memory_gb: 8}
+      - {mode: recursive-walk, concurrency: 32, purpose: diagnostic, vcpus: 16, memory_gb: 32, subject_vcpus: 4, replay_vcpus: 8, replay_memory_gb: 8}
+      - {mode: recursive-walk, concurrency: 32, purpose: diagnostic, vcpus: 32, memory_gb: 64, subject_vcpus: 8, replay_vcpus: 16, replay_memory_gb: 16}
+
+  s3-fast-list:
+    cases:
+      - {mode: list-hinted, concurrency: 100, segments: 1000, purpose: diagnostic, vcpus: 16, memory_gb: 32, subject_vcpus: 2, replay_vcpus: 8, replay_memory_gb: 8}
+      - {mode: list-hinted, concurrency: 100, segments: 1000, purpose: diagnostic, vcpus: 16, memory_gb: 32, subject_vcpus: 4, replay_vcpus: 8, replay_memory_gb: 8}
+      - {mode: list-hinted, concurrency: 100, segments: 1000, purpose: diagnostic, vcpus: 32, memory_gb: 64, subject_vcpus: 8, replay_vcpus: 16, replay_memory_gb: 16}
+
+  s3kor:
+    cases:
+      - {mode: list, purpose: diagnostic, vcpus: 16, memory_gb: 32, subject_vcpus: 2, replay_vcpus: 8, replay_memory_gb: 8}
+      - {mode: list, purpose: diagnostic, vcpus: 16, memory_gb: 32, subject_vcpus: 4, replay_vcpus: 8, replay_memory_gb: 8}
+      - {mode: list, purpose: diagnostic, vcpus: 32, memory_gb: 64, subject_vcpus: 8, replay_vcpus: 16, replay_memory_gb: 16}
+
+  s3p:
+    cases:
+      - {mode: ls, concurrency: 100, purpose: diagnostic, vcpus: 16, memory_gb: 32, subject_vcpus: 2, replay_vcpus: 8, replay_memory_gb: 8}
+      - {mode: ls, concurrency: 100, purpose: diagnostic, vcpus: 16, memory_gb: 32, subject_vcpus: 4, replay_vcpus: 8, replay_memory_gb: 8}
+      - {mode: ls, concurrency: 100, purpose: diagnostic, vcpus: 32, memory_gb: 64, subject_vcpus: 8, replay_vcpus: 16, replay_memory_gb: 16}
+
+  s5cmd:
+    cases:
+      - {mode: recursive-with-dirs, purpose: diagnostic, vcpus: 16, memory_gb: 32, subject_vcpus: 2, replay_vcpus: 8, replay_memory_gb: 8}
+      - {mode: recursive-with-dirs, purpose: diagnostic, vcpus: 16, memory_gb: 32, subject_vcpus: 4, replay_vcpus: 8, replay_memory_gb: 8}
+      - {mode: recursive-with-dirs, purpose: diagnostic, vcpus: 32, memory_gb: 64, subject_vcpus: 8, replay_vcpus: 16, replay_memory_gb: 16}
+
+  s7cmd:
+    cases:
+      - {mode: recursive-one-nosort, concurrency: 64, purpose: diagnostic, vcpus: 16, memory_gb: 32, subject_vcpus: 2, replay_vcpus: 8, replay_memory_gb: 8}
+      - {mode: recursive-one-nosort, concurrency: 64, purpose: diagnostic, vcpus: 16, memory_gb: 32, subject_vcpus: 4, replay_vcpus: 8, replay_memory_gb: 8}
+      - {mode: recursive-one-nosort, concurrency: 64, purpose: diagnostic, vcpus: 32, memory_gb: 64, subject_vcpus: 8, replay_vcpus: 16, replay_memory_gb: 16}
+
+  swath:
+    cases:
+      - mode: recursive-tsv-dataset
+        concurrency: 64
+        purpose: diagnostic
+        vcpus: 16
+        memory_gb: 32
+        subject_vcpus: 2
+        replay_vcpus: 8
+        replay_memory_gb: 8
+        config: &swath_tsv
+          jvm_max_heap: 4g
+          text_writers: 3
+          text_part_size: 1gb
+          writeback_size: 32mb
+          part_rotation_interval: "0"
+          part_rotation_max_rows: 0
+      - mode: recursive-tsv-dataset
+        concurrency: 64
+        purpose: diagnostic
+        vcpus: 16
+        memory_gb: 32
+        subject_vcpus: 4
+        replay_vcpus: 8
+        replay_memory_gb: 8
+        config: *swath_tsv
+      - mode: recursive-tsv-dataset
+        concurrency: 64
+        purpose: diagnostic
+        vcpus: 32
+        memory_gb: 64
+        subject_vcpus: 8
+        replay_vcpus: 16
+        replay_memory_gb: 16
+        config: *swath_tsv

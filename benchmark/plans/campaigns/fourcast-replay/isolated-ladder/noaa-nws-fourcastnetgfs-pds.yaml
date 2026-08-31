@@ -1,0 +1,75 @@
+# Focused qualification after the 2026-08-28 N4 topology canary proved that the
+# earlier contiguous cpusets placed replay and subject on sibling SMT threads.
+# One x32 box and one 16-vCPU replay allocation remain fixed across the 2/4/8
+# subject ladder. The replay-20 top cells are capacity controls, not another
+# subject tier. This remains a diagnostic elimination rung, not an OSS timing.
+spec_version: 3
+
+bucket: noaa-nws-fourcastnetgfs-pds
+region: us-east-1
+auth_role: public-read
+
+replay:
+  capacity_status: uncalibrated
+  server_image_uri: ghcr.io/varveio/swath-replay@sha256:8fb53a327f946f10db17d4fd082a7b2e06bc678a1e828a197a1ef5717473a46a
+  fixture_uri: gs://s3-listing-study-results-29c02004/fixtures/noaa-nws-fourcastnetgfs-pds/current-eba31d9/part-00000.parquet
+  fixture_sha256: abc259e0e2e956f096c6aa0dc5e3532c608a4df4675e165a6560ae6d868374e2
+  serving_mode: sorted
+  latency_model:
+    deadlines_ms:
+      worker_page: 85
+      pivot_probe: 35
+      structure_probe: 37
+    scale: 1.0
+    jitter: none
+
+defaults:
+  reps: 1
+  timeout_s: 1800
+  vcpus: 32
+  memory_gb: 64
+  container_memory_gb: 8
+  subject_vcpus: 2
+  replay_vcpus: 16
+  replay_memory_gb: 16
+  replay_parquet_connections: 64
+  replay_max_concurrent_requests: 4096
+  replay_prefetch: false
+  replay_prefetch_max_windows: 96
+  replay_heap_percent: 75
+
+tools:
+  rclone:
+    cases:
+      - {mode: recursive-walk, concurrency: 32, purpose: diagnostic, subject_vcpus: 2}
+      - {mode: recursive-walk, concurrency: 32, purpose: diagnostic, subject_vcpus: 4}
+      - {mode: recursive-walk, concurrency: 32, purpose: diagnostic, subject_vcpus: 8}
+      - {mode: recursive-walk, concurrency: 32, purpose: diagnostic, subject_vcpus: 8, replay_vcpus: 20}
+
+  s3-fast-list:
+    reps: 3
+    cases:
+      - {mode: list-hinted, concurrency: 100, segments: 1000, purpose: diagnostic, subject_vcpus: 2}
+      - {mode: list-hinted, concurrency: 100, segments: 1000, purpose: diagnostic, subject_vcpus: 4}
+      - {mode: list-hinted, concurrency: 100, segments: 1000, purpose: diagnostic, subject_vcpus: 8}
+      - {mode: list-hinted, concurrency: 100, segments: 1000, purpose: diagnostic, subject_vcpus: 8, replay_vcpus: 20}
+
+  s5cmd:
+    cases:
+      - mode: fanout-with-dirs
+        concurrency: 3
+        purpose: diagnostic
+        subject_vcpus: 8
+        config:
+          # The current FourCast fixture has only d/f/i initial bytes. These
+          # three disjoint shards cover all 4,081,170 keys and no remainder.
+          shard_initials: dfi
+
+exclude:
+  - {tool: aws-cli, reason: source-established serial path already flat on this elimination fixture}
+  - {tool: minio-mc, reason: source-established serial path already flat on this elimination fixture}
+  - {tool: ps3, reason: high request amplification and weak achieved width; classification retained as provisional}
+  - {tool: s3kor, reason: source-established serial path already flat on this elimination fixture}
+  - {tool: s3p, reason: parallel capability carried to the larger-fixture rung; no isolated FourCast rerun needed}
+  - {tool: s7cmd, reason: delimiter fanout cannot be qualified by this flat fixture; carried to a hierarchical fixture}
+  - {tool: swath, reason: isolated repeatability control lives in the paired focused plan}

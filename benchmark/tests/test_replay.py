@@ -59,7 +59,7 @@ def evidence(*, after_requests: int = 1, after_errors: int = 0) -> dict[str, obj
         "readiness": {"state": "ready"},
         "before": metrics(0),
         "samples": [metrics(1)],
-        "resource_samples": [{"server_cpuset": "0-1", "subject_cpuset": "2-3"}],
+        "resource_samples": [{"box_vcpus": 6, "server_cpuset": "0,3", "subject_cpuset": "1,4"}],
         "after": metrics(after_requests, after_errors),
         "errors": [],
     }
@@ -81,11 +81,58 @@ def test_replay_evidence_accepts_canonical_single_cpu_sets() -> None:
     allocation["subject_vcpus"] = 1
     allocation["replay_vcpus"] = 1
     observed = evidence()
-    observed["resource_samples"] = [{"server_cpuset": "0", "subject_cpuset": "1"}]
+    observed["resource_samples"] = [{"box_vcpus": 4, "server_cpuset": "0", "subject_cpuset": "1"}]
     assert (
         replay.evidence_errors(replay.parse_document(document), observed, purpose="measurement")
         == ()
     )
+
+
+@pytest.mark.parametrize(
+    ("box_vcpus", "replay_vcpus", "subject_vcpus", "expected_server", "expected_subject"),
+    (
+        (16, 8, 2, (0, 1, 2, 3, 8, 9, 10, 11), (4, 12)),
+        (
+            32,
+            16,
+            8,
+            (*range(0, 8), *range(16, 24)),
+            (*range(8, 12), *range(24, 28)),
+        ),
+    ),
+)
+def test_n4_allocation_keeps_replay_and_subject_on_separate_physical_cores(
+    box_vcpus: int,
+    replay_vcpus: int,
+    subject_vcpus: int,
+    expected_server: tuple[int, ...],
+    expected_subject: tuple[int, ...],
+) -> None:
+    document = config().as_dict()
+    allocation = document["allocation"]
+    assert isinstance(allocation, dict)
+    allocation["replay_vcpus"] = replay_vcpus
+    allocation["subject_vcpus"] = subject_vcpus
+
+    server, subject = replay.allocation_cpu_sets(
+        replay.parse_document(document).allocation, box_vcpus=box_vcpus
+    )
+
+    assert server == expected_server
+    assert subject == expected_subject
+    assert set(server).isdisjoint(subject)
+
+
+def test_format_cpuset_is_the_one_formatter_replay_runtime_shares() -> None:
+    """The sampler's resource_samples and evidence_errors' cpuset comparison must
+    read off one formatter, or a silent divergence would refuse every
+    calibrated measurement (`replay_runtime.sample_metrics`,
+    `replay._resource_sample_matches_allocation`).
+    """
+    from benchmark import replay_runtime
+
+    assert replay.format_cpuset({4, 1, 2, 7, 8, 9}) == "1-2,4,7-9"
+    assert replay_runtime.format_cpuset is replay.format_cpuset
 
 
 def test_fixture_manifest_binds_names_sizes_and_bytes(tmp_path: Path) -> None:

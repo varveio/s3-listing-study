@@ -149,7 +149,7 @@ the benchmark worker. Each immutable receipt retains its exact original
 invocation.
 
 Swap `--mode` for any mode declared by `command.py` (`recursive`, `recursive-with-dirs`,
-`fanout-with-dirs`, `delimiter`, `rootkeys`, `json`, `listv1`, `allversions`,
+`fanout-with-dirs`, `fanout-fixture-with-dirs`, `delimiter`, `rootkeys`, `json`, `listv1`, `allversions`,
 `fullpath`) and add
 `--prefix <p>` for a scoped listing (e.g. `normals-hourly/`). The fan-out mode
 is not a single wrapper invocation — it is the wrapper run once per shard
@@ -164,6 +164,10 @@ standard wrapper-era receipt because the retired wrapper could not supply the
 commands file. The current campaign capsule's `fanout-with-dirs` driver closes
 that integration gap: it creates an inherited Linux memory file from the
 plan-recorded shard prefixes and immediately execs s5cmd `run` against it.
+`fanout-fixture-with-dirs` uses the same native path but reads the create-only,
+digest-bound `s5cmd-shards.input` companion staged beside a replay fixture. The
+fixture builder derives one safe top-level shard per distinct first path
+component; unsafe or empty components refuse bundle creation.
 
 `recursive-with-dirs` postdates the smoke corpus and has no receipt above. It
 runs the same delimiter-free recursive command as `recursive`, but its

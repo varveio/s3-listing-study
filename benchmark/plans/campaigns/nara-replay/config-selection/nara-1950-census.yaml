@@ -1,0 +1,95 @@
+# NARA top-tier configuration selection before the fixed 2/4/8 CPU ladder.
+# FourCast eliminated the native serial paths; this plan carries only the six
+# parallel-capable candidates. Every row uses one x32 box, topology-aware
+# physical-core isolation, subject8 and replay20. Close configuration pairs are
+# repeated later rather than selected from a small difference in this pass.
+spec_version: 3
+
+bucket: nara-1950-census
+region: us-east-2
+auth_role: public-read
+
+replay:
+  capacity_status: uncalibrated
+  server_image_uri: ghcr.io/varveio/swath-replay@sha256:8fb53a327f946f10db17d4fd082a7b2e06bc678a1e828a197a1ef5717473a46a
+  fixture_uri: gs://s3-listing-study-results-29c02004/fixtures/nara-1950-census/current-eba31d9/part-*.parquet
+  fixture_sha256: 48468b7c1ea8bf657fcb089dbcb1d940d3af62b748a7cb66f6dccc8876905db4
+  serving_mode: sorted
+  latency_model:
+    deadlines_ms:
+      worker_page: 86
+      pivot_probe: 44
+      structure_probe: 50
+    scale: 1.0
+    jitter: none
+
+defaults:
+  reps: 1
+  timeout_s: 1800
+  vcpus: 32
+  memory_gb: 64
+  container_memory_gb: 8
+  subject_vcpus: 8
+  replay_vcpus: 20
+  replay_memory_gb: 20
+  replay_parquet_connections: 64
+  # The replay server maps this directly to Jetty's maximum platform-thread
+  # pool. The first s7cmd c64 probe proved 4096 is unsafe: the pool expanded to
+  # its ceiling and exhausted localhost ephemeral ports. The upstream replay
+  # default of 512 remains 8x wider than the largest c64 client in this plan.
+  replay_max_concurrent_requests: 512
+  replay_prefetch: false
+  replay_prefetch_max_windows: 96
+  replay_heap_percent: 75
+
+tools:
+  rclone:
+    cases:
+      - {mode: recursive-walk, concurrency: 32, purpose: diagnostic}
+      - {mode: recursive-walk, concurrency: 64, purpose: diagnostic}
+
+  s3-fast-list:
+    cases:
+      - {mode: list-hinted, concurrency: 100, segments: 1000, purpose: diagnostic}
+
+  s3p:
+    cases:
+      - {mode: ls, concurrency: 16, purpose: diagnostic}
+      - {mode: ls, concurrency: 100, purpose: diagnostic}
+
+  s5cmd:
+    cases:
+      - mode: fanout-with-dirs
+        concurrency: 5
+        purpose: diagnostic
+        config:
+          # All current fixture keys begin with one of these five bytes. The
+          # two dominant root arms, `1*` and `t*`, each hold about 6.6M rows.
+          shard_initials: 1cmtz
+
+  s7cmd:
+    cases:
+      - {mode: recursive-one-nosort, concurrency: 64, purpose: diagnostic}
+
+  swath:
+    cases:
+      - mode: recursive-tsv-dataset
+        concurrency: 64
+        purpose: diagnostic
+        config: &swath_tsv
+          jvm_max_heap: 4g
+          text_writers: 3
+          text_part_size: 1gb
+          writeback_size: 32mb
+          part_rotation_interval: "0"
+          part_rotation_max_rows: 0
+      - mode: recursive-tsv-dataset
+        concurrency: 128
+        purpose: diagnostic
+        config: *swath_tsv
+
+exclude:
+  - {tool: aws-cli, reason: stopped after source-established serial and flat FourCast path}
+  - {tool: minio-mc, reason: stopped after source-established serial and flat FourCast path}
+  - {tool: ps3, reason: stopped after slow high-amplification FourCast result with weak achieved width}
+  - {tool: s3kor, reason: stopped after source-established serial and flat FourCast path}

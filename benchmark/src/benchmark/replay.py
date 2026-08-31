@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import math
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
 from benchmark.contract import canonical_json
@@ -212,12 +212,21 @@ def evidence_errors(config: ReplayConfig, evidence: object, *, purpose: str) -> 
         resources = evidence.get("resource_samples")
         if not isinstance(samples, list) or not samples:
             errors.append("calibrated replay measurement has no interval metrics sample")
-        expected_server = _cpuset(0, config.allocation.replay_vcpus)
-        expected_subject = _cpuset(config.allocation.replay_vcpus, config.allocation.subject_vcpus)
+        legacy_server = format_cpuset(range(config.allocation.replay_vcpus))
+        legacy_subject = format_cpuset(
+            range(
+                config.allocation.replay_vcpus,
+                config.allocation.replay_vcpus + config.allocation.subject_vcpus,
+            )
+        )
         if not isinstance(resources, list) or not any(
             isinstance(sample, Mapping)
-            and sample.get("server_cpuset") == expected_server
-            and sample.get("subject_cpuset") == expected_subject
+            and _resource_sample_matches_allocation(
+                config.allocation,
+                sample,
+                legacy_server=legacy_server,
+                legacy_subject=legacy_subject,
+            )
             for sample in resources
         ):
             errors.append("calibrated replay measurement has no matching cpuset resource sample")
@@ -402,14 +411,89 @@ def allocation_summary(
     )
     if host_memory is not None and host_memory < 1:
         raise ReplayError("replay and subject memory ceilings leave no host memory headroom")
+    server_cpus, subject_cpus = allocation_cpu_sets(allocation, box_vcpus=box_vcpus)
     return ReplayAllocationSummary(
-        server_cpuset=_cpuset(0, allocation.replay_vcpus),
-        subject_cpuset=_cpuset(allocation.replay_vcpus, allocation.subject_vcpus),
+        server_cpuset=format_cpuset(server_cpus),
+        subject_cpuset=format_cpuset(subject_cpus),
         host_vcpus=host_vcpus,
         host_memory_headroom_gb=host_memory,
     )
 
 
-def _cpuset(start: int, count: int) -> str:
-    end = start + count - 1
-    return str(start) if start == end else f"{start}-{end}"
+def allocation_cpu_sets(
+    allocation: ReplayAllocation, *, box_vcpus: int
+) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    """Allocate whole N4 physical cores to replay and subject where possible.
+
+    GCP Batch exposes N4 SMT siblings in two equal logical-CPU halves (for
+    example 0,16 on n4-highcpu-32). Contiguous first-half/second-half cpusets
+    therefore colocate the two controlled processes on the same physical cores.
+    Each group receives both threads of consecutive cores; an odd requested
+    count receives one thread of its final core, whose sibling is not assigned
+    to the other controlled group.
+    """
+    if box_vcpus < 2 or box_vcpus % 2:
+        raise ReplayError("replay CPU isolation requires an even N4 vCPU count")
+    sibling_stride = box_vcpus // 2
+
+    def group(start_core: int, count: int) -> tuple[tuple[int, ...], int]:
+        whole_cores, odd_thread = divmod(count, 2)
+        cores_used = whole_cores + odd_thread
+        if start_core + cores_used > sibling_stride:
+            raise ReplayError("replay and subject allocations exceed the N4 physical cores")
+        first_threads = list(range(start_core, start_core + whole_cores))
+        cpus = first_threads + [cpu + sibling_stride for cpu in first_threads]
+        if odd_thread:
+            cpus.append(start_core + whole_cores)
+        return tuple(sorted(cpus)), start_core + cores_used
+
+    server_cpus, next_core = group(0, allocation.replay_vcpus)
+    subject_cpus, _ = group(next_core, allocation.subject_vcpus)
+    return server_cpus, subject_cpus
+
+
+def _resource_sample_matches_allocation(
+    allocation: ReplayAllocation,
+    sample: Mapping[str, object],
+    *,
+    legacy_server: str,
+    legacy_subject: str,
+) -> bool:
+    box_vcpus = sample.get("box_vcpus")
+    if isinstance(box_vcpus, int) and not isinstance(box_vcpus, bool):
+        try:
+            server, subject = allocation_cpu_sets(allocation, box_vcpus=box_vcpus)
+        except ReplayError:
+            return False
+        return sample.get("server_cpuset") == format_cpuset(server) and sample.get(
+            "subject_cpuset"
+        ) == format_cpuset(subject)
+    # Receipts written before topology-aware allocation did not retain the box
+    # width. Continue to read those historical resource samples; new samples
+    # always carry box_vcpus and must match the topology-aware allocation above.
+    return (
+        sample.get("server_cpuset") == legacy_server
+        and sample.get("subject_cpuset") == legacy_subject
+    )
+
+
+def format_cpuset(cpus: Iterable[int]) -> str:
+    """Render a cpuset as the compact ``N,M-K`` string docker/the sampler expect.
+
+    Public and shared: evidence_errors above and replay_runtime's resource
+    sampler both format a cpuset from the same allocation, and a divergence
+    between two copies would silently refuse every calibrated measurement.
+    """
+    ordered = sorted(set(cpus))
+    if not ordered:
+        raise ReplayError("cpuset cannot be empty")
+    ranges: list[str] = []
+    start = previous = ordered[0]
+    for cpu in ordered[1:]:
+        if cpu == previous + 1:
+            previous = cpu
+            continue
+        ranges.append(str(start) if start == previous else f"{start}-{previous}")
+        start = previous = cpu
+    ranges.append(str(start) if start == previous else f"{start}-{previous}")
+    return ",".join(ranges)

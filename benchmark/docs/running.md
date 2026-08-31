@@ -77,8 +77,9 @@ tool enforces for you; a missing item surfaces as a provider error mid-campaign.
    in the plan bind what is served. A staged `fixture_uri` also requires that
    digest; staging recomputes it before the server starts. No correctness
    manifest is generated or bound. The worker counts rows inside the container
-   after timing, uploads raw products for manual investigation, computes its
-   final completion code, and publishes `result.json` last. Keep
+   after timing, retains logs, computes its final completion code, and publishes
+   `result.json` last. Native products are uploaded only with
+   `--retain-products`. Keep
    `replay.capacity_status: uncalibrated` until a real diagnostic capacity
    canary has a committed receipt. The staged-fixture provider path separately
    remains `VERIFIED: no` until a committed canary uses `fixture_uri`; a bundled
@@ -226,6 +227,11 @@ Two flags change what a repeated `submit` does with what it finds:
 
 Defaults worth knowing: `--provisioning` is `SPOT`, so preemption is expected
 rather than exceptional. `--network`/`--subnetwork` must be supplied together.
+
+`--retain-products` uploads the native listing product in addition to logs and
+the bound result marker. It is off by default. Enable it before submission for
+any group intended for content verification or manual product inspection; it
+does not retroactively recover a product from a settled row-count-only attempt.
 
 **`--stagger-seconds`** sleeps that long before each submission after the
 launch's first. A plan with several fan-out subjects — several

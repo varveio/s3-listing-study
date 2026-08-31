@@ -155,7 +155,8 @@ when a diagnostic varies cache capacity.
 replay measurements. Set it to `calibrated` only after a real diagnostic
 capacity canary has a committed receipt for this backend and allocation family.
 Replay plans carry no correctness manifest: the worker counts rows in-container,
-retains raw products, and routine reporting reads `result.json` only.
+retains logs and `result.json`, and routine reporting reads that marker only.
+Native product upload is an operator opt-in, not a plan axis.
 
 An image-bundled fixture states `fixture_sha256` alone. A staged fixture states
 both `fixture_uri` and `fixture_sha256`. `fixture_uri` names either one exact

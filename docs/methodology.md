@@ -12,7 +12,7 @@ subjects have now run at smoke on amd64 through the attempt engine: seven
 anonymously and `s3p`, `s3kor`, `s4cmd`, and `ps3` with a scoped credential.
 Those attempts establish that the retired groundwork path worked, not
 correctness: none is bound to the current comparative verifier. The replay path
-records in-container row counts and retains raw products. See
+records in-container row counts, logs, and bound result markers. See
 `../tools/README.md` for per-tool status and `smoke-bucket.md` for the historical
 reference snapshot.
 
@@ -22,6 +22,15 @@ counting, raw-product retention, and receipt export for those exact capsule
 shapes. It is an uncalibrated 2,048-row integration canary, not a comparative
 benchmark, content-verification result, replay-capacity qualification,
 staged-fixture run, or qualification of the other eight capsules.
+
+**Material evidence-retention change — 2026-08-28.** Native listing products
+are no longer uploaded by default. The worker still counts them locally after
+timing, retains stderr and any genuine stdout/setup logs, records replay and
+resource evidence, and uploads `result.json` last. `campaign submit
+--retain-products` opts native products back in for a group that needs content
+investigation or explicit verification. Secret-pattern scanning was removed
+entirely; credential delivery remains scoped to the subject environment and is
+never written into result metadata.
 
 **Protocol note.** The comparative measurement plan predates comparative
 results. The groundwork procedure was improved after the aws-cli and
@@ -377,7 +386,8 @@ screening attempt. Before a replay result can advance or eliminate a candidate:
 
 1. the fixture has an immutable content identity;
 2. the worker records an in-container row count after timing and retains the
-   untouched native product;
+   attempt logs and bound result marker; a run needing content inspection opts
+   into native-product upload before submission;
 3. the complete server image, serving mode, latency treatment, and allocation
    are part of case identity and the receipt;
 4. the attempt retains server meters and interval-aligned cpuset-utilization
@@ -385,6 +395,14 @@ screening attempt. Before a replay result can advance or eliminate a candidate:
    control; and
 5. any known protocol divergence affecting that subject's request pattern is
    fixed or makes the attempt ineligible for comparison.
+
+**CPU-isolation correction, 2026-08-28.** Disjoint logical CPU numbers are not
+enough on an SMT machine. An N4 topology receipt showed that the lower and upper
+halves are sibling threads of the same physical cores; the earlier contiguous
+replay/subject split therefore shared cores. Replay allocations now keep both
+sibling threads of a physical core in one controlled group, and replay and
+subject receive different physical-core sets. Results made under the earlier
+split remain diagnostics but cannot establish subject CPU response.
 
 A diagnostic canary checks the endpoint, backend binding, replay evidence,
 row-count, upload, and result/report path, but creates no comparative timing or
