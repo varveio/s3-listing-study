@@ -13,7 +13,8 @@ from pathlib import Path
 
 from benchmark import gcs
 from benchmark.contract import canonical_json
-from benchmark.replay import REPLAY_METRICS_URL, ReplayConfig, allocation_cpu_sets, format_cpuset
+from benchmark.replay import REPLAY_METRICS_URL, ReplayConfig, allocation_cpu_sets
+from benchmark.replay import format_cpuset as format_cpuset
 
 REPLAY_READINESS_TIMEOUT_S = 600
 REPLAY_HTTP_TIMEOUT_S = 5.0
