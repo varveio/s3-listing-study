@@ -760,6 +760,35 @@ def test_rclone_refuses_an_endpoint_that_breaks_its_quoted_connection_field(
         )
 
 
+def test_s3_fast_list_fixture_hints_digest_is_a_declared_config_key() -> None:
+    """``hints_file_sha256`` binds the staged hints companion (gcp_batch), the
+    same way s5cmd declares ``shard_file_sha256`` for its fixture fanout: this
+    build never reads it, but a plan setting it must not be refused as an
+    unknown config key.
+    """
+    adapter = load_command_adapter(adapter_path("s3-fast-list"))
+    command = adapter.compile(
+        CommandRequest(
+            "list-hinted-fixture",
+            BUCKET,
+            REGION,
+            tool="s3-fast-list",
+            config={"concurrency": 100, "segments": 1000, "hints_file_sha256": "a" * 64},
+            sink_dir=SINK,
+        )
+    )
+    assert command == adapter.compile(
+        CommandRequest(
+            "list-hinted-fixture",
+            BUCKET,
+            REGION,
+            tool="s3-fast-list",
+            config={"concurrency": 100, "segments": 1000},
+            sink_dir=SINK,
+        )
+    )
+
+
 def test_s3_fast_list_local_split_does_not_receive_the_remote_endpoint() -> None:
     adapter = load_command_adapter(adapter_path("s3-fast-list"))
     ordinary = adapter.compile(
@@ -799,7 +828,7 @@ def test_s5cmd_fanout_accepts_disjoint_complete_prefixes() -> None:
             tool="s5cmd",
             config={
                 "concurrency": 8,
-                "shard_prefixes": "blend.2020_blend.2021_index.html",
+                "shard_prefixes": "blend.2020,blend.2021,index.html",
             },
         )
     )
@@ -808,6 +837,25 @@ def test_s5cmd_fanout_accepts_disjoint_complete_prefixes() -> None:
     assert "blend.2021" in command
     assert "index.html" in command
     assert command[command.index("--numworkers") + 1] == "8"
+
+
+def test_s5cmd_fanout_shard_prefixes_can_contain_underscores() -> None:
+    # SAFE_PREFIX admits '_', so the separator must not: a comma-separated
+    # list is the only encoding that keeps an underscore-bearing S3 key
+    # prefix (e.g. "index_blend") expressible as a single shard.
+    adapter = load_command_adapter(adapter_path("s5cmd"))
+    command = adapter.compile(
+        CommandRequest(
+            "fanout-with-dirs",
+            BUCKET,
+            REGION,
+            tool="s5cmd",
+            config={"shard_prefixes": "index_blend,blend.2020"},
+        )
+    )
+    assert command.count("--shard") == 2
+    assert "index_blend" in command
+    assert "blend.2020" in command
 
 
 def test_ps3_renders_the_prefix_discovery_cutoff() -> None:
@@ -1215,6 +1263,83 @@ def test_s5cmd_fanout_reads_fixture_shards(tmp_path: Path) -> None:
         "ls -e -s 's3://bucket-x/blend.20200101*'",
         "ls -e -s 's3://bucket-x/index.html*'",
     ]
+
+
+def _run_fanout_shard_file(tmp_path: Path, contents: bytes) -> subprocess.CompletedProcess[str]:
+    shards = tmp_path / "s5cmd-shards.input"
+    shards.write_bytes(contents)
+    wrapper = ROOT / "tools/s5cmd/adapter/fanout.py"
+    return subprocess.run(
+        [
+            "/usr/bin/python3",
+            str(wrapper),
+            "--s5cmd",
+            "/bin/true",
+            "--bucket",
+            BUCKET,
+            "--shard-file",
+            str(shards),
+            "--numworkers",
+            "64",
+        ],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+
+def test_s5cmd_fanout_shard_file_refuses_duplicate_shards(tmp_path: Path) -> None:
+    done = _run_fanout_shard_file(tmp_path, b"blend.2020\nindex.html\nblend.2020\n")
+    assert done.returncode != 0
+    assert "repeat" in done.stderr
+
+
+def test_s5cmd_fanout_shard_file_tolerates_crlf_line_endings(tmp_path: Path) -> None:
+    # Text-mode universal-newline reading normalizes CRLF to '\n' before
+    # rstrip("\n") runs, so a CRLF-authored shard file compiles to clean
+    # prefixes rather than a glob with a trailing '\r' that would silently
+    # match nothing; SAFE_SHARD is the backstop for a '\r' that survives
+    # regardless (e.g. a future change to the read mode).
+    shards = tmp_path / "s5cmd-shards.input"
+    shards.write_bytes(b"blend.2020\r\nindex.html\r\n")
+    fake = tmp_path / "fake-s5cmd"
+    fake.write_text(
+        "#!/usr/bin/python3\n"
+        "import json, sys\n"
+        "with open(sys.argv[-1], encoding='utf-8') as source:\n"
+        "    print(json.dumps({'commands': source.read()}))\n",
+        encoding="utf-8",
+    )
+    fake.chmod(0o755)
+    wrapper = ROOT / "tools/s5cmd/adapter/fanout.py"
+    done = subprocess.run(
+        [
+            "/usr/bin/python3",
+            str(wrapper),
+            "--s5cmd",
+            str(fake),
+            "--bucket",
+            BUCKET,
+            "--shard-file",
+            str(shards),
+            "--numworkers",
+            "64",
+        ],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    assert done.returncode == 0, done.stderr
+    assert json.loads(done.stdout)["commands"].splitlines() == [
+        "ls -e -s 's3://bucket-x/blend.2020*'",
+        "ls -e -s 's3://bucket-x/index.html*'",
+    ]
+
+
+def test_s5cmd_fanout_shard_file_refuses_unsafe_characters(tmp_path: Path) -> None:
+    done = _run_fanout_shard_file(tmp_path, b"blend.2020\nin*dex\n")
+    assert done.returncode != 0
+    assert "safe prefixes" in done.stderr
 
 
 @pytest.mark.parametrize("shards", ["00", "a,a", "a*", "", "雪"])

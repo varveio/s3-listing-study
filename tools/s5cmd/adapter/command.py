@@ -140,10 +140,11 @@ def _fanout_shards(request: CommandRequest) -> tuple[str, ...]:
                 f"{TOOL} fanout states both shard_initials and shard_prefixes"
             )
         if not isinstance(raw_prefixes, str):
-            raise CommandAdapterError(
-                f"{TOOL} shard_prefixes must be an underscore-separated string"
-            )
-        shards = tuple(raw_prefixes.split("_"))
+            raise CommandAdapterError(f"{TOOL} shard_prefixes must be a comma-separated string")
+        # ',' is not in SAFE_PREFIX, so a shard can never contain the
+        # separator itself -- unlike '_', which is a legal S3 key character
+        # and would make an underscore-bearing prefix inexpressible.
+        shards = tuple(raw_prefixes.split(","))
         if not shards or any(SAFE_PREFIX.fullmatch(shard) is None for shard in shards):
             raise CommandAdapterError(
                 f"{TOOL} shard_prefixes must contain non-empty safe prefixes: {raw_prefixes!r}"

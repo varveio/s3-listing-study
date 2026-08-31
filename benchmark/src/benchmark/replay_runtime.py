@@ -13,7 +13,7 @@ from pathlib import Path
 
 from benchmark import gcs
 from benchmark.contract import canonical_json
-from benchmark.replay import REPLAY_METRICS_URL, ReplayConfig, allocation_cpu_sets
+from benchmark.replay import REPLAY_METRICS_URL, ReplayConfig, allocation_cpu_sets, format_cpuset
 
 REPLAY_READINESS_TIMEOUT_S = 600
 REPLAY_HTTP_TIMEOUT_S = 5.0
@@ -165,8 +165,8 @@ def _resource_sample(
             "elapsed_s": round(elapsed_s, 3),
             "interval_s": round(interval_s, 3),
             "box_vcpus": box_vcpus,
-            "server_cpuset": _format_cpuset(server_cpus),
-            "subject_cpuset": _format_cpuset(subject_cpus),
+            "server_cpuset": format_cpuset(server_cpus),
+            "subject_cpuset": format_cpuset(subject_cpus),
             "server_cpuset_utilization": round(server_util, 6),
             "server_cores_used": round(server_util * len(server_cpus), 3),
             "subject_cpuset_utilization": round(subject_util, 6),
@@ -253,17 +253,3 @@ def sample_metrics(
                 assert isinstance(errors, list)
                 errors.append({"phase": "heartbeat-upload", "uri": uri, "error": str(exc)})
             next_heartbeat_s += REPLAY_HEARTBEAT_INTERVAL_S
-
-
-def _format_cpuset(cpus: set[int]) -> str:
-    ordered = sorted(cpus)
-    ranges: list[str] = []
-    start = previous = ordered[0]
-    for cpu in ordered[1:]:
-        if cpu == previous + 1:
-            previous = cpu
-            continue
-        ranges.append(str(start) if start == previous else f"{start}-{previous}")
-        start = previous = cpu
-    ranges.append(str(start) if start == previous else f"{start}-{previous}")
-    return ",".join(ranges)

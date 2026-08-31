@@ -5,7 +5,16 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shlex
+
+# Mirrors command.py's SAFE_PREFIX charset so a hand-made --shard-file gets
+# the same refusals as --shard: no empty/unsafe prefixes, no shell-glob
+# metacharacters. '\r' is deliberately excluded from this charset too: text
+# mode's universal-newline read already normalizes CRLF/CR line endings to
+# '\n' before rstrip("\n") runs, but this is the backstop that would refuse
+# a stray '\r' rather than fold it into a glob that quietly matches nothing.
+SAFE_SHARD = re.compile(r"\A[A-Za-z0-9._/-]+\Z")
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -36,8 +45,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.shard_file:
         with open(args.shard_file, encoding="utf-8") as source:
             shards = [line.rstrip("\n") for line in source]
-        if not shards or any(not shard for shard in shards):
-            raise SystemExit("shard file must contain non-empty prefixes")
+        if not shards or any(SAFE_SHARD.fullmatch(shard) is None for shard in shards):
+            raise SystemExit(f"shard file must contain non-empty safe prefixes: {shards!r}")
+        if len(set(shards)) != len(shards):
+            raise SystemExit(f"shard file must not repeat a shard: {shards!r}")
     assert shards is not None
     payload = commands(args.bucket, args.prefix, shards)
 

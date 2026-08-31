@@ -123,6 +123,18 @@ def test_n4_allocation_keeps_replay_and_subject_on_separate_physical_cores(
     assert set(server).isdisjoint(subject)
 
 
+def test_format_cpuset_is_the_one_formatter_replay_runtime_shares() -> None:
+    """The sampler's resource_samples and evidence_errors' cpuset comparison must
+    read off one formatter, or a silent divergence would refuse every
+    calibrated measurement (`replay_runtime.sample_metrics`,
+    `replay._resource_sample_matches_allocation`).
+    """
+    from benchmark import replay_runtime
+
+    assert replay.format_cpuset({4, 1, 2, 7, 8, 9}) == "1-2,4,7-9"
+    assert replay_runtime.format_cpuset is replay.format_cpuset
+
+
 def test_fixture_manifest_binds_names_sizes_and_bytes(tmp_path: Path) -> None:
     (tmp_path / "b.parquet").write_bytes(b"second")
     (tmp_path / "a.parquet").write_bytes(b"first")

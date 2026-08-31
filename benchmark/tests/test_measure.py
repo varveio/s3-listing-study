@@ -1136,6 +1136,14 @@ MODES = {
         product_artifact="listing",
         product_channel="file",
     ),
+    "symlinks": Mode(
+        product="parquet",
+        fields=("key",),
+        axes={"segments": Stated()},
+        artifacts={"listing": "listing.parquet"},
+        product_artifact="listing",
+        product_channel="file",
+    ),
 }
 
 
@@ -1162,6 +1170,13 @@ def build_command(request: CommandRequest) -> tuple[str, ...]:
         return (sys.executable, "-c", "pass")
     if request.mode == "dies":
         return (sys.executable, "-c", "raise SystemExit(9)")
+    if request.mode == "symlinks":
+        return (
+            sys.executable,
+            str(here / "symlinks.py"),
+            request.artifact_path,
+            request.sink_dir + "/listing.parquet",
+        )
     return (sys.executable, str(here / "subject.py"), request.artifact_path, request.sink_dir)
 
 
@@ -1215,6 +1230,19 @@ Path(sys.argv[2]).write_text(Path(sys.argv[1]).read_text())
 print("wrote the listing")
 """
 
+SYMLINKS_SUBJECT = """\
+import sys
+from pathlib import Path
+
+# Writes its declared product like any other file-channel subject, then also
+# leaves a symlink beside it in native/ -- the shape a misbehaving (or hostile)
+# subject can leave behind that `retained_files` refuses to publish.
+product = Path(sys.argv[2])
+product.write_text(Path(sys.argv[1]).read_text())
+product.with_name("stray-link").symlink_to(product)
+print("wrote the listing")
+"""
+
 INLINE_SPLIT = (
     """\
 import sys
@@ -1238,6 +1266,7 @@ def inline_capsule(tmp_path: Path, split: str = INLINE_SPLIT) -> Path:
     (adapter / "split.py").write_text(split, encoding="utf-8")
     (adapter / "prints.py").write_text(PRINTS_SUBJECT, encoding="utf-8")
     (adapter / "writes.py").write_text(WRITES_SUBJECT, encoding="utf-8")
+    (adapter / "symlinks.py").write_text(SYMLINKS_SUBJECT, encoding="utf-8")
     return tmp_path / "tools"
 
 
@@ -1531,6 +1560,7 @@ def test_a_product_lands_under_its_declared_name_whichever_channel_carries_it(
     timings = printed["postprocessing_seconds"]
     assert set(timings) == {
         "replay_evidence_finalize",
+        "secret_scan",
         "row_count",
         "capture_finalize",
         "native_manifest",
@@ -1550,6 +1580,41 @@ def test_a_product_lands_under_its_declared_name_whichever_channel_carries_it(
     # Its stdout is a genuine log, and is captured as one.
     assert written["stdout"]["name"] == "stdout.log.gz"
     assert (tmp_path / "writes/attempt/stdout.log.gz").exists()
+
+
+def test_a_symlink_left_in_native_refuses_cleanly_instead_of_crashing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`native_manifest`/`artifacts_size_bytes` walk retained_files after the timed
+    run, which raises ArtifactSafetyError on a symlink a subject left in native/.
+    Uncaught, that is a traceback after the run with no result.json published at
+    all; the worker must instead give the same classified refusal an unusable
+    product gets, on EXIT_ARTIFACT_UNUSABLE, with nothing uploaded.
+
+    The restored secret scan also walks native/ when products are retained and
+    would refuse this same symlink first (a real, and separately tested,
+    defense) -- disabled here to isolate the guard this test targets.
+    """
+    monkeypatch.setattr(measure, "scan_for_secrets", lambda _paths: None)
+    code = run_inline_worker(tmp_path, monkeypatch, mode="symlinks")
+    assert code == measure.EXIT_ARTIFACT_UNUSABLE
+    assert "measure: retained output is not publishable" in capsys.readouterr().err
+    # The marker-last contract: a refusal this late publishes nothing, rather
+    # than a marker describing bytes nothing proved safe.
+    assert not (tmp_path / "attempt/result.json").exists()
+
+
+def test_a_symlink_left_in_native_is_refused_by_the_secret_scan_first(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """With both guards live, the earlier secret scan is what a real run hits:
+    it also walks native/ under retain-products, fails closed on the same
+    unprovable symlink, and refuses before the run ever reaches
+    `native_manifest`/`artifacts_size_bytes`."""
+    code = run_inline_worker(tmp_path, monkeypatch, mode="symlinks")
+    assert code == measure.EXIT_SECRET_DETECTED
+    assert "measure: possible secret in" in capsys.readouterr().err
+    assert not (tmp_path / "attempt/result.json").exists()
 
 
 def test_a_preparation_publishes_no_measured_product_even_in_a_measuring_mode(

@@ -15,6 +15,11 @@ from benchmark.runtime.command_adapter import (
 )
 
 TOOL = "s3-fast-list"
+CONFIG_KEYS = frozenset({"hints_file_sha256"})
+"""``hints_file_sha256`` binds ``list-hinted-fixture`` to its staged hints
+companion (``benchmark.drivers.gcp_batch``), the same way s5cmd's
+``shard_file_sha256`` binds its fixture-backed fanout; this build never reads
+it, since the digest check runs before the subject starts."""
 S3_FAST_LIST = Executable("s3-fast-list", ("/usr/bin/s3-fast-list",))
 KS_TOOL = Executable("ks-tool", ("/usr/bin/ks-tool",))
 """The hints generator, the second crate of the same Cargo workspace.

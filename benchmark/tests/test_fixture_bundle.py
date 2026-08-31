@@ -1,0 +1,65 @@
+"""``fixture_bundle``'s s5cmd shard union must actually be disjoint.
+
+Fanout renders every shard as an unslashed ``s3://bucket/{shard}*`` glob, so a
+shard that is a string prefix of another (``v1``/``v10``,
+``index.html``/``index.html.bak``) would double-list every key under the
+shorter one -- silently contradicting the "complete, disjoint" union the
+manifest and README claim.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import duckdb
+import pytest
+
+from benchmark.fixture_bundle import FixtureBundleError, _generate_s5cmd_shards
+
+
+def _write_fixture(data_dir: Path, keys: tuple[str, ...]) -> None:
+    data_dir.mkdir(parents=True, exist_ok=True)
+    path = data_dir / "part-00000.parquet"
+    values = ", ".join(f"('{key}')" for key in keys)
+    with duckdb.connect() as connection:
+        connection.execute(
+            f"""
+            COPY (
+                SELECT encode(k) AS key, 'OBJECT' AS row_type
+                FROM (VALUES {values}) AS t(k)
+            ) TO '{path}' (FORMAT PARQUET)
+            """
+        )
+
+
+def test_colliding_top_level_shards_are_refused(tmp_path: Path) -> None:
+    """``v1`` prefixes ``v10``: a fanout `s3://bucket/v1*` glob would also match
+    every key under ``v10/``, so the two shards are not disjoint.
+    """
+    data_dir = tmp_path / "data"
+    _write_fixture(data_dir, ("v1/a.dat", "v10/b.dat", "v2/c.dat"))
+
+    with pytest.raises(FixtureBundleError, match="not prefix-free"):
+        _generate_s5cmd_shards(data_dir, tmp_path / "s5cmd-shards.input")
+
+
+def test_colliding_dotted_top_level_shards_are_refused(tmp_path: Path) -> None:
+    """The same collision as it would actually occur: an object and its
+    ``.bak`` sibling sharing a bucket root.
+    """
+    data_dir = tmp_path / "data"
+    _write_fixture(data_dir, ("index.html", "index.html.bak/x"))
+
+    with pytest.raises(FixtureBundleError, match="not prefix-free"):
+        _generate_s5cmd_shards(data_dir, tmp_path / "s5cmd-shards.input")
+
+
+def test_disjoint_top_level_shards_are_accepted(tmp_path: Path) -> None:
+    data_dir = tmp_path / "data"
+    _write_fixture(data_dir, ("alpha/a.dat", "beta/b.dat", "gamma/c.dat"))
+    output = tmp_path / "s5cmd-shards.input"
+
+    summary = _generate_s5cmd_shards(data_dir, output)
+
+    assert summary["shards"] == 3
+    assert output.read_text() == "alpha\nbeta\ngamma\n"

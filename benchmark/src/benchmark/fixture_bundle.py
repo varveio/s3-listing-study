@@ -252,6 +252,15 @@ def _generate_s5cmd_shards(data_dir: Path, output: Path) -> dict[str, object]:
         ]
     if not shards or any(SAFE_S5CMD_SHARD_RE.fullmatch(shard) is None for shard in shards):
         raise FixtureBundleError("fixture has an empty or unsafe s5cmd top-level shard")
+    # Fanout renders each shard as an unslashed `{shard}*` glob, so one shard
+    # that is a string prefix of the next (`v1`/`v10`, `index.html`/
+    # `index.html.bak`) would double-list every key under the shorter one.
+    # `shards` is sorted, so a collision is always adjacent.
+    for previous, current in zip(shards, shards[1:], strict=False):
+        if current.startswith(previous):
+            raise FixtureBundleError(
+                f"fixture s5cmd shards are not prefix-free: {previous!r} prefixes {current!r}"
+            )
     output.write_text("".join(f"{shard}\n" for shard in shards))
     return {"name": S5CMD_SHARDS_NAME, "shards": len(shards), "sha256": _sha256_file(output)}
 

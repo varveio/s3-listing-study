@@ -214,6 +214,7 @@ def _fixture_staging_script(
     expected_sha256: str,
     *,
     hints_uri: str | None = None,
+    hints_sha256: str | None = None,
     s5cmd_shards_uri: str | None = None,
     s5cmd_shards_sha256: str | None = None,
 ) -> str:
@@ -221,7 +222,9 @@ def _fixture_staging_script(
 
     The digest is over sorted ``name<TAB>size<TAB>sha256<NL>`` rows for the
     immediate ``*.parquet`` children. The check runs before the replay server
-    starts, so mutable storage can serve only the bytes the case named.
+    starts, so mutable storage can serve only the bytes the case named. The
+    s3-fast-list hints companion and the s5cmd shards companion are each
+    digest-bound the same way: neither is trusted on emptiness alone.
     """
     destination = shlex.quote(REPLAY_FIXTURE_CONTAINER_DIR)
     source = shlex.quote(uri)
@@ -244,13 +247,18 @@ def _fixture_staging_script(
         'rm -f "$manifest"',
     ]
     if hints_uri is not None:
+        assert hints_sha256 is not None
         hints_source = shlex.quote(hints_uri)
         hints_path = f"{destination}/{REPLAY_FIXTURE_HINTS_NAME}"
+        hints_expected = shlex.quote(hints_sha256)
         commands.extend(
             (
                 f"gcloud storage cp {hints_source} {hints_path}",
                 f"[[ -s {hints_path} ]] || "
                 '{ echo "fixture hints are missing or empty" >&2; exit 1; }',
+                f'actual="$(sha256sum {hints_path})"; actual="${{actual%% *}}"',
+                f'[[ "$actual" == {hints_expected} ]] || '
+                '{ echo "fixture hints digest mismatch: $actual" >&2; exit 1; }',
                 f"IFS= read -r first_hint < {hints_path}",
                 '[[ -n "$first_hint" ]] || '
                 '{ echo "fixture hints begin with an empty cut point" >&2; exit 1; }',
@@ -336,6 +344,20 @@ def render_batch_job(
         mode = subject_config.get("mode")
         fixture_hints = attempt.tool == "s3-fast-list" and mode == "list-hinted-fixture"
         fixture_s5cmd_shards = attempt.tool == "s5cmd" and mode == "fanout-fixture-with-dirs"
+        if (fixture_hints or fixture_s5cmd_shards) and replay.backend.fixture_uri is None:
+            # Otherwise this renders and submits cleanly, and the subject dies at
+            # runtime on a companion path staging never mounted -- a burned VM
+            # instead of a refusal here, before anything is spent.
+            raise CampaignError(
+                f"fixture-companion mode {mode!r} requires a staged fixture bundle: "
+                "replay.backend.fixture_uri must end in part-*.parquet"
+            )
+        hints_file_sha256 = subject_config.get("hints_file_sha256")
+        if fixture_hints and (
+            not isinstance(hints_file_sha256, str)
+            or SHA256_RE.fullmatch(hints_file_sha256) is None
+        ):
+            raise CampaignError("fixture-backed s3-fast-list requires config.hints_file_sha256")
         s5cmd_shards_sha256 = subject_config.get("shard_file_sha256")
         if fixture_s5cmd_shards and (
             not isinstance(s5cmd_shards_sha256, str)
@@ -416,6 +438,7 @@ def render_batch_job(
                             backend.fixture_uri,
                             backend.fixture_sha256,
                             hints_uri=hints_uri,
+                            hints_sha256=(hints_file_sha256 if fixture_hints else None),
                             s5cmd_shards_uri=s5cmd_shards_uri,
                             s5cmd_shards_sha256=(
                                 s5cmd_shards_sha256 if fixture_s5cmd_shards else None

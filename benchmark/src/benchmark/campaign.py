@@ -437,6 +437,11 @@ def worker_argument_pairs(
 ) -> tuple[tuple[str, str], ...]:
     """Render one worker request independently of its container executor."""
     memory = attempt.container_memory_gb
+    # A preparation's whole purpose is publishing native/ for a later case's
+    # REQUIRES chain (`produced_artifact` reads native_manifest); an operator's
+    # false default must not starve that chain of the artifact it exists to
+    # produce, so a preparation attempt always retains regardless of the flag.
+    retains = retain_products or attempt.purpose == "preparation"
     pairs = (
         ("--tool", attempt.tool),
         ("--mode", str(json.loads(attempt.config)["mode"])),
@@ -449,7 +454,7 @@ def worker_argument_pairs(
         ("--destination", destination),
         ("--timeout", str(attempt.timeout_s)),
         ("--term-grace", str(term_grace)),
-        ("--retain-products", "true" if retain_products else "false"),
+        ("--retain-products", "true" if retains else "false"),
         ("--image", image["image_uri"]),
         ("--toolbox-manifest-sha256", image["toolbox_manifest_sha256"]),
         ("--toolbox-recipe-sha256", image["toolbox_recipe_sha256"]),

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import math
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
 from benchmark.contract import canonical_json
@@ -212,8 +212,8 @@ def evidence_errors(config: ReplayConfig, evidence: object, *, purpose: str) -> 
         resources = evidence.get("resource_samples")
         if not isinstance(samples, list) or not samples:
             errors.append("calibrated replay measurement has no interval metrics sample")
-        legacy_server = _cpuset(range(config.allocation.replay_vcpus))
-        legacy_subject = _cpuset(
+        legacy_server = format_cpuset(range(config.allocation.replay_vcpus))
+        legacy_subject = format_cpuset(
             range(
                 config.allocation.replay_vcpus,
                 config.allocation.replay_vcpus + config.allocation.subject_vcpus,
@@ -413,8 +413,8 @@ def allocation_summary(
         raise ReplayError("replay and subject memory ceilings leave no host memory headroom")
     server_cpus, subject_cpus = allocation_cpu_sets(allocation, box_vcpus=box_vcpus)
     return ReplayAllocationSummary(
-        server_cpuset=_cpuset(server_cpus),
-        subject_cpuset=_cpuset(subject_cpus),
+        server_cpuset=format_cpuset(server_cpus),
+        subject_cpuset=format_cpuset(subject_cpus),
         host_vcpus=host_vcpus,
         host_memory_headroom_gb=host_memory,
     )
@@ -465,9 +465,9 @@ def _resource_sample_matches_allocation(
             server, subject = allocation_cpu_sets(allocation, box_vcpus=box_vcpus)
         except ReplayError:
             return False
-        return sample.get("server_cpuset") == _cpuset(server) and sample.get(
+        return sample.get("server_cpuset") == format_cpuset(server) and sample.get(
             "subject_cpuset"
-        ) == _cpuset(subject)
+        ) == format_cpuset(subject)
     # Receipts written before topology-aware allocation did not retain the box
     # width. Continue to read those historical resource samples; new samples
     # always carry box_vcpus and must match the topology-aware allocation above.
@@ -477,7 +477,13 @@ def _resource_sample_matches_allocation(
     )
 
 
-def _cpuset(cpus: Sequence[int]) -> str:
+def format_cpuset(cpus: Iterable[int]) -> str:
+    """Render a cpuset as the compact ``N,M-K`` string docker/the sampler expect.
+
+    Public and shared: evidence_errors above and replay_runtime's resource
+    sampler both format a cpuset from the same allocation, and a divergence
+    between two copies would silently refuse every calibrated measurement.
+    """
     ordered = sorted(set(cpus))
     if not ordered:
         raise ReplayError("cpuset cannot be empty")

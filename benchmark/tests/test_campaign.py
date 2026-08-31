@@ -384,6 +384,121 @@ def test_renderer_refuses_malformed_frozen_replay_allocation(
         )
 
 
+def _fixture_backed_attempt(
+    tmp_path: Path, *, tool: str, mode: str
+) -> tuple[ledger.Attempt, campaign.ImageSet, gcp_batch.BatchOptions, Plan]:
+    """A replay-backed attempt from the runner canary, respelled onto a
+    fixture-companion mode and tool -- exercising `render_batch_job` in
+    isolation the same way `test_renderer_refuses_malformed_frozen_replay_allocation`
+    does, without depending on any other committed plan's own case shape.
+    """
+    plan = Plan.load(REPLAY_CANARY)
+    base = plan.cases[0]
+    assert base.tool == "s3-fast-list" and base.replay is not None
+    images = image_set(tmp_path)
+    attempt = campaign.planned_attempt(base, context(plan, base, images))[2](1)[0]
+    fixture = replace(
+        base.replay,
+        backend=replace(
+            base.replay.backend,
+            fixture_uri="gs://fixtures/case/part-*.parquet",
+            fixture_sha256="e" * 64,
+        ),
+    )
+    config = json.loads(attempt.config)
+    config["mode"] = mode
+    respelled = replace(
+        attempt,
+        tool=tool,
+        config=json.dumps(config, sort_keys=True, separators=(",", ":")),
+        replay=fixture.canonical_json(),
+    )
+    return respelled, images, context(plan, base, images).options, plan
+
+
+def _without_fixture_uri(attempt: ledger.Attempt) -> ledger.Attempt:
+    """Respell an attempt's resolved replay onto an image-baked backend."""
+    assert attempt.replay is not None
+    document = json.loads(attempt.replay)
+    del document["backend"]["fixture_uri"]
+    return replace(attempt, replay=json.dumps(document, sort_keys=True, separators=(",", ":")))
+
+
+def test_a_fixture_companion_mode_without_a_staged_fixture_is_refused_at_render_time(
+    tmp_path: Path,
+) -> None:
+    """A plan pairing list-hinted-fixture with an image-baked replay backend --
+    no fixture_uri, so staging never runs and the companion is never mounted --
+    must be refused here, before a VM is ever submitted to die on the missing
+    /fixtures/source path.
+    """
+    attempt, images, options, _ = _fixture_backed_attempt(
+        tmp_path, tool="s3-fast-list", mode="list-hinted-fixture"
+    )
+    config = json.loads(attempt.config)
+    config["hints_file_sha256"] = "a" * 64
+    attempt = _without_fixture_uri(
+        replace(attempt, config=json.dumps(config, sort_keys=True, separators=(",", ":")))
+    )
+
+    with pytest.raises(ledger.CampaignError, match="fixture-companion mode"):
+        gcp_batch.render_batch_job(attempt, images.image_for("s3-fast-list"), suite=SUITE, options=options)
+
+
+def test_fixture_backed_s5cmd_without_a_staged_fixture_is_refused_at_render_time(
+    tmp_path: Path,
+) -> None:
+    attempt, images, options, _ = _fixture_backed_attempt(
+        tmp_path, tool="s5cmd", mode="fanout-fixture-with-dirs"
+    )
+    config = json.loads(attempt.config)
+    config["shard_file_sha256"] = "b" * 64
+    attempt = _without_fixture_uri(
+        replace(attempt, config=json.dumps(config, sort_keys=True, separators=(",", ":")))
+    )
+
+    with pytest.raises(ledger.CampaignError, match="fixture-companion mode"):
+        gcp_batch.render_batch_job(attempt, images.image_for("s5cmd"), suite=SUITE, options=options)
+
+
+def test_fixture_hints_mode_without_a_declared_digest_is_refused_at_render_time(
+    tmp_path: Path,
+) -> None:
+    """A staged fixture is present, but no `hints_file_sha256` was declared --
+    the same gap the committed nbm-replay plan has today; the operator copies
+    the digest from the bundle's fixture.json before submitting.
+    """
+    attempt, images, options, _ = _fixture_backed_attempt(
+        tmp_path, tool="s3-fast-list", mode="list-hinted-fixture"
+    )
+
+    with pytest.raises(ledger.CampaignError, match="hints_file_sha256"):
+        gcp_batch.render_batch_job(attempt, images.image_for("s3-fast-list"), suite=SUITE, options=options)
+
+
+def test_fixture_hints_companion_is_digest_bound_in_the_staging_script(tmp_path: Path) -> None:
+    """Symmetric with the s5cmd shards companion: the hints companion is staged
+    only after its own sha256 checks out, not merely on `[[ -s ]]` and a
+    non-empty first line.
+    """
+    attempt, images, options, _ = _fixture_backed_attempt(
+        tmp_path, tool="s3-fast-list", mode="list-hinted-fixture"
+    )
+    config = json.loads(attempt.config)
+    config["hints_file_sha256"] = "c" * 64
+    attempt = replace(attempt, config=json.dumps(config, sort_keys=True, separators=(",", ":")))
+
+    request = gcp_batch.render_batch_job(
+        attempt, images.image_for("s3-fast-list"), suite=SUITE, options=options
+    )
+
+    stage = request["taskGroups"][0]["taskSpec"]["runnables"][0]
+    script = stage["container"]["commands"][1]
+    assert "s3-fast-list-hints.input" in script
+    assert '[[ "$actual" == ' + "c" * 64 + " ]]" in script
+    assert "fixture hints digest mismatch" in script
+
+
 def test_two_cases_hashing_to_one_case_id_are_refused(
     submitted: tuple[sqlite3.Connection, Plan, Case, campaign.ImageSet],
 ) -> None:
@@ -500,6 +615,39 @@ def rendered_request(tmp_path: Path, **overrides: Any) -> tuple[ledger.Attempt, 
     _, _, build = campaign.planned_attempt(case, context(plan, case, images, **overrides))
     attempt, request = build(1)
     return attempt, cast(dict[str, Any], json.loads(request))
+
+
+def test_a_preparation_attempt_always_retains_products(tmp_path: Path) -> None:
+    """A preparation's whole purpose is the native/ artifact its REQUIRES chain
+    needs (`produced_artifact`), so its worker must not skip uploading it just
+    because the operator left `--retain-products` at its false default."""
+    plan = loaded_plan()
+    case = any_case(plan)
+    assert case.purpose == "measurement"
+    images = image_set(tmp_path)
+    _, _, build = campaign.planned_attempt(case, context(plan, case, images))
+    attempt, _ = build(1)
+    image = images.image_for(attempt.tool)
+
+    def retain_products_flag(attempt: ledger.Attempt, *, retain_products: bool) -> str:
+        pairs = dict(
+            campaign.worker_argument_pairs(
+                attempt,
+                image,
+                output="/tmp/out",
+                destination="gs://d/",
+                term_grace=5.0,
+                retain_products=retain_products,
+            )
+        )
+        return pairs["--retain-products"]
+
+    assert retain_products_flag(attempt, retain_products=False) == "false"
+
+    preparation = replace(attempt, purpose="preparation")
+    assert retain_products_flag(preparation, retain_products=False) == "true"
+    # The operator flag still works, and does not double up with purpose.
+    assert retain_products_flag(preparation, retain_products=True) == "true"
 
 
 def test_a_dry_run_renders_every_planned_attempt_and_writes_nothing(
