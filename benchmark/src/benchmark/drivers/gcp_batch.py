@@ -354,8 +354,7 @@ def render_batch_job(
             )
         hints_file_sha256 = subject_config.get("hints_file_sha256")
         if fixture_hints and (
-            not isinstance(hints_file_sha256, str)
-            or SHA256_RE.fullmatch(hints_file_sha256) is None
+            not isinstance(hints_file_sha256, str) or SHA256_RE.fullmatch(hints_file_sha256) is None
         ):
             raise CampaignError("fixture-backed s3-fast-list requires config.hints_file_sha256")
         s5cmd_shards_sha256 = subject_config.get("shard_file_sha256")

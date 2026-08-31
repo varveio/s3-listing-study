@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import itertools
 import json
 import os
 import platform
@@ -256,7 +257,7 @@ def _generate_s5cmd_shards(data_dir: Path, output: Path) -> dict[str, object]:
     # that is a string prefix of the next (`v1`/`v10`, `index.html`/
     # `index.html.bak`) would double-list every key under the shorter one.
     # `shards` is sorted, so a collision is always adjacent.
-    for previous, current in zip(shards, shards[1:], strict=False):
+    for previous, current in itertools.pairwise(shards):
         if current.startswith(previous):
             raise FixtureBundleError(
                 f"fixture s5cmd shards are not prefix-free: {previous!r} prefixes {current!r}"

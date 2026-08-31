@@ -442,7 +442,9 @@ def test_a_fixture_companion_mode_without_a_staged_fixture_is_refused_at_render_
     )
 
     with pytest.raises(ledger.CampaignError, match="fixture-companion mode"):
-        gcp_batch.render_batch_job(attempt, images.image_for("s3-fast-list"), suite=SUITE, options=options)
+        gcp_batch.render_batch_job(
+            attempt, images.image_for("s3-fast-list"), suite=SUITE, options=options
+        )
 
 
 def test_fixture_backed_s5cmd_without_a_staged_fixture_is_refused_at_render_time(
@@ -473,7 +475,9 @@ def test_fixture_hints_mode_without_a_declared_digest_is_refused_at_render_time(
     )
 
     with pytest.raises(ledger.CampaignError, match="hints_file_sha256"):
-        gcp_batch.render_batch_job(attempt, images.image_for("s3-fast-list"), suite=SUITE, options=options)
+        gcp_batch.render_batch_job(
+            attempt, images.image_for("s3-fast-list"), suite=SUITE, options=options
+        )
 
 
 def test_fixture_hints_companion_is_digest_bound_in_the_staging_script(tmp_path: Path) -> None:
