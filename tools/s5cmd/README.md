@@ -2,7 +2,12 @@
 
 [s5cmd](https://github.com/peak/s5cmd) is a Go CLI that lists an S3 bucket by walking one ListObjectsV2 continuation chain, printing each object as a text or JSON row; its worker-pool speed reputation is about transfers, not listing.
 The study runs the upstream project unmodified — anonymous access uses s5cmd's own `--no-sign-request` flag, not a fork or patch.
-This study's groundwork is complete; no benchmark comparison has been run.
+
+> **Study status (2026-09-scale-diagnostics).** This tool's standing in the current release:
+> Reached the 66.4M-object rung with an exact count in 352.2 s, but only with harness-supplied shards (`s5cmd.962211b4b344.s1`).
+> The release is diagnostic: no attempt in it carries `purpose = measurement`, so
+> nothing here is a calibrated benchmark or a ranking. Report and data:
+> [`results/2026-09-scale-diagnostics/REPORT.md`](../../results/2026-09-scale-diagnostics/REPORT.md).
 
 ## At a glance
 

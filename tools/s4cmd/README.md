@@ -2,7 +2,12 @@
 
 [s4cmd](https://github.com/bloomreach/s4cmd) is a single-file Python "super S3 CLI" that lists a bucket by walking its pseudo-directory tree and printing one plain-text `ls` line per object, parallelising the walk through client-side delimiter recursion rather than a caller-supplied shard list.
 It is the canonical bloomreach project rather than a fork, and its last release (`2.1.0`) is dormant — the tag is 2018-era — though it still installs and runs under a current boto3.
-This study's groundwork is complete; no benchmark comparison has been run.
+
+> **Study status (2026-09-scale-diagnostics).** This tool's standing in the current release:
+> No attempt in the current release.
+> The release is diagnostic: no attempt in it carries `purpose = measurement`, so
+> nothing here is a calibrated benchmark or a ranking. Report and data:
+> [`results/2026-09-scale-diagnostics/REPORT.md`](../../results/2026-09-scale-diagnostics/REPORT.md).
 
 ## At a glance
 

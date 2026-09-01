@@ -2,7 +2,12 @@
 
 [s3p](https://github.com/generalui/s3p) ("S3 Parallel") lists an S3 bucket and prints one object key per line, discovering the keyspace by recursive bisection — synthetic midpoint keys and two concurrent ListObjectsV2 calls per range node — instead of the serial continuation-token page loop used by the other tools in this survey. By this study's reading it is the only keyspace bisector among the tools surveyed here — a comparative claim this study has not audited.
 It is an upstream tool published by GenUI; this study tested the npm distribution unmodified rather than a fork.
-This study's groundwork is complete; no benchmark comparison has been run.
+
+> **Study status (2026-09-scale-diagnostics).** This tool's standing in the current release:
+> Reached the 143M-object rung with an exact count in 4,238.8 s at c16 (`s3p.1b77f20ed931.s1`); CPU-bound in its cheapest mode.
+> The release is diagnostic: no attempt in it carries `purpose = measurement`, so
+> nothing here is a calibrated benchmark or a ranking. Report and data:
+> [`results/2026-09-scale-diagnostics/REPORT.md`](../../results/2026-09-scale-diagnostics/REPORT.md).
 
 ## At a glance
 

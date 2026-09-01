@@ -2,7 +2,12 @@
 
 [rclone](https://github.com/rclone/rclone) lists an S3 bucket by paging ListObjectsV2 — either as a single flat recursive chain or as a per-directory hierarchical walk — and prints the result as JSON or delimited text through its `ls*` command family (lsjson/lsf/ls/lsl/lsd).
 It is the upstream rclone project's own general-purpose multi-cloud sync/transfer tool, not a fork, and S3 is one of roughly 70 backends.
-This study's groundwork is complete; no benchmark comparison has been run.
+
+> **Study status (2026-09-scale-diagnostics).** This tool's standing in the current release:
+> Reached the 143M-object rung in 667.0 s at c64 (`rclone.6319ec57665d.s1`), nine rows short of the fixture count; killed at the 8 GiB container limit on the flat fixture.
+> The release is diagnostic: no attempt in it carries `purpose = measurement`, so
+> nothing here is a calibrated benchmark or a ranking. Report and data:
+> [`results/2026-09-scale-diagnostics/REPORT.md`](../../results/2026-09-scale-diagnostics/REPORT.md).
 
 ## At a glance
 

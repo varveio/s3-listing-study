@@ -7,7 +7,12 @@ many `ListObjectsV2` paginations run at once instead of one serial walk.
 Swath is built by Varve, which also maintains this study — a conflict we disclose
 and control for rather than treat as licence to relax the run-record rules; see
 [Varve and Swath](#varve-and-swath).
-This study's groundwork is complete; no benchmark comparison has been run.
+
+> **Study status (2026-09-scale-diagnostics).** This tool's standing in the current release:
+> Reached the 143M-object rung with an exact count in 173.7 s at c256 (`swath.be4140354dd1.s1`); every replay row on the small-directory fixtures is penalised by the instrument's structure-probe defect.
+> The release is diagnostic: no attempt in it carries `purpose = measurement`, so
+> nothing here is a calibrated benchmark or a ranking. Report and data:
+> [`results/2026-09-scale-diagnostics/REPORT.md`](../../results/2026-09-scale-diagnostics/REPORT.md).
 
 ## At a glance
 
