@@ -128,3 +128,35 @@ jobs:
 
       - name: pytest
         run: uv run pytest
+
+  public-release:
+    # Reads only what is committed. The exporter needs the private ledger and
+    # the private evidence store; this gate must not, or "the release is safe"
+    # would be a claim only one machine can check.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+
+      - name: Sync (locked)
+        run: uv sync --locked
+
+      - name: Validate every committed public release
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          found=0
+          for manifest in results/*/manifest.json; do
+            found=1
+            uv run python -m benchmark.public_validate --release-dir "$(dirname "$manifest")"
+          done
+          if [ "$found" -eq 0 ]; then
+            echo "no committed release under results/ -- nothing to validate"
+          fi
