@@ -43,6 +43,9 @@ tools:
     cases:
       # The study's selected width; on a flat root this is one serial page chain regardless of width.
       - {mode: recursive-walk, concurrency: 64, purpose: diagnostic}
+      # 2026-09-01 memory control: the 8 GiB arm was SIGKILLed at 1,402 s with 8.37 GB RSS because
+      # rclone materialises a whole directory before walking it. Same fairness step s3-fast-list got.
+      - {mode: recursive-walk, concurrency: 64, purpose: diagnostic, container_memory_gb: 16}
 
   s7cmd:
     cases:
