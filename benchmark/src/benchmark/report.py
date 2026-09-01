@@ -80,6 +80,7 @@ COLUMNS = (
     "state",
     "evidence_state",
     "replay_state",
+    "replay_timing",
     "exit",
     "worker_exit",
     "row_count",
@@ -184,6 +185,8 @@ def row_for(row: sqlite3.Row, *, adapter_root: str) -> dict[str, Any]:
         "state": row["state"],
         "evidence_state": "UNAVAILABLE",
         "replay_state": "-",
+        "replay_timing": "-",
+        "replay_timing_detail": None,
         "exit": "-",
         "worker_exit": "-",
         "row_count": "-",
@@ -210,17 +213,27 @@ def row_for(row: sqlite3.Row, *, adapter_root: str) -> dict[str, Any]:
     execution = result.get("execution")
     replay_evidence = result.get("replay_evidence")
     replay_state = "-"
+    replay_timing = "-"
+    replay_timing_detail: dict[str, object] | None = None
     if row["replay"] is not None:
         try:
+            replay_config = replay_contract.parse_document(str(row["replay"]))
             replay_refusals = replay_contract.replay_refusals(
-                row["replay"], replay_evidence, purpose=str(row["purpose"])
+                replay_config, replay_evidence, purpose=str(row["purpose"])
             )
+            replay_timing_detail = replay_contract.replay_timing_assessment(
+                replay_config, replay_evidence
+            )
+            replay_timing = str(replay_timing_detail["state"])
         except replay_contract.ReplayError:
             replay_refusals = ("recorded replay document is malformed",)
+            replay_timing = "MALFORMED"
         replay_state = "REFUSED" if replay_refusals else "COMPLETE"
     measured = {
         **base,
         "replay_state": replay_state,
+        "replay_timing": replay_timing,
+        "replay_timing_detail": replay_timing_detail,
         "exit": result.get("exit_code", "-"),
         "worker_exit": result.get("worker_exit_code", "-"),
         "row_count": result.get("row_count", "-"),
@@ -275,8 +288,15 @@ def report_rows(db_rows: list[sqlite3.Row], *, adapter_root: str) -> list[dict[s
 
 
 def is_publishable_measurement(row: dict[str, Any]) -> bool:
-    """A replay measurement is publishable only after its capacity is calibrated."""
-    return bool(row["purpose"] == "measurement" and row["capacity_status"] != "UNCALIBRATED")
+    """A replay timing must be calibrated and pass its delivered-treatment gate."""
+    if row["purpose"] != "measurement":
+        return False
+    if row["capacity_status"] == "-":
+        return True
+    return bool(
+        row["capacity_status"] == "CALIBRATED"
+        and row["replay_timing"] == replay_contract.TIMING_VALID
+    )
 
 
 def is_timing(row: dict[str, Any]) -> bool:
@@ -338,6 +358,39 @@ def preparation_lines(rows: list[dict[str, Any]]) -> list[str]:
     return lines
 
 
+def replay_timing_lines(rows: list[dict[str, Any]]) -> list[str]:
+    """Render the delivered treatment; the state alone is not an audit trail."""
+    lines: list[str] = []
+    for row in rows:
+        detail = row.get("replay_timing_detail")
+        if not isinstance(detail, dict):
+            continue
+        shapes = detail.get("shapes")
+        rendered_shapes: list[str] = []
+        if isinstance(shapes, dict):
+            for name, raw in sorted(shapes.items()):
+                if not isinstance(raw, dict):
+                    continue
+                rendered_shapes.append(
+                    f"{name}: n={float(raw['requests']):g}, "
+                    f"mean={float(raw['delivered_mean_ms']):.3f}ms/"
+                    f"{float(raw['requested_ms']):g}ms, "
+                    f"overrun={100 * float(raw['overrun_fraction']):.3f}%"
+                )
+        resource = detail.get("resource")
+        rendered_resource = "resource evidence not applicable"
+        if isinstance(resource, dict):
+            rendered_resource = (
+                f"replay CPU >=90% in {resource['high_cpu_samples']}/{resource['samples']} samples"
+            )
+        observations = "; ".join((*rendered_shapes, rendered_resource))
+        reasons = detail.get("reasons")
+        if isinstance(reasons, list) and reasons:
+            observations += "; " + "; ".join(map(str, reasons))
+        lines.append(f"- `{row['attempt_id']}`: **{detail['state']}** — {observations}")
+    return lines
+
+
 def slot_note(con: sqlite3.Connection, slot: sqlite3.Row) -> str:
     """One blocked slot, and whether anything can still pay it.
 
@@ -368,6 +421,7 @@ def render_markdown(rows: list[dict[str, Any]], *, blocked: list[str]) -> str:
         for title, section in (
             ("Rate cases", rate_lines(members)),
             ("Preparations", preparation_lines(members)),
+            ("Replay timing treatment", replay_timing_lines(members)),
         ):
             if section:
                 lines.extend(["", f"### {title}", "", *section])
@@ -408,6 +462,14 @@ def report_exit_code(rows: list[dict[str, Any]], *, blocked: list[str]) -> int:
     if any(
         row["state"] == "SUCCEEDED"
         and (row["worker_exit"] != 0 or row["replay_state"] not in {"-", "COMPLETE"})
+        for row in rows
+    ):
+        return 1
+    if any(
+        row["state"] == "SUCCEEDED"
+        and row["purpose"] == "measurement"
+        and row["capacity_status"] != "-"
+        and row["replay_timing"] != replay_contract.TIMING_VALID
         for row in rows
     ):
         return 1

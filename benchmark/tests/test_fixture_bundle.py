@@ -14,12 +14,19 @@ from pathlib import Path
 import duckdb
 import pytest
 
-from benchmark.fixture_bundle import FixtureBundleError, _generate_s5cmd_shards
+from benchmark.fixture_bundle import (
+    FixtureBundleError,
+    _generate_s5cmd_shards,
+    _physical_order_validation,
+)
 
 
 def _write_fixture(data_dir: Path, keys: tuple[str, ...]) -> None:
     data_dir.mkdir(parents=True, exist_ok=True)
-    path = data_dir / "part-00000.parquet"
+    _write_part(data_dir / "part-00000.parquet", keys)
+
+
+def _write_part(path: Path, keys: tuple[str, ...]) -> None:
     values = ", ".join(f"('{key}')" for key in keys)
     with duckdb.connect() as connection:
         connection.execute(
@@ -63,3 +70,54 @@ def test_disjoint_top_level_shards_are_accepted(tmp_path: Path) -> None:
 
     assert summary["shards"] == 3
     assert output.read_text() == "alpha\nbeta\ngamma\n"
+
+
+def test_physical_order_scan_records_part_boundaries(tmp_path: Path) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    _write_part(data_dir / "part-00000.parquet", ("a", "b"))
+    _write_part(data_dir / "part-00001.parquet", ("c", "d"))
+
+    summary = _physical_order_validation(data_dir)
+
+    assert summary["rows"] == 4
+    assert summary["descending_adjacent_pairs"] == 0
+    assert summary["adjacent_duplicate_pairs"] == 0
+    assert summary["parts"] == [
+        {
+            "name": "part-00000.parquet",
+            "rows": 2,
+            "first_key": "a",
+            "last_key": "b",
+            "descending_adjacent_pairs": 0,
+            "adjacent_duplicate_pairs": 0,
+        },
+        {
+            "name": "part-00001.parquet",
+            "rows": 2,
+            "first_key": "c",
+            "last_key": "d",
+            "descending_adjacent_pairs": 0,
+            "adjacent_duplicate_pairs": 0,
+        },
+    ]
+
+
+@pytest.mark.parametrize(
+    ("first", "second", "message"),
+    (
+        (("a", "c", "b"), ("d",), "descending adjacent"),
+        (("a", "b"), ("aa", "c"), "descending adjacent"),
+        (("a", "b"), ("b", "c"), "adjacent duplicate"),
+    ),
+)
+def test_physical_order_scan_refuses_unsorted_or_duplicate_fixture(
+    tmp_path: Path, first: tuple[str, ...], second: tuple[str, ...], message: str
+) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    _write_part(data_dir / "part-00000.parquet", first)
+    _write_part(data_dir / "part-00001.parquet", second)
+
+    with pytest.raises(FixtureBundleError, match=message):
+        _physical_order_validation(data_dir)
