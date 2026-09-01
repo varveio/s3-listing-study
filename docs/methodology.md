@@ -416,7 +416,7 @@ does not prove that a colocated replay server delivered it without queueing.
 Reporting therefore classifies every latency-injected replay attempt from its
 retained per-shape meters and 10-second replay-cpuset samples:
 
-- `TIMING_VALID`: each observed shape's delivered mean is at most 110% of its
+- `TIMING_VALID`: each observed shape's request-service mean is at most 110% of its
   deadline and fewer than 1% of its requests overran; at least five resource
   samples exist, with fewer than 20% at or above 90% replay CPU;
 - `PRESSURE_DEGRADED`: the attempt misses that gate, but no shape exceeds a 10%

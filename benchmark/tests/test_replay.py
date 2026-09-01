@@ -153,7 +153,7 @@ def test_replay_evidence_accepts_canonical_single_cpu_sets() -> None:
         (1.05, 0, (0.5,) * 4, replay.INSUFFICIENT_EVIDENCE),
     ),
 )
-def test_replay_timing_gate_classifies_delivered_treatment_and_cpu_pressure(
+def test_replay_timing_gate_classifies_request_service_time_and_cpu_pressure(
     mean_ratio: float, overruns: int, cpu: tuple[float, ...], expected: str
 ) -> None:
     assessment = replay.replay_timing_assessment(
@@ -166,6 +166,7 @@ def test_replay_timing_gate_classifies_delivered_treatment_and_cpu_pressure(
     worker = shapes["worker_page"]
     assert isinstance(worker, dict)
     assert worker["requests"] == 100
+    assert worker["request_mean_ms"] == pytest.approx(100 * mean_ratio)
 
 
 def test_replay_timing_gate_does_not_apply_without_latency_injection() -> None:

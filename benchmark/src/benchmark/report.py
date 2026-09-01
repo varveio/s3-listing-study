@@ -373,7 +373,7 @@ def replay_timing_lines(rows: list[dict[str, Any]]) -> list[str]:
                     continue
                 rendered_shapes.append(
                     f"{name}: n={float(raw['requests']):g}, "
-                    f"mean={float(raw['delivered_mean_ms']):.3f}ms/"
+                    f"request-mean={float(raw['request_mean_ms']):.3f}ms/"
                     f"{float(raw['requested_ms']):g}ms, "
                     f"overrun={100 * float(raw['overrun_fraction']):.3f}%"
                 )
