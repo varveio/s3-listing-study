@@ -59,7 +59,6 @@ REPLAY_READINESS_TIMEOUT_S = 600
 HYPERDISK_BOOT_DISK = {
     "type": "hyperdisk-balanced",
     "image": "batch-cos",
-    "sizeGb": "100",
 }
 REPLAY_STAGING_IMAGE = (
     "gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:"
@@ -94,6 +93,7 @@ class BatchOptions:
     aws_credential_secret: str | None = None
     term_grace: float = 5.0
     retain_products: bool = False
+    boot_disk_size_gb: int = 100
 
     def service_account_for(self, auth_role: str | None) -> str:
         if auth_role is None:
@@ -122,7 +122,7 @@ class BatchOptions:
                 "provisioning": self.provisioning,
                 "boot_disk": {
                     "type": "hyperdisk-balanced",
-                    "size_gb": 100,
+                    "size_gb": self.boot_disk_size_gb,
                 },
                 "network": self.network,
                 "subnetwork": self.subnetwork,
@@ -139,6 +139,12 @@ def _validate_batch_options(options: BatchOptions) -> None:
         raise CampaignError("network and subnetwork must be supplied together")
     if options.provisioning not in {"SPOT", "STANDARD"}:
         raise CampaignError("provisioning must be SPOT or STANDARD")
+    if (
+        isinstance(options.boot_disk_size_gb, bool)
+        or not isinstance(options.boot_disk_size_gb, int)
+        or options.boot_disk_size_gb < 1
+    ):
+        raise CampaignError("boot disk size must be a positive integer")
     if (
         options.authenticated_worker_sa
         and options.authenticated_worker_sa == options.anonymous_worker_sa
@@ -506,7 +512,10 @@ def render_batch_job(
         "provisioningModel": options.provisioning,
     }
     if attempt.machine_type.startswith(("n4-", "c4-", "c4d-")):
-        policy["bootDisk"] = dict(HYPERDISK_BOOT_DISK)
+        policy["bootDisk"] = {
+            **HYPERDISK_BOOT_DISK,
+            "sizeGb": str(options.boot_disk_size_gb),
+        }
     allocation_policy: dict[str, Any] = {
         "instances": [{"policy": policy}],
         "serviceAccount": {"email": attempt.service_account},
@@ -693,16 +702,17 @@ def _options(args: argparse.Namespace) -> BatchOptions:
             + ", ".join(f"--{name.replace('_', '-')}" for name in missing)
         )
     return BatchOptions(
-        args.anonymous_worker_sa,
-        args.authenticated_worker_sa,
-        args.network,
-        args.subnetwork,
-        args.zone,
-        args.provisioning,
-        args.project,
-        args.location,
-        args.secret_resource,
+        anonymous_worker_sa=args.anonymous_worker_sa,
+        authenticated_worker_sa=args.authenticated_worker_sa,
+        network=args.network,
+        subnetwork=args.subnetwork,
+        zone=args.zone,
+        provisioning=args.provisioning,
+        project=args.project,
+        location=args.location,
+        aws_credential_secret=args.secret_resource,
         retain_products=getattr(args, "retain_products", False),
+        boot_disk_size_gb=getattr(args, "boot_disk_gb", 100),
     )
 
 
