@@ -1,0 +1,75 @@
+# Flat-namespace cell: every key of real-changesets sits at the bucket root, so a delimiter
+# walker has exactly one continuation chain while a range-splitting lister can still parallelise.
+# The fixture is the retained product of the real-S3 Swath capture `swath.85ccd37c1b88.s1`
+# (2026-09-01), bundled without hints/shard companions because no prefix exists to cut on.
+# One common allocation for every tool; timings remain diagnostic until the replay gate is calibrated.
+spec_version: 3
+
+bucket: real-changesets
+region: us-west-2
+auth_role: public-read
+
+replay:
+  capacity_status: uncalibrated
+  server_image_uri: ghcr.io/varveio/swath-replay@sha256:3955f242f25294d3ebc6d63d3cf23e2a2694f7f1c9a5334dc6ec1054b0a69097
+  fixture_uri: gs://s3-listing-study-results-29c02004/fixtures/real-changesets/current-2908fdf/part-*.parquet
+  fixture_sha256: 295177c95d43a602f1bf54f9dab7f6c05bb9cff9f1822f734a8bcb190bc57edd
+  serving_mode: sorted
+  latency_model:
+    deadlines_ms:
+      worker_page: 122
+      pivot_probe: 88
+      structure_probe: 88
+    scale: 1.0
+    jitter: none
+
+defaults:
+  reps: 1
+  timeout_s: 5400
+  vcpus: 32
+  memory_gb: 64
+  container_memory_gb: 8
+  subject_vcpus: 8
+  replay_vcpus: 20
+  replay_memory_gb: 20
+  replay_parquet_connections: 64
+  replay_max_concurrent_requests: 512
+  replay_prefetch: false
+  replay_prefetch_max_windows: 96
+  replay_heap_percent: 75
+
+tools:
+  rclone:
+    cases:
+      # The study's selected width; on a flat root this is one serial page chain regardless of width.
+      - {mode: recursive-walk, concurrency: 64, purpose: diagnostic}
+
+  s7cmd:
+    cases:
+      # Shallow mode at the width used on NBM; no sub-prefixes exist, so the leaf drain is the run.
+      - mode: recursive-one-nosort
+        concurrency: 16
+        purpose: diagnostic
+        config: {aws_max_attempts: 1, parallel_depth: 1}
+
+  swath:
+    cases:
+      - mode: recursive-tsv-dataset
+        concurrency: 64
+        purpose: diagnostic
+        config:
+          jvm_max_heap: 4g
+          text_writers: 3
+          text_part_size: 1gb
+          writeback_size: 32mb
+          part_rotation_interval: "0"
+          part_rotation_max_rows: 0
+
+exclude:
+  - {tool: aws-cli, reason: stopped after FourCast}
+  - {tool: minio-mc, reason: stopped after FourCast}
+  - {tool: ps3, reason: stopped after FourCast}
+  - {tool: s3kor, reason: stopped after FourCast}
+  - {tool: s3p, reason: stopped after blockchain}
+  - {tool: s3-fast-list, reason: stopped after the NBM memory control; no hints companion on a flat namespace}
+  - {tool: s5cmd, reason: assisted fanout has nothing to shard on a flat namespace}
