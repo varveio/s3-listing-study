@@ -18,6 +18,13 @@ tools:
         concurrency: 1024
         purpose: diagnostic
         config: {jvm_max_heap: 16g, sort_merge_parallelism: 8}
+      # 2026-09-01 CPU follow-up: double the box, AIMD ceiling, and final merge width.
+      - mode: recursive-parquet-sorted
+        concurrency: 2048
+        purpose: diagnostic
+        vcpus: 32
+        memory_gb: 64
+        config: {jvm_max_heap: 16g, sort_merge_parallelism: 16}
       - mode: recursive-tsv-zstd
         concurrency: 1024
         purpose: diagnostic
