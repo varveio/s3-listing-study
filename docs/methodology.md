@@ -5,16 +5,40 @@ are controlled, and what gets published. It was committed *before* comparative
 results existed, on purpose — see
 [We wrote the plan down first](#we-wrote-the-plan-down-first).
 
-**Status: plan written before comparisons; measurement not yet executed.** No
-benchmark has been run and no comparative performance result exists in this repo (smoke receipts
-carry per-run wall-clock and RSS, but never as a comparison). All eleven
-subjects have now run at smoke on amd64 through the attempt engine: seven
+**Document status — 2026-09-01.** This file is two things at once, and the
+line between them matters when reading it:
+
+- **Preregistration.** [Where we started](#where-we-started), [We wrote the
+  plan down first](#we-wrote-the-plan-down-first), [The five decisions that
+  shape everything](#the-five-decisions-that-shape-everything),
+  [Run records (receipts)](#run-records-receipts) and [What this setup cannot
+  tell us](#what-this-setup-cannot-tell-us) were committed *before* comparative
+  results existed and are unchanged by them. They say what the study intended
+  to measure and on what terms.
+- **What has since run.** [Replay screening, then real-S3
+  validation](#replay-screening-then-real-s3-validation) and
+  [Execution order](#execution-order) describe a funnel that has now executed,
+  and the dated material-change notes below record every rule change in the
+  order it happened.
+
+Comparative runs have executed and are published as a **diagnostic** release,
+`2026-09-scale-diagnostics`. No attempt in it carries `purpose = measurement`:
+the replay instrument overran its declared budget on one request shape, which
+this document's own gate treats as disqualifying for a measurement, so the
+release publishes controlled diagnostics and says so in
+`manifest.json.claim_ceiling`. The plan in this file is therefore *not* yet
+fully executed as written — the calibrated comparison it describes remains
+future work. What ran, what it settled and what it did not is
+[`../results/2026-09-scale-diagnostics/REPORT.md`](../results/2026-09-scale-diagnostics/REPORT.md).
+
+Smoke receipts carry per-run wall-clock and RSS, but never as a comparison. All
+eleven subjects ran at smoke on amd64 through the attempt engine: seven
 anonymously and `s3p`, `s3kor`, `s4cmd`, and `ps3` with a scoped credential.
 Those attempts establish that the retired groundwork path worked, not
 correctness: none is bound to the current comparative verifier. The replay path
 records in-container row counts, logs, and bound result markers. See
-`../tools/README.md` for per-tool status and `smoke-bucket.md` for the historical
-reference snapshot.
+`../tools/README.md` for per-tool status and the current release outcome, and
+`smoke-bucket.md` for the historical reference snapshot.
 
 **Qualification status — 2026-08-26.** A committed bounded three-tool replay
 canary now exercises submit, poll/status, summary reporting, worker-side row

@@ -14,12 +14,18 @@ real buckets in the modes it actually offers, and try it under limits and
 interruption.
 See [`README.md`](README.md).
 
-**Status: groundwork complete (wave 2); no benchmark run.** Every subject has
-been through the full groundwork pipeline (pinned builds, smoke runs,
-source-anchored reports, reconciliation, and critical cross-checks) and carries
-committed receipts. Smoke is not measurement — no benchmark or comparative
-performance result exists in this repo (receipts carry a wall-clock/RSS figure,
-but only as a fact about that one run). All eleven have now run at smoke on
+**Status: groundwork complete (wave 2); one diagnostic result release
+published.** Every subject has been through the full groundwork pipeline
+(pinned builds, smoke runs, source-anchored reports, reconciliation, and
+critical cross-checks) and carries committed receipts. Smoke is not
+measurement: a smoke receipt's wall-clock/RSS figure is a fact about that one
+run and nothing more. Comparative runs are published in
+`results/2026-09-scale-diagnostics/` — a **diagnostic** release, in which no
+attempt carries `purpose = measurement`, so nothing in it may be cited as a
+calibrated benchmark or a ranking. Its `manifest.json.claim_ceiling` states
+that in machine-readable form, and `results/2026-09-scale-diagnostics/REPORT.md`
+states it in prose. Do not write a claim into this repository that the release's
+ceiling does not permit. All eleven subjects ran at smoke on
 amd64 through the now-retired groundwork attempt engine — `aws-cli`, `s5cmd`, `s7cmd`, `rclone`,
 `minio-mc`, `s3-fast-list` and Swath anonymously, and `s3p`, `s3kor`, `s4cmd`
 and `ps3` with a credential, which previously blocked them. Running is not
