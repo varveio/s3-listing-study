@@ -315,19 +315,19 @@ def replay_timing_assessment(config: ReplayConfig, evidence: object) -> dict[str
             absent_is_zero=True,
         )
         if requests is None or total_ms is None or overruns is None:
-            reasons.append(f"{shape} delivered-latency meters are missing or non-monotonic")
+            reasons.append(f"{shape} request-latency meters are missing or non-monotonic")
             continue
         if requests == 0:
             continue
         if overruns > requests:
             reasons.append(f"{shape} overrun count exceeds request count")
             continue
-        delivered_mean_ms = total_ms / requests
+        request_mean_ms = total_ms / requests
         shapes[shape] = {
             "requested_ms": requested_ms,
             "requests": requests,
-            "delivered_mean_ms": delivered_mean_ms,
-            "mean_ratio": delivered_mean_ms / requested_ms,
+            "request_mean_ms": request_mean_ms,
+            "mean_ratio": request_mean_ms / requested_ms,
             "overruns": overruns,
             "overrun_fraction": overruns / requests,
         }
