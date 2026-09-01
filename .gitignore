@@ -43,3 +43,4 @@ __pycache__/
 # in a repo whose rules turn on what is committed (see NOTICE).
 /build/
 /dist/
+.cache/

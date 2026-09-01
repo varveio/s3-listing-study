@@ -1,8 +1,8 @@
 {
   "path": "results/2026-09-scale-diagnostics/",
-  "published_at": "2026-09-01T20:21:52.213671+00:00",
+  "published_at": "2026-09-01T21:26:59.529246+00:00",
   "release_id": "2026-09-scale-diagnostics",
   "schema_version": 1,
-  "source_commit": "53dc89472ec7633181867c79b09874fad77b0cf7",
+  "source_commit": "1a72bb265b21402a15f6a6931f5742855cbe4089",
   "status": "diagnostic"
 }

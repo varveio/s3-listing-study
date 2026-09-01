@@ -87,7 +87,7 @@
     ]
   },
   "rclone": {
-    "attempts": 27,
+    "attempts": 31,
     "capsule_path": "tools/rclone/",
     "image_digests": [
       "sha256:0e3e0225ef0ec01a08c90ae8795927a1a55f5b8803dd89754e6d04256852bfab",
@@ -114,6 +114,7 @@
       "c31f05fcd4fe333f508aef23672ee3ff48af5cea0a59cae0c051ee3c78a40beb"
     ],
     "modes": [
+      "recursive-fastlist",
       "recursive-hierarchical",
       "recursive-walk"
     ],
