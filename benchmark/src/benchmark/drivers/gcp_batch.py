@@ -401,6 +401,10 @@ def render_batch_job(
             "--max-concurrent-requests",
             str(allocation.replay_max_concurrent_requests),
         ]
+        if allocation.replay_delimiter_connections is not None:
+            server_commands.extend(
+                ("--delimiter-connections", str(allocation.replay_delimiter_connections))
+            )
         profile_spec = backend.profile_spec
         if profile_spec is not None:
             assert backend.latency_scale is not None

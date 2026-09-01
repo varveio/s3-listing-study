@@ -153,7 +153,15 @@ defaults:
   replay_prefetch: false
   replay_prefetch_max_windows: 96 # response-window cache capacity
   replay_heap_percent: 75
+  replay_delimiter_connections: 32 # optional: delimiter reader fleet width
 ```
+
+`replay_delimiter_connections` is the one optional replay field. Stated, it
+is passed to the server as `--delimiter-connections` and becomes part of the
+case identity; omitted, the server applies its own default and the field is
+absent from the identity, so cases declared before the field existed keep
+their identities. Only replay images at or after swath `dce690a` accept the
+flag; an older image refuses to start with it.
 
 `vcpus`/`memory_gb` keep meaning **the box**. `container_memory_gb` is the
 subject ceiling; `subject_vcpus` and the replay fields are the independent

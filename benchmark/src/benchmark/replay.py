@@ -38,6 +38,9 @@ REPLAY_INTEGER_FIELDS = (
 )
 REPLAY_BOOLEAN_FIELDS = ("replay_prefetch",)
 REPLAY_FIELDS = (*REPLAY_INTEGER_FIELDS, *REPLAY_BOOLEAN_FIELDS)
+# Stated only when a case pins it; absent means the server's own default, and an
+# absent field is omitted from the identity so every earlier identity holds.
+REPLAY_OPTIONAL_INTEGER_FIELDS = ("replay_delimiter_connections",)
 CAPACITY_STATUSES = ("uncalibrated", "calibrated")
 _HEX64_RE = re.compile(r"[0-9a-f]{64}")
 _PINNED_IMAGE_RE = re.compile(r"[^\s@]+@sha256:[0-9a-f]{64}")
@@ -134,9 +137,15 @@ class ReplayAllocation:
     replay_heap_percent: int
     replay_prefetch_max_windows: int
     replay_prefetch: bool
+    replay_delimiter_connections: int | None = None
 
     def as_dict(self) -> dict[str, object]:
-        return {field: getattr(self, field) for field in REPLAY_FIELDS}
+        document: dict[str, object] = {field: getattr(self, field) for field in REPLAY_FIELDS}
+        for field in REPLAY_OPTIONAL_INTEGER_FIELDS:
+            value = getattr(self, field)
+            if value is not None:
+                document[field] = value
+        return document
 
 
 @dataclass(frozen=True)
@@ -572,14 +581,21 @@ def parse_warmup(value: object) -> tuple[tuple[str, int], ...] | None:
 
 
 def parse_allocation(value: object) -> ReplayAllocation:
-    if not isinstance(value, Mapping) or set(value) != set(REPLAY_FIELDS):
+    if not isinstance(value, Mapping) or not (
+        set(REPLAY_FIELDS) <= set(value) <= {*REPLAY_FIELDS, *REPLAY_OPTIONAL_INTEGER_FIELDS}
+    ):
         raise ReplayError("replay allocation has invalid fields")
     integers = {field: _positive(value[field], field) for field in REPLAY_INTEGER_FIELDS}
+    optional = {
+        field: _positive(value[field], field)
+        for field in REPLAY_OPTIONAL_INTEGER_FIELDS
+        if field in value
+    }
     if not isinstance(value["replay_prefetch"], bool):
         raise ReplayError("replay_prefetch must be a boolean")
     if integers["replay_heap_percent"] > 100:
         raise ReplayError("replay_heap_percent must be between 1 and 100")
-    return ReplayAllocation(**integers, replay_prefetch=value["replay_prefetch"])
+    return ReplayAllocation(**integers, **optional, replay_prefetch=value["replay_prefetch"])
 
 
 def parse_document(raw: str | Mapping[str, object]) -> ReplayConfig:
