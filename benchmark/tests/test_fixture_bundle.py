@@ -121,3 +121,42 @@ def test_physical_order_scan_refuses_unsorted_or_duplicate_fixture(
 
     with pytest.raises(FixtureBundleError, match=message):
         _physical_order_validation(data_dir)
+
+
+def test_dataset_uri_replaces_the_capture(tmp_path: Path) -> None:
+    from benchmark.fixture_bundle import parse_args
+
+    args = parse_args(
+        [
+            "--bucket",
+            "real-changesets",
+            "--region",
+            "us-west-2",
+            "--output",
+            str(tmp_path / "bundle"),
+            "--dataset-uri",
+            "gs://results/scale-study/real-changesets/swath.abc.s1/native/listing",
+            "--replay-image",
+            "ghcr.io/varveio/swath-replay@sha256:" + "0" * 64,
+            "--cpuset",
+            "0-3",
+        ]
+    )
+    assert args.swath_image is None
+    assert args.dataset_uri.endswith("/native/listing")
+
+    with pytest.raises(SystemExit):
+        parse_args(
+            [
+                "--bucket",
+                "real-changesets",
+                "--region",
+                "us-west-2",
+                "--output",
+                str(tmp_path / "other"),
+                "--replay-image",
+                "ghcr.io/varveio/swath-replay@sha256:" + "0" * 64,
+                "--cpuset",
+                "0-3",
+            ]
+        )

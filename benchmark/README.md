@@ -163,6 +163,15 @@ uv run python -m benchmark.fixture_bundle \
   --gcs-prefix gs://RESULTS/fixtures/noaa-nbm-grib2-pds/current-REV
 ```
 
+When the bucket has already been captured by a study attempt (a real-S3 Swath
+`recursive-parquet-sorted` row with retained products), pass that attempt's
+`native/listing/` prefix as `--dataset-uri gs://RESULTS/scale-study/<bucket>/<attempt>/native/listing`
+instead of `--swath-image`: the bundle copies the retained dataset and its
+`_swath_summary.json` report, then runs the same analysis, physical-order scan,
+hint and shard generation, latency derivation, and sorted-serving validation.
+The study run is then both the live anchor and the fixture, and the bucket is
+never listed twice.
+
 The output is create-once: an existing output directory or GCS object is a
 refusal, never an implicit resume or overwrite. The uploaded bundle directory
 has a fixed contract (the local Parquet parts remain below `dataset/data/`):
