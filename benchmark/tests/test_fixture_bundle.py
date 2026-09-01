@@ -160,3 +160,28 @@ def test_dataset_uri_replaces_the_capture(tmp_path: Path) -> None:
                 "0-3",
             ]
         )
+
+
+def test_string_annotated_keys_are_read_as_bytes(tmp_path: Path) -> None:
+    """Swath 0.3.1 writes the key column as a UTF-8 string; the bundle must treat it as bytes."""
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    path = data_dir / "part-00000.parquet"
+    with duckdb.connect() as connection:
+        connection.execute(
+            f"""
+            COPY (
+                SELECT k AS key, 'OBJECT' AS row_type
+                FROM (VALUES ('a/1'), ('a/2'), ('b/1')) AS t(k)
+            ) TO '{path}' (FORMAT PARQUET)
+            """
+        )
+    order = _physical_order_validation(data_dir)
+    assert order["rows"] == 3 and order["descending_adjacent_pairs"] == 0
+    shards_path = tmp_path / "shards.input"
+    shards = _generate_s5cmd_shards(data_dir, shards_path)
+    assert shards["shards"] == 2 and shards_path.read_text() == "a\nb\n"
+    from benchmark.fixture_bundle import _fixture_analysis
+
+    analysis = _fixture_analysis(data_dir)
+    assert analysis["rows"] == 3 and analysis["key_annotation"] == "VARCHAR"
