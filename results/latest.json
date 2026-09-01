@@ -3,6 +3,6 @@
   "published_at": "2026-09-01T21:26:59.529246+00:00",
   "release_id": "2026-09-scale-diagnostics",
   "schema_version": 1,
-  "source_commit": "1a72bb265b21402a15f6a6931f5742855cbe4089",
+  "source_commit": "35fa6b9c31a9794771a5b3b5bde1217b65a9af67",
   "status": "diagnostic"
 }

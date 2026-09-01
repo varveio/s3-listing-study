@@ -31,6 +31,13 @@ exclusions:
       A running or queued attempt has no settled outcome. It is not hidden: the
       manifest records how many rows were skipped for this reason.
 
+# Workloads withheld from the release entirely: rows, groups and fixture
+# records. The manifest counts the withheld attempts; it does not name them.
+withheld_workloads:
+  sorel-20m: >-
+    The SOREL-20M dataset licence does not permit publishing derived results,
+    so the attempts against it stay in the private ledger.
+
 source_ledger:
   suite: scale-study
   schema_version: 3

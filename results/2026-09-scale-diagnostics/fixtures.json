@@ -302,46 +302,6 @@
       "region": "us-west-2"
     }
   },
-  "sorel-20m/current-eba31d9": {
-    "availability": "not-published",
-    "capture_attempt_id": null,
-    "capture_image_digest": null,
-    "capture_tool": null,
-    "capture_tool_version": null,
-    "captured_at": null,
-    "id": "sorel-20m/current-eba31d9",
-    "latency_model": {
-      "deadlines_ms": {
-        "pivot_probe": 88,
-        "structure_probe": 88,
-        "worker_page": 126
-      },
-      "jitter": "none",
-      "scale": 1.0
-    },
-    "manifest_sha256": "e17191c5213316db2733a32239c8b5e79f7e6ce4e067ed618911c412ce2b2bd1",
-    "metadata_staged": false,
-    "object_count": 9919142,
-    "object_count_source": "observed-row-count",
-    "recapture": "Re-list the source bucket with the pinned capture tool at the recorded version and sorted output; the manifest digest identifies the bundle.",
-    "serving_mode": "sorted",
-    "shape": {
-      "alphabet_positions_observed": null,
-      "bytes": null,
-      "delimiter_fanout_max": null,
-      "distinct_keys": null,
-      "distinct_prefixes_by_depth": null,
-      "divergence_depth_histogram": null,
-      "duplicate_keys": null,
-      "first_characters": null,
-      "mass_skew_gini": null
-    },
-    "source": {
-      "bucket": "sorel-20m",
-      "prefix": null,
-      "region": "us-west-2"
-    }
-  },
   "swath-replay/idc-open-data/current-geometry-20260824": {
     "availability": "not-published",
     "capture_attempt_id": null,

@@ -6,45 +6,43 @@
     "universal_tool_ranking": false
   },
   "counts": {
-    "attempts": 284,
+    "attempts": 270,
     "by_capacity_status": {
-      "UNCALIBRATED": 272,
-      "malformed": 1,
+      "UNCALIBRATED": 259,
       "null": 11
     },
     "by_publication_status": {
-      "diagnostic": 275,
+      "diagnostic": 261,
       "preparation": 9
     },
     "by_purpose": {
-      "diagnostic": 275,
+      "diagnostic": 261,
       "preparation": 9
     },
     "by_replay_timing": {
-      "CAPACITY_FAILED": 60,
-      "INSUFFICIENT_EVIDENCE": 65,
-      "MALFORMED": 1,
+      "CAPACITY_FAILED": 61,
+      "INSUFFICIENT_EVIDENCE": 56,
       "NOT_APPLICABLE": 44,
-      "PRESSURE_DEGRADED": 33,
-      "TIMING_VALID": 64,
-      "null": 17
+      "PRESSURE_DEGRADED": 24,
+      "TIMING_VALID": 66,
+      "null": 19
     },
     "by_state": {
       "CANCELLED": 4,
-      "FAILED": 11,
-      "SUCCEEDED": 269
+      "FAILED": 13,
+      "SUCCEEDED": 253
     },
     "by_tool": {
       "aws-cli": 9,
       "minio-mc": 9,
       "ps3": 12,
-      "rclone": 27,
+      "rclone": 31,
       "s3-fast-list": 41,
       "s3kor": 9,
       "s3p": 23,
       "s5cmd": 17,
       "s7cmd": 24,
-      "swath": 113
+      "swath": 95
     },
     "by_workload": {
       "aws-public-blockchain": 15,
@@ -54,13 +52,13 @@
       "nara-1950-census": 50,
       "noaa-nbm-grib2-pds": 15,
       "noaa-nws-fourcastnetgfs-pds": 159,
-      "real-changesets": 4,
-      "sentinel-cogs": 3,
-      "sorel-20m": 18
+      "real-changesets": 8,
+      "sentinel-cogs": 3
     },
-    "skipped_non_terminal": 2
+    "skipped_non_terminal": 0,
+    "withheld_attempts": 18
   },
-  "data_as_of": "2026-09-01T20:21:52.213671+00:00",
+  "data_as_of": "2026-09-01T21:26:59.529246+00:00",
   "disclosures": [
     {
       "affects": "every row",
@@ -73,6 +71,8 @@
         "bc-swath-server-20260829",
         "blockchain-swath-reader-control-20260829",
         "blockchain-swath-width-20260829",
+        "changesets-flat-rclone-listr-20260901",
+        "changesets-flat-rclone-mem16-20260901",
         "fc-cpu-corrected-20260828",
         "fc-cpu-sanity-20260828",
         "fc-ps3-p5000-20260829",
@@ -89,7 +89,6 @@
         "s3fl-hinted-fixed-replay-r2-20260826",
         "s3fl-hinted-nolat-r2-20260826",
         "s3fl-hinted-nolat-r3-20260826",
-        "sorel-swath-transfer-20260828",
         "swath-031-blockchain-a-20260901",
         "swath-031-fc-cap-none-20260901",
         "swath-031-fc-cap-s3-20260901",
@@ -101,7 +100,6 @@
         "swath-031-nara-cpu-20260901",
         "swath-031-nara-select-20260901",
         "swath-031-nbm-20260901",
-        "swath-031-sorel-20260901",
         "swath-main-canary-20260901",
         "swath-main-largest-20260901",
         "swath-postfix-blockchain-a-20260901",
@@ -116,7 +114,6 @@
         "swath-postfix-nara-cpu-20260901",
         "swath-postfix-nara-select-20260901",
         "swath-postfix-nbm-20260901",
-        "swath-postfix-sorel-20260901",
         "swath-warmup-blockchain-a-20260901"
       ],
       "detail": "The ledger records no plan path, so plan attribution is declared in the release spec. Groups with no confident attribution carry source.plan_path = null rather than a guess.",
@@ -126,6 +123,8 @@
       "affects": [
         "aws-cli.62e242fb6445.s1",
         "ps3.15a8814f300b.s1",
+        "rclone.997236778cca.s1",
+        "rclone.997236778cca.s2",
         "s3-fast-list.57dddc2de524.s1",
         "s3-fast-list.68d757575cc2.s1",
         "s5cmd.ce66ec57b593.s1",
@@ -142,7 +141,6 @@
         "nara-1950-census/current-eba31d9",
         "noaa-nws-fourcastnetgfs-pds/1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4",
         "noaa-nws-fourcastnetgfs-pds/current-eba31d9",
-        "sorel-20m/current-eba31d9",
         "swath-replay/idc-open-data/current-geometry-20260824"
       ],
       "detail": "No staged fixture bundle summary was found for these fixtures, so their shape metrics are null and their object_count is the largest row count a successful attempt reported off the fixture (object_count_source says which).",
@@ -173,12 +171,9 @@
       "id": "real-s3-rows-are-single-observations"
     },
     {
-      "affects": [
-        "rclone.997236778cca.s1",
-        "rclone.d92a513cb0f2.s1"
-      ],
-      "detail": "Attempts that had not settled when the release was cut are not included.",
-      "id": "non-terminal-attempts-skipped"
+      "affects": "18 attempt(s) across 1 workload(s)",
+      "detail": "Attempts against workloads whose dataset licence does not permit publishing derived results are withheld: their rows, groups and fixture records are absent. The release spec names the workloads and the reason.",
+      "id": "workloads-withheld"
     }
   ],
   "exclusions": [
@@ -189,14 +184,14 @@
   ],
   "files": [
     {
-      "bytes": 22391,
+      "bytes": 22600,
       "path": "REPORT.md",
-      "sha256": "09d876b29e708fb0ca75d0ab7fc3aebc1870584549b39710cabf160dcb68a80b"
+      "sha256": "b7e6b5635e6fbc95a168aeb9850123e5bdd3a102428a63a12dc808829894596c"
     },
     {
-      "bytes": 1101157,
+      "bytes": 1039179,
       "path": "attempts.jsonl",
-      "sha256": "46bba6e50e16a92ce0670c87993c6646e2a003775c99978f52746510287fa252"
+      "sha256": "84e0ebed4a61552f8d4de17fa7825bec3c76c7721b58e33c7d8f80bc470cbe20"
     },
     {
       "bytes": 1998,
@@ -239,19 +234,19 @@
       "sha256": "e1a409242cdad3dc9032bbe5274aadb0679736e4241a660cf9ff51854463d4ab"
     },
     {
-      "bytes": 11526,
+      "bytes": 10253,
       "path": "fixtures.json",
-      "sha256": "625214fb181176c9fff58e5758ddcf5442fa61a8a4d5dba78a1540a8976ed8eb"
+      "sha256": "abf76188175470259dd504d8150ff530d0a647058c244794875313f719d81259"
     },
     {
-      "bytes": 22200,
+      "bytes": 22227,
       "path": "subjects.json",
-      "sha256": "3e634c004ec23d69432641958ba5f1addd93c382c7f8720f78b4192bb434052a"
+      "sha256": "a1bf24973a27a3254604992d5214786d29cd609aea14ab313925205d1eabf23a"
     },
     {
-      "bytes": 102575,
+      "bytes": 97834,
       "path": "summary.csv",
-      "sha256": "f68e418e2dea5c0746032adb8ed22eb258afc500c4ff196ac4df86413001146e"
+      "sha256": "a52487dc257b1756b96a685f57827215da4d4aed9f5b682e29a29f3a04c57d63"
     }
   ],
   "fixtures": [
@@ -284,11 +279,6 @@
       "id": "real-changesets/current-2908fdf",
       "object_count": 13868442,
       "sha256": "295177c95d43a602f1bf54f9dab7f6c05bb9cff9f1822f734a8bcb190bc57edd"
-    },
-    {
-      "id": "sorel-20m/current-eba31d9",
-      "object_count": 9919142,
-      "sha256": "e17191c5213316db2733a32239c8b5e79f7e6ce4e067ed618911c412ce2b2bd1"
     },
     {
       "id": "swath-replay/idc-open-data/current-geometry-20260824",
@@ -325,7 +315,7 @@
       "attempts": 4,
       "group_id": "blockchain-capacity-20260829",
       "plan_path": "benchmark/plans/campaigns/aws-public-blockchain-replay/capacity/aws-public-blockchain.yaml",
-      "plan_sha256": "2e028b73b6f30d6de0616378972358685fe3cc8e5273f18da03b932f2863389a"
+      "plan_sha256": "615b0419f3a7b6fe30819a0ba869fd6e09c651dabcf81b43520a849ec7751f99"
     },
     {
       "attempts": 2,
@@ -355,7 +345,19 @@
       "attempts": 3,
       "group_id": "changesets-flat-20260901",
       "plan_path": "benchmark/plans/campaigns/real-changesets-replay/flat/real-changesets.yaml",
-      "plan_sha256": "9f49e7329f00737f952c3791985ee6703d696df24d51a190467198b79f401b00"
+      "plan_sha256": "5b2887ceb04ffc38f0a826977b0be963e5fd95b1d7febbc9ba38614f81e465e4"
+    },
+    {
+      "attempts": 3,
+      "group_id": "changesets-flat-rclone-listr-20260901",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 1,
+      "group_id": "changesets-flat-rclone-mem16-20260901",
+      "plan_path": null,
+      "plan_sha256": null
     },
     {
       "attempts": 31,
@@ -508,12 +510,6 @@
       "plan_sha256": null
     },
     {
-      "attempts": 6,
-      "group_id": "sorel-swath-transfer-20260828",
-      "plan_path": null,
-      "plan_sha256": null
-    },
-    {
       "attempts": 1,
       "group_id": "swath-031-blockchain-a-20260901",
       "plan_path": null,
@@ -576,12 +572,6 @@
     {
       "attempts": 1,
       "group_id": "swath-031-nbm-20260901",
-      "plan_path": null,
-      "plan_sha256": null
-    },
-    {
-      "attempts": 6,
-      "group_id": "swath-031-sorel-20260901",
       "plan_path": null,
       "plan_sha256": null
     },
@@ -666,12 +656,6 @@
     {
       "attempts": 1,
       "group_id": "swath-postfix-nbm-20260901",
-      "plan_path": null,
-      "plan_sha256": null
-    },
-    {
-      "attempts": 6,
-      "group_id": "swath-postfix-sorel-20260901",
       "plan_path": null,
       "plan_sha256": null
     },
@@ -808,7 +792,7 @@
     ]
   },
   "include": "all-terminal",
-  "published_at": "2026-09-01T20:21:52.213671+00:00",
+  "published_at": "2026-09-01T21:26:59.529246+00:00",
   "release_id": "2026-09-scale-diagnostics",
   "schema_version": 1,
   "source": {
@@ -818,7 +802,7 @@
     "ledger_suite": "scale-study",
     "reader_ledger_schema_version": 3,
     "release_spec": "benchmark/publication/2026-09-scale-diagnostics.yaml",
-    "repository_commit": "53dc89472ec7633181867c79b09874fad77b0cf7",
+    "repository_commit": "35fa6b9c31a9794771a5b3b5bde1217b65a9af67",
     "row_schema_version": 1
   },
   "status": "diagnostic",
