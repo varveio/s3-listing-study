@@ -2086,3 +2086,31 @@ def test_a_slot_abandons_only_once_every_candidate_is_gone(
         argparse.Namespace(state=state, attempt=second["attempt_id"], slot=None)
     )
     assert [slot["state"] for slot in ledger.pending_rows(con)] == ["ABANDONED", "ABANDONED"]
+
+
+def test_renderer_passes_a_stated_delimiter_width_to_the_server(tmp_path: Path) -> None:
+    plan = Plan.load(REPLAY_CANARY)
+    case = plan.cases[0]
+    images = image_set(tmp_path)
+    attempt = campaign.planned_attempt(case, context(plan, case, images))[2](1)[0]
+    replay = json.loads(attempt.replay or "null")
+    replay["allocation"]["replay_delimiter_connections"] = 128
+    stated = replace(attempt, replay=json.dumps(replay, sort_keys=True, separators=(",", ":")))
+
+    request = gcp_batch.render_batch_job(
+        stated,
+        images.image_for(case.tool),
+        suite=SUITE,
+        options=context(plan, case, images).options,
+    )
+    server = request["taskGroups"][0]["taskSpec"]["runnables"][2]
+    commands = server["container"]["commands"]
+    assert commands[commands.index("--delimiter-connections") + 1] == "128"
+    assert "--delimiter-connections" not in json.dumps(
+        gcp_batch.render_batch_job(
+            attempt,
+            images.image_for(case.tool),
+            suite=SUITE,
+            options=context(plan, case, images).options,
+        )
+    )

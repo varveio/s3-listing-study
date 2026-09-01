@@ -332,3 +332,29 @@ def test_declared_warmup_is_part_of_the_treatment_identity() -> None:
 def test_malformed_warmup_is_refused(warmup: dict[str, object]) -> None:
     with pytest.raises(replay.ReplayError):
         replay.parse_warmup(warmup)
+
+
+def test_delimiter_connections_is_optional_and_identity_bearing_only_when_stated() -> None:
+    allocation = {
+        "subject_vcpus": 2,
+        "replay_vcpus": 2,
+        "replay_memory_gb": 4,
+        "replay_parquet_connections": 4,
+        "replay_max_concurrent_requests": 32,
+        "replay_heap_percent": 75,
+        "replay_prefetch_max_windows": 96,
+        "replay_prefetch": False,
+    }
+    absent = replay.parse_allocation(allocation)
+    assert absent.replay_delimiter_connections is None
+    assert "replay_delimiter_connections" not in absent.as_dict()
+
+    stated = replay.parse_allocation({**allocation, "replay_delimiter_connections": 128})
+    assert stated.replay_delimiter_connections == 128
+    assert stated.as_dict()["replay_delimiter_connections"] == 128
+    assert stated.as_dict() != absent.as_dict()
+
+    with pytest.raises(replay.ReplayError):
+        replay.parse_allocation({**allocation, "replay_delimiter_connections": 0})
+    with pytest.raises(replay.ReplayError):
+        replay.parse_allocation({**allocation, "replay_reader_width": 8})

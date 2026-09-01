@@ -987,6 +987,7 @@ def test_every_key_a_row_may_state_changes_the_case_it_resolves_to(tmp_path: Pat
         "replay_prefetch": (False, True),
         "replay_prefetch_max_windows": (96, 1024),
         "replay_heap_percent": (50, 75),
+        "replay_delimiter_connections": (16, 32),
     }
     assert set(pairs) == set(bench.ROW_FIELDS), "a row key with no coverage here"
 
@@ -1298,6 +1299,7 @@ def test_a_tool_body_is_the_defaults_vocabulary_plus_its_rows() -> None:
     assert set(bench.ROW_FIELDS) & set(bench.LAYER_FIELDS) == {
         *bench.RESOURCE_FIELDS,
         *bench.REPLAY_FIELDS,
+        *bench.REPLAY_OPTIONAL_INTEGER_FIELDS,
         "signed",
     }
 

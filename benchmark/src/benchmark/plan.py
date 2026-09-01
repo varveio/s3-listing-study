@@ -139,6 +139,7 @@ PROCESS_FIELDS = ("container_memory_gb",)
 REPLAY_INTEGER_FIELDS = replay_contract.REPLAY_INTEGER_FIELDS
 REPLAY_BOOLEAN_FIELDS = replay_contract.REPLAY_BOOLEAN_FIELDS
 REPLAY_FIELDS = replay_contract.REPLAY_FIELDS
+REPLAY_OPTIONAL_INTEGER_FIELDS = replay_contract.REPLAY_OPTIONAL_INTEGER_FIELDS
 ReplayBackend = replay_contract.ReplayBackend
 ReplayPlan = replay_contract.ReplayPlan
 ReplayConfig = replay_contract.ReplayConfig
@@ -193,6 +194,7 @@ ROW_FIELDS = (
     "segments",
     *RESOURCE_FIELDS,
     *REPLAY_FIELDS,
+    *REPLAY_OPTIONAL_INTEGER_FIELDS,
 )
 
 # The row axes resolution lifts into the config blob; `mode` travels separately
@@ -215,7 +217,13 @@ STATISTICS = ("timing", "rate")
 # What a layer may state: what every case under it inherits. No `mode` — eleven
 # tools have eleven mode vocabularies, so nothing above a row has one to state.
 # `signed` is here as well as in a row, for a roster swept as one stratum.
-LAYER_FIELDS = ("signed", *RESOURCE_FIELDS, *SCHEDULE_FIELDS, *REPLAY_FIELDS)
+LAYER_FIELDS = (
+    "signed",
+    *RESOURCE_FIELDS,
+    *SCHEDULE_FIELDS,
+    *REPLAY_FIELDS,
+    *REPLAY_OPTIONAL_INTEGER_FIELDS,
+)
 
 TOOL_FIELDS = ("cases", *LAYER_FIELDS)
 
@@ -705,7 +713,7 @@ def _replay_shape(
     resolved: dict[str, Any] = {}
     if complete:
         resolved.update(optional_defaults)
-    for field in REPLAY_INTEGER_FIELDS:
+    for field in (*REPLAY_INTEGER_FIELDS, *REPLAY_OPTIONAL_INTEGER_FIELDS):
         if field not in table:
             continue
         resolved[field] = _positive_int(table[field], field, where, path)
@@ -1460,7 +1468,11 @@ def _case_replay(
     so while it is still a file rather than after a VM has booted.
     """
     if context.replay is None:
-        stated = sorted(field for field in REPLAY_FIELDS if field in resolved)
+        stated = sorted(
+            field
+            for field in (*REPLAY_FIELDS, *REPLAY_OPTIONAL_INTEGER_FIELDS)
+            if field in resolved
+        )
         if stated:
             raise PlanError(
                 f"'tools.{tool}' in {path} sizes a replay server ({', '.join(stated)}) "
@@ -1470,7 +1482,12 @@ def _case_replay(
 
     try:
         replay = replay_contract.make_config(
-            context.replay, {field: resolved[field] for field in REPLAY_FIELDS}
+            context.replay,
+            {
+                field: resolved[field]
+                for field in (*REPLAY_FIELDS, *REPLAY_OPTIONAL_INTEGER_FIELDS)
+                if field in resolved
+            },
         )
         replay_contract.allocation_summary(
             replay,
