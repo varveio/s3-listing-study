@@ -445,6 +445,20 @@ rule without rewriting their raw `result.json` evidence. Earlier wording that
 treated any single overrun as an automatic timing failure is superseded by this
 magnitude-and-sustained-pressure rule.
 
+**Replay warm-up, 2026-09-01.** A local isolation study of the replay server
+found that its delimiter path costs 1–2 ms per request once warm but that a
+campaign issues only a few hundred structure probes against millions of pages,
+so that path may never leave the JIT's interpreted tiers during a run; the
+server also opens its per-file delimiter reader pools lazily inside the first
+request that needs them. A plan may therefore declare a `replay.warmup`: a
+deterministic breadth-first delimiter walk from the fixture root plus pivot and
+page requests at keys that walk returned, driven by the worker after readiness
+and before the `before` metrics snapshot. The warm-up applies identically to
+every tool in the plan, is part of the treatment identity (a warmed server is
+a different instrument), never enters a treatment meter, and is recorded with
+its issued counts and duration in the attempt's replay evidence. Rows without
+a declared warm-up keep their identities and their cold-server classification.
+
 Latency injection is a declared experimental treatment. A fixed-latency profile
 is valid for a controlled screen when it is applied identically and reported as
 such; it is not described as reproducing S3's full latency distribution unless

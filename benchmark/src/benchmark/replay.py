@@ -21,7 +21,10 @@ REPLAY_BLOCK_FIELDS = (
     "latency_model",
 )
 REPLAY_FIXTURE_FIELDS = ("fixture_sha256", "fixture_uri")
+REPLAY_OPTIONAL_FIELDS = ("warmup",)
 LATENCY_MODEL_FIELDS = ("deadlines_ms", "scale", "jitter")
+WARMUP_COUNT_FIELDS = ("structure_probes", "pivot_probes", "worker_pages")
+WARMUP_FIELDS = (*WARMUP_COUNT_FIELDS, "in_flight")
 INJECT_SHAPES = ("worker_page", "pivot_probe", "structure_probe")
 SERVING_MODES = ("sorted", "duckdb")
 REPLAY_INTEGER_FIELDS = (
@@ -86,6 +89,7 @@ class ReplayBackend:
     latency_deadlines_ms: tuple[tuple[str, int], ...] | None
     latency_scale: float | None
     latency_jitter: str | None
+    warmup: tuple[tuple[str, int], ...] | None = None
 
     @property
     def profile_spec(self) -> str | None:
@@ -111,6 +115,10 @@ class ReplayBackend:
         }
         if self.fixture_uri is not None:
             document["fixture_uri"] = self.fixture_uri
+        if self.warmup is not None:
+            # Declared warm-up is part of the treatment: a warmed server is a different
+            # instrument from a cold one. Absent means none, so earlier identities hold.
+            document["warmup"] = dict(self.warmup)
         return document
 
 
@@ -457,10 +465,11 @@ def replay_refusals(
 def parse_backend(value: object) -> ReplayBackend:
     if not isinstance(value, Mapping):
         raise ReplayError("replay backend is not an object")
-    allowed = {*REPLAY_BLOCK_FIELDS, *REPLAY_FIXTURE_FIELDS}
+    allowed = {*REPLAY_BLOCK_FIELDS, *REPLAY_FIXTURE_FIELDS, *REPLAY_OPTIONAL_FIELDS}
     unknown = sorted(set(value) - allowed)
     if unknown:
         raise ReplayError(f"replay backend has unknown field(s): {', '.join(map(str, unknown))}")
+    warmup = parse_warmup(value.get("warmup"))
     missing = sorted(set(REPLAY_BLOCK_FIELDS) - set(value))
     if missing:
         raise ReplayError(f"replay backend is missing {', '.join(missing)}")
@@ -505,6 +514,7 @@ def parse_backend(value: object) -> ReplayBackend:
             latency_deadlines_ms=None,
             latency_scale=None,
             latency_jitter=None,
+            warmup=warmup,
         )
     if not isinstance(latency, Mapping) or set(latency) != set(LATENCY_MODEL_FIELDS):
         raise ReplayError("replay latency_model has invalid fields")
@@ -532,7 +542,33 @@ def parse_backend(value: object) -> ReplayBackend:
         latency_deadlines_ms=deadlines,
         latency_scale=float(scale),
         latency_jitter="none",
+        warmup=warmup,
     )
+
+
+def parse_warmup(value: object) -> tuple[tuple[str, int], ...] | None:
+    """Parse the optional declared warm-up the worker drives before the subject clock starts.
+
+    The request counts are issued against the replay endpoint after readiness and before the
+    ``before`` metrics snapshot, so they warm the server's JIT, reader pools, and page indexes
+    without entering any treatment meter. ``structure_probes`` walk the fixture's delimiter tree
+    breadth-first from the root; ``pivot_probes`` and ``worker_pages`` use keys that walk returned
+    as ``start-after`` anchors.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, Mapping) or set(map(str, value)) != set(WARMUP_FIELDS):
+        raise ReplayError(f"replay warmup must contain exactly {', '.join(WARMUP_FIELDS)}")
+    counts: list[tuple[str, int]] = []
+    for name in WARMUP_COUNT_FIELDS:
+        count = value[name]
+        if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+            raise ReplayError(f"replay warmup {name} must be a non-negative integer")
+        counts.append((name, count))
+    if all(count == 0 for _, count in counts):
+        raise ReplayError("replay warmup must request at least one request; omit it for none")
+    counts.append(("in_flight", _positive(value["in_flight"], "replay warmup in_flight")))
+    return tuple(counts)
 
 
 def parse_allocation(value: object) -> ReplayAllocation:
@@ -567,7 +603,12 @@ def parse_document(raw: str | Mapping[str, object]) -> ReplayConfig:
 def parse_plan(value: object) -> ReplayPlan:
     if not isinstance(value, Mapping):
         raise ReplayError("replay plan block is not an object")
-    allowed = {*REPLAY_BLOCK_FIELDS, *REPLAY_FIXTURE_FIELDS, "capacity_status"}
+    allowed = {
+        *REPLAY_BLOCK_FIELDS,
+        *REPLAY_FIXTURE_FIELDS,
+        *REPLAY_OPTIONAL_FIELDS,
+        "capacity_status",
+    }
     required = {*REPLAY_BLOCK_FIELDS, "capacity_status"}
     if set(value) - allowed or required - set(value):
         unknown = sorted(set(value) - allowed)

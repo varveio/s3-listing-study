@@ -75,6 +75,8 @@ def _replay_projection(
     else:
         profile = ",".join(f"{shape}={delay}ms" for shape, delay in backend.latency_deadlines_ms)
         latency = f"{profile} scale={backend.latency_scale} jitter={backend.latency_jitter}"
+    if backend.warmup is not None:
+        latency += " warmup=" + ",".join(f"{name}={count}" for name, count in backend.warmup)
     fixture = f"sha256:{backend.fixture_sha256[:12]}…"
     if backend.fixture_uri is not None:
         fixture = f"{backend.fixture_uri} ({fixture})"
