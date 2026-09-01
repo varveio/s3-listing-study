@@ -1,0 +1,381 @@
+{
+  "aws-public-blockchain/current-eba31d9": {
+    "availability": "not-published",
+    "capture_attempt_id": null,
+    "capture_image_digest": "sha256:771adb5d8d5f9edafe0b21f0780d6a75e4663cb2eb6e43663b9c3138361df6d3",
+    "capture_tool": "swath",
+    "capture_tool_version": "0.2.5-SNAPSHOT",
+    "captured_at": "2026-08-28T22:50:25.906473+00:00",
+    "id": "aws-public-blockchain/current-eba31d9",
+    "latency_model": {
+      "deadlines_ms": {
+        "pivot_probe": 46,
+        "structure_probe": 55,
+        "worker_page": 94
+      },
+      "jitter": "none",
+      "scale": 1.0
+    },
+    "manifest_sha256": "f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0",
+    "metadata_staged": true,
+    "object_count": 143008674,
+    "object_count_source": "staged-bundle-summary",
+    "recapture": "Re-list the source bucket with the pinned capture tool at the recorded version and sorted output; the manifest digest identifies the bundle.",
+    "serving_mode": "sorted",
+    "shape": {
+      "alphabet_positions_observed": 8,
+      "bytes": 3181635918,
+      "delimiter_fanout_max": 1000,
+      "distinct_keys": 143008674,
+      "distinct_prefixes_by_depth": {
+        "1": 5,
+        "2": 12,
+        "3": 42
+      },
+      "divergence_depth_histogram": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        3,
+        0,
+        5194
+      ],
+      "duplicate_keys": 0,
+      "first_characters": "aimv",
+      "mass_skew_gini": 0.4929398015981566
+    },
+    "source": {
+      "bucket": "aws-public-blockchain",
+      "prefix": "",
+      "region": "us-east-2"
+    }
+  },
+  "nara-1950-census/current-eba31d9": {
+    "availability": "not-published",
+    "capture_attempt_id": null,
+    "capture_image_digest": null,
+    "capture_tool": null,
+    "capture_tool_version": null,
+    "captured_at": null,
+    "id": "nara-1950-census/current-eba31d9",
+    "latency_model": {
+      "deadlines_ms": {
+        "pivot_probe": 44,
+        "structure_probe": 50,
+        "worker_page": 86
+      },
+      "jitter": "none",
+      "scale": 1.0
+    },
+    "manifest_sha256": "48468b7c1ea8bf657fcb089dbcb1d940d3af62b748a7cb66f6dccc8876905db4",
+    "metadata_staged": false,
+    "object_count": 13540310,
+    "object_count_source": "observed-row-count",
+    "recapture": "Re-list the source bucket with the pinned capture tool at the recorded version and sorted output; the manifest digest identifies the bundle.",
+    "serving_mode": "sorted",
+    "shape": {
+      "alphabet_positions_observed": null,
+      "bytes": null,
+      "delimiter_fanout_max": null,
+      "distinct_keys": null,
+      "distinct_prefixes_by_depth": null,
+      "divergence_depth_histogram": null,
+      "duplicate_keys": null,
+      "first_characters": null,
+      "mass_skew_gini": null
+    },
+    "source": {
+      "bucket": "nara-1950-census",
+      "prefix": null,
+      "region": "us-east-2"
+    }
+  },
+  "noaa-nbm-grib2-pds/current-eba31d9": {
+    "availability": "not-published",
+    "capture_attempt_id": null,
+    "capture_image_digest": "sha256:771adb5d8d5f9edafe0b21f0780d6a75e4663cb2eb6e43663b9c3138361df6d3",
+    "capture_tool": "swath",
+    "capture_tool_version": "0.2.5-SNAPSHOT",
+    "captured_at": "2026-08-28T22:37:56.715725+00:00",
+    "id": "noaa-nbm-grib2-pds/current-eba31d9",
+    "latency_model": {
+      "deadlines_ms": {
+        "pivot_probe": 37,
+        "structure_probe": 51,
+        "worker_page": 87
+      },
+      "jitter": "none",
+      "scale": 1.0
+    },
+    "manifest_sha256": "de7e0487fe7237590b421299853ff7f88f27a006f5d8528ece23f3be26a2624a",
+    "metadata_staged": true,
+    "object_count": 66405936,
+    "object_count_source": "staged-bundle-summary",
+    "recapture": "Re-list the source bucket with the pinned capture tool at the recorded version and sorted output; the manifest digest identifies the bundle.",
+    "serving_mode": "sorted",
+    "shape": {
+      "alphabet_positions_observed": 8,
+      "bytes": 1614435629,
+      "delimiter_fanout_max": 1000,
+      "distinct_keys": 66405936,
+      "distinct_prefixes_by_depth": {
+        "1": 2292,
+        "2": 54931,
+        "3": 118527
+      },
+      "divergence_depth_histogram": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        7,
+        28,
+        231,
+        211,
+        481
+      ],
+      "duplicate_keys": 0,
+      "first_characters": "bi",
+      "mass_skew_gini": 0.37689556782449735
+    },
+    "source": {
+      "bucket": "noaa-nbm-grib2-pds",
+      "prefix": "",
+      "region": "us-east-1"
+    }
+  },
+  "noaa-nws-fourcastnetgfs-pds/1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4": {
+    "availability": "not-published",
+    "capture_attempt_id": null,
+    "capture_image_digest": null,
+    "capture_tool": null,
+    "capture_tool_version": null,
+    "captured_at": null,
+    "id": "noaa-nws-fourcastnetgfs-pds/1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4",
+    "latency_model": {
+      "deadlines_ms": {
+        "pivot_probe": 35,
+        "structure_probe": 37,
+        "worker_page": 85
+      },
+      "jitter": "none",
+      "scale": 1.0
+    },
+    "manifest_sha256": "1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4",
+    "metadata_staged": false,
+    "object_count": 4081171,
+    "object_count_source": "observed-row-count",
+    "recapture": "Re-list the source bucket with the pinned capture tool at the recorded version and sorted output; the manifest digest identifies the bundle.",
+    "serving_mode": "sorted",
+    "shape": {
+      "alphabet_positions_observed": null,
+      "bytes": null,
+      "delimiter_fanout_max": null,
+      "distinct_keys": null,
+      "distinct_prefixes_by_depth": null,
+      "divergence_depth_histogram": null,
+      "duplicate_keys": null,
+      "first_characters": null,
+      "mass_skew_gini": null
+    },
+    "source": {
+      "bucket": "noaa-nws-fourcastnetgfs-pds",
+      "prefix": null,
+      "region": "us-east-1"
+    }
+  },
+  "noaa-nws-fourcastnetgfs-pds/current-eba31d9": {
+    "availability": "not-published",
+    "capture_attempt_id": null,
+    "capture_image_digest": null,
+    "capture_tool": null,
+    "capture_tool_version": null,
+    "captured_at": null,
+    "id": "noaa-nws-fourcastnetgfs-pds/current-eba31d9",
+    "latency_model": {
+      "deadlines_ms": {
+        "pivot_probe": 35,
+        "structure_probe": 37,
+        "worker_page": 85
+      },
+      "jitter": "none",
+      "scale": 1.0
+    },
+    "manifest_sha256": "abc259e0e2e956f096c6aa0dc5e3532c608a4df4675e165a6560ae6d868374e2",
+    "metadata_staged": false,
+    "object_count": 4081170,
+    "object_count_source": "observed-row-count",
+    "recapture": "Re-list the source bucket with the pinned capture tool at the recorded version and sorted output; the manifest digest identifies the bundle.",
+    "serving_mode": "sorted",
+    "shape": {
+      "alphabet_positions_observed": null,
+      "bytes": null,
+      "delimiter_fanout_max": null,
+      "distinct_keys": null,
+      "distinct_prefixes_by_depth": null,
+      "divergence_depth_histogram": null,
+      "duplicate_keys": null,
+      "first_characters": null,
+      "mass_skew_gini": null
+    },
+    "source": {
+      "bucket": "noaa-nws-fourcastnetgfs-pds",
+      "prefix": null,
+      "region": "us-east-1"
+    }
+  },
+  "real-changesets/current-2908fdf": {
+    "availability": "not-published",
+    "capture_attempt_id": null,
+    "capture_image_digest": null,
+    "capture_tool": "swath",
+    "capture_tool_version": "0.3.1",
+    "captured_at": "2026-09-01T19:50:23.416741+00:00",
+    "id": "real-changesets/current-2908fdf",
+    "latency_model": {
+      "deadlines_ms": {
+        "pivot_probe": 88,
+        "structure_probe": 88,
+        "worker_page": 122
+      },
+      "jitter": "none",
+      "scale": 1.0
+    },
+    "manifest_sha256": "295177c95d43a602f1bf54f9dab7f6c05bb9cff9f1822f734a8bcb190bc57edd",
+    "metadata_staged": true,
+    "object_count": 13868442,
+    "object_count_source": "staged-bundle-summary",
+    "recapture": "Re-list the source bucket with the pinned capture tool at the recorded version and sorted output; the manifest digest identifies the bundle.",
+    "serving_mode": "sorted",
+    "shape": {
+      "alphabet_positions_observed": 8,
+      "bytes": 317666726,
+      "delimiter_fanout_max": 0,
+      "distinct_keys": 13868442,
+      "distinct_prefixes_by_depth": {
+        "1": 13868442,
+        "2": 13868442,
+        "3": 13868442
+      },
+      "divergence_depth_histogram": [
+        0,
+        2,
+        9,
+        92,
+        458,
+        442,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        82,
+        0
+      ],
+      "duplicate_keys": 0,
+      "first_characters": "13",
+      "mass_skew_gini": 0.8249675422678907
+    },
+    "source": {
+      "bucket": "real-changesets",
+      "prefix": "",
+      "region": "us-west-2"
+    }
+  },
+  "sorel-20m/current-eba31d9": {
+    "availability": "not-published",
+    "capture_attempt_id": null,
+    "capture_image_digest": null,
+    "capture_tool": null,
+    "capture_tool_version": null,
+    "captured_at": null,
+    "id": "sorel-20m/current-eba31d9",
+    "latency_model": {
+      "deadlines_ms": {
+        "pivot_probe": 88,
+        "structure_probe": 88,
+        "worker_page": 126
+      },
+      "jitter": "none",
+      "scale": 1.0
+    },
+    "manifest_sha256": "e17191c5213316db2733a32239c8b5e79f7e6ce4e067ed618911c412ce2b2bd1",
+    "metadata_staged": false,
+    "object_count": 9919142,
+    "object_count_source": "observed-row-count",
+    "recapture": "Re-list the source bucket with the pinned capture tool at the recorded version and sorted output; the manifest digest identifies the bundle.",
+    "serving_mode": "sorted",
+    "shape": {
+      "alphabet_positions_observed": null,
+      "bytes": null,
+      "delimiter_fanout_max": null,
+      "distinct_keys": null,
+      "distinct_prefixes_by_depth": null,
+      "divergence_depth_histogram": null,
+      "duplicate_keys": null,
+      "first_characters": null,
+      "mass_skew_gini": null
+    },
+    "source": {
+      "bucket": "sorel-20m",
+      "prefix": null,
+      "region": "us-west-2"
+    }
+  },
+  "swath-replay/idc-open-data/current-geometry-20260824": {
+    "availability": "not-published",
+    "capture_attempt_id": null,
+    "capture_image_digest": null,
+    "capture_tool": null,
+    "capture_tool_version": null,
+    "captured_at": null,
+    "id": "swath-replay/idc-open-data/current-geometry-20260824",
+    "latency_model": {
+      "deadlines_ms": {},
+      "jitter": null,
+      "scale": null
+    },
+    "manifest_sha256": "8a83fdc88000d6a1f4e3563eb3151407a91b6ca319713b08cff3e72442608ebe",
+    "metadata_staged": false,
+    "object_count": 56311145,
+    "object_count_source": "observed-row-count",
+    "recapture": "Re-list the source bucket with the pinned capture tool at the recorded version and sorted output; the manifest digest identifies the bundle.",
+    "serving_mode": "sorted",
+    "shape": {
+      "alphabet_positions_observed": null,
+      "bytes": null,
+      "delimiter_fanout_max": null,
+      "distinct_keys": null,
+      "distinct_prefixes_by_depth": null,
+      "divergence_depth_histogram": null,
+      "duplicate_keys": null,
+      "first_characters": null,
+      "mass_skew_gini": null
+    },
+    "source": {
+      "bucket": "idc-open-data",
+      "prefix": null,
+      "region": "us-east-1"
+    }
+  }
+}
