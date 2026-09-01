@@ -1,0 +1,801 @@
+{
+  "claim_ceiling": {
+    "calibrated_replay_benchmark": false,
+    "controlled_replay_diagnostics": true,
+    "live_s3_performance": false,
+    "universal_tool_ranking": false
+  },
+  "counts": {
+    "attempts": 284,
+    "by_capacity_status": {
+      "UNCALIBRATED": 272,
+      "malformed": 1,
+      "null": 11
+    },
+    "by_publication_status": {
+      "diagnostic": 275,
+      "preparation": 9
+    },
+    "by_purpose": {
+      "diagnostic": 275,
+      "preparation": 9
+    },
+    "by_replay_timing": {
+      "CAPACITY_FAILED": 60,
+      "INSUFFICIENT_EVIDENCE": 65,
+      "MALFORMED": 1,
+      "NOT_APPLICABLE": 44,
+      "PRESSURE_DEGRADED": 33,
+      "TIMING_VALID": 64,
+      "null": 17
+    },
+    "by_state": {
+      "CANCELLED": 4,
+      "FAILED": 11,
+      "SUCCEEDED": 269
+    },
+    "by_tool": {
+      "aws-cli": 9,
+      "minio-mc": 9,
+      "ps3": 12,
+      "rclone": 27,
+      "s3-fast-list": 41,
+      "s3kor": 9,
+      "s3p": 23,
+      "s5cmd": 17,
+      "s7cmd": 24,
+      "swath": 113
+    },
+    "by_workload": {
+      "aws-public-blockchain": 15,
+      "fah-public-data-covid19-absolute-free-energy": 4,
+      "idc-open-data": 13,
+      "janelia-cosem-datasets": 3,
+      "nara-1950-census": 50,
+      "noaa-nbm-grib2-pds": 15,
+      "noaa-nws-fourcastnetgfs-pds": 159,
+      "real-changesets": 4,
+      "sentinel-cogs": 3,
+      "sorel-20m": 18
+    },
+    "skipped_non_terminal": 2
+  },
+  "data_as_of": "2026-09-01T20:21:52.213671+00:00",
+  "disclosures": [
+    {
+      "affects": "every row",
+      "detail": "No attempt in this release carries purpose=measurement. Every row is a diagnostic or a preparation, and no row may be read as a calibrated benchmark result.",
+      "id": "no-measurement-rows"
+    },
+    {
+      "affects": [
+        "bc-rclone-c128-20260829",
+        "bc-swath-server-20260829",
+        "blockchain-swath-reader-control-20260829",
+        "blockchain-swath-width-20260829",
+        "fc-cpu-corrected-20260828",
+        "fc-cpu-sanity-20260828",
+        "fc-ps3-p5000-20260829",
+        "fc-rclone-repeat-20260828",
+        "latency-fixed-replay-20260826",
+        "nbm-s3fl-16g-20260828",
+        "nbm-s3fl-16g-fixed-20260828",
+        "nbm-s5-fair-20260829",
+        "nbm-s5-fix-20260829",
+        "nbm-s7-c4-20260828",
+        "nbm-s7-nofile-20260828",
+        "nbm-s7-retry1-20260828",
+        "s3fl-hinted-fixed-replay-20260826",
+        "s3fl-hinted-fixed-replay-r2-20260826",
+        "s3fl-hinted-nolat-r2-20260826",
+        "s3fl-hinted-nolat-r3-20260826",
+        "sorel-swath-transfer-20260828",
+        "swath-031-blockchain-a-20260901",
+        "swath-031-fc-cap-none-20260901",
+        "swath-031-fc-cap-s3-20260901",
+        "swath-031-fc-cpu-20260901",
+        "swath-031-fc-screen-none-20260901",
+        "swath-031-fc-screen-s3-20260901",
+        "swath-031-fc-tuning-20260901",
+        "swath-031-idc-20260901",
+        "swath-031-nara-cpu-20260901",
+        "swath-031-nara-select-20260901",
+        "swath-031-nbm-20260901",
+        "swath-031-sorel-20260901",
+        "swath-main-canary-20260901",
+        "swath-main-largest-20260901",
+        "swath-postfix-blockchain-a-20260901",
+        "swath-postfix-canary-20260901",
+        "swath-postfix-fc-cap-none-20260901",
+        "swath-postfix-fc-cap-s3-20260901",
+        "swath-postfix-fc-cpu-20260901",
+        "swath-postfix-fc-screen-none-20260901",
+        "swath-postfix-fc-screen-s3-20260901",
+        "swath-postfix-fc-tuning-20260901",
+        "swath-postfix-idc-20260901",
+        "swath-postfix-nara-cpu-20260901",
+        "swath-postfix-nara-select-20260901",
+        "swath-postfix-nbm-20260901",
+        "swath-postfix-sorel-20260901",
+        "swath-warmup-blockchain-a-20260901"
+      ],
+      "detail": "The ledger records no plan path, so plan attribution is declared in the release spec. Groups with no confident attribution carry source.plan_path = null rather than a guess.",
+      "id": "plan-path-not-recorded"
+    },
+    {
+      "affects": [
+        "aws-cli.62e242fb6445.s1",
+        "ps3.15a8814f300b.s1",
+        "s3-fast-list.57dddc2de524.s1",
+        "s3-fast-list.68d757575cc2.s1",
+        "s5cmd.ce66ec57b593.s1",
+        "swath.7107861537aa.s1",
+        "swath.c42bfeced387.s1",
+        "swath.cea468a24158.s1",
+        "swath.d41a04e156f5.s1"
+      ],
+      "detail": "These attempts have no result.json bound to them, so every outcome metric is null. The rows are kept: a settled attempt with no evidence is data.",
+      "id": "evidence-not-bound"
+    },
+    {
+      "affects": [
+        "nara-1950-census/current-eba31d9",
+        "noaa-nws-fourcastnetgfs-pds/1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4",
+        "noaa-nws-fourcastnetgfs-pds/current-eba31d9",
+        "sorel-20m/current-eba31d9",
+        "swath-replay/idc-open-data/current-geometry-20260824"
+      ],
+      "detail": "No staged fixture bundle summary was found for these fixtures, so their shape metrics are null and their object_count is the largest row count a successful attempt reported off the fixture (object_count_source says which).",
+      "id": "fixture-metadata-not-staged"
+    },
+    {
+      "affects": [
+        "swath.c862c6707224.s1"
+      ],
+      "detail": "The Swath run summary is only present where the run's products were retained. Every other Swath row carries native_summary = null.",
+      "id": "native-summary-rarely-retained"
+    },
+    {
+      "affects": [
+        "swath.0b5db9b35947.s1",
+        "swath.0d01af45ef74.s1",
+        "swath.4b2db6e9f6a9.s1",
+        "swath.6b1ffae260c0.s1",
+        "swath.7107861537aa.s1",
+        "swath.7b028bd8c692.s1",
+        "swath.85ccd37c1b88.s1",
+        "swath.a0f1b2c053d8.s1",
+        "swath.c42bfeced387.s1",
+        "swath.cea468a24158.s1",
+        "swath.d7668a13dc4c.s1"
+      ],
+      "detail": "Rows with replay = null ran against the live bucket, uncontrolled and n=1. They are observations, not performance measurements.",
+      "id": "real-s3-rows-are-single-observations"
+    },
+    {
+      "affects": [
+        "rclone.997236778cca.s1",
+        "rclone.d92a513cb0f2.s1"
+      ],
+      "detail": "Attempts that had not settled when the release was cut are not included.",
+      "id": "non-terminal-attempts-skipped"
+    }
+  ],
+  "exclusions": [
+    {
+      "reason": "A running or queued attempt has no settled outcome. It is not hidden: the manifest records how many rows were skipped for this reason.",
+      "rule": "state not in the ledger's TERMINAL_STATES at export time"
+    }
+  ],
+  "files": [
+    {
+      "bytes": 1101157,
+      "path": "attempts.jsonl",
+      "sha256": "46bba6e50e16a92ce0670c87993c6646e2a003775c99978f52746510287fa252"
+    },
+    {
+      "bytes": 680,
+      "path": "charts/nbm-same-allocation-wall.csv",
+      "sha256": "61df2e8cda132710ed46c586191a5a1a88f15042eb1e955dfd518da54df6f741"
+    },
+    {
+      "bytes": 3339,
+      "path": "charts/nbm-same-allocation-wall.svg",
+      "sha256": "c86152d1a06effb769aa1ebecff3ed96ec9832189828473e7de9ef6fe89e05ff"
+    },
+    {
+      "bytes": 22764,
+      "path": "charts/s3-fast-list-rss.csv",
+      "sha256": "eb58b86c236edd1ec6221ca6b70924e57fcd2138a6a184b0d3c69e8ad47225d6"
+    },
+    {
+      "bytes": 13533,
+      "path": "charts/s3-fast-list-rss.svg",
+      "sha256": "e1a409242cdad3dc9032bbe5274aadb0679736e4241a660cf9ff51854463d4ab"
+    },
+    {
+      "bytes": 11526,
+      "path": "fixtures.json",
+      "sha256": "625214fb181176c9fff58e5758ddcf5442fa61a8a4d5dba78a1540a8976ed8eb"
+    },
+    {
+      "bytes": 22200,
+      "path": "subjects.json",
+      "sha256": "3e634c004ec23d69432641958ba5f1addd93c382c7f8720f78b4192bb434052a"
+    },
+    {
+      "bytes": 102575,
+      "path": "summary.csv",
+      "sha256": "f68e418e2dea5c0746032adb8ed22eb258afc500c4ff196ac4df86413001146e"
+    }
+  ],
+  "fixtures": [
+    {
+      "id": "aws-public-blockchain/current-eba31d9",
+      "object_count": 143008674,
+      "sha256": "f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0"
+    },
+    {
+      "id": "nara-1950-census/current-eba31d9",
+      "object_count": 13540310,
+      "sha256": "48468b7c1ea8bf657fcb089dbcb1d940d3af62b748a7cb66f6dccc8876905db4"
+    },
+    {
+      "id": "noaa-nbm-grib2-pds/current-eba31d9",
+      "object_count": 66405936,
+      "sha256": "de7e0487fe7237590b421299853ff7f88f27a006f5d8528ece23f3be26a2624a"
+    },
+    {
+      "id": "noaa-nws-fourcastnetgfs-pds/1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4",
+      "object_count": 4081171,
+      "sha256": "1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4"
+    },
+    {
+      "id": "noaa-nws-fourcastnetgfs-pds/current-eba31d9",
+      "object_count": 4081170,
+      "sha256": "abc259e0e2e956f096c6aa0dc5e3532c608a4df4675e165a6560ae6d868374e2"
+    },
+    {
+      "id": "real-changesets/current-2908fdf",
+      "object_count": 13868442,
+      "sha256": "295177c95d43a602f1bf54f9dab7f6c05bb9cff9f1822f734a8bcb190bc57edd"
+    },
+    {
+      "id": "sorel-20m/current-eba31d9",
+      "object_count": 9919142,
+      "sha256": "e17191c5213316db2733a32239c8b5e79f7e6ce4e067ed618911c412ce2b2bd1"
+    },
+    {
+      "id": "swath-replay/idc-open-data/current-geometry-20260824",
+      "object_count": 56311145,
+      "sha256": "8a83fdc88000d6a1f4e3563eb3151407a91b6ca319713b08cff3e72442608ebe"
+    }
+  ],
+  "groups": [
+    {
+      "attempts": 10,
+      "group_id": "all-tools-no-latency-screen-20260826",
+      "plan_path": "benchmark/plans/campaigns/fourcast-replay/screen-no-latency/noaa-nws-fourcastnetgfs-pds.yaml",
+      "plan_sha256": "d8232d4b56b8e1fb8d164096f765e80947ef8118fc25bfb887703551237a04d7"
+    },
+    {
+      "attempts": 10,
+      "group_id": "all-tools-no-latency-screen-r2-20260826",
+      "plan_path": "benchmark/plans/campaigns/fourcast-replay/screen-no-latency/noaa-nws-fourcastnetgfs-pds.yaml",
+      "plan_sha256": "d8232d4b56b8e1fb8d164096f765e80947ef8118fc25bfb887703551237a04d7"
+    },
+    {
+      "attempts": 1,
+      "group_id": "bc-rclone-c128-20260829",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 2,
+      "group_id": "bc-swath-server-20260829",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 4,
+      "group_id": "blockchain-capacity-20260829",
+      "plan_path": "benchmark/plans/campaigns/aws-public-blockchain-replay/capacity/aws-public-blockchain.yaml",
+      "plan_sha256": "2e028b73b6f30d6de0616378972358685fe3cc8e5273f18da03b932f2863389a"
+    },
+    {
+      "attempts": 2,
+      "group_id": "blockchain-swath-reader-control-20260829",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 2,
+      "group_id": "blockchain-swath-width-20260829",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 2,
+      "group_id": "capacity-no-latency-20260826",
+      "plan_path": "benchmark/plans/campaigns/fourcast-replay/capacity-no-latency/noaa-nws-fourcastnetgfs-pds.yaml",
+      "plan_sha256": "f4d232a2d72af868e9fe59ef63993d1f3a3328b54d8951fd08c6d731e14755b8"
+    },
+    {
+      "attempts": 2,
+      "group_id": "capacity-no-latency-rerun-20260826",
+      "plan_path": "benchmark/plans/campaigns/fourcast-replay/capacity-no-latency/noaa-nws-fourcastnetgfs-pds.yaml",
+      "plan_sha256": "f4d232a2d72af868e9fe59ef63993d1f3a3328b54d8951fd08c6d731e14755b8"
+    },
+    {
+      "attempts": 3,
+      "group_id": "changesets-flat-20260901",
+      "plan_path": "benchmark/plans/campaigns/real-changesets-replay/flat/real-changesets.yaml",
+      "plan_sha256": "9f49e7329f00737f952c3791985ee6703d696df24d51a190467198b79f401b00"
+    },
+    {
+      "attempts": 31,
+      "group_id": "fc-cpu-corrected-20260828",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 2,
+      "group_id": "fc-cpu-sanity-20260828",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 29,
+      "group_id": "fc-cpu-screen-20260828",
+      "plan_path": "benchmark/plans/campaigns/fourcast-replay/cpu-screen/noaa-nws-fourcastnetgfs-pds.yaml",
+      "plan_sha256": "f4208cd0f61c1670ebd0df381187028abcfb58236a8d82e1ffb63625a30dbdcd"
+    },
+    {
+      "attempts": 18,
+      "group_id": "fc-isolated-ladder-20260828",
+      "plan_path": "benchmark/plans/campaigns/fourcast-replay/isolated-ladder/noaa-nws-fourcastnetgfs-pds.yaml",
+      "plan_sha256": "da73c7399a0561515a7ec7f755c33d760f92bd1c4df0f7f0625a082f6da483e3"
+    },
+    {
+      "attempts": 1,
+      "group_id": "fc-ps3-p5000-20260829",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 2,
+      "group_id": "fc-rclone-repeat-20260828",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 7,
+      "group_id": "fc-tuning-followup-20260828",
+      "plan_path": "benchmark/plans/campaigns/fourcast-replay/tuning-followup/noaa-nws-fourcastnetgfs-pds.yaml",
+      "plan_sha256": "e706fba90c5c0eb93cf255bc67c1b6ed7b7aa04b6230dad9edf797423844adc4"
+    },
+    {
+      "attempts": 14,
+      "group_id": "latency-fixed-replay-20260826",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 10,
+      "group_id": "nara-config-followup-20260828",
+      "plan_path": "benchmark/plans/campaigns/nara-replay/config-followup/nara-1950-census.yaml",
+      "plan_sha256": "2e9ab21c5983c34d7749b19031b4c5608eab64ba86dfcb353fb156e221719294"
+    },
+    {
+      "attempts": 10,
+      "group_id": "nara-config-selection-20260828",
+      "plan_path": "benchmark/plans/campaigns/nara-replay/config-selection/nara-1950-census.yaml",
+      "plan_sha256": "3f9a6925aafdf08d9fae70f54083198e5b7caddf7489d13333b6adb7ff2a8578"
+    },
+    {
+      "attempts": 19,
+      "group_id": "nara-cpu-ladder-20260828",
+      "plan_path": "benchmark/plans/campaigns/nara-replay/cpu-ladder/nara-1950-census.yaml",
+      "plan_sha256": "f9d7d126b2489fc2b3ab7983252afa017739d61144b26d47e18429d4ad8a4c47"
+    },
+    {
+      "attempts": 1,
+      "group_id": "nara-rclone-query-recovery-20260828",
+      "plan_path": "benchmark/plans/campaigns/nara-replay/rclone-query-recovery/nara-1950-census.yaml",
+      "plan_sha256": "26b46d483b5d0641d01ed92a24165e5248d7e07fa616f79a9e6fd232613f5f13"
+    },
+    {
+      "attempts": 2,
+      "group_id": "nara-s7-depth-recovery-20260828",
+      "plan_path": "benchmark/plans/campaigns/nara-replay/s7-depth-recovery/nara-1950-census.yaml",
+      "plan_sha256": "9251fd47955d2d5db203ed1a6cfd7c60aa3299eca86afd86d291557ba11bc6e8"
+    },
+    {
+      "attempts": 6,
+      "group_id": "nbm-capacity-20260828",
+      "plan_path": "benchmark/plans/campaigns/nbm-replay/capacity/noaa-nbm-grib2-pds.yaml",
+      "plan_sha256": "cd0bbf61fee9a8561bf2709713eaf9506e211b2bedc190c5fab763b821987dfd"
+    },
+    {
+      "attempts": 1,
+      "group_id": "nbm-s3fl-16g-20260828",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 1,
+      "group_id": "nbm-s3fl-16g-fixed-20260828",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 1,
+      "group_id": "nbm-s5-fair-20260829",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 1,
+      "group_id": "nbm-s5-fix-20260829",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 1,
+      "group_id": "nbm-s7-c4-20260828",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 1,
+      "group_id": "nbm-s7-nofile-20260828",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 1,
+      "group_id": "nbm-s7-retry1-20260828",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 1,
+      "group_id": "s3fl-hinted-fixed-replay-20260826",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 2,
+      "group_id": "s3fl-hinted-fixed-replay-r2-20260826",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 1,
+      "group_id": "s3fl-hinted-nolat-r2-20260826",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 3,
+      "group_id": "s3fl-hinted-nolat-r3-20260826",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 6,
+      "group_id": "sorel-swath-transfer-20260828",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 1,
+      "group_id": "swath-031-blockchain-a-20260901",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 1,
+      "group_id": "swath-031-fc-cap-none-20260901",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 1,
+      "group_id": "swath-031-fc-cap-s3-20260901",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 3,
+      "group_id": "swath-031-fc-cpu-20260901",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 1,
+      "group_id": "swath-031-fc-screen-none-20260901",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 2,
+      "group_id": "swath-031-fc-screen-s3-20260901",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 3,
+      "group_id": "swath-031-fc-tuning-20260901",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 6,
+      "group_id": "swath-031-idc-20260901",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 2,
+      "group_id": "swath-031-nara-cpu-20260901",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 2,
+      "group_id": "swath-031-nara-select-20260901",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 1,
+      "group_id": "swath-031-nbm-20260901",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 6,
+      "group_id": "swath-031-sorel-20260901",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 1,
+      "group_id": "swath-main-canary-20260901",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 1,
+      "group_id": "swath-main-largest-20260901",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 1,
+      "group_id": "swath-postfix-blockchain-a-20260901",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 1,
+      "group_id": "swath-postfix-canary-20260901",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 1,
+      "group_id": "swath-postfix-fc-cap-none-20260901",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 1,
+      "group_id": "swath-postfix-fc-cap-s3-20260901",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 3,
+      "group_id": "swath-postfix-fc-cpu-20260901",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 1,
+      "group_id": "swath-postfix-fc-screen-none-20260901",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 2,
+      "group_id": "swath-postfix-fc-screen-s3-20260901",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 3,
+      "group_id": "swath-postfix-fc-tuning-20260901",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 7,
+      "group_id": "swath-postfix-idc-20260901",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 2,
+      "group_id": "swath-postfix-nara-cpu-20260901",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 2,
+      "group_id": "swath-postfix-nara-select-20260901",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 1,
+      "group_id": "swath-postfix-nbm-20260901",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 6,
+      "group_id": "swath-postfix-sorel-20260901",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 1,
+      "group_id": "swath-real-s3-fah-sorted-20260901",
+      "plan_path": "benchmark/plans/campaigns/swath-real-s3-peak/fah-public-data-covid19-absolute-free-energy.yaml",
+      "plan_sha256": "b50b181856a80a6ebde66513d46c4f1ad3a6a968355044ea866bb1237fcc8c66"
+    },
+    {
+      "attempts": 1,
+      "group_id": "swath-real-s3-janelia-sorted-20260901",
+      "plan_path": "benchmark/plans/campaigns/swath-real-s3-peak/janelia-cosem-datasets.yaml",
+      "plan_sha256": "67bf4477c43fd59992fdfcea50e59d9cd2c7727f3b23f2d4cb70061941de6d62"
+    },
+    {
+      "attempts": 1,
+      "group_id": "swath-real-s3-sentinel-sorted-20260901",
+      "plan_path": "benchmark/plans/campaigns/swath-real-s3-peak/sentinel-cogs.yaml",
+      "plan_sha256": "9ba1de7507d04c3de20095d84599a8cece5d1cbd8c6576567dd73a08b6215fb9"
+    },
+    {
+      "attempts": 1,
+      "group_id": "swath-s3-changesets-sort-20260901",
+      "plan_path": "benchmark/plans/campaigns/swath-real-s3-peak/real-changesets.yaml",
+      "plan_sha256": "b27e4388229c91590b33fee57f668e108aaa20ade4a903464629b65de317f423"
+    },
+    {
+      "attempts": 1,
+      "group_id": "swath-s3-fah-sort-cpu32-20260901",
+      "plan_path": "benchmark/plans/campaigns/swath-real-s3-peak/fah-public-data-covid19-absolute-free-energy.yaml",
+      "plan_sha256": "b50b181856a80a6ebde66513d46c4f1ad3a6a968355044ea866bb1237fcc8c66"
+    },
+    {
+      "attempts": 1,
+      "group_id": "swath-s3-fah-sort-use1-20260901",
+      "plan_path": "benchmark/plans/campaigns/swath-real-s3-peak/fah-public-data-covid19-absolute-free-energy.yaml",
+      "plan_sha256": "b50b181856a80a6ebde66513d46c4f1ad3a6a968355044ea866bb1237fcc8c66"
+    },
+    {
+      "attempts": 1,
+      "group_id": "swath-s3-fah-tsv-c2048-20260901",
+      "plan_path": "benchmark/plans/campaigns/swath-real-s3-peak/fah-public-data-covid19-absolute-free-energy.yaml",
+      "plan_sha256": "b50b181856a80a6ebde66513d46c4f1ad3a6a968355044ea866bb1237fcc8c66"
+    },
+    {
+      "attempts": 1,
+      "group_id": "swath-s3-janelia-sort-cpu32-20260901",
+      "plan_path": "benchmark/plans/campaigns/swath-real-s3-peak/janelia-cosem-datasets.yaml",
+      "plan_sha256": "67bf4477c43fd59992fdfcea50e59d9cd2c7727f3b23f2d4cb70061941de6d62"
+    },
+    {
+      "attempts": 1,
+      "group_id": "swath-s3-janelia-sort-use1-20260901",
+      "plan_path": "benchmark/plans/campaigns/swath-real-s3-peak/janelia-cosem-datasets.yaml",
+      "plan_sha256": "67bf4477c43fd59992fdfcea50e59d9cd2c7727f3b23f2d4cb70061941de6d62"
+    },
+    {
+      "attempts": 1,
+      "group_id": "swath-s3-sentinel-sort-use1-20260901",
+      "plan_path": "benchmark/plans/campaigns/swath-real-s3-peak/sentinel-cogs.yaml",
+      "plan_sha256": "9ba1de7507d04c3de20095d84599a8cece5d1cbd8c6576567dd73a08b6215fb9"
+    },
+    {
+      "attempts": 1,
+      "group_id": "swath-s3-sentinel-tsv-c2048-20260901",
+      "plan_path": "benchmark/plans/campaigns/swath-real-s3-peak/sentinel-cogs.yaml",
+      "plan_sha256": "9ba1de7507d04c3de20095d84599a8cece5d1cbd8c6576567dd73a08b6215fb9"
+    },
+    {
+      "attempts": 1,
+      "group_id": "swath-warmup-blockchain-a-20260901",
+      "plan_path": null,
+      "plan_sha256": null
+    }
+  ],
+  "images": {
+    "image_set_sha256": [
+      "011f83231e5d4644f36399a077eec42b74ea7cac4470b11724999425b608865c",
+      "0321d63f6b4983f9ed34f36c4cdcc950c5d059e600fc7afedfa4b1b46b9e5105",
+      "04cddf087ebbd5d8dc6adbddd9c01112b355cf249c267ed103ed49a1877963ed",
+      "0bae9345f2ce52ad2e58edcb817edd68b4b8e09853cdb67b5facc14495252e51",
+      "10ce5c815c5dab948184e660f0d6844373113c76fe03796b60924ad7b247fdb9",
+      "2198e8e69b7058e77071f00f60aa997012eaa00e69f195280606d135f26d2ac6",
+      "3119405028cedeba747413078f2edb16acd02db3c72700a79c6778f0631446d5",
+      "3a4ca5c8818e6e4787e5c81c37058b2b80fcba4a147cc5a17bffc281ee26698b",
+      "4a835ea3daf5c73854f68fbf610e7c3e16a0f84cab7ce05da25a91f777b5c294",
+      "5ecf54bd5a11ef3bf0b24e7030294f2e8c494aa00e9f980c2042308d032e68ff",
+      "6c2963d2612f9c20338bed7fca30fec8ae06322ee97879020cd41f1a073e2dac",
+      "6cd82f131d8f9b9158493174d0b0adfdd204926fa9f73756de246af2677d07c1",
+      "7f0f050538d6fa0d60d3c3c5887c9423e170fea158112395a9417a6ffe64e391",
+      "8282a955ee623c0b9a00ddad1974ada710af7f4734fa3ac86a7c9fa400fd0f89",
+      "85a088375aa1e34cea002280b5d2032a8d310f6dce5e03810f54344bce04c92d",
+      "8be91cae1a589ed7484b90f109dd192402f1dc3bfd2ef242d273de24c3286ec0",
+      "8c77b524605f3823f19597cb677874c55cc634b04af8f2d555d7950b30325c0e",
+      "af45c681674423f4d864eefde47bd530bb8b91778cf061d435cafc61d53e947b",
+      "c08e668bd5239df81ccea19a95091a2bdd6426d704269b9d38ac196be5270f92",
+      "c31f05fcd4fe333f508aef23672ee3ff48af5cea0a59cae0c051ee3c78a40beb",
+      "e78f8a5cf286b69eb89beda0390b5dc295beea3877e8e79c8b117a922e036dd6",
+      "fe78d77dfbd5a1b764553456e8a4b81e9d6f4aee870029ef1af278cf57b807d3"
+    ],
+    "replay_server_image_digests": [
+      "sha256:3955f242f25294d3ebc6d63d3cf23e2a2694f7f1c9a5334dc6ec1054b0a69097",
+      "sha256:8fb53a327f946f10db17d4fd082a7b2e06bc678a1e828a197a1ef5717473a46a",
+      "sha256:992ef65f1d8e92385a39dfe0eea487ceeeaefd4ca186cd8511447317872ade1d",
+      "sha256:ace5350d99c217bf5919b795fc53ed955d1dc2fb6bef1eecf36e8a90e9732f07",
+      "sha256:c5f4239abbce7772faa2d58c661192bd6a890e460158b5e56fcb8c51b573cb63",
+      "sha256:e63da67a02b3f5e9a7bb78621bca74b157b6a86acbce30af5f2d650a44aa27c5",
+      "sha256:f51c4d12ac0e1f52fd02f1a77a74e962d610d518e64ab8425635512370973612"
+    ],
+    "toolbox_image_digests": [
+      "sha256:0e3e0225ef0ec01a08c90ae8795927a1a55f5b8803dd89754e6d04256852bfab",
+      "sha256:0e79492cdf5598a74baa3671cd9191871ab98c3507c484ced3ef65a8a41b0c22",
+      "sha256:1906559a130773f351f30e954b48e81af9ef7a5be5d14a911e0d36f8e5891285",
+      "sha256:1a563daf8712b6d69089eca5856322fc4e3b50424a6aed7d6a95e2ee16c65492",
+      "sha256:1d2b46520c8d09111a1fd5e47e008cfcff0dc9c62166a21075822219be4f32ac",
+      "sha256:1f815b5f0d7882f52ab7bf26b5d5bda0f315d86f327ddb25690f30de5d3b12f8",
+      "sha256:211e8205b11bf3ed5d5e808fe80edbd129326835ad77b55cbd88d9e10b058b57",
+      "sha256:2ac8ec3e7f251d1f14db9651e649307ddea82944819c26aedabb54ef55856a11",
+      "sha256:397aa1b776a18c6f00170ad2d2defb3591eb4e59d1678363da86377cb58be679",
+      "sha256:4db3a23f3adc2b1e77111ff6ce36f5bca1038caee8177bd1a93f2fcd0eb55a55",
+      "sha256:4ec249eb979ec883d42bf3ac670623d822c56bf21c9fcdf4b3b773f650da0b48",
+      "sha256:60a7e6ee3a476f9d7e12c33977f0813f22161bbc34b6bdb6b292f0bc7543d86b",
+      "sha256:6473a6c151a35e0875cf66f17932284b6cc88789ef7ca78f76edf1bdfbc50a7c",
+      "sha256:6678b8c013c1053536a56b1560f63a1a785b6208b8ff7baec94f6b286bfbc751",
+      "sha256:76881fbccfa6efa4c5402b8d7fa0df57be06df2ed7012a91c8e26b3e201603d7",
+      "sha256:79b567baf5a2fc18e75846af9b0887f83335203e27d034a648baba69ee73cfc4",
+      "sha256:9d212ec1cae1ed8f5fac65e7030e271db80bb3b5680edd43b9978368263ba1ed",
+      "sha256:9fe6f7fb00c9f857f434a0151476bb8184dd139df13c284692a2e9f09846fb91",
+      "sha256:b8bae19a747ab5da97ad64a56642d679ae8050e04969c548728afc71054ee3ef",
+      "sha256:c84fb245d6fc7194d5c1cb4743806a64b4f9a13b647b91b8bab0cf670a3b93b7",
+      "sha256:e78985f90874f3d8b4528e6826459878d717fc22d0a12dc79106997eb857a65d",
+      "sha256:ea3dce97e66990edfda1b1e09470f617af481c14110a50c995477ff757e1fee7"
+    ]
+  },
+  "include": "all-terminal",
+  "published_at": "2026-09-01T20:21:52.213671+00:00",
+  "release_id": "2026-09-scale-diagnostics",
+  "schema_version": 1,
+  "source": {
+    "exporter_version": 1,
+    "formula_version": 1,
+    "ledger_schema_version": 3,
+    "ledger_suite": "scale-study",
+    "reader_ledger_schema_version": 3,
+    "release_spec": "benchmark/publication/2026-09-scale-diagnostics.yaml",
+    "repository_commit": "53dc89472ec7633181867c79b09874fad77b0cf7",
+    "row_schema_version": 1
+  },
+  "status": "diagnostic",
+  "title": "Scale-study replay diagnostics"
+}
