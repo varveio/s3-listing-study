@@ -41,7 +41,7 @@ longer.
 
 **A first release of results is published, as diagnostics.**
 [`results/2026-09-scale-diagnostics/`](results/2026-09-scale-diagnostics/)
-carries 284 settled attempts across eleven tools, and
+carries 270 settled attempts across ten tools, and
 [`RESULTS.md`](RESULTS.md) is the index. Start with the release's own
 [report](results/2026-09-scale-diagnostics/REPORT.md).
 
@@ -56,8 +56,9 @@ listing tools.**
 What the release does settle: which approaches survive a rising object count,
 where each one stops and by what mechanism, exact object counts wherever a run
 returned one, and the memory behaviour that decides several of the outcomes.
-Eleven tools were screened from a 4.08-million-object fixture upward; ten
-completed the first rung and four reached 143 million. Separately, one tool
+Ten tools were screened from a 4.08-million-object fixture upward; an
+eleventh roster tool, s4cmd, has no attempt in the release. All ten completed
+the first rung and four reached 143 million. Separately, one tool
 listed a 1.07-billion-object public bucket on live S3 from a single 32-vCPU VM
 with an exact count — one run, one tool, and bounded in the report.
 

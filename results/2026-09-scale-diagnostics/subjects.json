@@ -374,7 +374,7 @@
     ]
   },
   "swath": {
-    "attempts": 113,
+    "attempts": 95,
     "capsule_path": "tools/swath/",
     "image_digests": [
       "sha256:0e3e0225ef0ec01a08c90ae8795927a1a55f5b8803dd89754e6d04256852bfab",

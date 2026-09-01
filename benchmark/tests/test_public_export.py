@@ -274,3 +274,33 @@ def test_the_release_spec_refuses_a_selective_release(tmp_path: Path) -> None:
     body = SPEC.replace("include: all-terminal", "include: hand-picked")
     with pytest.raises(public_export.ExportError, match="only implements 'all-terminal'"):
         public_export.load_release_spec(spec_at(tmp_path, body))
+
+
+def test_a_withheld_workload_leaves_the_release_entirely(tmp_path: Path) -> None:
+    con = fixture_ledger(tmp_path)
+    write_evidence(
+        record(con, tmp_path, tool="alpha", digest="aaaa", purpose="diagnostic"),
+        wall_seconds=2.5,
+        argv=["/usr/bin/alpha"],
+        tool_version="1.2.3",
+    )
+    write_evidence(
+        record(con, tmp_path, tool="alpha", digest="dddd", purpose="diagnostic", bucket="licensed"),
+        wall_seconds=3.5,
+        argv=["/usr/bin/alpha"],
+        tool_version="1.2.3",
+    )
+    body = SPEC + "withheld_workloads:\n  licensed: the dataset licence forbids publication\n"
+    release = public_export.build_release(
+        ledger.attempt_rows(con),
+        spec=public_export.load_release_spec(spec_at(tmp_path, body)),
+        commit=COMMIT,
+        repo_root=Path(report.DEFAULT_ADAPTER_ROOT).parent.resolve(),
+        adapter_root=adapter_root(tmp_path, "alpha"),
+    )
+    assert [row["target"]["bucket"] for row in release.rows] == ["bucket-one"]
+    assert release.manifest["counts"]["attempts"] == 1
+    assert release.manifest["counts"]["withheld_attempts"] == 1
+    assert "licensed" not in json.dumps(release.manifest)
+    withheld = [d for d in release.manifest["disclosures"] if d["id"] == "workloads-withheld"]
+    assert withheld and withheld[0]["affects"] == "1 attempt(s) across 1 workload(s)"

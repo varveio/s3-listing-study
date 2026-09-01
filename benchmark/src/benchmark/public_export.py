@@ -372,6 +372,7 @@ class ReleaseSpec:
     ledger_suite: str
     ledger_schema_version: int
     plans: dict[str, str]
+    withheld_workloads: dict[str, str]
 
 
 def load_release_spec(path: Path) -> ReleaseSpec:
@@ -404,6 +405,9 @@ def load_release_spec(path: Path) -> ReleaseSpec:
         ledger_suite=str(source.get("suite")),
         ledger_schema_version=int(source["schema_version"]),
         plans={str(k): str(v) for k, v in (document.get("plans") or {}).items()},
+        withheld_workloads={
+            str(k): str(v) for k, v in (document.get("withheld_workloads") or {}).items()
+        },
     )
 
 
@@ -1112,9 +1116,17 @@ def build_release(
     repo_root: Path,
     adapter_root: str,
 ) -> Release:
-    terminal = [row for row in db_rows if row["state"] in TERMINAL_STATES]
+    # A withheld workload leaves the release entirely: its rows, its fixture and
+    # its groups. The manifest counts what was withheld so the omission is not
+    # silent, without naming the workload, because the withholding reason is
+    # that the name and its data may not be published.
+    withheld = [row for row in db_rows if str(row["target_bucket"]) in spec.withheld_workloads]
+    releasable = [
+        row for row in db_rows if str(row["target_bucket"]) not in spec.withheld_workloads
+    ]
+    terminal = [row for row in releasable if row["state"] in TERMINAL_STATES]
     skipped = sorted(
-        str(row["attempt_id"]) for row in db_rows if row["state"] not in TERMINAL_STATES
+        str(row["attempt_id"]) for row in releasable if row["state"] not in TERMINAL_STATES
     )
     bound_rows = report.report_rows(list(terminal), adapter_root=adapter_root)
     bound_by_id = {str(bound["attempt_id"]): bound for bound in bound_rows}
@@ -1228,6 +1240,19 @@ def build_release(
             "detail": "Attempts that had not settled when the release was cut are not included.",
             "affects": skipped,
         },
+        {
+            "id": "workloads-withheld",
+            "detail": (
+                "Attempts against workloads whose dataset licence does not permit publishing "
+                "derived results are withheld: their rows, groups and fixture records are absent. "
+                "The release spec names the workloads and the reason."
+            ),
+            "affects": (
+                f"{len(withheld)} attempt(s) across {len(spec.withheld_workloads)} workload(s)"
+                if withheld
+                else []
+            ),
+        },
     ]
 
     manifest = {
@@ -1290,6 +1315,7 @@ def build_release(
                 rows, lambda row: name_of(row["classification"]["replay_timing"])
             ),
             "skipped_non_terminal": len(skipped),
+            "withheld_attempts": len(withheld),
         },
         "disclosures": [entry for entry in disclosures if entry.get("affects") != []],
         "files": [],

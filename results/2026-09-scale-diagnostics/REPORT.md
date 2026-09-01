@@ -1,6 +1,6 @@
 # S3 listing tools from 4 million to 1.07 billion objects: a diagnostic release
 
-Release `2026-09-scale-diagnostics` · data as of 2026-09-01 · 284 settled attempts
+Release `2026-09-scale-diagnostics` · data as of 2026-09-01 · 270 settled attempts
 
 This is the written companion to the release data in this directory. Every
 number below is quoted from `summary.csv` / `attempts.jsonl` unless the text
@@ -194,16 +194,19 @@ declared deadlines 122 ms `worker_page` / 88 ms `structure_probe` / 88 ms
 | Swath c64 `recursive-tsv-dataset` | `swath.666e471aac76.s1` | 47.5 s | exact 13,868,442 | 369,512 | Completed, over 14,845 replay requests. |
 | s7cmd c16 `recursive-one-nosort` | `s7cmd.97b265107a89.s1` | 1,289.5 s | exact 13,868,442 | 50,944 | Completed as one serial drain: with no sub-prefixes to discover, its prefix-parallel phase has nothing to divide. |
 | rclone c64 `recursive-walk`, 8 GiB | `rclone.795fbd66217b.s1` | 1,401.8 s | none | 8,369,376 | **Failed.** Killed at the container memory cap (subject exit -9) after issuing all 13,869 pages, having written nothing. |
-| rclone c64 `recursive-walk`, 16 GiB | `rclone.d92a513cb0f2.s1` | pending | pending | pending | The memory control for the row above. It settled after this export was cut; its figures land in the next export from the same ledger. <!-- RCLONE-WALK-16G-PENDING --> |
-| rclone `lsjson --fast-list -R`, 8 GiB | `rclone.997236778cca` | pending | pending | pending | rclone's default streaming path, run to establish whether the memory profile above belongs to the tool or to the walk mode. <!-- RCLONE-LISTR-PENDING --> |
+| rclone c64 `recursive-walk`, 16 GiB | `rclone.d92a513cb0f2.s1` | 1,377.6 s | exact 13,868,442 | 8,121,012 | Completed. The memory control for the row above: the walk holds about 8.1 GB resident for a 13.9M-entry directory, so the 8 GiB cap was the edge of that footprint, not a leak. |
+| rclone `lsjson --fast-list -R`, 8 GiB | `rclone.997236778cca.s3` | 1,851.8 s | exact 13,868,442 | 73,764 | Completed on the third Spot attempt; the first two were preempted before producing evidence and are exported as failures with no outcome. rclone's default streaming path holds about 74 MB resident, so the memory profile above belongs to the walk mode, not the tool. |
 
 What the completed rows show: on a flat namespace the per-directory walk holds
 the whole result set in memory and is killed at 8 GiB before emitting anything,
 and the prefix-discovery design degenerates to a single sequential pagination.
 The range-splitting design is unaffected, because it does not need directories
-to divide the keyspace. What they do not show is anything about rclone's default
-mode, which is what the pending row exists to settle — until it lands, the
-flat-namespace statement is about `recursive-walk`, not about rclone.
+to divide the keyspace. rclone's default streaming mode settles the memory
+question: it completes the same cell in 74 MB, so the 8 GB footprint belongs to
+`recursive-walk`, not to rclone. Both rclone modes are one sequential pagination
+of 13,869 pages. Their wall clocks differ because of the replay deadline each
+request shape draws, 88 ms for the walk's delimiter pages against 122 ms for the
+streaming mode's plain pages, not because one mode lists faster.
 
 ## Swath on live S3
 
@@ -326,6 +329,4 @@ happens to penalise Swath rather than favour it.
 
 A release directory is immutable once tagged. A correction is a new release
 whose manifest names what it supersedes; see the correction policy in
-`results/README.md`. Two attempts were still settling when this export was cut
-and are marked pending above. They arrive in the next export from the same
-ledger, not as edits to these files.
+`results/README.md`.

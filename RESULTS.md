@@ -7,7 +7,7 @@ behind every claim.
 ## Current release
 
 **[`results/2026-09-scale-diagnostics/`](results/2026-09-scale-diagnostics/)** —
-*Scale-study replay diagnostics*, 284 settled attempts, data as of 2026-09-01.
+*Scale-study replay diagnostics*, 270 settled attempts, data as of 2026-09-01.
 
 > **Diagnostic release. Nothing in it is a measurement-grade comparison.** No
 > attempt carries `purpose = measurement`; the replay instrument has a known
@@ -27,8 +27,9 @@ behind every claim.
 - [`charts/`](results/2026-09-scale-diagnostics/charts/) — four figures, each
   with the exact rows it drew beside it as CSV.
 
-Eleven tools were screened from a 4.08-million-object fixture upward. Ten
-completed the first rung; four reached 143 million. Separately, one tool listed
+Ten tools were screened from a 4.08-million-object fixture upward; an
+eleventh roster tool, s4cmd, has no attempt in the release. All ten completed
+the first rung; four reached 143 million. Separately, one tool listed
 a 1.07-billion-object public bucket on live S3 from a single 32-vCPU VM, with an
 exact count — n=1, one tool, and bounded in the report.
 
