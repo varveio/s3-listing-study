@@ -97,8 +97,10 @@ def test_warm_up_walks_breadth_first_and_reports_issued_counts() -> None:
     assert outcome["state"] == "truncated"
     assert outcome["issued"] == {"structure_probes": 4, "pivot_probes": 3, "worker_pages": 2}
     assert outcome["distinct_prefixes"] == 3 and outcome["failures"] == 0
-    structure = [q for q in _Handler.seen if "delimiter" in q]
-    assert [q.get("prefix", "") for q in structure] == ["", "a/", "b/", "a/x/"]
+    structure = [q.get("prefix", "") for q in _Handler.seen if "delimiter" in q]
+    # Breadth-first by wave: the root alone, then its two children in either arrival order
+    # (they run concurrently), then the grandchild.
+    assert structure[0] == "" and sorted(structure[1:3]) == ["a/", "b/"] and structure[3] == "a/x/"
     probes = [q for q in _Handler.seen if "delimiter" not in q]
     assert sorted(q["max-keys"] for q in probes) == ["1", "1", "1", "1000", "1000"]
     assert all(q["start-after"] in {"root.txt", "a/1", "a/2", "b/1", "a/x/1"} for q in probes)
