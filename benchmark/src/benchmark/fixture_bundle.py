@@ -556,8 +556,19 @@ def _render_readme(summary: Mapping[str, object]) -> str:
 
     source = mapping("source")
     fixture = mapping("fixture")
-    hints = mapping("s3_fast_list_hints")
-    s5cmd_shards = mapping("s5cmd_shards")
+    hints = None if summary.get("s3_fast_list_hints") is None else mapping("s3_fast_list_hints")
+    s5cmd_shards = None if summary.get("s5cmd_shards") is None else mapping("s5cmd_shards")
+    companion_lines = (
+        "- Companion inputs: not generated (`--without-companions`; no tool in this "
+        "fixture's cells reads hints or shards)"
+        if hints is None or s5cmd_shards is None
+        else (
+            f"- s3-fast-list hints: `{HINTS_NAME}`, {hints['cut_points']} cuts / "
+            f"{hints['ranges']} ranges,\n  SHA-256 `{hints['sha256']}`\n"
+            f"- s5cmd fanout: `{S5CMD_SHARDS_NAME}`, {s5cmd_shards['shards']} disjoint "
+            f"top-level shards,\n  SHA-256 `{s5cmd_shards['sha256']}`"
+        )
+    )
     latency = mapping("latency_model")
     capture = mapping("capture")
     physical_order = mapping("physical_order_validation")
@@ -573,10 +584,7 @@ not a benchmark result.
 - Physical order: {physical_order["rows"]:,} rows scanned;
   {physical_order["descending_adjacent_pairs"]} descents /
   {physical_order["adjacent_duplicate_pairs"]} adjacent duplicates
-- s3-fast-list hints: `{HINTS_NAME}`, {hints["cut_points"]} cuts / {hints["ranges"]} ranges,
-  SHA-256 `{hints["sha256"]}`
-- s5cmd fanout: `{S5CMD_SHARDS_NAME}`, {s5cmd_shards["shards"]} disjoint top-level shards,
-  SHA-256 `{s5cmd_shards["sha256"]}`
+{companion_lines}
 - Replay latency deadlines: `{latency["deadlines_ms"]}`
 - Swath image: `{capture["swath_image"]}`
 - Replay validation image: `{capture["replay_image"]}`
@@ -623,10 +631,15 @@ def build_bundle(args: argparse.Namespace) -> dict[str, object]:
         raise FixtureBundleError(
             "fixture physical-order scan and aggregate analysis disagree on row count"
         )
-    hints_path = output / HINTS_NAME
-    hints = _generate_hints(data_dir, hints_path, args.segments)
-    s5cmd_shards_path = output / S5CMD_SHARDS_NAME
-    s5cmd_shards = _generate_s5cmd_shards(data_dir, s5cmd_shards_path)
+    companions: list[Path] = []
+    hints: dict[str, object] | None = None
+    s5cmd_shards: dict[str, object] | None = None
+    if not args.without_companions:
+        hints_path = output / HINTS_NAME
+        hints = _generate_hints(data_dir, hints_path, args.segments)
+        s5cmd_shards_path = output / S5CMD_SHARDS_NAME
+        s5cmd_shards = _generate_s5cmd_shards(data_dir, s5cmd_shards_path)
+        companions = [hints_path, s5cmd_shards_path]
     latency = _latency_profile(report)
     serving_validation = _validate_sorted_serving(
         args, data_dir, latency, output / "sorted-validation.log"
@@ -661,7 +674,9 @@ def build_bundle(args: argparse.Namespace) -> dict[str, object]:
             "files": len(parquet_paths),
             "bytes": sum(path.stat().st_size for path in parquet_paths),
         },
-        "s3_fast_list_hints": {**hints, "segments": args.segments, "name": HINTS_NAME},
+        "s3_fast_list_hints": (
+            None if hints is None else {**hints, "segments": args.segments, "name": HINTS_NAME}
+        ),
         "s5cmd_shards": s5cmd_shards,
         "latency_model": latency,
         "physical_order_validation": physical_order,
@@ -675,7 +690,7 @@ def build_bundle(args: argparse.Namespace) -> dict[str, object]:
     if gcs_prefix is not None:
         _upload_bundle(
             gcs_prefix,
-            (*parquet_paths, hints_path, s5cmd_shards_path, summary_path, readme_path),
+            (*parquet_paths, *companions, summary_path, readme_path),
         )
     return summary
 
@@ -700,6 +715,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--replay-memory-gb", type=int, default=20)
     parser.add_argument("--concurrency", type=int, default=128)
     parser.add_argument("--segments", type=int, default=1000)
+    parser.add_argument(
+        "--without-companions",
+        action="store_true",
+        help="skip the s3-fast-list hints and s5cmd shard companions (a flat namespace has "
+        "no prefixes to cut or shard on, and neither tool runs on it)",
+    )
     parser.add_argument("--gcs-prefix")
     parser.add_argument("--validation-port", type=int, default=29090)
     parser.add_argument("--validation-metrics-port", type=int, default=29192)
