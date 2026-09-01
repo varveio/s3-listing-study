@@ -107,6 +107,24 @@ The other explicit treatment is no injection:
   latency_model: none
 ```
 
+A plan may also declare a **warm-up** the worker drives after the server is
+ready and before the `before` metrics snapshot, so the requests warm the
+server's JIT, reader pools, and page indexes without entering any treatment
+meter:
+
+```yaml
+  warmup:
+    structure_probes: 2000   # breadth-first delimiter walk from the fixture root
+    pivot_probes: 200        # max-keys=1 at keys the walk returned
+    worker_pages: 200        # max-keys=1000 at the same anchors
+    in_flight: 64
+```
+
+A warmed server is a different instrument from a cold one, so the block is part
+of the treatment identity; omitting it means none and leaves earlier identities
+unchanged. The worker records the counts actually issued, the wall-clock spent,
+and whether the phase was truncated in `replay_evidence.warmup`.
+
 The latency treatment is a **measurement, not a preference**. A fixed model
 adds the fixture's measured per-request latency profile; `none` measures the
 subject and replay server without that delay. They impose different demand on

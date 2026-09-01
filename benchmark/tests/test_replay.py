@@ -286,3 +286,49 @@ def test_generated_runner_fixture_is_small_paginated_and_digest_bound(tmp_path: 
         "00000000000000000000000000000000",
         "000000000000000000000000000007ff",
     )
+
+
+def test_declared_warmup_is_part_of_the_treatment_identity() -> None:
+    backend = {
+        "server_image_uri": "registry/replay@sha256:" + "a" * 64,
+        "fixture_sha256": "b" * 64,
+        "serving_mode": "sorted",
+        "latency_model": "none",
+    }
+    cold = replay.parse_backend(backend)
+    warm = replay.parse_backend(
+        {
+            **backend,
+            "warmup": {
+                "structure_probes": 2000,
+                "pivot_probes": 200,
+                "worker_pages": 200,
+                "in_flight": 64,
+            },
+        }
+    )
+    assert cold.warmup is None and "warmup" not in cold.as_dict()
+    assert warm.as_dict()["warmup"] == {
+        "structure_probes": 2000,
+        "pivot_probes": 200,
+        "worker_pages": 200,
+        "in_flight": 64,
+    }
+    assert cold.as_dict() != warm.as_dict()
+    plan = replay.parse_plan({**backend, "capacity_status": "uncalibrated", "warmup": None})
+    assert plan.backend.warmup is None
+
+
+@pytest.mark.parametrize(
+    "warmup",
+    [
+        {"structure_probes": 1},
+        {"structure_probes": 0, "pivot_probes": 0, "worker_pages": 0, "in_flight": 8},
+        {"structure_probes": -1, "pivot_probes": 0, "worker_pages": 0, "in_flight": 8},
+        {"structure_probes": 1, "pivot_probes": 0, "worker_pages": 0, "in_flight": 0},
+        {"structure_probes": True, "pivot_probes": 0, "worker_pages": 0, "in_flight": 8},
+    ],
+)
+def test_malformed_warmup_is_refused(warmup: dict[str, object]) -> None:
+    with pytest.raises(replay.ReplayError):
+        replay.parse_warmup(warmup)
