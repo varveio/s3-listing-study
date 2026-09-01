@@ -65,6 +65,61 @@ def evidence(*, after_requests: int = 1, after_errors: int = 0) -> dict[str, obj
     }
 
 
+def timing_config() -> replay.ReplayConfig:
+    document = config().as_dict()
+    backend = document["backend"]
+    assert isinstance(backend, dict)
+    backend["latency_model"] = {
+        "deadlines_ms": {
+            "worker_page": 100,
+            "pivot_probe": 50,
+            "structure_probe": 50,
+        },
+        "scale": 1.0,
+        "jitter": "none",
+    }
+    return replay.parse_document(document)
+
+
+def timing_evidence(
+    *, mean_ratio: float, overruns: int, cpu: tuple[float, ...]
+) -> dict[str, object]:
+    def observation(*, requests: int, sum_ms: float, overrun_count: int) -> dict[str, object]:
+        meters: list[dict[str, object]] = []
+        for shape in replay.INJECT_SHAPES:
+            active = shape == "worker_page"
+            meters.append(
+                {
+                    "name": replay.REQUEST_LATENCY_TIMER,
+                    "type": "timer",
+                    "tags": {"shape": shape},
+                    "count": requests if active else 0,
+                    "sum_ms": sum_ms if active else 0.0,
+                }
+            )
+        if overrun_count:
+            meters.append(
+                {
+                    "name": replay.INJECT_OVERRUN_COUNTER,
+                    "type": "counter",
+                    "tags": {"shape": "worker_page"},
+                    "count": overrun_count,
+                }
+            )
+        return {"metrics": {"meters": meters}}
+
+    return {
+        "before": observation(requests=0, sum_ms=0, overrun_count=0),
+        "after": observation(
+            requests=100,
+            sum_ms=100 * 100 * mean_ratio,
+            overrun_count=overruns,
+        ),
+        "resource_samples": [{"server_cpuset_utilization": utilization} for utilization in cpu],
+        "errors": [],
+    }
+
+
 def test_replay_evidence_refuses_inactive_or_erroring_server() -> None:
     assert "did not increase" in " ".join(
         replay.evidence_errors(config(), evidence(after_requests=0), purpose="measurement")
@@ -86,6 +141,35 @@ def test_replay_evidence_accepts_canonical_single_cpu_sets() -> None:
         replay.evidence_errors(replay.parse_document(document), observed, purpose="measurement")
         == ()
     )
+
+
+@pytest.mark.parametrize(
+    ("mean_ratio", "overruns", "cpu", "expected"),
+    (
+        (1.05, 0, (0.5,) * 5, replay.TIMING_VALID),
+        (1.15, 5, (0.5,) * 5, replay.PRESSURE_DEGRADED),
+        (1.30, 0, (0.5,) * 5, replay.CAPACITY_FAILED),
+        (1.05, 0, (0.91, 0.5, 0.5, 0.5, 0.5), replay.CAPACITY_FAILED),
+        (1.05, 0, (0.5,) * 4, replay.INSUFFICIENT_EVIDENCE),
+    ),
+)
+def test_replay_timing_gate_classifies_delivered_treatment_and_cpu_pressure(
+    mean_ratio: float, overruns: int, cpu: tuple[float, ...], expected: str
+) -> None:
+    assessment = replay.replay_timing_assessment(
+        timing_config(), timing_evidence(mean_ratio=mean_ratio, overruns=overruns, cpu=cpu)
+    )
+
+    assert assessment["state"] == expected
+    shapes = assessment["shapes"]
+    assert isinstance(shapes, dict)
+    worker = shapes["worker_page"]
+    assert isinstance(worker, dict)
+    assert worker["requests"] == 100
+
+
+def test_replay_timing_gate_does_not_apply_without_latency_injection() -> None:
+    assert replay.replay_timing_assessment(config(), evidence())["state"] == replay.NOT_APPLICABLE
 
 
 @pytest.mark.parametrize(

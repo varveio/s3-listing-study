@@ -82,6 +82,16 @@ def replay_metrics(requests: int, errors: int = 0) -> dict[str, object]:
                 "tags": {},
                 "count": float(errors),
             },
+            *(
+                {
+                    "name": "swath.replay.request.latency",
+                    "type": "timer",
+                    "tags": {"shape": shape},
+                    "count": requests,
+                    "sum_ms": float(requests),
+                }
+                for shape in ("worker_page", "pivot_probe", "structure_probe")
+            ),
         ]
     }
 
@@ -329,6 +339,7 @@ def complete_replay_evidence(replay: str) -> CompleteReplayEvidence:
                         "host_mem_available_kb": 1024,
                         "host_load1": 0.5,
                     }
+                    for _ in range(5)
                 ]
                 if calibrated
                 else []
@@ -408,6 +419,30 @@ def test_replay_report_uses_result_json_and_declared_allocations(tmp_path: Path)
     assert row["declared_subject_allocation"] == "cpus=2-3,7-8;memory=8GiB"
     assert row["derived_host_headroom"] == "vcpus=2;memory=16GiB"
     assert row["capacity_status"] == "CALIBRATED"
+    assert row["replay_timing"] == "TIMING_VALID"
+    assert "worker_page" in report.replay_timing_lines([row])[0]
+
+
+def test_pressure_failed_replay_remains_functional_but_is_not_a_timing(
+    tmp_path: Path,
+) -> None:
+    replay = replay_document(tmp_path / "manifest.tsv.gz")
+    con = fixture_ledger(tmp_path)
+    attempt = record(con, tmp_path, tool="alpha", digest="aaaa", replay=replay)
+    prefix = write_evidence(attempt, **complete_replay_evidence(replay))
+    document = json.loads((prefix / "result.json").read_text())
+    after = document["replay_evidence"]["after"]["metrics"]["meters"]
+    for meter in after:
+        if meter["name"] == "swath.replay.request.latency":
+            meter["sum_ms"] = 4.0
+    (prefix / "result.json").write_text(json.dumps(document))
+
+    row = rows_of(con, adapter_root(tmp_path, "alpha"))[0]
+
+    assert row["replay_timing"] == "CAPACITY_FAILED"
+    assert report.subject_succeeded(row)
+    assert not report.is_timing(row)
+    assert report.report_exit_code([row], blocked=[]) == 1
 
 
 def test_uncalibrated_replay_diagnostic_stays_out_of_publishable_rows(tmp_path: Path) -> None:

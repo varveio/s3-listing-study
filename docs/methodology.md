@@ -411,6 +411,40 @@ canary has a committed receipt. A plan states that condition explicitly as
 `replay.capacity_status: uncalibrated`; no replay measurement is eligible before
 the status is changed to `calibrated`.
 
+**Delivered-treatment correction, 2026-09-01.** Declaring a latency profile
+does not prove that a colocated replay server delivered it without queueing.
+Reporting therefore classifies every latency-injected replay attempt from its
+retained per-shape meters and 10-second replay-cpuset samples:
+
+- `TIMING_VALID`: each observed shape's delivered mean is at most 110% of its
+  deadline and fewer than 1% of its requests overran; at least five resource
+  samples exist, with fewer than 20% at or above 90% replay CPU;
+- `PRESSURE_DEGRADED`: the attempt misses that gate, but no shape exceeds a 10%
+  overrun fraction or 125% of its requested mean and replay CPU is not sustained
+  at the ceiling;
+- `CAPACITY_FAILED`: any shape exceeds either of those latter limits, or at
+  least 20% of five or more resource samples are at or above 90% replay CPU;
+  and
+- `INSUFFICIENT_EVIDENCE`: the injected attempt has no observed request shape,
+  incomplete/non-monotonic meters, or fewer than five resource samples.
+
+An attempt without latency injection is `NOT_APPLICABLE`; it may characterize a
+raw ceiling but does not pass the injected-treatment timing gate. These are
+provisional capacity-calibration thresholds, dated before the next rung rather
+than fitted to it. They classify instrument pressure separately from subject
+success: a pressure-degraded or capacity-failed attempt may still establish
+exit behavior and row count, but it cannot supply comparative timing.
+
+`capacity_status: calibrated` additionally requires a committed diagnostic
+receipt showing that one common replay allocation passes this gate for the
+heaviest included client shape and that its subject wall time agrees, within a
+predeclared uncertainty band, with a paired materially overprovisioned replay
+control. Contact with a configured reader-pool limit is reported but is not by
+itself a failure. Historical replay rows may be labeled by this same derived
+rule without rewriting their raw `result.json` evidence. Earlier wording that
+treated any single overrun as an automatic timing failure is superseded by this
+magnitude-and-sustained-pressure rule.
+
 Latency injection is a declared experimental treatment. A fixed-latency profile
 is valid for a controlled screen when it is applied identically and reported as
 such; it is not described as reproducing S3's full latency distribution unless

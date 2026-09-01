@@ -154,6 +154,12 @@ when a diagnostic varies cache capacity.
 `uncalibrated` permits diagnostic replay work only, while `calibrated` permits
 replay measurements. Set it to `calibrated` only after a real diagnostic
 capacity canary has a committed receipt for this backend and allocation family.
+That receipt must show the common allocation passing the delivered-treatment
+gate in [`docs/methodology.md`](../../docs/methodology.md) for the heaviest
+included client shape, plus a paired materially overprovisioned replay control
+whose subject wall time agrees within the predeclared uncertainty band. A
+calibrated measurement that does not itself classify `TIMING_VALID` is retained
+as functional evidence but reporting refuses it as a timing.
 Replay plans carry no correctness manifest: the worker counts rows in-container,
 retains logs and `result.json`, and routine reporting reads that marker only.
 Native product upload is an operator opt-in, not a plan axis.
@@ -198,6 +204,17 @@ order. Transform such input once with `swath-replay sort-fixture`, or declare
 `--serving-mode sorted` does not need another sort for correctness. Sorted mode
 is the final gate: it requires every resolved part to be stamped object mode,
 pure `OBJECT`, strictly globally ordered, and a complete multipart sequence.
+
+`benchmark.fixture_bundle` does not infer that physical-order fact from replay
+startup. Before generating companions or uploading a new bundle, it scans raw
+BLOB keys in lexicographic part-filename and physical row-number order, fails on
+an adjacent descent or duplicate (including a part boundary), reconciles the
+scan's row count with the aggregate fixture analysis, and records every part's
+count and first/last key in `fixture.json.physical_order_validation`. It then
+starts sorted replay as a separate `sorted_serving_validation`; readiness proves
+that the pinned server accepts the stamped parts, not that an unscanned input
+was ordered. Existing staged fixture bytes require a separately retained audit
+if they predate schema 2 rather than gaining this claim retroactively.
 
 The staged-fixture branch remains `VERIFIED: no`: its manifest contract has
 offline coverage, but no committed campaign receipt has exercised the provider

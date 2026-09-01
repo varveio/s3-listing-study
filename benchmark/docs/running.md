@@ -81,7 +81,11 @@ tool enforces for you; a missing item surfaces as a provider error mid-campaign.
    `result.json` last. Native products are uploaded only with
    `--retain-products`. Keep
    `replay.capacity_status: uncalibrated` until a real diagnostic capacity
-   canary has a committed receipt. The staged-fixture provider path separately
+   canary has a committed receipt. Before promotion, confirm the common
+   allocation reports `TIMING_VALID` for the heaviest included request shape
+   and run its paired materially overprovisioned replay control; predeclare the
+   wall-time agreement band. A pressure-degraded or capacity-failed row may
+   remain a functionality result but is not a timing. The staged-fixture provider path separately
    remains `VERIFIED: no` until a committed canary uses `fixture_uri`; a bundled
    fixture canary does not qualify that download and manifest-check branch. Before
    hashing or uploading a fixture, apply the separate
