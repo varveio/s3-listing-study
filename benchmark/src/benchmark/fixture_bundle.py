@@ -478,6 +478,32 @@ def _upload_bundle(uri: str, paths: Iterable[Path]) -> list[str]:
     return uploaded
 
 
+def _download_dataset(uri: str, dataset: Path) -> list[str]:
+    """Copy one retained sorted Swath dataset (an attempt's ``native/listing/``) into ``dataset``.
+
+    A study capture on the real bucket is both the live anchor and the fixture, so the bundle
+    reuses its retained product rather than listing the bucket again. Every object under the prefix
+    is copied with its relative path, which preserves the ``data/`` parts, the dataset manifest, and
+    ``_swath_summary.json`` (the same report shape a local capture writes to ``report.json``).
+    """
+    bucket_name, prefix = _gcs_parts(uri)
+    bucket = storage.Client().bucket(bucket_name)
+    copied: list[str] = []
+    for blob in bucket.list_blobs(prefix=prefix + "/"):
+        relative = blob.name[len(prefix) + 1 :]
+        if not relative or relative.endswith("/"):
+            continue
+        target = dataset / relative
+        if not target.resolve().is_relative_to(dataset.resolve()):
+            raise FixtureBundleError(f"refusing dataset object outside the bundle: {blob.name}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        blob.download_to_filename(target)
+        copied.append(f"gs://{bucket_name}/{blob.name}")
+    if not copied:
+        raise FixtureBundleError(f"no objects under {uri}")
+    return copied
+
+
 def _read_report(path: Path) -> dict[str, object]:
     try:
         value = json.loads(path.read_text())
@@ -547,10 +573,15 @@ def build_bundle(args: argparse.Namespace) -> dict[str, object]:
     report_dir.mkdir(mode=0o777)
     dataset.chmod(0o777)
     report_dir.chmod(0o777)
-    command = _capture_command(args, output)
-    _run_stream(command, output / "capture.log")
-
-    report = _read_report(report_dir / "report.json")
+    if args.dataset_uri:
+        copied = _download_dataset(args.dataset_uri, dataset)
+        command = ("gcs-copy", args.dataset_uri, *copied)
+        report = _read_report(dataset / "_swath_summary.json")
+        (report_dir / "report.json").write_text(json.dumps(report, sort_keys=True) + "\n")
+    else:
+        command = _capture_command(args, output)
+        _run_stream(command, output / "capture.log")
+        report = _read_report(report_dir / "report.json")
     data_dir = dataset / "data"
     manifest_sha256, manifest_rows = fixture_manifest(data_dir)
     analysis = _fixture_analysis(data_dir)
@@ -578,6 +609,7 @@ def build_bundle(args: argparse.Namespace) -> dict[str, object]:
         "generated_at": datetime.now(UTC).isoformat(),
         "source": {"bucket": args.bucket, "region": args.region, "prefix": args.prefix},
         "capture": {
+            "dataset_uri": args.dataset_uri,
             "swath_image": args.swath_image,
             "replay_image": args.replay_image,
             "harness_revision": harness_revision,
@@ -627,7 +659,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--region", required=True)
     parser.add_argument("--prefix", default="")
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--swath-image", required=True)
+    parser.add_argument(
+        "--dataset-uri",
+        help="gs:// prefix of a retained sorted Swath dataset (a study attempt's native/listing/) "
+        "to bundle instead of capturing the bucket again",
+    )
+    parser.add_argument("--swath-image", help="required unless --dataset-uri is given")
     parser.add_argument("--replay-image", required=True)
     parser.add_argument("--cpuset", required=True)
     parser.add_argument("--memory-gb", type=int, default=16)
@@ -644,8 +681,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     for name in ("memory_gb", "replay_memory_gb", "concurrency", "segments", "ready_timeout_s"):
         if getattr(args, name) < 1:
             parser.error(f"--{name.replace('_', '-')} must be positive")
+    if args.dataset_uri:
+        try:
+            _gcs_parts(args.dataset_uri)
+        except FixtureBundleError:
+            parser.error("--dataset-uri must be a gs://bucket/prefix of a retained dataset")
+        if args.swath_image is not None:
+            parser.error("--swath-image is meaningless with --dataset-uri")
+    elif args.swath_image is None:
+        parser.error("--swath-image is required unless --dataset-uri is given")
     try:
-        args.swath_image = _require_image(args.swath_image, "--swath-image")
+        if args.swath_image is not None:
+            args.swath_image = _require_image(args.swath_image, "--swath-image")
         args.replay_image = _require_image(args.replay_image, "--replay-image")
     except FixtureBundleError as exc:
         parser.error(str(exc))
