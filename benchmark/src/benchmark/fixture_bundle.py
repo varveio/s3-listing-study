@@ -167,19 +167,38 @@ def _generate_hints(data_dir: Path, output: Path, segments: int) -> dict[str, ob
     return {str(key): value for key, value in summary.items()}
 
 
+def _create_fixture_source(connection: duckdb.DuckDBPyConnection, paths: Sequence[Path]) -> str:
+    """Expose the parts as ``fixture_source`` with a BLOB ``key`` whatever the writer annotated.
+
+    Swath 0.3.1 annotates the key column as a UTF-8 string; earlier captures wrote raw bytes. The
+    physical bytes and their order are identical, so a string key is re-exposed as its bytes and
+    every downstream query keeps byte semantics. Returns the annotation found (``BLOB`` or
+    ``VARCHAR``).
+    """
+    connection.from_parquet([str(path) for path in paths]).create_view("fixture_parts")
+    columns = {
+        str(name): str(kind)
+        for _, name, kind, *_ in connection.execute("PRAGMA table_info('fixture_parts')").fetchall()
+    }
+    key_kind = columns.get("key")
+    if columns.get("row_type") != "VARCHAR" or key_kind not in {"BLOB", "VARCHAR"}:
+        raise FixtureBundleError(
+            "fixture must expose key BLOB or VARCHAR and row_type VARCHAR columns; "
+            f"found key={key_kind!r}, row_type={columns.get('row_type')!r}"
+        )
+    key_expression = "encode(key)" if key_kind == "VARCHAR" else "key"
+    connection.execute(
+        "CREATE VIEW fixture_source AS "
+        f"SELECT * REPLACE ({key_expression} AS key) FROM fixture_parts"
+    )
+    return key_kind
+
+
 def _fixture_analysis(data_dir: Path) -> dict[str, object]:
     paths = sorted(data_dir.glob("*.parquet"))
     with duckdb.connect() as connection:
         connection.execute("SET threads=8")
-        connection.from_parquet([str(path) for path in paths]).create_view("fixture_source")
-        columns = {
-            str(name): str(kind)
-            for _, name, kind, *_ in connection.execute(
-                "PRAGMA table_info('fixture_source')"
-            ).fetchall()
-        }
-        if columns.get("key") != "BLOB" or columns.get("row_type") != "VARCHAR":
-            raise FixtureBundleError("fixture must expose key BLOB and row_type VARCHAR columns")
+        key_kind = _create_fixture_source(connection, paths)
         counts = connection.execute(
             """
             SELECT count(*), count(DISTINCT key),
@@ -231,6 +250,7 @@ def _fixture_analysis(data_dir: Path) -> dict[str, object]:
         "min_key": str(counts[4]),
         "max_key": str(counts[5]),
         "row_types": {str(kind): int(count) for kind, count in row_types},
+        "key_annotation": key_kind,
         "first_characters": str(first_characters),
         "distinct_prefixes_by_depth": depths,
         "largest_root_prefixes": top_level,
@@ -251,11 +271,20 @@ def _physical_order_validation(data_dir: Path) -> dict[str, object]:
         # prove the physical ordering contract this fixture claims.
         connection.execute("SET threads=1")
         for path in paths:
+            kind_row = connection.execute(
+                "SELECT typeof(key) FROM read_parquet(?) LIMIT 1", [str(path)]
+            ).fetchone()
+            key_kind = None if kind_row is None else str(kind_row[0])
+            if key_kind not in {"BLOB", "VARCHAR"}:
+                raise FixtureBundleError(
+                    f"fixture part has non-key column {key_kind!r}: {path.name}"
+                )
+            key_expression = "encode(key)" if key_kind == "VARCHAR" else "key"
             result = connection.execute(
-                """
+                f"""
                 WITH ordered AS (
-                    SELECT key, file_row_number,
-                           lag(key) OVER (ORDER BY file_row_number) AS previous_key
+                    SELECT {key_expression} AS key, file_row_number,
+                           lag({key_expression}) OVER (ORDER BY file_row_number) AS previous_key
                     FROM read_parquet(?, file_row_number = true)
                 )
                 SELECT count(*),
@@ -323,7 +352,7 @@ def _generate_s5cmd_shards(data_dir: Path, output: Path) -> dict[str, object]:
     """Write the complete disjoint top-level prefix union for native s5cmd fanout."""
     paths = sorted(data_dir.glob("*.parquet"))
     with duckdb.connect() as connection:
-        connection.from_parquet([str(path) for path in paths]).create_view("fixture_source")
+        _create_fixture_source(connection, paths)
         shards = [
             str(row[0])
             for row in connection.execute(

@@ -45,18 +45,28 @@ def _fixture_files(directory: Path) -> tuple[Path, ...]:
     return files
 
 
-def _validate_schema(connection: duckdb.DuckDBPyConnection) -> None:
+def _create_fixture_source(connection: duckdb.DuckDBPyConnection, files: tuple[Path, ...]) -> None:
+    """Expose the parts as ``fixture_source`` with a BLOB ``key`` whatever the writer annotated.
+
+    Swath 0.3.1 annotates the key column as a UTF-8 string; earlier captures wrote raw bytes. The
+    bytes and their order are identical, so a string key is re-exposed as its bytes.
+    """
+    connection.from_parquet([str(path) for path in files]).create_view("fixture_parts")
     columns = {
         str(name): str(kind)
-        for _, name, kind, *_ in connection.execute(
-            "PRAGMA table_info('fixture_source')"
-        ).fetchall()
+        for _, name, kind, *_ in connection.execute("PRAGMA table_info('fixture_parts')").fetchall()
     }
-    if columns.get("key") != "BLOB" or columns.get("row_type") != "VARCHAR":
+    key_kind = columns.get("key")
+    if key_kind not in {"BLOB", "VARCHAR"} or columns.get("row_type") != "VARCHAR":
         raise FixtureHintsError(
-            "fixture must expose key BLOB and row_type VARCHAR columns; "
-            f"found key={columns.get('key')!r}, row_type={columns.get('row_type')!r}"
+            "fixture must expose key BLOB or VARCHAR and row_type VARCHAR columns; "
+            f"found key={key_kind!r}, row_type={columns.get('row_type')!r}"
         )
+    key_expression = "encode(key)" if key_kind == "VARCHAR" else "key"
+    connection.execute(
+        "CREATE VIEW fixture_source AS "
+        f"SELECT * REPLACE ({key_expression} AS key) FROM fixture_parts"
+    )
 
 
 def _safe_payload(
@@ -158,9 +168,7 @@ def _write_new(path: Path, payload: bytes) -> None:
         Path(temporary).unlink(missing_ok=True)
 
 
-def generate_hints(
-    fixture: Path, output: Path, *, segments: int, prefix: str = ""
-) -> HintSummary:
+def generate_hints(fixture: Path, output: Path, *, segments: int, prefix: str = "") -> HintSummary:
     """Write safe cut points with the pinned upstream splitter's exact semantics."""
     if isinstance(segments, bool) or not isinstance(segments, int) or segments < 1:
         raise FixtureHintsError(f"segments must be a positive integer; got {segments!r}")
@@ -169,11 +177,8 @@ def generate_hints(
     effective_prefix = "" if prefix == "/" else prefix
     files = _fixture_files(fixture)
     with duckdb.connect() as connection:
-        connection.from_parquet([str(path) for path in files]).create_view("fixture_source")
-        _validate_schema(connection)
-        payload, object_rows, prefix_groups = _safe_payload(
-            connection, effective_prefix, segments
-        )
+        _create_fixture_source(connection, files)
+        payload, object_rows, prefix_groups = _safe_payload(connection, effective_prefix, segments)
     _write_new(output, payload)
     cut_points = payload.count(b"\n")
     return HintSummary(
