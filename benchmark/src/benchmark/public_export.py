@@ -63,6 +63,12 @@ REPLAY_ENDPOINT = "<replay-endpoint>"
 
 RELEASE_DIRNAME = "results"
 
+# Files a person writes into a release directory and the exporter never
+# generates or rewrites. They are sealed and listed in the manifest like any
+# other file, so a re-export after the prose changes reseals rather than
+# silently leaving the report outside the checksums.
+HANDWRITTEN_FILES = ("REPORT.md",)
+
 
 class ExportError(RuntimeError):
     """The release cannot be produced safely from the inputs given."""
@@ -1326,6 +1332,7 @@ result data. A release is generated, never hand-edited.
 
 | File | Role |
 | --- | --- |
+| `REPORT.md` | The release's written companion: status, funnel, dispositions, limits. Handwritten, sealed here, never generated |
 | `manifest.json` | Identity, status, claim ceiling, commit, counts, checksums, disclosures |
 | `attempts.jsonl` | One compact JSON object per attempt — the canonical dataset |
 | `summary.csv` | Flat scalar view of the same rows, for spreadsheets |
@@ -1410,6 +1417,17 @@ def render_release(release: Release, output_root: Path, *, chart_spec: Path | No
                 fixtures=release.fixtures,
             )
         )
+
+    # The report is written by hand, not generated, and the exporter must not
+    # touch its text -- but it is part of the release a reader receives, so it
+    # is sealed with everything else. Leaving it outside the seal would mean a
+    # release whose prose could be edited without the checksums noticing, and
+    # would fail `public_validate`'s "checksums cover every file" rule the
+    # moment the report was added.
+    for companion in HANDWRITTEN_FILES:
+        path = directory / companion
+        if path.is_file():
+            written.append(path)
 
     manifest = dict(release.manifest)
     manifest["published_at"] = manifest["published_at"] or manifest["data_as_of"]
