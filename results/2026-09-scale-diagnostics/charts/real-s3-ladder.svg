@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 470" width="940" height="470" role="img">
+<rect width="940" height="470" fill="#ffffff"/>
+<text x="24.0" y="34.0" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="16" fill="#1c1c1c" text-anchor="start">Swath on live S3 — objects listed against whole-process rate (single observations)</text>
+<rect x="96.0" y="62.0" width="624.0" height="330.0" fill="none" stroke="#d8d8d8" stroke-width="1"/>
+<line x1="96.0" y1="62.0" x2="720.0" y2="62.0" stroke="#d8d8d8" stroke-width="1"/>
+<text x="96.0" y="410.0" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="10" fill="#5c5c5c" text-anchor="middle">0</text>
+<text x="88.0" y="396.0" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="10" fill="#5c5c5c" text-anchor="end">0</text>
+<line x1="96.0" y1="144.5" x2="720.0" y2="144.5" stroke="#d8d8d8" stroke-width="1"/>
+<text x="252.0" y="410.0" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="10" fill="#5c5c5c" text-anchor="middle">5e+08</text>
+<text x="88.0" y="313.5" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="10" fill="#5c5c5c" text-anchor="end">1e+06</text>
+<line x1="96.0" y1="227.0" x2="720.0" y2="227.0" stroke="#d8d8d8" stroke-width="1"/>
+<text x="408.0" y="410.0" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="10" fill="#5c5c5c" text-anchor="middle">1e+09</text>
+<text x="88.0" y="231.0" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="10" fill="#5c5c5c" text-anchor="end">2e+06</text>
+<line x1="96.0" y1="309.5" x2="720.0" y2="309.5" stroke="#d8d8d8" stroke-width="1"/>
+<text x="564.0" y="410.0" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="10" fill="#5c5c5c" text-anchor="middle">1.5e+09</text>
+<text x="88.0" y="148.5" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="10" fill="#5c5c5c" text-anchor="end">3e+06</text>
+<line x1="96.0" y1="392.0" x2="720.0" y2="392.0" stroke="#d8d8d8" stroke-width="1"/>
+<text x="720.0" y="410.0" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="10" fill="#5c5c5c" text-anchor="middle">2e+09</text>
+<text x="88.0" y="66.0" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="10" fill="#5c5c5c" text-anchor="end">4e+06</text>
+<circle cx="100.3" cy="373.7" r="5" fill="#2f6f9f" fill-opacity="0.85"/>
+<circle cx="259.2" cy="275.6" r="5" fill="#2f6f9f" fill-opacity="0.85"/>
+<circle cx="259.2" cy="239.0" r="5" fill="#2f6f9f" fill-opacity="0.85"/>
+<circle cx="259.2" cy="161.7" r="5" fill="#2f6f9f" fill-opacity="0.85"/>
+<circle cx="395.5" cy="282.7" r="5" fill="#2f6f9f" fill-opacity="0.85"/>
+<circle cx="395.5" cy="256.7" r="5" fill="#2f6f9f" fill-opacity="0.85"/>
+<circle cx="429.4" cy="267.4" r="5" fill="#2f6f9f" fill-opacity="0.85"/>
+<circle cx="429.4" cy="133.8" r="5" fill="#2f6f9f" fill-opacity="0.85"/>
+<text x="746.0" y="66.0" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="11" fill="#1c1c1c" text-anchor="start">tool</text>
+<circle cx="752.0" cy="82.0" r="5" fill="#2f6f9f"/>
+<text x="766.0" y="86.0" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="11" fill="#5c5c5c" text-anchor="start">swath</text>
+<path d="M746.0,97.0 l11,11 M757.0,97.0 l-11,11" stroke="#b03a3a" stroke-width="2.4" fill="none"/>
+<text x="766.0" y="106.0" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="11" fill="#5c5c5c" text-anchor="start">no accepted result</text>
+<text x="408.0" y="432.0" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="11" fill="#5c5c5c" text-anchor="middle">objects listed (exact count returned by the run)</text>
+<text x="24.0" y="48.0" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="11" fill="#5c5c5c" text-anchor="start">objects per second over the whole process wall</text>
+<text x="24.0" y="454.0" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="11" fill="#5c5c5c" text-anchor="start">diagnostic; live-S3 observations of one tool, n=1 per point, machine type and output mode differ between points; not a benchmark</text>
+</svg>
