@@ -1,0 +1,99 @@
+# Committed chart specs for the public releases.
+#
+# A figure is an argument, so the rows behind it are declared here rather than
+# chosen inside the renderer: each entry names its selection rule, its metric,
+# its axis units, and the caption that bounds what the picture may be read to
+# say. `benchmark/src/benchmark/public_render.py` draws exactly this and writes
+# the selected rows beside each figure as CSV.
+#
+# `status: pending` entries are declared but not drawn.
+spec_version: 1
+
+charts:
+  - id: nbm-same-allocation-wall
+    status: rendered
+    kind: bars
+    title: NBM 66.4M-object replay fixture — wall clock at the same declared allocation
+    # Explicit attempt ids, not a "best per tool" sweep: this figure exists to
+    # compare three configurations that ran under one declared allocation, and
+    # a rule that re-picked the fastest arm per tool would quietly change the
+    # comparison the next time the release is cut.
+    #
+    #   rclone  c64 recursive-walk           nbm-capacity-20260828
+    #   s5cmd   c64 fanout-fixture-with-dirs nbm-s5-fix-20260829 (the fair
+    #           fanout arm; the 2026-08-28 s5cmd row ran at c8, a different
+    #           allocation, and is not comparable here)
+    #   swath   c64 recursive-tsv-dataset    nbm-capacity-20260828
+    select:
+      attempt_ids:
+        - rclone.14e265d296a0.s1
+        - s5cmd.962211b4b344.s1
+        - swath.1a8598593dbb.s1
+    metric: outcome.wall_seconds
+    axis_label: wall seconds (lower is faster)
+    series_label: "{tool.name} {tool.mode} c{tool.concurrency}"
+    bar_label: "[{classification.replay_timing}]"
+    caption: >-
+      diagnostic; Swath rows are CAPACITY_FAILED on structure probes, which only slows Swath
+    csv_columns:
+      - attempt_id
+      - group_id
+      - tool.name
+      - tool.mode
+      - tool.concurrency
+      - classification.purpose
+      - classification.capacity_status
+      - classification.replay_timing
+      - state.provider
+      - outcome.row_count
+      - outcome.wall_seconds
+      - derived.wall_keys_per_second
+
+  - id: s3-fast-list-rss
+    status: rendered
+    kind: scatter
+    title: Peak RSS against fixture size — s3-fast-list, with Swath and rclone for reference
+    select:
+      where:
+        tool.name: [s3-fast-list, swath, rclone]
+        fixture.id:
+          - noaa-nbm-grib2-pds/current-eba31d9
+          - nara-1950-census/current-eba31d9
+          - noaa-nws-fourcastnetgfs-pds/current-eba31d9
+          - noaa-nws-fourcastnetgfs-pds/1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4
+      pick: all
+    x: fixture.object_count
+    y: outcome.max_rss_kb
+    x_label: fixture objects
+    y_label: peak RSS (KiB)
+    caption: >-
+      diagnostic; a cross marks an attempt with no accepted result — on the 66.4M-object NBM
+      fixture s3-fast-list was killed at the container memory limit. Fixture object counts
+      without a staged bundle summary are observed row counts; see fixtures.json.
+    csv_columns:
+      - attempt_id
+      - group_id
+      - tool.name
+      - tool.mode
+      - tool.concurrency
+      - fixture.id
+      - fixture.object_count
+      - state.provider
+      - outcome.subject_exit_code
+      - outcome.row_count
+      - outcome.max_rss_kb
+      - outcome.max_rss_floor_kb
+      - machine.container_memory_gb
+
+  - id: fourcast-roster
+    status: pending
+    note: >-
+      Phase B. The FourCast roster figure needs the disposition layer to say which arm of each
+      tool represents it and why; drawing it from the raw rows would encode that judgement in
+      the renderer instead of in a reviewable file.
+
+  - id: real-s3-ladder
+    status: pending
+    note: >-
+      Phase B. The real-S3 rows are single uncontrolled observations of one tool. A ladder
+      figure needs the claim layer to carry that limitation next to the picture.
