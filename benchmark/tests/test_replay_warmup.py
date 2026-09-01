@@ -89,6 +89,7 @@ def test_warm_up_walks_breadth_first_and_reports_issued_counts() -> None:
             }
         )
         host, port = server.server_address[:2]
+        host = host.decode() if isinstance(host, bytes) else host
         outcome = replay_runtime.warm_up(config, "fx", endpoint_url=f"http://{host}:{port}")
     finally:
         server.shutdown()
