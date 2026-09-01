@@ -1,0 +1,67 @@
+# Release spec for the public result release `2026-09-scale-diagnostics`.
+#
+# This file holds the *release facts* — status, claim ceiling, what is included,
+# what is excluded, and the declared group -> plan attribution. The exporter
+# (`benchmark/src/benchmark/public_export.py`) holds no release facts of its
+# own: change the release by changing this file, not the code.
+spec_version: 1
+
+release_id: 2026-09-scale-diagnostics
+title: Scale-study replay diagnostics
+# One of: diagnostic | benchmark | erratum.
+status: diagnostic
+
+# The machine-readable ceiling on what this release may be used to claim.
+# Prose, charts and any generated site are bounded by these flags.
+claim_ceiling:
+  controlled_replay_diagnostics: true
+  calibrated_replay_benchmark: false
+  live_s3_performance: false
+  universal_tool_ranking: false
+
+# Every terminal attempt in the source ledger, whatever its state, purpose or
+# tool. Selection is not a lever in this release: successes, failures,
+# cancellations, preparations, canaries, replay rows and real-S3 rows all
+# export.
+include: all-terminal
+
+exclusions:
+  - rule: state not in the ledger's TERMINAL_STATES at export time
+    reason: >-
+      A running or queued attempt has no settled outcome. It is not hidden: the
+      manifest records how many rows were skipped for this reason.
+
+source_ledger:
+  suite: scale-study
+  schema_version: 3
+
+# Group -> committed plan path. Declared, not inferred: the ledger records no
+# plan path, so an attribution that is not certain is left out and the manifest
+# discloses how many groups carry no plan. A wrong plan is worse than none.
+plans:
+  nbm-capacity-20260828: benchmark/plans/campaigns/nbm-replay/capacity/noaa-nbm-grib2-pds.yaml
+  blockchain-capacity-20260829: benchmark/plans/campaigns/aws-public-blockchain-replay/capacity/aws-public-blockchain.yaml
+  changesets-flat-20260901: benchmark/plans/campaigns/real-changesets-replay/flat/real-changesets.yaml
+  fc-cpu-screen-20260828: benchmark/plans/campaigns/fourcast-replay/cpu-screen/noaa-nws-fourcastnetgfs-pds.yaml
+  fc-isolated-ladder-20260828: benchmark/plans/campaigns/fourcast-replay/isolated-ladder/noaa-nws-fourcastnetgfs-pds.yaml
+  fc-tuning-followup-20260828: benchmark/plans/campaigns/fourcast-replay/tuning-followup/noaa-nws-fourcastnetgfs-pds.yaml
+  capacity-no-latency-20260826: benchmark/plans/campaigns/fourcast-replay/capacity-no-latency/noaa-nws-fourcastnetgfs-pds.yaml
+  capacity-no-latency-rerun-20260826: benchmark/plans/campaigns/fourcast-replay/capacity-no-latency/noaa-nws-fourcastnetgfs-pds.yaml
+  all-tools-no-latency-screen-20260826: benchmark/plans/campaigns/fourcast-replay/screen-no-latency/noaa-nws-fourcastnetgfs-pds.yaml
+  all-tools-no-latency-screen-r2-20260826: benchmark/plans/campaigns/fourcast-replay/screen-no-latency/noaa-nws-fourcastnetgfs-pds.yaml
+  nara-cpu-ladder-20260828: benchmark/plans/campaigns/nara-replay/cpu-ladder/nara-1950-census.yaml
+  nara-config-selection-20260828: benchmark/plans/campaigns/nara-replay/config-selection/nara-1950-census.yaml
+  nara-config-followup-20260828: benchmark/plans/campaigns/nara-replay/config-followup/nara-1950-census.yaml
+  nara-rclone-query-recovery-20260828: benchmark/plans/campaigns/nara-replay/rclone-query-recovery/nara-1950-census.yaml
+  nara-s7-depth-recovery-20260828: benchmark/plans/campaigns/nara-replay/s7-depth-recovery/nara-1950-census.yaml
+  swath-real-s3-fah-sorted-20260901: benchmark/plans/campaigns/swath-real-s3-peak/fah-public-data-covid19-absolute-free-energy.yaml
+  swath-s3-fah-sort-cpu32-20260901: benchmark/plans/campaigns/swath-real-s3-peak/fah-public-data-covid19-absolute-free-energy.yaml
+  swath-s3-fah-sort-use1-20260901: benchmark/plans/campaigns/swath-real-s3-peak/fah-public-data-covid19-absolute-free-energy.yaml
+  swath-s3-fah-tsv-c2048-20260901: benchmark/plans/campaigns/swath-real-s3-peak/fah-public-data-covid19-absolute-free-energy.yaml
+  swath-real-s3-janelia-sorted-20260901: benchmark/plans/campaigns/swath-real-s3-peak/janelia-cosem-datasets.yaml
+  swath-s3-janelia-sort-cpu32-20260901: benchmark/plans/campaigns/swath-real-s3-peak/janelia-cosem-datasets.yaml
+  swath-s3-janelia-sort-use1-20260901: benchmark/plans/campaigns/swath-real-s3-peak/janelia-cosem-datasets.yaml
+  swath-real-s3-sentinel-sorted-20260901: benchmark/plans/campaigns/swath-real-s3-peak/sentinel-cogs.yaml
+  swath-s3-sentinel-sort-use1-20260901: benchmark/plans/campaigns/swath-real-s3-peak/sentinel-cogs.yaml
+  swath-s3-sentinel-tsv-c2048-20260901: benchmark/plans/campaigns/swath-real-s3-peak/sentinel-cogs.yaml
+  swath-s3-changesets-sort-20260901: benchmark/plans/campaigns/swath-real-s3-peak/real-changesets.yaml
