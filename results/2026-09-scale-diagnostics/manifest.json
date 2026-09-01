@@ -6,39 +6,37 @@
     "universal_tool_ranking": false
   },
   "counts": {
-    "attempts": 284,
+    "attempts": 288,
     "by_capacity_status": {
-      "UNCALIBRATED": 272,
-      "malformed": 1,
+      "UNCALIBRATED": 277,
       "null": 11
     },
     "by_publication_status": {
-      "diagnostic": 275,
+      "diagnostic": 279,
       "preparation": 9
     },
     "by_purpose": {
-      "diagnostic": 275,
+      "diagnostic": 279,
       "preparation": 9
     },
     "by_replay_timing": {
-      "CAPACITY_FAILED": 60,
+      "CAPACITY_FAILED": 61,
       "INSUFFICIENT_EVIDENCE": 65,
-      "MALFORMED": 1,
       "NOT_APPLICABLE": 44,
       "PRESSURE_DEGRADED": 33,
-      "TIMING_VALID": 64,
-      "null": 17
+      "TIMING_VALID": 66,
+      "null": 19
     },
     "by_state": {
       "CANCELLED": 4,
-      "FAILED": 11,
-      "SUCCEEDED": 269
+      "FAILED": 13,
+      "SUCCEEDED": 271
     },
     "by_tool": {
       "aws-cli": 9,
       "minio-mc": 9,
       "ps3": 12,
-      "rclone": 27,
+      "rclone": 31,
       "s3-fast-list": 41,
       "s3kor": 9,
       "s3p": 23,
@@ -54,13 +52,13 @@
       "nara-1950-census": 50,
       "noaa-nbm-grib2-pds": 15,
       "noaa-nws-fourcastnetgfs-pds": 159,
-      "real-changesets": 4,
+      "real-changesets": 8,
       "sentinel-cogs": 3,
       "sorel-20m": 18
     },
-    "skipped_non_terminal": 2
+    "skipped_non_terminal": 0
   },
-  "data_as_of": "2026-09-01T20:21:52.213671+00:00",
+  "data_as_of": "2026-09-01T21:26:59.529246+00:00",
   "disclosures": [
     {
       "affects": "every row",
@@ -73,6 +71,8 @@
         "bc-swath-server-20260829",
         "blockchain-swath-reader-control-20260829",
         "blockchain-swath-width-20260829",
+        "changesets-flat-rclone-listr-20260901",
+        "changesets-flat-rclone-mem16-20260901",
         "fc-cpu-corrected-20260828",
         "fc-cpu-sanity-20260828",
         "fc-ps3-p5000-20260829",
@@ -126,6 +126,8 @@
       "affects": [
         "aws-cli.62e242fb6445.s1",
         "ps3.15a8814f300b.s1",
+        "rclone.997236778cca.s1",
+        "rclone.997236778cca.s2",
         "s3-fast-list.57dddc2de524.s1",
         "s3-fast-list.68d757575cc2.s1",
         "s5cmd.ce66ec57b593.s1",
@@ -171,14 +173,6 @@
       ],
       "detail": "Rows with replay = null ran against the live bucket, uncontrolled and n=1. They are observations, not performance measurements.",
       "id": "real-s3-rows-are-single-observations"
-    },
-    {
-      "affects": [
-        "rclone.997236778cca.s1",
-        "rclone.d92a513cb0f2.s1"
-      ],
-      "detail": "Attempts that had not settled when the release was cut are not included.",
-      "id": "non-terminal-attempts-skipped"
     }
   ],
   "exclusions": [
@@ -189,9 +183,9 @@
   ],
   "files": [
     {
-      "bytes": 1101157,
+      "bytes": 1113945,
       "path": "attempts.jsonl",
-      "sha256": "46bba6e50e16a92ce0670c87993c6646e2a003775c99978f52746510287fa252"
+      "sha256": "8e9dbf0d31db1bea6f558e49ed6203b1a67ae94f30cccc104525057ad2d230f2"
     },
     {
       "bytes": 680,
@@ -219,14 +213,14 @@
       "sha256": "625214fb181176c9fff58e5758ddcf5442fa61a8a4d5dba78a1540a8976ed8eb"
     },
     {
-      "bytes": 22200,
+      "bytes": 22228,
       "path": "subjects.json",
-      "sha256": "3e634c004ec23d69432641958ba5f1addd93c382c7f8720f78b4192bb434052a"
+      "sha256": "8cb9421ce836ad4b05ff4f090e689ca2718c466846471ab762b0f7178af01832"
     },
     {
-      "bytes": 102575,
+      "bytes": 103810,
       "path": "summary.csv",
-      "sha256": "f68e418e2dea5c0746032adb8ed22eb258afc500c4ff196ac4df86413001146e"
+      "sha256": "c0bb5f3637e6128a228d38106a3c971e61978d9d4a39d1e4d6cb537e6ac81bb7"
     }
   ],
   "fixtures": [
@@ -300,7 +294,7 @@
       "attempts": 4,
       "group_id": "blockchain-capacity-20260829",
       "plan_path": "benchmark/plans/campaigns/aws-public-blockchain-replay/capacity/aws-public-blockchain.yaml",
-      "plan_sha256": "2e028b73b6f30d6de0616378972358685fe3cc8e5273f18da03b932f2863389a"
+      "plan_sha256": "615b0419f3a7b6fe30819a0ba869fd6e09c651dabcf81b43520a849ec7751f99"
     },
     {
       "attempts": 2,
@@ -330,7 +324,19 @@
       "attempts": 3,
       "group_id": "changesets-flat-20260901",
       "plan_path": "benchmark/plans/campaigns/real-changesets-replay/flat/real-changesets.yaml",
-      "plan_sha256": "9f49e7329f00737f952c3791985ee6703d696df24d51a190467198b79f401b00"
+      "plan_sha256": "5b2887ceb04ffc38f0a826977b0be963e5fd95b1d7febbc9ba38614f81e465e4"
+    },
+    {
+      "attempts": 3,
+      "group_id": "changesets-flat-rclone-listr-20260901",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 1,
+      "group_id": "changesets-flat-rclone-mem16-20260901",
+      "plan_path": null,
+      "plan_sha256": null
     },
     {
       "attempts": 31,
@@ -783,7 +789,7 @@
     ]
   },
   "include": "all-terminal",
-  "published_at": "2026-09-01T20:21:52.213671+00:00",
+  "published_at": "2026-09-01T21:26:59.529246+00:00",
   "release_id": "2026-09-scale-diagnostics",
   "schema_version": 1,
   "source": {
@@ -793,7 +799,7 @@
     "ledger_suite": "scale-study",
     "reader_ledger_schema_version": 3,
     "release_spec": "benchmark/publication/2026-09-scale-diagnostics.yaml",
-    "repository_commit": "53dc89472ec7633181867c79b09874fad77b0cf7",
+    "repository_commit": "1a72bb265b21402a15f6a6931f5742855cbe4089",
     "row_schema_version": 1
   },
   "status": "diagnostic",
