@@ -1,0 +1,33 @@
+# Flat-namespace rung: every key sits at the bucket root (`<id>.json`), no delimiter anywhere.
+# This Swath sorted capture on real S3 is the live anchor and, retained, the replay fixture for
+# the delimiter walkers' flat-bucket cells.
+spec_version: 2
+
+bucket: real-changesets
+region: us-west-2
+auth_role: public-read
+
+defaults:
+  reps: 1
+  timeout_s: 7200
+  vcpus: 16
+  memory_gb: 32
+
+tools:
+  swath:
+    cases:
+      - mode: recursive-parquet-sorted
+        concurrency: 1024
+        purpose: diagnostic
+        config: {jvm_max_heap: 16g, sort_merge_parallelism: 8}
+
+exclude:
+  - {tool: aws-cli, reason: outside this Swath-only real-S3 capture}
+  - {tool: minio-mc, reason: outside this Swath-only real-S3 capture}
+  - {tool: ps3, reason: outside this Swath-only real-S3 capture}
+  - {tool: rclone, reason: runs on the replay fixture this capture produces}
+  - {tool: s3-fast-list, reason: outside this Swath-only real-S3 capture}
+  - {tool: s3kor, reason: outside this Swath-only real-S3 capture}
+  - {tool: s3p, reason: outside this Swath-only real-S3 capture}
+  - {tool: s5cmd, reason: outside this Swath-only real-S3 capture}
+  - {tool: s7cmd, reason: runs on the replay fixture this capture produces}
