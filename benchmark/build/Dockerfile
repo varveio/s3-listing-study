@@ -96,7 +96,7 @@ ADD --checksum=sha256:34ecf3a725e835e88ad115a73d6e7b3a324c95677439c43f5baec536d8
 RUN tar xzf /tmp/s7cmd.tar.gz -C /tmp \
     && install -m 0755 /tmp/s7cmd /usr/local/bin/s7cmd
 
-FROM ghcr.io/varveio/swath@sha256:a13adef049de8c11c053861918005aaaae6c8576797df48867d1c5efdbcfc88b AS swath_install
+FROM ghcr.io/varveio/swath@sha256:888fad98fdbeda88d79d32426dfbff570174e7de0bda0330d8eb86a3fc79f7aa AS swath_install
 
 # Only subject runtime binaries and closures cross into the final toolbox.
 FROM runtime_base AS toolbox
