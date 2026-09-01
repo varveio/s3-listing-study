@@ -23,6 +23,7 @@ result data. A release is generated, never hand-edited.
 
 | File | Role |
 | --- | --- |
+| `REPORT.md` | Written companion: status, funnel, dispositions, limits. Handwritten, sealed here |
 | `manifest.json` | Identity, status, claim ceiling, commit, counts, checksums, disclosures |
 | `attempts.jsonl` | One compact JSON object per attempt — the canonical dataset |
 | `summary.csv` | Flat scalar view of the same rows, for spreadsheets |
