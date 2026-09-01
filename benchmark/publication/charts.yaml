@@ -86,14 +86,100 @@ charts:
       - machine.container_memory_gb
 
   - id: fourcast-roster
-    status: pending
-    note: >-
-      Phase B. The FourCast roster figure needs the disposition layer to say which arm of each
-      tool represents it and why; drawing it from the raw rows would encode that judgement in
-      the renderer instead of in a reviewable file.
+    status: rendered
+    kind: bars
+    title: FourCast 4.08M-object replay fixture — wall clock, one declared arm per tool
+    # Explicit attempt ids, because "the arm that represents a tool" is a
+    # judgement and belongs in a reviewable file. The rule applied here, once,
+    # to every tool: the 8-vCPU / 8-GiB arm of `fc-cpu-corrected-20260828`,
+    # the one group in which all ten subjects ran the same fixture at the same
+    # declared allocation, and in which every one of these rows returned the
+    # fixture's exact 4,081,170 objects. Ordered by wall clock so the figure
+    # reads as a spread, not a ranking: the arms are not equivalent
+    # configurations of a common tool, and three of them expose no listing
+    # concurrency knob at all.
+    #
+    # Two asymmetries the caption names and the CSV carries: s3-fast-list ran
+    # `list-hinted`, with cut-points supplied by the harness rather than
+    # discovered by the tool, and Swath's row is CAPACITY_FAILED because the
+    # replay server overran its structure-probe budget, which only slows Swath.
+    select:
+      attempt_ids:
+        - rclone.4dc6bee15451.s1
+        - s3-fast-list.8bd55064004a.s1
+        - swath.88891b1437de.s1
+        - s3p.bce7ef300683.s1
+        - s7cmd.b5d4fe29dd1e.s1
+        - ps3.55c79d26bce0.s1
+        - s3kor.8514c3397199.s1
+        - minio-mc.04c17e5ac8da.s1
+        - s5cmd.9541d7894859.s1
+        - aws-cli.a7d9377bd706.s1
+    metric: outcome.wall_seconds
+    axis_label: wall seconds (lower is faster)
+    series_label: "{tool.name} {tool.mode}"
+    bar_label: "[{classification.replay_timing}]"
+    caption: >-
+      diagnostic; one 8-vCPU/8-GiB arm per tool, one group, exact counts; s3-fast-list is
+      hint-fed and Swath is instrument-penalized
+    csv_columns:
+      - attempt_id
+      - group_id
+      - tool.name
+      - tool.version
+      - tool.mode
+      - tool.concurrency
+      - machine.subject_vcpus
+      - machine.container_memory_gb
+      - classification.purpose
+      - classification.capacity_status
+      - classification.replay_timing
+      - state.provider
+      - outcome.row_count
+      - outcome.wall_seconds
+      - outcome.max_rss_kb
+      - derived.wall_keys_per_second
 
   - id: real-s3-ladder
-    status: pending
-    note: >-
-      Phase B. The real-S3 rows are single uncontrolled observations of one tool. A ladder
-      figure needs the claim layer to carry that limitation next to the picture.
+    status: rendered
+    kind: scatter
+    title: Swath on live S3 — objects listed against whole-process rate (single observations)
+    # Every settled real-S3 Swath row in the release, named rather than
+    # filtered, so the figure cannot quietly change shape when a row is added.
+    # These are uncontrolled observations against live public buckets, n=1
+    # each, on machine types that differ between points; the picture is a
+    # ladder of what one tool did once at each size, not a scaling curve and
+    # not a comparison — no other subject has run on live S3 at all.
+    select:
+      attempt_ids:
+        - swath.85ccd37c1b88.s1
+        - swath.d7668a13dc4c.s1
+        - swath.4b2db6e9f6a9.s1
+        - swath.a0f1b2c053d8.s1
+        - swath.0b5db9b35947.s1
+        - swath.0d01af45ef74.s1
+        - swath.6b1ffae260c0.s1
+        - swath.7b028bd8c692.s1
+    x: outcome.row_count
+    y: derived.wall_keys_per_second
+    x_label: objects listed (exact count returned by the run)
+    y_label: objects per second over the whole process wall
+    caption: >-
+      diagnostic; live-S3 observations of one tool, n=1 per point, machine type and output mode
+      differ between points; not a benchmark
+    csv_columns:
+      - attempt_id
+      - group_id
+      - target.bucket
+      - target.region
+      - tool.name
+      - tool.version
+      - tool.mode
+      - tool.concurrency
+      - machine.type
+      - machine.vcpus
+      - state.provider
+      - outcome.row_count
+      - outcome.wall_seconds
+      - outcome.max_rss_kb
+      - derived.wall_keys_per_second

@@ -1,0 +1,11 @@
+attempt_id,group_id,tool.name,tool.version,tool.mode,tool.concurrency,machine.subject_vcpus,machine.container_memory_gb,classification.purpose,classification.capacity_status,classification.replay_timing,state.provider,outcome.row_count,outcome.wall_seconds,outcome.max_rss_kb,derived.wall_keys_per_second
+rclone.4dc6bee15451.s1,fc-cpu-corrected-20260828,rclone,1.74.4,recursive-walk,32,8,8,diagnostic,UNCALIBRATED,INSUFFICIENT_EVIDENCE,SUCCEEDED,4081170,17.726591,248736,230228.7
+s3-fast-list.8bd55064004a.s1,fc-cpu-corrected-20260828,s3-fast-list,1.1.0,list-hinted,100,8,8,diagnostic,UNCALIBRATED,INSUFFICIENT_EVIDENCE,SUCCEEDED,4081170,20.04402,847160,203610.354
+swath.88891b1437de.s1,fc-cpu-corrected-20260828,swath,0.2.5-SNAPSHOT,recursive-tsv-dataset,64,8,8,diagnostic,UNCALIBRATED,CAPACITY_FAILED,SUCCEEDED,4081170,51.401708,308152,79397.556
+s3p.bce7ef300683.s1,fc-cpu-corrected-20260828,s3p,3.7.2,ls,100,8,8,diagnostic,UNCALIBRATED,PRESSURE_DEGRADED,SUCCEEDED,4081170,104.428217,276776,39081.104
+s7cmd.b5d4fe29dd1e.s1,fc-cpu-corrected-20260828,s7cmd,1.5.0,recursive-one-nosort,64,8,8,diagnostic,UNCALIBRATED,PRESSURE_DEGRADED,SUCCEEDED,4081170,237.815286,50176,17161.092
+ps3.55c79d26bce0.s1,fc-cpu-corrected-20260828,ps3,0.1.16,list,256,8,8,diagnostic,UNCALIBRATED,TIMING_VALID,SUCCEEDED,4081170,369.287718,92116,11051.464
+s3kor.8514c3397199.s1,fc-cpu-corrected-20260828,s3kor,v0.0.37,list,,8,8,diagnostic,UNCALIBRATED,TIMING_VALID,SUCCEEDED,4081170,410.960476,50176,9930.809
+minio-mc.04c17e5ac8da.s1,fc-cpu-corrected-20260828,minio-mc,RELEASE.2025-08-13T08-35-41Z,recursive,,8,8,diagnostic,UNCALIBRATED,TIMING_VALID,SUCCEEDED,4081170,419.69381,49920,9724.161
+s5cmd.9541d7894859.s1,fc-cpu-corrected-20260828,s5cmd,v2.3.0,recursive-with-dirs,,8,8,diagnostic,UNCALIBRATED,TIMING_VALID,SUCCEEDED,4081170,437.22724,50176,9334.208
+aws-cli.a7d9377bd706.s1,fc-cpu-corrected-20260828,aws-cli,2.36.1,s3api-v2-text,,8,8,diagnostic,UNCALIBRATED,TIMING_VALID,SUCCEEDED,4081170,700.047309,85076,5829.849

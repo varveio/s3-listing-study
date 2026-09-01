@@ -188,6 +188,16 @@
       "sha256": "8e9dbf0d31db1bea6f558e49ed6203b1a67ae94f30cccc104525057ad2d230f2"
     },
     {
+      "bytes": 1998,
+      "path": "charts/fourcast-roster.csv",
+      "sha256": "a3902990885b5438914b33c6fee0e2638ceef9708bbec2db44b71b2a80e40fcd"
+    },
+    {
+      "bytes": 6325,
+      "path": "charts/fourcast-roster.svg",
+      "sha256": "ddd1d4d0670765eb8540e832597815483330c91b637bc1848dfed0b461bba79f"
+    },
+    {
       "bytes": 680,
       "path": "charts/nbm-same-allocation-wall.csv",
       "sha256": "61df2e8cda132710ed46c586191a5a1a88f15042eb1e955dfd518da54df6f741"
@@ -196,6 +206,16 @@
       "bytes": 3339,
       "path": "charts/nbm-same-allocation-wall.svg",
       "sha256": "c86152d1a06effb769aa1ebecff3ed96ec9832189828473e7de9ef6fe89e05ff"
+    },
+    {
+      "bytes": 1850,
+      "path": "charts/real-s3-ladder.csv",
+      "sha256": "962212339a44434db31d0ba5dce8cb3aaf2d1758b47f36bf7a7cd0bbd00a0e59"
+    },
+    {
+      "bytes": 4424,
+      "path": "charts/real-s3-ladder.svg",
+      "sha256": "9af125d911a3d72ab1b440c785e09522b143105f1fe83f76089ae8482ab31220"
     },
     {
       "bytes": 22764,
