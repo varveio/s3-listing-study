@@ -59,3 +59,13 @@ instances:
   - { vcpus: 48, memory_gb: 96, machine_type: n4-highcpu-48 }
   - { vcpus: 48, memory_gb: 192, machine_type: n4-standard-48 }
   - { vcpus: 48, memory_gb: 384, machine_type: n4-highmem-48 }
+
+  # Capacity controls for the 143M-row replay fixture. These deliberately
+  # leave eight vCPUs outside replay64+subject8 and replay48+subject8.
+  - { vcpus: 64, memory_gb: 128, machine_type: n4-highcpu-64 }
+  - { vcpus: 64, memory_gb: 256, machine_type: n4-standard-64 }
+  - { vcpus: 64, memory_gb: 512, machine_type: n4-highmem-64 }
+
+  - { vcpus: 80, memory_gb: 160, machine_type: n4-highcpu-80 }
+  - { vcpus: 80, memory_gb: 320, machine_type: n4-standard-80 }
+  - { vcpus: 80, memory_gb: 640, machine_type: n4-highmem-80 }
