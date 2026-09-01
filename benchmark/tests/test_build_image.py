@@ -77,7 +77,7 @@ def test_dockerfile_is_self_contained_and_checksum_pinned() -> None:
     assert source.count("ADD --checksum=sha256:") == 10
     assert (
         "FROM ghcr.io/varveio/swath@sha256:"
-        "776e788200a1e70f30206897303a34e4faabd56c591e1c9562277677085c4f60 "
+        "b3c8287cf6fc0368c8b3f732d01f328bbc7c8296049ec6370f3225a05998875e "
         "AS swath_install"
     ) in source
     for stage in (

@@ -1,9 +1,8 @@
 # syntax=docker/dockerfile:1
 ARG SHARED_BASE_IMAGE
-# Upstream's published 0.3.1 release image (registry tag 0.3.1, git tag v0.3.1,
-# revision 7b9a5e2), pinned by immutable index digest. Its tested jar and
+# The official main image, pinned by immutable index digest. Its tested jar and
 # JRE are copied onto the common study base without recompiling Swath.
-FROM ghcr.io/varveio/swath@sha256:776e788200a1e70f30206897303a34e4faabd56c591e1c9562277677085c4f60 AS upstream
+FROM ghcr.io/varveio/swath@sha256:b3c8287cf6fc0368c8b3f732d01f328bbc7c8296049ec6370f3225a05998875e AS upstream
 
 FROM ${SHARED_BASE_IMAGE}
 USER root
