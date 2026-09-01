@@ -33,6 +33,10 @@ is itself generated. This page is the operator's side.
 - `benchmark/src/benchmark/public_export.py` — the exporter.
 - `benchmark/src/benchmark/public_render.py` — the SVG renderer.
 - `benchmark/src/benchmark/public_validate.py` — the committed-files-only gate.
+- `results/<release-id>/REPORT.md` — the release's written companion. This one
+  file is handwritten, not generated: the exporter never produces or rewrites
+  its text, but it does seal it, so the prose cannot be edited without the
+  checksums noticing. `public_export.HANDWRITTEN_FILES` names it.
 
 ## Generating a release
 
@@ -64,8 +68,8 @@ uv run python -m benchmark.public_render \
 ```
 
 Note that the checksums and the manifest are written by the exporter, so a
-render-only pass leaves the release inconsistent until the exporter runs again.
-The validator will say so.
+render-only pass — or an edit to `REPORT.md` — leaves the release inconsistent
+until the exporter runs again. The validator will say so.
 
 ## What the exporter guarantees
 
@@ -111,6 +115,23 @@ and `replay_timing == TIMING_VALID`.
 
 The `public-release` job in `.github/workflows/checks.yml` runs it over every
 release directory under `results/`.
+
+## Writing the report
+
+`REPORT.md` is the one place in a release where a person argues from the data,
+so it carries the burden the data does not: the status box that says what the
+release is not, the funnel with the mechanism that stopped each subject, the
+instrument and any defect in it, the per-tool dispositions, and an explicit
+"what this does not establish". Two rules:
+
+1. **Every number is checked against the committed files.** If a figure is not
+   in `summary.csv` or `attempts.jsonl`, the report says where it comes from
+   instead of quoting it as if it were exported.
+2. **Every claim names its attempt id.** Claim-to-attempt binding lives in the
+   report's own tables until a disposition layer exists to hold it.
+
+Neutral vocabulary throughout: a tool stops at a rung for a stated mechanical
+reason. No leaders, no survivors, no podium.
 
 ## Changing a release
 
