@@ -61,6 +61,43 @@ tools:
           writeback_size: 32mb
           part_rotation_interval: "0"
           part_rotation_max_rows: 0
+      # 2026-09-01 delimiter-width sweep on the post-fix image. The row above ran at
+      # the image's own default (32 on this host). 128 is the fix-1-only arm: the width
+      # the 0.3.1 rows had, so it isolates the key-only projection from the narrower
+      # fleet. 16 and 64 bracket the default. One repetition each; diagnostic.
+      - mode: recursive-tsv-dataset
+        concurrency: 256
+        purpose: diagnostic
+        replay_delimiter_connections: 128
+        config:
+          jvm_max_heap: 4g
+          text_writers: 3
+          text_part_size: 1gb
+          writeback_size: 32mb
+          part_rotation_interval: "0"
+          part_rotation_max_rows: 0
+      - mode: recursive-tsv-dataset
+        concurrency: 256
+        purpose: diagnostic
+        replay_delimiter_connections: 64
+        config:
+          jvm_max_heap: 4g
+          text_writers: 3
+          text_part_size: 1gb
+          writeback_size: 32mb
+          part_rotation_interval: "0"
+          part_rotation_max_rows: 0
+      - mode: recursive-tsv-dataset
+        concurrency: 256
+        purpose: diagnostic
+        replay_delimiter_connections: 16
+        config:
+          jvm_max_heap: 4g
+          text_writers: 3
+          text_part_size: 1gb
+          writeback_size: 32mb
+          part_rotation_interval: "0"
+          part_rotation_max_rows: 0
 
 exclude:
   - {tool: aws-cli, reason: stopped after FourCast}
