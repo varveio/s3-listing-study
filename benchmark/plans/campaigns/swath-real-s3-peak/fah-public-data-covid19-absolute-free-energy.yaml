@@ -29,6 +29,13 @@ tools:
         concurrency: 1024
         purpose: diagnostic
         config: {jvm_max_heap: 16g, text_writers: 8}
+      # 2026-09-01 throughput follow-up: 32-vCPU tuned shape, pure listing to compressed TSV.
+      - mode: recursive-tsv-zstd
+        concurrency: 2048
+        purpose: diagnostic
+        vcpus: 32
+        memory_gb: 64
+        config: {jvm_max_heap: 16g, text_writers: 16}
 
 exclude:
   - {tool: aws-cli, reason: outside this Swath-only real-S3 diagnostic}
