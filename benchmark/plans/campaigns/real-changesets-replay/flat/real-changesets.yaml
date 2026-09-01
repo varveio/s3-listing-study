@@ -46,6 +46,10 @@ tools:
       # 2026-09-01 memory control: the 8 GiB arm was SIGKILLed at 1,402 s with 8.37 GB RSS because
       # rclone materialises a whole directory before walking it. Same fairness step s3-fast-list got.
       - {mode: recursive-walk, concurrency: 64, purpose: diagnostic, container_memory_gb: 16}
+      # rclone's default recursive path (ListR, which `--fast-list` also selects) streams entries
+      # through a callback instead of materialising the directory; on a flat root it is the fair
+      # configuration: one undelimited serial chain with bounded memory.
+      - {mode: recursive-fastlist, purpose: diagnostic}
 
   s7cmd:
     cases:
