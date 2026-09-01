@@ -9,7 +9,7 @@ auth_role: public-read
 
 replay:
   capacity_status: uncalibrated
-  server_image_uri: ghcr.io/varveio/swath-replay@sha256:992ef65f1d8e92385a39dfe0eea487ceeeaefd4ca186cd8511447317872ade1d
+  server_image_uri: ghcr.io/varveio/swath-replay@sha256:3955f242f25294d3ebc6d63d3cf23e2a2694f7f1c9a5334dc6ec1054b0a69097
   fixture_uri: gs://s3-listing-study-results-29c02004/fixtures/swath-replay/idc-open-data/current-geometry-20260824/part-*.parquet
   fixture_sha256: 8a83fdc88000d6a1f4e3563eb3151407a91b6ca319713b08cff3e72442608ebe
   serving_mode: sorted

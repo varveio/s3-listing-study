@@ -1,8 +1,8 @@
 # syntax=docker/dockerfile:1
 ARG SHARED_BASE_IMAGE
-# The official main image, pinned by immutable index digest. Its tested jar and
+# The official 0.3.1 image, pinned by immutable index digest. Its tested jar and
 # JRE are copied onto the common study base without recompiling Swath.
-FROM ghcr.io/varveio/swath@sha256:6595c2f18da68cee4c1b1cdaf5335d993fea7b8f2f8aaf2f26ef3c81058a9ffd AS upstream
+FROM ghcr.io/varveio/swath@sha256:776e788200a1e70f30206897303a34e4faabd56c591e1c9562277677085c4f60 AS upstream
 
 FROM ${SHARED_BASE_IMAGE}
 USER root
