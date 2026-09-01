@@ -1,6 +1,7 @@
-# Capacity continuation after NBM narrowed the active race to Swath and rclone.
-# The Swath width bracket holds its 8-vCPU/output treatment fixed; later rows
-# are appended here rather than split into per-control plans.
+# 2026-09-01 post-fix Swath replay-capacity qualification. The seven earlier
+# allocation controls remain in git and the unified ledger; this current plan
+# starts with overprovisioned cell A only. Append B/C, then the selected common-
+# allocation widths, here after A passes the declared replay-pressure gate.
 spec_version: 3
 
 bucket: aws-public-blockchain
@@ -21,110 +22,25 @@ replay:
 defaults:
   reps: 1
   timeout_s: 7200
-  vcpus: 32
-  memory_gb: 64
+  vcpus: 80
+  memory_gb: 160
   container_memory_gb: 8
   subject_vcpus: 8
-  replay_vcpus: 20
+  replay_vcpus: 64
   replay_memory_gb: 20
-  replay_parquet_connections: 64
+  replay_parquet_connections: 128
   replay_max_concurrent_requests: 512
   replay_prefetch: false
   replay_prefetch_max_windows: 96
   replay_heap_percent: 75
 
 tools:
-  rclone:
-    cases:
-      - {mode: recursive-walk, concurrency: 64, purpose: diagnostic}
-      - {mode: recursive-walk, concurrency: 128, purpose: diagnostic}
-
-  s3p:
-    cases:
-      - {mode: ls, concurrency: 16, purpose: diagnostic}
-
-  s7cmd:
-    cases:
-      - mode: recursive-one-nosort
-        concurrency: 16
-        purpose: diagnostic
-        config: {parallel_depth: 1}
-
   swath:
     cases:
-      - mode: recursive-tsv-dataset
-        concurrency: 64
-        purpose: diagnostic
-        config:
-          jvm_max_heap: 4g
-          text_writers: 3
-          text_part_size: 1gb
-          writeback_size: 32mb
-          part_rotation_interval: "0"
-          part_rotation_max_rows: 0
-      - mode: recursive-tsv-dataset
-        concurrency: 128
-        purpose: diagnostic
-        config:
-          jvm_max_heap: 4g
-          text_writers: 3
-          text_part_size: 1gb
-          writeback_size: 32mb
-          part_rotation_interval: "0"
-          part_rotation_max_rows: 0
+      # A: c256 under the materially overprovisioned replay64 control.
       - mode: recursive-tsv-dataset
         concurrency: 256
         purpose: diagnostic
-        config:
-          jvm_max_heap: 4g
-          text_writers: 3
-          text_part_size: 1gb
-          writeback_size: 32mb
-          part_rotation_interval: "0"
-          part_rotation_max_rows: 0
-      - mode: recursive-tsv-dataset
-        concurrency: 128
-        purpose: diagnostic
-        replay_parquet_connections: 128
-        config:
-          jvm_max_heap: 4g
-          text_writers: 3
-          text_part_size: 1gb
-          writeback_size: 32mb
-          part_rotation_interval: "0"
-          part_rotation_max_rows: 0
-      - mode: recursive-tsv-dataset
-        concurrency: 256
-        purpose: diagnostic
-        replay_parquet_connections: 128
-        config:
-          jvm_max_heap: 4g
-          text_writers: 3
-          text_part_size: 1gb
-          writeback_size: 32mb
-          part_rotation_interval: "0"
-          part_rotation_max_rows: 0
-      - mode: recursive-tsv-dataset
-        concurrency: 128
-        purpose: diagnostic
-        vcpus: 48
-        memory_gb: 96
-        replay_vcpus: 32
-        replay_parquet_connections: 128
-        config:
-          jvm_max_heap: 4g
-          text_writers: 3
-          text_part_size: 1gb
-          writeback_size: 32mb
-          part_rotation_interval: "0"
-          part_rotation_max_rows: 0
-      - mode: recursive-tsv-dataset
-        concurrency: 256
-        purpose: diagnostic
-        vcpus: 48
-        memory_gb: 96
-        replay_vcpus: 32
-        replay_parquet_connections: 128
         config:
           jvm_max_heap: 4g
           text_writers: 3
@@ -140,3 +56,6 @@ exclude:
   - {tool: s3-fast-list, reason: stopped after NBM memory control}
   - {tool: s3kor, reason: stopped after FourCast}
   - {tool: s5cmd, reason: blockchain preceded the fair NBM c64 fanout; carry on next rung}
+  - {tool: rclone, reason: post-fix capacity qualification is Swath-only}
+  - {tool: s3p, reason: post-fix capacity qualification is Swath-only}
+  - {tool: s7cmd, reason: post-fix capacity qualification is Swath-only}
