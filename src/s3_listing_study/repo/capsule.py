@@ -53,6 +53,33 @@ REQUIRED_H2 = {
     "Evidence boundary",
 }
 FIXTURE_TOOLS = {"s3p", "s4cmd"}
+
+# The one release a tool page must currently point at. A capsule page's status
+# is a fact about the study as a whole, not about the tool, so it is declared
+# once here and every page is required to carry the same block rather than each
+# page inventing its own wording. Bump this and the block below together when a
+# new release supersedes this one; the validator will then name every page that
+# still points at the old release.
+CURRENT_RELEASE = "2026-09-scale-diagnostics"
+
+# The required status block, verbatim except for the one line each page fills in
+# with its own outcome. The previous contract required a single stale sentence
+# ("no benchmark comparison has been run"), which was true when it was written,
+# stayed in eleven pages after it stopped being true, and had no way to say what
+# a reader should read instead. A block is required in its place: what the
+# current release is, that its ceiling forbids reading it as a benchmark, where
+# to find it, and one line of this tool's own outcome in it.
+STATUS_BLOCK = re.compile(
+    r"^> \*\*Study status \(" + re.escape(CURRENT_RELEASE) + r"\)\.\*\* "
+    r"This tool's standing in the current release:\n"
+    r"^> .+\n"
+    r"^> The release is diagnostic: no attempt in it carries "
+    r"`purpose = measurement`, so\n"
+    r"^> nothing here is a calibrated benchmark or a ranking\. Report and data:\n"
+    r"^> \[`results/" + re.escape(CURRENT_RELEASE) + r"/REPORT\.md`\]"
+    r"\(\.\./\.\./results/" + re.escape(CURRENT_RELEASE) + r"/REPORT\.md\)\.$",
+    re.M,
+)
 # Which capsules came through the legacy consolidated layout. Whether a capsule
 # was migrated is a fact about its history, so it is declared here rather than
 # inferred from whether data/claims.json currently declares a legacy_ledger.
@@ -734,9 +761,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "README introduction must link the tool.json upstream repository "
                 "before the first H2"
             )
-        stable = "This study's groundwork is complete; no benchmark comparison has been run."
-        if stable not in intro:
-            errors.append("README introduction must contain the stable study-status sentence")
+        if not STATUS_BLOCK.search(intro):
+            errors.append(
+                "README introduction must carry the required study-status block for "
+                f"{CURRENT_RELEASE} (see capsule.STATUS_BLOCK) before the first H2"
+            )
         h2 = set(re.findall(r"^## ([^#\n]+?)\s*$", readme, re.M))
         missing_h2 = REQUIRED_H2 - h2
         if missing_h2:

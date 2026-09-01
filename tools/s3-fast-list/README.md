@@ -2,7 +2,12 @@
 
 [s3-fast-list](https://github.com/aws-samples/s3-fast-list) is an AWS Samples Rust tool that lists an S3 bucket through ListObjectsV2 and exports the object metadata to a Parquet file.
 Its distinctive trick is to split the keyspace into byte-range slices — supplied as a hints file — and list those slices concurrently instead of walking one serial pagination chain.
-This study's groundwork is complete; no benchmark comparison has been run.
+
+> **Study status (2026-09-scale-diagnostics).** This tool's standing in the current release:
+> Reached the 66.4M-object rung with an exact count in 333.8 s using harness-supplied cut-points (`s3-fast-list.246cf7252988.s1`); two attempts died at the memory limit.
+> The release is diagnostic: no attempt in it carries `purpose = measurement`, so
+> nothing here is a calibrated benchmark or a ranking. Report and data:
+> [`results/2026-09-scale-diagnostics/REPORT.md`](../../results/2026-09-scale-diagnostics/REPORT.md).
 
 ## At a glance
 

@@ -2,7 +2,12 @@
 
 [aws-cli](https://github.com/aws/aws-cli) is AWS's official command-line client; it lists an S3 bucket through the `ListObjectsV2` continuation-token paginator and prints the keys as text, JSON, or one of several other output formats.
 It exposes two independent listing surfaces — the high-level `aws s3 ls` and the low-level `aws s3api list-objects-v2` (plus the legacy V1 `list-objects` and `list-object-versions`) — both serial and single-threaded, with no listing-concurrency knob anywhere; aws-cli is also the study's pinned harness client, at version 2.36.0 one patch behind the 2.36.1 tested here, so a sibling build produces the listings every other tool is checked against.
-This study's groundwork is complete; no benchmark comparison has been run.
+
+> **Study status (2026-09-scale-diagnostics).** This tool's standing in the current release:
+> Completed the 4.08M-object rung with an exact count in 700.0 s (`aws-cli.a7d9377bd706.s1`); serial by construction and not carried further.
+> The release is diagnostic: no attempt in it carries `purpose = measurement`, so
+> nothing here is a calibrated benchmark or a ranking. Report and data:
+> [`results/2026-09-scale-diagnostics/REPORT.md`](../../results/2026-09-scale-diagnostics/REPORT.md).
 
 ## At a glance
 

@@ -2,7 +2,12 @@
 
 [pS3](https://github.com/jboothomas/ps3) ("parallel S3") is a Go command-line tool that lists an entire S3 bucket by discovering key prefixes through a brute-force character walk and then paginating them in parallel, printing each object as a plain text line.
 It is an unmaintained single-author project that cuts no releases or tags and is licensed GPL-3.0; this study reviewed and ran the upstream project itself at pinned default-branch HEAD `9428492`, not a fork.
-This study's groundwork is complete; no benchmark comparison has been run.
+
+> **Study status (2026-09-scale-diagnostics).** This tool's standing in the current release:
+> Completed the 4.08M-object rung with an exact count in 369.3 s (`ps3.55c79d26bce0.s1`); the wider fairness arm reached the 1,800 s cap without a count.
+> The release is diagnostic: no attempt in it carries `purpose = measurement`, so
+> nothing here is a calibrated benchmark or a ranking. Report and data:
+> [`results/2026-09-scale-diagnostics/REPORT.md`](../../results/2026-09-scale-diagnostics/REPORT.md).
 
 ## At a glance
 

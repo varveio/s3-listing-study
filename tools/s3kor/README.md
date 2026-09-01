@@ -2,7 +2,12 @@
 
 [s3kor](https://github.com/sethkor/s3kor) is a Go re-implementation of a subset of the `aws s3` CLI whose `ls` subcommand lists an S3 bucket and prints one plain-text key per line.
 Its "parallel" reputation is transfer-side only: `ls` is a single serial `ListObjectsV2Pages` pagination chain, and the per-page goroutines merely format already-fetched pages rather than issuing concurrent LIST requests; the study tested upstream directly (no fork), under a GPL-3.0 license, against a project that has been dormant since 2022.
-This study's groundwork is complete; no benchmark comparison has been run.
+
+> **Study status (2026-09-scale-diagnostics).** This tool's standing in the current release:
+> Completed the 4.08M-object rung with an exact count in 411.0 s (`s3kor.8514c3397199.s1`); serial listing, not carried further.
+> The release is diagnostic: no attempt in it carries `purpose = measurement`, so
+> nothing here is a calibrated benchmark or a ranking. Report and data:
+> [`results/2026-09-scale-diagnostics/REPORT.md`](../../results/2026-09-scale-diagnostics/REPORT.md).
 
 ## At a glance
 

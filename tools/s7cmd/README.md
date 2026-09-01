@@ -2,7 +2,12 @@
 
 [s7cmd](https://github.com/nidor1998/s7cmd) is an umbrella Rust CLI whose `ls` subcommand lists an S3 bucket and prints the result as aligned text, TSV, one-line, or JSON; its listing engine is the separate [s3ls-rs](https://github.com/nidor1998/s3ls-rs) crate pinned at `=1.0.3`, which discovers common-prefixes in parallel to a fixed depth and then drains each leaf with sequential pagination.
 It is not a fork: the study built and ran s7cmd unmodified from its own repository, and every listing-engine source anchor resolves in the s3ls-rs crate it depends on rather than in a reimplementation.
-This study's groundwork is complete; no benchmark comparison has been run.
+
+> **Study status (2026-09-scale-diagnostics).** This tool's standing in the current release:
+> Exact at the 13.5M-object rung in 601.0 s (`s7cmd.bdba69aad415.s1`); returned no count at 66.4M and reached the 7,200 s cap at 143M.
+> The release is diagnostic: no attempt in it carries `purpose = measurement`, so
+> nothing here is a calibrated benchmark or a ranking. Report and data:
+> [`results/2026-09-scale-diagnostics/REPORT.md`](../../results/2026-09-scale-diagnostics/REPORT.md).
 
 ## At a glance
 

@@ -2,7 +2,12 @@
 
 [MinIO Client (`mc`)](https://github.com/minio/mc) is MinIO's own command-line client for S3; its `mc ls` and `mc find` subcommands list a bucket by paginating serially through the S3 list API — ListObjectsV2 on the default listing path — printing a humanized text table by default and JSON Lines under `--json`.
 mc is the canonical MinIO project rather than a fork, and its repository is now archived (read-only) on GitHub, so the pinned release is effectively terminal.
-This study's groundwork is complete; no benchmark comparison has been run.
+
+> **Study status (2026-09-scale-diagnostics).** This tool's standing in the current release:
+> Completed the 4.08M-object rung with an exact count in 419.7 s (`minio-mc.04c17e5ac8da.s1`); serial iterator, flat in memory, not carried further.
+> The release is diagnostic: no attempt in it carries `purpose = measurement`, so
+> nothing here is a calibrated benchmark or a ranking. Report and data:
+> [`results/2026-09-scale-diagnostics/REPORT.md`](../../results/2026-09-scale-diagnostics/REPORT.md).
 
 ## At a glance
 
