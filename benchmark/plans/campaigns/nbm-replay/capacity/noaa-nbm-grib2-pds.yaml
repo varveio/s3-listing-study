@@ -10,7 +10,7 @@ auth_role: public-read
 
 replay:
   capacity_status: uncalibrated
-  server_image_uri: ghcr.io/varveio/swath-replay@sha256:992ef65f1d8e92385a39dfe0eea487ceeeaefd4ca186cd8511447317872ade1d
+  server_image_uri: ghcr.io/varveio/swath-replay@sha256:3955f242f25294d3ebc6d63d3cf23e2a2694f7f1c9a5334dc6ec1054b0a69097
   fixture_uri: gs://s3-listing-study-results-29c02004/fixtures/noaa-nbm-grib2-pds/current-eba31d9/part-*.parquet
   fixture_sha256: de7e0487fe7237590b421299853ff7f88f27a006f5d8528ece23f3be26a2624a
   serving_mode: sorted
