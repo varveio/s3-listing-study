@@ -1,8 +1,8 @@
 {
   "tool": "swath",
   "tool_version": "0.2.5-SNAPSHOT",
-  "tool_build_sha256": "4b0ced9df3d4afff03ba7411762e8e194c0720adf701286433a83df0249d21c2",
-  "tool_artifact": {"kind":"container-image","locator":"ghcr.io/varveio/swath","sha256":"b3c8287cf6fc0368c8b3f732d01f328bbc7c8296049ec6370f3225a05998875e"},
+  "tool_build_sha256": "93be4f93eff469c8ec2518b67cca3f8df3f1da99daf058f8c1484d8114fa3c18",
+  "tool_artifact": {"kind":"container-image","locator":"ghcr.io/varveio/swath","sha256":"6595c2f18da68cee4c1b1cdaf5335d993fea7b8f2f8aaf2f26ef3c81058a9ffd"},
   "subject_workdir": "/opt/swath",
   "executable": [
     "/opt/java/openjdk/bin/java",
