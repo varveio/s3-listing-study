@@ -18,6 +18,15 @@ replay:
     deadlines_ms: {worker_page: 94, pivot_probe: 46, structure_probe: 55}
     scale: 1.0
     jitter: none
+  # 2026-09-01: declared warm-up (see docs/methodology.md, "Replay warm-up"). A local isolation
+  # study attributed the structure-probe overruns to a cold delimiter path (JIT, lazy per-file
+  # reader pools) rather than to scan cost; the walk below warms it identically for every tool.
+  # This is a new treatment identity; the cold-server A row remains in the ledger unchanged.
+  warmup:
+    structure_probes: 2000
+    pivot_probes: 200
+    worker_pages: 200
+    in_flight: 64
 
 defaults:
   reps: 1
