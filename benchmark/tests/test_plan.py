@@ -1302,6 +1302,14 @@ def test_a_tool_body_is_the_defaults_vocabulary_plus_its_rows() -> None:
     }
 
 
+def test_case_label_accepts_a_comma_delimited_capsule_value() -> None:
+    label = bench.case_label(
+        (("mode", "fanout-with-dirs"), ("shard_prefixes", "blend.2020,blend.2021"))
+    )
+
+    assert bench.CASE_LABEL_RE.fullmatch(label)
+
+
 def test_incomplete_defaults_are_refused(tmp_path: Path) -> None:
     path = write(tmp_path, ONE_CASE)
     path.write_text(

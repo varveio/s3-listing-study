@@ -223,7 +223,7 @@ HEX64_RE = re.compile(r"[0-9a-f]{64}")
 
 # Anchored with ``\Z`` and applied with ``fullmatch``: ``$`` also matches before
 # a trailing newline, and a label is printed and grepped.
-CASE_LABEL_RE = re.compile(r"\A[a-z0-9][a-z0-9._-]{0,254}\Z")
+CASE_LABEL_RE = re.compile(r"\A[a-z0-9][a-z0-9,._-]{0,254}\Z")
 TOOL_RE = re.compile(r"\A[a-z0-9][a-z0-9-]{0,40}\Z")
 
 
@@ -1423,7 +1423,7 @@ def _case(
     if not CASE_LABEL_RE.fullmatch(label):
         raise PlanError(
             f"'tools.{tool}' in {path} generates the unusable case label {label!r} "
-            "(axis values must be lowercase, digits, '.', '_' or '-', and the label must be "
+            "(axis values must be lowercase, digits, ',', '.', '_' or '-', and the label must be "
             "at most 255 characters)"
         )
     case = Case(
