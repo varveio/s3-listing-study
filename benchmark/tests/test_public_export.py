@@ -190,7 +190,7 @@ def test_the_allowlist_refuses_a_leaked_column(tmp_path: Path) -> None:
 def test_a_private_string_in_an_allowlisted_field_is_refused(tmp_path: Path) -> None:
     release = export(tmp_path, tmp_path / "out")
     smuggled = json.loads(json.dumps(release.rows[0]))
-    smuggled["state"]["detail"] = "see gs://s3-listing-study-results-29c02004/nbm-capacity/"
+    smuggled["state"]["detail"] = "see gs://a-private-result-store/a-suite/"
     with pytest.raises(public_export.ExportError, match="private result-store URI"):
         public_export.vet_row(smuggled)
 
