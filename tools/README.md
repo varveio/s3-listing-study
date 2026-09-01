@@ -8,8 +8,14 @@ the study, in what role, and where each subject stands.
 **Where the study stands:** groundwork is complete for every subject — pinned
 builds or source checkouts, anonymous smoke runs where the tool could list,
 source-anchored mechanism reports, and a claim-by-claim reconciliation of the
-inherited notes. **No benchmark comparison has been run**, and everything
-scale-dependent or comparative stays unverified until the benchmark phase.
+inherited notes. Comparative runs have since happened and are published as a
+**diagnostic** release, `2026-09-scale-diagnostics`: see
+[`../RESULTS.md`](../RESULTS.md) and the release's
+[report](../results/2026-09-scale-diagnostics/REPORT.md). No attempt in that
+release carries `purpose = measurement`, so it establishes where each approach
+stops and by what mechanism — not a ranking, and not a calibrated benchmark.
+The "current release outcome" column below summarises each subject's standing
+in it; the report holds the attempt ids behind every figure.
 
 ## Start here
 
@@ -47,16 +53,16 @@ reason recorded. The tables are summaries, not the evidence record.
 
 The tier label is a study-scope identifier, not a ranking of the projects.
 
-| Tool | How it lists | What we want to learn |
-| --- | --- | --- |
-| [`aws-cli`](aws-cli/) | One serial page-by-page chain of ListObjectsV2 calls | A familiar reference point; memory behavior differs by output *format*, not command surface |
-| [`PS3`](ps3/) | Brute-force character expansion of the keyspace | How its published comparisons with aws-cli and s5cmd translate to our setup |
-| [`rclone`](rclone/) | A flat single-sweep ListR chain, or a per-directory walk that fans directories across `--checkers` workers | Memory and exit behavior under constrained runs |
-| [`S3P`](s3p/) | Recursive bisection of the keyspace using synthetic midpoint keys | Whether recursive bisection translates to our setup |
-| [`s3-fast-list`](s3-fast-list/) | Splits the keyspace at user-supplied cut-points (`-k` hints); serial without them | How hint-based splitting behaves for throughput and correctness; two correctness hypotheses are queued on its page |
-| [`s5cmd`](s5cmd/) | One serial ListObjectsV2 chain; users can fan out per-prefix `ls` jobs through its worker pool | How its transfer-oriented concurrency relates to listing workloads |
-| [`s7cmd`](s7cmd/) | Umbrella CLI over the s3ls-rs engine: parallel prefix discovery, then sequential pagination per leaf | The planned representative of the s3ls-rs family |
-| [`Swath`](swath/) | Splits the keyspace into ranges and lists them in parallel with work stealing | The tool we build, included with the same run-record requirements as the other tools |
+| Tool | How it lists | What we want to learn | Current release outcome |
+| --- | --- | --- | --- |
+| [`aws-cli`](aws-cli/) | One serial page-by-page chain of ListObjectsV2 calls | A familiar reference point; memory behavior differs by output *format*, not command surface | Completed the 4.08M rung, exact, in 700.0 s. Serial by construction; kept as the reference point and not carried further. |
+| [`PS3`](ps3/) | Brute-force character expansion of the keyspace | How its published comparisons with aws-cli and s5cmd translate to our setup | Completed 4.08M, exact, in 369.3 s. The wider fairness arm reached the 1,800 s cap without a count; not carried further. |
+| [`rclone`](rclone/) | A flat single-sweep ListR chain, or a per-directory walk that fans directories across `--checkers` workers | Memory and exit behavior under constrained runs | Reached 143M in 667.0 s at c64, nine rows short of the fixture count. Killed at the 8 GiB container limit on the flat 13.9M fixture. |
+| [`S3P`](s3p/) | Recursive bisection of the keyspace using synthetic midpoint keys | Whether recursive bisection translates to our setup | Reached 143M, exact, in 4,238.8 s at c16. CPU-bound in its cheapest mode; width does not help it. |
+| [`s3-fast-list`](s3-fast-list/) | Splits the keyspace at user-supplied cut-points (`-k` hints); serial without them | How hint-based splitting behaves for throughput and correctness; two correctness hypotheses are queued on its page | Reached 66.4M, exact, in 333.8 s with harness-supplied cut-points and 11,347,320 KiB peak RSS. Two attempts died at the container memory limit. |
+| [`s5cmd`](s5cmd/) | One serial ListObjectsV2 chain; users can fan out per-prefix `ls` jobs through its worker pool | How its transfer-oriented concurrency relates to listing workloads | Reached 66.4M, exact, in 352.2 s, but only with harness-supplied shards; it has no listing fanout of its own. |
+| [`s7cmd`](s7cmd/) | Umbrella CLI over the s3ls-rs engine: parallel prefix discovery, then sequential pagination per leaf | The planned representative of the s3ls-rs family | Exact at 13.5M in 601.0 s. Returned no count at 66.4M and reached the 7,200 s cap on the skewed 143M fixture. |
+| [`Swath`](swath/) | Splits the keyspace into ranges and lists them in parallel with work stealing | The tool we build, included with the same run-record requirements as the other tools | Reached 143M, exact, in 173.7 s at c256. Every replay row on the small-directory fixtures is penalised by the instrument's structure-probe defect. |
 
 `s3ls-rs` is not listed separately: `s7cmd ls` **is** that crate (pinned
 `=1.0.3`), so s7cmd represents the family and engine results generalize. Its
@@ -68,11 +74,11 @@ is not included in this public repository.
 These tools are in scope when the harness and credential setup make a useful
 run practical. The grouping describes study scope, not project quality.
 
-| Tool | How it lists |
-| --- | --- |
-| [`s4cmd`](s4cmd/) | Client-side `delimiter=/` recursion over the legacy v1 API: each discovered pseudo-directory becomes a new thread-pool task |
-| [`MinIO mc`](minio-mc/) | A serial client-side iterator |
-| [`s3kor`](s3kor/) | Serial listing; its "parallel" reputation is transfer-only |
+| Tool | How it lists | Current release outcome |
+| --- | --- | --- |
+| [`s4cmd`](s4cmd/) | Client-side `delimiter=/` recursion over the legacy v1 API: each discovered pseudo-directory becomes a new thread-pool task | No attempt in the current release. |
+| [`MinIO mc`](minio-mc/) | A serial client-side iterator | Completed 4.08M, exact, in 419.7 s. Serial iterator, flat in memory; not carried further. |
+| [`s3kor`](s3kor/) | Serial listing; its "parallel" reputation is transfer-only | Completed 4.08M, exact, in 411.0 s. Serial listing; not carried further. |
 
 ### Related approaches documented for context (Tier 3)
 

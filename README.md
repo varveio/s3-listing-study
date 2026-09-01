@@ -39,31 +39,39 @@ longer.
 
 ## Status
 
-**Groundwork is complete; comparative measurement has not started. No benchmark
-result exists in this repository yet.**
+**A first release of results is published, as diagnostics.**
+[`results/2026-09-scale-diagnostics/`](results/2026-09-scale-diagnostics/)
+carries 284 settled attempts across eleven tools, and
+[`RESULTS.md`](RESULTS.md) is the index. Start with the release's own
+[report](results/2026-09-scale-diagnostics/REPORT.md).
 
-Every subject has completed the groundwork pipeline: a pinned build or source
+It is labelled a diagnostic release, and the label is load-bearing: no attempt
+in it carries `purpose = measurement`, the replay instrument it was screened on
+has a known defect that penalises one subject in one direction, and the
+live-S3 rows are single uncontrolled observations of one tool. The release's
+`manifest.json` states that ceiling in machine-readable form, and the report
+states it in prose. **There is no calibrated benchmark here and no ranking of
+listing tools.**
+
+What the release does settle: which approaches survive a rising object count,
+where each one stops and by what mechanism, exact object counts wherever a run
+returned one, and the memory behaviour that decides several of the outcomes.
+Eleven tools were screened from a 4.08-million-object fixture upward; ten
+completed the first rung and four reached 143 million. Separately, one tool
+listed a 1.07-billion-object public bucket on live S3 from a single 32-vCPU VM
+with an exact count — one run, one tool, and bounded in the report.
+
+Groundwork remains what it was: every subject has a pinned build or source
 checkout, a source-anchored mechanism report, claim-by-claim reconciliation,
 and smoke receipts where the tool could list the registered public bucket.
-Smoke timings are capsule diagnostics and facts about individual runs, not
-comparative performance results.
+Smoke timings are capsule diagnostics and facts about individual runs, never
+comparative results.
 
-Groundwork split the roster into two cohorts:
-
-- **Ran anonymously at smoke:** `aws-cli`, `s5cmd`, `s7cmd`, `rclone`,
-  `minio-mc`, `s3-fast-list` (a disclosed fork build pending an upstream
-  `--no-sign-request` contribution), and Swath. A smoke run does not by itself
-  establish correctness or performance beyond that exact run.
-- **Ran with a scoped credential:** `s3p`, `s3kor`, `s4cmd`, and `ps3` expose no
-  unsigned request path, so they cannot be smoked anonymously at all. Their
-  committed capability receipts document that limitation, and they have since
-  listed the smoke bucket under a list-only credential. The same caveat applies:
-  a smoke run establishes nothing beyond that exact run.
-
-See [`tools/README.md`](tools/README.md) for the per-tool status,
-[`docs/methodology.md`](docs/methodology.md) for the measurement plan we wrote
-down before running the comparisons, and
-[`benchmark/README.md`](benchmark/README.md) for the production benchmark boundary.
+See [`tools/README.md`](tools/README.md) for the per-tool status and the
+current release outcome per subject, [`docs/methodology.md`](docs/methodology.md)
+for the measurement plan written before the comparisons and dated notes on what
+has since run, and [`benchmark/README.md`](benchmark/README.md) for the
+production benchmark boundary.
 
 ## What we do
 
