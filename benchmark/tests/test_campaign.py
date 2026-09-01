@@ -89,6 +89,28 @@ def options(**overrides: object) -> gcp_batch.BatchOptions:
     return gcp_batch.BatchOptions(**values)
 
 
+def test_boot_disk_override_is_rendered_and_recorded(tmp_path: Path) -> None:
+    plan = Plan.load(REPLAY_CANARY)
+    case = plan.cases[0]
+    images = image_set(tmp_path)
+    launch = context(plan, case, images, boot_disk_size_gb=200)
+    attempt = campaign.planned_attempt(case, launch)[2](1)[0]
+
+    request = gcp_batch.render_batch_job(
+        attempt,
+        images.image_for(case.tool),
+        suite=SUITE,
+        options=launch.options,
+    )
+
+    assert request["allocationPolicy"]["instances"][0]["policy"]["bootDisk"] == {
+        "type": "hyperdisk-balanced",
+        "image": "batch-cos",
+        "sizeGb": "200",
+    }
+    assert json.loads(attempt.executor_env)["boot_disk"]["size_gb"] == 200
+
+
 def loaded_plan() -> Plan:
     return Plan.load(PLAN_PATH)
 

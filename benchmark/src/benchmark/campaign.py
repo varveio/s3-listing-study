@@ -1627,6 +1627,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         p.add_argument("--zone")
         p.add_argument("--provisioning", choices=("SPOT", "STANDARD"), default="SPOT")
         p.add_argument(
+            "--boot-disk-gb",
+            type=int,
+            default=100,
+            help="Hyperdisk boot-disk size for N4/C4/C4D jobs; recorded as executor "
+            "environment rather than case identity",
+        )
+        p.add_argument(
             "--retain-products",
             action="store_true",
             help="upload native listing products; off by default, while logs and "

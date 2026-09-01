@@ -231,6 +231,10 @@ Two flags change what a repeated `submit` does with what it finds:
 
 Defaults worth knowing: `--provisioning` is `SPOT`, so preemption is expected
 rather than exceptional. `--network`/`--subnetwork` must be supplied together.
+N4/C4/C4D jobs use a 100-GiB Hyperdisk boot disk by default. Pass
+`--boot-disk-gb N` when retained or staged products need more space; the exact
+size is frozen in `executor_env` but, like project and network, deliberately
+does not change case identity.
 
 `--retain-products` uploads the native listing product in addition to logs and
 the bound result marker. It is off by default. Enable it before submission for
