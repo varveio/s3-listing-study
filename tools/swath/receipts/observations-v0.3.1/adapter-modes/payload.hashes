@@ -14,7 +14,10 @@ normalized_rows=2549
 distinct_keys=2549
 keyset_sha256=2830c2eed8fc980cf780a3320b460e182f455b6e3cfcdbe34963d29ba923813c
 normalized_sha256=c9a2cdae568a4a62e4094bba9c68731f573fdd355c946052bbd8cfcca9c40a76
-raw=listing/data/part-w0-00000.parquet=a53ffa8bd43e1e70…; listing/data/part-w1-00000.parquet=2dc7c14d5b50b9fd…; listing/data/part-w2-00000.parquet=5ea9cf393cfe4ef3…
+raw_parts=3
+raw_sha256[listing/data/part-w0-00000.parquet]=a53ffa8bd43e1e70155a9161a7e77598b9c8b523b48e780e226a1fde25c17f85
+raw_sha256[listing/data/part-w1-00000.parquet]=2dc7c14d5b50b9fd08baf0bbac49b793ddec58428187d63e0070e4a318aaabe7
+raw_sha256[listing/data/part-w2-00000.parquet]=5ea9cf393cfe4ef36922f59f659b7b9db77c51ce533034052100d7f877bf153d
 
 [recursive-parquet-sorted]
 exit=0
@@ -23,7 +26,8 @@ normalized_rows=2549
 distinct_keys=2549
 keyset_sha256=2830c2eed8fc980cf780a3320b460e182f455b6e3cfcdbe34963d29ba923813c
 normalized_sha256=c9a2cdae568a4a62e4094bba9c68731f573fdd355c946052bbd8cfcca9c40a76
-raw=listing/data/part-00000.parquet=2f9919bb47ccba43…
+raw_parts=1
+raw_sha256[listing/data/part-00000.parquet]=2f9919bb47ccba4347a38c8207beb54fdde4dae69de40b52a9cd86d950bc3e56
 
 [recursive-table]
 exit=0
@@ -50,7 +54,10 @@ normalized_rows=2549
 distinct_keys=2549
 keyset_sha256=2830c2eed8fc980cf780a3320b460e182f455b6e3cfcdbe34963d29ba923813c
 normalized_sha256=c9a2cdae568a4a62e4094bba9c68731f573fdd355c946052bbd8cfcca9c40a76
-raw=listing/data/part-w0-00000.tsv=33336ab8be989a97…; listing/data/part-w1-00000.tsv=897819eaedd077a2…; listing/data/part-w2-00000.tsv=a5e83ab07b7f050b…
+raw_parts=3
+raw_sha256[listing/data/part-w0-00000.tsv]=33336ab8be989a97ec48fe48835115f454030b1dd9bf9455e3388b176f3267dc
+raw_sha256[listing/data/part-w1-00000.tsv]=897819eaedd077a2febf027a4c4aba5dcdd9075649700e278e7ed16e2dea512b
+raw_sha256[listing/data/part-w2-00000.tsv]=a5e83ab07b7f050beec9a598b53fd708dc33fe6b9ccea507a369600d38aa1cb4
 
 [recursive-tsv-zstd]
 exit=0
@@ -59,7 +66,10 @@ normalized_rows=2549
 distinct_keys=2549
 keyset_sha256=2830c2eed8fc980cf780a3320b460e182f455b6e3cfcdbe34963d29ba923813c
 normalized_sha256=c9a2cdae568a4a62e4094bba9c68731f573fdd355c946052bbd8cfcca9c40a76
-raw=listing/data/part-w0-00000.tsv.zst=4067a949c107ed50…; listing/data/part-w1-00000.tsv.zst=387abc4eb5da1f3d…; listing/data/part-w2-00000.tsv.zst=c38f06c22d11e5cd…
+raw_parts=3
+raw_sha256[listing/data/part-w0-00000.tsv.zst]=4067a949c107ed50b4e3964595c18cfbe81f54f9aef90d87ba651fc114bab5dc
+raw_sha256[listing/data/part-w1-00000.tsv.zst]=387abc4eb5da1f3dc8ca8815a8f1c0ce1e83fcfa78453d483cac673220748e1f
+raw_sha256[listing/data/part-w2-00000.tsv.zst]=c38f06c22d11e5cd3635c41c643a633ed74eddfb5533b9e63d70dede34abb0e9
 
 [seed-none]
 exit=0
