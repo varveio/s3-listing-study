@@ -77,6 +77,10 @@ LISTING = "listing"
 """The logical name every mode here publishes its listing under."""
 
 DATASET_NAME = "listing"
+RUN_REPORT_NAME = "_swath_summary.json"
+"""Swath writes this sidecar on its own only for Parquet directory output; every
+directory mode asks for it explicitly at the same place, beside the manifest, so a
+compressed-TSV run leaves the same report a sorted capture does."""
 """The dataset directory built under the engine's sink.
 
 No recognized extension, so ``-o`` infers a directory dataset; the explicit
@@ -348,6 +352,8 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
                 "dir",
                 "-o",
                 dataset,
+                "--report",
+                f"{dataset}/{RUN_REPORT_NAME}",
                 "--text-writers",
                 _text_writers(request),
                 "--compression",
@@ -375,6 +381,8 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
                 "parquet",
                 "-o",
                 dataset,
+                "--report",
+                f"{dataset}/{RUN_REPORT_NAME}",
                 *_parquet_writers(request),
                 *_size_option(request, "parquet_part_size", "--parquet-part-size"),
                 *_size_option(request, "writeback_size", "--writeback-size"),
@@ -394,6 +402,8 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
             "parquet",
             "-o",
             dataset,
+            "--report",
+            f"{dataset}/{RUN_REPORT_NAME}",
             "--sort",
             "--tune",
             "sort.ignore-disk-check=on",
