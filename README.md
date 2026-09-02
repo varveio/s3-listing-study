@@ -13,10 +13,11 @@ works, run it, and write down what happened, with enough detail that you can
 check us.
 
 > **Current release: `2026-09-scale-diagnostics`.** Ten tools, replay
-> fixtures from 4 million to 143 million objects, plus a few single runs of
-> one tool on live S3 up to a billion rows. It is a set of findings about
-> what each tool does at scale, not a benchmark and not a ranking.
-> **[Read what we found →](RESULTS.md)**
+> fixtures from 4 million to 143 million objects, plus single runs of one
+> tool on live S3. The biggest of those: Swath returned 1.07 billion rows from
+> a public bucket in 5 minutes 41 seconds on one VM, once. It is a set of
+> findings about what each tool does at scale, not a benchmark and not a
+> ranking. **[Read what we found →](RESULTS.md)**
 
 ## Who is behind this
 

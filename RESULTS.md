@@ -7,6 +7,19 @@ ledger, logs, listing products and fixture bytes stay private. This page is
 the short version; every claim on it names its run in the table at the end,
 and the public rows are one click below.
 
+## The largest thing we listed
+
+In one run on 2026-09-01, Swath 0.3.1 returned 1,068,477,307 rows from the
+public `sentinel-cogs` bucket and exited after 5 minutes 41 seconds, writing
+compressed TSV to disk, on one 32-vCPU VM in another region. That is one run,
+of one tool, against a bucket that changes and has no reference count, so it
+is an observation and not a comparison. It is also the largest listing in the
+release by a factor of seven over the biggest replay fixture. The same tool
+returned 960 million rows from `janelia-cosem-datasets` in 9 minutes 45
+seconds and 523 million from a Folding@home bucket in 3 minutes 7 seconds,
+each once. Every row is in the table at the end and in the
+[report](results/2026-09-scale-diagnostics/REPORT.md#swath-on-live-s3).
+
 ## What we did
 
 Ten tools were pinned by image digest and driven through versions of one
@@ -73,13 +86,15 @@ with what it is and is not. None of them is a ranking.
 
 ## Swath on live S3
 
-In one uncontrolled live-S3 run, Swath 0.3.1 returned 1,068,477,307 rows from
-a public bucket and exited after 341.4 seconds, including writing compressed
-TSV to disk from one 32-vCPU VM. The bucket has no independent manifest and
-changed between runs, so this is a one-run observation, not a verified
-inventory and not a comparative result. The listing-phase time inside that
-run is in a private run summary, not in the public row; the report says so
-where it quotes it. The full set of live-S3 runs is
+Eight single runs of Swath against four public buckets, from 13.9 million
+rows to 1.07 billion, on 16- and 32-vCPU VMs. No other tool ran on live S3 in
+this release, so nothing here compares tools. The wall clocks are whole
+process, start to exit, including writing the output; the listing phase
+inside the billion-row run is shorter, but that figure is in a private run
+summary, not in the public row, and the report labels it as such. Two runs of
+`sentinel-cogs` returned different counts because the bucket changed
+between them; neither was checked against a manifest, because none exists for a
+live bucket. The full ladder is
 [in the report](results/2026-09-scale-diagnostics/REPORT.md#swath-on-live-s3).
 
 ## What this does not mean
@@ -137,6 +152,8 @@ or the tool's source.
 | s7cmd serial drain on the flat fixture | `s7cmd.97b265107a89.s1` | row + source |
 | Swath on the flat fixture, `INSUFFICIENT_EVIDENCE` | `swath.666e471aac76.s1` | row |
 | Swath, 1,068,477,307 rows returned on live S3, 341.4 s | `swath.7b028bd8c692.s1` | row |
+| Swath, 959,831,933 rows returned on live S3, 585.1 s | `swath.0d01af45ef74.s1` | row |
+| Swath, 522,925,693 rows returned on live S3, 187.3 s | `swath.a0f1b2c053d8.s1` | row |
 
 ## Drill down
 
