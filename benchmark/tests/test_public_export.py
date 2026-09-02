@@ -6,6 +6,7 @@ import json
 import re
 import sqlite3
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -309,7 +310,7 @@ def test_a_withheld_workload_leaves_the_release_entirely(tmp_path: Path) -> None
 def test_an_unstaged_fixture_count_stays_null() -> None:
     """Subject output is recorded as observed, never promoted to fixture truth."""
 
-    def row(count: int | None, state: str = "SUCCEEDED") -> dict:
+    def row(count: int | None, state: str = "SUCCEEDED") -> dict[str, Any]:
         return {
             "fixture": {"id": "bucket/abc", "sha256": "0" * 64, "serving_mode": "sorted"},
             "outcome": {"row_count": count},
