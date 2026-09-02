@@ -219,7 +219,7 @@ not measurements: the buckets are not under our control, the machine types and
 output modes differ, and nothing was repeated. `manifest.json` discloses them
 as `real-s3-rows-are-single-observations`.
 
-| bucket | objects | machine | mode | wall | objects/s | attempt |
+| bucket | objects | machine | mode | process wall, start to exit | objects/s over process wall | attempt |
 | --- | ---: | --- | --- | ---: | ---: | --- |
 | `real-changesets` | 13,868,442 | n4-highcpu-16 | sorted Parquet c1024 | 62.7 s | 221,259 | `swath.85ccd37c1b88.s1` |
 | `fah-public-data-covid19-absolute-free-energy` | 522,925,693 | n4-highcpu-16 | sorted Parquet c1024 | 370.7 s | 1,410,484 | `swath.d7668a13dc4c.s1` |
@@ -230,7 +230,11 @@ as `real-s3-rows-are-single-observations`.
 | `sentinel-cogs` | 1,068,443,985 | n4-highcpu-32 | sorted Parquet c1024 | 707.4 s | 1,510,392 | `swath.6b1ffae260c0.s1` |
 | `sentinel-cogs` | 1,068,477,307 | n4-highcpu-32 | TSV + zstd c2048 | 341.4 s | 3,129,747 | `swath.7b028bd8c692.s1` |
 
-Objects per second is over the process wall. The two `sentinel-cogs` counts
+"Process wall" is the whole run from start to exit, including writing the
+output to disk; the listing phase alone is shorter, and only the process wall
+is in the release rows (for the billion-object run, 5 m 12 s of listing inside
+5 m 41 s of process). Objects per second divides the count by that process
+wall, so it understates the listing rate. The two `sentinel-cogs` counts
 differ because the bucket changed between runs; each is the exact integer that
 run returned, and neither was verified against a key manifest, because none
 exists for a changing public bucket. The figure is

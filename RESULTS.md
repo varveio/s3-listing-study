@@ -51,8 +51,10 @@ and one was slowed by the instrument.
 
 ## Swath on live S3
 
-Swath listed a 1.07-billion-object public bucket from one 32-vCPU VM in
-5 minutes 41 seconds, with an exact count. One run, one day, one bucket, one
+Swath listed a 1.07-billion-object public bucket from one 32-vCPU VM with an
+exact count. The whole process, from start to the compressed output on disk
+and exit, took 5 minutes 41 seconds; the listing phase inside it took
+5 minutes 12 seconds. One run, one day, one bucket, one
 tool. It says nothing comparative. The full ladder of live-S3 runs is
 [in the report](results/2026-09-scale-diagnostics/REPORT.md#swath-on-live-s3).
 
