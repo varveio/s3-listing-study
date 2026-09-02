@@ -196,7 +196,7 @@ as a ceiling of `64` — Swath's own width when unsilenced,
 rather than pinning it, so the number reaches the record and a plan can sweep
 it; the image's own `list --help` prints `--concurrency=N  AIMD ceiling for
 concurrent listing requests (default: 64)`. What this study *asks* for is plan
-content: every swath row in `benchmark/plans/buckets/` states `concurrency: 8`,
+content: every swath row in `benchmark/plans/examples/` states `concurrency: 8`,
 visible and reviewable in the plan rather than buried in the capsule. The
 capsule also renders the harness's heap share into
 `JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=<percent>`, since which variable a JVM

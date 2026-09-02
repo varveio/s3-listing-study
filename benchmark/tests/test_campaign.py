@@ -29,7 +29,7 @@ from benchmark.plan import Case, Plan
 from benchmark.runtime.command_adapter import HEAP_PERCENT
 
 ROOT = Path(__file__).parents[2]
-PLAN_PATH = ROOT / "benchmark/plans/buckets/noaa-ghcn-pds.yaml"
+PLAN_PATH = ROOT / "benchmark/plans/examples/noaa-ghcn-pds.yaml"
 REPLAY_CANARY = ROOT / "benchmark/plans/canaries/runner-replay-canary.yaml"
 DIGEST = "a" * 64
 PLATFORM = "9" * 64

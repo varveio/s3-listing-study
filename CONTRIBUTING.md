@@ -100,8 +100,8 @@ tool footers. Same for PR bodies. Imperative mood; explain *why*.
 
 The two rules that bind every contributor are the no-AI-attribution rule above
 and the run-record requirements earlier on this page. [`AGENTS.md`](AGENTS.md)
-carries the rest of the working conventions, but it's written for automated
-agents working in the repo (tiering, routing, provenance discipline) — read it
+carries the same rules in the form automated agents read, plus a routing
+table into the docs — read it
 if that's you; otherwise this page is all you need.
 
 ## Code of conduct

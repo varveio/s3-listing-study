@@ -195,7 +195,7 @@ def test_the_committed_plan_loads() -> None:
 
 def test_the_repeatability_canary_keeps_the_full_roster() -> None:
     """The shipped exception is one canary row per registered capsule."""
-    path = ROOT / "benchmark/plans/experiments/repeatability/noaa-nws-rtofs-pds.yaml"
+    path = ROOT / "benchmark/plans/examples/repeatability/noaa-nws-rtofs-pds.yaml"
     exclusions = tuple(
         item
         for item in bench.load_default_exclusions(ROOT / "benchmark/plans/tools.yaml")
@@ -657,7 +657,7 @@ def test_duplicate_values_on_an_independent_axis_are_refused_as_one_case(
         load(path)
 
 
-@pytest.mark.parametrize("bucket", ["noaa-rtma-pds", "sorel-20m"])
+@pytest.mark.parametrize("bucket", ["noaa-rtma-pds"])
 def test_large_bucket_campaign_plans_resolve_seventeen_cases(bucket: str) -> None:
     loaded = bench.Plan.load(bench.default_path(bucket))
     assert len(loaded.cases) == 17

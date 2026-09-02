@@ -1,4 +1,4 @@
-"""Read one bucket's benchmark plan: ``benchmark/plans/buckets/<bucket>.yaml``.
+"""Read one bucket's benchmark plan: ``benchmark/plans/examples/<bucket>.yaml``.
 
 A plan says what to run against one bucket and on what box. It is deliberately
 *not* the smoke registry: ``data/registry.toml`` holds bucket facts for the
@@ -403,8 +403,8 @@ def bench_dir() -> Path:
 
 
 def buckets_dir() -> Path:
-    """``benchmark/plans/buckets`` at the repo root."""
-    return bench_dir() / "buckets"
+    """``benchmark/plans/examples`` at the repo root: the example whole-bucket plans."""
+    return bench_dir() / "examples"
 
 
 def default_path(bucket: str) -> Path:

@@ -37,7 +37,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="python -m benchmark.plan_cli", allow_abbrev=False, add_help=True
     )
     source = parser.add_mutually_exclusive_group(required=True)
-    source.add_argument("--bucket", help="plan under benchmark/plans/buckets")
+    source.add_argument("--bucket", help="example plan under benchmark/plans/examples")
     source.add_argument("--path", help="path to a plan file")
     parser.add_argument(
         "--json", action="store_true", help="emit the resolved cases as JSON instead of a table"

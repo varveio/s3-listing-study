@@ -106,7 +106,7 @@ session runner:
 ```sh
 uv run python benchmark/src/benchmark/campaign.py submit \
   --executor docker --suite rtofs-canary \
-  --plan benchmark/plans/experiments/repeatability/noaa-nws-rtofs-pds.yaml \
+  --plan benchmark/plans/examples/repeatability/noaa-nws-rtofs-pds.yaml \
   --image benchmark-toolbox:local --results-root /absolute/path/to/results \
   --location us-east1-b --seed 982451653 \
   --allow-retired-s4cmd-s3-canary --dry-run
@@ -246,7 +246,7 @@ toolbox smoke has passed:
 
 ```sh
 uv run python benchmark/src/benchmark/campaign.py submit \
-  --suite s3-listing-study --plan benchmark/plans/buckets/noaa-ghcn-pds.yaml \
+  --suite s3-listing-study --plan benchmark/plans/examples/noaa-ghcn-pds.yaml \
   --project my-project --location us-central1 \
   --results-bucket my-results --image-set /secure/images.json \
   --anonymous-worker-sa anonymous-worker@my-project.iam.gserviceaccount.com \
@@ -338,3 +338,5 @@ only the committed files. See
 [`docs/publishing.md`](docs/publishing.md) for the command sequence, the
 allowlist and forbidden-text guarantees, what the validator enforces, and the
 immutability and correction policy that a release directory carries.
+[`docs/testing.md`](docs/testing.md) says which tests this harness keeps and
+which it deletes on sight.

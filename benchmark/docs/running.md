@@ -162,7 +162,7 @@ staged-fixture plan, real-S3, and dependency-slot submission remain unverified.
 ```sh
 uv run python benchmark/src/benchmark/campaign.py submit \
   --suite s3-listing-study \
-  --plan benchmark/plans/buckets/noaa-ghcn-pds.yaml \
+  --plan benchmark/plans/examples/noaa-ghcn-pds.yaml \
   --project my-project --location us-central1 \
   --results-bucket my-results --image-set /secure/images.json \
   --anonymous-worker-sa anonymous-worker@my-project.iam.gserviceaccount.com \
@@ -176,7 +176,7 @@ provider — use it first:
 
 ```sh
 uv run python benchmark/src/benchmark/campaign.py submit \
-  --suite s3-listing-study --plan benchmark/plans/buckets/noaa-ghcn-pds.yaml \
+  --suite s3-listing-study --plan benchmark/plans/examples/noaa-ghcn-pds.yaml \
   --project my-project --location us-central1 \
   --results-bucket my-results --image-set /secure/images.json \
   --anonymous-worker-sa anonymous-worker@my-project.iam.gserviceaccount.com \

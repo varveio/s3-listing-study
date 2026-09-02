@@ -1,7 +1,11 @@
 # Benchmark plans
 
-Reusable study plans live under [`buckets/`](buckets/), saying what to run
-against that bucket and on what box. [`canaries/`](canaries/) holds the two
+[`campaigns/`](campaigns/) holds the plans behind the published releases;
+`manifest.json.groups` in each release names which plan a group ran.
+[`examples/`](examples/) holds whole-bucket example plans from the August
+2026 live pass (`noaa-ghcn-pds`, `noaa-rtma-pds`) and the local repeatability
+canary; none of those buckets appears in a release, and the plans stay as
+worked examples for `plan_cli` and the tests. [`canaries/`](canaries/) holds the two
 small runner qualifications: signed stdout, unsigned stdout, and native-file
 capsule paths against replay, plus representative shapes against ordinary S3.
 [`campaigns/`](campaigns/) holds the capacity, tuning, and measurement plans
