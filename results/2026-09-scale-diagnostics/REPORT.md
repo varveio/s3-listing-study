@@ -68,6 +68,12 @@ that subject settled on that fixture, whatever its outcome.
 | `noaa-nbm-grib2-pds` | 66,405,936 | rclone, s3-fast-list, s3p, s5cmd, s7cmd, Swath |
 | `aws-public-blockchain` | 143,008,674 | rclone, s3p, s7cmd, Swath |
 
+`fixtures.json` also carries a second, digest-named FourCast record from the
+2026-08-26 screens whose metadata was never staged; its object count of
+4,081,171 is the largest successful row count on it, which is s3kor's known
+one-row surplus, not a different fixture. Every FourCast figure in this report
+uses the staged bundle's 4,081,170.
+
 The roster figure for the first rung is
 [`charts/fourcast-roster.svg`](charts/fourcast-roster.svg), with the exact rows
 behind it in [`charts/fourcast-roster.csv`](charts/fourcast-roster.csv): one
@@ -124,15 +130,51 @@ fixtures under the same treatment classify `TIMING_VALID` or
 `PRESSURE_DEGRADED`. Every Swath-versus-other comparison in this release is
 therefore biased *against* Swath, and any Swath ratio here is a lower bound.
 
-**Live S3, for calibration.** The 2026-09-01 live-S3 runs recorded per-shape
-client-side latencies against real buckets: structure probes at p50 in the
-50–100 ms range with heavy p99 tails, and worker pages at roughly 216 ms p50 for
-a 1,000-entry page. The flat 55 ms structure budget is therefore close to live
-S3's median rather than generous, which makes the instrument's overrun a
-one-directional penalty and not a modelling artefact. These per-shape latency
-distributions live in the campaign ledger's replay evidence and in the runs' own
-summaries; this release's row schema carries the declared deadlines and the
-delivered classification, not the delivered distributions.
+**Where the deadlines come from, and for whom they hold.** Each fixture's
+deadlines are the rounded p50 of one request's client-observed round trip per
+shape, read from the phase timers of the Swath run that captured the fixture,
+from GCP `us-east1` at concurrency 64–128 and a few hundred to a thousand
+requests per second (FourCast's 85 ms worker deadline was set between that
+run's 86.0 ms and a same-day serial AWS CLI sample's 82 ms on the same
+bucket). In every capture that retained the breakdown, the median
+connection-pool wait was microseconds and the worker-page total sat about 4 ms
+above time-to-first-byte, so the number carries no client-side queue at the
+median. A client holding 128 requests in flight can still load S3 in a way a
+serial client never does, and Swath's own clock cannot see that, so the
+deadlines were checked against clients that are not Swath. That check is
+direct for FourCast (the serial sample above) and aggregate for `us-east-1`:
+in the study's August basic pass, which predates this ledger and is not
+exported here, the roster's serial tools ran against live S3, and their wall
+time per page minus their client cost per page (measured on the no-latency
+replay) leaves 77–87 ms against declared deadlines of 85–87 ms, with their
+replay wall clocks under the treatment agreeing with those live-S3 wall clocks
+within a few percent. That residual is a mean over a run on a different
+bucket, not a p50; it shows that replay charges a serial tool no more per page
+than live S3 did, not that every deadline equals a serial p50. The cross-check
+is an internal one, not a published receipt, and no row in this release
+depends on it. No fixture's deadline sits above the residual serial clients
+left on its region. Subjects under roughly 1,000 requests per second therefore
+see a floor consistent with what serial clients saw; rclone's directory walk
+exceeds that on plain request count (1,200 per second on NARA) but every one of
+those requests is a delimiter rollup priced at the cheaper structure deadline.
+Swath at c256 reaches about 2,700 pages per second, and the 2026-09-01 live-S3
+runs show its worker-page p50 at 166–283 ms at 2,300–3,800 pages per second,
+so replay overstates Swath's page throughput relative to live S3 by an
+unmeasured factor; those runs do not separate S3-side queueing from
+client-side post-first-byte delay, so the live p50-to-floor ratio of 1.3–2× is
+a ceiling on the worker-page term, not an estimate. The treatment models
+neither S3's tail (worker-page p99 of 0.5–0.8 s and structure-probe p99 of
+0.4–20 s on the large buckets in the same live runs) nor throttling, and it
+prices a request by its syntax rather than by what it returns (see the flat
+namespace below). Live structure probes sat at a p50 of 50–100 ms with heavy
+tails, so the flat 55 ms structure budget is close to live S3's median rather
+than generous, which makes the instrument's overrun a one-directional penalty
+and not a modelling artefact. The per-shape latency distributions live in the
+campaign ledger's replay evidence and in the runs' own summaries; this
+release's row schema carries the declared deadlines and the delivered
+classification, not the delivered distributions. The manifest carries no
+disclosure id for the latency model's limits; this paragraph is that
+disclosure for this release, and the next export adds the id.
 
 **A negative result, disclosed.** The leading hypothesis for the overrun was
 cold-path cost — JIT warm-up and lazily opened reader pools. It was tested
@@ -206,7 +248,15 @@ question: it completes the same cell in 74 MB, so the 8 GB footprint belongs to
 `recursive-walk`, not to rclone. Both rclone modes are one sequential pagination
 of 13,869 pages. Their wall clocks differ because of the replay deadline each
 request shape draws, 88 ms for the walk's delimiter pages against 122 ms for the
-streaming mode's plain pages, not because one mode lists faster.
+streaming mode's plain pages, not because one mode lists faster. That
+discount is a property of the instrument, not of S3: the server classifies a
+request by its syntax, so a `delimiter=/` page that returns 1,000 objects on a
+flat namespace draws the 88 ms probe deadline, whereas live S3 serves it at
+about the cost of a plain page because it returns the same 1,000 entries. On
+this fixture the 34 ms per-page difference favours the walk and s7cmd's leaf
+drain, both of which paginate with a delimiter, over the plain-page modes. The
+Swath arm exports `INSUFFICIENT_EVIDENCE` for delivered timing; its wall clock
+is a functional result, not a timing.
 
 ## Swath on live S3
 
@@ -256,8 +306,9 @@ Its boundary, to be stated with it every time it is quoted:
 - **This is not a 5M keys/s result.** The whole-process rate is 3.13M
   objects/s; the listing phase alone is faster. Neither reaches 5M/s, and this
   release does not claim it.
-- **One tool.** No other subject has run against live S3 at all, so this says
-  nothing comparative.
+- **One tool.** No other subject ran against live S3 in this release's window,
+  so this says nothing comparative. The study's August basic pass did run the
+  roster on live S3, but those rows predate this ledger and are not exported.
 - **Listing, not inventory.** The product is a key listing with size, ETag,
   modification time and storage class. It is not a comparison against S3
   Inventory, which is a different mechanism with a different latency.

@@ -181,7 +181,9 @@ subject at a time against real S3. A nearby contender is included when the goal
 is to validate replay's selection, not merely show that the selected
 configuration works. Real-S3 observations govern claims about S3; disagreement
 triggers investigation rather than a composite score. Failure and congestion
-behavior remain a separate workload.
+behavior remain a separate workload. That stage has not yet run: the current
+release's live-S3 rows are single observations of one tool, and no finalist
+set has been validated.
 
 ## Running the checks in this repo
 
@@ -207,10 +209,11 @@ unexercised modes through `EXPECTED_PAYLOADS` and `unexercised_modes`.
 
 ## Results
 
-Comparative results have not been published yet. When available, versioned
-campaigns and machine-readable datasets will live under `results/`. Smoke
-receipts remain run-specific evidence about correctness and testability, not
-benchmark results.
+A first release is published under
+[`results/2026-09-scale-diagnostics/`](results/2026-09-scale-diagnostics/REPORT.md)
+as diagnostics, not comparative results; [`RESULTS.md`](RESULTS.md) is the
+index. Smoke receipts remain run-specific evidence about correctness and
+testability, not benchmark results.
 
 ## Contributing
 
