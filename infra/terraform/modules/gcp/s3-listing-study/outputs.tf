@@ -58,6 +58,14 @@ output "subnetwork_self_link" {
   value       = var.create_network ? google_compute_subnetwork.this[0].self_link : null
 }
 
+output "subnetwork_self_links" {
+  description = "Created subnet self-links keyed by region, including the primary subnet; empty when create_network is false."
+  value = var.create_network ? merge(
+    { (var.region) = google_compute_subnetwork.this[0].self_link },
+    { for region, subnet in google_compute_subnetwork.additional : region => subnet.self_link },
+  ) : {}
+}
+
 output "authenticated_worker_sa_email" {
   description = "Identity for Batch tasks in the authenticated stratum — the only one that can read the AWS credentials secret. Null when create_aws_credentials_secret is false. The orchestrator submits an authenticated case with THIS service account and an anonymous case with worker_sa_email; that choice is what enforces the stratum."
   value       = var.create_aws_credentials_secret ? google_service_account.authenticated_worker[0].email : null

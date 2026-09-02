@@ -18,7 +18,7 @@ recovered.
 | `worker.tf` | the identity each Batch attempt task runs as |
 | `orchestrator.tf` | the privilege bundle for driving a campaign |
 | `runner.tf` | the VM for toolbox builds, campaign management, verification, and reports |
-| `network.tf` | optional VPC, for estates without a default network |
+| `network.tf` | optional VPC and regional subnets, for estates without a default network |
 
 ## Why this is a module and not an environment
 
@@ -40,6 +40,11 @@ module "s3_listing_study" {
   project     = "my-benchmark-project"
   region      = "us-east1"
   runner_zone = "us-east1-b"
+
+  create_network = true
+  additional_subnet_cidrs = {
+    us-west1 = "10.20.0.0/20"
+  }
 
   manager_members = [
     "serviceAccount:ci@my-benchmark-project.iam.gserviceaccount.com",
@@ -71,6 +76,13 @@ account or a workstation identity that also drives campaigns.
 quota and by Cloud Batch's concurrent-job limits, neither of which this module
 manages. Check both before a first large run — exceeding them shows up as jobs
 queued indefinitely rather than as an error.
+
+**Additional Batch regions.** When `create_network` is true,
+`additional_subnet_cidrs` adds regional subnets to the same global VPC without
+moving the primary subnet. CIDRs must not overlap. Submit each Batch job in the
+matching region and pass `network_self_link` plus that region's entry from
+`subnetwork_self_links`; the campaign CLI does not select Terraform outputs
+implicitly.
 
 **Provisioning the runner.** Deliberately not automated, mirroring the estate's
 other build hosts: the instance has no startup script. SSH in and install the
@@ -151,7 +163,9 @@ and output carries its own description.
 
 The four an orchestrator needs are `results_bucket_url` (artifact destination),
 `image_repo_url` (repository root for an explicitly authorized toolbox publication), `worker_sa_email` (the job's `allocationPolicy`
-service account), and `runner_ssh` (how to get onto the runner).
+service account), and `runner_ssh` (how to get onto the runner). A custom-VPC
+deployment also uses `network_self_link` and the selected regional entry from
+`subnetwork_self_links` when submitting Batch jobs.
 
 The module does not build or publish the toolbox. Follow
 [`benchmark/README.md`](../../../../../benchmark/README.md) and

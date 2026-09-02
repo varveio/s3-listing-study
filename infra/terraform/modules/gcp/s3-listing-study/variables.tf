@@ -49,6 +49,17 @@ variable "subnet_cidr" {
   default     = "10.10.0.0/20"
 }
 
+variable "additional_subnet_cidrs" {
+  description = "Additional Batch subnet regions mapped to non-overlapping IPv4 ranges in the created VPC. Ignored unless create_network is true; do not repeat var.region."
+  type        = map(string)
+  default     = {}
+
+  validation {
+    condition     = alltrue([for cidr in values(var.additional_subnet_cidrs) : can(cidrnetmask(cidr))])
+    error_message = "Each additional_subnet_cidrs value must be a valid IPv4 CIDR range."
+  }
+}
+
 # ── Authenticated stratum ─────────────────────────────────────────────────────
 
 variable "create_aws_credentials_secret" {
