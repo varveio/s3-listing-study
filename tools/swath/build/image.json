@@ -1,7 +1,7 @@
 {
   "tool": "swath",
   "tool_version": "0.3.1",
-  "tool_build_sha256": "ebab55bf00b7dc2f73b6610a9363a811aa60da80a157d7573e505ae9fe3c0f20",
+  "tool_build_sha256": "833566f43178e37f371dade058934fb38cecaaafc74ed6534daac9bcf7117dc5",
   "tool_artifact": {"kind":"container-image","locator":"ghcr.io/varveio/swath","sha256":"776e788200a1e70f30206897303a34e4faabd56c591e1c9562277677085c4f60"},
   "subject_workdir": "/opt/swath",
   "executable": [
@@ -11,5 +11,5 @@
   ],
   "command": "adapter/command.py",
   "normalizer": "adapter/normalize.py",
-  "adapter_bundle_sha256": "6985ad4b31d845bb940d7568ceec53c27ba1442758f413295473a38c290f8b84"
+  "adapter_bundle_sha256": "6af4ec67375b7393892c56bcb1025323e0a1a1c1aaa5229831877ecbed5e49dc"
 }
