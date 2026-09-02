@@ -38,7 +38,7 @@ present in the registry.
 `manifest unknown`, which will catch anyone who copies the git tag — the git tag
 *is* `v`-prefixed, and release version discipline is mechanical: a release fails
 unless the git tag equals `v` plus the Gradle version — claim
-`upstream-publishes-tagged-releases`. Nine such tags exist, from v0.1.0
+`upstream-publishes-tagged-releases`. Eight such tags exist, from v0.1.0
 (2026-07-27) to v0.3.1 (2026-09-01); v0.3.0 and v0.3.1 were published an hour
 apart, and the 0.3.1 notes say the `swath` CLI is unchanged from 0.3.0.
 
@@ -260,8 +260,8 @@ one unreplicated prefix-scale run at one setting measures nothing.
 before the first request, because region resolution and credential resolution are
 independent code paths — claim `region-required-even-anonymously`. This is the
 single most likely reason a first containerized run fails, and it is why
-`--region us-east-1` is explicit in every invocation below. Upstream's own
-anonymous quickstarts omit it.
+`--region us-east-1` is explicit in every invocation below. Upstream's v0.2.0
+quickstarts omitted it; since the 0.3.0 documentation rewrite they carry it.
 
 ## Adapter and harness contract
 

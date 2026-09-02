@@ -62,18 +62,13 @@ resolve in [`data/claims.json`](data/claims.json).
 
 - **`--concurrency N` is a ceiling, not a setpoint.** A run starts at
   `min(4, N)` permits and the store, not the flag, sets the steady-state level,
-  so a benchmark that reads the flag as "N concurrent requests" will be wrong and
-  must instrument effective concurrency separately.
+  and the controller never searches the level back down for efficiency, so a
+  benchmark that reads the flag as "N concurrent requests" will be wrong and
+  must instrument effective concurrency separately. The v0.2.0 engine-default
+  flips and their one supported rollback are explained on the mechanism page.
   [`Concurrency, AIMD, and flow control`](docs/mechanism.md#concurrency-aimd-and-flow-control)
-  · `concurrency-flag-is-aimd-ceiling`
-
-- **v0.2.0's engine change is two default flips, and the old one was
-  structurally blind.** Rate-anchored sensing and a floored tail reach are both
-  on by default now; the previous tail-floor reading multiplied any estimate to
-  exactly zero once its reach term went non-positive. The documented pre-0.2.0
-  rollback pair is the one supported non-default engine configuration.
-  [`Engine defaults and the one supported rollback`](docs/mechanism.md#engine-defaults-and-the-one-supported-rollback)
-  · `v020-engine-default-flips`, `engine-toggles-are-diagnostic`
+  · `concurrency-flag-is-aimd-ceiling`, `aimd-does-not-search-down`,
+  `v020-engine-default-flips`, `engine-toggles-are-diagnostic`
 
 - **No claim is receipt-backed and no verifier ran.** Diagnostic attempt
   receipts exist, but carry no verifier verdict and cannot confirm a claim; the
@@ -161,7 +156,7 @@ resolve in [`data/claims.json`](data/claims.json).
   `forward-progress-guard-covers-terminal-page`.
 - The project is young and solo: 39 days old at the 2026-09-02 update, created
   2026-07-25, with one human contributor — claim
-  `upstream-is-young-and-solo-maintained` — and nine releases in five weeks,
+  `upstream-is-young-and-solo-maintained` — and eight releases in five weeks,
   claim `upstream-publishes-tagged-releases`. Upstream's nightly
   deep-verification workflow failed on every visible run at the 2026-08-02
   research date and was intermittent at the update, five of the last eight runs

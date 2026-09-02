@@ -29,8 +29,10 @@ that is not represented by a canonical claim is attributed inline to the
 v0.2.0 derivation in [`../research/report.md`](../research/report.md),
 whose known anchor defects are listed in
 [`../research/ERRATA.md`](../research/ERRATA.md); the readers of the v0.3.1
-update confirmed the engine files that narrative describes are byte-identical
-between the two tags.
+update found the stealing and seeding core that narrative describes —
+`Worklist`, `Thief`, `ThiefPolicy`, `HybridSeedPlanner`, `SeedStep`,
+`RateAnchoredEstimator` — byte-identical between the two tags, while the
+retry, gauge, scanner and command files changed in the ways this page names.
 
 Everything below is established from the pinned source and the project's own
 documentation unless it names a run. Source can establish a mechanism; it cannot
@@ -432,9 +434,12 @@ cannot be varied across a resume boundary — claim `resume-cli-surface-is-restr
 
 Memory should be flat in object count for the text modes given the streaming
 output stage and the bounded entry queue, but memory cliffs and OOM behaviour are
-scale-dependent and stay `unverified` — claim `bounded-memory-at-scale`. The two
-documented growth paths outside the invariant are Parquet part-metadata
-re-serialization and `--sort` staging metadata.
+scale-dependent and stay `unverified` — claim `bounded-memory-at-scale`. At
+v0.3.1 the growth paths outside the invariant are the bounded dataset writer
+pool, whose queue is capped and whose writers above four are admitted against
+heap, and the sorted finalization pipeline, whose readers and encoders are
+admitted against heap and file-descriptor budgets — claims
+`parquet-writers-range-widened`, `sort-merge-parallelism-tune`.
 
 ## Absences, dead code, and documentation drift
 

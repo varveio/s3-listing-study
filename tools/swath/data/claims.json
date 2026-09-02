@@ -85,7 +85,7 @@
     },
     {
       "id": "upstream-publishes-tagged-releases",
-      "statement": "Upstream publishes tagged releases with v-prefixed git tags: nine from v0.1.0 on 2026-07-27 to v0.3.1 on 2026-09-01, seven of them between the two subjects this capsule has described.",
+      "statement": "Upstream publishes tagged releases with v-prefixed git tags: eight from v0.1.0 on 2026-07-27 to v0.3.1 on 2026-09-01, six of them between the two subjects this capsule has described.",
       "scope": "structure",
       "status": "supported",
       "disposition": "corrected",
@@ -1652,7 +1652,7 @@
       "scope": "output",
       "status": "supported",
       "disposition": "corrected",
-      "qualification": "At v0.3.1 S3's wire form YYYY-MM-DDTHH:MM:SS.000Z is exactly twenty-four characters, so it fills the time column with no padding and the offsets 1-14 / 17-40 / 43-end still hold, as the study's 0.3.1 table sample shows; the padding helper appends without padding when the gap is not positive, so an adapter must keep asserting the two separator spaces and refuse otherwise. A six-digit fraction (twenty-seven characters, possible on the epoch-micros fallback path) or any longer wire spelling would overflow. The formatter still emits neither etag nor storage class.",
+      "qualification": "At v0.3.1 S3's wire form YYYY-MM-DDTHH:MM:SS.000Z is exactly twenty-four characters, so it fills the time column with no padding and the offsets 1-14 / 17-40 / 43-end still hold, as the study's retained 0.3.1 table sample shows for the rows it holds; the padding helper appends without padding when the gap is not positive, so an adapter must keep asserting the two separator spaces and refuse otherwise. A six-digit fraction (twenty-seven characters, possible on the epoch-micros fallback path) or any longer wire spelling would overflow. The formatter still emits neither etag nor storage class.",
       "evidence": [
         {
           "kind": "source",
@@ -1705,6 +1705,10 @@
         {
           "kind": "documentation",
           "path": "../adapter/normalize.py"
+        },
+        {
+          "kind": "observation",
+          "artifact": "../receipts/observations-v0.3.1/adapter-modes/table.sample.txt"
         }
       ]
     },
@@ -1714,7 +1718,7 @@
       "scope": "output",
       "status": "supported",
       "disposition": "corrected",
-      "qualification": "The v0.2.0 ISO_INSTANT rendering (Fields.isoMicros) no longer exists. Because S3 spells LastModified with millisecond precision, a live 0.3.1 run emits YYYY-MM-DDTHH:MM:SS.000Z on every row (the study's 0.3.1 JSONL and table samples show exactly this), so a normalizer's unconditional fraction stripping is now exercised on every row rather than being a hedge; any other endpoint spelling the AWS SDK grammar accepts (for example a +0000 offset) would reach the text sinks unchanged, and the Parquet sink parses it lazily. The empty-string sentinel still collides with a real 1970-01-01T00:00:00Z on the rendering path.",
+      "qualification": "The v0.2.0 ISO_INSTANT rendering (Fields.isoMicros) no longer exists. Because S3 spells LastModified with millisecond precision, a live 0.3.1 run against S3 emits YYYY-MM-DDTHH:MM:SS.000Z (source proves the pass-through; the study's retained 0.3.1 JSONL and table samples show that spelling on every retained row, and the round-trip's fraction stripping fired on all 2,549 rows of each text mode), so a normalizer's unconditional fraction stripping is now exercised on every row rather than being a hedge; any other endpoint spelling the AWS SDK grammar accepts (for example a +0000 offset) would reach the text sinks unchanged, and the Parquet sink parses it lazily. The empty-string sentinel still collides with a real 1970-01-01T00:00:00Z on the rendering path.",
       "evidence": [
         {
           "kind": "source",
@@ -1815,6 +1819,14 @@
         {
           "kind": "observation",
           "artifact": "../receipts/observations-v0.2.0/full/stdout.sample.jsonl"
+        },
+        {
+          "kind": "observation",
+          "artifact": "../receipts/observations-v0.3.1/adapter-modes/jsonl.sample.jsonl"
+        },
+        {
+          "kind": "observation",
+          "artifact": "../receipts/observations-v0.3.1/adapter-modes/table.sample.txt"
         }
       ]
     },
@@ -1972,7 +1984,7 @@
       "scope": "performance",
       "status": "unverified",
       "disposition": "retained",
-      "qualification": "The streaming output stage and the bounded entry queue say memory should be flat in object count for the text modes, but memory cliffs and OOM behaviour are scale-dependent and no cliff was probed. Observed peak RSS was 508.8 MB on the full run and 415.1 MB on the hourly run, JVM-baseline-dominated at this scale and not a scale result. Parquet part-metadata re-serialization and sort staging metadata are the two documented growth paths to target.",
+      "qualification": "The streaming output stage and the bounded entry queue say memory should be flat in object count for the text modes, but memory cliffs and OOM behaviour are scale-dependent and no cliff was probed. Observed peak RSS was 508.8 MB on the full run and 415.1 MB on the hourly run, JVM-baseline-dominated at this scale and not a scale result. At v0.3.1 the growth paths to target are the bounded dataset writer pool, whose queue is capped process-wide and whose writers above four are admitted against heap, and the sorted finalization pipeline, whose readers and encoders are admitted against heap and file-descriptor budgets; the v0.2.0 Parquet part-metadata re-serialization path no longer exists, manifests being written once at completion.",
       "evidence": [
         {
           "kind": "none",
@@ -2748,11 +2760,11 @@
       "scope": "output",
       "status": "unverified",
       "disposition": "retained",
-      "qualification": "No Parquet dataset was written or read back at v0.2.0. Source establishes that the key column is raw bytes, covered by claim parquet-key-column-is-byte-exact, but dataset completeness needs a volume-mounting harness path plus a read-back step, and on arm64 it would also be the first exercise of the Zstd and Parquet native code paths.",
+      "qualification": "On 2026-09-02 the v0.3.1 image wrote a direct and a sorted Parquet dataset over the 2,549-key normals-hourly/ prefix, both read back through the normalizer to the same key set as the six text modes (../receipts/observations-v0.3.1/). That is an observation of count and cross-mode agreement on ASCII keys, not a completeness verdict: no reference-manifest verifier ran, no edge-key corpus exists, and the datasets were produced outside the benchmark worker. Source establishes that the key column is raw bytes and UTF-8-only, covered by claim parquet-key-column-is-byte-exact.",
       "evidence": [
         {
           "kind": "none",
-          "reason": "No verifier or read-back ran against a Parquet dataset; none was produced."
+          "reason": "No verifier verdict exists for any Parquet dataset: the 2026-09-02 round-trip established only count and cross-mode agreement over one ASCII-keyed prefix, outside the benchmark worker, with no edge corpus."
         }
       ]
     },
@@ -2966,7 +2978,7 @@
       "scope": "mechanism",
       "status": "supported",
       "disposition": "corrected",
-      "qualification": "At v0.3.1 the schema is still pinned at user_version 1 with exact-match-or-refuse and no version migration path, carrying run_meta, listing_node and part_file tables; additive nullable columns (run_meta context columns and, since 0.3.0, part_file.format_version and extension_type) are backfilled by the same idempotent ALTER TABLE step for fresh and older databases alike. The durable cursor is the highest key inside a finalized part, giving exactly-once for Parquet parts; the plain cursor column still exists but no text sink is resumable any more, so its at-most-once semantic no longer reaches a user. The checkpoint is deleted on clean completion, so resuming a completed directory reports already complete and exits 0.",
+      "qualification": "At v0.3.1 the schema is still pinned at user_version 1 with exact-match-or-refuse and no version migration path, carrying run_meta, listing_node and part_file tables; additive nullable columns (run_meta context columns and, since 0.3.0, part_file.format_version and extension_type) are backfilled by the same idempotent ALTER TABLE step for fresh and older databases alike. The durable cursor is the highest key inside a finalized part, intended to give exactly-once for Parquet parts, a runtime property that claim exactly-once-under-crash leaves unverified; the plain cursor column still exists but no text sink is resumable any more, so its at-most-once semantic no longer reaches a user. The checkpoint is deleted on clean completion, so resuming a completed directory reports already complete and exits 0.",
       "evidence": [
         {
           "kind": "source",
@@ -3702,7 +3714,7 @@
     },
     {
       "id": "aimd-does-not-search-down",
-      "statement": "Upstream documents at 0.3.0 that the AIMD controller is reactive backpressure only: a 503 or timeout storm can lower T and latency inflation can hold growth, but nothing lowers T for efficiency, so a clean endpoint runs at the full --concurrency ceiling and Tmax must be sized by the operator from repeated runs.",
+      "statement": "Upstream documents at 0.3.0 that the AIMD controller is reactive backpressure only: a 503 or timeout storm can lower T and latency inflation can hold growth, but nothing lowers T for efficiency, so a clean endpoint can climb to a high T that only the --concurrency ceiling bounds, and Tmax must be sized by the operator from repeated runs rather than inferred from a run that never hit it.",
       "scope": "performance",
       "status": "supported",
       "disposition": "retained",
@@ -3980,7 +3992,7 @@
     },
     {
       "id": "last-modified-text-is-endpoint-spelling",
-      "statement": "Text sinks write last_modified as the endpoint's LastModified text on the production S3 path, so live rows read YYYY-MM-DDTHH:MM:SS.000Z; only entries rebuilt from epoch micros are rendered by swath (0, 3 or 6 fraction digits, empty for zero).",
+      "statement": "Text sinks write last_modified as the endpoint's LastModified text on the production S3 path, so rows listed from S3 carry its spelling, YYYY-MM-DDTHH:MM:SS.000Z in the study's retained 0.3.1 samples; only entries rebuilt from epoch micros are rendered by swath (0, 3 or 6 fraction digits, empty for zero).",
       "scope": "output",
       "status": "supported",
       "disposition": "retained",
@@ -4053,6 +4065,14 @@
         {
           "kind": "documentation",
           "path": "../research/v0.3.1/reader-D.md"
+        },
+        {
+          "kind": "observation",
+          "artifact": "../receipts/observations-v0.3.1/adapter-modes/jsonl.sample.jsonl"
+        },
+        {
+          "kind": "observation",
+          "artifact": "../receipts/observations-v0.3.1/adapter-modes/table.sample.txt"
         }
       ]
     },
