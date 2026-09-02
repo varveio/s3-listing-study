@@ -512,7 +512,8 @@ is recorded in the study's working notes, and no published row depends on it.
 The treatment is therefore a floor for subjects under roughly 1,000 requests
 per second on plain pages. A subject above that rate sees a floor that live S3
 does not give it, and its replay throughput is an overstatement by an
-unmeasured factor; in this study only Swath reaches that rate. Fixed p50
+unmeasured factor; in this study only Swath can reach that rate, and no
+published row has. Fixed p50
 deadlines carry no tail and no throttling, and the server prices a request by
 its syntax, so a `delimiter=/` page that returns objects draws the structure
 deadline rather than the page deadline.
