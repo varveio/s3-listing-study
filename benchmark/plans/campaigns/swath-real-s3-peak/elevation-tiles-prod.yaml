@@ -1,0 +1,33 @@
+# Swath-only real-S3 compressed-TSV listing of a public bucket at about ten billion objects (tile pyramid, short keys).
+# No sorted capture here: this bucket is a throughput point, not a replay fixture (yet).
+spec_version: 2
+
+bucket: elevation-tiles-prod
+region: us-east-1
+auth_role: public-read
+
+defaults:
+  reps: 1
+  timeout_s: 14400
+  vcpus: 64
+  memory_gb: 128
+
+tools:
+  swath:
+    cases:
+      # 2026-09-02: the 64-vCPU shape shared with the sentinel-cogs and janelia rows of the same day.
+      - mode: recursive-tsv-zstd
+        concurrency: 2048
+        purpose: diagnostic
+        config: {jvm_max_heap: 24g, text_writers: 32}
+
+exclude:
+  - {tool: aws-cli, reason: outside this Swath-only real-S3 diagnostic}
+  - {tool: minio-mc, reason: outside this Swath-only real-S3 diagnostic}
+  - {tool: ps3, reason: outside this Swath-only real-S3 diagnostic}
+  - {tool: rclone, reason: outside this Swath-only real-S3 diagnostic}
+  - {tool: s3-fast-list, reason: outside this Swath-only real-S3 diagnostic}
+  - {tool: s3kor, reason: outside this Swath-only real-S3 diagnostic}
+  - {tool: s3p, reason: outside this Swath-only real-S3 diagnostic}
+  - {tool: s5cmd, reason: outside this Swath-only real-S3 diagnostic}
+  - {tool: s7cmd, reason: outside this Swath-only real-S3 diagnostic}
