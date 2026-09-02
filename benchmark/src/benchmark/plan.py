@@ -1,4 +1,4 @@
-"""Read one bucket's benchmark plan: ``benchmark/plans/buckets/<bucket>.yaml``.
+"""Read one bucket's benchmark plan: ``benchmark/plans/examples/<bucket>.yaml``.
 
 A plan says what to run against one bucket and on what box. It is deliberately
 *not* the smoke registry: ``data/registry.toml`` holds bucket facts for the
@@ -139,6 +139,7 @@ PROCESS_FIELDS = ("container_memory_gb",)
 REPLAY_INTEGER_FIELDS = replay_contract.REPLAY_INTEGER_FIELDS
 REPLAY_BOOLEAN_FIELDS = replay_contract.REPLAY_BOOLEAN_FIELDS
 REPLAY_FIELDS = replay_contract.REPLAY_FIELDS
+REPLAY_OPTIONAL_INTEGER_FIELDS = replay_contract.REPLAY_OPTIONAL_INTEGER_FIELDS
 ReplayBackend = replay_contract.ReplayBackend
 ReplayPlan = replay_contract.ReplayPlan
 ReplayConfig = replay_contract.ReplayConfig
@@ -193,6 +194,7 @@ ROW_FIELDS = (
     "segments",
     *RESOURCE_FIELDS,
     *REPLAY_FIELDS,
+    *REPLAY_OPTIONAL_INTEGER_FIELDS,
 )
 
 # The row axes resolution lifts into the config blob; `mode` travels separately
@@ -215,7 +217,13 @@ STATISTICS = ("timing", "rate")
 # What a layer may state: what every case under it inherits. No `mode` — eleven
 # tools have eleven mode vocabularies, so nothing above a row has one to state.
 # `signed` is here as well as in a row, for a roster swept as one stratum.
-LAYER_FIELDS = ("signed", *RESOURCE_FIELDS, *SCHEDULE_FIELDS, *REPLAY_FIELDS)
+LAYER_FIELDS = (
+    "signed",
+    *RESOURCE_FIELDS,
+    *SCHEDULE_FIELDS,
+    *REPLAY_FIELDS,
+    *REPLAY_OPTIONAL_INTEGER_FIELDS,
+)
 
 TOOL_FIELDS = ("cases", *LAYER_FIELDS)
 
@@ -223,7 +231,7 @@ HEX64_RE = re.compile(r"[0-9a-f]{64}")
 
 # Anchored with ``\Z`` and applied with ``fullmatch``: ``$`` also matches before
 # a trailing newline, and a label is printed and grepped.
-CASE_LABEL_RE = re.compile(r"\A[a-z0-9][a-z0-9._-]{0,254}\Z")
+CASE_LABEL_RE = re.compile(r"\A[a-z0-9][a-z0-9,._-]{0,254}\Z")
 TOOL_RE = re.compile(r"\A[a-z0-9][a-z0-9-]{0,40}\Z")
 
 
@@ -395,8 +403,8 @@ def bench_dir() -> Path:
 
 
 def buckets_dir() -> Path:
-    """``benchmark/plans/buckets`` at the repo root."""
-    return bench_dir() / "buckets"
+    """``benchmark/plans/examples`` at the repo root: the example whole-bucket plans."""
+    return bench_dir() / "examples"
 
 
 def default_path(bucket: str) -> Path:
@@ -705,7 +713,7 @@ def _replay_shape(
     resolved: dict[str, Any] = {}
     if complete:
         resolved.update(optional_defaults)
-    for field in REPLAY_INTEGER_FIELDS:
+    for field in (*REPLAY_INTEGER_FIELDS, *REPLAY_OPTIONAL_INTEGER_FIELDS):
         if field not in table:
             continue
         resolved[field] = _positive_int(table[field], field, where, path)
@@ -1423,7 +1431,7 @@ def _case(
     if not CASE_LABEL_RE.fullmatch(label):
         raise PlanError(
             f"'tools.{tool}' in {path} generates the unusable case label {label!r} "
-            "(axis values must be lowercase, digits, '.', '_' or '-', and the label must be "
+            "(axis values must be lowercase, digits, ',', '.', '_' or '-', and the label must be "
             "at most 255 characters)"
         )
     case = Case(
@@ -1460,7 +1468,11 @@ def _case_replay(
     so while it is still a file rather than after a VM has booted.
     """
     if context.replay is None:
-        stated = sorted(field for field in REPLAY_FIELDS if field in resolved)
+        stated = sorted(
+            field
+            for field in (*REPLAY_FIELDS, *REPLAY_OPTIONAL_INTEGER_FIELDS)
+            if field in resolved
+        )
         if stated:
             raise PlanError(
                 f"'tools.{tool}' in {path} sizes a replay server ({', '.join(stated)}) "
@@ -1470,7 +1482,12 @@ def _case_replay(
 
     try:
         replay = replay_contract.make_config(
-            context.replay, {field: resolved[field] for field in REPLAY_FIELDS}
+            context.replay,
+            {
+                field: resolved[field]
+                for field in (*REPLAY_FIELDS, *REPLAY_OPTIONAL_INTEGER_FIELDS)
+                if field in resolved
+            },
         )
         replay_contract.allocation_summary(
             replay,

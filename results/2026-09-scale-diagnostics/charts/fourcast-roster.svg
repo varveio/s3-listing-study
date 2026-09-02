@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 636" width="900" height="636" role="img" aria-labelledby="chart-title chart-desc">
+<title id="chart-title">FourCast 4.08M-object replay fixture — wall clock, one declared arm per tool</title>
+<desc id="chart-desc">diagnostic, not a ranking; one 8-vCPU/8-GiB arm per tool, one group, every count matched the fixture; only five rows are TIMING_VALID; s3-fast-list is hint-fed, Swath is a pre-release build and instrument-penalized; output contracts differ per tool</desc>
+<rect width="900" height="636" fill="#ffffff"/>
+<text x="24.0" y="34.0" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="16" fill="#1c1c1c" text-anchor="start">FourCast 4.08M-object replay fixture — wall clock, one declared arm per tool</text>
+<line x1="210.0" y1="62.0" x2="210.0" y2="562.0" stroke="#d8d8d8" stroke-width="1"/>
+<text x="210.0" y="578.0" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="10" fill="#5c5c5c" text-anchor="middle">0</text>
+<line x1="367.5" y1="62.0" x2="367.5" y2="562.0" stroke="#d8d8d8" stroke-width="1"/>
+<text x="367.5" y="578.0" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="10" fill="#5c5c5c" text-anchor="middle">200</text>
+<line x1="525.0" y1="62.0" x2="525.0" y2="562.0" stroke="#d8d8d8" stroke-width="1"/>
+<text x="525.0" y="578.0" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="10" fill="#5c5c5c" text-anchor="middle">400</text>
+<line x1="682.5" y1="62.0" x2="682.5" y2="562.0" stroke="#d8d8d8" stroke-width="1"/>
+<text x="682.5" y="578.0" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="10" fill="#5c5c5c" text-anchor="middle">600</text>
+<line x1="840.0" y1="62.0" x2="840.0" y2="562.0" stroke="#d8d8d8" stroke-width="1"/>
+<text x="840.0" y="578.0" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="10" fill="#5c5c5c" text-anchor="middle">800</text>
+<rect x="210.0" y="62.0" width="14.0" height="34.0" fill="#2f6f9f"/>
+<text x="200.0" y="83.1" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="12" fill="#1c1c1c" text-anchor="end">rclone recursive-walk</text>
+<text x="232.0" y="83.1" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="11" fill="#5c5c5c" text-anchor="start">17.7266  [INSUFFICIENT_EVIDENCE]</text>
+<rect x="210.0" y="112.0" width="15.8" height="34.0" fill="#b4643c"/>
+<text x="200.0" y="133.1" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="12" fill="#1c1c1c" text-anchor="end">s3-fast-list list-hinted</text>
+<text x="233.8" y="133.1" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="11" fill="#5c5c5c" text-anchor="start">20.044  [INSUFFICIENT_EVIDENCE]</text>
+<rect x="210.0" y="162.0" width="40.5" height="34.0" fill="#4f8a5b"/>
+<text x="200.0" y="183.1" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="12" fill="#1c1c1c" text-anchor="end">swath recursive-tsv-dataset</text>
+<text x="258.5" y="183.1" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="11" fill="#5c5c5c" text-anchor="start">51.4017  [CAPACITY_FAILED]</text>
+<rect x="210.0" y="212.0" width="82.2" height="34.0" fill="#7a5ea8"/>
+<text x="200.0" y="233.1" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="12" fill="#1c1c1c" text-anchor="end">s3p ls</text>
+<text x="300.2" y="233.1" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="11" fill="#5c5c5c" text-anchor="start">104.428  [PRESSURE_DEGRADED]</text>
+<rect x="210.0" y="262.0" width="187.3" height="34.0" fill="#9a8232"/>
+<text x="200.0" y="283.1" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="12" fill="#1c1c1c" text-anchor="end">s7cmd recursive-one-nosort</text>
+<text x="405.3" y="283.1" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="11" fill="#5c5c5c" text-anchor="start">237.815  [PRESSURE_DEGRADED]</text>
+<rect x="210.0" y="312.0" width="290.8" height="34.0" fill="#8a5060"/>
+<text x="200.0" y="333.1" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="12" fill="#1c1c1c" text-anchor="end">ps3 list</text>
+<text x="508.8" y="333.1" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="11" fill="#5c5c5c" text-anchor="start">369.288  [TIMING_VALID]</text>
+<rect x="210.0" y="362.0" width="323.6" height="34.0" fill="#2f6f9f"/>
+<text x="200.0" y="383.1" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="12" fill="#1c1c1c" text-anchor="end">s3kor list</text>
+<text x="541.6" y="383.1" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="11" fill="#5c5c5c" text-anchor="start">410.96  [TIMING_VALID]</text>
+<rect x="210.0" y="412.0" width="330.5" height="34.0" fill="#b4643c"/>
+<text x="200.0" y="433.1" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="12" fill="#1c1c1c" text-anchor="end">minio-mc recursive</text>
+<text x="548.5" y="433.1" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="11" fill="#5c5c5c" text-anchor="start">419.694  [TIMING_VALID]</text>
+<rect x="210.0" y="462.0" width="344.3" height="34.0" fill="#4f8a5b"/>
+<text x="200.0" y="483.1" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="12" fill="#1c1c1c" text-anchor="end">s5cmd recursive-with-dirs</text>
+<text x="562.3" y="483.1" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="11" fill="#5c5c5c" text-anchor="start">437.227  [TIMING_VALID]</text>
+<rect x="210.0" y="512.0" width="551.3" height="34.0" fill="#7a5ea8"/>
+<text x="200.0" y="533.1" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="12" fill="#1c1c1c" text-anchor="end">aws-cli s3api-v2-text</text>
+<text x="769.3" y="533.1" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="11" fill="#5c5c5c" text-anchor="start">700.047  [TIMING_VALID]</text>
+<text x="525.0" y="596.0" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="11" fill="#5c5c5c" text-anchor="middle">wall seconds (lower is faster)</text>
+<text x="24.0" y="620.0" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="11" fill="#5c5c5c" text-anchor="start">diagnostic, not a ranking; one 8-vCPU/8-GiB arm per tool, one group, every count matched the fixture; only five rows are TIMING_VALID; s3-fast-list is hint-fed, Swath is a pre-release build and instrument-penalized; output contracts differ per tool</text>
+</svg>

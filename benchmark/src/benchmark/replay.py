@@ -21,7 +21,10 @@ REPLAY_BLOCK_FIELDS = (
     "latency_model",
 )
 REPLAY_FIXTURE_FIELDS = ("fixture_sha256", "fixture_uri")
+REPLAY_OPTIONAL_FIELDS = ("warmup",)
 LATENCY_MODEL_FIELDS = ("deadlines_ms", "scale", "jitter")
+WARMUP_COUNT_FIELDS = ("structure_probes", "pivot_probes", "worker_pages")
+WARMUP_FIELDS = (*WARMUP_COUNT_FIELDS, "in_flight")
 INJECT_SHAPES = ("worker_page", "pivot_probe", "structure_probe")
 SERVING_MODES = ("sorted", "duckdb")
 REPLAY_INTEGER_FIELDS = (
@@ -35,12 +38,37 @@ REPLAY_INTEGER_FIELDS = (
 )
 REPLAY_BOOLEAN_FIELDS = ("replay_prefetch",)
 REPLAY_FIELDS = (*REPLAY_INTEGER_FIELDS, *REPLAY_BOOLEAN_FIELDS)
+# Stated only when a case pins it; absent means the server's own default, and an
+# absent field is omitted from the identity so every earlier identity holds.
+REPLAY_OPTIONAL_INTEGER_FIELDS = ("replay_delimiter_connections",)
 CAPACITY_STATUSES = ("uncalibrated", "calibrated")
 _HEX64_RE = re.compile(r"[0-9a-f]{64}")
 _PINNED_IMAGE_RE = re.compile(r"[^\s@]+@sha256:[0-9a-f]{64}")
 _GCS_PATTERN_META = frozenset("*?[]")
 REQUEST_COUNTER = "swath.replay.http.requests"
 ERROR_COUNTER = "swath.replay.http.errors"
+REQUEST_LATENCY_TIMER = "swath.replay.request.latency"
+INJECT_OVERRUN_COUNTER = "swath.replay.inject.overrun"
+TIMING_VALID = "TIMING_VALID"
+PRESSURE_DEGRADED = "PRESSURE_DEGRADED"
+CAPACITY_FAILED = "CAPACITY_FAILED"
+INSUFFICIENT_EVIDENCE = "INSUFFICIENT_EVIDENCE"
+NOT_APPLICABLE = "NOT_APPLICABLE"
+REPLAY_TIMING_STATES = (
+    TIMING_VALID,
+    PRESSURE_DEGRADED,
+    CAPACITY_FAILED,
+    INSUFFICIENT_EVIDENCE,
+    NOT_APPLICABLE,
+)
+TIMING_GATE_VERSION = 1
+TIMING_GATE_MIN_RESOURCE_SAMPLES = 5
+TIMING_GATE_HIGH_CPU = 0.90
+TIMING_GATE_SUSTAINED_CPU_FRACTION = 0.20
+TIMING_GATE_VALID_OVERRUN_FRACTION = 0.01
+TIMING_GATE_FAILED_OVERRUN_FRACTION = 0.10
+TIMING_GATE_VALID_MEAN_RATIO = 1.10
+TIMING_GATE_FAILED_MEAN_RATIO = 1.25
 
 
 class ReplayError(ValueError):
@@ -64,6 +92,7 @@ class ReplayBackend:
     latency_deadlines_ms: tuple[tuple[str, int], ...] | None
     latency_scale: float | None
     latency_jitter: str | None
+    warmup: tuple[tuple[str, int], ...] | None = None
 
     @property
     def profile_spec(self) -> str | None:
@@ -89,6 +118,10 @@ class ReplayBackend:
         }
         if self.fixture_uri is not None:
             document["fixture_uri"] = self.fixture_uri
+        if self.warmup is not None:
+            # Declared warm-up is part of the treatment: a warmed server is a different
+            # instrument from a cold one. Absent means none, so earlier identities hold.
+            document["warmup"] = dict(self.warmup)
         return document
 
 
@@ -104,9 +137,15 @@ class ReplayAllocation:
     replay_heap_percent: int
     replay_prefetch_max_windows: int
     replay_prefetch: bool
+    replay_delimiter_connections: int | None = None
 
     def as_dict(self) -> dict[str, object]:
-        return {field: getattr(self, field) for field in REPLAY_FIELDS}
+        document: dict[str, object] = {field: getattr(self, field) for field in REPLAY_FIELDS}
+        for field in REPLAY_OPTIONAL_INTEGER_FIELDS:
+            value = getattr(self, field)
+            if value is not None:
+                document[field] = value
+        return document
 
 
 @dataclass(frozen=True)
@@ -172,6 +211,194 @@ def counter_value(observation: object, name: str) -> float | None:
         ):
             matches.append(float(count))
     return matches[0] if len(matches) == 1 else None
+
+
+def _meter(
+    observation: object, name: str, kind: str, tags: Mapping[str, str]
+) -> Mapping[str, object] | None:
+    if not isinstance(observation, Mapping):
+        return None
+    metrics = observation.get("metrics")
+    if not isinstance(metrics, Mapping):
+        return None
+    meters = metrics.get("meters")
+    if not isinstance(meters, Sequence) or isinstance(meters, str | bytes):
+        return None
+    matches = [
+        meter
+        for meter in meters
+        if isinstance(meter, Mapping)
+        and meter.get("name") == name
+        and meter.get("type") == kind
+        and meter.get("tags") == tags
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _finite_nonnegative(value: object) -> float | None:
+    if (
+        isinstance(value, int | float)
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+        and value >= 0
+    ):
+        return float(value)
+    return None
+
+
+def _meter_delta(
+    before: object,
+    after: object,
+    *,
+    name: str,
+    kind: str,
+    tags: Mapping[str, str],
+    field: str,
+    absent_is_zero: bool = False,
+) -> float | None:
+    values: list[float] = []
+    for observation in (before, after):
+        meter = _meter(observation, name, kind, tags)
+        if meter is None and absent_is_zero:
+            values.append(0.0)
+            continue
+        value = _finite_nonnegative(meter.get(field) if meter is not None else None)
+        if value is None:
+            return None
+        values.append(value)
+    delta = values[1] - values[0]
+    return delta if delta >= 0 else None
+
+
+def replay_timing_assessment(config: ReplayConfig, evidence: object) -> dict[str, object]:
+    """Classify replay pressure without changing the attempt's functional verdict.
+
+    This is a derived reporting gate over the raw meters retained in
+    ``result.json``. It deliberately does not become another persisted verdict:
+    historical and future evidence are classified by the same code.
+    """
+    assessment: dict[str, object] = {
+        "gate_version": TIMING_GATE_VERSION,
+        "state": INSUFFICIENT_EVIDENCE,
+        "shapes": {},
+        "resource": None,
+        "reasons": [],
+    }
+    deadlines = config.backend.latency_deadlines_ms
+    if deadlines is None:
+        return {**assessment, "state": NOT_APPLICABLE, "reasons": []}
+    if not isinstance(evidence, Mapping):
+        return {**assessment, "reasons": ["replay evidence is not an object"]}
+
+    reasons: list[str] = []
+    recorded_errors = evidence.get("errors")
+    if not isinstance(recorded_errors, list):
+        reasons.append("replay evidence errors is not a list")
+    elif recorded_errors:
+        reasons.append("replay evidence records collection errors")
+
+    before, after = evidence.get("before"), evidence.get("after")
+    shapes: dict[str, object] = {}
+    assert config.backend.latency_scale is not None
+    for shape, base_deadline_ms in deadlines:
+        requested_ms = base_deadline_ms * config.backend.latency_scale
+        tags = {"shape": shape}
+        requests = _meter_delta(
+            before,
+            after,
+            name=REQUEST_LATENCY_TIMER,
+            kind="timer",
+            tags=tags,
+            field="count",
+        )
+        total_ms = _meter_delta(
+            before,
+            after,
+            name=REQUEST_LATENCY_TIMER,
+            kind="timer",
+            tags=tags,
+            field="sum_ms",
+        )
+        overruns = _meter_delta(
+            before,
+            after,
+            name=INJECT_OVERRUN_COUNTER,
+            kind="counter",
+            tags=tags,
+            field="count",
+            # Micrometer does not publish a tagged counter until its first
+            # event. Absence on either boundary therefore means zero overruns,
+            # not missing evidence; the request timer is the activity proof.
+            absent_is_zero=True,
+        )
+        if requests is None or total_ms is None or overruns is None:
+            reasons.append(f"{shape} request-latency meters are missing or non-monotonic")
+            continue
+        if requests == 0:
+            continue
+        if overruns > requests:
+            reasons.append(f"{shape} overrun count exceeds request count")
+            continue
+        request_mean_ms = total_ms / requests
+        shapes[shape] = {
+            "requested_ms": requested_ms,
+            "requests": requests,
+            "request_mean_ms": request_mean_ms,
+            "mean_ratio": request_mean_ms / requested_ms,
+            "overruns": overruns,
+            "overrun_fraction": overruns / requests,
+        }
+    if not shapes:
+        reasons.append("injected replay attempt has no observed request shape")
+
+    raw_resources = evidence.get("resource_samples")
+    utilizations: list[float] = []
+    if not isinstance(raw_resources, list):
+        reasons.append("replay resource samples is not a list")
+    else:
+        for sample in raw_resources:
+            utilization = (
+                _finite_nonnegative(sample.get("server_cpuset_utilization"))
+                if isinstance(sample, Mapping)
+                else None
+            )
+            if utilization is None or utilization > 1:
+                reasons.append("replay resource sample has invalid server utilization")
+                break
+            utilizations.append(utilization)
+    high_cpu_samples = sum(value >= TIMING_GATE_HIGH_CPU for value in utilizations)
+    high_cpu_fraction = high_cpu_samples / len(utilizations) if utilizations else 0.0
+    resource = {
+        "samples": len(utilizations),
+        "high_cpu_samples": high_cpu_samples,
+        "high_cpu_fraction": round(high_cpu_fraction, 6),
+        "high_cpu_threshold": TIMING_GATE_HIGH_CPU,
+    }
+    if len(utilizations) < TIMING_GATE_MIN_RESOURCE_SAMPLES:
+        reasons.append(f"replay has fewer than {TIMING_GATE_MIN_RESOURCE_SAMPLES} resource samples")
+
+    assessment.update({"shapes": shapes, "resource": resource, "reasons": reasons})
+    if reasons:
+        return assessment
+
+    capacity_failed = high_cpu_fraction >= TIMING_GATE_SUSTAINED_CPU_FRACTION or any(
+        isinstance(shape, Mapping)
+        and (
+            float(shape["overrun_fraction"]) > TIMING_GATE_FAILED_OVERRUN_FRACTION
+            or float(shape["mean_ratio"]) > TIMING_GATE_FAILED_MEAN_RATIO
+        )
+        for shape in shapes.values()
+    )
+    timing_valid = high_cpu_fraction < TIMING_GATE_SUSTAINED_CPU_FRACTION and all(
+        isinstance(shape, Mapping)
+        and float(shape["overrun_fraction"]) < TIMING_GATE_VALID_OVERRUN_FRACTION
+        and float(shape["mean_ratio"]) <= TIMING_GATE_VALID_MEAN_RATIO
+        for shape in shapes.values()
+    )
+    assessment["state"] = (
+        CAPACITY_FAILED if capacity_failed else TIMING_VALID if timing_valid else PRESSURE_DEGRADED
+    )
+    return assessment
 
 
 def evidence_errors(config: ReplayConfig, evidence: object, *, purpose: str) -> tuple[str, ...]:
@@ -247,10 +474,11 @@ def replay_refusals(
 def parse_backend(value: object) -> ReplayBackend:
     if not isinstance(value, Mapping):
         raise ReplayError("replay backend is not an object")
-    allowed = {*REPLAY_BLOCK_FIELDS, *REPLAY_FIXTURE_FIELDS}
+    allowed = {*REPLAY_BLOCK_FIELDS, *REPLAY_FIXTURE_FIELDS, *REPLAY_OPTIONAL_FIELDS}
     unknown = sorted(set(value) - allowed)
     if unknown:
         raise ReplayError(f"replay backend has unknown field(s): {', '.join(map(str, unknown))}")
+    warmup = parse_warmup(value.get("warmup"))
     missing = sorted(set(REPLAY_BLOCK_FIELDS) - set(value))
     if missing:
         raise ReplayError(f"replay backend is missing {', '.join(missing)}")
@@ -295,6 +523,7 @@ def parse_backend(value: object) -> ReplayBackend:
             latency_deadlines_ms=None,
             latency_scale=None,
             latency_jitter=None,
+            warmup=warmup,
         )
     if not isinstance(latency, Mapping) or set(latency) != set(LATENCY_MODEL_FIELDS):
         raise ReplayError("replay latency_model has invalid fields")
@@ -322,18 +551,51 @@ def parse_backend(value: object) -> ReplayBackend:
         latency_deadlines_ms=deadlines,
         latency_scale=float(scale),
         latency_jitter="none",
+        warmup=warmup,
     )
 
 
+def parse_warmup(value: object) -> tuple[tuple[str, int], ...] | None:
+    """Parse the optional declared warm-up the worker drives before the subject clock starts.
+
+    The request counts are issued against the replay endpoint after readiness and before the
+    ``before`` metrics snapshot, so they warm the server's JIT, reader pools, and page indexes
+    without entering any treatment meter. ``structure_probes`` walk the fixture's delimiter tree
+    breadth-first from the root; ``pivot_probes`` and ``worker_pages`` use keys that walk returned
+    as ``start-after`` anchors.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, Mapping) or set(map(str, value)) != set(WARMUP_FIELDS):
+        raise ReplayError(f"replay warmup must contain exactly {', '.join(WARMUP_FIELDS)}")
+    counts: list[tuple[str, int]] = []
+    for name in WARMUP_COUNT_FIELDS:
+        count = value[name]
+        if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+            raise ReplayError(f"replay warmup {name} must be a non-negative integer")
+        counts.append((name, count))
+    if all(count == 0 for _, count in counts):
+        raise ReplayError("replay warmup must request at least one request; omit it for none")
+    counts.append(("in_flight", _positive(value["in_flight"], "replay warmup in_flight")))
+    return tuple(counts)
+
+
 def parse_allocation(value: object) -> ReplayAllocation:
-    if not isinstance(value, Mapping) or set(value) != set(REPLAY_FIELDS):
+    if not isinstance(value, Mapping) or not (
+        set(REPLAY_FIELDS) <= set(value) <= {*REPLAY_FIELDS, *REPLAY_OPTIONAL_INTEGER_FIELDS}
+    ):
         raise ReplayError("replay allocation has invalid fields")
     integers = {field: _positive(value[field], field) for field in REPLAY_INTEGER_FIELDS}
+    optional = {
+        field: _positive(value[field], field)
+        for field in REPLAY_OPTIONAL_INTEGER_FIELDS
+        if field in value
+    }
     if not isinstance(value["replay_prefetch"], bool):
         raise ReplayError("replay_prefetch must be a boolean")
     if integers["replay_heap_percent"] > 100:
         raise ReplayError("replay_heap_percent must be between 1 and 100")
-    return ReplayAllocation(**integers, replay_prefetch=value["replay_prefetch"])
+    return ReplayAllocation(**integers, **optional, replay_prefetch=value["replay_prefetch"])
 
 
 def parse_document(raw: str | Mapping[str, object]) -> ReplayConfig:
@@ -357,7 +619,12 @@ def parse_document(raw: str | Mapping[str, object]) -> ReplayConfig:
 def parse_plan(value: object) -> ReplayPlan:
     if not isinstance(value, Mapping):
         raise ReplayError("replay plan block is not an object")
-    allowed = {*REPLAY_BLOCK_FIELDS, *REPLAY_FIXTURE_FIELDS, "capacity_status"}
+    allowed = {
+        *REPLAY_BLOCK_FIELDS,
+        *REPLAY_FIXTURE_FIELDS,
+        *REPLAY_OPTIONAL_FIELDS,
+        "capacity_status",
+    }
     required = {*REPLAY_BLOCK_FIELDS, "capacity_status"}
     if set(value) - allowed or required - set(value):
         unknown = sorted(set(value) - allowed)

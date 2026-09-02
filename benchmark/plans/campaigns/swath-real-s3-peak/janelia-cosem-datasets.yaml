@@ -1,0 +1,42 @@
+# Swath-only real-S3 sorted capture followed by a separately selected TSV pass.
+spec_version: 2
+
+bucket: janelia-cosem-datasets
+region: us-east-1
+auth_role: public-read
+
+defaults:
+  reps: 1
+  timeout_s: 14400
+  vcpus: 16
+  memory_gb: 32
+
+tools:
+  swath:
+    cases:
+      - mode: recursive-parquet-sorted
+        concurrency: 1024
+        purpose: diagnostic
+        config: {jvm_max_heap: 16g, sort_merge_parallelism: 8}
+      # 2026-09-01 CPU follow-up: double the box, AIMD ceiling, and final merge width.
+      - mode: recursive-parquet-sorted
+        concurrency: 2048
+        purpose: diagnostic
+        vcpus: 32
+        memory_gb: 64
+        config: {jvm_max_heap: 16g, sort_merge_parallelism: 16}
+      - mode: recursive-tsv-zstd
+        concurrency: 1024
+        purpose: diagnostic
+        config: {jvm_max_heap: 16g, text_writers: 8}
+
+exclude:
+  - {tool: aws-cli, reason: outside this Swath-only real-S3 diagnostic}
+  - {tool: minio-mc, reason: outside this Swath-only real-S3 diagnostic}
+  - {tool: ps3, reason: outside this Swath-only real-S3 diagnostic}
+  - {tool: rclone, reason: outside this Swath-only real-S3 diagnostic}
+  - {tool: s3-fast-list, reason: outside this Swath-only real-S3 diagnostic}
+  - {tool: s3kor, reason: outside this Swath-only real-S3 diagnostic}
+  - {tool: s3p, reason: outside this Swath-only real-S3 diagnostic}
+  - {tool: s5cmd, reason: outside this Swath-only real-S3 diagnostic}
+  - {tool: s7cmd, reason: outside this Swath-only real-S3 diagnostic}

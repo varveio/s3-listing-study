@@ -8,10 +8,18 @@ kept in internal notes that are not published in this repository.
 
 For anyone evaluating what this study is, how credible it is, and what it found.
 
+- [`instrument.md`](instrument.md) — how the replay instrument works: the
+  server, the three request shapes, what a latency deadline is and where each
+  fixture's deadlines come from, the known skews, and the known defects by
+  release.
 - [`methodology.md`](methodology.md) — how the study is run: the five decisions
   that shape everything, the replay-screening → real-S3-validation funnel, and
   the run-record requirements. The measurement plan, written down before
-  comparative runs and carrying dated material changes.
+  comparative runs and carrying dated material changes; its status header says
+  which sections are the preregistration and which describe what has since run.
+- [`../results/2026-09-scale-diagnostics/REPORT.md`](../results/2026-09-scale-diagnostics/REPORT.md)
+  — the current release's report: the funnel, the instrument and its defect,
+  the per-tool dispositions, and the limits on every claim.
 - [`s3-reference.md`](s3-reference.md) — the documented `ListObjectsV2` contract
   the tools drive: lexicographical ordering, `prefix`/`delimiter`/`CommonPrefixes`,
   `StartAfter`, pagination, key encoding, and the Express One Zone differences.
@@ -29,14 +37,23 @@ For anyone evaluating what this study is, how credible it is, and what it found.
 
 ## Results
 
-No measurement results yet — the benchmark phase has not started, and no
-comparative performance result exists in this repository. (Smoke receipts carry
-per-run wall-clock and RSS figures, but never as a comparison.)
+Published results live outside `docs/`, in the release directories under
+[`../results/`](../results/README.md). [`../RESULTS.md`](../RESULTS.md) is the
+index.
 
-Groundwork findings *do* exist for every subject and live on those tools' own
-pages, with receipts under `tools/<tool>/receipts/`. See
-[`../tools/README.md`](../tools/README.md) for the cohort split and per-tool
-status. Cross-tool findings land in
+The current release is `2026-09-scale-diagnostics`, and its written companion —
+what ran, the largest fixture each subject was taken to and why, the
+instrument and its known defect, and what the study does not establish — is
+[`../results/2026-09-scale-diagnostics/REPORT.md`](../results/2026-09-scale-diagnostics/REPORT.md).
+It is a **diagnostic** release: no attempt in it carries
+`purpose = measurement`, so nothing in it is a calibrated benchmark or a
+ranking. The machine-readable ceiling is in that release's `manifest.json`.
+
+Groundwork findings also exist for every subject and live on those tools' own
+pages, with receipts under `tools/<tool>/receipts/`. Smoke receipts carry
+per-run wall-clock and RSS figures, but never as a comparison. See
+[`../tools/README.md`](../tools/README.md) for the cohort split, the per-tool
+status and the current release outcome. Cross-tool questions land in
 [`open-questions.md`](open-questions.md).
 
 ## Operating & extending the study

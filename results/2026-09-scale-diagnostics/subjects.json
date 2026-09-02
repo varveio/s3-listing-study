@@ -1,0 +1,450 @@
+{
+  "aws-cli": {
+    "attempts": 9,
+    "capsule_path": "tools/aws-cli/",
+    "image_digests": [
+      "sha256:1f815b5f0d7882f52ab7bf26b5d5bda0f315d86f327ddb25690f30de5d3b12f8",
+      "sha256:9fe6f7fb00c9f857f434a0151476bb8184dd139df13c284692a2e9f09846fb91"
+    ],
+    "image_set_sha256": [
+      "04cddf087ebbd5d8dc6adbddd9c01112b355cf249c267ed103ed49a1877963ed",
+      "c31f05fcd4fe333f508aef23672ee3ff48af5cea0a59cae0c051ee3c78a40beb"
+    ],
+    "modes": [
+      "s3api-v2-text"
+    ],
+    "note": "Roles and dispositions are a later layer; this release states only what ran and how it settled.",
+    "platform_sha256": [
+      "d7c5939e67bc97c5b42b3e6ef9fac84846a3e0cc7de58e1b6442103ec13e20a5",
+      "ea4ef4184a64ca8eef07800380346042d51c2f95c1554ef8a68f746122e11888"
+    ],
+    "tool": "aws-cli",
+    "tool_slice_sha256": [
+      "d69553eff54962386c299d9d48c14133c7bf2897cd9a4314378307dc0ae081b7"
+    ],
+    "versions": [
+      "2.36.1"
+    ]
+  },
+  "minio-mc": {
+    "attempts": 9,
+    "capsule_path": "tools/minio-mc/",
+    "image_digests": [
+      "sha256:1f815b5f0d7882f52ab7bf26b5d5bda0f315d86f327ddb25690f30de5d3b12f8",
+      "sha256:9fe6f7fb00c9f857f434a0151476bb8184dd139df13c284692a2e9f09846fb91"
+    ],
+    "image_set_sha256": [
+      "04cddf087ebbd5d8dc6adbddd9c01112b355cf249c267ed103ed49a1877963ed",
+      "c31f05fcd4fe333f508aef23672ee3ff48af5cea0a59cae0c051ee3c78a40beb"
+    ],
+    "modes": [
+      "recursive",
+      "recursive-json"
+    ],
+    "note": "Roles and dispositions are a later layer; this release states only what ran and how it settled.",
+    "platform_sha256": [
+      "d7c5939e67bc97c5b42b3e6ef9fac84846a3e0cc7de58e1b6442103ec13e20a5",
+      "ea4ef4184a64ca8eef07800380346042d51c2f95c1554ef8a68f746122e11888"
+    ],
+    "tool": "minio-mc",
+    "tool_slice_sha256": [
+      "2f7b4182abe3bc5b4b699a7adc36f54d9cc9a59dd57bda5d6df6dcef945335e0",
+      "32ba614555a32b5c2c8bbe3c6dd52c8fd72c0e365578176599ee671869eb5436"
+    ],
+    "versions": [
+      "RELEASE.2025-08-13T08-35-41Z"
+    ]
+  },
+  "ps3": {
+    "attempts": 12,
+    "capsule_path": "tools/ps3/",
+    "image_digests": [
+      "sha256:1f815b5f0d7882f52ab7bf26b5d5bda0f315d86f327ddb25690f30de5d3b12f8",
+      "sha256:9fe6f7fb00c9f857f434a0151476bb8184dd139df13c284692a2e9f09846fb91",
+      "sha256:ea3dce97e66990edfda1b1e09470f617af481c14110a50c995477ff757e1fee7"
+    ],
+    "image_set_sha256": [
+      "04cddf087ebbd5d8dc6adbddd9c01112b355cf249c267ed103ed49a1877963ed",
+      "2198e8e69b7058e77071f00f60aa997012eaa00e69f195280606d135f26d2ac6",
+      "c31f05fcd4fe333f508aef23672ee3ff48af5cea0a59cae0c051ee3c78a40beb"
+    ],
+    "modes": [
+      "list"
+    ],
+    "note": "Roles and dispositions are a later layer; this release states only what ran and how it settled.",
+    "platform_sha256": [
+      "377430c306db20e0fbf0426532a38d1d7ee83436a84a116add46058446352677",
+      "d7c5939e67bc97c5b42b3e6ef9fac84846a3e0cc7de58e1b6442103ec13e20a5",
+      "ea4ef4184a64ca8eef07800380346042d51c2f95c1554ef8a68f746122e11888"
+    ],
+    "tool": "ps3",
+    "tool_slice_sha256": [
+      "7b6d1f2c2046273425f4c1521cc7a6a47de46f9f0d19ff15f17ba20de0d69658",
+      "8844ab5cdfe6bc6d1162d9bade2f1c9cc432ae4775ad9f21c7d426d955302572"
+    ],
+    "versions": [
+      "0.1.16"
+    ]
+  },
+  "rclone": {
+    "attempts": 31,
+    "capsule_path": "tools/rclone/",
+    "image_digests": [
+      "sha256:0e3e0225ef0ec01a08c90ae8795927a1a55f5b8803dd89754e6d04256852bfab",
+      "sha256:0e79492cdf5598a74baa3671cd9191871ab98c3507c484ced3ef65a8a41b0c22",
+      "sha256:1f815b5f0d7882f52ab7bf26b5d5bda0f315d86f327ddb25690f30de5d3b12f8",
+      "sha256:211e8205b11bf3ed5d5e808fe80edbd129326835ad77b55cbd88d9e10b058b57",
+      "sha256:6678b8c013c1053536a56b1560f63a1a785b6208b8ff7baec94f6b286bfbc751",
+      "sha256:79b567baf5a2fc18e75846af9b0887f83335203e27d034a648baba69ee73cfc4",
+      "sha256:9d212ec1cae1ed8f5fac65e7030e271db80bb3b5680edd43b9978368263ba1ed",
+      "sha256:9fe6f7fb00c9f857f434a0151476bb8184dd139df13c284692a2e9f09846fb91",
+      "sha256:e78985f90874f3d8b4528e6826459878d717fc22d0a12dc79106997eb857a65d",
+      "sha256:ea3dce97e66990edfda1b1e09470f617af481c14110a50c995477ff757e1fee7"
+    ],
+    "image_set_sha256": [
+      "011f83231e5d4644f36399a077eec42b74ea7cac4470b11724999425b608865c",
+      "04cddf087ebbd5d8dc6adbddd9c01112b355cf249c267ed103ed49a1877963ed",
+      "2198e8e69b7058e77071f00f60aa997012eaa00e69f195280606d135f26d2ac6",
+      "3a4ca5c8818e6e4787e5c81c37058b2b80fcba4a147cc5a17bffc281ee26698b",
+      "6cd82f131d8f9b9158493174d0b0adfdd204926fa9f73756de246af2677d07c1",
+      "7f0f050538d6fa0d60d3c3c5887c9423e170fea158112395a9417a6ffe64e391",
+      "8282a955ee623c0b9a00ddad1974ada710af7f4734fa3ac86a7c9fa400fd0f89",
+      "85a088375aa1e34cea002280b5d2032a8d310f6dce5e03810f54344bce04c92d",
+      "8c77b524605f3823f19597cb677874c55cc634b04af8f2d555d7950b30325c0e",
+      "c31f05fcd4fe333f508aef23672ee3ff48af5cea0a59cae0c051ee3c78a40beb"
+    ],
+    "modes": [
+      "recursive-fastlist",
+      "recursive-hierarchical",
+      "recursive-walk"
+    ],
+    "note": "Roles and dispositions are a later layer; this release states only what ran and how it settled.",
+    "platform_sha256": [
+      "0051dcc799c25d76e7e8e739460a02a79cda21d48c135363ec8b8ae424bd4d4a",
+      "377430c306db20e0fbf0426532a38d1d7ee83436a84a116add46058446352677",
+      "587e725df77daf18060e6f14d0e52ac8118b9fb270b5843a068527c21fbfdfb0",
+      "7ebba7bcefcb94785f48d2727b0f7d028bca1c8e8ae5f5b786cd945780366320",
+      "9c298ff7796e32fe62996dd780fa73d2253c5295906f097f46045a413575b952",
+      "9db1cc46c2a7afd10f4f3b1f7d8cfab340f2c7a35f3e50d97336ed28289a4d9e",
+      "b02bae1dc8a7aafc6ca3f7b8cbeed487fef1ead5f21be813c9cb4df5ca4eb516",
+      "d7c5939e67bc97c5b42b3e6ef9fac84846a3e0cc7de58e1b6442103ec13e20a5",
+      "ea4ef4184a64ca8eef07800380346042d51c2f95c1554ef8a68f746122e11888",
+      "f0b53c8f07f908155042dafee1ba60950e84ca6963c9b760780ea1397685899c"
+    ],
+    "tool": "rclone",
+    "tool_slice_sha256": [
+      "7e755e8a6b9c56efea5d8a2e888212b7cc46b430e517951e52ccd9cd3bd27196",
+      "cb6b654f56d264b0e81887a4807d4bde7f8da5322a5bca6fa7a2fb576fe7693f"
+    ],
+    "versions": [
+      "1.74.4"
+    ]
+  },
+  "s3-fast-list": {
+    "attempts": 41,
+    "capsule_path": "tools/s3-fast-list/",
+    "image_digests": [
+      "sha256:0e3e0225ef0ec01a08c90ae8795927a1a55f5b8803dd89754e6d04256852bfab",
+      "sha256:1f815b5f0d7882f52ab7bf26b5d5bda0f315d86f327ddb25690f30de5d3b12f8",
+      "sha256:60a7e6ee3a476f9d7e12c33977f0813f22161bbc34b6bdb6b292f0bc7543d86b",
+      "sha256:6678b8c013c1053536a56b1560f63a1a785b6208b8ff7baec94f6b286bfbc751",
+      "sha256:79b567baf5a2fc18e75846af9b0887f83335203e27d034a648baba69ee73cfc4",
+      "sha256:9d212ec1cae1ed8f5fac65e7030e271db80bb3b5680edd43b9978368263ba1ed",
+      "sha256:9fe6f7fb00c9f857f434a0151476bb8184dd139df13c284692a2e9f09846fb91",
+      "sha256:e78985f90874f3d8b4528e6826459878d717fc22d0a12dc79106997eb857a65d"
+    ],
+    "image_set_sha256": [
+      "011f83231e5d4644f36399a077eec42b74ea7cac4470b11724999425b608865c",
+      "04cddf087ebbd5d8dc6adbddd9c01112b355cf249c267ed103ed49a1877963ed",
+      "3a4ca5c8818e6e4787e5c81c37058b2b80fcba4a147cc5a17bffc281ee26698b",
+      "6c2963d2612f9c20338bed7fca30fec8ae06322ee97879020cd41f1a073e2dac",
+      "6cd82f131d8f9b9158493174d0b0adfdd204926fa9f73756de246af2677d07c1",
+      "8282a955ee623c0b9a00ddad1974ada710af7f4734fa3ac86a7c9fa400fd0f89",
+      "85a088375aa1e34cea002280b5d2032a8d310f6dce5e03810f54344bce04c92d",
+      "c31f05fcd4fe333f508aef23672ee3ff48af5cea0a59cae0c051ee3c78a40beb"
+    ],
+    "modes": [
+      "list",
+      "list-hinted",
+      "list-hinted-fixture"
+    ],
+    "note": "Roles and dispositions are a later layer; this release states only what ran and how it settled.",
+    "platform_sha256": [
+      "0051dcc799c25d76e7e8e739460a02a79cda21d48c135363ec8b8ae424bd4d4a",
+      "587e725df77daf18060e6f14d0e52ac8118b9fb270b5843a068527c21fbfdfb0",
+      "7ebba7bcefcb94785f48d2727b0f7d028bca1c8e8ae5f5b786cd945780366320",
+      "85a123c67d67eab7fe88bf23f97587ac5b175da6eb1e7f23d2e18091075cef1e",
+      "9db1cc46c2a7afd10f4f3b1f7d8cfab340f2c7a35f3e50d97336ed28289a4d9e",
+      "d7c5939e67bc97c5b42b3e6ef9fac84846a3e0cc7de58e1b6442103ec13e20a5",
+      "ea4ef4184a64ca8eef07800380346042d51c2f95c1554ef8a68f746122e11888",
+      "f0b53c8f07f908155042dafee1ba60950e84ca6963c9b760780ea1397685899c"
+    ],
+    "tool": "s3-fast-list",
+    "tool_slice_sha256": [
+      "403cf86f56f40878d456ba5cdf29625c1cad75e817cce22fbe90ba54816980a7",
+      "d2a952640698381824870063f960f09859ccd91b69652ce33029370691bc0c63",
+      "d7ef1284b6200434ce12a5f07e77bca53e4fb4fd063d38f253d43164985c5f91"
+    ],
+    "versions": [
+      "1.1.0"
+    ]
+  },
+  "s3kor": {
+    "attempts": 9,
+    "capsule_path": "tools/s3kor/",
+    "image_digests": [
+      "sha256:1f815b5f0d7882f52ab7bf26b5d5bda0f315d86f327ddb25690f30de5d3b12f8",
+      "sha256:9fe6f7fb00c9f857f434a0151476bb8184dd139df13c284692a2e9f09846fb91"
+    ],
+    "image_set_sha256": [
+      "04cddf087ebbd5d8dc6adbddd9c01112b355cf249c267ed103ed49a1877963ed",
+      "c31f05fcd4fe333f508aef23672ee3ff48af5cea0a59cae0c051ee3c78a40beb"
+    ],
+    "modes": [
+      "list"
+    ],
+    "note": "Roles and dispositions are a later layer; this release states only what ran and how it settled.",
+    "platform_sha256": [
+      "d7c5939e67bc97c5b42b3e6ef9fac84846a3e0cc7de58e1b6442103ec13e20a5",
+      "ea4ef4184a64ca8eef07800380346042d51c2f95c1554ef8a68f746122e11888"
+    ],
+    "tool": "s3kor",
+    "tool_slice_sha256": [
+      "049e088300ce42ba3288de4c631e539721dcceceed84213a7d3261786534d25a",
+      "c2940051f890612b5481ea46af33e937fbacc6d1f35e60807e093d2dc015de15"
+    ],
+    "versions": [
+      "v0.0.37"
+    ]
+  },
+  "s3p": {
+    "attempts": 23,
+    "capsule_path": "tools/s3p/",
+    "image_digests": [
+      "sha256:0e3e0225ef0ec01a08c90ae8795927a1a55f5b8803dd89754e6d04256852bfab",
+      "sha256:1906559a130773f351f30e954b48e81af9ef7a5be5d14a911e0d36f8e5891285",
+      "sha256:1f815b5f0d7882f52ab7bf26b5d5bda0f315d86f327ddb25690f30de5d3b12f8",
+      "sha256:6678b8c013c1053536a56b1560f63a1a785b6208b8ff7baec94f6b286bfbc751",
+      "sha256:79b567baf5a2fc18e75846af9b0887f83335203e27d034a648baba69ee73cfc4",
+      "sha256:9d212ec1cae1ed8f5fac65e7030e271db80bb3b5680edd43b9978368263ba1ed",
+      "sha256:9fe6f7fb00c9f857f434a0151476bb8184dd139df13c284692a2e9f09846fb91"
+    ],
+    "image_set_sha256": [
+      "011f83231e5d4644f36399a077eec42b74ea7cac4470b11724999425b608865c",
+      "04cddf087ebbd5d8dc6adbddd9c01112b355cf249c267ed103ed49a1877963ed",
+      "3a4ca5c8818e6e4787e5c81c37058b2b80fcba4a147cc5a17bffc281ee26698b",
+      "4a835ea3daf5c73854f68fbf610e7c3e16a0f84cab7ce05da25a91f777b5c294",
+      "6cd82f131d8f9b9158493174d0b0adfdd204926fa9f73756de246af2677d07c1",
+      "85a088375aa1e34cea002280b5d2032a8d310f6dce5e03810f54344bce04c92d",
+      "c31f05fcd4fe333f508aef23672ee3ff48af5cea0a59cae0c051ee3c78a40beb"
+    ],
+    "modes": [
+      "ls"
+    ],
+    "note": "Roles and dispositions are a later layer; this release states only what ran and how it settled.",
+    "platform_sha256": [
+      "0051dcc799c25d76e7e8e739460a02a79cda21d48c135363ec8b8ae424bd4d4a",
+      "2476e6f6461148de08f5d17d5f7dca705b777a361cfc5ac478292b410d46992b",
+      "7ebba7bcefcb94785f48d2727b0f7d028bca1c8e8ae5f5b786cd945780366320",
+      "9db1cc46c2a7afd10f4f3b1f7d8cfab340f2c7a35f3e50d97336ed28289a4d9e",
+      "d7c5939e67bc97c5b42b3e6ef9fac84846a3e0cc7de58e1b6442103ec13e20a5",
+      "ea4ef4184a64ca8eef07800380346042d51c2f95c1554ef8a68f746122e11888",
+      "f0b53c8f07f908155042dafee1ba60950e84ca6963c9b760780ea1397685899c"
+    ],
+    "tool": "s3p",
+    "tool_slice_sha256": [
+      "cc8eb73c94173df63ba7209994e4969b4c8b03eede222659d3f3e8350a1b1f09"
+    ],
+    "versions": [
+      "3.7.2"
+    ]
+  },
+  "s5cmd": {
+    "attempts": 17,
+    "capsule_path": "tools/s5cmd/",
+    "image_digests": [
+      "sha256:0e3e0225ef0ec01a08c90ae8795927a1a55f5b8803dd89754e6d04256852bfab",
+      "sha256:1f815b5f0d7882f52ab7bf26b5d5bda0f315d86f327ddb25690f30de5d3b12f8",
+      "sha256:6473a6c151a35e0875cf66f17932284b6cc88789ef7ca78f76edf1bdfbc50a7c",
+      "sha256:6678b8c013c1053536a56b1560f63a1a785b6208b8ff7baec94f6b286bfbc751",
+      "sha256:9d212ec1cae1ed8f5fac65e7030e271db80bb3b5680edd43b9978368263ba1ed",
+      "sha256:9fe6f7fb00c9f857f434a0151476bb8184dd139df13c284692a2e9f09846fb91",
+      "sha256:e78985f90874f3d8b4528e6826459878d717fc22d0a12dc79106997eb857a65d",
+      "sha256:ea3dce97e66990edfda1b1e09470f617af481c14110a50c995477ff757e1fee7"
+    ],
+    "image_set_sha256": [
+      "011f83231e5d4644f36399a077eec42b74ea7cac4470b11724999425b608865c",
+      "0321d63f6b4983f9ed34f36c4cdcc950c5d059e600fc7afedfa4b1b46b9e5105",
+      "04cddf087ebbd5d8dc6adbddd9c01112b355cf249c267ed103ed49a1877963ed",
+      "2198e8e69b7058e77071f00f60aa997012eaa00e69f195280606d135f26d2ac6",
+      "6cd82f131d8f9b9158493174d0b0adfdd204926fa9f73756de246af2677d07c1",
+      "8282a955ee623c0b9a00ddad1974ada710af7f4734fa3ac86a7c9fa400fd0f89",
+      "85a088375aa1e34cea002280b5d2032a8d310f6dce5e03810f54344bce04c92d",
+      "c31f05fcd4fe333f508aef23672ee3ff48af5cea0a59cae0c051ee3c78a40beb"
+    ],
+    "modes": [
+      "fanout-fixture-with-dirs",
+      "fanout-with-dirs",
+      "recursive",
+      "recursive-with-dirs"
+    ],
+    "note": "Roles and dispositions are a later layer; this release states only what ran and how it settled.",
+    "platform_sha256": [
+      "377430c306db20e0fbf0426532a38d1d7ee83436a84a116add46058446352677",
+      "587e725df77daf18060e6f14d0e52ac8118b9fb270b5843a068527c21fbfdfb0",
+      "7ebba7bcefcb94785f48d2727b0f7d028bca1c8e8ae5f5b786cd945780366320",
+      "9db1cc46c2a7afd10f4f3b1f7d8cfab340f2c7a35f3e50d97336ed28289a4d9e",
+      "c43bb80b23adc9d69b22e162430d3ec93e347f2d2a5f930ebdaf0425dc30a605",
+      "d7c5939e67bc97c5b42b3e6ef9fac84846a3e0cc7de58e1b6442103ec13e20a5",
+      "ea4ef4184a64ca8eef07800380346042d51c2f95c1554ef8a68f746122e11888",
+      "f0b53c8f07f908155042dafee1ba60950e84ca6963c9b760780ea1397685899c"
+    ],
+    "tool": "s5cmd",
+    "tool_slice_sha256": [
+      "0a7134df7960d7a2f020f53fea23cdb8c6f2bd713f77a146a0b398e92ef34017",
+      "426647eaf56aaf373e2aed0c462d34564fb3077912b038a89e18495280c0a57b",
+      "bfc8a528d293188ab1d4fe856f6b7312349ccdedb0dcbc5ba93e6a7444429862",
+      "ccb07f49f464ff7a964323cc27c05dc63af5478ec56a12a5c7f911e3ffadda47",
+      "d940a091d6fd1a5a73290230f0a128c492da417d61326a9837a9eb102526cb0e"
+    ],
+    "versions": [
+      "v2.3.0"
+    ]
+  },
+  "s7cmd": {
+    "attempts": 24,
+    "capsule_path": "tools/s7cmd/",
+    "image_digests": [
+      "sha256:0e3e0225ef0ec01a08c90ae8795927a1a55f5b8803dd89754e6d04256852bfab",
+      "sha256:1906559a130773f351f30e954b48e81af9ef7a5be5d14a911e0d36f8e5891285",
+      "sha256:1f815b5f0d7882f52ab7bf26b5d5bda0f315d86f327ddb25690f30de5d3b12f8",
+      "sha256:211e8205b11bf3ed5d5e808fe80edbd129326835ad77b55cbd88d9e10b058b57",
+      "sha256:2ac8ec3e7f251d1f14db9651e649307ddea82944819c26aedabb54ef55856a11",
+      "sha256:4ec249eb979ec883d42bf3ac670623d822c56bf21c9fcdf4b3b773f650da0b48",
+      "sha256:60a7e6ee3a476f9d7e12c33977f0813f22161bbc34b6bdb6b292f0bc7543d86b",
+      "sha256:6678b8c013c1053536a56b1560f63a1a785b6208b8ff7baec94f6b286bfbc751",
+      "sha256:76881fbccfa6efa4c5402b8d7fa0df57be06df2ed7012a91c8e26b3e201603d7",
+      "sha256:79b567baf5a2fc18e75846af9b0887f83335203e27d034a648baba69ee73cfc4",
+      "sha256:9d212ec1cae1ed8f5fac65e7030e271db80bb3b5680edd43b9978368263ba1ed",
+      "sha256:9fe6f7fb00c9f857f434a0151476bb8184dd139df13c284692a2e9f09846fb91"
+    ],
+    "image_set_sha256": [
+      "011f83231e5d4644f36399a077eec42b74ea7cac4470b11724999425b608865c",
+      "04cddf087ebbd5d8dc6adbddd9c01112b355cf249c267ed103ed49a1877963ed",
+      "0bae9345f2ce52ad2e58edcb817edd68b4b8e09853cdb67b5facc14495252e51",
+      "10ce5c815c5dab948184e660f0d6844373113c76fe03796b60924ad7b247fdb9",
+      "3a4ca5c8818e6e4787e5c81c37058b2b80fcba4a147cc5a17bffc281ee26698b",
+      "4a835ea3daf5c73854f68fbf610e7c3e16a0f84cab7ce05da25a91f777b5c294",
+      "5ecf54bd5a11ef3bf0b24e7030294f2e8c494aa00e9f980c2042308d032e68ff",
+      "6c2963d2612f9c20338bed7fca30fec8ae06322ee97879020cd41f1a073e2dac",
+      "6cd82f131d8f9b9158493174d0b0adfdd204926fa9f73756de246af2677d07c1",
+      "85a088375aa1e34cea002280b5d2032a8d310f6dce5e03810f54344bce04c92d",
+      "8c77b524605f3823f19597cb677874c55cc634b04af8f2d555d7950b30325c0e",
+      "c31f05fcd4fe333f508aef23672ee3ff48af5cea0a59cae0c051ee3c78a40beb"
+    ],
+    "modes": [
+      "recursive-one-nosort",
+      "recursive-tsv",
+      "recursive-tsv-nosort"
+    ],
+    "note": "Roles and dispositions are a later layer; this release states only what ran and how it settled.",
+    "platform_sha256": [
+      "0051dcc799c25d76e7e8e739460a02a79cda21d48c135363ec8b8ae424bd4d4a",
+      "05d7baad91a60d40a430016e04dec8ffc13228032687fe518fa0255deb568e3d",
+      "2476e6f6461148de08f5d17d5f7dca705b777a361cfc5ac478292b410d46992b",
+      "7ebba7bcefcb94785f48d2727b0f7d028bca1c8e8ae5f5b786cd945780366320",
+      "85a123c67d67eab7fe88bf23f97587ac5b175da6eb1e7f23d2e18091075cef1e",
+      "9db1cc46c2a7afd10f4f3b1f7d8cfab340f2c7a35f3e50d97336ed28289a4d9e",
+      "b02bae1dc8a7aafc6ca3f7b8cbeed487fef1ead5f21be813c9cb4df5ca4eb516",
+      "be6b6fd0d252cf4d700a860f3cef5d62cabbb033c652813f75f96d8d9e53934a",
+      "d7c5939e67bc97c5b42b3e6ef9fac84846a3e0cc7de58e1b6442103ec13e20a5",
+      "ea4ef4184a64ca8eef07800380346042d51c2f95c1554ef8a68f746122e11888",
+      "f0b53c8f07f908155042dafee1ba60950e84ca6963c9b760780ea1397685899c",
+      "f77f73da29bf558ade733d7eda6acf36fcaf6bece3ca69f41f86a118408fdbee"
+    ],
+    "tool": "s7cmd",
+    "tool_slice_sha256": [
+      "461ed0bbb0c55cb549b51957041b8bd43581a5fd741e34f541f174305d8773a0",
+      "62a22c888d7ce5e139efa61028a39cbff942a0557432de73ac66a540baae60ac",
+      "d51a116abacd0cb8d942f45d21e54ee2338fc6efb9bce86d09a9c2e4a5c9b41e",
+      "db0dce60302ee7407c02357cad495e4efae624e78be6c262c3e66968bbcb3839"
+    ],
+    "versions": [
+      "1.5.0"
+    ]
+  },
+  "swath": {
+    "attempts": 95,
+    "capsule_path": "tools/swath/",
+    "image_digests": [
+      "sha256:0e3e0225ef0ec01a08c90ae8795927a1a55f5b8803dd89754e6d04256852bfab",
+      "sha256:1906559a130773f351f30e954b48e81af9ef7a5be5d14a911e0d36f8e5891285",
+      "sha256:1a563daf8712b6d69089eca5856322fc4e3b50424a6aed7d6a95e2ee16c65492",
+      "sha256:1d2b46520c8d09111a1fd5e47e008cfcff0dc9c62166a21075822219be4f32ac",
+      "sha256:1f815b5f0d7882f52ab7bf26b5d5bda0f315d86f327ddb25690f30de5d3b12f8",
+      "sha256:211e8205b11bf3ed5d5e808fe80edbd129326835ad77b55cbd88d9e10b058b57",
+      "sha256:397aa1b776a18c6f00170ad2d2defb3591eb4e59d1678363da86377cb58be679",
+      "sha256:4db3a23f3adc2b1e77111ff6ce36f5bca1038caee8177bd1a93f2fcd0eb55a55",
+      "sha256:6678b8c013c1053536a56b1560f63a1a785b6208b8ff7baec94f6b286bfbc751",
+      "sha256:79b567baf5a2fc18e75846af9b0887f83335203e27d034a648baba69ee73cfc4",
+      "sha256:9d212ec1cae1ed8f5fac65e7030e271db80bb3b5680edd43b9978368263ba1ed",
+      "sha256:9fe6f7fb00c9f857f434a0151476bb8184dd139df13c284692a2e9f09846fb91",
+      "sha256:b8bae19a747ab5da97ad64a56642d679ae8050e04969c548728afc71054ee3ef",
+      "sha256:c84fb245d6fc7194d5c1cb4743806a64b4f9a13b647b91b8bab0cf670a3b93b7"
+    ],
+    "image_set_sha256": [
+      "011f83231e5d4644f36399a077eec42b74ea7cac4470b11724999425b608865c",
+      "04cddf087ebbd5d8dc6adbddd9c01112b355cf249c267ed103ed49a1877963ed",
+      "3119405028cedeba747413078f2edb16acd02db3c72700a79c6778f0631446d5",
+      "3a4ca5c8818e6e4787e5c81c37058b2b80fcba4a147cc5a17bffc281ee26698b",
+      "4a835ea3daf5c73854f68fbf610e7c3e16a0f84cab7ce05da25a91f777b5c294",
+      "6cd82f131d8f9b9158493174d0b0adfdd204926fa9f73756de246af2677d07c1",
+      "85a088375aa1e34cea002280b5d2032a8d310f6dce5e03810f54344bce04c92d",
+      "8be91cae1a589ed7484b90f109dd192402f1dc3bfd2ef242d273de24c3286ec0",
+      "8c77b524605f3823f19597cb677874c55cc634b04af8f2d555d7950b30325c0e",
+      "af45c681674423f4d864eefde47bd530bb8b91778cf061d435cafc61d53e947b",
+      "c08e668bd5239df81ccea19a95091a2bdd6426d704269b9d38ac196be5270f92",
+      "c31f05fcd4fe333f508aef23672ee3ff48af5cea0a59cae0c051ee3c78a40beb",
+      "e78f8a5cf286b69eb89beda0390b5dc295beea3877e8e79c8b117a922e036dd6",
+      "fe78d77dfbd5a1b764553456e8a4b81e9d6f4aee870029ef1af278cf57b807d3"
+    ],
+    "modes": [
+      "recursive-parquet",
+      "recursive-parquet-sorted",
+      "recursive-tsv",
+      "recursive-tsv-dataset",
+      "recursive-tsv-zstd"
+    ],
+    "note": "Roles and dispositions are a later layer; this release states only what ran and how it settled.",
+    "platform_sha256": [
+      "0051dcc799c25d76e7e8e739460a02a79cda21d48c135363ec8b8ae424bd4d4a",
+      "0061d62c4550d5f6efe4fbf3da4e5f8ae0ba2e533159df60c584d5cd1b3e79ec",
+      "0b813eed1aeb857b8469e44eb0fdde8c667a91d0d37e2955d058ece54fde4a4c",
+      "15eeff0304a91d5b076152973413e61f2c0270634a5ff2cc5018c52ab22041c1",
+      "2476e6f6461148de08f5d17d5f7dca705b777a361cfc5ac478292b410d46992b",
+      "2a8abc760eb2521cb0766af6f0c1bf62c06b9b63171555b219dd2b6df243b751",
+      "7ebba7bcefcb94785f48d2727b0f7d028bca1c8e8ae5f5b786cd945780366320",
+      "8489df9f7d7631a714e9960abef33e3331b3b8d879e01877b600c1145297871a",
+      "9db1cc46c2a7afd10f4f3b1f7d8cfab340f2c7a35f3e50d97336ed28289a4d9e",
+      "b02bae1dc8a7aafc6ca3f7b8cbeed487fef1ead5f21be813c9cb4df5ca4eb516",
+      "cfddeb7144007d963a9ee2670744be880a415427c50dcd540012cb3376946f1f",
+      "d7c5939e67bc97c5b42b3e6ef9fac84846a3e0cc7de58e1b6442103ec13e20a5",
+      "ea4ef4184a64ca8eef07800380346042d51c2f95c1554ef8a68f746122e11888",
+      "f0b53c8f07f908155042dafee1ba60950e84ca6963c9b760780ea1397685899c"
+    ],
+    "tool": "swath",
+    "tool_slice_sha256": [
+      "0b7c91c88bff32fb90fe34dc0f4c4985605a85306ff4baee3071bb9dc72df871",
+      "602c1037dc1f21e3f3140b73d9e1733b2bf0df3f4b127206bd1258199b8c0af3",
+      "8842dab3c9c8a949325fe903cd8ac7dfb4e3d4442fa2e94d39551e5fc3ff3bc8",
+      "8cebd8bd016e801ccc512c21768eb9f61f3313e67c04f209f82d45da8ee44556",
+      "9c30ed00b33bdaf7c934f5c933b91dfaee414118f9c91d47ff7e0d0aba7a98db",
+      "ed124931dedb697b4a88fa85873274c2bc9bedfb46e8d1471fb37a8e894b04b3"
+    ],
+    "versions": [
+      "0.2.5-SNAPSHOT",
+      "0.3.0",
+      "0.3.1"
+    ]
+  }
+}

@@ -53,15 +53,18 @@ facts under `tools/<tool>/build/`.
   - `verify.py` is the explicit real-S3 content-comparison path; replay is
     row-count-only and is refused there without staging raw products.
   - `report.py` binds `result.json` summaries to controller state and renders
-    row counts, timing, RSS, and replay-server evidence without reading listings.
+    row counts, timing, RSS, and replay-server evidence without reading listings;
+    injected replay attempts are separately labeled timing-valid,
+    pressure-degraded, capacity-failed, or insufficient-evidence.
   - `receipt.py` exports one settled group as a deterministic factual draft,
     including frozen requests and bound result/verification identities.
   - `replay_fixture.py` generates the small synthetic canary fixture outside the
     checkout and computes the content identity required by staged Parquet.
   - `fixture_bundle.py` reproducibly captures a public bucket with an immutable
     Swath image, writes sorted Parquet, derives s3-fast-list hints, measures
-    content and prefix shape, validates strict sorted replay startup, and can
-    upload the complete bundle with create-only GCS writes.
+    content and prefix shape, scans physical raw-key order and part boundaries,
+    separately validates strict sorted replay startup, and can upload the
+    complete bundle with create-only GCS writes.
   - `runtime/` is the contract layer the eleven capsule adapters import
     (`benchmark.runtime.*`); it runs both inside the image and orchestrator-side
     during verification.
@@ -103,7 +106,7 @@ session runner:
 ```sh
 uv run python benchmark/src/benchmark/campaign.py submit \
   --executor docker --suite rtofs-canary \
-  --plan benchmark/plans/experiments/repeatability/noaa-nws-rtofs-pds.yaml \
+  --plan benchmark/plans/examples/repeatability/noaa-nws-rtofs-pds.yaml \
   --image benchmark-toolbox:local --results-root /absolute/path/to/results \
   --location us-east1-b --seed 982451653 \
   --allow-retired-s4cmd-s3-canary --dry-run
@@ -160,6 +163,15 @@ uv run python -m benchmark.fixture_bundle \
   --gcs-prefix gs://RESULTS/fixtures/noaa-nbm-grib2-pds/current-REV
 ```
 
+When the bucket has already been captured by a study attempt (a real-S3 Swath
+`recursive-parquet-sorted` row with retained products), pass that attempt's
+`native/listing/` prefix as `--dataset-uri gs://RESULTS/scale-study/<bucket>/<attempt>/native/listing`
+instead of `--swath-image`: the bundle copies the retained dataset and its
+`_swath_summary.json` report, then runs the same analysis, physical-order scan,
+hint and shard generation, latency derivation, and sorted-serving validation.
+The study run is then both the live anchor and the fixture, and the bucket is
+never listed twice.
+
 The output is create-once: an existing output directory or GCS object is a
 refusal, never an implicit resume or overwrite. The uploaded bundle directory
 has a fixed contract (the local Parquet parts remain below `dataset/data/`):
@@ -175,7 +187,8 @@ README.md
 `fixture.json` retains the exact capture argv and image digests, Swath report,
 part manifest and replay fixture digest, row/distinct/duplicate/marker counts,
 prefix-depth shape, latency observations and fixed-p50 treatment, generated
-hint and s5cmd-shard counts/digests, host allocation, and sorted replay readiness. The uploader
+hint and s5cmd-shard counts/digests, host allocation, the fail-closed physical
+order scan with per-part boundaries, and sorted replay readiness. The uploader
 uses GCS generation precondition zero for every object. Replay plans continue to
 address only `part-*.parquet`; fixture-backed s3-fast-list and s5cmd modes stage
 their fixed companions from the same directory. The former bypasses the serial
@@ -233,7 +246,7 @@ toolbox smoke has passed:
 
 ```sh
 uv run python benchmark/src/benchmark/campaign.py submit \
-  --suite s3-listing-study --plan benchmark/plans/buckets/noaa-ghcn-pds.yaml \
+  --suite s3-listing-study --plan benchmark/plans/examples/noaa-ghcn-pds.yaml \
   --project my-project --location us-central1 \
   --results-bucket my-results --image-set /secure/images.json \
   --anonymous-worker-sa anonymous-worker@my-project.iam.gserviceaccount.com \
@@ -294,7 +307,13 @@ server evidence, in-container row count, raw upload, and result/report path. It
 produces neither comparative timing nor rate data. Replay
 capacity is **UNCALIBRATED** while the plan's `replay.capacity_status` says
 `uncalibrated`; no replay measurement row is eligible. Set it to `calibrated`
-only after a real diagnostic capacity canary has a committed receipt.
+only after a real diagnostic capacity canary has a committed receipt. The
+receipt must include a common allocation that passes the delivered-treatment
+gate and a paired materially overprovisioned control; see
+[`docs/methodology.md`](../docs/methodology.md). Reporting derives the gate from
+the raw meters for historical and future rows. It never rewrites evidence, and
+a failed gate changes timing eligibility rather than the subject's functional
+outcome.
 
 ### Malformed or partial evidence is refused
 
@@ -308,3 +327,16 @@ literal `-`; a field is compared only when both tools expose it. This avoids
 NULL-blind anti-joins and prevents a tool that cannot report a field from creating
 a false mismatch, while also making absence of that field non-evidence. Non-UTF-8
 keys are outside the declared benchmark corpus and verifier scope.
+
+## Publishing results
+
+Nothing in the campaign ledger is public. A public result release is a
+deterministic, allowlisted projection of it — one committed directory under
+`results/`, generated by `benchmark/src/benchmark/public_*.py` from a release
+spec in `benchmark/publication/`, and checked in CI by a validator that reads
+only the committed files. See
+[`docs/publishing.md`](docs/publishing.md) for the command sequence, the
+allowlist and forbidden-text guarantees, what the validator enforces, and the
+immutability and correction policy that a release directory carries.
+[`docs/testing.md`](docs/testing.md) says which tests this harness keeps and
+which it deletes on sight.

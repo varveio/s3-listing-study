@@ -195,7 +195,7 @@ def test_the_committed_plan_loads() -> None:
 
 def test_the_repeatability_canary_keeps_the_full_roster() -> None:
     """The shipped exception is one canary row per registered capsule."""
-    path = ROOT / "benchmark/plans/experiments/repeatability/noaa-nws-rtofs-pds.yaml"
+    path = ROOT / "benchmark/plans/examples/repeatability/noaa-nws-rtofs-pds.yaml"
     exclusions = tuple(
         item
         for item in bench.load_default_exclusions(ROOT / "benchmark/plans/tools.yaml")
@@ -657,7 +657,7 @@ def test_duplicate_values_on_an_independent_axis_are_refused_as_one_case(
         load(path)
 
 
-@pytest.mark.parametrize("bucket", ["noaa-rtma-pds", "sorel-20m"])
+@pytest.mark.parametrize("bucket", ["noaa-rtma-pds"])
 def test_large_bucket_campaign_plans_resolve_seventeen_cases(bucket: str) -> None:
     loaded = bench.Plan.load(bench.default_path(bucket))
     assert len(loaded.cases) == 17
@@ -987,6 +987,7 @@ def test_every_key_a_row_may_state_changes_the_case_it_resolves_to(tmp_path: Pat
         "replay_prefetch": (False, True),
         "replay_prefetch_max_windows": (96, 1024),
         "replay_heap_percent": (50, 75),
+        "replay_delimiter_connections": (16, 32),
     }
     assert set(pairs) == set(bench.ROW_FIELDS), "a row key with no coverage here"
 
@@ -1298,8 +1299,17 @@ def test_a_tool_body_is_the_defaults_vocabulary_plus_its_rows() -> None:
     assert set(bench.ROW_FIELDS) & set(bench.LAYER_FIELDS) == {
         *bench.RESOURCE_FIELDS,
         *bench.REPLAY_FIELDS,
+        *bench.REPLAY_OPTIONAL_INTEGER_FIELDS,
         "signed",
     }
+
+
+def test_case_label_accepts_a_comma_delimited_capsule_value() -> None:
+    label = bench.case_label(
+        (("mode", "fanout-with-dirs"), ("shard_prefixes", "blend.2020,blend.2021"))
+    )
+
+    assert bench.CASE_LABEL_RE.fullmatch(label)
 
 
 def test_incomplete_defaults_are_refused(tmp_path: Path) -> None:

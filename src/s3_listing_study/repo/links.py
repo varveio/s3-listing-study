@@ -31,6 +31,7 @@ SURFACE_GLOBS = [
     "docs/**/*.md",
     "benchmark/**/*.md",
     "tools/README.md",
+    "results/**/*.md",
 ]
 
 LINK = re.compile(r"\[[^]]*\]\(([^)\s]+)(?:\s+[\"'][^\"']*[\"'])?\)")

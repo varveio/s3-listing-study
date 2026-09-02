@@ -27,11 +27,11 @@
 # pd-balanced. Set it to `hyperdisk-balanced` explicitly. Not pd-ssd — N4 does
 # not take that either, and Batch's own disk-type field does not list a
 # Hyperdisk value, so this needs checking against the API it actually accepts.
-# The controller provisions the original 100 GiB N4 boot disk and bind-mounts
+# The controller provisions a 100 GiB N4 boot disk by default and bind-mounts
 # the subject's attempt directory from /mnt/stateful_partition so retained
 # output does not traverse the container overlay. The size is recorded in
-# executor_env rather than the case hash, per the settled identity contract.
-# Any larger-bucket capacity change is a separate later decision.
+# executor_env rather than the case hash, per the settled identity contract;
+# an operator may enlarge it with `--boot-disk-gb` for a retained large product.
 
 spec_version: 2
 
@@ -59,3 +59,13 @@ instances:
   - { vcpus: 48, memory_gb: 96, machine_type: n4-highcpu-48 }
   - { vcpus: 48, memory_gb: 192, machine_type: n4-standard-48 }
   - { vcpus: 48, memory_gb: 384, machine_type: n4-highmem-48 }
+
+  # Capacity controls for the 143M-row replay fixture. These deliberately
+  # leave eight vCPUs outside replay64+subject8 and replay48+subject8.
+  - { vcpus: 64, memory_gb: 128, machine_type: n4-highcpu-64 }
+  - { vcpus: 64, memory_gb: 256, machine_type: n4-standard-64 }
+  - { vcpus: 64, memory_gb: 512, machine_type: n4-highmem-64 }
+
+  - { vcpus: 80, memory_gb: 160, machine_type: n4-highcpu-80 }
+  - { vcpus: 80, memory_gb: 320, machine_type: n4-standard-80 }
+  - { vcpus: 80, memory_gb: 640, machine_type: n4-highmem-80 }

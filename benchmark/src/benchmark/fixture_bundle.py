@@ -167,19 +167,38 @@ def _generate_hints(data_dir: Path, output: Path, segments: int) -> dict[str, ob
     return {str(key): value for key, value in summary.items()}
 
 
+def _create_fixture_source(connection: duckdb.DuckDBPyConnection, paths: Sequence[Path]) -> str:
+    """Expose the parts as ``fixture_source`` with a BLOB ``key`` whatever the writer annotated.
+
+    Swath 0.3.1 annotates the key column as a UTF-8 string; earlier captures wrote raw bytes. The
+    physical bytes and their order are identical, so a string key is re-exposed as its bytes and
+    every downstream query keeps byte semantics. Returns the annotation found (``BLOB`` or
+    ``VARCHAR``).
+    """
+    connection.from_parquet([str(path) for path in paths]).create_view("fixture_parts")
+    columns = {
+        str(name): str(kind)
+        for _, name, kind, *_ in connection.execute("PRAGMA table_info('fixture_parts')").fetchall()
+    }
+    key_kind = columns.get("key")
+    if columns.get("row_type") != "VARCHAR" or key_kind not in {"BLOB", "VARCHAR"}:
+        raise FixtureBundleError(
+            "fixture must expose key BLOB or VARCHAR and row_type VARCHAR columns; "
+            f"found key={key_kind!r}, row_type={columns.get('row_type')!r}"
+        )
+    key_expression = "encode(key)" if key_kind == "VARCHAR" else "key"
+    connection.execute(
+        "CREATE VIEW fixture_source AS "
+        f"SELECT * REPLACE ({key_expression} AS key) FROM fixture_parts"
+    )
+    return key_kind
+
+
 def _fixture_analysis(data_dir: Path) -> dict[str, object]:
     paths = sorted(data_dir.glob("*.parquet"))
     with duckdb.connect() as connection:
         connection.execute("SET threads=8")
-        connection.from_parquet([str(path) for path in paths]).create_view("fixture_source")
-        columns = {
-            str(name): str(kind)
-            for _, name, kind, *_ in connection.execute(
-                "PRAGMA table_info('fixture_source')"
-            ).fetchall()
-        }
-        if columns.get("key") != "BLOB" or columns.get("row_type") != "VARCHAR":
-            raise FixtureBundleError("fixture must expose key BLOB and row_type VARCHAR columns")
+        key_kind = _create_fixture_source(connection, paths)
         counts = connection.execute(
             """
             SELECT count(*), count(DISTINCT key),
@@ -231,17 +250,109 @@ def _fixture_analysis(data_dir: Path) -> dict[str, object]:
         "min_key": str(counts[4]),
         "max_key": str(counts[5]),
         "row_types": {str(kind): int(count) for kind, count in row_types},
+        "key_annotation": key_kind,
         "first_characters": str(first_characters),
         "distinct_prefixes_by_depth": depths,
         "largest_root_prefixes": top_level,
     }
 
 
+def _physical_order_validation(data_dir: Path) -> dict[str, object]:
+    """Prove raw-key order in physical part/row order, independently of replay."""
+    paths = sorted(data_dir.glob("*.parquet"))
+    if not paths:
+        raise FixtureBundleError("fixture has no Parquet parts to order-validate")
+    parts: list[dict[str, object]] = []
+    previous_last: bytes | None = None
+    rows = descents = duplicates = cross_part_descents = cross_part_duplicates = 0
+    with duckdb.connect() as connection:
+        # The explicit row-number order is the evidence boundary. A parallel
+        # table scan's delivery order is an implementation detail and cannot
+        # prove the physical ordering contract this fixture claims.
+        connection.execute("SET threads=1")
+        for path in paths:
+            kind_row = connection.execute(
+                "SELECT typeof(key) FROM read_parquet(?) LIMIT 1", [str(path)]
+            ).fetchone()
+            key_kind = None if kind_row is None else str(kind_row[0])
+            if key_kind not in {"BLOB", "VARCHAR"}:
+                raise FixtureBundleError(
+                    f"fixture part has non-key column {key_kind!r}: {path.name}"
+                )
+            key_expression = "encode(key)" if key_kind == "VARCHAR" else "key"
+            result = connection.execute(
+                f"""
+                WITH ordered AS (
+                    SELECT {key_expression} AS key, file_row_number,
+                           lag({key_expression}) OVER (ORDER BY file_row_number) AS previous_key
+                    FROM read_parquet(?, file_row_number = true)
+                )
+                SELECT count(*),
+                       count(*) FILTER (WHERE previous_key > key),
+                       count(*) FILTER (WHERE previous_key = key),
+                       arg_min(key, file_row_number),
+                       arg_max(key, file_row_number)
+                FROM ordered
+                """,
+                [str(path)],
+            ).fetchone()
+            if result is None or int(result[0]) == 0:
+                raise FixtureBundleError(f"fixture part is empty: {path.name}")
+            part_rows, part_descents, part_duplicates = map(int, result[:3])
+            first_key, last_key = result[3], result[4]
+            if not isinstance(first_key, bytes) or not isinstance(last_key, bytes):
+                raise FixtureBundleError(f"fixture part has non-BLOB key boundaries: {path.name}")
+            boundary_descent = previous_last is not None and previous_last > first_key
+            boundary_duplicate = previous_last is not None and previous_last == first_key
+            cross_part_descents += int(boundary_descent)
+            cross_part_duplicates += int(boundary_duplicate)
+            rows += part_rows
+            descents += part_descents
+            duplicates += part_duplicates
+            try:
+                first_text, last_text = first_key.decode(), last_key.decode()
+            except UnicodeDecodeError as exc:
+                raise FixtureBundleError(
+                    f"fixture part has a non-UTF-8 key boundary: {path.name}"
+                ) from exc
+            parts.append(
+                {
+                    "name": path.name,
+                    "rows": part_rows,
+                    "first_key": first_text,
+                    "last_key": last_text,
+                    "descending_adjacent_pairs": part_descents,
+                    "adjacent_duplicate_pairs": part_duplicates,
+                }
+            )
+            previous_last = last_key
+    total_descents = descents + cross_part_descents
+    total_duplicates = duplicates + cross_part_duplicates
+    summary: dict[str, object] = {
+        "order": "part-filename-then-physical-row; raw-key-bytes ascending",
+        "rows": rows,
+        "descending_adjacent_pairs": total_descents,
+        "adjacent_duplicate_pairs": total_duplicates,
+        "cross_part_descending_pairs": cross_part_descents,
+        "cross_part_duplicate_pairs": cross_part_duplicates,
+        "parts": parts,
+    }
+    if total_descents:
+        raise FixtureBundleError(
+            f"fixture physical order has {total_descents} descending adjacent key pair(s)"
+        )
+    if total_duplicates:
+        raise FixtureBundleError(
+            f"fixture physical order has {total_duplicates} adjacent duplicate key pair(s)"
+        )
+    return summary
+
+
 def _generate_s5cmd_shards(data_dir: Path, output: Path) -> dict[str, object]:
     """Write the complete disjoint top-level prefix union for native s5cmd fanout."""
     paths = sorted(data_dir.glob("*.parquet"))
     with duckdb.connect() as connection:
-        connection.from_parquet([str(path) for path in paths]).create_view("fixture_source")
+        _create_fixture_source(connection, paths)
         shards = [
             str(row[0])
             for row in connection.execute(
@@ -310,7 +421,7 @@ def _wait_for_health(url: str, timeout_s: int) -> dict[str, object]:
     raise FixtureBundleError(f"replay sorted validation did not become ready: {last_error}")
 
 
-def _validate_sorted(
+def _validate_sorted_serving(
     args: argparse.Namespace, data_dir: Path, latency: Mapping[str, object], log_path: Path
 ) -> dict[str, object]:
     deadlines = latency["deadlines_ms"]
@@ -396,6 +507,32 @@ def _upload_bundle(uri: str, paths: Iterable[Path]) -> list[str]:
     return uploaded
 
 
+def _download_dataset(uri: str, dataset: Path) -> list[str]:
+    """Copy one retained sorted Swath dataset (an attempt's ``native/listing/``) into ``dataset``.
+
+    A study capture on the real bucket is both the live anchor and the fixture, so the bundle
+    reuses its retained product rather than listing the bucket again. Every object under the prefix
+    is copied with its relative path, which preserves the ``data/`` parts, the dataset manifest, and
+    ``_swath_summary.json`` (the same report shape a local capture writes to ``report.json``).
+    """
+    bucket_name, prefix = _gcs_parts(uri)
+    bucket = storage.Client().bucket(bucket_name)
+    copied: list[str] = []
+    for blob in bucket.list_blobs(prefix=prefix + "/"):
+        relative = blob.name[len(prefix) + 1 :]
+        if not relative or relative.endswith("/"):
+            continue
+        target = dataset / relative
+        if not target.resolve().is_relative_to(dataset.resolve()):
+            raise FixtureBundleError(f"refusing dataset object outside the bundle: {blob.name}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        blob.download_to_filename(target)
+        copied.append(f"gs://{bucket_name}/{blob.name}")
+    if not copied:
+        raise FixtureBundleError(f"no objects under {uri}")
+    return copied
+
+
 def _read_report(path: Path) -> dict[str, object]:
     try:
         value = json.loads(path.read_text())
@@ -419,10 +556,22 @@ def _render_readme(summary: Mapping[str, object]) -> str:
 
     source = mapping("source")
     fixture = mapping("fixture")
-    hints = mapping("s3_fast_list_hints")
-    s5cmd_shards = mapping("s5cmd_shards")
+    hints = None if summary.get("s3_fast_list_hints") is None else mapping("s3_fast_list_hints")
+    s5cmd_shards = None if summary.get("s5cmd_shards") is None else mapping("s5cmd_shards")
+    companion_lines = (
+        "- Companion inputs: not generated (`--without-companions`; no tool in this "
+        "fixture's cells reads hints or shards)"
+        if hints is None or s5cmd_shards is None
+        else (
+            f"- s3-fast-list hints: `{HINTS_NAME}`, {hints['cut_points']} cuts / "
+            f"{hints['ranges']} ranges,\n  SHA-256 `{hints['sha256']}`\n"
+            f"- s5cmd fanout: `{S5CMD_SHARDS_NAME}`, {s5cmd_shards['shards']} disjoint "
+            f"top-level shards,\n  SHA-256 `{s5cmd_shards['sha256']}`"
+        )
+    )
     latency = mapping("latency_model")
     capture = mapping("capture")
+    physical_order = mapping("physical_order_validation")
     return f"""# Replay fixture bundle
 
 Generated by `python -m benchmark.fixture_bundle`; this directory is evidence,
@@ -432,10 +581,10 @@ not a benchmark result.
 - Rows / distinct keys: {fixture["rows"]:,} / {fixture["distinct_keys"]:,}
 - Fixture digest: `{fixture["sha256"]}`
 - Sorted Parquet: {fixture["files"]} part(s), {fixture["bytes"]:,} bytes
-- s3-fast-list hints: `{HINTS_NAME}`, {hints["cut_points"]} cuts / {hints["ranges"]} ranges,
-  SHA-256 `{hints["sha256"]}`
-- s5cmd fanout: `{S5CMD_SHARDS_NAME}`, {s5cmd_shards["shards"]} disjoint top-level shards,
-  SHA-256 `{s5cmd_shards["sha256"]}`
+- Physical order: {physical_order["rows"]:,} rows scanned;
+  {physical_order["descending_adjacent_pairs"]} descents /
+  {physical_order["adjacent_duplicate_pairs"]} adjacent duplicates
+{companion_lines}
 - Replay latency deadlines: `{latency["deadlines_ms"]}`
 - Swath image: `{capture["swath_image"]}`
 - Replay validation image: `{capture["replay_image"]}`
@@ -461,10 +610,15 @@ def build_bundle(args: argparse.Namespace) -> dict[str, object]:
     report_dir.mkdir(mode=0o777)
     dataset.chmod(0o777)
     report_dir.chmod(0o777)
-    command = _capture_command(args, output)
-    _run_stream(command, output / "capture.log")
-
-    report = _read_report(report_dir / "report.json")
+    if args.dataset_uri:
+        copied = _download_dataset(args.dataset_uri, dataset)
+        command = ("gcs-copy", args.dataset_uri, *copied)
+        report = _read_report(dataset / "_swath_summary.json")
+        (report_dir / "report.json").write_text(json.dumps(report, sort_keys=True) + "\n")
+    else:
+        command = _capture_command(args, output)
+        _run_stream(command, output / "capture.log")
+        report = _read_report(report_dir / "report.json")
     data_dir = dataset / "data"
     manifest_sha256, manifest_rows = fixture_manifest(data_dir)
     analysis = _fixture_analysis(data_dir)
@@ -472,19 +626,32 @@ def build_bundle(args: argparse.Namespace) -> dict[str, object]:
         raise FixtureBundleError(
             f"fixture has {analysis['rows']} rows but Swath reported {report.get('objects')}"
         )
-    hints_path = output / HINTS_NAME
-    hints = _generate_hints(data_dir, hints_path, args.segments)
-    s5cmd_shards_path = output / S5CMD_SHARDS_NAME
-    s5cmd_shards = _generate_s5cmd_shards(data_dir, s5cmd_shards_path)
+    physical_order = _physical_order_validation(data_dir)
+    if physical_order["rows"] != analysis["rows"]:
+        raise FixtureBundleError(
+            "fixture physical-order scan and aggregate analysis disagree on row count"
+        )
+    companions: list[Path] = []
+    hints: dict[str, object] | None = None
+    s5cmd_shards: dict[str, object] | None = None
+    if not args.without_companions:
+        hints_path = output / HINTS_NAME
+        hints = _generate_hints(data_dir, hints_path, args.segments)
+        s5cmd_shards_path = output / S5CMD_SHARDS_NAME
+        s5cmd_shards = _generate_s5cmd_shards(data_dir, s5cmd_shards_path)
+        companions = [hints_path, s5cmd_shards_path]
     latency = _latency_profile(report)
-    validation = _validate_sorted(args, data_dir, latency, output / "sorted-validation.log")
+    serving_validation = _validate_sorted_serving(
+        args, data_dir, latency, output / "sorted-validation.log"
+    )
     parquet_paths = sorted(data_dir.glob("*.parquet"))
     gcs_prefix = args.gcs_prefix.rstrip("/") if args.gcs_prefix else None
     summary: dict[str, object] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "generated_at": datetime.now(UTC).isoformat(),
         "source": {"bucket": args.bucket, "region": args.region, "prefix": args.prefix},
         "capture": {
+            "dataset_uri": args.dataset_uri,
             "swath_image": args.swath_image,
             "replay_image": args.replay_image,
             "harness_revision": harness_revision,
@@ -507,10 +674,13 @@ def build_bundle(args: argparse.Namespace) -> dict[str, object]:
             "files": len(parquet_paths),
             "bytes": sum(path.stat().st_size for path in parquet_paths),
         },
-        "s3_fast_list_hints": {**hints, "segments": args.segments, "name": HINTS_NAME},
+        "s3_fast_list_hints": (
+            None if hints is None else {**hints, "segments": args.segments, "name": HINTS_NAME}
+        ),
         "s5cmd_shards": s5cmd_shards,
         "latency_model": latency,
-        "sorted_validation": validation,
+        "physical_order_validation": physical_order,
+        "sorted_serving_validation": serving_validation,
         "gcs_prefix": gcs_prefix,
     }
     summary_path = output / SUMMARY_NAME
@@ -520,7 +690,7 @@ def build_bundle(args: argparse.Namespace) -> dict[str, object]:
     if gcs_prefix is not None:
         _upload_bundle(
             gcs_prefix,
-            (*parquet_paths, hints_path, s5cmd_shards_path, summary_path, readme_path),
+            (*parquet_paths, *companions, summary_path, readme_path),
         )
     return summary
 
@@ -533,13 +703,24 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--region", required=True)
     parser.add_argument("--prefix", default="")
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--swath-image", required=True)
+    parser.add_argument(
+        "--dataset-uri",
+        help="gs:// prefix of a retained sorted Swath dataset (a study attempt's native/listing/) "
+        "to bundle instead of capturing the bucket again",
+    )
+    parser.add_argument("--swath-image", help="required unless --dataset-uri is given")
     parser.add_argument("--replay-image", required=True)
     parser.add_argument("--cpuset", required=True)
     parser.add_argument("--memory-gb", type=int, default=16)
     parser.add_argument("--replay-memory-gb", type=int, default=20)
     parser.add_argument("--concurrency", type=int, default=128)
     parser.add_argument("--segments", type=int, default=1000)
+    parser.add_argument(
+        "--without-companions",
+        action="store_true",
+        help="skip the s3-fast-list hints and s5cmd shard companions (a flat namespace has "
+        "no prefixes to cut or shard on, and neither tool runs on it)",
+    )
     parser.add_argument("--gcs-prefix")
     parser.add_argument("--validation-port", type=int, default=29090)
     parser.add_argument("--validation-metrics-port", type=int, default=29192)
@@ -550,8 +731,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     for name in ("memory_gb", "replay_memory_gb", "concurrency", "segments", "ready_timeout_s"):
         if getattr(args, name) < 1:
             parser.error(f"--{name.replace('_', '-')} must be positive")
+    if args.dataset_uri:
+        try:
+            _gcs_parts(args.dataset_uri)
+        except FixtureBundleError:
+            parser.error("--dataset-uri must be a gs://bucket/prefix of a retained dataset")
+        if args.swath_image is not None:
+            parser.error("--swath-image is meaningless with --dataset-uri")
+    elif args.swath_image is None:
+        parser.error("--swath-image is required unless --dataset-uri is given")
     try:
-        args.swath_image = _require_image(args.swath_image, "--swath-image")
+        if args.swath_image is not None:
+            args.swath_image = _require_image(args.swath_image, "--swath-image")
         args.replay_image = _require_image(args.replay_image, "--replay-image")
     except FixtureBundleError as exc:
         parser.error(str(exc))

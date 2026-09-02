@@ -37,7 +37,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="python -m benchmark.plan_cli", allow_abbrev=False, add_help=True
     )
     source = parser.add_mutually_exclusive_group(required=True)
-    source.add_argument("--bucket", help="plan under benchmark/plans/buckets")
+    source.add_argument("--bucket", help="example plan under benchmark/plans/examples")
     source.add_argument("--path", help="path to a plan file")
     parser.add_argument(
         "--json", action="store_true", help="emit the resolved cases as JSON instead of a table"
@@ -75,6 +75,8 @@ def _replay_projection(
     else:
         profile = ",".join(f"{shape}={delay}ms" for shape, delay in backend.latency_deadlines_ms)
         latency = f"{profile} scale={backend.latency_scale} jitter={backend.latency_jitter}"
+    if backend.warmup is not None:
+        latency += " warmup=" + ",".join(f"{name}={count}" for name, count in backend.warmup)
     fixture = f"sha256:{backend.fixture_sha256[:12]}…"
     if backend.fixture_uri is not None:
         fixture = f"{backend.fixture_uri} ({fixture})"

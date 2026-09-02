@@ -29,7 +29,7 @@ from benchmark.plan import Case, Plan
 from benchmark.runtime.command_adapter import HEAP_PERCENT
 
 ROOT = Path(__file__).parents[2]
-PLAN_PATH = ROOT / "benchmark/plans/buckets/noaa-ghcn-pds.yaml"
+PLAN_PATH = ROOT / "benchmark/plans/examples/noaa-ghcn-pds.yaml"
 REPLAY_CANARY = ROOT / "benchmark/plans/canaries/runner-replay-canary.yaml"
 DIGEST = "a" * 64
 PLATFORM = "9" * 64
@@ -87,6 +87,28 @@ def options(**overrides: object) -> gcp_batch.BatchOptions:
     }
     values.update(overrides)
     return gcp_batch.BatchOptions(**values)
+
+
+def test_boot_disk_override_is_rendered_and_recorded(tmp_path: Path) -> None:
+    plan = Plan.load(REPLAY_CANARY)
+    case = plan.cases[0]
+    images = image_set(tmp_path)
+    launch = context(plan, case, images, boot_disk_size_gb=200)
+    attempt = campaign.planned_attempt(case, launch)[2](1)[0]
+
+    request = gcp_batch.render_batch_job(
+        attempt,
+        images.image_for(case.tool),
+        suite=SUITE,
+        options=launch.options,
+    )
+
+    assert request["allocationPolicy"]["instances"][0]["policy"]["bootDisk"] == {
+        "type": "hyperdisk-balanced",
+        "image": "batch-cos",
+        "sizeGb": "200",
+    }
+    assert json.loads(attempt.executor_env)["boot_disk"]["size_gb"] == 200
 
 
 def loaded_plan() -> Plan:
@@ -2064,3 +2086,31 @@ def test_a_slot_abandons_only_once_every_candidate_is_gone(
         argparse.Namespace(state=state, attempt=second["attempt_id"], slot=None)
     )
     assert [slot["state"] for slot in ledger.pending_rows(con)] == ["ABANDONED", "ABANDONED"]
+
+
+def test_renderer_passes_a_stated_delimiter_width_to_the_server(tmp_path: Path) -> None:
+    plan = Plan.load(REPLAY_CANARY)
+    case = plan.cases[0]
+    images = image_set(tmp_path)
+    attempt = campaign.planned_attempt(case, context(plan, case, images))[2](1)[0]
+    replay = json.loads(attempt.replay or "null")
+    replay["allocation"]["replay_delimiter_connections"] = 128
+    stated = replace(attempt, replay=json.dumps(replay, sort_keys=True, separators=(",", ":")))
+
+    request = gcp_batch.render_batch_job(
+        stated,
+        images.image_for(case.tool),
+        suite=SUITE,
+        options=context(plan, case, images).options,
+    )
+    server = request["taskGroups"][0]["taskSpec"]["runnables"][2]
+    commands = server["container"]["commands"]
+    assert commands[commands.index("--delimiter-connections") + 1] == "128"
+    assert "--delimiter-connections" not in json.dumps(
+        gcp_batch.render_batch_job(
+            attempt,
+            images.image_for(case.tool),
+            suite=SUITE,
+            options=context(plan, case, images).options,
+        )
+    )

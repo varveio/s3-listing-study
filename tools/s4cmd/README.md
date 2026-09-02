@@ -2,17 +2,41 @@
 
 [s4cmd](https://github.com/bloomreach/s4cmd) is a single-file Python "super S3 CLI" that lists a bucket by walking its pseudo-directory tree and printing one plain-text `ls` line per object, parallelising the walk through client-side delimiter recursion rather than a caller-supplied shard list.
 It is the canonical bloomreach project rather than a fork, and its last release (`2.1.0`) is dormant — the tag is 2018-era — though it still installs and runs under a current boto3.
-This study's groundwork is complete; no benchmark comparison has been run.
+
+> **Study status (2026-09-scale-diagnostics).** This tool's standing in the current release:
+> No attempt in the current release.
+> The release is diagnostic: no attempt in it carries `purpose = measurement`, so
+> nothing here is a calibrated benchmark or a ranking. Report and data:
+> [`results/2026-09-scale-diagnostics/REPORT.md`](../../results/2026-09-scale-diagnostics/REPORT.md).
+
+## In the current release
+
+The release `2026-09-scale-diagnostics` is diagnostic: it settles what ran, what each run returned, and how much memory it used; no row in it is a calibrated measurement, and nothing here is a ranking.
+s4cmd has no attempt in the release: the replay instrument serves `ListObjectsV2` only, and s4cmd lists through the legacy `list_objects` v1 API (see [How it works](#how-it-works)), so the adapter refuses the replay endpoint; on live S3 it needs credentials, and no credentialed live run was scheduled.
+
+| fixture | attempts | outcomes | timing grades of completed rows | row cited in the report |
+| --- | ---: | --- | --- | --- |
+| none | 0 | — | — | none cited |
+
+Largest fixture attempted: none. The report lists s4cmd in the roster with no attempt; that is a study decision, not a measured limit of the tool.
+
+A timing grade (`TIMING_VALID`, `PRESSURE_DEGRADED`, `CAPACITY_FAILED`, `INSUFFICIENT_EVIDENCE`, `NOT_APPLICABLE`) describes how well the replay instrument delivered its declared latency treatment on that row, not whether the tool succeeded; the definitions are in [`docs/instrument.md`](../../docs/instrument.md#how-a-release-grades-the-delivered-treatment).
+
+Report: [`results/2026-09-scale-diagnostics/REPORT.md`](../../results/2026-09-scale-diagnostics/REPORT.md); findings page: [`RESULTS.md`](../../RESULTS.md); rows: [`results/2026-09-scale-diagnostics/attempts.jsonl`](../../results/2026-09-scale-diagnostics/attempts.jsonl).
+
+The rows are an allowlisted public projection of the campaign ledger; the original result files and logs are private. The receipts under `receipts/` in this directory are groundwork evidence and do not cover the release rows.
 
 ## At a glance
+
+Groundwork subject: the pinned build, smoke runs and source study from August 2026. The current release's rows are in the section above.
 
 | Question | Current answer |
 | --- | --- |
 | Tested subject | Upstream `bloomreach/s4cmd` at pinned commit `80059bf` (release tag `2.1.0`), built into a local `python:3.7-slim` image with a 2018-era boto3 pin and run under the shared harness. Full canonical identity is in [`data/tool.json`](data/tool.json). |
-| Exercised coverage | `recursive` has run under a scoped list-only credential. s4cmd has no unsigned/anonymous access, so anonymously every mode is *blocked, not skipped*; the other three modes have not been run under credentials. Source was read at the pinned commit. |
+| Exercised coverage | During groundwork: `recursive` has run under a scoped list-only credential. s4cmd has no unsigned/anonymous access, so anonymously every mode is *blocked, not skipped*; the other three modes have not been run under credentials. Source was read at the pinned commit. Scale behaviour was not exercised during groundwork or in the release (section above). |
 | Correctness | Not attempted. The credentialed `recursive` attempt produced keys, but auditing an attempt against a reference manifest is not implemented, so nothing has checked them. |
 | Capability finding | A receipted harness probe of `recursive` exited 1 at client construction, before any S3 request; canonical claim `recursive-blocked-without-credentials`. This is the block itself, not a listing run. |
-| Results | No benchmark or comparative result exists, and none can be produced anonymously; s4cmd requires credentials to list. |
+| Results | No calibrated benchmark or comparative result exists in this study. The current release has no rows for this tool (section above); values in this table describe single groundwork runs, and none can be produced anonymously because s4cmd requires credentials to list. |
 
 ## How it works
 
@@ -94,6 +118,7 @@ resolve in [`data/claims.json`](data/claims.json).
 - Every listing mode is blocked without credentials; a credentialed run is
   required to exercise `recursive`, `shallow`, `show-directory`, and `du` and to
   sweep the `-c` thread count within the aggregate concurrency cap.
+  **Release update:** no release attempt exists; the replay instrument serves `ListObjectsV2` only and s4cmd's v1 path cannot run against it (section above).
 - Edge-key fidelity is deferred (`EDGE_BUCKET=none`): unicode, weird-key, and
   multipart-ETag behavior were not exercised.
 
@@ -112,6 +137,7 @@ resolve in [`data/claims.json`](data/claims.json).
   how many LIST pages does `ls -r` issue versus a flat scan?
 - At what key count does accumulate-then-sort exhaust memory, and how does peak
   RSS scale with N?
+  **Release update:** not answered; s4cmd has no row in the release (section above).
 - How does s4cmd behave under throttling (503 SlowDown is not in its own
   retryable set) and what is the client-CPU cost of per-line formatting plus a
   full sort at large N?
@@ -154,4 +180,4 @@ confirms run-dependent behavior. The receipt-backed `confirmed` facts here — t
 flag's presence, s4cmd's install/import/run under a current boto3, and the
 corrected `2.1.0` version self-report — are all build, startup, and capability
 facts; none confirms listing correctness. No smoke listing observation and no
-benchmark result exist.
+benchmark result exist. Rows in `results/` are the public projection of the campaign ledger, separate from the receipts here; neither is a benchmark result.

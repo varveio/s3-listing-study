@@ -1254,6 +1254,7 @@ def _replay_phase(
     box_vcpus: int,
     attempt_destination: str,
     publish_failure: Callable[..., int],
+    bucket: str,
 ) -> tuple[int | None, Callable[[], None]]:
     """Start replay evidence collection and return its matching finalizer."""
     if replay_evidence is None:
@@ -1274,6 +1275,10 @@ def _replay_phase(
             publish_failure(exit_code=EXIT_REPLAY_EVIDENCE_FAILED, setup=None, started_at=None),
             lambda: None,
         )
+    if replay_config.backend.warmup is not None:
+        # Declared warm-up runs after readiness and before the ``before`` snapshot, so its
+        # requests warm the server without entering any treatment meter delta.
+        replay_evidence["warmup"] = replay_runtime.warm_up(replay_config, bucket)
     replay_evidence["before"] = replay_runtime.scrape_metrics(replay_evidence, "before")
     if replay_evidence["before"] is None:
         return (
@@ -1504,7 +1509,12 @@ def main(argv: list[str] | None = None) -> int:
     subject_stdout = product.path if product is not None and product.takes_stdout else stdout_path
 
     replay_failure, finish_replay = _replay_phase(
-        replay_evidence, replay_config, args.vcpus, attempt_destination, publish_failure
+        replay_evidence,
+        replay_config,
+        args.vcpus,
+        attempt_destination,
+        publish_failure,
+        args.bucket,
     )
     if replay_failure is not None:
         return replay_failure

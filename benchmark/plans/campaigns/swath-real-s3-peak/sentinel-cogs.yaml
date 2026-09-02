@@ -1,0 +1,41 @@
+# Swath-only real-S3 sorted capture followed by a separately selected TSV pass.
+spec_version: 2
+
+bucket: sentinel-cogs
+region: us-west-2
+auth_role: public-read
+
+defaults:
+  reps: 1
+  timeout_s: 14400
+  vcpus: 32
+  memory_gb: 64
+
+tools:
+  swath:
+    cases:
+      - mode: recursive-parquet-sorted
+        concurrency: 1024
+        purpose: diagnostic
+        config: {jvm_max_heap: 16g, sort_merge_parallelism: 8}
+      - mode: recursive-tsv-zstd
+        concurrency: 1024
+        purpose: diagnostic
+        config: {jvm_max_heap: 16g, text_writers: 8}
+      # 2026-09-01 throughput follow-up: the doubled AIMD ceiling and writer count this bucket's
+      # sorted capture never had; pure listing to compressed TSV, no sort or merge.
+      - mode: recursive-tsv-zstd
+        concurrency: 2048
+        purpose: diagnostic
+        config: {jvm_max_heap: 16g, text_writers: 16}
+
+exclude:
+  - {tool: aws-cli, reason: outside this Swath-only real-S3 diagnostic}
+  - {tool: minio-mc, reason: outside this Swath-only real-S3 diagnostic}
+  - {tool: ps3, reason: outside this Swath-only real-S3 diagnostic}
+  - {tool: rclone, reason: outside this Swath-only real-S3 diagnostic}
+  - {tool: s3-fast-list, reason: outside this Swath-only real-S3 diagnostic}
+  - {tool: s3kor, reason: outside this Swath-only real-S3 diagnostic}
+  - {tool: s3p, reason: outside this Swath-only real-S3 diagnostic}
+  - {tool: s5cmd, reason: outside this Swath-only real-S3 diagnostic}
+  - {tool: s7cmd, reason: outside this Swath-only real-S3 diagnostic}

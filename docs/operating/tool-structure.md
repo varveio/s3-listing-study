@@ -84,15 +84,21 @@ Its normal order is:
 1. Three short introductory sentences: what the tool *does* — it lists a
    bucket — stated before its principal output format, with the upstream
    project linked and the distinctive listing or concurrency mechanism glossed
-   in plain terms; any remaining upstream-ownership or fork context; and stable
-   study status. While the repository remains in its current groundwork state,
-   the third sentence is exactly: "This study's groundwork is complete; no
-   benchmark comparison has been run."
+   in plain terms; any remaining upstream-ownership or fork context; and the
+   study-status block. The block is shared wording declared once in
+   `s3_listing_study.repo.capsule.STATUS_BLOCK` (which release is current,
+   that its ceiling forbids reading it as a benchmark, where it lives) with
+   one line the page fills in with its own outcome. The validator requires
+   every page to carry the current block, so a superseded release is caught
+   on every page at once.
 
-   That wording is deliberately true for run and blocked subjects alike — a
-   per-tool sentence claiming the tool was built or run would be false for
-   credential-blocked subjects. Change the shared sentence only when the
-   repository's actual study phase changes.
+   Immediately after the block, an H2 **In the current release** carries the
+   page's release layer: the version(s) and modes that ran, one row per
+   fixture with attempt counts, outcomes and timing grades, the largest
+   fixture attempted and why no larger one was scheduled, and any setup
+   asymmetry. Everything below it is the groundwork layer, and every "not
+   exercised" or "no receipt" statement on the page says which layer it
+   belongs to.
 2. **At a glance:** the tested-subject facts stated inline — fork, patch, built
    revision, and how it was run — with the canonical record in `data/tool.json`
    linked second rather than in place of the facts; exercised coverage;

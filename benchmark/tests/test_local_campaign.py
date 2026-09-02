@@ -18,7 +18,7 @@ from benchmark import campaign, docker_executor, ledger
 from benchmark.plan import Plan
 
 ROOT = Path(__file__).parents[2]
-PLAN_PATH = ROOT / "benchmark/plans/buckets/noaa-ghcn-pds.yaml"
+PLAN_PATH = ROOT / "benchmark/plans/examples/noaa-ghcn-pds.yaml"
 SUITE = "s3-listing-study"
 
 

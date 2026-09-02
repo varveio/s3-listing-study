@@ -7,13 +7,22 @@ import math
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
+from xml.etree import ElementTree
 
 from benchmark import gcs
 from benchmark.contract import canonical_json
-from benchmark.replay import REPLAY_METRICS_URL, ReplayConfig, allocation_cpu_sets
+from benchmark.replay import (
+    REPLAY_ENDPOINT_URL,
+    REPLAY_METRICS_URL,
+    ReplayConfig,
+    allocation_cpu_sets,
+)
 from benchmark.replay import format_cpuset as format_cpuset
 
 REPLAY_READINESS_TIMEOUT_S = 600
@@ -21,11 +30,16 @@ REPLAY_HTTP_TIMEOUT_S = 5.0
 REPLAY_READINESS_POLL_S = 1.0
 REPLAY_SAMPLE_INTERVAL_S = 10.0
 REPLAY_HEARTBEAT_INTERVAL_S = 60.0
+WARMUP_TIMEOUT_S = 180.0
+WARMUP_REQUEST_TIMEOUT_S = 30.0
+WARMUP_ANCHOR_LIMIT = 4096
+_S3_NS = "{http://s3.amazonaws.com/doc/2006-03-01/}"
 
 
 def evidence() -> dict[str, object]:
     return {
         "readiness": None,
+        "warmup": None,
         "before": None,
         "samples": [],
         "resource_samples": [],
@@ -73,6 +87,127 @@ def wait_for_replay() -> dict[str, object]:
         "wait_ms": round((time.monotonic() - started) * 1000),
         "attempts": attempts,
         "last_error": last_error,
+    }
+
+
+def _warmup_get(url: str) -> bytes:
+    request = urllib.request.Request(url, headers={"Accept": "application/xml"})
+    with urllib.request.urlopen(request, timeout=WARMUP_REQUEST_TIMEOUT_S) as response:
+        if response.status != 200:
+            raise OSError(f"HTTP {response.status}")
+        return bytes(response.read())
+
+
+def _warmup_listing(body: bytes) -> tuple[list[str], list[str]]:
+    """The common prefixes and object keys of one ListObjectsV2 response, in document order."""
+    root = ElementTree.fromstring(body)
+    # ``<Prefix>`` also names the request's own prefix at the top level; keep only children.
+    prefixes = [
+        element.text or ""
+        for common in root.iter(f"{_S3_NS}CommonPrefixes")
+        for element in common.iter(f"{_S3_NS}Prefix")
+        if element.text
+    ]
+    keys = [element.text or "" for element in root.iter(f"{_S3_NS}Key") if element.text]
+    return prefixes, keys
+
+
+def warm_up(
+    config: ReplayConfig, bucket: str, *, endpoint_url: str = REPLAY_ENDPOINT_URL
+) -> dict[str, object]:
+    """Drive the declared warm-up against the replay endpoint before the subject clock starts.
+
+    Structure probes walk the delimiter tree breadth-first from the root, so the request set is a
+    deterministic function of the fixture and the declared count. Keys those responses return are
+    the ``start-after`` anchors for pivot probes (``max-keys=1``) and worker pages
+    (``max-keys=1000``), spread evenly over the sorted anchor list. Requests run ``in_flight`` at a
+    time; the whole phase is bounded by a wall-clock budget and every count actually issued is
+    recorded, so a truncated warm-up is visible rather than silent.
+    """
+    declared = dict(config.backend.warmup or ())
+    if not declared:
+        return {"state": "skipped", "requested": None}
+    started = time.monotonic()
+    in_flight = max(1, int(declared["in_flight"]))
+    base = f"{endpoint_url.rstrip('/')}/{bucket}"
+    issued = dict.fromkeys(("structure_probes", "pivot_probes", "worker_pages"), 0)
+    failures: list[str] = []
+    anchors: list[str] = []
+    seen: set[str] = set()
+    queue: deque[str] = deque([""])
+    truncated = False
+
+    def budget_left() -> bool:
+        return time.monotonic() - started < WARMUP_TIMEOUT_S
+
+    def fetch(query: str) -> bytes | None:
+        try:
+            return _warmup_get(f"{base}?{query}")
+        except (OSError, ValueError, urllib.error.URLError) as exc:
+            if len(failures) < 20:
+                failures.append(str(exc))
+            return None
+
+    with ThreadPoolExecutor(max_workers=in_flight, thread_name_prefix="replay-warmup") as pool:
+        target = int(declared["structure_probes"])
+        while issued["structure_probes"] < target and queue and budget_left():
+            wave = [
+                queue.popleft()
+                for _ in range(min(in_flight, target - issued["structure_probes"], len(queue)))
+            ]
+            queries = [
+                "list-type=2&delimiter=%2F&max-keys=1000&prefix=" + urllib.parse.quote(prefix)
+                for prefix in wave
+            ]
+            for body in pool.map(fetch, queries):
+                issued["structure_probes"] += 1
+                if body is None:
+                    continue
+                try:
+                    prefixes, keys = _warmup_listing(body)
+                except ElementTree.ParseError as exc:
+                    if len(failures) < 20:
+                        failures.append(f"unparseable listing: {exc}")
+                    continue
+                for prefix in prefixes:
+                    if prefix not in seen:
+                        seen.add(prefix)
+                        queue.append(prefix)
+                if len(anchors) < WARMUP_ANCHOR_LIMIT:
+                    anchors.extend(keys[: WARMUP_ANCHOR_LIMIT - len(anchors)])
+        if issued["structure_probes"] < target:
+            truncated = True
+
+        anchors = sorted(set(anchors))
+        for name, max_keys in (("pivot_probes", 1), ("worker_pages", 1000)):
+            target = int(declared[name])
+            if target == 0:
+                continue
+            if not anchors:
+                truncated = True
+                continue
+            step = max(1, len(anchors) // target)
+            chosen = [anchors[(index * step) % len(anchors)] for index in range(target)]
+            queries = [
+                f"list-type=2&max-keys={max_keys}&start-after=" + urllib.parse.quote(anchor)
+                for anchor in chosen
+            ]
+            for offset in range(0, len(queries), in_flight):
+                if not budget_left():
+                    truncated = True
+                    break
+                for _body in pool.map(fetch, queries[offset : offset + in_flight]):
+                    issued[name] += 1
+
+    return {
+        "state": "truncated" if truncated else "complete",
+        "requested": declared,
+        "issued": issued,
+        "distinct_prefixes": len(seen),
+        "anchors": len(anchors),
+        "failures": len(failures),
+        "failure_samples": failures[:5],
+        "duration_ms": round((time.monotonic() - started) * 1000),
     }
 
 

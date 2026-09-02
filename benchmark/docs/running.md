@@ -81,7 +81,11 @@ tool enforces for you; a missing item surfaces as a provider error mid-campaign.
    `result.json` last. Native products are uploaded only with
    `--retain-products`. Keep
    `replay.capacity_status: uncalibrated` until a real diagnostic capacity
-   canary has a committed receipt. The staged-fixture provider path separately
+   canary has a committed receipt. Before promotion, confirm the common
+   allocation reports `TIMING_VALID` for the heaviest included request shape
+   and run its paired materially overprovisioned replay control; predeclare the
+   wall-time agreement band. A pressure-degraded or capacity-failed row may
+   remain a functionality result but is not a timing. The staged-fixture provider path separately
    remains `VERIFIED: no` until a committed canary uses `fixture_uri`; a bundled
    fixture canary does not qualify that download and manifest-check branch. Before
    hashing or uploading a fixture, apply the separate
@@ -158,7 +162,7 @@ staged-fixture plan, real-S3, and dependency-slot submission remain unverified.
 ```sh
 uv run python benchmark/src/benchmark/campaign.py submit \
   --suite s3-listing-study \
-  --plan benchmark/plans/buckets/noaa-ghcn-pds.yaml \
+  --plan benchmark/plans/examples/noaa-ghcn-pds.yaml \
   --project my-project --location us-central1 \
   --results-bucket my-results --image-set /secure/images.json \
   --anonymous-worker-sa anonymous-worker@my-project.iam.gserviceaccount.com \
@@ -172,7 +176,7 @@ provider — use it first:
 
 ```sh
 uv run python benchmark/src/benchmark/campaign.py submit \
-  --suite s3-listing-study --plan benchmark/plans/buckets/noaa-ghcn-pds.yaml \
+  --suite s3-listing-study --plan benchmark/plans/examples/noaa-ghcn-pds.yaml \
   --project my-project --location us-central1 \
   --results-bucket my-results --image-set /secure/images.json \
   --anonymous-worker-sa anonymous-worker@my-project.iam.gserviceaccount.com \
@@ -227,6 +231,10 @@ Two flags change what a repeated `submit` does with what it finds:
 
 Defaults worth knowing: `--provisioning` is `SPOT`, so preemption is expected
 rather than exceptional. `--network`/`--subnetwork` must be supplied together.
+N4/C4/C4D jobs use a 100-GiB Hyperdisk boot disk by default. Pass
+`--boot-disk-gb N` when retained or staged products need more space; the exact
+size is frozen in `executor_env` but, like project and network, deliberately
+does not change case identity.
 
 `--retain-products` uploads the native listing product in addition to logs and
 the bound result marker. It is off by default. Enable it before submission for

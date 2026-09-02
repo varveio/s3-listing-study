@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 286" width="900" height="286" role="img" aria-labelledby="chart-title chart-desc">
+<title id="chart-title">NBM 66.4M-object replay fixture — wall clock at the same declared allocation</title>
+<desc id="chart-desc">diagnostic; the Swath row is CAPACITY_FAILED (the instrument overran its structure-probe budget, which slows Swath) and a 0.2.5-SNAPSHOT build; the model's other skews are not measured, so no cross-tool ratio is established; output contracts differ per tool</desc>
+<rect width="900" height="286" fill="#ffffff"/>
+<text x="24.0" y="34.0" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="16" fill="#1c1c1c" text-anchor="start">NBM 66.4M-object replay fixture — wall clock at the same declared allocation</text>
+<line x1="210.0" y1="62.0" x2="210.0" y2="212.0" stroke="#d8d8d8" stroke-width="1"/>
+<text x="210.0" y="228.0" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="10" fill="#5c5c5c" text-anchor="middle">0</text>
+<line x1="367.5" y1="62.0" x2="367.5" y2="212.0" stroke="#d8d8d8" stroke-width="1"/>
+<text x="367.5" y="228.0" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="10" fill="#5c5c5c" text-anchor="middle">100</text>
+<line x1="525.0" y1="62.0" x2="525.0" y2="212.0" stroke="#d8d8d8" stroke-width="1"/>
+<text x="525.0" y="228.0" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="10" fill="#5c5c5c" text-anchor="middle">200</text>
+<line x1="682.5" y1="62.0" x2="682.5" y2="212.0" stroke="#d8d8d8" stroke-width="1"/>
+<text x="682.5" y="228.0" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="10" fill="#5c5c5c" text-anchor="middle">300</text>
+<line x1="840.0" y1="62.0" x2="840.0" y2="212.0" stroke="#d8d8d8" stroke-width="1"/>
+<text x="840.0" y="228.0" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="10" fill="#5c5c5c" text-anchor="middle">400</text>
+<rect x="210.0" y="62.0" width="515.3" height="34.0" fill="#2f6f9f"/>
+<text x="200.0" y="83.1" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="12" fill="#1c1c1c" text-anchor="end">rclone recursive-walk c64</text>
+<text x="733.3" y="83.1" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="11" fill="#5c5c5c" text-anchor="start">327.183  [TIMING_VALID]</text>
+<rect x="210.0" y="112.0" width="554.8" height="34.0" fill="#b4643c"/>
+<text x="200.0" y="133.1" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="12" fill="#1c1c1c" text-anchor="end">s5cmd fanout-fixture-with-dirs c64</text>
+<text x="772.8" y="133.1" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="11" fill="#5c5c5c" text-anchor="start">352.247  [TIMING_VALID]</text>
+<rect x="210.0" y="162.0" width="194.4" height="34.0" fill="#4f8a5b"/>
+<text x="200.0" y="183.1" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="12" fill="#1c1c1c" text-anchor="end">swath recursive-tsv-dataset c64</text>
+<text x="412.4" y="183.1" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="11" fill="#5c5c5c" text-anchor="start">123.435  [CAPACITY_FAILED]</text>
+<text x="525.0" y="246.0" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="11" fill="#5c5c5c" text-anchor="middle">wall seconds (lower is faster)</text>
+<text x="24.0" y="270.0" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="11" fill="#5c5c5c" text-anchor="start">diagnostic; the Swath row is CAPACITY_FAILED (the instrument overran its structure-probe budget, which slows Swath) and a 0.2.5-SNAPSHOT build; the model's other skews are not measured, so no cross-tool ratio is established; output contracts differ per tool</text>
+</svg>

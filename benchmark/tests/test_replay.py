@@ -65,6 +65,61 @@ def evidence(*, after_requests: int = 1, after_errors: int = 0) -> dict[str, obj
     }
 
 
+def timing_config() -> replay.ReplayConfig:
+    document = config().as_dict()
+    backend = document["backend"]
+    assert isinstance(backend, dict)
+    backend["latency_model"] = {
+        "deadlines_ms": {
+            "worker_page": 100,
+            "pivot_probe": 50,
+            "structure_probe": 50,
+        },
+        "scale": 1.0,
+        "jitter": "none",
+    }
+    return replay.parse_document(document)
+
+
+def timing_evidence(
+    *, mean_ratio: float, overruns: int, cpu: tuple[float, ...]
+) -> dict[str, object]:
+    def observation(*, requests: int, sum_ms: float, overrun_count: int) -> dict[str, object]:
+        meters: list[dict[str, object]] = []
+        for shape in replay.INJECT_SHAPES:
+            active = shape == "worker_page"
+            meters.append(
+                {
+                    "name": replay.REQUEST_LATENCY_TIMER,
+                    "type": "timer",
+                    "tags": {"shape": shape},
+                    "count": requests if active else 0,
+                    "sum_ms": sum_ms if active else 0.0,
+                }
+            )
+        if overrun_count:
+            meters.append(
+                {
+                    "name": replay.INJECT_OVERRUN_COUNTER,
+                    "type": "counter",
+                    "tags": {"shape": "worker_page"},
+                    "count": overrun_count,
+                }
+            )
+        return {"metrics": {"meters": meters}}
+
+    return {
+        "before": observation(requests=0, sum_ms=0, overrun_count=0),
+        "after": observation(
+            requests=100,
+            sum_ms=100 * 100 * mean_ratio,
+            overrun_count=overruns,
+        ),
+        "resource_samples": [{"server_cpuset_utilization": utilization} for utilization in cpu],
+        "errors": [],
+    }
+
+
 def test_replay_evidence_refuses_inactive_or_erroring_server() -> None:
     assert "did not increase" in " ".join(
         replay.evidence_errors(config(), evidence(after_requests=0), purpose="measurement")
@@ -86,6 +141,36 @@ def test_replay_evidence_accepts_canonical_single_cpu_sets() -> None:
         replay.evidence_errors(replay.parse_document(document), observed, purpose="measurement")
         == ()
     )
+
+
+@pytest.mark.parametrize(
+    ("mean_ratio", "overruns", "cpu", "expected"),
+    (
+        (1.05, 0, (0.5,) * 5, replay.TIMING_VALID),
+        (1.15, 5, (0.5,) * 5, replay.PRESSURE_DEGRADED),
+        (1.30, 0, (0.5,) * 5, replay.CAPACITY_FAILED),
+        (1.05, 0, (0.91, 0.5, 0.5, 0.5, 0.5), replay.CAPACITY_FAILED),
+        (1.05, 0, (0.5,) * 4, replay.INSUFFICIENT_EVIDENCE),
+    ),
+)
+def test_replay_timing_gate_classifies_request_service_time_and_cpu_pressure(
+    mean_ratio: float, overruns: int, cpu: tuple[float, ...], expected: str
+) -> None:
+    assessment = replay.replay_timing_assessment(
+        timing_config(), timing_evidence(mean_ratio=mean_ratio, overruns=overruns, cpu=cpu)
+    )
+
+    assert assessment["state"] == expected
+    shapes = assessment["shapes"]
+    assert isinstance(shapes, dict)
+    worker = shapes["worker_page"]
+    assert isinstance(worker, dict)
+    assert worker["requests"] == 100
+    assert worker["request_mean_ms"] == pytest.approx(100 * mean_ratio)
+
+
+def test_replay_timing_gate_does_not_apply_without_latency_injection() -> None:
+    assert replay.replay_timing_assessment(config(), evidence())["state"] == replay.NOT_APPLICABLE
 
 
 @pytest.mark.parametrize(
@@ -201,3 +286,75 @@ def test_generated_runner_fixture_is_small_paginated_and_digest_bound(tmp_path: 
         "00000000000000000000000000000000",
         "000000000000000000000000000007ff",
     )
+
+
+def test_declared_warmup_is_part_of_the_treatment_identity() -> None:
+    backend = {
+        "server_image_uri": "registry/replay@sha256:" + "a" * 64,
+        "fixture_sha256": "b" * 64,
+        "serving_mode": "sorted",
+        "latency_model": "none",
+    }
+    cold = replay.parse_backend(backend)
+    warm = replay.parse_backend(
+        {
+            **backend,
+            "warmup": {
+                "structure_probes": 2000,
+                "pivot_probes": 200,
+                "worker_pages": 200,
+                "in_flight": 64,
+            },
+        }
+    )
+    assert cold.warmup is None and "warmup" not in cold.as_dict()
+    assert warm.as_dict()["warmup"] == {
+        "structure_probes": 2000,
+        "pivot_probes": 200,
+        "worker_pages": 200,
+        "in_flight": 64,
+    }
+    assert cold.as_dict() != warm.as_dict()
+    plan = replay.parse_plan({**backend, "capacity_status": "uncalibrated", "warmup": None})
+    assert plan.backend.warmup is None
+
+
+@pytest.mark.parametrize(
+    "warmup",
+    [
+        {"structure_probes": 1},
+        {"structure_probes": 0, "pivot_probes": 0, "worker_pages": 0, "in_flight": 8},
+        {"structure_probes": -1, "pivot_probes": 0, "worker_pages": 0, "in_flight": 8},
+        {"structure_probes": 1, "pivot_probes": 0, "worker_pages": 0, "in_flight": 0},
+        {"structure_probes": True, "pivot_probes": 0, "worker_pages": 0, "in_flight": 8},
+    ],
+)
+def test_malformed_warmup_is_refused(warmup: dict[str, object]) -> None:
+    with pytest.raises(replay.ReplayError):
+        replay.parse_warmup(warmup)
+
+
+def test_delimiter_connections_is_optional_and_identity_bearing_only_when_stated() -> None:
+    allocation = {
+        "subject_vcpus": 2,
+        "replay_vcpus": 2,
+        "replay_memory_gb": 4,
+        "replay_parquet_connections": 4,
+        "replay_max_concurrent_requests": 32,
+        "replay_heap_percent": 75,
+        "replay_prefetch_max_windows": 96,
+        "replay_prefetch": False,
+    }
+    absent = replay.parse_allocation(allocation)
+    assert absent.replay_delimiter_connections is None
+    assert "replay_delimiter_connections" not in absent.as_dict()
+
+    stated = replay.parse_allocation({**allocation, "replay_delimiter_connections": 128})
+    assert stated.replay_delimiter_connections == 128
+    assert stated.as_dict()["replay_delimiter_connections"] == 128
+    assert stated.as_dict() != absent.as_dict()
+
+    with pytest.raises(replay.ReplayError):
+        replay.parse_allocation({**allocation, "replay_delimiter_connections": 0})
+    with pytest.raises(replay.ReplayError):
+        replay.parse_allocation({**allocation, "replay_reader_width": 8})

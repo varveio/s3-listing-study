@@ -1,6 +1,7 @@
-# Capacity continuation after NBM narrowed the active race to Swath and rclone.
-# The Swath width bracket holds its 8-vCPU/output treatment fixed; later rows
-# are appended here rather than split into per-control plans.
+# 2026-09-01 post-fix Swath replay-capacity qualification. The seven earlier
+# allocation controls remain in git and the unified ledger; this current plan
+# starts with overprovisioned cell A only. Append B/C, then the selected common-
+# allocation widths, here after A passes the declared replay-pressure gate.
 spec_version: 3
 
 bucket: aws-public-blockchain
@@ -9,7 +10,11 @@ auth_role: public-read
 
 replay:
   capacity_status: uncalibrated
-  server_image_uri: us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:f51c4d12ac0e1f52fd02f1a77a74e962d610d518e64ab8425635512370973612
+  # 2026-09-01: replay image built from swath fix/replay-delimiter-seek at dce690a (key-only
+  # delimiter readers, bare objects via the range pool, independent delimiter-pool width,
+  # default 32 on this host). A new server image is a new treatment identity; the 0.3.1
+  # release image rows (cold and warmed) remain in the ledger unchanged.
+  server_image_uri: us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:5797514c7599c795197e53f4e55651829fca7c1630c351242407690bff9881ad
   fixture_uri: gs://s3-listing-study-results-29c02004/fixtures/aws-public-blockchain/current-eba31d9/part-*.parquet
   fixture_sha256: f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0
   serving_mode: sorted
@@ -17,61 +22,35 @@ replay:
     deadlines_ms: {worker_page: 94, pivot_probe: 46, structure_probe: 55}
     scale: 1.0
     jitter: none
+  # 2026-09-01: declared warm-up (see docs/methodology.md, "Replay warm-up"). A local isolation
+  # study attributed the structure-probe overruns to a cold delimiter path (JIT, lazy per-file
+  # reader pools) rather than to scan cost; the walk below warms it identically for every tool.
+  # This is a new treatment identity; the cold-server A row remains in the ledger unchanged.
+  warmup:
+    structure_probes: 2000
+    pivot_probes: 200
+    worker_pages: 200
+    in_flight: 64
 
 defaults:
   reps: 1
   timeout_s: 7200
-  vcpus: 32
-  memory_gb: 64
+  vcpus: 80
+  memory_gb: 160
   container_memory_gb: 8
   subject_vcpus: 8
-  replay_vcpus: 20
+  replay_vcpus: 64
   replay_memory_gb: 20
-  replay_parquet_connections: 64
+  replay_parquet_connections: 128
   replay_max_concurrent_requests: 512
   replay_prefetch: false
   replay_prefetch_max_windows: 96
   replay_heap_percent: 75
 
 tools:
-  rclone:
-    cases:
-      - {mode: recursive-walk, concurrency: 64, purpose: diagnostic}
-      - {mode: recursive-walk, concurrency: 128, purpose: diagnostic}
-
-  s3p:
-    cases:
-      - {mode: ls, concurrency: 16, purpose: diagnostic}
-
-  s7cmd:
-    cases:
-      - mode: recursive-one-nosort
-        concurrency: 16
-        purpose: diagnostic
-        config: {parallel_depth: 1}
-
   swath:
     cases:
-      - mode: recursive-tsv-dataset
-        concurrency: 64
-        purpose: diagnostic
-        config:
-          jvm_max_heap: 4g
-          text_writers: 3
-          text_part_size: 1gb
-          writeback_size: 32mb
-          part_rotation_interval: "0"
-          part_rotation_max_rows: 0
-      - mode: recursive-tsv-dataset
-        concurrency: 128
-        purpose: diagnostic
-        config:
-          jvm_max_heap: 4g
-          text_writers: 3
-          text_part_size: 1gb
-          writeback_size: 32mb
-          part_rotation_interval: "0"
-          part_rotation_max_rows: 0
+      # A: c256 under the materially overprovisioned replay64 control.
       - mode: recursive-tsv-dataset
         concurrency: 256
         purpose: diagnostic
@@ -82,10 +61,14 @@ tools:
           writeback_size: 32mb
           part_rotation_interval: "0"
           part_rotation_max_rows: 0
+      # 2026-09-01 delimiter-width sweep on the post-fix image. The row above ran at
+      # the image's own default (32 on this host). 128 is the fix-1-only arm: the width
+      # the 0.3.1 rows had, so it isolates the key-only projection from the narrower
+      # fleet. 16 and 64 bracket the default. One repetition each; diagnostic.
       - mode: recursive-tsv-dataset
-        concurrency: 128
+        concurrency: 256
         purpose: diagnostic
-        replay_parquet_connections: 128
+        replay_delimiter_connections: 128
         config:
           jvm_max_heap: 4g
           text_writers: 3
@@ -96,21 +79,7 @@ tools:
       - mode: recursive-tsv-dataset
         concurrency: 256
         purpose: diagnostic
-        replay_parquet_connections: 128
-        config:
-          jvm_max_heap: 4g
-          text_writers: 3
-          text_part_size: 1gb
-          writeback_size: 32mb
-          part_rotation_interval: "0"
-          part_rotation_max_rows: 0
-      - mode: recursive-tsv-dataset
-        concurrency: 128
-        purpose: diagnostic
-        vcpus: 48
-        memory_gb: 96
-        replay_vcpus: 32
-        replay_parquet_connections: 128
+        replay_delimiter_connections: 64
         config:
           jvm_max_heap: 4g
           text_writers: 3
@@ -121,10 +90,7 @@ tools:
       - mode: recursive-tsv-dataset
         concurrency: 256
         purpose: diagnostic
-        vcpus: 48
-        memory_gb: 96
-        replay_vcpus: 32
-        replay_parquet_connections: 128
+        replay_delimiter_connections: 16
         config:
           jvm_max_heap: 4g
           text_writers: 3
@@ -140,3 +106,6 @@ exclude:
   - {tool: s3-fast-list, reason: stopped after NBM memory control}
   - {tool: s3kor, reason: stopped after FourCast}
   - {tool: s5cmd, reason: blockchain preceded the fair NBM c64 fanout; carry on next rung}
+  - {tool: rclone, reason: post-fix capacity qualification is Swath-only}
+  - {tool: s3p, reason: post-fix capacity qualification is Swath-only}
+  - {tool: s7cmd, reason: post-fix capacity qualification is Swath-only}

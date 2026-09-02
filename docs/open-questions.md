@@ -15,12 +15,39 @@ claims in [`../tools/README.md`](../tools/README.md#what-the-evidence-labels-mea
 The numbered section headings below are stable anchors: the per-tool research
 trails cite these questions by number (§1–§8).
 
+## What the 2026-09 release touched
+
+The release `2026-09-scale-diagnostics` (see [`../RESULTS.md`](../RESULTS.md))
+was a scale screen on a replay instrument, not a run of these questions. It
+touches them as follows; each question below carries the same note in place.
+Nothing here moves a question to `confirmed`: the release has no verifier
+verdicts and no calibrated timing.
+
+| question | touched by the release? | what exists |
+| --- | --- | --- |
+| §1 latency versus throttling | by construction excluded | replay has no throttling at all; the live-S3 Swath rows drew no `SlowDown` per the private run summary, not a release field |
+| §2 client language | rows exist, no comparison | ten tools on one fixture, but the grades and asymmetries forbid a ratio |
+| §3 crash-resume | not touched | no interruption run in the release |
+| §4 S3 Express | not touched | |
+| §5 versioned buckets | not touched | |
+| §6 S3-compatible differences | partly | the replay server is itself a non-AWS endpoint; its syntax pricing and its structure-probe defect are on the instrument page |
+| §7 non-S3 stores | not touched | |
+| §8 published algorithm | not touched | |
+
 ---
 
 ## 1. Does latency matter more than throttling for parallel listing?
 
-**Status: `unverified` study hypothesis.** No comparative or throttle campaign
-has run.
+**Status: `unverified` study hypothesis.** No throttle campaign has run.
+
+*2026-09 release:* the replay instrument removes throttling by construction
+(no `SlowDown`, no rise under load; see
+[`instrument.md`](instrument.md#known-skews)), so the replay rows cannot
+speak to this question. The live-S3 Swath rows are single runs; that S3
+returned no `SlowDown` in them is from the private run summary, not a
+release field. Several replay rows ran above 1,000 requests/s
+(rclone's NARA walk, s7cmd's NARA arms), which is where live S3 would begin
+to answer the question and replay does not.
 
 Our starting hypothesis is that latency matters more, which would affect what
 is worth optimizing.
@@ -78,6 +105,14 @@ Related mechanics, all inherited and unverified:
 **Status: `unverified` study hypothesis.** The cited rewrite result is context;
 this study has not isolated language from algorithm, output, or runtime.
 
+*2026-09 release:* all ten runnable tools completed the 4.08M-object fixture
+in one group, but the rows are not a language experiment: only five of the
+ten are `TIMING_VALID`, the tools write different outputs, two ran with
+harness assistance, and the release forbids a ranking. The Swath-versus-
+s3-fast-list hypotheses below likewise have rows beside each other on the
+66.4M fixture (`s3-fast-list.246cf7252988.s1`, `swath.df1d7593b967.s1`) and no
+ratio: the Swath row is `CAPACITY_FAILED` on the instrument's own defect.
+
 The Pure Storage project reported a **3.93× speedup from rewriting Python → Go**
 on a workload that is nominally I/O-bound. That's a strong hint that at the top
 of the range, client-side deserialization and bookkeeping dominate — not the
@@ -118,6 +153,7 @@ Related comparative hypotheses moved here from the Swath-only ledger remain
 
 **Status: `unverified` field hypothesis.** Neither the all-tools absence claim
 nor Swath's claimed exception has passed the planned interruption test.
+*2026-09 release:* no interruption run; unchanged.
 
 Our starting notes say that none of the surveyed tools except Swath claim
 first-class LIST crash-recovery. That remains an open question.
@@ -191,6 +227,14 @@ Source: https://xuanwo.io/2025/02-why-s3-list-objects-taking-120s-to-respond/
 **Status: `unverified` inherited conformance leads.** These items need direct
 public-source review and endpoint-versus-real-S3 captures before they support a
 finding about any tool.
+
+*2026-09 release:* the study now runs most attempts against its own
+S3-compatible endpoint, the replay server, and the instrument page records
+two ways it differs from S3 that matter here: a request is priced by its
+syntax, and a `delimiter=/` rollup cost the server more than a page on
+small-directory fixtures. Nine of ten tools listed correctly against it;
+s4cmd could not, because it uses the v1 API. That is evidence about one
+endpoint, not about the stores named below.
 
 Inherited from Swath's conformance work. Relevant here because several tools are
 tested against non-AWS endpoints, and a "bug" we attribute to a tool may

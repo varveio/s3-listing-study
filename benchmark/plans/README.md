@@ -1,7 +1,11 @@
 # Benchmark plans
 
-Reusable study plans live under [`buckets/`](buckets/), saying what to run
-against that bucket and on what box. [`canaries/`](canaries/) holds the two
+[`campaigns/`](campaigns/) holds the plans behind the published releases;
+`manifest.json.groups` in each release names which plan a group ran.
+[`examples/`](examples/) holds whole-bucket example plans from the August
+2026 live pass (`noaa-ghcn-pds`, `noaa-rtma-pds`) and the local repeatability
+canary; none of those buckets appears in a release, and the plans stay as
+worked examples for `plan_cli` and the tests. [`canaries/`](canaries/) holds the two
 small runner qualifications: signed stdout, unsigned stdout, and native-file
 capsule paths against replay, plus representative shapes against ordinary S3.
 [`campaigns/`](campaigns/) holds the capacity, tuning, and measurement plans
@@ -107,6 +111,24 @@ The other explicit treatment is no injection:
   latency_model: none
 ```
 
+A plan may also declare a **warm-up** the worker drives after the server is
+ready and before the `before` metrics snapshot, so the requests warm the
+server's JIT, reader pools, and page indexes without entering any treatment
+meter:
+
+```yaml
+  warmup:
+    structure_probes: 2000   # breadth-first delimiter walk from the fixture root
+    pivot_probes: 200        # max-keys=1 at keys the walk returned
+    worker_pages: 200        # max-keys=1000 at the same anchors
+    in_flight: 64
+```
+
+A warmed server is a different instrument from a cold one, so the block is part
+of the treatment identity; omitting it means none and leaves earlier identities
+unchanged. The worker records the counts actually issued, the wall-clock spent,
+and whether the phase was truncated in `replay_evidence.warmup`.
+
 The latency treatment is a **measurement, not a preference**. A fixed model
 adds the fixture's measured per-request latency profile; `none` measures the
 subject and replay server without that delay. They impose different demand on
@@ -135,7 +157,15 @@ defaults:
   replay_prefetch: false
   replay_prefetch_max_windows: 96 # response-window cache capacity
   replay_heap_percent: 75
+  replay_delimiter_connections: 32 # optional: delimiter reader fleet width
 ```
+
+`replay_delimiter_connections` is the one optional replay field. Stated, it
+is passed to the server as `--delimiter-connections` and becomes part of the
+case identity; omitted, the server applies its own default and the field is
+absent from the identity, so cases declared before the field existed keep
+their identities. Only replay images at or after swath `dce690a` accept the
+flag; an older image refuses to start with it.
 
 `vcpus`/`memory_gb` keep meaning **the box**. `container_memory_gb` is the
 subject ceiling; `subject_vcpus` and the replay fields are the independent
@@ -154,6 +184,12 @@ when a diagnostic varies cache capacity.
 `uncalibrated` permits diagnostic replay work only, while `calibrated` permits
 replay measurements. Set it to `calibrated` only after a real diagnostic
 capacity canary has a committed receipt for this backend and allocation family.
+That receipt must show the common allocation passing the delivered-treatment
+gate in [`docs/methodology.md`](../../docs/methodology.md) for the heaviest
+included client shape, plus a paired materially overprovisioned replay control
+whose subject wall time agrees within the predeclared uncertainty band. A
+calibrated measurement that does not itself classify `TIMING_VALID` is retained
+as functional evidence but reporting refuses it as a timing.
 Replay plans carry no correctness manifest: the worker counts rows in-container,
 retains logs and `result.json`, and routine reporting reads that marker only.
 Native product upload is an operator opt-in, not a plan axis.
@@ -198,6 +234,17 @@ order. Transform such input once with `swath-replay sort-fixture`, or declare
 `--serving-mode sorted` does not need another sort for correctness. Sorted mode
 is the final gate: it requires every resolved part to be stamped object mode,
 pure `OBJECT`, strictly globally ordered, and a complete multipart sequence.
+
+`benchmark.fixture_bundle` does not infer that physical-order fact from replay
+startup. Before generating companions or uploading a new bundle, it scans raw
+BLOB keys in lexicographic part-filename and physical row-number order, fails on
+an adjacent descent or duplicate (including a part boundary), reconciles the
+scan's row count with the aggregate fixture analysis, and records every part's
+count and first/last key in `fixture.json.physical_order_validation`. It then
+starts sorted replay as a separate `sorted_serving_validation`; readiness proves
+that the pinned server accepts the stamped parts, not that an unscanned input
+was ordered. Existing staged fixture bytes require a separately retained audit
+if they predate schema 2 rather than gaining this claim retroactively.
 
 The staged-fixture branch remains `VERIFIED: no`: its manifest contract has
 offline coverage, but no committed campaign receipt has exercised the provider

@@ -5,16 +5,40 @@ are controlled, and what gets published. It was committed *before* comparative
 results existed, on purpose — see
 [We wrote the plan down first](#we-wrote-the-plan-down-first).
 
-**Status: plan written before comparisons; measurement not yet executed.** No
-benchmark has been run and no comparative performance result exists in this repo (smoke receipts
-carry per-run wall-clock and RSS, but never as a comparison). All eleven
-subjects have now run at smoke on amd64 through the attempt engine: seven
+**Document status — 2026-09-01.** This file is two things at once, and the
+line between them matters when reading it:
+
+- **Preregistration.** [Where we started](#where-we-started), [We wrote the
+  plan down first](#we-wrote-the-plan-down-first), [The five decisions that
+  shape everything](#the-five-decisions-that-shape-everything),
+  [Run records (receipts)](#run-records-receipts) and [What this setup cannot
+  tell us](#what-this-setup-cannot-tell-us) were committed *before* comparative
+  results existed and are unchanged by them. They say what the study intended
+  to measure and on what terms.
+- **What has since run.** [Replay screening, then real-S3
+  validation](#replay-screening-then-real-s3-validation) and
+  [Execution order](#execution-order) describe a funnel that has now executed,
+  and the dated material-change notes below record every rule change in the
+  order it happened.
+
+Comparative runs have executed and are published as a **diagnostic** release,
+`2026-09-scale-diagnostics`. No attempt in it carries `purpose = measurement`:
+the replay instrument overran its declared budget on one request shape, which
+this document's own gate treats as disqualifying for a measurement, so the
+release publishes controlled diagnostics and says so in
+`manifest.json.claim_ceiling`. The plan in this file is therefore *not* yet
+fully executed as written — the calibrated comparison it describes remains
+future work. What ran, what it settled and what it did not is
+[`../results/2026-09-scale-diagnostics/REPORT.md`](../results/2026-09-scale-diagnostics/REPORT.md).
+
+Smoke receipts carry per-run wall-clock and RSS, but never as a comparison. All
+eleven subjects ran at smoke on amd64 through the attempt engine: seven
 anonymously and `s3p`, `s3kor`, `s4cmd`, and `ps3` with a scoped credential.
 Those attempts establish that the retired groundwork path worked, not
 correctness: none is bound to the current comparative verifier. The replay path
 records in-container row counts, logs, and bound result markers. See
-`../tools/README.md` for per-tool status and `smoke-bucket.md` for the historical
-reference snapshot.
+`../tools/README.md` for per-tool status and the current release outcome, and
+`smoke-bucket.md` for the historical reference snapshot.
 
 **Qualification status — 2026-08-26.** A committed bounded three-tool replay
 canary now exercises submit, poll/status, summary reporting, worker-side row
@@ -53,8 +77,9 @@ decisions are unchanged.
 Routine attempts do not normalize or convert listing output. After the timed
 subject exits successfully, the selected adapter's `count_rows` path applies
 the same mode-specific row selection as its verifier normalizer but computes
-only a count. The worker retains and uploads the original stdout, stderr, and
-native directory output. Five-field normalization is benchmark-verifier work
+only a count. The worker counts the native product locally, retains stderr and genuine
+stdout logs, and uploads native products only when the group was submitted
+with `--retain-products` (the 2026-08-28 retention change above). Five-field normalization is benchmark-verifier work
 invoked only for explicit correctness verification.
 
 Routine campaign reporting is summary-only. The campaign model owns a
@@ -223,7 +248,10 @@ Questions outstanding: are the buckets **public** (LIST is free; runs bounded on
 by time and disk) or **owner-controlled** (LIST costs money; needs a budget)? What
 **region** are they in relative to the runner box? Cross-region latency can
 dominate and swamp genuine algorithmic differences — if the sample is remote, that
-must be stated as a limitation or controlled by running in-region.
+must be stated as a limitation or controlled by running in-region. Replay
+deadlines are derived per fixture from the capture's own round trip, so a
+cross-region bucket's fixture carries its cross-region floor (real-changesets
+in `us-west-2`: 122 ms against 85–94 ms for the east fixtures).
 
 ### 3. Keeping comparisons useful
 
@@ -411,10 +439,91 @@ canary has a committed receipt. A plan states that condition explicitly as
 `replay.capacity_status: uncalibrated`; no replay measurement is eligible before
 the status is changed to `calibrated`.
 
+**Delivered-treatment correction, 2026-09-01.** Declaring a latency profile
+does not prove that a colocated replay server delivered it without queueing.
+Reporting therefore classifies every latency-injected replay attempt from its
+retained per-shape meters and 10-second replay-cpuset samples:
+
+- `TIMING_VALID`: each observed shape's request-service mean is at most 110% of its
+  deadline and fewer than 1% of its requests overran; at least five resource
+  samples exist, with fewer than 20% at or above 90% replay CPU;
+- `PRESSURE_DEGRADED`: the attempt misses that gate, but no shape exceeds a 10%
+  overrun fraction or 125% of its requested mean and replay CPU is not sustained
+  at the ceiling;
+- `CAPACITY_FAILED`: any shape exceeds either of those latter limits, or at
+  least 20% of five or more resource samples are at or above 90% replay CPU;
+  and
+- `INSUFFICIENT_EVIDENCE`: the injected attempt has no observed request shape,
+  incomplete/non-monotonic meters, or fewer than five resource samples.
+
+An attempt without latency injection is `NOT_APPLICABLE`; it may characterize a
+raw ceiling but does not pass the injected-treatment timing gate. These are
+provisional capacity-calibration thresholds, dated before the next rung rather
+than fitted to it. They classify instrument pressure separately from subject
+success: a pressure-degraded or capacity-failed attempt may still establish
+exit behavior and row count, but it cannot supply comparative timing.
+
+`capacity_status: calibrated` additionally requires a committed diagnostic
+receipt showing that one common replay allocation passes this gate for the
+heaviest included client shape and that its subject wall time agrees, within a
+predeclared uncertainty band, with a paired materially overprovisioned replay
+control. Contact with a configured reader-pool limit is reported but is not by
+itself a failure. Historical replay rows may be labeled by this same derived
+rule without rewriting their raw `result.json` evidence. Earlier wording that
+treated any single overrun as an automatic timing failure is superseded by this
+magnitude-and-sustained-pressure rule.
+
+**Replay warm-up, 2026-09-01.** A local isolation study of the replay server
+found that its delimiter path costs 1–2 ms per request once warm but that a
+campaign issues only a few hundred structure probes against millions of pages,
+so that path may never leave the JIT's interpreted tiers during a run; the
+server also opens its per-file delimiter reader pools lazily inside the first
+request that needs them. A plan may therefore declare a `replay.warmup`: a
+deterministic breadth-first delimiter walk from the fixture root plus pivot and
+page requests at keys that walk returned, driven by the worker after readiness
+and before the `before` metrics snapshot. The warm-up applies identically to
+every tool in the plan, is part of the treatment identity (a warmed server is
+a different instrument), never enters a treatment meter, and is recorded with
+its issued counts and duration in the attempt's replay evidence. Rows without
+a declared warm-up keep their identities and their cold-server classification.
+
 Latency injection is a declared experimental treatment. A fixed-latency profile
 is valid for a controlled screen when it is applied identically and reported as
 such; it is not described as reproducing S3's full latency distribution unless
 that stronger fidelity has separately been demonstrated.
+
+**Latency-treatment provenance, 2026-09-02.** A fixture's fixed deadlines are
+the rounded p50 of one request's client-observed round trip per shape, read
+from the phase timers of the Swath run that captured the fixture. A capture may
+supply deadlines only if its median connection-pool wait is negligible and its
+total is within a few milliseconds of its time-to-first-byte, so that no client-side
+connection queue is inside the number. That test does not detect client CPU
+starvation, which inflates time-to-first-byte itself: a 2026-08-06 FourCast
+reference reported a 123.7 ms worker-page p50 where a 2026-08-26 control on
+the same bucket reported 86.0 ms, and only a cross-check against a non-Swath
+client would have rejected it. A capture must therefore pass both the phase
+test and the cross-check. Because a
+client holding many requests in flight can load S3 in a way a serial client
+never does, and the capturing client cannot see that from inside, the floor is
+cross-checked against clients other than Swath: directly, by a same-bucket
+serial sample of about 100 unsigned pages over one keep-alive connection from
+the runner's zone, whose p50 must be within about 15% of the deadline, a deadline above the
+serial p50 being conservative and one below it optimistic; and in
+aggregate against the roster's serial tools on live S3 in the study's August
+basic pass, whose wall time per page minus client cost per page must leave a
+residual that brackets the deadline for that region within a few
+milliseconds and never one materially below it. That residual is a run mean, not a p50; the check establishes
+that replay charges a serial tool no more per page than live S3 did. The
+August pass predates the campaign ledger and is not exported; the cross-check
+is recorded in the study's working notes, and no published row depends on it.
+The treatment is therefore a floor for subjects under roughly 1,000 requests
+per second on plain pages. A subject above that rate sees a floor that live S3
+does not give it, and its replay throughput is an overstatement by an
+unmeasured factor; in this study only Swath can reach that rate, and no
+published row has. Fixed p50
+deadlines carry no tail and no throttling, and the server prices a request by
+its syntax, so a `delimiter=/` page that returns objects draws the structure
+deadline rather than the page deadline.
 
 The plan fixes its advancement rule before the relevant replay results are
 examined. Capacity-calibration rows are diagnostics and cannot eliminate a
