@@ -42,8 +42,8 @@ longer.
 **A first release of results is published.** The short version is
 [**What we found**](RESULTS.md): ten tools screened from 4.08 million objects
 to 143 million, where each one stopped and why, and one tool's billion-object
-run on live S3. It is a screening release, not a benchmark and not a ranking;
-`RESULTS.md` says what it does and does not mean, and the release's own
+run on live S3. `RESULTS.md` says what it does and does not mean, and the
+release's own
 [report](results/2026-09-scale-diagnostics/REPORT.md) holds every number and
 attempt id.
 

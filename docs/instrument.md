@@ -83,9 +83,10 @@ keep-alive connection, timed from request sent to last byte.
 | NARA | 86 | 92.3 | 95.6 | 104 | 320 |
 | blockchain | 94 | 95.8 | 101.1 | 112 | 423 |
 
-The deadlines sit within about 10% of what a serial client measured: a little
-above it in Virginia, a little below it in Ohio. Capture load did not inflate
-them. This control is recorded in the study's working notes, not in a release.
+Two deadlines sit 11–14% above the serial median (Virginia) and two sit 2–7%
+below it (Ohio). A deadline above the serial median is conservative, since it
+slows every tool equally; one below it is optimistic. Capture load did not
+push the Ohio deadlines above what a serial client sees. This control is recorded in the study's working notes, not in a release.
 
 **Against the serial tools' own live runs.** In the August live-S3 pass, the
 serial tools' wall time per page, minus their client cost per page as measured

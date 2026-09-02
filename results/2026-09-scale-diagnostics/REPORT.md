@@ -29,7 +29,7 @@ not settle relative speed. The machine-readable ceiling in `manifest.json`:
 Two facts bound every timing here. The replay server missed its own latency
 budget on one request shape under load, and the tool that issues that shape at
 volume is Swath, the study's own tool, so every Swath timing on the three
-large fixtures failed the timing gate. And the live-S3 rows are single runs of
+small-directory fixtures (NARA, NBM, blockchain) failed the timing gate. And the live-S3 rows are single runs of
 one tool.
 
 ## The funnel
@@ -59,8 +59,10 @@ One 8-vCPU / 8-GiB arm per tool from group `fc-cpu-corrected-20260828`, each
 returning the exact count; rows in
 [`charts/fourcast-roster.csv`](charts/fourcast-roster.csv). It is ordered by
 wall clock and it is not a ranking. Three of those tools have no
-listing-concurrency control, one was fed cut-points by the harness, and one
-was slowed by the instrument.
+listing-concurrency control, one was fed cut-points by the harness, and only
+five of the ten rows graded `TIMING_VALID` (the CSV carries each row's grade).
+The Swath row is a `0.2.5-SNAPSHOT` build, the documented exception to the
+released-version rule; every other row is a tagged release.
 
 ## Where each tool stopped, and why
 
@@ -69,9 +71,9 @@ was slowed by the instrument.
 | aws-cli | 4.08M | One serial `ListObjectsV2` chain; no listing-parallelism control. 143M objects would be about 143,000 sequential pages. | `aws-cli.a7d9377bd706.s1` |
 | minio-mc | 4.08M | Serial client-side iterator. | `minio-mc.04c17e5ac8da.s1` |
 | s3kor | 4.08M | Serial listing; its parallelism is in transfers. | `s3kor.8514c3397199.s1` |
-| ps3 | 4.08M | Request amplification. The fairness arm at `--prefix-count 5000` reached the 1,800 s cap without a count. | `ps3.31a9e4da68b2.s1` |
+| ps3 | 4.08M | Request amplification: 469,241 replay requests for a 4,082-page fixture. The fairness arm at `--prefix-count 5000` reached the 1,800 s cap without a count; that arm also ran against a replay server capped at 512 concurrent requests and graded `PRESSURE_DEGRADED`, so its wall is not clean. | `ps3.31a9e4da68b2.s1` |
 | s5cmd | 66.4M | No listing fan-out of its own; the comparable arms ran on shard lists the harness supplied. Not carried to 143M. | `s5cmd.962211b4b344.s1` |
-| s3-fast-list | 66.4M | Memory. Two of three NBM attempts died at the container limit; the one that completed, at 16 GiB, peaked at 11,347,320 KiB. Not carried further, by decision. | `s3-fast-list.246cf7252988.s1` |
+| s3-fast-list | 66.4M | Memory. One of three NBM attempts was killed at an 8 GiB limit; a second failed at 16 GiB with exit 0 and no recorded reason; the one that completed, at 16 GiB, peaked at 10.8 GiB (11,347,320 KiB). Not carried further, by decision. | `s3-fast-list.246cf7252988.s1` |
 | s7cmd | 143M, no count | Parallel prefix discovery, then serial pagination per leaf. On the skewed 143M fixture it hit the 7,200 s cap (exit 124) with one dominant leaf still draining. | `s7cmd.a9b999169187.s1` |
 | s3p | 143M | Completed, exact, 4,238.8 s at c16. CPU-bound in its cheapest key-only mode; width does not help. | `s3p.1b77f20ed931.s1` |
 | rclone | 143M | Completed in 667.0 s at c64. Returned 143,008,665 rows, nine short, consistent with a walk not emitting directory markers. The c128 arm was slower, 821.0 s. | `rclone.6319ec57665d.s1`, `rclone.3eff2ab4f661.s1` |
@@ -83,6 +85,16 @@ Peak resident memory against fixture size; a cross marks an attempt with no
 accepted result. On the 66.4M-object NBM fixture s3-fast-list was killed at
 the container memory limit twice. Rows in
 [`charts/s3-fast-list-rss.csv`](charts/s3-fast-list-rss.csv).
+
+### Where the setup was not equal
+
+| asymmetry | detail | attempts |
+| --- | --- | --- |
+| replay server size on blockchain | Swath's fastest blockchain rows ran against a 64-vCPU replay server; every other tool's blockchain row had 20 vCPU. Subject allocations were equal (8 vCPU / 8 GiB). At the same 20-vCPU replay server, Swath c256 took 208.9 s. | `swath.be4140354dd1.s1` (64), `swath.9ad793f7eea7.s1` (20), `rclone.6319ec57665d.s1` (20), `s3p.1b77f20ed931.s1` (20) |
+| pre-release build in the roster figure | the FourCast roster's Swath row is `0.2.5-SNAPSHOT`; the dispositions row is `0.3.1` | `swath.88891b1437de.s1` |
+| harness-supplied shards | s5cmd's comparable arms ran on shard lists the harness generated from the fixture; the tool has no listing fan-out of its own | `s5cmd.962211b4b344.s1` |
+| fixture-derived hints | s3-fast-list's arm was fed keyspace cut-points generated from the fixture | `s3-fast-list.246cf7252988.s1` |
+| replay concurrency cap on ps3's wide arm | 512 concurrent requests against 4,096 for its completing arm | `ps3.31a9e4da68b2.s1`, `ps3.55c79d26bce0.s1` |
 
 ## Per-tool dispositions
 The best-completing arm actually recorded for each tool. "Exact" means the run
@@ -138,7 +150,7 @@ more than a page, the inverse of S3.
 | measurement on `aws-public-blockchain`, c256, replay 64 vCPU / 20 GiB | cold server | warmed server |
 | --- | ---: | ---: |
 | attempt | `swath.be4140354dd1.s1` | `swath.6d4bdaf4f615.s1` |
-| declared deadlines, worker / structure / pivot (ms) | 94 / 55 / 46 | 94 / 55 / 46 |
+| declared deadlines, worker / pivot / structure (ms) | 94 / 46 / 55 | 94 / 46 / 55 |
 | delivered structure-probe mean, as a ratio of 55 ms | 2.07 | 2.03 |
 | structure probes that overran | 46.0% | 45.4% |
 | warm-up requests before the run (`replay.requests.before`) | 0 | 2,400 |
@@ -180,8 +192,9 @@ zone, 100 unsigned pages one at a time over one keep-alive connection):
 | NARA | 86 | 92.3 | 95.6 |
 | blockchain | 94 | 95.8 | 101.1 |
 
-The deadlines sit within about 10% of a serial client's median on the same
-bucket. The control and the August serial-tool cross-check are described in
+Two deadlines sit 11–14% above the serial median (`us-east-1`) and two sit
+2–7% below it (`us-east-2`). The high side is conservative: it slows every
+tool equally, Swath included. The control and the August serial-tool cross-check are described in
 [`docs/instrument.md`](../../docs/instrument.md); both are internal checks,
 not published receipts, and no row here depends on them. The manifest
 carries no disclosure id for the latency model's limits; that page and this
@@ -194,7 +207,7 @@ prefix-parallel designs from range-parallel ones. The fixture is a live-S3
 Swath capture of `real-changesets`: 13,868,442 rows, one part, digest
 `295177c9…c57edd`. Every arm ran on `n4-highcpu-32` with the subject at 8 vCPU
 / 8 GiB and replay at 20 vCPU / 20 GiB, deadlines 122 / 88 / 88 ms for
-worker / structure / pivot.
+worker / pivot / structure.
 
 | arm | wall | count | peak RSS (KiB) | delivered timing | attempt |
 | --- | ---: | --- | ---: | --- | --- |
@@ -202,15 +215,16 @@ worker / structure / pivot.
 | s7cmd c16 `recursive-one-nosort` | 1,289.5 s | exact | 50,944 | `TIMING_VALID` | `s7cmd.97b265107a89.s1` |
 | rclone c64 `recursive-walk`, 8 GiB | 1,401.8 s | none | 8,369,376 | `TIMING_VALID` | `rclone.795fbd66217b.s1` |
 | rclone c64 `recursive-walk`, 16 GiB | 1,377.6 s | exact | 8,121,012 | `TIMING_VALID` | `rclone.d92a513cb0f2.s1` |
-| rclone `lsjson --fast-list -R`, 8 GiB | 1,851.8 s | exact | 73,764 | `TIMING_VALID` | `rclone.997236778cca.s3` |
+| rclone `lsjson --fast-list -R` (server-side recursion), 8 GiB | 1,851.8 s | exact | 73,764 | `TIMING_VALID` | `rclone.997236778cca.s3` |
 
 What the rows show:
 
 - **The per-directory walk holds the whole result set in memory.** At 8 GiB it
   was killed (subject exit -9) after issuing all 13,869 pages and writing
-  nothing. At 16 GiB it completed with about 8.1 GB resident. That is the
-  footprint of `recursive-walk`, not of rclone: its default streaming mode
-  completed the same cell in 74 MB.
+  nothing. At 16 GiB it completed with 7.7 GiB resident. That is the footprint
+  of `recursive-walk`, not of rclone: its `--fast-list` arm, which uses
+  server-side recursive listing, completed the same cell in 72 MiB. Both arms
+  are explicit, non-default flag sets.
 - **Prefix discovery collapses to one serial drain.** With no sub-prefixes to
   divide, s7cmd paginated the whole bucket sequentially.
 - **Range splitting is unaffected**, because it does not need directories to
@@ -219,11 +233,11 @@ What the rows show:
   functional result.
 - **Two rclone modes, one pagination, two wall clocks.** Both modes issued
   13,869 pages. The walk paginates with `delimiter=/`, which the server prices
-  at the 88 ms structure deadline; the streaming mode uses plain pages at
-  122 ms. That 34 ms per-page discount is the instrument pricing by syntax,
+  at the 88 ms structure deadline; the streaming mode uses plain pages at  122 ms. That 34 ms per-page discount is the instrument pricing by syntax,
   not one mode listing faster, and on this fixture it favours the walk and
-  s7cmd's drain. The first two `lsjson` attempts were Spot-preempted before
-  producing evidence and are exported as failures.
+  s7cmd's drain. The first two `--fast-list` attempts failed before producing
+  evidence (`MISSING_EVIDENCE`); that they were Spot-preempted comes from the
+  runner log, not the release rows.
 
 ## Swath on live S3
 
@@ -233,16 +247,16 @@ not measurements: the buckets are not under our control, the machine types and
 output modes differ, and nothing was repeated. `manifest.json` discloses them
 as `real-s3-rows-are-single-observations`.
 
-| bucket | objects | machine | mode | process wall, start to exit | objects/s over process wall | attempt |
-| --- | ---: | --- | --- | ---: | ---: | --- |
-| `real-changesets` | 13,868,442 | n4-highcpu-16 | sorted Parquet c1024 | 62.7 s | 221,259 | `swath.85ccd37c1b88.s1` |
-| `fah-public-data-covid19-absolute-free-energy` | 522,925,693 | n4-highcpu-16 | sorted Parquet c1024 | 370.7 s | 1,410,484 | `swath.d7668a13dc4c.s1` |
-| same | 522,925,693 | n4-highcpu-32 | sorted Parquet c2048 | 281.9 s | 1,854,866 | `swath.4b2db6e9f6a9.s1` |
-| same | 522,925,693 | n4-highcpu-32 | TSV + zstd c2048 | 187.3 s | 2,791,827 | `swath.a0f1b2c053d8.s1` |
-| `janelia-cosem-datasets` | 959,831,933 | n4-highcpu-16 | sorted Parquet c1024 | 724.2 s | 1,325,437 | `swath.0b5db9b35947.s1` |
-| same | 959,831,933 | n4-highcpu-32 | sorted Parquet c2048 | 585.1 s | 1,640,372 | `swath.0d01af45ef74.s1` |
-| `sentinel-cogs` | 1,068,443,985 | n4-highcpu-32 | sorted Parquet c1024 | 707.4 s | 1,510,392 | `swath.6b1ffae260c0.s1` |
-| `sentinel-cogs` | 1,068,477,307 | n4-highcpu-32 | TSV + zstd c2048 | 341.4 s | 3,129,747 | `swath.7b028bd8c692.s1` |
+| bucket | objects | Swath | machine | mode | process wall, start to exit | objects/s over process wall | attempt |
+| --- | ---: | --- | --- | --- | ---: | ---: | --- |
+| `real-changesets` | 13,868,442 | 0.3.1 | n4-highcpu-16 | sorted Parquet c1024 | 62.7 s | 221,259 | `swath.85ccd37c1b88.s1` |
+| `fah-public-data-covid19-absolute-free-energy` | 522,925,693 | 0.3.0 | n4-highcpu-16 | sorted Parquet c1024 | 370.7 s | 1,410,484 | `swath.d7668a13dc4c.s1` |
+| same | 522,925,693 | 0.3.1 | n4-highcpu-32 | sorted Parquet c2048 | 281.9 s | 1,854,866 | `swath.4b2db6e9f6a9.s1` |
+| same | 522,925,693 | 0.3.1 | n4-highcpu-32 | TSV + zstd c2048 | 187.3 s | 2,791,827 | `swath.a0f1b2c053d8.s1` |
+| `janelia-cosem-datasets` | 959,831,933 | 0.3.0 | n4-highcpu-16 | sorted Parquet c1024 | 724.2 s | 1,325,437 | `swath.0b5db9b35947.s1` |
+| same | 959,831,933 | 0.3.1 | n4-highcpu-32 | sorted Parquet c2048 | 585.1 s | 1,640,372 | `swath.0d01af45ef74.s1` |
+| `sentinel-cogs` | 1,068,443,985 | 0.3.0 | n4-highcpu-32 | sorted Parquet c1024 | 707.4 s | 1,510,392 | `swath.6b1ffae260c0.s1` |
+| `sentinel-cogs` | 1,068,477,307 | 0.3.1 | n4-highcpu-32 | TSV + zstd c2048 | 341.4 s | 3,129,747 | `swath.7b028bd8c692.s1` |
 
 "Process wall" is the whole run from start to exit, including writing the
 output to disk; the listing phase alone is shorter, and only the process wall
@@ -288,7 +302,8 @@ the release rows.
 - **It does not establish correctness.** Counts are checked against fixture
   object counts, not key by key. "Ran" and "verified" are separate facts.
 - **It does not establish scaling behaviour.** Each live-S3 point has a
-  different machine, output mode, region and bucket shape.
+  different machine, output mode, region, bucket shape, and in three cases a
+  different Swath version.
 - **It does not establish tuning conclusions.** Concurrency arms separated by
   single-run noise under a pressured instrument are not evidence of a knee.
 - **It says nothing about a bucket it did not list**, nor about
@@ -314,6 +329,8 @@ rather than favouring it.
   and no key material.
 - Failed and cancelled attempts stay in the rows with their `state` and
   `state_detail`. A settled attempt with no evidence is data, not an omission.
+- 18 attempts against licence-restricted workloads are withheld; the
+  manifest's `workloads-withheld` disclosure names the reason.
 - No generated site. The release is this directory and this report.
 - No cost figure is quoted; the row schema carries none. A later export may
   add a Spot list-price estimate, labelled as such.

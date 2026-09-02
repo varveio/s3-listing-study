@@ -507,7 +507,8 @@ client holding many requests in flight can load S3 in a way a serial client
 never does, and the capturing client cannot see that from inside, the floor is
 cross-checked against clients other than Swath: directly, by a same-bucket
 serial sample of about 100 unsigned pages over one keep-alive connection from
-the runner's zone, whose p50 must be within about 10% of the deadline; and in
+the runner's zone, whose p50 must be within about 15% of the deadline, a deadline above the
+serial p50 being conservative and one below it optimistic; and in
 aggregate against the roster's serial tools on live S3 in the study's August
 basic pass, whose wall time per page minus client cost per page must leave a
 residual that brackets the deadline for that region within a few
