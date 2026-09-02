@@ -42,10 +42,11 @@ Two more findings:
   at an 8 GiB cap; s7cmd's prefix discovery collapsed to one serial drain;
   Swath's range splitting was unaffected.
 
-The first-rung figure is
-[the ten-tool roster](results/2026-09-scale-diagnostics/charts/fourcast-roster.svg),
-with [the rows behind it](results/2026-09-scale-diagnostics/charts/fourcast-roster.csv).
-It is ordered by wall clock and **it is not a ranking**: three of those tools
+![The ten-tool roster on the 4.08M-object fixture, wall clock per tool](results/2026-09-scale-diagnostics/charts/fourcast-roster.svg)
+
+The rows behind the figure are
+[here](results/2026-09-scale-diagnostics/charts/fourcast-roster.csv). It is
+ordered by wall clock and **it is not a ranking**: three of those tools
 have no listing-concurrency control, one was fed cut-points by the harness,
 and one was slowed by the instrument.
 

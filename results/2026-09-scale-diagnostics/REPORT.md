@@ -53,12 +53,14 @@ largest row count observed on it, which is s3kor's known one-row surplus, and
 every FourCast figure here uses the staged bundle's 4,081,170. s4cmd is in the
 roster and has no attempt in this release.
 
-The first-rung figure is [`charts/fourcast-roster.svg`](charts/fourcast-roster.svg),
-rows in [`charts/fourcast-roster.csv`](charts/fourcast-roster.csv): one
-8-vCPU / 8-GiB arm per tool from group `fc-cpu-corrected-20260828`, each
-returning the exact count. It is ordered by wall clock and it is not a
-ranking. Three of those tools have no listing-concurrency control, one was fed
-cut-points by the harness, and one was slowed by the instrument.
+![FourCast 4.08M-object fixture: wall clock, one declared arm per tool](charts/fourcast-roster.svg)
+
+One 8-vCPU / 8-GiB arm per tool from group `fc-cpu-corrected-20260828`, each
+returning the exact count; rows in
+[`charts/fourcast-roster.csv`](charts/fourcast-roster.csv). It is ordered by
+wall clock and it is not a ranking. Three of those tools have no
+listing-concurrency control, one was fed cut-points by the harness, and one
+was slowed by the instrument.
 
 ## Where each tool stopped, and why
 
@@ -75,8 +77,14 @@ cut-points by the harness, and one was slowed by the instrument.
 | rclone | 143M | Completed in 667.0 s at c64. Returned 143,008,665 rows, nine short, consistent with a walk not emitting directory markers. The c128 arm was slower, 821.0 s. | `rclone.6319ec57665d.s1`, `rclone.3eff2ab4f661.s1` |
 | Swath | 143M | Completed, exact, 173.7 s at c256. Every Swath row on this fixture failed the timing gate; see below. | `swath.be4140354dd1.s1` |
 
-## Per-tool dispositions
+![Peak RSS against fixture size: s3-fast-list, with Swath and rclone for reference](charts/s3-fast-list-rss.svg)
 
+Peak resident memory against fixture size; a cross marks an attempt with no
+accepted result. On the 66.4M-object NBM fixture s3-fast-list was killed at
+the container memory limit twice. Rows in
+[`charts/s3-fast-list-rss.csv`](charts/s3-fast-list-rss.csv).
+
+## Per-tool dispositions
 The best-completing arm actually recorded for each tool. "Exact" means the run
 returned the fixture's object count. Figures are `wall_seconds`, `row_count`
 and `max_rss_kb` for the named attempt.
@@ -93,6 +101,12 @@ and `max_rss_kb` for the named attempt.
 | s7cmd | 1.5.0 | `recursive-one-nosort` c16 | NARA 13.5M | 601.0 s | exact | 111,160 | `CAPACITY_FAILED` | `s7cmd.bdba69aad415.s1` |
 | rclone | 1.74.4 | `recursive-walk` c64 | blockchain 143M | 667.0 s | 143,008,665 of 143,008,674 | 1,893,836 | `TIMING_VALID` | `rclone.6319ec57665d.s1` |
 | Swath | 0.3.1 | `recursive-tsv-dataset` c256 | blockchain 143M | 173.7 s | exact | 2,232,392 | `CAPACITY_FAILED` | `swath.be4140354dd1.s1` |
+
+![NBM 66.4M-object fixture: wall clock at the same declared allocation](charts/nbm-same-allocation-wall.svg)
+
+Wall clock on the 66.4M-object NBM fixture at one declared allocation. The
+Swath rows are `CAPACITY_FAILED` on structure probes, which slows only Swath.
+Rows in [`charts/nbm-same-allocation-wall.csv`](charts/nbm-same-allocation-wall.csv).
 
 Standing notes per tool:
 
@@ -237,9 +251,12 @@ is in the release rows (for the billion-object run, 5 m 12 s of listing inside
 wall, so it understates the listing rate. The two `sentinel-cogs` counts
 differ because the bucket changed between runs; each is the exact integer that
 run returned, and neither was verified against a key manifest, because none
-exists for a changing public bucket. The figure is
-[`charts/real-s3-ladder.svg`](charts/real-s3-ladder.svg), rows in
-[`charts/real-s3-ladder.csv`](charts/real-s3-ladder.csv).
+exists for a changing public bucket.
+
+![Swath on live S3: objects listed against whole-process rate, single observations](charts/real-s3-ladder.svg)
+
+One point per run, machine type and output mode differ between points; rows
+in [`charts/real-s3-ladder.csv`](charts/real-s3-ladder.csv).
 
 ### The billion-object run, and its boundary
 
