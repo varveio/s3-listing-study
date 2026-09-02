@@ -24,17 +24,18 @@ SUPPORTS_UNSIGNED = True
 """--no-sign-request lists anonymously. The signed path drops the flag and has
 not been exercised by a committed run."""
 
-CONCURRENCY = Ceiling(64, "source@cef8ec2")
+CONCURRENCY = Ceiling(64, "source@7b9a5e2")
 """Swath's own width when unsilenced: `S3Config.DEFAULT_MAX_PARALLEL`
-(`ConnectionOptions.java:78-80`).
+(`S3Config.java:81`, bound by `ConnectionOptions.java:79-81` @7b9a5e2).
 
 A ceiling because `--concurrency N` is an AIMD limit: a run starts at
 `min(4, N)` permits and the store, not the flag, sets the steady-state level, so
 the achieved width is a fact about the run and belongs in evidence.
 
-**Receipt owed.** `cef8ec2` is v0.2.0 source while `build/image.json` pins the
-0.2.4 jar, so the 64 stands on a reading of the wrong revision until a
-`list --help` on 0.2.4 confirms it. Also in `docs/running.md`.
+The 64 is read at the same revision `build/image.json` pins (the v0.3.1
+release image, revision 7b9a5e2), and that image's own `list --help` prints
+`--concurrency=N  AIMD ceiling for concurrent listing requests (default: 64)`;
+the capture is in `docs/running.md`.
 
 What a campaign asks Swath for is plan content -- the historical cap of 8 is a
 `concurrency` row field in `benchmark/plans/buckets/*.yaml`, where it is visible

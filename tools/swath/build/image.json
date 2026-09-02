@@ -1,8 +1,8 @@
 {
   "tool": "swath",
-  "tool_version": "0.2.5-SNAPSHOT",
-  "tool_build_sha256": "dc179e5afadf8fd221be0db3b83a58f635cbf4554bebf4fb8cbbdbb40bb4e2a5",
-  "tool_artifact": {"kind":"container-image","locator":"ghcr.io/varveio/swath","sha256":"a13adef049de8c11c053861918005aaaae6c8576797df48867d1c5efdbcfc88b"},
+  "tool_version": "0.3.1",
+  "tool_build_sha256": "833566f43178e37f371dade058934fb38cecaaafc74ed6534daac9bcf7117dc5",
+  "tool_artifact": {"kind":"container-image","locator":"ghcr.io/varveio/swath","sha256":"776e788200a1e70f30206897303a34e4faabd56c591e1c9562277677085c4f60"},
   "subject_workdir": "/opt/swath",
   "executable": [
     "/opt/java/openjdk/bin/java",
@@ -11,5 +11,5 @@
   ],
   "command": "adapter/command.py",
   "normalizer": "adapter/normalize.py",
-  "adapter_bundle_sha256": "6985ad4b31d845bb940d7568ceec53c27ba1442758f413295473a38c290f8b84"
+  "adapter_bundle_sha256": "6af4ec67375b7393892c56bcb1025323e0a1a1c1aaa5229831877ecbed5e49dc"
 }

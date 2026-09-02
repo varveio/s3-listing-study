@@ -95,7 +95,7 @@ jobs:
         # pinned checkouts, with --require-checked so it cannot pass having
         # checked nothing:
         #   uv run s3-listing-study check-source-anchors --tool swath --require-checked \
-        #     --source-root /path/to/swath-at-cef8ec2
+        #     --source-root /path/to/swath-at-7b9a5e2
         run: uv run s3-listing-study check-source-anchors --self-test
 
       - name: Markdown link check (current-state surfaces)

@@ -94,7 +94,7 @@ describes the recorded provenance, not a new registry pull or rebuild test.
 | minio-mc | Public upstream digest reference | Not needed | Registry bytes identified by digest |
 | s7cmd | Local-only image | No recipe in this repository | No |
 | s3-fast-list | Local-only image | Yes | No; dependency/toolchain closure differs from upstream |
-| Swath | **Public upstream digest reference** (`ghcr.io/varveio/swath@sha256:ef1aca9ab473f133acceb5730ff88d52abaaa89e773801cdb62deff51f9909b0`, pulled anonymously) | Not needed | Registry bytes identified by digest (committed observation); an unreceipted observation found the `org.opencontainers.image.revision` label equal to the tested commit |
+| Swath | **Public upstream digest reference** (`ghcr.io/varveio/swath@sha256:776e788200a1e70f30206897303a34e4faabd56c591e1c9562277677085c4f60`, pulled anonymously) | Not needed | Registry bytes identified by digest (committed observation); an unreceipted observation found the `org.opencontainers.image.revision` label equal to the tested commit |
 | s3p | Local-only study image | Yes | No; dependency closure is not locked |
 | s3kor | Local-only study image | Yes | No exact-byte rebuild demonstrated |
 | s4cmd | Throwaway local-registry image | Yes | No exact-byte rebuild demonstrated |

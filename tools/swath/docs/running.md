@@ -1,7 +1,11 @@
 # Swath — running
 
-What this study selected as its v0.2.0 subject, what it ran, what it could not
-run, what could not be checked, and how to reproduce the work that exists.
+What this study selected as its v0.3.1 subject, what it ran, what it could not
+run, what could not be checked, and how to reproduce the work that exists. The
+two instrumented listing runs below were made on the previous subject, v0.2.0,
+and are retained as observations of that image; the v0.3.1 image has been
+exercised through the adapter round-trip described under
+[What ran on v0.3.1](#what-ran-on-v031-the-adapter-round-trip).
 
 Canonical tested identity — repository, version, pinned revision, and study
 states — lives in [`../data/tool.json`](../data/tool.json). The claim `some-id`
@@ -9,33 +13,46 @@ reference notation and the evidence vocabulary are defined once in
 [`mechanism.md`](mechanism.md); this page does not repeat them. Mechanism
 explanation lives there too.
 
-## Comparative image prepared 2026-08-10 (not run evidence)
+## Toolbox image selection (not run evidence)
 
-[image.json](../build/image.json) selects official Swath 0.2.4 JAR plus runtime tree from digest-pinned Temurin 25 JRE. Shared assembly is defined once in [tool-structure.md](../../../docs/operating/tool-structure.md). Historical receipts below continue to describe the images and artifacts they name.
+[`image.json`](../build/image.json) pins upstream's published v0.3.1 release
+image by index digest, and both the capsule's
+[`build/Dockerfile`](../build/Dockerfile) and the benchmark toolbox recipe copy
+its jar and Temurin 25 JRE from that digest without recompiling Swath. Shared
+assembly is defined once in
+[tool-structure.md](../../../docs/operating/tool-structure.md). Earlier
+diagnostic receipts below describe the images and artifacts they name at the
+time (a 0.2.4 release jar, a 0.2.5-SNAPSHOT main image).
 
 ## Tested subject: upstream's published image
 
 The subject is upstream's own published image, an OCI index at
-`ghcr.io/varveio/swath@sha256:ef1aca9ab473f133acceb5730ff88d52abaaa89e773801cdb62deff51f9909b0`,
+`ghcr.io/varveio/swath@sha256:776e788200a1e70f30206897303a34e4faabd56c591e1c9562277677085c4f60`,
 pulled anonymously with no `docker login` — claim
 `published-image-is-anonymously-pullable`. Nothing was built locally for this
-subject.
+subject. The index carries `linux/amd64` and `linux/arm64` children plus two
+attestation manifests, and a cosign signature tag for the index digest is
+present in the registry.
 
-**Tag trap.** The registry tag is `0.2.0`, with no `v` prefix. `v0.2.0` returns
+**Tag trap.** The registry tag is `0.3.1`, with no `v` prefix. `v0.3.1` returns
 `manifest unknown`, which will catch anyone who copies the git tag — the git tag
 *is* `v`-prefixed, and release version discipline is mechanical: a release fails
 unless the git tag equals `v` plus the Gradle version — claim
-`upstream-publishes-tagged-releases`.
+`upstream-publishes-tagged-releases`. Nine such tags exist, from v0.1.0
+(2026-07-27) to v0.3.1 (2026-09-01); v0.3.0 and v0.3.1 were published an hour
+apart, and the 0.3.1 notes say the `swath` CLI is unchanged from 0.3.0.
 
 The image binds itself to source: both per-arch config blobs carry
-`org.opencontainers.image.revision` equal to the pinned commit `cef8ec2`, so the
+`org.opencontainers.image.revision` equal to the pinned commit `7b9a5e2`, so the
 source-to-image link is embedded in the artifact rather than recorded only in a
 build receipt — claim `image-label-binds-to-source-commit`. The jar inside it is
 the release build job's own uber-jar, promoted by a build-context override and
-checksum-verified before use. The running image self-reports `swath 0.2.0
-(cef8ec24a74f)` — claim `image-self-reports-v020`. The label read, the
-manifest fetch and the `--version` probe were all direct container observations
-with no receipt.
+checksum-verified before use; the image is pushed by digest, smoked, and only
+then tagged. The running image self-reports `swath 0.3.1`, `Commit:
+7b9a5e2fba04`, `Runtime: 25.0.4+7-LTS` — claim `image-self-reports-v020`. The
+label read, the manifest fetch and the `--version` probe were all direct
+container observations on 2026-09-02 with no receipt, recorded in
+[`../research/v0.3.1/report.md`](../research/v0.3.1/report.md).
 
 At this revision the repository is public, carries an Apache-2.0 licence and a
 `NOTICE` naming Varve Systems Ltd, and publishes tagged releases — claims
@@ -57,7 +74,11 @@ claim" clause elsewhere in this capsule.**
 The v0.2.0 derivation ran on a shared devcontainer carrying unrelated workloads
 and private checkouts, not a runner provisioned to the study's mandatory
 security profile. The retired wrapper-era evidence path was therefore never
-used, and no wrapper-era receipt exists for those runs.
+used, and no wrapper-era receipt exists for those runs. The v0.3.1 adapter
+round-trip of 2026-09-02 is likewise a direct `docker run` observation on the
+maintainer's workstation, preserved under
+[`../receipts/observations-v0.3.1/`](../receipts/observations-v0.3.1/) and
+labelled as such.
 
 Those v0.2.0 runs under "What ran" below remain direct container observations:
 `docker run` with `--cap-drop ALL`, `--security-opt no-new-privileges:true`, and
@@ -120,9 +141,9 @@ report them correctly.
 Elsewhere in this capsule this caveat appears as a short clause with a link back
 here, never re-derived.
 
-## What ran
+## What ran on v0.2.0: the two instrumented runs
 
-Two instrumented listing runs on 2026-08-02, both anonymous
+Two instrumented listing runs on 2026-08-02 on the v0.2.0 image, both anonymous
 (`--no-sign-request` from a credential-starved container), both
 `--concurrency 8`, `--format jsonl -v`, `--region us-east-1`, against
 `noaa-normals-pds`, on the index's arm64 child manifest with no emulation. Four
@@ -190,9 +211,50 @@ What they settle, each with its own limits:
 Two offline probes under `--network none` also ran: `--version`, and `list
 --help`, whose usage block shows the absence of `--max-keys`, `--delimiter`,
 `--recursive`, `--no-owner-split` and `--all-versions`. Those absences are
-established from source; the help probe observed them live without a receipt —
-claims `page-size-fixed-no-max-keys`, `no-shallow-listing-mode`,
-`no-owner-split-flag-absent`, `versions-listing-is-dead-code`.
+established from source and persist at v0.3.1, whose captured help is diffed
+against v0.2.0's in the v0.3.1 record; the help probes observed them live
+without a receipt — claims `page-size-fixed-no-max-keys`,
+`no-shallow-listing-mode`, `no-owner-split-flag-absent`,
+`versions-listing-is-dead-code`.
+
+## What ran on v0.3.1: the adapter round-trip
+
+On 2026-09-02 every mode `../adapter/command.py` declares was compiled by the
+adapter, executed on the pinned v0.3.1 image (amd64 child, native,
+`--cap-drop ALL`, `no-new-privileges`, metadata service disabled) against
+`s3://noaa-normals-pds/normals-hourly/` anonymously, and read back through
+`../adapter/normalize.py`. This is the capsule-authoring verification loop, not
+a benchmark and not a receipt; its record is
+[`../receipts/observations-v0.3.1/adapter-modes/`](../receipts/observations-v0.3.1/adapter-modes/).
+No `concurrency` was configured, so the adapter rendered its declared default
+of 64.
+
+| Mode | Exit | Normalized rows | Distinct keys | Same key set as every other mode |
+| --- | --- | --- | --- | --- |
+| `recursive-tsv` | 0 | 2,549 | 2,549 | yes |
+| `recursive-jsonl` | 0 | 2,549 | 2,549 | yes |
+| `recursive-table` | 0 | 2,549 | 2,549 | yes, after a normalizer fix |
+| `seed-none` | 0 | 2,549 | 2,549 | yes |
+| `recursive-tsv-dataset` | 0 | 2,549 | 2,549 | yes |
+| `recursive-tsv-zstd` | 0 | 2,549 | 2,549 | yes |
+| `recursive-parquet` | 0 | 2,549 | 2,549 | yes |
+| `recursive-parquet-sorted` | 0 | 2,549 | 2,549 | yes |
+
+The count matches the registry's figure for the prefix, and the eight key-set
+digests are identical. That is count-and-uniqueness plus cross-mode agreement
+over one prefix in single runs: not a completeness check, not a full-bucket
+run, and not comparable to anything — the caveats of
+[What the verifier could not check](#what-the-verifier-could-not-check) apply
+in full. Two things it does settle: every argv the adapter emits parses and
+completes on 0.3.1, and every native output shape — stdout streams, compressed
+and plain text dataset parts, direct and sorted Parquet datasets with their
+`_SUCCESS` markers — is read by the normalizer. One defect it found was the
+study's: the aligned table sink now prints millisecond fractions on every
+timestamp, which the normalizer's table query did not strip, so that mode
+first normalized to zero rows. The retained TSV stderr carries Swath's own
+`list_run_summary` line for that run (144 API calls, peak 18 in flight under
+the ceiling of 64, 13 steals, 1 split), quoted here only to say what is there;
+one unreplicated prefix-scale run at one setting measures nothing.
 
 **Region is required, even anonymously.** A run with no resolvable region exits 2
 before the first request, because region resolution and credential resolution are
@@ -205,33 +267,44 @@ anonymous quickstarts omit it.
 
 `../adapter/command.py` implements the shared typed command contract without
 shell or NUL transport and never runs Docker or the tool. The subject image
-entrypoint is `["java","-jar","/opt/swath/swath.jar"]`, and the adapter preserves that
-top-level option or the `list` subcommand, not at a binary name.
-`../adapter/normalize.py` converts native output into the historical verifier's
-five-field normalized stream.
+entrypoint is `["java","-jar","/opt/swath/swath.jar"]`; the adapter spells the
+same launcher with the absolute JRE path, because the attempt engine's
+environment does not carry Temurin's `bin` on `PATH`. `../adapter/normalize.py`
+converts native output into the five-field comparison stream.
 
-**Both adapter modules were derived against v0.2.0.** Their typed contracts and
-argv are covered by repository tests, and `recursive-tsv` has now executed
-in-image against Swath 0.2.4 in diagnostic attempt 3. They
-emit `--concurrency`, `--format table`, `--tune seed.mode=none` and — for the
-sort disk guard — `--tune sort.ignore-disk-check=on`, there being no
-`--force-sort` option at all even though the guard's own error message names one
-(claims `mode-inventory-v020`, `concurrency-flag-is-aimd-ceiling`,
-`live-error-messages-name-absent-flags`). The normalizer's modes are
-`recursive-tsv`, `recursive-jsonl`, `recursive-table`, `seed-none`,
-`parquet-probe` and `sort-probe`, named to match v0.2.0's own format names.
+**Both adapter modules were validated against v0.3.1 by execution.** Their
+typed contracts and argv are covered by repository tests, and every declared
+mode round-tripped on the pinned image on 2026-09-02 (above). Every option the
+adapter emits appears in the 0.3.1 installed help — `--compression`,
+`--text-writers`, `--text-part-size`, `--writeback-size` and the
+`sort.merge-parallelism` tune key are 0.3.0 additions the adapter already
+carried — and it emits `--tune seed.mode=none` and, for the sorted-staging
+disk guard, `--tune sort.ignore-disk-check=on`, there being no `--force-sort`
+option at all even though the guard's own error message still names one
+(claims `mode-inventory-v020`, `live-error-messages-name-absent-flags`). The
+normalizer's modes are `recursive-tsv`, `recursive-jsonl`, `recursive-table`,
+`seed-none`, `recursive-tsv-dataset`, `recursive-tsv-zstd`,
+`recursive-parquet` and `recursive-parquet-sorted`. Two 0.3.0 output changes
+reach it: every text sink now prints `last_modified` as S3 spells it, with a
+millisecond fraction, which the normalizer strips on every row (claims
+`timestamp-precision-is-variable`, `last-modified-text-is-endpoint-spelling`);
+and the Parquet `key` column is annotated `STRING`, so DuckDB returns it as
+text and the normalizer re-encodes it as UTF-8, which is byte-exact because
+Swath refuses to write a non-UTF-8 key (claim
+`parquet-key-is-string-annotated-utf8-only`).
 
-**The concurrency the capsule declares, and the receipt it owes.** `command.py`
-declares `concurrency` as a ceiling of `64` — Swath's own width when unsilenced,
-`S3Config.DEFAULT_MAX_PARALLEL` (`ConnectionOptions.java:78-80 @cef8ec2`) — and
-renders it from the run's config rather than pinning it, so the number reaches
-the record and a plan can sweep it. What this study *asks* for is plan content:
+**The concurrency the capsule declares.** `command.py` declares `concurrency`
+as a ceiling of `64` — Swath's own width when unsilenced,
+`S3Config.DEFAULT_MAX_PARALLEL` (`S3Config.java:81`, bound by
+`ConnectionOptions.java:79-81 @7b9a5e2`) — and renders it from the run's config
+rather than pinning it, so the number reaches the record and a plan can sweep
+it. The 0.3.1 image's own `list --help` prints `--concurrency=N  AIMD ceiling
+for concurrent listing requests (default: 64)`, which settles the receipt the
+v0.2.0 page owed on this number. What this study *asks* for is plan content:
 every swath row in `benchmark/plans/buckets/` states `concurrency: 8`, which is
 the historical frozen cap under the prose-only `CONCURRENCY_CAP=8` convention,
 now visible and reviewable in the plan rather than buried in the capsule. The
-`64` is read from v0.2.0 source while `../build/image.json` pins the 0.2.4 jar,
-so it stands on the wrong revision. **Receipt owed: `list --help` on 0.2.4.**
-The capsule also renders the harness's heap share into
+capsule also renders the harness's heap share into
 `JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=<percent>`, since which variable a JVM
 reads is Swath's business and the share is the harness's.
 
@@ -243,13 +316,14 @@ runtime or cross-mode-agreement claim. Of those modes, only `recursive-tsv` now
 has later diagnostic-attempt runtime coverage; the others still need registered
 benchmark attempts.
 
-**What the current benchmark can publish.** Text modes flow through captured raw
-streams. For both Parquet modes, `command.py` directs the dataset into the
-benchmark worker's native sink directory; the worker recursively retains,
-hashes, secret-scans, and uploads that tree. The retired wrapper's
-`file-sinks-not-harness-capturable` limitation therefore describes historical
-smoke evidence, not the current benchmark. No comparative Parquet attempt has
-yet established that the new path works end to end.
+**What the current benchmark can publish.** Stream modes flow through captured
+raw streams. For the Parquet and text-dataset modes, `command.py` directs the
+dataset into the benchmark worker's native sink directory; the worker
+recursively retains, hashes, secret-scans, and uploads that tree. The retired
+wrapper's `file-sinks-not-harness-capturable` limitation therefore describes
+historical smoke evidence, not the current benchmark. The 2026-09-02
+round-trip exercised that sink shape outside the worker; no comparative
+Parquet attempt has yet established the path end to end through the worker.
 
 The current adapter does not declare a `--report` mode. In the historical runs,
 the clean scrape target was the `list_run_summary` line on stderr at `-v`, which
@@ -257,33 +331,57 @@ is where every counter above came from — claim `api-calls-counter-is-trustwort
 
 ## Mode-by-mode coverage
 
-Swath v0.2.0 offers nine executable modes — three text formats, Parquet as a
-single-file sink and as a directory dataset, sorted Parquet, the `resume`
-subcommand, and two reachable seed modes — plus `seed.mode=hints`, which is
-declared and rejected at seed time and so is not an executable mode at all —
-claim `mode-inventory-v020`.
+Swath v0.3.1 offers at least thirteen modes — three text formats to a stream
+or file, partitioned TSV and JSONL directory datasets, a diagnostic discard
+sink, Parquet as a single-file sink and as a directory dataset, sorted Parquet,
+the `resume` subcommand, and two reachable seed modes — with a compression
+axis on the text outputs, plus `seed.mode=hints`, which is declared and
+rejected at seed time and so is not an executable mode at all — claim
+`mode-inventory-v020`.
 
-| Mode | Status in this pass | Why |
+| Mode | Status at v0.3.1 | Why |
 | --- | --- | --- |
-| `--format jsonl` | Observed twice directly, exit 0; no receipt, no verifier verdict | Runner-security blocker |
-| `--tune seed.mode=shallow` (default) | Observed in both direct runs | Default; no receipt |
-| `--format tsv` | Diagnostic attempt completed, exit 0; no verifier verdict | Swath 0.2.4 attempt 3 counted 2,549 rows under `normals-hourly/`; this does not confirm a v0.2.0 claim |
-| `--format table` | Unverified | Present only in an unauditable historical adapter summary; re-run required |
-| `--tune seed.mode=none` | Unverified | Present only in an unauditable historical adapter summary; the seed-cost arms remain uncompared — claim `seed-cost-direction-at-smoke` |
-| `--tune seed.mode=hints` | Unexercised | Declared but unreachable: it throws at seed time, after the checkpoint database is opened and the S3 client is built — claim `seed-hints-unimplemented`. Worth one capability probe of the exit-2 failure |
-| `--format parquet` probes | Declared; benchmark run pending | Current adapter writes into the retained native sink; no comparative result exists yet |
-| `--sort` | Declared; benchmark run pending | Parquet-only by construction; current adapter writes into the retained native sink |
-| `swath resume <dir>` | Unexercised | Needs a durable checkpoint and is not a declared current driver mode — claim `only-parquet-directory-is-resumable` |
+| `--format jsonl` | Round-tripped on the prefix, exit 0; no receipt, no verifier verdict | Also observed twice on v0.2.0, once at full-bucket scope |
+| `--format tsv` | Round-tripped on the prefix, exit 0; no verifier verdict | Also the 0.2.4 diagnostic attempt 3 (2,549 rows) |
+| `--format table` | Round-tripped on the prefix, exit 0 after a normalizer fix | Millisecond timestamps overflowed nothing but were not stripped; fixed in `normalize.py` |
+| `--tune seed.mode=shallow` (default) | Exercised by every round-trip mode and both v0.2.0 runs | Default |
+| `--tune seed.mode=none` | Round-tripped on the prefix, exit 0 | Output captured, counters not compared; the seed-cost arms remain uncompared — claim `seed-cost-direction-at-smoke` |
+| `--tune seed.mode=hints` | Unexercised | Declared but unreachable: it throws at seed time, after the checkpoint database is opened and the S3 client is built — claim `seed-hints-unimplemented` |
+| TSV directory dataset, plain and zstd | Round-tripped on the prefix, exit 0 | 0.3.0 mode; `--checkpoint none` required — claim `text-datasets-require-checkpoint-none` |
+| `--format parquet` directory | Round-tripped on the prefix, exit 0 | Native sink retained and normalized; no comparative result exists |
+| `--sort` | Round-tripped on the prefix, exit 0 | Parquet-only by construction; one `part-00000.parquet` published with manifest and `_SUCCESS` |
+| `--format discard` | Unexercised | 0.3.0 diagnostic sink; not a declared adapter mode — claim `discard-sink-measures-listing-engine` |
+| JSONL directory dataset, gzip compression | Unexercised | Not declared adapter modes |
+| `swath resume <dir>` | Unexercised | Needs a durable checkpoint and is not a declared adapter mode — claim `only-parquet-directory-is-resumable` |
 | `--fetch-owner` | Unexercised | Request-shape variant rather than a mode; one representative run recommended |
+
+"Round-tripped" means exit 0, 2,549 normalized rows and the shared key-set
+digest in the 2026-09-02 observation; it is not verification.
 
 Edge-key fidelity was not exercised at all: the study registry configures no edge
 bucket and the corpus listed carries no control-character keys — claim
 `control-char-key-fidelity-untested`.
 
-## Reproducing the two runs
+## Reproducing the runs
 
-Both runs were direct `docker run` invocations. This is what was executed, not a
-reconstruction:
+The v0.3.1 round-trip argv for each mode is in the observation's table; the
+stream modes reduce to, for example:
+
+```sh
+docker run --rm --cap-drop ALL --security-opt no-new-privileges:true \
+  -e AWS_EC2_METADATA_DISABLED=true -e TZ=UTC -e HOME=/nonexistent \
+  -e JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=75 \
+  --entrypoint /opt/java/openjdk/bin/java \
+  ghcr.io/varveio/swath@sha256:776e788200a1e70f30206897303a34e4faabd56c591e1c9562277677085c4f60 \
+  -jar /opt/swath/swath.jar -v --color never \
+  list s3://noaa-normals-pds/normals-hourly/ --region us-east-1 --no-sign-request \
+  --concurrency 64 --checkpoint none --format tsv
+```
+
+The image must be pulled by digest first; the tag, if you use one, is `0.3.1`.
+
+The two v0.2.0 runs were direct `docker run` invocations. This is what was
+executed, not a reconstruction:
 
 ```sh
 docker run --rm --pull=never --cap-drop ALL --security-opt no-new-privileges:true \
@@ -299,8 +397,8 @@ docker run --rm --pull=never --cap-drop ALL --security-opt no-new-privileges:tru
     --region us-east-1 --no-sign-request --format jsonl -v --concurrency 8
 ```
 
-The full-bucket run is the same invocation with `s3://noaa-normals-pds/`. The
-image must be pulled by digest first; the tag, if you use one, is `0.2.0`.
+The full-bucket run is the same invocation with `s3://noaa-normals-pds/`. That
+image's tag is `0.2.0`; it is no longer the tested subject.
 
 **A claim-confirming re-run is a different procedure.** The capsule records the
 Swath build and adapter declarations used by the unified benchmark toolbox.
@@ -310,9 +408,11 @@ smoke remains study evidence, not a benchmark result. The other text modes and
 capability probe.
 
 [`../receipts/observations-v0.2.0/`](../receipts/observations-v0.2.0/) preserves
-the canonical v0.2.0 observations. [`../receipts/smoke/`](../receipts/smoke/)
-holds later diagnostic attempt receipts, most recently the v0.2.4 attempt 3;
-they do not supersede the observations or confirm their claims.
+the v0.2.0 observations and
+[`../receipts/observations-v0.3.1/`](../receipts/observations-v0.3.1/) the
+v0.3.1 round-trip. [`../receipts/smoke/`](../receipts/smoke/) holds the
+diagnostic attempt receipts of 2026-08-10 (0.2.2 and 0.2.4); none of these
+supersede one another or confirm a claim.
 
 ## Deferred coverage
 
@@ -322,9 +422,11 @@ Each of these stays `unverified`, with its own reason:
   was performed, and neither observation run could have exercised it: a stdout
   run gets an in-process memory-backed checkpoint (claims `crash-resume-works`,
   `exactly-once-under-crash`).
-- **Parquet and sorted-Parquet execution and fidelity** — no such run was made at
-  v0.2.0; the benchmark adapter and native sink now declare a capturable route,
-  but it has not produced comparative evidence (claims `parquet-modes-execute`,
+- **Parquet and sorted-Parquet execution and fidelity** — both modes completed
+  on the prefix in the v0.3.1 round-trip and normalized to the shared key set,
+  which is an observation, not a receipt, and says nothing about fidelity
+  beyond the 2,549 ASCII keys it listed; the benchmark route through the worker
+  has not produced comparative evidence (claims `parquet-modes-execute`,
   `parquet-output-byte-exact`).
 - **Bounded memory at scale** — the observed peak RSS figures are
   JVM-baseline-dominated at this scale and probe no cliff (claim
@@ -335,15 +437,18 @@ Each of these stays `unverified`, with its own reason:
   seed, and the one `seed.mode=none` run captured output only, with no
   `list_run_summary` counters, so no cost comparison of the two arms exists at
   v0.2.0 (claim `seed-cost-direction-at-smoke`).
-- **amd64 execution at v0.2.0** — amd64 is supported across every channel,
-  including a real child manifest in the published index and dual-platform CI
-  builds, but both canonical v0.2.0 observations were native arm64. The later
-  v0.2.4 diagnostic attempt ran on amd64 and does not settle the v0.2.0 claim
-  (claims `amd64-built-and-smoked-upstream`, `arm64-not-runtime-smoked-at-v020`).
-- **Concurrency above 8, AIMD necessity, and JVM cost at high list rates** — no
-  run here went above `--concurrency 8`, nothing throttled, and neither run was a
-  high-rate one (claims `parallelism-ratio-at-higher-concurrency`,
-  `aimd-necessity`, `java-handicap-at-high-rates`).
+- **arm64 at v0.3.1** — the v0.3.1 round-trip and the 2026-08-10 diagnostic
+  attempts ran the amd64 child; the only arm64 runtime observations are the two
+  v0.2.0 runs, and upstream still does not runtime-smoke arm64 (claims
+  `amd64-built-and-smoked-upstream`, `arm64-not-runtime-smoked-at-v020`,
+  `runs-executed-natively-on-arm64`).
+- **Concurrency above 8, AIMD necessity, and JVM cost at high list rates** — the
+  instrumented runs used `--concurrency 8`; the v0.3.1 round-trip ran at the
+  adapter's default ceiling of 64 and self-reported peak 18 in flight on a
+  2,549-key prefix, which is one unreplicated number, not a ratio; nothing
+  throttled, and no run was a high-rate one (claims
+  `parallelism-ratio-at-higher-concurrency`, `aimd-necessity`,
+  `java-handicap-at-high-rates`).
 - **Endpoint conformance and intra-page ordering** — the encoding hazards and the
   missing ordering check are source-established and need a replay server or a
   seeded edge corpus, not another listing run (claims
