@@ -307,16 +307,20 @@ not measurements: the buckets are not under our control, the machine types and
 output modes differ, and nothing was repeated. `manifest.json` discloses them
 as `real-s3-rows-are-single-observations`.
 
-| bucket | objects | Swath | machine | mode | process wall, start to exit | objects/s over process wall | attempt |
-| --- | ---: | --- | --- | --- | ---: | ---: | --- |
-| `real-changesets` | 13,868,442 | 0.3.1 | n4-highcpu-16 | sorted Parquet c1024 | 62.7 s | 221,259 | `swath.85ccd37c1b88.s1` |
-| `fah-public-data-covid19-absolute-free-energy` | 522,925,693 | 0.3.0 | n4-highcpu-16 | sorted Parquet c1024 | 370.7 s | 1,410,484 | `swath.d7668a13dc4c.s1` |
-| same | 522,925,693 | 0.3.1 | n4-highcpu-32 | sorted Parquet c2048 | 281.9 s | 1,854,866 | `swath.4b2db6e9f6a9.s1` |
-| same | 522,925,693 | 0.3.1 | n4-highcpu-32 | TSV + zstd c2048 | 187.3 s | 2,791,827 | `swath.a0f1b2c053d8.s1` |
-| `janelia-cosem-datasets` | 959,831,933 | 0.3.0 | n4-highcpu-16 | sorted Parquet c1024 | 724.2 s | 1,325,437 | `swath.0b5db9b35947.s1` |
-| same | 959,831,933 | 0.3.1 | n4-highcpu-32 | sorted Parquet c2048 | 585.1 s | 1,640,372 | `swath.0d01af45ef74.s1` |
-| `sentinel-cogs` | 1,068,443,985 | 0.3.0 | n4-highcpu-32 | sorted Parquet c1024 | 707.4 s | 1,510,392 | `swath.6b1ffae260c0.s1` |
-| `sentinel-cogs` | 1,068,477,307 | 0.3.1 | n4-highcpu-32 | TSV + zstd c2048 | 341.4 s | 3,129,747 | `swath.7b028bd8c692.s1` |
+| bucket | objects | Swath | machine | mode | process wall, start to exit | objects/s over process wall | peak RSS (KiB) | attempt |
+| --- | ---: | --- | --- | --- | ---: | ---: | ---: | --- |
+| `real-changesets` | 13,868,442 | 0.3.1 | n4-highcpu-16 | sorted Parquet c1024 | 62.7 s | 221,259 | 1,521,648 | `swath.85ccd37c1b88.s1` |
+| `fah-public-data-covid19-absolute-free-energy` | 522,925,693 | 0.3.0 | n4-highcpu-16 | sorted Parquet c1024 | 370.7 s | 1,410,484 | 7,754,624 | `swath.d7668a13dc4c.s1` |
+| same | 522,925,693 | 0.3.1 | n4-highcpu-32 | sorted Parquet c2048 | 281.9 s | 1,854,866 | 12,362,232 | `swath.4b2db6e9f6a9.s1` |
+| same | 522,925,693 | 0.3.1 | n4-highcpu-32 | TSV + zstd c2048 | 187.3 s | 2,791,827 | 8,585,240 | `swath.a0f1b2c053d8.s1` |
+| `janelia-cosem-datasets` | 959,831,933 | 0.3.0 | n4-highcpu-16 | sorted Parquet c1024 | 724.2 s | 1,325,437 | 9,701,684 | `swath.0b5db9b35947.s1` |
+| same | 959,831,933 | 0.3.1 | n4-highcpu-32 | sorted Parquet c2048 | 585.1 s | 1,640,372 | 13,703,164 | `swath.0d01af45ef74.s1` |
+| `sentinel-cogs` | 1,068,443,985 | 0.3.0 | n4-highcpu-32 | sorted Parquet c1024 | 707.4 s | 1,510,392 | 8,228,716 | `swath.6b1ffae260c0.s1` |
+| `sentinel-cogs` | 1,068,477,307 | 0.3.1 | n4-highcpu-32 | TSV + zstd c2048 | 341.4 s | 3,129,747 | 9,343,792 | `swath.7b028bd8c692.s1` |
+
+Peak RSS is the subject's `max_rss_kb`; on the largest run it is 9.3 GB for
+1.07 billion rows, and the sorted-Parquet mode holds more (13.7 GB at 960
+million) because it sorts before it writes.
 
 "Process wall" is the whole run from start to exit, including writing the
 output to disk; the listing phase alone is shorter, and only the process wall

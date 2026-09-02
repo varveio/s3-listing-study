@@ -17,8 +17,19 @@ is an observation and not a comparison. It is also the largest listing in the
 release by a factor of seven over the biggest replay fixture. The same tool
 returned 960 million rows from `janelia-cosem-datasets` in 9 minutes 45
 seconds and 523 million from a Folding@home bucket in 3 minutes 7 seconds,
-each once. Every row is in the table at the end and in the
-[report](results/2026-09-scale-diagnostics/REPORT.md#swath-on-live-s3).
+each once.
+
+| bucket | rows returned | process wall | peak RSS | output | attempt |
+| --- | ---: | ---: | ---: | --- | --- |
+| `sentinel-cogs` | 1,068,477,307 | 5 m 41 s | 9.3 GB | TSV + zstd | `swath.7b028bd8c692.s1` |
+| `janelia-cosem-datasets` | 959,831,933 | 9 m 45 s | 13.7 GB | sorted Parquet | `swath.0d01af45ef74.s1` |
+| `fah-public-data-covid19-absolute-free-energy` | 522,925,693 | 3 m 7 s | 8.6 GB | TSV + zstd | `swath.a0f1b2c053d8.s1` |
+
+All three: Swath 0.3.1, one `n4-highcpu-32` in GCP `us-east1`, 2,048
+requests in flight allowed, one run each, no other tool. Memory is bounded
+because Swath streams its output; the sorted-Parquet run holds more because
+it sorts before it writes. Every live run, including the earlier 0.3.0 ones,
+is in the [report](results/2026-09-scale-diagnostics/REPORT.md#swath-on-live-s3).
 
 ## What we did
 
@@ -53,16 +64,23 @@ credentials on live S3. Ten tools completed the 4.08-million-object rung. Four
 were taken to 143 million. Where a tool was not taken further, that was a
 study decision with a stated reason, not a measured limit of the tool.
 
-| tool | largest fixture attempted | what happened there | why no larger fixture was scheduled |
-| --- | ---: | --- | --- |
-| aws-cli, minio-mc, s3kor | 4.08M | Completed; count matched (three of s3kor's nine rows returned one row more) | One page at a time; the tool has no listing-parallelism control |
-| ps3 | 4.08M | Completed at c256; the wide arm hit the 30-minute cap | About 115 replay requests per page of the fixture |
-| s5cmd | 66.4M | Completed; count matched | No listing fan-out of its own; it ran on shard lists the harness supplied |
-| s3-fast-list | 66.4M | One of three attempts completed, at 10.8 GiB resident; one was killed at an 8 GiB limit; one failed at 16 GiB with exit 0 | Memory; study decision |
-| s7cmd | 143M | Timed out at the 2-hour cap with no count | Paginates each directory serially; that one dominant directory was still draining is a runner-log diagnosis |
-| s3p | 143M | Completed, in its key-only mode; count matched | Largest fixture in the release |
-| rclone | 143M | Completed; nine rows short of the fixture count | Largest fixture in the release |
-| Swath | 143M | Completed; count matched | Largest fixture in the release |
+The tools split into four strategies, and the strategy predicts the wall
+better than the tool does: **serial** pagination follows one continuation
+chain; **prefix discovery** fans out across `/`-separated directories;
+**speculative range splitting** invents keyspace boundaries and lists the
+ranges in parallel; **supplied partitions** list ranges someone else
+provides. Swath is range splitting that keeps re-splitting while it runs.
+
+| tool | strategy | largest fixture attempted | what happened there | why no larger fixture was scheduled |
+| --- | --- | ---: | --- | --- |
+| aws-cli, minio-mc, s3kor | serial | 4.08M | Completed; count matched (three of s3kor's nine rows returned one row more) | One page at a time; the tool has no listing-parallelism control |
+| ps3 | speculative range splitting (character expansion) | 4.08M | Completed at c256; the wide arm hit the 30-minute cap | About 115 replay requests per page of the fixture |
+| s5cmd | supplied partitions (serial on its own) | 66.4M | Completed; count matched | No listing fan-out of its own; it ran on shard lists the harness supplied |
+| s3-fast-list | supplied partitions (serial on its own) | 66.4M | One of three attempts completed, at 10.8 GiB resident; one was killed at an 8 GiB limit; one failed at 16 GiB with exit 0 | Memory; study decision |
+| s7cmd | prefix discovery | 143M | Timed out at the 2-hour cap with no count | Paginates each directory serially; that one dominant directory was still draining is a runner-log diagnosis |
+| s3p | speculative range splitting (bisection) | 143M | Completed, in its key-only mode; count matched | Largest fixture in the release |
+| rclone | prefix discovery (walk) | 143M | Completed; nine rows short of the fixture count | Largest fixture in the release |
+| Swath | adaptive range splitting | 143M | Completed; count matched | Largest fixture in the release |
 
 Two more findings:
 

@@ -37,17 +37,21 @@ repo can get.
 
 ## What we found, in one paragraph
 
-The interesting result is not who is fastest. It is that the tools fall into
-three designs, and each design runs into a different wall for a different
-reason. Serial tools (aws-cli, minio-mc, s3kor) are correct and tiny in
-memory but page one request at a time, so 143 million objects would be about
-143,000 sequential requests. Prefix-parallel tools (rclone, s7cmd) fan out
-across directories, which is fast on a bushy namespace and collapses on a
-flat one: rclone's walk filled 8 GiB and was killed, s7cmd drained the whole
-bucket on one thread. Keyspace-parallel tools (s3p, s3-fast-list, Swath)
-split the key range instead and do not care about directories, at the cost
-of either needing hints or issuing probe requests. All of that, with the
-runs behind each sentence, is on the [findings page](RESULTS.md).
+The interesting result is not who is fastest. It is that the tools use one
+of four strategies, and each strategy runs into a different wall for a
+different reason. **Serial** tools (aws-cli, minio-mc, s3kor, s5cmd on its
+own) are correct and tiny in memory but page one request at a time, so 143
+million objects would be about 143,000 sequential requests. **Prefix
+discovery** (rclone's walk, s7cmd) fans out across directories, which is
+fast on a bushy namespace and collapses on a flat one: rclone's walk filled
+8 GiB and was killed, s7cmd drained the whole bucket on one thread.
+**Speculative range splitting** (s3p, ps3) invents keyspace boundaries and
+lists the ranges in parallel, without needing directories, at the cost of
+probe requests and guesses that can land badly. **Supplied partitions**
+(s3-fast-list with hints, s5cmd with a shard list) parallelise well once
+someone tells them where to cut, and cannot help on an unfamiliar bucket.
+Swath is range splitting that keeps re-splitting while it runs. All of that,
+with the runs behind each sentence, is on the [findings page](RESULTS.md).
 
 ## What you can and cannot take from it
 
