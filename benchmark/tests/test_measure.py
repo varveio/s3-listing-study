@@ -1035,6 +1035,38 @@ def test_default_upload_omits_native_product_but_keeps_logs_and_marker(
     assert all("/native" not in uri for uri in uploaded)
 
 
+def test_default_upload_keeps_the_run_report_out_of_a_dropped_native_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The dataset stays behind; the subject's own run report travels, at the
+    native-relative path a retained tree would have given it."""
+    attempt = tmp_path / "attempt"
+    (attempt / "native/listing/data").mkdir(parents=True)
+    (attempt / "native/listing/data/part-0.tsv.zst").write_bytes(b"rows")
+    (attempt / "native/listing/_swath_summary.json").write_text('{"objects": 4}')
+    (attempt / "stderr.log.gz").write_bytes(b"log")
+    (attempt / "result.json").write_text("{}")
+    uploaded: list[str] = []
+    monkeypatch.setattr(gcs, "upload_file", lambda _path, uri, **_kwargs: uploaded.append(uri))
+    monkeypatch.setattr(gcs, "upload_tree", lambda _path, uri, **_kwargs: uploaded.append(uri))
+
+    assert measure.upload(attempt, "gs://bucket/leaf/")
+
+    assert "gs://bucket/leaf/native/listing/_swath_summary.json" in uploaded
+    assert not any(uri.endswith("part-0.tsv.zst") or uri.endswith("/native") for uri in uploaded)
+    assert uploaded[-1] == "gs://bucket/leaf/result.json"
+    assert measure.run_report_manifest(attempt / "native") == {
+        "listing/_swath_summary.json": measure.sha256_of(
+            attempt / "native/listing/_swath_summary.json"
+        )
+    }
+
+    local = tmp_path / "results" / "leaf"
+    assert measure.upload(attempt, str(local))
+    assert (local / "native/listing/_swath_summary.json").read_text() == '{"objects": 4}'
+    assert not (local / "native/listing/data").exists()
+
+
 def test_local_publication_is_create_only(tmp_path: Path) -> None:
     """A second execution cannot merge with or replace a local evidence leaf."""
     attempt = tmp_path / "attempt"
