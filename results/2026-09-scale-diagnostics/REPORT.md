@@ -157,12 +157,16 @@ left on its region. Subjects under roughly 1,000 requests per second therefore
 see a floor consistent with what serial clients saw; rclone's directory walk
 exceeds that on plain request count (1,200 per second on NARA) but every one of
 those requests is a delimiter rollup priced at the cheaper structure deadline.
-Swath at c256 reaches about 2,700 pages per second, and the 2026-09-01 live-S3
-runs show its worker-page p50 at 166–283 ms at 2,300–3,800 pages per second,
-so replay overstates Swath's page throughput relative to live S3 by an
-unmeasured factor; those runs do not separate S3-side queueing from
-client-side post-first-byte delay, so the live p50-to-floor ratio of 1.3–2× is
-a ceiling on the worker-page term, not an estimate. The treatment models
+Swath is the one subject that can exceed that rate: the 2026-09-01 live-S3
+runs at c1024–c2048 show its worker-page p50 at 166–283 ms at 2,300–3,800
+pages per second, which the fixed deadline would not reproduce. No row in this
+release ran there. The fastest Swath row, `swath.be4140354dd1.s1` at c256 on
+8 vCPU, made about 870 requests per second over its 173.7 s, at or below the
+943 per second at which the same bucket's own live capture sat on the floor,
+and every other Swath row was slower. Above that rate the live runs do not
+separate S3-side queueing from client-side post-first-byte delay, so the live
+p50-to-floor ratio of 1.3–2× is a ceiling on how far replay could flatter a
+faster Swath row, not an estimate for any row here. The treatment models
 neither S3's tail (worker-page p99 of 0.5–0.8 s and structure-probe p99 of
 0.4–20 s on the large buckets in the same live runs) nor throttling, and it
 prices a request by its syntax rather than by what it returns (see the flat
