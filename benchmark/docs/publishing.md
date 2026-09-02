@@ -129,6 +129,12 @@ instrument and any defect in it, the per-tool dispositions, and an explicit
    instead of quoting it as if it were exported.
 2. **Every claim names its attempt id.** Claim-to-attempt binding lives in the
    report's own tables until a disposition layer exists to hold it.
+3. **Prose carries one number or one identifier per sentence.** Everything
+   else goes in a table. Attempt ids appear in a table cell, never
+   mid-sentence. No paragraph runs past about five lines, and no status box
+   precedes content. The instrument is explained once in
+   `docs/instrument.md`; the report links there and records only how the
+   instrument behaved in this release.
 
 Neutral vocabulary throughout: a tool stops at a rung for a stated mechanical
 reason. No leaders, no survivors, no podium.

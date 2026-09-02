@@ -8,12 +8,12 @@ the study, in what role, and where each subject stands.
 **Where the study stands:** groundwork is complete for every subject — pinned
 builds or source checkouts, anonymous smoke runs where the tool could list,
 source-anchored mechanism reports, and a claim-by-claim reconciliation of the
-inherited notes. Comparative runs have since happened and are published as a
-**diagnostic** release, `2026-09-scale-diagnostics`: see
-[`../RESULTS.md`](../RESULTS.md) and the release's
-[report](../results/2026-09-scale-diagnostics/REPORT.md). No attempt in that
-release carries `purpose = measurement`, so it establishes where each approach
-stops and by what mechanism — not a ranking, and not a calibrated benchmark.
+inherited notes. Comparative runs have since happened and are published as a screening
+release, `2026-09-scale-diagnostics`: the short version is
+[`../RESULTS.md`](../RESULTS.md) and the numbers are in the release's
+[report](../results/2026-09-scale-diagnostics/REPORT.md). It establishes
+where each approach stops and by what mechanism, not a ranking and not a
+calibrated benchmark.
 The "current release outcome" column below summarises each subject's standing
 in it; the report holds the attempt ids behind every figure.
 

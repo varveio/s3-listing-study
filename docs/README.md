@@ -8,6 +8,10 @@ kept in internal notes that are not published in this repository.
 
 For anyone evaluating what this study is, how credible it is, and what it found.
 
+- [`instrument.md`](instrument.md) — how the replay instrument works: the
+  server, the three request shapes, what a latency deadline is and where each
+  fixture's deadlines come from, the known skews, and the known defects by
+  release.
 - [`methodology.md`](methodology.md) — how the study is run: the five decisions
   that shape everything, the replay-screening → real-S3-validation funnel, and
   the run-record requirements. The measurement plan, written down before

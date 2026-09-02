@@ -39,40 +39,22 @@ longer.
 
 ## Status
 
-**A first release of results is published, as diagnostics.**
-[`results/2026-09-scale-diagnostics/`](results/2026-09-scale-diagnostics/)
-carries 270 settled attempts across ten tools, and
-[`RESULTS.md`](RESULTS.md) is the index. Start with the release's own
-[report](results/2026-09-scale-diagnostics/REPORT.md).
-
-It is labelled a diagnostic release, and the label is load-bearing: no attempt
-in it carries `purpose = measurement`, the replay instrument it was screened on
-has a known defect that penalises one subject in one direction, and the
-live-S3 rows are single uncontrolled observations of one tool. The release's
-`manifest.json` states that ceiling in machine-readable form, and the report
-states it in prose. **There is no calibrated benchmark here and no ranking of
-listing tools.**
-
-What the release does settle: which approaches survive a rising object count
-within the rungs each was carried to, where each one stops and by what
-mechanism, the object count each completed run returned, and the memory behaviour that decides several of the outcomes.
-Ten tools were screened from a 4.08-million-object fixture upward; an
-eleventh roster tool, s4cmd, has no attempt in the release. All ten completed
-the first rung and four reached 143 million. Separately, one tool
-listed a 1.07-billion-object public bucket on live S3 from a single 32-vCPU VM
-with an exact count — one run, one tool, and bounded in the report.
+**A first release of results is published.** The short version is
+[**What we found**](RESULTS.md): ten tools screened from 4.08 million objects
+to 143 million, where each one stopped and why, and one tool's billion-object
+run on live S3. It is a screening release, not a benchmark and not a ranking;
+`RESULTS.md` says what it does and does not mean, and the release's own
+[report](results/2026-09-scale-diagnostics/REPORT.md) holds every number and
+attempt id.
 
 Groundwork remains what it was: every subject has a pinned build or source
 checkout, a source-anchored mechanism report, claim-by-claim reconciliation,
 and smoke receipts where the tool could list the registered public bucket.
-Smoke timings are capsule diagnostics and facts about individual runs, never
-comparative results.
-
-See [`tools/README.md`](tools/README.md) for the per-tool status and the
-current release outcome per subject, [`docs/methodology.md`](docs/methodology.md)
-for the measurement plan written before the comparisons and dated notes on what
-has since run, and [`benchmark/README.md`](benchmark/README.md) for the
-production benchmark boundary.
+See [`tools/README.md`](tools/README.md) for the per-tool pages,
+[`docs/instrument.md`](docs/instrument.md) for how the replay instrument
+works, [`docs/methodology.md`](docs/methodology.md) for the measurement plan
+written before the comparisons, and [`benchmark/README.md`](benchmark/README.md)
+for the harness.
 
 ## What we do
 
@@ -165,28 +147,18 @@ notes to be wrong; finding and fixing those is part of the work.
 
 ## Screening and validation
 
-**Replay comes first for screening and configuration search.** Every candidate
-sees the same captured listing, declared latency treatment, and controlled
-backend. That latency treatment is derived from the study's own tool: each
-fixture's fixed per-shape deadlines are the p50 round trip observed by the
-Swath run that captured it, cross-checked against serial clients as the
-release report sets out. That lets the study eliminate clearly slower candidates without making
-many high-fan-out tools contend for the same live S3 key ranges. The replay
-server is part of the measuring instrument, so every attempt must carry exact
-fixture and server identity plus evidence that the server was not the
-bottleneck. The worker records row count after timing and retains the raw
-product; routine reporting reads only `result.json`. Replay results are labeled
-synthetic.
+Replay comes first: every candidate sees the same captured listing, the same
+declared latency treatment, and the same controlled backend, so clearly
+slower candidates can be eliminated without many high-fan-out tools
+contending for one live bucket's key ranges. The replay server is part of the
+measuring instrument, its latency treatment is derived from the study's own
+tool and cross-checked against serial clients, and every attempt carries
+exact fixture and server identity. All of that is set out in
+[`docs/instrument.md`](docs/instrument.md).
 
-**Real S3 validates the finalists.** Once replay has narrowed each tool to its
-strongest configuration or small candidate set, a few fresh-VM runs execute one
-subject at a time against real S3. A nearby contender is included when the goal
-is to validate replay's selection, not merely show that the selected
-configuration works. Real-S3 observations govern claims about S3; disagreement
-triggers investigation rather than a composite score. Failure and congestion
-behavior remain a separate workload. That stage has not yet run: the current
-release's live-S3 rows are single observations of one tool, and no finalist
-set has been validated.
+Real S3 is meant to validate the finalists afterwards, one subject at a time
+on fresh VMs. That stage has not yet run: the current release's live-S3 rows
+are single observations of one tool.
 
 ## Running the checks in this repo
 
@@ -209,14 +181,6 @@ byte-for-byte replay gate supplied historical evidence for the Python port; they
 are not a current test path. Current checks exercise every declared mode with
 synthetic fixtures and independently pin the committed-payload denominator and
 unexercised modes through `EXPECTED_PAYLOADS` and `unexercised_modes`.
-
-## Results
-
-A first release is published under
-[`results/2026-09-scale-diagnostics/`](results/2026-09-scale-diagnostics/REPORT.md)
-as diagnostics, not comparative results; [`RESULTS.md`](RESULTS.md) is the
-index. Smoke receipts remain run-specific evidence about correctness and
-testability, not benchmark results.
 
 ## Contributing
 
