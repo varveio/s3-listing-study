@@ -14,30 +14,38 @@ latency taken from the real bucket. Fixtures rose from 4.08 million objects to
 143 million. A separate, smaller set of runs went against live S3.
 
 The question was not "which tool is fastest". It was: **which approaches
-survive a rising object count, and where does each one stop?**
+survive a rising object count, and what happens at the largest fixture each
+one is taken to?**
+
+A few terms: a *rung* is one fixture size; an *arm* is one tool in one
+configuration on one rung; *c64* means 64 requests in flight; *fan-out* is a
+tool splitting the listing across prefixes; *cut-points* are keyspace
+boundaries handed to a tool that cannot find its own; *RSS* is resident
+memory.
 
 ## What we found
 
-Ten tools completed the 4.08-million-object rung. Four reached 143 million.
-Each tool that stopped earlier stopped for a reason we can name. (A "rung" is
-one fixture size; an "arm" is one tool in one configuration on one rung.)
+Ten tools completed the 4.08-million-object rung. Four were taken to 143
+million. Where a tool was not taken further, that was a study decision with a
+stated reason, not a measured limit of the tool.
 
-| tool | reached | what stopped it |
+| tool | largest fixture attempted | why no larger one |
 | --- | ---: | --- |
 | aws-cli, minio-mc, s3kor | 4.08M | One page at a time; the tool has no listing-parallelism control |
 | ps3 | 4.08M | Issues several requests per page; its wide arm hit the 30-minute cap |
 | s5cmd | 66.4M | No listing fan-out of its own; it ran on shard lists the harness supplied |
 | s3-fast-list | 66.4M | Memory: 10.8 GiB resident at 66.4M objects; one of three attempts was killed at an 8 GiB limit |
 | s7cmd | 143M, no count | Paginates each directory serially; one dominant directory was still draining at the 2-hour cap |
-| s3p | 143M | Completed; CPU-bound in its cheapest mode |
-| rclone | 143M | Completed; nine rows short of the fixture count (directory markers not emitted) |
+| s3p | 143M | Completed, in its key-only mode |
+| rclone | 143M | Completed; nine rows short of the fixture count |
 | Swath | 143M | Completed |
 
 Two more findings:
 
-- **Counts are exact.** Where a run returned a count, it is the fixture's
-  exact object count, or the report says by how much it differs. Nothing is
-  sampled.
+- **Counts are checked against the fixture.** Where a run returned a count,
+  it matched the fixture's object count or the report says by how much it
+  differs. That is count agreement, not key-by-key verification, and nothing
+  is sampled.
 - **A flat namespace separates the designs.** With no directories to fan out  across, rclone's per-directory walk filled an 8 GiB memory cap and was
   killed; s7cmd's prefix discovery collapsed to one serial drain;
   Swath's range splitting was unaffected.
@@ -53,8 +61,8 @@ gate.
 
 ## Swath on live S3
 
-Swath listed a 1.07-billion-object public bucket from one 32-vCPU VM with an
-exact count. The whole process, from start to the compressed output on disk
+Swath returned 1,068,477,307 rows from a public bucket using one 32-vCPU VM.
+No reference count exists for a live bucket. The whole process, from start to the compressed output on disk
 and exit, took 5 minutes 41 seconds; the listing phase inside it took
 5 minutes 12 seconds. One run, one day, one bucket, one
 tool. It says nothing comparative. The full ladder of live-S3 runs is
@@ -75,10 +83,11 @@ tool. It says nothing comparative. The full ladder of live-S3 runs is
   it flatters a client fast enough to push S3, which no run in this release
   was.
 - **The setup was not equal everywhere.** Swath's fastest 143M rows ran
-  against a replay server three times larger than the other tools'; at the
-  same server Swath took 209 s, not 174 s. s5cmd and s3-fast-list ran on
-  shards and cut-points the harness generated. The report lists every such
-  asymmetry.
+  against a replay server three times larger than the other tools'. Its rows
+  on the same server as the others took 209 to 238 s, but those are an older
+  build, so no pair of rows isolates the server size. s5cmd and s3-fast-list
+  ran on shards and cut-points the harness generated. The report lists every
+  such asymmetry.
 - **"Ran" and "verified" are separate facts.** Counts are checked against the
   fixture's object count, not key by key.
 - **We build Swath and we run this study.** Every page says so.
@@ -95,10 +104,10 @@ tool. It says nothing comparative. The full ladder of live-S3 runs is
 | s3p, 143M, exact | `s3p.1b77f20ed931.s1` |
 | rclone, 143M, 143,008,665 of 143,008,674 | `rclone.6319ec57665d.s1` |
 | Swath, 143M, exact, on a 64-vCPU replay server | `swath.be4140354dd1.s1` |
-| Swath, 143M, exact, on the 20-vCPU replay server the other tools had | `swath.9ad793f7eea7.s1` |
+| Swath (older build), 143M, exact, on the 20-vCPU replay server the other tools had | `swath.9ad793f7eea7.s1` |
 | rclone walk killed at 8 GiB on the flat fixture | `rclone.795fbd66217b.s1` |
 | s7cmd serial drain on the flat fixture | `s7cmd.97b265107a89.s1` |
-| Swath, 1,068,477,307 objects on live S3, 341.4 s | `swath.7b028bd8c692.s1` |
+| Swath, 1,068,477,307 rows returned on live S3, 341.4 s | `swath.7b028bd8c692.s1` |
 
 ## Drill down
 

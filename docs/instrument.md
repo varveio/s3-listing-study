@@ -84,8 +84,9 @@ keep-alive connection, timed from request sent to last byte.
 | blockchain | 94 | 95.8 | 101.1 | 112 | 423 |
 
 Two deadlines sit 11–14% above the serial median (Virginia) and two sit 2–7%
-below it (Ohio). A deadline above the serial median is conservative, since it
-slows every tool equally; one below it is optimistic. Capture load did not
+below it (Ohio). A deadline above the serial median is applied uniformly to
+every request; how much wall time it adds depends on each tool's request
+count, shapes and concurrency. One below it is optimistic for everyone. Capture load did not
 push the Ohio deadlines above what a serial client sees. This control is recorded in the study's working notes, not in a release.
 
 **Against the serial tools' own live runs.** In the August live-S3 pass, the
@@ -109,9 +110,9 @@ replay. Replay is optimistic for that mode.
 
 | skew | direction | who it touches |
 | --- | --- | --- |
-| **No rise under load.** A client that pushes S3 above roughly 1,000 pages per second sees higher latency on S3 than replay gives it. | favours the fast client | Only Swath can reach that rate. No run in the current release did: the fastest Swath row made about 870 requests per second, at or below the rate of the same bucket's live capture. |
+| **No rise under load.** A client that pushes S3 above roughly 1,000 pages per second sees higher latency on S3 than replay gives it (the threshold is from Swath's own live runs, recorded in the study's working notes). | favours the fast client | Only Swath can reach that rate. No run in the current release did: the fastest Swath row made about 870 requests per second (a release field), at or below the rate of the same bucket's live capture (from the capture's own summary). |
 | **No tail.** Live S3's p99 is 2.5 to 4.5 times its median. Replay has none. | favours everyone; direction between tools depends on their design | all |
-| **No throttling.** Replay never returns `SlowDown`. | favours everyone | all; no live run in this study drew throttling from one client |
+| **No throttling.** Replay never returns `SlowDown`. | favours everyone | all; no single-client live run in this study drew throttling (from the runs' own summaries, not a release field) |
 | **Priced by syntax.** A `delimiter=/` request draws the structure deadline even when it returns 1,000 plain objects, as it does on a flat namespace. | favours delimiter-paging modes on flat fixtures | rclone's walk, s7cmd's drain |
 | **Owner fetch not modelled.** | favours minio-mc's recursive mode | minio-mc |
 

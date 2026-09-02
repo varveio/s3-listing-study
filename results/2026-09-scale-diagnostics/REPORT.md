@@ -13,7 +13,8 @@ and every claim names its attempt in a table. The short version is
 Ten listing tools were pinned by image digest and driven through one harness
 against staged replay fixtures of real S3 buckets, from 4.08 million objects
 to 143 million, plus a small set of Swath runs against live S3. The question
-was which approaches survive a rising object count and where each one stops.
+was which approaches survive a rising object count, and what was observed at
+the largest fixture each was taken to.
 
 It is a **screening release**. It settles what ran, what each run returned,
 how much memory it used, and the mechanism that stopped each tool. It does
@@ -64,9 +65,14 @@ five of the ten rows graded `TIMING_VALID` (the CSV carries each row's grade).
 The Swath row is a `0.2.5-SNAPSHOT` build, the documented exception to the
 released-version rule; every other row is a tagged release.
 
-## Where each tool stopped, and why
+## The largest fixture attempted per tool
 
-| tool | last rung | why it went no further | attempt |
+"Not advanced" is a study decision, not a measured limit of the tool. The
+reason column says why no larger fixture was scheduled; where that reason is
+a diagnosis rather than a row field, it comes from the runner log and the
+tool's source, not from the release rows.
+
+| tool | largest fixture attempted | why no larger one | attempt |
 | --- | --- | --- | --- |
 | aws-cli | 4.08M | One serial `ListObjectsV2` chain; no listing-parallelism control. 143M objects would be about 143,000 sequential pages. | `aws-cli.a7d9377bd706.s1` |
 | minio-mc | 4.08M | Serial client-side iterator. | `minio-mc.04c17e5ac8da.s1` |
@@ -74,23 +80,23 @@ released-version rule; every other row is a tagged release.
 | ps3 | 4.08M | Request amplification: 469,241 replay requests for a 4,082-page fixture. The fairness arm at `--prefix-count 5000` reached the 1,800 s cap without a count; that arm also ran against a replay server capped at 512 concurrent requests and graded `PRESSURE_DEGRADED`, so its wall is not clean. | `ps3.31a9e4da68b2.s1` |
 | s5cmd | 66.4M | No listing fan-out of its own; the comparable arms ran on shard lists the harness supplied. Not carried to 143M. | `s5cmd.962211b4b344.s1` |
 | s3-fast-list | 66.4M | Memory. One of three NBM attempts was killed at an 8 GiB limit; a second failed at 16 GiB with exit 0 and no recorded reason; the one that completed, at 16 GiB, peaked at 10.8 GiB (11,347,320 KiB). Not carried further, by decision. | `s3-fast-list.246cf7252988.s1` |
-| s7cmd | 143M, no count | Parallel prefix discovery, then serial pagination per leaf. On the skewed 143M fixture it hit the 7,200 s cap (exit 124) with one dominant leaf still draining. | `s7cmd.a9b999169187.s1` |
-| s3p | 143M | Completed, exact, 4,238.8 s at c16. CPU-bound in its cheapest key-only mode; width does not help. | `s3p.1b77f20ed931.s1` |
-| rclone | 143M | Completed in 667.0 s at c64. Returned 143,008,665 rows, nine short, consistent with a walk not emitting directory markers. The c128 arm was slower, 821.0 s. | `rclone.6319ec57665d.s1`, `rclone.3eff2ab4f661.s1` |
+| s7cmd | 143M, no count | Parallel prefix discovery, then serial pagination per leaf (from its source). On the skewed 143M fixture it hit the 7,200 s cap (exit 124); that one dominant leaf was still draining is a diagnosis from the runner log. | `s7cmd.a9b999169187.s1` |
+| s3p | 143M | Completed with the fixture count in 4,238.8 s in its c16 key-only arm. This release does not establish CPU or width effects. | `s3p.1b77f20ed931.s1` |
+| rclone | 143M | Completed in 667.0 s at c64. Returned 143,008,665 rows, nine short of the fixture; the directory-marker explanation is a diagnosis, not a row field. The c128 arm took 821.0 s. | `rclone.6319ec57665d.s1`, `rclone.3eff2ab4f661.s1` |
 | Swath | 143M | Completed, exact, 173.7 s at c256. Every Swath row on this fixture failed the timing gate; see below. | `swath.be4140354dd1.s1` |
 
 ![Peak RSS against fixture size: s3-fast-list, with Swath and rclone for reference](charts/s3-fast-list-rss.svg)
 
 Peak resident memory against fixture size; a cross marks an attempt with no
-accepted result. On the 66.4M-object NBM fixture s3-fast-list was killed at
-the container memory limit twice. Rows in
+accepted result. On the 66.4M-object NBM fixture s3-fast-list failed without
+an accepted result twice; one of those was killed at the 8 GiB limit. Rows in
 [`charts/s3-fast-list-rss.csv`](charts/s3-fast-list-rss.csv).
 
 ### Where the setup was not equal
 
 | asymmetry | detail | attempts |
 | --- | --- | --- |
-| replay server size on blockchain | Swath's fastest blockchain rows ran against a 64-vCPU replay server; every other tool's blockchain row had 20 vCPU. Subject allocations were equal (8 vCPU / 8 GiB). At the same 20-vCPU replay server, Swath c256 took 208.9 s. | `swath.be4140354dd1.s1` (64), `swath.9ad793f7eea7.s1` (20), `rclone.6319ec57665d.s1` (20), `s3p.1b77f20ed931.s1` (20) |
+| replay server size on blockchain | Swath's fastest blockchain rows ran against a 64-vCPU replay server; every other tool's blockchain row had 20 vCPU. Subject allocations were equal (8 vCPU / 8 GiB). The Swath c256 rows on the 20-vCPU server took 208.9 s and 238.4 s, but they are the `0.2.5-SNAPSHOT` build while the 173.7 s row is `0.3.1`, so no pair of rows isolates the server size. All are `CAPACITY_FAILED`. | `swath.be4140354dd1.s1` (64, 0.3.1), `swath.9ad793f7eea7.s1` and `swath.bfbcc490799b.s1` (20, 0.2.5-SNAPSHOT), `rclone.6319ec57665d.s1` (20), `s3p.1b77f20ed931.s1` (20) |
 | pre-release build in the roster figure | the FourCast roster's Swath row is `0.2.5-SNAPSHOT`; the dispositions row is `0.3.1` | `swath.88891b1437de.s1` |
 | harness-supplied shards | s5cmd's comparable arms ran on shard lists the harness generated from the fixture; the tool has no listing fan-out of its own | `s5cmd.962211b4b344.s1` |
 | fixture-derived hints | s3-fast-list's arm was fed keyspace cut-points generated from the fixture | `s3-fast-list.246cf7252988.s1` |
@@ -104,7 +110,7 @@ and `max_rss_kb` for the named attempt.
 | tool | version | arm | fixture | wall | count | peak RSS (KiB) | delivered timing | attempt |
 | --- | --- | --- | --- | ---: | --- | ---: | --- | --- |
 | aws-cli | 2.36.1 | `s3api-v2-text` | FourCast 4.08M | 700.0 s | exact | 85,076 | `TIMING_VALID` | `aws-cli.a7d9377bd706.s1` |
-| minio-mc | 2025-08-13 | `recursive` | FourCast 4.08M | 419.7 s | exact | 49,920 | `TIMING_VALID` | `minio-mc.04c17e5ac8da.s1` |
+| minio-mc | RELEASE.2025-08-13T08-35-41Z | `recursive` | FourCast 4.08M | 419.7 s | exact | 49,920 | `TIMING_VALID` | `minio-mc.04c17e5ac8da.s1` |
 | s3kor | v0.0.37 | `list` | FourCast 4.08M | 411.0 s | exact | 50,176 | `TIMING_VALID` | `s3kor.8514c3397199.s1` |
 | ps3 | 0.1.16 | `list` c256 | FourCast 4.08M | 369.3 s | exact | 92,116 | `TIMING_VALID` | `ps3.55c79d26bce0.s1` |
 | s5cmd | v2.3.0 | `fanout-fixture-with-dirs` c64 | NBM 66.4M | 352.2 s | exact | 1,380,592 | `TIMING_VALID` | `s5cmd.962211b4b344.s1` |
@@ -127,11 +133,14 @@ Standing notes per tool:
 - **ps3**: completes at 4M; the wider fairness arm timed out.
 - **s5cmd**: completes only with harness-supplied shards; that asymmetry is
   disclosed wherever it is charted.
-- **s3-fast-list**: fast when fed cut-points; memory is the binding constraint.
-- **s3p**: reaches 143M correctly, CPU-bound.
-- **s7cmd**: correct at 13.5M; returned no count on NBM (exit 1, all four
-  arms); capped on the skewed 143M fixture.
-- **rclone**: reaches 143M; memory is the constraint on a flat namespace.
+- **s3-fast-list**: completed NBM with fixture-derived cut-points; memory
+  constrained further study.
+- **s3p**: completed 143M with the fixture count.
+- **s7cmd**: matched the fixture count at 13.5M; returned no count on NBM
+  (exit 1, all four arms); capped on the skewed 143M fixture.
+- **rclone**: reaches 143M nine rows short; on NARA its six rows returned
+  13,540,306 or 13,540,116 against a fixture of 13,540,310; memory is the
+  constraint on a flat namespace.
 - **Swath**: reaches 143M; slowed by the instrument on the small-directory
   fixtures; built by the organisation that maintains this study.
 
@@ -158,8 +167,10 @@ more than a page, the inverse of S3.
 | count | exact | exact |
 | delivered timing | `CAPACITY_FAILED` | `CAPACITY_FAILED` |
 
-The warm-up (2,000 / 200 / 200 requests over 27,891 prefixes, 7.3 s) tested the
-hypothesis that the overrun was cold-path cost. It changed nothing, so the
+The warm-up (2,000 / 200 / 200 requests over 27,891 prefixes in 7.3 s; the
+composition is from the campaign plan and the runner log, only the 2,400
+total is a release field) tested the hypothesis that the overrun was
+cold-path cost. It changed nothing, so the
 per-seek cost is the defect. The ratio and overrun figures come from the
 ledger's delivered-timing evidence; the walls, counts and `requests.before`
 values are in the release rows. A warmed server is a different treatment
@@ -171,8 +182,8 @@ Other tools also have `CAPACITY_FAILED` rows: s7cmd on NARA and blockchain,
 one s3-fast-list row on NBM, and several FourCast rows of rclone, ps3, s3p and
 s7cmd from the earlier, smaller replay allocation. This release's row schema
 does not carry the failing reason for those. rclone's directory walk, which
-also issues delimiter requests at volume, classifies `TIMING_VALID` on NARA,
-NBM and blockchain.
+also issues delimiter requests at volume, classifies `PRESSURE_DEGRADED` on
+NARA and `TIMING_VALID` on NBM and blockchain.
 
 **What that means for comparisons.** Where a Swath row is set beside a
 `TIMING_VALID` or `PRESSURE_DEGRADED` row of another tool, the defect runs
@@ -193,8 +204,9 @@ zone, 100 unsigned pages one at a time over one keep-alive connection):
 | blockchain | 94 | 95.8 | 101.1 |
 
 Two deadlines sit 11–14% above the serial median (`us-east-1`) and two sit
-2–7% below it (`us-east-2`). The high side is conservative: it slows every
-tool equally, Swath included. The control and the August serial-tool cross-check are described in
+2–7% below it (`us-east-2`). A deadline above the serial median is applied
+uniformly to every request; how much wall time it adds depends on each
+tool's request count, shapes and concurrency. The control and the August serial-tool cross-check are described in
 [`docs/instrument.md`](../../docs/instrument.md); both are internal checks,
 not published receipts, and no row here depends on them. The manifest
 carries no disclosure id for the latency model's limits; that page and this
@@ -204,7 +216,7 @@ section are the disclosure for this release.
 
 A flat namespace, with no interior slashes, is the shape that separates
 prefix-parallel designs from range-parallel ones. The fixture is a live-S3
-Swath capture of `real-changesets`: 13,868,442 rows, one part, digest
+Swath capture of `real-changesets`: 13,868,442 rows, digest
 `295177c9…c57edd`. Every arm ran on `n4-highcpu-32` with the subject at 8 vCPU
 / 8 GiB and replay at 20 vCPU / 20 GiB, deadlines 122 / 88 / 88 ms for
 worker / pivot / structure.
@@ -274,8 +286,9 @@ in [`charts/real-s3-ladder.csv`](charts/real-s3-ladder.csv).
 
 ### The billion-object run, and its boundary
 
-Swath returned an exact 1,068,477,307 objects from `sentinel-cogs` in
-5 m 41 s of process wall (`swath.7b028bd8c692.s1`). The listing phase took
+Swath returned 1,068,477,307 rows from `sentinel-cogs` in 5 m 41 s of
+process wall (`swath.7b028bd8c692.s1`). No reference manifest exists for a
+live bucket, so that is the count the run returned, not a verified count. The listing phase took
 5 m 12 s and the compressed TSV was on disk at about 5 m 39 s; those two
 milestones come from the run's own summary, and only the process wall is in
 the release rows.
