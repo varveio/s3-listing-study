@@ -37,6 +37,14 @@ tools:
         vcpus: 64
         memory_gb: 128
         config: {jvm_max_heap: 24g, text_writers: 32}
+      # 2026-09-02 readahead probe: the published 32-vCPU TSV shape with Swath's opt-in
+      # intra-range speculative page prefetch switched on. Both Sentinel runs at 32 and 64 vCPU
+      # sat at 3.4-3.9M keys/s with in-flight far under the ceiling; this is the one documented
+      # lever that targets the serial leaf drain.
+      - mode: recursive-tsv-zstd
+        concurrency: 2048
+        purpose: diagnostic
+        config: {jvm_max_heap: 16g, text_writers: 16, engine_readahead: "on"}
 
 exclude:
   - {tool: aws-cli, reason: outside this Swath-only real-S3 diagnostic}

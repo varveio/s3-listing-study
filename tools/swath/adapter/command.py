@@ -51,6 +51,7 @@ AXES = {"concurrency": CONCURRENCY, "heap_percent": Fixed(HEAP_PERCENT)}
 
 CONFIG_KEYS = frozenset(
     {
+        "engine_readahead",
         "jvm_max_heap",
         "parquet_part_size",
         "parquet_writers",
@@ -66,6 +67,9 @@ CONFIG_KEYS = frozenset(
 
 ENV_CONFIG_KEYS = frozenset({"jvm_max_heap"})
 """Declared controls consumed by :func:`build_env`, independent of output mode."""
+
+ENGINE_CONFIG_KEYS = frozenset({"engine_readahead"})
+"""Declared listing-engine controls rendered into the common head, so every mode consumes them."""
 
 JVM_MAX_HEAP_RE = re.compile(r"\A[1-9][0-9]*[kKmMgG]\Z")
 
@@ -228,9 +232,23 @@ def _text_writers(request: CommandRequest) -> str:
     return str(value)
 
 
+def _engine_readahead(request: CommandRequest) -> tuple[str, ...]:
+    """`--tune engine.readahead=on|off`: Swath's opt-in intra-range speculative page
+    prefetch on dense serial drains (off by default in 0.3.x, so absent means the
+    tool's own default and only an explicit value is rendered)."""
+    value = request.config.get("engine_readahead")
+    if value is None:
+        return ()
+    if value not in ("on", "off"):
+        raise CommandAdapterError(f"{TOOL} engine_readahead must be 'on' or 'off'; got: {value!r}")
+    return "--tune", f"engine.readahead={value}"
+
+
 def _mode_config(request: CommandRequest, allowed: frozenset[str]) -> None:
     """Refuse a declared Swath knob neither the mode argv nor environment consumes."""
-    unused = sorted((set(request.config) & CONFIG_KEYS) - allowed - ENV_CONFIG_KEYS)
+    unused = sorted(
+        (set(request.config) & CONFIG_KEYS) - allowed - ENV_CONFIG_KEYS - ENGINE_CONFIG_KEYS
+    )
     if unused:
         raise CommandAdapterError(
             f"{TOOL} mode {request.mode!r} does not use config key(s): {', '.join(unused)}"
@@ -297,6 +315,7 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
         "--concurrency",
         _concurrency(request),
         *(("--endpoint-url", request.endpoint_url) if request.endpoint_url else ()),
+        *_engine_readahead(request),
     )
     # Every mode but the sorted one is a single ephemeral shot, so it keeps no
     # durable state. Sorting is the exception: it tracks sort segments across the

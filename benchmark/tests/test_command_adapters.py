@@ -1126,6 +1126,34 @@ def test_swath_renders_retained_output_controls_and_refuses_the_wrong_mode() -> 
         )
 
 
+def test_swath_renders_engine_readahead_in_every_mode_and_refuses_other_values() -> None:
+    """`engine_readahead` is a listing-engine control, so it rides in the common
+    head ahead of the mode's formatter flags and no mode refuses it."""
+    adapter = load_command_adapter(adapter_path("swath"))
+    for mode in ("recursive-tsv", "recursive-tsv-zstd", "recursive-parquet-sorted"):
+        argv = adapter.compile(
+            CommandRequest(
+                mode,
+                BUCKET,
+                REGION,
+                tool="swath",
+                sink_dir=SINK,
+                config={"engine_readahead": "on"},
+            )
+        )
+        tune_at = argv.index("--tune")
+        assert argv[tune_at + 1] == "engine.readahead=on"
+        assert tune_at < argv.index("--checkpoint")
+    silent = adapter.compile(CommandRequest("recursive-tsv", BUCKET, REGION, tool="swath"))
+    assert "engine.readahead=on" not in silent and "engine.readahead=off" not in silent
+    with pytest.raises(CommandAdapterError, match=r"engine_readahead must be 'on' or 'off'"):
+        adapter.compile(
+            CommandRequest(
+                "recursive-tsv", BUCKET, REGION, tool="swath", config={"engine_readahead": True}
+            )
+        )
+
+
 def test_one_rule_decides_what_a_producing_mode_inherits() -> None:
     """A chain link and an inline setup exec inherit by the same rule.
 
