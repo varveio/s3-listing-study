@@ -3,40 +3,41 @@
 This directory is history, not current state. Current facts live in
 [`../data/claims.json`](../data/claims.json), explained by
 [`../docs/`](../docs/) and summarised in [`../README.md`](../README.md).
-
-Everything here derives **one** subject: swath **v0.2.0** (`cef8ec2`). This
-capsule carries **no migration stratum** — no frozen pre-restructure page, no
-conservation map, and no `legacy_origins` on any claim — so nothing here is
-path-pinned by the claims schema.
+Everything here describes one subject, swath **v0.3.1** (`7b9a5e2`).
 
 | File | What it is |
 | --- | --- |
-| [`report.md`](report.md) | The consolidated source-first report. `data/claims.json` was written from this. |
-| [`reader-A-engine.md`](reader-A-engine.md) | Seeding, stealing, range scanning, concurrency, the v0.1.0→v0.2.0 engine delta, and the disjointness invariants. |
-| [`reader-B-store.md`](reader-B-store.md) | Request shapes, retries, 503/AIMD handling, key fidelity through `encoding-type=url`, protocol-violation defences, request observability. |
-| [`reader-C-cli.md`](reader-C-cli.md) | CLI surface, the mode-versus-tunable inventory, anonymous access, resume semantics, exit codes, documentation drift. |
-| [`reader-D-output.md`](reader-D-output.md) | Output formats, the normalizer contract per format, the memory model, `--report` and `cost.api_calls`. |
-| [`reader-E-build.md`](reader-E-build.md) | Build and packaging, the published image and its provenance, the architecture matrix, upstream health. |
-| [`ERRATA.md`](ERRATA.md) | Defects found in the above **after** they were frozen. Read it beside `report.md`. |
-| [`codex-review.md`](codex-review.md) | The independent cross-model review and the resolution of each finding. |
+| [`report.md`](report.md) | How the ledger was derived: method, image identity, the installed-help diff against 0.2.0, the adapter round-trip, and the per-claim verdict table. |
+| [`reader-A.md`](reader-A.md) | Engine: work stealing, seeding, AIMD, retries, watchdog, engine toggles. |
+| [`reader-B.md`](reader-B.md) | S3 store: request shape, streamed response parsing and key decoding, retries, region, User-Agent. |
+| [`reader-C.md`](reader-C.md) | CLI, modes, exit codes, checkpoints and resume, documentation drift. |
+| [`reader-D.md`](reader-D.md) | Output formats, timestamps, Parquet key typing, datasets and publication. |
+| [`codex-review.md`](codex-review.md) | The independent cross-model review of the ledger and pages, and the resolution of each finding. |
 
 ## How it was derived
 
-Five readers with disjoint file sets worked a frozen worktree at the `v0.2.0`
-tag, with no access to any existing capsule prose — source-first by discipline,
-because reading finished prose first anchors a researcher into confirming rather
-than discovering. Their reports were consolidated into `report.md`, which
-was then reviewed by a different model family; all eight of that review's
-findings were re-verified against source and accepted.
+The ledger descends from a blind, source-first derivation of swath v0.2.0
+(`cef8ec2`): five readers over disjoint file sets on a frozen worktree with no
+access to any existing capsule prose, an integrator, and a cross-model review.
+When upstream released 0.3.1, four readers over the same disjoint areas took
+every claim to the frozen `7b9a5e2` tree and reported, per claim, whether it
+held, moved, changed or reversed, with the lines they actually read; the
+integrator read the build and upstream area, applied the verdicts, added the
+behaviours the readers' change sweeps found, and the anchor gate re-checked
+every anchor at `7b9a5e2`. That update was diff-driven rather than blind — a
+deviation from [`tool-onboarding.md`](../../../docs/operating/tool-onboarding.md)
+§ Re-deriving, made at the owner's request and argued in `report.md`. A second
+cross-model review then read the result and its blockers were resolved.
 
-The reader files are kept rather than folded into `report.md` because they carry
-the full evidence at a depth the consolidated report compresses, and because
-`ERRATA.md` records that anchor accuracy varies between them.
+## Retired: the v0.2.0 layer
 
-## Reading order
-
-Auditing a current claim: start at [`../data/claims.json`](../data/claims.json),
-follow its evidence, and come here only for how the wording was reached. Auditing
-the derivation itself: read [`report.md`](report.md) with [`ERRATA.md`](ERRATA.md)
-open beside it — the errata records source anchors whose line numbers are wrong
-in the report and correct in the ledger.
+The v0.2.0 derivation record — five reader reports, the consolidated report,
+its errata, the first cross-model review, the two instrumented v0.2.0 run
+observations, and three 2026-08-10 diagnostic attempt receipts on 0.2.2 and
+0.2.4 — was retired on 2026-09-02 when the capsule became 0.3.1-only, by owner
+decision and before the study was published. The criterion was that the
+subject was superseded, not anything its evidence showed: every conclusion of
+that layer that still holds at 0.3.1 is conserved in the ledger through the
+per-claim re-test, and the seven ledger claims that stated v0.2.0 run figures
+were dropped rather than carried. The files remain reachable at commit
+`8733e22` of this repository.

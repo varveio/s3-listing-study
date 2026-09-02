@@ -16,11 +16,10 @@ The tested-subject facts are stated here; the canonical record is
 
 | Question | Current answer |
 | --- | --- |
-| Tested subject | Upstream's own published image for `v0.2.0` — no fork, no patch, nothing built locally — pulled anonymously by digest, its `org.opencontainers.image.revision` label equal to the tested commit `cef8ec2`, self-reporting `swath 0.2.0 (cef8ec24a74f)`. The registry tag is `0.2.0`; `v0.2.0` is a 404. Run anonymously (`--no-sign-request`) at `--concurrency 8`, native arm64. Canonical identity: [`data/tool.json`](data/tool.json). |
-| Exercised coverage | Two direct v0.2.0 `jsonl` observations, one on the full bucket and one prefix. A later diagnostic attempt ran v0.2.4 `recursive-tsv` over `normals-hourly/` on amd64. A separate four-mode adapter summary lacks the exact commands and raw normalized outputs needed to support a canonical runtime claim. No Parquet, sorted-Parquet or resume run; no credentialed, edge-key, crash, or high-concurrency run. |
-| Correctness and verifier state | **No verifier verdict exists for any run**, and **no completeness check was performed**: count-and-uniqueness against the registry's recorded figures is the only cross-check, and it cannot detect a substituted key or compensating errors — claim `smoke-output-count-and-uniqueness`, with the reasons in [`docs/running.md`](docs/running.md#what-the-verifier-could-not-check). |
-| Receipts | Diagnostic attempt receipts exist, but none has a verifier verdict or confirms a claim. Latest: Swath 0.2.4, anonymous amd64 `recursive-tsv` over `normals-hourly/`, exit 0, clean secret scan, 2,549 rows counted. Evidence boundary: [`docs/running.md`](docs/running.md#diagnostic-attempt-receipts-but-no-verifier-verdict). |
-| v0.2.0 smoke observation | The full-bucket observation exited 0 having emitted 148,917 JSON Lines rows with zero duplicate keys, and reported eight concurrent listings in flight — claims `smoke-output-count-and-uniqueness`, `full-run-reported-parallel-listings`. A single unreplicated groundwork run, counted by the tool itself: not a benchmark result and not comparable to anything. |
+| Tested subject | Upstream's own published image for `v0.3.1` — no fork, no patch, nothing built locally — pulled anonymously by digest, its `org.opencontainers.image.revision` label equal to the tested commit `7b9a5e2` on both architectures, self-reporting `swath 0.3.1` / `Commit: 7b9a5e2fba04`. The registry tag is `0.3.1`; `v0.3.1` is a 404. Canonical identity: [`data/tool.json`](data/tool.json). |
+| Exercised coverage | All eight adapter modes — TSV, JSONL and table streams, `seed.mode=none`, plain and zstd TSV directory datasets, direct and sorted Parquet datasets — round-tripped anonymously over the 2,549-key `normals-hourly/` prefix on amd64, each exiting 0 and normalizing to the same key set — claim `round-trip-count-and-cross-mode-agreement`. No full-bucket, credentialed, edge-key, crash, resume, discard-sink, arm64 or high-rate run. |
+| Correctness and verifier state | **No verifier verdict exists for any run**, and **no completeness check was performed**: count against the registry's recorded figure plus cross-mode agreement is the only cross-check, and it cannot detect a substituted key or compensating errors — reasons in [`docs/running.md`](docs/running.md#what-the-verifier-could-not-check). |
+| Receipts | None. The round-trip is a direct `docker run` observation on the maintainer's workstation, not a harness run record; nothing confirms a claim. Evidence boundary: [`docs/running.md`](docs/running.md#no-receipts-and-no-verifier-verdict). |
 | Results | No benchmark or comparative result exists. |
 
 ## How it works
@@ -32,7 +31,9 @@ peer's range at a synthesized pivot key, and each worker paginates its range wit
 descent creates the first ranges; `--concurrency` is an AIMD ceiling, not a
 setpoint, and the store sets the steady-state level. Output streams straight
 through the formatter with no per-run accumulation, to stdout text or a Parquet
-dataset. Full account: [`docs/mechanism.md`](docs/mechanism.md).
+dataset; since 0.3.0 the text formats can also be gzip- or zstd-compressed or
+written as partitioned directory datasets, and a discard sink runs the engine
+with no output at all. Full account: [`docs/mechanism.md`](docs/mechanism.md).
 
 ## Modes and study coverage
 
@@ -40,11 +41,13 @@ Upstream's mode surface and what this study exercised are separate.
 
 | Mode | Upstream purpose | What this study exercised |
 | --- | --- | --- |
-| `list --format jsonl \| tsv \| table` | Fully enumerate a bucket to a text stream. | `jsonl` in two direct v0.2.0 observations; `tsv` in a later v0.2.4 diagnostic attempt with no verifier verdict. A four-mode adapter summary is preserved but is not independently auditable and supports no canonical runtime claim. |
-| `list --tune seed.mode=shallow \| none` | Change whether an up-front `delimiter=/` descent runs at all — a request-pattern change, not an output change. | `shallow` in the two direct observations. `none` appears only in the unauditable adapter summary, so the cost arms remain uncompared. |
-| `list --tune seed.mode=hints` | Declared hinted seeding. | Not run; it throws at seed time, so there is no hinted mode. |
-| `list --format parquet` / `--sort` | Write a multi-part, optionally globally key-sorted Parquet dataset to a directory. | Not run; the current driver writes `/tmp/swout`, which the minimal attempt contract does not publish. Parquet is also Swath's only byte-exact output path. |
-| `swath resume <dir>` | Resume a crashed listing from a SQLite checkpoint. | Not run; it needs a durable checkpoint, which needs a directory dataset, which needs a mount. |
+| `list --format jsonl \| tsv \| table` | Fully enumerate a bucket to a text stream. | All three round-tripped over the prefix, exit 0. No verifier verdict on any. |
+| `list --tune seed.mode=shallow \| none` | Change whether an up-front `delimiter=/` descent runs at all — a request-pattern change, not an output change. | Both round-tripped; the run counters were not compared, so the cost arms remain uncompared. |
+| `list --tune seed.mode=hints` | Declared hinted seeding. | Not run; it still throws at seed time, so there is no hinted mode. |
+| `list --format tsv \| jsonl -o <dir>`, `--compression` | Partitioned, optionally compressed text directory datasets with a manifest and `_SUCCESS` (0.3.0). | Plain and zstd TSV datasets round-tripped; JSONL datasets and gzip not run. Non-resumable by construction. |
+| `list --format parquet` / `--sort` | Write a multi-part, optionally globally key-sorted Parquet dataset to a directory. | Both round-tripped over the prefix through the adapter's native-sink route; no benchmark attempt through the worker yet. Parquet is Swath's byte-exact output path, now typed `STRING` and UTF-8-only. |
+| `list --format discard` | Run the listing engine with no output, to separate listing cost from output cost (0.3.0). | Not run; not a declared adapter mode. |
+| `swath resume <dir>` | Resume a crashed managed-Parquet listing from a SQLite checkpoint. | Not run; it needs a durable checkpoint, which needs a Parquet directory dataset. |
 
 Swath has no shallow `ls`-style output mode and no `inspect` or `diff`
 subcommand. Mechanism detail is in [`docs/mechanism.md`](docs/mechanism.md);
@@ -58,41 +61,51 @@ resolve in [`data/claims.json`](data/claims.json).
 
 - **`--concurrency N` is a ceiling, not a setpoint.** A run starts at
   `min(4, N)` permits and the store, not the flag, sets the steady-state level,
-  so a benchmark that reads the flag as "N concurrent requests" will be wrong and
-  must instrument effective concurrency separately.
+  and the controller never searches the level back down for efficiency, so a
+  benchmark that reads the flag as "N concurrent requests" will be wrong and
+  must instrument effective concurrency separately. The v0.2.0 engine-default
+  flips and their one supported rollback are explained on the mechanism page.
   [`Concurrency, AIMD, and flow control`](docs/mechanism.md#concurrency-aimd-and-flow-control)
-  · `concurrency-flag-is-aimd-ceiling`
+  · `concurrency-flag-is-aimd-ceiling`, `aimd-does-not-search-down`,
+  `v020-engine-default-flips`, `engine-toggles-are-diagnostic`
 
-- **v0.2.0's engine change is two default flips, and the old one was
-  structurally blind.** Rate-anchored sensing and a floored tail reach are both
-  on by default now; the previous tail-floor reading multiplied any estimate to
-  exactly zero once its reach term went non-positive. The documented pre-0.2.0
-  rollback pair is the one supported non-default engine configuration.
-  [`Engine defaults and the one supported rollback`](docs/mechanism.md#engine-defaults-and-the-one-supported-rollback)
-  · `v020-engine-default-flips`, `engine-toggles-are-diagnostic`
-
-- **No claim is receipt-backed and no verifier ran.** Later diagnostic attempt
-  receipts exist, but carry no verifier verdict and cannot confirm the canonical
-  v0.2.0 claims. The retained observations support only the facts their
-  committed commands and payload samples expose. The absent completeness check
-  and the bucket's drift are stated once, in the linked section.
+- **No claim is receipt-backed and no verifier ran.** The only runtime
+  evidence is the eight-mode round-trip, an observation that supports only the
+  facts its committed commands and payload hashes expose: every mode parses,
+  completes, and agrees with the others on one prefix. The absent completeness
+  check and the bucket's drift are stated once, in the linked section.
   [`What the verifier could not check`](docs/running.md#what-the-verifier-could-not-check)
-  · `smoke-output-count-and-uniqueness`, `aimd-idle-at-smoke`
+  · `round-trip-count-and-cross-mode-agreement`, `aimd-necessity`
+
+- **Since 0.3.0 Swath parses S3's response and decodes keys itself.** A
+  Swath-owned interceptor streams the `ListObjectsV2` XML and percent-decodes
+  keys with the same `URLDecoder` call the SDK used, so the earlier finding
+  that it performed no decoding of its own is reversed and recorded as
+  contradicted under its ID; the two encoding hazards below moved with it into
+  Swath's own tree. Text sinks also now print timestamps as S3 spells them, with a
+  millisecond fraction, and the Parquet key column is annotated `STRING` and
+  refuses non-UTF-8 keys.
+  [`Key fidelity and the encoding contract`](docs/mechanism.md#key-fidelity-and-the-encoding-contract)
+  · `encoding-type-url-no-local-decode`, `listobjects-response-streamed-by-swath-interceptor`,
+  `last-modified-text-is-endpoint-spelling`, `parquet-key-is-string-annotated-utf8-only`
 
 - **Several knobs a cross-tool comparison would reach for do not exist.** Page
   size is a hard-coded 1000 with no `--max-keys`, so it is not sweepable without
   patching source; there is no `--delimiter` or `--recursive`; the owner-split
-  kill switch has no flag spelling; and versioned listing is dead code.
+  kill switch has no flag spelling and sits behind an `--engine-toggle` option
+  that 0.3.0 hid from the help; and versioned listing is dead code.
   [`Absences, dead code, and documentation drift`](docs/mechanism.md#absences-dead-code-and-documentation-drift)
   · `page-size-fixed-no-max-keys`, `no-shallow-listing-mode`,
   `no-owner-split-flag-absent`, `versions-listing-is-dead-code`
 
-- **The tool's prose docs and javadoc are not a reliable statement of what
-  ships.** Fifteen drift items were consolidated, three of which state engine
-  defaults backwards, one of which has a correctness consequence in the
+- **The tool's javadoc and older prose are not a reliable statement of what
+  ships.** Fifteen drift items were consolidated at 0.2.0, three of which state
+  engine defaults backwards, one of which has a correctness consequence in the
   encoding-decode contract, and two of which are live error messages telling a
-  user to pass flags that do not exist. The reference tables, golden help
-  captures and code are reliable.
+  user to pass flags that do not exist; the re-checked items, both error
+  messages included, persist at v0.3.1. The reference tables, golden help
+  captures, the code, and 0.3.0's test-enforced supported-surface page are
+  reliable.
   [`Absences, dead code, and documentation drift`](docs/mechanism.md#absences-dead-code-and-documentation-drift)
   · `docs-and-javadoc-drift`, `live-error-messages-name-absent-flags`
 
@@ -100,53 +113,49 @@ resolve in [`data/claims.json`](data/claims.json).
 
 ### Coverage gaps
 
-- Only `jsonl` with the default shallow seed is supported by auditable direct
-  observations, on one bucket in two unreplicated runs.
-  No credentialed, edge-key, crash, resume, or high-concurrency run — claims
+- The runtime evidence is one prefix in single runs per mode; no full-bucket,
+  credentialed, edge-key, crash, resume, or high-rate run — claims
   `control-char-key-fidelity-untested`, `crash-resume-works`,
   `exactly-once-under-crash`.
-- Both canonical v0.2.0 observations were native arm64. A later v0.2.4
-  diagnostic attempt exercised amd64, but does not settle the v0.2.0 runtime
-  claim. amd64 is supported across every publishing channel, including a real
-  child manifest in the published index, and the v0.2.0 workflows do not
-  runtime-smoke arm64 because their runners are amd64 —
+- The round-trip ran amd64. amd64 is supported across every publishing
+  channel, and upstream's workflows still do not runtime-smoke arm64 because
+  their runners are amd64; this study holds no arm64 observation of v0.3.1 —
   claims `amd64-built-and-smoked-upstream`, `arm64-not-runtime-smoked-at-v020`.
 
 ### Harness and verifier blockers
 
 - Diagnostic attempt receipts exist, but no run has a verifier verdict and no
   claim is `confirmed`; see
-  [`docs/running.md`](docs/running.md#diagnostic-attempt-receipts-but-no-verifier-verdict),
+  [`docs/running.md`](docs/running.md#no-receipts-and-no-verifier-verdict),
   which owns that caveat.
-- The current driver sends Parquet probes to `/tmp/swout`, while the minimal
-  attempt contract publishes only the two raw streams and `result.json`; those
-  native outputs are therefore not currently preserved. This is a driver and
-  publication limitation, not a tool one. Because Parquet is Swath's only byte-exact
-  output path, leaving the gap open means never exercising it — claims
+- The adapter directs Parquet and text datasets into the benchmark worker's
+  native sink, and that shape was exercised outside the worker in the
+  round-trip. No benchmark attempt has yet run it through the worker — claims
   `file-sinks-not-harness-capturable`, `parquet-key-column-is-byte-exact`.
-- The committed adapter has been rewritten for v0.2.0, and `recursive-tsv` has
-  executed through the current derived-image attempt path on v0.2.4. A
-  claim-confirming run still needs the required execution profile and the
-  reference/verifier path — see
-  [`docs/running.md`](docs/running.md#adapter-and-harness-contract).
+- The committed adapter was validated by execution, which also caught and
+  fixed a normalizer defect in the aligned-table mode. A claim-confirming run
+  still needs the required execution profile and the reference/verifier path —
+  see [`docs/running.md`](docs/running.md#adapter-and-harness-contract).
 
 ### Tool findings and risks
 
-- Swath never validates that an endpoint honoured `encoding-type=url`, and the
-  SDK's decode is gated on a case-sensitive echo. A nonconforming endpoint would
+- Swath never validates that an endpoint honoured `encoding-type=url`, and its
+  own decode is gated on a case-sensitive echo. A nonconforming endpoint would
   produce a wrong answer with a clean exit and no warning. Conditional, not
   observed — claims `encoding-contract-not-validated`,
   `plus-to-space-conditional-hazard`.
 - Pages are assumed to arrive in ascending byte order and never checked — claim
-  `no-intra-page-ordering-check`.
-- The project is new: eight days old at the 2026-08-02 research date, created
-  2026-07-25, with a single contributor — claim
-  `upstream-is-young-and-solo-maintained` — and two releases in six days, claim
-  `upstream-publishes-tagged-releases`. Upstream's nightly deep-verification
-  workflow had failed on every visible run at that date while pull-request and
-  `main` CI were green — claim `nightly-deep-verification-failing`. All three are
-  read from the GitHub APIs on one day and move with time. The code is careful
-  and the prose has not caught up, which is claim `docs-and-javadoc-drift`.
+  `no-intra-page-ordering-check`. Since 0.3.0 a terminal page that repeats the
+  cursor is fatal, which a replay server must honour — claim
+  `forward-progress-guard-covers-terminal-page`.
+- The project is young and solo: 39 days old at the 2026-09-02 update, created
+  2026-07-25, with one human contributor — claim
+  `upstream-is-young-and-solo-maintained` — and eight releases in five weeks,
+  claim `upstream-publishes-tagged-releases`. Upstream's nightly
+  deep-verification workflow was intermittent at the 2026-09-02 reading, five
+  of the last eight runs failing — claim `nightly-deep-verification-failing`. All three are read from
+  the GitHub APIs on one day and move with time. The code is careful and the
+  javadoc has not caught up, which is claim `docs-and-javadoc-drift`.
 
 ### Benchmark questions
 
@@ -168,42 +177,45 @@ resolve in [`data/claims.json`](data/claims.json).
 | Inspect canonical identity, study states, and the full claim ledger | [`data/tool.json`](data/tool.json) and [`data/claims.json`](data/claims.json) |
 | Integrate the subject with the shared harness | [`adapter/`](adapter/) |
 | See which subject image the derived attempt image is built from | [`build/`](build/) |
-| Read the independent blind re-derivation at v0.2.0, its errata, and its cross-model review | [`research/`](research/) |
+| See how the ledger was derived, the installed-help diff against 0.2.0, and the cross-model review | [`research/`](research/) |
 | Audit an individual claim's evidence in depth | [`data/claims.json`](data/claims.json), then the owning `research/reader-*.md` |
-| Inspect the committed observations | [`receipts/`](receipts/) |
+| Inspect the committed round-trip observation | [`receipts/`](receipts/) |
 
 ## Provenance
 
-**Firsthand, single-subject.** Everything current about v0.2.0 comes from a
-source-first derivation against the pinned commit `cef8ec2` — five readers over
-a frozen worktree, deliberately blind to any existing capsule prose —
-consolidated, then re-checked by an independent cross-model review whose
-findings were all re-verified against source before being accepted. It is
-recorded in
-[`research/`](research/), with known defects in that record listed in
-[`research/ERRATA.md`](research/ERRATA.md).
+**Firsthand.** Every claim resolves to source lines at the pinned commit
+`7b9a5e2`, to upstream's own documentation, or to the study's one committed
+observation. The ledger descends from a blind, source-first derivation of the
+previous release, v0.2.0 — five readers over disjoint file sets with no access
+to any existing capsule prose, an integrator, and an independent cross-model
+review — which was then re-tested claim by claim against the frozen v0.3.1
+tree by four readers over the same areas, every anchor re-checked
+mechanically, one claim reversed, twenty-nine revised, seventeen added, and
+the result reviewed again by a different model family. That update was
+diff-driven rather than blind, a stated deviation from the study's
+re-derivation rule argued in [`research/report.md`](research/report.md). The
+v0.2.0 layer itself — its reports, run observations and diagnostic receipts —
+was retired when the capsule became 0.3.1-only, before publication;
+[`research/README.md`](research/README.md) records what was retired, why, and
+where it remains reachable.
 
 This page has **a single layer.** The capsule carries no migration stratum — no
 frozen pre-restructure page, no conservation map, and no claim in
 [`data/claims.json`](data/claims.json) carries a legacy origin. Every claim
-states the v0.2.0 subject on its own evidence.
+states the v0.3.1 subject on its own evidence.
 
-The two canonical v0.2.0 runtime observations are the study's own, and neither
-is **a run record** in the harness sense; source reading is not a run record
-either. Later diagnostic attempt receipts, most recently v0.2.4 attempt 3, are a
-separate evidence layer and carry no verifier verdict — see
-[`docs/running.md`](docs/running.md#diagnostic-attempt-receipts-but-no-verifier-verdict).
+The adapter round-trip is the study's own and is not **a run record** in the
+harness sense; source reading is not a run record either — see
+[`docs/running.md`](docs/running.md#no-receipts-and-no-verifier-verdict).
 
 ## Evidence boundary
 
 Source and documentation can establish a mechanism or a risk; they cannot
 establish that a run behaved as designed. No receipt here carries the verifier
-verdict needed to support `confirmed`; the later diagnostic attempts do not
-change that boundary. The canonical runtime facts here are direct v0.2.0
+verdict needed to support `confirmed`. The runtime facts here are direct
 container observations — Swath's own self-reported counters and the rows it
-emitted — from single unreplicated runs, two of them instrumented. They and the
-later v0.2.4 diagnostic attempt are groundwork, not benchmark results, and no
-number here is comparative.
+emitted — from an eight-mode round-trip over one prefix, one run per mode.
+They are groundwork, not benchmark results, and no number here is comparative.
 
 ## Varve and Swath
 
@@ -213,13 +225,13 @@ design; we also know Swath's tuning envelope more deeply than we know the other
 tools, which makes us participants in the space we are studying. We apply the
 same harness, buckets, and run-record requirements to Swath as to every other
 tool, and publish the results on the same terms whether or not they favour it —
-which is why this page states plainly that Swath's v0.2.0 pass produced no
-wrapper-era receipt and no verifier verdict, while later diagnostic receipts do
-not confirm its claims. Swath's earlier internal benchmark history is
+which is why this page states plainly that no run of Swath here has produced a
+receipt or a verifier verdict. Swath's earlier internal benchmark history is
 **not** used here; any number must be produced again on this harness. The
-structural control on the first-party source basis is that the v0.2.0 derivation
-was source-first and deliberately blind, every claim is anchored, and an
-independent cross-model review re-verified the anchors — claim
+structural control on the first-party source basis is that the original
+derivation was source-first and deliberately blind, every claim is anchored,
+independent cross-model reviews re-verified the anchors at both versions, and
+the v0.3.1 update re-tested every claim rather than carrying it forward — claim
 `first-party-source-basis`. We welcome help from people who know the
 other tools better; the run records are published so readers can inspect and
 improve the setup.

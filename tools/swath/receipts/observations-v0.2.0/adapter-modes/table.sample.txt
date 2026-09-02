@@ -1,3 +1,0 @@
-     232303441  2026-07-22T12:52:19Z      normals-hourly/1991-2020/archive/us-climate-normals_1991-2020_v1.0.0_hourly_multivariate_by-station_c20210423.tar.gz
-     243943659  2026-07-22T12:53:39Z      normals-hourly/1991-2020/archive/us-climate-normals_1991-2020_v1.0.0_hourly_multivariate_by-variable_c20210423.tar.gz
-       3184153  2026-07-22T12:54:13Z      normals-hourly/1981-2010/access/AQW00061705.csv

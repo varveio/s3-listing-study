@@ -1,0 +1,3 @@
+       3184153  2026-07-22T12:54:13.000Z  normals-hourly/1981-2010/access/AQW00061705.csv
+       2471966  2026-07-22T12:53:20.000Z  normals-hourly/1981-2010/access/FMW00040308.csv
+       2139117  2026-07-22T12:52:53.000Z  normals-hourly/1981-2010/access/FMW00040504.csv

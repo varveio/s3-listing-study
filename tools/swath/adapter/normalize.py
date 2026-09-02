@@ -14,11 +14,13 @@ Field exposure — ``recursive-tsv`` / ``seed-none`` / ``recursive-jsonl`` carry
 five fields. ``recursive-table`` (TableFormatter) prints size, last_modified
 and key only, so etag and storage_class are `-`.
 
-mtime is swath's own ``DateTimeFormatter.ISO_INSTANT`` (``Fields.isoMicros``).
-S3 LastModified is whole-second, so the value already reads
-``YYYY-MM-DDTHH:MM:SSZ`` and is passed through unchanged. A sub-second instant
-would both fail the contract's mtime gate and shift the aligned columns; that is
-a hardening item for a non-S3 store, not something to paper over here.
+mtime: since 0.3.0 the text sinks write the endpoint's own ``LastModified``
+text, which real S3 spells ``YYYY-MM-DDTHH:MM:SS.000Z``; before that, swath
+rendered ``ISO_INSTANT`` and S3's whole seconds came out as
+``YYYY-MM-DDTHH:MM:SSZ``. Every query strips a trailing fraction, so both
+spellings normalize to the contract's whole-second Zulu form. The aligned sink
+gives the instant a 24-character column that the S3 spelling exactly fills; an
+endpoint spelling it longer would overflow the columns and be refused.
 
 ``prefix`` (argv[2]) is accepted per the adapter contract and unused: swath lists
 ``s3://bucket/prefix`` and returns WHOLE keys, so nothing needs reconstructing.
@@ -119,7 +121,7 @@ QUERIES = {
     # instant in [17,40], two spaces, the key from column 43 to end of line. The
     # formatter emits neither etag nor storage class.
     "recursive-table": f"""
-        SELECT "key", "size", NULL, "mtime", NULL
+        SELECT "key", "size", NULL, regexp_replace("mtime", '\\.[0-9]+Z$', 'Z'), NULL
         FROM (SELECT trim(substr(line, 1, 14)) AS "size",
                      trim(substr(line, 17, 24)) AS "mtime",
                      substr(line, 43) AS "key"
@@ -169,10 +171,12 @@ def validate_text_framing(data: bytes, mode: str) -> None:
                 )
 
 
-# The key column is Parquet BLOB, so it reaches the emit boundary as raw bytes
-# and is never narrowed to what UTF-8 can spell -- the one Swath output path
-# with that property. last_modified is TIMESTAMP WITH TIME ZONE; rendering it
-# through UTC keeps the contract's whole-second Zulu spelling.
+# The key column is Parquet BINARY annotated STRING (0.3.0; plain BINARY
+# before), so DuckDB returns it as VARCHAR and the emit boundary re-encodes it
+# as UTF-8: byte-exact because swath refuses to write a key that is not valid
+# UTF-8, which is the one Swath output path with that property. last_modified
+# is TIMESTAMP WITH TIME ZONE; rendering it through UTC keeps the contract's
+# whole-second Zulu spelling.
 PARQUET_QUERY = """
     SELECT "key", CAST("size" AS VARCHAR), "etag",
            strftime("last_modified" AT TIME ZONE 'UTC', '%Y-%m-%dT%H:%M:%SZ'),

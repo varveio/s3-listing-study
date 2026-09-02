@@ -254,7 +254,7 @@ The closure requirement is load-bearing, and the obvious implementation misses
 it. Capturing a stage body *after* its `FROM` line would leave three externally
 pinned bases outside both slices: `rust@sha256:cf9dd0…` (s3-fast-list),
 `node@sha256:2cf067cf…` (s3p), and
-`ghcr.io/varveio/swath@sha256:a13adef0…`, which is the direct base of the single
+`ghcr.io/varveio/swath@sha256:776e7882…`, which is the direct base of the single
 `swath_install` stage. A Swath image bump would then change nothing about
 swath's identity, which is the unrepairable direction of error.
 

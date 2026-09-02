@@ -92,12 +92,12 @@ MODES = {
     "recursive-tsv": Mode(
         product="text",
         fields=("key", "size", "mtime", "etag"),
-        axes={"concurrency": Ceiling(64, "source@cef8ec2")},
+        axes={"concurrency": Ceiling(64, "source@7b9a5e2")},
     ),
     "recursive-parquet-sorted": Mode(
         product="parquet-sorted",
         fields=("key", "size", "mtime", "etag"),
-        axes={"concurrency": Ceiling(64, "source@cef8ec2")},
+        axes={"concurrency": Ceiling(64, "source@7b9a5e2")},
         purpose_ceiling="measurement",
     ),
 }
