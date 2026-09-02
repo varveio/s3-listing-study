@@ -247,7 +247,10 @@ Questions outstanding: are the buckets **public** (LIST is free; runs bounded on
 by time and disk) or **owner-controlled** (LIST costs money; needs a budget)? What
 **region** are they in relative to the runner box? Cross-region latency can
 dominate and swamp genuine algorithmic differences — if the sample is remote, that
-must be stated as a limitation or controlled by running in-region.
+must be stated as a limitation or controlled by running in-region. Replay
+deadlines are derived per fixture from the capture's own round trip, so a
+cross-region bucket's fixture carries its cross-region floor (real-changesets
+in `us-west-2`: 122 ms against 85–94 ms for the east fixtures).
 
 ### 3. Keeping comparisons useful
 
@@ -487,6 +490,32 @@ Latency injection is a declared experimental treatment. A fixed-latency profile
 is valid for a controlled screen when it is applied identically and reported as
 such; it is not described as reproducing S3's full latency distribution unless
 that stronger fidelity has separately been demonstrated.
+
+**Latency-treatment provenance, 2026-09-02.** A fixture's fixed deadlines are
+the rounded p50 of one request's client-observed round trip per shape, read
+from the phase timers of the Swath run that captured the fixture. A capture may
+supply deadlines only if its median connection-pool wait is negligible and its
+total is within a few milliseconds of its time-to-first-byte, so that no
+client-side queue is inside the number; a capture that fails that test is not
+a deadline source, and one such run exists (a 2026-08-06 FourCast reference at
+123.7 ms worker-page p50 against a clean 86.0 ms on the same bucket). Because a
+client holding many requests in flight can load S3 in a way a serial client
+never does, and the capturing client cannot see that from inside, the floor is
+cross-checked against clients other than Swath: directly where a same-bucket
+serial sample exists (FourCast), and otherwise against the roster's serial
+tools on live S3 in the study's August basic pass, whose wall time per page
+minus client cost per page must leave a residual at or above the deadline for
+that region. That residual is a run mean, not a p50; the check establishes
+that replay charges a serial tool no more per page than live S3 did. The
+August pass predates the campaign ledger and is not exported; the cross-check
+is recorded in the study's working notes, and no published row depends on it.
+The treatment is therefore a floor for subjects under roughly 1,000 requests
+per second on plain pages. A subject above that rate sees a floor that live S3
+does not give it, and its replay throughput is an overstatement by an
+unmeasured factor; in this study only Swath reaches that rate. Fixed p50
+deadlines carry no tail and no throttling, and the server prices a request by
+its syntax, so a `delimiter=/` page that returns objects draws the structure
+deadline rather than the page deadline.
 
 The plan fixes its advancement rule before the relevant replay results are
 examined. Capacity-calibration rows are diagnostics and cannot eliminate a
