@@ -373,6 +373,10 @@ class ReleaseSpec:
     ledger_schema_version: int
     plans: dict[str, str]
     withheld_workloads: dict[str, str]
+    # Release-level disclosures that no row can carry: facts about how the
+    # campaigns were run (an evolving harness, a shared host disk) that a reader
+    # of the manifest needs and the exporter cannot derive from the ledger.
+    disclosures: list[dict[str, Any]]
 
 
 def load_release_spec(path: Path) -> ReleaseSpec:
@@ -394,12 +398,31 @@ def load_release_spec(path: Path) -> ReleaseSpec:
             "committed selection rule this code does not have"
         )
     source = document.get("source_ledger") or {}
+    # A claim-ceiling flag is the one field a reader may act on without reading
+    # the prose, so it must be a real boolean: the string "false" is truthy in
+    # Python, and bool("false") would publish a ceiling the spec did not declare.
+    ceiling = document.get("claim_ceiling") or {}
+    for key, value in ceiling.items():
+        if not isinstance(value, bool):
+            raise ExportError(
+                f"release spec {path} claim_ceiling.{key} is {value!r}; a claim-ceiling flag "
+                "must be a YAML boolean, not a string"
+            )
+    disclosures: list[dict[str, Any]] = []
+    for entry in document.get("disclosures") or []:
+        if not isinstance(entry, dict) or not {"id", "detail", "affects"} <= set(entry):
+            raise ExportError(
+                f"release spec {path}: every disclosure needs an id, a detail and an affects"
+            )
+        disclosures.append(
+            {"id": str(entry["id"]), "detail": str(entry["detail"]), "affects": entry["affects"]}
+        )
     return ReleaseSpec(
         path=path,
         release_id=str(document["release_id"]),
         title=str(document["title"]),
         status=str(document["status"]),
-        claim_ceiling={str(k): bool(v) for k, v in (document["claim_ceiling"] or {}).items()},
+        claim_ceiling={str(k): v for k, v in ceiling.items()},
         include=str(document["include"]),
         exclusions=[dict(entry) for entry in (document.get("exclusions") or [])],
         ledger_suite=str(source.get("suite")),
@@ -408,6 +431,7 @@ def load_release_spec(path: Path) -> ReleaseSpec:
         withheld_workloads={
             str(k): str(v) for k, v in (document.get("withheld_workloads") or {}).items()
         },
+        disclosures=disclosures,
     )
 
 
@@ -897,13 +921,16 @@ def build_fixtures(
     tens of gigabytes of third-party object keys. `availability` says so rather
     than leaving a reader to guess a download exists.
     """
-    observed: dict[str, int] = {}
+    # What successful attempts returned off each fixture. This is subject output
+    # and is recorded as such; it is never promoted to the fixture's cardinality,
+    # because a subject that over-counts (one did, by one row) would otherwise
+    # define the truth it is then judged against.
+    observed: dict[str, set[int]] = {}
     for row in rows:
         fixture = row.get("fixture")
         count = row["outcome"]["row_count"]
         if fixture and row["state"]["provider"] == "SUCCEEDED" and isinstance(count, int):
-            key = str(fixture["id"])
-            observed[key] = max(observed.get(key, 0), count)
+            observed.setdefault(str(fixture["id"]), set()).add(count)
 
     catalog: dict[str, Any] = {}
     for row in rows:
@@ -930,15 +957,22 @@ def build_fixtures(
             # by a campaign attempt, so there is no capture attempt to cite.
             "capture_attempt_id": None,
             "captured_at": (staged or {}).get("generated_at"),
-            "object_count": staged_count(bundle, report_block) or observed.get(identifier),
-            # Where no bundle summary was staged, the count is the largest row
-            # count any successful attempt reported off that fixture -- an
-            # observation from this release's own data, labelled as one, never a
-            # number invented to fill the column.
+            # The fixture's cardinality comes from the staged bundle summary or it
+            # is null. Where no summary was staged the column stays empty and
+            # `observed_row_counts` says what the runs returned, so no row can
+            # be judged "matched the fixture" against its own output.
+            "object_count": staged_count(bundle, report_block),
             "object_count_source": (
-                "staged-bundle-summary"
-                if staged_count(bundle, report_block)
-                else ("observed-row-count" if observed.get(identifier) else None)
+                "staged-bundle-summary" if staged_count(bundle, report_block) else None
+            ),
+            "observed_row_counts": (
+                {
+                    "min": min(observed[identifier]),
+                    "max": max(observed[identifier]),
+                    "distinct": sorted(observed[identifier]),
+                }
+                if observed.get(identifier)
+                else None
             ),
             "manifest_sha256": row["fixture"]["sha256"],
             "capture_tool": "swath" if staged else None,
@@ -1214,8 +1248,9 @@ def build_release(
             "id": "fixture-metadata-not-staged",
             "detail": (
                 "No staged fixture bundle summary was found for these fixtures, so their shape "
-                "metrics are null and their object_count is the largest row count a successful "
-                "attempt reported off the fixture (object_count_source says which)."
+                "metrics and object_count are null. observed_row_counts records the distinct "
+                "row counts successful attempts returned off the fixture; that is subject "
+                "output, not fixture cardinality, and no count-match judgement rests on it."
             ),
             "affects": unstaged,
         },
@@ -1254,6 +1289,8 @@ def build_release(
             ),
         },
     ]
+
+    disclosures.extend(spec.disclosures)
 
     manifest = {
         "schema_version": ROW_SCHEMA_VERSION,
@@ -1335,40 +1372,57 @@ def build_release(
 def readme_text(release: Release) -> str:
     return f"""# Public results
 
-Each directory under `results/` is one immutable release of this study's public
-result data. A release is generated, never hand-edited.
+Each directory under `results/` is one release of this study's public result
+data: an allowlisted projection of the private campaign ledger, generated by
+code, with one handwritten companion (`REPORT.md`) sealed beside it.
 
 ## Release contract
 
-- **Immutable.** Once a release directory is committed, its files are not
-  revised in place. A correction is a new release whose `manifest.json` names
-  what it supersedes, plus an erratum note in the superseded release.
-- **Canonical versus original.** `attempts.jsonl` is the canonical *public*
-  dataset. It is not the original evidence: the campaign ledger, the provider
-  request, the per-attempt `result.json`, the console logs and the listing
-  products stay private. Every row's `evidence[]` names what exists, with a
-  digest and the reason it is not published.
-- **Generated.** `summary.csv`, the charts and their CSVs are derived from
-  `attempts.jsonl`. Never edit them; regenerate.
+- **Public projection, not original evidence.** `attempts.jsonl` is the
+  canonical *public* dataset. The campaign ledger, the provider request, the
+  per-attempt `result.json`, the console logs and the listing products stay
+  private. Every row's `evidence[]` names what exists, with a digest and the
+  reason it is not published.
+- **Auditable, not independently reproducible.** A reader can inspect every
+  configuration, image digest, fixture digest, outcome and derivation. A reader
+  cannot rerun the identical replay experiment from this repository alone: the
+  fixture bytes and the original evidence store are not published, and the
+  source buckets are mutable, so re-listing one yields a new fixture, not the
+  old digest.
+- **Generated, with one exception.** `attempts.jsonl`, `summary.csv`,
+  `fixtures.json`, `subjects.json`, the charts and their CSVs are written by
+  the exporter. Never edit them; regenerate. `REPORT.md` is the exception: it
+  is written by hand and sealed with the rest.
 - **Bounded claims.** `manifest.json.claim_ceiling` states in machine-readable
   form what the release may be used to claim. Prose and figures are bounded by
   it.
+- **Mutable until tagged, immutable after.** A release directory may be
+  regenerated or resealed while it lives on a draft branch. It becomes
+  immutable when an annotated tag or GitHub Release names it; from then on a
+  correction is a new release whose manifest names what it supersedes, and the
+  old directory is not touched.
 
 ## Files in a release
 
 | File | Role |
 | --- | --- |
-| `REPORT.md` | Written companion: status, funnel, dispositions, limits. Handwritten, sealed here |
+| `REPORT.md` | Written companion: what ran, what it returned, the limits. Handwritten, sealed |
 | `manifest.json` | Identity, status, claim ceiling, commit, counts, checksums, disclosures |
-| `attempts.jsonl` | One compact JSON object per attempt — the canonical dataset |
+| `attempts.jsonl` | One compact JSON object per attempt — the canonical public dataset |
 | `summary.csv` | Flat scalar view of the same rows, for spreadsheets |
-| `fixtures.json` | Per replay fixture: source, digest, object count, shape, latency, availability |
+| `fixtures.json` | Per fixture: source, digest, staged count or null, observed counts, shape |
 | `subjects.json` | Per tool: versions, image and slice digests, modes seen, capsule path |
 | `charts/*.svg`, `charts/*.csv` | Deterministic figures and the exact rows behind each one |
 | `checksums.sha256` | SHA-256 of every other file in the release |
 
+`checksums.sha256` and the manifest's file digests are integrity metadata:
+they let a reader confirm the files they hold are the files that were sealed
+together. They are not a signature. Anyone editing a release can regenerate
+them, so the authentic boundary is the Git commit or tag, not the checksum
+file.
+
 `results/latest.json` points at the most recent release. Durable claims should
-cite an immutable release path, not `latest`.
+cite a release path, not `latest`.
 
 ## Schema versions
 
@@ -1389,13 +1443,18 @@ campaign's own gate says the row is a publishable measurement: `purpose ==
 measurement`, `capacity_status == CALIBRATED`, and `replay_timing ==
 TIMING_VALID`.
 
+A fixture's `object_count` is the staged bundle's count or `null`. It is never
+inferred from what a tool returned; `observed_row_counts` carries that
+separately, and "count matched the fixture" is only ever said against a staged
+count.
+
 ## Correction policy
 
-1. Never rewrite a committed release.
+1. Never rewrite a tagged release.
 2. Publish a new release with `status: erratum` (or a normal release naming the
-   supersession) and record what changed.
-3. Add the erratum pointer to the superseded release's manifest in the same
-   commit as the new release.
+   supersession) and record what changed in its manifest.
+3. Record the supersession in the new release and in this index, not in the
+   old directory.
 
 ## Regenerating and validating
 
@@ -1409,7 +1468,13 @@ uv run python -m benchmark.public_validate --release-dir results/{release.spec.r
 
 The exporter needs the private ledger and the private evidence store. The
 validator does not: it reads only the committed files, and CI runs it on every
-change.
+change. What it checks is integrity and structure: every file is checksummed
+and the digests match, rows are unique and in stable order, `summary.csv` and
+the chart CSVs cite rows that exist, no row is relabelled a measurement, no
+fixture's count is inferred from subject output, and no file carries a private
+pattern. It does not re-derive every CSV cell or chart value from the JSONL,
+and it does not check prose against the data; the release report is reviewed
+by hand for that.
 
 ## Releases
 

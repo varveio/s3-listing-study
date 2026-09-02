@@ -45,10 +45,15 @@ class RenderError(RuntimeError):
 
 def value_at(row: Mapping[str, Any], path: str, fixtures: Mapping[str, Any]) -> Any:
     """Read one dotted field, plus the release-level joins a chart may name."""
-    if path == "fixture.object_count":
+    if path.startswith("fixture.") and path.split(".", 1)[1] not in (row.get("fixture") or {}):
         fixture = row.get("fixture") or {}
-        return (fixtures.get(str(fixture.get("id"))) or {}).get("object_count")
-    current: Any = row
+        current: Any = fixtures.get(str(fixture.get("id"))) or {}
+        for part in path.split(".")[1:]:
+            if not isinstance(current, Mapping):
+                return None
+            current = current.get(part)
+        return current
+    current = row
     for part in path.split("."):
         if not isinstance(current, Mapping):
             return None
@@ -124,7 +129,10 @@ def _text(x: float, y: float, body: str, *, size: float, fill: str, anchor: str 
 def _frame(width: float, height: float, title: str, caption: str, body: str) -> str:
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width:g} {height:g}" '
-        f'width="{width:g}" height="{height:g}" role="img">\n'
+        f'width="{width:g}" height="{height:g}" role="img" '
+        f'aria-labelledby="chart-title chart-desc">\n'
+        f'<title id="chart-title">{escape(title)}</title>\n'
+        f'<desc id="chart-desc">{escape(caption)}</desc>\n'
         f'<rect width="{width:g}" height="{height:g}" fill="{PAPER}"/>\n'
         + _text(24, 34, title, size=16, fill=INK)
         + "\n"
@@ -215,10 +223,20 @@ def render_scatter(
     selected: Sequence[Mapping[str, Any]],
     fixtures: Mapping[str, Any],
 ) -> str:
-    x_path, y_path = str(chart["x"]), str(chart["y"])
-    points = [
-        (row, value_at(row, x_path, fixtures), value_at(row, y_path, fixtures)) for row in selected
-    ]
+    # `x` may name a list of paths: the first non-null wins. The one use is a
+    # fixture count that is staged for some fixtures and only observed for
+    # others; the spec's axis label must say so where it uses that.
+    x_paths = [str(p) for p in (chart["x"] if isinstance(chart["x"], list) else [chart["x"]])]
+    y_path = str(chart["y"])
+
+    def x_of(row: Mapping[str, Any]) -> Any:
+        for path in x_paths:
+            value = value_at(row, path, fixtures)
+            if value is not None:
+                return value
+        return None
+
+    points = [(row, x_of(row), value_at(row, y_path, fixtures)) for row in selected]
     xs = [float(x) for _, x, _ in points if isinstance(x, (int, float))]
     ys = [float(y) for _, _, y in points if isinstance(y, (int, float))]
     if not xs or not ys:

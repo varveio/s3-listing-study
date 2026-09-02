@@ -4,20 +4,68 @@
 Its distinctive trick is to split the keyspace into byte-range slices — supplied as a hints file — and list those slices concurrently instead of walking one serial pagination chain.
 
 > **Study status (2026-09-scale-diagnostics).** This tool's standing in the current release:
-> Reached the 66.4M-object rung with an exact count in 333.8 s using harness-supplied cut-points (`s3-fast-list.246cf7252988.s1`); two attempts died at the memory limit.
+> Completed the 66.4M-object fixture with a count that matched it, in 333.8 s, on harness-supplied cut-points (`s3-fast-list.246cf7252988.s1`); one other attempt was killed at 8 GiB and one failed at 16 GiB with exit 0.
 > The release is diagnostic: no attempt in it carries `purpose = measurement`, so
 > nothing here is a calibrated benchmark or a ranking. Report and data:
 > [`results/2026-09-scale-diagnostics/REPORT.md`](../../results/2026-09-scale-diagnostics/REPORT.md).
 
+## In the current release
+
+The release `2026-09-scale-diagnostics` is diagnostic: it settles what ran, what
+each run returned, and how much memory it used; no row in it is a calibrated
+measurement, and nothing here is a ranking. s3-fast-list `1.1.0` (the
+anonymous-access fork build) ran in the release in adapter modes `list`,
+`list-hinted` and `list-hinted-fixture`.
+
+| fixture | attempts | outcomes | timing grades of completed rows | row cited in the report |
+| --- | ---: | --- | --- | --- |
+| FourCast 4.08M | 32 | SUCCEEDED 30, FAILED 2 | INSUFFICIENT_EVIDENCE 19, NOT_APPLICABLE 7, TIMING_VALID 4 | none cited |
+| NARA 13.5M | 6 | SUCCEEDED 6 | TIMING_VALID 3, PRESSURE_DEGRADED 3 | none cited |
+| NBM 66.4M | 3 | SUCCEEDED 1, FAILED 2 | PRESSURE_DEGRADED 1 | `s3-fast-list.246cf7252988.s1` |
+
+`list` and `list-hinted` ran on the 4.08M and 13.5M fixtures; only
+`list-hinted-fixture` ran on the 66.4M fixture.
+
+Largest fixture attempted: 66.4M. Memory is the reason no larger one was
+scheduled. One of the three attempts on that fixture failed with subject
+exit -9 under an 8 GiB limit; that the memory limit killed it is a diagnosis
+from the runner log, not a release field. A second failed at 16 GiB with exit
+0 and no recorded reason. The one that completed, at 16 GiB, peaked at
+11,347,320 KiB (`s3-fast-list.246cf7252988.s1`). Not carried further (study
+decision).
+
+Setup asymmetry named in the report: the 66.4M arm was fed keyspace
+cut-points generated from the fixture (`list-hinted-fixture`). The
+`list-hinted` arms on the smaller fixtures took their cut-points from a
+chained prior `list` attempt through the adapter's inline split step; that the
+inline step runs the upstream `ks-tool split` is an adapter declaration, not a
+release field.
+
+On timing grades: what `TIMING_VALID` / `PRESSURE_DEGRADED` /
+`CAPACITY_FAILED` / `INSUFFICIENT_EVIDENCE` / `NOT_APPLICABLE` mean is on
+[`docs/instrument.md`](../../docs/instrument.md); a grade describes the replay
+instrument, not whether the tool succeeded.
+
+Report: [`results/2026-09-scale-diagnostics/REPORT.md`](../../results/2026-09-scale-diagnostics/REPORT.md).
+Findings page: [`RESULTS.md`](../../RESULTS.md). Rows:
+[`results/2026-09-scale-diagnostics/attempts.jsonl`](../../results/2026-09-scale-diagnostics/attempts.jsonl).
+
+The rows are an allowlisted public projection of the campaign ledger; the
+original result files and logs are private. The receipts under `receipts/` in
+this directory are groundwork evidence and do not cover the release rows.
+
 ## At a glance
+
+Groundwork subject: the pinned build, smoke runs and source study from August
+2026. The current release's rows are in the section above.
 
 | Question | Current answer |
 | --- | --- |
 | Tested subject | An anonymous-access fork: upstream `b11e385` + the 51-line `--no-sign-request` patch, built at checkout `6c72f59` (version `1.1.0`) and run anonymously. Full canonical identity is in [`data/tool.json`](data/tool.json). |
-| Exercised coverage | Plain serial `list` only. The hinted path, `diff`, and both `ks-tool` modes were not exercised. |
+| Exercised coverage | During groundwork: plain serial `list` only. The hinted path was not exercised during groundwork; the release ran `list`, `list-hinted` and `list-hinted-fixture` on fixtures to 66.4M objects (section above). `diff` and both `ks-tool` modes as standalone attempts were not exercised during groundwork or in the release. |
 | Correctness | The standard verifier was blocked because the harness capture was not binary-safe. A limited direct-capture diff matched the manifest on all four smoke scopes (148,917 keys for the full bucket); canonical claim `limited-direct-capture-manifest-match` records this as an observation, not a certified verdict. See [`Running details`](docs/running.md#the-harness-capture-incompatibility-and-the-direct-capture-procedure). |
 | Smoke observation | A receipted harness run of the full bucket exited 0 in 20.06 s with a 65.1 MB main-process peak RSS. These are facts of single groundwork runs, not benchmark results, and are not execution-bound to the direct-capture comparison above. |
-| Results | No benchmark or comparative result exists. Smoke timing and memory values describe individual groundwork runs only. |
+| Results | No calibrated benchmark or comparative result exists in this study. The current release's rows for this tool (section above) are diagnostic; smoke timing and memory values in this table describe single groundwork runs. |
 
 ## How it works
 
@@ -37,11 +85,11 @@ this study's actual coverage are shown in separate columns.
 
 | Mode | Upstream purpose | What this study exercised |
 | --- | --- | --- |
-| Plain `list` | Recursively list one bucket through ListObjectsV2 and write object metadata to Parquet plus a key-distribution CSV. | Built and smoked anonymously against one public bucket in a full scope and three prefixes. Source and run facts are recorded, but the standard correctness verifier was blocked. |
-| Hinted `list -k` | Convert supplied keyspace cut points into multiple concurrently listed ranges. Hints may be hand-written or prepared from earlier key-distribution data. | The current capsule has a preparation-backed real-S3 mode and a replay-only fixture-companion mode. The latter removes the serial bootstrap from repeated replay cells; it has no committed receipt yet. |
-| `diff` | List two buckets and emit differing object records. | Not run; groundwork had no second bucket configured for this mode. |
-| `ks-tool split` | Turn a key-distribution file into hints for a chosen segment count. | Its split loop is now source-audited for the standalone fixture utility, but the upstream binary still has no committed run receipt. |
-| `ks-tool inventory` | Prepare keyspace information from S3 Inventory input. | The subcommand's existence is source-supported, but its internals were not independently audited and it was not run. |
+| Plain `list` | Recursively list one bucket through ListObjectsV2 and write object metadata to Parquet plus a key-distribution CSV. | Built and smoked anonymously against one public bucket in a full scope and three prefixes. Source and run facts are recorded, but the standard correctness verifier was blocked. **Release:** ran in `2026-09-scale-diagnostics` as adapter mode `list` (fixtures to 13.5M objects; section above). |
+| Hinted `list -k` | Convert supplied keyspace cut points into multiple concurrently listed ranges. Hints may be hand-written or prepared from earlier key-distribution data. | The current capsule has a preparation-backed real-S3 mode and a replay-only fixture-companion mode. The latter removes the serial bootstrap from repeated replay cells; it has no groundwork receipt; release rows exist (section above). **Release:** ran in `2026-09-scale-diagnostics` as adapter mode `list-hinted` (fixtures to 13.5M objects) and as adapter mode `list-hinted-fixture` (the 66.4M fixture; section above). |
+| `diff` | List two buckets and emit differing object records. | Not run during groundwork or in the release; groundwork had no second bucket configured for this mode. |
+| `ks-tool split` | Turn a key-distribution file into hints for a chosen segment count. | Its split loop is now source-audited for the standalone fixture utility, but the upstream binary has no committed groundwork receipt and no standalone release row; the release's `list-hinted` attempts consumed cut-points from the adapter's inline split step (section above). |
+| `ks-tool inventory` | Prepare keyspace information from S3 Inventory input. | The subcommand's existence is source-supported, but its internals were not independently audited and it was not run during groundwork or in the release. |
 
 The upstream project also exposes concurrency, Tokio worker-count, endpoint,
 and constrained Rhai-filter controls. Their presence does not mean the study
@@ -72,10 +120,14 @@ resolve in [`data/claims.json`](data/claims.json).
   exclusive and the upper-bound check runs before insertion, so source review
   indicates a key equal to a cut point can fall between adjacent open ranges.
   This contradicts the inherited correctness-regardless-of-balance claim and is a
-  source-derived risk, not run-confirmed behavior; the hinted path has not been
-  exercised.
+  source-derived risk, not run-confirmed behavior; the hinted path was not
+  exercised during groundwork.
   [`Boundary semantics`](docs/mechanism.md#boundary-semantics)
   · `hint-boundary-key-can-be-omitted`
+  **Release update:** the hinted 66.4M row returned a count that matched the
+  fixture (`s3-fast-list.246cf7252988.s1`); the fixture generator refuses a
+  cut-point equal to an object key (adapter source, not a release field), so
+  that row does not test the boundary case.
 
 - **A fatal range error can still exit zero with partial output.** The reviewed
   fatal-error path completes the range normally enough for accumulated data to be
@@ -84,6 +136,9 @@ resolve in [`data/claims.json`](data/claims.json).
   injection, not something observed during smoke.
   [`Error handling`](docs/mechanism.md#error-handling)
   · `fatal-slice-error-can-exit-zero`
+  **Release update:** one 66.4M attempt at 16 GiB failed with subject exit 0
+  and no recorded reason (`s3-fast-list.540930a67436.s1`); the release rows
+  do not say whether this path was the cause.
 
 - **Every object is held in memory until one Parquet dump at the end.** The
   implementation holds object records in a two-level map before writing Parquet,
@@ -92,15 +147,21 @@ resolve in [`data/claims.json`](data/claims.json).
   so that scaling stays unverified.
   [`Memory model`](docs/mechanism.md#memory-model--accumulate-then-dump)
   · `listing-accumulates-before-dump`, `memory-grows-with-bucket-size`
+  **Release update:** the completed 66.4M row peaked at 11,347,320 KiB
+  (`s3-fast-list.246cf7252988.s1`). One attempt on the same fixture ended with
+  subject exit -9 under an 8 GiB limit (`s3-fast-list.500509011e5c.s1`); that
+  the limit killed it is a diagnosis from the runner log, not a release field.
 
 ## Limitations and open questions
 
 ### Coverage gaps
 
 - Exercise hinted `list -k` with a mounted hints file, including a real object
-  whose key exactly equals a cut point.
+  whose key equals a cut point. The release ran hinted arms (section above)
+  but none with a key on a cut point.
 - Exercise `diff`, `ks-tool split`, `ks-tool inventory`, filters, and custom
-  endpoint behavior with inputs appropriate to each mode.
+  endpoint behavior with inputs appropriate to each mode; none ran as a
+  standalone attempt during groundwork or in the release.
 - Confirm the eventual upstream benchmark subject and common architecture; only
   an arm64 fork image was built and run during groundwork.
 
@@ -125,12 +186,16 @@ resolve in [`data/claims.json`](data/claims.json).
 - What is the end-to-end cost of preparing hints before a first parallel list?
 - How does peak memory grow with object count and metadata shape, and where does
   it fail under a fixed memory limit?
+  **Release update:** the release rows give peak RSS per fixture up to 66.4M
+  (section above and the report's RSS chart); one attempt at 8 GiB ended with
+  exit -9 (`s3-fast-list.500509011e5c.s1`). The rows are single runs and do
+  not establish a curve.
 - How do throttling, retries, cancellation, and output finalization behave under
   controlled interruption and fault injection?
 
 ### Tool risks to test
 
-- Reproduce or falsify key omission at an exact hint boundary.
+- Reproduce or falsify key omission at a hint boundary.
 - Reproduce or falsify partial output with exit zero after a fatal range error.
 - Test unusual ETags and service errors against the source-located panic and
   error-classification paths.
@@ -161,4 +226,5 @@ not a run record. See [`research/tool-page.md`](research/tool-page.md) and
 
 Source and documentation explain mechanisms and risks; only a committed receipt
 confirms run-dependent study behavior. Smoke observations are not benchmark
-results.
+results. Rows in `results/` are the public projection of the campaign ledger,
+separate from the receipts here; neither is a benchmark result.

@@ -42,8 +42,8 @@ Published results live outside `docs/`, in the release directories under
 index.
 
 The current release is `2026-09-scale-diagnostics`, and its written companion —
-what ran, where each subject stopped and why, the instrument and its known
-defect, and what the study does not establish — is
+what ran, the largest fixture each subject was taken to and why, the
+instrument and its known defect, and what the study does not establish — is
 [`../results/2026-09-scale-diagnostics/REPORT.md`](../results/2026-09-scale-diagnostics/REPORT.md).
 It is a **diagnostic** release: no attempt in it carries
 `purpose = measurement`, so nothing in it is a calibrated benchmark or a

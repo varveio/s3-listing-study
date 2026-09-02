@@ -34,11 +34,14 @@ charts:
     series_label: "{tool.name} {tool.mode} c{tool.concurrency}"
     bar_label: "[{classification.replay_timing}]"
     caption: >-
-      diagnostic; Swath rows are CAPACITY_FAILED on structure probes, which only slows Swath
+      diagnostic; the Swath row is CAPACITY_FAILED (the instrument overran its structure-probe
+      budget, which slows Swath) and a 0.2.5-SNAPSHOT build; the model's other skews are not
+      measured, so no cross-tool ratio is established; output contracts differ per tool
     csv_columns:
       - attempt_id
       - group_id
       - tool.name
+      - tool.version
       - tool.mode
       - tool.concurrency
       - classification.purpose
@@ -62,14 +65,21 @@ charts:
           - noaa-nws-fourcastnetgfs-pds/current-eba31d9
           - noaa-nws-fourcastnetgfs-pds/1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4
       pick: all
-    x: fixture.object_count
+    # The x position is the staged fixture count where one exists (NBM) and,
+    # where none was staged, the largest row count a successful run returned
+    # off that fixture. The second is subject output, not fixture truth; it
+    # positions a point on an axis and is never a count-match judgement. The
+    # CSV carries both fields so a reader can see which applies to each row.
+    x:
+      - fixture.object_count
+      - fixture.observed_row_counts.max
     y: outcome.max_rss_kb
-    x_label: fixture objects
+    x_label: fixture objects (staged count; where none was staged, the largest row count a run returned)
     y_label: peak RSS (KiB)
     caption: >-
-      diagnostic; a cross marks an attempt with no accepted result — on the 66.4M-object NBM
-      fixture s3-fast-list was killed at the container memory limit. Fixture object counts
-      without a staged bundle summary are observed row counts; see fixtures.json.
+      diagnostic, rows from several campaigns and modes, not one series; a cross marks an
+      attempt with no accepted result — on NBM one s3-fast-list attempt was killed at 8 GiB and
+      one failed at 16 GiB with exit 0. Only NBM has a staged fixture count; see fixtures.json.
     csv_columns:
       - attempt_id
       - group_id
@@ -78,6 +88,7 @@ charts:
       - tool.concurrency
       - fixture.id
       - fixture.object_count
+      - fixture.observed_row_counts.max
       - state.provider
       - outcome.subject_exit_code
       - outcome.row_count
@@ -93,8 +104,8 @@ charts:
     # judgement and belongs in a reviewable file. The rule applied here, once,
     # to every tool: the 8-vCPU / 8-GiB arm of `fc-cpu-corrected-20260828`,
     # the one group in which all ten subjects ran the same fixture at the same
-    # declared allocation, and in which every one of these rows returned the
-    # fixture's exact 4,081,170 objects. Ordered by wall clock so the figure
+    # declared allocation, and in which every one of these rows returned a
+    # count matching the fixture's 4,081,170 objects. Ordered by wall clock so the figure
     # reads as a spread, not a ranking: the arms are not equivalent
     # configurations of a common tool, and three of them expose no listing
     # concurrency knob at all.
@@ -120,8 +131,9 @@ charts:
     series_label: "{tool.name} {tool.mode}"
     bar_label: "[{classification.replay_timing}]"
     caption: >-
-      diagnostic; one 8-vCPU/8-GiB arm per tool, one group, exact counts; s3-fast-list is
-      hint-fed and Swath is instrument-penalized
+      diagnostic, not a ranking; one 8-vCPU/8-GiB arm per tool, one group, every count matched
+      the fixture; only five rows are TIMING_VALID; s3-fast-list is hint-fed, Swath is a
+      pre-release build and instrument-penalized; output contracts differ per tool
     csv_columns:
       - attempt_id
       - group_id

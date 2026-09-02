@@ -9,7 +9,8 @@ those statements, a lot of them were hard to find. Some of the notes were ours,
 and we had not properly checked them either.
 
 So we started testing. This repo is where we install each tool, read how it
-works, run it against real buckets, and write down what we see.
+works, run it against real buckets and staged copies of them, and write down
+what we see.
 
 This is not a leaderboard. These tools were built for different jobs, and we
 are not crowning an overall winner. We are part of the story: Varve builds
@@ -17,6 +18,11 @@ Swath, maintains this repo, and decides what gets merged, and our earlier tool
 research informed Swath's design. When we report an observation from a run, we
 tie it to a specific version, setup, bucket, and machine, with a link to that
 run.
+
+> **Current release: `2026-09-scale-diagnostics`.** 270 settled attempts, ten
+> tools, replay fixtures to 143M objects, plus single-run Swath observations on
+> live S3 to 1.07B rows. Diagnostic only: not a benchmark and not a ranking.
+> [Read what we found](RESULTS.md).
 
 ## Why this exists
 
@@ -40,12 +46,15 @@ longer.
 ## Status
 
 **A first release of results is published.** The short version is
-[**What we found**](RESULTS.md): ten tools screened from 4.08 million objects
-to 143 million, where each one stopped and why, and one tool's billion-object
-run on live S3. `RESULTS.md` says what it does and does not mean, and the
-release's own
-[report](results/2026-09-scale-diagnostics/REPORT.md) holds every number and
-attempt id.
+[**What we found**](RESULTS.md): eleven tools researched, ten run against
+replay fixtures from 4.08 million objects to 143 million, the largest fixture
+each was taken to and why, and one tool's billion-object run on live S3.
+`RESULTS.md` says what it does and does not mean, and the release's own
+[report](results/2026-09-scale-diagnostics/REPORT.md) holds the numbers and
+attempt ids behind it. The release rows are an allowlisted public projection of a
+private campaign ledger; the release combines several campaigns run while the
+harness and the tools were evolving, with every attempt pinned to its exact
+identities.
 
 Groundwork remains what it was: every subject has a pinned build or source
 checkout, a source-anchored mechanism report, claim-by-claim reconciliation,
@@ -73,9 +82,11 @@ For each tool in scope:
    and interrupt it mid-run. Record what happens, including whether output is
    complete and whether the exit status describes the result accurately.
 5. **Publish the run record.** Record the exact invocation, tool version,
-   declared machine type/resources,
-   bucket identity, exit code, captured output or content-addressed artifact,
-   and verifier result.
+   declared machine type/resources, bucket identity, exit code, row count,
+   wall clock and peak memory, and a digest of the captured output. The
+   output itself, the logs and the ledger stay private; a release publishes
+   an allowlisted projection of the record, and no release row yet carries a
+   verifier verdict.
 
 ## How we work
 
@@ -109,9 +120,11 @@ interested in the space, not a sales comparison.
 - **Swath results are published on the same terms whether or not they favor it.**
   Readers should be able to see where another approach works better or Swath
   does not suit the workload.
-- **Surprising or consequential observations include a reproducer.** The run
-  record carries the invocation, version, environment, bucket identity, exit
-  code, and captured output needed to check it.
+- **Surprising or consequential observations name their run.** The public
+  row carries the invocation, version, image digests, bucket or fixture
+  identity, exit code and outcome needed to audit it. The fixture bytes and
+  the original evidence are not published, so a release is auditable rather
+  than independently reproducible.
 - **Maintainer context is welcome.** If we run into something surprising, we'll
   usually check with the tool's maintainers before we write it up — the way we'd
   want someone to do for us. Reproducible problems are filed upstream where
@@ -148,15 +161,17 @@ notes to be wrong; finding and fixing those is part of the work.
 ## Screening and validation
 
 Replay comes first: every candidate sees the same captured listing, the same
-declared latency treatment, and the same controlled backend, so clearly
-slower candidates can be eliminated without many high-fan-out tools
-contending for one live bucket's key ranges. The replay server is part of the
+declared latency treatment, and the same controlled backend, so candidates
+can be screened without many high-fan-out tools contending for one live
+bucket's key ranges. Screening is a study decision about what to run next,
+not a finding that a candidate cannot complete a larger fixture. The replay server is part of the
 measuring instrument, its latency treatment is derived from the study's own
-tool and cross-checked against serial clients, and every attempt carries
-exact fixture and server identity. All of that is set out in
+tool and cross-checked against serial clients in internal controls recorded
+in working notes, and every attempt carries exact fixture and server
+identity. All of that is set out in
 [`docs/instrument.md`](docs/instrument.md).
 
-Real S3 is meant to validate the finalists afterwards, one subject at a time
+Real S3 is meant to validate the configurations carried furthest, one subject at a time
 on fresh VMs. That stage has not yet run: the current release's live-S3 rows
 are single observations of one tool.
 

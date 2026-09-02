@@ -1,4 +1,4 @@
-attempt_id,group_id,tool.name,tool.mode,tool.concurrency,classification.purpose,classification.capacity_status,classification.replay_timing,state.provider,outcome.row_count,outcome.wall_seconds,derived.wall_keys_per_second
-rclone.14e265d296a0.s1,nbm-capacity-20260828,rclone,recursive-walk,64,diagnostic,UNCALIBRATED,TIMING_VALID,SUCCEEDED,66405936,327.183359,202962.45
-s5cmd.962211b4b344.s1,nbm-s5-fix-20260829,s5cmd,fanout-fixture-with-dirs,64,diagnostic,UNCALIBRATED,TIMING_VALID,SUCCEEDED,66405936,352.246869,188521.011
-swath.1a8598593dbb.s1,nbm-capacity-20260828,swath,recursive-tsv-dataset,64,diagnostic,UNCALIBRATED,CAPACITY_FAILED,SUCCEEDED,66405936,123.435084,537982.669
+attempt_id,group_id,tool.name,tool.version,tool.mode,tool.concurrency,classification.purpose,classification.capacity_status,classification.replay_timing,state.provider,outcome.row_count,outcome.wall_seconds,derived.wall_keys_per_second
+rclone.14e265d296a0.s1,nbm-capacity-20260828,rclone,1.74.4,recursive-walk,64,diagnostic,UNCALIBRATED,TIMING_VALID,SUCCEEDED,66405936,327.183359,202962.45
+s5cmd.962211b4b344.s1,nbm-s5-fix-20260829,s5cmd,v2.3.0,fanout-fixture-with-dirs,64,diagnostic,UNCALIBRATED,TIMING_VALID,SUCCEEDED,66405936,352.246869,188521.011
+swath.1a8598593dbb.s1,nbm-capacity-20260828,swath,0.2.5-SNAPSHOT,recursive-tsv-dataset,64,diagnostic,UNCALIBRATED,CAPACITY_FAILED,SUCCEEDED,66405936,123.435084,537982.669

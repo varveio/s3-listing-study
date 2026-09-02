@@ -304,3 +304,64 @@ def test_a_withheld_workload_leaves_the_release_entirely(tmp_path: Path) -> None
     assert "licensed" not in json.dumps(release.manifest)
     withheld = [d for d in release.manifest["disclosures"] if d["id"] == "workloads-withheld"]
     assert withheld and withheld[0]["affects"] == "1 attempt(s) across 1 workload(s)"
+
+
+def test_an_unstaged_fixture_count_stays_null() -> None:
+    """Subject output is recorded as observed, never promoted to fixture truth."""
+
+    def row(count: int | None, state: str = "SUCCEEDED") -> dict:
+        return {
+            "fixture": {"id": "bucket/abc", "sha256": "0" * 64, "serving_mode": "sorted"},
+            "outcome": {"row_count": count},
+            "state": {"provider": state},
+            "target": {"bucket": "bucket", "region": "us-east-1"},
+        }
+
+    rows = [row(4081170), row(4081171), row(None), row(9, state="FAILED")]
+    catalog = public_export.build_fixtures(rows, fetch=lambda identifier: None)
+    record = catalog["bucket/abc"]
+    assert record["object_count"] is None
+    assert record["object_count_source"] is None
+    assert record["observed_row_counts"] == {
+        "min": 4081170,
+        "max": 4081171,
+        "distinct": [4081170, 4081171],
+    }
+    staged = public_export.build_fixtures(
+        rows, fetch=lambda identifier: {"fixture": {"distinct_keys": 4081170}}
+    )["bucket/abc"]
+    assert staged["object_count"] == 4081170
+    assert staged["object_count_source"] == "staged-bundle-summary"
+
+
+def test_the_validator_refuses_a_fixture_count_taken_from_a_subject() -> None:
+    fixtures = {"f1": {"object_count": 4081171, "object_count_source": "observed-row-count"}}
+    manifest = {"fixtures": [{"id": "f1", "object_count": 4081170}]}
+    problems = list(public_validate.check_fixtures(fixtures, manifest))
+    assert any("from subject output" in problem for problem in problems)
+    assert any("disagrees with fixtures.json" in problem for problem in problems)
+    staged = {"f1": {"object_count": 10, "object_count_source": "staged-bundle-summary"}}
+    assert (
+        list(
+            public_validate.check_fixtures(staged, {"fixtures": [{"id": "f1", "object_count": 10}]})
+        )
+        == []
+    )
+
+
+def test_the_release_spec_refuses_a_string_claim_ceiling(tmp_path: Path) -> None:
+    body = SPEC.replace(
+        "calibrated_replay_benchmark: false", 'calibrated_replay_benchmark: "false"'
+    )
+    with pytest.raises(public_export.ExportError, match="must be a YAML boolean"):
+        public_export.load_release_spec(spec_at(tmp_path, body))
+
+
+def test_spec_disclosures_reach_the_manifest(tmp_path: Path) -> None:
+    body = (
+        SPEC
+        + "disclosures:\n  - id: shared-host-disk\n    detail: one disk\n    affects: every row\n"
+    )
+    release = export(tmp_path, tmp_path / "out", body=body)
+    ids = [entry["id"] for entry in release.manifest["disclosures"]]
+    assert "shared-host-disk" in ids

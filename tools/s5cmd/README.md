@@ -4,20 +4,63 @@
 The study runs the upstream project unmodified — anonymous access uses s5cmd's own `--no-sign-request` flag, not a fork or patch.
 
 > **Study status (2026-09-scale-diagnostics).** This tool's standing in the current release:
-> Reached the 66.4M-object rung with an exact count in 352.2 s, but only with harness-supplied shards (`s5cmd.962211b4b344.s1`).
+> Completed the 66.4M-object fixture with a count that matched it, in 352.2 s, on shard lists the harness supplied (`s5cmd.962211b4b344.s1`); not carried further.
 > The release is diagnostic: no attempt in it carries `purpose = measurement`, so
 > nothing here is a calibrated benchmark or a ranking. Report and data:
 > [`results/2026-09-scale-diagnostics/REPORT.md`](../../results/2026-09-scale-diagnostics/REPORT.md).
 
+## In the current release
+
+The release `2026-09-scale-diagnostics` is diagnostic: it settles what ran, what
+each run returned, and how much memory it used; no row in it is a calibrated
+measurement, and nothing here is a ranking. s5cmd `v2.3.0` ran in the release
+in adapter modes `recursive`, `recursive-with-dirs`, `fanout-with-dirs` and
+`fanout-fixture-with-dirs`.
+
+| fixture | attempts | outcomes | timing grades of completed rows | row cited in the report |
+| --- | ---: | --- | --- | --- |
+| FourCast 4.08M | 10 | SUCCEEDED 9, CANCELLED 1 | TIMING_VALID 8, NOT_APPLICABLE 1 | none cited |
+| NARA 13.5M | 4 | SUCCEEDED 4 | TIMING_VALID 4 | none cited |
+| NBM 66.4M | 3 | SUCCEEDED 2, FAILED 1 | TIMING_VALID 2 | `s5cmd.962211b4b344.s1` |
+
+The single-process modes `recursive` and `recursive-with-dirs` ran on the
+4.08M fixture only; every row above that fixture is a `fanout-with-dirs` or
+`fanout-fixture-with-dirs` row.
+
+Largest fixture attempted: 66.4M. s5cmd has no listing fan-out of its own,
+so the comparable arms ran on shard lists the harness supplied. Not carried
+to 143M (study decision).
+
+Setup asymmetry named in the report: the 66.4M arm ran on shard lists the
+harness generated from the fixture (`s5cmd.962211b4b344.s1`). The
+`fanout-with-dirs` arms on the smaller fixtures took their shards from the
+campaign plan, as `--shard` values in the recorded argv.
+
+On timing grades: what `TIMING_VALID` / `PRESSURE_DEGRADED` /
+`CAPACITY_FAILED` / `INSUFFICIENT_EVIDENCE` / `NOT_APPLICABLE` mean is on
+[`docs/instrument.md`](../../docs/instrument.md); a grade describes the replay
+instrument, not whether the tool succeeded.
+
+Report: [`results/2026-09-scale-diagnostics/REPORT.md`](../../results/2026-09-scale-diagnostics/REPORT.md).
+Findings page: [`RESULTS.md`](../../RESULTS.md). Rows:
+[`results/2026-09-scale-diagnostics/attempts.jsonl`](../../results/2026-09-scale-diagnostics/attempts.jsonl).
+
+The rows are an allowlisted public projection of the campaign ledger; the
+original result files and logs are private. The receipts under `receipts/` in
+this directory are groundwork evidence and do not cover the release rows.
+
 ## At a glance
+
+Groundwork subject: the pinned build, smoke runs and source study from August
+2026. The current release's rows are in the section above.
 
 | Question | Current answer |
 | --- | --- |
 | Tested subject | Upstream s5cmd `v2.3.0` (commit `991c9fb`), run anonymously from upstream's own published image `peakcom/s5cmd:v2.3.0` pinned by digest. Full canonical identity is in [`data/tool.json`](data/tool.json). |
-| Exercised coverage | Every previously registered listing mode was smoked: recursive, delimiter, JSON, ListObjects v1, all-versions, full-path, and the hand-built per-prefix fan-out. The newer directory-preserving and integrated-fan-out modes have parser coverage but no campaign receipt. Transfers (`cp`/`sync`) are out of scope. |
-| Correctness | The verifier PASSed all ten smoke receipts with 0 duplicates/missing/extra in each; the full-bucket modes and the fan-out union each matched all 148,917 manifest keys, and the scoped runs matched their smaller scopes. A newer recursive normalizer that retains `DIR` rows has parser coverage but no run receipt yet. See [`docs/running.md`](docs/running.md). |
+| Exercised coverage | During groundwork: every previously registered listing mode was smoked: recursive, delimiter, JSON, ListObjects v1, all-versions, full-path, and the hand-built per-prefix fan-out. The directory-preserving and integrated-fan-out modes were not exercised during groundwork; the release ran `recursive-with-dirs`, `fanout-with-dirs` and `fanout-fixture-with-dirs` on fixtures to 66.4M objects (section above). Transfers (`cp`/`sync`) are out of scope. |
+| Correctness | The verifier PASSed all ten smoke receipts with 0 duplicates/missing/extra in each; the full-bucket modes and the fan-out union each matched all 148,917 manifest keys, and the scoped runs matched their smaller scopes. The recursive normalizer that retains `DIR` rows has parser coverage and no groundwork receipt; release rows exist (section above), and counts there are cardinality agreement, not a verifier verdict. See [`docs/running.md`](docs/running.md). |
 | Smoke observation | A receipted recursive full-bucket run listed 148,917 keys and exited 0 in 16.96 s at a 40.3 MB peak RSS. This is a single groundwork run, not a benchmark result. |
-| Results | No benchmark or comparative result exists. Smoke timing and memory values describe individual groundwork runs only. |
+| Results | No calibrated benchmark or comparative result exists in this study. The current release's rows for this tool (section above) are diagnostic; smoke timing and memory values in this table describe single groundwork runs. |
 
 ## How it works
 
@@ -38,12 +81,12 @@ coverage are shown in separate columns.
 
 | Mode | Upstream purpose | What this study exercised |
 | --- | --- | --- |
-| `ls` (recursive / delimiter / full-path) | List a bucket or prefix through ListObjectsV2, recursively or one level deep, as text or absolute paths. | Smoked anonymously against one public bucket; every scope PASSed the verifier. |
-| Recursive `ls` retaining `DIR` rows | Preserve trailing-slash objects that s5cmd classifies as directories during an undelimited listing. | Capsule and parser fixture added after a scale diagnostic; not yet receipt-backed. |
-| `ls --json` | Emit one JSON object per key. | Smoked; same key set as recursive, output-only difference. |
-| `ls --use-list-objects-v1` / `ls --all-versions` | List through the legacy ListObjects v1 API or ListObjectVersions. | Both smoked and PASSed; all-versions validates the request/output contract only, on a non-versioned bucket. |
-| `run <file>` + `--numworkers` | Execute a batch of commands in parallel through the worker pool. | The smoke-era hand-built union was complete. The current `fanout-with-dirs` capsule drives the same mechanism in one measured process, but has no campaign receipt yet. |
-| `cp` / `sync` (transfer) | Parallel object transfer — the tool's headline feature. | Not run: out of listing scope and mutating. |
+| `ls` (recursive / delimiter / full-path) | List a bucket or prefix through ListObjectsV2, recursively or one level deep, as text or absolute paths. | Smoked anonymously against one public bucket; every scope PASSed the verifier. **Release:** ran in `2026-09-scale-diagnostics` as adapter mode `recursive` (the 4.08M fixture only; section above). Delimiter and full-path did not run in the release. |
+| Recursive `ls` retaining `DIR` rows | Preserve trailing-slash objects that s5cmd classifies as directories during an undelimited listing. | Capsule and parser fixture added after a scale diagnostic; no groundwork receipt; release rows exist (section above). **Release:** ran in `2026-09-scale-diagnostics` as adapter mode `recursive-with-dirs` (the 4.08M fixture only; section above). |
+| `ls --json` | Emit one JSON object per key. | Smoked during groundwork; same key set as recursive, output-only difference. Not run in the release. |
+| `ls --use-list-objects-v1` / `ls --all-versions` | List through the legacy ListObjects v1 API or ListObjectVersions. | Both smoked and PASSed during groundwork; all-versions validates the request/output contract only, on a non-versioned bucket. Neither ran in the release. |
+| `run <file>` + `--numworkers` | Execute a batch of commands in parallel through the worker pool. | The smoke-era hand-built union was complete. The current `fanout-with-dirs` capsule drives the same mechanism in one measured process; no groundwork receipt; release rows exist (section above). **Release:** ran in `2026-09-scale-diagnostics` as adapter mode `fanout-with-dirs` (fixtures to 66.4M objects) and as adapter mode `fanout-fixture-with-dirs` (the 66.4M fixture, shards from the fixture bundle; section above). |
+| `cp` / `sync` (transfer) | Parallel object transfer — the tool's headline feature. | Not run during groundwork or in the release: out of listing scope and mutating. |
 
 Detailed mode and source coverage is in
 [`docs/mechanism.md`](docs/mechanism.md), while build and smoke coverage is in
@@ -60,6 +103,9 @@ resolve in [`data/claims.json`](data/claims.json).
   receipt-settled.
   [`Listing is one serial, paginated stream`](docs/mechanism.md#listing-is-one-serial-paginated-stream)
   · `ls-is-one-serial-list-chain`, `serial-listing-at-scale-unverified`
+  **Release update:** the single-process `recursive` arm ran only on the
+  4.08M fixture in the release (section above); no release row shows a lone
+  `ls` above that fixture.
 
 - **All parallelism is transfer-side — except the `run` fan-out.** `--numworkers`
   does nothing for a lone `ls`, but `s5cmd run` dispatches its `ls` lines through
@@ -72,6 +118,10 @@ resolve in [`data/claims.json`](data/claims.json).
   duplicates; its speed against a native parallel lister is unmeasured.
   [`The run/--numworkers fan-out dispatch`](docs/mechanism.md#the-run--numworkers-fan-out-dispatch)
   · `fanout-completeness-verified`, `fanout-speed-vs-native-unverified`
+  **Release update:** the fan-out on harness-supplied shards returned a count
+  that matched the 66.4M fixture (`s5cmd.962211b4b344.s1`); that is
+  cardinality agreement, not key-by-key verification, and the release makes no
+  cross-tool comparison.
 
 - **The 1,000-key page size is S3's ceiling, not an s5cmd deficit.** s5cmd never
   sets `MaxKeys`, so S3 returns its own 1,000-key maximum; no real-S3 client can
@@ -97,21 +147,29 @@ resolve in [`data/claims.json`](data/claims.json).
   bucket.
 - Transfer commands (`cp`/`sync`) and their memory reports are out of listing
   scope and were not run.
-- The directory-preserving recursive mode has no committed run yet. Its
-  delimiter-free request cannot produce CommonPrefixes, but exact verification
-  still decides whether its retained `DIR` rows reconstruct the fixture.
-- The integrated `fanout-with-dirs` mode also has no committed campaign run.
-  Its plan must state disjoint, complete first-character shards or explicit
-  safe prefixes; the adapter refuses duplicates, while fixture analysis and
-  exact verification remain responsible for proving that the union is complete.
+- The directory-preserving recursive mode has no groundwork receipt; release
+  rows exist (section above). Its delimiter-free request cannot produce
+  CommonPrefixes, but a key-by-key verification, which the release does not
+  perform, still decides whether its retained `DIR` rows reconstruct the
+  fixture.
+- The integrated `fanout-with-dirs` mode has no groundwork receipt; release
+  rows exist (section above). Its plan must state disjoint, complete
+  first-character shards or explicit safe prefixes; the adapter refuses
+  duplicates, while fixture analysis and key-by-key verification remain
+  responsible for proving that the union is complete.
 
 ### Benchmark questions
 
 - Serial listing at 10^6–10^8 keys, quantified against parallel-capable tools.
+  **Release update:** the lone-`ls` arm ran only at 4.08M in the release
+  (section above), and the release makes no cross-tool comparison.
 - v1 vs v2 vs ListObjectVersions cost — smoke saw roughly 17 s / 70 s / 87 s on
   the same bucket, single-run observations only.
 - Fan-out throughput sweeping `--numworkers` and shard granularity.
 - `--retry-count` behavior under throttling, and memory at scale.
+  **Release update:** the 66.4M fan-out row peaked at 1,380,592 KiB
+  (`s5cmd.962211b4b344.s1`); the release rows carry peak RSS per attempt
+  (section above) and do not establish a curve.
 
 ### Inherited reports not settled here
 
@@ -147,4 +205,6 @@ that name s5cmd alongside other tools live in `docs/open-questions.md`.
 Source and documentation explain mechanisms and correct the inherited framing;
 only a committed receipt confirms run-dependent study behavior, and an `[OBS]`
 capability probe supports without confirming. Smoke observations are facts about
-single groundwork runs, not benchmark or comparative results.
+single groundwork runs, not benchmark or comparative results. Rows in `results/`
+are the public projection of the campaign ledger, separate from the receipts
+here; neither is a benchmark result.

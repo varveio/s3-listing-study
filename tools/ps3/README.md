@@ -4,19 +4,40 @@
 It is an unmaintained single-author project that cuts no releases or tags and is licensed GPL-3.0; this study reviewed and ran the upstream project itself at pinned default-branch HEAD `9428492`, not a fork.
 
 > **Study status (2026-09-scale-diagnostics).** This tool's standing in the current release:
-> Completed the 4.08M-object rung with an exact count in 369.3 s (`ps3.55c79d26bce0.s1`); the wider fairness arm reached the 1,800 s cap without a count.
+> Completed the 4.08M-object fixture with a count that matched it, in 369.3 s (`ps3.55c79d26bce0.s1`); the wider arm reached the 1,800 s cap without a count.
 > The release is diagnostic: no attempt in it carries `purpose = measurement`, so
 > nothing here is a calibrated benchmark or a ranking. Report and data:
 > [`results/2026-09-scale-diagnostics/REPORT.md`](../../results/2026-09-scale-diagnostics/REPORT.md).
 
+## In the current release
+
+The release `2026-09-scale-diagnostics` is diagnostic: it settles what ran, what each run returned, and how much memory it used; no row in it is a calibrated measurement, and nothing here is a ranking.
+In the release pS3 ran as version 0.1.16 in one adapter mode, `list` (upstream `list-objects-v2`), at its fixed width of 256, under a scoped list-only credential. No fixture count was staged for FourCast in this release; "count matched" on this page means the capture report's 4,081,170 from the study's working notes, not a release field.
+
+| fixture | attempts | outcomes | timing grades of completed rows | row cited in the report |
+| --- | ---: | --- | --- | --- |
+| FourCast 4.08M | 12 | FAILED 1, SUCCEEDED 11 | `NOT_APPLICABLE` 3, `PRESSURE_DEGRADED` 1, `CAPACITY_FAILED` 4, `TIMING_VALID` 3 | `ps3.55c79d26bce0.s1` (dispositions); `ps3.31a9e4da68b2.s1` (largest fixture attempted, the wide arm) |
+
+Largest fixture attempted: FourCast 4.08M. No larger one was scheduled because of request amplification: the wide arm issued 469,241 replay requests for a 4,082-page fixture (`replay.requests` in the row). That arm, at `--prefix-count 5000`, reached the 1,800 s cap without a count (`ps3.31a9e4da68b2.s1`). It also ran against a replay server capped at 512 concurrent requests and graded `PRESSURE_DEGRADED`, so its wall is not clean; "not carried further" is a study decision, not a measured limit of the tool.
+
+Where the setup was not equal: the replay concurrency cap on pS3's wide arm was 512 concurrent requests, against 4,096 for its completing arm (`ps3.31a9e4da68b2.s1`, `ps3.55c79d26bce0.s1`).
+
+A timing grade (`TIMING_VALID`, `PRESSURE_DEGRADED`, `CAPACITY_FAILED`, `INSUFFICIENT_EVIDENCE`, `NOT_APPLICABLE`) describes how well the replay instrument delivered its declared latency treatment on that row, not whether the tool succeeded; the definitions are in [`docs/instrument.md`](../../docs/instrument.md#how-a-release-grades-the-delivered-treatment).
+
+Report: [`results/2026-09-scale-diagnostics/REPORT.md`](../../results/2026-09-scale-diagnostics/REPORT.md); findings page: [`RESULTS.md`](../../RESULTS.md); rows: [`results/2026-09-scale-diagnostics/attempts.jsonl`](../../results/2026-09-scale-diagnostics/attempts.jsonl).
+
+The rows are an allowlisted public projection of the campaign ledger; the original result files and logs are private. The receipts under `receipts/` in this directory are groundwork evidence and do not cover the release rows.
+
 ## At a glance
+
+Groundwork subject: the pinned build, smoke runs and source study from August 2026. The current release's rows are in the section above.
 
 | Question | Current answer |
 | --- | --- |
 | Tested subject | pS3 v0.1.16 at pinned upstream HEAD `9428492` (no fork). The source does not compile, so the study runs upstream's committed prebuilt amd64 binary `pS3.0-1-16` inside a study container, under qemu emulation on an arm64 runner. Full canonical identity is in [`data/tool.json`](data/tool.json). |
-| Exercised coverage | No listing was produced. Only capability and build probes ran: `--version`/`--help`, one anonymous `list-objects-v2` attempt, and a native source-compile attempt. `list-object-versions` and `head-objects` were not run. |
-| Correctness / verifier | Blocked. pS3 has no unsigned request path, so under `CREDS=none` every listing mode is blocked and the verifier had no output to check. |
-| Results | No benchmark or comparative result exists. |
+| Exercised coverage | During groundwork: no listing was produced. Only capability and build probes ran: `--version`/`--help`, one anonymous `list-objects-v2` attempt, and a native source-compile attempt. `list-object-versions` and `head-objects` were not exercised during groundwork or in the release. Scale behaviour was not exercised during groundwork; the release ran `list` on fixtures to 4.08M objects (section above). |
+| Correctness / verifier | Blocked during groundwork. pS3 has no unsigned request path, so under `CREDS=none` every listing mode is blocked and the verifier had no output to check. In the release the cited row's count matched the fixture (section above); that is cardinality agreement, not key-by-key verification. |
+| Results | No calibrated benchmark or comparative result exists in this study. The current release's rows for this tool (section above) are diagnostic; smoke timing and memory values in this table describe single groundwork runs. |
 | Smoke observation | The one anonymous `list-objects-v2` attempt exited 1 with no listing; separately, an unpromoted observation recorded a bare no-credentials environment returning exit 0 with empty output. These are single-run groundwork facts, not benchmark results — both are claimed and cited under [What we learned](#what-we-learned). |
 
 ## How it works
@@ -39,7 +60,7 @@ since run under a scoped list-only credential.
 
 | Mode | Upstream purpose | What this study exercised |
 | --- | --- | --- |
-| `list-objects-v2` | Brute-force prefix fan-out over ListObjectsV2, recursive, full bucket only. | One anonymous attempt, exit 1, no listing; source read. |
+| `list-objects-v2` | Brute-force prefix fan-out over ListObjectsV2, recursive, full bucket only. | One anonymous attempt, exit 1, no listing; source read. No groundwork receipt for a listing; release rows exist (section above). **Release:** ran in `2026-09-scale-diagnostics` as adapter mode `list` (fixtures to 4.08M objects; section above). |
 | `list-object-versions` | List object versions through the ListObjectVersions API. | Not run; blocked by the same auth wall. Command source is absent from the checkout. |
 | `head-objects` | List and HEAD every object (inferred from the name and a helper). | Not run; command source is absent from the checkout. |
 | `list-test` | Unmodified cobra scaffold; a development placeholder. | Not run. |
@@ -75,6 +96,7 @@ resolve in [`data/claims.json`](data/claims.json).
   pS3 cannot run inside the shared `CONCURRENCY_CAP` of 8.
   [`Concurrency`](docs/mechanism.md#concurrency-a-256-pager-var-unbounded-discovery)
   · `discovery-goroutines-unbounded`, `no-concurrency-flag-uncappable`
+  **Release update:** the release rows ran at the fixed width of 256, recorded as `c256` (section above).
 
 - **The fixed 81-character alphabet silently drops out-of-alphabet keys.** Because
   discovery only extends prefixes with bytes from that set, any key whose next
@@ -87,8 +109,9 @@ resolve in [`data/claims.json`](data/claims.json).
 
 ### Coverage gaps
 
-- No listing ran; `list-object-versions` and `head-objects` were never exercised
-  and their command source is absent from the checkout.
+- During groundwork no listing ran (the release rows above did);
+  `list-object-versions` and `head-objects` were never exercised in either
+  layer, and their command source is absent from the checkout.
 - Out-of-alphabet key handling needs an edge fixture (`EDGE_BUCKET=none`,
   deferred) and credentials to demonstrate at runtime.
 
@@ -98,8 +121,10 @@ resolve in [`data/claims.json`](data/claims.json).
   shared verifier has nothing to check.
 - Listing concurrency is uncappable, so pS3 cannot run inside the shared
   `CONCURRENCY_CAP`; participation needs a solo window or a package-var patch.
+  **Release update:** the release ran it at its fixed width of 256 against the replay instrument (section above).
 - The tested binary is amd64-only and ran under qemu emulation; benchmark timing
   needs a natively common architecture.
+  **Release update:** the release rows ran on `n4-highcpu` machines (the `machine.type` field in the rows), not under emulation.
 
 ### Benchmark questions
 
@@ -108,8 +133,10 @@ resolve in [`data/claims.json`](data/claims.json).
   internally checkable because aws-cli and s5cmd are study subjects.
 - What is the discovery-LIST tax at scale on a sparse deep-shared-prefix keyspace,
   and how does `--prefix-count` trade discovery overhead against parallelism?
+  **Release update:** the `--prefix-count 5000` arm issued 469,241 replay requests for a 4,082-page fixture and reached the 1,800 s cap without a count (`ps3.31a9e4da68b2.s1`); that arm ran against a replay server capped at 512 concurrent requests, so its wall is not clean, and the trade-off is not established.
 - How do memory and throughput behave with the in-memory prefix list and 256
   workers at millions of keys?
+  **Release update:** peak RSS was 92,116 KiB on the 4.08M-object fixture in `ps3.55c79d26bce0.s1`; no larger fixture was attempted.
 
 ### Tool risks to test
 
@@ -148,4 +175,4 @@ Source and documentation explain mechanisms and risks; only a committed receipt
 confirms run-dependent behavior, and here that is limited to the anonymous
 exit-1 attempt, the version self-report, and the source-compile failure.
 Observations, including the bare-environment exit-0 note, are not receipts, and no
-benchmark result exists.
+benchmark result exists. Rows in `results/` are the public projection of the campaign ledger, separate from the receipts here; neither is a benchmark result.

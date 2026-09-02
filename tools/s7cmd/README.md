@@ -4,20 +4,73 @@
 It is not a fork: the study built and ran s7cmd unmodified from its own repository, and every listing-engine source anchor resolves in the s3ls-rs crate it depends on rather than in a reimplementation.
 
 > **Study status (2026-09-scale-diagnostics).** This tool's standing in the current release:
-> Exact at the 13.5M-object rung in 601.0 s (`s7cmd.bdba69aad415.s1`); returned no count at 66.4M and reached the 7,200 s cap at 143M.
+> Matched the 13.5M-object fixture's count in 601.0 s (`s7cmd.bdba69aad415.s1`); returned no count at 66.4M and reached the 7,200 s cap at 143M.
 > The release is diagnostic: no attempt in it carries `purpose = measurement`, so
 > nothing here is a calibrated benchmark or a ranking. Report and data:
 > [`results/2026-09-scale-diagnostics/REPORT.md`](../../results/2026-09-scale-diagnostics/REPORT.md).
 
+## In the current release
+
+The release `2026-09-scale-diagnostics` is diagnostic: it settles what ran,
+what each run returned, and how much memory it used; no row in it is a
+calibrated measurement, and nothing here is a ranking. s7cmd ran as version
+1.5.0 in three adapter modes, `recursive-one-nosort`, `recursive-tsv` and
+`recursive-tsv-nosort`, all of them upstream `ls -r`; the
+`--max-parallel-listings` of each arm is in its row.
+
+| fixture | attempts | outcomes | timing grades of completed rows | row cited in the report |
+| --- | ---: | --- | --- | --- |
+| FourCast 4.08M | 10 | SUCCEEDED 10 | CAPACITY_FAILED 5, PRESSURE_DEGRADED 3, NOT_APPLICABLE 2 | none cited |
+| NARA 13.5M | 8 | SUCCEEDED 8 | INSUFFICIENT_EVIDENCE 3, CAPACITY_FAILED 5 | `s7cmd.bdba69aad415.s1` |
+| real-changesets 13.9M (flat) | 1 | SUCCEEDED 1 | TIMING_VALID 1 | `s7cmd.97b265107a89.s1` |
+| NBM 66.4M | 4 | SUCCEEDED 4 | INSUFFICIENT_EVIDENCE 4 | none cited |
+| blockchain 143M | 1 | SUCCEEDED 1 | CAPACITY_FAILED 1 | `s7cmd.a9b999169187.s1` |
+
+"Outcomes" is the settled state of the attempt, and a settled row can carry
+no count: the four NBM rows have no `row_count` and a subject exit code of 1,
+and the 143M row has no `row_count` and a subject exit code of 124, the
+7,200 s cap. On the flat 13.9M fixture the cited row's count matched the
+staged fixture count. On the 13.5M fixture the cited row's count matched the
+capture report's count, which is in the study's working notes because no
+fixture count was staged there (the report's "Per-tool dispositions" labels it
+"= capture").
+
+Largest fixture attempted: 143M, with no count. The report's "largest fixture
+attempted" table gives the reason no larger one was scheduled: parallel prefix
+discovery, then serial pagination per leaf (from its source); on the skewed
+143M fixture it reached the 7,200 s cap with exit 124, and that one dominant
+leaf was still draining is a diagnosis from the runner log, not a release
+field.
+
+No row of the report's "Where the setup was not equal" table names s7cmd.
+
+What `TIMING_VALID`, `PRESSURE_DEGRADED`, `CAPACITY_FAILED`,
+`INSUFFICIENT_EVIDENCE` and `NOT_APPLICABLE` mean is on
+[`docs/instrument.md`](../../docs/instrument.md#how-a-release-grades-the-delivered-treatment);
+a grade describes how the replay instrument delivered its latency treatment
+during the run, not whether the tool succeeded.
+
+Report:
+[`results/2026-09-scale-diagnostics/REPORT.md`](../../results/2026-09-scale-diagnostics/REPORT.md).
+Findings: [`RESULTS.md`](../../RESULTS.md). Rows:
+[`results/2026-09-scale-diagnostics/attempts.jsonl`](../../results/2026-09-scale-diagnostics/attempts.jsonl).
+
+The rows are an allowlisted public projection of the campaign ledger; the
+original result files and logs are private. The receipts under `receipts/` in
+this directory are groundwork evidence and do not cover the release rows.
+
 ## At a glance
+
+Groundwork subject: the pinned build, smoke runs and source study from
+August 2026. The current release's rows are in the section above.
 
 | Question | Current answer |
 | --- | --- |
 | Tested subject | s7cmd v1.5.0 (commit `d589df7`), built from its own Dockerfile at the pinned SHA and run anonymously (arm64, native). The `ls` engine is the s3ls-rs crate v1.0.3 (commit `bf42067`). Full canonical identity is in [`data/tool.json`](data/tool.json). |
-| Exercised coverage | Twelve `ls` mode/scope runs (recursive TSV/aligned/JSON/one-line, `--no-sort`, `--all-versions`, `--max-depth`, and shallow), plus a `_build` capture and a bucket-list capability probe. |
-| Correctness | The verifier returned PASS on all twelve exercised runs against `noaa-normals-pds`; canonical claim `smoke-modes-all-pass`. Anonymous `ListBuckets` is blocked (307, exit 1), so that path is untested-for-that-reason, not skipped. See [`Running details`](docs/running.md#smoked-modes). |
+| Exercised coverage | During groundwork: twelve `ls` mode/scope runs (recursive TSV/aligned/JSON/one-line, `--no-sort`, `--all-versions`, `--max-depth`, and shallow), plus a `_build` capture and a bucket-list capability probe. Scale behaviour was not exercised during groundwork; the release ran `recursive-one-nosort`, `recursive-tsv` and `recursive-tsv-nosort` on fixtures to 143M objects (section above). |
+| Correctness | During groundwork, the verifier returned PASS on all twelve exercised runs against `noaa-normals-pds`; canonical claim `smoke-modes-all-pass`. The release rows check the row count against a staged fixture count where one exists, and against the capture report's count in the study's working notes where none was staged; never key by key (section above). Anonymous `ListBuckets` is blocked (307, exit 1), so that path is untested-for-that-reason, not skipped. See [`Running details`](docs/running.md#smoked-modes). |
 | Smoke observation | A single recursive full-bucket run recorded 204 counted page fetches and a 120.8 MB peak RSS at 148,917 keys. These are facts of one groundwork run each, not benchmark results; the page-fetch figure is a page-fetch count, not a wire-level request count. |
-| Results | No benchmark or comparative result exists. Smoke timing, memory, and page-fetch values describe individual groundwork runs only. |
+| Results | No calibrated benchmark or comparative result exists in this study. The current release's rows for this tool (section above) are diagnostic; smoke timing and memory values in this table describe single groundwork runs. |
 
 ## How it works
 
@@ -37,9 +90,9 @@ actual coverage are shown in separate columns. Only `ls` is in study scope.
 
 | Mode | Upstream purpose | What this study exercised |
 | --- | --- | --- |
-| `ls` object listing | List a bucket or prefix, recursively or at one delimiter level, in aligned / TSV / one-line / JSON form. | Twelve anonymous runs against one public bucket across a full scope and several prefixes; all PASSED the verifier. |
-| `ls --all-versions` | Switch the API to `ListObjectVersions`, adding `VersionId` and delete-marker rows. | Run once; passed only because the smoke bucket has single null-version objects, so genuine multi-version collapse was never exercised. |
-| `ls` with no target | Call `ListBuckets` to enumerate buckets. | Probed as a capability only; anonymous `ListBuckets` is blocked (307, exit 1). |
+| `ls` object listing | List a bucket or prefix, recursively or at one delimiter level, in aligned / TSV / one-line / JSON form. | Groundwork: twelve anonymous runs against one public bucket across a full scope and several prefixes; all PASSED the verifier. **Release:** ran in `2026-09-scale-diagnostics` as adapter modes `recursive-one-nosort`, `recursive-tsv` and `recursive-tsv-nosort`, all `ls -r` (fixtures to 143M objects; section above). |
+| `ls --all-versions` | Switch the API to `ListObjectVersions`, adding `VersionId` and delete-marker rows. | Groundwork: run once; passed only because the smoke bucket has single null-version objects, so genuine multi-version collapse was never exercised. Not run in the release: the adapter refuses this mode against the replay endpoint because it does not issue `ListObjectsV2` (from the adapter source). |
+| `ls` with no target | Call `ListBuckets` to enumerate buckets. | Groundwork: probed as a capability only; anonymous `ListBuckets` is blocked (307, exit 1). Not run in the release, for the same adapter reason as `--all-versions`. |
 | `cp` / `mv` / `rm` / `sync` / `clean` and bucket admin | The umbrella's other subcommands, composing three sibling crates. | Out of scope; not exercised. |
 
 Upstream also exposes concurrency, rate-limit, Express One Zone, and sort-threshold
@@ -69,6 +122,12 @@ resolve in [`data/claims.json`](data/claims.json).
   fan-out depth and then paginates each leaf sequentially; a flat keyspace
   discovers no sub-prefixes and collapses to one sequential pass — a source-
   established shape not measured at smoke.
+  **Release update:** on the flat 13.9M fixture, `s7cmd.97b265107a89.s1`
+  returned the fixture's object count. Its wall was 1,289.5 s. That the drain
+  was one serial pass there is read from the tool's source, not a release
+  field. On the skewed 143M fixture, `s7cmd.a9b999169187.s1` reached the
+  7,200 s cap with no count; that one dominant leaf was still draining is a
+  diagnosis from the runner log, not a release field.
   [`Parallel discovery and flat drain`](docs/mechanism.md#parallel-discovery-and-flat-drain)
   · `parallel-path-algorithm`, `flat-bucket-collapses-to-sequential`
 
@@ -102,6 +161,9 @@ resolve in [`data/claims.json`](data/claims.json).
   version-aware manifest; the current pass had `EDGE_BUCKET=none`.
 - Exercise a flat (non-hierarchical) keyspace, an Express One Zone bucket, and
   the rate-limit and sort-threshold controls.
+  **Release update:** the flat keyspace was run once, `s7cmd.97b265107a89.s1`
+  (section above); the Express One Zone, rate-limit and sort-threshold controls
+  were not exercised during groundwork or in the release.
 - Run `ls` with credentials so the `ListBuckets` path can be exercised rather
   than blocked.
 
@@ -124,8 +186,17 @@ resolve in [`data/claims.json`](data/claims.json).
 
 - How does listing throughput change with fan-out depth, concurrency, key
   distribution, and prefix shape, including the flat-keyspace collapse?
+  **Release update:** no comparative numbers exist; the scale rows are in the
+  release section above and are diagnostic. The 66.4M rows returned no count
+  (subject exit 1, all four arms), and the 143M row reached the 7,200 s cap
+  (`s7cmd.a9b999169187.s1`).
 - Where does the buffer-all sorted mode's peak memory grow relative to `--no-sort`,
   and what is the latency step at the 1,000,000-key sort threshold?
+  **Release update:** on the 4.08M fixture the sorted `recursive-tsv` row
+  `s7cmd.5941a76a7bbc.s1` peaked at 3,067,664 KiB. The `--no-sort` rows on the
+  same fixture peaked near 50,000 KiB; each row's `max_rss_kb` is in the release
+  rows (section above). Single diagnostic rows, not a measurement of the
+  sort threshold.
 - What is the true wire-level request count behind `api_calls` under retries?
 
 ### Tool risks to test
@@ -166,3 +237,5 @@ Source and documentation explain mechanisms and risks; only a committed receipt
 confirms run-dependent study behavior. The twelve verifier PASSes and the
 single-run page-fetch, timing, and memory figures are smoke observations, not
 benchmark results, and are not bound to one another across execution paths.
+Rows in `results/` are the public projection of the campaign ledger, separate
+from the receipts here; neither is a benchmark result.

@@ -143,7 +143,7 @@
         "noaa-nws-fourcastnetgfs-pds/current-eba31d9",
         "swath-replay/idc-open-data/current-geometry-20260824"
       ],
-      "detail": "No staged fixture bundle summary was found for these fixtures, so their shape metrics are null and their object_count is the largest row count a successful attempt reported off the fixture (object_count_source says which).",
+      "detail": "No staged fixture bundle summary was found for these fixtures, so their shape metrics and object_count are null. observed_row_counts records the distinct row counts successful attempts returned off the fixture; that is subject output, not fixture cardinality, and no count-match judgement rests on it.",
       "id": "fixture-metadata-not-staged"
     },
     {
@@ -174,6 +174,36 @@
       "affects": "18 attempt(s) across 1 workload(s)",
       "detail": "Attempts against workloads whose dataset licence does not permit publishing derived results are withheld: their rows, groups and fixture records are absent. The release spec names the workloads and the reason.",
       "id": "workloads-withheld"
+    },
+    {
+      "affects": "every row",
+      "detail": "This release combines several diagnostic campaigns run between 2026-08-26 and 2026-09-01 while the harness, the replay server and Swath were evolving. Every attempt pins its exact tool, image, platform, fixture and replay identities, but rows from different groups are not comparable merely because they share a release; the report's asymmetry table names the cases that matter.",
+      "id": "multi-campaign-corpus"
+    },
+    {
+      "affects": "every row with replay != null",
+      "detail": "Replay applies one fixed deadline per request shape, taken from the median of the Swath capture run and checked against a serial client on the same bucket. It has no tail, no throttling and no rise under load, and it prices a request by its syntax. The serial checks are internal controls recorded in working notes, not published receipts. docs/instrument.md carries the model, its provenance and its known skews.",
+      "id": "latency-model-is-not-s3"
+    },
+    {
+      "affects": "every row with replay != null",
+      "detail": "The replay server's fixture and the subject's output live on the same boot disk of one VM. CPU sets are separated by physical core; disk bandwidth, page cache and memory bandwidth are not, and no disk metric is exported.",
+      "id": "shared-host-disk"
+    },
+    {
+      "affects": "REPORT.md",
+      "detail": "Some statements in REPORT.md rest on the private run summary, the runner log or the tool's source rather than on a field of these rows (the listing-phase time inside a live-S3 run, a diagnosis of why a run was slow, a Spot preemption). The report labels each such statement with its source; none is a release field.",
+      "id": "prose-cites-private-evidence"
+    },
+    {
+      "affects": "every row with fixture != null",
+      "detail": "Fixtures are published as digests and shape metrics only. The fixture bytes and the original evidence store are private, and the source buckets are mutable, so the identical replay experiment cannot be rerun from this repository alone; the release is auditable, not independently reproducible.",
+      "id": "fixtures-not-published"
+    },
+    {
+      "affects": "s4cmd",
+      "detail": "s4cmd is a roster subject with no attempt in this release: it lists through the legacy ListObjects v1 API, which the replay server does not serve, and it requires credentials on live S3.",
+      "id": "roster-subject-not-run"
     }
   ],
   "exclusions": [
@@ -184,9 +214,9 @@
   ],
   "files": [
     {
-      "bytes": 23115,
+      "bytes": 28545,
       "path": "REPORT.md",
-      "sha256": "3a85f12a774b206f3d4e3521d5ecf49b8445015948cb1e9b262ee3fa86ea31fd"
+      "sha256": "63935fe1f7aa4221b2a5a806713ea3d2ecaf09175ac887674106a81e4592deff"
     },
     {
       "bytes": 1039179,
@@ -199,19 +229,19 @@
       "sha256": "a3902990885b5438914b33c6fee0e2638ceef9708bbec2db44b71b2a80e40fcd"
     },
     {
-      "bytes": 6325,
+      "bytes": 6877,
       "path": "charts/fourcast-roster.svg",
-      "sha256": "ddd1d4d0670765eb8540e832597815483330c91b637bc1848dfed0b461bba79f"
+      "sha256": "04374118ff822e94ba650ddf24460acfb25d8ed38271001a0dff8f53c7b60f51"
     },
     {
-      "bytes": 680,
+      "bytes": 722,
       "path": "charts/nbm-same-allocation-wall.csv",
-      "sha256": "61df2e8cda132710ed46c586191a5a1a88f15042eb1e955dfd518da54df6f741"
+      "sha256": "6decf41f286d996ba46ab767c91ad9d0f448c165c0ea17f83d4a1d8c6e925cff"
     },
     {
-      "bytes": 3339,
+      "bytes": 3949,
       "path": "charts/nbm-same-allocation-wall.svg",
-      "sha256": "c86152d1a06effb769aa1ebecff3ed96ec9832189828473e7de9ef6fe89e05ff"
+      "sha256": "e6df3d7757dc04daec70a46d940e0181843f8bbd36f160f05b305c5152d4a64a"
     },
     {
       "bytes": 1850,
@@ -219,24 +249,24 @@
       "sha256": "962212339a44434db31d0ba5dce8cb3aaf2d1758b47f36bf7a7cd0bbd00a0e59"
     },
     {
-      "bytes": 4424,
+      "bytes": 4740,
       "path": "charts/real-s3-ladder.svg",
-      "sha256": "9af125d911a3d72ab1b440c785e09522b143105f1fe83f76089ae8482ab31220"
+      "sha256": "d5ba3122ec2574b0eb9aeaa1b65316ea1a8d740d98ac40bef747429fc038fed7"
     },
     {
-      "bytes": 22764,
+      "bytes": 22976,
       "path": "charts/s3-fast-list-rss.csv",
-      "sha256": "eb58b86c236edd1ec6221ca6b70924e57fcd2138a6a184b0d3c69e8ad47225d6"
+      "sha256": "bdf84f58d149d69c7354187740c807a12875823797ce839d8308ac374aa93ab7"
     },
     {
-      "bytes": 13533,
+      "bytes": 14077,
       "path": "charts/s3-fast-list-rss.svg",
-      "sha256": "e1a409242cdad3dc9032bbe5274aadb0679736e4241a660cf9ff51854463d4ab"
+      "sha256": "1284a3be277fbc6323534b4195b7a1bc6778f50bffcbe9b576ae31e045913e3d"
     },
     {
-      "bytes": 10253,
+      "bytes": 11144,
       "path": "fixtures.json",
-      "sha256": "abf76188175470259dd504d8150ff530d0a647058c244794875313f719d81259"
+      "sha256": "edb2837195d089e08f9ae0249820fb0baa801302e96af5d5c71d770c12aa920c"
     },
     {
       "bytes": 22227,
@@ -244,9 +274,9 @@
       "sha256": "a1bf24973a27a3254604992d5214786d29cd609aea14ab313925205d1eabf23a"
     },
     {
-      "bytes": 97834,
+      "bytes": 96217,
       "path": "summary.csv",
-      "sha256": "a52487dc257b1756b96a685f57827215da4d4aed9f5b682e29a29f3a04c57d63"
+      "sha256": "a47ee6dff113712f859359ff892f1258dfb3ec2f8c80fa1a4189af9349606a01"
     }
   ],
   "fixtures": [
@@ -257,7 +287,7 @@
     },
     {
       "id": "nara-1950-census/current-eba31d9",
-      "object_count": 13540310,
+      "object_count": null,
       "sha256": "48468b7c1ea8bf657fcb089dbcb1d940d3af62b748a7cb66f6dccc8876905db4"
     },
     {
@@ -267,12 +297,12 @@
     },
     {
       "id": "noaa-nws-fourcastnetgfs-pds/1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4",
-      "object_count": 4081171,
+      "object_count": null,
       "sha256": "1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4"
     },
     {
       "id": "noaa-nws-fourcastnetgfs-pds/current-eba31d9",
-      "object_count": 4081170,
+      "object_count": null,
       "sha256": "abc259e0e2e956f096c6aa0dc5e3532c608a4df4675e165a6560ae6d868374e2"
     },
     {
@@ -282,7 +312,7 @@
     },
     {
       "id": "swath-replay/idc-open-data/current-geometry-20260824",
-      "object_count": 56311145,
+      "object_count": null,
       "sha256": "8a83fdc88000d6a1f4e3563eb3151407a91b6ca319713b08cff3e72442608ebe"
     }
   ],

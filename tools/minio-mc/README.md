@@ -4,20 +4,39 @@
 mc is the canonical MinIO project rather than a fork, and its repository is now archived (read-only) on GitHub, so the pinned release is effectively terminal.
 
 > **Study status (2026-09-scale-diagnostics).** This tool's standing in the current release:
-> Completed the 4.08M-object rung with an exact count in 419.7 s (`minio-mc.04c17e5ac8da.s1`); serial iterator, flat in memory, not carried further.
+> Completed the 4.08M-object fixture with a count that matched it, in 419.7 s (`minio-mc.04c17e5ac8da.s1`); serial iterator, not carried further.
 > The release is diagnostic: no attempt in it carries `purpose = measurement`, so
 > nothing here is a calibrated benchmark or a ranking. Report and data:
 > [`results/2026-09-scale-diagnostics/REPORT.md`](../../results/2026-09-scale-diagnostics/REPORT.md).
 
+## In the current release
+
+The release `2026-09-scale-diagnostics` is diagnostic: it settles what ran, what each run returned, and how much memory it used; no row in it is a calibrated measurement, and nothing here is a ranking.
+In the release mc ran as `RELEASE.2025-08-13T08-35-41Z` in two adapter modes, `recursive` and `recursive-json`. No fixture count was staged for FourCast in this release; "count matched" on this page means the capture report's 4,081,170 from the study's working notes, not a release field.
+
+| fixture | attempts | outcomes | timing grades of completed rows | row cited in the report |
+| --- | ---: | --- | --- | --- |
+| FourCast 4.08M | 9 | SUCCEEDED 9 | `TIMING_VALID` 7, `NOT_APPLICABLE` 2 | `minio-mc.04c17e5ac8da.s1` |
+
+Largest fixture attempted: FourCast 4.08M. No larger one was scheduled because mc lists through a serial client-side iterator (a reading of the tool's source, not a release field); "not carried further" is a study decision, not a measured limit of the tool.
+
+A timing grade (`TIMING_VALID`, `PRESSURE_DEGRADED`, `CAPACITY_FAILED`, `INSUFFICIENT_EVIDENCE`, `NOT_APPLICABLE`) describes how well the replay instrument delivered its declared latency treatment on that row, not whether the tool succeeded; the definitions are in [`docs/instrument.md`](../../docs/instrument.md#how-a-release-grades-the-delivered-treatment).
+
+Report: [`results/2026-09-scale-diagnostics/REPORT.md`](../../results/2026-09-scale-diagnostics/REPORT.md); findings page: [`RESULTS.md`](../../RESULTS.md); rows: [`results/2026-09-scale-diagnostics/attempts.jsonl`](../../results/2026-09-scale-diagnostics/attempts.jsonl).
+
+The rows are an allowlisted public projection of the campaign ledger; the original result files and logs are private. The receipts under `receipts/` in this directory are groundwork evidence and do not cover the release rows.
+
 ## At a glance
+
+Groundwork subject: the pinned build, smoke runs and source study from August 2026. The current release's rows are in the section above.
 
 | Question | Current answer |
 | --- | --- |
 | Tested subject | Upstream mc release `RELEASE.2025-08-13T08-35-41Z` at commit `7394ce0`, run anonymously from the official multi-arch image on native arm64; every LIST decision lives in the pinned minio-go `v7.0.90` SDK. Full canonical identity is in [`data/tool.json`](data/tool.json). |
-| Exercised coverage | Seven listing modes across ten anonymous smoke runs — recursive and delimiter `ls`, `--versions`, and `mc find`, in both text and JSON. `--rewind`, `--incomplete`, and `--zip` were recorded but not smoked. |
-| Correctness | All ten smoke receipts PASS the study verifier for the fields each mode exposes, including 148,917 keys matched byte-exact under `--json`. In [`data/claims.json`](data/claims.json): `all-smoke-modes-verified-pass`, `recursive-lists-complete-bucket`, `json-mode-exact-fields`. |
+| Exercised coverage | During groundwork: seven listing modes across ten anonymous smoke runs — recursive and delimiter `ls`, `--versions`, and `mc find`, in both text and JSON. `--rewind`, `--incomplete`, and `--zip` were recorded but not smoked, and were not exercised in the release either. Scale behaviour was not exercised during groundwork; the release ran `recursive` and `recursive-json` on fixtures to 4.08M objects (section above). |
+| Correctness | All ten smoke receipts PASS the study verifier for the fields each mode exposes, including 148,917 keys matched byte-for-byte under `--json`. In [`data/claims.json`](data/claims.json): `all-smoke-modes-verified-pass`, `recursive-lists-complete-bucket`, `json-mode-exact-fields`. |
 | Smoke observation | The full-bucket `--json` run exited 0 in 91.8 s with a 35.4 MB peak RSS. These are facts of single groundwork runs, not benchmark results. |
-| Results | No benchmark or comparative result exists. mc exposes no page-size or concurrency knob to sweep on the listing path. |
+| Results | No calibrated benchmark or comparative result exists in this study. The current release's rows for this tool (section above) are diagnostic; smoke timing and memory values in this table describe single groundwork runs. mc exposes no page-size or concurrency knob to sweep on the listing path. |
 
 ## How it works
 
@@ -38,7 +57,7 @@ actually exercised are shown in separate columns.
 
 | Mode | Upstream purpose | What this study exercised |
 | --- | --- | --- |
-| `mc ls --recursive` | List a bucket completely through serial ListObjectsV2 pagination. | Smoked anonymously in full scope and three prefixes, text and `--json`; the full bucket matched the manifest exactly. |
+| `mc ls --recursive` | List a bucket completely through serial ListObjectsV2 pagination. | Smoked anonymously in full scope and three prefixes, text and `--json`; the full bucket's count and keys matched the manifest. **Release:** ran in `2026-09-scale-diagnostics` as adapter modes `recursive` and `recursive-json` (fixtures to 4.08M objects; section above). |
 | `mc ls` (delimiter) | List one directory level, folders as synthetic CommonPrefixes. | Smoked at the bucket root, text and `--json`; folders carry synthetic timestamps and zero size. |
 | `mc ls --versions` | List through the list-object-versions API. | Smoked on one prefix; every object returned once because the bucket is unversioned. Multi-version fidelity is deferred. |
 | `mc find` | A second traversal command over the same serial List() path. | Smoked on one prefix, text and `--json`; scoped to STANDARD objects because find skips GLACIER and emits no ETag. |
@@ -58,6 +77,7 @@ resolve in [`data/claims.json`](data/claims.json).
   on the listing path for a benchmark to sweep — it is a serial baseline.
   [`docs/mechanism.md`](docs/mechanism.md#listing-is-one-serial-single-goroutine-paginated-stream)
   · `listing-is-serial-single-goroutine`, `maxkeys-hardwired-no-page-knob`, `concurrency-is-one-not-tunable`
+  **Release update:** the cited row `minio-mc.04c17e5ac8da.s1` issued 4,082 replay requests for the 4,082-page fixture (`replay.requests` in the row), consistent with one serial chain.
 
 - **The listing engine is minio-go, not mc.** Every meaningful LIST decision —
   V1/V2 selection, delimiter, pagination, retry, encoding, and the
@@ -106,6 +126,7 @@ resolve in [`data/claims.json`](data/claims.json).
   CPU/output cost of text versus `--json` at scale?
 - Does the streaming memory footprint stay bounded at millions of keys and under
   `--versions`?
+  **Release update:** peak RSS was 49,920 KiB on the 4.08M-object fixture in `minio-mc.04c17e5ac8da.s1`; no larger fixture was attempted and `--versions` did not run in the release.
 - How do retries and backoff behave under 503 throttling?
 
 ### Tool risks to test
@@ -141,4 +162,4 @@ and [`research/reconciliation.md`](research/reconciliation.md).
 Source and documentation explain mechanisms and risks; only a committed receipt
 confirms run-dependent study behavior. The `[OBS]` debug-trace and pre-flight are
 capability probes, not run receipts, and smoke observations are not benchmark
-results.
+results. Rows in `results/` are the public projection of the campaign ledger, separate from the receipts here; neither is a benchmark result.

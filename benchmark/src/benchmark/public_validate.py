@@ -2,11 +2,17 @@
 
 The exporter runs where the private ledger and the private evidence store are
 reachable, which is exactly one machine. Everything after that is a repository
-anyone can clone -- so the gate that says a release is safe and self-consistent
-has to run on the committed files alone. This does, and CI runs it on every
-change, which means a hand-edit to `attempts.jsonl`, a stale `summary.csv`, a
-leaked private path, or a diagnostic relabelled as a measurement fails the build
-rather than reaching a reader.
+anyone can clone -- so the gate that says a release is integrity-checked and
+structurally sound has to run on the committed files alone. This does, and CI
+runs it on every change, which means a hand-edit to `attempts.jsonl`, a stale
+`summary.csv`, a leaked private path, a fixture count inferred from subject
+output, or a diagnostic relabelled as a measurement fails the build rather than
+reaching a reader.
+
+What it does not do, so nobody reads more into a pass than it earns: it does
+not re-derive every `summary.csv` cell or chart value from the JSONL, and it
+does not check the report's prose against the data. `results/README.md` says
+the same to the reader.
 
 Usage:
     python -m benchmark.public_validate --release-dir results/<release-id>
@@ -122,6 +128,24 @@ def check_rows(
             yield f"{attempt}: fixture {fixture['id']} does not resolve in fixtures.json"
 
 
+def check_fixtures(fixtures: Mapping[str, Any], manifest: Mapping[str, Any]) -> Iterator[str]:
+    """A fixture's cardinality is staged or null; never what a subject returned."""
+    for key, record in fixtures.items():
+        count, source = record.get("object_count"), record.get("object_count_source")
+        if source == "observed-row-count":
+            yield f"fixtures.json: {key} takes its object_count from subject output"
+        if count is not None and source != "staged-bundle-summary":
+            yield f"fixtures.json: {key} carries an object_count with no staged source"
+        if count is None and source is not None:
+            yield f"fixtures.json: {key} names an object_count_source but has no count"
+    listed = {
+        str(entry["id"]): entry.get("object_count") for entry in manifest.get("fixtures") or []
+    }
+    for key, record in fixtures.items():
+        if key in listed and listed[key] != record.get("object_count"):
+            yield f"manifest.json: object_count for fixture {key} disagrees with fixtures.json"
+
+
 def check_summary(directory: Path, rows: Sequence[Mapping[str, Any]]) -> Iterator[str]:
     with (directory / "summary.csv").open(newline="") as handle:
         table = list(csv.DictReader(handle))
@@ -167,6 +191,7 @@ def validate(directory: Path) -> list[str]:
     problems.extend(check_checksums(directory))
     problems.extend(check_manifest(manifest, directory))
     problems.extend(check_rows(rows, manifest, fixtures))
+    problems.extend(check_fixtures(fixtures, manifest))
     problems.extend(check_summary(directory, rows))
     problems.extend(check_charts(directory, rows))
     return problems
@@ -192,7 +217,10 @@ def main(argv: list[str] | None = None) -> int:
     if problems:
         print(f"public-validate: {len(problems)} problem(s) in {args.release_dir}", file=sys.stderr)
         return 1
-    print(f"public-validate: {args.release_dir} is consistent and carries nothing private")
+    print(
+        f"public-validate: {args.release_dir} is integrity-checked, structurally valid, "
+        "and carries nothing private"
+    )
     return 0
 
 

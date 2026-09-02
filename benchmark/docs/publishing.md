@@ -33,6 +33,8 @@ is itself generated. This page is the operator's side.
 - `benchmark/src/benchmark/public_export.py` — the exporter.
 - `benchmark/src/benchmark/public_render.py` — the SVG renderer.
 - `benchmark/src/benchmark/public_validate.py` — the committed-files-only gate.
+- `benchmark/src/benchmark/public_reseal.py` — re-derives the generated files
+  and reseals a release from its public files, for edits that need no ledger.
 - `results/<release-id>/REPORT.md` — the release's written companion. This one
   file is handwritten, not generated: the exporter never produces or rewrites
   its text, but it does seal it, so the prose cannot be edited without the
@@ -119,10 +121,10 @@ release directory under `results/`.
 ## Writing the report
 
 `REPORT.md` is the one place in a release where a person argues from the data,
-so it carries the burden the data does not: the status box that says what the
-release is not, the funnel with the mechanism that stopped each subject, the
-instrument and any defect in it, the per-tool dispositions, and an explicit
-"what this does not establish". Two rules:
+so it carries the burden the data does not: what the release is and is not,
+the funnel with the largest fixture attempted per subject and why no larger
+one was scheduled, the instrument and any defect in it, the per-tool
+dispositions, and an explicit "what this does not establish". The rules:
 
 1. **Every number is checked against the committed files.** If a figure is not
    in `summary.csv` or `attempts.jsonl`, the report says where it comes from
@@ -136,15 +138,52 @@ instrument and any defect in it, the per-tool dispositions, and an explicit
    `docs/instrument.md`; the report links there and records only how the
    instrument behaved in this release.
 
-Neutral vocabulary throughout: a tool stops at a rung for a stated mechanical
-reason. No leaders, no survivors, no podium.
+One vocabulary throughout, on every public surface (findings page, report,
+tool pages, chart captions):
+
+- `largest fixture attempted`, never "stopped", "eliminated" or "survived";
+- `completed`, `timed out in this arm`, `failed under this memory limit`,
+  `not carried further (study decision)`;
+- `count matched` (the staged fixture count, or the capture's count where the
+  report says none was staged), never "exact"; count agreement is not
+  key-by-key verification;
+- `assisted` for shards or cut-points the harness supplied;
+- no tuning or bottleneck language ("CPU-bound", "width does not help") unless
+  the resource evidence behind it is a release field;
+- no cross-tool ratio while any row in the comparison is `CAPACITY_FAILED` or
+  `INSUFFICIENT_EVIDENCE`;
+- a statement that rests on the runner log, the tool's source, the private
+  run summary or working notes is labelled with that source.
+
+No leaders, no survivors, no podium.
 
 ## Changing a release
 
-A committed release is immutable. Correct it by publishing a new release that
-names what it supersedes, and add the erratum pointer to the superseded
-release's manifest in the same commit. Do not rewrite a release in place: prose
-and links already published elsewhere would silently change their evidence.
+A release directory is mutable while it lives on a draft branch and immutable
+once an annotated tag or GitHub Release names it. Before the tag, regenerate
+or reseal freely. After it, correct by publishing a new release that names
+what it supersedes; do not touch the old directory, its manifest included.
+Prose and links already published elsewhere would silently change their
+evidence.
+
+### Resealing without the ledger
+
+An edit to `REPORT.md`, a chart-spec change, or a change to one of the
+exporter's projections leaves the seal stale, and the exporter needs the
+private ledger to run. `benchmark.public_reseal` re-derives every generated
+file that is a pure function of the committed public files (`summary.csv`,
+the charts and their CSVs, the manifest's fixture and file entries, the
+checksums) and reseals the directory:
+
+```
+uv run python -m benchmark.public_reseal \
+    --release-dir results/2026-09-scale-diagnostics
+uv run python -m benchmark.public_validate --release-dir results/2026-09-scale-diagnostics
+```
+
+It never touches `attempts.jsonl`, `fixtures.json`, `subjects.json` or
+`REPORT.md`. Anything that needs the ledger (a new row, a fixture's staged
+metadata, the exporter's disclosures list) waits for the next export.
 
 ## Adding a figure
 

@@ -1,4 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 470" width="940" height="470" role="img">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 470" width="940" height="470" role="img" aria-labelledby="chart-title chart-desc">
+<title id="chart-title">Swath on live S3 — objects listed against whole-process rate (single observations)</title>
+<desc id="chart-desc">diagnostic; live-S3 observations of one tool, n=1 per point, machine type and output mode differ between points; not a benchmark</desc>
 <rect width="940" height="470" fill="#ffffff"/>
 <text x="24.0" y="34.0" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="16" fill="#1c1c1c" text-anchor="start">Swath on live S3 — objects listed against whole-process rate (single observations)</text>
 <rect x="96.0" y="62.0" width="624.0" height="330.0" fill="none" stroke="#d8d8d8" stroke-width="1"/>

@@ -20,6 +20,14 @@
     "metadata_staged": true,
     "object_count": 143008674,
     "object_count_source": "staged-bundle-summary",
+    "observed_row_counts": {
+      "distinct": [
+        143008665,
+        143008674
+      ],
+      "max": 143008674,
+      "min": 143008665
+    },
     "recapture": "Re-list the source bucket with the pinned capture tool at the recorded version and sorted output; the manifest digest identifies the bundle.",
     "serving_mode": "sorted",
     "shape": {
@@ -79,8 +87,17 @@
     },
     "manifest_sha256": "48468b7c1ea8bf657fcb089dbcb1d940d3af62b748a7cb66f6dccc8876905db4",
     "metadata_staged": false,
-    "object_count": 13540310,
-    "object_count_source": "observed-row-count",
+    "object_count": null,
+    "object_count_source": null,
+    "observed_row_counts": {
+      "distinct": [
+        13540116,
+        13540306,
+        13540310
+      ],
+      "max": 13540310,
+      "min": 13540116
+    },
     "recapture": "Re-list the source bucket with the pinned capture tool at the recorded version and sorted output; the manifest digest identifies the bundle.",
     "serving_mode": "sorted",
     "shape": {
@@ -121,6 +138,13 @@
     "metadata_staged": true,
     "object_count": 66405936,
     "object_count_source": "staged-bundle-summary",
+    "observed_row_counts": {
+      "distinct": [
+        66405936
+      ],
+      "max": 66405936,
+      "min": 66405936
+    },
     "recapture": "Re-list the source bucket with the pinned capture tool at the recorded version and sorted output; the manifest digest identifies the bundle.",
     "serving_mode": "sorted",
     "shape": {
@@ -180,8 +204,17 @@
     },
     "manifest_sha256": "1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4",
     "metadata_staged": false,
-    "object_count": 4081171,
-    "object_count_source": "observed-row-count",
+    "object_count": null,
+    "object_count_source": null,
+    "observed_row_counts": {
+      "distinct": [
+        2000,
+        4081170,
+        4081171
+      ],
+      "max": 4081171,
+      "min": 2000
+    },
     "recapture": "Re-list the source bucket with the pinned capture tool at the recorded version and sorted output; the manifest digest identifies the bundle.",
     "serving_mode": "sorted",
     "shape": {
@@ -220,8 +253,15 @@
     },
     "manifest_sha256": "abc259e0e2e956f096c6aa0dc5e3532c608a4df4675e165a6560ae6d868374e2",
     "metadata_staged": false,
-    "object_count": 4081170,
-    "object_count_source": "observed-row-count",
+    "object_count": null,
+    "object_count_source": null,
+    "observed_row_counts": {
+      "distinct": [
+        4081170
+      ],
+      "max": 4081170,
+      "min": 4081170
+    },
     "recapture": "Re-list the source bucket with the pinned capture tool at the recorded version and sorted output; the manifest digest identifies the bundle.",
     "serving_mode": "sorted",
     "shape": {
@@ -262,6 +302,13 @@
     "metadata_staged": true,
     "object_count": 13868442,
     "object_count_source": "staged-bundle-summary",
+    "observed_row_counts": {
+      "distinct": [
+        13868442
+      ],
+      "max": 13868442,
+      "min": 13868442
+    },
     "recapture": "Re-list the source bucket with the pinned capture tool at the recorded version and sorted output; the manifest digest identifies the bundle.",
     "serving_mode": "sorted",
     "shape": {
@@ -317,8 +364,15 @@
     },
     "manifest_sha256": "8a83fdc88000d6a1f4e3563eb3151407a91b6ca319713b08cff3e72442608ebe",
     "metadata_staged": false,
-    "object_count": 56311145,
-    "object_count_source": "observed-row-count",
+    "object_count": null,
+    "object_count_source": null,
+    "observed_row_counts": {
+      "distinct": [
+        56311145
+      ],
+      "max": 56311145,
+      "min": 56311145
+    },
     "recapture": "Re-list the source bucket with the pinned capture tool at the recorded version and sorted output; the manifest digest identifies the bundle.",
     "serving_mode": "sorted",
     "shape": {

@@ -42,6 +42,53 @@ source_ledger:
   suite: scale-study
   schema_version: 3
 
+# Release-level disclosures. These are facts about how the campaigns were run
+# that no attempt row can carry and the exporter cannot derive from the ledger;
+# they are appended to manifest.json.disclosures verbatim.
+disclosures:
+  - id: multi-campaign-corpus
+    detail: >-
+      This release combines several diagnostic campaigns run between 2026-08-26 and
+      2026-09-01 while the harness, the replay server and Swath were evolving. Every
+      attempt pins its exact tool, image, platform, fixture and replay identities, but
+      rows from different groups are not comparable merely because they share a release;
+      the report's asymmetry table names the cases that matter.
+    affects: every row
+  - id: latency-model-is-not-s3
+    detail: >-
+      Replay applies one fixed deadline per request shape, taken from the median of the
+      Swath capture run and checked against a serial client on the same bucket. It has no
+      tail, no throttling and no rise under load, and it prices a request by its syntax.
+      The serial checks are internal controls recorded in working notes, not published
+      receipts. docs/instrument.md carries the model, its provenance and its known skews.
+    affects: every row with replay != null
+  - id: shared-host-disk
+    detail: >-
+      The replay server's fixture and the subject's output live on the same boot disk of
+      one VM. CPU sets are separated by physical core; disk bandwidth, page cache and
+      memory bandwidth are not, and no disk metric is exported.
+    affects: every row with replay != null
+  - id: prose-cites-private-evidence
+    detail: >-
+      Some statements in REPORT.md rest on the private run summary, the runner log or the
+      tool's source rather than on a field of these rows (the listing-phase time inside a
+      live-S3 run, a diagnosis of why a run was slow, a Spot preemption). The report labels
+      each such statement with its source; none is a release field.
+    affects: REPORT.md
+  - id: fixtures-not-published
+    detail: >-
+      Fixtures are published as digests and shape metrics only. The fixture bytes and the
+      original evidence store are private, and the source buckets are mutable, so the
+      identical replay experiment cannot be rerun from this repository alone; the release
+      is auditable, not independently reproducible.
+    affects: every row with fixture != null
+  - id: roster-subject-not-run
+    detail: >-
+      s4cmd is a roster subject with no attempt in this release: it lists through the
+      legacy ListObjects v1 API, which the replay server does not serve, and it requires
+      credentials on live S3.
+    affects: s4cmd
+
 # Group -> committed plan path. Declared, not inferred: the ledger records no
 # plan path, so an attribution that is not certain is left out and the manifest
 # discloses how many groups carry no plan. A wrong plan is worse than none.

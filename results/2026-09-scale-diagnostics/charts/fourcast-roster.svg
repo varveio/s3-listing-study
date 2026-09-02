@@ -1,4 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 636" width="900" height="636" role="img">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 636" width="900" height="636" role="img" aria-labelledby="chart-title chart-desc">
+<title id="chart-title">FourCast 4.08M-object replay fixture — wall clock, one declared arm per tool</title>
+<desc id="chart-desc">diagnostic, not a ranking; one 8-vCPU/8-GiB arm per tool, one group, every count matched the fixture; only five rows are TIMING_VALID; s3-fast-list is hint-fed, Swath is a pre-release build and instrument-penalized; output contracts differ per tool</desc>
 <rect width="900" height="636" fill="#ffffff"/>
 <text x="24.0" y="34.0" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="16" fill="#1c1c1c" text-anchor="start">FourCast 4.08M-object replay fixture — wall clock, one declared arm per tool</text>
 <line x1="210.0" y1="62.0" x2="210.0" y2="562.0" stroke="#d8d8d8" stroke-width="1"/>
@@ -42,5 +44,5 @@
 <text x="200.0" y="533.1" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="12" fill="#1c1c1c" text-anchor="end">aws-cli s3api-v2-text</text>
 <text x="769.3" y="533.1" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="11" fill="#5c5c5c" text-anchor="start">700.047  [TIMING_VALID]</text>
 <text x="525.0" y="596.0" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="11" fill="#5c5c5c" text-anchor="middle">wall seconds (lower is faster)</text>
-<text x="24.0" y="620.0" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="11" fill="#5c5c5c" text-anchor="start">diagnostic; one 8-vCPU/8-GiB arm per tool, one group, exact counts; s3-fast-list is hint-fed and Swath is instrument-penalized</text>
+<text x="24.0" y="620.0" font-family="'DejaVu Sans','Helvetica Neue',Helvetica,Arial,sans-serif" font-size="11" fill="#5c5c5c" text-anchor="start">diagnostic, not a ranking; one 8-vCPU/8-GiB arm per tool, one group, every count matched the fixture; only five rows are TIMING_VALID; s3-fast-list is hint-fed, Swath is a pre-release build and instrument-penalized; output contracts differ per tool</text>
 </svg>

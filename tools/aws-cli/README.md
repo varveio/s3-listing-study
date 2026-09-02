@@ -4,20 +4,39 @@
 It exposes two independent listing surfaces — the high-level `aws s3 ls` and the low-level `aws s3api list-objects-v2` (plus the legacy V1 `list-objects` and `list-object-versions`) — both serial and single-threaded, with no listing-concurrency knob anywhere; aws-cli is also the study's pinned harness client, at version 2.36.0 one patch behind the 2.36.1 tested here, so a sibling build produces the listings every other tool is checked against.
 
 > **Study status (2026-09-scale-diagnostics).** This tool's standing in the current release:
-> Completed the 4.08M-object rung with an exact count in 700.0 s (`aws-cli.a7d9377bd706.s1`); serial by construction and not carried further.
+> Completed the 4.08M-object fixture with a count that matched it, in 700.0 s (`aws-cli.a7d9377bd706.s1`); serial by construction and not carried further.
 > The release is diagnostic: no attempt in it carries `purpose = measurement`, so
 > nothing here is a calibrated benchmark or a ranking. Report and data:
 > [`results/2026-09-scale-diagnostics/REPORT.md`](../../results/2026-09-scale-diagnostics/REPORT.md).
 
+## In the current release
+
+The release `2026-09-scale-diagnostics` is diagnostic: it settles what ran, what each run returned, and how much memory it used; no row in it is a calibrated measurement, and nothing here is a ranking.
+In the release aws-cli ran as version 2.36.1 in one adapter mode, `s3api-v2-text`. No fixture count was staged for FourCast in this release; "count matched" on this page means the capture report's 4,081,170 from the study's working notes, not a release field.
+
+| fixture | attempts | outcomes | timing grades of completed rows | row cited in the report |
+| --- | ---: | --- | --- | --- |
+| FourCast 4.08M | 9 | SUCCEEDED 8, CANCELLED 1 | `TIMING_VALID` 6, `NOT_APPLICABLE` 1, `PRESSURE_DEGRADED` 1 | `aws-cli.a7d9377bd706.s1` |
+
+Largest fixture attempted: FourCast 4.08M. No larger one was scheduled because aws-cli lists through one serial `ListObjectsV2` chain with no listing-parallelism control, so the 143M-object fixture would be about 143,000 sequential pages (a reading of the tool's source, not a release field); "not carried further" is a study decision, not a measured limit of the tool.
+
+A timing grade (`TIMING_VALID`, `PRESSURE_DEGRADED`, `CAPACITY_FAILED`, `INSUFFICIENT_EVIDENCE`, `NOT_APPLICABLE`) describes how well the replay instrument delivered its declared latency treatment on that row, not whether the tool succeeded; the definitions are in [`docs/instrument.md`](../../docs/instrument.md#how-a-release-grades-the-delivered-treatment).
+
+Report: [`results/2026-09-scale-diagnostics/REPORT.md`](../../results/2026-09-scale-diagnostics/REPORT.md); findings page: [`RESULTS.md`](../../RESULTS.md); rows: [`results/2026-09-scale-diagnostics/attempts.jsonl`](../../results/2026-09-scale-diagnostics/attempts.jsonl).
+
+The rows are an allowlisted public projection of the campaign ledger; the original result files and logs are private. The receipts under `receipts/` in this directory are groundwork evidence and do not cover the release rows.
+
 ## At a glance
+
+Groundwork subject: the pinned build, smoke runs and source study from August 2026. The current release's rows are in the section above.
 
 | Question | Current answer |
 | --- | --- |
 | Tested subject | The official upstream image `amazon/aws-cli:2.36.1`, source pinned at commit `12d962d2`, run anonymously with `--no-sign-request` and no self-authored Dockerfile. Full canonical identity is in [`data/tool.json`](data/tool.json). |
-| Exercised coverage | Both surfaces (`s3 ls` and `s3api` V2, legacy V1, and versions), the `text`, `json`, and `yaml-stream` output formats, delimiter-root listing, a resume round-trip probe, and a manual prefix fan-out. Every smoke mode ran anonymously and passed the verifier. |
+| Exercised coverage | During groundwork: both surfaces (`s3 ls` and `s3api` V2, legacy V1, and versions), the `text`, `json`, and `yaml-stream` output formats, delimiter-root listing, a resume round-trip probe, and a manual prefix fan-out. Every smoke mode ran anonymously and passed the verifier. Scale behaviour was not exercised during groundwork; the release ran `s3api-v2-text` on fixtures to 4.08M objects (section above). |
 | Correctness | Every mode matched its own registered scope in the manifest, and the two full-bucket executions (`s3 ls --recursive` and `s3api-v2-text`) matched all 148,917 keys; a four-shard-plus-remainder fan-out reconstructed the whole bucket with zero duplicates and zero missing or extra keys. |
 | Smoke observation | The full-bucket `s3api-v2-text` run listed 148,917 keys and exited 0 in about 26 s. This is a single groundwork fact, not a benchmark result. |
-| Results | No benchmark or comparative result exists. Smoke timing values describe individual groundwork runs only. |
+| Results | No calibrated benchmark or comparative result exists in this study. The current release's rows for this tool (section above) are diagnostic; smoke timing and memory values in this table describe single groundwork runs. |
 
 ## How it works
 
@@ -39,7 +58,7 @@ coverage are shown in separate columns.
 | Mode | Upstream purpose | What this study exercised |
 | --- | --- | --- |
 | `s3 ls` | High-level recursive or delimiter listing with fixed text output. | Ran recursively over the full bucket and non-recursively at the delimiter root, both verifier PASS. |
-| `s3api list-objects-v2` | Low-level ListObjectsV2 pagination with a projectable output format. | Ran full-bucket and three scoped prefixes in `text`, plus `json` and `yaml-stream` on one prefix, all PASS. |
+| `s3api list-objects-v2` | Low-level ListObjectsV2 pagination with a projectable output format. | Ran full-bucket and three scoped prefixes in `text`, plus `json` and `yaml-stream` on one prefix, all PASS. **Release:** ran in `2026-09-scale-diagnostics` as adapter mode `s3api-v2-text` (fixtures to 4.08M objects; section above). |
 | `s3api list-objects` / `list-object-versions` | Legacy V1 Marker pagination and version listing. | Ran one prefix each, verifier PASS. |
 | Manual prefix fan-out | Not a tool feature: N caller-run disjoint-prefix invocations, unioned. | Four prefix shards plus a delimiter-root remainder reconstructed the full bucket clean. |
 | `--page-size`, timeouts, retries | Pagination and resilience tunables. | Defaults read from source; no page-size sweep or fault injection was run. |
@@ -56,6 +75,7 @@ resolve in [`data/claims.json`](data/claims.json).
   format.
   [`Memory behavior by output format`](docs/mechanism.md#memory-behavior-by-output-format)
   · `memory-format-split`
+  **Release update:** the streaming `s3api-v2-text` mode peaked at 85,076 KiB on the 4.08M-object fixture in `aws-cli.a7d9377bd706.s1`; the buffered formats did not run in the release.
 
 - **There is no listing parallelism anywhere; the only parallel path is a manual
   prefix fan-out.** Both surfaces run one serial paginator; concurrency exists
@@ -92,6 +112,7 @@ resolve in [`data/claims.json`](data/claims.json).
   timeout/retry behavior (`timeout-retry-behavior-under-fault`) were run.
 - The buffered `--output json`/`yaml`/`table` path was not driven to a
   many-million-key OOM; whether it OOMs at scale is unsettled by smoke.
+  **Release update:** only the streaming `s3api-v2-text` mode ran in the release, so this remains open.
 
 ### Scale-dependent hypotheses
 
@@ -101,6 +122,7 @@ resolve in [`data/claims.json`](data/claims.json).
   and the third-party ~12M-object mid-run failure
   (`twelve-million-midrun-failure-thirdparty`) are inherited and unexecuted;
   smoke scale cannot speak to them.
+  **Release update:** `aws-cli.a7d9377bd706.s1` completed the 4.08M-object fixture with a count that matched it (section above); no larger fixture was attempted, so these figures remain unexecuted and the release rows are diagnostic, not comparative.
 
 ### Benchmark questions
 
@@ -138,4 +160,4 @@ and [`research/reconciliation.md`](research/reconciliation.md).
 Source and documentation explain the mechanisms and risks; only a committed
 receipt confirms run-dependent study behavior. A `--debug` probe is an
 observation of one invocation, not a receipted run, and smoke observations are
-not benchmark results.
+not benchmark results. Rows in `results/` are the public projection of the campaign ledger, separate from the receipts here; neither is a benchmark result.

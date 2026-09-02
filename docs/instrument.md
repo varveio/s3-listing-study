@@ -12,9 +12,11 @@ Running ten tools with high fan-out against one live bucket makes them
 compete for the same S3 key-range budget, and the first attempt at that
 (August 2026) drew `SlowDown` throttling that belonged to the contention, not
 to any tool. Replay gives every tool the same fixture, the same latency, the
-same backend and a declared machine allocation, so differences are the
-tools'. The price is that replay is a model of S3, not S3. The rest of this
-page is about that price.
+same backend and a declared machine allocation, which removes the backend as
+a variable. What remains in a wall clock is the tool, its output contract
+(text, JSON, Parquet or compressed TSV are not one operation), the host the
+tool shares with the server, and the model's own skews. The price is that
+replay is a model of S3, not S3. The rest of this page is about that price.
 
 ## What the server does
 
@@ -31,6 +33,25 @@ Every request is classified into one of three shapes by its syntax:
 | `worker_page` | any ordinary listing request | up to 1,000 objects |
 | `pivot_probe` | `max-keys` of 1, no delimiter | one nearby key |
 | `structure_probe` | any request with `delimiter=/` | common prefixes plus bare objects |
+
+Pricing by syntax is a choice with a consequence: a request's cost is set by
+its shape, not by the work it causes or the bytes it returns, so two
+algorithms that issue different shapes for the same listing pay different
+totals from the model, and the model can rank them differently from S3.
+
+## What the server shares with the subject
+
+The server and the subject run on one VM, each pinned to its own physical
+cores so they do not share SMT siblings. They do share the boot disk, which
+holds both the fixture the server reads and the output the subject writes,
+and with it the page cache and memory bandwidth. No disk metric is exported.
+A subject that writes a large output competes with the server more than one
+that writes text; the release discloses this as `shared-host-disk`.
+
+The server itself is pinned per attempt by image digest
+(`replay.server_image_digest` in each row). The current release used several
+server builds across its campaigns, up to five on one fixture; the digests are
+in the rows and in `manifest.json.images.replay_server_image_digests`.
 
 ## What a deadline is
 
@@ -50,10 +71,13 @@ differs from S3.
 
 ## Where the deadlines come from
 
-Each fixture's deadlines are the median round trip of one request per shape,
-measured by the Swath run that captured the fixture, from the same GCP zone
-the campaigns run in. The capture runs held 64 to 128 requests in flight, so
-the number was checked two ways for client-side and S3-side load effects.
+**Derivation.** Each fixture's deadlines are the median round trip of one
+request per shape, measured by the Swath run that captured the fixture, from
+the same GCP zone the campaigns run in. The capture runs held 64 to 128
+requests in flight, so the number was then checked two ways, below, for
+client-side and S3-side load effects. Both checks are internal controls
+recorded in the study's working notes; neither is a published receipt, and
+neither can be audited from this repository.
 
 | fixture | region | worker / pivot / structure deadline (ms) | capture concurrency |
 | --- | --- | --- | --- |
@@ -86,14 +110,15 @@ keep-alive connection, timed from request sent to last byte.
 Two deadlines sit 11–14% above the serial median (Virginia) and two sit 2–7%
 below it (Ohio). A deadline above the serial median is applied uniformly to
 every request; how much wall time it adds depends on each tool's request
-count, shapes and concurrency. One below it is optimistic for everyone. Capture load did not
-push the Ohio deadlines above what a serial client sees. This control is recorded in the study's working notes, not in a release.
+count, shapes and concurrency. One below it is optimistic for everyone.
+Capture load did not push the Ohio deadlines above what a serial client sees.
 
-**Against the serial tools' own live runs.** In the August live-S3 pass, the
-serial tools' wall time per page, minus their client cost per page as measured
-on a no-latency replay, left 77 to 87 ms in `us-east-1` against deadlines of
-85 to 87. Their replay wall clocks under the treatment matched their live-S3
-wall clocks within a few percent:
+**Against the serial tools' own live runs.** In the August live-S3 pass,
+which predates the public ledger and is not exported, the serial tools' wall
+time per page, minus their client cost per page as measured on a no-latency
+replay, left 77 to 87 ms in `us-east-1` against deadlines of 85 to 87. Their
+replay wall clocks under the treatment matched their live-S3 wall clocks
+within a few percent:
 
 | serial tool | live S3, ms per page | replay under 85 ms, ms per page |
 | --- | ---: | ---: |
@@ -110,7 +135,7 @@ replay. Replay is optimistic for that mode.
 
 | skew | direction | who it touches |
 | --- | --- | --- |
-| **No rise under load.** A client that pushes S3 above roughly 1,000 pages per second sees higher latency on S3 than replay gives it (the threshold is from Swath's own live runs, recorded in the study's working notes). | favours the fast client | Only Swath can reach that rate. No run in the current release did: the fastest Swath row made about 870 requests per second (a release field), at or below the rate of the same bucket's live capture (from the capture's own summary). |
+| **No rise under load.** A client that pushes S3 above roughly 1,000 requests per second sees higher latency on S3 than replay gives it (the threshold is from Swath's own live runs, recorded in the study's working notes). | favours the fast client | Several release rows ran above that rate, measured as `replay.requests.after` over `wall_seconds`: rclone's NARA walk at about 1,190 to 1,234 requests/s (`PRESSURE_DEGRADED`, six rows), s7cmd's NARA arms at 2,600 to 2,800 (no count returned), and Swath at 1,268 on idc-open-data with no latency treatment. Swath's fastest blockchain row made about 870. Whether live S3 would have slowed any of those rows is not something the rows can say. |
 | **No tail.** Live S3's p99 is 2.5 to 4.5 times its median. Replay has none. | favours everyone; direction between tools depends on their design | all |
 | **No throttling.** Replay never returns `SlowDown`. | favours everyone | all; no single-client live run in this study drew throttling (from the runs' own summaries, not a release field) |
 | **Priced by syntax.** A `delimiter=/` request draws the structure deadline even when it returns 1,000 plain objects, as it does on a flat namespace. | favours delimiter-paging modes on flat fixtures | rclone's walk, s7cmd's drain |
@@ -122,7 +147,7 @@ replay. Replay is optimistic for that mode.
 server's sorted-Parquet seek makes a `delimiter=/` rollup far more expensive
 than a page, the inverse of S3. Under Swath's page load the server missed the
 structure deadline on about half of those requests, so every Swath row on the
-three large fixtures failed the study's timing gate. A warmed server changed
+three small-directory fixtures (NARA, NBM, blockchain) failed the study's timing gate. A warmed server changed
 nothing, so the cost is per seek, not cold start. The numbers are in the
 [release report](../results/2026-09-scale-diagnostics/REPORT.md#the-instrument-in-this-release).
 
