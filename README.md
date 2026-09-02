@@ -53,9 +53,9 @@ live-S3 rows are single uncontrolled observations of one tool. The release's
 states it in prose. **There is no calibrated benchmark here and no ranking of
 listing tools.**
 
-What the release does settle: which approaches survive a rising object count,
-where each one stops and by what mechanism, exact object counts wherever a run
-returned one, and the memory behaviour that decides several of the outcomes.
+What the release does settle: which approaches survive a rising object count
+within the rungs each was carried to, where each one stops and by what
+mechanism, the object count each completed run returned, and the memory behaviour that decides several of the outcomes.
 Ten tools were screened from a 4.08-million-object fixture upward; an
 eleventh roster tool, s4cmd, has no attempt in the release. All ten completed
 the first rung and four reached 143 million. Separately, one tool
@@ -167,7 +167,10 @@ notes to be wrong; finding and fixing those is part of the work.
 
 **Replay comes first for screening and configuration search.** Every candidate
 sees the same captured listing, declared latency treatment, and controlled
-backend. That lets the study eliminate clearly slower candidates without making
+backend. That latency treatment is derived from the study's own tool: each
+fixture's fixed per-shape deadlines are the p50 round trip observed by the
+Swath run that captured it, cross-checked against serial clients as the
+release report sets out. That lets the study eliminate clearly slower candidates without making
 many high-fan-out tools contend for the same live S3 key ranges. The replay
 server is part of the measuring instrument, so every attempt must carry exact
 fixture and server identity plus evidence that the server was not the
