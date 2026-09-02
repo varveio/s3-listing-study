@@ -1,215 +1,133 @@
 # S3 Listing Study
 
-We build [Swath](https://github.com/varveio/swath), a tool for listing large
-S3 buckets. Before building it, we studied how existing listing tools approached
-the problem. That work helped shape Swath, and it left us with a pile of notes:
-one tool is much faster than the CLI, another struggles at very large scale,
-another only parallelizes transfers. When we went looking for the runs behind
-those statements, a lot of them were hard to find. Some of the notes were ours,
-and we had not properly checked them either.
+A community notebook on one narrow question: **how do the various tools that
+list an S3 bucket actually behave when the bucket is big?**
 
-So we started testing. This repo is where we install each tool, read how it
-works, run it against real buckets and staged copies of them, and write down
-what we see.
+Listing sounds trivial until a bucket has a hundred million objects. Then it
+matters whether a tool pages through the keys one request at a time, splits
+the work across prefixes, or splits it across the keyspace, and whether it
+keeps every key in memory while it does so. There are a lot of opinions
+about this in blog posts and issue trackers, and not many runs anyone can
+check. This repo is an attempt to fix that: install each tool, read how it
+works, run it, and write down what happened, with enough detail that you can
+check us.
 
-This is not a leaderboard. These tools were built for different jobs, and we
-are not crowning an overall winner. We are part of the story: Varve builds
-Swath, maintains this repo, and decides what gets merged, and our earlier tool
-research informed Swath's design. When we report an observation from a run, we
-tie it to a specific version, setup, bucket, and machine, with a link to that
-run.
+> **Current release: `2026-09-scale-diagnostics`.** Ten tools, replay
+> fixtures from 4 million to 143 million objects, plus a few single runs of
+> one tool on live S3 up to a billion rows. It is a set of findings about
+> what each tool does at scale, not a benchmark and not a ranking.
+> **[Read what we found →](RESULTS.md)**
 
-> **Current release: `2026-09-scale-diagnostics`.** 270 settled attempts, ten
-> tools, replay fixtures to 143M objects, plus single-run Swath observations on
-> live S3 to 1.07B rows. Diagnostic only: not a benchmark and not a ranking.
-> [Read what we found](RESULTS.md).
+## Who is behind this
 
-## Why this exists
+We are the people who build [Swath](https://github.com/varveio/swath), one of
+the tools in the study. We started this because we kept repeating claims
+about other tools that we could not back up with a run, and that bothered us.
+So, yes, we have a horse in this race, and every page says so. What we can
+offer instead of neutrality is transparency: the same harness and the same
+rules for every tool, every run published including the ones where Swath
+looks bad or the instrument broke, and an open invitation to anyone who knows
+a tool better than we do to fix our setup.
 
-Our early research mixed notes from tool documentation, source code, issue
-trackers, and published benchmarks. It was useful when deciding how Swath should
-work, but it was not a reproducible comparison. When we went back to check the
-notes, we found that many observations — including some we had treated as
-settled — did not have a reproducible run behind them.
+This is a side project run out of curiosity, not a sales comparison. Nobody
+is being crowned. If you maintain one of these tools and we got it wrong,
+[please tell us](CONTRIBUTING.md); that is the most useful contribution this
+repo can get.
 
-This project is us doing that homework properly: install each tool, read its
-documentation, inspect source where the documentation does not settle a
-question, run it against real buckets in the modes it actually offers, and
-save enough detail for someone else to check our work. The original starting
-notes are preserved in each tool's `research/` directory and reconciliation;
-they are questions to check, not results to repeat.
+## What we found, in one paragraph
 
-Benchmark numbers age quickly. Mechanism reports — how a tested version divides
-the keyspace, paginates, uses memory, and handles failures — often remain useful
-longer.
+The interesting result is not who is fastest. It is that the tools fall into
+three designs, and each design runs into a different wall for a different
+reason. Serial tools (aws-cli, minio-mc, s3kor) are correct and tiny in
+memory but page one request at a time, so 143 million objects would be about
+143,000 sequential requests. Prefix-parallel tools (rclone, s7cmd) fan out
+across directories, which is fast on a bushy namespace and collapses on a
+flat one: rclone's walk filled 8 GiB and was killed, s7cmd drained the whole
+bucket on one thread. Keyspace-parallel tools (s3p, s3-fast-list, Swath)
+split the key range instead and do not care about directories, at the cost
+of either needing hints or issuing probe requests. All of that, with the
+runs behind each sentence, is on the [findings page](RESULTS.md).
 
-## Status
+## What you can and cannot take from it
 
-**A first release of results is published.** The short version is
-[**What we found**](RESULTS.md): eleven tools researched, ten run against
-replay fixtures from 4.08 million objects to 143 million, the largest fixture
-each was taken to and why, and one tool's billion-object run on live S3.
-`RESULTS.md` says what it does and does not mean, and the release's own
-[report](results/2026-09-scale-diagnostics/REPORT.md) holds the numbers and
-attempt ids behind it. The release rows are an allowlisted public projection of a
-private campaign ledger; the release combines several campaigns run while the
-harness and the tools were evolving, with every attempt pinned to its exact
-identities.
+- **Take:** which tool completed which size, what it returned, how much
+  memory it used, what happened at the largest size we tried, and where the
+  study chose not to go further.
+- **Do not take:** a speed ranking. Most runs went through a replay server
+  that imitates S3 with a fixed latency, that server had a defect that
+  happens to slow our own tool, the setups were not equal everywhere, and
+  each cell is a single run. The release's `manifest.json` says all of this
+  in machine-readable form.
+- **Also do not take:** a promise of reproducibility. You can audit every
+  run (its command, versions, image digests, outcome), but the fixture bytes
+  and the raw logs are not published, so you cannot rerun the identical
+  experiment from this repo alone.
 
-Groundwork remains what it was: every subject has a pinned build or source
-checkout, a source-anchored mechanism report, claim-by-claim reconciliation,
-and smoke receipts where the tool could list the registered public bucket.
-See [`tools/README.md`](tools/README.md) for the per-tool pages,
-[`docs/instrument.md`](docs/instrument.md) for how the replay instrument
-works, [`docs/methodology.md`](docs/methodology.md) for the measurement plan
-written before the comparisons, and [`benchmark/README.md`](benchmark/README.md)
-for the harness.
+## How to read this repo
 
-## What we do
+| You want | Go to |
+| --- | --- |
+| The short version | [`RESULTS.md`](RESULTS.md) |
+| Every number and attempt id | [the release report](results/2026-09-scale-diagnostics/REPORT.md) |
+| The raw rows, one JSON object per run | [`results/2026-09-scale-diagnostics/`](results/2026-09-scale-diagnostics/) and the [release contract](results/README.md) |
+| How one tool lists, and how it did here | [`tools/`](tools/README.md), one page per tool |
+| How the replay instrument works and where it is wrong | [`docs/instrument.md`](docs/instrument.md) |
+| The plan we wrote before running anything | [`docs/methodology.md`](docs/methodology.md) |
+| The harness itself | [`benchmark/`](benchmark/README.md) |
 
-For each tool in scope:
-
-1. **Learn how listing works.** Does it parallelize listing, or only transfers?
-   How does it choose cut-points in the keyspace? Documentation first; source
-   when the documentation is silent or ambiguous.
-2. **Run it for real** against sample buckets with known, differing keyspace
-   shapes — flat, deep, dense-tailed, and sparse.
-3. **Try its real modes.** If it has a concurrency knob, sweep it. If it
-   accepts hints from a prior listing, run both unhinted and hinted paths. If it has
-   a fast-path flag, use it. We put comparable effort into finding a supported
-   setup for each tool rather than testing only defaults.
-4. **Try it under limits and interruption.** Constrain memory, increase scale,
-   and interrupt it mid-run. Record what happens, including whether output is
-   complete and whether the exit status describes the result accurately.
-5. **Publish the run record.** Record the exact invocation, tool version,
-   declared machine type/resources, bucket identity, exit code, row count,
-   wall clock and peak memory, and a digest of the captured output. The
-   output itself, the logs and the ledger stay private; a release publishes
-   an allowlisted projection of the record, and no release row yet carries a
-   verifier verdict.
+Every tool page has the same shape: what the tool is, how its listing works
+under the hood (with links into its source), what we saw in the current
+release, what we saw in the earlier groundwork runs, and what is still open.
 
 ## How we work
 
-This project is maintained by [Varve](https://varve.io/), which builds
-[Swath](https://github.com/varveio/swath), one of the tools evaluated here.
-Varve's object-storage work depends on understanding large bucket listings;
-[Outcrop](https://outcrop.varve.io/) is a public example of that work over
-open-data buckets.
+- **Read first, run second.** Documentation, then source when the docs are
+  silent, then a real run. A claim from source stays labelled as a claim
+  from source until a run confirms it.
+- **The plan came before the runs.** [`docs/methodology.md`](docs/methodology.md)
+  was written before the comparative runs, and later changes are dated and
+  explained.
+- **Every run is a record.** Version, image digest, exact command, machine,
+  fixture, exit code, row count, wall clock, peak memory. Failed and
+  cancelled runs stay in the data.
+- **Swath gets no special treatment.** Same harness, same limits, same
+  publishing rules. When the instrument broke, it broke against Swath, and
+  the numbers are published as they are.
+- **We try to find a good setup for every tool**, not just defaults. Where a
+  tool needs help the harness gives it (shards for s5cmd, cut-points for
+  s3-fast-list), and that help is disclosed wherever the result appears.
+- **Maintainers get the benefit of the doubt.** If something surprises us we
+  ask before we write it up, and reproducible problems get filed upstream.
 
-We naturally know Swath better than we know the other tools. We publish our
-setup and run records so people who know those tools can help us improve the
-work. Varve decides what gets merged. This is a project we run because we are
-interested in the space, not a sales comparison.
+## Running the checks
 
-- **We wrote the plan down first.** What gets measured was committed before
-  comparative runs — see [`docs/methodology.md`](docs/methodology.md). Material
-  later changes are dated and explained, so the history stays easy to follow.
-- **The motivating workload is declared.** Swath was designed for first-contact
-  listing: an unfamiliar bucket with no hints or prior inventory. That creates
-  a framing bias, so first-contact and explicitly hinted modes are treated as
-  distinct workloads and reported separately. The benchmark does not add
-  cold/warm machine-state arms.
-- **Swath is recorded on the same terms.** It uses the same correctness
-  verifier, benchmark harness, resource limits, limits-and-interruption checks,
-  run-record requirements, and review. Our familiarity with it does not turn an
-  unpublished result into a result for this project.
-- **We look for a useful supported setup for every tool.** If one tool is tuned, comparable knobs are
-  explored for the others and the tuning is disclosed. Where a tool's best
-  supported configuration is unclear, its maintainers are invited to correct
-  the setup.
-- **Swath results are published on the same terms whether or not they favor it.**
-  Readers should be able to see where another approach works better or Swath
-  does not suit the workload.
-- **Surprising or consequential observations name their run.** The public
-  row carries the invocation, version, image digests, bucket or fixture
-  identity, exit code and outcome needed to audit it. The fixture bytes and
-  the original evidence are not published, so a release is auditable rather
-  than independently reproducible.
-- **Maintainer context is welcome.** If we run into something surprising, we'll
-  usually check with the tool's maintainers before we write it up — the way we'd
-  want someone to do for us. Reproducible problems are filed upstream where
-  appropriate.
-- **Patches and forks are disclosed.** Study-modified builds are identified
-  explicitly and are never presented as upstream behavior. Comparative
-  benchmarks use upstream releases unless a documented exception is part of
-  the result.
-
-We expect to miss better modes and misunderstand details. Corrections from the
-people who know these tools are especially welcome.
-
-## How the tool pages evolve
-
-Each tool began with inherited starting notes compiled from public
-documentation, source, issue trackers, and published observations. Groundwork
-then used a separate source-first pass: the researcher first worked from
-upstream docs, pinned source, and its own smoke runs without seeing that sheet.
-Only after that report existed were the two compared item by item.
-
-Every runnable subject uses the same capsule layout: a concise `README.md`
-that routes to machine-readable identity and claims (`data/`), the current
-explanation (`docs/`), tool-specific benchmark declarations (`adapter/`), the frozen research
-trail (`research/`), and committed run evidence (`receipts/`). The layout and
-the responsibilities of every layer are described in
-[`tools/README.md`](tools/README.md) and defined in
-[`docs/operating/tool-structure.md`](docs/operating/tool-structure.md).
-
-Updates are observation-specific, not page-wide. Documentation and source can
-support a description or explain a question, but executable behavior is not a
-project result until a committed run checks it. We expect some of the starting
-notes to be wrong; finding and fixing those is part of the work.
-
-## Screening and validation
-
-Replay comes first: every candidate sees the same captured listing, the same
-declared latency treatment, and the same controlled backend, so candidates
-can be screened without many high-fan-out tools contending for one live
-bucket's key ranges. Screening is a study decision about what to run next,
-not a finding that a candidate cannot complete a larger fixture. The replay server is part of the
-measuring instrument, its latency treatment is derived from the study's own
-tool and cross-checked against serial clients in internal controls recorded
-in working notes, and every attempt carries exact fixture and server
-identity. All of that is set out in
-[`docs/instrument.md`](docs/instrument.md).
-
-Real S3 is meant to validate the configurations carried furthest, one subject at a time
-on fresh VMs. That stage has not yet run: the current release's live-S3 rows
-are single observations of one tool.
-
-## Running the checks in this repo
-
-Repository-study validation and the production benchmark harness are Python.
-Install the project before running capsule checks, adapter tests, or benchmark
-dry runs:
+Everything here is Python. The tests use committed synthetic fixtures and
+need no bucket, no credentials and no network.
 
 ```sh
-uv sync                     # or: python3 -m venv .venv && .venv/bin/pip install -e .
-uv run pytest               # offline: no bucket, no network, no data directory
-uv run pytest benchmark/tests/test_adapters.py  # focused adapter contract and corpus coverage
+uv sync            # or: python3 -m venv .venv && .venv/bin/pip install -e .
+uv run pytest      # the whole suite
+uv run python -m benchmark.public_validate --release-dir results/2026-09-scale-diagnostics
 ```
 
-The pytest suites use committed synthetic fixtures and need no bucket or cloud
-credentials. Toolbox smoke and cloud canaries are separate benchmark operations;
-historical smoke receipts under `tools/` remain immutable capsule evidence.
-
-A tool's adapter is `adapter/normalize.py`. The retired shell adapters and their
-byte-for-byte replay gate supplied historical evidence for the Python port; they
-are not a current test path. Current checks exercise every declared mode with
-synthetic fixtures and independently pin the committed-payload denominator and
-unexercised modes through `EXPECTED_PAYLOADS` and `unexercised_modes`.
+The last line checks a published release from the committed files alone:
+checksums, structure, and that no row is labelled a measurement without
+earning it.
 
 ## Contributing
 
-**If we got your tool wrong, please tell us** — see
-[`CONTRIBUTING.md`](CONTRIBUTING.md). Corrections from the people who wrote
-these tools are the most valuable contribution this repository can receive.
+Corrections beat additions. If a tool page describes your tool wrongly, if
+we ran it in a silly configuration, or if a claim on a page does not match
+the row it cites, open an issue or a pull request.
+[`CONTRIBUTING.md`](CONTRIBUTING.md) says how to tell us we got your tool
+wrong, what helps us reproduce a result, and the few rules we keep.
 
 ## License
 
 [Apache-2.0](LICENSE). Copyright 2026 Varve Systems Ltd.
 
-The tools evaluated here are the property of their respective authors and are
-used under their own licenses; no third-party source is vendored into this
-repository, save one upstream build recipe carried verbatim
-(`tools/s3-fast-list/build/Dockerfile`, MIT-0). See [`NOTICE`](NOTICE) for attribution
-and [`THIRD-PARTY.md`](THIRD-PARTY.md) for the per-tool license inventory, that
-exception, and the copyleft posture.
+The tools evaluated here belong to their respective authors and are used
+under their own licenses; no third-party source is vendored, save one
+upstream build recipe carried verbatim
+(`tools/s3-fast-list/build/Dockerfile`, MIT-0). See [`NOTICE`](NOTICE) and
+[`THIRD-PARTY.md`](THIRD-PARTY.md).
