@@ -77,8 +77,9 @@ decisions are unchanged.
 Routine attempts do not normalize or convert listing output. After the timed
 subject exits successfully, the selected adapter's `count_rows` path applies
 the same mode-specific row selection as its verifier normalizer but computes
-only a count. The worker retains and uploads the original stdout, stderr, and
-native directory output. Five-field normalization is benchmark-verifier work
+only a count. The worker counts the native product locally, retains stderr and genuine
+stdout logs, and uploads native products only when the group was submitted
+with `--retain-products` (the 2026-08-28 retention change above). Five-field normalization is benchmark-verifier work
 invoked only for explicit correctness verification.
 
 Routine campaign reporting is summary-only. The campaign model owns a
@@ -495,17 +496,22 @@ that stronger fidelity has separately been demonstrated.
 the rounded p50 of one request's client-observed round trip per shape, read
 from the phase timers of the Swath run that captured the fixture. A capture may
 supply deadlines only if its median connection-pool wait is negligible and its
-total is within a few milliseconds of its time-to-first-byte, so that no
-client-side queue is inside the number; a capture that fails that test is not
-a deadline source, and one such run exists (a 2026-08-06 FourCast reference at
-123.7 ms worker-page p50 against a clean 86.0 ms on the same bucket). Because a
+total is within a few milliseconds of its time-to-first-byte, so that no client-side
+connection queue is inside the number. That test does not detect client CPU
+starvation, which inflates time-to-first-byte itself: a 2026-08-06 FourCast
+reference reported a 123.7 ms worker-page p50 where a 2026-08-26 control on
+the same bucket reported 86.0 ms, and only a cross-check against a non-Swath
+client would have rejected it. A capture must therefore pass both the phase
+test and the cross-check. Because a
 client holding many requests in flight can load S3 in a way a serial client
 never does, and the capturing client cannot see that from inside, the floor is
-cross-checked against clients other than Swath: directly where a same-bucket
-serial sample exists (FourCast), and otherwise against the roster's serial
-tools on live S3 in the study's August basic pass, whose wall time per page
-minus client cost per page must leave a residual at or above the deadline for
-that region. That residual is a run mean, not a p50; the check establishes
+cross-checked against clients other than Swath: directly, by a same-bucket
+serial sample of about 100 unsigned pages over one keep-alive connection from
+the runner's zone, whose p50 must be within about 10% of the deadline; and in
+aggregate against the roster's serial tools on live S3 in the study's August
+basic pass, whose wall time per page minus client cost per page must leave a
+residual that brackets the deadline for that region within a few
+milliseconds and never one materially below it. That residual is a run mean, not a p50; the check establishes
 that replay charges a serial tool no more per page than live S3 did. The
 August pass predates the campaign ledger and is not exported; the cross-check
 is recorded in the study's working notes, and no published row depends on it.

@@ -64,7 +64,7 @@ that subject settled on that fixture, whatever its outcome.
 | `noaa-nws-fourcastnetgfs-pds` | 4,081,170 | aws-cli, minio-mc, ps3, rclone, s3-fast-list, s3kor, s3p, s5cmd, s7cmd, Swath |
 | `nara-1950-census` | 13,540,310 | rclone, s3-fast-list, s3p, s5cmd, s7cmd, Swath |
 | `real-changesets` (flat) | 13,868,442 | rclone, s7cmd, Swath |
-| `idc-open-data` | 56,311,145 | Swath |
+| `idc-open-data` | 56,311,145 | Swath, with no latency treatment declared on that fixture |
 | `noaa-nbm-grib2-pds` | 66,405,936 | rclone, s3-fast-list, s3p, s5cmd, s7cmd, Swath |
 | `aws-public-blockchain` | 143,008,674 | rclone, s3p, s7cmd, Swath |
 
@@ -108,15 +108,21 @@ budget per request shape. Three shapes are declared and enforced:
 - `structure_probe` — a `delimiter=/` rollup that returns CommonPrefixes,
 - `pivot_probe` — a single-key point lookup.
 
-Each attempt's `replay.latency_model.deadlines_ms` records the budget it ran
-under, and the harness classifies the *delivered* timing after the fact. That
+A deadline is a target total time, not a timeout, a cap or a surcharge: the
+server serves the request, then holds the response until the deadline has
+elapsed, so a client observes the larger of the server's own cost and the
+deadline, and a request whose serving cost exceeds the deadline is an overrun.
+`TIMING_VALID` means only that this synthetic treatment was delivered as
+declared, not that the treatment matches S3. Each attempt's
+`replay.latency_model.deadlines_ms` records the budget it ran under, and the harness classifies the *delivered* timing after the fact. That
 classification is `replay_timing` in `summary.csv`, and it is fail-closed: a run
 whose instrument missed its budget cannot be published as a measurement, however
 the subject behaved.
 
 **The defect.** On the fixtures with many small directories — NARA, NBM and
 `aws-public-blockchain` — the server overruns the `structure_probe` budget under
-page load. On `aws-public-blockchain` at c256 (declared 94 / 55 / 46 ms, replay
+page load. On `aws-public-blockchain` at c256 (declared 94 ms `worker_page`, 55 ms `structure_probe`, 46 ms `pivot_probe`;
+replay
 allocated 64 vCPU and 20 GiB, `swath.be4140354dd1.s1`) the delivered
 structure-probe mean is roughly twice the declared 55 ms and just under half of
 those probes overrun. The cause is in the server's sorted-Parquet seek: a
@@ -124,17 +130,27 @@ delimiter rollup reopens a row-group reader and decodes a whole key page per
 seek, so replay's rollup is far more expensive than its own page — the inverse
 of live S3, where a rollup is cheaper than a page because it returns less.
 
-**Who this affects.** Only Swath issues structure probes at volume. rclone,
-s5cmd, s3p, s7cmd and the serial tools do not, and their rows on the same
-fixtures under the same treatment classify `TIMING_VALID` or
-`PRESSURE_DEGRADED`. Every Swath-versus-other comparison in this release is
-therefore biased *against* Swath, and any Swath ratio here is a lower bound.
+**Who this affects.** Swath issues structure probes at volume alongside its
+page load, and the overrun bites its rows hardest: every Swath row on NARA,
+NBM and `aws-public-blockchain` is `CAPACITY_FAILED`. It is not exclusive to
+Swath. rclone's directory walk also issues delimiter requests in volume, and
+its NARA, NBM and blockchain rows classify `TIMING_VALID`; but s7cmd's NARA
+and blockchain rows, one s3-fast-list NBM row, and several FourCast rows of
+rclone, ps3, s3p and s7cmd from the earlier, smaller replay allocation also
+classify `CAPACITY_FAILED`, and this release's row schema does not carry the
+failing reason for them. Where a Swath row is compared with a `TIMING_VALID`
+or `PRESSURE_DEGRADED` row of another tool, the instrument's defect runs
+against Swath; the other skews of the treatment (no tail, no rate response,
+syntax-based pricing) are not measured well enough to call any cross-tool
+ratio a bound in either direction. Where both rows are `CAPACITY_FAILED`, no
+direction is established.
 
 **Where the deadlines come from, and for whom they hold.** Each fixture's
 deadlines are the rounded p50 of one request's client-observed round trip per
 shape, read from the phase timers of the Swath run that captured the fixture,
-from GCP `us-east1` at concurrency 64–128 and a few hundred to a thousand
-requests per second (FourCast's 85 ms worker deadline was set between that
+from GCP `us-east1`, at c64 for FourCast, c128 for NARA, NBM and blockchain,
+and c1024 for `real-changesets`, at 81 to 1,051 requests per second (the
+`real-changesets` capture averaged 32 requests in flight; FourCast's 85 ms worker deadline was set between that
 run's 86.0 ms and a same-day serial AWS CLI sample's 82 ms on the same
 bucket). In every capture that retained the breakdown, the median
 connection-pool wait was microseconds and the worker-page total sat about 4 ms
@@ -152,8 +168,24 @@ within a few percent. That residual is a mean over a run on a different
 bucket, not a p50; it shows that replay charges a serial tool no more per page
 than live S3 did, not that every deadline equals a serial p50. The cross-check
 is an internal one, not a published receipt, and no row in this release
-depends on it. No fixture's deadline sits above the residual serial clients
-left on its region. Subjects under roughly 1,000 requests per second therefore
+depends on it. The `us-east-1` deadlines of 85 and 87 ms sit inside that band
+and above parts of it: the per-tool residuals were 83.8 (s5cmd), 87.1 (rclone)
+and 83.1 and 77.1 (aws-cli). The `us-west-2` deadline of 122 ms sits well below
+the 136–144 ms residuals measured there. On 2026-09-02, after this release's
+rows were settled, a same-bucket serial control was run for the four replay
+fixtures from the same zone: 100 unsigned 1,000-key pages one at a time over
+one keep-alive connection, request sent to last byte. Its p50 was 74.5 ms on
+FourCast (deadline 85), 78.0 on NBM (87), 92.3 on NARA (86) and 95.8 on
+`aws-public-blockchain` (94), with means 4–6 ms above each p50 and p99 of
+190–423 ms. So the deadlines sit within about 10% of what a serial client
+measured on the same buckets, above it in `us-east-1` and at or below it in
+`us-east-2`; the capture concurrency did not inflate them. That control is
+retained in the study's working notes, not in this release. One serial tool
+does not reproduce: minio-mc's recursive mode cycled at about 569 ms per page
+on live S3 against 114 ms under the 85 ms treatment, because it requests owner
+information on every page and replay serves that as an ordinary page; replay
+is optimistic for that mode. Five further non-Swath subjects have no live-S3
+counterpart and were not checked. Subjects under roughly 1,000 requests per second therefore
 see a floor consistent with what serial clients saw; rclone's directory walk
 exceeds that on plain request count (1,200 per second on NARA) but every one of
 those requests is a delimiter rollup priced at the cheaper structure deadline.
@@ -170,10 +202,10 @@ faster Swath row, not an estimate for any row here. The treatment models
 neither S3's tail (worker-page p99 of 0.5–0.8 s and structure-probe p99 of
 0.4–20 s on the large buckets in the same live runs) nor throttling, and it
 prices a request by its syntax rather than by what it returns (see the flat
-namespace below). Live structure probes sat at a p50 of 50–100 ms with heavy
-tails, so the flat 55 ms structure budget is close to live S3's median rather
-than generous, which makes the instrument's overrun a one-directional penalty
-and not a modelling artefact. The per-shape latency distributions live in the
+namespace below). Each fixture's structure budget is that fixture's own
+captured structure-probe p50 (37–88 ms across the five fixtures), a median by
+construction rather than an independently validated bound; the instrument's
+overrun is a departure from that median in one direction only, slower. The per-shape latency distributions live in the
 campaign ledger's replay evidence and in the runs' own summaries; this
 release's row schema carries the declared deadlines and the delivered
 classification, not the delivered distributions. The manifest carries no
@@ -195,10 +227,11 @@ warm-up-duration figures come from the ledger's delivered-timing evidence, not
 from this release's rows; the wall clocks, counts and `requests.before` values
 are in `summary.csv` and `attempts.jsonl`.
 
-One consequence of the warm-up block being new: the warmed row's replay evidence
-does not satisfy the classifier's contract, so it exports as
-`replay_timing = MALFORMED` rather than as a delivered-timing verdict. It is
-kept, labelled and disclosed rather than dropped.
+The warmed row is a new treatment identity, since a warmed server is a
+different instrument, so it is not interchangeable with the cold row. It is
+exported as its own case, `swath.6d4bdaf4f615.s1`, with
+`replay_timing = CAPACITY_FAILED` and the warm-up's issued counts in its replay
+evidence.
 
 ## Per-tool dispositions
 
@@ -259,8 +292,9 @@ flat namespace draws the 88 ms probe deadline, whereas live S3 serves it at
 about the cost of a plain page because it returns the same 1,000 entries. On
 this fixture the 34 ms per-page difference favours the walk and s7cmd's leaf
 drain, both of which paginate with a delimiter, over the plain-page modes. The
-Swath arm exports `INSUFFICIENT_EVIDENCE` for delivered timing; its wall clock
-is a functional result, not a timing.
+Swath arm exports `INSUFFICIENT_EVIDENCE` for delivered timing because its
+47.5 s run collected fewer than five 10-second replay resource samples; its
+wall clock is a functional result, not a timing.
 
 ## Swath on live S3
 
@@ -283,7 +317,9 @@ was repeated. `manifest.json` discloses them under
 | `sentinel-cogs` | 1,068,477,307 | n4-highcpu-32 | TSV + zstd c2048 | 341.4 s | 3,129,747 | `swath.7b028bd8c692.s1` |
 
 The two `sentinel-cogs` counts differ because they are listings of a live bucket
-taken hours apart. Both are exact counts of what was there at the time.
+taken hours apart. Each is the exact integer that run returned; neither was
+verified against a contemporaneous key manifest, because none exists for a
+changing public bucket.
 
 The figure is [`charts/real-s3-ladder.svg`](charts/real-s3-ladder.svg), with its
 rows in [`charts/real-s3-ladder.csv`](charts/real-s3-ladder.csv).
