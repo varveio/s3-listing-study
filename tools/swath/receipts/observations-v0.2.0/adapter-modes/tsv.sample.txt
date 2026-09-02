@@ -1,3 +1,0 @@
-key	size	last_modified	etag	storage_class	row_type
-normals-hourly/1991-2020/archive/us-climate-normals_1991-2020_v1.0.0_hourly_multivariate_by-station_c20210423.tar.gz	232303441	2026-07-22T12:52:19Z	66bcd724d807339d848cc9b0b358dcf8	STANDARD	OBJECT
-normals-hourly/1991-2020/archive/us-climate-normals_1991-2020_v1.0.0_hourly_multivariate_by-variable_c20210423.tar.gz	243943659	2026-07-22T12:53:39Z	550472d2e74bc56382185d42fc94f2ce	STANDARD	OBJECT

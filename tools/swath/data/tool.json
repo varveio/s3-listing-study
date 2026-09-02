@@ -16,14 +16,14 @@
       "value": "0.3.1",
       "provenance": {
         "kind": "documentation",
-        "reference": "../research/v0.3.1/report.md"
+        "reference": "../research/report.md"
       }
     },
     "revision": {
       "value": "7b9a5e2fba045c67165c76511f8c40c880406a8a",
       "provenance": {
         "kind": "documentation",
-        "reference": "../research/v0.3.1/report.md"
+        "reference": "../research/report.md"
       }
     }
   },
@@ -35,7 +35,6 @@
     "benchmark_eligibility": "conditional"
   },
   "evidence_roots": [
-    "../receipts/observations-v0.2.0",
     "../receipts/observations-v0.3.1"
   ]
 }

@@ -4,12 +4,30 @@
   "tool": "swath",
   "claims": [
     {
+      "id": "round-trip-count-and-cross-mode-agreement",
+      "statement": "On 2026-09-02 the v0.3.1 image listed the 2,549-key normals-hourly/ prefix of noaa-normals-pds anonymously through all eight adapter modes, each exiting 0 and normalizing to 2,549 rows, 2,549 distinct keys and one identical key-set digest.",
+      "scope": "runtime",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "A direct docker run observation on the maintainer's workstation, not a receipt: no attempt record, no verifier verdict, no reference manifest. The count matches the registry's recorded figure for the prefix and the eight modes agree with one another, which cannot detect a substituted key or a missing key compensated by an extra one. One prefix, one run per mode, no counters compared between modes; nothing here is comparative.",
+      "evidence": [
+        {
+          "kind": "observation",
+          "artifact": "../receipts/observations-v0.3.1/adapter-modes/payload.hashes"
+        },
+        {
+          "kind": "observation",
+          "artifact": "../receipts/observations-v0.3.1/adapter-modes/observation.md"
+        }
+      ]
+    },
+    {
       "id": "repo-is-public-at-v020",
       "statement": "Swath's canonical repository is github.com/varveio/swath and it is public at v0.3.1, as it was at v0.2.0.",
       "scope": "structure",
       "status": "supported",
       "disposition": "corrected",
-      "qualification": "At the 2026-08-02 research date and again on 2026-09-02 the repository, its releases, and its container images were all publicly readable without authentication; the GitHub API reports visibility public and licence Apache-2.0.",
+      "qualification": "On 2026-09-02 the repository, its releases, and its container images were all publicly readable without authentication; the GitHub API reports visibility public and licence Apache-2.0.",
       "evidence": [
         {
           "kind": "documentation",
@@ -128,10 +146,6 @@
           "commit": "7b9a5e2fba045c67165c76511f8c40c880406a8a",
           "path": "scripts/ci/verify-container-promotion.sh",
           "lines": "23-45"
-        },
-        {
-          "kind": "documentation",
-          "path": "../research/report.md"
         }
       ]
     },
@@ -164,10 +178,6 @@
           "commit": "7b9a5e2fba045c67165c76511f8c40c880406a8a",
           "path": "NOTICE",
           "lines": "1-12"
-        },
-        {
-          "kind": "documentation",
-          "path": "../research/report.md"
         }
       ]
     },
@@ -620,7 +630,7 @@
       "scope": "mechanism",
       "status": "supported",
       "disposition": "retained",
-      "qualification": "At v0.2.0 the throttle decrease factor is 0.7 and counts as a real AIMD vote; a separate sustained-timeout shed uses factor 0.5 once per jittered 25 to 40 second window. Growth is additionally gated by a hard worker-timeout freeze and a latency-inflation freeze. Whether the controller was ever exercised is separate and is covered by claim aimd-idle-at-smoke.",
+      "qualification": "The throttle decrease factor is 0.7 and counts as a real AIMD vote; a separate sustained-timeout shed uses factor 0.5 once per jittered 25 to 40 second window. Growth is additionally gated by a hard worker-timeout freeze and a latency-inflation freeze. Whether the controller was ever exercised is a separate, unanswered question: the one retained run summary records zero throttle events (claim aimd-necessity).",
       "evidence": [
         {
           "kind": "source",
@@ -689,34 +699,16 @@
       ]
     },
     {
-      "id": "aimd-idle-at-smoke",
-      "statement": "Both v0.2.0 listing runs recorded zero throttle events, zero transient events, zero AIMD votes, zero AIMD target reductions, and zero errors.",
-      "scope": "runtime",
-      "status": "supported",
-      "disposition": "retained",
-      "qualification": "These zeros are Swath's own self-reported counters on the list_run_diagnostics stderr line, not an independent wire capture, from two single unreplicated runs on 2026-08-02 against a clean public bucket at --concurrency 8. Neither run is a receipt: the runner-security profile was not provisioned, so the harness wrapper was never used. This settles that AIMD did not fire in these two runs, not whether it is dead weight. Observed on the v0.2.0 image (run of 2026-08-02). Not re-run on v0.3.1; the 2026-09-02 v0.3.1 adapter round-trip over normals-hourly/ (../receipts/observations-v0.3.1/) is a different, unreplicated run whose counters are not restated here.",
-      "evidence": [
-        {
-          "kind": "observation",
-          "artifact": "../receipts/observations-v0.2.0/full/stderr.txt"
-        },
-        {
-          "kind": "observation",
-          "artifact": "../receipts/observations-v0.2.0/hourly/stderr.txt"
-        }
-      ]
-    },
-    {
       "id": "aimd-necessity",
       "statement": "Swath's AIMD 503 controller may be dead weight if listing is latency-bound rather than throttle-bound.",
       "scope": "performance",
       "status": "unverified",
       "disposition": "retained",
-      "qualification": "This is an open hypothesis, not a finding. It is a scale and concurrency question that two runs at --concurrency 8 against a clean public bucket cannot reach.",
+      "qualification": "This is an open hypothesis, not a finding. It is a scale and concurrency question that a single prefix-scale run against a clean public bucket cannot reach.",
       "evidence": [
         {
           "kind": "none",
-          "reason": "No throttling or high-concurrency scenario exercised the controller; both v0.2.0 runs recorded zero throttle events."
+          "reason": "No throttling or high-concurrency scenario has exercised the controller; the one retained run summary records zero errors against a clean public bucket."
         }
       ]
     },
@@ -937,48 +929,16 @@
       ]
     },
     {
-      "id": "full-run-reported-parallel-listings",
-      "statement": "The full-bucket v0.2.0 listing run reported eight concurrent listings in flight, with nineteen splits and twenty-five steals.",
-      "scope": "runtime",
-      "status": "supported",
-      "disposition": "retained",
-      "qualification": "These are Swath's own self-reported counters from a single unreplicated run on 2026-08-02 at --concurrency 8, with no receipt and no verifier verdict. Observed on the v0.2.0 image (run of 2026-08-02). Not re-run on v0.3.1; the 2026-09-02 v0.3.1 adapter round-trip over normals-hourly/ (../receipts/observations-v0.3.1/) is a different, unreplicated run whose counters are not restated here.",
-      "evidence": [
-        {
-          "kind": "observation",
-          "artifact": "../receipts/observations-v0.2.0/full/stderr.txt"
-        }
-      ]
-    },
-    {
-      "id": "peak-in-flight-reached-ceiling-at-both-scopes",
-      "statement": "Peak in-flight concurrency reached the configured ceiling of eight at both observed scopes.",
-      "scope": "runtime",
-      "status": "supported",
-      "disposition": "retained",
-      "qualification": "The 2,549-key hourly run reached eight after 246 milliseconds from forty-eight seed ranges with zero splits, and the full-bucket run reached eight after 1,922 milliseconds from five seed ranges with nineteen splits. Self-reported counters from two single unreplicated runs on 2026-08-02, no receipts. Observed on the v0.2.0 image (run of 2026-08-02). Not re-run on v0.3.1; the 2026-09-02 v0.3.1 adapter round-trip over normals-hourly/ (../receipts/observations-v0.3.1/) is a different, unreplicated run whose counters are not restated here.",
-      "evidence": [
-        {
-          "kind": "observation",
-          "artifact": "../receipts/observations-v0.2.0/hourly/stderr.txt"
-        },
-        {
-          "kind": "observation",
-          "artifact": "../receipts/observations-v0.2.0/full/stderr.txt"
-        }
-      ]
-    },
-    {
       "id": "parallelism-ratio-at-higher-concurrency",
       "statement": "The observed parallelism ratio holds at concurrency above eight and at larger scopes.",
       "scope": "performance",
       "status": "unverified",
       "disposition": "retained",
-      "qualification": "Both v0.2.0 runs capped --concurrency at 8. The behaviour at Swath's default 64 and on larger buckets is unmeasured, and the ceiling-not-setpoint finding means the sweep must instrument effective concurrency rather than the flag.",
+      "qualification": "Nothing above one prefix-scale run at the default ceiling has been measured. The behaviour on larger buckets is unmeasured, and the ceiling-not-setpoint finding means the sweep must instrument effective concurrency rather than the flag.",
       "evidence": [
         {
           "kind": "none",
-          "reason": "No concurrency sweep above 8 has been run; concurrency behaviour is scale-dependent and not settleable by these two runs. One unreplicated v0.3.1 round-trip on 2026-09-02 ran the prefix at the adapter's default ceiling of 64 and self-reported peak 18 in flight with average 6.98 (../receipts/observations-v0.3.1/adapter-modes/stderr.recursive-tsv.txt); a single prefix-scale run at one setting is not a ratio measurement."
+          "reason": "No concurrency sweep has been run and concurrency behaviour is scale-dependent. One unreplicated v0.3.1 round-trip on 2026-09-02 ran the prefix at the adapter's default ceiling of 64 and self-reported peak 18 in flight with average 6.98 (../receipts/observations-v0.3.1/adapter-modes/stderr.recursive-tsv.txt); a single prefix-scale run at one setting is not a ratio measurement."
         }
       ]
     },
@@ -1127,10 +1087,6 @@
           "commit": "7b9a5e2fba045c67165c76511f8c40c880406a8a",
           "path": "swath-s3/src/test/java/io/varve/swath/store/s3/S3ClientFactoryTest.java",
           "lines": "196-246"
-        },
-        {
-          "kind": "documentation",
-          "path": "../research/report.md"
         }
       ]
     },
@@ -1197,10 +1153,6 @@
           "commit": "7b9a5e2fba045c67165c76511f8c40c880406a8a",
           "path": "docs/internals/s3-implementation-compatibility.md",
           "lines": "18-25"
-        },
-        {
-          "kind": "documentation",
-          "path": "../research/report.md"
         }
       ]
     },
@@ -1355,32 +1307,6 @@
         {
           "kind": "none",
           "reason": "No concurrent-mutation or replay experiment was run; source cannot settle behaviour against a bucket that changes mid-listing."
-        }
-      ]
-    },
-    {
-      "id": "smoke-output-count-and-uniqueness",
-      "statement": "The full-bucket v0.2.0 listing run emitted 148,917 JSONL rows with zero duplicate keys, matching the smoke registry's recorded key count for the bucket.",
-      "scope": "correctness",
-      "status": "supported",
-      "disposition": "retained",
-      "qualification": "The manifest artifact was absent and harness/verify-listing.sh could not run, so there is no verifier verdict for any run. Count-and-uniqueness against the registry's recorded figure can detect a missing or duplicated key in aggregate but cannot detect a substituted key, a corrupted key, or compensating errors. Single unreplicated run on 2026-08-02, no receipt. On 2026-09-02 the v0.3.1 image listed the 2,549-key normals-hourly/ prefix through all eight adapter modes, each normalizing to 2,549 rows, 2,549 distinct keys and one identical key-set digest (observation, not a receipt; prefix scope only, and still not a completeness check).",
-      "evidence": [
-        {
-          "kind": "observation",
-          "artifact": "../receipts/observations-v0.2.0/full/payload.hashes"
-        },
-        {
-          "kind": "observation",
-          "artifact": "../receipts/observations-v0.2.0/full/stderr.txt"
-        },
-        {
-          "kind": "documentation",
-          "path": "../research/report.md"
-        },
-        {
-          "kind": "observation",
-          "artifact": "../receipts/observations-v0.3.1/adapter-modes/payload.hashes"
         }
       ]
     },
@@ -1818,10 +1744,6 @@
         },
         {
           "kind": "observation",
-          "artifact": "../receipts/observations-v0.2.0/full/stdout.sample.jsonl"
-        },
-        {
-          "kind": "observation",
           "artifact": "../receipts/observations-v0.3.1/adapter-modes/jsonl.sample.jsonl"
         },
         {
@@ -1984,11 +1906,11 @@
       "scope": "performance",
       "status": "unverified",
       "disposition": "retained",
-      "qualification": "The streaming output stage and the bounded entry queue say memory should be flat in object count for the text modes, but memory cliffs and OOM behaviour are scale-dependent and no cliff was probed. Observed peak RSS was 508.8 MB on the full run and 415.1 MB on the hourly run, JVM-baseline-dominated at this scale and not a scale result. At v0.3.1 the growth paths to target are the bounded dataset writer pool, whose queue is capped process-wide and whose writers above four are admitted against heap, and the sorted finalization pipeline, whose readers and encoders are admitted against heap and file-descriptor budgets; the v0.2.0 Parquet part-metadata re-serialization path no longer exists, manifests being written once at completion.",
+      "qualification": "The streaming output stage and the bounded entry queue say memory should be flat in object count for the text modes, but memory cliffs and OOM behaviour are scale-dependent and no cliff was probed. The round-trip's TSV run self-reported 287 MB peak RSS on a 2,549-key prefix, JVM-baseline-dominated and not a scale result. At v0.3.1 the growth paths to target are the bounded dataset writer pool, whose queue is capped process-wide and whose writers above four are admitted against heap, and the sorted finalization pipeline, whose readers and encoders are admitted against heap and file-descriptor budgets; the v0.2.0 Parquet part-metadata re-serialization path no longer exists, manifests being written once at completion.",
       "evidence": [
         {
           "kind": "none",
-          "reason": "Memory behaviour at scale is scale-dependent; the 148,917-key scope cannot test it and no scale campaign has run."
+          "reason": "Memory behaviour at scale is scale-dependent; a 2,549-key prefix cannot test it and no scale campaign has run."
         }
       ]
     },
@@ -2047,42 +1969,6 @@
           "commit": "7b9a5e2fba045c67165c76511f8c40c880406a8a",
           "path": "swath-s3/src/test/java/io/varve/swath/store/s3/SeedDeadEndpointFailFastTest.java",
           "lines": "67"
-        }
-      ]
-    },
-    {
-      "id": "probe-overhead-higher-on-small-prefix",
-      "statement": "API calls per thousand objects were far higher on the small prefix: 29.42 on the 2,549-key hourly prefix versus 1.61 on the full bucket.",
-      "scope": "runtime",
-      "status": "supported",
-      "disposition": "retained",
-      "qualification": "These ratios are Swath's own self-reported counters from two single unreplicated runs on 2026-08-02 that vary both size and keyspace shape with no repeats, so they settle two observed ratios, not a general overhead-versus-scale law. No receipts, no verifier verdict. Observed on the v0.2.0 image (run of 2026-08-02). Not re-run on v0.3.1; the 2026-09-02 v0.3.1 adapter round-trip over normals-hourly/ (../receipts/observations-v0.3.1/) is a different, unreplicated run whose counters are not restated here.",
-      "evidence": [
-        {
-          "kind": "observation",
-          "artifact": "../receipts/observations-v0.2.0/hourly/stderr.txt"
-        },
-        {
-          "kind": "observation",
-          "artifact": "../receipts/observations-v0.2.0/full/stderr.txt"
-        }
-      ]
-    },
-    {
-      "id": "non-worker-page-call-share",
-      "statement": "Non-worker-page calls were a minority of both runs: 26 of the hourly run's 75 API calls and 75 of the full run's 240, or 35 and 31 percent.",
-      "scope": "runtime",
-      "status": "supported",
-      "disposition": "retained",
-      "qualification": "It is computed from each run's recorded page-fetch count on the diagnostics line, not from a theoretical keys-divided-by-page-size floor, which understates real paging badly because parallel range workers do not fill their pages. The captured counters do not decompose the residue into seed, structure and pivot classes, and the runs' own probe_fetches figures do not reconcile with it. Two points, no trend, no receipts. Observed on the v0.2.0 image (run of 2026-08-02). Not re-run on v0.3.1; the 2026-09-02 v0.3.1 adapter round-trip over normals-hourly/ (../receipts/observations-v0.3.1/) is a different, unreplicated run whose counters are not restated here.",
-      "evidence": [
-        {
-          "kind": "observation",
-          "artifact": "../receipts/observations-v0.2.0/hourly/stderr.txt"
-        },
-        {
-          "kind": "observation",
-          "artifact": "../receipts/observations-v0.2.0/full/stderr.txt"
         }
       ]
     },
@@ -2347,10 +2233,6 @@
           "commit": "7b9a5e2fba045c67165c76511f8c40c880406a8a",
           "path": "swath-cli/src/test/resources/help/swath-list.txt",
           "lines": "1-25"
-        },
-        {
-          "kind": "documentation",
-          "path": "../research/report.md"
         }
       ]
     },
@@ -2385,10 +2267,6 @@
           "commit": "7b9a5e2fba045c67165c76511f8c40c880406a8a",
           "path": "swath-replay/src/main/java/io/varve/swath/replay/server/BenchCommand.java",
           "lines": "46"
-        },
-        {
-          "kind": "documentation",
-          "path": "../research/report.md"
         }
       ]
     },
@@ -2774,7 +2652,7 @@
       "scope": "operability",
       "status": "supported",
       "disposition": "retained",
-      "qualification": "Precedence is --no-sign-request over --profile over the SDK default chain, with bearer-token command auth as a fourth orthogonal path that replaces SigV4 entirely. Both v0.2.0 runs listed anonymously from a credential-starved container and exited 0; those are single unreplicated observations on 2026-08-02, not receipts.",
+      "qualification": "Precedence is --no-sign-request over --profile over the SDK default chain, with bearer-token command auth as a fourth orthogonal path that replaces SigV4 entirely. Every mode of the 2026-09-02 round-trip listed anonymously from a credential-starved container and exited 0 (claim round-trip-count-and-cross-mode-agreement); single unreplicated observations, not receipts.",
       "evidence": [
         {
           "kind": "source",
@@ -2799,10 +2677,6 @@
           "commit": "7b9a5e2fba045c67165c76511f8c40c880406a8a",
           "path": "swath-cli/src/main/java/io/varve/swath/cli/ConnectionOptions.java",
           "lines": "79-80"
-        },
-        {
-          "kind": "observation",
-          "artifact": "../receipts/observations-v0.2.0/full/stderr.txt"
         }
       ]
     },
@@ -2896,7 +2770,7 @@
       "scope": "operability",
       "status": "supported",
       "disposition": "corrected",
-      "qualification": "The exception hierarchy is sealed, so the error-to-exit mapping is compiler-checked for exhaustiveness, and a protocol violation is searched for first through the cause chain and suppressed exceptions so it outranks every cancellation code, which all claim a resumable partial. Exit 74 (added in 0.2.2) is not a new exception type: OutputException derives it by searching its own cause chain for an out-of-space IOException, so the sealed permits list is unchanged. Upstream's usage and FAQ tables agree with source on all eight codes and add that 74, 75, 124, 130 and 143 imply resumable state only when the run uses a managed Parquet directory. Both v0.2.0 observation runs exited 0.",
+      "qualification": "The exception hierarchy is sealed, so the error-to-exit mapping is compiler-checked for exhaustiveness, and a protocol violation is searched for first through the cause chain and suppressed exceptions so it outranks every cancellation code, which all claim a resumable partial. Exit 74 (added in 0.2.2) is not a new exception type: OutputException derives it by searching its own cause chain for an out-of-space IOException, so the sealed permits list is unchanged. Upstream's usage and FAQ tables agree with source on all eight codes and add that 74, 75, 124, 130 and 143 imply resumable state only when the run uses a managed Parquet directory.",
       "evidence": [
         {
           "kind": "source",
@@ -3323,28 +3197,6 @@
           "commit": "7b9a5e2fba045c67165c76511f8c40c880406a8a",
           "path": ".github/workflows/release.yml",
           "lines": "255,341-348,389-390"
-        },
-        {
-          "kind": "documentation",
-          "path": "../research/report.md"
-        }
-      ]
-    },
-    {
-      "id": "runs-executed-natively-on-arm64",
-      "statement": "Both v0.2.0 listing runs executed natively on arm64 from the index's arm64 child manifest, with no emulation.",
-      "scope": "compatibility",
-      "status": "supported",
-      "disposition": "retained",
-      "qualification": "Because a stdout run still opens an in-process SQLite database, these runs did load the SQLite JDBC driver and its native library on arm64 and completed at exit 0, which closes the native-extraction half of the untested-arm64 gap. The durable on-disk checkpoint and the Zstd and Parquet native paths remain unexercised on arm64. Two single unreplicated runs on 2026-08-02, no receipts; the four adapter-mode observations of the same date ran natively on arm64 from the same image, and this claim's figures are not restated from them.",
-      "evidence": [
-        {
-          "kind": "observation",
-          "artifact": "../receipts/observations-v0.2.0/full/stderr.txt"
-        },
-        {
-          "kind": "documentation",
-          "path": "../research/report.md"
         }
       ]
     },
@@ -3354,7 +3206,7 @@
       "scope": "compatibility",
       "status": "supported",
       "disposition": "retained",
-      "qualification": "Still true at v0.3.1: the publish workflow says so outright and the release smoke runs its container on an amd64 runner. Risk is low, since the jar is arch-neutral, but non-zero for the native extraction paths. The only arm64 runtime observations this study holds are the two v0.2.0 runs.",
+      "qualification": "Still true at v0.3.1: the publish workflow says so outright and the release smoke runs its container on an amd64 runner. Risk is low, since the jar is arch-neutral, but non-zero for the native extraction paths. This study holds no arm64 runtime observation of v0.3.1; the round-trip ran the amd64 child.",
       "evidence": [
         {
           "kind": "source",
@@ -3501,10 +3353,6 @@
           "commit": "7b9a5e2fba045c67165c76511f8c40c880406a8a",
           "path": "swath-cli/src/test/java/io/varve/swath/cli/HelpUsageGoldenTest.java",
           "lines": "66-94"
-        },
-        {
-          "kind": "documentation",
-          "path": "../research/report.md"
         }
       ]
     },
@@ -3514,7 +3362,7 @@
       "scope": "structure",
       "status": "supported",
       "disposition": "corrected",
-      "qualification": "Read from the GitHub repository and contributors APIs on 2026-08-02 and 2026-09-02. A project-age and staffing fact that moves with time, not a judgement about the code; the sole contributor is also the sole reviewer of the protected public-release environment, which makes releases a single point of failure.",
+      "qualification": "Read from the GitHub repository and contributors APIs on 2026-09-02. A project-age and staffing fact that moves with time, not a judgement about the code; the sole contributor is also the sole reviewer of the protected public-release environment, which makes releases a single point of failure.",
       "evidence": [
         {
           "kind": "documentation",
@@ -3526,29 +3374,21 @@
         },
         {
           "kind": "documentation",
-          "path": "../research/reader-E-build.md"
-        },
-        {
-          "kind": "documentation",
           "path": "../research/report.md"
         }
       ]
     },
     {
       "id": "nightly-deep-verification-failing",
-      "statement": "Upstream's scheduled Nightly deep verification workflow had failed on every visible run at the 2026-08-02 research date; at 2026-09-02 it was intermittent, with five failures and three successes in the eight most recent runs.",
+      "statement": "Upstream's scheduled Nightly deep verification workflow was intermittent at the 2026-09-02 reading, with five failures and three successes in the eight most recent runs, while pull-request and main continuous integration were green.",
       "scope": "structure",
       "status": "supported",
       "disposition": "corrected",
-      "qualification": "On 2026-08-02 four visible runs (07-30 to 08-02) all failed on the same stale head bf0bac8. On 2026-09-02 the runs of 08-27, 08-28 and 08-31 succeeded and those of 08-29, 08-30, 08-31, 09-01 and 09-02 failed, including the run at b6181a1, three commits before the v0.3.1 tag. The cause was not investigated and what that suite covers was not established, so this bounds the project's visible verification health and nothing more.",
+      "qualification": "On 2026-09-02 the runs of 08-27, 08-28 and 08-31 succeeded and those of 08-29, 08-30, 08-31, 09-01 and 09-02 failed, including the run at b6181a1, three commits before the v0.3.1 tag. The cause was not investigated and what that suite covers was not established, so this bounds the project's visible verification health and nothing more.",
       "evidence": [
         {
           "kind": "documentation",
           "url": "https://api.github.com/repos/varveio/swath/actions/runs"
-        },
-        {
-          "kind": "documentation",
-          "path": "../research/reader-E-build.md"
         },
         {
           "kind": "documentation",
@@ -3620,7 +3460,7 @@
       "scope": "performance",
       "status": "unverified",
       "disposition": "retained",
-      "qualification": "Not tested at high list rates. The full run's 16.9 second session against a 10.4 second listing phase, and the hourly run's 8.4 against 4.1, are consistent with JVM startup plus a serial seed descent, but neither is a high-rate result and both are single unreplicated observations.",
+      "qualification": "Not tested at high list rates. The round-trip's TSV run reported a 1.5 second listing phase inside a 2.7 second session on a 2,549-key prefix, consistent with JVM startup plus a serial seed descent, but that is one unreplicated prefix-scale observation and not a high-rate result.",
       "evidence": [
         {
           "kind": "none",
@@ -3708,7 +3548,7 @@
         },
         {
           "kind": "documentation",
-          "path": "../research/v0.3.1/reader-A.md"
+          "path": "../research/reader-A.md"
         }
       ]
     },
@@ -3754,7 +3594,7 @@
         },
         {
           "kind": "documentation",
-          "path": "../research/v0.3.1/reader-A.md"
+          "path": "../research/reader-A.md"
         }
       ]
     },
@@ -3784,7 +3624,7 @@
         },
         {
           "kind": "documentation",
-          "path": "../research/v0.3.1/reader-B.md"
+          "path": "../research/reader-B.md"
         }
       ]
     },
@@ -3822,7 +3662,7 @@
         },
         {
           "kind": "documentation",
-          "path": "../research/v0.3.1/reader-B.md"
+          "path": "../research/reader-B.md"
         }
       ]
     },
@@ -3916,7 +3756,7 @@
         },
         {
           "kind": "documentation",
-          "path": "../research/v0.3.1/reader-B.md"
+          "path": "../research/reader-B.md"
         }
       ]
     },
@@ -3986,7 +3826,7 @@
         },
         {
           "kind": "documentation",
-          "path": "../research/v0.3.1/reader-D.md"
+          "path": "../research/reader-D.md"
         }
       ]
     },
@@ -4064,7 +3904,7 @@
         },
         {
           "kind": "documentation",
-          "path": "../research/v0.3.1/reader-D.md"
+          "path": "../research/reader-D.md"
         },
         {
           "kind": "observation",
@@ -4142,7 +3982,7 @@
         },
         {
           "kind": "documentation",
-          "path": "../research/v0.3.1/reader-C.md"
+          "path": "../research/reader-C.md"
         }
       ]
     },
@@ -4212,7 +4052,7 @@
         },
         {
           "kind": "documentation",
-          "path": "../research/v0.3.1/reader-C.md"
+          "path": "../research/reader-C.md"
         }
       ]
     },
@@ -4274,7 +4114,7 @@
         },
         {
           "kind": "documentation",
-          "path": "../research/v0.3.1/reader-C.md"
+          "path": "../research/reader-C.md"
         }
       ]
     },
@@ -4320,7 +4160,7 @@
         },
         {
           "kind": "documentation",
-          "path": "../research/v0.3.1/reader-C.md"
+          "path": "../research/reader-C.md"
         }
       ]
     },
@@ -4366,7 +4206,7 @@
         },
         {
           "kind": "documentation",
-          "path": "../research/v0.3.1/reader-C.md"
+          "path": "../research/reader-C.md"
         }
       ]
     },
@@ -4428,7 +4268,7 @@
         },
         {
           "kind": "documentation",
-          "path": "../research/v0.3.1/reader-C.md"
+          "path": "../research/reader-C.md"
         }
       ]
     },
@@ -4482,7 +4322,7 @@
         },
         {
           "kind": "documentation",
-          "path": "../research/v0.3.1/reader-D.md"
+          "path": "../research/reader-D.md"
         }
       ]
     },
@@ -4528,7 +4368,7 @@
         },
         {
           "kind": "documentation",
-          "path": "../research/v0.3.1/reader-D.md"
+          "path": "../research/reader-D.md"
         }
       ]
     },
@@ -4574,7 +4414,7 @@
         },
         {
           "kind": "documentation",
-          "path": "../research/v0.3.1/reader-C.md"
+          "path": "../research/reader-C.md"
         }
       ]
     },
@@ -4636,7 +4476,7 @@
         },
         {
           "kind": "documentation",
-          "path": "../research/v0.3.1/reader-C.md"
+          "path": "../research/reader-C.md"
         }
       ]
     }

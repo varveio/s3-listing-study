@@ -1,64 +1,50 @@
-# Independent cross-model review — v0.2.0 groundwork (swath v0.2.0)
+# Independent cross-model review — v0.3.1 update
 
-Reviewer: OpenAI Codex CLI, `gpt-5.6-sol`, reasoning effort `xhigh`, `--sandbox read-only`.
-Subject: the artifacts in this directory, against the frozen source at `cef8ec2` (tag v0.2.0).
-Scope note: the reviewer was explicitly kept away from the pre-existing `tools/swath/`
-capsule, so this artifact stays independently derived and can still be compared with it.
+Reviewer: Codex (a different model family from the writer), read-only brief over
+`git diff main..HEAD` in five slices (evidence, prose, adapter, machinery, rules)
+with the frozen v0.2.0 and v0.3.1 checkouts and the pulled 0.3.1 image. Verdict on
+the first pass: **NOT_READY**, nine blockers, two non-blocking findings. Every
+finding was re-verified against source and accepted; all are resolved in the
+commit that adds this file. The report is reproduced below verbatim, followed by
+the resolutions.
 
-Findings are reproduced below, followed by resolutions. The reviewer emitted its
-locations as markdown links to absolute machine-local paths; that link syntax has
-been flattened to code spans so the repository link checker does not read them as
-broken repo links. No wording was changed.
-
-Findings, otherwise verbatim: Eight findings:
-four major, four minor. All eight were independently re-verified against source
-before being acted on, and all eight were accepted — none was disputed.
-
-## Findings (verbatim)
-
-1. **Major — JSONL normalization fails to reject tab/newline keys.** `normalize.sh:25–33` runs the guard after `join("\t")`. At that point a tab has already become a sixth field and a newline a second record, while `k=$1` hides the offending character. Synthetic inputs produced malformed output with exit 0, violating the five-field verifier contract stated at `report.md:333`.
-
-2. **Major — probe overhead is calculated incorrectly.** `report.md:583–585` subtracts the theoretical minimum page count from total calls and labels the remainder “non-page.” The observations already record actual worker-page fetches: 49 for hourly and 165 for full, alongside 75/240 total calls (`hourly stderr:12–13`, `full stderr:12–13`). With no retries and readahead off, non-worker calls were therefore 26 and 75—not 72 and 91. Probe calls did not dominate the hourly run. The same false figures recur at `report.md:709`.
-
-3. **Major — ephemeral SQLite is mischaracterized in opposite directions.** `report.md:36` says every split is durable, although stdout/`--checkpoint none` uses non-durable SQLite `:memory:`. Conversely, `report.md:602` and `report.md:712` claim those runs may not have exercised `sqlite-jdbc`. They necessarily did: ephemeral runs call `SqliteCheckpointStore.openEphemeral`, which opens `jdbc:sqlite::memory:` (`ListCommand.java:627`, `SqliteCheckpointStore.java:85`). The arm64 runs close the SQLite native-extraction gap, though not the Zstd/Parquet gap.
-
-4. **Major — hypothetical endpoint hazards are generalized as observed behavior.** `report.md:714` says the `+`/`EncodingType` hazards “become live” on MinIO, Ceph, R2, or LocalStack and produce wrong answers. The derivation establishes only conditional behavior for a nonconforming endpoint; the tested LocalStack build preserved `+`, the tested MinIO build was conformant, and nothing cited tests Ceph or R2 (`reader-B-store.md:195`, `reader-B-store.md:209`). `report.md:437` likewise presents real-S3 behavior beside an anchor that tests only LocalStack.
-
-5. **Minor — “FREE” resume classifications imply controls the resume CLI does not expose.** The tunables table marks concurrency, queue size, request rate, and Parquet controls as `FREE` at `report.md:203–219`. Reader C defines that as “may change freely on a resume” at `reader-C-cli.md:194`, then contradicts it at `reader-C-cli.md:215`: `swath resume` accepts none of those flags. The golden help confirms the restricted surface (`swath-resume.txt:1`).
-
-6. **Minor — the artifacts repeat and omit another stale live flag name.** `reader-D-output.md:175` says the disk guard is bypassed with `--force-sort`, contradicting the correct `--tune sort.ignore-disk-check=on` surface in `report.md:218`. Worse, the shipped guard’s runtime exhaustion message itself tells users to pass nonexistent `--force-sort` (`SortDiskGuard.java:186`). This fifteenth drift item is absent from the supposedly consolidated fourteen-item set at `report.md:630`.
-
-7. **Minor — the sustained-timeout shed is overstated as impossible during progress.** `report.md:118` and `reader-A-engine.md:160` say a progressing run “never sheds.” The code permits up to `max(1,T/32)` successes in the window (`ConcurrencyGauge.java:489`); for example, at `T=4`, three timeouts plus one success still triggers a shed.
-
-8. **Minor — the unused atomic API counter is said to drive cost reporting.** `report.md:360` and `reader-B-store.md:334` say `S3PageFetcher.apiCalls()` drives the cost line and efficiency guard. Targeted lookup finds no production caller of that accessor; `cost.api_calls` comes from the summed `swath.api.calls` meter at `RunMetrics.java:2169`.
 ## Resolutions
 
-Every finding was accepted and fixed. Verification of each fix was performed
-independently of the agent that applied it.
+- Release counts: eight version tags in total, six between the subjects; corrected in the ledger, README, running page and this record (the ninth GitHub release was a non-version media tag).
+- `aimd-does-not-search-down`: guaranteed full-ceiling wording replaced by the conditional wording the algorithm reference supports.
+- `parquet-output-byte-exact`: qualification and `none` reason rewritten around the remaining gap (no verifier verdict, no edge corpus, outside the worker) instead of denying the round-trip.
+- `bounded-memory-at-scale`: obsolete part-metadata growth path replaced by the writer pool and sort pipeline admission targets, in ledger and mechanism page.
+- `checkpoint-resume-design-exists`: "giving exactly-once" became "intended to give", pointing at the unverified crash claim.
+- running.md region warning scoped to v0.2.0 quickstarts.
+- The blanket "engine files byte-identical" sentence narrowed, on both pages, to the six stealing/seeding files reader A found unchanged.
+- Verdict-table rationales restored in full.
+- README trimmed to five findings; the engine-default-flip bullet folded into the concurrency bullet.
+- The three timestamp claims now cite the retained v0.3.1 samples as observations and bound "every row" to the rows the samples and round-trip establish.
 
-| # | Sev | Finding | Resolution |
-| --- | --- | --- | --- |
-| 1 | major | jsonl guard ran after `join("\t")`, so a TAB in a key emitted a malformed 6-field row with exit 0 | Refusal moved inside `jq`, onto the raw `.key`, before the join. Re-verified: normal row → 5 fields exit 0; TAB key → exit 3, no output; newline key → exit 3; 5,000 real rows → uniformly 5 fields. `adapter/normalize.sh:29-45` |
-| 2 | major | "non-page calls" derived from a *theoretical minimum* page count, inflating probe overhead to 72/91 and wrongly concluding probes dominate the small run | Corrected to the actual fetched-page counts recorded in the observations: 26/75 (hourly) and 75/240 (full) — 35% vs 31%. Conclusion inverted: probe overhead dominates neither run. `report.md:581-591`, `:716` |
-| 3 | major | Ephemeral SQLite described wrongly in both directions — splits called durable, and arm64 runs said possibly not to exercise `sqlite-jdbc` | Both corrected and anchored. `--checkpoint none` uses an in-process `:memory:` SQLite, so commits are not durable, and the arm64 runs *did* load `sqlite-jdbc`. The `zstd-jni`/Parquet native gap remains open. `report.md:36`, `:608`, `:719` |
-| 4 | major | Conditional endpoint hazards (`+`-to-space, `EncodingType` gating) presented as live behaviour on MinIO/Ceph/R2/LocalStack | Rewritten as conditional and `[INFERRED]`, naming LocalStack and MinIO as actually tested and Ceph/R2 as untested speculation. `report.md:439`, `:721` |
-| 5 | minor | `FREE` resume class implied flags settable on `swath resume`, which its golden help refutes | Qualification added: `FREE` means not identity-bearing / not refused, not settable on the resume command line. `report.md:223` |
-| 6 | minor | Drift set claimed fourteen items but omitted `SortDiskGuard`'s message naming the nonexistent `--force-sort` | Added as D15, count corrected. `report.md:636`, `:658`. `reader-D-output.md:176` annotated inline rather than overwritten |
-| 7 | minor | Sustained-timeout shed described as never firing on a progressing run | Softened to what the code guarantees — up to `max(1, T/32)` successes are permitted, so a progressing run can still shed. `report.md:118` |
-| 8 | minor | `S3PageFetcher.apiCalls()` credited with driving the cost line | Corrected: that accessor has no `src/main` caller; `cost.api_calls` is the summed `swath.api.calls` meter. `report.md:362`, `reader-B-store.md:336` annotated |
+## Review report
 
-### Raised during the fix pass, beyond the review's own findings
+# Verdict: NOT_READY
+withinBudget: true
+coverage: Evidence — 45 claims checked: 34 source-backed claims across all four reader areas (all 17 additions, the one contradicted claim, and 16 of 29 corrected claims), plus all 11 unverified claims and their `none` reasons; `tool.json` identity/state also checked. Prose — all five requested pages read, claim references resolved, README contract and cross-page counts checked. Adapter — both modules read; all emitted options compared with offline `list --help`/`--tune help`/`resume --help`; retained table sample and crafted fractional-timestamp, multibyte-key, and `\\xHH` cases exercised; Parquet STRING handling checked against source/tests. Machinery — every requested changed file read, digest occurrences compared, local image metadata/version inspected, and CI/build-identity guard diffs checked. Rules — the re-derivation rule and the report's stated deviation compared in full.
 
-- **Two different `pages` fields exist in the observation files** and would confuse anyone
-  re-checking finding 2: `list_run_summary` reports committed pages (18 / 159),
-  `list_run_diagnostics` reports pages fetched (49 / 165). Traced to source
-  (`RunMetrics` raw-count vs committed-page counters). The fetch count is the correct
-  denominator, so the corrected 26/75 stands. Recorded in `report.md:587`.
-- **Open lead, not acted on:** run 1 records `fetched_keys=37524` for a prefix holding
-  2,549 keys — roughly 15x over-fetch, because parallel range workers each pull a full
-  1,000-key page and discard everything past their `hi`. On these two runs that, not probe
-  count, is the dominant small-scope inefficiency. No claim is made about it; it is a
-  candidate finding for a future pass with a provisioned runner.
-- `reader-B-store.md:205` asserts real-S3 `+` encoding without a real-S3 anchor — the same
-  weakness finding 4 corrected in the report. Left in place, flagged here, because the
-  reader files are derivation records rather than current claims.
+## Blockers
+- [evidence/prose] `tools/swath/data/claims.json:88`, `tools/swath/README.md:164`, `tools/swath/research/v0.3.1/report.md:265` — release counts are off by one — the frozen upstream has eight release tags total (`v0.1.0`, `v0.2.0`, `v0.2.1`, `v0.2.2`, `v0.2.3`, `v0.2.4`, `v0.3.0`, `v0.3.1`) and six, not seven, are in `v0.2.0..v0.3.1`; upstream `CHANGELOG.md:8` and `CHANGELOG.md:25` at `7b9a5e2` identify the two releases after 0.2.4 — change nine to eight and seven to six in the ledger and both prose sites.
+- [evidence] `tools/swath/data/claims.json:3705` — new claim `aimd-does-not-search-down` strengthens “can reach a high T before queue latency catches up” into “a clean endpoint runs at the full --concurrency ceiling” — upstream `docs/internals/algorithms.md:1185-1194 @ 7b9a5e2` explicitly says successful-latency inflation can hold growth and only says a clean endpoint *can reach a high T*; `docs/configuration.md:60-66 @ 7b9a5e2` likewise describes gradual growth, not guaranteed arrival at the ceiling — retain the no-search-down conclusion but change the guaranteed full-ceiling wording to the conditional wording the source supports.
+- [evidence] `tools/swath/data/claims.json:2751` — `parquet-output-byte-exact` retains a now-false qualification and `none` reason (“No verifier or read-back ran … none was produced,” line 2755) — the committed v0.3.1 observation says direct and sorted Parquet datasets were produced, read back, and normalized (`tools/swath/receipts/observations-v0.3.1/adapter-modes/observation.md:7-11,27-36`); this still is not a completeness verdict, so keep the claim `unverified` but rewrite the qualification/reason around the actual remaining gap (no reference-verifier verdict/edge corpus/worker-path qualification), rather than denying the observation.
+- [evidence/prose] `tools/swath/data/claims.json:1975`, `tools/swath/docs/mechanism.md:433` — `bounded-memory-at-scale` still names “Parquet part-metadata re-serialization” as a current growth path, although this update's own output reader says that path no longer exists (`tools/swath/research/v0.3.1/reader-D.md:63-65`) and upstream v0.3.1 centralizes one manifest write at successful completion (`swath-core/src/main/java/io/varve/swath/output/dataset/DatasetPublication.java:20-30 @ 7b9a5e2`) — keep the scale claim unverified and its no-scale-run reason, but replace the obsolete target with the current bounded writer-pool queue and sort pipeline heap/file-descriptor admission targets in both ledger and mechanism prose.
+- [evidence] `tools/swath/data/claims.json:2969` — supported source-only claim `checkpoint-resume-design-exists` says the durable cursor is “giving exactly-once for Parquet parts,” while the capsule's explicit runtime claim `exactly-once-under-crash` remains unverified and the current mechanism page correctly calls this only the *intended basis* (`tools/swath/docs/mechanism.md:398-408`) — source can establish the cursor/commit design but not crash-time exactly-once behavior; change “giving” to “intended to give” and point to the unverified crash claim.
+- [prose] `tools/swath/docs/running.md:259` — the current v0.3.1 operator guide ends the region warning with “Upstream's own anonymous quickstarts omit it” at line 264 — upstream `README.md:40-54 @ 7b9a5e2` and `docs/operating.md:25-31 @ 7b9a5e2` explicitly include `--region us-east-1`, exactly as corrected claim `region-required-even-anonymously` says — delete the sentence or scope it explicitly to v0.2.0.
+- [prose] `tools/swath/research/README.md:48` — the router says at lines 51-52 that the v0.3.1 readers confirmed “the engine files that report describes are byte-identical between the tags” — the frozen upstream diff changes ten engine/CLI-engine files, including `TransientRetryFetcher.java` (the new seed fail-fast), `RangeScanner.java` (the terminal-page guard), `ConcurrencyGauge.java`, and `ListCommand.java`; the v0.3.1 reader/report themselves classify multiple engine claims as changed — narrow this to the particular unchanged files/claims, or remove it.
+- [prose] `tools/swath/docs/mechanism.md:28` — the same false byte-identical statement appears on the current mechanism page at lines 32-33 — upstream `swath-core/src/main/java/io/varve/swath/engine/TransientRetryFetcher.java:205-211 @ 7b9a5e2` and `swath-core/src/main/java/io/varve/swath/engine/RangeScanner.java:274-281 @ 7b9a5e2` are two concrete new/changed engine mechanisms described later on this same page — remove the blanket claim; individual ledger claims already identify what is unchanged.
+- [prose] `tools/swath/research/v0.3.1/report.md:279` — 42 of the per-claim “Reader rationale” cells are physically truncated mid-sentence/mid-token (for example `PageBatch.c` at line 285, `Any study prose th` at 289, `ContinuationTok` at 301, and `UTF-8 by constru` at 341) — this makes the promised claim-by-claim derivation record incomplete and even cuts off the record's own account of stale qualifications; restore the full reader rationales from the companion reports or replace each truncated cell with an intact concise rationale/link.
+
+## Non-blocking findings
+- [prose/contract] `tools/swath/README.md:58` — “What we learned” contains six findings (starting at lines 63, 70, 78, 87, 99, and 108), while `docs/operating/tool-structure.md:108-112` caps this landing-page section at three to five — consolidate or move one finding into the owning mechanism/running page.
+- [evidence] `tools/swath/data/claims.json:1655`, `:1717`, `:3983` — the aligned/timestamp claims say the v0.3.1 sample proves S3's 24-character millisecond spelling and, twice, strengthen it to “every row”/all “live rows,” but neither `aligned-fixed-column-timestamp-assumption` nor `last-modified-text-is-endpoint-spelling` cites the committed v0.3.1 observation, and `timestamp-precision-is-variable` cites only a v0.2.0 sample; upstream source (`swath-s3/src/main/java/io/varve/swath/store/s3/StreamingListObjectsV2Interceptor.java:208-213,541-542 @ 7b9a5e2`) proves pass-through, not what the service emitted — add the v0.3.1 observation artifacts as `kind: observation` and bound the runtime wording to what the retained samples/round-trip establish, or add authoritative protocol evidence for the general S3 spelling.
+
+## Checked and found sound
+- [evidence] Apart from the findings above, sampled statements and qualifications are shown by their cited `7b9a5e2` lines. All 418 source entries name the frozen v0.3.1 commit; the ledger has 88 `supported`, 11 `unverified`, zero `confirmed`, 29 `corrected`, one `contradicted`, and 17 additions. The other ten `none` reasons remain accurate and no `unverified` claim carries non-`none` evidence.
+- [prose] Every claim ID used by the current README/mechanism/running pages resolves. The v0.2.0 observations, v0.3.1 round-trip, diagnostic receipts, absence of a verifier verdict, and absence of completeness checking are kept distinct. Counts for eight adapter modes, thirteen upstream modes under the stated definition, eight exit codes, 84 intervening commits, 29 corrected claims, one contradicted claim, and 17 additions agree across ledger/pages; only the release count is defective.
+- [adapter] Every argv token emitted by `command.py` exists on the installed 0.3.1 surface, including the five tune keys/options used by configured modes; sorted Parquet correctly uses `--checkpoint auto`. The table sample normalizes `.000Z` to whole-second `Z`; separator checks refuse an overflowing timestamp; both TSV and table refuse ambiguous literal/control `\\xHH` keys; a multibyte UTF-8 key is retained. The Parquet query correctly consumes the new STRING-annotated physical BINARY key as VARCHAR, filters object rows, and requires `_SUCCESS` before reading a dataset.
+- [machinery] The selected digest `sha256:776e788200a1e70f30206897303a34e4faabd56c591e1c9562277677085c4f60` is identical in both build recipes, `image.json`, the build regression test, and the requested docs. The local image reports 0.3.1/`7b9a5e2fba04`, carries the full revision label, and has the launcher/user/workdir the capsule expects. The only CI change is the example checkout revision; the self-test remains active, and the toolbox test still guards the exact Swath `FROM` digest and slice identity.
+- [rules] `tools/swath/research/v0.3.1/report.md:8-32` explicitly identifies the blind-re-derivation rule, the owner's minimal diff-driven exception, the inherited question-set risk, the per-claim re-test, and the change-driven new-fact sweep. It does not claim that minimal patching is generally permitted or license carrying a claim forward on trust. The stale claims reported above are execution defects, not an undisclosed rule change.

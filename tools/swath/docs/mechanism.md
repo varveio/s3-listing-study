@@ -7,12 +7,10 @@ and parallelises, what it keeps in memory, what it emits, and how it fails.
 `org.opencontainers.image.revision` label equals the pinned source commit
 `7b9a5e2fba045c67165c76511f8c40c880406a8a` (short `7b9a5e2`). Canonical identity
 is in [`../data/tool.json`](../data/tool.json); how that image was selected and
-run is in [`running.md`](running.md). The capsule first described v0.2.0
-(`cef8ec2`); every claim below was re-tested against the v0.3.1 tree, and the
-per-claim record of what held, moved or changed is
-[`../research/v0.3.1/report.md`](../research/v0.3.1/report.md). Where a
-behaviour is new since v0.2.0 the text says so, because the study's own
-runtime observations of the engine are still the v0.2.0 ones.
+run is in [`running.md`](running.md). Where a behaviour changed between
+upstream's 0.2.0 and 0.3.1 the text says so, because those are the changes a
+reader of the earlier releases would otherwise miss; how the ledger was
+derived and re-tested is [`../research/report.md`](../research/report.md).
 
 **Evidence and reference notation, defined once for this capsule.** A reference
 of the form claim `some-id` resolves in the canonical ledger,
@@ -21,18 +19,12 @@ evidence strength, its source, documentation, observation and run anchors, and
 its qualification. This page does not repeat those anchors. Statuses use the
 canonical vocabulary — `supported`, `unverified`, `unverifiable`, `confirmed` —
 as defined in [`../../../docs/methodology.md`](../../../docs/methodology.md)
-§ Evidence language. **No claim on this subject is `confirmed`**: later
-diagnostic attempt receipts carry no verifier verdict or claim-confirming
-evidence. The boundary is owned by
-[`running.md`](running.md#diagnostic-attempt-receipts-but-no-verifier-verdict). Narrative
-that is not represented by a canonical claim is attributed inline to the
-v0.2.0 derivation in [`../research/report.md`](../research/report.md),
-whose known anchor defects are listed in
-[`../research/ERRATA.md`](../research/ERRATA.md); the readers of the v0.3.1
-update found the stealing and seeding core that narrative describes —
-`Worklist`, `Thief`, `ThiefPolicy`, `HybridSeedPlanner`, `SeedStep`,
-`RateAnchoredEstimator` — byte-identical between the two tags, while the
-retry, gauge, scanner and command files changed in the ways this page names.
+§ Evidence language. **No claim on this subject is `confirmed`**: no receipt
+with a verifier verdict exists. The boundary is owned by
+[`running.md`](running.md#no-receipts-and-no-verifier-verdict). Narrative that
+is not represented by a canonical claim is attributed inline to the reader
+companions in [`../research/`](../research/), which cite the source lines they
+read at `7b9a5e2`.
 
 Everything below is established from the pinned source and the project's own
 documentation unless it names a run. Source can establish a mechanism; it cannot
@@ -54,7 +46,7 @@ source; no run instruments the worklist.
 The code separates an executor layer (locks, clocks, RPC) from a pure policy
 layer that decides by request-and-response over probe outcomes, across three
 seams — `Thief`/`ThiefPolicy`, `OwnerSelfSplit`/`OwnerSplitGovernor`,
-`SeedStep`/`HybridSeedPlanner` (report § 2). The policy classes are
+`SeedStep`/`HybridSeedPlanner` (reader companions). The policy classes are
 deterministic state machines with no I/O, which is why they carry the
 complexity they do.
 
@@ -67,7 +59,7 @@ density-proportional *in effect* at runtime is not something source settles.
 Owner self-split runs inside the page-commit lock with zero extra API calls; its
 gate chain includes a confetti-feedback gate that suppresses carving when
 completed children come back as runts, letting every sixteenth carve through as
-a probe (report § 2.3).
+a probe (reader companions).
 
 ## The range model and why no deduplication pass exists
 
@@ -154,7 +146,7 @@ One page fetch is exactly one `ListObjectsV2` call. Every request carries
 `encoding-type=url`; prefix, `start_after`, delimiter, fetch-owner and
 requester-pays are conditional. Four request shapes exist in tree: worker pages,
 readahead guesses (off by default), `delimiter=/` structure probes from the seed
-and from a thief, and single-key thief pivot probes (report § 2.1). Since 0.2.4
+and from a thief, and single-key thief pivot probes (reader companions). Since 0.2.4
 every request also carries a `swath/<version>` prefix in its HTTP User-Agent,
 ahead of the SDK's own markers, so the tool is attributable in server access
 logs — claim `user-agent-identifies-swath`.
@@ -465,11 +457,11 @@ statement of the shipped surface or the shipped defaults, while its reference
 tables, golden help captures, the code and — new in 0.3.0 — a supported-surface
 page whose completeness against the visible option set is enforced by a golden
 test are — claims `docs-and-javadoc-drift`, `supported-cli-surface-page-is-tested`.
-Fifteen distinct drift items were consolidated at v0.2.0 across four
-independent readers plus a cross-model review. Of those re-checked at 0.3.1,
-the three that state engine defaults backwards persist verbatim, as do both
-live error messages below; one item left the usage prose but survives in the
-roadmap and javadoc, and one was reworded rather than retracted. The encoding
+Fifteen distinct drift items were consolidated in the study's earlier
+derivation at v0.2.0. Of those re-checked at 0.3.1, the three that state
+engine defaults backwards persist verbatim, as do both live error messages
+below; one item left the usage prose but survives in the roadmap and javadoc,
+and one was reworded rather than retracted. The encoding
 item has a correctness consequence and is discussed above. In fairness, the
 flag and default tables matched the golden help and the source field defaults
 on every entry checked at both versions.
