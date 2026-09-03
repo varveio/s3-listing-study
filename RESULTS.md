@@ -9,27 +9,35 @@ and the public rows are one click below.
 
 ## The largest thing we listed
 
-In one run on 2026-09-01, Swath 0.3.1 returned 1,068,477,307 rows from the
-public `sentinel-cogs` bucket and exited after 5 minutes 41 seconds, writing
-compressed TSV to disk, on one 32-vCPU VM in another region. That is one run,
-of one tool, against a bucket that changes and has no reference count, so it
-is an observation and not a comparison. It is also the largest listing in the
-release by a factor of seven over the biggest replay fixture. The same tool
-returned 960 million rows from `janelia-cosem-datasets` in 9 minutes 45
-seconds and 523 million from a Folding@home bucket in 3 minutes 7 seconds,
-each once.
+In one run on 2026-09-03, Swath 0.3.2 returned 10,293,380,300 rows from the
+public `elevation-tiles-prod` bucket and exited after 18 minutes 45 seconds,
+writing 255 GB of compressed TSV to disk, on one 64-vCPU VM. That is one run,
+of one tool, against a bucket with no reference count, so it is an
+observation and not a comparison. It is the largest listing in the release by
+a factor of seventy over the biggest replay fixture. The same bucket on Swath
+0.3.1 the day before took 1 hour 22 minutes on the same machine; the 0.3.2
+release fixes a wakeup storm in the pipeline's shared channel that had kept
+most of the fetch workers parked (upstream #206). The same tool returned
+1.95 billion rows from `usgs-lidar-public` in 6 minutes 42 seconds, 1.92
+billion from `its-live-data` in 6 minutes 13 seconds and 1.07 billion from
+`sentinel-cogs` in 3 minutes 44 seconds, each once, on 64 vCPU.
 
 | bucket | rows returned | process wall | peak RSS | output | attempt |
 | --- | ---: | ---: | ---: | --- | --- |
-| `sentinel-cogs` | 1,068,477,307 | 5 m 41 s | 9.3 GB | TSV + zstd | `swath.7b028bd8c692.s1` |
-| `janelia-cosem-datasets` | 959,831,933 | 9 m 45 s | 13.7 GB | sorted Parquet | `swath.0d01af45ef74.s1` |
-| `fah-public-data-covid19-absolute-free-energy` | 522,925,693 | 3 m 7 s | 8.6 GB | TSV + zstd | `swath.a0f1b2c053d8.s1` |
+| `elevation-tiles-prod` | 10,293,380,300 | 18 m 45 s | 11.9 GB | TSV + zstd | `swath.52ab9213be7b.s1` |
+| `usgs-lidar-public` | 1,950,065,411 | 6 m 42 s | 12.3 GB | TSV + zstd | `swath.2e269c9f9dd4.s1` |
+| `its-live-data` | 1,917,546,508 | 6 m 13 s | 13.0 GB | TSV + zstd | `swath.693fc5f2ffbf.s1` |
+| `sentinel-cogs` | 1,068,996,570 | 3 m 44 s | 13.3 GB | TSV + zstd | `swath.9dcd956bbc5c.s1` |
+| `janelia-cosem-datasets` | 959,831,933 | 2 m 58 s | 9.6 GB | TSV + zstd | `swath.29b5a8610a12.s1` |
 
-All three: Swath 0.3.1, one `n4-highcpu-32` in GCP `us-east1`, 2,048
-requests in flight allowed, one run each, no other tool. Memory is bounded
-because Swath streams its output; the sorted-Parquet run holds more because
-it sorts before it writes. Every live run, including the earlier 0.3.0 ones,
-is in the [report](results/2026-09-scale-diagnostics/REPORT.md#swath-on-live-s3).
+All five: Swath 0.3.2, one `n4-highcpu-64` in GCP `us-east1`, 2,048 requests
+in flight allowed, 32 writer lanes, one run each, no other tool. Memory is
+bounded because Swath streams its output. The 32-vCPU row that headlined the
+previous version of this page (1.07 billion in 5 m 41 s) is still in the
+report beside its 0.3.2 repeats, which land between 4 m 53 s and 5 m 57 s of
+process wall: at that shape the fix is inside run-to-run variance. Every live
+run, including the earlier 0.3.0 and 0.3.1 ones, is in the
+[report](results/2026-09-scale-diagnostics/REPORT.md#swath-on-live-s3).
 
 ## What we did
 
@@ -104,8 +112,9 @@ with what it is and is not. None of them is a ranking.
 
 ## Swath on live S3
 
-Eight single runs of Swath against four public buckets, from 13.9 million
-rows to 1.07 billion, on 16- and 32-vCPU VMs. No other tool ran on live S3 in
+Thirty single runs of three Swath builds against seven public buckets, from
+13.9 million rows to 10.3 billion, on 16-, 32- and 64-vCPU VMs; the 0.3.2 rows
+of 2026-09-03 repeat the earlier shapes on the released fix for upstream #206. No other tool ran on live S3 in
 this release, so nothing here compares tools. The wall clocks are whole
 process, start to exit, including writing the output; the listing phase
 inside the billion-row run is shorter, but that figure is in a private run
@@ -169,7 +178,10 @@ or the tool's source.
 | rclone walk killed at 8 GiB on the flat fixture | `rclone.795fbd66217b.s1` | row + log |
 | s7cmd serial drain on the flat fixture | `s7cmd.97b265107a89.s1` | row + source |
 | Swath on the flat fixture, `INSUFFICIENT_EVIDENCE` | `swath.666e471aac76.s1` | row |
-| Swath, 1,068,477,307 rows returned on live S3, 341.4 s | `swath.7b028bd8c692.s1` | row |
+| Swath 0.3.2, 10,293,380,300 rows returned on live S3, 1,124.7 s | `swath.52ab9213be7b.s1` | row |
+| Swath 0.3.1, the same bucket, 4,907.6 s | `swath.644f4a4a175b.s1` | row |
+| Swath 0.3.2 at 64 vCPU: 1.95 B in 402.3 s, 1.92 B in 372.6 s, 1.07 B in 223.6 s, 960 M in 178.1 s | `swath.2e269c9f9dd4.s1`, `swath.693fc5f2ffbf.s1`, `swath.9dcd956bbc5c.s1`, `swath.29b5a8610a12.s1` | rows |
+| Swath, 1,068,477,307 rows returned on live S3, 341.4 s, and its 0.3.2 repeats at 293.1 s, 355.6 s and 337.1 s | `swath.7b028bd8c692.s1`, `swath.6bdbca2ec124.s1`, `swath.8d806cdc14d5.s1`, `swath.8d806cdc14d5.s2` | rows |
 | Swath, 959,831,933 rows returned on live S3, 585.1 s | `swath.0d01af45ef74.s1` | row |
 | Swath, 522,925,693 rows returned on live S3, 187.3 s | `swath.a0f1b2c053d8.s1` | row |
 

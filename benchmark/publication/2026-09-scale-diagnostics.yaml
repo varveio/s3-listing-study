@@ -49,7 +49,7 @@ disclosures:
   - id: multi-campaign-corpus
     detail: >-
       This release combines several diagnostic campaigns run between 2026-08-26 and
-      2026-09-01 while the harness, the replay server and Swath were evolving. Every
+      2026-09-03 while the harness, the replay server and Swath were evolving. Every
       attempt pins its exact tool, image, platform, fixture and replay identities, but
       rows from different groups are not comparable merely because they share a release;
       the report's asymmetry table names the cases that matter.
@@ -82,6 +82,23 @@ disclosures:
       identical replay experiment cannot be rerun from this repository alone; the release
       is auditable, not independently reproducible.
     affects: every row with fixture != null
+  - id: unreleased-swath-builds
+    detail: >-
+      Rows whose Swath version is 0.2.5-SNAPSHOT (2026-08) or 0.3.2-SNAPSHOT (2026-09-03) ran
+      unreleased builds pinned by image digest: the 0.3.2-SNAPSHOT rows are the sink-channel fix
+      (upstream #209, commit cc052c9) and its lane-routing follow-up (#210, commit 5cdaeaf,
+      not merged) measured on sentinel-cogs before v0.3.2 was cut. They are diagnostics of a
+      change, not release rows; the released-build rows of the same shapes are the s032-* groups.
+    affects: every row with version ending in -SNAPSHOT
+  - id: concurrent-live-s3-launches
+    detail: >-
+      Live-S3 rows launched in parallel from the same project and VPC (2026-09-02 four buckets;
+      2026-09-03 the s032-s3-* groups) share the path out of the VPC. The sentinel-cogs 32-vCPU
+      TSV row of 2026-09-03 listed 23 % slower while four other live-S3 jobs ran than the same
+      build did alone earlier that morning, with S3 first-byte latency and sink waits both
+      higher; the 64-vCPU row reproduced its solo figure within 2 %. Where a solo re-run exists
+      it is the row to cite; the report names them.
+    affects: every row with replay == null
   - id: roster-subject-not-run
     detail: >-
       s4cmd is a roster subject with no attempt in this release: it lists through the
@@ -119,3 +136,44 @@ plans:
   swath-s3-sentinel-sort-use1-20260901: benchmark/plans/campaigns/swath-real-s3-peak/sentinel-cogs.yaml
   swath-s3-sentinel-tsv-c2048-20260901: benchmark/plans/campaigns/swath-real-s3-peak/sentinel-cogs.yaml
   swath-s3-changesets-sort-20260901: benchmark/plans/campaigns/swath-real-s3-peak/real-changesets.yaml
+  swath-s3-sentinel-tsv-cpu64-20260902: benchmark/plans/campaigns/swath-real-s3-peak/sentinel-cogs.yaml
+  swath-s3-janelia-tsv-cpu64-20260902: benchmark/plans/campaigns/swath-real-s3-peak/janelia-cosem-datasets.yaml
+  swath-s3-lidar-tsv-cpu64-20260902: benchmark/plans/campaigns/swath-real-s3-peak/usgs-lidar-public.yaml
+  swath-s3-itslive-tsv-cpu64-20260902: benchmark/plans/campaigns/swath-real-s3-peak/its-live-data.yaml
+  swath-s3-elevation-tsv-cpu64-20260902: benchmark/plans/campaigns/swath-real-s3-peak/elevation-tiles-prod.yaml
+  swath-s3-sentinel-tsv-readahead-20260902: benchmark/plans/campaigns/swath-real-s3-peak/sentinel-cogs.yaml
+  swath-s3-sentinel-readahead-b-20260902: benchmark/plans/campaigns/swath-real-s3-peak/sentinel-cogs.yaml
+  swath-s3-sentinel-usw1-20260902: benchmark/plans/campaigns/swath-real-s3-peak/sentinel-cogs.yaml
+  swath-s3-sentinel-usw1-b-20260902: benchmark/plans/campaigns/swath-real-s3-peak/sentinel-cogs.yaml
+  swath-s3-sentinel-sinkfix-20260903: benchmark/plans/campaigns/swath-real-s3-peak/sentinel-cogs.yaml
+  swath-s3-sentinel-sinkfix-cpu64-20260903: benchmark/plans/campaigns/swath-real-s3-peak/sentinel-cogs.yaml
+  swath-s3-sentinel-lanes-20260903: benchmark/plans/campaigns/swath-real-s3-peak/sentinel-cogs.yaml
+  swath-s3-sentinel-lanes32-20260903: benchmark/plans/campaigns/swath-real-s3-peak/sentinel-cogs.yaml
+  swath-s3-sentinel-lanes64-20260903: benchmark/plans/campaigns/swath-real-s3-peak/sentinel-cogs.yaml
+  s032-capacity-n-noaa-nws-fou-r1: benchmark/plans/campaigns/fourcast-replay/capacity-no-latency/noaa-nws-fourcastnetgfs-pds.yaml
+  s032-capacity-s-noaa-nws-fou-r1: benchmark/plans/campaigns/fourcast-replay/capacity-s3-latency/noaa-nws-fourcastnetgfs-pds.yaml
+  s032-screen-no--noaa-nws-fou-r1: benchmark/plans/campaigns/fourcast-replay/screen-no-latency/noaa-nws-fourcastnetgfs-pds.yaml
+  s032-screen-s3--noaa-nws-fou-r1: benchmark/plans/campaigns/fourcast-replay/screen-s3-latency/noaa-nws-fourcastnetgfs-pds.yaml
+  s032-s3-sentinel-c-1-a: benchmark/plans/campaigns/swath-real-s3-peak/sentinel-cogs.yaml
+  s032-s3-usgs-lidar-1-a: benchmark/plans/campaigns/swath-real-s3-peak/usgs-lidar-public.yaml
+  s032-s3-real-chang-1-a: benchmark/plans/campaigns/swath-real-s3-peak/real-changesets.yaml
+  s032-s3-fah-public-1-a: benchmark/plans/campaigns/swath-real-s3-peak/fah-public-data-covid19-absolute-free-energy.yaml
+  s032-s3-janelia-co-1-a: benchmark/plans/campaigns/swath-real-s3-peak/janelia-cosem-datasets.yaml
+  s032-cpu-screen-noaa-nws-fou-r2: benchmark/plans/campaigns/fourcast-replay/cpu-screen/noaa-nws-fourcastnetgfs-pds.yaml
+  s032-isolated-r-noaa-nws-fou-r2: benchmark/plans/campaigns/fourcast-replay/isolated-repeatability/noaa-nws-fourcastnetgfs-pds.yaml
+  s032-tuning-fol-noaa-nws-fou-r2: benchmark/plans/campaigns/fourcast-replay/tuning-followup/noaa-nws-fourcastnetgfs-pds.yaml
+  s032-screen-no--idc-open-dat-r2: benchmark/plans/campaigns/idc-replay/screen-no-latency/idc-open-data.yaml
+  s032-config-sel-nara-1950-ce-r3: benchmark/plans/campaigns/nara-replay/config-selection/nara-1950-census.yaml
+  s032-config-fol-nara-1950-ce-r3: benchmark/plans/campaigns/nara-replay/config-followup/nara-1950-census.yaml
+  s032-cpu-ladder-nara-1950-ce-r3: benchmark/plans/campaigns/nara-replay/cpu-ladder/nara-1950-census.yaml
+  s032-capacity-noaa-nbm-gri-r3: benchmark/plans/campaigns/nbm-replay/capacity/noaa-nbm-grib2-pds.yaml
+  s032-flat-real-changes-r3: benchmark/plans/campaigns/real-changesets-replay/flat/real-changesets.yaml
+  s032-capacity-aws-public-b-r3: benchmark/plans/campaigns/aws-public-blockchain-replay/capacity/aws-public-blockchain.yaml
+  s032-s3-fah-public-2-a: benchmark/plans/campaigns/swath-real-s3-peak/fah-public-data-covid19-absolute-free-energy.yaml
+  s032-s3-its-live-d-1-a: benchmark/plans/campaigns/swath-real-s3-peak/its-live-data.yaml
+  s032-s3-janelia-co-2-a: benchmark/plans/campaigns/swath-real-s3-peak/janelia-cosem-datasets.yaml
+  s032-s3-sentinel-c-2-b: benchmark/plans/campaigns/swath-real-s3-peak/sentinel-cogs.yaml
+  s032-s3-fah-public-3-a: benchmark/plans/campaigns/swath-real-s3-peak/fah-public-data-covid19-absolute-free-energy.yaml
+  s032-s3-elevation--1-a: benchmark/plans/campaigns/swath-real-s3-peak/elevation-tiles-prod.yaml
+  s032-s3-janelia-co-3-a: benchmark/plans/campaigns/swath-real-s3-peak/janelia-cosem-datasets.yaml
+  s032-s3-sentinel-c-3-b: benchmark/plans/campaigns/swath-real-s3-peak/sentinel-cogs.yaml
