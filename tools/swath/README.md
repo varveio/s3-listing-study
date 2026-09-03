@@ -26,9 +26,9 @@ the released-version rule), `0.3.0` and `0.3.1`, in adapter modes
 parquet`), and, on live S3 only, `recursive-parquet-sorted` (`list --format
 parquet --sort`) and `recursive-tsv-zstd` (the TSV dataset with
 `--compression zstd`); the `--concurrency` of each arm is in its row. The
-groundwork subject further down this page is v0.3.1, the same build as the
-release's `0.3.1` rows; the earlier release rows are builds the groundwork
-does not describe.
+groundwork subject further down this page is v0.3.2 (moved from v0.3.1 by the bounded delta in
+[`research/v0.3.2/report.md`](research/v0.3.2/report.md)); the release's `0.3.1` rows are the build the
+groundwork was read on, and the earlier release rows are builds the groundwork does not describe.
 
 | fixture | attempts | outcomes | timing grades of completed rows | row cited in the report |
 | --- | ---: | --- | --- | --- |

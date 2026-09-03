@@ -13,17 +13,17 @@
     "variant": "upstream",
     "repository": "https://github.com/varveio/swath",
     "version": {
-      "value": "0.3.1",
+      "value": "0.3.2",
       "provenance": {
         "kind": "documentation",
-        "reference": "../research/report.md"
+        "reference": "../research/v0.3.2/report.md"
       }
     },
     "revision": {
-      "value": "7b9a5e2fba045c67165c76511f8c40c880406a8a",
+      "value": "acf0d509f238832ffe2f0fb608951be33e99ae6f",
       "provenance": {
         "kind": "documentation",
-        "reference": "../research/report.md"
+        "reference": "../research/v0.3.2/report.md"
       }
     }
   },

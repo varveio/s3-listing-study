@@ -1,7 +1,8 @@
 # Swath — running
 
-What this study selected as its v0.3.1 subject, what it ran, what it could not
-run, what could not be checked, and how to reproduce the work that exists.
+What this study selected as its subject (v0.3.2 since 2026-09-03; the v0.3.1 work below
+stands wherever the code is unchanged, see [`../research/v0.3.2/report.md`](../research/v0.3.2/report.md)),
+what it ran, what it could not run, what could not be checked, and how to reproduce the work that exists.
 
 Canonical tested identity — repository, version, pinned revision, and study
 states — lives in [`../data/tool.json`](../data/tool.json). The claim `some-id`
@@ -11,7 +12,7 @@ explanation lives there too.
 
 ## Toolbox image selection (not run evidence)
 
-[`image.json`](../build/image.json) pins upstream's published v0.3.1 release
+[`image.json`](../build/image.json) pins upstream's published v0.3.2 release
 image by index digest, and both the capsule's
 [`build/Dockerfile`](../build/Dockerfile) and the benchmark toolbox recipe copy
 its jar and Temurin 25 JRE from that digest without recompiling Swath. Shared
@@ -21,32 +22,34 @@ assembly is defined once in
 ## Tested subject: upstream's published image
 
 The subject is upstream's own published image, an OCI index at
-`ghcr.io/varveio/swath@sha256:776e788200a1e70f30206897303a34e4faabd56c591e1c9562277677085c4f60`,
+`ghcr.io/varveio/swath@sha256:0bbc96c10b4b63d184cce76734679dd4a2f54a1c81c7c94c1000f7114eab8e43`,
 pulled anonymously with no `docker login` — claim
 `published-image-is-anonymously-pullable`. Nothing was built locally for this
 subject. The index carries `linux/amd64` and `linux/arm64` children plus two
 attestation manifests, and a cosign signature tag for the index digest is
 present in the registry.
 
-**Tag trap.** The registry tag is `0.3.1`, with no `v` prefix. `v0.3.1` returns
+**Tag trap.** The registry tag is `0.3.2`, with no `v` prefix. `v0.3.2` returns
 `manifest unknown`, which will catch anyone who copies the git tag — the git tag
 *is* `v`-prefixed, and release version discipline is mechanical: a release fails
 unless the git tag equals `v` plus the Gradle version — claim
-`upstream-publishes-tagged-releases`. Eight such tags exist, from v0.1.0
-(2026-07-27) to v0.3.1 (2026-09-01); v0.3.0 and v0.3.1 were published an hour
-apart, and the 0.3.1 notes say the `swath` CLI is unchanged from 0.3.0.
+`upstream-publishes-tagged-releases`. Nine such tags exist, from v0.1.0
+(2026-07-27) to v0.3.2 (2026-09-03); v0.3.0 and v0.3.1 were published an hour
+apart, the 0.3.1 notes say the `swath` CLI is unchanged from 0.3.0, and 0.3.2
+changes one pipeline seam and no CLI surface (claims
+`channel-wakeup-is-relay-not-broadcast`, `page-tally-computed-on-fetch-worker`).
 
 The image binds itself to source: both per-arch config blobs carry
-`org.opencontainers.image.revision` equal to the pinned commit `7b9a5e2`, so the
+`org.opencontainers.image.revision` equal to the pinned commit `acf0d50`, so the
 source-to-image link is embedded in the artifact rather than recorded only in a
 build receipt — claim `image-label-binds-to-source-commit`. The jar inside it is
 the release build job's own uber-jar, promoted by a build-context override and
 checksum-verified before use; the image is pushed by digest, smoked, and only
-then tagged. The running image self-reports `swath 0.3.1`, `Commit:
-7b9a5e2fba04`, `Runtime: 25.0.4+7-LTS` — claim `image-self-reports-v020`. The
+then tagged. The running image self-reports `swath 0.3.2, Commit: acf0d509f238, Runtime: 25.0.4+7-LTS` — claim `image-self-reports-v020`. The
 label read, the manifest fetch and the `--version` probe were all direct
-container observations on 2026-09-02 with no receipt, recorded in
-[`../research/report.md`](../research/report.md).
+container observations on 2026-09-03 with no receipt, recorded in
+[`../research/v0.3.2/report.md`](../research/v0.3.2/report.md) (the 0.3.1 equivalents are in
+[`../research/report.md`](../research/report.md)).
 
 At this revision the repository is public, carries an Apache-2.0 licence and a
 `NOTICE` naming Varve Systems Ltd, and publishes tagged releases — claims
