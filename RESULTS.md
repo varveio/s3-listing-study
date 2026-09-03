@@ -7,36 +7,54 @@ ledger, logs, listing products and fixture bytes stay private. This page is
 the short version; every claim on it names its run in the table at the end,
 and the public rows are one click below.
 
-## The largest thing we listed
+## A billion objects in four minutes, ten billion in twenty
 
-In one run on 2026-09-03, Swath 0.3.2 returned 10,293,380,300 rows from the
-public `elevation-tiles-prod` bucket and exited after 18 minutes 45 seconds,
-writing 255 GB of compressed TSV to disk, on one 64-vCPU VM. That is one run,
-of one tool, against a bucket with no reference count, so it is an
-observation and not a comparison. It is the largest listing in the release by
-a factor of seventy over the biggest replay fixture. The same bucket on Swath
-0.3.1 the day before took 1 hour 22 minutes on the same machine; the 0.3.2
-release fixes a wakeup storm in the pipeline's shared channel that had kept
-most of the fetch workers parked (upstream #206). The same tool returned
-1.95 billion rows from `usgs-lidar-public` in 6 minutes 42 seconds, 1.92
-billion from `its-live-data` in 6 minutes 13 seconds and 1.07 billion from
-`sentinel-cogs` in 3 minutes 44 seconds, each once, on 64 vCPU.
+On 2026-09-03 we pointed Swath 0.3.2 at five large public buckets, one run
+each, from one 64-vCPU VM in GCP `us-east1`, writing compressed TSV to the
+VM's disk. It returned 1.07 billion rows from `sentinel-cogs` in 3 minutes 44
+seconds and 10.29 billion rows from `elevation-tiles-prod` in 18 minutes 45
+seconds. Those times are the whole process, from start to exit, with the
+output on disk. Nothing here is a comparison: no other tool ran on live S3,
+and no reference count exists for a public bucket that keeps changing, so
+each count is what the run returned.
 
-| bucket | rows returned | process wall | peak RSS | output | attempt |
-| --- | ---: | ---: | ---: | --- | --- |
-| `elevation-tiles-prod` | 10,293,380,300 | 18 m 45 s | 11.9 GB | TSV + zstd | `swath.52ab9213be7b.s1` |
-| `usgs-lidar-public` | 1,950,065,411 | 6 m 42 s | 12.3 GB | TSV + zstd | `swath.2e269c9f9dd4.s1` |
-| `its-live-data` | 1,917,546,508 | 6 m 13 s | 13.0 GB | TSV + zstd | `swath.693fc5f2ffbf.s1` |
-| `sentinel-cogs` | 1,068,996,570 | 3 m 44 s | 13.3 GB | TSV + zstd | `swath.9dcd956bbc5c.s1` |
-| `janelia-cosem-datasets` | 959,831,933 | 2 m 58 s | 9.6 GB | TSV + zstd | `swath.29b5a8610a12.s1` |
+| bucket | rows returned | process wall | time per billion rows | peak RSS | attempt |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `elevation-tiles-prod` | 10,293,380,300 | 18 m 45 s | 1 m 49 s | 11.9 GB | `swath.52ab9213be7b.s1` |
+| `usgs-lidar-public` | 1,950,065,411 | 6 m 42 s | 3 m 26 s | 12.3 GB | `swath.2e269c9f9dd4.s1` |
+| `its-live-data` | 1,917,546,508 | 6 m 13 s | 3 m 14 s | 13.0 GB | `swath.693fc5f2ffbf.s1` |
+| `sentinel-cogs` | 1,068,996,570 | 3 m 44 s | 3 m 29 s | 13.3 GB | `swath.9dcd956bbc5c.s1` |
+| `janelia-cosem-datasets` | 959,831,933 | 2 m 58 s | 3 m 06 s | 9.6 GB | `swath.29b5a8610a12.s1` |
 
-All five: Swath 0.3.2, one `n4-highcpu-64` in GCP `us-east1`, 2,048 requests
-in flight allowed, 32 writer lanes, one run each, no other tool. Memory is
-bounded because Swath streams its output. The 32-vCPU row that headlined the
-previous version of this page (1.07 billion in 5 m 41 s) is still in the
-report beside its 0.3.2 repeats, which land between 4 m 53 s and 5 m 57 s of
-process wall: at that shape the fix is inside run-to-run variance. Every live
-run, including the earlier 0.3.0 and 0.3.1 ones, is in the
+All five: Swath 0.3.2, one `n4-highcpu-64`, 2,048 requests in flight
+allowed, 32 writer lanes, TSV + zstd, one run each. Memory stays around 10 to
+13 GB whatever the bucket size because Swath streams its output.
+
+What to read into it, and what not to:
+
+- **The flat bucket is the best case.** `elevation-tiles-prod` has ten
+  billion keys in one flat namespace, so every request returns a full page
+  and there is no directory structure to probe. That is why it runs at
+  under two minutes per billion while the hierarchical buckets take three
+  to three and a half. Expect the slower figure for a bucket with structure.
+- **Why 0.3.2 is faster than the day before.** The same five buckets on
+  Swath 0.3.1, same machine, took 1.35 to 4.4 times longer (the ten-billion
+  run: 1 hour 22 minutes). Swath 0.3.2 fixes a wakeup storm in the pipeline
+  channel that hands pages from the fetch workers to the writer, which had
+  kept most workers idle behind the sink; the fix is upstream #206 and #209,
+  and the report shows the before-and-after pairs.
+- **Single runs.** Every row is one run on one day. Where we repeated a shape
+  we show the spread: the 32-vCPU, 16-writer `sentinel-cogs` run that
+  headlined the previous version of this page (1.07 billion in 5 m 41 s on
+  0.3.1) was repeated three times on 0.3.2 the same day and came in between
+  4 m 53 s and 5 m 56 s, around the old figure. At that smaller shape the
+  fix is inside run-to-run variance; the gains above are at 64 vCPU.
+- **One tool, one region, public internet.** All runs read a `us-west-2` or
+  `us-east-1` bucket from GCP `us-east1`, unsigned. Several of the 0.3.2 runs
+  on different buckets ran at the same time from the same project; the
+  report discloses which.
+
+Every live run, including the earlier 0.3.0 and 0.3.1 ones, is in the
 [report](results/2026-09-scale-diagnostics/REPORT.md#swath-on-live-s3).
 
 ## What we did
