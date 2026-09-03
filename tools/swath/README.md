@@ -20,7 +20,9 @@ The release `2026-09-scale-diagnostics` is diagnostic: it settles what ran,
 what each run returned, and how much memory it used; no row in it is a
 calibrated measurement, and nothing here is a ranking. Swath ran as versions
 `0.2.5-SNAPSHOT` (a pre-release build, the report's documented exception to
-the released-version rule), `0.3.0` and `0.3.1`, in adapter modes
+the released-version rule), `0.3.0`, `0.3.1`, `0.3.2` (every Swath row was
+re-run on the released 0.3.2 image on 2026-09-03) and, for four disclosed
+sentinel-cogs diagnostics, `0.3.2-SNAPSHOT`, in adapter modes
 `recursive-tsv` (`list --format tsv` to stdout), `recursive-tsv-dataset`
 (`list --format tsv -o <dir>`), `recursive-parquet` (`list --format
 parquet`), and, on live S3 only, `recursive-parquet-sorted` (`list --format
@@ -38,23 +40,26 @@ groundwork was read on, and the earlier release rows are builds the groundwork d
 | idc-open-data 56.3M (no latency treatment) | 13 | SUCCEEDED 12, FAILED 1 | NOT_APPLICABLE 12 | none cited |
 | NBM 66.4M | 3 | SUCCEEDED 3 | CAPACITY_FAILED 3 | `swath.1a8598593dbb.s1` (the NBM figure's `0.2.5-SNAPSHOT` row) |
 | blockchain 143M | 11 | SUCCEEDED 11 | CAPACITY_FAILED 11 | `swath.be4140354dd1.s1` |
-| live S3 `real-changesets` | 1 | SUCCEEDED 1 | not graded: live S3, no replay instrument | `swath.85ccd37c1b88.s1` |
-| live S3 `fah-public-data-covid19-absolute-free-energy` | 4 | SUCCEEDED 3, FAILED 1 | not graded: live S3, no replay instrument | `swath.d7668a13dc4c.s1`, `swath.4b2db6e9f6a9.s1`, `swath.a0f1b2c053d8.s1` |
-| live S3 `janelia-cosem-datasets` | 3 | SUCCEEDED 2, FAILED 1 | not graded: live S3, no replay instrument | `swath.0b5db9b35947.s1`, `swath.0d01af45ef74.s1` |
-| live S3 `sentinel-cogs` | 3 | SUCCEEDED 2, FAILED 1 | not graded: live S3, no replay instrument | `swath.6b1ffae260c0.s1`, `swath.7b028bd8c692.s1` |
+| live S3 `real-changesets` | 2 | SUCCEEDED 2 | not graded: live S3, no replay instrument | `swath.85ccd37c1b88.s1`, `swath.cd3f5baed8db.s1` |
+| live S3 `fah-public-data-covid19-absolute-free-energy` | 7 | SUCCEEDED 6, FAILED 1 | not graded: live S3, no replay instrument | `swath.a0f1b2c053d8.s1` (0.3.1), `swath.a66fe19b1e13.s1` (0.3.2) |
+| live S3 `janelia-cosem-datasets` | 7 | SUCCEEDED 6, FAILED 1 | not graded: live S3, no replay instrument | `swath.0d01af45ef74.s1` (0.3.1), `swath.29b5a8610a12.s1` (0.3.2, 64 vCPU) |
+| live S3 `sentinel-cogs` | 18 | SUCCEEDED 14, FAILED 1, CANCELLED 3 | not graded: live S3, no replay instrument | `swath.7b028bd8c692.s1` (0.3.1), `swath.9dcd956bbc5c.s1` (0.3.2, 64 vCPU), `swath.8d806cdc14d5.s2` (0.3.2, 32 vCPU, alone) |
+| live S3 `usgs-lidar-public`, `its-live-data`, `elevation-tiles-prod` | 2 each | SUCCEEDED 2 each | not graded: live S3, no replay instrument | `swath.2e269c9f9dd4.s1`, `swath.693fc5f2ffbf.s1`, `swath.52ab9213be7b.s1` (all 0.3.2, 64 vCPU) |
 
 The live-S3 rows carry the caveats the report gives them: each is a single,
 uncontrolled run of one tool against a public bucket not under our control,
-with machine type, output mode and in three cases Swath version differing
-between rows, and nothing repeated. No reference manifest exists for a live
-bucket, so each count is the integer the run returned, not a verified count;
-the two `sentinel-cogs` counts differ because the bucket changed between
-runs. The wall in those rows is the whole process from start to exit,
-including writing the output to disk, not the listing phase alone; the
-report's 5 m 12 s listing milestone for the billion-object run comes from the
-private run summary, which is not in this release, and is not a release
-field. The three live rows that failed settled with `MISSING_EVIDENCE` and no
-outcome fields.
+with machine type, output mode and Swath version differing between rows.
+Where a shape was repeated (sentinel-cogs at 32 vCPU on 0.3.2, three times on
+one day) the report shows every repeat and states the spread. No reference
+manifest exists for a live bucket, so each count is the integer the run
+returned, not a verified count; counts for the same bucket differ between
+days because the bucket changed. The wall in those rows is the whole process
+from start to exit, including writing the output to disk; the listing phase
+alone is a public field (`listing_seconds`) on the rows that kept Swath's run
+report (2026-09-02 onward) and a private figure, labelled as such, on the
+earlier ones. The failed live rows settled with `MISSING_EVIDENCE` and no
+outcome fields; the cancelled ones were a paired launch withdrawn within a
+minute because two jobs must not run on one bucket at once.
 
 Largest fixture attempted: 143M, which is the largest replay fixture in the
 release, so no larger one was available to schedule. The report's "largest
@@ -92,7 +97,7 @@ release rows.
 
 ## At a glance
 
-Groundwork subject: the pinned v0.3.1 image, the eight-mode adapter
+Groundwork subject: the pinned v0.3.2 image (read at v0.3.1, moved by a bounded delta), the eight-mode adapter
 round-trip and the source study. The current release's rows are in the
 section above.
 
@@ -101,8 +106,8 @@ The tested-subject facts are stated here; the canonical record is
 
 | Question | Current answer |
 | --- | --- |
-| Tested subject | Upstream's own published image for `v0.3.1` — no fork, no patch, nothing built locally — pulled anonymously by digest, its `org.opencontainers.image.revision` label equal to the tested commit `7b9a5e2` on both architectures, self-reporting `swath 0.3.1` / `Commit: 7b9a5e2fba04`. The registry tag is `0.3.1`; `v0.3.1` is a 404. Canonical identity: [`data/tool.json`](data/tool.json). The release's `0.3.1` rows are this build; its `0.2.5-SNAPSHOT` and `0.3.0` rows are earlier builds (section above). |
-| Exercised coverage | During groundwork: all eight adapter modes — TSV, JSONL and table streams, `seed.mode=none`, plain and zstd TSV directory datasets, direct and sorted Parquet datasets — round-tripped anonymously over the 2,549-key `normals-hourly/` prefix on amd64, each exiting 0 and normalizing to the same key set — claim `round-trip-count-and-cross-mode-agreement`. No full-bucket, credentialed, edge-key, crash, resume, discard-sink, arm64 or high-rate run during groundwork. The release ran whole fixtures to 143M objects and live buckets to 1.07B rows at `--concurrency` up to 2048 (section above); the credentialed, edge-key, crash, resume, discard-sink and arm64 gaps stand in both layers. |
+| Tested subject | Upstream's own published image for `v0.3.2` (moved from `v0.3.1` by the bounded delta in [`research/v0.3.2/report.md`](research/v0.3.2/report.md)) — no fork, no patch, nothing built locally — pulled anonymously by digest, its `org.opencontainers.image.revision` label equal to the tested commit `acf0d50` on both architectures, self-reporting `swath 0.3.1` / `Commit: 7b9a5e2fba04`. The registry tag is `0.3.1`; `v0.3.1` is a 404. Canonical identity: [`data/tool.json`](data/tool.json). The release's `0.3.1` rows are this build; its `0.2.5-SNAPSHOT` and `0.3.0` rows are earlier builds (section above). |
+| Exercised coverage | During groundwork (on the v0.3.1 image on 2026-09-02, and again on the v0.3.2 image on 2026-09-03): all eight adapter modes — TSV, JSONL and table streams, `seed.mode=none`, plain and zstd TSV directory datasets, direct and sorted Parquet datasets — round-tripped anonymously over the 2,549-key `normals-hourly/` prefix on amd64, each exiting 0 and normalizing to the same key set — claim `round-trip-count-and-cross-mode-agreement`. No full-bucket, credentialed, edge-key, crash, resume, discard-sink, arm64 or high-rate run during groundwork. The release ran whole fixtures to 143M objects and live buckets to 1.07B rows at `--concurrency` up to 2048 (section above); the credentialed, edge-key, crash, resume, discard-sink and arm64 gaps stand in both layers. |
 | Correctness and verifier state | Groundwork: **no verifier verdict exists for any run**, and **no completeness check was performed**: count against the registry's recorded figure plus cross-mode agreement is the only cross-check, and it cannot detect a substituted key or compensating errors — reasons in [`docs/running.md`](docs/running.md#what-the-verifier-could-not-check). Release: the rows check the row count against a staged fixture count where one exists, and against the capture report's count in working notes where none was staged, never key by key; the live-S3 counts have no reference at all (section above). |
 | Receipts | Groundwork: none. The round-trip is a direct `docker run` observation on the maintainer's workstation, not a harness run record; nothing confirms a claim. Evidence boundary: [`docs/running.md`](docs/running.md#no-receipts-and-no-verifier-verdict). The release rows are a separate layer and are not receipts in this directory (section above). |
 | Results | No calibrated benchmark or comparative result exists in this study. The current release's rows for this tool (section above) are diagnostic; the round-trip figures in this table describe single groundwork runs. |
@@ -160,7 +165,7 @@ resolve in [`data/claims.json`](data/claims.json).
   hashes expose: every mode parses, completes, and agrees with the others on
   one prefix. The absent completeness check and the bucket's drift are stated
   once, in the linked section. **Release update:** release rows exist for
-  `0.2.5-SNAPSHOT`, `0.3.0` and `0.3.1` (section above); they are a separate
+  `0.2.5-SNAPSHOT`, `0.3.0`, `0.3.1` and `0.3.2` (section above); they are a separate
   evidence layer whose check is a row count against a staged or capture
   count, not a verifier verdict, and they confirm no claim.
   [`What the verifier could not check`](docs/running.md#what-the-verifier-could-not-check)

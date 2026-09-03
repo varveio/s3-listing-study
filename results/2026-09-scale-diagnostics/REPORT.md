@@ -55,7 +55,7 @@ Two facts bound every timing here. The replay server missed its own latency
 budget on one request shape under load, and the tool that issues that shape at
 volume is Swath, the study's own tool, so every Swath timing on the three
 small-directory fixtures (NARA, NBM, blockchain) failed the timing gate. And the live-S3 rows are single runs of
-one tool.
+one tool; where a shape was repeated, every repeat is shown and the spread is stated.
 
 ## The funnel
 
@@ -369,6 +369,22 @@ on both days.
 
 One point per run, machine type, build and output mode differ between points;
 rows in [`charts/real-s3-ladder.csv`](charts/real-s3-ladder.csv).
+
+### Time per billion rows
+
+For the 64-vCPU rows of 2026-09-03, process wall divided by rows returned:
+
+| bucket | rows | Swath 0.3.1 | Swath 0.3.2 |
+| --- | ---: | ---: | ---: |
+| `elevation-tiles-prod` (flat) | 10.29 B | 7 m 57 s / B | 1 m 49 s / B |
+| `janelia-cosem-datasets` | 0.96 B | 6 m 11 s / B | 3 m 06 s / B |
+| `its-live-data` | 1.92 B | 5 m 32 s / B | 3 m 14 s / B |
+| `usgs-lidar-public` | 1.95 B | 4 m 39 s / B | 3 m 26 s / B |
+| `sentinel-cogs` | 1.07 B | 5 m 37 s / B | 3 m 29 s / B |
+
+The 0.3.1 rows are the 2026-09-02 four-bucket launch, the 0.3.2 rows the
+2026-09-03 re-run, both launched several buckets at a time
+(`concurrent-live-s3-launches`). One pair of single runs per bucket.
 
 ### The ten-billion-object run, and its boundary
 
