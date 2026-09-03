@@ -279,7 +279,9 @@ uploads the final `result.json` marker with
 `ifGenerationMatch=0`. A second execution cannot merge with or replace a
 deterministic attempt prefix. Raw listing products are omitted by default; pass
 `campaign submit --retain-products` when manual content investigation or
-verification needs them.
+verification needs them. A subject's own run report inside its output tree
+(Swath's `_swath_summary.json`) is kept on every attempt regardless, at its
+native-relative path, and `native_manifest` binds it.
 
 ### Replay reporting is row-count-only
 

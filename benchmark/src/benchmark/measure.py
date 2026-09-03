@@ -312,7 +312,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--retain-products",
         choices=("true", "false"),
         default="false",
-        help="Upload native listing products. False retains logs and result.json only.",
+        help="Upload native listing products. False keeps logs, result.json, and the "
+        "subject's run reports under native/ only.",
     )
     parser.add_argument(
         "--input-artifact",
@@ -1000,6 +1001,26 @@ def native_inventory(native_root: Path) -> dict[str, int]:
     }
 
 
+RUN_REPORT_NAMES = frozenset({"_swath_summary.json"})
+"""Files a subject writes into its output tree that report on the run rather
+than form its product. They are kept on every attempt, retained products or
+not: a report the size of a log is evidence about the run, and dropping it with
+the dataset left every live-S3 row without a listing-phase figure."""
+
+
+def run_report_files(native_root: Path) -> list[Path]:
+    """The run reports under ``native/``, in path order."""
+    return sorted(path for path in retained_files(native_root) if path.name in RUN_REPORT_NAMES)
+
+
+def run_report_manifest(native_root: Path) -> dict[str, str]:
+    """Content hashes for the run reports alone, keyed by native-relative path."""
+    return {
+        path.relative_to(native_root).as_posix(): sha256_of(path)
+        for path in run_report_files(native_root)
+    }
+
+
 def row_count_for(
     adapter_dir: str,
     tool: str,
@@ -1040,6 +1061,11 @@ def upload(
     artifacts but no marker -- exactly the shape verify.py treats as
     "incomplete", never as a passing (or failing) verdict.
 
+    ``native/`` travels whole only when the attempt retains its products;
+    otherwise just its run reports (:data:`RUN_REPORT_NAMES`) go, at their
+    native-relative paths, so a reader finds them where a retained tree would
+    have had them.
+
     A ``gs://`` destination uses the production uploader. An absolute local
     destination gets the same create-only, marker-last contract so the Docker
     executor does not need a second measurement worker.
@@ -1049,6 +1075,8 @@ def upload(
         for path in attempt_dir.iterdir()
         if path.name != "result.json" and (retain_products or path.name != "native")
     )
+    native_root = attempt_dir / "native"
+    reports = [] if retain_products else run_report_files(native_root)
     try:
         upload_started = time.monotonic()
         local_destination: Path | None = None
@@ -1062,6 +1090,11 @@ def upload(
                     gcs.upload_file(
                         path, destination.rstrip("/") + "/" + path.name, create_only=True
                     )
+            for path in reports:
+                relative = path.relative_to(native_root).as_posix()
+                gcs.upload_file(
+                    path, destination.rstrip("/") + "/native/" + relative, create_only=True
+                )
         else:
             local_destination = Path(destination)
             if not local_destination.is_absolute():
@@ -1073,6 +1106,10 @@ def upload(
                     shutil.copytree(path, target)
                 else:
                     shutil.copy2(path, target)
+            for path in reports:
+                target = local_destination / "native" / path.relative_to(native_root)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(path, target)
         if postprocessing_seconds is not None:
             postprocessing_seconds["artifact_upload"] = time.monotonic() - upload_started
             result_path = attempt_dir / "result.json"
@@ -1560,9 +1597,10 @@ def main(argv: list[str] | None = None) -> int:
     # Scan the uncompressed captures before any upload. A retained credential
     # turns the whole attempt into a refusal rather than public evidence that a
     # later reader is expected to notice and clean up. Scoped to what
-    # `upload()` actually publishes: native/ only when this attempt retains
-    # its products -- a discarded native/ tree never reaches a reader, so
-    # scanning it would only cost time on bytes nobody will see.
+    # `upload()` actually publishes: native/ whole only when this attempt
+    # retains its products, otherwise just its run reports -- a discarded
+    # dataset never reaches a reader, so scanning it would only cost time on
+    # bytes nobody will see.
     phase_started = time.monotonic()
     scanned = [stderr_path]
     if subject_stdout == stdout_path:
@@ -1571,6 +1609,8 @@ def main(argv: list[str] | None = None) -> int:
         scanned.append(attempt_dir / "inline")
     if retain_products:
         scanned.append(native_root)
+    else:
+        scanned.extend(run_report_files(native_root))
     secret_hit = scan_for_secrets(scanned)
     postprocessing_seconds["secret_scan"] = time.monotonic() - phase_started
     if secret_hit:
@@ -1631,8 +1671,12 @@ def main(argv: list[str] | None = None) -> int:
     # verdict becomes the same refusal `product_gap` already gives a missing
     # product, on the same exit code.
     try:
+        # Without retention the manifest still binds what does travel: the run
+        # reports, at the paths verify.py will find them under native/.
         native_files = (
-            {} if minimal_evidence or not retain_products else native_manifest(native_root)
+            run_report_manifest(native_root)
+            if not retain_products
+            else ({} if minimal_evidence else native_manifest(native_root))
         )
         native_sizes = (
             native_inventory(native_root)
@@ -1649,7 +1693,7 @@ def main(argv: list[str] | None = None) -> int:
             for root in attempt_dir.iterdir()
             if root.name != "native" or retain_products
             for path in retained_files(root)
-        )
+        ) + (0 if retain_products else sum(p.stat().st_size for p in run_report_files(native_root)))
     except (OSError, ArtifactSafetyError) as exc:
         print(f"measure: retained output is not publishable: {exc}", file=sys.stderr)
         return EXIT_ARTIFACT_UNUSABLE

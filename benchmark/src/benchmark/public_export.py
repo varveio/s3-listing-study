@@ -1110,12 +1110,20 @@ def _fixture_metadata_uri(fixture_uri: str) -> str:
 def _load_native_summary(
     db_row: sqlite3.Row, result: Mapping[str, Any] | None
 ) -> dict[str, Any] | None:
-    """The Swath run summary, only where the products were actually retained."""
+    """The Swath run summary, wherever the attempt published one.
+
+    A full-evidence attempt lists it in ``native_manifest`` (hashes); a
+    minimal-evidence replay attempt lists it in ``native_files`` (sizes). The
+    two are read together, because the first release read only the second and
+    so carried a listing phase for one replay capture and no live-S3 row.
+    """
     if not result or db_row["tool"] != "swath":
         return None
-    names = result.get("native_files")
-    if not isinstance(names, Mapping):
-        return None
+    names: set[str] = set()
+    for field in ("native_manifest", "native_files"):
+        listed = result.get(field)
+        if isinstance(listed, Mapping):
+            names.update(str(name) for name in listed)
     for name in sorted(names):
         if str(name).endswith("_swath_summary.json"):
             loaded = report.load_json_at(str(db_row["result_prefix"]), f"native/{name}")

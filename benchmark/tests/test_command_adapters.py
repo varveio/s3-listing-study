@@ -389,6 +389,7 @@ def _swath(mode: str, prefix: str) -> tuple[str, ...]:
     )
     common = (*head, "--checkpoint", "none")
     dataset = f"{SINK}/listing"
+    report = ("--report", f"{dataset}/_swath_summary.json")
     return {
         "recursive-tsv": (*common, "--format", "tsv"),
         "recursive-jsonl": (*common, "--format", "jsonl"),
@@ -400,6 +401,7 @@ def _swath(mode: str, prefix: str) -> tuple[str, ...]:
             "dir",
             "-o",
             dataset,
+            *report,
             "--text-writers",
             "3",
             "--compression",
@@ -413,6 +415,7 @@ def _swath(mode: str, prefix: str) -> tuple[str, ...]:
             "dir",
             "-o",
             dataset,
+            *report,
             "--text-writers",
             "3",
             "--compression",
@@ -420,7 +423,7 @@ def _swath(mode: str, prefix: str) -> tuple[str, ...]:
         ),
         "recursive-table": (*common, "--format", "table"),
         "seed-none": (*common, "--format", "tsv", "--tune", "seed.mode=none"),
-        "recursive-parquet": (*common, "--format", "parquet", "-o", dataset),
+        "recursive-parquet": (*common, "--format", "parquet", "-o", dataset, *report),
         "recursive-parquet-sorted": (
             *head,
             "--checkpoint",
@@ -429,6 +432,7 @@ def _swath(mode: str, prefix: str) -> tuple[str, ...]:
             "parquet",
             "-o",
             dataset,
+            *report,
             "--sort",
             "--tune",
             "sort.ignore-disk-check=on",
@@ -1122,6 +1126,52 @@ def test_swath_renders_retained_output_controls_and_refuses_the_wrong_mode() -> 
                 tool="swath",
                 sink_dir=SINK,
                 config={"text_writers": 3},
+            )
+        )
+
+
+def test_swath_asks_every_directory_mode_for_its_run_report_beside_the_manifest() -> None:
+    """Swath writes `_swath_summary.json` unprompted only for Parquet directories;
+    the adapter asks for it explicitly, at that same path, in every directory mode."""
+    adapter = load_command_adapter(adapter_path("swath"))
+    for mode in (
+        "recursive-tsv-zstd",
+        "recursive-tsv-dataset",
+        "recursive-parquet",
+        "recursive-parquet-sorted",
+    ):
+        argv = adapter.compile(CommandRequest(mode, BUCKET, REGION, tool="swath", sink_dir=SINK))
+        at = argv.index("--report")
+        assert argv[at + 1] == f"{SINK}/listing/_swath_summary.json"
+        assert argv[argv.index("-o") + 1] == f"{SINK}/listing"
+    stdout_mode = adapter.compile(CommandRequest("recursive-tsv", BUCKET, REGION, tool="swath"))
+    assert "--report" not in stdout_mode
+
+
+def test_swath_renders_engine_readahead_in_every_mode_and_refuses_other_values() -> None:
+    """`engine_readahead` is a listing-engine control, so it rides in the common
+    head ahead of the mode's formatter flags and no mode refuses it."""
+    adapter = load_command_adapter(adapter_path("swath"))
+    for mode in ("recursive-tsv", "recursive-tsv-zstd", "recursive-parquet-sorted"):
+        argv = adapter.compile(
+            CommandRequest(
+                mode,
+                BUCKET,
+                REGION,
+                tool="swath",
+                sink_dir=SINK,
+                config={"engine_readahead": "on"},
+            )
+        )
+        tune_at = argv.index("--tune")
+        assert argv[tune_at + 1] == "engine.readahead=on"
+        assert tune_at < argv.index("--checkpoint")
+    silent = adapter.compile(CommandRequest("recursive-tsv", BUCKET, REGION, tool="swath"))
+    assert "engine.readahead=on" not in silent and "engine.readahead=off" not in silent
+    with pytest.raises(CommandAdapterError, match=r"engine_readahead must be 'on' or 'off'"):
+        adapter.compile(
+            CommandRequest(
+                "recursive-tsv", BUCKET, REGION, tool="swath", config={"engine_readahead": True}
             )
         )
 

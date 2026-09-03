@@ -1636,8 +1636,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         p.add_argument(
             "--retain-products",
             action="store_true",
-            help="upload native listing products; off by default, while logs and "
-            "result.json remain",
+            help="upload native listing products; off by default, while logs, "
+            "result.json and the subject's run reports under native/ remain",
         )
 
     submit = sub.add_parser("submit")

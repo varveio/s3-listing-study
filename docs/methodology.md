@@ -54,7 +54,10 @@ resource evidence, and uploads `result.json` last. `campaign submit
 --retain-products` opts native products back in for a group that needs content
 investigation or explicit verification. Secret-pattern scanning was removed
 entirely; credential delivery remains scoped to the subject environment and is
-never written into result metadata.
+never written into result metadata. Since 2026-09-02 the subject's own run
+report inside the output tree (Swath's `_swath_summary.json`) is kept on every
+attempt even when the product is dropped, so a live-S3 row can carry its
+listing phase.
 
 **Protocol note.** The comparative measurement plan predates comparative
 results. The groundwork procedure was improved after the aws-cli and

@@ -29,6 +29,15 @@ tools:
         concurrency: 1024
         purpose: diagnostic
         config: {jvm_max_heap: 16g, text_writers: 8}
+      # 2026-09-02 doubled box: 64 vCPU, same 2,048 ceiling (never binding at 32 vCPU:
+      # in-flight peaked at 1,567), writers doubled with the cores, heap raised for the
+      # extra lanes. Pure listing to compressed TSV; the same-bucket 32-vs-64 pair.
+      - mode: recursive-tsv-zstd
+        concurrency: 2048
+        purpose: diagnostic
+        vcpus: 64
+        memory_gb: 128
+        config: {jvm_max_heap: 24g, text_writers: 32}
 
 exclude:
   - {tool: aws-cli, reason: outside this Swath-only real-S3 diagnostic}
