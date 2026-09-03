@@ -1,4 +1,4 @@
-# Ten S3 listing tools in replay to 143M objects, plus Swath alone on live S3 to 1.07B
+# Ten S3 listing tools in replay to 143M objects, plus Swath alone on live S3 to 10.3B
 
 Release `2026-09-scale-diagnostics` · data as of 2026-09-01 · 270 settled attempts
 
@@ -55,7 +55,7 @@ Two facts bound every timing here. The replay server missed its own latency
 budget on one request shape under load, and the tool that issues that shape at
 volume is Swath, the study's own tool, so every Swath timing on the three
 small-directory fixtures (NARA, NBM, blockchain) failed the timing gate. And the live-S3 rows are single runs of
-one tool.
+one tool; where a shape was repeated, every repeat is shown and the spread is stated.
 
 ## The funnel
 
@@ -301,59 +301,121 @@ What the rows show:
 
 ## Swath on live S3
 
-These rows ran against live public buckets from one VM in GCP `us-east1`,
-unsigned reads, one run each, no other subject present. They are observations,
-not measurements: the buckets are not under our control, the machine types and
-output modes differ, and nothing was repeated. `manifest.json` discloses them
-as `real-s3-rows-are-single-observations`.
+These rows ran against live public buckets from Standard N4 VMs in GCP
+`us-east1` (two 2026-09-02 `sentinel-cogs` rows from `us-west1`), unsigned
+reads, one run each, no other subject present. They are observations, not
+measurements: the buckets are not under our control, the machine types and
+output modes differ, and almost nothing was repeated. `manifest.json`
+discloses them as `real-s3-rows-are-single-observations`; the 2026-09-02 and
+2026-09-03 rows were launched several buckets at a time from one project and
+share the path out of the VPC (`concurrent-live-s3-launches`).
 
-| bucket | objects | Swath | machine | mode | process wall, start to exit | objects/s over process wall | peak RSS (KiB) | attempt |
-| --- | ---: | --- | --- | --- | ---: | ---: | ---: | --- |
-| `real-changesets` | 13,868,442 | 0.3.1 | n4-highcpu-16 | sorted Parquet c1024 | 62.7 s | 221,259 | 1,521,648 | `swath.85ccd37c1b88.s1` |
-| `fah-public-data-covid19-absolute-free-energy` | 522,925,693 | 0.3.0 | n4-highcpu-16 | sorted Parquet c1024 | 370.7 s | 1,410,484 | 7,754,624 | `swath.d7668a13dc4c.s1` |
-| same | 522,925,693 | 0.3.1 | n4-highcpu-32 | sorted Parquet c2048 | 281.9 s | 1,854,866 | 12,362,232 | `swath.4b2db6e9f6a9.s1` |
-| same | 522,925,693 | 0.3.1 | n4-highcpu-32 | TSV + zstd c2048 | 187.3 s | 2,791,827 | 8,585,240 | `swath.a0f1b2c053d8.s1` |
-| `janelia-cosem-datasets` | 959,831,933 | 0.3.0 | n4-highcpu-16 | sorted Parquet c1024 | 724.2 s | 1,325,437 | 9,701,684 | `swath.0b5db9b35947.s1` |
-| same | 959,831,933 | 0.3.1 | n4-highcpu-32 | sorted Parquet c2048 | 585.1 s | 1,640,372 | 13,703,164 | `swath.0d01af45ef74.s1` |
-| `sentinel-cogs` | 1,068,443,985 | 0.3.0 | n4-highcpu-32 | sorted Parquet c1024 | 707.4 s | 1,510,392 | 8,228,716 | `swath.6b1ffae260c0.s1` |
-| `sentinel-cogs` | 1,068,477,307 | 0.3.1 | n4-highcpu-32 | TSV + zstd c2048 | 341.4 s | 3,129,747 | 9,343,792 | `swath.7b028bd8c692.s1` |
+Three Swath builds appear. 0.3.0 and 0.3.1 are the September 1 rows. 0.3.2
+(released 2026-09-03) carries upstream #209: the listing pipeline's shared
+channel relays one wakeup per page instead of broadcasting to every parked
+fetch worker, and per-page row tallies move off the single consumer thread.
+Every 0.3.2 row was re-run on the released image on 2026-09-03; the
+`0.3.2-SNAPSHOT` rows in `summary.csv` are the pre-release diagnostics of
+that change and are not in this table (`unreleased-swath-builds`). The
+listing-phase column is Swath's own `listing_duration_ms` from the run report
+the harness now retains; it is blank where the report was not kept.
 
-Peak RSS is the subject's `max_rss_kb`; on the largest run it is 9.3 GB for
-1.07 billion rows, and the sorted-Parquet mode holds more (13.7 GB at 960
-million) because it sorts before it writes.
+| bucket | objects | Swath | machine | mode | process wall, start to exit | listing phase | objects/s over process wall | peak RSS (KiB) | attempt |
+| --- | ---: | --- | --- | --- | ---: | ---: | ---: | ---: | --- |
+| `real-changesets` | 13,868,442 | 0.3.1 | n4-highcpu-16 | sorted Parquet c1024 | 62.7 s | 0 m 37 s | 221,259 | 1,521,648 | `swath.85ccd37c1b88.s1` |
+| same | 13,868,442 | 0.3.2 | n4-highcpu-16 | sorted Parquet c1024 | 63.8 s | 0 m 40 s | 217,274 | 1,375,188 | `swath.cd3f5baed8db.s1` |
+| `fah-public-data-covid19-absolute-free-energy` | 522,925,693 | 0.3.0 | n4-highcpu-16 | sorted Parquet c1024 | 370.7 s | 3 m 21 s | 1,410,483 | 7,754,624 | `swath.d7668a13dc4c.s1` |
+| same | 522,925,693 | 0.3.1 | n4-highcpu-32 | sorted Parquet c2048 | 281.9 s | 2 m 21 s | 1,854,866 | 12,362,232 | `swath.4b2db6e9f6a9.s1` |
+| same | 522,925,693 | 0.3.1 | n4-highcpu-32 | TSV + zstd c2048 | 187.3 s | — | 2,791,827 | 8,585,240 | `swath.a0f1b2c053d8.s1` |
+| same | 522,925,693 | 0.3.2 | n4-highcpu-16 | sorted Parquet c1024 | 381.9 s | 3 m 26 s | 1,369,246 | 6,799,360 | `swath.82e29cbdb8e3.s1` |
+| same | 522,925,693 | 0.3.2 | n4-highcpu-32 | sorted Parquet c2048 | 253.4 s | 2 m 08 s | 2,063,624 | 12,870,704 | `swath.36e6d2ba0067.s1` |
+| same | 522,925,693 | 0.3.2 | n4-highcpu-32 | TSV + zstd c2048 | 153.5 s | 2 m 12 s | 3,405,791 | 8,637,804 | `swath.a66fe19b1e13.s1` |
+| `janelia-cosem-datasets` | 959,831,933 | 0.3.0 | n4-highcpu-16 | sorted Parquet c1024 | 724.2 s | 7 m 02 s | 1,325,437 | 9,701,684 | `swath.0b5db9b35947.s1` |
+| same | 959,831,933 | 0.3.1 | n4-highcpu-32 | sorted Parquet c2048 | 585.1 s | 6 m 33 s | 1,640,371 | 13,703,164 | `swath.0d01af45ef74.s1` |
+| same | 959,831,933 | 0.3.1 | n4-highcpu-64 | TSV + zstd c2048 | 356.3 s | — | 2,693,662 | 8,300,944 | `swath.93d4c3f66d3f.s1` |
+| same | 959,831,933 | 0.3.2 | n4-highcpu-16 | sorted Parquet c1024 | 632.1 s | 6 m 08 s | 1,518,375 | 6,455,680 | `swath.a92bfdd01952.s1` |
+| same | 959,831,933 | 0.3.2 | n4-highcpu-32 | sorted Parquet c2048 | 400.0 s | 3 m 51 s | 2,399,703 | 13,785,644 | `swath.4f98a532f4a1.s1` |
+| same | 959,831,933 | 0.3.2 | n4-highcpu-64 | TSV + zstd c2048 | 178.1 s | 2 m 47 s | 5,389,761 | 9,583,916 | `swath.29b5a8610a12.s1` |
+| `sentinel-cogs` | 1,068,443,985 | 0.3.0 | n4-highcpu-32 | sorted Parquet c1024 | 707.4 s | 5 m 28 s | 1,510,391 | 8,228,716 | `swath.6b1ffae260c0.s1` |
+| same | 1,068,805,992 | 0.3.1 | n4-highcpu-32 | TSV + zstd c2048 | 610.1 s | — | 1,751,779 | 17,801,588 | `swath.1eaefee08af5.s2` |
+| same | 1,068,477,307 | 0.3.1 | n4-highcpu-32 | TSV + zstd c2048 | 341.4 s | — | 3,129,746 | 9,343,792 | `swath.7b028bd8c692.s1` |
+| same | 1,068,821,150 | 0.3.1 | n4-highcpu-32 | TSV + zstd c2048 | 425.5 s | 6 m 49 s | 2,512,056 | 10,128,260 | `swath.aeba20509673.s1` |
+| same | 1,068,819,955 | 0.3.1 | n4-highcpu-32 | TSV + zstd c2048 | 450.9 s | — | 2,370,254 | 8,686,932 | `swath.d206c4aa76c7.s1` |
+| same | 1,068,804,790 | 0.3.1 | n4-highcpu-64 | TSV + zstd c2048 | 359.9 s | — | 2,969,564 | 9,982,108 | `swath.31d7484be314.s1` |
+| same | 1,068,988,262 | 0.3.2 | n4-highcpu-32 | sorted Parquet c1024 | 653.6 s | 5 m 12 s | 1,635,443 | 7,942,020 | `swath.5825fc907ee8.s1` |
+| same | 1,068,994,118 | 0.3.2 | n4-highcpu-32 | TSV + zstd c2048 | 355.6 s | 5 m 27 s | 3,006,060 | 12,160,540 | `swath.8d806cdc14d5.s1` |
+| same | 1,069,003,533 | 0.3.2 | n4-highcpu-32 | TSV + zstd c2048 | 337.0 s | 5 m 10 s | 3,172,168 | 10,531,024 | `swath.8d806cdc14d5.s2` |
+| same | 1,068,996,570 | 0.3.2 | n4-highcpu-64 | TSV + zstd c2048 | 223.6 s | 3 m 15 s | 4,781,046 | 13,282,672 | `swath.9dcd956bbc5c.s1` |
+| `usgs-lidar-public` | 1,950,065,411 | 0.3.1 | n4-highcpu-64 | TSV + zstd c2048 | 544.6 s | — | 3,580,529 | 9,977,076 | `swath.54d5dd7df2af.s1` |
+| same | 1,950,065,411 | 0.3.2 | n4-highcpu-64 | TSV + zstd c2048 | 402.3 s | 6 m 31 s | 4,847,423 | 12,343,348 | `swath.2e269c9f9dd4.s1` |
+| `its-live-data` | 1,917,502,738 | 0.3.1 | n4-highcpu-64 | TSV + zstd c2048 | 636.3 s | — | 3,013,438 | 15,054,072 | `swath.12d7ebe2ad2d.s1` |
+| same | 1,917,546,508 | 0.3.2 | n4-highcpu-64 | TSV + zstd c2048 | 372.6 s | 5 m 45 s | 5,145,782 | 12,953,496 | `swath.693fc5f2ffbf.s1` |
+| `elevation-tiles-prod` | 10,293,380,300 | 0.3.1 | n4-highcpu-64 | TSV + zstd c2048 | 4907.6 s | — | 2,097,435 | 14,305,204 | `swath.644f4a4a175b.s1` |
+| same | 10,293,380,300 | 0.3.2 | n4-highcpu-64 | TSV + zstd c2048 | 1124.7 s | 18 m 29 s | 9,151,901 | 11,857,000 | `swath.52ab9213be7b.s1` |
+
+Peak RSS is the subject's `max_rss_kb`; on the 10-billion-row run it is 11.9
+GB, and the sorted-Parquet mode holds more (13.8 GB at 960 million) because
+it sorts before it writes.
 
 "Process wall" is the whole run from start to exit, including writing the
-output to disk; the listing phase alone is shorter, and only the process wall
-is in the release rows (for the billion-object run, 5 m 12 s of listing inside
-5 m 41 s of process). Objects per second divides the count by that process
-wall, so it understates the listing rate. The two `sentinel-cogs` counts
-differ because the bucket changed between runs; each is the integer that run
-returned, and neither was verified against a key manifest, because none
-exists for a changing public bucket.
+output to disk; objects per second divides the count by that wall, so it
+understates the listing rate. Counts for the same bucket differ between runs
+because the buckets change; each is the integer that run returned, and none
+was verified against a key manifest, because none exists for a changing
+public bucket. `elevation-tiles-prod` returned the same 10,293,380,300 rows
+on both days.
 
 ![Swath on live S3: objects listed against whole-process rate, single observations](charts/real-s3-ladder.svg)
 
-One point per run, machine type and output mode differ between points; rows
-in [`charts/real-s3-ladder.csv`](charts/real-s3-ladder.csv).
+One point per run, machine type, build and output mode differ between points;
+rows in [`charts/real-s3-ladder.csv`](charts/real-s3-ladder.csv).
 
-### The billion-object run, and its boundary
+### Time per billion rows
 
-In one uncontrolled live-S3 run, Swath 0.3.1 returned 1,068,477,307 rows
-from `sentinel-cogs` and exited after 341.4 s, including writing compressed
-TSV to disk (`swath.7b028bd8c692.s1`). No reference manifest exists for a
-live bucket, so that is the count the run returned, not a verified count.
-The public row carries the process wall and the count; its `listing_seconds`
-and `native_summary` are null. The private run summary, which is not in this
-release, recorded a listing phase of 5 m 12 s and the compressed TSV on disk
-at about 5 m 39 s (`prose-cites-private-evidence` in the manifest).
+For the 64-vCPU rows of 2026-09-03, process wall divided by rows returned:
+
+| bucket | rows | Swath 0.3.1 | Swath 0.3.2 |
+| --- | ---: | ---: | ---: |
+| `elevation-tiles-prod` (flat) | 10.29 B | 7 m 57 s / B | 1 m 49 s / B |
+| `janelia-cosem-datasets` | 0.96 B | 6 m 11 s / B | 3 m 06 s / B |
+| `its-live-data` | 1.92 B | 5 m 32 s / B | 3 m 14 s / B |
+| `usgs-lidar-public` | 1.95 B | 4 m 39 s / B | 3 m 26 s / B |
+| `sentinel-cogs` | 1.07 B | 5 m 37 s / B | 3 m 29 s / B |
+
+The 0.3.1 rows are the 2026-09-02 four-bucket launch, the 0.3.2 rows the
+2026-09-03 re-run, both launched several buckets at a time
+(`concurrent-live-s3-launches`). One pair of single runs per bucket.
+
+### The ten-billion-object run, and its boundary
+
+In one uncontrolled live-S3 run on 2026-09-03, Swath 0.3.2 returned
+10,293,380,300 rows from `elevation-tiles-prod` and exited after 1,124.7 s,
+18 minutes 45 seconds, including writing 254.6 GB of compressed TSV to disk
+(`swath.52ab9213be7b.s1`), on one `n4-highcpu-64` with 32 writer lanes. The
+public row carries the process wall, the count and a listing phase of
+1,109 s (18 m 29 s) read from the retained run report. The run's own
+counters, which are not release fields, recorded 10,420,631 list calls
+(1.012 per thousand objects, so full pages), an average of 1,034 requests in
+flight of the 2,048 allowed, and 53 of 64 cores busy. The same bucket on
+0.3.1 the day before, same machine and shape, took 4,907.6 s
+(`swath.644f4a4a175b.s1`) with about 173 requests in flight: the difference
+is the sink channel, not the bucket.
+
+The billion-object `sentinel-cogs` runs tell a narrower story. At 64 vCPU the
+0.3.2 row took 223.6 s against 359.9 s on 0.3.1. At the published 32-vCPU
+shape, three runs of the same 0.3.2 code on the same day listed in 4 m 25 s
+(pre-release image, alone), 5 m 27 s (released image, four other live-S3
+jobs running) and 5 m 10 s (released image, alone; `swath.8d806cdc14d5.s2`,
+the row to cite), around the 5 m 12 s of the 0.3.1 row: at that shape the
+change is inside run-to-run variance.
 
 | boundary | detail |
 | --- | --- |
 | one run | one day, one bucket, not repeated; no interval exists |
-| one machine | a Standard `n4-highcpu-32` in `us-east1`, listing a `us-west-2` bucket over the public internet |
-| client-side limit, per the private summary | about 25 of 32 cores were producing compressed TSV, and S3 returned no `SlowDown`; neither is a release field, and no CPU or I/O metric is exported |
-| not 5M keys/s | the whole-process rate is 3.13M objects/s; the listing phase alone is faster, and neither reaches 5M/s |
-| one tool | no other subject ran against live S3 in this release's window; the August live pass predates this ledger and is not exported |
+| one machine | a Standard `n4-highcpu-64` in `us-east1`, listing a `us-east-1` bucket over the public internet |
+| a flat bucket | full 1,000-key pages and no hierarchy probing; the best case for a range-splitting lister, and the case the old sink throttled hardest |
+| client-side counters are private | in-flight, cores busy and call counts come from the retained run report, cited under `prose-cites-private-evidence` |
+| one tool | no other subject ran against live S3 in this release's window |
 | listing, not inventory | key, size, ETag, modification time and storage class; not a comparison with S3 Inventory |
 
 ## What this study does not establish
@@ -370,9 +432,9 @@ at about 5 m 39 s (`prose-cites-private-evidence` in the manifest).
   fixture count where one exists, and against the capture's count in working
   notes where none was staged; never key by key. "Ran" and "verified" are
   separate facts.
-- **It does not establish scaling behaviour.** Each live-S3 point has a
-  different machine, output mode, region, bucket shape, and in three cases a
-  different Swath version.
+- **It does not establish scaling behaviour.** Live-S3 points differ in
+  machine, output mode, region, bucket shape and Swath version; where two rows
+  share a shape and differ only in build, they are one pair of single runs.
 - **It does not establish tuning conclusions.** Concurrency arms separated by
   single-run noise under a pressured instrument are not evidence of a knee.
 - **It says nothing about a bucket it did not list**, nor about

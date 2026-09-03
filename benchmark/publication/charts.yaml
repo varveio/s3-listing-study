@@ -156,22 +156,46 @@ charts:
     status: rendered
     kind: scatter
     title: Swath on live S3 — objects listed against whole-process rate (single observations)
-    # Every settled real-S3 Swath row in the release, named rather than
-    # filtered, so the figure cannot quietly change shape when a row is added.
+    # Every settled real-S3 Swath row of a released build in the release, named
+    # rather than filtered, so the figure cannot quietly change shape when a
+    # row is added. Rows of unreleased builds (0.3.2-SNAPSHOT, the sink-fix
+    # diagnostics of 2026-09-03) are left out; they are in summary.csv.
     # These are uncontrolled observations against live public buckets, n=1
     # each, on machine types that differ between points; the picture is a
     # ladder of what one tool did once at each size, not a scaling curve and
     # not a comparison — no other subject has run on live S3 at all.
     select:
       attempt_ids:
-        - swath.85ccd37c1b88.s1
-        - swath.d7668a13dc4c.s1
+        - swath.52ab9213be7b.s1
+        - swath.644f4a4a175b.s1
+        - swath.36e6d2ba0067.s1
         - swath.4b2db6e9f6a9.s1
+        - swath.82e29cbdb8e3.s1
         - swath.a0f1b2c053d8.s1
+        - swath.a66fe19b1e13.s1
+        - swath.d7668a13dc4c.s1
+        - swath.12d7ebe2ad2d.s1
+        - swath.693fc5f2ffbf.s1
         - swath.0b5db9b35947.s1
         - swath.0d01af45ef74.s1
+        - swath.29b5a8610a12.s1
+        - swath.4f98a532f4a1.s1
+        - swath.93d4c3f66d3f.s1
+        - swath.a92bfdd01952.s1
+        - swath.85ccd37c1b88.s1
+        - swath.cd3f5baed8db.s1
+        - swath.1eaefee08af5.s2
+        - swath.31d7484be314.s1
+        - swath.5825fc907ee8.s1
         - swath.6b1ffae260c0.s1
         - swath.7b028bd8c692.s1
+        - swath.8d806cdc14d5.s1
+        - swath.8d806cdc14d5.s2
+        - swath.9dcd956bbc5c.s1
+        - swath.aeba20509673.s1
+        - swath.d206c4aa76c7.s1
+        - swath.2e269c9f9dd4.s1
+        - swath.54d5dd7df2af.s1
     x: outcome.row_count
     y: derived.wall_keys_per_second
     x_label: objects listed (exact count returned by the run)

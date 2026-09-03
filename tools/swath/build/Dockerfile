@@ -3,7 +3,7 @@ ARG SHARED_BASE_IMAGE
 # Upstream's published 0.3.1 release image (registry tag 0.3.1, git tag v0.3.1,
 # revision 7b9a5e2), pinned by immutable index digest. Its tested jar and
 # JRE are copied onto the common study base without recompiling Swath.
-FROM ghcr.io/varveio/swath@sha256:776e788200a1e70f30206897303a34e4faabd56c591e1c9562277677085c4f60 AS upstream
+FROM ghcr.io/varveio/swath@sha256:0bbc96c10b4b63d184cce76734679dd4a2f54a1c81c7c94c1000f7114eab8e43 AS upstream
 
 FROM ${SHARED_BASE_IMAGE}
 USER root

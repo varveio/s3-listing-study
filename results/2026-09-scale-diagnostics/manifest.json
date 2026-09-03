@@ -6,31 +6,31 @@
     "universal_tool_ranking": false
   },
   "counts": {
-    "attempts": 270,
+    "attempts": 338,
     "by_capacity_status": {
-      "UNCALIBRATED": 259,
-      "null": 11
+      "UNCALIBRATED": 298,
+      "null": 40
     },
     "by_publication_status": {
-      "diagnostic": 261,
+      "diagnostic": 329,
       "preparation": 9
     },
     "by_purpose": {
-      "diagnostic": 261,
+      "diagnostic": 329,
       "preparation": 9
     },
     "by_replay_timing": {
-      "CAPACITY_FAILED": 61,
-      "INSUFFICIENT_EVIDENCE": 56,
-      "NOT_APPLICABLE": 44,
+      "CAPACITY_FAILED": 79,
+      "INSUFFICIENT_EVIDENCE": 69,
+      "NOT_APPLICABLE": 52,
       "PRESSURE_DEGRADED": 24,
       "TIMING_VALID": 66,
-      "null": 19
+      "null": 48
     },
     "by_state": {
-      "CANCELLED": 4,
+      "CANCELLED": 7,
       "FAILED": 13,
-      "SUCCEEDED": 253
+      "SUCCEEDED": 318
     },
     "by_tool": {
       "aws-cli": 9,
@@ -42,23 +42,26 @@
       "s3p": 23,
       "s5cmd": 17,
       "s7cmd": 24,
-      "swath": 95
+      "swath": 163
     },
     "by_workload": {
-      "aws-public-blockchain": 15,
-      "fah-public-data-covid19-absolute-free-energy": 4,
-      "idc-open-data": 13,
-      "janelia-cosem-datasets": 3,
-      "nara-1950-census": 50,
-      "noaa-nbm-grib2-pds": 15,
-      "noaa-nws-fourcastnetgfs-pds": 159,
-      "real-changesets": 8,
-      "sentinel-cogs": 3
+      "aws-public-blockchain": 21,
+      "elevation-tiles-prod": 2,
+      "fah-public-data-covid19-absolute-free-energy": 7,
+      "idc-open-data": 19,
+      "its-live-data": 2,
+      "janelia-cosem-datasets": 7,
+      "nara-1950-census": 59,
+      "noaa-nbm-grib2-pds": 16,
+      "noaa-nws-fourcastnetgfs-pds": 175,
+      "real-changesets": 10,
+      "sentinel-cogs": 18,
+      "usgs-lidar-public": 2
     },
     "skipped_non_terminal": 0,
     "withheld_attempts": 18
   },
-  "data_as_of": "2026-09-01T21:26:59.529246+00:00",
+  "data_as_of": "2026-09-03T10:04:44.589312+00:00",
   "disclosures": [
     {
       "affects": "every row",
@@ -85,6 +88,7 @@
         "nbm-s7-c4-20260828",
         "nbm-s7-nofile-20260828",
         "nbm-s7-retry1-20260828",
+        "s032-s3-sentinel-solo32",
         "s3fl-hinted-fixed-replay-20260826",
         "s3fl-hinted-fixed-replay-r2-20260826",
         "s3fl-hinted-nolat-r2-20260826",
@@ -114,6 +118,8 @@
         "swath-postfix-nara-cpu-20260901",
         "swath-postfix-nara-select-20260901",
         "swath-postfix-nbm-20260901",
+        "swath-seekfix-blockchain-a-20260901",
+        "swath-seekfix-width-sweep-20260901",
         "swath-warmup-blockchain-a-20260901"
       ],
       "detail": "The ledger records no plan path, so plan attribution is declared in the release spec. Groups with no confident attribution carry source.plan_path = null rather than a guess.",
@@ -128,7 +134,10 @@
         "s3-fast-list.57dddc2de524.s1",
         "s3-fast-list.68d757575cc2.s1",
         "s5cmd.ce66ec57b593.s1",
+        "swath.1eaefee08af5.s1",
         "swath.7107861537aa.s1",
+        "swath.71974e96fd62.s1",
+        "swath.79755b842d62.s1",
         "swath.c42bfeced387.s1",
         "swath.cea468a24158.s1",
         "swath.d41a04e156f5.s1"
@@ -148,7 +157,62 @@
     },
     {
       "affects": [
-        "swath.c862c6707224.s1"
+        "swath.03be96dcab9d.s1",
+        "swath.0b5db9b35947.s1",
+        "swath.0b8586d306c9.s1",
+        "swath.0d01af45ef74.s1",
+        "swath.2503b450edb1.s1",
+        "swath.29b5a8610a12.s1",
+        "swath.2e269c9f9dd4.s1",
+        "swath.36e6d2ba0067.s1",
+        "swath.3e144673d0fd.s1",
+        "swath.4b2db6e9f6a9.s1",
+        "swath.4c013cd71921.s1",
+        "swath.4ed5380ddb4f.s1",
+        "swath.4ed5380ddb4f.s2",
+        "swath.4ed5380ddb4f.s3",
+        "swath.4ed5380ddb4f.s4",
+        "swath.4f98a532f4a1.s1",
+        "swath.5289504bc736.s1",
+        "swath.52ab9213be7b.s1",
+        "swath.5825fc907ee8.s1",
+        "swath.5aca107729b4.s1",
+        "swath.612250769ed4.s1",
+        "swath.693fc5f2ffbf.s1",
+        "swath.6b1ffae260c0.s1",
+        "swath.6bdbca2ec124.s1",
+        "swath.71974e96fd62.s2",
+        "swath.79755b842d62.s2",
+        "swath.7d797b5af5e4.s1",
+        "swath.82e29cbdb8e3.s1",
+        "swath.85ccd37c1b88.s1",
+        "swath.8d806cdc14d5.s1",
+        "swath.8d806cdc14d5.s2",
+        "swath.8edc0810f326.s1",
+        "swath.8edc0810f326.s2",
+        "swath.8edc0810f326.s3",
+        "swath.8edc0810f326.s4",
+        "swath.8edc0810f326.s5",
+        "swath.8edc0810f326.s6",
+        "swath.9dcd956bbc5c.s1",
+        "swath.a324acad75fe.s1",
+        "swath.a668d615d1fd.s1",
+        "swath.a66fe19b1e13.s1",
+        "swath.a92bfdd01952.s1",
+        "swath.abab0c08fd5b.s1",
+        "swath.aeba20509673.s1",
+        "swath.b5e15c7be01b.s1",
+        "swath.c1b3d62998f6.s1",
+        "swath.c3e2d6ca9ba0.s1",
+        "swath.c862c6707224.s1",
+        "swath.cd3f5baed8db.s1",
+        "swath.d7668a13dc4c.s1",
+        "swath.d8cacc6c9bd2.s1",
+        "swath.d8cacc6c9bd2.s2",
+        "swath.d8cacc6c9bd2.s3",
+        "swath.e154ad055071.s1",
+        "swath.f7ddf3b0cd56.s1",
+        "swath.f86c507fbaae.s1"
       ],
       "detail": "The Swath run summary is only present where the run's products were retained. Every other Swath row carries native_summary = null.",
       "id": "native-summary-rarely-retained"
@@ -157,14 +221,43 @@
       "affects": [
         "swath.0b5db9b35947.s1",
         "swath.0d01af45ef74.s1",
+        "swath.12d7ebe2ad2d.s1",
+        "swath.1eaefee08af5.s1",
+        "swath.1eaefee08af5.s2",
+        "swath.29b5a8610a12.s1",
+        "swath.2e269c9f9dd4.s1",
+        "swath.31d7484be314.s1",
+        "swath.36e6d2ba0067.s1",
         "swath.4b2db6e9f6a9.s1",
+        "swath.4f98a532f4a1.s1",
+        "swath.52ab9213be7b.s1",
+        "swath.54d5dd7df2af.s1",
+        "swath.5825fc907ee8.s1",
+        "swath.644f4a4a175b.s1",
+        "swath.693fc5f2ffbf.s1",
         "swath.6b1ffae260c0.s1",
+        "swath.6bdbca2ec124.s1",
         "swath.7107861537aa.s1",
+        "swath.71974e96fd62.s1",
+        "swath.71974e96fd62.s2",
+        "swath.79755b842d62.s1",
+        "swath.79755b842d62.s2",
         "swath.7b028bd8c692.s1",
+        "swath.82e29cbdb8e3.s1",
         "swath.85ccd37c1b88.s1",
+        "swath.8d806cdc14d5.s1",
+        "swath.8d806cdc14d5.s2",
+        "swath.93d4c3f66d3f.s1",
+        "swath.9dcd956bbc5c.s1",
         "swath.a0f1b2c053d8.s1",
+        "swath.a668d615d1fd.s1",
+        "swath.a66fe19b1e13.s1",
+        "swath.a92bfdd01952.s1",
+        "swath.aeba20509673.s1",
         "swath.c42bfeced387.s1",
+        "swath.cd3f5baed8db.s1",
         "swath.cea468a24158.s1",
+        "swath.d206c4aa76c7.s1",
         "swath.d7668a13dc4c.s1"
       ],
       "detail": "Rows with replay = null ran against the live bucket, uncontrolled and n=1. They are observations, not performance measurements.",
@@ -177,7 +270,7 @@
     },
     {
       "affects": "every row",
-      "detail": "This release combines several diagnostic campaigns run between 2026-08-26 and 2026-09-01 while the harness, the replay server and Swath were evolving. Every attempt pins its exact tool, image, platform, fixture and replay identities, but rows from different groups are not comparable merely because they share a release; the report's asymmetry table names the cases that matter.",
+      "detail": "This release combines several diagnostic campaigns run between 2026-08-26 and 2026-09-03 while the harness, the replay server and Swath were evolving. Every attempt pins its exact tool, image, platform, fixture and replay identities, but rows from different groups are not comparable merely because they share a release; the report's asymmetry table names the cases that matter.",
       "id": "multi-campaign-corpus"
     },
     {
@@ -201,6 +294,16 @@
       "id": "fixtures-not-published"
     },
     {
+      "affects": "every row with version ending in -SNAPSHOT",
+      "detail": "Rows whose Swath version is 0.2.5-SNAPSHOT (2026-08) or 0.3.2-SNAPSHOT (2026-09-03) ran unreleased builds pinned by image digest: the 0.3.2-SNAPSHOT rows are the sink-channel fix (upstream #209, commit cc052c9) and its lane-routing follow-up (#210, commit 5cdaeaf, not merged) measured on sentinel-cogs before v0.3.2 was cut. They are diagnostics of a change, not release rows; the released-build rows of the same shapes are the s032-* groups.",
+      "id": "unreleased-swath-builds"
+    },
+    {
+      "affects": "every row with replay == null",
+      "detail": "Live-S3 rows launched in parallel from the same project and VPC (2026-09-02 four buckets; 2026-09-03 the s032-s3-* groups) share the path out of the VPC. The sentinel-cogs 32-vCPU TSV row of 2026-09-03 listed 23 % slower while four other live-S3 jobs ran than the same build did alone earlier that morning, with S3 first-byte latency and sink waits both higher; the 64-vCPU row reproduced its solo figure within 2 %. Where a solo re-run exists it is the row to cite; the report names them.",
+      "id": "concurrent-live-s3-launches"
+    },
+    {
       "affects": "s4cmd",
       "detail": "s4cmd is a roster subject with no attempt in this release: it lists through the legacy ListObjects v1 API, which the replay server does not serve, and it requires credentials on live S3.",
       "id": "roster-subject-not-run"
@@ -214,14 +317,14 @@
   ],
   "files": [
     {
-      "bytes": 28862,
+      "bytes": 34306,
       "path": "REPORT.md",
-      "sha256": "24cb945c0f73ba0ce3e7fa3441dbcf2d580012dd407d2fe8438a92daaf125321"
+      "sha256": "9848d7cc6e3d1e6dd01e29736162ea23bbef567930fecb994f9d5067e994f1cb"
     },
     {
-      "bytes": 1039179,
+      "bytes": 1334271,
       "path": "attempts.jsonl",
-      "sha256": "84e0ebed4a61552f8d4de17fa7825bec3c76c7721b58e33c7d8f80bc470cbe20"
+      "sha256": "1fb5c89142463ce1463c0aa57ea1705005827318b9b624b75734d8226ff5ed93"
     },
     {
       "bytes": 1998,
@@ -244,24 +347,24 @@
       "sha256": "e6df3d7757dc04daec70a46d940e0181843f8bbd36f160f05b305c5152d4a64a"
     },
     {
-      "bytes": 1850,
+      "bytes": 5972,
       "path": "charts/real-s3-ladder.csv",
-      "sha256": "962212339a44434db31d0ba5dce8cb3aaf2d1758b47f36bf7a7cd0bbd00a0e59"
+      "sha256": "10d29a63a19e2c9daf025cfdf54d5f4996b437fc1b26f99a2af4bf0bac1b3212"
     },
     {
-      "bytes": 4740,
+      "bytes": 6347,
       "path": "charts/real-s3-ladder.svg",
-      "sha256": "d5ba3122ec2574b0eb9aeaa1b65316ea1a8d740d98ac40bef747429fc038fed7"
+      "sha256": "6d0e011e16a8fe0766489ed1fb7b37e3aa767ca8088952689d5d355039300a64"
     },
     {
-      "bytes": 22976,
+      "bytes": 27611,
       "path": "charts/s3-fast-list-rss.csv",
-      "sha256": "bdf84f58d149d69c7354187740c807a12875823797ce839d8308ac374aa93ab7"
+      "sha256": "9dc12b7b2a92971e4f64c03a2d474342d647b204ec75f3664818284701809de5"
     },
     {
-      "bytes": 14077,
+      "bytes": 15975,
       "path": "charts/s3-fast-list-rss.svg",
-      "sha256": "1284a3be277fbc6323534b4195b7a1bc6778f50bffcbe9b576ae31e045913e3d"
+      "sha256": "a036bd8c4e33d340e07537729f6b691f941f25a2173cc711dbe57e64806a2365"
     },
     {
       "bytes": 11144,
@@ -269,14 +372,14 @@
       "sha256": "edb2837195d089e08f9ae0249820fb0baa801302e96af5d5c71d770c12aa920c"
     },
     {
-      "bytes": 22227,
+      "bytes": 24314,
       "path": "subjects.json",
-      "sha256": "a1bf24973a27a3254604992d5214786d29cd609aea14ab313925205d1eabf23a"
+      "sha256": "d9f9eab30e7d6b757011cce3b028ce17d50b9899720e2ed40d6b60342311207c"
     },
     {
-      "bytes": 96217,
+      "bytes": 118188,
       "path": "summary.csv",
-      "sha256": "a47ee6dff113712f859359ff892f1258dfb3ec2f8c80fa1a4189af9349606a01"
+      "sha256": "f9a53ae7f215f2b8f7c8596373863621dbe823563f6db4e324a46b36b408ab3f"
     }
   ],
   "fixtures": [
@@ -345,7 +448,7 @@
       "attempts": 4,
       "group_id": "blockchain-capacity-20260829",
       "plan_path": "benchmark/plans/campaigns/aws-public-blockchain-replay/capacity/aws-public-blockchain.yaml",
-      "plan_sha256": "615b0419f3a7b6fe30819a0ba869fd6e09c651dabcf81b43520a849ec7751f99"
+      "plan_sha256": "47df80b015274d6a6088f5d4e505a562bc8c767e44f71d678bb8c0e911bfe278"
     },
     {
       "attempts": 2,
@@ -514,6 +617,174 @@
       "group_id": "nbm-s7-retry1-20260828",
       "plan_path": null,
       "plan_sha256": null
+    },
+    {
+      "attempts": 1,
+      "group_id": "s032-capacity-aws-public-b-r3",
+      "plan_path": "benchmark/plans/campaigns/aws-public-blockchain-replay/capacity/aws-public-blockchain.yaml",
+      "plan_sha256": "47df80b015274d6a6088f5d4e505a562bc8c767e44f71d678bb8c0e911bfe278"
+    },
+    {
+      "attempts": 1,
+      "group_id": "s032-capacity-n-noaa-nws-fou-r1",
+      "plan_path": "benchmark/plans/campaigns/fourcast-replay/capacity-no-latency/noaa-nws-fourcastnetgfs-pds.yaml",
+      "plan_sha256": "f4d232a2d72af868e9fe59ef63993d1f3a3328b54d8951fd08c6d731e14755b8"
+    },
+    {
+      "attempts": 1,
+      "group_id": "s032-capacity-noaa-nbm-gri-r3",
+      "plan_path": "benchmark/plans/campaigns/nbm-replay/capacity/noaa-nbm-grib2-pds.yaml",
+      "plan_sha256": "cd0bbf61fee9a8561bf2709713eaf9506e211b2bedc190c5fab763b821987dfd"
+    },
+    {
+      "attempts": 1,
+      "group_id": "s032-capacity-s-noaa-nws-fou-r1",
+      "plan_path": "benchmark/plans/campaigns/fourcast-replay/capacity-s3-latency/noaa-nws-fourcastnetgfs-pds.yaml",
+      "plan_sha256": "82881a3c26a90cf911f2dfdc129f367be0bc98ec62bf4b8d1604865f5fb86fea"
+    },
+    {
+      "attempts": 4,
+      "group_id": "s032-config-fol-nara-1950-ce-r3",
+      "plan_path": "benchmark/plans/campaigns/nara-replay/config-followup/nara-1950-census.yaml",
+      "plan_sha256": "2e9ab21c5983c34d7749b19031b4c5608eab64ba86dfcb353fb156e221719294"
+    },
+    {
+      "attempts": 2,
+      "group_id": "s032-config-sel-nara-1950-ce-r3",
+      "plan_path": "benchmark/plans/campaigns/nara-replay/config-selection/nara-1950-census.yaml",
+      "plan_sha256": "3f9a6925aafdf08d9fae70f54083198e5b7caddf7489d13333b6adb7ff2a8578"
+    },
+    {
+      "attempts": 3,
+      "group_id": "s032-cpu-ladder-nara-1950-ce-r3",
+      "plan_path": "benchmark/plans/campaigns/nara-replay/cpu-ladder/nara-1950-census.yaml",
+      "plan_sha256": "f9d7d126b2489fc2b3ab7983252afa017739d61144b26d47e18429d4ad8a4c47"
+    },
+    {
+      "attempts": 3,
+      "group_id": "s032-cpu-screen-noaa-nws-fou-r2",
+      "plan_path": "benchmark/plans/campaigns/fourcast-replay/cpu-screen/noaa-nws-fourcastnetgfs-pds.yaml",
+      "plan_sha256": "f4208cd0f61c1670ebd0df381187028abcfb58236a8d82e1ffb63625a30dbdcd"
+    },
+    {
+      "attempts": 1,
+      "group_id": "s032-flat-real-changes-r3",
+      "plan_path": "benchmark/plans/campaigns/real-changesets-replay/flat/real-changesets.yaml",
+      "plan_sha256": "5b2887ceb04ffc38f0a826977b0be963e5fd95b1d7febbc9ba38614f81e465e4"
+    },
+    {
+      "attempts": 5,
+      "group_id": "s032-isolated-r-noaa-nws-fou-r2",
+      "plan_path": "benchmark/plans/campaigns/fourcast-replay/isolated-repeatability/noaa-nws-fourcastnetgfs-pds.yaml",
+      "plan_sha256": "c3926a44d201839cc7d50e184b69c52c03252ed997326b8d01884590ca0c1c6a"
+    },
+    {
+      "attempts": 1,
+      "group_id": "s032-s3-elevation--1-a",
+      "plan_path": "benchmark/plans/campaigns/swath-real-s3-peak/elevation-tiles-prod.yaml",
+      "plan_sha256": "5dff987143b9c95269c6b9da8527db594043bd69b16510bca4c5173eb98af5a0"
+    },
+    {
+      "attempts": 1,
+      "group_id": "s032-s3-fah-public-1-a",
+      "plan_path": "benchmark/plans/campaigns/swath-real-s3-peak/fah-public-data-covid19-absolute-free-energy.yaml",
+      "plan_sha256": "b50b181856a80a6ebde66513d46c4f1ad3a6a968355044ea866bb1237fcc8c66"
+    },
+    {
+      "attempts": 1,
+      "group_id": "s032-s3-fah-public-2-a",
+      "plan_path": "benchmark/plans/campaigns/swath-real-s3-peak/fah-public-data-covid19-absolute-free-energy.yaml",
+      "plan_sha256": "b50b181856a80a6ebde66513d46c4f1ad3a6a968355044ea866bb1237fcc8c66"
+    },
+    {
+      "attempts": 1,
+      "group_id": "s032-s3-fah-public-3-a",
+      "plan_path": "benchmark/plans/campaigns/swath-real-s3-peak/fah-public-data-covid19-absolute-free-energy.yaml",
+      "plan_sha256": "b50b181856a80a6ebde66513d46c4f1ad3a6a968355044ea866bb1237fcc8c66"
+    },
+    {
+      "attempts": 1,
+      "group_id": "s032-s3-its-live-d-1-a",
+      "plan_path": "benchmark/plans/campaigns/swath-real-s3-peak/its-live-data.yaml",
+      "plan_sha256": "9aa88d530dca3fb48571d6fa43a57f37a309b30b0380092529c1d59ca14893af"
+    },
+    {
+      "attempts": 1,
+      "group_id": "s032-s3-janelia-co-1-a",
+      "plan_path": "benchmark/plans/campaigns/swath-real-s3-peak/janelia-cosem-datasets.yaml",
+      "plan_sha256": "738e16ecd238dfd1bec886f51b7fd07b196ba4550e49a5b4b5f86493a1f53326"
+    },
+    {
+      "attempts": 1,
+      "group_id": "s032-s3-janelia-co-2-a",
+      "plan_path": "benchmark/plans/campaigns/swath-real-s3-peak/janelia-cosem-datasets.yaml",
+      "plan_sha256": "738e16ecd238dfd1bec886f51b7fd07b196ba4550e49a5b4b5f86493a1f53326"
+    },
+    {
+      "attempts": 1,
+      "group_id": "s032-s3-janelia-co-3-a",
+      "plan_path": "benchmark/plans/campaigns/swath-real-s3-peak/janelia-cosem-datasets.yaml",
+      "plan_sha256": "738e16ecd238dfd1bec886f51b7fd07b196ba4550e49a5b4b5f86493a1f53326"
+    },
+    {
+      "attempts": 1,
+      "group_id": "s032-s3-real-chang-1-a",
+      "plan_path": "benchmark/plans/campaigns/swath-real-s3-peak/real-changesets.yaml",
+      "plan_sha256": "b27e4388229c91590b33fee57f668e108aaa20ade4a903464629b65de317f423"
+    },
+    {
+      "attempts": 1,
+      "group_id": "s032-s3-sentinel-c-1-a",
+      "plan_path": "benchmark/plans/campaigns/swath-real-s3-peak/sentinel-cogs.yaml",
+      "plan_sha256": "20760cb886d7add321583f349587b19fd2498606138d00254f896353dba7c225"
+    },
+    {
+      "attempts": 1,
+      "group_id": "s032-s3-sentinel-c-2-b",
+      "plan_path": "benchmark/plans/campaigns/swath-real-s3-peak/sentinel-cogs.yaml",
+      "plan_sha256": "20760cb886d7add321583f349587b19fd2498606138d00254f896353dba7c225"
+    },
+    {
+      "attempts": 1,
+      "group_id": "s032-s3-sentinel-c-3-b",
+      "plan_path": "benchmark/plans/campaigns/swath-real-s3-peak/sentinel-cogs.yaml",
+      "plan_sha256": "20760cb886d7add321583f349587b19fd2498606138d00254f896353dba7c225"
+    },
+    {
+      "attempts": 1,
+      "group_id": "s032-s3-sentinel-solo32",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 1,
+      "group_id": "s032-s3-usgs-lidar-1-a",
+      "plan_path": "benchmark/plans/campaigns/swath-real-s3-peak/usgs-lidar-public.yaml",
+      "plan_sha256": "cbd52da63be2df461fdc9473241c1e3ca3cb5e40ecfe761e10134768a49504e0"
+    },
+    {
+      "attempts": 6,
+      "group_id": "s032-screen-no--idc-open-dat-r2",
+      "plan_path": "benchmark/plans/campaigns/idc-replay/screen-no-latency/idc-open-data.yaml",
+      "plan_sha256": "e41acca761b46dbe387fe97cfbea1df662abae9a3e033dceff02216ac628ddb0"
+    },
+    {
+      "attempts": 1,
+      "group_id": "s032-screen-no--noaa-nws-fou-r1",
+      "plan_path": "benchmark/plans/campaigns/fourcast-replay/screen-no-latency/noaa-nws-fourcastnetgfs-pds.yaml",
+      "plan_sha256": "d8232d4b56b8e1fb8d164096f765e80947ef8118fc25bfb887703551237a04d7"
+    },
+    {
+      "attempts": 2,
+      "group_id": "s032-screen-s3--noaa-nws-fou-r1",
+      "plan_path": "benchmark/plans/campaigns/fourcast-replay/screen-s3-latency/noaa-nws-fourcastnetgfs-pds.yaml",
+      "plan_sha256": "358705755512b529e7731800637a072fca7f6272add0972d36ec274579cb14f4"
+    },
+    {
+      "attempts": 3,
+      "group_id": "s032-tuning-fol-noaa-nws-fou-r2",
+      "plan_path": "benchmark/plans/campaigns/fourcast-replay/tuning-followup/noaa-nws-fourcastnetgfs-pds.yaml",
+      "plan_sha256": "e706fba90c5c0eb93cf255bc67c1b6ed7b7aa04b6230dad9edf797423844adc4"
     },
     {
       "attempts": 1,
@@ -699,19 +970,25 @@
       "attempts": 1,
       "group_id": "swath-real-s3-janelia-sorted-20260901",
       "plan_path": "benchmark/plans/campaigns/swath-real-s3-peak/janelia-cosem-datasets.yaml",
-      "plan_sha256": "67bf4477c43fd59992fdfcea50e59d9cd2c7727f3b23f2d4cb70061941de6d62"
+      "plan_sha256": "738e16ecd238dfd1bec886f51b7fd07b196ba4550e49a5b4b5f86493a1f53326"
     },
     {
       "attempts": 1,
       "group_id": "swath-real-s3-sentinel-sorted-20260901",
       "plan_path": "benchmark/plans/campaigns/swath-real-s3-peak/sentinel-cogs.yaml",
-      "plan_sha256": "9ba1de7507d04c3de20095d84599a8cece5d1cbd8c6576567dd73a08b6215fb9"
+      "plan_sha256": "20760cb886d7add321583f349587b19fd2498606138d00254f896353dba7c225"
     },
     {
       "attempts": 1,
       "group_id": "swath-s3-changesets-sort-20260901",
       "plan_path": "benchmark/plans/campaigns/swath-real-s3-peak/real-changesets.yaml",
       "plan_sha256": "b27e4388229c91590b33fee57f668e108aaa20ade4a903464629b65de317f423"
+    },
+    {
+      "attempts": 1,
+      "group_id": "swath-s3-elevation-tsv-cpu64-20260902",
+      "plan_path": "benchmark/plans/campaigns/swath-real-s3-peak/elevation-tiles-prod.yaml",
+      "plan_sha256": "5dff987143b9c95269c6b9da8527db594043bd69b16510bca4c5173eb98af5a0"
     },
     {
       "attempts": 1,
@@ -733,27 +1010,117 @@
     },
     {
       "attempts": 1,
+      "group_id": "swath-s3-itslive-tsv-cpu64-20260902",
+      "plan_path": "benchmark/plans/campaigns/swath-real-s3-peak/its-live-data.yaml",
+      "plan_sha256": "9aa88d530dca3fb48571d6fa43a57f37a309b30b0380092529c1d59ca14893af"
+    },
+    {
+      "attempts": 1,
       "group_id": "swath-s3-janelia-sort-cpu32-20260901",
       "plan_path": "benchmark/plans/campaigns/swath-real-s3-peak/janelia-cosem-datasets.yaml",
-      "plan_sha256": "67bf4477c43fd59992fdfcea50e59d9cd2c7727f3b23f2d4cb70061941de6d62"
+      "plan_sha256": "738e16ecd238dfd1bec886f51b7fd07b196ba4550e49a5b4b5f86493a1f53326"
     },
     {
       "attempts": 1,
       "group_id": "swath-s3-janelia-sort-use1-20260901",
       "plan_path": "benchmark/plans/campaigns/swath-real-s3-peak/janelia-cosem-datasets.yaml",
-      "plan_sha256": "67bf4477c43fd59992fdfcea50e59d9cd2c7727f3b23f2d4cb70061941de6d62"
+      "plan_sha256": "738e16ecd238dfd1bec886f51b7fd07b196ba4550e49a5b4b5f86493a1f53326"
+    },
+    {
+      "attempts": 1,
+      "group_id": "swath-s3-janelia-tsv-cpu64-20260902",
+      "plan_path": "benchmark/plans/campaigns/swath-real-s3-peak/janelia-cosem-datasets.yaml",
+      "plan_sha256": "738e16ecd238dfd1bec886f51b7fd07b196ba4550e49a5b4b5f86493a1f53326"
+    },
+    {
+      "attempts": 1,
+      "group_id": "swath-s3-lidar-tsv-cpu64-20260902",
+      "plan_path": "benchmark/plans/campaigns/swath-real-s3-peak/usgs-lidar-public.yaml",
+      "plan_sha256": "cbd52da63be2df461fdc9473241c1e3ca3cb5e40ecfe761e10134768a49504e0"
+    },
+    {
+      "attempts": 2,
+      "group_id": "swath-s3-sentinel-lanes-20260903",
+      "plan_path": "benchmark/plans/campaigns/swath-real-s3-peak/sentinel-cogs.yaml",
+      "plan_sha256": "20760cb886d7add321583f349587b19fd2498606138d00254f896353dba7c225"
+    },
+    {
+      "attempts": 1,
+      "group_id": "swath-s3-sentinel-lanes32-20260903",
+      "plan_path": "benchmark/plans/campaigns/swath-real-s3-peak/sentinel-cogs.yaml",
+      "plan_sha256": "20760cb886d7add321583f349587b19fd2498606138d00254f896353dba7c225"
+    },
+    {
+      "attempts": 1,
+      "group_id": "swath-s3-sentinel-lanes64-20260903",
+      "plan_path": "benchmark/plans/campaigns/swath-real-s3-peak/sentinel-cogs.yaml",
+      "plan_sha256": "20760cb886d7add321583f349587b19fd2498606138d00254f896353dba7c225"
+    },
+    {
+      "attempts": 1,
+      "group_id": "swath-s3-sentinel-readahead-b-20260902",
+      "plan_path": "benchmark/plans/campaigns/swath-real-s3-peak/sentinel-cogs.yaml",
+      "plan_sha256": "20760cb886d7add321583f349587b19fd2498606138d00254f896353dba7c225"
+    },
+    {
+      "attempts": 1,
+      "group_id": "swath-s3-sentinel-sinkfix-20260903",
+      "plan_path": "benchmark/plans/campaigns/swath-real-s3-peak/sentinel-cogs.yaml",
+      "plan_sha256": "20760cb886d7add321583f349587b19fd2498606138d00254f896353dba7c225"
+    },
+    {
+      "attempts": 1,
+      "group_id": "swath-s3-sentinel-sinkfix-cpu64-20260903",
+      "plan_path": "benchmark/plans/campaigns/swath-real-s3-peak/sentinel-cogs.yaml",
+      "plan_sha256": "20760cb886d7add321583f349587b19fd2498606138d00254f896353dba7c225"
     },
     {
       "attempts": 1,
       "group_id": "swath-s3-sentinel-sort-use1-20260901",
       "plan_path": "benchmark/plans/campaigns/swath-real-s3-peak/sentinel-cogs.yaml",
-      "plan_sha256": "9ba1de7507d04c3de20095d84599a8cece5d1cbd8c6576567dd73a08b6215fb9"
+      "plan_sha256": "20760cb886d7add321583f349587b19fd2498606138d00254f896353dba7c225"
     },
     {
       "attempts": 1,
       "group_id": "swath-s3-sentinel-tsv-c2048-20260901",
       "plan_path": "benchmark/plans/campaigns/swath-real-s3-peak/sentinel-cogs.yaml",
-      "plan_sha256": "9ba1de7507d04c3de20095d84599a8cece5d1cbd8c6576567dd73a08b6215fb9"
+      "plan_sha256": "20760cb886d7add321583f349587b19fd2498606138d00254f896353dba7c225"
+    },
+    {
+      "attempts": 1,
+      "group_id": "swath-s3-sentinel-tsv-cpu64-20260902",
+      "plan_path": "benchmark/plans/campaigns/swath-real-s3-peak/sentinel-cogs.yaml",
+      "plan_sha256": "20760cb886d7add321583f349587b19fd2498606138d00254f896353dba7c225"
+    },
+    {
+      "attempts": 1,
+      "group_id": "swath-s3-sentinel-tsv-readahead-20260902",
+      "plan_path": "benchmark/plans/campaigns/swath-real-s3-peak/sentinel-cogs.yaml",
+      "plan_sha256": "20760cb886d7add321583f349587b19fd2498606138d00254f896353dba7c225"
+    },
+    {
+      "attempts": 1,
+      "group_id": "swath-s3-sentinel-usw1-20260902",
+      "plan_path": "benchmark/plans/campaigns/swath-real-s3-peak/sentinel-cogs.yaml",
+      "plan_sha256": "20760cb886d7add321583f349587b19fd2498606138d00254f896353dba7c225"
+    },
+    {
+      "attempts": 1,
+      "group_id": "swath-s3-sentinel-usw1-b-20260902",
+      "plan_path": "benchmark/plans/campaigns/swath-real-s3-peak/sentinel-cogs.yaml",
+      "plan_sha256": "20760cb886d7add321583f349587b19fd2498606138d00254f896353dba7c225"
+    },
+    {
+      "attempts": 1,
+      "group_id": "swath-seekfix-blockchain-a-20260901",
+      "plan_path": null,
+      "plan_sha256": null
+    },
+    {
+      "attempts": 4,
+      "group_id": "swath-seekfix-width-sweep-20260901",
+      "plan_path": null,
+      "plan_sha256": null
     },
     {
       "attempts": 1,
@@ -769,26 +1136,35 @@
       "04cddf087ebbd5d8dc6adbddd9c01112b355cf249c267ed103ed49a1877963ed",
       "0bae9345f2ce52ad2e58edcb817edd68b4b8e09853cdb67b5facc14495252e51",
       "10ce5c815c5dab948184e660f0d6844373113c76fe03796b60924ad7b247fdb9",
+      "1b1e4b89a29925296523ede7d5f5f6207c5db028ab830b8e66db3ffc53eff518",
       "2198e8e69b7058e77071f00f60aa997012eaa00e69f195280606d135f26d2ac6",
       "3119405028cedeba747413078f2edb16acd02db3c72700a79c6778f0631446d5",
       "3a4ca5c8818e6e4787e5c81c37058b2b80fcba4a147cc5a17bffc281ee26698b",
       "4a835ea3daf5c73854f68fbf610e7c3e16a0f84cab7ce05da25a91f777b5c294",
+      "4bc3d8e24765ec6fe546d3dfe4200bfd17c0cb24e7f8944f73e75b7578b5eb1a",
       "5ecf54bd5a11ef3bf0b24e7030294f2e8c494aa00e9f980c2042308d032e68ff",
+      "62ec2a420217937d0c29e5321547c253f80a3d6cbf031114caabcd55007f7fba",
       "6c2963d2612f9c20338bed7fca30fec8ae06322ee97879020cd41f1a073e2dac",
       "6cd82f131d8f9b9158493174d0b0adfdd204926fa9f73756de246af2677d07c1",
       "7f0f050538d6fa0d60d3c3c5887c9423e170fea158112395a9417a6ffe64e391",
       "8282a955ee623c0b9a00ddad1974ada710af7f4734fa3ac86a7c9fa400fd0f89",
       "85a088375aa1e34cea002280b5d2032a8d310f6dce5e03810f54344bce04c92d",
+      "88cb322c181c76f2e7aa54e23ac71985c8693db77e5d331d8664041231c20c69",
       "8be91cae1a589ed7484b90f109dd192402f1dc3bfd2ef242d273de24c3286ec0",
       "8c77b524605f3823f19597cb677874c55cc634b04af8f2d555d7950b30325c0e",
+      "90608e43475dc34e039030fc37662ff0a4b588992046dafa4ced2005b0d6bc73",
+      "a3723f1d6dde19ad48d58969348ea1bb4dc3627a2a371c3929ae58093fd21911",
+      "a70e75aa06c8e0a8e7cfcefe12bcda1cbf7ec026d6da2e21de28de91b7027817",
       "af45c681674423f4d864eefde47bd530bb8b91778cf061d435cafc61d53e947b",
       "c08e668bd5239df81ccea19a95091a2bdd6426d704269b9d38ac196be5270f92",
       "c31f05fcd4fe333f508aef23672ee3ff48af5cea0a59cae0c051ee3c78a40beb",
       "e78f8a5cf286b69eb89beda0390b5dc295beea3877e8e79c8b117a922e036dd6",
+      "fcd8c0a4c8a9bfcecccb0d7fd8dab331ac5f897a83cc346953b571f4f1139530",
       "fe78d77dfbd5a1b764553456e8a4b81e9d6f4aee870029ef1af278cf57b807d3"
     ],
     "replay_server_image_digests": [
       "sha256:3955f242f25294d3ebc6d63d3cf23e2a2694f7f1c9a5334dc6ec1054b0a69097",
+      "sha256:5797514c7599c795197e53f4e55651829fca7c1630c351242407690bff9881ad",
       "sha256:8fb53a327f946f10db17d4fd082a7b2e06bc678a1e828a197a1ef5717473a46a",
       "sha256:992ef65f1d8e92385a39dfe0eea487ceeeaefd4ca186cd8511447317872ade1d",
       "sha256:ace5350d99c217bf5919b795fc53ed955d1dc2fb6bef1eecf36e8a90e9732f07",
@@ -799,8 +1175,10 @@
     "toolbox_image_digests": [
       "sha256:0e3e0225ef0ec01a08c90ae8795927a1a55f5b8803dd89754e6d04256852bfab",
       "sha256:0e79492cdf5598a74baa3671cd9191871ab98c3507c484ced3ef65a8a41b0c22",
+      "sha256:0f376b395cce0029b0bbf68a71e0414df72fa0a3b172edf601aa848809997f8f",
       "sha256:1906559a130773f351f30e954b48e81af9ef7a5be5d14a911e0d36f8e5891285",
       "sha256:1a563daf8712b6d69089eca5856322fc4e3b50424a6aed7d6a95e2ee16c65492",
+      "sha256:1b95a0095b61ce7fbbc1ea72590d0aa02db4a3a066ef057420f553561504846b",
       "sha256:1d2b46520c8d09111a1fd5e47e008cfcff0dc9c62166a21075822219be4f32ac",
       "sha256:1f815b5f0d7882f52ab7bf26b5d5bda0f315d86f327ddb25690f30de5d3b12f8",
       "sha256:211e8205b11bf3ed5d5e808fe80edbd129326835ad77b55cbd88d9e10b058b57",
@@ -809,20 +1187,25 @@
       "sha256:4db3a23f3adc2b1e77111ff6ce36f5bca1038caee8177bd1a93f2fcd0eb55a55",
       "sha256:4ec249eb979ec883d42bf3ac670623d822c56bf21c9fcdf4b3b773f650da0b48",
       "sha256:60a7e6ee3a476f9d7e12c33977f0813f22161bbc34b6bdb6b292f0bc7543d86b",
+      "sha256:637465126b9e1c5ab78a73719446b28e6387051f2cc2159484761c5794f96332",
       "sha256:6473a6c151a35e0875cf66f17932284b6cc88789ef7ca78f76edf1bdfbc50a7c",
       "sha256:6678b8c013c1053536a56b1560f63a1a785b6208b8ff7baec94f6b286bfbc751",
       "sha256:76881fbccfa6efa4c5402b8d7fa0df57be06df2ed7012a91c8e26b3e201603d7",
       "sha256:79b567baf5a2fc18e75846af9b0887f83335203e27d034a648baba69ee73cfc4",
+      "sha256:8f8e145767216253a737fd48041655fd1c53570398b9dd298cf509a7149b11d0",
       "sha256:9d212ec1cae1ed8f5fac65e7030e271db80bb3b5680edd43b9978368263ba1ed",
       "sha256:9fe6f7fb00c9f857f434a0151476bb8184dd139df13c284692a2e9f09846fb91",
       "sha256:b8bae19a747ab5da97ad64a56642d679ae8050e04969c548728afc71054ee3ef",
+      "sha256:bc36b9dd9fa084f26dd0f2ba353492f500dd45acb6de93b0e2c7c6607f9c0eee",
       "sha256:c84fb245d6fc7194d5c1cb4743806a64b4f9a13b647b91b8bab0cf670a3b93b7",
       "sha256:e78985f90874f3d8b4528e6826459878d717fc22d0a12dc79106997eb857a65d",
-      "sha256:ea3dce97e66990edfda1b1e09470f617af481c14110a50c995477ff757e1fee7"
+      "sha256:ea3dce97e66990edfda1b1e09470f617af481c14110a50c995477ff757e1fee7",
+      "sha256:f0650dabec11aafcb909ce09b0089bebb87dde364108ca7941af3e00832a49cc",
+      "sha256:f5d740a607c84964217d54f6cb2e84790a491b507eff7940251dcf2ded123e92"
     ]
   },
   "include": "all-terminal",
-  "published_at": "2026-09-01T21:26:59.529246+00:00",
+  "published_at": "2026-09-03T10:04:44.589312+00:00",
   "release_id": "2026-09-scale-diagnostics",
   "schema_version": 1,
   "source": {
@@ -832,7 +1215,7 @@
     "ledger_suite": "scale-study",
     "reader_ledger_schema_version": 3,
     "release_spec": "benchmark/publication/2026-09-scale-diagnostics.yaml",
-    "repository_commit": "35fa6b9c31a9794771a5b3b5bde1217b65a9af67",
+    "repository_commit": "9c4f953f472525749601c99cef059379d6a32506",
     "row_schema_version": 1
   },
   "status": "diagnostic",

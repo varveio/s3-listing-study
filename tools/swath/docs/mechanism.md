@@ -1,11 +1,12 @@
 # Swath — mechanism
 
-How Swath v0.3.1 lists a bucket: how it divides the keyspace, how it paginates
+How Swath v0.3.2 lists a bucket (the text says v0.3.1 where it was read there and the code is unchanged at v0.3.2; the 0.3.2 delta is one pipeline seam, see [`../research/v0.3.2/report.md`](../research/v0.3.2/report.md)): how it divides the keyspace, how it paginates
 and parallelises, what it keeps in memory, what it emits, and how it fails.
 
-**Tested subject.** Upstream's own published image for `v0.3.1`, whose
+**Tested subject.** Upstream's own published image for `v0.3.2`, whose
 `org.opencontainers.image.revision` label equals the pinned source commit
-`7b9a5e2fba045c67165c76511f8c40c880406a8a` (short `7b9a5e2`). Canonical identity
+`acf0d509f238832ffe2f0fb608951be33e99ae6f` (short `acf0d50`); the ledger was read at v0.3.1
+(`7b9a5e2`) and moved to v0.3.2 by a bounded delta. Canonical identity
 is in [`../data/tool.json`](../data/tool.json); how that image was selected and
 run is in [`running.md`](running.md). Where a behaviour changed between
 upstream's 0.2.0 and 0.3.1 the text says so, because those are the changes a
