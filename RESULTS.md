@@ -117,8 +117,9 @@ Thirty single runs of three Swath builds against seven public buckets, from
 of 2026-09-03 repeat the earlier shapes on the released fix for upstream #206. No other tool ran on live S3 in
 this release, so nothing here compares tools. The wall clocks are whole
 process, start to exit, including writing the output; the listing phase
-inside the billion-row run is shorter, but that figure is in a private run
-summary, not in the public row, and the report labels it as such. Two runs of
+inside each run is shorter; for the 2026-09-02 and 2026-09-03 rows it is in
+the public row (`listing_seconds`, read from the retained run report), and
+for the earlier rows it is a private figure the report labels as such. Two runs of
 `sentinel-cogs` returned different counts because the bucket changed
 between them; neither was checked against a manifest, because none exists for a
 live bucket. The full ladder is
