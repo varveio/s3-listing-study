@@ -3,10 +3,11 @@
 This directory is history, not current state. Current facts live in
 [`../data/claims.json`](../data/claims.json), explained by
 [`../docs/`](../docs/) and summarised in [`../README.md`](../README.md).
-Everything here describes one subject, swath **v0.3.1** (`7b9a5e2`).
+Everything here describes swath **v0.3.1** (`7b9a5e2`), plus the patch-release delta record in [`v0.3.2/`](v0.3.2/) that moved the capsule to **v0.3.2** (`acf0d50`).
 
 | File | What it is |
 | --- | --- |
+| [`v0.3.2/report.md`](v0.3.2/report.md) | The 0.3.2 patch-release delta: the mechanical anchor bound (409 of 418 anchors on unchanged files), the nine re-read anchors, the two added claims, the re-observed image identity and adapter round-trip. |
 | [`report.md`](report.md) | How the ledger was derived: method, image identity, the installed-help diff against 0.2.0, the adapter round-trip, and the per-claim verdict table. |
 | [`reader-A.md`](reader-A.md) | Engine: work stealing, seeding, AIMD, retries, watchdog, engine toggles. |
 | [`reader-B.md`](reader-B.md) | S3 store: request shape, streamed response parsing and key decoding, retries, region, User-Agent. |
