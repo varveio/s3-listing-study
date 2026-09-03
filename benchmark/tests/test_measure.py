@@ -1056,9 +1056,7 @@ def test_default_upload_keeps_the_run_report_out_of_a_dropped_native_tree(
     assert not any(uri.endswith("part-0.tsv.zst") or uri.endswith("/native") for uri in uploaded)
     assert uploaded[-1] == "gs://bucket/leaf/result.json"
     assert measure.run_report_manifest(attempt / "native") == {
-        "listing/_swath_summary.json": sha256_of(
-            attempt / "native/listing/_swath_summary.json"
-        )
+        "listing/_swath_summary.json": sha256_of(attempt / "native/listing/_swath_summary.json")
     }
 
     local = tmp_path / "results" / "leaf"
