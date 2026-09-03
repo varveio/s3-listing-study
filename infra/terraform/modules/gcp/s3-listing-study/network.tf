@@ -34,3 +34,26 @@ resource "google_compute_subnetwork" "this" {
   # than as a machine with no route to Google.
   private_ip_google_access = true
 }
+
+# Additional regions share the study VPC but keep independent address space.
+# This is deliberately a separate resource from `this`: callers can add regions
+# without moving the established primary subnet from its count-based state
+# address.
+resource "google_compute_subnetwork" "additional" {
+  for_each = var.create_network ? var.additional_subnet_cidrs : {}
+
+  project       = var.project
+  name          = "${local.name}-${each.key}"
+  region        = each.key
+  network       = google_compute_network.this[0].id
+  ip_cidr_range = each.value
+
+  private_ip_google_access = true
+
+  lifecycle {
+    precondition {
+      condition     = each.key != var.region
+      error_message = "additional_subnet_cidrs must not repeat the primary region in var.region."
+    }
+  }
+}
