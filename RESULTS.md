@@ -215,6 +215,9 @@ or the tool's source.
   comparative runs, with its dated changes.
 - **[Per-tool pages](tools/README.md)**: how each tool lists, its groundwork
   evidence, and its standing in this release.
+- **[How this work came together](https://sagi.org/posts/how-i-built-swath/)**:
+  the story behind Swath, the tool survey, the replay instrument, and this
+  study. It provides context; result provenance is in the attempt table above.
 - **The public rows**, in `results/2026-09-scale-diagnostics/`:
   [`attempts.jsonl`](results/2026-09-scale-diagnostics/attempts.jsonl) (one
   object per run, canonical),

@@ -30,6 +30,11 @@ rules for every tool, every run published including the ones where Swath
 looks bad or the instrument broke, and an open invitation to anyone who knows
 a tool better than we do to fix our setup.
 
+For the story of how Swath and this study grew out of the same work, read
+[How I built swath: listing a billion S3 objects in 4 minutes](https://sagi.org/posts/how-i-built-swath/).
+The post provides background; the committed run records and release report
+remain the evidence for the findings.
+
 This is a side project run out of curiosity, not a sales comparison. Nobody
 is being crowned. If you maintain one of these tools and we got it wrong,
 [please tell us](CONTRIBUTING.md); that is the most useful contribution this
