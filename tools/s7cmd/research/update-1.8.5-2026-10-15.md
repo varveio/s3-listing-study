@@ -143,6 +143,47 @@ The remaining retarget checklist is concrete:
 No v1.8.5 receipt, performance result, correctness verdict or completed
 runtime qualification is recorded as of 2026-10-15.
 
+### Future retarget file map and validation order
+
+The following is a future implementation path, not a completed build. Follow
+[tool onboarding](../../../docs/operating/tool-onboarding.md),
+[capsule authoring](../../../docs/operating/capsule-authoring.md) and the
+[build/identity contract](../../../benchmark/docs/identity.md) when reopening it.
+The historical-source and migration-origin decisions above come first; this
+map does not silently supply a schema solution.
+
+| Files or helpers | Future change or check |
+| --- | --- |
+| `data/tool.json`, `data/claims.json` | Represent the new subject without rebinding historical claims or receipts; resolve the historical-source and new-origin constraints before changing canonical identity |
+| `adapter/command.py`, `adapter/normalize.py` | Review every emitted mode/flag against pinned CLI source and every projected field against its formatter; preserve workload semantics, disclose the inherited timeout, and use candidate-source default provenance until real help exists |
+| `build/Dockerfile`, `build/image.json` | Select the exact candidate asset URL/name/checksum above; keep executable and workdir declarations consistent with installation; derive both build-input and adapter-bundle digests |
+| [shared Dockerfile](../../../benchmark/build/Dockerfile) | Update `s7cmd_install` to the identical artifact; preserve shared-base and runtime-closure contracts rather than introducing a standalone parent image |
+| [build-selection helpers](../../../benchmark/src/benchmark/runtime/build_selection.py) | `adapter_bundle_sha256` and the existing build-input hashing implementation define the digests; `load_registered_selection` must accept the resulting metadata, with no hand-invented digest |
+| [toolbox build helpers](../../../benchmark/src/benchmark/build_image.py), [context allowlist](../../../benchmark/build/Dockerfile.dockerignore) | `registered_selections`, `validate_executed_sources` and `toolbox_manifest` must bind the selected artifact and executed recipe; add `SUPPORT_INPUTS` and context entries only if the retarget introduces supporting build files |
+| [command tests](../../../benchmark/tests/test_command_adapters.py), [normalizer tests](../../../benchmark/tests/test_adapters.py), [build tests](../../../benchmark/tests/test_build_image.py) | Update meaningful source-derived expectations when semantics change; old fixture tests alone cannot validate the new binary |
+| `docs/`, `README.md`, dated research | State separately what is source-supported, built, actually executed and verified; retain historical evidence under its own version |
+
+Validation proceeds in distinct stages:
+
+1. **Static preparation:** capsule/schema and links, every old/new source anchor
+   against its exact checkout, build/adapter digest checks, command/normalizer
+   unit tests and offline toolbox manifest/source checks. Resolve the inherited
+   anchor debt tracked in [open questions](../../../docs/open-questions.md#s7cmd-historical-deep-leaf-concurrency-and-anchor-debt).
+   These checks do not establish that the candidate executable loads or works.
+2. **After subject execution is reopened:** use the existing shared Docker
+   toolbox build path from a clean reviewed revision. Capture actual version
+   and help, inspect build metadata and complete intended mode/output smoke
+   checks in the container. A Docker build may itself execute subjects; it is
+   therefore part of this later stage, not static preparation.
+3. **Future benchmark preparation:** follow the harness
+   [running guide](../../../benchmark/docs/running.md) and
+   [publishing rules](../../../benchmark/docs/publishing.md) for digest-pinned
+   images, exact argv/config/resources, retained failures and content
+   verification. Qualify hierarchical/deep-leaf, flat and skewed fixtures
+   before drawing any comparison; source fixes do not establish a ranking.
+
+No Docker build, subject command or cloud run is part of this source update.
+
 ## Pinned source index
 
 These links highlight the primary sources for key findings; complete pinned
