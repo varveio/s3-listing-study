@@ -79,3 +79,45 @@ split policies may help skew or sparse/irregular keys. Catalog materialization
 may dominate DataChain even when its enumeration is competitive; initialization
 and output serialization may also materially affect Swath's end-to-end result. None of these
 is an observed result, and upstream PR timing tables cannot settle them here.
+
+## Continuation contract for capsule implementation
+
+**Prepared:** release/branch selection, source derivation, API/product boundaries,
+known semantics and review findings. **Not prepared:** an accepted runnable
+capsule, dependency-locked image or runtime qualification. Start with the released
+0.60.0 cold-catalog subject; keep #2027 and #2051 as separately identified later
+arms. Re-check upstream state, but do not silently replace these frozen subjects.
+
+| Work item | Concrete destination and decision |
+| --- | --- |
+| Canonical source claims | `tools/datachain/data/claims.json`, then `data/tool.json`; source findings stay supported and unexecuted claims stay unverified. No fabricated receipts. |
+| Public API launcher | A study-owned file under `build/`; call `read_storage` and `to_iter`, isolate catalog/cache/tmp, disable analytics, serialize four native fields. It must contain no listing or partitioning implementation. |
+| Command and normalization | `adapter/command.py` and `adapter/normalize.py`; declare the file product, four fields, signed/unsigned behavior, current-object scope, prefix refusals and released serial width. Preserve errors and malformed/partial products. |
+| Artifact and closure | `build/Dockerfile`, `build/image.json` and dependency lock; select the official 0.60.0 wheel for the shared Linux AMD64/Python runtime and verify artifact provenance against the source tag. A development archive needs its own identity and dependency assessment. |
+| Shared toolbox assembly | Add the stage and payload copy in `benchmark/build/Dockerfile`, context allowlist in `benchmark/build/Dockerfile.dockerignore`, and stage/support-input registration in `benchmark/src/benchmark/build_image.py`. The launcher and lock must enter the build-input hash. |
+| Harness registration | `benchmark/src/benchmark/contract.py` roster and `benchmark/plans/tools.yaml` default/explicit exclusion policy. Register without silently expanding old campaign populations. |
+| Contract coverage | Include the new subject in both shared suites, `benchmark/tests/test_command_adapters.py` and `benchmark/tests/test_adapters.py`, as well as `benchmark/tests/test_build_image.py`, `benchmark/tests/test_plan.py` and meaningful DataChain-specific parsing/refusal checks. A passing hard-coded old roster does not test the new adapter. |
+| Explanations | Derive `docs/mechanism.md`, `docs/running.md`, then the runnable README from the ledger. Keep this research and all prior evidence intact. |
+
+Use the existing hash helpers in
+[build_selection.py](../../../benchmark/src/benchmark/runtime/build_selection.py),
+not hand-written digest constants. The
+[build tool](../../../benchmark/src/benchmark/build_image.py) validates and embeds
+the toolbox manifest from a clean commit. The adapter bundle covers only its two
+contract files; any separate launcher belongs in the registered build inputs.
+
+The implementation's static gate is capsule validation, local-link checking,
+exact-revision source-anchor checking, shared adapter tests, and the repository's
+lint/type checks. The authoritative command sequence is in
+[capsule-authoring.md](../../../docs/operating/capsule-authoring.md#the-verification-loop).
+The subsequent execution gate is separate: build and attest the clean revision,
+exercise the real API in the container, inspect native output, and compare known
+keys/metadata on bounded fixtures. A clean exit or matched count is insufficient.
+The [runbook](../../../benchmark/docs/running.md) defines image identity, attempt
+records, retention, verification and receipt export; it is not an instruction to
+provision a new host. Execution remains deferred for this research proposal.
+
+A future agent should report these stages independently. An implemented adapter
+that has only passed synthetic tests is not qualified; an image whose help works
+has not established listing completeness; a smoke-qualified subject has not yet
+earned scale or comparative claims.

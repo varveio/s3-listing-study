@@ -159,19 +159,21 @@ both accounts rather than choose one:
 | 2.05M current objects | 47 | 171 s | 45 |
 | 10.5M object versions | 174 (2.9 min) | 14.8 min | "no versioning" |
 
-The DataChain arm is described as `read_storage(...)` at the unmerged PR #2027
-tip plus the #2037 key-filter fix, writing each entry into a local listing
+The DataChain arm is described as `read_storage(...)` at the PR #2027
+tip (unmerged as of 2026-10-15) plus the #2037 key-filter fix, writing each entry into a local listing
 dataset. It is not a released subject or necessarily the exact candidate head
 pinned elsewhere in this report. The large current-object arm explicitly uses
-`version_aware=False`. The author says DataChain skips 55 folder markers in that
-bucket while Swath reports them, so even the emitted populations differ. For the
+`version_aware=False`, citing issue #2036 and PR #2038 without specifying the
+exact assembled revision. The author says DataChain skips 55 folder markers
+and that the other tools report them, which implies Swath includes them; even
+the described emitted populations differ. For the
 version-history arm, the author explicitly says DataChain's version count was
 not checked. The Swath entry is the author's unsupported-versioning claim;
-this study has no version-listing run record in this comparison to verify it.
+this section cites no study run record that confirms or refutes it.
 
 The comment does not pin a Swath version or provide complete commands and
-uncertainty estimates. These inconsistent numbers establish neither equivalence
-nor a DataChain win. They identify comparisons to investigate after the subjects,
+uncertainty estimates. These inconsistent numbers establish no ranking or equivalence in either
+direction, including no Swath advantage or DataChain advantage. They identify comparisons to investigate after the subjects,
 products, key populations and upstream discrepancies are resolved.
 
 ## Other tools in the upstream comparison
