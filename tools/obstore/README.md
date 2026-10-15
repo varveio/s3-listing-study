@@ -5,6 +5,10 @@ streaming metadata-list API. No obstore subject has been installed, executed or
 benchmarked for this onboarding proposal. This directory is not a runnable capsule
 and is absent from the published diagnostic release.
 
+[Continuation checklist](research/onboarding.md) maps the decided API boundary,
+remaining artifact decisions and exact repository integration surfaces for a
+future authorized agent. Research readiness is not runtime qualification.
+
 The proposed released subject is **0.12.0** (`py-v0.12.0`), source commit
 `abe772d39f446a7850fa61060bc7b0c3c9792cad`, published October 15, 2026.
 Its locked Rust `object_store` dependency is **0.14.2**. As checked on 2026-10-15,
