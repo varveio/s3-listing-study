@@ -78,6 +78,15 @@ bucket.
 | [`s3-fast-list`](s3-fast-list/) | Splits the keyspace at user-supplied cut-points (`-k` hints); serial without them; holds every key in memory until one Parquet write at the end | Completed 66.4M, count matched, in 333.8 s on cut-points the harness generated, with 11,347,320 KiB peak RSS. One other attempt was killed at 8 GiB; one failed at 16 GiB with exit 0. |
 | [`s5cmd`](s5cmd/) `run` | Fans per-prefix `ls` jobs through its worker pool from a shard list | Completed 66.4M, count matched, in 352.2 s, on shard lists the harness supplied. Not carried further. |
 
+### Research candidates
+
+These entries are source research and onboarding proposals. They have no new
+study run records and are not part of the executable benchmark roster.
+
+| Tool | Why investigate it | State |
+| --- | --- | --- |
+| [DataChain](datachain/) | Cold catalog materialization and a proposed parallel range lister | Released 0.60.0 and open optimization/API proposals researched separately; execution deferred |
+
 ### Not run, kept for context
 
 These are not single-bucket listers and do not enter the runs. They are here
