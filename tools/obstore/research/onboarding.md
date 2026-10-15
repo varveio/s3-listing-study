@@ -5,8 +5,11 @@ and authorizes no installation, build, subject execution or benchmark. It gives
 a future agent a concrete starting point after those actions are authorized.
 
 Use the [source report](report.md) for frozen obstore 0.12.0 commit
-`abe772d39f446a7850fa61060bc7b0c3c9792cad`, object_store 0.14.2 archive checksum,
-dependency-source identity and their provenance limits. Recheck release/wheel
+`bbf158a79dca6ee61f78b8f0d218dbda591bfe40`, object_store 0.14.2 archive checksum,
+dependency-source identity and their provenance limits. The report preserves the
+initial `abe772d39f446a7850fa61060bc7b0c3c9792cad` snapshot and records the
+workflow-only tag move; unchanged source does not identify compiled wheels.
+Recheck release/wheel
 availability before final subject selection; a newer release needs its own read.
 
 ## Product decisions already made

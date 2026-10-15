@@ -10,8 +10,11 @@ remaining artifact decisions and exact repository integration surfaces for a
 future authorized agent. Research readiness is not runtime qualification.
 
 The proposed released subject is **0.12.0** (`py-v0.12.0`), source commit
-`abe772d39f446a7850fa61060bc7b0c3c9792cad`, published October 15, 2026.
-Its locked Rust `object_store` dependency is **0.14.2**. As checked on 2026-10-15,
+`bbf158a79dca6ee61f78b8f0d218dbda591bfe40`, published October 15, 2026.
+The initial October 15 derivation snapshot was `abe772d39f446a7850fa61060bc7b0c3c9792cad`;
+[the report](research/report.md#identity-and-scope) records the subsequent tag
+move and workflow-only diff. Compiled wheel identity remains unverified.
+Its locked Rust `object_store` dependency is **0.14.2**. As rechecked on 2026-10-15 at 16:45 UTC,
 upstream main and that release point to the same commit.
 
 [The source report](research/report.md) explains the exact API, one-chain S3

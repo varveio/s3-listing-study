@@ -9,15 +9,31 @@ study observations of runtime behavior remain unverified.
 
 The [latest GitHub release](https://github.com/developmentseed/obstore/releases/tag/py-v0.12.0)
 is `py-v0.12.0`, published 2026-10-15 at 15:01:29 UTC, commit
-`abe772d39f446a7850fa61060bc7b0c3c9792cad`. Main resolved to that same commit when
-checked. The [DataChain comparison comment](https://github.com/datachain-ai/datachain/pull/2027#issuecomment-6128223196), checked on 2026-10-15, does not identify its obstore version,
+`bbf158a79dca6ee61f78b8f0d218dbda591bfe40` as rechecked through GitHub's tag-ref
+and commit APIs at **2026-10-15 16:45 UTC**. Main resolved to that same commit.
+The initial read earlier on October 15 observed the release tag and main at
+`abe772d39f446a7850fa61060bc7b0c3c9792cad`; that remains the dated original
+derivation snapshot, not the currently resolved release identity.
+
+The [exact comparison](https://github.com/developmentseed/obstore/compare/abe772d39f446a7850fa61060bc7b0c3c9792cad...bbf158a79dca6ee61f78b8f0d218dbda591bfe40)
+is one additional commit, [#800](https://github.com/developmentseed/obstore/pull/800),
+changing only `.github/workflows/wheels.yml`. It skips free-threaded Python 3.14
+wheel builds on 32-bit x86 and armv7 Linux targets, using target-specific extra
+interpreter lists. Git tree comparison confirms the listing/binding source,
+manifests and Cargo.lock are unchanged. Source links below now target the
+current release revision; their listing-relevant contents match the initial
+snapshot. This does **not** establish identical compiled wheels, wheel availability
+or dependency closure: artifact selection, hashes and platform qualification
+remain future work. The GitHub release page may retain the original displayed
+commit while the tag resolves to the new commit, so the dated API resolution
+is the selected source identity. The [DataChain comparison comment](https://github.com/datachain-ai/datachain/pull/2027#issuecomment-6128223196), checked on 2026-10-15, does not identify its obstore version,
 so its claims cannot be attributed to this newly released version.
 
-The [package manifest](https://github.com/developmentseed/obstore/blob/abe772d39f446a7850fa61060bc7b0c3c9792cad/obstore/pyproject.toml)
+The [package manifest](https://github.com/developmentseed/obstore/blob/bbf158a79dca6ee61f78b8f0d218dbda591bfe40/obstore/pyproject.toml)
 requires Python 3.11 or newer and uses maturin. The
-[Rust manifest](https://github.com/developmentseed/obstore/blob/abe772d39f446a7850fa61060bc7b0c3c9792cad/Cargo.toml)
+[Rust manifest](https://github.com/developmentseed/obstore/blob/bbf158a79dca6ee61f78b8f0d218dbda591bfe40/Cargo.toml)
 allows `object_store` 0.14.x; the committed
-[lockfile](https://github.com/developmentseed/obstore/blob/abe772d39f446a7850fa61060bc7b0c3c9792cad/Cargo.lock#L1422)
+[lockfile](https://github.com/developmentseed/obstore/blob/bbf158a79dca6ee61f78b8f0d218dbda591bfe40/Cargo.lock#L1422)
 resolves **0.14.2**, registry checksum
 `f1796bc93603f78c5760a69f2d58badc9618d22adade0a95385bb2adbae4eb94`.
 The corresponding upstream dependency tag `v0.14.2` points to
@@ -32,8 +48,8 @@ It offers no user-facing adaptive key-range scheduler in the selected list API.
 
 ## Public API
 
-The [Python contract](https://github.com/developmentseed/obstore/blob/abe772d39f446a7850fa61060bc7b0c3c9792cad/obstore/python/obstore/_list.pyi#L136)
-and [Rust binding](https://github.com/developmentseed/obstore/blob/abe772d39f446a7850fa61060bc7b0c3c9792cad/obstore/src/list.rs#L350)
+The [Python contract](https://github.com/developmentseed/obstore/blob/bbf158a79dca6ee61f78b8f0d218dbda591bfe40/obstore/python/obstore/_list.pyi#L136)
+and [Rust binding](https://github.com/developmentseed/obstore/blob/bbf158a79dca6ee61f78b8f0d218dbda591bfe40/obstore/src/list.rs#L350)
 give this signature:
 
 ```python
@@ -52,7 +68,7 @@ counterpart return objects and common prefixes for one directory level; the
 [dependency implementation](https://github.com/apache/arrow-rs-object-store/blob/279572ea60f3a7a6e5237e066a6f4a35eee611e0/src/client/list.rs#L112) collects its paginated directory results before
 returning. It should not be assumed to be a streaming recursive alternative.
 
-The [S3 constructor contract](https://github.com/developmentseed/obstore/blob/abe772d39f446a7850fa61060bc7b0c3c9792cad/obstore/python/obstore/_store/_aws.pyi#L539)
+The [S3 constructor contract](https://github.com/developmentseed/obstore/blob/bbf158a79dca6ee61f78b8f0d218dbda591bfe40/obstore/python/obstore/_store/_aws.pyi#L539)
 is:
 
 ```python
@@ -113,7 +129,7 @@ instead of importing general-purpose bucket assumptions.
 
 ## Output, prefixes and unusual keys
 
-The binding's [metadata conversion](https://github.com/developmentseed/obstore/blob/abe772d39f446a7850fa61060bc7b0c3c9792cad/obstore/src/list.rs#L42)
+The binding's [metadata conversion](https://github.com/developmentseed/obstore/blob/bbf158a79dca6ee61f78b8f0d218dbda591bfe40/obstore/src/list.rs#L42)
 exposes `path`, `last_modified`, `size`, nullable `e_tag` and nullable `version`.
 Arrow carries the same information; neither form exposes storage class here.
 The dependency's [S3 response conversion](https://github.com/apache/arrow-rs-object-store/blob/279572ea60f3a7a6e5237e066a6f4a35eee611e0/src/client/s3.rs#L77)
@@ -129,7 +145,7 @@ itself define a disjoint bounded partition. Multiple manually constructed offset
 streams would be an external partitioning design, not native range splitting.
 
 Python paths go through
-[PyPath / Path::parse](https://github.com/developmentseed/obstore/blob/abe772d39f446a7850fa61060bc7b0c3c9792cad/pyo3-object_store/src/path.rs#L11).
+[PyPath / Path::parse](https://github.com/developmentseed/obstore/blob/bbf158a79dca6ee61f78b8f0d218dbda591bfe40/pyo3-object_store/src/path.rs#L11).
 The dependency's [Path implementation](https://github.com/apache/arrow-rs-object-store/blob/279572ea60f3a7a6e5237e066a6f4a35eee611e0/src/path/mod.rs#L93)
 documents UTF-8 paths, no relative `.`/`..` segments, no empty interior segments
 and no ASCII controls. Parsing strips a leading and trailing slash; it does not
@@ -155,7 +171,7 @@ checks; no observed result is claimed here.
 
 ## Memory and concurrency
 
-The [binding stream implementation](https://github.com/developmentseed/obstore/blob/abe772d39f446a7850fa61060bc7b0c3c9792cad/obstore/src/list.rs#L80)
+The [binding stream implementation](https://github.com/developmentseed/obstore/blob/bbf158a79dca6ee61f78b8f0d218dbda591bfe40/obstore/src/list.rs#L80)
 holds one fused stream and accumulates up to `chunk_size` metadata entries for a
 normal next call. It does not collect the entire bucket in this mode. The network
 page, Rust-to-Python conversion and Arrow conversion also occupy memory; no peak
@@ -180,11 +196,11 @@ separate scoped configuration and must not log secrets.
 
 Custom `endpoint` and `virtual_hosted_style_request` must agree. Path-style is
 appropriate to consider for a local S3 endpoint; HTTP requires
-`client_options={"allow_http": True}`. The [service-specific configuration](https://github.com/developmentseed/obstore/blob/abe772d39f446a7850fa61060bc7b0c3c9792cad/obstore/python/obstore/_store/_aws.pyi#L93)
+`client_options={"allow_http": True}`. The [service-specific configuration](https://github.com/developmentseed/obstore/blob/bbf158a79dca6ee61f78b8f0d218dbda591bfe40/obstore/python/obstore/_store/_aws.pyi#L93)
 `aws_endpoint_url_s3` takes precedence over generic `endpoint`. Open
 [#754](https://github.com/developmentseed/obstore/issues/754) reports confusion
 because virtual-hosted mode expects the bucket in the endpoint, unlike boto3's
-service-root convention; the [selected source contract](https://github.com/developmentseed/obstore/blob/abe772d39f446a7850fa61060bc7b0c3c9792cad/obstore/python/obstore/_store/_aws.pyi#L406) documents that requirement.
+service-root convention; the [selected source contract](https://github.com/developmentseed/obstore/blob/bbf158a79dca6ee61f78b8f0d218dbda591bfe40/obstore/python/obstore/_store/_aws.pyi#L406) documents that requirement.
 These options make endpoint qualification plausible, not proven compatible.
 
 Other relevant open work, checked 2026-10-15:
@@ -229,7 +245,7 @@ Before any runnable capsule or execution is authorized:
    Do not add manufactured substring prefixes or parallel ranges to the base mode.
 4. Declare each supported knob fixed or explored: batch size, dict versus Arrow,
    sync versus async consumption, HTTP client/pool/timeouts and retry configuration.
-   Pin the Arrow dependency before any such arm; the [binding checks for `arro3.core`](https://github.com/developmentseed/obstore/blob/abe772d39f446a7850fa61060bc7b0c3c9792cad/obstore/src/list.rs#L360)
+   Pin the Arrow dependency before any such arm; the [binding checks for `arro3.core`](https://github.com/developmentseed/obstore/blob/bbf158a79dca6ee61f78b8f0d218dbda591bfe40/obstore/src/list.rs#L360)
    at stream construction. Predeclare comparable batch-size exploration; batch size is a conversion knob,
    not S3 concurrency. An optional collect arm must be labeled as materializing
    and given the same memory budget as other materializing products.
