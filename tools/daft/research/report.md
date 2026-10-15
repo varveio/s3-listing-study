@@ -31,8 +31,34 @@ The released [Python public API](https://github.com/Eventual-Inc/Daft/blob/aad22
 is `daft.from_glob_path(path, io_config=None)`, also exported at the top level.
 It accepts one pattern or a list and builds a lazy glob scan DataFrame. For
 whole-bucket recursive discovery, `s3://bucket/**` is the proposed pattern;
-`s3://bucket/` without a wildcard is a shallow directory listing in the glob
+[`s3://bucket/` without a wildcard](https://github.com/Eventual-Inc/Daft/blob/aad22b926e340b09449b4bcc61d95d9964473d31/src/daft-io/src/object_store_glob.rs#L364-L399) is a shallow directory listing in the glob
 implementation, so these cannot be exchanged as equivalent commands.
+
+The proposed subject explicitly selects the **native runner**, using public
+`daft.set_runner_native()` before anything initializes a runner. The
+[runner configuration source](https://github.com/Eventual-Inc/Daft/blob/aad22b926e340b09449b4bcc61d95d9964473d31/src/daft-runners/src/runners.rs#L255-L299)
+uses `DAFT_RUNNER` when supplied; absent an override it detects a Ray environment
+and selects Ray there, otherwise native. Thus native is not an unconditional
+default in every environment. Public
+[runner selection](https://github.com/Eventual-Inc/Daft/blob/aad22b926e340b09449b4bcc61d95d9964473d31/daft/runners/__init__.py#L22-L64)
+locks the runner once initialized; future qualification must record selection
+and reject an unintended Ray/environment-selected execution path.
+
+The pinned native dispatch chain is explicit:
+
+| Step | Source evidence |
+| --- | --- |
+| Public API calls the Python logical builder | [file_path.py](https://github.com/Eventual-Inc/Daft/blob/aad22b926e340b09449b4bcc61d95d9964473d31/daft/io/file_path.py#L45-L58) |
+| Python builder calls the Rust-bound builder | [builder.py](https://github.com/Eventual-Inc/Daft/blob/aad22b926e340b09449b4bcc61d95d9964473d31/daft/logical/builder.py#L127-L138) |
+| Rust binding delegates to a SourceInfo::GlobScan logical source | [binding](https://github.com/Eventual-Inc/Daft/blob/aad22b926e340b09449b4bcc61d95d9964473d31/src/daft-logical-plan/src/builder/mod.rs#L1284-L1291), [logical construction](https://github.com/Eventual-Inc/Daft/blob/aad22b926e340b09449b4bcc61d95d9964473d31/src/daft-logical-plan/src/builder/mod.rs#L189-L200) |
+| NativeRunner converts that logical plan into a local physical plan | [native_runner.py](https://github.com/Eventual-Inc/Daft/blob/aad22b926e340b09449b4bcc61d95d9964473d31/daft/runners/native_runner.py#L150-L159) |
+| Local translation maps SourceInfo::GlobScan to LocalPhysicalPlan::glob_scan | [translate.rs](https://github.com/Eventual-Inc/Daft/blob/aad22b926e340b09449b4bcc61d95d9964473d31/src/daft-local-plan/src/translate.rs#L75-L87) |
+| Native execution instantiates GlobScanSource from that physical node | [pipeline.rs](https://github.com/Eventual-Inc/Daft/blob/aad22b926e340b09449b4bcc61d95d9964473d31/src/daft-local-execution/src/pipeline.rs#L493-L512) |
+
+The no-file-format-reader inference below is limited to this native path.
+Ray/distributed execution is outside this proposed subject and needs its own
+source derivation and qualification; the Python docstring alone does not prove
+its metadata or content-read behavior.
 
 The [native glob scan source](https://github.com/Eventual-Inc/Daft/blob/aad22b926e340b09449b4bcc61d95d9964473d31/src/daft-local-execution/src/sources/glob_scan.rs#L60-L132)
 invokes metadata globbing, makes path and size arrays, and fills `num_rows` with
@@ -46,7 +72,9 @@ version ID or storage class. The candidate's comparable fields are key and size,
 with an explicit URI-to-key mapping to be qualified.
 
 A proposed public flow is to create the DataFrame with an explicit S3 IOConfig,
-then drain `iter_rows()` or `to_arrow_iter()` into a retained listing product.
+then drain `iter_rows()` into retained JSONL as the base output arm. An optional
+`to_arrow_iter()` export would be a separately declared arm with its own
+serialization and dependency choices; it is not interchangeable timed work.
 The public [iterator methods](https://github.com/Eventual-Inc/Daft/blob/aad22b926e340b09449b4bcc61d95d9964473d31/daft/dataframe/dataframe.py#L528-L650)
 expose a results buffer measured in partitions. Calling `show()`, `.limit()`,
 constructing the DataFrame, or counting only a preview cannot establish a complete
@@ -56,7 +84,8 @@ listing. `collect()` explicitly materializes the entire DataFrame. The private
 It exposes extra knobs but is not the proposed public entrypoint.
 
 Metadata-only does not mean LIST-only. An exact non-wildcard file path can cause
-a size/HEAD lookup; the S3 directory path also has an exact-file fallback. A
+a size/HEAD lookup; the S3 directory path also has an
+[exact-file fallback](https://github.com/Eventual-Inc/Daft/blob/aad22b926e340b09449b4bcc61d95d9964473d31/src/daft-io/src/s3_like.rs#L1466-L1489). A
 future request trace must distinguish LIST/HEAD and establish absence of object
 body reads for the selected recursive pattern. Neither inference from source
 nor the name of the API replaces that qualification.
@@ -102,7 +131,7 @@ observed scale limit.
 
 There is no single truthful listing-width knob in the selected public signature.
 `S3Config.max_connections_per_io_thread` defaults to eight in the
-[configuration source](https://github.com/Eventual-Inc/Daft/blob/aad22b926e340b09449b4bcc61d95d9964473d31/src/common/io-config/src/s3.rs).
+[configuration source](https://github.com/Eventual-Inc/Daft/blob/aad22b926e340b09449b4bcc61d95d9964473d31/src/common/io-config/src/s3.rs#L239-L269).
 The [S3 connection semaphore](https://github.com/Eventual-Inc/Daft/blob/aad22b926e340b09449b4bcc61d95d9964473d31/src/daft-io/src/s3_like.rs#L740-L747)
 has that value multiplied by IO pool thread count; the
 [runtime](https://github.com/Eventual-Inc/Daft/blob/aad22b926e340b09449b4bcc61d95d9964473d31/src/common/runtime/src/lib.rs#L25-L28)
@@ -121,10 +150,16 @@ use supported knobs for each compared subject and disclose the different
 mechanisms rather than modify Daft's engine for an advantageous variant.
 
 The native glob source batches metadata and limits the output channel, but
-also maintains a `seen_paths` DashSet across the input batch to deduplicate
-paths. This retains strings proportional to distinct discovered paths, even
-when the consumer uses an iterator. Add per-directory buffering, the glob
-result channel (default 16,384 entries), in-flight tasks, Arrow batches, public
+also maintains a `seen_paths` DashSet. It is
+[created once per incoming `(input_id, glob_paths)` vector](https://github.com/Eventual-Inc/Daft/blob/aad22b926e340b09449b4bcc61d95d9964473d31/src/daft-local-execution/src/sources/glob_scan.rs#L64-L100),
+shared across all tasks and chunks for those patterns, and remains in scope
+through [task completion and input flush](https://github.com/Eventual-Inc/Daft/blob/aad22b926e340b09449b4bcc61d95d9964473d31/src/daft-local-execution/src/sources/glob_scan.rs#L172-L195).
+It is not recreated per emitted Arrow/output batch. For one whole-bucket input
+pattern it retains distinct paths through that scan; a later input vector gets
+a fresh set. Thus retained strings grow with discovered paths in that input,
+even when the consumer uses an iterator. Add per-directory buffering, the glob
+[result channel (default 16,384 entries)](https://github.com/Eventual-Inc/Daft/blob/aad22b926e340b09449b4bcc61d95d9964473d31/src/daft-io/src/object_store_glob.rs#L423-L424),
+in-flight tasks, Arrow batches, public
 iterator partition buffering, imports and serialization. A streaming consumer
 does not establish bounded total memory. No memory cliff or OOM was observed
 here. A future measured boundary should include initialization, discovery,
@@ -165,7 +200,7 @@ surface would not preserve version IDs anyway. Compare current objects only,
 and leave all-version enumeration to a separately derived subject if upstream
 adds one.
 
-The [S3 configuration](https://github.com/Eventual-Inc/Daft/blob/aad22b926e340b09449b4bcc61d95d9964473d31/src/common/io-config/src/s3.rs)
+The [S3 configuration](https://github.com/Eventual-Inc/Daft/blob/aad22b926e340b09449b4bcc61d95d9964473d31/src/common/io-config/src/s3.rs#L20-L49)
 exposes region, endpoint URL, anonymous mode, key/access-key/session-token,
 profile and credentials provider, requester-pays and addressing/TLS controls.
 The [client constructor](https://github.com/Eventual-Inc/Daft/blob/aad22b926e340b09449b4bcc61d95d9964473d31/src/daft-io/src/s3_like.rs#L503-L540)
@@ -194,11 +229,14 @@ be resolved into a claim about what ran. Counts/byte sums in an upstream table
 also cannot establish key-by-key completeness, and DataChain's catalog writes
 are a different product from enumeration alone. No upstream timing is adopted.
 
-A bounded public issue/PR search on 2026-10-15 found these relevant open threads:
+A bounded GitHub issue/PR search on 2026-10-15 used
+`repo:Eventual-Inc/Daft glob is:open`,
+`repo:Eventual-Inc/Daft listing is:open`, and
+`repo:Eventual-Inc/Daft unicode glob`; it found these relevant open threads:
 
 | Thread | Why it matters; limit of the evidence |
 | --- | --- |
-| [#7175, local glob/read_text_files hang](https://github.com/Eventual-Inc/Daft/issues/7175) | A report about a local filesystem special-file panic in a development version on macOS. It is not the same evidence as the upstream S3 repeated-slash report. |
+| [#7175, local glob/read_text_files panic and hang](https://github.com/Eventual-Inc/Daft/issues/7175) | A report of a local filesystem special-file panic followed by a hung query in a development version on macOS. It is not the same evidence as the upstream S3 repeated-slash report. |
 | [#6344, iterative scan task generation](https://github.com/Eventual-Inc/Daft/issues/6344) | Discusses eager scan-task generation and limit behavior for file-reading plans. Do not attribute that entire reader path to the separate metadata glob DataFrame. |
 | [#6400, eliminate GlobScan parallel code path](https://github.com/Eventual-Inc/Daft/issues/6400) | Proposes consolidating the metadata scan with the physical scan path. Future releases could change the memory/execution boundary; a moving main cannot inherit this release's derivation. |
 | [PR #7571, object-storage key separators on Windows](https://github.com/Eventual-Inc/Daft/pull/7571) | Proposes writer-side object-key joining fixes with raw-key preservation tests. It concerns Windows writers and does not establish that the selected Linux metadata API handles every key. |
@@ -211,15 +249,15 @@ reference.
 ## Distinct coverage and future qualification
 
 Daft deserves separate candidate research despite overlapping the prefix-walk
-family represented by s7cmd and rclone. The selected pipeline combines a native
+family represented by [s7cmd and rclone in the study strategy map](../../README.md#prefix-discovery). The selected pipeline combines a native
 AWS SDK, recursive glob traversal, adaptive directory-to-flat fallback, filtering,
 deduplication and an analytics-facing DataFrame export. That is an end-to-end
 product boundary worth exposing. It is not evidence for a new range-splitting
 algorithm or an expectation of better performance.
 
-Compared with obstore, Daft is a different S3 backend and a different public
+Compared with [obstore's list-stream binding](https://github.com/developmentseed/obstore/blob/abe772d39f446a7850fa61060bc7b0c3c9792cad/obstore/src/list.rs#L350-L381), Daft is a different S3 backend and a different public
 execution layer, so it is not merely another Python wrapper over the same
-object_store stream. Compared with released DataChain, it does not require a
+object_store stream. Compared with [released DataChain catalog materialization](https://github.com/datachain-ai/datachain/blob/529a5ac2330a15a46ba64d446b075d01cd9daed4/src/datachain/lib/dc/storage.py#L259-L284), it does not require a
 persistent listing catalog for this proposed API, but still has deduplication
 and buffering costs. Comparing these complete products would not isolate their
 underlying pagination engines. s7cmd and rclone remain useful directory-walk
@@ -243,7 +281,13 @@ A future owner-authorized qualification should:
    Compare normalized content, duplicates and explicit exclusions; a successful
    count cannot silently turn a filtered glob into a complete S3 inventory.
 4. Explore supported connection controls under matched CPU/memory budgets for
-   every subject. Record CPU visibility, retry policy, iterator buffer and
+   every subject. Daft's public set is narrower: connections per IO thread,
+   IOConfig auth/endpoint/retry controls, and the iterator's result buffer.
+   [Native runner `num_threads`](https://github.com/Eventual-Inc/Daft/blob/aad22b926e340b09449b4bcc61d95d9964473d31/daft/runners/native_runner.py#L69-L77) configures compute threads, not the fixed
+   IO-pool formula; no public IO-pool-width override was identified in the
+   inspected runtime. Public `from_glob_path` exposes neither fanout threshold
+   nor page size; those backend defaults must be disclosed, not patched into
+   an undocumented tuning arm. Record CPU visibility, retry policy, iterator buffer and
    actual request concurrency; retain failed/timeout attempts. Do not give one
    subject a supplied partition map or patched traversal without disclosing a
    separate arm and comparable preparation effort.
