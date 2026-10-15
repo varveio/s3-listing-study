@@ -113,8 +113,9 @@ exit-zero source account must remain scoped to the old subject.
 
 ## Readiness and evidence boundary
 
-Canonical identity, executable adapters, build pins and the historical claims
-ledger remain unchanged at v1.5.0. Candidate source claims are kept in the
+Canonical identity, executable adapters and build pins remain at v1.5.0.
+The current historical claim `parallel-path-algorithm` carries a source-only
+correction for its early leaf-permit release, preserving its legacy origin. Candidate source claims are kept in the
 sibling `update-1.8.5-2026-10-15.claims.json`, explicitly outside the canonical
 ledger; they are not a new runtime qualification. Published release files and
 all old research/receipts remain untouched.
@@ -142,6 +143,14 @@ The remaining retarget checklist is concrete:
 
 No v1.8.5 receipt, performance result, correctness verdict or completed
 runtime qualification is recorded as of 2026-10-15.
+
+The [coverage requirements](../docs/running.md#coverage-needed-for-the-deep-leaf-fix)
+explain why the historical one-slash replay canary never reaches the affected
+branch and predeclare a future depth-3, many-leaf, multi-page fixture with
+request-width instrumentation. The real-S3 full-bucket smoke can reach the
+branch but records 204 page fetches and row checks, not in-flight width; its
+shallow and prefix-scoped smokes cannot pass relative depth 2. Old count
+agreement is not concurrency verification.
 
 ### Future retarget file map and validation order
 

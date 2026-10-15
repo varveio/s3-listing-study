@@ -129,6 +129,8 @@ acquisition), :701-727 (per-task acquisition), :825 (construction) @ bf42067]:
 > explicitly drops the permit before awaiting `list_sequential` when
 > `depth > max_parallel_listing_max_depth` (default 2). See
 > [the registered engine source](https://github.com/nidor1998/s3ls-rs/blob/bf42067537da476b157b5d289a3e72d049b60db2/src/storage/s3/mod.rs#L580-L587).
+> Canonical claim `parallel-path-algorithm` records this correction as
+> source-supported, with disposition `corrected`; its legacy origin B6 remains.
 > Configured concurrency 64 is therefore not proof of actual deep-leaf width.
 > This correction makes no inference about recorded counts, timings or memory;
 > [the open question](../../../docs/open-questions.md#s7cmd-historical-deep-leaf-concurrency-and-anchor-debt)
