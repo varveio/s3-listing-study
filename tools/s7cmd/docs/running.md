@@ -56,14 +56,14 @@ The older real-S3 smoke is distinct: its
 keys with up to three slashes. A full root walk can therefore reach depth-3
 leaves. That receipt records 204 logical page fetches and count/uniqueness checks,
 not actual simultaneous leaf-request width, so it cannot qualify the cap
-correction either. Prefix-scoped
-runs reset recursion depth at their chosen start; absolute slash count alone
+correction either. The [dispatch call starts recursion at zero for its selected prefix](https://github.com/nidor1998/s3ls-rs/blob/bf42067537da476b157b5d289a3e72d049b60db2/src/storage/s3/mod.rs#L421-L428).
+Prefix-scoped runs therefore reset depth at their chosen start; absolute slash count alone
 does not establish their exercised branch. Here the receipt's maximum absolute
 key depth is three slashes: selecting `normals-hourly/` leaves at most two
 relative slash levels; the other scoped recursive smoke starts remove two or
 three levels. Those scoped runs never pass relative depth 2. Non-recursive
-shallow modes do not recurse, and `--max-depth 1` stops at its content boundary
-before reaching depth 3. Thus the full-bucket recursive smoke can reach the
+shallow modes do not recurse, and [the content-depth gate](https://github.com/nidor1998/s3ls-rs/blob/bf42067537da476b157b5d289a3e72d049b60db2/src/storage/s3/mod.rs#L572-L578)
+for `--max-depth 1` stops before reaching depth 3. Thus the full-bucket recursive smoke can reach the
 affected leaf branch, while these shallow and scoped smokes cannot; none
 records in-flight width.
 

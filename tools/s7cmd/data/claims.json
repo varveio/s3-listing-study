@@ -919,11 +919,11 @@
     },
     {
       "id": "parallel-path-algorithm",
-      "statement": "The parallel path uses a tokio JoinSet for child prefix tasks, acquires semaphore permits sized to max_parallel_listings for dispatch and discovery, and paginates discovered prefixes with a slash delimiter; beyond the fan-out depth, s3ls-rs 1.0.3 releases its permit before awaiting the sequential leaf scan, so that scan is not bounded by the permit cap.",
+      "statement": "The parallel path uses a tokio JoinSet for child prefix tasks, acquires permits for dispatch and discovery from a semaphore sized to max_parallel_listings, and paginates discovered prefixes with a slash delimiter; beyond the fan-out depth, s3ls-rs 1.0.3 releases its permit before awaiting the sequential leaf scan, so that scan is not bounded by the permit cap.",
       "scope": "mechanism",
       "status": "supported",
       "disposition": "corrected",
-      "qualification": "Source correction for registered s7cmd 1.5.0 / s3ls-rs 1.0.3, not a new runtime observation. Dropping a parent permit before spawning children avoids parent-child permit deadlock, but the separate early release at lines 580-587 also excludes deep sequential leaf scans from the configured cap. Configured concurrency is not proof of achieved deep-leaf request width. Historical counts, timings, memory, receipts and published results are unaffected by this source correction.",
+      "qualification": "Source correction for registered s7cmd 1.5.0 / s3ls-rs 1.0.3, not a new runtime observation. Dropping a parent permit before spawning children avoids parent-child permit deadlock, but the separate early release at lines 580-587 also excludes deep sequential leaf scans from the configured cap. Configured concurrency is not proof of achieved deep-leaf request width. Historical records are not edited; this source correction makes no inference about their counts, timings or memory. See docs/open-questions.md#s7cmd-historical-deep-leaf-concurrency-and-anchor-debt for interpretation limits.",
       "legacy_origins": [
         "B6"
       ],
