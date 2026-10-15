@@ -128,3 +128,20 @@ engine revision without their `src/` prefix. Those entries were not rewritten
 in this narrowly scoped research update. This inherited anchor debt remains a
 separate correction before a future capsule retarget; it does not invalidate
 the separately checked candidate anchors or provide new runtime evidence.
+
+## Pinned source index
+
+These links identify the exact source bytes used by the candidate claims; the
+source labels above also remain readable by the repository anchor checker.
+
+| Finding | Pinned primary source |
+| --- | --- |
+| s7cmd version and exact listing-engine dependency | [Cargo.toml, lines 1–25](https://github.com/nidor1998/s7cmd/blob/1e8c7d0644f30cb5da927b87277376620fcd0554/Cargo.toml#L1-L25) |
+| 1.1.0 fix announcement | [s3ls-rs changelog](https://github.com/nidor1998/s3ls-rs/blob/2993e4f8fd23316c63f63d04a6b6f2102cfdd41b/CHANGELOG.md#L75-L85) |
+| Leaf scan retains its permit | [storage/s3/mod.rs, lines 582–595](https://github.com/nidor1998/s3ls-rs/blob/2993e4f8fd23316c63f63d04a6b6f2102cfdd41b/src/storage/s3/mod.rs#L582-L595) |
+| Parent releases permit before child tasks | [storage/s3/mod.rs, lines 685–738](https://github.com/nidor1998/s3ls-rs/blob/2993e4f8fd23316c63f63d04a6b6f2102cfdd41b/src/storage/s3/mod.rs#L685-L738) |
+| Default width, depth, queue and sort threshold | [config/args/mod.rs, lines 23–26](https://github.com/nidor1998/s3ls-rs/blob/2993e4f8fd23316c63f63d04a6b6f2102cfdd41b/src/config/args/mod.rs#L23-L26) |
+| Parallel dispatch conditions | [storage/s3/mod.rs, lines 402–432](https://github.com/nidor1998/s3ls-rs/blob/2993e4f8fd23316c63f63d04a6b6f2102cfdd41b/src/storage/s3/mod.rs#L402-L432) |
+| Exact rate-limit refill schedule | [storage/s3/mod.rs, lines 863–895](https://github.com/nidor1998/s3ls-rs/blob/2993e4f8fd23316c63f63d04a6b6f2102cfdd41b/src/storage/s3/mod.rs#L863-L895) |
+| JSON metadata fields | [display/json.rs, lines 27–67](https://github.com/nidor1998/s3ls-rs/blob/2993e4f8fd23316c63f63d04a6b6f2102cfdd41b/src/display/json.rs#L27-L67) |
+| Caught Ctrl-C returns 130 | [ls_bin/mod.rs, lines 72–81](https://github.com/nidor1998/s7cmd/blob/1e8c7d0644f30cb5da927b87277376620fcd0554/src/ls_bin/mod.rs#L72-L81) |
