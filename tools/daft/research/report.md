@@ -76,7 +76,15 @@ then drain `iter_rows()` into retained JSONL as the base output arm. An optional
 `to_arrow_iter()` export would be a separately declared arm with its own
 serialization and dependency choices; it is not interchangeable timed work.
 The public [iterator methods](https://github.com/Eventual-Inc/Daft/blob/aad22b926e340b09449b4bcc61d95d9964473d31/daft/dataframe/dataframe.py#L528-L650)
-expose a results buffer measured in partitions. Calling `show()`, `.limit()`,
+accept `results_buffer_size`, whose docstring describes partition buffering.
+That argument is **inert for the selected pinned native runner**:
+[`iter_rows` forwards it](https://github.com/Eventual-Inc/Daft/blob/aad22b926e340b09449b4bcc61d95d9964473d31/daft/dataframe/dataframe.py#L573-L605),
+[`run_iter_tables` passes it to `run_iter`](https://github.com/Eventual-Inc/Daft/blob/aad22b926e340b09449b4bcc61d95d9964473d31/daft/runners/native_runner.py#L194-L198),
+but [`NativeRunner.run_iter`](https://github.com/Eventual-Inc/Daft/blob/aad22b926e340b09449b4bcc61d95d9964473d31/daft/runners/native_runner.py#L85-L132)
+neither reads it nor forwards it into `_optimize_and_execute`. The public
+signature/docstring therefore does not make it an effective memory or execution
+control for this subject. This conclusion is from source, not a runtime knob
+experiment. Calling `show()`, `.limit()`,
 constructing the DataFrame, or counting only a preview cannot establish a complete
 listing. `collect()` explicitly materializes the entire DataFrame. The private
 `daft.daft.io_glob` binding is another product: it
@@ -159,8 +167,10 @@ pattern it retains distinct paths through that scan; a later input vector gets
 a fresh set. Thus retained strings grow with discovered paths in that input,
 even when the consumer uses an iterator. Add per-directory buffering, the glob
 [result channel (default 16,384 entries)](https://github.com/Eventual-Inc/Daft/blob/aad22b926e340b09449b4bcc61d95d9964473d31/src/daft-io/src/object_store_glob.rs#L423-L424),
-in-flight tasks, Arrow batches, public
-iterator partition buffering, imports and serialization. A streaming consumer
+in-flight tasks, Arrow batches, native execution channels, imports and
+serialization. These internal buffers are distinct from the accepted but ignored
+`results_buffer_size` argument; setting that argument does not resize the pinned
+native runner's channels. A streaming consumer
 does not establish bounded total memory. No memory cliff or OOM was observed
 here. A future measured boundary should include initialization, discovery,
 deduplication and complete export, with no warm result reuse or accidental
@@ -194,6 +204,39 @@ or Unicode failure. The existing
 cover recursive patterns, escaping and fallback, but source tests are not this
 study's execution evidence.
 
+### Source-derived repeated-prefix cycle risk
+
+For a general-purpose S3 bucket containing key `a//b`, the
+[AWS delimiter contract](https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html#API_ListObjectsV2_ResponseSyntax)
+implies that listing `Prefix=a/` with `Delimiter=/` groups it under
+`CommonPrefix=a//`. The following is a conditional control-flow derivation,
+not an executed fixture or a reproduced hang:
+
+1. The [S3 response conversion](https://github.com/Eventual-Inc/Daft/blob/aad22b926e340b09449b4bcc61d95d9964473d31/src/daft-io/src/s3_like.rs#L1008-L1022)
+   preserves that prefix as a Directory with filepath `s3://bucket/a//`.
+2. The [`**` recursion](https://github.com/Eventual-Inc/Daft/blob/aad22b926e340b09449b4bcc61d95d9964473d31/src/daft-io/src/object_store_glob.rs#L447-L475)
+   visits that Directory at the same glob fragment. `advance` stores its path
+   [without a visited-directory check](https://github.com/Eventual-Inc/Daft/blob/aad22b926e340b09449b4bcc61d95d9964473d31/src/daft-io/src/object_store_glob.rs#L59-L65).
+3. The next directory request parses the raw key, then
+   [`trim_end_matches("/")` followed by one slash](https://github.com/Eventual-Inc/Daft/blob/aad22b926e340b09449b4bcc61d95d9964473d31/src/daft-io/src/s3_like.rs#L1428-L1457)
+   changes `a//` back to request prefix `a/`, which can return the same
+   `CommonPrefix=a//` and repeat the recursion.
+4. In the minimal one-child shape, the
+   [fanout accounting](https://github.com/Eventual-Inc/Daft/blob/aad22b926e340b09449b4bcc61d95d9964473d31/src/daft-io/src/object_store_glob.rs#L59-L64)
+   multiplies by one on every revisit, while
+   [fallback triggers only when directory count exceeds its threshold](https://github.com/Eventual-Inc/Daft/blob/aad22b926e340b09449b4bcc61d95d9964473d31/src/daft-io/src/object_store_glob.rs#L276-L298).
+   The default threshold 1,024 is not crossed by that shape. The downstream
+   `seen_paths` set deduplicates emitted file paths, not recursive Directory
+   visits, so it is not a cycle guard here.
+
+This provides a concrete source-based possible cycle/hang mechanism for the
+selected release under those response/shape conditions. It does not establish
+an observed hang, universal failure for every `//` key, or the cause of the
+unpinned upstream comparison's report. Actual request traces, cancellation and
+retained outcomes remain deferred qualification work. Other directory fanout
+can change fallback behavior, so the mechanism must not be generalized beyond
+its conditions.
+
 The reviewed S3 list path uses current-object `ListObjectsV2`; no all-versions
 or delete-marker mode is exposed by the selected metadata API. The FileMetadata
 surface would not preserve version IDs anyway. Compare current objects only,
@@ -220,7 +263,9 @@ The comment does not give a pinned Daft version and exact API/options sufficient
 to identify a reproduced subject. This source read shows a recursive directory
 fanout path, so the broad serial characterization cannot establish Daft's general
 mechanism. The reports motivate repeated-slash, cancellation and timeout cases;
-they do not establish a hang, defect, current release limitation or ranking here.
+they do not establish a reproduced hang or ranking here. The separate pinned
+source derivation above identifies a possible repeated-prefix cycle; it does
+not reproduce the upstream report.
 
 The same comment's prose says other tools report the folder markers that some
 subjects skip, while the selected Daft source explicitly filters zero-byte
@@ -282,13 +327,15 @@ A future owner-authorized qualification should:
    count cannot silently turn a filtered glob into a complete S3 inventory.
 4. Explore supported connection controls under matched CPU/memory budgets for
    every subject. Daft's public set is narrower: connections per IO thread,
-   IOConfig auth/endpoint/retry controls, and the iterator's result buffer.
+   IOConfig auth/endpoint/retry controls. The public iterator's accepted
+   `results_buffer_size` is ignored by this native runner and must not be swept
+   as an effective control or cited as a memory bound.
    [Native runner `num_threads`](https://github.com/Eventual-Inc/Daft/blob/aad22b926e340b09449b4bcc61d95d9964473d31/daft/runners/native_runner.py#L69-L77) configures compute threads, not the fixed
    IO-pool formula; no public IO-pool-width override was identified in the
    inspected runtime. Public `from_glob_path` exposes neither fanout threshold
    nor page size; those backend defaults must be disclosed, not patched into
-   an undocumented tuning arm. Record CPU visibility, retry policy, iterator buffer and
-   actual request concurrency; retain failed/timeout attempts. Do not give one
+   an undocumented tuning arm. Record CPU visibility, retry policy, accepted-but-inert arguments, native
+   execution configuration and actual request concurrency; retain failed/timeout attempts. Do not give one
    subject a supplied partition map or patched traversal without disclosing a
    separate arm and comparable preparation effort.
 5. Predeclare diagnostic workloads and interpretation before any comparative

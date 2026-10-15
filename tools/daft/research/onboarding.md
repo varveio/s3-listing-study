@@ -20,6 +20,9 @@ Resolve these decisions before writing an adapter:
 
 - Define a byte-preserving URI-to-key mapping, including slash, escaping and
   Unicode cases. The source emits a full path, not an already qualified S3 key.
+  Include the [source-derived repeated-prefix cycle risk](report.md#source-derived-repeated-prefix-cycle-risk)
+  in deferred qualification: a one-child `a//b` shape can revisit the same
+  directory request. This is not a reproduced hang.
 - Decide how optional/null size is represented and when missing size makes an
   attempted comparison incomplete; never manufacture a size. `num_rows` is
   built as null on the selected source path and is not a promised object metric.
@@ -32,7 +35,11 @@ Resolve these decisions before writing an adapter:
   requirement is not evidence of what a wheel contains. Keep artifact provenance
   and installed/build identity separate from the frozen source reference.
 - Bind native runner choice, anonymous/region/endpoint settings, connection and
-  iterator-buffer controls to the invocation. Public fanout/page-size knobs were
+  native execution configuration to the invocation. Do not treat the accepted
+  `results_buffer_size` argument as an effective knob: the selected native
+  runner ignores it, as traced in the [source report](report.md#public-operation-and-content-boundary).
+  Native internal channels have their own implementation-defined buffering.
+  Public fanout/page-size knobs were
   not identified; preserve and disclose backend defaults rather than inventing
   a concurrency axis. Record CPU visibility because IO width depends on it.
 

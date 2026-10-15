@@ -22,7 +22,11 @@ In the pinned v0.7.26 native-runner source, metadata has path, optional size and
 `num_rows` built as null, without ETag, modification time or storage class.
 Source shows recursive directory tasks and a flat-prefix fallback; actual
 concurrent LIST requests remain unverified. The proposed export is a full
-`iter_rows()` drain; Arrow export would be a separate arm.
+`iter_rows()` drain; Arrow export would be a separate arm. The pinned native
+runner accepts but ignores `results_buffer_size`; its internal channels are not
+controlled by that argument. The [source report](research/report.md) also traces
+a possible repeated-prefix cycle for a one-child `a//b` shape. Neither that
+cycle/hang nor actual request concurrency has been reproduced by this study.
 
 The pinned [glob filter](https://github.com/Eventual-Inc/Daft/blob/aad22b926e340b09449b4bcc61d95d9964473d31/src/daft-io/src/object_store_glob.rs#L302-L340)
 excludes valid S3 objects: zero-byte slash markers, case-insensitive Spark
