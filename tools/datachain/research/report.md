@@ -142,27 +142,37 @@ duplicated local-plus-Studio CLI display, fixed by merged
 problem from #2050's duplicate reads and does not establish duplicate emitted
 keys in the range engine.
 
-## What the upstream table reports against Swath
+## What the upstream comparison reports against Swath
 
-These are **upstream-reported numbers**, read from the
+These are **upstream claims**, read from the
 [comparison comment](https://github.com/datachain-ai/datachain/pull/2027#issuecomment-6128223196)
-on 2026-10-15, not study run records or verified current-version results:
+on 2026-10-15, not study run records. Varve maintains this study and builds
+Swath; its upstream-reported limitations receive the same treatment.
 
-| Reported S3 workload | DataChain | Swath |
-| --- | --- | --- |
-| 257K current objects | 17 s | 11 s |
-| 2.05M current objects | 47 s | 45 s |
-| 10.5M object versions | 174 s | No result in the table |
+The source's table and Findings prose disagree. Bare table values appear to be
+seconds, inferred from its inline minute conversions; the values below preserve
+both accounts rather than choose one:
 
-The table places the tools close on the larger current-object case, but does
-not establish statistical equivalence or a DataChain win. Its DataChain arm
-includes catalog writes and an extra key-filter fix; other arms only list.
-It does not pin a Swath version or provide complete commands and uncertainty
-estimates. The absent Swath version-history result is not evidence of a speed
-comparison or, by itself, of unsupported functionality. The author's table and
-Findings prose also disagree on some timings, as detailed below. These numbers
-are leads for a later controlled comparison, not an answer to which tool is
-faster generally.
+| Reported S3 workload | DataChain table value | DataChain Findings prose | Swath table entry |
+| --- | --- | --- | --- |
+| 257K objects | 17 | 18.3 s | 11 |
+| 2.05M current objects | 47 | 171 s | 45 |
+| 10.5M object versions | 174 (2.9 min) | 14.8 min | "no versioning" |
+
+The DataChain arm is described as `read_storage(...)` at the unmerged PR #2027
+tip plus the #2037 key-filter fix, writing each entry into a local listing
+dataset. It is not a released subject or necessarily the exact candidate head
+pinned elsewhere in this report. The large current-object arm explicitly uses
+`version_aware=False`. The author says DataChain skips 55 folder markers in that
+bucket while Swath reports them, so even the emitted populations differ. For the
+version-history arm, the author explicitly says DataChain's version count was
+not checked. The Swath entry is the author's unsupported-versioning claim;
+this study has no version-listing run record in this comparison to verify it.
+
+The comment does not pin a Swath version or provide complete commands and
+uncertainty estimates. These inconsistent numbers establish neither equivalence
+nor a DataChain win. They identify comparisons to investigate after the subjects,
+products, key populations and upstream discrepancies are resolved.
 
 ## Other tools in the upstream comparison
 
