@@ -86,7 +86,7 @@ DataChain's in-memory listing-coordinator recovery and catalog materialization
 from Swath's managed-Parquet durable cursors and publication. Compare one-shot,
 unordered products separately from resumable or sorted outputs. Do not interpret
 a simpler listing scheduler as grounds to remove an existing output guarantee;
-this proposal implements neither a new Swath mode nor an algorithm change.
+this research implements neither a new Swath mode nor an algorithm change.
 
 ## Continuation contract for capsule implementation
 

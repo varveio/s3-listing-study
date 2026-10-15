@@ -25,7 +25,7 @@ structural comparison; it does not establish which is faster or more complete.
 The [recovery/output comparison](research/report.md#recovery-and-output-responsibilities)
 also distinguishes DataChain's in-memory range recovery from Swath's transactional
 work tracking and managed-Parquet durability, publication and optional sorting.
-Swath's one-shot text output is not resumable; the product boundary matters.
+Swath documents its one-shot text output as non-resumable; the product boundary matters.
 
 DataChain's upstream comparison introduces two useful research candidates:
 **obstore** and **Daft**. s3ls-rs is already represented through s7cmd; the cited
