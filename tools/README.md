@@ -93,6 +93,15 @@ operations, `s3pd` (a downloader), the legacy Python `s3p`, and
 | [Pure Storage 67B-object result](pure-storage/) | Ran on FlashBlade hardware, not AWS; `unverifiable` with the resources we have, so it stays separate from AWS results. |
 | [S3 Inventory / S3 Metadata](s3-inventory/) | Not a tool under test: the baseline that makes this whole category conditional. |
 
+## Research candidates
+
+These source-researched candidates have no runnable capsule or study execution
+result. Their presence here does not add them to the benchmark roster.
+
+| Candidate | Listing subject and next decision |
+| --- | --- |
+| [Daft](daft/) | Public metadata-only `from_glob_path` DataFrame; directory fanout with flat-prefix fallback. Research-only proposal; future API/content qualification required. |
+
 ## How the tools were reached
 
 Groundwork split the roster by how a tool can be reached at all: aws-cli,
