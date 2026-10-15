@@ -919,11 +919,11 @@
     },
     {
       "id": "parallel-path-algorithm",
-      "statement": "The parallel path uses a tokio JoinSet bounded by a semaphore sized to max_parallel_listings, paginates each prefix with a slash delimiter, drops the parent permit before spawning child tasks, and switches to sequential drain once recursion passes the fan-out depth.",
+      "statement": "The parallel path uses a tokio JoinSet for child prefix tasks, acquires permits for dispatch and discovery from a semaphore sized to max_parallel_listings, and paginates discovered prefixes with a slash delimiter; beyond the fan-out depth, s3ls-rs 1.0.3 releases its permit before awaiting the sequential leaf scan, so that scan is not bounded by the permit cap.",
       "scope": "mechanism",
       "status": "supported",
-      "disposition": "retained",
-      "qualification": "Dropping the parent permit before spawning children is the deadlock-avoidance rule; the parent must not hold a worker permit while blocked on children that also need permits. The semaphore is sized to max_parallel_listings at :789 and constructed at :825.",
+      "disposition": "corrected",
+      "qualification": "Source correction for registered s7cmd 1.5.0 / s3ls-rs 1.0.3, not a new runtime observation. Dropping a parent permit before spawning children avoids parent-child permit deadlock, but the separate early release at lines 580-587 also excludes deep sequential leaf scans from the configured cap. Configured concurrency is not proof of achieved deep-leaf request width. Historical records are not edited; this source correction makes no inference about their counts, timings or memory. See docs/open-questions.md#s7cmd-historical-deep-leaf-concurrency-and-anchor-debt for interpretation limits.",
       "legacy_origins": [
         "B6"
       ],
@@ -935,6 +935,14 @@
           "commit": "bf42067",
           "path": "src/storage/s3/mod.rs",
           "lines": "558-746,789,825"
+        },
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/nidor1998/s3ls-rs",
+          "commit": "bf42067537da476b157b5d289a3e72d049b60db2",
+          "path": "src/storage/s3/mod.rs",
+          "lines": "580-587"
         }
       ]
     },

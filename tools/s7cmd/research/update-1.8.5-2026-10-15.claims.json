@@ -1,0 +1,189 @@
+{
+  "subject": {
+    "tool": "s7cmd",
+    "version": "1.8.5",
+    "revision": "1e8c7d0644f30cb5da927b87277376620fcd0554",
+    "listing_engine_version": "1.3.4",
+    "listing_engine_revision": "2993e4f8fd23316c63f63d04a6b6f2102cfdd41b",
+    "state": "source-researched candidate, not registered or executed"
+  },
+  "claims": [
+    {
+      "id": "current-subject-1-8-5",
+      "statement": "The proposed next subject is official s7cmd v1.8.5, pinning the s3ls-rs listing engine at exactly 1.3.4.",
+      "scope": "structure",
+      "status": "supported",
+      "qualification": "Latest official release checked 2026-10-15; issue #29 requested then-latest 1.8.4, superseded by 1.8.5. No candidate-version binary execution has occurred.",
+      "evidence": [
+        {
+          "kind": "source",
+          "repository": "https://github.com/nidor1998/s7cmd",
+          "commit": "1e8c7d0644f30cb5da927b87277376620fcd0554",
+          "path": "Cargo.toml",
+          "lines": "1-25",
+          "source_role": "candidate-source"
+        },
+        {
+          "kind": "documentation",
+          "url": "https://github.com/nidor1998/s7cmd/releases/tag/v1.8.5"
+        }
+      ]
+    },
+    {
+      "id": "current-leaf-permit-fix",
+      "statement": "The candidate listing engine retains its semaphore permit throughout the sequential deep-prefix leaf scan before releasing it.",
+      "scope": "mechanism",
+      "status": "supported",
+      "qualification": "Registered s3ls-rs 1.0.3 releases the permit before awaiting the leaf scan; 1.1.0 documents the fix. The old implementation can exceed the configured leaf-request cap. No performance, count, completeness or memory effect is inferred.",
+      "evidence": [
+        {
+          "kind": "source",
+          "repository": "https://github.com/nidor1998/s3ls-rs",
+          "commit": "2993e4f8fd23316c63f63d04a6b6f2102cfdd41b",
+          "path": "src/storage/s3/mod.rs",
+          "lines": "582-595",
+          "source_role": "candidate-source"
+        },
+        {
+          "kind": "source",
+          "repository": "https://github.com/nidor1998/s3ls-rs",
+          "commit": "2993e4f8fd23316c63f63d04a6b6f2102cfdd41b",
+          "path": "CHANGELOG.md",
+          "lines": "75-85",
+          "source_role": "candidate-source"
+        },
+        {
+          "kind": "source",
+          "source_role": "historical-registered-source",
+          "repository": "https://github.com/nidor1998/s3ls-rs",
+          "commit": "bf42067537da476b157b5d289a3e72d049b60db2",
+          "path": "src/storage/s3/mod.rs",
+          "lines": "580-587"
+        }
+      ]
+    },
+    {
+      "id": "current-parallel-dispatch",
+      "statement": "The candidate engine uses prefix-based parallel listing for recursive listings when concurrency exceeds one, except Express One Zone without its opt-in.",
+      "scope": "mechanism",
+      "status": "supported",
+      "qualification": "Flat namespaces still do not manufacture additional independent prefix chains. Width is a bound; actual concurrency and performance await runs.",
+      "evidence": [
+        {
+          "kind": "source",
+          "repository": "https://github.com/nidor1998/s3ls-rs",
+          "commit": "2993e4f8fd23316c63f63d04a6b6f2102cfdd41b",
+          "path": "src/storage/s3/mod.rs",
+          "lines": "402-432",
+          "source_role": "candidate-source"
+        },
+        {
+          "kind": "source",
+          "repository": "https://github.com/nidor1998/s3ls-rs",
+          "commit": "2993e4f8fd23316c63f63d04a6b6f2102cfdd41b",
+          "path": "src/storage/s3/mod.rs",
+          "lines": "599-606",
+          "source_role": "candidate-source"
+        },
+        {
+          "kind": "source",
+          "repository": "https://github.com/nidor1998/s3ls-rs",
+          "commit": "2993e4f8fd23316c63f63d04a6b6f2102cfdd41b",
+          "path": "src/storage/s3/mod.rs",
+          "lines": "685-738",
+          "source_role": "candidate-source"
+        }
+      ]
+    },
+    {
+      "id": "current-defaults-source",
+      "statement": "Candidate engine source declares default concurrency 64, parallel depth 2, queue size 200000 and sorting threshold 1000000.",
+      "scope": "mechanism",
+      "status": "supported",
+      "qualification": "These are source-defined defaults, not captured help from v1.8.5; real CLI validation is NOT RUN.",
+      "evidence": [
+        {
+          "kind": "source",
+          "repository": "https://github.com/nidor1998/s3ls-rs",
+          "commit": "2993e4f8fd23316c63f63d04a6b6f2102cfdd41b",
+          "path": "src/config/args/mod.rs",
+          "lines": "23-26",
+          "source_role": "candidate-source"
+        },
+        {
+          "kind": "source",
+          "repository": "https://github.com/nidor1998/s3ls-rs",
+          "commit": "2993e4f8fd23316c63f63d04a6b6f2102cfdd41b",
+          "path": "src/config/args/mod.rs",
+          "lines": "500-522",
+          "source_role": "candidate-source"
+        }
+      ]
+    },
+    {
+      "id": "current-output-source",
+      "statement": "Candidate engine source supports TSV columns ending in key and JSON object metadata fields Key, LastModified, ETag, Size and optional StorageClass.",
+      "scope": "output",
+      "status": "supported",
+      "qualification": "The adapter is carried forward after source review; old output receipts do not validate the new binary. JSON preserves escaped control characters through serde; text formatters escape them unless raw output is requested.",
+      "evidence": [
+        {
+          "kind": "source",
+          "repository": "https://github.com/nidor1998/s3ls-rs",
+          "commit": "2993e4f8fd23316c63f63d04a6b6f2102cfdd41b",
+          "path": "src/display/tsv.rs",
+          "lines": "15-21",
+          "source_role": "candidate-source"
+        },
+        {
+          "kind": "source",
+          "repository": "https://github.com/nidor1998/s3ls-rs",
+          "commit": "2993e4f8fd23316c63f63d04a6b6f2102cfdd41b",
+          "path": "src/display/json.rs",
+          "lines": "27-67",
+          "source_role": "candidate-source"
+        },
+        {
+          "kind": "source",
+          "source_role": "candidate-source",
+          "repository": "https://github.com/nidor1998/s3ls-rs",
+          "commit": "2993e4f8fd23316c63f63d04a6b6f2102cfdd41b",
+          "path": "src/display/mod.rs",
+          "lines": "78-108"
+        }
+      ]
+    },
+    {
+      "id": "current-interruption-source",
+      "statement": "Candidate s7cmd source returns exit 130 after a caught Ctrl-C interruption of its listing pipeline.",
+      "scope": "operability",
+      "status": "supported",
+      "qualification": "Source-supported change from the historical exit-zero account; no interruption or resume test has been executed for v1.8.5.",
+      "evidence": [
+        {
+          "kind": "source",
+          "repository": "https://github.com/nidor1998/s7cmd",
+          "commit": "1e8c7d0644f30cb5da927b87277376620fcd0554",
+          "path": "src/ls_bin/mod.rs",
+          "lines": "72-81",
+          "source_role": "candidate-source"
+        }
+      ]
+    },
+    {
+      "id": "current-real-cli-validation",
+      "statement": "Candidate v1.8.5 binary execution, output normalization against its real output, and comparative qualification remain unverified.",
+      "scope": "operability",
+      "status": "unverified",
+      "qualification": "NOT RUN as of 2026-10-15. Source reading, artifact checksum and static harness checks are not executable validation.",
+      "evidence": [
+        {
+          "kind": "none",
+          "reason": "No v1.8.5 subject execution, including --help or --version, Docker build, smoke or benchmark is recorded by this update."
+        }
+      ]
+    }
+  ],
+  "record_kind": "source-study-claims",
+  "format_note": "Research-only record, not the canonical claims schema. Candidate means source-researched and unexecuted; supported denotes pinned source support only. No inherited disposition or legacy origin is asserted."
+}

@@ -365,3 +365,27 @@ their numbers or adopted them as comparisons.
   relevant to this study's own credibility — it is exactly what will happen to
   our numbers, and it is why we wrote the comparison plan down before running it. See
   [`../tools/s5cmd/`](../tools/s5cmd/).
+
+
+## s7cmd historical deep-leaf concurrency and anchor debt
+
+**Status: source-supported correction; runtime impact unverified.** Registered
+s7cmd v1.5.0 uses s3ls-rs 1.0.3, whose
+[pinned leaf branch](https://github.com/nidor1998/s3ls-rs/blob/bf42067537da476b157b5d289a3e72d049b60db2/src/storage/s3/mod.rs#L580-L587)
+drops its semaphore permit before awaiting sequential pagination when recursion
+passes the fan-out depth (default 2). The
+[candidate engine fix](https://github.com/nidor1998/s3ls-rs/blob/2993e4f8fd23316c63f63d04a6b6f2102cfdd41b/src/storage/s3/mod.rs#L582-L595)
+holds that permit until the leaf scan finishes.
+
+Configured concurrency 64 in historical diagnostic rows is therefore not proof
+that effective deep-leaf `ListObjectsV2` concurrency was capped at 64 on fixtures
+with enough prefixes reaching beyond the fan-out depth. The rows and receipts
+remain unchanged. No count, timing, memory or correctness consequence follows
+from this source finding; actual request width and any impact need separately
+qualified evidence. The [versioned research](../tools/s7cmd/research/update-1.8.5-2026-10-15.md)
+records the v1.8.5 candidate and remaining retarget gates.
+
+A separate inherited source-anchor debt remains in the canonical v1.5.0 ledger:
+ten `config/` or `display/` paths omit `src/`. Correct those paths against the
+recorded old revision in a scoped provenance correction before retargeting;
+do not replace old anchors with candidate source or alter historical receipts.

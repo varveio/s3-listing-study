@@ -1,3 +1,89 @@
+# s7cmd — registered subject and next-candidate preparation
+
+## Source preparation for candidate v1.8.5 — NOT RUN
+
+The registered [identity](../data/tool.json), [image](../build/image.json),
+recipes and adapters still describe **v1.5.0**. They were not retargeted by this
+research update. Source-researched next candidate **v1.8.5** is documented in the
+[versioned update](../research/update-1.8.5-2026-10-15.md) and its
+[research claims](../research/update-1.8.5-2026-10-15.claims.json).
+
+The proposed official Linux x86-64 glibc archive has SHA-256
+`a8ebdaf9922b52659311cbf66264291b0a8cac7072b77323899e3cb41f8ed27c`.
+It was downloaded for checksum and member inspection only; its member is
+`s7cmd`. It was never executed or installed.
+
+Candidate source defines the carried-forward mode and metadata flags; the
+[versioned report](../research/update-1.8.5-2026-10-15.md#cli-and-output-source-derivation)
+links their exact declarations.
+A later retarget must update both artifact recipes and hashes, record the new
+identity without misbinding old source/receipts, and change concurrency
+provenance from historical help to new source until a real help capture exists.
+The existing 15000 ms connect timeout is inherited study setup, not a newly
+demonstrated requirement of v1.8.5; future comparisons must disclose it and
+apply comparable setup effort to the other tools.
+
+Retargeting also needs a deliberate solution to the canonical ledger's
+historical-source and migration-origin constraints; see the research checklist.
+No executable/build registration is claimed complete by these source findings.
+
+**NOT RUN as of 2026-10-15:** candidate help/version, Docker builds, smoke and
+benchmarks; no candidate package was installed. Future runtime
+qualification needs intended mode/normalizer pairs and matched content checks,
+including hierarchical prefixes beyond fan-out depth, flat and skewed fixtures.
+Historical observations below remain v1.5.0 evidence and cannot establish
+v1.8.5 behavior. No historical receipt or published result was changed.
+
+## Coverage needed for the deep-leaf fix
+
+The historical [runner replay canary](../../../receipts/replay-canary-current-20260826/README.md)
+is integration evidence, not coverage of this bug. Its committed
+[generator](../../../benchmark/fixtures/replay-canary/generate.sql) defines
+2048 keys `group-%02d/object-%06d.dat`: 16 group prefixes with 128 objects each,
+one slash per key. Starting at the bucket root, recursion is depth 0 there and
+depth 1 in each group. The [recorded argv](../../../receipts/replay-canary-current-20260826/receipt.json)
+does not override parallel fan-out depth; the
+[pinned source default is 2](https://github.com/nidor1998/s3ls-rs/blob/bf42067537da476b157b5d289a3e72d049b60db2/src/config/args/mod.rs#L23-L24).
+The affected `depth > 2` branch first occurs at depth 3 and is unreachable for
+this shape (it is also unreachable for any allowed positive fan-out depth).
+The recorded [s7cmd canary row](../../../receipts/replay-canary-current-20260826/operator-log.md)
+uses configured concurrency 64; neither its exit nor its count tests the
+leaf-permit correction. This is a source/fixture-shape deduction, not a new
+request trace or subject execution.
+
+The older real-S3 smoke is distinct: its
+[full-bucket receipt](../receipts/smoke/recursive-tsv/full/receipt.md) records
+keys with up to three slashes. A full root walk can therefore reach depth-3
+leaves. That receipt records 204 logical page fetches and count/uniqueness checks,
+not actual simultaneous leaf-request width, so it cannot qualify the cap
+correction either. The [dispatch call starts recursion at zero for its selected prefix](https://github.com/nidor1998/s3ls-rs/blob/bf42067537da476b157b5d289a3e72d049b60db2/src/storage/s3/mod.rs#L421-L428).
+Prefix-scoped runs therefore reset depth at their chosen start; absolute slash count alone
+does not establish their exercised branch. Here the receipt's maximum absolute
+key depth is three slashes: selecting `normals-hourly/` leaves at most two
+relative slash levels; the other scoped recursive smoke starts remove two or
+three levels. Those scoped runs never pass relative depth 2. Non-recursive
+shallow modes do not recurse, and [the content-depth gate](https://github.com/nidor1998/s3ls-rs/blob/bf42067537da476b157b5d289a3e72d049b60db2/src/storage/s3/mod.rs#L572-L578)
+for `--max-depth 1` stops before reaching depth 3. Thus the full-bucket recursive smoke can reach the
+affected leaf branch, while these shallow and scoped smokes cannot; none
+records in-flight width.
+
+A future fixture for this fix must predeclare a selected start prefix and
+**more than two additional directory levels** beneath it, so the walk reaches
+at least depth 3. It must contain more independent depth-3 leaves than the
+configured concurrency cap (for example, more than 64 when testing 64), with
+multiple pages per leaf to sustain overlap. Use recursive object listing,
+concurrency greater than 1, fan-out depth explicitly 2, and no content-depth
+limit truncating the walk. Record these choices and the fixture manifest before
+running. Instrument actual concurrent in-flight leaf `ListObjectsV2` requests
+and distinguish retries, rather than reading configured concurrency as achieved
+width. Compare the old and candidate subjects under matched setup and verify
+keys/metadata as a separate outcome. These are future qualification requirements;
+no fixture generation, build or run is recorded here.
+
+## Historical v1.5.0 operating record
+
+Everything below describes the registered historical subject.
+
 # s7cmd — running
 
 How the pinned image was built, every mode that has been smoked, how to

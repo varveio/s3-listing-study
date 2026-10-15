@@ -59,6 +59,27 @@ The rows are an allowlisted public projection of the campaign ledger; the
 original result files and logs are private. The receipts under `receipts/` in
 this directory are groundwork evidence and do not cover the release rows.
 
+## Source update for issue #29 — candidate only
+
+The registered capsule and every observation below remain **s7cmd v1.5.0 /
+s3ls-rs 1.0.3**. Source research for
+[issue #29](https://github.com/varveio/s3-listing-study/issues/29) identifies
+**v1.8.5 / engine 1.3.4** as the next candidate (latest official release checked
+2026-10-15), superseding the issue's then-latest v1.8.4 request. No adapter, recipe, build pin, historical receipt or published release was
+changed.
+
+The candidate engine fixes deep-prefix concurrency accounting: its leaf scan
+holds the semaphore permit until sequential pagination finishes. The old early
+release could allow more concurrent leaf requests than the configured cap.
+That source change does not establish a speedup or a missing-object bug.
+[Versioned research and remaining retarget gates](research/update-1.8.5-2026-10-15.md)
+and [candidate source claims](research/update-1.8.5-2026-10-15.claims.json)
+explain the fix, defaults and changed Ctrl-C exit semantics.
+
+Candidate binary CLI/output validation, smoke and benchmarks are **NOT RUN**.
+Existing findings and open questions below retain their historical v1.5.0 scope;
+source compatibility cannot transfer old runtime observations to v1.8.5.
+
 ## At a glance
 
 Groundwork subject: the pinned build, smoke runs and source study from
