@@ -142,6 +142,28 @@ duplicated local-plus-Studio CLI display, fixed by merged
 problem from #2050's duplicate reads and does not establish duplicate emitted
 keys in the range engine.
 
+## What the upstream table reports against Swath
+
+These are **upstream-reported numbers**, read from the
+[comparison comment](https://github.com/datachain-ai/datachain/pull/2027#issuecomment-6128223196)
+on 2026-10-15, not study run records or verified current-version results:
+
+| Reported S3 workload | DataChain | Swath |
+| --- | --- | --- |
+| 257K current objects | 17 s | 11 s |
+| 2.05M current objects | 47 s | 45 s |
+| 10.5M object versions | 174 s | No result in the table |
+
+The table places the tools close on the larger current-object case, but does
+not establish statistical equivalence or a DataChain win. Its DataChain arm
+includes catalog writes and an extra key-filter fix; other arms only list.
+It does not pin a Swath version or provide complete commands and uncertainty
+estimates. The absent Swath version-history result is not evidence of a speed
+comparison or, by itself, of unsupported functionality. The author's table and
+Findings prose also disagree on some timings, as detailed below. These numbers
+are leads for a later controlled comparison, not an answer to which tool is
+faster generally.
+
 ## Other tools in the upstream comparison
 
 The [comparison comment](https://github.com/datachain-ai/datachain/pull/2027#issuecomment-6128223196)
