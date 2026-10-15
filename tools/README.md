@@ -78,6 +78,15 @@ bucket.
 | [`s3-fast-list`](s3-fast-list/) | Splits the keyspace at user-supplied cut-points (`-k` hints); serial without them; holds every key in memory until one Parquet write at the end | Completed 66.4M, count matched, in 333.8 s on cut-points the harness generated, with 11,347,320 KiB peak RSS. One other attempt was killed at 8 GiB; one failed at 16 GiB with exit 0. |
 | [`s5cmd`](s5cmd/) `run` | Fans per-prefix `ls` jobs through its worker pool from a shard list | Completed 66.4M, count matched, in 352.2 s, on shard lists the harness supplied. Not carried further. |
 
+### Research candidates
+
+These source-only proposals are not runnable capsules and have no study run
+records or published results.
+
+| Tool | Proposed scope | Study state |
+| --- | --- | --- |
+| [obstore](obstore/) | Native Python metadata streaming over Rust object_store; released 0.12.0 | Source research and onboarding proposal only; not executed or integrated. |
+
 ### Not run, kept for context
 
 These are not single-bucket listers and do not enter the runs. They are here
