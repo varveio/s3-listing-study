@@ -229,6 +229,16 @@ not an executed fixture or a reproduced hang:
    `seen_paths` set deduplicates emitted file paths, not recursive Directory
    visits, so it is not a cycle guard here.
 
+The selected full-scan native path passes
+[`None` for the glob row limit](https://github.com/Eventual-Inc/Daft/blob/aad22b926e340b09449b4bcc61d95d9964473d31/src/daft-local-execution/src/sources/glob_scan.rs#L78-L90).
+In this one-key shape the key remains rolled into a Directory response rather
+than becoming an emitted file; recursive visits clone the result sender, while
+the [unlimited consumer waits on that channel](https://github.com/Eventual-Inc/Daft/blob/aad22b926e340b09449b4bcc61d95d9964473d31/src/daft-io/src/object_store_glob.rs#L655-L684).
+Thus this is a possible nontermination risk, not merely duplicate output.
+Flat-prefix fallback bypasses the Directory recursion; errors, cancellation or
+a row limit actually reached through other emitted results can end consumption.
+A positive row limit alone is not an escape guarantee when no file is emitted.
+
 This provides a concrete source-based possible cycle/hang mechanism for the
 selected release under those response/shape conditions. It does not establish
 an observed hang, universal failure for every `//` key, or the cause of the
