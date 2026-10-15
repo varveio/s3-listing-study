@@ -29,6 +29,9 @@ excludes valid S3 objects: zero-byte slash markers, case-insensitive Spark
 marker names/prefixes and `.crc` suffixes. A complete glob is therefore not an
 unfiltered object inventory; exclusions must be reported.
 
+The [continuation checklist](research/onboarding.md) maps the remaining capsule,
+Docker and qualification work for a later authorized session.
+
 The [source-anchored research and onboarding proposal](research/report.md)
 covers identities, API boundaries, concurrency, marker filtering, path semantics,
 memory risks, upstream reports and future qualification requirements. Daft adds
