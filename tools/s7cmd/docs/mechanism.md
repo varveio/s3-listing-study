@@ -1,3 +1,39 @@
+# s7cmd — current source update and historical mechanism
+
+The source-researched next candidate is **v1.8.5**, engine **s3ls-rs 1.3.4**,
+not the v1.5.0 subject described in the preserved account below. Current research claim IDs resolve in the
+[versioned research ledger](../research/update-1.8.5-2026-10-15.claims.json);
+[data/claims.json](../data/claims.json) remains the registered v1.5.0 ledger. The independent source derivation
+is [the versioned update](../research/update-1.8.5-2026-10-15.md).
+
+## Candidate 1.8.5 source findings
+
+The engine still discovers slash-delimited prefixes to a fixed fan-out depth,
+then scans each leaf without a delimiter (`current-parallel-dispatch`). The
+important correction is that deep leaf scans now retain a semaphore permit
+throughout their sequential pagination (`current-leaf-permit-fix`). The old
+release dropped that permit before the scan, allowing more simultaneous leaf
+requests than the configured cap. This can change request pressure, memory,
+errors and elapsed time; source alone establishes no direction or magnitude.
+It is not evidence that old object counts were wrong.
+
+Source defaults remain 64 concurrent listings, depth 2, queue size 200000 and
+sort threshold 1000000 (`current-defaults-source`). These are source facts,
+not new help receipts. A flat keyspace still offers no prefix fan-out.
+The common TSV and JSON metadata surfaces remain source-compatible with the
+adapter (`current-output-source`). A caught listing Ctrl-C now returns 130
+(`current-interruption-source`), superseding the old exit-zero account.
+
+No candidate-version executable, including `--help`, has run
+(`current-real-cli-validation`). Performance, memory, correctness, endpoint
+compatibility and real CLI/output validation remain open for future runs.
+
+## Historical v1.5.0 / s3ls-rs 1.0.3 account
+
+Everything below describes the prior subject and its preserved evidence.
+The old semaphore-cap and interruption statements must not be read as facts
+about the candidate v1.8.5 subject.
+
 # s7cmd — mechanism
 
 Source-anchored architecture of `s7cmd ls`, which is a thin wrapper around

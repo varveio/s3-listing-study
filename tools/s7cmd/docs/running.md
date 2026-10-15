@@ -1,3 +1,41 @@
+# s7cmd — registered subject and next-candidate preparation
+
+## Source preparation for candidate v1.8.5 — NOT RUN
+
+The registered [identity](../data/tool.json), [image](../build/image.json),
+recipes and adapters still describe **v1.5.0**. They were not retargeted by this
+research update. Source-researched next candidate **v1.8.5** is documented in the
+[versioned update](../research/update-1.8.5-2026-10-15.md) and its
+[research claims](../research/update-1.8.5-2026-10-15.claims.json).
+
+The proposed official Linux x86-64 glibc archive has SHA-256
+`a8ebdaf9922b52659311cbf66264291b0a8cac7072b77323899e3cb41f8ed27c`.
+It was downloaded for checksum and member inspection only; its member is
+`s7cmd`. It was never executed or installed.
+
+Source review found existing mode and metadata flags in the new engine.
+A later retarget must update both artifact recipes and hashes, record the new
+identity without misbinding old source/receipts, and change concurrency
+provenance from historical help to new source until a real help capture exists.
+The existing 15000 ms connect timeout is inherited study setup, not a newly
+demonstrated requirement of v1.8.5; future comparisons must disclose it and
+apply comparable setup effort to the other tools.
+
+Retargeting also needs a deliberate solution to the canonical ledger's
+historical-source and migration-origin constraints; see the research checklist.
+No executable/build registration is claimed complete by these source findings.
+
+User instruction deferred **all subject execution**, including help/version,
+Docker builds, smoke, package installation and benchmarks. Future runtime
+qualification needs intended mode/normalizer pairs and matched content checks,
+including hierarchical prefixes beyond fan-out depth, flat and skewed fixtures.
+Historical observations below remain v1.5.0 evidence and cannot establish
+v1.8.5 behavior. No historical receipt or published result was changed.
+
+## Historical v1.5.0 operating record
+
+Everything below describes the registered historical subject.
+
 # s7cmd — running
 
 How the pinned image was built, every mode that has been smoked, how to
