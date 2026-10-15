@@ -13,7 +13,9 @@ The proposed official Linux x86-64 glibc archive has SHA-256
 It was downloaded for checksum and member inspection only; its member is
 `s7cmd`. It was never executed or installed.
 
-Source review found existing mode and metadata flags in the new engine.
+Candidate source defines the carried-forward mode and metadata flags; the
+[versioned report](../research/update-1.8.5-2026-10-15.md#cli-and-output-source-derivation)
+links their exact declarations.
 A later retarget must update both artifact recipes and hashes, record the new
 identity without misbinding old source/receipts, and change concurrency
 provenance from historical help to new source until a real help capture exists.
@@ -25,8 +27,8 @@ Retargeting also needs a deliberate solution to the canonical ledger's
 historical-source and migration-origin constraints; see the research checklist.
 No executable/build registration is claimed complete by these source findings.
 
-User instruction deferred **all subject execution**, including help/version,
-Docker builds, smoke, package installation and benchmarks. Future runtime
+**NOT RUN as of 2026-10-15:** candidate help/version, Docker builds, smoke and
+benchmarks; no candidate package was installed. Future runtime
 qualification needs intended mode/normalizer pairs and matched content checks,
 including hierarchical prefixes beyond fan-out depth, flat and skewed fixtures.
 Historical observations below remain v1.5.0 evidence and cannot establish

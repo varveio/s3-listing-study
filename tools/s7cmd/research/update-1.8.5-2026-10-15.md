@@ -2,13 +2,12 @@
 
 This is a source and build-preparation update for study issue
 [#29](https://github.com/varveio/s3-listing-study/issues/29), not a run record.
-The upstream CLI and engine were read before consulting the existing capsule.
 No subject command, including help/version, container build, package install,
 benchmark, or cloud task was run. Existing research and receipts are unchanged.
 
 ## Selected releases and request mapping
 
-Issue #29 was opened 2026-09-23 by the author, requesting then-latest s7cmd
+Issue #29 was opened 2026-09-23 by the s7cmd author, requesting then-latest s7cmd
 v1.8.4 and linking the s3ls-rs 1.1.0 listing fix. The official GitHub latest
 release API checked 2026-10-15 selects **v1.8.5**, published 2026-09-26.
 Its immutable tag resolves to `1e8c7d0644f30cb5da927b87277376620fcd0554`.
@@ -21,8 +20,11 @@ stdout flushing for `get-object-annotation`, not listing; both pin listing
 engine 1.3.4. Thus latest 1.8.5 addresses the request's listing concern while
 including the subsequent unrelated fix.
 [SRC CHANGELOG.md:8-71 @ 1e8c7d0644f30cb5da927b87277376620fcd0554]
+[Version 1.8.4 exact crate pin](https://github.com/nidor1998/s7cmd/blob/c443920f2596f2afa18a8f5c73f8d70fc46e90fe/Cargo.toml#L20-L25).
 
-The official Linux x86-64 glibc2.28 archive's GitHub asset digest and separately
+The official artifact is
+[`s7cmd-1.8.5-linux-glibc2.28-x86_64.tar.gz`](https://github.com/nidor1998/s7cmd/releases/download/v1.8.5/s7cmd-1.8.5-linux-glibc2.28-x86_64.tar.gz).
+Its GitHub asset digest and separately
 downloaded bytes agree on SHA-256
 `a8ebdaf9922b52659311cbf66264291b0a8cac7072b77323899e3cb41f8ed27c`.
 Archive member inspection found `s7cmd`. This verifies selected artifact bytes
@@ -34,8 +36,11 @@ and layout only, not that the executable loads or behaves as source suggests.
 The referenced s3ls-rs **1.1.0** change is a concurrency-limit correction.
 Parallel listing discovers `/` prefixes until `max_parallel_listing_max_depth`,
 then handles a deeper prefix with delimiter-free sequential pagination.
-Previously it released the task's semaphore permit before awaiting that leaf
-scan. Many deep prefixes could therefore drain simultaneously without consuming
+At the registered engine revision 1.0.3, the branch explicitly calls
+`drop(permit)` before awaiting that leaf scan.
+[SRC src/storage/s3/mod.rs:580-587 @ bf42067537da476b157b5d289a3e72d049b60db2]
+[Registered 1.0.3 leaf branch](https://github.com/nidor1998/s3ls-rs/blob/bf42067537da476b157b5d289a3e72d049b60db2/src/storage/s3/mod.rs#L580-L587).
+Many deep prefixes could therefore drain simultaneously without consuming
 permits, exceeding `--max-parallel-listings`. Current source awaits the entire
 leaf scan while holding the permit, then explicitly drops it. Sequential leaf
 scans never acquire another permit; parents release theirs before awaiting
@@ -52,11 +57,36 @@ The historical diagnostic timings and memory remain observations of that old
 executable and setup. They cannot transfer as observations of the new engine.
 
 The same 1.1.0 changelog also fixes rate limiting: earlier refill arithmetic
-rounded effective rates down to multiples of ten; the selected engine computes
-an exact refill schedule. No rate-limited run is claimed here.
+rounded effective rates down to multiples of ten; the candidate engine computes
+an exact refill schedule.
+[SRC CHANGELOG.md:76-85 @ 2993e4f8fd23316c63f63d04a6b6f2102cfdd41b]
+No rate-limited run is claimed here.
 [SRC src/storage/s3/mod.rs:863-895 @ 2993e4f8fd23316c63f63d04a6b6f2102cfdd41b]
 
+## Changelog coverage
+
+The listing-relevant release notes between s3ls-rs 1.0.3 and 1.3.4, and
+s7cmd 1.5.0 and 1.8.5, describe additional changes. In addition to permit accounting
+and exact rate limiting, they document removal of the positional `TARGET`
+environment fallback (1.2.0 engine / 1.7.0 umbrella), shell-completion broken-pipe
+handling (1.2.2 / 1.7.2), Ctrl-C exit 130 (1.3.0 / 1.8.0), newline termination of
+configuration errors (1.3.1 / 1.8.1), dependency/security refreshes, and the newer
+S3-compatible-service support policy. This is changelog coverage, not runtime
+verification of those changes. Existing explicitly passed bucket targets avoid
+relying on the removed positional environment fallback.
+[SRC CHANGELOG.md:8-95 @ 2993e4f8fd23316c63f63d04a6b6f2102cfdd41b]
+[SRC CHANGELOG.md:8-590 @ 1e8c7d0644f30cb5da927b87277376620fcd0554]
+
 ## CLI and output source derivation
+
+The carried-forward flags have source declarations: recursive listing,
+`--no-sort`, `--show-etag`, `--show-storage-class`, `--json`, `--tsv`, `-1`,
+`--disable-color-tracing`, region/endpoint/path-style/unsigned settings,
+`--max-parallel-listings`, fan-out depth, retry attempts and connect timeout.
+[Mode/output declarations](https://github.com/nidor1998/s3ls-rs/blob/2993e4f8fd23316c63f63d04a6b6f2102cfdd41b/src/config/args/mod.rs#L96-L428),
+[AWS, concurrency, retry and timeout declarations](https://github.com/nidor1998/s3ls-rs/blob/2993e4f8fd23316c63f63d04a6b6f2102cfdd41b/src/config/args/mod.rs#L430-L550).
+[SRC src/config/args/mod.rs:96-110,226-280,331-405,425-550 @ 2993e4f8fd23316c63f63d04a6b6f2102cfdd41b]
+
 
 The umbrella CLI uses `s3ls_rs::CLIArgs`, converts it to the engine Config, and
 runs `ListingPipeline`; this is not an independent listing reimplementation.
@@ -110,29 +140,13 @@ The remaining retarget checklist is concrete:
    counts alone will not establish completeness. Disclose inherited timeout
    setup and explore comparable knobs for the other tools.
 
-No schema or gate was loosened to make this research look runnable. No new
-receipt, performance result, correctness verdict, or claim of completed runtime
-onboarding exists here. Independent review and owner review still gate the
-research update.
-
-## Static verification of this update
-
-Capsule structure and repository link checks pass. The source-anchor checker
-verified all 14 labels in this new report and all 11 source references in its
-separate research ledger against the exact tagged checkouts, with none skipped
-or failed. These checks read Git objects; they never execute a subject.
-
-The combined canonical-ledger anchor gate also exposed ten pre-existing
-historical paths beginning `config/` or `display/` that do not exist at the old
-engine revision without their `src/` prefix. Those entries were not rewritten
-in this narrowly scoped research update. This inherited anchor debt remains a
-separate correction before a future capsule retarget; it does not invalidate
-the separately checked candidate anchors or provide new runtime evidence.
+No v1.8.5 receipt, performance result, correctness verdict or completed
+runtime qualification is recorded as of 2026-10-15.
 
 ## Pinned source index
 
-These links identify the exact source bytes used by the candidate claims; the
-source labels above also remain readable by the repository anchor checker.
+These links highlight the primary sources for key findings; complete pinned
+references accompany the individual findings and research-ledger entries.
 
 | Finding | Pinned primary source |
 | --- | --- |

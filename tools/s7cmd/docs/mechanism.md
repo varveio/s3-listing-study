@@ -17,12 +17,12 @@ requests than the configured cap. This can change request pressure, memory,
 errors and elapsed time; source alone establishes no direction or magnitude.
 It is not evidence that old object counts were wrong.
 
-Source defaults remain 64 concurrent listings, depth 2, queue size 200000 and
+Source defaults are 64 concurrent listings, depth 2, queue size 200000 and
 sort threshold 1000000 (`current-defaults-source`). These are source facts,
 not new help receipts. A flat keyspace still offers no prefix fan-out.
 The common TSV and JSON metadata surfaces remain source-compatible with the
 adapter (`current-output-source`). A caught listing Ctrl-C now returns 130
-(`current-interruption-source`), superseding the old exit-zero account.
+(`current-interruption-source`), differing from the old exit-zero account.
 
 No candidate-version executable, including `--help`, has run
 (`current-real-cli-validation`). Performance, memory, correctness, endpoint
@@ -31,8 +31,8 @@ compatibility and real CLI/output validation remain open for future runs.
 ## Historical v1.5.0 / s3ls-rs 1.0.3 account
 
 Everything below describes the prior subject and its preserved evidence.
-The old semaphore-cap and interruption statements must not be read as facts
-about the candidate v1.8.5 subject.
+The old interruption account belongs to v1.5.0. Its semaphore-cap description
+also needs the source correction beside that statement below.
 
 # s7cmd — mechanism
 
@@ -123,6 +123,17 @@ bounded by an `Arc<Semaphore>` sized `max_parallel_listings`; acquisition
 happens at dispatch and again per spawned task, and the semaphore itself is
 constructed once [SRC s3ls-rs src/storage/s3/mod.rs:409-427 (dispatch
 acquisition), :701-727 (per-task acquisition), :825 (construction) @ bf42067]:
+
+> **Source correction (2026-10-15).** The preserved semaphore description above
+> does not establish a cap on v1.5.0's deep-leaf requests: its engine 1.0.3
+> explicitly drops the permit before awaiting `list_sequential` when
+> `depth > max_parallel_listing_max_depth` (default 2). See
+> [the registered engine source](https://github.com/nidor1998/s3ls-rs/blob/bf42067537da476b157b5d289a3e72d049b60db2/src/storage/s3/mod.rs#L580-L587).
+> Configured concurrency 64 is therefore not proof of actual deep-leaf width.
+> This correction makes no inference about recorded counts, timings or memory;
+> [the open question](../../../docs/open-questions.md#s7cmd-historical-deep-leaf-concurrency-and-anchor-debt)
+> tracks the qualification boundary.
+
 
 1. **Discovery phase** (recursion depth <= `max_parallel_listing_max_depth`,
    default 2 [SRC config/args/mod.rs:24,506-507 @ bf42067]): paginate the

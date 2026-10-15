@@ -65,8 +65,8 @@ The registered capsule and every observation below remain **s7cmd v1.5.0 /
 s3ls-rs 1.0.3**. Source research for
 [issue #29](https://github.com/varveio/s3-listing-study/issues/29) identifies
 **v1.8.5 / engine 1.3.4** as the next candidate (latest official release checked
-2026-10-15), superseding the issue's then-latest v1.8.4 request. No executable,
-build registration, historical receipt or published release was changed.
+2026-10-15), superseding the issue's then-latest v1.8.4 request. No adapter, recipe, build pin, historical receipt or published release was
+changed.
 
 The candidate engine fixes deep-prefix concurrency accounting: its leaf scan
 holds the semaphore permit until sequential pagination finishes. The old early
