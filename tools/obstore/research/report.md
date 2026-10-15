@@ -10,8 +10,8 @@ study observations of runtime behavior remain unverified.
 The [latest GitHub release](https://github.com/developmentseed/obstore/releases/tag/py-v0.12.0)
 is `py-v0.12.0`, published 2026-10-15 at 15:01:29 UTC, commit
 `abe772d39f446a7850fa61060bc7b0c3c9792cad`. Main resolved to that same commit when
-checked. Earlier DataChain comparisons do not identify their obstore version,
-so their claims cannot be attributed to this newly released version.
+checked. The [DataChain comparison comment](https://github.com/datachain-ai/datachain/pull/2027#issuecomment-6128223196), checked on 2026-10-15, does not identify its obstore version,
+so its claims cannot be attributed to this newly released version.
 
 The [package manifest](https://github.com/developmentseed/obstore/blob/abe772d39f446a7850fa61060bc7b0c3c9792cad/obstore/pyproject.toml)
 requires Python 3.11 or newer and uses maturin. The
@@ -21,8 +21,10 @@ allows `object_store` 0.14.x; the committed
 resolves **0.14.2**, registry checksum
 `f1796bc93603f78c5760a69f2d58badc9618d22adade0a95385bb2adbae4eb94`.
 The corresponding upstream dependency tag `v0.14.2` points to
-`279572ea60f3a7a6e5237e066a6f4a35eee611e0`. This locks the source derivation;
-an eventual wheel's compiled dependency identity still needs artifact provenance.
+`279572ea60f3a7a6e5237e066a6f4a35eee611e0`. The checksum pins the crates.io archive; this read has not established byte-for-byte
+equivalence between that archive and the dependency git tag. The dependency source
+links below describe that tagged source. An eventual wheel's compiled dependency
+identity still needs artifact provenance.
 
 Obstore is in scope as a potential current-object S3 metadata lister. It also
 supports other backends, but this proposal does not expand the study to them.
@@ -47,7 +49,7 @@ chunk size. Ordering is explicitly not guaranteed by the Python contract.
 
 `list_with_delimiter(store, prefix=None, *, return_arrow=False)` and its async
 counterpart return objects and common prefixes for one directory level; the
-dependency implementation collects its paginated directory results before
+[dependency implementation](https://github.com/apache/arrow-rs-object-store/blob/279572ea60f3a7a6e5237e066a6f4a35eee611e0/src/client/list.rs#L112) collects its paginated directory results before
 returning. It should not be assumed to be a streaming recursive alternative.
 
 The [S3 constructor contract](https://github.com/developmentseed/obstore/blob/abe772d39f446a7850fa61060bc7b0c3c9792cad/obstore/python/obstore/_store/_aws.pyi#L539)
@@ -114,7 +116,10 @@ instead of importing general-purpose bucket assumptions.
 The binding's [metadata conversion](https://github.com/developmentseed/obstore/blob/abe772d39f446a7850fa61060bc7b0c3c9792cad/obstore/src/list.rs#L42)
 exposes `path`, `last_modified`, `size`, nullable `e_tag` and nullable `version`.
 Arrow carries the same information; neither form exposes storage class here.
-Null version/ETag must remain null rather than invented identifiers. An eventual
+The dependency's [S3 response conversion](https://github.com/apache/arrow-rs-object-store/blob/279572ea60f3a7a6e5237e066a6f4a35eee611e0/src/client/s3.rs#L77)
+sets `version: None` explicitly for every `ListContents` row. Thus the native
+version key is structurally present but null in this S3 list path; it provides no
+version ID. Null version/ETag must remain null rather than invented identifiers. An eventual
 normalizer must decide ETag quotation and timestamp normalization explicitly.
 
 Prefix matching is by path segment: `foo/bar` includes `foo/bar/x` and descendants,
@@ -133,13 +138,20 @@ that is not a measured Unicode round-trip guarantee or a normalization policy.
 Literal percent sequences and canonically equivalent Unicode keys need byte-exact
 future fixtures rather than URL-decoding assumptions.
 
-Open [#429](https://github.com/developmentseed/obstore/issues/429) reports that
+Open as checked 2026-10-15, [#429](https://github.com/developmentseed/obstore/issues/429) reports that
 double-delimiter keys stop iteration; comments include an S3 example as well as
-Azure. This is an upstream report, not a reproduced result for 0.12.0. The source
-path restrictions explain the risk. A future attempt must retain partial output
+Azure. This is an upstream report, not a reproduced result for 0.12.0. This must be distinguished from input parsing: the S3
+[response decoder](https://github.com/apache/arrow-rs-object-store/blob/279572ea60f3a7a6e5237e066a6f4a35eee611e0/src/aws/client.rs#L1032)
+converts the decoded response through `TryFrom<ListResponse>`, whose
+[object conversion](https://github.com/apache/arrow-rs-object-store/blob/279572ea60f3a7a6e5237e066a6f4a35eee611e0/src/client/s3.rs#L77)
+uses `location: Path::parse(value.key)?`, not the encoding `Path::from` constructor.
+Consequently an empty interior segment can error during returned-key conversion.
+The same parse strips a leading and trailing slash: a returned key `a/b/` can
+be represented as `a/b`, potentially colliding with a distinct real `a/b` key.
+These are source-derived failure/identity risks, not observations for 0.12.0. A future attempt must retain partial output
 and failure status rather than silently skip the key or publish partial success.
-Leading/trailing slashes and folder-marker objects also need explicit identity
-checks; this proposal does not claim their observed behavior.
+Leading/trailing slashes and folder-marker objects therefore need explicit identity
+checks; no observed result is claimed here.
 
 ## Memory and concurrency
 
@@ -168,11 +180,11 @@ separate scoped configuration and must not log secrets.
 
 Custom `endpoint` and `virtual_hosted_style_request` must agree. Path-style is
 appropriate to consider for a local S3 endpoint; HTTP requires
-`client_options={"allow_http": True}`. The service-specific `aws_endpoint_url_s3`
-setting takes precedence over generic `endpoint`. Open
+`client_options={"allow_http": True}`. The [service-specific configuration](https://github.com/developmentseed/obstore/blob/abe772d39f446a7850fa61060bc7b0c3c9792cad/obstore/python/obstore/_store/_aws.pyi#L93)
+`aws_endpoint_url_s3` takes precedence over generic `endpoint`. Open
 [#754](https://github.com/developmentseed/obstore/issues/754) reports confusion
 because virtual-hosted mode expects the bucket in the endpoint, unlike boto3's
-service-root convention; the selected source contract documents that requirement.
+service-root convention; the [selected source contract](https://github.com/developmentseed/obstore/blob/abe772d39f446a7850fa61060bc7b0c3c9792cad/obstore/python/obstore/_store/_aws.pyi#L406) documents that requirement.
 These options make endpoint qualification plausible, not proven compatible.
 
 Other relevant open work, checked 2026-10-15:
@@ -183,7 +195,8 @@ Other relevant open work, checked 2026-10-15:
   It addresses [#494](https://github.com/developmentseed/obstore/issues/494).
 - [#791](https://github.com/developmentseed/obstore/pull/791) proposes preserving
   modification time and version in fsspec `ls(detail=True)`. It is unmerged.
-  Direct native metadata conversion already exposes those fields; do not conflate
+  Direct native dictionaries contain both field names, but the S3 list conversion
+  explicitly fills `version` with null as described above; do not conflate
   the fsspec wrapper with the proposed native listing subject.
 - [#762](https://github.com/developmentseed/obstore/pull/762) proposes replacing
   store prefixes while sharing the connection pool. It is unmerged; avoid
@@ -195,14 +208,15 @@ Other relevant open work, checked 2026-10-15:
 
 Recommend a separate released obstore subject using native `list()` streaming.
 Its direct metadata boundary differs from DataChain's cold catalog materialization
-and adds a Rust library baseline alongside CLI tools. The selected list path is
+and adds a Python binding to a Rust library alongside CLI tools; the hypothetical
+Python dict/JSON arm also pays Python conversion and formatting costs. The selected list path is
 serial pagination; Swath's range-splitting strategy is different. Neither source
-structure nor the upstream DataChain table establishes a faster subject. Varve
+structure nor the [upstream DataChain table](https://github.com/datachain-ai/datachain/pull/2027#issuecomment-6128223196) establishes a faster subject. Varve
 maintains this study and builds Swath, which remains subject to identical rules.
 
 Before any runnable capsule or execution is authorized:
 
-1. Select and checksum-pin the official 0.12.0 wheel for the declared Python,
+1. Recheck releases and wheel availability, then select and checksum-pin the official 0.12.0 wheel for the declared Python,
    architecture and platform; inspect wheel availability and dependency provenance.
    Prefer that artifact to a new source build. Record artifact and image identities
    only when actually obtained; none are fabricated here.
@@ -213,7 +227,10 @@ Before any runnable capsule or execution is authorized:
 3. Qualify full-key identity on an unprefixed store, exact output escaping,
    nullable fields, errors after partial results and endpoint/auth behavior.
    Do not add manufactured substring prefixes or parallel ranges to the base mode.
-4. Predeclare comparable batch-size exploration; batch size is a conversion knob,
+4. Declare each supported knob fixed or explored: batch size, dict versus Arrow,
+   sync versus async consumption, HTTP client/pool/timeouts and retry configuration.
+   Pin the Arrow dependency before any such arm; the [binding checks for `arro3.core`](https://github.com/developmentseed/obstore/blob/abe772d39f446a7850fa61060bc7b0c3c9792cad/obstore/src/list.rs#L360)
+   at stream construction. Predeclare comparable batch-size exploration; batch size is a conversion knob,
    not S3 concurrency. An optional collect arm must be labeled as materializing
    and given the same memory budget as other materializing products.
 
