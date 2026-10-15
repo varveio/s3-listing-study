@@ -75,8 +75,8 @@ original range continues reading. Empty probes tighten the bound and can propose
 a nearer dense split; bounded S3 splits skip probing.
 
 Child processes request and parse pages. Migration holds the last key's group
-until a complete key is known, so a range can resume after that key, including
-when a child dies. This also matters for multiple versions sharing one key.
+until a complete key is known; the source is designed to resume after that key
+when a child dies while the coordinator survives. This also matters for multiple versions sharing one key.
 GCS can send an upper `endOffset`; S3 and Azure filter results beyond the upper
 bound after receiving a page. Crossing-page work is therefore possible even when
 emitted ranges are disjoint. [#2050](https://github.com/datachain-ai/datachain/issues/2050)
@@ -118,6 +118,50 @@ Swath separates seeding, pivot construction and split policies. Both use range
 partitioning and density-sensitive proposals. “Simpler” describes that visible
 policy structure; it establishes no performance or correctness advantage. This comparison does not reconstruct which historical
 Swath revision the DataChain author read.
+
+## Recovery and output responsibilities
+
+The comparison above covers scheduling policy, not the whole output contract.
+At the pinned #2027 head, the [range scheduler](https://github.com/datachain-ai/datachain/blob/e5854d5b55b8e56ad213b7bfd9bff4bd67db614c/src/datachain/client/fsspec.py#L430-L565)
+creates its work queue, observed alphabet, active-range count and probe tasks
+in memory. [Bound objects](https://github.com/datachain-ai/datachain/blob/e5854d5b55b8e56ad213b7bfd9bff4bd67db614c/src/datachain/client/listing_worker.py#L26-L44)
+keep the current range end and page observations there too. The
+[child-recovery path](https://github.com/datachain-ai/datachain/blob/e5854d5b55b8e56ad213b7bfd9bff4bd67db614c/src/datachain/client/fsspec.py#L570-L617)
+retains a last-complete-key variable and a held key group, then catches
+`ChildDied` and resumes fetching within the surviving coordinator. This is not
+by itself a persisted range-worklist or an output-commit cursor that survives
+loss of that coordinator. The claim is confined to this listing engine:
+[`read_storage` still saves its listing dataset](https://github.com/datachain-ai/datachain/blob/e5854d5b55b8e56ad213b7bfd9bff4bd67db614c/src/datachain/lib/dc/storage.py#L274-L300),
+and this is not an assertion that DataChain has no persistent data or other
+checkpoint facilities.
+
+Swath's pinned public [durability documentation](https://github.com/varveio/swath/blob/69cb809112a8b3d300a6e6f40967594e59763212/docs/internals/overview.md#durability-model)
+and [checkpoint interface](https://github.com/varveio/swath/blob/69cb809112a8b3d300a6e6f40967594e59763212/swath-core/src/main/java/io/varve/swath/checkpoint/CheckpointStore.java#L99-L176)
+assign additional responsibilities to its work tracker and managed outputs:
+
+| Boundary | DataChain #2027 listing path | Swath at the public source pin |
+| --- | --- | --- |
+| Work state | In-memory queue and range bounds in the reviewed scheduler | SQLite-backed worklist; page commits and range splits have transactional contracts |
+| Recovery | Last-complete-key recovery from a child failure while the coordinator survives | Reopen incomplete work; for managed Parquet, reset listing progress to the output's durable cursor |
+| Output completion | The listing generator feeds catalog writes; the reviewed range state has no durable-output acknowledgement cursor | Managed Parquet distinguishes listing cursor from durable cursor, advanced after finalized parts are durable |
+| Ordering/publication | A dataset-backed API and its export are separate from the range scheduler; no equivalent managed-Parquet publisher is established by this scheduler read | Optional external sorting plus a publication stage for prepared dataset parts |
+
+The [sorted publisher implementation](https://github.com/varveio/swath/blob/69cb809112a8b3d300a6e6f40967594e59763212/swath-core/src/main/java/io/varve/swath/output/sorted/SortedDatasetPublisher.java#L87-L115)
+validates a prepared set, renames parts, syncs the directory and invokes the
+publication callback. These are concrete responsibilities beyond pivot choice.
+They explain part of the difference in implementation scope; they do not prove
+that every extra policy or line of code is necessary, or establish measured
+recovery correctness or speed. Swath's own documentation explicitly excludes
+one-shot stdout/text sinks from resumability, so its managed-Parquet contract
+must not be attributed to a text-mode comparison.
+
+A useful future design question is whether DataChain's compact adaptive policy
+and lack of a separate initial seed phase suit a clearly scoped one-shot,
+unordered product. Swath already offers non-resumable text output; any proposed
+simplification must say which additional work it removes and which contract it
+changes. Total request/probe counts require traces, and performance requires
+matched runs. This research supports neither removing guarantees from Swath's
+resumable outputs nor declaring a speed winner.
 
 ## Correctness and API follow-ups
 

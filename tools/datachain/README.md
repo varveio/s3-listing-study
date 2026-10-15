@@ -21,7 +21,11 @@ The important distinction, checked on 2026-10-15:
 The proposed scheduler is compact: one initial range, observed-character
 midpoints, page-age rules and conditional probes. Swath's public source
 separates seeding, pivot construction and split policies. This is a source-level
-structural comparison; it does not establish which is faster or more complete. The report links the exact source revisions.
+structural comparison; it does not establish which is faster or more complete.
+The [recovery/output comparison](research/report.md#recovery-and-output-responsibilities)
+also distinguishes DataChain's in-memory range recovery from Swath's transactional
+work tracking and managed-Parquet durability, publication and optional sorting.
+Swath's one-shot text output is not resumable; the product boundary matters.
 
 DataChain's upstream comparison introduces two useful research candidates:
 **obstore** and **Daft**. s3ls-rs is already represented through s7cmd; the cited

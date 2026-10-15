@@ -80,6 +80,14 @@ may dominate DataChain even when its enumeration is competitive; initialization
 and output serialization may also materially affect Swath's end-to-end result. None of these
 is an observed result, and upstream PR timing tables cannot settle them here.
 
+Before comparing complexity or timing, declare the recovery and output contract:
+[the source comparison](report.md#recovery-and-output-responsibilities) separates
+DataChain's in-memory listing-coordinator recovery and catalog materialization
+from Swath's managed-Parquet durable cursors and publication. Compare one-shot,
+unordered products separately from resumable or sorted outputs. Do not interpret
+a simpler listing scheduler as grounds to remove an existing output guarantee;
+this proposal implements neither a new Swath mode nor an algorithm change.
+
 ## Continuation contract for capsule implementation
 
 **Prepared:** release/branch selection, source derivation, API/product boundaries,
