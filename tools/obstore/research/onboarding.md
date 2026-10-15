@@ -34,13 +34,14 @@ Follow the authoritative [onboarding sequence](../../../docs/operating/tool-onbo
 | Integration surface | Future work |
 | --- | --- |
 | `tools/obstore/data/claims.json`, `data/tool.json` | Create the born-canonical ledger and subject identity; source-only claims stay supported/unverified as appropriate. Do not invent receipts or a migration stratum. |
-| `tools/obstore/adapter/command.py`, `adapter/normalize.py` | Implement typed shared contracts, full absolute executable argv, complete streamed output and explicit failures/null handling. Derive key escaping and metadata normalization from real output later. |
+| `tools/obstore/adapter/command.py`, `adapter/normalize.py` | Declare modes, product/field coverage and supported settings; implement typed shared contracts, full absolute executable argv, complete streamed output and explicit failures/null handling. Derive key escaping and metadata normalization from real output later. |
 | `tools/obstore/build/Dockerfile`, `build/image.json`, dependency lock and launcher | Select official wheel/platform/Python, checksum every artifact and lock the complete runtime closure. Decide launcher path and copy/runtime layout. Hash launcher and lock bytes as supporting build inputs; bind executable prefix and adapter digest to registration. |
 | `benchmark/build/Dockerfile`, `benchmark/build/Dockerfile.dockerignore` | Add isolated install stage, copy the actual runtime closure and launcher, and include required inputs in build context. Keep capsule recipe and shared recipe consistent. |
 | `benchmark/src/benchmark/build_image.py` | Register stage in `TOOL_STAGES` and all lock/launcher supporting bytes in `SUPPORT_INPUTS`; recompute hashes through the existing build machinery. |
 | `benchmark/src/benchmark/contract.py` | Add to `TOOLBOX_TOOLS` only when runnable integration is ready; keep the registered set and stage map consistent. |
-| `benchmark/plans/tools.yaml` | Register actual modes, field coverage and supported settings; preserve current-only scope and declare optional arms separately. |
+| `benchmark/plans/tools.yaml` | Register default and explicit-exclusion policy so existing campaigns keep their subjects; preserve current-only scope and declare optional arms separately. |
 | `benchmark/tests/test_command_adapters.py`, `benchmark/tests/test_adapters.py` | Update both tool rosters and relevant mode/field/command expectations; exercise malformed rows, nullable metadata, escaping, error propagation and declared unsupported requests. |
+| `benchmark/tests/test_build_image.py`, `benchmark/tests/test_plan.py` | Check build registration and plan coverage without weakening the historical campaign guards. |
 | Capsule README and `docs/` | Replace candidate-only navigation with runnable documentation only when the actual contracts exist; qualification status remains explicit. |
 
 Artifact selection, wheel compatibility, dependency closure and launcher are
