@@ -22,6 +22,7 @@ Four groups of inputs go into the hash:
 | --- | --- |
 | **Environment** | The values the harness acts on: auth role, target bucket/region/prefix, location, machine type, vCPUs, memory, container ceiling, output target, timeout — and, for a case that consumes an artifact, the artifact's content digest (`model.md` makes `input_artifact_sha256` a hash input; a case consuming nothing omits the key) |
 | **Replay** | When present, the complete resolved replay document: pinned server implementation, fixture binding, serving and latency treatment, capacity status, and every independent subject/server allocation and control |
+| **Fault treatments** | When present, the canonical fault schedule (where the first step is killed) and the canonical sidecar declaration (which pinned executable stands between subject and replay server, and with what arguments) — [`model.md`](model.md) § *An attempt may be killed and resumed* and § *A sidecar sits between the subject and the replay server* |
 | **Config** | The capsule's own keys, `{}` when empty |
 | **What ran it** | The tool slice and the platform slice |
 
@@ -45,7 +46,14 @@ CASE_HASH_V2 = b"s3-listing-study-case-v2\0"
 
 
 def case_hash(
-    environment: dict, config: dict, tool_slice: str, platform: str, replay: dict | None = None
+    environment: dict,
+    config: dict,
+    tool_slice: str,
+    platform: str,
+    replay: dict | None = None,
+    *,
+    fault_schedule: dict | None = None,
+    sidecar: dict | None = None,
 ) -> str:
     inputs = {
         "environment": environment,  # the table above, absent keys omitted
@@ -55,6 +63,10 @@ def case_hash(
     }
     if replay is not None:
         inputs["replay"] = replay
+    if fault_schedule is not None:
+        inputs["fault_schedule"] = fault_schedule
+    if sidecar is not None:
+        inputs["sidecar"] = sidecar
     document = json.dumps(
         inputs,
         sort_keys=True,
@@ -90,6 +102,12 @@ def case_hash(
   [*Two identities, two questions*](#two-identities-two-questions). The encoding
   is identical either way, so one function serves both and the caller decides
   what it is identifying.
+
+`replay`, `fault_schedule` and `sidecar` are optional keys under the rule
+above: absent when a case has none, so adding them changed no existing case's
+document and needed no version bump. `case_inputs` is also where the worker's
+`--fault-schedule` and `--sidecar` flags are rendered from, so the request a
+job is given and the document its identity hashed cannot disagree.
 
 **Changing the input list re-identifies everything.** That is the intended
 behaviour, not a hazard: a case measured under a different set of inputs is a

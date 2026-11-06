@@ -187,6 +187,8 @@ def row_for(row: sqlite3.Row, *, adapter_root: str) -> dict[str, Any]:
         "replay_state": "-",
         "replay_timing": "-",
         "replay_timing_detail": None,
+        "fault_detail": None,
+        "sidecar_detail": None,
         "exit": "-",
         "worker_exit": "-",
         "row_count": "-",
@@ -244,6 +246,12 @@ def row_for(row: sqlite3.Row, *, adapter_root: str) -> dict[str, Any]:
         # the subject fields.
         "max_rss_floor_kb": (
             execution.get("max_rss_floor_kb", "-") if isinstance(execution, dict) else "-"
+        ),
+        "fault_detail": result.get("fault") if isinstance(result.get("fault"), dict) else None,
+        "sidecar_detail": (
+            result.get("sidecar_evidence")
+            if isinstance(result.get("sidecar_evidence"), dict)
+            else None
         ),
     }
     return {**measured, "evidence_state": "RESULT_BOUND"}
@@ -391,6 +399,73 @@ def replay_timing_lines(rows: list[dict[str, Any]]) -> list[str]:
     return lines
 
 
+def fault_lines(rows: list[dict[str, Any]]) -> list[str]:
+    """Both steps of every killed-and-resumed attempt.
+
+    The table's subject columns describe the last step that ran, which for a
+    landed kill is the resume; this is where the killed step, the gap, the sum
+    and the capsule's relisted figure are read.
+    """
+    lines: list[str] = []
+    for row in rows:
+        fault = row.get("fault_detail")
+        if not isinstance(fault, dict):
+            continue
+        raw_steps = fault.get("steps")
+        steps = raw_steps if isinstance(raw_steps, list) else []
+        rendered = [
+            f"{step.get('step')} exit {step.get('exit_code')}, {step.get('wall_seconds')}s, "
+            f"max RSS {step.get('max_rss_kb')} KiB"
+            for step in steps
+            if isinstance(step, dict)
+        ]
+        landed = fault.get("landed")
+        line = (
+            f"- `{row['attempt_id']}`: kill at {fault.get('kill_after_s')}s "
+            f"{'landed' if landed else 'did NOT land (the subject settled first)'}; "
+            + "; ".join(rendered)
+        )
+        if landed:
+            line += (
+                f"; gap {fault.get('gap_seconds')}s; "
+                f"subject wall {fault.get('subject_wall_seconds')}s over both steps"
+            )
+        relisted = fault.get("relisted")
+        if isinstance(relisted, dict):
+            line += "; relisted " + ", ".join(f"{k}={v}" for k, v in sorted(relisted.items()))
+        elif fault.get("relisted_error"):
+            line += f"; relisted REFUSED: {fault['relisted_error']}"
+        elif not fault.get("relisted_declared"):
+            line += "; relisted not declared by the capsule"
+        lines.append(line)
+    return lines
+
+
+def sidecar_lines(rows: list[dict[str, Any]]) -> list[str]:
+    """What the sidecar between subject and server recorded, from its bound timeline."""
+    lines: list[str] = []
+    for row in rows:
+        sidecar = row.get("sidecar_detail")
+        if not isinstance(sidecar, dict):
+            continue
+        timeline = sidecar.get("timeline")
+        observed = "no timeline"
+        if isinstance(timeline, dict):
+            totals = timeline.get("totals")
+            rendered = (
+                ", ".join(f"{k}={v}" for k, v in sorted(totals.items()))
+                if isinstance(totals, dict)
+                else "-"
+            )
+            observed = f"timeline {timeline.get('rows')} bucket(s): {rendered}"
+        line = f"- `{row['attempt_id']}`: {sidecar.get('name')} **{sidecar.get('state')}** — "
+        line += observed
+        if sidecar.get("error"):
+            line += f"; {sidecar['error']}"
+        lines.append(line)
+    return lines
+
+
 def slot_note(con: sqlite3.Connection, slot: sqlite3.Row) -> str:
     """One blocked slot, and whether anything can still pay it.
 
@@ -422,6 +497,8 @@ def render_markdown(rows: list[dict[str, Any]], *, blocked: list[str]) -> str:
             ("Rate cases", rate_lines(members)),
             ("Preparations", preparation_lines(members)),
             ("Replay timing treatment", replay_timing_lines(members)),
+            ("Fault schedule", fault_lines(members)),
+            ("Sidecar", sidecar_lines(members)),
         ):
             if section:
                 lines.extend(["", f"### {title}", "", *section])

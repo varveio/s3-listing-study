@@ -85,6 +85,68 @@ def _replay_summary(row: sqlite3.Row, result: Mapping[str, object]) -> dict[str,
     }
 
 
+def _fault_summary(result: Mapping[str, object]) -> dict[str, object]:
+    """Both steps of a killed-and-resumed attempt, without their cgroup snapshots."""
+    fault = result.get("fault")
+    if not isinstance(fault, Mapping):
+        return {"state": "MISSING"}
+    steps = fault.get("steps")
+    return {
+        "state": "LANDED" if fault.get("landed") is True else "NOT_LANDED",
+        "schedule": fault.get("schedule"),
+        "kill_after_s": fault.get("kill_after_s"),
+        "resume_mode": fault.get("resume_mode"),
+        "steps": [
+            {
+                name: step.get(name)
+                for name in (
+                    "step",
+                    "mode",
+                    "argv",
+                    "exit_code",
+                    "timed_out",
+                    "wall_seconds",
+                    "max_rss_kb",
+                    "stdout",
+                    "stderr",
+                )
+            }
+            for step in (steps if isinstance(steps, list) else [])
+            if isinstance(step, Mapping)
+        ],
+        "gap_seconds": fault.get("gap_seconds"),
+        "subject_wall_seconds": fault.get("subject_wall_seconds"),
+        "resume_evidence": fault.get("resume_evidence"),
+        "relisted": fault.get("relisted"),
+        "relisted_declared": fault.get("relisted_declared"),
+        "relisted_error": fault.get("relisted_error"),
+    }
+
+
+def _sidecar_summary(result: Mapping[str, object]) -> dict[str, object]:
+    """The sidecar's lifecycle and its timeline, bound by digest as uploaded."""
+    evidence = result.get("sidecar_evidence")
+    if not isinstance(evidence, Mapping):
+        return {"state": "MISSING"}
+    return {
+        name: evidence.get(name)
+        for name in (
+            "state",
+            "name",
+            "argv",
+            "executable_sha256",
+            "readiness_ms",
+            "alive_through_subject",
+            "stop",
+            "timeline",
+            "stdout_totals",
+            "stdout",
+            "stderr",
+            "error",
+        )
+    }
+
+
 def _verification_summary(
     row: sqlite3.Row, result_sha256: str, loaded: tuple[dict[str, Any], bytes] | None
 ) -> dict[str, object] | None:
@@ -135,6 +197,10 @@ def _evidence(row: sqlite3.Row) -> dict[str, object]:
         "result": {field: result.get(field) for field in RESULT_FIELDS},
         "argv": result.get("argv"),
         "replay": _replay_summary(row, result),
+        # Present only for a case that declared the treatment, so a receipt of a
+        # group without one is byte-identical to what this exporter wrote before.
+        **({"fault": _fault_summary(result)} if "fault_schedule" in result else {}),
+        **({"sidecar": _sidecar_summary(result)} if "sidecar" in result else {}),
         "verification": _verification_summary(
             row, result_sha256, load_json_at(str(row["result_prefix"]), "verify.json")
         ),

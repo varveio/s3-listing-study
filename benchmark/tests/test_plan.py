@@ -988,6 +988,14 @@ def test_every_key_a_row_may_state_changes_the_case_it_resolves_to(tmp_path: Pat
         "replay_prefetch_max_windows": (96, 1024),
         "replay_heap_percent": (50, 75),
         "replay_delimiter_connections": (16, 32),
+        # A kill point is a different treatment, so it is a different case.
+        "fault_kill_at_s": (10, 20),
+        "fault_kill_percent": (25, 50),
+        "fault_expected_wall_s": (100, 200),
+    }
+    # The other half of a relative kill point, stated beside the one under test.
+    companions = {"fault_kill_percent": ("fault_expected_wall_s", 100)} | {
+        "fault_expected_wall_s": ("fault_kill_percent", 50)
     }
     assert set(pairs) == set(bench.ROW_FIELDS), "a row key with no coverage here"
 
@@ -1005,6 +1013,19 @@ def test_every_key_a_row_may_state_changes_the_case_it_resolves_to(tmp_path: Pat
             },
             artifacts=PRODUCT,
             product_artifact=LISTING,
+            product_channel="file",
+            resume="resume-tsv",
+        ),
+        "resume-tsv": capsule.Mode(
+            product="text",
+            fields=("key",),
+            axes={
+                "concurrency": capsule.Ceiling(64, "unverified"),
+                "segments": capsule.Default(64, "unverified"),
+            },
+            artifacts=PRODUCT,
+            product_artifact=LISTING,
+            product_channel="file",
         ),
         "recursive-jsonl": capsule.Mode(
             product="text", fields=("key",), artifacts=PRODUCT, product_artifact=LISTING
@@ -1046,6 +1067,8 @@ def test_every_key_a_row_may_state_changes_the_case_it_resolves_to(tmp_path: Pat
         directory.mkdir()
         path = directory / "b.yaml"
         row = {"mode": "recursive-tsv"} | {field: value}
+        if field in companions:
+            row |= dict([companions[field]])
         # A server's share is carved out of the box, so a row sweeping the
         # server's size needs a box with room to sweep it in.
         if field in bench.REPLAY_FIELDS or field in {"container_memory_gb", "vcpus"}:
@@ -1295,11 +1318,12 @@ def test_a_tool_body_is_the_defaults_vocabulary_plus_its_rows() -> None:
     assert "mode" not in bench.LAYER_FIELDS
     # The overlap is what a case is *and* can sensibly be defaulted: the
     # allocation -- the subject's and, where there is one, the replay backend's --
-    # and which stratum it ran in.
+    # which stratum it ran in, and where a fault schedule kills it.
     assert set(bench.ROW_FIELDS) & set(bench.LAYER_FIELDS) == {
         *bench.RESOURCE_FIELDS,
         *bench.REPLAY_FIELDS,
         *bench.REPLAY_OPTIONAL_INTEGER_FIELDS,
+        *bench.FAULT_FIELDS,
         "signed",
     }
 

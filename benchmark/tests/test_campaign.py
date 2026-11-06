@@ -2114,3 +2114,48 @@ def test_renderer_passes_a_stated_delimiter_width_to_the_server(tmp_path: Path) 
             options=context(plan, case, images).options,
         )
     )
+
+
+def test_a_fault_treatment_reaches_the_frozen_request_from_the_hashed_case(
+    tmp_path: Path,
+) -> None:
+    """The worker flags are rendered out of `case_inputs`, so what Batch is told,
+    what a retry re-renders, and what the hash covered are one document."""
+    from benchmark import faults
+
+    plan = Plan.load(REPLAY_CANARY)
+    sidecar = faults.Sidecar(
+        name="faultproxy",
+        executable_uri="gs://bucket/tools/faultproxy",
+        executable_sha256="c" * 64,
+        listen="127.0.0.1:19091",
+        listen_flag="-listen",
+        target_flag="-target",
+        timeline_flag="-timeline",
+        args=("-window", "throttle:0s-130s:0.2"),
+    )
+    case = replace(
+        plan.cases[0], fault_schedule=faults.FaultSchedule(kill_at_s=30), sidecar=sidecar
+    )
+    assert campaign._case_from_document(campaign._case_document(case)) == case
+    images = image_set(tmp_path)
+    attempt = campaign.planned_attempt(case, context(plan, case, images))[2](1)[0]
+    request = gcp_batch.render_batch_job(
+        attempt,
+        images.image_for(case.tool),
+        suite=SUITE,
+        options=context(plan, case, images).options,
+    )
+    assert gcp_batch.request_argument(request, "--fault-schedule") == (
+        '{"kill_at_s":30,"kind":"kill-resume","signal":"SIGKILL"}'
+    )
+    assert json.loads(gcp_batch.request_argument(request, "--sidecar")) == sidecar.as_dict()
+    # No new runnable: the sidecar is the worker's own child.
+    assert len(request["taskGroups"][0]["taskSpec"]["runnables"]) == len(
+        gcp_batch.render_batch_job(
+            campaign.planned_attempt(plan.cases[0], context(plan, case, images))[2](1)[0],
+            images.image_for(case.tool),
+            suite=SUITE,
+            options=context(plan, case, images).options,
+        )["taskGroups"][0]["taskSpec"]["runnables"]
+    )

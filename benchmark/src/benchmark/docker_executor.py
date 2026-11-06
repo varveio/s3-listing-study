@@ -223,6 +223,10 @@ def load_plan(path: Path, host: Host, *, allow_s4cmd: bool) -> bench.Plan:
     )
     if loaded.replay is not None:
         raise CampaignError("the Docker executor does not run replay sidecars yet")
+    if any(case.fault_schedule is not None for case in loaded.cases):
+        # The worker would run it, but the local scope is frozen at single-exec,
+        # independent real-S3 cases (`architecture.md`); a schedule is Batch-only.
+        raise CampaignError("the Docker executor does not run fault schedules")
     steps = campaign.expand_launch(loaded.cases, loaded.adapters)
     if any(step.waits_for is not None for step in steps):
         raise CampaignError("the Docker executor does not run prerequisite chains yet")

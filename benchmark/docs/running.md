@@ -30,6 +30,8 @@ group did it. Do not promote a step because a neighbouring step worked.
 | `verify` | no — replay is deliberately outside its content-comparison path |
 | `report` | **yes** — same canary, including bound replay evidence and row counts |
 | receipt export | **yes** — same canary |
+| fault schedule (kill, then resume, in one attempt) | no — bounded synthetic test only |
+| sidecar (fault proxy between subject and replay) | no — bounded synthetic test only |
 
 ## Before you submit
 
@@ -409,6 +411,49 @@ Use either when a case genuinely cannot run. Neither is a way to make a red
 campaign look green: `verify` and `report` still see the accepted state, and
 an accepted failure is an absent measurement, not a passing one.
 
+## Fault schedules and sidecars
+
+`VERIFIED: no` — both paths are exercised only by bounded synthetic tests
+(`test_measure.py`: a real child process SIGKILLed at one second and resumed; a
+real loopback proxy process stood between a subject and a stubbed replay
+server). No campaign has run either on Batch, and no shipped capsule declares a
+resume. Promote each separately, in the commit whose group exercised it.
+
+What each is and what it records is [`model.md`](model.md) § *An attempt may be
+killed and resumed* and § *A sidecar sits between the subject and the replay
+server*; how a plan states them is
+[`../plans/README.md`](../plans/README.md) § *A plan may kill and resume its
+subject* and § *A plan may stand a sidecar in front of its replay server*.
+Operationally:
+
+- **Dry-run first, and read the worker flags.** Each attempt's frozen request
+  carries `--fault-schedule` and, for a sidecar plan, `--sidecar`, rendered
+  from the case's `case_inputs`. `retry` re-renders them unchanged.
+- **Stage the sidecar executable once, by digest.** Upload the static binary to
+  one exact `gs://` object both worker identities can read, and put its sha256
+  in the plan. The worker refuses bytes that do not match, before the subject
+  runs. The binary runs inside the toolbox container, so it must be a Linux
+  amd64 executable with no dependency the toolbox image lacks.
+- **Tune the kill point until every attempt is killed.** An attempt whose
+  subject settled before the kill reports `worker_exit 15` and has one step.
+  `report` lists it under *Fault schedule* as "did NOT land"; move
+  `fault_kill_at_s` earlier, or raise `fault_expected_wall_s`.
+- **Read both steps, not the table.** For a killed attempt the table's `exit`,
+  `wall_seconds` and `max_rss_kb` are the resume's. The *Fault schedule*
+  section of `report` gives each step, the gap, the summed subject wall and the
+  capsule's relisted figure; the receipt exports the same under
+  `evidence.fault`.
+- **Read the sidecar's timeline from the evidence.** `report`'s *Sidecar*
+  section and the receipt's `evidence.sidecar` summarize it; the file itself is
+  `sidecar/timeline.tsv` under the attempt prefix, bound by digest.
+- **The sidecar shares the subject's cpuset and memory ceiling.** Size
+  `subject_vcpus` and `container_memory_gb` for both, and compare a proxied arm
+  with an unproxied one only knowing the proxy's own cost is inside it.
+- **Warm-up and replay metrics bypass the sidecar**, by design: they go to the
+  server directly, so the proxy's timeline begins at the subject's first
+  request. The worker's readiness check is a bare TCP connect, which sends no
+  request.
+
 ## Verify
 
 `VERIFIED: no`
@@ -521,6 +566,11 @@ one mistake with no undo. A `SUCCEEDED` attempt's evidence is never a target.
 - **`cancel` is one group and one-way.**
 - **`retry` on a `statistic: rate` case is a no-op**, by design — its failures
   are data, not an owed retry.
+- **A fault schedule's two steps share one `timeout_s`.** The resume gets what
+  the killed step left of it, so a kill late in a long timeout leaves the
+  resume little room.
+- **The Docker executor refuses fault schedules and sidecars**; both run on
+  Batch only.
 - **Losing `campaign.db` loses the binding**, not the evidence — but without it
   the evidence in GCS cannot be tied to intent, and `verify`/`report` will
   refuse it.

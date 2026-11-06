@@ -52,6 +52,11 @@ facts under `tools/<tool>/build/`.
     entrypoint.
   - `verify.py` is the explicit real-S3 content-comparison path; replay is
     row-count-only and is refused there without staging raw products.
+  - `faults.py` is the fault contract a plan, the controller and the worker
+    share: a per-row kill-and-resume schedule and a plan-level sidecar between
+    the subject and the replay server; `fault_runtime.py` runs the sidecar and
+    keeps what a killed step left. Both are `VERIFIED: no` beyond bounded
+    synthetic tests.
   - `report.py` binds `result.json` summaries to controller state and renders
     row counts, timing, RSS, and replay-server evidence without reading listings;
     injected replay attempts are separately labeled timing-valid,

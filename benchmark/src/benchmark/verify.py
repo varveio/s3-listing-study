@@ -134,8 +134,20 @@ GAP_EXIT_CODES = {
 
 
 def expected_result_binding(row: sqlite3.Row) -> dict[str, object]:
-    """The result fields frozen by the ledger row that launched an attempt."""
+    """The result fields frozen by the ledger row that launched an attempt.
+
+    A fault schedule and a sidecar are bound from `case_inputs`, the document
+    the case hashed, and only when the case states them: an attempt that
+    declared neither binds exactly as it always did.
+    """
+    inputs = json.loads(row["case_inputs"])
+    treatments = {
+        name: inputs[name]
+        for name in ("fault_schedule", "sidecar")
+        if isinstance(inputs, dict) and name in inputs
+    }
     return {
+        **treatments,
         "group_id": row["group_id"],
         "job_name": row["job_name"],
         "case_id": row["case_id"],
@@ -215,7 +227,13 @@ def _pre_subject_errors(result: dict[str, object], *, exit_code: object) -> list
         and isinstance(replay_evidence, dict)
         and bool(replay_evidence.get("errors"))
     )
-    if not isinstance(result.get("setup"), dict) and not replay_refusal:
+    sidecar_evidence = result.get("sidecar_evidence")
+    sidecar_refusal = (
+        isinstance(result.get("sidecar"), dict)
+        and isinstance(sidecar_evidence, dict)
+        and sidecar_evidence.get("state") == "failed"
+    )
+    if not isinstance(result.get("setup"), dict) and not replay_refusal and not sidecar_refusal:
         errors.append("setup")
     if exit_code == 0:
         errors.append("exit_code")
@@ -294,6 +312,7 @@ def _execution_errors(
             ):
                 errors.append(f"execution.cgroup.{name}")
     errors.extend(result_capture_errors(result))
+    errors.extend(fault_errors(result))
     counted = (
         purpose != "preparation"
         and exit_code == 0
@@ -304,6 +323,47 @@ def _execution_errors(
         errors.append("row_count")
     if not counted and row_count is not None:
         errors.append("row_count")
+    return errors
+
+
+def fault_errors(result: dict[str, object]) -> list[str]:
+    """Where a killed-and-resumed attempt's marker does not say what both steps did.
+
+    Present only when the case declared a schedule; the top-level subject fields
+    describe the last step that ran, so that step must be the one they mirror.
+    """
+    if "fault_schedule" not in result:
+        return ["fault"] if "fault" in result else []
+    fault = result.get("fault")
+    if not isinstance(fault, dict):
+        return ["fault"]
+    errors: list[str] = []
+    steps = fault.get("steps")
+    landed = fault.get("landed")
+    if not isinstance(landed, bool):
+        errors.append("fault.landed")
+    if not isinstance(steps, list) or len(steps) not in (1, 2):
+        return [*errors, "fault.steps"]
+    if landed is False and len(steps) != 1:
+        errors.append("fault.steps")
+    for index, step in enumerate(steps):
+        if not isinstance(step, dict):
+            errors.append(f"fault.steps[{index}]")
+            continue
+        for name in ("exit_code", "max_rss_kb"):
+            value = step.get(name)
+            if isinstance(value, bool) or not isinstance(value, int):
+                errors.append(f"fault.steps[{index}].{name}")
+        wall = step.get("wall_seconds")
+        if isinstance(wall, bool) or not isinstance(wall, int | float) or not math.isfinite(wall):
+            errors.append(f"fault.steps[{index}].wall_seconds")
+    last = steps[-1]
+    if isinstance(last, dict) and (
+        last.get("exit_code") != result.get("exit_code")
+        or last.get("wall_seconds") != result.get("wall_seconds")
+        or last.get("max_rss_kb") != result.get("max_rss_kb")
+    ):
+        errors.append("fault.steps[-1]/subject")
     return errors
 
 

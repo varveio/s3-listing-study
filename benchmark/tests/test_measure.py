@@ -16,12 +16,14 @@ import benchmark.adapters as adapters
 import benchmark.gcs as gcs
 import benchmark.measure as measure
 import benchmark.procs as procs
+import benchmark.replay as replay
 import benchmark.replay_runtime as replay_runtime
 import benchmark.verify as verify
 from benchmark.contract import CREDENTIAL_ENV_VAR, TOOLBOX_TOOLS, sha256_of
 from benchmark.runtime.command_adapter import HEAP_PERCENT
 
 ROOT = Path(__file__).parents[2]
+REPLAY_ENDPOINT = replay.REPLAY_ENDPOINT_URL
 
 
 def image_metadata(workdir: str | None = None) -> dict[str, object]:
@@ -1699,3 +1701,329 @@ def test_a_clean_subject_that_never_wrote_its_declared_product_is_refused(
     assert result["exit_code"] == 0
     assert result["product_error"] == "declared product listing.parquet was not written"
     assert result["row_count"] is None
+
+
+# ── a fault schedule: one attempt, a killed step and a resume ────────────────
+
+FAULT_CAPSULE = """\
+import sys
+from pathlib import Path
+
+from benchmark.runtime.command_adapter import CommandRequest, Executable, Mode, ResumeSteps
+
+TOOL = "swath"
+EXECUTABLES = (Executable("python", (sys.executable,)),)
+SUPPORTS_UNSIGNED = True
+CONFIG_KEYS = frozenset({"keys"})
+LISTING = {"listing": "listing.txt"}
+MODES = {
+    "list": Mode(
+        product="text",
+        fields=("key",),
+        artifacts=LISTING,
+        product_artifact="listing",
+        product_channel="file",
+        resume="resume",
+        resume_evidence=("progress.txt", "never-written.json"),
+    ),
+    "resume": Mode(
+        product="text",
+        fields=("key",),
+        artifacts=LISTING,
+        product_artifact="listing",
+        product_channel="file",
+    ),
+}
+
+
+def build_command(request: CommandRequest) -> tuple[str, ...]:
+    return (
+        sys.executable,
+        str(Path(__file__).with_name("lister.py")),
+        request.mode,
+        request.sink_dir,
+        str(request.config["keys"]),
+    )
+
+
+def relisted(steps: ResumeSteps) -> dict[str, int]:
+    durable = len((steps.killed_evidence / "progress.txt").read_text().split())
+    started = int(steps.resume_stdout.read_text().split("from=")[1].split()[0])
+    return {"durable_at_kill": durable, "relisted_keys": durable - started}
+
+
+RELISTED = {"list": relisted}
+"""
+
+FAULT_LISTER = """\
+import sys
+import time
+from pathlib import Path
+
+mode, sink, keys = sys.argv[1], Path(sys.argv[2]), int(sys.argv[3])
+progress = sink / "progress.txt"
+start = 0
+if mode == "resume":
+    # Relist the last two durable keys, as a resume that cannot trust its tail does.
+    start = max(0, len(progress.read_text().split()) - 2)
+    print(f"resumed from={start}")
+    progress.write_text("")
+with open(progress, "a") as durable:
+    for key in range(start, keys):
+        durable.write(f"k{key}\\n")
+        durable.flush()
+        if mode == "list":
+            time.sleep(0.05)
+(sink / "listing.txt").write_text("".join(f"k{key}\\n" for key in range(keys)))
+print(f"{mode} listed {keys - start}", file=sys.stderr)
+"""
+
+
+def run_fault_worker(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    schedule: dict[str, object],
+    keys: int,
+) -> tuple[int, dict[str, Any]]:
+    """One attempt of a fixture capsule whose `list` mode resumes as `resume`.
+
+    The subject is a real child process writing a key per 50 ms, so a kill at one
+    second lands mid-listing and a short listing settles before it does.
+    """
+    adapter = tmp_path / "tools" / "swath" / "adapter"
+    adapter.mkdir(parents=True)
+    (adapter / "command.py").write_text(FAULT_CAPSULE, encoding="utf-8")
+    (adapter / "lister.py").write_text(FAULT_LISTER, encoding="utf-8")
+    monkeypatch.setattr(measure, "row_count_for", lambda *_args: (keys, None))
+    argv = basic_worker_argv(tmp_path)
+    for flag, value in (
+        ("--tool", "swath"),
+        ("--mode", "list"),
+        ("--config", json.dumps({"keys": keys, "mode": "list"}, sort_keys=True)),
+        ("--adapter-root", str(tmp_path / "tools")),
+        ("--destination", str(tmp_path / "published")),
+    ):
+        argv[argv.index(flag) + 1] = value
+    argv += [
+        "--retain-products",
+        "true",
+        "--fault-schedule",
+        json.dumps(schedule, sort_keys=True, separators=(",", ":")),
+    ]
+    code = measure.main(argv)
+    return code, json.loads((tmp_path / "attempt/result.json").read_text())
+
+
+def test_a_killed_step_and_its_resume_are_two_executions_of_one_attempt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """SIGKILL at half of a two-second expectation, then the capsule's resume.
+
+    Each step keeps its own logs, exit code, wall and RSS; the top-level subject
+    fields are the resume's, because its sink is what the row count reads; and
+    the relisted figure is derived by the capsule from what each step left.
+    """
+    schedule = {"kind": "kill-resume", "signal": "SIGKILL", "kill_percent": 50}
+    schedule["expected_wall_s"] = 2
+    code, result = run_fault_worker(tmp_path, monkeypatch, schedule=schedule, keys=200)
+
+    assert code == 0, result
+    fault = result["fault"]
+    killed, resumed = fault["steps"]
+    assert fault["landed"] is True and fault["kill_after_s"] == 1.0
+    assert killed["exit_code"] == -signal.SIGKILL
+    assert killed["execution"]["fault_kill_sent"] is True
+    assert killed["execution"]["timed_out"] is False
+    assert 1.0 <= killed["wall_seconds"] < 3.0
+    assert killed["argv"][2:4] == ["list", str(tmp_path / "attempt/native")]
+    assert resumed["argv"][2] == "resume" and resumed["exit_code"] == 0
+    assert (resumed["exit_code"], resumed["wall_seconds"], resumed["max_rss_kb"]) == (
+        result["exit_code"],
+        result["wall_seconds"],
+        result["max_rss_kb"],
+    )
+    assert fault["subject_wall_seconds"] == pytest.approx(
+        killed["wall_seconds"] + resumed["wall_seconds"], abs=1e-5
+    )
+    # The killed step's progress, as it left it, before the resume rewrote it.
+    durable = fault["relisted"]["durable_at_kill"]
+    assert 5 <= durable < 200
+    assert fault["relisted"] == {"durable_at_kill": durable, "relisted_keys": 2}
+    assert fault["resume_evidence"]["never-written.json"] is None
+    assert fault["resume_evidence"]["progress.txt"] is not None
+    # Separate logs, published beside each other under the one attempt prefix.
+    published = tmp_path / "published"
+    assert killed["stderr"]["name"] == "killed/stderr.log.gz"
+    assert resumed["stderr"] == result["stderr"]
+    assert gzip.decompress((published / "killed/stdout.log.gz").read_bytes()) == b""
+    assert b"resume listed" in gzip.decompress((published / "stderr.log.gz").read_bytes())
+    assert (published / "killed/sink/progress.txt").is_file()
+    assert result["fault_schedule"] == schedule
+    assert verify.result_semantic_errors(result) == []
+
+
+def test_a_kill_that_never_lands_is_refused_as_what_was_asked_for(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A subject that settles first is an uninterrupted run, which is not this case."""
+    schedule = {"kind": "kill-resume", "kill_at_s": 1, "signal": "SIGKILL"}
+    code, result = run_fault_worker(tmp_path, monkeypatch, schedule=schedule, keys=3)
+
+    assert code == result["worker_exit_code"] == measure.EXIT_FAULT_NOT_LANDED
+    assert result["exit_code"] == 0
+    assert result["fault"]["landed"] is False
+    assert [step["step"] for step in result["fault"]["steps"]] == ["killed"]
+    assert result["fault"]["relisted"] is None
+    assert not (tmp_path / "attempt/killed").exists()
+    assert verify.result_semantic_errors(result) == []
+
+
+# ── a sidecar between the subject and the replay server ──────────────────────
+
+FAKE_PROXY = """\
+import signal
+import socket
+import sys
+
+args = sys.argv[1:]
+flag = lambda name: args[args.index(name) + 1]
+host, port = flag("-listen").rsplit(":", 1)
+server = socket.socket()
+server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+server.bind((host, int(port)))
+server.listen()
+arrived = 0
+
+
+def stop(*_args):
+    with open(flag("-timeline"), "w") as timeline:
+        timeline.write("t_ms\\tarrived\\tthrottled\\tmax_active\\n")
+        timeline.write(f"0\\t{arrived}\\t0\\t1\\n100\\t0\\t0\\t0\\n")
+    print(f"requests={arrived} throttled=0", flush=True)
+    sys.exit(0)
+
+
+signal.signal(signal.SIGTERM, stop)
+print("target " + flag("-target") + " seed " + flag("-seed"), file=sys.stderr, flush=True)
+while True:
+    connection, _peer = server.accept()
+    # Requests, not connections: the worker's readiness probe connects and
+    # sends nothing, and an HTTP proxy's counter never sees it.
+    if not connection.recv(4096):
+        connection.close()
+        continue
+    arrived += 1
+    connection.sendall(b"HTTP/1.0 200 OK\\r\\nContent-Length: 0\\r\\n\\r\\n")
+    connection.close()
+"""
+
+
+def free_port() -> int:
+    import socket
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return int(probe.getsockname()[1])
+
+
+def run_sidecar_worker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, proxy: str
+) -> tuple[int, dict[str, Any], list[dict[str, object]]]:
+    """One replay diagnostic whose subject reaches the server through a staged sidecar.
+
+    The replay server is the stub the replay tests use; the sidecar and the
+    subject are real processes, and the subject makes one HTTP request to
+    whatever endpoint the worker compiled it against.
+    """
+    executable = f"#!{sys.executable}\n{proxy}".encode()
+    monkeypatch.setattr(gcs, "download_bytes", lambda _uri: executable)
+    compiled: list[dict[str, object]] = []
+
+    def compile_subject(*_args: object, **kwargs: object) -> tuple[tuple[str, ...], dict[str, str]]:
+        compiled.append(kwargs)
+        request = f"import urllib.request; urllib.request.urlopen({kwargs['endpoint_url']!r})"
+        return (sys.executable, "-c", request), {}
+
+    monkeypatch.setattr(adapters, "compile_command", compile_subject)
+    monkeypatch.setattr(
+        replay_runtime,
+        "wait_for_replay",
+        lambda: {"state": "ready", "wait_ms": 1, "attempts": 1, "last_error": None},
+    )
+
+    def scrape(evidence: dict[str, object], phase: str, **_kwargs: object) -> dict[str, object]:
+        count = 3 if phase == "before" else 4
+        return {
+            "observed_at": "2026-11-06T00:00:00+00:00",
+            "metrics": {
+                "meters": [
+                    {"name": replay.REQUEST_COUNTER, "type": "counter", "tags": {}, "count": count},
+                    {"name": replay.ERROR_COUNTER, "type": "counter", "tags": {}, "count": 0},
+                ]
+            },
+        }
+
+    monkeypatch.setattr(replay_runtime, "scrape_metrics", scrape)
+    monkeypatch.setattr(measure, "row_count_for", lambda *_args: (1, None))
+    sidecar = {
+        "name": "faultproxy",
+        "executable_uri": "gs://bucket/tools/faultproxy",
+        "executable_sha256": hashlib.sha256(executable).hexdigest(),
+        "listen": f"127.0.0.1:{free_port()}",
+        "listen_flag": "-listen",
+        "target_flag": "-target",
+        "timeline_flag": "-timeline",
+        "args": ["-seed", "7"],
+    }
+    argv = basic_worker_argv(tmp_path, replay=True)
+    argv[argv.index("--purpose") + 1] = "diagnostic"
+    argv[argv.index("--destination") + 1] = str(tmp_path / "published")
+    argv += ["--sidecar", json.dumps(sidecar, sort_keys=True, separators=(",", ":"))]
+    code = measure.main(argv)
+    return code, json.loads((tmp_path / "attempt/result.json").read_text()), compiled
+
+
+def test_a_sidecar_stands_between_subject_and_server_and_its_timeline_is_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Started before the subject, stopped after it, its timeline published and bound.
+
+    The subject is compiled against the sidecar's listen address rather than the
+    server's; the sidecar is told the server's address; and what it wrote on
+    SIGTERM lands under ``sidecar/`` in the attempt's create-only evidence.
+    """
+    code, result, compiled = run_sidecar_worker(tmp_path, monkeypatch, proxy=FAKE_PROXY)
+
+    assert code == 0, result
+    sidecar = result["sidecar"]
+    evidence = result["sidecar_evidence"]
+    assert compiled[0]["endpoint_url"] == f"http://{sidecar['listen']}"
+    assert evidence["state"] == "stopped"
+    assert evidence["alive_through_subject"] is True
+    assert evidence["stop"]["signal"] == "SIGTERM" and evidence["stop"]["exit_code"] == 0
+    assert evidence["argv"][-6:-2] == ["-listen", sidecar["listen"], "-target", REPLAY_ENDPOINT]
+    timeline = tmp_path / "published/sidecar/timeline.tsv"
+    assert evidence["timeline"]["sha256"] == sha256_of(timeline)
+    assert evidence["timeline"]["rows"] == 2
+    assert evidence["timeline"]["totals"] == {"arrived": 1, "throttled": 0, "max_active": 1}
+    assert evidence["stdout_totals"] == {"requests": 1, "throttled": 0}
+    stderr = gzip.decompress((tmp_path / "published/sidecar/stderr.log.gz").read_bytes())
+    assert stderr == f"target {REPLAY_ENDPOINT} seed 7\n".encode()
+    assert verify.result_semantic_errors(result) == []
+
+
+def test_a_sidecar_that_never_listens_refuses_before_the_subject_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    code, result, compiled = run_sidecar_worker(
+        tmp_path, monkeypatch, proxy="raise SystemExit(3)\n"
+    )
+
+    assert code == result["worker_exit_code"] == measure.EXIT_SIDECAR_FAILED
+    assert result["execution"] is None and result["argv"] is None
+    assert result["sidecar_evidence"]["state"] == "failed"
+    assert "exited 3 before it listened" in result["sidecar_evidence"]["error"]
+    assert result["sidecar_evidence"]["stop"]["exit_code"] == 3
+    assert verify.result_semantic_errors(result) == []
+    assert len(compiled) == 1
