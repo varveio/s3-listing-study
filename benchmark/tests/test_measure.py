@@ -4,22 +4,27 @@ import gzip
 import hashlib
 import json
 import os
+import shutil
 import signal
 import sys
+import time
 import tomllib
+from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
 import benchmark.adapters as adapters
+import benchmark.fault_runtime as fault_runtime
 import benchmark.gcs as gcs
 import benchmark.measure as measure
 import benchmark.procs as procs
 import benchmark.replay as replay
 import benchmark.replay_runtime as replay_runtime
 import benchmark.verify as verify
-from benchmark.contract import CREDENTIAL_ENV_VAR, TOOLBOX_TOOLS, sha256_of
+from benchmark import ledger, receipt, report
+from benchmark.contract import CREDENTIAL_ENV_VAR, TOOLBOX_TOOLS, canonical_json, sha256_of
 from benchmark.runtime.command_adapter import HEAP_PERCENT
 
 ROOT = Path(__file__).parents[2]
@@ -1785,6 +1790,9 @@ def run_fault_worker(
     *,
     schedule: dict[str, object],
     keys: int,
+    capsule: str = FAULT_CAPSULE,
+    lister: str = FAULT_LISTER,
+    timeout: int | None = None,
 ) -> tuple[int, dict[str, Any]]:
     """One attempt of a fixture capsule whose `list` mode resumes as `resume`.
 
@@ -1793,8 +1801,8 @@ def run_fault_worker(
     """
     adapter = tmp_path / "tools" / "swath" / "adapter"
     adapter.mkdir(parents=True)
-    (adapter / "command.py").write_text(FAULT_CAPSULE, encoding="utf-8")
-    (adapter / "lister.py").write_text(FAULT_LISTER, encoding="utf-8")
+    (adapter / "command.py").write_text(capsule, encoding="utf-8")
+    (adapter / "lister.py").write_text(lister, encoding="utf-8")
     monkeypatch.setattr(measure, "row_count_for", lambda *_args: (keys, None))
     argv = basic_worker_argv(tmp_path)
     for flag, value in (
@@ -1811,6 +1819,8 @@ def run_fault_worker(
         "--fault-schedule",
         json.dumps(schedule, sort_keys=True, separators=(",", ":")),
     ]
+    if timeout is not None:
+        argv += ["--timeout", str(timeout)]
     code = measure.main(argv)
     return code, json.loads((tmp_path / "attempt/result.json").read_text())
 
@@ -1877,6 +1887,187 @@ def test_a_kill_that_never_lands_is_refused_as_what_was_asked_for(
     assert result["fault"]["relisted"] is None
     assert not (tmp_path / "attempt/killed").exists()
     assert verify.result_semantic_errors(result) == []
+
+
+RACE_LISTER = """\
+import sys
+from pathlib import Path
+
+mode, sink = sys.argv[1], Path(sys.argv[2])
+if mode == "list":
+    # Blocks until the worker's kill opens the gate, then exits 0 before the
+    # signal is delivered: the race between a subject's own exit and SIGKILL.
+    with open({gate!r}, "rb") as gate:
+        gate.read(1)
+(sink / "listing.txt").write_text("k0\\n")
+"""
+
+
+def test_a_kill_the_subject_outran_is_sent_but_not_landed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A subject that exits 0 between the last poll and SIGKILL was not killed.
+
+    Made deterministic by holding the signal until the subject has exited and
+    is a zombie: the dispatch is recorded, the reaped status is its own exit,
+    and the attempt is refused with one step rather than resumed.
+    """
+    gate = tmp_path / "gate"
+    os.mkfifo(gate)
+    real_killpg = os.killpg
+    raced: list[int] = []
+
+    def outrun(pgid: int, sig: int) -> None:
+        if sig == signal.SIGKILL and not raced:
+            raced.append(pgid)
+            with open(gate, "wb") as opened:
+                opened.write(b"x")
+            os.waitid(os.P_PID, pgid, os.WEXITED | os.WNOWAIT)
+        real_killpg(pgid, sig)
+
+    monkeypatch.setattr(os, "killpg", outrun)
+    schedule = {"kind": "kill-resume", "kill_at_s": 1, "signal": "SIGKILL"}
+    code, result = run_fault_worker(
+        tmp_path,
+        monkeypatch,
+        schedule=schedule,
+        keys=1,
+        lister=RACE_LISTER.format(gate=str(gate)),
+    )
+
+    assert raced, "the kill point was never reached"
+    assert code == result["worker_exit_code"] == measure.EXIT_FAULT_NOT_LANDED
+    fault = result["fault"]
+    (killed,) = fault["steps"]
+    assert killed["exit_code"] == result["exit_code"] == 0
+    assert killed["execution"]["fault_kill_sent"] is True
+    assert killed["execution"]["fault_kill_landed"] is False
+    assert (fault["kill_sent"], fault["landed"]) == (True, False)
+    assert not (tmp_path / "attempt/killed").exists()
+    assert verify.result_semantic_errors(result) == []
+    # The same marker claiming a landed kill, or a clean worker, is refused.
+    for mutation in ({"landed": True}, {}):
+        mutated = json.loads(json.dumps(result))
+        mutated["fault"].update(mutation)
+        if not mutation:
+            mutated["worker_exit_code"] = 0
+        assert verify.result_semantic_errors(mutated)
+
+
+SLOW_RESUME_LISTER = FAULT_LISTER.replace(
+    '    print(f"resumed from={start}")\n',
+    '    print(f"resumed from={start}")\n    time.sleep(30)\n',
+)
+
+
+def slow_copy(monkeypatch: pytest.MonkeyPatch, seconds: float) -> None:
+    """Evidence copying that takes ``seconds`` of the attempt's one deadline."""
+    real = fault_runtime.copy_resume_evidence
+
+    def copy(*args: Any, **kwargs: Any) -> Any:
+        time.sleep(seconds)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(fault_runtime, "copy_resume_evidence", copy)
+
+
+def test_the_resume_gets_what_is_left_of_one_deadline_to_the_fraction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A slow copy between the steps comes out of the resume's time, unrounded.
+
+    Three seconds, a kill at one, and 1.3 s of copying leave the resume about
+    0.65 s: not a whole second rounded down to nothing nor a floor of one
+    invented on top, and a resume that would run longer times out inside it.
+    """
+    slow_copy(monkeypatch, 1.3)
+    schedule = {"kind": "kill-resume", "kill_at_s": 1, "signal": "SIGKILL"}
+    code, result = run_fault_worker(
+        tmp_path,
+        monkeypatch,
+        schedule=schedule,
+        keys=200,
+        lister=SLOW_RESUME_LISTER,
+        timeout=3,
+    )
+
+    assert code == 0, result
+    fault = result["fault"]
+    killed, resumed = fault["steps"]
+    budget = fault["resume_timeout_s"]
+    # Everything between the steps came out of it, the copy included, and
+    # nothing was rounded either way: a whole-second budget would be 0 or 1.
+    assert 0.2 < budget < 3 - killed["wall_seconds"] - 1.3 < 1
+    assert resumed["timed_out"] is True and resumed["exit_code"] == 124
+    assert budget <= resumed["wall_seconds"] < budget + 0.5
+    assert verify.result_semantic_errors(result) == []
+
+
+def test_a_worker_past_the_shared_deadline_runs_no_resume(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Copying that outlasts the attempt's deadline is a refusal, not a free second."""
+    slow_copy(monkeypatch, 2.5)
+    schedule = {"kind": "kill-resume", "kill_at_s": 1, "signal": "SIGKILL"}
+    code, result = run_fault_worker(tmp_path, monkeypatch, schedule=schedule, keys=200, timeout=3)
+
+    assert code == result["worker_exit_code"] == measure.EXIT_FAULT_INCOMPLETE
+    fault = result["fault"]
+    assert fault["landed"] is True and len(fault["steps"]) == 1
+    assert "deadline was spent" in fault["error"]
+    assert fault["resume_timeout_s"] is None and fault["gap_seconds"] is None
+    # The killed step is the attempt's last, its logs where they always are.
+    assert result["exit_code"] == -signal.SIGKILL
+    assert result["stderr"]["name"] == "stderr.log.gz"
+    assert verify.result_semantic_errors(result) == []
+
+
+def test_a_failed_evidence_copy_keeps_the_killed_step_and_runs_no_resume(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An I/O error copying the killed step's checkpoint is recorded and refused."""
+
+    def broken(_source: object, _target: object, _name: str) -> None:
+        raise OSError(5, "Input/output error")
+
+    monkeypatch.setattr(fault_runtime, "_copy_regular", broken)
+    schedule = {"kind": "kill-resume", "kill_at_s": 1, "signal": "SIGKILL"}
+    code, result = run_fault_worker(tmp_path, monkeypatch, schedule=schedule, keys=200)
+
+    assert code == result["worker_exit_code"] == measure.EXIT_FAULT_INCOMPLETE
+    fault = result["fault"]
+    assert [step["step"] for step in fault["steps"]] == ["killed"]
+    assert fault["error"].startswith("killed-step evidence was not copied: progress.txt")
+    assert fault["relisted"] is None
+    assert verify.result_semantic_errors(result) == []
+    mutated = {**result, "worker_exit_code": 0}
+    assert "fault/worker_exit_code" in verify.result_semantic_errors(mutated)
+
+
+def test_evidence_beneath_a_symlinked_directory_is_unsafe_not_absent(tmp_path: Path) -> None:
+    """Every component of a declared path is checked, not only the last one."""
+    sink = tmp_path / "sink"
+    outside = tmp_path / "outside"
+    (outside / "deep").mkdir(parents=True)
+    (outside / "deep/report.json").write_text("not the sink's")
+    (sink / "real").mkdir(parents=True)
+    (sink / "real/progress.txt").write_text("k0\n")
+    (sink / "real/link").symlink_to(outside)
+    os.mkfifo(sink / "pipe")
+    into = tmp_path / "copied"
+
+    recorded, error = fault_runtime.copy_resume_evidence(
+        sink, ("real/progress.txt", "real/never.json", "real/link/deep/report.json"), into
+    )
+    assert recorded == {
+        "real/progress.txt": sha256_of(sink / "real/progress.txt"),
+        "real/never.json": None,
+    }
+    assert error == "unsafe: real/link/deep/report.json: real/link is a symlink"
+    assert not (into / "real/link").exists()
+    for name, reason in (("pipe", "not a regular file"), ("real/progress.txt/x", "directory")):
+        _recorded, error = fault_runtime.copy_resume_evidence(sink, (name,), tmp_path / name)
+        assert error is not None and reason in error
 
 
 # ── a sidecar between the subject and the replay server ──────────────────────
@@ -2027,3 +2218,203 @@ def test_a_sidecar_that_never_listens_refuses_before_the_subject_runs(
     assert result["sidecar_evidence"]["stop"]["exit_code"] == 3
     assert verify.result_semantic_errors(result) == []
     assert len(compiled) == 1
+
+
+@pytest.mark.parametrize(
+    ("change", "refusal"),
+    (
+        (("    sys.exit(0)\n", "    sys.exit(3)\n"), "exited 3 on SIGTERM, not 0"),
+        (("0\\t{arrived}\\t0\\t1\\n", "0\\t{arrived}\\tlots\\n"), "unusable: line 2 has 3 cells"),
+        (('timeline.write("t_ms\\tarrived\\tthrottled\\tmax_active\\n")', "pass"), "column names"),
+        (("timeline.write(", "len("), "unusable: empty"),
+        (
+            ('with open(flag("-timeline"), "w") as timeline:', "if False:"),
+            "without writing its timeline",
+        ),
+    ),
+)
+def test_a_sidecar_that_fails_its_own_shutdown_is_refused_with_its_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: tuple[str, str], refusal: str
+) -> None:
+    """A real proxy that wrote its timeline and then failed, or wrote one nobody can read.
+
+    The file's existence is not the acceptance: a nonzero exit during SIGTERM
+    handling, a ragged bucket, or a missing header is refused as the sidecar's
+    failure, and whatever it did write is still published and bound.
+    """
+    old, new = change
+    assert old in FAKE_PROXY
+    code, result, _compiled = run_sidecar_worker(
+        tmp_path, monkeypatch, proxy=FAKE_PROXY.replace(old, new)
+    )
+
+    assert code == result["worker_exit_code"] == measure.EXIT_SIDECAR_FAILED
+    evidence = result["sidecar_evidence"]
+    assert evidence["state"] == "failed" and refusal in evidence["error"]
+    assert evidence["alive_through_subject"] is True
+    timeline = evidence["timeline"]
+    if timeline is not None:
+        assert timeline["sha256"] == sha256_of(tmp_path / "published/sidecar/timeline.tsv")
+    assert verify.result_semantic_errors(result) == []
+    clean = {**result, "worker_exit_code": 0}
+    assert "sidecar_evidence/worker_exit_code" in verify.result_semantic_errors(clean)
+
+
+# ── treatment evidence through the gates that bind it ────────────────────────
+
+
+def gates(
+    tmp_path: Path,
+    result: dict[str, Any],
+    *,
+    declared: Mapping[str, object],
+    adapter_root: Path,
+    purpose: str = "measurement",
+) -> tuple[list[str], str]:
+    """Bind ``result`` to a ledger row whose case hashed ``declared``; return what two gates say.
+
+    The evidence is the worker's own published attempt, copied under the
+    prefix its identity names; the receipt's binding errors and the report's
+    evidence state are read from the real exporters.
+    """
+    root = tmp_path / f"gate-{len(list(tmp_path.glob('gate-*')))}"
+    prefix = root / "evidence" / str(result["attempt_id"])
+    shutil.copytree(tmp_path / "published", prefix)
+    (prefix / "result.json").write_text(json.dumps(result))
+    resources = result["declared_resources"]
+    inputs = json.dumps({"case": result["case_id"], **declared}, sort_keys=True)
+    con = ledger.open_ledger(str(root / "campaign.db"), suite="fault-gates")
+
+    def build(ordinal: int) -> tuple[ledger.Attempt, str]:
+        attempt = ledger.Attempt(
+            case_id=str(result["case_id"]),
+            attempt=ordinal,
+            case_inputs=inputs,
+            group_id=str(result["group_id"]),
+            tool=str(result["tool"]),
+            auth_role=None,
+            executor="gcp-batch",
+            location="us-east1",
+            machine_type=resources["machine_type"],
+            vcpus=resources["vcpus"],
+            memory_gb=resources["memory_gb"],
+            container_memory_gb=resources["container_memory_gb"],
+            heap_percent=75,
+            timeout_s=3600,
+            target_bucket=str(result["bucket"]),
+            target_region=str(result["region"]),
+            target_prefix=str(result["prefix"]),
+            config=json.dumps(result["config"]),
+            input_artifact_sha256=None,
+            produced_by=None,
+            tool_slice_sha256="a" * 64,
+            platform_sha256="b" * 64,
+            image_uri=str(result["image"]),
+            image_set_sha256=str(result["image_set_sha256"]),
+            executor_env="{}",
+            service_account="worker@example.com",
+            secret_resource=None,
+            job_name=str(result["job_name"]),
+            result_prefix=str(prefix),
+            purpose=purpose,
+            statistic="timing",
+            origin="planned",
+            replay=None if result["replay"] is None else canonical_json(result["replay"]),
+        )
+        return attempt, "{}"
+
+    attempt, _ = ledger.journal_intent(
+        con, case_id=str(result["case_id"]), case_inputs=inputs, build=build
+    )
+    ledger.set_state(con, attempt.attempt_id, "SUCCEEDED")
+    (row,) = ledger.attempt_rows(con, group_id=str(result["group_id"]))
+    exported = receipt.build_receipt(con, str(result["group_id"]))["attempts"]
+    con.close()
+    evidence = cast(list[dict[str, Any]], exported)[0]["evidence"]
+    reported = report.row_for(row, adapter_root=str(adapter_root))["evidence_state"]
+    return list(evidence["binding_errors"]), str(reported)
+
+
+def mutated(result: dict[str, Any], change: Callable[[dict[str, Any]], object]) -> dict[str, Any]:
+    copy: dict[str, Any] = json.loads(json.dumps(result))
+    change(copy)
+    return copy
+
+
+def test_fault_evidence_that_does_not_hold_is_refused_by_binding_receipt_and_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A real killed-and-resumed attempt binds; each lie about it, or undeclaring it, does not."""
+    schedule = {"kind": "kill-resume", "kill_at_s": 1, "signal": "SIGKILL"}
+    code, result = run_fault_worker(tmp_path, monkeypatch, schedule=schedule, keys=200)
+    assert code == 0, result
+    tools = tmp_path / "tools"
+    declared = {"fault_schedule": schedule}
+    assert gates(tmp_path, result, declared=declared, adapter_root=tools) == ([], "RESULT_BOUND")
+
+    def drop_resume(r: dict[str, Any]) -> None:
+        r["fault"]["steps"].pop()
+
+    def unkilled(r: dict[str, Any]) -> None:
+        r["fault"]["steps"][0]["exit_code"] = 0
+        r["fault"]["steps"][0]["execution"]["exit_code"] = 0
+
+    cases: list[tuple[Callable[[dict[str, Any]], object], str]] = [
+        (drop_resume, "fault/worker_exit_code"),
+        (unkilled, "fault.landed"),
+        (
+            lambda r: r["fault"]["steps"][0]["stderr"].update(name="x.gz"),
+            "fault.steps[0].stderr.name",
+        ),
+        (lambda r: r["fault"].update(subject_wall_seconds=1.0), "fault.subject_wall_seconds"),
+        (lambda r: r["fault"].update(relisted={"relisted_keys": "two"}), "fault.relisted"),
+        (lambda r: r["fault"]["schedule"].update(kill_at_s=2), "fault.schedule"),
+        (lambda r: r.pop("fault"), "fault"),
+    ]
+    for change, error in cases:
+        errors, state = gates(
+            tmp_path, mutated(result, change), declared=declared, adapter_root=tools
+        )
+        assert error in errors and state == "RESULT_MISMATCH", (error, errors)
+    errors, state = gates(tmp_path, result, declared={}, adapter_root=tools)
+    assert errors == ["fault_schedule"] and state == "RESULT_MISMATCH"
+
+
+def test_sidecar_evidence_that_does_not_hold_is_refused_by_binding_receipt_and_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    code, result, _compiled = run_sidecar_worker(tmp_path, monkeypatch, proxy=FAKE_PROXY)
+    assert code == 0, result
+    tools = ROOT / "tools"
+    declared = {"sidecar": result["sidecar"]}
+    assert gates(tmp_path, result, declared=declared, adapter_root=tools, purpose="diagnostic") == (
+        [],
+        "RESULT_BOUND",
+    )
+    cases: list[tuple[Callable[[dict[str, Any]], object], str]] = [
+        (
+            lambda r: r["sidecar_evidence"].update(executable_sha256="0" * 64),
+            "sidecar_evidence.executable_sha256",
+        ),
+        (lambda r: r["sidecar_evidence"]["stop"].update(exit_code=3), "sidecar_evidence.stop"),
+        (
+            lambda r: r["sidecar_evidence"]["timeline"].update(usable=False),
+            "sidecar_evidence.timeline",
+        ),
+        (
+            lambda r: r["sidecar_evidence"].update(alive_through_subject=False),
+            "sidecar_evidence.alive_through_subject",
+        ),
+        (lambda r: r.pop("sidecar_evidence"), "sidecar_evidence"),
+    ]
+    for change, error in cases:
+        errors, state = gates(
+            tmp_path,
+            mutated(result, change),
+            declared=declared,
+            adapter_root=tools,
+            purpose="diagnostic",
+        )
+        assert error in errors and state == "RESULT_MISMATCH", (error, errors)
+    errors, state = gates(tmp_path, result, declared={}, adapter_root=tools, purpose="diagnostic")
+    assert errors == ["sidecar"] and state == "RESULT_MISMATCH"

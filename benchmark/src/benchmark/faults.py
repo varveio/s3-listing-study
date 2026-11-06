@@ -57,6 +57,9 @@ SIDECAR_TIMELINE_NAME = "timeline.tsv"
 SIDECAR_READINESS_TIMEOUT_S = 30.0
 SIDECAR_STOP_GRACE_S = 30.0
 """How long a sidecar gets after SIGTERM to write its timeline and exit."""
+SIDECAR_KILL_WAIT_S = 10.0
+"""How long the worker waits for a sidecar to be reaped after SIGKILL before it
+refuses it as unstoppable, so a stuck stop cannot hold the attempt's marker."""
 SIDECAR_RESERVED_PORTS = frozenset({REPLAY_ENDPOINT_PORT, REPLAY_METRICS_PORT})
 
 _NAME_RE = re.compile(r"\A[a-z0-9][a-z0-9-]{0,40}\Z")
@@ -65,6 +68,8 @@ _FLAG_RE = re.compile(r"\A--?[A-Za-z0-9][A-Za-z0-9_-]*\Z")
 _LISTEN_RE = re.compile(r"\A127\.0\.0\.1:([0-9]{1,5})\Z")
 _GCS_RE = re.compile(r"\Ags://[^/\s*?\[\]]+/[^\s*?\[\]]+[^/\s*?\[\]]\Z")
 _TOTAL_RE = re.compile(r"\A([a-z][a-z0-9_]*)=(-?[0-9]+)\Z")
+_INTEGER_RE = re.compile(r"\A-?[0-9]+\Z")
+_COLUMN_RE = re.compile(r"\A[A-Za-z_][A-Za-z0-9_]*\Z")
 
 
 class FaultError(ValueError):
@@ -317,6 +322,34 @@ def timeline_summary(text: str) -> dict[str, Any]:
             continue
         totals[column] = max(values, default=0) if column.startswith("max_") else sum(values)
     return {"columns": columns, "rows": len(rows), "totals": totals}
+
+
+def timeline_errors(text: str) -> str | None:
+    """Why a timeline is not usable evidence, or ``None`` when it is.
+
+    Usable means a header of distinct column names (identifiers), at least one
+    bucket, and every bucket the header's width with an integer in every cell.
+    An empty file, a header with no buckets, or a ragged or non-numeric row is
+    a file the sidecar left, not a record of what it did; the summary
+    (`timeline_summary`) would quietly drop the columns it cannot total.
+    """
+    lines = [line for line in text.splitlines() if line]
+    if not lines:
+        return "empty"
+    columns = lines[0].split("\t")
+    if not all(_COLUMN_RE.fullmatch(column) for column in columns):
+        return "the first line is not column names"
+    if len(set(columns)) != len(columns):
+        return "header names a column twice"
+    if len(lines) == 1:
+        return "a header and no buckets"
+    for number, line in enumerate(lines[1:], start=2):
+        cells = line.split("\t")
+        if len(cells) != len(columns):
+            return f"line {number} has {len(cells)} cells under {len(columns)} columns"
+        if not all(_INTEGER_RE.fullmatch(cell) for cell in cells):
+            return f"line {number} has a cell that is not an integer"
+    return None
 
 
 def stdout_totals(text: str) -> dict[str, int] | None:

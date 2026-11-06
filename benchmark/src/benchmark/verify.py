@@ -60,6 +60,7 @@ import hashlib
 import json
 import math
 import shutil
+import signal
 import sqlite3
 import sys
 import tempfile
@@ -71,6 +72,7 @@ from typing import Any
 import duckdb
 
 from benchmark import adapters, gcs
+from benchmark import faults as fault_contract
 from benchmark import replay as replay_contract
 from benchmark.contract import (
     EXIT_BINDING_MISMATCH,
@@ -133,6 +135,10 @@ GAP_EXIT_CODES = {
 }
 
 
+TREATMENT_FIELDS = ("fault_schedule", "sidecar")
+"""Declarations a result carries only when its case hashed them (`model.md`)."""
+
+
 def expected_result_binding(row: sqlite3.Row) -> dict[str, object]:
     """The result fields frozen by the ledger row that launched an attempt.
 
@@ -143,7 +149,7 @@ def expected_result_binding(row: sqlite3.Row) -> dict[str, object]:
     inputs = json.loads(row["case_inputs"])
     treatments = {
         name: inputs[name]
-        for name in ("fault_schedule", "sidecar")
+        for name in TREATMENT_FIELDS
         if isinstance(inputs, dict) and name in inputs
     }
     return {
@@ -178,6 +184,9 @@ def result_binding_errors(
     errors = [
         name for name, value in expected.items() if name not in result or result.get(name) != value
     ]
+    # A treatment the case never declared is as much a disagreement as one it
+    # declared and the marker lost: the hash covers both directions.
+    errors.extend(name for name in TREATMENT_FIELDS if name not in expected and name in result)
     errors.extend(result_semantic_errors(result, purpose=purpose))
     return errors
 
@@ -235,6 +244,12 @@ def _pre_subject_errors(result: dict[str, object], *, exit_code: object) -> list
     )
     if not isinstance(result.get("setup"), dict) and not replay_refusal and not sidecar_refusal:
         errors.append("setup")
+    # No subject ran, so no step did; a sidecar may not have been started yet,
+    # but one that was is a refusal, never a clean stop.
+    if "fault" in result:
+        errors.append("fault")
+    if "sidecar_evidence" in result and not sidecar_refusal:
+        errors.append("sidecar_evidence")
     if exit_code == 0:
         errors.append("exit_code")
     errors.extend(
@@ -313,6 +328,7 @@ def _execution_errors(
                 errors.append(f"execution.cgroup.{name}")
     errors.extend(result_capture_errors(result))
     errors.extend(fault_errors(result))
+    errors.extend(sidecar_errors(result))
     counted = (
         purpose != "preparation"
         and exit_code == 0
@@ -326,11 +342,46 @@ def _execution_errors(
     return errors
 
 
+def _number(value: object, *, minimum: float | None = None) -> bool:
+    return (
+        not isinstance(value, bool)
+        and isinstance(value, int | float)
+        and math.isfinite(value)
+        and (minimum is None or value >= minimum)
+    )
+
+
+def _integer(value: object) -> bool:
+    return not isinstance(value, bool) and isinstance(value, int)
+
+
+def _hex64(value: object) -> bool:
+    return isinstance(value, str) and len(value) == 64 and not set(value) - HEX64
+
+
+def _capture_errors(
+    block: object, where: str, *, prefix: str, minimal: bool, optional: bool
+) -> list[str]:
+    """A published log of one step or of the sidecar, named under its own directory."""
+    if block is None:
+        return [] if optional else [where]
+    errors = [f"{where}.{name}" for name in _artifact_errors(block, minimal=minimal)]
+    if isinstance(block, dict) and not str(block.get("name", "")).startswith(f"{prefix}/"):
+        errors.append(f"{where}.name")
+    return errors
+
+
 def fault_errors(result: dict[str, object]) -> list[str]:
     """Where a killed-and-resumed attempt's marker does not say what both steps did.
 
-    Present only when the case declared a schedule; the top-level subject fields
-    describe the last step that ran, so that step must be the one they mirror.
+    Present only when the case declared a schedule. Validated as evidence, not
+    as a declaration: the block's schedule is the declared one; each step is a
+    complete execution record; two steps exist exactly when the kill landed
+    (death by SIGKILL, reaped) and the resume ran, with the gap and the summed
+    wall that follow from them; the top-level subject fields mirror the last
+    step; the copied checkpoint record and the relisted figure are well formed;
+    and an attempt whose treatment is incomplete — kill not landed, resume not
+    run, relisted figure refused — carries a failing worker exit.
     """
     if "fault_schedule" not in result:
         return ["fault"] if "fault" in result else []
@@ -338,32 +389,216 @@ def fault_errors(result: dict[str, object]) -> list[str]:
     if not isinstance(fault, dict):
         return ["fault"]
     errors: list[str] = []
-    steps = fault.get("steps")
+    try:
+        schedule = fault_contract.parse_schedule(result["fault_schedule"])  # type: ignore[arg-type]
+    except (fault_contract.FaultError, TypeError):
+        return ["fault_schedule"]
+    if fault.get("schedule") != schedule.as_dict():
+        errors.append("fault.schedule")
+    if fault.get("kill_after_s") != schedule.kill_after_s:
+        errors.append("fault.kill_after_s")
     landed = fault.get("landed")
+    kill_sent = fault.get("kill_sent")
     if not isinstance(landed, bool):
         errors.append("fault.landed")
+    if not isinstance(kill_sent, bool) or (landed is True and kill_sent is not True):
+        errors.append("fault.kill_sent")
+    resume_mode = fault.get("resume_mode")
+    if not isinstance(resume_mode, str) or not resume_mode or resume_mode == result.get("mode"):
+        errors.append("fault.resume_mode")
+    error = fault.get("error")
+    if error is not None and not isinstance(error, str):
+        errors.append("fault.error")
+    steps = fault.get("steps")
     if not isinstance(steps, list) or len(steps) not in (1, 2):
         return [*errors, "fault.steps"]
-    if landed is False and len(steps) != 1:
-        errors.append("fault.steps")
+    minimal = result.get("evidence_profile") == "minimal-replay"
+    expected = (("killed", result.get("mode")), ("resume", resume_mode))
     for index, step in enumerate(steps):
+        where = f"fault.steps[{index}]"
         if not isinstance(step, dict):
-            errors.append(f"fault.steps[{index}]")
+            errors.append(where)
             continue
+        if (step.get("step"), step.get("mode")) != expected[index]:
+            errors.append(f"{where}.step")
+        if not isinstance(step.get("argv"), list) or not step.get("argv"):
+            errors.append(f"{where}.argv")
         for name in ("exit_code", "max_rss_kb"):
-            value = step.get(name)
-            if isinstance(value, bool) or not isinstance(value, int):
-                errors.append(f"fault.steps[{index}].{name}")
-        wall = step.get("wall_seconds")
-        if isinstance(wall, bool) or not isinstance(wall, int | float) or not math.isfinite(wall):
-            errors.append(f"fault.steps[{index}].wall_seconds")
+            if not _integer(step.get(name)):
+                errors.append(f"{where}.{name}")
+        if not _number(step.get("wall_seconds"), minimum=0):
+            errors.append(f"{where}.wall_seconds")
+        if not isinstance(step.get("timed_out"), bool):
+            errors.append(f"{where}.timed_out")
+        execution = step.get("execution")
+        if not isinstance(execution, dict) or any(
+            execution.get(name) != step.get(name)
+            for name in ("exit_code", "timed_out", "wall_seconds", "max_rss_kb")
+        ):
+            errors.append(f"{where}.execution")
+    if errors:
+        return errors
+
+    killed = steps[0]
+    killed_execution = killed["execution"]
+    if killed_execution.get("fault_kill_after_s") != schedule.kill_after_s:
+        errors.append("fault.steps[0].execution.fault_kill_after_s")
+    if killed_execution.get("fault_kill_sent") != kill_sent:
+        errors.append("fault.steps[0].execution.fault_kill_sent")
+    if killed_execution.get("fault_kill_landed") != landed:
+        errors.append("fault.steps[0].execution.fault_kill_landed")
+    if landed and (killed["exit_code"] != -signal.SIGKILL or killed["timed_out"]):
+        # A landed kill is the reaped SIGKILL and nothing else.
+        errors.append("fault.landed")
+    resumed = len(steps) == 2
+    if resumed:
+        if not landed or error is not None:
+            errors.append("fault.steps")
+        if not _number(fault.get("gap_seconds"), minimum=0):
+            errors.append("fault.gap_seconds")
+        if not _number(fault.get("resume_timeout_s")) or fault["resume_timeout_s"] <= 0:
+            errors.append("fault.resume_timeout_s")
+        total = round(killed["wall_seconds"] + steps[1]["wall_seconds"], 6)
+    else:
+        if fault.get("gap_seconds") is not None or fault.get("resume_timeout_s") is not None:
+            errors.append("fault.gap_seconds")
+        total = killed["wall_seconds"]
+    if fault.get("subject_wall_seconds") != total:
+        errors.append("fault.subject_wall_seconds")
+
+    # The top-level subject fields are the last step's.
     last = steps[-1]
-    if isinstance(last, dict) and (
-        last.get("exit_code") != result.get("exit_code")
-        or last.get("wall_seconds") != result.get("wall_seconds")
-        or last.get("max_rss_kb") != result.get("max_rss_kb")
+    if (
+        last["exit_code"] != result.get("exit_code")
+        or last["wall_seconds"] != result.get("wall_seconds")
+        or last["max_rss_kb"] != result.get("max_rss_kb")
+        or last["timed_out"] != result.get("timed_out")
+        or last["argv"] != result.get("argv")
+        or last["execution"] != result.get("execution")
     ):
         errors.append("fault.steps[-1]/subject")
+    for stem in ("stdout", "stderr"):
+        if last.get(stem) != result.get(stem):
+            errors.append(f"fault.steps[-1].{stem}")
+        if resumed:
+            errors.extend(
+                _capture_errors(
+                    killed.get(stem),
+                    f"fault.steps[0].{stem}",
+                    prefix="killed",
+                    minimal=minimal,
+                    optional=stem == "stdout",
+                )
+            )
+
+    evidence = fault.get("resume_evidence")
+    if (
+        not isinstance(evidence, dict)
+        or not all(
+            isinstance(name, str) and (digest is None or _hex64(digest))
+            for name, digest in evidence.items()
+        )
+        or (evidence and not landed)
+    ):
+        errors.append("fault.resume_evidence")
+
+    relisted = fault.get("relisted")
+    relisted_error = fault.get("relisted_error")
+    if not isinstance(fault.get("relisted_declared"), bool):
+        errors.append("fault.relisted_declared")
+    if relisted_error is not None and not isinstance(relisted_error, str):
+        errors.append("fault.relisted_error")
+    if relisted is not None and (
+        fault_contract.relisted_errors(relisted) is not None
+        or not resumed
+        or fault.get("relisted_declared") is not True
+        or relisted_error is not None
+    ):
+        errors.append("fault.relisted")
+
+    complete = landed is True and resumed and error is None and relisted_error is None
+    if result.get("worker_exit_code") == 0 and not complete:
+        errors.append("fault/worker_exit_code")
+    return errors
+
+
+def sidecar_errors(result: dict[str, object]) -> list[str]:
+    """Where a sidecar's lifecycle evidence does not support the attempt it is in.
+
+    Required whenever the case declared a sidecar and a subject ran. A clean
+    stop is the one shape a successful attempt may carry: the declared digest,
+    the declared endpoint, alive through the subject, SIGTERMed and exited 0
+    unforced, a usable timeline bound by digest at its published name, and
+    logs under ``sidecar/``. A failed sidecar is evidence too, and its attempt
+    carries a failing worker exit.
+    """
+    declared = result.get("sidecar")
+    if "sidecar" not in result:
+        return ["sidecar_evidence"] if "sidecar_evidence" in result else []
+    evidence = result.get("sidecar_evidence")
+    if not isinstance(declared, dict) or not isinstance(evidence, dict):
+        return ["sidecar_evidence"]
+    try:
+        sidecar = fault_contract.parse_sidecar(declared)
+    except (fault_contract.FaultError, TypeError):
+        return ["sidecar"]
+    errors: list[str] = []
+    state = evidence.get("state")
+    if state not in ("stopped", "failed"):
+        return ["sidecar_evidence.state"]
+    if evidence.get("name") != sidecar.name:
+        errors.append("sidecar_evidence.name")
+    if evidence.get("executable_sha256") != sidecar.executable_sha256:
+        errors.append("sidecar_evidence.executable_sha256")
+    if evidence.get("endpoint_url") != sidecar.endpoint_url:
+        errors.append("sidecar_evidence.endpoint_url")
+    argv = evidence.get("argv")
+    # The staged executable and the timeline path are worker-local; everything
+    # between them is the declaration, rendered.
+    if not isinstance(argv, list) or argv[1:-1] != list(sidecar.argv("", "")[1:-1]):
+        errors.append("sidecar_evidence.argv")
+    if state == "failed":
+        if not isinstance(evidence.get("error"), str) or not evidence["error"]:
+            errors.append("sidecar_evidence.error")
+        if result.get("worker_exit_code") == 0:
+            errors.append("sidecar_evidence/worker_exit_code")
+        return errors
+    minimal = result.get("evidence_profile") == "minimal-replay"
+    stop = evidence.get("stop")
+    if not isinstance(stop, dict) or (
+        stop.get("signal") != "SIGTERM"
+        or stop.get("exit_code") != 0
+        or stop.get("forced_kill") is not False
+        or stop.get("reaped") is not True
+    ):
+        errors.append("sidecar_evidence.stop")
+    if evidence.get("alive_through_subject") is not True:
+        errors.append("sidecar_evidence.alive_through_subject")
+    if evidence.get("error") is not None:
+        errors.append("sidecar_evidence.error")
+    if not _integer(evidence.get("readiness_ms")) or evidence["readiness_ms"] < 0:
+        errors.append("sidecar_evidence.readiness_ms")
+    timeline = evidence.get("timeline")
+    if (
+        not isinstance(timeline, dict)
+        or timeline.get("name") != f"sidecar/{fault_contract.SIDECAR_TIMELINE_NAME}"
+        or not _hex64(timeline.get("sha256"))
+        or not _integer(timeline.get("size_bytes"))
+        or timeline.get("usable") is not True
+        or not _integer(timeline.get("rows"))
+        or timeline["rows"] < 1
+    ):
+        errors.append("sidecar_evidence.timeline")
+    for stem in ("stdout", "stderr"):
+        errors.extend(
+            _capture_errors(
+                evidence.get(stem),
+                f"sidecar_evidence.{stem}",
+                prefix="sidecar",
+                minimal=minimal,
+                optional=True,
+            )
+        )
     return errors
 
 

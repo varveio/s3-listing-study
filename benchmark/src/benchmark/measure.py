@@ -74,13 +74,23 @@ other than exactly one file.
 EXIT_REPLAY_EVIDENCE_FAILED = 14
 """The replay server did not provide the evidence protocol this attempt required."""
 EXIT_FAULT_NOT_LANDED = 15
-"""A fault schedule's kill never reached the subject: it settled first.
+"""A fault schedule's kill did not end the subject.
 
-The case asked for a killed run and a resume; an uninterrupted run is a
-different measurement, so it is published as what it was and refused as what
-was asked for. Move the kill earlier, or the expected wall up."""
+Either the subject settled before the kill point, or the reaped status was not
+death by SIGKILL (it exited between the last poll and the signal). The case
+asked for a killed run and a resume; an uninterrupted run is a different
+measurement, so it is published as what it was and refused as what was asked
+for, whatever the subject's own exit was. Move the kill earlier: a smaller
+``fault_kill_at_s``, ``fault_kill_percent`` or ``fault_expected_wall_s``."""
 EXIT_SIDECAR_FAILED = 16
-"""The declared sidecar would not start, died while the subject ran, or left no timeline."""
+"""The declared sidecar would not start, died while the subject ran, did not stop
+cleanly on SIGTERM, or left no usable timeline."""
+EXIT_FAULT_INCOMPLETE = 17
+"""A fault schedule's kill landed and its resume never ran.
+
+Either the attempt's one deadline was spent before the resume could start, or
+the killed step's declared evidence could not be copied safely. The killed step
+is published as the attempt's last; it is not a recovery measurement."""
 REPLAY_ENDPOINT_URL = replay.REPLAY_ENDPOINT_URL
 REPLAY_HTTP_TIMEOUT_S = replay_runtime.REPLAY_HTTP_TIMEOUT_S
 SETUP_TIMEOUT_S = 300
@@ -510,7 +520,7 @@ def preflight(argv: tuple[str, ...]) -> bool:
 def run_tool(
     argv: tuple[str, ...],
     attempt_dir: Path,
-    timeout: int,
+    timeout: float,
     term_grace: float,
     env: dict[str, str],
     *,
@@ -524,8 +534,12 @@ def run_tool(
 
     ``kill_after_s`` is a fault schedule's kill point: the whole process group
     gets SIGKILL with no TERM first, because a subject given the chance to
-    flush is not the failure being measured. It is recorded as a sent kill, not
-    a timeout, and only when the subject was still running to receive it.
+    flush is not the failure being measured. Sending the kill and the kill
+    landing are recorded apart, because they can disagree: the subject can exit
+    on its own between the last poll and the signal, and a zombie takes no
+    signal. ``fault_kill_sent`` says the worker dispatched it to a subject it
+    had not yet reaped; ``fault_kill_landed`` is true only when the status the
+    worker then reaped is death by SIGKILL. Anything else is not a landed kill.
 
     ``stdout_path`` is where fd 1 lands. It defaults to this phase's own log,
     and a subject that only prints its listing is handed its declared product
@@ -623,13 +637,20 @@ def run_tool(
 
         residual = procs.live_pids(tracked_pids - {proc.pid})
         if fault_killed:
-            with contextlib.suppress(ProcessLookupError):
+            try:
                 os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                # The group is already gone: whatever the subject's status is,
+                # this signal is not what produced it.
+                fault_killed = False
             procs.signal_pids(residual, signal.SIGKILL)
             kill_sent = True
             if not reap_subject(max(term_grace, 1.0)):
                 reap_subject(None)
-            exit_code = proc.returncode if proc.returncode is not None else -signal.SIGKILL
+            # The reaped status, never a stand-in: a subject whose status could
+            # not be had reports what `reap_subject` recorded, and is not landed.
+            assert proc.returncode is not None
+            exit_code = proc.returncode
         elif timed_out or residual or procs.process_group_exists(proc.pid):
             if timed_out:
                 exit_code = 124  # conventional timeout exit code
@@ -712,7 +733,13 @@ def run_tool(
         **(
             {}
             if kill_after_s is None
-            else {"fault_kill_after_s": kill_after_s, "fault_kill_sent": fault_killed}
+            else {
+                "fault_kill_after_s": kill_after_s,
+                "fault_kill_sent": fault_killed,
+                "fault_kill_landed": (
+                    fault_killed and subject_usage is not None and exit_code == -signal.SIGKILL
+                ),
+            }
         ),
         "cgroup": {
             "location": str(cgroup) if cgroup else None,
@@ -1019,9 +1046,10 @@ def published_product(product: Product | None, *, gap: str | None) -> Product | 
     actually holds, under a name that says what it is.
 
     A product that never landed is left alone: there is nothing to compress, and
-    `product_gap` has already said so.
+    `product_gap` has already said so — or, for a subject that did not exit
+    clean (a killed step whose resume never ran), nothing needs saying.
     """
-    if product is None or not product.compress or gap is not None:
+    if product is None or not product.compress or gap is not None or not product.path.is_file():
         return product
     return replace(product, name=f"{product.name}.gz", path=gzip_file(product.path))
 
@@ -1419,9 +1447,15 @@ def _run_fault_schedule(
 
     The killed step's logs move under ``killed/`` before the resume starts, so
     each step keeps its own and the top-level logs are always the last step's.
-    Both steps share the row's one deadline: the resume gets what the killed
-    step left of it, because the provider bounds the container, not a step.
+    Both steps share the row's one deadline, a single monotonic instant fixed
+    before the killed step starts: the resume gets what is left of it after the
+    killed step *and* everything the worker did between the steps, to the
+    fraction of a second, because the provider bounds the container, not a step.
+    A deadline already spent, or killed-step evidence that cannot be copied
+    safely, is recorded as ``fault.error`` with no resume run, and the attempt
+    keeps the killed step as its last.
     """
+    deadline = time.monotonic() + args.timeout
     killed_started_at = datetime.now(UTC).isoformat()
     killed = run_tool(
         command,
@@ -1435,10 +1469,11 @@ def _run_fault_schedule(
         kill_after_s=schedule.kill_after_s,
     )
     killed_finished = time.monotonic()
-    landed = killed.get("fault_kill_sent") is True
+    landed = killed.get("fault_kill_landed") is True
     fault: dict[str, object] = {
         "schedule": schedule.as_dict(),
         "kill_after_s": schedule.kill_after_s,
+        "kill_sent": killed.get("fault_kill_sent") is True,
         "landed": landed,
         "resume_mode": resume_mode,
         "steps": [
@@ -1452,33 +1487,55 @@ def _run_fault_schedule(
             )
         ],
         "gap_seconds": None,
+        "resume_timeout_s": None,
         "subject_wall_seconds": killed["wall_seconds"],
         "resume_evidence": {},
         "relisted": None,
         "relisted_declared": False,
         "relisted_error": None,
+        "error": None,
     }
     if not landed or not _settled(killed):
-        # Nothing to resume: the subject finished, timed out, or left a process
-        # behind, and each of those is decided from this one execution.
+        # Nothing to resume: the subject finished, timed out, left a process
+        # behind, or was not provably ended by this kill, and each of those is
+        # decided from this one execution.
         return killed, command, fault
 
     killed_dir = attempt_dir / "killed"
     killed_dir.mkdir()
-    for name in ("stdout.log", "stderr.log"):
-        if (attempt_dir / name).exists():
-            os.replace(attempt_dir / name, killed_dir / name)
-    fault["resume_evidence"] = fault_runtime.copy_resume_evidence(
+    recorded, evidence_error = fault_runtime.copy_resume_evidence(
         native_root, resume_evidence, killed_dir / "sink"
     )
+    fault["resume_evidence"] = recorded
+    if evidence_error is not None:
+        # The killed step stays the attempt's last, its logs where the
+        # top-level capture reads them; what was copied is published under
+        # `killed/` all the same.
+        fault["error"] = f"killed-step evidence was not copied: {evidence_error}"
+        return killed, command, fault
+    logs = [name for name in ("stdout.log", "stderr.log") if (attempt_dir / name).exists()]
+    for name in logs:
+        os.replace(attempt_dir / name, killed_dir / name)
+    # Measured last, after every piece of inter-step work, and passed on as is:
+    # no rounding down that takes time away, no floor that invents time.
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        for name in logs:
+            os.replace(killed_dir / name, attempt_dir / name)
+        fault["error"] = (
+            f"the attempt's {args.timeout}s deadline was spent "
+            f"{-remaining:.3f}s before the resume could start"
+        )
+        return killed, command, fault
     resume_started_at = datetime.now(UTC).isoformat()
     fault["gap_seconds"] = round(time.monotonic() - killed_finished, 6)
+    fault["resume_timeout_s"] = round(remaining, 6)
     wall = killed["wall_seconds"]
     assert isinstance(wall, float | int)
     resumed = run_tool(
         resume_command,
         attempt_dir,
-        max(1, int(args.timeout - wall)),
+        remaining,
         args.term_grace,
         resume_env,
         cwd=args.subject_workdir,
@@ -1902,36 +1959,43 @@ def main(argv: list[str] | None = None) -> int:
 
     started_at = datetime.now(UTC).isoformat()
     fault: dict[str, object] | None = None
-    if fault_schedule is None:
-        execution = run_tool(
-            command,
-            attempt_dir,
-            args.timeout,
-            args.term_grace,
-            env,
-            cwd=args.subject_workdir,
-            # The container's peak is not per exec: only an attempt whose setup exec
-            # already ran has something to clear out of it.
-            reset_peak=setup is not None,
-            stdout_path=subject_stdout,
-        )
-    else:
-        assert manifest is not None
-        execution, command, fault = _run_fault_schedule(
-            fault_schedule,
-            args,
-            mode=args.mode,
-            command=command,
-            env=env,
-            resume_mode=resume_mode,
-            resume_command=resume_command,
-            resume_env=resume_env,
-            resume_evidence=manifest.resume_evidence,
-            attempt_dir=attempt_dir,
-            native_root=native_root,
-            stdout_path=subject_stdout,
-            reset_peak=setup is not None,
-        )
+    try:
+        if fault_schedule is None:
+            execution = run_tool(
+                command,
+                attempt_dir,
+                args.timeout,
+                args.term_grace,
+                env,
+                cwd=args.subject_workdir,
+                # The container's peak is not per exec: only an attempt whose setup exec
+                # already ran has something to clear out of it.
+                reset_peak=setup is not None,
+                stdout_path=subject_stdout,
+            )
+        else:
+            assert manifest is not None
+            execution, command, fault = _run_fault_schedule(
+                fault_schedule,
+                args,
+                mode=args.mode,
+                command=command,
+                env=env,
+                resume_mode=resume_mode,
+                resume_command=resume_command,
+                resume_env=resume_env,
+                resume_evidence=manifest.resume_evidence,
+                attempt_dir=attempt_dir,
+                native_root=native_root,
+                stdout_path=subject_stdout,
+                reset_peak=setup is not None,
+            )
+    except BaseException:
+        # A worker that crashes mid-subject still stops what it started: a
+        # sidecar left running would outlive the attempt it belonged to.
+        if sidecar_run is not None:
+            sidecar_run.stop()
+        raise
     sidecar_error = None if sidecar_run is None else sidecar_run.stop()
     exit_value = execution["exit_code"]
     if isinstance(exit_value, bool) or not isinstance(exit_value, int):
@@ -2121,6 +2185,8 @@ def main(argv: list[str] | None = None) -> int:
             completion = 1
         elif not fault["landed"]:
             completion = EXIT_FAULT_NOT_LANDED
+        elif fault["error"] is not None:
+            completion = EXIT_FAULT_INCOMPLETE
         elif fault["relisted_error"] is not None:
             completion = EXIT_POSTPROCESSING_FAILED
     if sidecar_error is not None and completion == 0:
@@ -2175,7 +2241,10 @@ def main(argv: list[str] | None = None) -> int:
     elif completion == EXIT_POSTPROCESSING_FAILED:
         print("measure: successful subject output could not be counted", file=sys.stderr)
     elif completion == EXIT_FAULT_NOT_LANDED:
-        print("measure: the subject settled before its scheduled kill", file=sys.stderr)
+        print("measure: the scheduled kill did not land on the subject", file=sys.stderr)
+    elif completion == EXIT_FAULT_INCOMPLETE:
+        assert fault is not None
+        print(f"measure: the resume did not run: {fault['error']}", file=sys.stderr)
     elif completion == EXIT_SIDECAR_FAILED:
         print(f"measure: sidecar evidence was refused: {sidecar_error}", file=sys.stderr)
     elif completion == EXIT_REPLAY_EVIDENCE_FAILED:
