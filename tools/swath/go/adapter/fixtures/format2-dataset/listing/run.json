@@ -1,0 +1,165 @@
+{
+  "report_version": 1,
+  "build": {
+    "tool": "swath-go",
+    "version": "devel"
+  },
+  "attempt": {
+    "id": "e4843592af411c4194de68be61d106cf",
+    "started": "2026-11-06T16:22:23.671321844Z"
+  },
+  "invocation": {
+    "argv": [
+      "list",
+      "s3://fixture-bucket/a/",
+      "-o",
+      "format2-dataset/listing",
+      "--report",
+      "format2-dataset/swath-go-report.json",
+      "--region",
+      "us-east-1",
+      "--anonymous",
+      "--workers",
+      "4",
+      "--endpoint",
+      "http://127.0.0.1:5055",
+      "--part-interval",
+      "0s",
+      "--max-duration",
+      "60s",
+      "--part-size",
+      "30"
+    ],
+    "source": "s3://fixture-bucket/a/",
+    "out": "format2-dataset/listing",
+    "schema_id": "swath/s3-objects/v1",
+    "workers": 4,
+    "encoders": 4,
+    "memory_bytes": 268435456,
+    "part_size_bytes": 30
+  },
+  "outcome": {
+    "status": "committed",
+    "complete": true,
+    "stop_reason": "completed",
+    "entry_errors": 0,
+    "class": "completed",
+    "exit_code": 0,
+    "resumable": false
+  },
+  "timings": {
+    "started_at": "2026-11-06T16:22:23.671392318Z",
+    "listing_finished_at": "2026-11-06T16:22:23.748830555Z",
+    "finished_at": "2026-11-06T16:22:23.877098418Z",
+    "wall_ms": 205,
+    "listing_ms": 77,
+    "user_cpu_ms": 40,
+    "sys_cpu_ms": 14
+  },
+  "output": {
+    "rows_listed": 9,
+    "rows_retained": 0,
+    "rows_committed": 9,
+    "rows_durable": 9,
+    "parts_written": 5,
+    "parts_retained": 0,
+    "bytes": 11959
+  },
+  "resources": {
+    "peak_rss_bytes": 30195712,
+    "row_budget_bytes": 134217728,
+    "max_buffered_bytes": 0,
+    "frontier_wait_ns": 0,
+    "budget_wait_ns": 0,
+    "encoder_wait_ns": 0,
+    "spill": {
+      "rows": 0,
+      "bytes": 0,
+      "ranges": 0,
+      "peak_bytes": 0,
+      "refused": 0,
+      "max_bytes": 3980273664,
+      "peak_readers": 0
+    },
+    "features": {
+      "spill": true
+    },
+    "peak_nodes": 1,
+    "peak_markers": 0,
+    "part_time_cuts": 0
+  },
+  "source": {
+    "name": "s3",
+    "stats": {
+      "anonymous": true,
+      "credentials": "anonymous",
+      "region": "us-east-1",
+      "mean_active": 0.12138260149929853,
+      "counters": {
+        "features": {
+          "floors": false,
+          "limiter": true,
+          "max_keys": false,
+          "probe": false,
+          "request_rate": false,
+          "resume": false,
+          "seed": false,
+          "split": true,
+          "structure": false
+        },
+        "values": {
+          "objects": 9,
+          "bytes": 211,
+          "pages": 1,
+          "requests": 1,
+          "overfetch_keys": 0,
+          "split.considered": 0,
+          "split.pivot_extrapolated": 0,
+          "split.accepted_bounded": 0,
+          "split.accepted_frontier": 0,
+          "split.rejected.cursor": 0,
+          "split.rejected.bound": 0,
+          "split.rejected.done": 0,
+          "split.rejected.no_pivot": 0,
+          "split.rejected.unsafe_cursor": 0,
+          "split.rejected.unsafe_pivot": 0,
+          "split.skipped.no_demand": 0,
+          "split.skipped.outranked": 0,
+          "split.skipped.not_continuing": 0,
+          "child_empty.lower": 0,
+          "child_empty.upper": 0,
+          "max_active": 1,
+          "max_queued": 0,
+          "busy_ns": 8974624,
+          "sink_wait_ns": 5740,
+          "requeues": 0,
+          "empty_pages": 0,
+          "prefixes_normalized": 0,
+          "bound_drops": 0,
+          "mutex.wait_ns": 564,
+          "mutex.max_hold_ns": 1625,
+          "attempts": 1,
+          "retries": 0,
+          "throttles": 0,
+          "timeouts": 0,
+          "parse_failures": 0,
+          "inflight.max": 1,
+          "inflight.ns": 8935627,
+          "limiter.decreases": 0,
+          "limiter.floor_throttles": 0,
+          "limiter.increases": 0,
+          "limiter.growth_cooldown": 0,
+          "limiter.growth_latency_frozen": 0,
+          "limiter.growth_timeout_frozen": 0,
+          "limiter.valve": 0,
+          "limiter.waits": 0,
+          "limiter.wait_ns": 0,
+          "limiter.depth": 0,
+          "limiter.slow_start.doubles": 0,
+          "limiter.slow_start.ns": 0,
+          "limiter.slow_start.end": 0
+        }
+      }
+    }
+  }
+}
