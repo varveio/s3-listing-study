@@ -1552,6 +1552,14 @@ def _check_fault_treatments(case: Case, adapter: LoadedCommandAdapter, path: Pat
         raise PlanError(
             f"{where} schedules a kill on mode {case.mode!r}, whose capsule declares no resume"
         )
+    # The resume's output is what the attempt's row count reads, so the purpose
+    # the case claims must be one both modes permit, not just the killed one.
+    resume_manifest = adapter.modes[manifest.resume]
+    if not resume_manifest.permits_purpose(case.purpose):
+        raise PlanError(
+            f"{where} claims mode {case.mode!r} is a {case.purpose}, and its resume "
+            f"{manifest.resume!r} is capped at {resume_manifest.purpose_ceiling!r}"
+        )
     try:
         _compile_offline(
             adapter, case, manifest.resume, {**dict(case.config), "mode": manifest.resume}

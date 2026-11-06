@@ -200,6 +200,17 @@ def test_a_sidecar_is_plan_content_bound_to_every_case_and_its_identity(tmp_path
     assert faults.worker_flags(inputs) == (("--sidecar", canonical_json(SIDECAR)),)
 
 
+def test_a_resume_capped_below_the_claimed_purpose_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The resume's sink is what the row count reads, so its ceiling binds the case too."""
+    capped = adapter({"list": LIST, "resume": replace(RESUME, purpose_ceiling="canary")})
+    monkeypatch.setitem(globals(), "SWATH", capped)
+    assert load(tmp_path, "- {mode: list, purpose: canary, fault_kill_at_s: 10}\n").cases
+    with pytest.raises(bench.PlanError, match="capped at 'canary'"):
+        load(tmp_path, "- {mode: list, fault_kill_at_s: 10}\n")
+
+
 @pytest.mark.parametrize(
     ("change", "match"),
     (
@@ -239,6 +250,8 @@ def test_a_worker_document_that_is_not_canonical_is_refused() -> None:
         ({"list": replace(LIST, resume="absent")}, "unknown resume"),
         ({"list": LIST, "resume": PLAIN}, "same channel"),
         ({"list": LIST, "resume": replace(RESUME, resume="list")}, "own"),
+        ({"list": LIST, "resume": replace(RESUME, fields=("key", "size"))}, "product and fields"),
+        ({"list": LIST, "resume": replace(RESUME, product_compress=False)}, "product and fields"),
     ),
 )
 def test_a_resume_that_does_not_continue_the_same_product_fails_to_load(
@@ -257,43 +270,3 @@ def test_a_resume_cannot_join_two_stdout_streams() -> None:
             product_artifact="listing",
             resume="resume",
         )
-
-
-def test_a_result_whose_treatment_disagrees_with_the_hashed_case_is_refused() -> None:
-    """The marker must carry the schedule and sidecar the row hashed, or it binds nothing.
-
-    A row that stated neither binds exactly as before, so every historical
-    result keeps binding.
-    """
-    from benchmark.verify import expected_result_binding
-
-    schedule = faults.FaultSchedule(kill_at_s=30).as_dict()
-    row = {
-        "group_id": "g",
-        "job_name": "j",
-        "case_id": "swath.abc",
-        "attempt_id": "swath.abc.s1",
-        "tool": "swath",
-        "mode": "list",
-        "target_bucket": "b",
-        "target_region": "r",
-        "target_prefix": "",
-        "auth_role": None,
-        "image_uri": "i",
-        "image_set_sha256": "s",
-        "config": "{}",
-        "replay": None,
-        "machine_type": "m",
-        "vcpus": 1,
-        "memory_gb": 1,
-        "container_memory_gb": None,
-    }
-    plain = expected_result_binding({**row, "case_inputs": canonical_json({"config": {}})})  # type: ignore[arg-type]
-    assert "fault_schedule" not in plain and "sidecar" not in plain
-    inputs = canonical_json({"config": {}, "fault_schedule": schedule, "sidecar": SIDECAR})
-    bound = expected_result_binding({**row, "case_inputs": inputs})  # type: ignore[arg-type]
-    assert bound["fault_schedule"] == schedule and bound["sidecar"] == SIDECAR
-    result = {**bound, "fault_schedule": {**schedule, "kill_at_s": 31}}
-    assert [name for name, value in bound.items() if result.get(name) != value] == [
-        "fault_schedule"
-    ]

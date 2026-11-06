@@ -1077,6 +1077,18 @@ def _check_resume(
                 f"{path} resume mode {resume!r} must publish the artifacts {mode!r} publishes, "
                 "on the same channel"
             )
+        # The final product is counted and classified through the killed mode's
+        # manifest, so the resume has to mean the same bytes: the same product
+        # format, the same contract columns, compressed the same way.
+        if (
+            continued.product != manifest.product
+            or continued.fields != manifest.fields
+            or continued.product_compress != manifest.product_compress
+        ):
+            raise CommandAdapterError(
+                f"{path} resume mode {resume!r} must publish the product and fields {mode!r} "
+                "publishes"
+            )
 
 
 def _load_relisted(
