@@ -41,6 +41,7 @@ from pathlib import Path
 from typing import Any
 
 from benchmark import adapters
+from benchmark import faults as fault_contract
 from benchmark import replay as replay_contract
 from benchmark.ledger import (
     STATE_FILENAME,
@@ -414,22 +415,24 @@ def fault_lines(rows: list[dict[str, Any]]) -> list[str]:
         raw_steps = fault.get("steps")
         steps = raw_steps if isinstance(raw_steps, list) else []
         rendered = [
-            f"{step.get('step')} exit {step.get('exit_code')}, {step.get('wall_seconds')}s, "
-            f"max RSS {step.get('max_rss_kb')} KiB"
+            f"{step.get('step')} step exit {step.get('exit_code')}, wall "
+            f"{step.get('wall_seconds')}s, max RSS {step.get('max_rss_kb')} KiB"
             for step in steps
             if isinstance(step, dict)
         ]
         landed = fault.get("landed")
         line = (
             f"- `{row['attempt_id']}`: kill at {fault.get('kill_after_s')}s "
-            f"{'landed' if landed else 'did NOT land (the subject settled first)'}; "
-            + "; ".join(rendered)
+            f"{'landed' if landed else 'did NOT land (no reaped SIGKILL)'}; " + "; ".join(rendered)
         )
-        if landed:
+        if len(steps) == 2:
             line += (
-                f"; gap {fault.get('gap_seconds')}s; "
-                f"subject wall {fault.get('subject_wall_seconds')}s over both steps"
+                f"; gap {fault.get('gap_seconds')}s between the steps; summed subject wall "
+                f"{fault.get('subject_wall_seconds')}s over both steps (excludes the gap; "
+                "not recovery latency)"
             )
+        if fault.get("error"):
+            line += f"; resume NOT run: {fault['error']}"
         relisted = fault.get("relisted")
         if isinstance(relisted, dict):
             line += "; relisted " + ", ".join(f"{k}={v}" for k, v in sorted(relisted.items()))
@@ -481,6 +484,18 @@ def slot_note(con: sqlite3.Connection, slot: sqlite3.Row) -> str:
     return f"{note} -- UNSATISFIABLE, nothing in this group can pay it: {reason}"
 
 
+SCOPED_COLUMNS = frozenset({"exit", "wall_seconds", "max_rss_kb", "max_rss_floor_kb"})
+"""Subject metrics that describe one step of a killed-and-resumed attempt."""
+
+
+def table_cell(row: dict[str, Any], column: str) -> str:
+    """A table cell, with the step a treated attempt's subject metric describes."""
+    scope = fault_contract.metric_scope(row.get("fault_detail"))
+    if scope is None or column not in SCOPED_COLUMNS or row[column] == "-":
+        return str(row[column])
+    return f"{row[column]} ({scope})"
+
+
 def render_markdown(rows: list[dict[str, Any]], *, blocked: list[str]) -> str:
     header = "| " + " | ".join(COLUMNS) + " |"
     separator = "| " + " | ".join("---" for _ in COLUMNS) + " |"
@@ -492,7 +507,9 @@ def render_markdown(rows: list[dict[str, Any]], *, blocked: list[str]) -> str:
     for bucket in sorted({str(row["bucket"]) for row in rows}):
         members = [row for row in rows if row["bucket"] == bucket]
         lines.extend([f"## {bucket}", "", header, separator])
-        lines.extend("| " + " | ".join(str(row[c]) for c in COLUMNS) + " |" for row in members)
+        lines.extend(
+            "| " + " | ".join(table_cell(row, c) for c in COLUMNS) + " |" for row in members
+        )
         for title, section in (
             ("Rate cases", rate_lines(members)),
             ("Preparations", preparation_lines(members)),

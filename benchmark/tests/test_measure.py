@@ -2328,11 +2328,18 @@ def gates(
     )
     ledger.set_state(con, attempt.attempt_id, "SUCCEEDED")
     (row,) = ledger.attempt_rows(con, group_id=str(result["group_id"]))
-    exported = receipt.build_receipt(con, str(result["group_id"]))["attempts"]
+    document = receipt.build_receipt(con, str(result["group_id"]))
     con.close()
-    evidence = cast(list[dict[str, Any]], exported)[0]["evidence"]
-    reported = report.row_for(row, adapter_root=str(adapter_root))["evidence_state"]
-    return list(evidence["binding_errors"]), str(reported)
+    evidence = cast(list[dict[str, Any]], document["attempts"])[0]["evidence"]
+    reported = report.row_for(row, adapter_root=str(adapter_root))
+    rendered.extend(
+        (report.render_markdown([reported], blocked=[]), receipt.render_markdown(document))
+    )
+    return list(evidence["binding_errors"]), str(reported["evidence_state"])
+
+
+rendered: list[str] = []
+"""What the last `gates` call rendered: the campaign report, then the receipt."""
 
 
 def mutated(result: dict[str, Any], change: Callable[[dict[str, Any]], object]) -> dict[str, Any]:
@@ -2350,7 +2357,13 @@ def test_fault_evidence_that_does_not_hold_is_refused_by_binding_receipt_and_rep
     assert code == 0, result
     tools = tmp_path / "tools"
     declared = {"fault_schedule": schedule}
+    rendered.clear()
     assert gates(tmp_path, result, declared=declared, adapter_root=tools) == ([], "RESULT_BOUND")
+    # Both tables say whose metrics they print: the resume's, not the case's.
+    campaign_table, receipt_table = rendered
+    wall = f"| {result['wall_seconds']} (resume step only) |"
+    assert wall in campaign_table and wall in receipt_table
+    assert "not recovery latency" in campaign_table
 
     def drop_resume(r: dict[str, Any]) -> None:
         r["fault"]["steps"].pop()

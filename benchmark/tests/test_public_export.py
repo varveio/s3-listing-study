@@ -196,6 +196,30 @@ def test_a_private_string_in_an_allowlisted_field_is_refused(tmp_path: Path) -> 
         public_export.vet_row(smuggled)
 
 
+@pytest.mark.parametrize("treatment", ("fault_schedule", "sidecar"))
+def test_a_treated_attempt_has_no_public_form_yet(tmp_path: Path, treatment: str) -> None:
+    """Its row would print a resume's wall as the listing's and drop the treatment.
+
+    Refused from the ledger's case_inputs, so it holds even for an attempt whose
+    evidence never landed.
+    """
+    con, root = tiny_campaign(tmp_path)
+    (row,) = [row for row in ledger.attempt_rows(con) if row["state"] == "FAILED"]
+    inputs = {**json.loads(row["case_inputs"]), treatment: {"declared": True}}
+    con.execute(
+        "UPDATE attempts SET case_inputs = ? WHERE attempt_id = ?",
+        (json.dumps(inputs), row["attempt_id"]),
+    )
+    with pytest.raises(public_export.ExportError, match="1 treated attempt"):
+        public_export.build_release(
+            ledger.attempt_rows(con),
+            spec=public_export.load_release_spec(spec_at(tmp_path)),
+            commit=COMMIT,
+            repo_root=Path(report.DEFAULT_ADAPTER_ROOT).parent.resolve(),
+            adapter_root=root,
+        )
+
+
 def test_export_is_byte_identical_when_run_twice(tmp_path: Path) -> None:
     first, second = tmp_path / "one", tmp_path / "two"
     con, root = tiny_campaign(tmp_path)

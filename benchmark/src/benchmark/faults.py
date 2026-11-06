@@ -366,6 +366,23 @@ def stdout_totals(text: str) -> dict[str, int] | None:
     return totals or None
 
 
+def metric_scope(fault: object) -> str | None:
+    """Which step an attempt's top-level subject metrics describe, for a table cell.
+
+    ``None`` for an attempt with no fault block, whose metrics are its one
+    subject run. A resumed attempt's ``exit_code``, ``wall_seconds`` and
+    ``max_rss_kb`` are the resume step's alone; an attempt whose resume never
+    ran reports its first step. A table that prints those numbers without this
+    label reads a resume's wall as the case's listing time.
+    """
+    if not isinstance(fault, Mapping):
+        return None
+    steps = fault.get("steps")
+    if isinstance(steps, Sequence) and len(steps) == 2:
+        return "resume step only"
+    return "first step only"
+
+
 def relisted_errors(value: object) -> str | None:
     """Why a capsule's relisted figure is not a flat mapping of finite numbers."""
     if not isinstance(value, Mapping) or not value:

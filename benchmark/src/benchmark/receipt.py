@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from benchmark import replay as replay_contract
+from benchmark.faults import metric_scope
 from benchmark.ledger import (
     STATE_FILENAME,
     TERMINAL_STATES,
@@ -93,6 +94,10 @@ def _fault_summary(result: Mapping[str, object]) -> dict[str, object]:
     steps = fault.get("steps")
     return {
         "state": "LANDED" if fault.get("landed") is True else "NOT_LANDED",
+        "metric_scope": metric_scope(fault),
+        "kill_sent": fault.get("kill_sent"),
+        "error": fault.get("error"),
+        "resume_timeout_s": fault.get("resume_timeout_s"),
         "schedule": fault.get("schedule"),
         "kill_after_s": fault.get("kill_after_s"),
         "resume_mode": fault.get("resume_mode"),
@@ -274,15 +279,18 @@ def render_markdown(document: Mapping[str, Any]) -> str:
     for attempt in document["attempts"]:
         evidence = attempt["evidence"]
         result = evidence.get("result", {})
+        fault = evidence.get("fault")
+        scope = fault.get("metric_scope") if isinstance(fault, Mapping) else None
+        suffix = f" ({scope})" if scope else ""
         lines.append(
             "| {attempt_id} | {tool} | {mode} | {purpose} | {state} | {evidence_state} | "
             "{subject} | {worker} | {rows} | {wall} |".format(
                 **attempt,
                 evidence_state=evidence["state"],
-                subject=result.get("exit_code", "-"),
+                subject=f"{result.get('exit_code', '-')}{suffix}",
                 worker=result.get("worker_exit_code", "-"),
                 rows=result.get("row_count", "-"),
-                wall=result.get("wall_seconds", "-"),
+                wall=f"{result.get('wall_seconds', '-')}{suffix}",
             )
         )
     lines.extend(
