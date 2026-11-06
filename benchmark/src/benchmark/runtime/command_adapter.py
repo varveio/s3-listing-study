@@ -332,7 +332,9 @@ class Mode:
     The resume runs in the same sink and may rewrite what the killed step left
     there; these are the files ``RELISTED`` needs to see as the killed step left
     them. A file the killed step never wrote is recorded as absent, not refused:
-    a run killed before its first checkpoint is a real outcome.
+    a run killed before its first checkpoint is a real outcome. A path that
+    reaches through a symlink, or ends at anything but a regular file, is unsafe
+    and refuses the attempt before the resume (``fault_runtime``).
     """
 
     def __post_init__(self) -> None:

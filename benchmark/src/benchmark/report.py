@@ -435,7 +435,9 @@ def fault_lines(rows: list[dict[str, Any]]) -> list[str]:
             line += f"; resume NOT run: {fault['error']}"
         relisted = fault.get("relisted")
         if isinstance(relisted, dict):
-            line += "; relisted " + ", ".join(f"{k}={v}" for k, v in sorted(relisted.items()))
+            line += "; relisted (capsule-derived) " + ", ".join(
+                f"{k}={v}" for k, v in sorted(relisted.items())
+            )
         elif fault.get("relisted_error"):
             line += f"; relisted REFUSED: {fault['relisted_error']}"
         elif not fault.get("relisted_declared"):
