@@ -278,7 +278,8 @@ beside `fault_kill_at_s`. The kill point must fall inside `timeout_s`, which
 both steps share. The schedule is a case input — rendered into the label when
 a row states it, and hashed — so a killed row is never the same case as its
 uninterrupted sibling. It is refused for a mode whose capsule declares no
-resume, for a preparation, and for a mode that is part of a chain or runs an
+resume or whose resume mode is capped below the row's `purpose`, for a
+preparation, and for a mode that is part of a chain or runs an
 inline setup.
 
 ### A plan may stand a sidecar in front of its replay server

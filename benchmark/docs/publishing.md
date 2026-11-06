@@ -88,6 +88,10 @@ until the exporter runs again. The validator will say so.
   capacity status, or a delivered replay timing that the campaign's own
   reporting path would not give it. `classification.publication_status` says
   `measurement` only where `report.is_publishable_measurement` does.
+- **No treated attempts, yet.** An attempt whose case declared a fault
+  schedule or a sidecar is refused, which refuses the export: the row schema
+  carries one subject wall and a throughput derived from it, and nothing that
+  says the wall is a resume step's or that a sidecar stood in the path.
 - **Nulls stay null.** An unavailable metric exports as `null` — never `0`,
   never `"-"`, never `""`.
 - **Every terminal attempt.** Successes, failures, cancellations, preparations,

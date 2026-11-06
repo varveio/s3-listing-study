@@ -589,9 +589,10 @@ credential. The loader refuses:
 
 - a `resume` naming a mode that does not exist, or the mode itself;
 - a resumable mode on the `stdout` channel — two streams are not one listing;
-- a resume mode that does not publish the same `artifacts`, `product_artifact`
-  and `product_channel` as the mode it continues, because the final sink is
-  read through the killed mode's manifest;
+- a resume mode that does not publish the same `artifacts`, `product_artifact`,
+  `product_channel`, `product`, `fields` and `product_compress` as the mode it
+  continues, because the final sink is counted and classified through the
+  killed mode's manifest;
 - a resume mode with its own resume, inline setup or `REQUIRES`, and a resumable
   mode with an inline setup or `REQUIRES` — a killed attempt is two execs of one
   subject and nothing else;
@@ -603,7 +604,12 @@ checkpoint the killed step left is the only record of what it had made durable,
 and the resume is entitled to rewrite it. The worker copies each listed regular
 file to `killed/sink/` the moment the killed step is reaped, and records an
 absent one as absent rather than refusing — a run killed before its first
-checkpoint is a real outcome.
+checkpoint is a real outcome. A listed path that reaches through a symlink at
+any component, or ends at anything but a regular file, is unsafe rather than
+absent, and the attempt is refused before the resume runs.
+
+A plan may claim no more for a killed-and-resumed case than both modes'
+`purpose_ceiling` permits.
 
 `RELISTED` maps a resumable mode to a function taking one `ResumeSteps` —
 `sink` (after the resume), `killed_evidence` (the copies), the four

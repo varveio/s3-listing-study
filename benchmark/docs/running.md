@@ -413,11 +413,17 @@ an accepted failure is an absent measurement, not a passing one.
 
 ## Fault schedules and sidecars
 
-`VERIFIED: no` — both paths are exercised only by bounded synthetic tests
-(`test_measure.py`: a real child process SIGKILLed at one second and resumed; a
-real loopback proxy process stood between a subject and a stubbed replay
-server). No campaign has run either on Batch, and no shipped capsule declares a
-resume. Promote each separately, in the commit whose group exercised it.
+`VERIFIED: no` — both paths are exercised only by bounded synthetic tests in
+`test_measure.py`. For the schedule: a real child process SIGKILLed at one
+second and resumed, a deterministic exit-versus-signal race, the shared
+deadline, and unsafe or failed evidence copies. For the sidecar: a real
+loopback process that answers each request with an empty HTTP 200 itself —
+it forwards nothing, and the replay server's readiness and counters are
+stubbed — so the tests cover the endpoint the subject is pointed at and the
+sidecar's start, SIGTERM, timeline and shutdown refusals, not forwarding. No
+campaign has run either on Batch, and no shipped capsule declares a resume.
+Before qualification, run a forwarding proxy and a real resume-declaring
+capsule; promote each path separately, in the commit whose group exercised it.
 
 What each is and what it records is [`model.md`](model.md) § *An attempt may be
 killed and resumed* and § *A sidecar sits between the subject and the replay
@@ -434,15 +440,30 @@ Operationally:
   in the plan. The worker refuses bytes that do not match, before the subject
   runs. The binary runs inside the toolbox container, so it must be a Linux
   amd64 executable with no dependency the toolbox image lacks.
-- **Tune the kill point until every attempt is killed.** An attempt whose
-  subject settled before the kill reports `worker_exit 15` and has one step.
-  `report` lists it under *Fault schedule* as "did NOT land"; move
-  `fault_kill_at_s` earlier, or raise `fault_expected_wall_s`.
-- **Read both steps, not the table.** For a killed attempt the table's `exit`,
-  `wall_seconds` and `max_rss_kb` are the resume's. The *Fault schedule*
-  section of `report` gives each step, the gap, the summed subject wall and the
-  capsule's relisted figure; the receipt exports the same under
-  `evidence.fault`.
+- **Choose the kill point in qualification, then freeze it.** An attempt whose
+  kill did not land — the subject settled before the kill point, or exited on
+  its own as the kill was sent — reports `worker_exit 15` and has one step;
+  `report` lists it under *Fault schedule* as "did NOT land". The kill was too
+  late: move it earlier with a smaller `fault_kill_at_s`, `fault_kill_percent`
+  or `fault_expected_wall_s` (raising the expected wall moves a percentage
+  kill *later*). Do that tuning only in a qualification group. Once a
+  measurement group is submitted its schedule is fixed: never retune it to
+  turn misses into kills, and keep every unsuccessful attempt — `15`, `17`
+  and a failed resume alike — in the data. On a `statistic: rate` case
+  especially, tuning until every attempt qualifies selects the outcome being
+  measured.
+- **Read both steps, not the table.** For a resumed attempt the table's
+  `exit`, `wall_seconds` and `max_rss_kb` are the resume step's alone, and the
+  cells say so ("resume step only"; "first step only" when the resume never
+  ran). The *Fault schedule* section of `report` gives each step, the gap, the
+  summed subject wall (which excludes the gap and is not recovery latency) and
+  the capsule's relisted figure; the receipt exports the same under
+  `evidence.fault`, with its `metric_scope`.
+- **A treated attempt has no public form yet.** `benchmark.public_export`
+  refuses a release containing any attempt whose case declared a fault
+  schedule or a sidecar: a public row has one subject wall and derives a
+  throughput from it, and cannot yet say which step that wall is or that a
+  sidecar stood in the path.
 - **Read the sidecar's timeline from the evidence.** `report`'s *Sidecar*
   section and the receipt's `evidence.sidecar` summarize it; the file itself is
   `sidecar/timeline.tsv` under the attempt prefix, bound by digest.
@@ -567,8 +588,10 @@ one mistake with no undo. A `SUCCEEDED` attempt's evidence is never a target.
 - **`retry` on a `statistic: rate` case is a no-op**, by design — its failures
   are data, not an owed retry.
 - **A fault schedule's two steps share one `timeout_s`.** The resume gets what
-  the killed step left of it, so a kill late in a long timeout leaves the
-  resume little room.
+  is left after the killed step and the copying between the steps, to the
+  fraction of a second, so a kill late in a long timeout leaves the resume
+  little room; a deadline already spent refuses the attempt as
+  `worker_exit 17` rather than granting the resume extra time.
 - **The Docker executor refuses fault schedules and sidecars**; both run on
   Batch only.
 - **Losing `campaign.db` loses the binding**, not the evidence — but without it

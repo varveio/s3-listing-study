@@ -90,9 +90,11 @@ because the alternative is a subject timed against hints nobody made.
 
 ### An attempt may be killed and resumed
 
-`VERIFIED: no` — exercised only by the bounded synthetic test
-`test_a_killed_step_and_its_resume_are_two_executions_of_one_attempt`; no
-campaign has run a fault schedule on Batch or against a real capsule.
+`VERIFIED: no` — exercised only by bounded synthetic tests in
+`test_measure.py` (a real child process killed and resumed, a deterministic
+exit-versus-signal race, the shared deadline, unsafe and failed evidence
+copies); no campaign has run a fault schedule on Batch or against a real
+capsule.
 
 Some measurements are about recovery: what a subject does when it is killed
 mid-listing and resumed. A retry cannot answer that — it is a fresh attempt
@@ -107,8 +109,20 @@ schedule**, and the attempt then runs **two child executions of one subject**:
    ([`capsule-contract.md`](capsule-contract.md) § *A resume is the second step
    of a killed attempt*), compiled from the same config with only `mode`
    replaced, against the same sink, with the same credential and endpoint. It
-   gets what the killed step left of the row's one `timeout_s`: the provider
-   bounds the container, not a step.
+   gets what is left of the row's one `timeout_s`, measured on one monotonic
+   clock from before the killed step started to the instant the resume starts —
+   so evidence copying and every other piece of inter-step work come out of it
+   too, and the remainder is passed on as is, never rounded down and never
+   floored at a second. The provider bounds the container, not a step.
+
+**A kill is landed only when the reaped status says so.** Sending SIGKILL and
+the subject dying of it are recorded apart: the subject can exit on its own
+between the worker's last poll and the signal, and a process that has already
+exited takes no signal. `execution.fault_kill_sent` says the worker dispatched
+the kill to a subject it had not reaped; `execution.fault_kill_landed`, and
+`fault.landed`, are true only when the status it then reaped is death by
+SIGKILL. A dispatched kill with any other status is not landed, and the resume
+does not run.
 
 The schedule is plan content and an identity input
 ([`identity.md`](identity.md)): a killed-and-resumed case is never the same
@@ -125,6 +139,7 @@ because the resume may rewrite them. `result.json` carries the declaration as
 "fault": {
   "schedule": {"kind": "kill-resume", "signal": "SIGKILL", "kill_percent": 50, "expected_wall_s": 120},
   "kill_after_s": 60.0,
+  "kill_sent": true,
   "landed": true,
   "resume_mode": "resume",
   "steps": [
@@ -134,11 +149,13 @@ because the resume may rewrite them. `result.json` carries the declaration as
     {"step": "resume", "mode": "resume", "exit_code": 0, "wall_seconds": 71.4, "…": "…"}
   ],
   "gap_seconds": 0.02,
+  "resume_timeout_s": 3539.97,
   "subject_wall_seconds": 131.41,
   "resume_evidence": {"progress.json": "<sha256>", "missing.json": null},
   "relisted": {"relisted_keys": 9120, "relisted_requests": 11},
   "relisted_declared": true,
-  "relisted_error": null
+  "relisted_error": null,
+  "error": null
 }
 ```
 
@@ -159,15 +176,32 @@ records `relisted: null` with `relisted_declared: false`; one whose derivation
 raises or returns something other than finite numbers is a postprocessing
 failure, the same verdict as a row count that cannot be taken.
 
-The worker's acceptance adds two refusals to the usual ones:
+`resume_evidence` records each declared file's copied digest, or `null` when
+the killed step never wrote it. A declared path that resolves through anything
+other than real directories down to one regular file — a symlinked parent, a
+directory, a FIFO — is not absent but unsafe, and like an I/O error while
+copying it stops the attempt before the resume (`fault.error`).
+
+The worker's acceptance adds three refusals to the usual ones:
 
 | Exit | When |
 | --- | --- |
-| `15` (`EXIT_FAULT_NOT_LANDED`) | The subject settled — exited, or timed out — before the kill point. No resume runs; the attempt is published with one step, and refused, because an uninterrupted run is not the case that was asked for. Move the kill earlier or the expected wall up. |
+| `15` (`EXIT_FAULT_NOT_LANDED`) | The kill did not land: the subject settled before the kill point, or the status reaped after the dispatched kill was not death by SIGKILL. No resume runs; the attempt is published with one step, and refused whatever the subject's own exit, because an uninterrupted run is not the case that was asked for. A kill point that misses this way is too late: move it earlier — a smaller `fault_kill_at_s`, `fault_kill_percent` or `fault_expected_wall_s`. |
+| `17` (`EXIT_FAULT_INCOMPLETE`) | The kill landed and the resume did not run: the shared deadline was already spent when it could start, or the killed step's declared evidence was unsafe or could not be copied. `fault.error` says which; the killed step is the attempt's last, with its logs at the top level. |
 | `1` | The kernel's OOM killer ended the killed step, rather than the schedule. |
 
+A resume that runs and fails — nonzero, or timed out inside its share of the
+deadline — is a complete treatment with a failed outcome, published like any
+failed subject. `verify`, `report` and the receipt bind the `fault` block as
+evidence, not just the declaration: the schedule is the declared one, two
+steps exist exactly when the kill landed and the resume ran, the gap and the
+summed wall follow from them, the top-level fields are the last step's, the
+killed step's captures are under `killed/`, and an attempt whose treatment is
+incomplete must carry a failing worker exit.
+
 A schedule is refused at plan load on a mode whose capsule declares no resume,
-on a preparation, on a mode that is part of a chain or runs an inline setup (a
+when the resume mode's `purpose_ceiling` is below the case's purpose (the
+resume's sink is what the row count reads), on a preparation, on a mode that is part of a chain or runs an inline setup (a
 slot is paid by an attempt's *shape*, which the schedule is not part of, so a
 resumed listing must never be the bytes a chain consumes), and when the kill
 point is not inside the row's timeout. The bounded Docker executor refuses a
@@ -175,10 +209,13 @@ schedule: it runs on Batch only.
 
 ### A sidecar sits between the subject and the replay server
 
-`VERIFIED: no` — exercised only by the bounded synthetic tests
-`test_a_sidecar_stands_between_subject_and_server_and_its_timeline_is_evidence`
-and `test_a_sidecar_that_never_listens_refuses_before_the_subject_runs`; the
-swath fault proxy has not run under this harness.
+`VERIFIED: no` — exercised only by bounded synthetic tests in
+`test_measure.py`, whose sidecar is a real loopback process that answers each
+request with an empty HTTP 200 itself and forwards nothing; the replay
+server's readiness and counters are stubbed. They cover the endpoint the
+subject is compiled against, the start, readiness, SIGTERM and timeline
+lifecycle, and the shutdown refusals — not forwarding. The swath fault proxy
+has not run under this harness.
 
 A replay plan may declare one **sidecar**: a process that listens on a loopback
 port, forwards to the replay server, and writes a timeline when it is stopped.
@@ -222,8 +259,10 @@ never share a case.
   "endpoint_url": "http://127.0.0.1:19091",
   "readiness_ms": 41,
   "alive_through_subject": true,
-  "stop": {"signal": "SIGTERM", "exit_code": 0, "forced_kill": false, "wait_ms": 12},
+  "stop": {"signal": "SIGTERM", "exit_code": 0, "forced_kill": false, "reaped": true,
+           "wait_ms": 12},
   "timeline": {"name": "sidecar/timeline.tsv", "size_bytes": 40321, "sha256": "<sha256>",
+               "usable": true,
                "columns": ["t_ms", "arrived", "throttled", "reset", "delayed", "max_active"],
                "rows": 1312, "totals": {"arrived": 151204, "throttled": 30218, "…": "…"}},
   "stdout_totals": {"requests": 151204, "throttled": 30218, "…": "…"},
@@ -238,11 +277,21 @@ columns, which report their maximum; `stdout_totals` is the proxy's own last
 stdout line when it is `key=integer` tokens. Both are summaries for a reader who
 will not open the file; the timeline itself is bound by digest.
 
+**The one acceptable shutdown** is: alive through the subject, SIGTERMed by the
+worker, exited `0` within 30 seconds, and a usable timeline — a header of
+distinct column names, at least one bucket, and every bucket that width with
+an integer in every cell (`timeline.usable`). A timeline file existing is not
+enough: a sidecar that wrote one and then exited nonzero while handling
+SIGTERM may not have finished it.
+
 A sidecar is refused unless the plan has a replay backend, and on the same
 chain, inline and preparation cases a fault schedule is. It is refused at
 the worker, as `16` (`EXIT_SIDECAR_FAILED`), when it cannot be staged, does
 not listen within 30 seconds, exits while the subject runs, does not exit
-within 30 seconds of SIGTERM, or leaves no timeline. A sidecar that fails
+within 30 seconds of SIGTERM (it is then SIGKILLed, and refused as
+unstoppable if it is not reaped within 10 more), exits nonzero on SIGTERM, or
+leaves no usable timeline. Whatever it did write is published and bound all
+the same. A sidecar that fails
 before the subject publishes a marker with no execution and the failed
 `sidecar_evidence`, the same shape a refused replay readiness has.
 
