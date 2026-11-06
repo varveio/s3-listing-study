@@ -88,6 +88,217 @@ read from. It has no identity of its own: the axes it ran at are already in the
 measurement's config blob. A setup exec that fails is an attempt that fails,
 because the alternative is a subject timed against hints nobody made.
 
+### An attempt may be killed and resumed
+
+`VERIFIED: no` — exercised only by bounded synthetic tests in
+`test_measure.py` (a real child process killed and resumed, a deterministic
+exit-versus-signal race, the shared deadline, unsafe and failed evidence
+copies); no campaign has run a fault schedule on Batch or against a real
+capsule.
+
+Some measurements are about recovery: what a subject does when it is killed
+mid-listing and resumed. A retry cannot answer that — it is a fresh attempt
+under a fresh ordinal, starting from nothing. So a plan may state a **fault
+schedule**, and the attempt then runs **two child executions of one subject**:
+
+1. **The killed step.** The case's mode, run exactly as an unfaulted attempt
+   would be, and SIGKILLed — the whole process group, no TERM first — at the
+   stated point: `fault_kill_at_s` seconds after it starts, or
+   `fault_kill_percent` of `fault_expected_wall_s`.
+2. **The resume.** The mode the capsule declares as this mode's `resume`
+   ([`capsule-contract.md`](capsule-contract.md) § *A resume is the second step
+   of a killed attempt*), compiled from the same config with only `mode`
+   replaced, against the same sink, with the same credential and endpoint. It
+   gets what is left of the row's one `timeout_s`, measured on one monotonic
+   clock from before the killed step started to the instant the resume starts —
+   so evidence copying and every other piece of inter-step work come out of it
+   too, and the remainder is passed on as is, never rounded down and never
+   floored at a second. The provider bounds the container, not a step.
+
+**A kill is landed only when the reaped status says so.** Sending SIGKILL and
+the subject dying of it are recorded apart: the subject can exit on its own
+between the worker's last poll and the signal, and a process that has already
+exited takes no signal. `execution.fault_kill_sent` says the worker dispatched
+the kill to a subject it had not reaped; `execution.fault_kill_landed`, and
+`fault.landed`, are true only when the status it then reaped is death by
+SIGKILL. A dispatched kill with any other status is not landed, and the resume
+does not run.
+
+The schedule is plan content and an identity input
+([`identity.md`](identity.md)): a killed-and-resumed case is never the same
+case as its uninterrupted twin. It has no column of its own; it lives in
+`case_inputs`, and the worker's `--fault-schedule` flag is rendered from there.
+
+Each step keeps its own evidence. The killed step's logs move to `killed/`
+before the resume starts, and the files the capsule lists in
+`resume_evidence` are copied to `killed/sink/` as the killed step left them,
+because the resume may rewrite them. `result.json` carries the declaration as
+`fault_schedule` (bound against `case_inputs`) and what happened as `fault`:
+
+```json
+"fault": {
+  "schedule": {"kind": "kill-resume", "signal": "SIGKILL", "kill_percent": 50, "expected_wall_s": 120},
+  "kill_after_s": 60.0,
+  "kill_sent": true,
+  "landed": true,
+  "resume_mode": "resume",
+  "steps": [
+    {"step": "killed", "mode": "list", "argv": ["…"], "exit_code": -9, "timed_out": false,
+     "wall_seconds": 60.01, "max_rss_kb": 812344, "execution": {"…": "…"},
+     "stdout": {"name": "killed/stdout.log.gz", "…": "…"}, "stderr": {"…": "…"}},
+    {"step": "resume", "mode": "resume", "exit_code": 0, "wall_seconds": 71.4, "…": "…"}
+  ],
+  "gap_seconds": 0.02,
+  "resume_timeout_s": 3539.97,
+  "subject_wall_seconds": 131.41,
+  "resume_evidence": {"progress.json": "<sha256>", "missing.json": null},
+  "relisted": {"relisted_keys": 9120, "relisted_requests": 11},
+  "relisted_declared": true,
+  "relisted_error": null,
+  "error": null
+}
+```
+
+**The top-level subject fields are the last step's.** `argv`, `exit_code`,
+`execution`, `wall_seconds`, `max_rss_kb`, `stdout`, `stderr`, `row_count` and
+`product` describe the step whose sink the row count and product are read from:
+the resume, when the kill landed. So `wall_seconds` is the resume's wall, not
+the cost of the whole recovery — that is `fault.subject_wall_seconds`, the sum
+of the two steps' subject walls, which excludes the harness's own gap between
+them. Each step's `max_rss_kb` is reaped per invocation as always, and the
+cgroup peak is reset between the steps.
+
+**`relisted` is the capsule's figure, not the harness's.** A capsule may export
+a `RELISTED` derivation for the mode; the worker calls it after a clean resume
+with both steps' logs, the killed step's copied evidence and the final sink, and
+records the flat mapping of numbers it returns. A capsule that declares none
+records `relisted: null` with `relisted_declared: false`; one whose derivation
+raises or returns something other than finite numbers is a postprocessing
+failure, the same verdict as a row count that cannot be taken.
+
+`resume_evidence` records each declared file's copied digest, or `null` when
+the killed step never wrote it. A declared path that resolves through anything
+other than real directories down to one regular file — a symlinked parent, a
+directory, a FIFO — is not absent but unsafe, and like an I/O error while
+copying it stops the attempt before the resume (`fault.error`).
+
+The worker's acceptance adds three refusals to the usual ones:
+
+| Exit | When |
+| --- | --- |
+| `15` (`EXIT_FAULT_NOT_LANDED`) | The kill did not land: the subject settled before the kill point, or the status reaped after the dispatched kill was not death by SIGKILL. No resume runs; the attempt is published with one step, and refused whatever the subject's own exit, because an uninterrupted run is not the case that was asked for. A kill point that misses this way is too late: move it earlier — a smaller `fault_kill_at_s`, `fault_kill_percent` or `fault_expected_wall_s`. |
+| `17` (`EXIT_FAULT_INCOMPLETE`) | The kill landed and the resume did not run: the shared deadline was already spent when it could start, or the killed step's declared evidence was unsafe or could not be copied. `fault.error` says which; the killed step is the attempt's last, with its logs at the top level. |
+| `1` | The kernel's OOM killer ended the killed step, rather than the schedule. |
+
+A resume that runs and fails — nonzero, or timed out inside its share of the
+deadline — is a complete treatment with a failed outcome, published like any
+failed subject. `verify`, `report` and the receipt bind the `fault` block as
+evidence, not just the declaration: the schedule is the declared one, two
+steps exist exactly when the kill landed and the resume ran, the gap and the
+summed wall follow from them, the top-level fields are the last step's, the
+killed step's captures are under `killed/`, and an attempt whose treatment is
+incomplete must carry a failing worker exit.
+
+A schedule is refused at plan load on a mode whose capsule declares no resume,
+when the resume mode's `purpose_ceiling` is below the case's purpose (the
+resume's sink is what the row count reads), on a preparation, on a mode that is part of a chain or runs an inline setup (a
+slot is paid by an attempt's *shape*, which the schedule is not part of, so a
+resumed listing must never be the bytes a chain consumes), and when the kill
+point is not inside the row's timeout. The bounded Docker executor refuses a
+schedule: it runs on Batch only.
+
+### A sidecar sits between the subject and the replay server
+
+`VERIFIED: no` — exercised only by bounded synthetic tests in
+`test_measure.py`, whose sidecar is a real loopback process that answers each
+request with an empty HTTP 200 itself and forwards nothing; the replay
+server's readiness and counters are stubbed. They cover the endpoint the
+subject is compiled against, the start, readiness, SIGTERM and timeline
+lifecycle, and the shutdown refusals — not forwarding. The swath fault proxy
+has not run under this harness.
+
+A replay plan may declare one **sidecar**: a process that listens on a loopback
+port, forwards to the replay server, and writes a timeline when it is stopped.
+The swath fault-injecting proxy (`go/bench/faultproxy`) is what it was written
+for: throttle storms, latency inflation and resets, deterministic from a seed,
+with a TSV of 100 ms buckets since the first request written on SIGTERM.
+
+**It is the worker's child, not a Batch runnable.** The replay server is a
+background runnable because its evidence is scraped over HTTP while it runs. A
+sidecar's evidence is a file it writes only on SIGTERM, and that file has to
+exist before `result.json` is created — and no runnable can signal another
+container. So the worker stages the declared executable from its pinned `gs://`
+object, refuses it unless its sha256 matches the declaration, starts it in its
+own process group after the replay server's readiness, warm-up and `before`
+scrape (so its timeline holds the subject's requests and nothing else), waits
+until its listen address accepts a TCP connection, points the subject at that
+address instead of the server, and SIGTERMs it once the last subject step has
+settled. Its stdout and stderr are captured, and its timeline is published at
+`sidecar/timeline.tsv`.
+
+One consequence is a treatment rather than a defect, and a reader has to know
+it: **the sidecar shares the subject container's cpuset and memory ceiling.**
+Its forwarding CPU comes out of `subject_vcpus`, and its resident memory counts
+toward the container's cgroup peak (never toward the subject's own
+`max_rss_kb`, which is per invocation). A proxied arm is therefore compared
+with an unproxied arm at the same allocation only when the proxy's own cost is
+part of what is being measured; the declaration is in the identity, so the two
+never share a case.
+
+`result.json` carries the declaration as `sidecar` (bound against
+`case_inputs`) and what happened as `sidecar_evidence`:
+
+```json
+"sidecar_evidence": {
+  "state": "stopped",
+  "name": "faultproxy",
+  "argv": ["/…/faultproxy", "-seed", "7", "-window", "throttle:0s-130s:0.2",
+           "-listen", "127.0.0.1:19091", "-target", "http://127.0.0.1:19090",
+           "-timeline", "/tmp/attempt/sidecar/timeline.tsv"],
+  "executable_sha256": "<sha256>",
+  "endpoint_url": "http://127.0.0.1:19091",
+  "readiness_ms": 41,
+  "alive_through_subject": true,
+  "stop": {"signal": "SIGTERM", "exit_code": 0, "forced_kill": false, "reaped": true,
+           "wait_ms": 12},
+  "timeline": {"name": "sidecar/timeline.tsv", "size_bytes": 40321, "sha256": "<sha256>",
+               "usable": true,
+               "columns": ["t_ms", "arrived", "throttled", "reset", "delayed", "max_active"],
+               "rows": 1312, "totals": {"arrived": 151204, "throttled": 30218, "…": "…"}},
+  "stdout_totals": {"requests": 151204, "throttled": 30218, "…": "…"},
+  "stdout": {"name": "sidecar/stdout.log.gz", "…": "…"},
+  "stderr": {"name": "sidecar/stderr.log.gz", "…": "…"},
+  "error": null
+}
+```
+
+`timeline.totals` sums each integer column over the buckets, except `max_*`
+columns, which report their maximum; `stdout_totals` is the proxy's own last
+stdout line when it is `key=integer` tokens. Both are summaries for a reader who
+will not open the file; the timeline itself is bound by digest.
+
+**The one acceptable shutdown** is: alive through the subject, SIGTERMed by the
+worker, exited `0` within 30 seconds, and a usable timeline — a header of
+distinct column names, at least one bucket, and every bucket that width with
+an integer in every cell (`timeline.usable`). A timeline file existing is not
+enough: a sidecar that wrote one and then exited nonzero while handling
+SIGTERM may not have finished it.
+
+A sidecar is refused unless the plan has a replay backend, and on the same
+chain, inline and preparation cases a fault schedule is. It is refused at
+the worker, as `16` (`EXIT_SIDECAR_FAILED`), when it cannot be staged, does
+not listen within 30 seconds, exits while the subject runs, does not exit
+within 30 seconds of SIGTERM (it is then SIGKILLed, and refused as
+unstoppable if it is not reaped within 10 more), exits nonzero on SIGTERM, or
+leaves no usable timeline. Whatever it did write is published and bound all
+the same. A sidecar that fails
+before the subject publishes a marker with no execution and the failed
+`sidecar_evidence`, the same shape a refused replay readiness has.
+
+A fault schedule and a sidecar compose: the proxy then runs across both steps,
+so a throttle window that outlasts the kill goes on into the resume — the
+"resume into a storm" shape.
+
 ### What an attempt publishes
 
 ```text

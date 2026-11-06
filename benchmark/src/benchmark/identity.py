@@ -25,11 +25,20 @@ def case_inputs_document(
     tool_slice: str,
     platform: str,
     replay: Mapping[str, Any] | None = None,
+    *,
+    fault_schedule: Mapping[str, Any] | None = None,
+    sidecar: Mapping[str, Any] | None = None,
 ) -> str:
     """The exact canonical JSON `case_hash` is taken over.
 
     Stored byte-exactly as `case_inputs` (`model.md`): a hash collision is
     caught by comparing this document, not by trusting the digest.
+
+    `replay`, `fault_schedule` and `sidecar` are each omitted rather than null
+    when absent, so every identity minted before they existed still holds. The
+    worker's `--fault-schedule` and `--sidecar` flags are rendered back out of
+    this stored document (`faults.worker_flags`), the one place they cannot
+    disagree with the hash.
     """
     inputs: dict[str, Any] = {
         "environment": environment,
@@ -39,6 +48,10 @@ def case_inputs_document(
     }
     if replay is not None:
         inputs["replay"] = replay
+    if fault_schedule is not None:
+        inputs["fault_schedule"] = fault_schedule
+    if sidecar is not None:
+        inputs["sidecar"] = sidecar
     return canonical_json(inputs)
 
 
@@ -48,6 +61,9 @@ def case_hash(
     tool_slice: str,
     platform: str,
     replay: Mapping[str, Any] | None = None,
+    *,
+    fault_schedule: Mapping[str, Any] | None = None,
+    sidecar: Mapping[str, Any] | None = None,
 ) -> str:
     """Domain-separated sha256 of `case_inputs_document`, truncated to 12 hex digits.
 
@@ -55,7 +71,15 @@ def case_hash(
     tool prefixes `case_id` and the suite prefixes the path, neither is a hash
     input.
     """
-    document = case_inputs_document(environment, config, tool_slice, platform, replay)
+    document = case_inputs_document(
+        environment,
+        config,
+        tool_slice,
+        platform,
+        replay,
+        fault_schedule=fault_schedule,
+        sidecar=sidecar,
+    )
     digest = hashlib.sha256(CASE_HASH_V2 + document.encode())
     return digest.hexdigest()[:_HASH_HEX_DIGITS]
 
@@ -67,9 +91,21 @@ def case_id(
     tool_slice: str,
     platform: str,
     replay: Mapping[str, Any] | None = None,
+    *,
+    fault_schedule: Mapping[str, Any] | None = None,
+    sidecar: Mapping[str, Any] | None = None,
 ) -> str:
     """`<tool>.<hash>` — `tool` prefixes the identifier without entering the hash."""
-    return f"{tool}.{case_hash(environment, config, tool_slice, platform, replay)}"
+    digest = case_hash(
+        environment,
+        config,
+        tool_slice,
+        platform,
+        replay,
+        fault_schedule=fault_schedule,
+        sidecar=sidecar,
+    )
+    return f"{tool}.{digest}"
 
 
 def attempt_id(case: str, attempt: int) -> str:

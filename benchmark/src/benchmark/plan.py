@@ -70,6 +70,7 @@ from typing import TYPE_CHECKING, Any
 
 import yaml
 
+from benchmark import faults as fault_contract
 from benchmark import replay as replay_contract
 
 if TYPE_CHECKING:
@@ -99,6 +100,7 @@ TOP_LEVEL = (
     "region",
     "auth_role",
     "replay",
+    "sidecar",
     "defaults",
     "tools",
     "exclude",
@@ -143,6 +145,14 @@ REPLAY_OPTIONAL_INTEGER_FIELDS = replay_contract.REPLAY_OPTIONAL_INTEGER_FIELDS
 ReplayBackend = replay_contract.ReplayBackend
 ReplayPlan = replay_contract.ReplayPlan
 ReplayConfig = replay_contract.ReplayConfig
+
+# A kill-and-resume schedule (`benchmark/docs/model.md` § *An attempt may be
+# killed and resumed*). Flat scalars resolving through the same three layers as
+# every allocation, because where a kill lands has to move with the shape under
+# test: a 512-worker row finishes long before a 64-worker one.
+FAULT_FIELDS = fault_contract.FAULT_ROW_FIELDS
+FaultSchedule = fault_contract.FaultSchedule
+Sidecar = fault_contract.Sidecar
 
 # Required once resolved: a case that did not say how much memory it wanted
 # cannot be compared against one that did. The container ceiling is the
@@ -195,6 +205,7 @@ ROW_FIELDS = (
     *RESOURCE_FIELDS,
     *REPLAY_FIELDS,
     *REPLAY_OPTIONAL_INTEGER_FIELDS,
+    *FAULT_FIELDS,
 )
 
 # The row axes resolution lifts into the config blob; `mode` travels separately
@@ -223,6 +234,7 @@ LAYER_FIELDS = (
     *SCHEDULE_FIELDS,
     *REPLAY_FIELDS,
     *REPLAY_OPTIONAL_INTEGER_FIELDS,
+    *FAULT_FIELDS,
 )
 
 TOOL_FIELDS = ("cases", *LAYER_FIELDS)
@@ -328,6 +340,12 @@ class Case:
     still means what it always meant. Carried beside ``resources`` rather than
     inside it because they are two allocations on one box, and a reader comparing
     cases needs to see which of the two a row moved."""
+    fault_schedule: FaultSchedule | None = None
+    """When this case's first step is killed, before its capsule's resume runs as
+    the second step of the same attempt. ``None`` runs the subject once."""
+    sidecar: Sidecar | None = None
+    """The process the worker stands between the subject and the replay server,
+    when the plan declares one. ``None`` points the subject at the server."""
 
 
 @dataclass(frozen=True)
@@ -351,6 +369,8 @@ class Plan:
     replay: ReplayPlan | None
     """The backend every case here is measured against, when it is not a real
     bucket. ``None`` for a plan that lists S3 directly."""
+    sidecar: Sidecar | None
+    """What stands between every case's subject and that backend, if anything."""
     # The capsules this plan resolved against. Carried because a launch expands
     # each row's declared prerequisites (:func:`expand_requirements`) from the
     # same loaded capsule the case was resolved with, rather than reloading one
@@ -566,6 +586,7 @@ def _load(
     _reject_unknown(defaults, LAYER_FIELDS, "[defaults]", path)
     base_resources = _resources(defaults, "defaults", path, complete=True)
     replay_backend = _replay_backend(doc, path)
+    sidecar = _sidecar(doc, path, replay_backend)
     # Sized in defaults when there is a backend at all, so every row resolves a
     # server without each one restating it; a row still overrides to sweep it.
     base_replay = _replay_shape(defaults, "defaults", path, complete=replay_backend is not None)
@@ -576,6 +597,7 @@ def _load(
         )
     base_schedule = _schedule(defaults, "defaults", path, complete=True)
     base_signed = _signed(defaults, "defaults", path, complete=True)
+    base_faults = _fault_shape(defaults, "defaults", path)
 
     region = _string(doc, "region", "plan", path)
     # Resolved next to the plan rather than passed down from the caller, so a
@@ -598,7 +620,7 @@ def _load(
         region=region,
         cases=_cases(
             doc,
-            {**base_resources, **base_replay, **base_signed},
+            {**base_resources, **base_replay, **base_signed, **base_faults},
             base_schedule,
             modes,
             _Context(
@@ -609,11 +631,13 @@ def _load(
                 adapters=resolved_adapters,
                 auth_role=auth_role,
                 replay=replay_backend,
+                sidecar=sidecar,
                 path=path,
             ),
         ),
         exclusions=(*shared_exclusions, *_exclusions(doc, path)),
         replay=replay_backend,
+        sidecar=sidecar,
         adapters=resolved_adapters,
     )
     _reject_overlap(plan, path)
@@ -696,6 +720,29 @@ def _replay_backend(doc: Mapping[str, Any], path: Path) -> ReplayPlan | None:
         return replay_contract.parse_plan(block)
     except replay_contract.ReplayError as exc:
         raise PlanError(f"'[replay]' in {path}: {exc}") from exc
+
+
+def _sidecar(doc: Mapping[str, Any], path: Path, replay: ReplayPlan | None) -> Sidecar | None:
+    """The plan's ``sidecar`` block, or ``None`` when the subject talks to its target."""
+    if "sidecar" not in doc:
+        return None
+    if replay is None:
+        raise PlanError(
+            f"'[sidecar]' in {path} stands between a subject and a replay server, and this "
+            "plan declares no [replay] block"
+        )
+    block = _table(doc, "sidecar", "sidecar", path)
+    try:
+        return fault_contract.make_sidecar(block)
+    except fault_contract.FaultError as exc:
+        raise PlanError(f"'[sidecar]' in {path}: {exc}") from exc
+
+
+def _fault_shape(table: Mapping[str, Any], where: str, path: Path) -> dict[str, int]:
+    """The ``fault_*`` keys ``table`` states, flat; whether they cohere is `_case`'s question."""
+    return {
+        key: _positive_int(table[key], key, where, path) for key in FAULT_FIELDS if key in table
+    }
 
 
 def _replay_shape(
@@ -1028,6 +1075,7 @@ class _Context:
     auth_role: str | None
     replay: ReplayPlan | None
     path: Path
+    sidecar: Sidecar | None = None
 
 
 def _cases(
@@ -1078,6 +1126,7 @@ def _tool_cases(
         **_resources(table, where, path, complete=False),
         **_replay_shape(table, where, path, complete=False),
         **_signed(table, where, path, complete=False),
+        **_fault_shape(table, where, path),
     }
     schedule = {**base_schedule, **_schedule(table, where, path, complete=False)}
 
@@ -1448,9 +1497,78 @@ def _case(
         axes=chosen,
         config=tuple(config.items()),
         replay=resolved_replay,
+        fault_schedule=_fault_schedule(tool, resolved, schedule, path),
+        sidecar=context.sidecar,
     )
     _compile_inline(case, adapter, path)
+    _check_fault_treatments(case, adapter, path)
     return case
+
+
+def _fault_schedule(
+    tool: str, resolved: Mapping[str, Any], schedule: Mapping[str, int], path: Path
+) -> FaultSchedule | None:
+    try:
+        fault = fault_contract.make_schedule(resolved)
+    except fault_contract.FaultError as exc:
+        raise PlanError(f"'tools.{tool}' in {path}: {exc}") from exc
+    if fault is not None and fault.kill_after_s >= schedule["timeout_s"]:
+        # Both steps share the row's one deadline; a kill at or past it never lands.
+        raise PlanError(
+            f"'tools.{tool}' in {path} kills the subject at {fault.kill_after_s:g}s, which is "
+            f"not inside its {schedule['timeout_s']}s timeout"
+        )
+    return fault
+
+
+def _check_fault_treatments(case: Case, adapter: LoadedCommandAdapter, path: Path) -> None:
+    """Refuse a fault treatment on a case it cannot be told apart in.
+
+    A slot is paid by any attempt of its producer's *shape* (`model.md`), and
+    neither treatment is part of that shape: a killed-and-resumed or proxied
+    listing must never be the bytes a chain consumes. So both are confined to
+    cases with no chain on either side and no inline setup, and a schedule
+    additionally to a mode whose capsule declares how it resumes — compiled here,
+    so a resume its capsule cannot build fails while it is still a file.
+    """
+    if case.fault_schedule is None and case.sidecar is None:
+        return
+    where = f"'tools.{case.tool}' in {path}"
+    treatment = "a fault schedule" if case.fault_schedule is not None else "a sidecar"
+    manifest = adapter.modes[case.mode]
+    if (
+        case.purpose == "preparation"
+        or manifest.inline
+        or case.mode in adapter.requires
+        or case.mode in adapter.chain_artifacts
+    ):
+        raise PlanError(
+            f"{where} puts {treatment} on mode {case.mode!r}, which is part of a chain, runs "
+            "an inline setup, or is a preparation"
+        )
+    if case.fault_schedule is None:
+        return
+    if not manifest.resume:
+        raise PlanError(
+            f"{where} schedules a kill on mode {case.mode!r}, whose capsule declares no resume"
+        )
+    # The resume's output is what the attempt's row count reads, so the purpose
+    # the case claims must be one both modes permit, not just the killed one.
+    resume_manifest = adapter.modes[manifest.resume]
+    if not resume_manifest.permits_purpose(case.purpose):
+        raise PlanError(
+            f"{where} claims mode {case.mode!r} is a {case.purpose}, and its resume "
+            f"{manifest.resume!r} is capped at {resume_manifest.purpose_ceiling!r}"
+        )
+    try:
+        _compile_offline(
+            adapter, case, manifest.resume, {**dict(case.config), "mode": manifest.resume}
+        )
+    except Exception as exc:
+        raise PlanError(
+            f"{where}: mode {case.mode!r} resumes as {manifest.resume!r}, which its capsule "
+            f"cannot build: {exc}"
+        ) from exc
 
 
 def _case_replay(

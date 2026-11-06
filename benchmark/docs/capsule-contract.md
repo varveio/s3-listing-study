@@ -77,6 +77,7 @@ and a capsule could be altered without anything noticing.
 | `build_env(request)` | no, defaults to `FUNCTIONAL_ENV` | Environment derived from the request — heap flags, and nothing else so far |
 | `REQUIRES` | no, defaults empty | The chain of this capsule's own modes that must run before a mode, in order, each naming the artifact taken from it |
 | `VALIDATE_ARTIFACT` | no, defaults empty | Per producing mode, the check that refuses an artifact that is structurally useless before anything consumes it |
+| `RELISTED` | no, defaults empty | Per resumable mode, how the work a resume repeated is derived from the two steps of a killed attempt — see *A resume is the second step of a killed attempt* |
 
 A capsule that declares neither `SUPPORTS_UNSIGNED` nor `SUPPORTS_SIGNED` as
 true describes a subject that can issue no request at all, and the loader
@@ -124,6 +125,8 @@ write a directory sink while its TSV mode streams to stdout.
 | `product_artifact` | Which of `artifacts` carries this mode's *measured* output. Every mode a plan may measure names one; only a `preparation`-capped mode leaves it empty. |
 | `product_channel` | How that file gets its bytes — `stdout`, `file`, or `dataset`. See *The product travels on a declared file*. |
 | `product_compress` | Whether the product is gzipped before upload. Omit it and `product` answers: `text` compresses, Parquet does not. See *A text product is uploaded compressed*. |
+| `resume` | Another mode of this capsule that continues this one after a fault schedule killed it — see *A resume is the second step of a killed attempt*. |
+| `resume_evidence` | Sink-relative files the worker copies out after the killed step, before the resume can rewrite them. |
 
 **`product` and `fields` translate across tools; `axes` does not.** The first two
 describe the artifact, which is why they are comparable at all. An axis name
@@ -560,6 +563,62 @@ the usual shape with every subject field null (`execution`, `wall_seconds`,
 long it took, and its captured stdout/stderr under `inline/`. That capture is
 the only account of *why* the attempt has no measurement in it, and it is held
 with the subject's own retained evidence.
+
+### A resume is the second step of a killed attempt
+
+`VERIFIED: no` — no shipped capsule declares a resume yet; the contract is
+exercised by a synthetic capsule in `test_measure.py` only.
+
+That a subject can continue a listing it was killed in the middle of — and
+*how* it is told to — is a fact about the tool, so the capsule states it and a
+plan's fault schedule only says *when* to kill
+([`model.md`](model.md) § *An attempt may be killed and resumed*):
+
+```python
+MODES = {
+    "list": Mode(..., product_channel="dataset", resume="resume",
+                 resume_evidence=("_report.json",)),
+    "resume": Mode(..., product_channel="dataset"),
+}
+RELISTED = {"list": relisted}
+```
+
+The resume mode is compiled by the same `build_command`, from the killed step's
+config with only `mode` replaced, against the same `sink_dir`, endpoint and
+credential. The loader refuses:
+
+- a `resume` naming a mode that does not exist, or the mode itself;
+- a resumable mode on the `stdout` channel — two streams are not one listing;
+- a resume mode that does not publish the same `artifacts`, `product_artifact`,
+  `product_channel`, `product`, `fields` and `product_compress` as the mode it
+  continues, because the final sink is counted and classified through the
+  killed mode's manifest;
+- a resume mode with its own resume, inline setup or `REQUIRES`, and a resumable
+  mode with an inline setup or `REQUIRES` — a killed attempt is two execs of one
+  subject and nothing else;
+- `resume_evidence` without a `resume`, or naming a path outside the sink;
+- a `RELISTED` entry for a mode that declares no resume.
+
+`resume_evidence` exists because the resume runs in the same sink: a report or
+checkpoint the killed step left is the only record of what it had made durable,
+and the resume is entitled to rewrite it. The worker copies each listed regular
+file to `killed/sink/` the moment the killed step is reaped, and records an
+absent one as absent rather than refusing — a run killed before its first
+checkpoint is a real outcome. A listed path that reaches through a symlink at
+any component, or ends at anything but a regular file, is unsafe rather than
+absent, and the attempt is refused before the resume runs.
+
+A plan may claim no more for a killed-and-resumed case than both modes'
+`purpose_ceiling` permits.
+
+`RELISTED` maps a resumable mode to a function taking one `ResumeSteps` —
+`sink` (after the resume), `killed_evidence` (the copies), the four
+uncompressed logs, and the config — and returning a flat, non-empty mapping of
+figure name to a finite number or `None`. It is called only after a clean
+resume. The harness records what it returns and reads none of it; a derivation
+that raises or returns anything else fails postprocessing. It lives in
+`command.py` for the reason every declaration does: `adapter_bundle_sha256`
+covers that file and no other.
 
 ### An artifact is validated before anything consumes it
 

@@ -12,7 +12,10 @@ This is the page to read first. The three beside it are reference:
 
 `campaign.py` owns campaign planning, identity, slots, and launch bookkeeping.
 `drivers/gcp_batch.py` owns Batch request rendering, submission, polling, retry,
-cancellation, artifact transport, and replay-sidecar lifecycles.
+cancellation, artifact transport, and replay-sidecar lifecycles. A fault
+sidecar and a fault schedule's two steps are the measurement worker's own
+children instead, because their evidence must exist before the worker's
+create-only marker does ([`model.md`](model.md)).
 
 `docker_executor.py` is a bounded local session runner, not a second provider
 implementation below one campaign interface. `campaign.py submit --executor

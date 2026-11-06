@@ -34,7 +34,7 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
-from benchmark import adapters, gcs, procs, replay, replay_runtime
+from benchmark import adapters, fault_runtime, faults, gcs, procs, replay, replay_runtime
 from benchmark.contract import (
     AWS_CREDENTIAL_ENV_KEYS,
     AWS_CREDENTIAL_REQUIRED_ENV_KEYS,
@@ -49,6 +49,7 @@ from benchmark.runtime.command_adapter import (
     CommandRequest,
     LoadedCommandAdapter,
     Mode,
+    ResumeSteps,
     shared_axis_values,
 )
 
@@ -72,6 +73,24 @@ other than exactly one file.
 """
 EXIT_REPLAY_EVIDENCE_FAILED = 14
 """The replay server did not provide the evidence protocol this attempt required."""
+EXIT_FAULT_NOT_LANDED = 15
+"""A fault schedule's kill did not end the subject.
+
+Either the subject settled before the kill point, or the reaped status was not
+death by SIGKILL (it exited between the last poll and the signal). The case
+asked for a killed run and a resume; an uninterrupted run is a different
+measurement, so it is published as what it was and refused as what was asked
+for, whatever the subject's own exit was. Move the kill earlier: a smaller
+``fault_kill_at_s``, ``fault_kill_percent`` or ``fault_expected_wall_s``."""
+EXIT_SIDECAR_FAILED = 16
+"""The declared sidecar would not start, died while the subject ran, did not stop
+cleanly on SIGTERM, or left no usable timeline."""
+EXIT_FAULT_INCOMPLETE = 17
+"""A fault schedule's kill landed and its resume never ran.
+
+Either the attempt's one deadline was spent before the resume could start, or
+the killed step's declared evidence could not be copied safely. The killed step
+is published as the attempt's last; it is not a recovery measurement."""
 REPLAY_ENDPOINT_URL = replay.REPLAY_ENDPOINT_URL
 REPLAY_HTTP_TIMEOUT_S = replay_runtime.REPLAY_HTTP_TIMEOUT_S
 SETUP_TIMEOUT_S = 300
@@ -309,6 +328,20 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--endpoint-url", default="")
     parser.add_argument("--replay-config", default="", metavar="JSON")
     parser.add_argument(
+        "--fault-schedule",
+        default="",
+        metavar="JSON",
+        help="Kill the subject at the stated point, then run its capsule's resume mode as "
+        "the second step of this attempt (benchmark.faults).",
+    )
+    parser.add_argument(
+        "--sidecar",
+        default="",
+        metavar="JSON",
+        help="Run this staged process between the subject and the replay server, and publish "
+        "its timeline (benchmark.faults).",
+    )
+    parser.add_argument(
         "--retain-products",
         choices=("true", "false"),
         default="false",
@@ -487,16 +520,26 @@ def preflight(argv: tuple[str, ...]) -> bool:
 def run_tool(
     argv: tuple[str, ...],
     attempt_dir: Path,
-    timeout: int,
+    timeout: float,
     term_grace: float,
     env: dict[str, str],
     *,
     cwd: str | None = None,
     reset_peak: bool = False,
     stdout_path: Path | None = None,
+    kill_after_s: float | None = None,
 ) -> dict[str, object]:
     """Run argv, capture stdout/stderr to files, return
     (exit_code, wall_s, max_rss_kb, timed_out).
+
+    ``kill_after_s`` is a fault schedule's kill point: the whole process group
+    gets SIGKILL with no TERM first, because a subject given the chance to
+    flush is not the failure being measured. Sending the kill and the kill
+    landing are recorded apart, because they can disagree: the subject can exit
+    on its own between the last poll and the signal, and a zombie takes no
+    signal. ``fault_kill_sent`` says the worker dispatched it to a subject it
+    had not yet reaped; ``fault_kill_landed`` is true only when the status the
+    worker then reaped is death by SIGKILL. Anything else is not a landed kill.
 
     ``stdout_path`` is where fd 1 lands. It defaults to this phase's own log,
     and a subject that only prints its listing is handed its declared product
@@ -521,6 +564,7 @@ def run_tool(
     rss_floor_kb = procs.self_peak_rss_kb()
     start_ns = time.monotonic_ns()
     timed_out = False
+    fault_killed = False
     term_sent = False
     kill_sent = False
     process_tree_clean = True
@@ -579,6 +623,12 @@ def run_tool(
                 if residual or procs.process_group_exists(proc.pid):
                     process_tree_clean = False
                 break
+            if (
+                kill_after_s is not None
+                and (time.monotonic_ns() - start_ns) / 1_000_000_000 >= kill_after_s
+            ):
+                fault_killed = True
+                break
             if time.monotonic() >= deadline:
                 exit_code = 124
                 timed_out = True
@@ -586,7 +636,22 @@ def run_tool(
             time.sleep(0.01)
 
         residual = procs.live_pids(tracked_pids - {proc.pid})
-        if timed_out or residual or procs.process_group_exists(proc.pid):
+        if fault_killed:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                # The group is already gone: whatever the subject's status is,
+                # this signal is not what produced it.
+                fault_killed = False
+            procs.signal_pids(residual, signal.SIGKILL)
+            kill_sent = True
+            if not reap_subject(max(term_grace, 1.0)):
+                reap_subject(None)
+            # The reaped status, never a stand-in: a subject whose status could
+            # not be had reports what `reap_subject` recorded, and is not landed.
+            assert proc.returncode is not None
+            exit_code = proc.returncode
+        elif timed_out or residual or procs.process_group_exists(proc.pid):
             if timed_out:
                 exit_code = 124  # conventional timeout exit code
             try:
@@ -665,6 +730,17 @@ def run_tool(
         "descendants_empty": descendants_empty,
         "process_tree_clean": process_tree_clean,
         "subreaper_enabled": True,
+        **(
+            {}
+            if kill_after_s is None
+            else {
+                "fault_kill_after_s": kill_after_s,
+                "fault_kill_sent": fault_killed,
+                "fault_kill_landed": (
+                    fault_killed and subject_usage is not None and exit_code == -signal.SIGKILL
+                ),
+            }
+        ),
         "cgroup": {
             "location": str(cgroup) if cgroup else None,
             "memory_peak_reset": peak_reset,
@@ -970,9 +1046,10 @@ def published_product(product: Product | None, *, gap: str | None) -> Product | 
     actually holds, under a name that says what it is.
 
     A product that never landed is left alone: there is nothing to compress, and
-    `product_gap` has already said so.
+    `product_gap` has already said so — or, for a subject that did not exit
+    clean (a killed step whose resume never ran), nothing needs saying.
     """
-    if product is None or not product.compress or gap is not None:
+    if product is None or not product.compress or gap is not None or not product.path.is_file():
         return product
     return replace(product, name=f"{product.name}.gz", path=gzip_file(product.path))
 
@@ -1152,6 +1229,13 @@ def attempt_identity(
         "destination": destination,
         "config": config,
         "replay": getattr(args, "replay_document", None),
+        # Declarations, present only when the case states them: the binding
+        # compares each against the case_inputs the row hashed.
+        **{
+            name: document
+            for name in ("fault_schedule", "sidecar")
+            if (document := getattr(args, f"{name}_document", None)) is not None
+        },
         # Lineage, beside the timing: which bytes this case consumed, and where
         # the harness staged them from.
         "input_artifact": args.input_artifact or None,
@@ -1194,10 +1278,14 @@ def publish_pre_subject_failure(
     setup: Mapping[str, object] | None,
     started_at: str | None,
     replay_evidence: Mapping[str, object] | None,
+    sidecar_evidence: Mapping[str, object] | None = None,
 ) -> int:
     """Publish why an attempt failed before the subject could run."""
-    if setup is not None:
-        secret_hit = scan_for_secrets([attempt_dir / "inline"])
+    scanned = [attempt_dir / "inline"] if setup is not None else []
+    if sidecar_evidence is not None:
+        scanned.append(attempt_dir / fault_runtime.SIDECAR_DIR)
+    if scanned:
+        secret_hit = scan_for_secrets(scanned)
         if secret_hit:
             print(
                 f"measure: possible secret in {secret_hit}; refusing to upload this attempt",
@@ -1207,6 +1295,7 @@ def publish_pre_subject_failure(
     result = {
         **attempt_identity(args, config, destination),
         "replay_evidence": (None if replay_evidence is None else dict(replay_evidence)),
+        **({} if sidecar_evidence is None else {"sidecar_evidence": dict(sidecar_evidence)}),
         "argv": None,
         "setup": None if setup is None else dict(setup),
         "exit_code": exit_code,
@@ -1240,6 +1329,8 @@ class ResolvedInputs:
     replay_document: dict[str, object] | None
     minimal_evidence: bool
     replay_evidence: dict[str, object] | None
+    fault_schedule: faults.FaultSchedule | None = None
+    sidecar: faults.Sidecar | None = None
 
 
 def _resolve_inputs(args: argparse.Namespace) -> ResolvedInputs:
@@ -1275,6 +1366,17 @@ def _resolve_inputs(args: argparse.Namespace) -> ResolvedInputs:
             f"--mode {args.mode!r} is not the {config.get('mode')!r} its config "
             "states; the config is what the case hashed"
         )
+    try:
+        fault_schedule = faults.parse_schedule(args.fault_schedule) if args.fault_schedule else None
+        sidecar = faults.parse_sidecar(args.sidecar) if args.sidecar else None
+    except faults.FaultError as exc:
+        raise ValueError(str(exc)) from None
+    if sidecar is not None and replay_config is None:
+        raise ValueError("--sidecar stands in front of a replay server, and none is configured")
+    if (fault_schedule is not None or sidecar is not None) and args.purpose == "preparation":
+        raise ValueError("a preparation runs no fault treatment; its bytes are a chain's input")
+    args.fault_schedule_document = None if fault_schedule is None else fault_schedule.as_dict()
+    args.sidecar_document = None if sidecar is None else sidecar.as_dict()
     return ResolvedInputs(
         credential_env=credential_env,
         config=config,
@@ -1282,7 +1384,236 @@ def _resolve_inputs(args: argparse.Namespace) -> ResolvedInputs:
         replay_document=replay_document,
         minimal_evidence=minimal_evidence,
         replay_evidence=replay_evidence,
+        fault_schedule=fault_schedule,
+        sidecar=sidecar,
     )
+
+
+def _step_block(
+    name: str,
+    mode: str,
+    command: Sequence[str],
+    execution: Mapping[str, object],
+    *,
+    started_at: str,
+    finished_at: str,
+) -> dict[str, object]:
+    """One child execution of a killed-and-resumed attempt, in its own terms."""
+    return {
+        "step": name,
+        "mode": mode,
+        "argv": list(command),
+        "started_at": started_at,
+        "finished_at": finished_at,
+        "exit_code": execution["exit_code"],
+        "timed_out": execution["timed_out"],
+        "wall_seconds": execution["wall_seconds"],
+        "max_rss_kb": execution["max_rss_kb"],
+        "execution": dict(execution),
+        # Filled in once the captures are compressed into what is published.
+        "stdout": None,
+        "stderr": None,
+    }
+
+
+def _settled(execution: Mapping[str, object]) -> bool:
+    return all(
+        execution.get(field) is True
+        for field in ("process_group_empty", "descendants_empty", "process_tree_clean")
+    )
+
+
+def _run_fault_schedule(
+    schedule: faults.FaultSchedule,
+    args: argparse.Namespace,
+    *,
+    mode: str,
+    command: tuple[str, ...],
+    env: dict[str, str],
+    resume_mode: str,
+    resume_command: tuple[str, ...],
+    resume_env: dict[str, str],
+    resume_evidence: Sequence[str],
+    attempt_dir: Path,
+    native_root: Path,
+    stdout_path: Path,
+    reset_peak: bool,
+) -> tuple[dict[str, object], tuple[str, ...], dict[str, object]]:
+    """Run the killed step and, if the kill landed, the resume: two execs, one attempt.
+
+    Returns the execution and argv of the *last* step that ran, which is what the
+    attempt's top-level subject fields describe — the step whose sink the row
+    count and product are read from — and the ``fault`` block holding both.
+
+    The killed step's logs move under ``killed/`` before the resume starts, so
+    each step keeps its own and the top-level logs are always the last step's.
+    Both steps share the row's one deadline, a single monotonic instant fixed
+    before the killed step starts: the resume gets what is left of it after the
+    killed step *and* everything the worker did between the steps, to the
+    fraction of a second, because the provider bounds the container, not a step.
+    A deadline already spent, or killed-step evidence that cannot be copied
+    safely, is recorded as ``fault.error`` with no resume run, and the attempt
+    keeps the killed step as its last.
+    """
+    deadline = time.monotonic() + args.timeout
+    killed_started_at = datetime.now(UTC).isoformat()
+    killed = run_tool(
+        command,
+        attempt_dir,
+        args.timeout,
+        args.term_grace,
+        env,
+        cwd=args.subject_workdir,
+        reset_peak=reset_peak,
+        stdout_path=stdout_path,
+        kill_after_s=schedule.kill_after_s,
+    )
+    killed_finished = time.monotonic()
+    landed = killed.get("fault_kill_landed") is True
+    fault: dict[str, object] = {
+        "schedule": schedule.as_dict(),
+        "kill_after_s": schedule.kill_after_s,
+        "kill_sent": killed.get("fault_kill_sent") is True,
+        "landed": landed,
+        "resume_mode": resume_mode,
+        "steps": [
+            _step_block(
+                "killed",
+                mode,
+                command,
+                killed,
+                started_at=killed_started_at,
+                finished_at=datetime.now(UTC).isoformat(),
+            )
+        ],
+        "gap_seconds": None,
+        "resume_timeout_s": None,
+        "subject_wall_seconds": killed["wall_seconds"],
+        "resume_evidence": {},
+        "relisted": None,
+        "relisted_declared": False,
+        "relisted_error": None,
+        "error": None,
+    }
+    if not landed or not _settled(killed):
+        # Nothing to resume: the subject finished, timed out, left a process
+        # behind, or was not provably ended by this kill, and each of those is
+        # decided from this one execution.
+        return killed, command, fault
+
+    killed_dir = attempt_dir / "killed"
+    killed_dir.mkdir()
+    recorded, evidence_error = fault_runtime.copy_resume_evidence(
+        native_root, resume_evidence, killed_dir / "sink"
+    )
+    fault["resume_evidence"] = recorded
+    if evidence_error is not None:
+        # The killed step stays the attempt's last, its logs where the
+        # top-level capture reads them; what was copied is published under
+        # `killed/` all the same.
+        fault["error"] = f"killed-step evidence was not copied: {evidence_error}"
+        return killed, command, fault
+    logs = [name for name in ("stdout.log", "stderr.log") if (attempt_dir / name).exists()]
+    for name in logs:
+        os.replace(attempt_dir / name, killed_dir / name)
+    # Measured last, after every piece of inter-step work, and passed on as is:
+    # no rounding down that takes time away, no floor that invents time.
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        for name in logs:
+            os.replace(killed_dir / name, attempt_dir / name)
+        fault["error"] = (
+            f"the attempt's {args.timeout}s deadline was spent "
+            f"{-remaining:.3f}s before the resume could start"
+        )
+        return killed, command, fault
+    resume_started_at = datetime.now(UTC).isoformat()
+    fault["gap_seconds"] = round(time.monotonic() - killed_finished, 6)
+    fault["resume_timeout_s"] = round(remaining, 6)
+    wall = killed["wall_seconds"]
+    assert isinstance(wall, float | int)
+    resumed = run_tool(
+        resume_command,
+        attempt_dir,
+        remaining,
+        args.term_grace,
+        resume_env,
+        cwd=args.subject_workdir,
+        reset_peak=True,
+        stdout_path=stdout_path,
+    )
+    steps = fault["steps"]
+    assert isinstance(steps, list)
+    steps.append(
+        _step_block(
+            "resume",
+            resume_mode,
+            resume_command,
+            resumed,
+            started_at=resume_started_at,
+            finished_at=datetime.now(UTC).isoformat(),
+        )
+    )
+    resumed_wall = resumed["wall_seconds"]
+    assert isinstance(resumed_wall, float | int)
+    fault["subject_wall_seconds"] = round(wall + resumed_wall, 6)
+    return resumed, resume_command, fault
+
+
+def _relisted(
+    adapter: LoadedCommandAdapter,
+    mode: str,
+    fault: dict[str, object],
+    *,
+    attempt_dir: Path,
+    native_root: Path,
+    config: Mapping[str, object],
+) -> None:
+    """Ask the capsule what its resume listed again, when it declares how."""
+    hook = adapter.relisted.get(mode)
+    fault["relisted_declared"] = hook is not None
+    steps = fault["steps"]
+    assert isinstance(steps, list)
+    if hook is None or len(steps) != 2:
+        return
+    resumed = steps[1]
+    if resumed["exit_code"] != 0 or resumed["timed_out"]:
+        return
+    killed_dir = attempt_dir / "killed"
+    try:
+        value = hook(
+            ResumeSteps(
+                sink=native_root,
+                killed_evidence=killed_dir / "sink",
+                killed_stdout=killed_dir / "stdout.log",
+                killed_stderr=killed_dir / "stderr.log",
+                resume_stdout=attempt_dir / "stdout.log",
+                resume_stderr=attempt_dir / "stderr.log",
+                config=dict(config),
+            )
+        )
+    except Exception as exc:
+        fault["relisted_error"] = f"{type(exc).__name__}: {exc}"[:300]
+        return
+    error = faults.relisted_errors(value)
+    if error is not None:
+        fault["relisted_error"] = error
+        return
+    fault["relisted"] = {str(name): number for name, number in sorted(dict(value).items())}
+
+
+def _publish_captures(
+    directory: Path, prefix: str, *, hash_content: bool
+) -> tuple[dict[str, object] | None, dict[str, object] | None]:
+    """Gzip one step's or one sidecar's logs and describe them by attempt-relative name."""
+    blocks: list[dict[str, object] | None] = []
+    for name in ("stdout.log", "stderr.log"):
+        path = directory / name
+        block = capture_block(gzip_file(path) if path.exists() else None, hash_content=hash_content)
+        if block is not None:
+            block["name"] = f"{prefix}/{block['name']}"
+        blocks.append(block)
+    return blocks[0], blocks[1]
 
 
 def _replay_phase(
@@ -1370,6 +1701,7 @@ def _result_document(
     native_files: Mapping[str, str],
     native_sizes: Mapping[str, int] | None,
     artifacts_size_bytes: int,
+    treatments: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     return {
         **attempt_identity(args, config, attempt_destination),
@@ -1403,6 +1735,9 @@ def _result_document(
         "native_manifest": native_files,
         "native_files": native_sizes,
         "artifacts_size_bytes": artifacts_size_bytes,
+        # `fault` and `sidecar_evidence`, present only for a case that declared
+        # the treatment (`model.md`).
+        **(treatments or {}),
     }
 
 
@@ -1424,6 +1759,11 @@ def main(argv: list[str] | None = None) -> int:
     replay_config = resolved.replay_config
     minimal_evidence = resolved.minimal_evidence
     replay_evidence = resolved.replay_evidence
+    fault_schedule = resolved.fault_schedule
+    sidecar = resolved.sidecar
+    # Where the subject sends its requests: the sidecar, when one stands in
+    # front of the replay server, or the endpoint the provider request named.
+    subject_endpoint = sidecar.endpoint_url if sidecar is not None else args.endpoint_url
 
     metadata_error = validate_image_metadata(args)
     if metadata_error:
@@ -1460,6 +1800,8 @@ def main(argv: list[str] | None = None) -> int:
     # attempt from merging into the first.
     attempt_destination = args.destination.rstrip("/") + "/"
 
+    sidecar_run: fault_runtime.SidecarRun | None = None
+
     def publish_failure(
         *, exit_code: int, setup: Mapping[str, object] | None, started_at: str | None
     ) -> int:
@@ -1472,6 +1814,7 @@ def main(argv: list[str] | None = None) -> int:
             setup=setup,
             started_at=started_at,
             replay_evidence=replay_evidence,
+            sidecar_evidence=None if sidecar_run is None else sidecar_run.block,
         )
 
     # An untimed pre-phase, before the subject argv exists: what it publishes is
@@ -1486,6 +1829,9 @@ def main(argv: list[str] | None = None) -> int:
     # what says so, in the one place that already refuses it.
     manifest = adapter.modes.get(args.mode)
     inline_mode = manifest.inline if manifest is not None else ""
+    if (fault_schedule is not None or sidecar is not None) and inline_mode:
+        print("measure: a fault treatment does not run beside an inline setup", file=sys.stderr)
+        return 2
     if inline_mode:
         setup_started_at = datetime.now(UTC).isoformat()
         try:
@@ -1520,7 +1866,7 @@ def main(argv: list[str] | None = None) -> int:
             artifact_path=artifact_path,
             visible_memory_gb=visible_memory_gb,
             heap_percent=HEAP_PERCENT,
-            endpoint_url=args.endpoint_url,
+            endpoint_url=subject_endpoint,
         )
     except adapters.AdapterError as exc:
         print(f"measure: {exc}", file=sys.stderr)
@@ -1534,6 +1880,43 @@ def main(argv: list[str] | None = None) -> int:
         print(f"measure: {environment_error}", file=sys.stderr)
         return 2
     env = subject_env(args.region, functional_env, credential_env)
+
+    # The resume is compiled before anything runs, so a capsule that cannot
+    # state it refuses here rather than after the first step was killed.
+    resume_mode = manifest.resume if manifest is not None else ""
+    resume_command: tuple[str, ...] = ()
+    resume_env: dict[str, str] = {}
+    if fault_schedule is not None:
+        if not resume_mode:
+            print(f"measure: mode {args.mode!r} declares no resume", file=sys.stderr)
+            return EXIT_ADAPTER_ERROR
+        try:
+            resume_request = CommandRequest(
+                mode=resume_mode,
+                bucket=args.bucket,
+                region=args.region,
+                prefix=args.prefix,
+                tool=args.tool,
+                signed=args.auth_role is not None,
+                config={**config, "mode": resume_mode},
+                sink_dir=str(native_root),
+                artifact_path=artifact_path,
+                visible_memory_gb=visible_memory_gb,
+                heap_percent=HEAP_PERCENT,
+                endpoint_url=subject_endpoint,
+            )
+            resume_command = adapter.compile(resume_request)
+            resume_functional_env = adapter.build_env(resume_request)
+        except Exception as exc:
+            print(f"measure: {args.tool} resume {resume_mode!r}: {exc}", file=sys.stderr)
+            return EXIT_ADAPTER_ERROR
+        if not preflight(resume_command):
+            return 127
+        environment_error = validate_environment_inputs(resume_functional_env)
+        if environment_error:
+            print(f"measure: {environment_error}", file=sys.stderr)
+            return 2
+        resume_env = subject_env(args.region, resume_functional_env, credential_env)
 
     # Where this attempt's product is published, and so where fd 1 goes: a
     # subject that only prints has its listing landed in the declared file
@@ -1556,19 +1939,64 @@ def main(argv: list[str] | None = None) -> int:
     if replay_failure is not None:
         return replay_failure
 
+    if sidecar is not None:
+        # Started last, immediately before the subject: readiness, warm-up and
+        # the `before` scrape talk to the server directly, so the sidecar's
+        # timeline holds the subject's requests and nothing else.
+        sidecar_run = fault_runtime.SidecarRun(sidecar, attempt_dir / fault_runtime.SIDECAR_DIR)
+        try:
+            executable = fault_runtime.stage_executable(
+                sidecar, attempt_dir.parent / f"{attempt_dir.name}-sidecar"
+            )
+            sidecar_run.start(executable, SUBJECT_ENV)
+        except Exception as exc:
+            if sidecar_run.block.get("state") != "failed":
+                sidecar_run.fail(f"{type(exc).__name__}: {exc}"[:300])
+            print(f"measure: {sidecar_run.block['error']}", file=sys.stderr)
+            sidecar_run.stop()
+            finish_replay()
+            return publish_failure(exit_code=EXIT_SIDECAR_FAILED, setup=None, started_at=None)
+
     started_at = datetime.now(UTC).isoformat()
-    execution = run_tool(
-        command,
-        attempt_dir,
-        args.timeout,
-        args.term_grace,
-        env,
-        cwd=args.subject_workdir,
-        # The container's peak is not per exec: only an attempt whose setup exec
-        # already ran has something to clear out of it.
-        reset_peak=setup is not None,
-        stdout_path=subject_stdout,
-    )
+    fault: dict[str, object] | None = None
+    try:
+        if fault_schedule is None:
+            execution = run_tool(
+                command,
+                attempt_dir,
+                args.timeout,
+                args.term_grace,
+                env,
+                cwd=args.subject_workdir,
+                # The container's peak is not per exec: only an attempt whose setup exec
+                # already ran has something to clear out of it.
+                reset_peak=setup is not None,
+                stdout_path=subject_stdout,
+            )
+        else:
+            assert manifest is not None
+            execution, command, fault = _run_fault_schedule(
+                fault_schedule,
+                args,
+                mode=args.mode,
+                command=command,
+                env=env,
+                resume_mode=resume_mode,
+                resume_command=resume_command,
+                resume_env=resume_env,
+                resume_evidence=manifest.resume_evidence,
+                attempt_dir=attempt_dir,
+                native_root=native_root,
+                stdout_path=subject_stdout,
+                reset_peak=setup is not None,
+            )
+    except BaseException:
+        # A worker that crashes mid-subject still stops what it started: a
+        # sidecar left running would outlive the attempt it belonged to.
+        if sidecar_run is not None:
+            sidecar_run.stop()
+        raise
+    sidecar_error = None if sidecar_run is None else sidecar_run.stop()
     exit_value = execution["exit_code"]
     if isinstance(exit_value, bool) or not isinstance(exit_value, int):
         raise TypeError("run_tool returned a non-integer exit_code")
@@ -1607,6 +2035,10 @@ def main(argv: list[str] | None = None) -> int:
         scanned.insert(0, stdout_path)
     if setup is not None:
         scanned.append(attempt_dir / "inline")
+    if fault is not None and (attempt_dir / "killed").exists():
+        scanned.append(attempt_dir / "killed")
+    if sidecar_run is not None:
+        scanned.append(attempt_dir / fault_runtime.SIDECAR_DIR)
     if retain_products:
         scanned.append(native_root)
     else:
@@ -1656,10 +2088,43 @@ def main(argv: list[str] | None = None) -> int:
         )
     postprocessing_seconds["row_count"] = time.monotonic() - phase_started
 
+    if fault is not None:
+        # Read off the uncompressed logs and the sink as the resume left it,
+        # before either is compressed for publication.
+        phase_started = time.monotonic()
+        _relisted(
+            adapter,
+            args.mode,
+            fault,
+            attempt_dir=attempt_dir,
+            native_root=native_root,
+            config=config,
+        )
+        postprocessing_seconds["relisted"] = time.monotonic() - phase_started
+
     phase_started = time.monotonic()
     product = published_product(product, gap=product_error)
     stdout_gz = gzip_file(stdout_path) if subject_stdout == stdout_path else None
     stderr_gz = gzip_file(stderr_path) if stderr_path.exists() else None
+    treatments: dict[str, object] = {}
+    if fault is not None:
+        steps = fault["steps"]
+        assert isinstance(steps, list)
+        last = steps[-1]
+        last["stdout"] = capture_block(stdout_gz, hash_content=not minimal_evidence)
+        last["stderr"] = capture_block(stderr_gz, hash_content=not minimal_evidence)
+        if len(steps) == 2:
+            steps[0]["stdout"], steps[0]["stderr"] = _publish_captures(
+                attempt_dir / "killed", "killed", hash_content=not minimal_evidence
+            )
+        treatments["fault"] = fault
+    if sidecar_run is not None:
+        sidecar_run.block["stdout"], sidecar_run.block["stderr"] = _publish_captures(
+            attempt_dir / fault_runtime.SIDECAR_DIR,
+            fault_runtime.SIDECAR_DIR,
+            hash_content=not minimal_evidence,
+        )
+        treatments["sidecar_evidence"] = sidecar_run.block
     postprocessing_seconds["capture_finalize"] = time.monotonic() - phase_started
     phase_started = time.monotonic()
     # A subject that leaves a symlink, FIFO, or other special file in its
@@ -1711,6 +2176,21 @@ def main(argv: list[str] | None = None) -> int:
         descendants_empty=bool(execution["descendants_empty"]),
         process_tree_clean=bool(execution["process_tree_clean"]),
     )
+    if fault is not None and completion == 0:
+        steps = fault["steps"]
+        assert isinstance(steps, list)
+        killed_cgroup = steps[0]["execution"]["cgroup"]
+        if isinstance(killed_cgroup.get("oom_kill_delta"), int) and killed_cgroup["oom_kill_delta"]:
+            # The kernel, not the schedule, ended the first step.
+            completion = 1
+        elif not fault["landed"]:
+            completion = EXIT_FAULT_NOT_LANDED
+        elif fault["error"] is not None:
+            completion = EXIT_FAULT_INCOMPLETE
+        elif fault["relisted_error"] is not None:
+            completion = EXIT_POSTPROCESSING_FAILED
+    if sidecar_error is not None and completion == 0:
+        completion = EXIT_SIDECAR_FAILED
     replay_refusals: tuple[str, ...] = ()
     if replay_config is not None:
         replay_refusals = replay.replay_refusals(
@@ -1744,6 +2224,7 @@ def main(argv: list[str] | None = None) -> int:
         native_files=native_files,
         native_sizes=native_sizes,
         artifacts_size_bytes=artifacts_size_bytes,
+        treatments=treatments,
     )
     write_result_atomic(attempt_dir / "result.json", result)
     if not upload(
@@ -1759,6 +2240,13 @@ def main(argv: list[str] | None = None) -> int:
         print("measure: the subject exited clean and published no product", file=sys.stderr)
     elif completion == EXIT_POSTPROCESSING_FAILED:
         print("measure: successful subject output could not be counted", file=sys.stderr)
+    elif completion == EXIT_FAULT_NOT_LANDED:
+        print("measure: the scheduled kill did not land on the subject", file=sys.stderr)
+    elif completion == EXIT_FAULT_INCOMPLETE:
+        assert fault is not None
+        print(f"measure: the resume did not run: {fault['error']}", file=sys.stderr)
+    elif completion == EXIT_SIDECAR_FAILED:
+        print(f"measure: sidecar evidence was refused: {sidecar_error}", file=sys.stderr)
     elif completion == EXIT_REPLAY_EVIDENCE_FAILED:
         print(
             "measure: replay evidence protocol was refused: " + "; ".join(replay_refusals),

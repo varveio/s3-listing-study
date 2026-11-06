@@ -254,6 +254,66 @@ A `replay_*` key in a plan with no `replay:` block is refused, and so is a
 `replay:` block whose defaults do not size a server: a plan states its backend
 completely or not at all.
 
+### A plan may kill and resume its subject
+
+`VERIFIED: no` on Batch; see [`../docs/running.md`](../docs/running.md)
+§ *Fault schedules and sidecars*.
+
+A row — or a layer, for every row under it — may state a fault schedule. The
+attempt then SIGKILLs the subject at that point and runs the mode its capsule
+declares as the resume, as the second step of the same attempt:
+
+```yaml
+swath:
+  cases:
+    - {mode: list, concurrency: 64, fault_kill_at_s: 10}
+    - {mode: list, concurrency: 512, fault_kill_percent: 50, fault_expected_wall_s: 40}
+```
+
+`fault_kill_at_s` is seconds into the first step. `fault_kill_percent` (1–99)
+of `fault_expected_wall_s` states the same point relative to the wall the plan
+expects the first step to take uninterrupted, which is the usual way to keep a
+kill mid-listing across worker counts; the two are stated together, and never
+beside `fault_kill_at_s`. The kill point must fall inside `timeout_s`, which
+both steps share. The schedule is a case input — rendered into the label when
+a row states it, and hashed — so a killed row is never the same case as its
+uninterrupted sibling. It is refused for a mode whose capsule declares no
+resume or whose resume mode is capped below the row's `purpose`, for a
+preparation, and for a mode that is part of a chain or runs an
+inline setup.
+
+### A plan may stand a sidecar in front of its replay server
+
+`VERIFIED: no` on Batch; see [`../docs/running.md`](../docs/running.md)
+§ *Fault schedules and sidecars*.
+
+A replay plan may declare one process the subject talks to instead of the
+server — the swath fault proxy, typically:
+
+```yaml
+sidecar:
+  name: faultproxy
+  executable_uri: gs://RESULTS/tools/faultproxy-<rev>
+  executable_sha256: <64 hex, of that object>
+  listen: 127.0.0.1:19091
+  listen_flag: -listen
+  target_flag: -target
+  timeline_flag: -timeline
+  args: [-seed, "7", -window, "throttle:0s-130s:0.2"]
+```
+
+The worker stages the executable, refuses it unless its sha256 matches, and
+runs it as `<executable> <args…> <listen_flag> <listen> <target_flag>
+http://127.0.0.1:19090 <timeline_flag> <attempt>/sidecar/timeline.tsv`. The
+three flags name the harness-owned addresses in the sidecar's own vocabulary;
+`args` is everything else, forwarded verbatim, and may not restate them. The
+target is always the replay server and is not stated. `listen` is a loopback
+port other than the replay server's two. The whole block is a case input for
+every case in the plan, so a different fault treatment is a different plan —
+one per treatment, in a treatment directory, as with other replay treatments.
+A sidecar is refused without a `replay:` block, and on the chain, inline and
+preparation cases a fault schedule is.
+
 ### `config` is the one nested map
 
 Everything else a row states is a flat scalar. A row may also carry `config`, a

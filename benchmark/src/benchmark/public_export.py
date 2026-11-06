@@ -1150,6 +1150,26 @@ class Release:
     skipped: list[str]
 
 
+def declares_treatment(row: sqlite3.Row) -> bool:
+    """Whether the case this attempt ran hashed a fault schedule or a sidecar.
+
+    Read from the ledger's ``case_inputs``, the document the identity is over,
+    so a treated attempt is refused whether or not its evidence survived. A
+    public row reports one subject wall and derives throughput from it: for a
+    resumed attempt that is the resume's wall over the whole listing's rows,
+    and nothing in the row would say so. Until the schema and its validator
+    carry the treatment, its metric scope and its evidence, such an attempt
+    has no public form.
+    """
+    try:
+        inputs = json.loads(str(row["case_inputs"]))
+    except (TypeError, ValueError):
+        return False
+    return isinstance(inputs, dict) and any(
+        name in inputs for name in ("fault_schedule", "sidecar")
+    )
+
+
 def build_release(
     db_rows: Sequence[sqlite3.Row],
     *,
@@ -1166,6 +1186,14 @@ def build_release(
     releasable = [
         row for row in db_rows if str(row["target_bucket"]) not in spec.withheld_workloads
     ]
+    treated = sorted(str(row["attempt_id"]) for row in releasable if declares_treatment(row))
+    if treated:
+        raise ExportError(
+            "the public row schema cannot yet say that an attempt was killed and resumed or "
+            "ran behind a sidecar, nor which step its metrics describe; refusing to export "
+            f"{len(treated)} treated attempt(s): {', '.join(treated[:5])}"
+            + (" …" if len(treated) > 5 else "")
+        )
     terminal = [row for row in releasable if row["state"] in TERMINAL_STATES]
     skipped = sorted(
         str(row["attempt_id"]) for row in releasable if row["state"] not in TERMINAL_STATES

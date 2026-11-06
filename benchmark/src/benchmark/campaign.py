@@ -29,6 +29,7 @@ from google.api_core.exceptions import (
 )
 from google.auth.exceptions import DefaultCredentialsError
 
+from benchmark import faults as fault_contract
 from benchmark import gcs, identity
 from benchmark import plan as bench
 from benchmark import replay as replay_contract
@@ -278,9 +279,17 @@ def case_identity(
             timeout_s=case.timeout_s,
             input_artifact_sha256=input_artifact_sha256,
         )
+    treatments: dict[str, Any] = {
+        "fault_schedule": (None if case.fault_schedule is None else case.fault_schedule.as_dict()),
+        "sidecar": None if case.sidecar is None else case.sidecar.as_dict(),
+    }
     return (
-        identity.case_id(case.tool, environment, config, tool_slice, platform, replay),
-        identity.case_inputs_document(environment, config, tool_slice, platform, replay),
+        identity.case_id(
+            case.tool, environment, config, tool_slice, platform, replay, **treatments
+        ),
+        identity.case_inputs_document(
+            environment, config, tool_slice, platform, replay, **treatments
+        ),
     )
 
 
@@ -479,7 +488,13 @@ def worker_argument_pairs(
     )
     if _replay_document(attempt) is not None:
         pairs = (*pairs, ("--endpoint-url", endpoint_url), ("--replay-config", str(attempt.replay)))
-    return pairs
+    try:
+        treatments = fault_contract.worker_flags(attempt.case_inputs)
+    except fault_contract.FaultError as exc:
+        raise CampaignError(
+            f"{attempt.attempt_id} carries a malformed fault treatment: {exc}"
+        ) from None
+    return (*pairs, *treatments)
 
 
 def planned_attempt(
@@ -617,6 +632,12 @@ def _case_document(case: Case) -> dict[str, Any]:
         "axes": [list(pair) for pair in case.axes],
         "config": [list(pair) for pair in case.config],
         "replay": None if case.replay is None else case.replay.as_dict(),
+        # Present only when stated, so a slot booked before either existed reads
+        # back exactly as it was written.
+        **(
+            {} if case.fault_schedule is None else {"fault_schedule": case.fault_schedule.as_dict()}
+        ),
+        **({} if case.sidecar is None else {"sidecar": case.sidecar.as_dict()}),
     }
 
 
@@ -645,6 +666,16 @@ def _case_from_document(document: Any) -> Case:
             axes=tuple((str(key), value) for key, value in document["axes"]),
             config=tuple((str(key), value) for key, value in document["config"]),
             replay=replay,
+            fault_schedule=(
+                None
+                if document.get("fault_schedule") is None
+                else fault_contract.parse_schedule(document["fault_schedule"])
+            ),
+            sidecar=(
+                None
+                if document.get("sidecar") is None
+                else fault_contract.parse_sidecar(document["sidecar"])
+            ),
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise CampaignError(f"recorded case is not one this code understands: {exc}") from None

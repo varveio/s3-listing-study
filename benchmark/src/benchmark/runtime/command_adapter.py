@@ -315,6 +315,28 @@ class Mode:
     the measurement.
     """
 
+    resume: str = ""
+    """Another mode of this capsule that continues this one after it was killed.
+
+    What a plan's fault schedule runs as the second step of one attempt: the
+    measured mode is SIGKILLed at the stated point, then this mode runs against
+    the same sink, compiled from the same config with only ``mode`` replaced.
+    Empty means the subject has no resume path, and a plan scheduling a kill on
+    this mode is refused. Only a mode whose product lands in a file or dataset
+    can declare one: two stdout streams are not a listing the harness can join.
+    """
+
+    resume_evidence: tuple[str, ...] = ()
+    """Sink-relative files the worker copies out after the killed step.
+
+    The resume runs in the same sink and may rewrite what the killed step left
+    there; these are the files ``RELISTED`` needs to see as the killed step left
+    them. A file the killed step never wrote is recorded as absent, not refused:
+    a run killed before its first checkpoint is a real outcome. A path that
+    reaches through a symlink, or ends at anything but a regular file, is unsafe
+    and refuses the attempt before the resume (``fault_runtime``).
+    """
+
     def __post_init__(self) -> None:
         if self.product not in PRODUCTS:
             raise CommandAdapterError(f"mode product must be one of {PRODUCTS}: {self.product!r}")
@@ -333,6 +355,25 @@ class Mode:
             raise CommandAdapterError("mode executable must name a declared executable")
         if not isinstance(self.inline, str):
             raise CommandAdapterError("mode inline must name a declared mode of this capsule")
+        if not isinstance(self.resume, str):
+            raise CommandAdapterError("mode resume must name a declared mode of this capsule")
+        if not isinstance(self.resume_evidence, tuple) or not all(
+            isinstance(name, str)
+            and name
+            and not name.startswith("/")
+            and ".." not in PurePosixPath(name).parts
+            for name in self.resume_evidence
+        ):
+            raise CommandAdapterError(
+                "mode resume_evidence must be a tuple of paths under the sink"
+            )
+        if self.resume_evidence and not self.resume:
+            raise CommandAdapterError("mode declares resume_evidence but no resume mode")
+        if self.resume and self.product_channel == "stdout":
+            raise CommandAdapterError(
+                "a resumable mode publishes its product to a file or dataset; two stdout "
+                "streams are not one listing"
+            )
         axes = dict(self.axes)
         unreserved = sorted(set(axes) - set(RESERVED_AXES))
         if unreserved:
@@ -583,6 +624,38 @@ class ArtifactValidator(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
+class ResumeSteps:
+    """What the two steps of a killed-and-resumed attempt left, for ``RELISTED``.
+
+    Every path is one the worker owns. ``killed_evidence`` holds the mode's
+    declared ``resume_evidence`` files as the killed step left them, at their
+    sink-relative paths; ``sink`` is the shared sink after the resume finished.
+    The four logs are uncompressed, as each step wrote them.
+    """
+
+    sink: Path
+    killed_evidence: Path
+    killed_stdout: Path
+    killed_stderr: Path
+    resume_stdout: Path
+    resume_stderr: Path
+    config: Mapping[str, object]
+
+
+class RelistedHook(Protocol):
+    """A capsule's derivation of the work a resume repeated.
+
+    Returns a flat mapping of figure name to number — for swath, the keys and
+    requests the resume listed again over what the killed step had already made
+    durable. The harness records it beside the two steps and reads none of it;
+    raising makes the attempt's postprocessing fail, as a row count that cannot
+    be taken does.
+    """
+
+    def __call__(self, steps: ResumeSteps) -> Mapping[str, object]: ...
+
+
+@dataclass(frozen=True, slots=True)
 class LoadedCommandAdapter:
     """A capsule's complete-argv builder and its recorded subject prefix.
 
@@ -649,6 +722,10 @@ class LoadedCommandAdapter:
     )
     """Per producing mode, the structural check its artifact must pass. A mode
     with no entry produces bytes nothing structural can be said about."""
+
+    relisted: Mapping[str, RelistedHook] = field(default_factory=lambda: MappingProxyType({}))
+    """Per resumable mode, how the work its resume repeated is derived from the two
+    steps. A resumable mode with no entry records no relisted figure."""
 
     accepted_config_keys: frozenset[str] = frozenset()
     """Derived, never declared: see the class docstring. Any value passed in is
@@ -965,6 +1042,76 @@ def _check_inline(
             )
 
 
+def _check_resume(
+    modes: Mapping[str, Mode], requires: Mapping[str, tuple[Requirement, ...]], path: Path
+) -> None:
+    """Hold a resume to one flat step that publishes what the killed mode publishes.
+
+    The final sink is read through the *killed* mode's manifest — its product,
+    its row count — so a resume writing different files would leave a product
+    nobody declared. And like an inline exec, a resume that needs a step of its
+    own would put a graph inside one attempt.
+    """
+    for mode, manifest in modes.items():
+        resume = manifest.resume
+        if not resume:
+            continue
+        if resume == mode:
+            raise CommandAdapterError(f"{path} mode {mode!r} names itself as its resume")
+        continued = modes.get(resume)
+        if continued is None:
+            raise CommandAdapterError(f"{path} mode {mode!r} names unknown resume mode {resume!r}")
+        if continued.resume or continued.inline or resume in requires:
+            raise CommandAdapterError(
+                f"{path} resume mode {resume!r} needs a step of its own; a resume is one command"
+            )
+        if manifest.inline or mode in requires:
+            raise CommandAdapterError(
+                f"{path} mode {mode!r} declares a resume and a setup or chain; a killed attempt "
+                "is two execs of one subject and nothing else"
+            )
+        if (
+            continued.artifacts != manifest.artifacts
+            or continued.product_artifact != manifest.product_artifact
+            or continued.product_channel != manifest.product_channel
+        ):
+            raise CommandAdapterError(
+                f"{path} resume mode {resume!r} must publish the artifacts {mode!r} publishes, "
+                "on the same channel"
+            )
+        # The final product is counted and classified through the killed mode's
+        # manifest, so the resume has to mean the same bytes: the same product
+        # format, the same contract columns, compressed the same way.
+        if (
+            continued.product != manifest.product
+            or continued.fields != manifest.fields
+            or continued.product_compress != manifest.product_compress
+        ):
+            raise CommandAdapterError(
+                f"{path} resume mode {resume!r} must publish the product and fields {mode!r} "
+                "publishes"
+            )
+
+
+def _load_relisted(
+    module: ModuleType, path: Path, modes: Mapping[str, Mode]
+) -> Mapping[str, RelistedHook]:
+    raw = getattr(module, "RELISTED", None)
+    if raw is None:
+        return MappingProxyType({})
+    if not isinstance(raw, Mapping) or not raw:
+        raise CommandAdapterError(f"{path} RELISTED must map a resumable mode to its derivation")
+    hooks: dict[str, RelistedHook] = {}
+    for mode, hook in raw.items():
+        manifest = modes.get(mode)
+        if manifest is None or not manifest.resume:
+            raise CommandAdapterError(f"{path} RELISTED names {mode!r}, which declares no resume")
+        if not callable(hook) or not _accepts_one_argument(hook):
+            raise CommandAdapterError(f"{path} RELISTED[{mode!r}] must be callable as hook(steps)")
+        hooks[mode] = cast(RelistedHook, hook)
+    return MappingProxyType(hooks)
+
+
 def _accepts_one_argument(value: Callable[..., object]) -> bool:
     try:
         inspect.signature(value).bind(object())
@@ -1038,6 +1185,7 @@ def load_command_adapter(
     modes = _load_modes(module, path, executables)
     requires = _load_requires(module, path, modes)
     _check_inline(modes, requires, path)
+    _check_resume(modes, requires, path)
     _check_registered_executable(path, executables[0])
 
     return LoadedCommandAdapter(
@@ -1053,6 +1201,7 @@ def load_command_adapter(
         requires,
         _load_build_env(module, path, functional_env),
         _load_validate_artifact(module, path, modes),
+        _load_relisted(module, path, modes),
     )
 
 

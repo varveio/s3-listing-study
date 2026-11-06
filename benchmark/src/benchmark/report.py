@@ -41,6 +41,7 @@ from pathlib import Path
 from typing import Any
 
 from benchmark import adapters
+from benchmark import faults as fault_contract
 from benchmark import replay as replay_contract
 from benchmark.ledger import (
     STATE_FILENAME,
@@ -187,6 +188,8 @@ def row_for(row: sqlite3.Row, *, adapter_root: str) -> dict[str, Any]:
         "replay_state": "-",
         "replay_timing": "-",
         "replay_timing_detail": None,
+        "fault_detail": None,
+        "sidecar_detail": None,
         "exit": "-",
         "worker_exit": "-",
         "row_count": "-",
@@ -244,6 +247,12 @@ def row_for(row: sqlite3.Row, *, adapter_root: str) -> dict[str, Any]:
         # the subject fields.
         "max_rss_floor_kb": (
             execution.get("max_rss_floor_kb", "-") if isinstance(execution, dict) else "-"
+        ),
+        "fault_detail": result.get("fault") if isinstance(result.get("fault"), dict) else None,
+        "sidecar_detail": (
+            result.get("sidecar_evidence")
+            if isinstance(result.get("sidecar_evidence"), dict)
+            else None
         ),
     }
     return {**measured, "evidence_state": "RESULT_BOUND"}
@@ -391,6 +400,77 @@ def replay_timing_lines(rows: list[dict[str, Any]]) -> list[str]:
     return lines
 
 
+def fault_lines(rows: list[dict[str, Any]]) -> list[str]:
+    """Both steps of every killed-and-resumed attempt.
+
+    The table's subject columns describe the last step that ran, which for a
+    landed kill is the resume; this is where the killed step, the gap, the sum
+    and the capsule's relisted figure are read.
+    """
+    lines: list[str] = []
+    for row in rows:
+        fault = row.get("fault_detail")
+        if not isinstance(fault, dict):
+            continue
+        raw_steps = fault.get("steps")
+        steps = raw_steps if isinstance(raw_steps, list) else []
+        rendered = [
+            f"{step.get('step')} step exit {step.get('exit_code')}, wall "
+            f"{step.get('wall_seconds')}s, max RSS {step.get('max_rss_kb')} KiB"
+            for step in steps
+            if isinstance(step, dict)
+        ]
+        landed = fault.get("landed")
+        line = (
+            f"- `{row['attempt_id']}`: kill at {fault.get('kill_after_s')}s "
+            f"{'landed' if landed else 'did NOT land (no reaped SIGKILL)'}; " + "; ".join(rendered)
+        )
+        if len(steps) == 2:
+            line += (
+                f"; gap {fault.get('gap_seconds')}s between the steps; summed subject wall "
+                f"{fault.get('subject_wall_seconds')}s over both steps (excludes the gap; "
+                "not recovery latency)"
+            )
+        if fault.get("error"):
+            line += f"; resume NOT run: {fault['error']}"
+        relisted = fault.get("relisted")
+        if isinstance(relisted, dict):
+            line += "; relisted (capsule-derived) " + ", ".join(
+                f"{k}={v}" for k, v in sorted(relisted.items())
+            )
+        elif fault.get("relisted_error"):
+            line += f"; relisted REFUSED: {fault['relisted_error']}"
+        elif not fault.get("relisted_declared"):
+            line += "; relisted not declared by the capsule"
+        lines.append(line)
+    return lines
+
+
+def sidecar_lines(rows: list[dict[str, Any]]) -> list[str]:
+    """What the sidecar between subject and server recorded, from its bound timeline."""
+    lines: list[str] = []
+    for row in rows:
+        sidecar = row.get("sidecar_detail")
+        if not isinstance(sidecar, dict):
+            continue
+        timeline = sidecar.get("timeline")
+        observed = "no timeline"
+        if isinstance(timeline, dict):
+            totals = timeline.get("totals")
+            rendered = (
+                ", ".join(f"{k}={v}" for k, v in sorted(totals.items()))
+                if isinstance(totals, dict)
+                else "-"
+            )
+            observed = f"timeline {timeline.get('rows')} bucket(s): {rendered}"
+        line = f"- `{row['attempt_id']}`: {sidecar.get('name')} **{sidecar.get('state')}** — "
+        line += observed
+        if sidecar.get("error"):
+            line += f"; {sidecar['error']}"
+        lines.append(line)
+    return lines
+
+
 def slot_note(con: sqlite3.Connection, slot: sqlite3.Row) -> str:
     """One blocked slot, and whether anything can still pay it.
 
@@ -406,6 +486,18 @@ def slot_note(con: sqlite3.Connection, slot: sqlite3.Row) -> str:
     return f"{note} -- UNSATISFIABLE, nothing in this group can pay it: {reason}"
 
 
+SCOPED_COLUMNS = frozenset({"exit", "wall_seconds", "max_rss_kb", "max_rss_floor_kb"})
+"""Subject metrics that describe one step of a killed-and-resumed attempt."""
+
+
+def table_cell(row: dict[str, Any], column: str) -> str:
+    """A table cell, with the step a treated attempt's subject metric describes."""
+    scope = fault_contract.metric_scope(row.get("fault_detail"))
+    if scope is None or column not in SCOPED_COLUMNS or row[column] == "-":
+        return str(row[column])
+    return f"{row[column]} ({scope})"
+
+
 def render_markdown(rows: list[dict[str, Any]], *, blocked: list[str]) -> str:
     header = "| " + " | ".join(COLUMNS) + " |"
     separator = "| " + " | ".join("---" for _ in COLUMNS) + " |"
@@ -417,11 +509,15 @@ def render_markdown(rows: list[dict[str, Any]], *, blocked: list[str]) -> str:
     for bucket in sorted({str(row["bucket"]) for row in rows}):
         members = [row for row in rows if row["bucket"] == bucket]
         lines.extend([f"## {bucket}", "", header, separator])
-        lines.extend("| " + " | ".join(str(row[c]) for c in COLUMNS) + " |" for row in members)
+        lines.extend(
+            "| " + " | ".join(table_cell(row, c) for c in COLUMNS) + " |" for row in members
+        )
         for title, section in (
             ("Rate cases", rate_lines(members)),
             ("Preparations", preparation_lines(members)),
             ("Replay timing treatment", replay_timing_lines(members)),
+            ("Fault schedule", fault_lines(members)),
+            ("Sidecar", sidecar_lines(members)),
         ):
             if section:
                 lines.extend(["", f"### {title}", "", *section])
