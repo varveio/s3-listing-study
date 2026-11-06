@@ -1,0 +1,304 @@
+{
+  "$schema": "../../../schemas/claims.schema.json",
+  "schema_version": 1,
+  "tool": "swath-go",
+  "claims": [
+    {
+      "id": "go-port-is-a-separate-tool",
+      "statement": "The Go port is module github.com/varveio/swath/go, command go/cmd/swath, with CLI name swath; the Java distribution keeps its own swath launcher and the two are separate tools.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Stated by the port's own README at the pinned revision. The two share a repository, a name and a dataset family but not a command line: none of the Java capsule's flags is carried over, and the output format differs (format 2, which a Java reader refuses by design).",
+      "evidence": [
+        {"kind": "source", "subject": "upstream", "repository": "https://github.com/varveio/swath", "commit": "63a42568dbcfb2d3cdc18e3ccf7abfd69792ad77", "path": "go/README.md", "lines": "3-7"}
+      ]
+    },
+    {
+      "id": "subject-is-an-unmerged-branch-head",
+      "statement": "The subject is commit 63a42568dbcfb2d3cdc18e3ccf7abfd69792ad77, the head of upstream's unmerged spike/go-local-lister branch on 2026-11-06; the port has no tag, release, published binary or image.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Read from the public repository on 2026-11-06. The pin is provisional: it moves to the merge commit when the branch merges, and every anchor in this ledger moves with it. A branch head can move between readings, which is why each anchor names the full commit.",
+      "evidence": [
+        {"kind": "documentation", "url": "https://github.com/varveio/swath/tree/spike/go-local-lister"},
+        {"kind": "documentation", "path": "../research/derivation.md"}
+      ]
+    },
+    {
+      "id": "static-cgo-free-binary",
+      "statement": "The port builds as one pure-Go static binary with CGO_ENABLED=0; upstream CI cross-builds it that way for linux/amd64, linux/arm64, darwin/arm64 and windows/amd64.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Upstream CI builds each target to /dev/null as a compile check; it does not run the cross-built binaries. The toolchain is the go.mod directive's version, go 1.26.0.",
+      "evidence": [
+        {"kind": "source", "subject": "upstream", "repository": "https://github.com/varveio/swath", "commit": "63a42568dbcfb2d3cdc18e3ccf7abfd69792ad77", "path": ".github/workflows/ci.yml", "lines": "325-330,340-347"},
+        {"kind": "source", "subject": "upstream", "repository": "https://github.com/varveio/swath", "commit": "63a42568dbcfb2d3cdc18e3ccf7abfd69792ad77", "path": "go/go.mod", "lines": "3"}
+      ]
+    },
+    {
+      "id": "source-archive-build-has-no-revision",
+      "statement": "The port reads its reported revision only from Go's VCS build info, so a binary built from a source archive, as build/Dockerfile does, reports version devel and no revision in --version and in the run report.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Source-established: build() defaults to devel and fills the revision only from the vcs.revision build setting, which the Go toolchain records only when building inside a VCS checkout. The capsule's revision identity is therefore the checksum-pinned archive in build/image.json, not the binary's self-report.",
+      "evidence": [
+        {"kind": "source", "subject": "upstream", "repository": "https://github.com/varveio/swath", "commit": "63a42568dbcfb2d3cdc18e3ccf7abfd69792ad77", "path": "go/internal/listing/report.go", "lines": "191-214"}
+      ]
+    },
+    {
+      "id": "ranges-expand-in-key-order-without-a-sort",
+      "statement": "An S3 listing is a tree of half-open key ranges: a worker expands a range into rows that are already ascending plus child ranges that sort between them, and one drainer walks that tree depth-first, so rows reach the Parquet writer in global key order with no external sort, staging or merge.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Established from the port's architecture page and package map at the pinned revision; no run instruments the range tree. Splits are owner-side: the range engine has no stealing, unlike the Java engine's work-stealing scan.",
+      "evidence": [
+        {"kind": "source", "subject": "upstream", "repository": "https://github.com/varveio/swath", "commit": "63a42568dbcfb2d3cdc18e3ccf7abfd69792ad77", "path": "go/docs/architecture.md", "lines": "10-19,30,32,64-68"},
+        {"kind": "source", "subject": "upstream", "repository": "https://github.com/varveio/swath", "commit": "63a42568dbcfb2d3cdc18e3ccf7abfd69792ad77", "path": "go/docs/upgrade.md", "lines": "140"}
+      ]
+    },
+    {
+      "id": "workers-default-64-is-the-limiter-maximum",
+      "statement": "--workers defaults to 64 whatever the CPU count and sets both the listing goroutines and the maximum of the request limiter, whose limit starts at that maximum.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The flag's zero value is replaced by DefaultWorkers when the configuration resolves, and NewLimiter starts its limit at its maximum. This is why the capsule declares concurrency as a Ceiling of 64 rather than a Default: with the limiter on the achieved width is lower and data-dependent. Unlike the Java engine, which starts at min(4, N), the port starts at N unless --limiter-slow-start is given.",
+      "evidence": [
+        {"kind": "source", "subject": "upstream", "repository": "https://github.com/varveio/swath", "commit": "63a42568dbcfb2d3cdc18e3ccf7abfd69792ad77", "path": "go/internal/listing/listing.go", "lines": "143-153,176-178"},
+        {"kind": "source", "subject": "upstream", "repository": "https://github.com/varveio/swath", "commit": "63a42568dbcfb2d3cdc18e3ccf7abfd69792ad77", "path": "go/internal/source/objhttp/limiter.go", "lines": "31-36,74-82"},
+        {"kind": "source", "subject": "upstream", "repository": "https://github.com/varveio/swath", "commit": "63a42568dbcfb2d3cdc18e3ccf7abfd69792ad77", "path": "go/cmd/swath/main.go", "lines": "311"}
+      ]
+    },
+    {
+      "id": "limiter-is-aimd-on-throttle-answers",
+      "statement": "With the limiter on, the default, a throttle answer multiplies the requests in flight by 0.7 and growth returns one permit per second after 10 seconds without one; --limiter=false keeps a fixed --workers requests in flight.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Constants and defaults read from source; growth also freezes while successful attempts are slow or attempts time out. No run has exercised the limiter against real throttling, so how far below the ceiling a run settles is unknown.",
+      "evidence": [
+        {"kind": "source", "subject": "upstream", "repository": "https://github.com/varveio/swath", "commit": "63a42568dbcfb2d3cdc18e3ccf7abfd69792ad77", "path": "go/internal/source/objhttp/limiter.go", "lines": "13-28"},
+        {"kind": "source", "subject": "upstream", "repository": "https://github.com/varveio/swath", "commit": "63a42568dbcfb2d3cdc18e3ccf7abfd69792ad77", "path": "go/internal/source/keyrange/flags.go", "lines": "54-60"}
+      ]
+    },
+    {
+      "id": "seed-is-off-by-default",
+      "statement": "--seed, off by default, tiles the keyspace from delimiter probes of the folder hierarchy before splitting; without it the parallel core starts from the whole scope.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Read from the flag definition and the CLI page. It changes the request pattern, not the output; the capsule exposes it as the seed config key so a plan can sweep it.",
+      "evidence": [
+        {"kind": "source", "subject": "upstream", "repository": "https://github.com/varveio/swath", "commit": "63a42568dbcfb2d3cdc18e3ccf7abfd69792ad77", "path": "go/internal/source/keyrange/flags.go", "lines": "58,63"}
+      ]
+    },
+    {
+      "id": "s3-flag-surface",
+      "statement": "The S3 flag group offers --endpoint, --region, --profile, --anonymous, --request-payer, --request-timeout, --path-style, --fips, --dualstack and --fetch-owner; --anonymous sends unsigned requests whatever the environment holds.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Read from the flag registration. Without --anonymous the AWS SDK default chain applies and requests go unsigned only when that chain is empty. Path-style addressing is also used automatically for IP endpoints such as the study's replay server, so the capsule renders only --endpoint.",
+      "evidence": [
+        {"kind": "source", "subject": "upstream", "repository": "https://github.com/varveio/swath", "commit": "63a42568dbcfb2d3cdc18e3ccf7abfd69792ad77", "path": "go/internal/source/s3/register.go", "lines": "36-47"},
+        {"kind": "documentation", "url": "https://github.com/varveio/swath/blob/63a42568dbcfb2d3cdc18e3ccf7abfd69792ad77/go/docs/internals/providers.md"}
+      ]
+    },
+    {
+      "id": "output-is-a-format-2-sorted-dataset",
+      "statement": "swath list writes a globally key-sorted Parquet dataset: dense, disjoint data/part-NNNNN.parquet parts and a format-2 manifest.json listing them in order with exact base64 key bounds, row counts, sizes and md5.",
+      "scope": "output",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Format 2 is not a superset of the Java format 1: there is no _SUCCESS or symlink.txt, and a format-1 reader rejects it. The capsule's normalizer reads the parts in manifest order and checks rows and sizes against the manifest; it does not check md5 or key bounds.",
+      "evidence": [
+        {"kind": "documentation", "url": "https://github.com/varveio/swath/blob/63a42568dbcfb2d3cdc18e3ccf7abfd69792ad77/go/docs/upgrade.md"},
+        {"kind": "documentation", "url": "https://github.com/varveio/swath/blob/63a42568dbcfb2d3cdc18e3ccf7abfd69792ad77/go/docs/internals/parquet-output.md"}
+      ]
+    },
+    {
+      "id": "manifest-is-the-commit",
+      "statement": "manifest.json is installed last by an atomic rename and a directory sync; without it there is no dataset, even though a journaled run publishes parts into data/ before the end.",
+      "scope": "output",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Stated by the port's output documentation. It is why the normalizer refuses a directory with no manifest rather than reading whatever parts are present.",
+      "evidence": [
+        {"kind": "documentation", "url": "https://github.com/varveio/swath/blob/63a42568dbcfb2d3cdc18e3ccf7abfd69792ad77/go/docs/internals/parquet-output.md"}
+      ]
+    },
+    {
+      "id": "coverage-states-completeness",
+      "statement": "The manifest's coverage block states whether the dataset is the whole scope: complete, stop_reason, skipped_entries and filters, with scope whole or prefix; upstream's acceptance rule for a whole-source reader is complete true, skipped_entries 0, filters empty.",
+      "scope": "correctness",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "This is the tool's own statement of completeness, not a verification of it. The normalizer applies upstream's rule, also requiring stop_reason completed and a scope equal to the case's prefix.",
+      "evidence": [
+        {"kind": "documentation", "url": "https://github.com/varveio/swath/blob/63a42568dbcfb2d3cdc18e3ccf7abfd69792ad77/go/docs/upgrade.md"}
+      ]
+    },
+    {
+      "id": "s3-schema-is-current-object-nine-columns",
+      "statement": "The S3 schema swath/s3-objects/v1 has nine columns, key, size, last_modified, etag, storage_class, owner_id, owner_display_name, checksum_algorithm and checksum_type, with key a STRING-annotated byte array and last_modified a UTC microsecond timestamp.",
+      "scope": "output",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Format 2 drops the Java schema's version_id, is_latest, is_delete_marker and row_type, since every row is a current object; owner columns are null unless --fetch-owner. ETags lose one pair of surrounding quotes.",
+      "evidence": [
+        {"kind": "documentation", "url": "https://github.com/varveio/swath/blob/63a42568dbcfb2d3cdc18e3ccf7abfd69792ad77/go/docs/internals/parquet-output.md"}
+      ]
+    },
+    {
+      "id": "report-is-written-on-failure-too",
+      "statement": "--report FILE writes the JSON run report, with the outcome and a random attempt id, to FILE when the attempt ends, on failure too; upstream asks that the path be outside the output directory and fresh per attempt.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Read from the flag and the CLI page. A process killed hard writes no report, and the resume step reuses the list step's path, so the killed step's report must be copied out before the resume runs. The worker keeps only run reports whose names the harness lists, and this one is not yet listed.",
+      "evidence": [
+        {"kind": "source", "subject": "upstream", "repository": "https://github.com/varveio/swath", "commit": "63a42568dbcfb2d3cdc18e3ccf7abfd69792ad77", "path": "go/cmd/swath/main.go", "lines": "320"},
+        {"kind": "documentation", "url": "https://github.com/varveio/swath/blob/63a42568dbcfb2d3cdc18e3ccf7abfd69792ad77/go/docs/cli.md"}
+      ]
+    },
+    {
+      "id": "resume-replays-the-recorded-command",
+      "statement": "swath resume DIR continues an interrupted S3 run from the journal in DIR/.swath/ with the command it recorded; only runtime and operational flags may be given again, and on a committed complete dataset it exits 0 with nothing to do.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The flag sets are read from source and the behaviour from the CLI page. The source and output identity is frozen, so a resume that resolves another route is refused.",
+      "evidence": [
+        {"kind": "source", "subject": "upstream", "repository": "https://github.com/varveio/swath", "commit": "63a42568dbcfb2d3cdc18e3ccf7abfd69792ad77", "path": "go/cmd/swath/main.go", "lines": "289-300"},
+        {"kind": "documentation", "url": "https://github.com/varveio/swath/blob/63a42568dbcfb2d3cdc18e3ccf7abfd69792ad77/go/docs/cli.md"}
+      ]
+    },
+    {
+      "id": "exit-codes-classify-the-outcome",
+      "statement": "The exit code classifies the outcome: 0 completed, 1 fatal or incomplete, 2 usage or refused, 74 disk full, 75 stuck, 124 deadline, 130 interrupted, 143 terminated; 74, 75, 124, 130 and 143 leave a journaled run resumable.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "From the CLI page's outcome table. A dataset committed with partial coverage exits 1, so a partial dataset never exits 0.",
+      "evidence": [
+        {"kind": "documentation", "url": "https://github.com/varveio/swath/blob/63a42568dbcfb2d3cdc18e3ccf7abfd69792ad77/go/docs/cli.md"}
+      ]
+    },
+    {
+      "id": "hosted-runner-needs-a-finite-max-duration",
+      "statement": "--max-duration defaults to 0, no limit, and upstream says a hosted runner needs a finite --max-duration on every attempt with its own process deadline above it plus 20 seconds.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Only the deadline stops a service that answers forever without rows. The capsule cannot see the harness's timeout, so max_duration is a plan-stated config key and its relation to the row's timeout_s is the plan's to keep.",
+      "evidence": [
+        {"kind": "source", "subject": "upstream", "repository": "https://github.com/varveio/swath", "commit": "63a42568dbcfb2d3cdc18e3ccf7abfd69792ad77", "path": "go/cmd/swath/main.go", "lines": "321"},
+        {"kind": "documentation", "url": "https://github.com/varveio/swath/blob/63a42568dbcfb2d3cdc18e3ccf7abfd69792ad77/go/docs/cli.md"}
+      ]
+    },
+    {
+      "id": "image-builds-from-the-pinned-recipe",
+      "statement": "build/Dockerfile builds the subject image from the checksum-pinned source archive and the digest-pinned Go 1.26.0 builder.",
+      "scope": "operability",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "The image has not been built, and no image digest exists. A scratch build of the same archive with the same go build line outside Docker is described in docs/running.md; it is not the recipe's build.",
+      "evidence": [
+        {"kind": "none", "reason": "Nobody has built build/Dockerfile; the toolbox does not yet include this subject."}
+      ]
+    },
+    {
+      "id": "adapter-runs-under-the-harness",
+      "statement": "The compiled argv runs under the benchmark worker and its dataset normalizes through the worker's dataset channel.",
+      "scope": "runtime",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "The adapter's argv parsed and ran against a scratch build of the subject over a synthetic local S3 store to make the adapter fixture, and the normalizer reads that fixture; no harness attempt exists, and the subject is not registered with the toolbox.",
+      "evidence": [
+        {"kind": "none", "reason": "No harness run: the subject is not registered in the toolbox, so the worker cannot select it."}
+      ]
+    },
+    {
+      "id": "lists-a-bucket-completely",
+      "statement": "A run against S3 lists every object in its scope exactly once.",
+      "scope": "correctness",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "The coverage block is the tool's own claim of completeness and is not evidence of it. No run against S3, no reference manifest and no verifier verdict exist.",
+      "evidence": [
+        {"kind": "none", "reason": "Nobody has run the port against S3 in this study."}
+      ]
+    },
+    {
+      "id": "resume-after-kill-completes",
+      "statement": "A run killed by SIGKILL and continued with swath resume commits a complete dataset holding each key once.",
+      "scope": "runtime",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "Upstream documents the journal and a crash-matrix test suite; neither is a run of this study. Crash-resume is scale-dependent and is not settleable at smoke scale.",
+      "evidence": [
+        {"kind": "none", "reason": "No killed-and-resumed attempt has run; the harness's fault schedule is not on main."}
+      ]
+    },
+    {
+      "id": "limiter-under-real-throttling",
+      "statement": "Under real S3 throttling the limiter lowers the requests in flight below --workers and the run completes.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "The rules are source-established in claim limiter-is-aimd-on-throttle-answers; their behaviour against a throttling store is a run question.",
+      "evidence": [
+        {"kind": "none", "reason": "No run against a throttling store."}
+      ]
+    },
+    {
+      "id": "throughput-and-memory-at-scale",
+      "statement": "Wall clock, peak memory and spill at scale are within the bounds the run report and --memory imply.",
+      "scope": "performance",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "--memory bounds rows held between listing and encoding, not the process; peak RSS is a run fact. Nothing here is comparative.",
+      "evidence": [
+        {"kind": "none", "reason": "No run at any scale."}
+      ]
+    },
+    {
+      "id": "signed-path-unexercised",
+      "statement": "Without --anonymous the port signs with the AWS SDK default credential chain the harness provides.",
+      "scope": "runtime",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "The adapter drops --anonymous for a signed case; whether the harness's credential delivery reaches the SDK chain as the port expects is untested.",
+      "evidence": [
+        {"kind": "none", "reason": "No signed run."}
+      ]
+    },
+    {
+      "id": "go-and-java-datasets-agree",
+      "statement": "For the same bucket the Go port and the Java capsule's sorted Parquet mode produce the same key set and values.",
+      "scope": "correctness",
+      "status": "unverified",
+      "disposition": "retained",
+      "qualification": "Upstream ships go/bench/diffds.py for exactly this comparison; the study has not run either side of it.",
+      "evidence": [
+        {"kind": "none", "reason": "No run of the port, so nothing to compare."}
+      ]
+    },
+    {
+      "id": "first-party-source-basis",
+      "statement": "The study read the port's own public source and documentation, and the tool is built by the same organisation that runs the study.",
+      "scope": "structure",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Only public files at the pinned revision were read; no Swath-internal material is used. This capsule was authored by one writer and has not yet had the independent review the repository requires before the owner's review.",
+      "evidence": [
+        {"kind": "source", "subject": "upstream", "repository": "https://github.com/varveio/swath", "commit": "63a42568dbcfb2d3cdc18e3ccf7abfd69792ad77", "path": "go/internal/source/s3/register.go", "lines": "1-2"}
+      ]
+    }
+  ]
+}

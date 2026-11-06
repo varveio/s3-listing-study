@@ -1,0 +1,13 @@
+{
+  "tool": "swath-go",
+  "tool_version": "provisional-63a4256",
+  "tool_build_sha256": "038af19bd0b3f2b576d1eadf7ee397097c2c6c05bcf4e121f208b04127477b3f",
+  "tool_artifact": {"kind":"source-archive","locator":"https://github.com/varveio/swath/archive/63a42568dbcfb2d3cdc18e3ccf7abfd69792ad77.tar.gz","sha256":"22cf5a7696bc23c2ee9582d9eb8d4f6ade139fe44221f428292ee2811aa9b9e5"},
+  "subject_workdir": "/opt/swath-go",
+  "executable": [
+    "/opt/swath-go/swath"
+  ],
+  "command": "adapter/command.py",
+  "normalizer": "adapter/normalize.py",
+  "adapter_bundle_sha256": "4944c24c921774e7d00057712229f84236312e4a063425b9e481587e908a3e7e"
+}
