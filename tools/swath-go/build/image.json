@@ -1,13 +1,13 @@
 {
   "tool": "swath-go",
-  "tool_version": "provisional-7b05605",
-  "tool_build_sha256": "15ae352315a2f4ffcbf7a8853cae1b3d326c7131fd9d9f5ab0ed448c0c08785d",
-  "tool_artifact": {"kind":"source-archive","locator":"https://github.com/varveio/swath/archive/7b05605444766de4e7a736db0bc410409af47429.tar.gz","sha256":"ffa2a7493cfad80fcc680eddbe2389449375c429aa379bbcdf4046c1c5cdeb69"},
+  "tool_version": "main-a2efe16",
+  "tool_build_sha256": "107da43a5b1642ab8390b71a675dc0297b15ab8dc86dc25d53fd327df6331220",
+  "tool_artifact": {"kind":"source-archive","locator":"https://github.com/varveio/swath/archive/a2efe16e45d66088f6447e9723a119e5aebd4a91.tar.gz","sha256":"7f83c4e8845e14f68fe173f06a9525bfd28e513c38b408c43edc250a4a2770f4"},
   "subject_workdir": "/opt/swath-go",
   "executable": [
     "/opt/swath-go/swath"
   ],
   "command": "adapter/command.py",
   "normalizer": "adapter/normalize.py",
-  "adapter_bundle_sha256": "4f0d2fa0a7223feb10bca7a833304ad6cbcfe4c6343eb664af30c7d8982f3dbf"
+  "adapter_bundle_sha256": "79ae5655489af6722b623f7aec9d5f6f082553c47fd245c3ef53a86fb3f4b23d"
 }

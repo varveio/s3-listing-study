@@ -2,7 +2,7 @@
 
 Run with ``uv run pytest tools/swath-go``. Nothing here contacts a network or
 runs the subject. The normalizer cases read three committed products the Go
-binary built from the pinned revision wrote over a synthetic local S3 store
+binary built from the pull request's head revision wrote over a synthetic local S3 store
 (``format2-dataset/``, ``tsv-file/``, ``tsv-zstd-file/``); ``docs/running.md``
 § Adapter fixtures says exactly how. They are adapter test input, not run
 records: they show the normalizer reads what the binary writes, never how the
@@ -42,7 +42,10 @@ BUILD = CAPSULE / "build"
 DATASET = HERE / "format2-dataset"
 TSV = HERE / "tsv-file" / "listing.tsv"
 TSV_ZSTD = HERE / "tsv-zstd-file" / "listing.tsv.zst"
-PIN = "7b05605444766de4e7a736db0bc410409af47429"
+PIN = "a2efe16e45d66088f6447e9723a119e5aebd4a91"
+# The fixtures were written by the pull-request-head binary; the merge changed no
+# command-line or output-format file, so they were kept (docs/running.md).
+FIXTURE_REVISION = "7b05605444766de4e7a736db0bc410409af47429"
 
 FIXTURE_BASE = {
     "bucket": "fixture-bucket",
@@ -323,7 +326,7 @@ def test_fixture_was_written_by_the_compiled_argv(adapter: LoadedCommandAdapter,
     assert report["invocation"]["argv"] == list(argv[1:])
     assert report["outcome"]["class"] == "completed"
     assert report["outcome"]["exit_code"] == 0
-    assert report["build"]["revision"] == PIN
+    assert report["build"]["revision"] == FIXTURE_REVISION
 
 
 # --- build facts ------------------------------------------------------------------------------
@@ -345,7 +348,7 @@ def test_dockerfiles_pin_the_recorded_archive_and_stamp_its_revision() -> None:
     artifact = image["tool_artifact"]
     assert artifact["kind"] == "source-archive"
     assert artifact["locator"] == f"https://github.com/varveio/swath/archive/{PIN}.tar.gz"
-    assert image["tool_version"] == f"provisional-{PIN[:7]}"
+    assert image["tool_version"] == f"main-{PIN[:7]}"
     stamp = f'-ldflags="-s -w -X github.com/varveio/swath/go/internal/listing.revision={PIN}"'
     toolbox = (REPO / "benchmark/build/Dockerfile").read_text()
     stage = toolbox[toolbox.index("FROM golang:") : toolbox.index("AS toolbox")]

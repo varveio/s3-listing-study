@@ -30,15 +30,15 @@ SUPPORTS_UNSIGNED = True
 signed path drops the flag and lets the AWS SDK default chain find the
 credential; neither path has been exercised by a committed run."""
 
-PINNED_REVISION = "7b05605"
+PINNED_REVISION = "a2efe16"
 """The source revision every ``source@`` provenance below is read at. It is the
-head of upstream pull request varveio/swath#255 and moves to the merge commit
-when that pull request merges; ``build/image.json`` pins the same one."""
+merge commit of upstream pull request varveio/swath#255 on main;
+``build/image.json`` pins the same one."""
 
 CONCURRENCY = Ceiling(64, f"source@{PINNED_REVISION}")
 """The port's own width when unsilenced: ``listing.DefaultWorkers = 64``
 (``go/internal/listing/listing.go:215-218``, applied when ``--workers`` is 0 at
-``:248-250`` @7b05605), "whatever the CPU count". The flag has no upper bound:
+``:248-250`` @a2efe16), "whatever the CPU count". The flag has no upper bound:
 ``resolve`` refuses only a negative value (``listing.go:235``).
 
 A ceiling, as the Java capsule's AIMD 64 is, because ``--workers N`` sets both
@@ -175,7 +175,7 @@ DURATION_RE = re.compile(r"\A(?:0|(?:[0-9]+(?:\.[0-9]+)?(?:ns|us|µs|ms|s|m|h))+
 a negative value and 0 means off (``go/docs/cli.md:348-350``)."""
 
 SIZE_RE = re.compile(r"\A[0-9]+(?:\.[0-9]+)?(?:b|k|kb|kib|m|mb|mib|g|gb|gib|t|tb|tib)?\Z", re.I)
-"""``filter.ParseSize`` (``go/internal/filter/filter.go:224-253`` @7b05605), the
+"""``filter.ParseSize`` (``go/internal/filter/filter.go:224-253`` @a2efe16), the
 port's one size syntax: a decimal number and an optional binary unit in any
 case, coming to a whole number of bytes, which only the binary can check."""
 
@@ -290,7 +290,7 @@ RESUME_FROZEN_KEYS = frozenset({"seed", "structure", "part_size"})
 """Config a resume may not restate: the seed and structure policy and the part
 size are part of the recorded command and its resume identity, and ``swath
 resume`` accepts only the runtime and operational flags (``go/docs/cli.md:29-41``,
-``go/cmd/swath/main.go:319-328`` @7b05605), so a case stating one on the resume
+``go/cmd/swath/main.go:319-328`` @a2efe16), so a case stating one on the resume
 mode is refused rather than silently run at the journal's value."""
 
 

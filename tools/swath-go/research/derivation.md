@@ -9,21 +9,23 @@ because of how it was written, and may be renamed in review.
 ## Subject and pin
 
 - Repository: <https://github.com/varveio/swath>, public, Apache-2.0.
-- Revision: `7b05605444766de4e7a736db0bc410409af47429`, the head of upstream
-  pull request varveio/swath#255 (branch `go/engine-campaign`, based on main
-  `62b224f8`) when it was read on 2026-11-07 (commit date
-  2026-11-07T04:30:40Z). The port has no tag, release, published binary or
-  image, so this commit is the whole identity.
-- **Provisional.** The pin moves to the merge commit when the pull request
-  merges. Moving it means re-reading the files below at the new commit,
-  re-running the anchor check, refreshing the archive checksum in
-  [`../build/Dockerfile`](../build/Dockerfile), the toolbox recipe and
-  [`../build/image.json`](../build/image.json), moving every `source@`
-  provenance in [`../adapter/command.py`](../adapter/command.py), and re-making
-  the adapter fixtures.
-- Source archive: `https://github.com/varveio/swath/archive/7b05605444766de4e7a736db0bc410409af47429.tar.gz`,
-  SHA-256 `ffa2a7493cfad80fcc680eddbe2389449375c429aa379bbcdf4046c1c5cdeb69`,
+- Revision: `a2efe16e45d66088f6447e9723a119e5aebd4a91`, the squash merge of upstream
+  pull request varveio/swath#255 into main, read on 2026-11-07. The port has
+  no tag, release, published binary or image, so this commit is the whole
+  identity.
+- Source archive: `https://github.com/varveio/swath/archive/a2efe16e45d66088f6447e9723a119e5aebd4a91.tar.gz`,
+  SHA-256 `7f83c4e8845e14f68fe173f06a9525bfd28e513c38b408c43edc250a4a2770f4`,
   identical across two fetches on 2026-11-07.
+- Pull-request head: the capsule was pinned to `7b05605444766de4e7a736db0bc410409af47429`
+  (the head of #255, branch `go/engine-campaign`, archive SHA-256
+  `ffa2a7493cfad80fcc680eddbe2389449375c429aa379bbcdf4046c1c5cdeb69`) until the merge. Between the two commits only
+  `go/` changed: tests, `go/docs` prose (`measurements.md`, `operating.md`,
+  `testing.md`, `internals/counters.md`, `internals/ordering.md`, one line of
+  `upgrade.md` outside every cited range) and `go/internal/order/order.go` and
+  `go/internal/source/objhttp/objhttp.go`, neither of which a claim cites. No
+  command-line or output-format file changed, so every anchor resolves to the
+  same text at the merge commit and the adapter fixtures, made with the
+  pull-request-head binary, were kept.
 - Earlier pin: the capsule was first drafted at `63a4256`, the head of the
   unmerged `spike/go-local-lister` branch, and never ran there. Re-anchoring
   at `7b05605` changed three facts the draft stated: the seed is now on by

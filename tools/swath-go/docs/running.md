@@ -14,7 +14,7 @@ the port is `unverified`.
 
 The port has no release, so [`../build/Dockerfile`](../build/Dockerfile)
 builds it from source: GitHub's archive of commit
-`7b05605444766de4e7a736db0bc410409af47429`, checksum-pinned, compiled in a
+`a2efe16e45d66088f6447e9723a119e5aebd4a91`, checksum-pinned, compiled in a
 digest-pinned `golang:1.26.0-bookworm` stage with upstream's own build line
 from `go/build.sh` (`CGO_ENABLED=0`, `-trimpath`,
 `-ldflags="-s -w -X github.com/varveio/swath/go/internal/listing.revision=<commit>"`),
@@ -24,16 +24,20 @@ the committed `go.sum` (`-mod=readonly`) and no toolchain download
 the same stage as `swath_go_build` and copies the binary to
 `/opt/swath-go/swath` — claim `static-cgo-free-binary`.
 
-- **The pin is provisional.** It is the head of upstream pull request
-  varveio/swath#255 and moves to the merge commit when that pull request
-  merges — claim `subject-is-a-provisional-pull-request-head`. `tool_version`
-  in [`../build/image.json`](../build/image.json) says so as
-  `provisional-7b05605`, the only free token that file's closed field set has;
-  the archive locator and checksum carry the commit. Moving the pin means a new
-  archive checksum in both recipes and `image.json`, new `source@` provenance
-  in the adapter, a re-anchored ledger and re-made adapter fixtures.
+- **The pin is the merge commit.** It is the squash merge of upstream pull
+  request varveio/swath#255 into main, an unreleased commit — claim
+  `subject-is-an-unreleased-main-commit`. `tool_version` in
+  [`../build/image.json`](../build/image.json) says so as `main-a2efe16`, the
+  only free token that file's closed field set has; the archive locator and
+  checksum carry the commit. The pin moved there on 2026-11-07 from the pull
+  request's head, `7b05605`; the twenty replay rows and three live S3 rows
+  run that day ran from the `7b05605` bundle, and their receipts name it. The
+  two trees differ in no command-line or output-format file
+  ([`../research/derivation.md`](../research/derivation.md#subject-and-pin)),
+  so the ledger's anchors were re-checked rather than moved and the adapter
+  fixtures were kept.
 - **The binary names its revision.** The build passes the pinned commit at
-  link time, so `--version` prints `swath-go devel (7b05605…)` and every run
+  link time, so `--version` prints `swath-go devel (a2efe16…)` and every run
   report's `build.revision` carries it — claim
   `build-stamps-the-pinned-revision`.
 - **Image identity.** `image.json` records what the build-selection loader
@@ -64,7 +68,7 @@ fields and the run report at `SINK/swath-go-report.json`:
   dataset directory of text parts; a comparison of the two tools' TSV modes
   compares different product shapes.
 - **Concurrency** is the reserved axis, rendered as `--workers`, declared
-  `Ceiling(64, "source@7b05605")` with its source lines in the adapter's
+  `Ceiling(64, "source@a2efe16")` with its source lines in the adapter's
   docstring — claim `workers-default-64-is-the-limiter-maximum`. The flag has
   no upper bound.
 - **Signing.** An unsigned case renders `--anonymous`; a signed one drops it
@@ -182,7 +186,8 @@ rather than hand-made imitations: `format2-dataset/` (the sorted dataset,
 `.swath/` workspace included), `tsv-file/` and `tsv-zstd-file/`. They were made
 on 2026-11-07, outside the harness, like this:
 
-1. The pinned archive was built with the Dockerfile's `go build` line in the
+1. The pull request's head archive (`7b05605`, the pin before the merge) was
+   built with the Dockerfile's `go build` line in the
    same digest-pinned `golang:1.26.0-bookworm` image, giving a static binary
    with SHA-256
    `926c000bef5d05d17c11567a2067796a69daf9efa87b8bbe8b4f1fc868c604b8` whose
@@ -211,7 +216,7 @@ against S3.
 uv run pytest tools/swath-go          # argv, build facts, normalizer (offline)
 uv run s3-listing-study validate-capsule --tool swath-go
 uv run s3-listing-study check-source-anchors --tool swath-go --markdown tools/swath-go/ \
-    --require-checked --source-root https://github.com/varveio/swath=<checkout at 7b05605>
+    --require-checked --source-root https://github.com/varveio/swath=<checkout at a2efe16>
 uv run s3-listing-study check-links
 uv run python -m benchmark.plan_cli --path benchmark/plans/campaigns/swath-go-replay/<bucket>.yaml
 ```

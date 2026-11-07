@@ -1,8 +1,8 @@
 # Swath (Go port): how it works
 
 Scope: how the Go port of Swath lists S3, bounds its concurrency, orders and
-writes its output, and fails and resumes, at the pinned revision `7b05605`,
-the head of upstream pull request varveio/swath#255 (canonical identity:
+writes its output, and fails and resumes, at the pinned revision `a2efe16`,
+the merge commit of upstream pull request varveio/swath#255 (canonical identity:
 [`../data/tool.json`](../data/tool.json)). Everything here is read from
 upstream's public source and documentation. None of it is a run observation:
 no run of this subject exists in the study, so every runtime question stays
@@ -19,8 +19,8 @@ pure-Go binary with CGO disabled; it shares the `swath` name with the Java
 distribution and a few flag aliases, not its command line — claims
 `go-port-is-a-separate-tool`, `static-cgo-free-binary`. It lists a local
 directory, an S3 bucket or a GCS bucket; this capsule drives only S3. It has no
-release, so the subject is a pull-request head — claim
-`subject-is-a-provisional-pull-request-head` — and the build stamps that
+release, so the subject is an unreleased main commit — claim
+`subject-is-an-unreleased-main-commit` — and the build stamps that
 revision into `--version` and the run report — claim
 `build-stamps-the-pinned-revision`.
 
@@ -39,7 +39,7 @@ changing them is a diagnostic flag on `swath diag list` — claim
 `structure-is-a-diagnostic-flag`.
 
 Page fetches are `ListObjectsV2` requests issued by a hand-rolled client on the
-AWS SDK's authentication [SRC go/docs/architecture.md:47,50,61-62 @ 7b05605].
+AWS SDK's authentication [SRC go/docs/architecture.md:47,50,61-62 @ a2efe16].
 
 ## Concurrency and the request limiter
 
@@ -109,5 +109,5 @@ default, and upstream asks a hosted runner for a finite one — claim
   is `unverified` — claim `lists-a-bucket-completely`.
 - Crash-resume is documented and tested upstream but not run here — claim
   `resume-after-kill-completes`.
-- The pin is an open pull request's head — claim
-  `subject-is-a-provisional-pull-request-head`.
+- The pin is an unreleased commit, not a release — claim
+  `subject-is-an-unreleased-main-commit`.

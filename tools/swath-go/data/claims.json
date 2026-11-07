@@ -15,19 +15,19 @@
           "kind": "source",
           "subject": "upstream",
           "repository": "https://github.com/varveio/swath",
-          "commit": "7b05605444766de4e7a736db0bc410409af47429",
+          "commit": "a2efe16e45d66088f6447e9723a119e5aebd4a91",
           "path": "go/README.md",
           "lines": "3-7"
         }
       ]
     },
     {
-      "id": "subject-is-a-provisional-pull-request-head",
-      "statement": "The subject is commit 7b05605444766de4e7a736db0bc410409af47429, the head of upstream pull request varveio/swath#255 (branch go/engine-campaign, based on main 62b224f8) on 2026-11-07; the port has no tag, release, published binary or image.",
+      "id": "subject-is-an-unreleased-main-commit",
+      "statement": "The subject is commit a2efe16e45d66088f6447e9723a119e5aebd4a91, the squash merge of upstream pull request varveio/swath#255 into main on 2026-11-07; the port has no tag, release, published binary or image.",
       "scope": "structure",
       "status": "supported",
       "disposition": "retained",
-      "qualification": "Read from the public repository on 2026-11-07. The pin is provisional: it moves to the merge commit when the pull request merges, and every anchor in this ledger moves with it. A pull-request head can move between readings, which is why each anchor names the full commit.",
+      "qualification": "Read from the public repository on 2026-11-07. The capsule was first pinned to the pull request's head, 7b05605444766de4e7a736db0bc410409af47429; the merge commit's go/ tree differs from it only in tests, go/docs prose and the order and objhttp packages, and every anchor in this ledger was re-checked at the merge commit. Each anchor names the full commit.",
       "evidence": [
         {
           "kind": "documentation",
@@ -51,7 +51,7 @@
           "kind": "source",
           "subject": "upstream",
           "repository": "https://github.com/varveio/swath",
-          "commit": "7b05605444766de4e7a736db0bc410409af47429",
+          "commit": "a2efe16e45d66088f6447e9723a119e5aebd4a91",
           "path": "go/build.sh",
           "lines": "18"
         },
@@ -59,7 +59,7 @@
           "kind": "source",
           "subject": "upstream",
           "repository": "https://github.com/varveio/swath",
-          "commit": "7b05605444766de4e7a736db0bc410409af47429",
+          "commit": "a2efe16e45d66088f6447e9723a119e5aebd4a91",
           "path": ".github/workflows/ci.yml",
           "lines": "341-350"
         },
@@ -67,7 +67,7 @@
           "kind": "source",
           "subject": "upstream",
           "repository": "https://github.com/varveio/swath",
-          "commit": "7b05605444766de4e7a736db0bc410409af47429",
+          "commit": "a2efe16e45d66088f6447e9723a119e5aebd4a91",
           "path": "go/go.mod",
           "lines": "3"
         }
@@ -85,7 +85,7 @@
           "kind": "source",
           "subject": "upstream",
           "repository": "https://github.com/varveio/swath",
-          "commit": "7b05605444766de4e7a736db0bc410409af47429",
+          "commit": "a2efe16e45d66088f6447e9723a119e5aebd4a91",
           "path": "go/internal/listing/report.go",
           "lines": "350-370"
         },
@@ -93,7 +93,7 @@
           "kind": "source",
           "subject": "upstream",
           "repository": "https://github.com/varveio/swath",
-          "commit": "7b05605444766de4e7a736db0bc410409af47429",
+          "commit": "a2efe16e45d66088f6447e9723a119e5aebd4a91",
           "path": "go/build.sh",
           "lines": "12-18"
         }
@@ -111,7 +111,7 @@
           "kind": "source",
           "subject": "upstream",
           "repository": "https://github.com/varveio/swath",
-          "commit": "7b05605444766de4e7a736db0bc410409af47429",
+          "commit": "a2efe16e45d66088f6447e9723a119e5aebd4a91",
           "path": "go/docs/architecture.md",
           "lines": "15-22,28-34,45"
         }
@@ -129,7 +129,7 @@
           "kind": "source",
           "subject": "upstream",
           "repository": "https://github.com/varveio/swath",
-          "commit": "7b05605444766de4e7a736db0bc410409af47429",
+          "commit": "a2efe16e45d66088f6447e9723a119e5aebd4a91",
           "path": "go/internal/listing/listing.go",
           "lines": "215-218,235,248-250"
         },
@@ -137,7 +137,7 @@
           "kind": "source",
           "subject": "upstream",
           "repository": "https://github.com/varveio/swath",
-          "commit": "7b05605444766de4e7a736db0bc410409af47429",
+          "commit": "a2efe16e45d66088f6447e9723a119e5aebd4a91",
           "path": "go/internal/source/objhttp/limiter.go",
           "lines": "31-36,74-82"
         },
@@ -145,7 +145,7 @@
           "kind": "source",
           "subject": "upstream",
           "repository": "https://github.com/varveio/swath",
-          "commit": "7b05605444766de4e7a736db0bc410409af47429",
+          "commit": "a2efe16e45d66088f6447e9723a119e5aebd4a91",
           "path": "go/cmd/swath/main.go",
           "lines": "372"
         }
@@ -163,7 +163,7 @@
           "kind": "source",
           "subject": "upstream",
           "repository": "https://github.com/varveio/swath",
-          "commit": "7b05605444766de4e7a736db0bc410409af47429",
+          "commit": "a2efe16e45d66088f6447e9723a119e5aebd4a91",
           "path": "go/internal/source/objhttp/limiter.go",
           "lines": "13-29"
         },
@@ -171,7 +171,7 @@
           "kind": "source",
           "subject": "upstream",
           "repository": "https://github.com/varveio/swath",
-          "commit": "7b05605444766de4e7a736db0bc410409af47429",
+          "commit": "a2efe16e45d66088f6447e9723a119e5aebd4a91",
           "path": "go/internal/source/keyrange/flags.go",
           "lines": "52-54"
         }
@@ -189,7 +189,7 @@
           "kind": "source",
           "subject": "upstream",
           "repository": "https://github.com/varveio/swath",
-          "commit": "7b05605444766de4e7a736db0bc410409af47429",
+          "commit": "a2efe16e45d66088f6447e9723a119e5aebd4a91",
           "path": "go/internal/source/keyrange/flags.go",
           "lines": "46-57"
         },
@@ -197,7 +197,7 @@
           "kind": "source",
           "subject": "upstream",
           "repository": "https://github.com/varveio/swath",
-          "commit": "7b05605444766de4e7a736db0bc410409af47429",
+          "commit": "a2efe16e45d66088f6447e9723a119e5aebd4a91",
           "path": "go/docs/cli.md",
           "lines": "414-418"
         }
@@ -215,7 +215,7 @@
           "kind": "source",
           "subject": "upstream",
           "repository": "https://github.com/varveio/swath",
-          "commit": "7b05605444766de4e7a736db0bc410409af47429",
+          "commit": "a2efe16e45d66088f6447e9723a119e5aebd4a91",
           "path": "go/internal/source/keyrange/flags.go",
           "lines": "46-63"
         },
@@ -223,7 +223,7 @@
           "kind": "source",
           "subject": "upstream",
           "repository": "https://github.com/varveio/swath",
-          "commit": "7b05605444766de4e7a736db0bc410409af47429",
+          "commit": "a2efe16e45d66088f6447e9723a119e5aebd4a91",
           "path": "go/docs/cli.md",
           "lines": "44-47"
         }
@@ -241,7 +241,7 @@
           "kind": "source",
           "subject": "upstream",
           "repository": "https://github.com/varveio/swath",
-          "commit": "7b05605444766de4e7a736db0bc410409af47429",
+          "commit": "a2efe16e45d66088f6447e9723a119e5aebd4a91",
           "path": "go/internal/source/s3/register.go",
           "lines": "63-86"
         },
@@ -249,7 +249,7 @@
           "kind": "source",
           "subject": "upstream",
           "repository": "https://github.com/varveio/swath",
-          "commit": "7b05605444766de4e7a736db0bc410409af47429",
+          "commit": "a2efe16e45d66088f6447e9723a119e5aebd4a91",
           "path": "go/docs/cli.md",
           "lines": "420-422"
         }
@@ -267,7 +267,7 @@
           "kind": "source",
           "subject": "upstream",
           "repository": "https://github.com/varveio/swath",
-          "commit": "7b05605444766de4e7a736db0bc410409af47429",
+          "commit": "a2efe16e45d66088f6447e9723a119e5aebd4a91",
           "path": "go/docs/upgrade.md",
           "lines": "3-6,20-29,31-50"
         }
@@ -285,7 +285,7 @@
           "kind": "source",
           "subject": "upstream",
           "repository": "https://github.com/varveio/swath",
-          "commit": "7b05605444766de4e7a736db0bc410409af47429",
+          "commit": "a2efe16e45d66088f6447e9723a119e5aebd4a91",
           "path": "go/docs/internals/parquet-output.md",
           "lines": "108-117"
         }
@@ -303,7 +303,7 @@
           "kind": "source",
           "subject": "upstream",
           "repository": "https://github.com/varveio/swath",
-          "commit": "7b05605444766de4e7a736db0bc410409af47429",
+          "commit": "a2efe16e45d66088f6447e9723a119e5aebd4a91",
           "path": "go/docs/upgrade.md",
           "lines": "69-73,237-241"
         }
@@ -321,7 +321,7 @@
           "kind": "source",
           "subject": "upstream",
           "repository": "https://github.com/varveio/swath",
-          "commit": "7b05605444766de4e7a736db0bc410409af47429",
+          "commit": "a2efe16e45d66088f6447e9723a119e5aebd4a91",
           "path": "go/docs/upgrade.md",
           "lines": "75-90"
         },
@@ -329,7 +329,7 @@
           "kind": "source",
           "subject": "upstream",
           "repository": "https://github.com/varveio/swath",
-          "commit": "7b05605444766de4e7a736db0bc410409af47429",
+          "commit": "a2efe16e45d66088f6447e9723a119e5aebd4a91",
           "path": "go/docs/internals/parquet-output.md",
           "lines": "162-171"
         }
@@ -347,7 +347,7 @@
           "kind": "source",
           "subject": "upstream",
           "repository": "https://github.com/varveio/swath",
-          "commit": "7b05605444766de4e7a736db0bc410409af47429",
+          "commit": "a2efe16e45d66088f6447e9723a119e5aebd4a91",
           "path": "go/cmd/swath/output.go",
           "lines": "15-58"
         },
@@ -355,7 +355,7 @@
           "kind": "source",
           "subject": "upstream",
           "repository": "https://github.com/varveio/swath",
-          "commit": "7b05605444766de4e7a736db0bc410409af47429",
+          "commit": "a2efe16e45d66088f6447e9723a119e5aebd4a91",
           "path": "go/internal/textout/sink.go",
           "lines": "55-66,91-114"
         },
@@ -363,7 +363,7 @@
           "kind": "source",
           "subject": "upstream",
           "repository": "https://github.com/varveio/swath",
-          "commit": "7b05605444766de4e7a736db0bc410409af47429",
+          "commit": "a2efe16e45d66088f6447e9723a119e5aebd4a91",
           "path": "go/internal/textout/textout.go",
           "lines": "180-192"
         },
@@ -371,7 +371,7 @@
           "kind": "source",
           "subject": "upstream",
           "repository": "https://github.com/varveio/swath",
-          "commit": "7b05605444766de4e7a736db0bc410409af47429",
+          "commit": "a2efe16e45d66088f6447e9723a119e5aebd4a91",
           "path": "go/docs/cli.md",
           "lines": "355-378"
         }
@@ -389,7 +389,7 @@
           "kind": "source",
           "subject": "upstream",
           "repository": "https://github.com/varveio/swath",
-          "commit": "7b05605444766de4e7a736db0bc410409af47429",
+          "commit": "a2efe16e45d66088f6447e9723a119e5aebd4a91",
           "path": "go/internal/textout/textout.go",
           "lines": "194-228"
         },
@@ -397,7 +397,7 @@
           "kind": "source",
           "subject": "upstream",
           "repository": "https://github.com/varveio/swath",
-          "commit": "7b05605444766de4e7a736db0bc410409af47429",
+          "commit": "a2efe16e45d66088f6447e9723a119e5aebd4a91",
           "path": "go/docs/cli.md",
           "lines": "386-389"
         }
@@ -415,7 +415,7 @@
           "kind": "source",
           "subject": "upstream",
           "repository": "https://github.com/varveio/swath",
-          "commit": "7b05605444766de4e7a736db0bc410409af47429",
+          "commit": "a2efe16e45d66088f6447e9723a119e5aebd4a91",
           "path": "go/docs/cli.md",
           "lines": "395-396"
         },
@@ -423,7 +423,7 @@
           "kind": "source",
           "subject": "upstream",
           "repository": "https://github.com/varveio/swath",
-          "commit": "7b05605444766de4e7a736db0bc410409af47429",
+          "commit": "a2efe16e45d66088f6447e9723a119e5aebd4a91",
           "path": "go/internal/listing/listing.go",
           "lines": "596-613"
         }
@@ -441,7 +441,7 @@
           "kind": "source",
           "subject": "upstream",
           "repository": "https://github.com/varveio/swath",
-          "commit": "7b05605444766de4e7a736db0bc410409af47429",
+          "commit": "a2efe16e45d66088f6447e9723a119e5aebd4a91",
           "path": "go/cmd/swath/main.go",
           "lines": "370-376"
         },
@@ -449,7 +449,7 @@
           "kind": "source",
           "subject": "upstream",
           "repository": "https://github.com/varveio/swath",
-          "commit": "7b05605444766de4e7a736db0bc410409af47429",
+          "commit": "a2efe16e45d66088f6447e9723a119e5aebd4a91",
           "path": "go/internal/listing/listing.go",
           "lines": "211-214"
         },
@@ -457,7 +457,7 @@
           "kind": "source",
           "subject": "upstream",
           "repository": "https://github.com/varveio/swath",
-          "commit": "7b05605444766de4e7a736db0bc410409af47429",
+          "commit": "a2efe16e45d66088f6447e9723a119e5aebd4a91",
           "path": "go/docs/cli.md",
           "lines": "460-467"
         }
@@ -475,7 +475,7 @@
           "kind": "source",
           "subject": "upstream",
           "repository": "https://github.com/varveio/swath",
-          "commit": "7b05605444766de4e7a736db0bc410409af47429",
+          "commit": "a2efe16e45d66088f6447e9723a119e5aebd4a91",
           "path": "go/cmd/swath/main.go",
           "lines": "378"
         },
@@ -483,7 +483,7 @@
           "kind": "source",
           "subject": "upstream",
           "repository": "https://github.com/varveio/swath",
-          "commit": "7b05605444766de4e7a736db0bc410409af47429",
+          "commit": "a2efe16e45d66088f6447e9723a119e5aebd4a91",
           "path": "go/docs/cli.md",
           "lines": "16-24"
         }
@@ -501,7 +501,7 @@
           "kind": "source",
           "subject": "upstream",
           "repository": "https://github.com/varveio/swath",
-          "commit": "7b05605444766de4e7a736db0bc410409af47429",
+          "commit": "a2efe16e45d66088f6447e9723a119e5aebd4a91",
           "path": "go/cmd/swath/main.go",
           "lines": "319-328"
         },
@@ -509,7 +509,7 @@
           "kind": "source",
           "subject": "upstream",
           "repository": "https://github.com/varveio/swath",
-          "commit": "7b05605444766de4e7a736db0bc410409af47429",
+          "commit": "a2efe16e45d66088f6447e9723a119e5aebd4a91",
           "path": "go/docs/cli.md",
           "lines": "29-41"
         }
@@ -527,7 +527,7 @@
           "kind": "source",
           "subject": "upstream",
           "repository": "https://github.com/varveio/swath",
-          "commit": "7b05605444766de4e7a736db0bc410409af47429",
+          "commit": "a2efe16e45d66088f6447e9723a119e5aebd4a91",
           "path": "go/docs/cli.md",
           "lines": "487-530"
         }
@@ -545,7 +545,7 @@
           "kind": "source",
           "subject": "upstream",
           "repository": "https://github.com/varveio/swath",
-          "commit": "7b05605444766de4e7a736db0bc410409af47429",
+          "commit": "a2efe16e45d66088f6447e9723a119e5aebd4a91",
           "path": "go/cmd/swath/main.go",
           "lines": "379"
         },
@@ -553,7 +553,7 @@
           "kind": "source",
           "subject": "upstream",
           "repository": "https://github.com/varveio/swath",
-          "commit": "7b05605444766de4e7a736db0bc410409af47429",
+          "commit": "a2efe16e45d66088f6447e9723a119e5aebd4a91",
           "path": "go/docs/cli.md",
           "lines": "555-564"
         }

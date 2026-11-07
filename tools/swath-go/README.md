@@ -1,12 +1,12 @@
 # Swath (Go port)
 
-The [Go port of Swath](https://github.com/varveio/swath/tree/7b05605444766de4e7a736db0bc410409af47429/go)
+The [Go port of Swath](https://github.com/varveio/swath/tree/a2efe16e45d66088f6447e9723a119e5aebd4a91/go)
 lists an S3 bucket and writes the listing as a globally key-sorted Parquet
 dataset or as one TSV file, by expanding a tree of key ranges in parallel and
 walking it in key order, so rows arrive sorted with no sort afterwards. It is a
 separate tool from the Java [Swath](../swath/README.md), with its own command
 line and output format, and it has no release yet: the subject here is a pinned
-head of an open upstream pull request. Swath is built by Varve, which also
+unreleased commit on upstream's main. Swath is built by Varve, which also
 maintains this study; see [Varve and Swath](#varve-and-swath).
 
 > **Study status (2026-09-scale-diagnostics).** This tool's standing in the current release:
@@ -28,9 +28,9 @@ layer.
 
 | Question | Current answer |
 | --- | --- |
-| Tested subject | Upstream source at commit `7b05605` (head of pull request varveio/swath#255), built from GitHub's checksum-pinned archive of that commit with upstream's own static build line, the revision stamped in; no fork, no patch. The pin is **provisional** and moves to the merge commit when the pull request merges. Canonical identity: [`data/tool.json`](data/tool.json). |
+| Tested subject | Upstream source at commit `a2efe16` (the merge of pull request varveio/swath#255 into main), built from GitHub's checksum-pinned archive of that commit with upstream's own static build line, the revision stamped in; no fork, no patch. Rows run before the pin moved name the pull request's head, `7b05605`, in their receipts. Canonical identity: [`data/tool.json`](data/tool.json). |
 | How it runs | `swath list s3://… -o <sink>/listing` (the sorted dataset), `-o <sink>/listing.tsv` or `-o <sink>/listing.tsv.zst` (one TSV file), each with `--report <sink>/swath-go-report.json --workers N`, and `swath resume <sink>/listing` for a killed dataset run ([`docs/running.md`](docs/running.md#adapter-and-harness-contract)). The port is registered in the toolbox. |
-| Exercised coverage | None. No run against S3, no smoke, no harness attempt. |
+| Exercised coverage | No committed run record. Twenty replay rows and three live S3 rows were run through the harness on 2026-11-07 from the earlier `7b05605` bundle (campaign ledger); until their receipts are committed, nothing on this page rests on them. |
 | Correctness and verifier state | No verifier verdict and no completeness check exist. |
 | Results | None. Nothing here is a benchmark result or a comparison. |
 
@@ -103,8 +103,8 @@ observation.
 
 ### Tool risks
 
-- The subject is an open pull request's head and can move — claim
-  `subject-is-a-provisional-pull-request-head`.
+- The subject is an unreleased commit, not a release — claim
+  `subject-is-an-unreleased-main-commit`.
 - Upstream asks a hosted runner for a finite `--max-duration`, which the default
   does not provide — claim `hosted-runner-needs-a-finite-max-duration`.
 
@@ -125,12 +125,12 @@ observation.
 | Integrate the subject with the shared harness | [`adapter/`](adapter/) |
 | See the pinned build recipe | [`build/`](build/) |
 | See what was read and executed, and how this derivation departs from the usual method | [`research/derivation.md`](research/derivation.md) |
-| Find run records | [`receipts/`](receipts/) (empty: nothing has run) |
+| Find run records | [`receipts/`](receipts/) (empty: no receipt committed yet) |
 
 ## Provenance
 
 **Firsthand, from public material only.** Every claim resolves to a public
-source line or document at commit `7b05605`, checked mechanically; no
+source line or document at commit `a2efe16`, checked mechanically; no
 Swath-internal notes or benchmark history were used. The derivation was not
 blind (its author had read the Java Swath pages); it has had one independent
 review, whose findings are addressed, and awaits the owner's review;
@@ -152,4 +152,4 @@ participants in the space we study. The Go port gets exactly the rules every
 other tool gets: the same harness, run records and evidence vocabulary, and no
 number from Varve's own development of the port is used here. The port is
 added before it is released, which is why this page says plainly that it has
-not run and that its pin is provisional — claim `first-party-source-basis`.
+no committed run record and that its pin is an unreleased commit — claim `first-party-source-basis`.

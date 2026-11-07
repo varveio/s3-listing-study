@@ -13,7 +13,7 @@
     "variant": "upstream",
     "repository": "https://github.com/varveio/swath",
     "revision": {
-      "value": "7b05605444766de4e7a736db0bc410409af47429",
+      "value": "a2efe16e45d66088f6447e9723a119e5aebd4a91",
       "provenance": {
         "kind": "documentation",
         "reference": "../research/derivation.md"
