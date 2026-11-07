@@ -75,3 +75,4 @@ exclude:
   - {tool: s3-fast-list, reason: one strongest supported hinted configuration}
   - {tool: s3kor, reason: stopped after FourCast}
   - {tool: s5cmd, reason: one complete fixture-derived fanout configuration}
+  - {tool: swath-go, reason: registered after this plan's runs; the Go port has its own campaign plans}

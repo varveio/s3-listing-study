@@ -1,0 +1,76 @@
+# Swath (Go port) beside the Java capsule on the release fixture of nara-replay.
+# Replay image, fixture, latency deadlines, warm-up, machine, subject and replay
+# allocation and timeout are copied from the release plan campaigns/nara-replay/config-selection/nara-1950-census.yaml
+# (that file is the record and is not edited). Every row writes its product.
+# The Go rows state max_duration 30 s below timeout_s, as upstream asks of a hosted
+# runner (tools/swath-go/docs/running.md). The Java recursive-parquet-sorted rows are a
+# new replay treatment: the release has no Java sorted replay rows. They combine the
+# release replay rows' 4g heap with sort_merge_parallelism 8, borrowed from the release's
+# live sorted rows (which ran with a 16g heap on larger boxes). Any Java TSV row keeps the
+# release replay rows' heap and text-writer settings unchanged.
+spec_version: 3
+bucket: nara-1950-census
+region: us-east-2
+auth_role: public-read
+
+replay:
+  capacity_status: uncalibrated
+  server_image_uri: ghcr.io/varveio/swath-replay@sha256:3955f242f25294d3ebc6d63d3cf23e2a2694f7f1c9a5334dc6ec1054b0a69097
+  fixture_uri: gs://s3-listing-study-results-29c02004/fixtures/nara-1950-census/current-eba31d9/part-*.parquet
+  fixture_sha256: 48468b7c1ea8bf657fcb089dbcb1d940d3af62b748a7cb66f6dccc8876905db4
+  serving_mode: sorted
+  latency_model:
+    deadlines_ms:
+      worker_page: 86
+      pivot_probe: 44
+      structure_probe: 50
+    scale: 1.0
+    jitter: none
+
+defaults:
+  reps: 1
+  timeout_s: 1800
+  vcpus: 32
+  memory_gb: 64
+  container_memory_gb: 8
+  subject_vcpus: 8
+  replay_vcpus: 20
+  replay_memory_gb: 20
+  replay_parquet_connections: 64
+  # The replay server maps this directly to Jetty's maximum platform-thread
+  # pool. The first s7cmd c64 probe proved 4096 is unsafe: the pool expanded to
+  # its ceiling and exhausted localhost ephemeral ports. The upstream replay
+  # default of 512 remains 8x wider than the largest c64 client in this plan.
+  replay_max_concurrent_requests: 512
+  replay_prefetch: false
+  replay_prefetch_max_windows: 96
+  replay_heap_percent: 75
+
+tools:
+  swath-go:
+    cases:
+      - mode: recursive-parquet-sorted
+        concurrency: 64
+        purpose: diagnostic
+        config: {max_duration: 1770s}
+      - mode: recursive-tsv
+        concurrency: 64
+        purpose: diagnostic
+        config: {max_duration: 1770s}
+  swath:
+    cases:
+      - mode: recursive-parquet-sorted
+        concurrency: 64
+        purpose: diagnostic
+        config: {jvm_max_heap: 4g, sort_merge_parallelism: 8}
+
+exclude:
+  - {tool: aws-cli, reason: outside this Swath Go-and-Java side-by-side diagnostic}
+  - {tool: minio-mc, reason: outside this Swath Go-and-Java side-by-side diagnostic}
+  - {tool: ps3, reason: outside this Swath Go-and-Java side-by-side diagnostic}
+  - {tool: rclone, reason: outside this Swath Go-and-Java side-by-side diagnostic}
+  - {tool: s3-fast-list, reason: outside this Swath Go-and-Java side-by-side diagnostic}
+  - {tool: s3kor, reason: outside this Swath Go-and-Java side-by-side diagnostic}
+  - {tool: s3p, reason: outside this Swath Go-and-Java side-by-side diagnostic}
+  - {tool: s5cmd, reason: outside this Swath Go-and-Java side-by-side diagnostic}
+  - {tool: s7cmd, reason: outside this Swath Go-and-Java side-by-side diagnostic}

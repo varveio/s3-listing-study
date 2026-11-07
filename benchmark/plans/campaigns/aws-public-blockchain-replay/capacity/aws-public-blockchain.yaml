@@ -109,3 +109,4 @@ exclude:
   - {tool: rclone, reason: post-fix capacity qualification is Swath-only}
   - {tool: s3p, reason: post-fix capacity qualification is Swath-only}
   - {tool: s7cmd, reason: post-fix capacity qualification is Swath-only}
+  - {tool: swath-go, reason: registered after this plan's runs; the Go port has its own campaign plans}

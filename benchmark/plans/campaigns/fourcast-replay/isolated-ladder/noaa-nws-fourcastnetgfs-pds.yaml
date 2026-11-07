@@ -73,3 +73,4 @@ exclude:
   - {tool: s3p, reason: parallel capability carried to the larger-fixture rung; no isolated FourCast rerun needed}
   - {tool: s7cmd, reason: delimiter fanout cannot be qualified by this flat fixture; carried to a hierarchical fixture}
   - {tool: swath, reason: isolated repeatability control lives in the paired focused plan}
+  - {tool: swath-go, reason: registered after this plan's runs; the Go port has its own campaign plans}

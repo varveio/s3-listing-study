@@ -25,9 +25,12 @@ RUN /usr/bin/python3 -m zipfile -e /tmp/aws.zip /tmp/aws \
     && chmod 0755 /tmp/aws/aws/install /tmp/aws/aws/dist/aws /tmp/aws/aws/dist/aws_completer \
     && /tmp/aws/aws/install --install-dir /opt/aws-cli --bin-dir /usr/local/bin
 
+# dl.min.io answers 410 Gone for every community mc release since MinIO archived the
+# project (checked 2026-11-07); the same release binary, with the same digest, is a
+# GitHub release asset of minio/mc.
 FROM runtime_base AS minio_mc_install
 ADD --checksum=sha256:01f866e9c5f9b87c2b09116fa5d7c06695b106242d829a8bb32990c00312e891 \
-    https://dl.min.io/client/mc/release/linux-amd64/archive/mc.RELEASE.2025-08-13T08-35-41Z /usr/bin/mc
+    https://github.com/minio/mc/releases/download/RELEASE.2025-08-13T08-35-41Z/mc.linux-amd64.RELEASE.2025-08-13T08-35-41Z /usr/bin/mc
 RUN chmod 0755 /usr/bin/mc
 
 FROM runtime_base AS ps3_install
@@ -98,6 +101,18 @@ RUN tar xzf /tmp/s7cmd.tar.gz -C /tmp \
 
 FROM ghcr.io/varveio/swath@sha256:0bbc96c10b4b63d184cce76734679dd4a2f54a1c81c7c94c1000f7114eab8e43 AS swath_install
 
+FROM golang:1.26.0-bookworm@sha256:2a0ba12e116687098780d3ce700f9ce3cb340783779646aafbabed748fa6677c AS swath_go_build
+ADD --checksum=sha256:ffa2a7493cfad80fcc680eddbe2389449375c429aa379bbcdf4046c1c5cdeb69 \
+    https://github.com/varveio/swath/archive/7b05605444766de4e7a736db0bc410409af47429.tar.gz \
+    /tmp/swath.tar.gz
+RUN mkdir -p /src /out \
+    && tar xzf /tmp/swath.tar.gz -C /src --strip-components=1
+WORKDIR /src/go
+RUN GOTOOLCHAIN=local GOFLAGS=-mod=readonly CGO_ENABLED=0 \
+    go build -trimpath \
+      -ldflags="-s -w -X github.com/varveio/swath/go/internal/listing.revision=7b05605444766de4e7a736db0bc410409af47429" \
+      -o /out/swath ./cmd/swath
+
 # Only subject runtime binaries and closures cross into the final toolbox.
 FROM runtime_base AS toolbox
 COPY --from=aws_cli_install /opt/aws-cli/ /opt/aws-cli/
@@ -115,6 +130,7 @@ COPY --from=s5cmd_install /s5cmd /s5cmd
 COPY --from=s7cmd_install /usr/local/bin/s7cmd /usr/local/bin/s7cmd
 COPY --from=swath_install /opt/java/openjdk/ /opt/java/openjdk/
 COPY --from=swath_install /opt/swath/swath.jar /opt/swath/swath.jar
+COPY --from=swath_go_build /out/swath /opt/swath-go/swath
 # Per-tool work stays in its own instruction so a `# slice:` marker can attribute
 # it; an unmarked line is platform, which over-invalidates rather than hides.
 # slice: aws-cli

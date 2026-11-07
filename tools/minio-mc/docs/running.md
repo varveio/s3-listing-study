@@ -11,7 +11,7 @@ status vocabulary (`supported`, `confirmed`, `unverified`, `unverifiable`).
 
 ## Comparative image prepared 2026-08-10 (not run evidence)
 
-[image.json](../build/image.json) selects MinIO's official mc.RELEASE.2025-08-13T08-35-41Z Linux amd64 binary. Shared assembly is defined once in [tool-structure.md](../../../docs/operating/tool-structure.md). Historical receipts below continue to describe the images and artifacts they name.
+[image.json](../build/image.json) selects MinIO's official mc.RELEASE.2025-08-13T08-35-41Z Linux amd64 binary, SHA-256 `01f866e9c5f9b87c2b09116fa5d7c06695b106242d829a8bb32990c00312e891`. dl.min.io has answered 410 Gone for every community release since MinIO archived the project (checked 2026-11-07), so the build takes those exact bytes from the minio/mc GitHub release asset [`mc.linux-amd64.RELEASE.2025-08-13T08-35-41Z`](https://github.com/minio/mc/releases/download/RELEASE.2025-08-13T08-35-41Z/mc.linux-amd64.RELEASE.2025-08-13T08-35-41Z) under the same checksum ([`../build/Dockerfile`](../build/Dockerfile)). The binary is unchanged; the new locator changes the tool slice, and so the case identity. Shared assembly is defined once in [tool-structure.md](../../../docs/operating/tool-structure.md). Historical receipts below continue to describe the images and artifacts they name.
 
 ## Image
 

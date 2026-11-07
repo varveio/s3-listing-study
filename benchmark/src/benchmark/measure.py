@@ -1001,7 +1001,7 @@ def native_inventory(native_root: Path) -> dict[str, int]:
     }
 
 
-RUN_REPORT_NAMES = frozenset({"_swath_summary.json"})
+RUN_REPORT_NAMES = frozenset({"_swath_summary.json", "swath-go-report.json"})
 """Files a subject writes into its output tree that report on the run rather
 than form its product. They are kept on every attempt, retained products or
 not: a report the size of a log is evidence about the run, and dropping it with

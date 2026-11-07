@@ -93,5 +93,5 @@ module = ["google.cloud.*", "google.protobuf.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
-testpaths = ["benchmark/tests", "tests"]
+testpaths = ["benchmark/tests", "tests", "tools/swath-go/adapter/fixtures"]
 addopts = "-ra"

@@ -45,3 +45,6 @@ tools:
             - {vcpus: 2, memory_gb: 4, container_memory_gb: 2}
             - {vcpus: 2, memory_gb: 4, container_memory_gb: 4}
             - {vcpus: 4, memory_gb: 8, container_memory_gb: 8}
+
+exclude:
+  - {tool: swath-go, reason: not in this plan's roster; the Go port has its own campaign plans}

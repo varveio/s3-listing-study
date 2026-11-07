@@ -178,6 +178,10 @@ def test_the_committed_plan_loads() -> None:
             tool="s4cmd",
             reason="owner decision — excluded from comparative and replay runs",
         ),
+        bench.Exclusion(
+            tool="swath-go",
+            reason="not in this plan's roster; the Go port has its own campaign plans",
+        ),
     )
     assert len(loaded.cases_for("swath")) == 4
 
@@ -194,7 +198,8 @@ def test_the_committed_plan_loads() -> None:
 
 
 def test_the_repeatability_canary_keeps_the_full_roster() -> None:
-    """The shipped exception is one canary row per registered capsule."""
+    """The shipped exception is one canary row per capsule registered when it shipped;
+    the Go port, registered later, is excluded by name."""
     path = ROOT / "benchmark/plans/examples/repeatability/noaa-nws-rtofs-pds.yaml"
     exclusions = tuple(
         item
@@ -287,6 +292,12 @@ def test_the_committed_plan_matches_the_registered_tools() -> None:
     root = Path(__file__).resolve().parents[2]
     registered = {p.parents[1].name for p in root.glob("tools/*/build/image.json")}
     bench.check_roster(bench.Plan.load(bench.default_path("noaa-ghcn-pds")), registered)
+
+
+def test_every_registered_tool_has_a_default_mode() -> None:
+    """A plan row that names no mode needs one, for every tool a plan may run."""
+    defaults = bench.load_default_modes(bench.bench_dir() / "tools.yaml")
+    assert set(defaults) == bench_cli.registered_tools()
 
 
 def test_every_default_mode_is_one_its_adapter_implements() -> None:
@@ -1418,4 +1429,4 @@ def test_resolve_plan_reports_a_bad_plan_without_a_traceback(
 
 def test_every_registered_tool_is_discoverable() -> None:
     """The roster check is only as good as the set it compares against."""
-    assert len(bench_cli.registered_tools()) == 11
+    assert len(bench_cli.registered_tools()) == 12

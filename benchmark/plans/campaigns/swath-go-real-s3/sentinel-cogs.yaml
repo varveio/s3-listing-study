@@ -1,0 +1,42 @@
+# Swath (Go port) sorted dataset against live S3, unsigned. No replay block.
+# The Java sorted capture of this bucket ran at 32 vCPU with a 14400 s timeout
+# (campaigns/swath-real-s3-peak/sentinel-cogs.yaml); the Go rows take the same box and timeout.
+# Submit with --retain-products and --boot-disk-gb 200: a billion-row sorted dataset is kept.
+# One subject per bucket at a time: submit the two cases one after the other, each with its
+# own --case, waiting for the first subject to stop before submitting the second, or submit
+# the plan with --stagger-seconds long enough that they cannot overlap.
+spec_version: 2
+
+bucket: sentinel-cogs
+region: us-west-2
+auth_role: public-read
+
+defaults:
+  reps: 1
+  timeout_s: 14400
+  vcpus: 32
+  memory_gb: 64
+
+tools:
+  swath-go:
+    cases:
+      - mode: recursive-parquet-sorted
+        concurrency: 64
+        purpose: diagnostic
+        config: {max_duration: 14370s}
+      - mode: recursive-parquet-sorted
+        concurrency: 256
+        purpose: diagnostic
+        config: {max_duration: 14370s}
+
+exclude:
+  - {tool: aws-cli, reason: outside this Go-port real-S3 diagnostic}
+  - {tool: minio-mc, reason: outside this Go-port real-S3 diagnostic}
+  - {tool: ps3, reason: outside this Go-port real-S3 diagnostic}
+  - {tool: rclone, reason: outside this Go-port real-S3 diagnostic}
+  - {tool: s3-fast-list, reason: outside this Go-port real-S3 diagnostic}
+  - {tool: s3kor, reason: outside this Go-port real-S3 diagnostic}
+  - {tool: s3p, reason: outside this Go-port real-S3 diagnostic}
+  - {tool: s5cmd, reason: outside this Go-port real-S3 diagnostic}
+  - {tool: s7cmd, reason: outside this Go-port real-S3 diagnostic}
+  - {tool: swath, reason: outside this Go-port real-S3 diagnostic}

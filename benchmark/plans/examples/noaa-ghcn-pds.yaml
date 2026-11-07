@@ -97,3 +97,6 @@ tools:
       - {mode: recursive-parquet, container_memory_gb: 4}
       - {mode: recursive-parquet-sorted, container_memory_gb: 2}
       - {mode: recursive-parquet-sorted, container_memory_gb: 4}
+
+exclude:
+  - {tool: swath-go, reason: not in this plan's roster; the Go port has its own campaign plans}

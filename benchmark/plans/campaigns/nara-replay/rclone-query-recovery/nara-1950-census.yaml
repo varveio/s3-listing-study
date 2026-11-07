@@ -53,3 +53,4 @@ exclude:
   - {tool: s5cmd, reason: selected separately}
   - {tool: s7cmd, reason: selected separately}
   - {tool: swath, reason: selected separately}
+  - {tool: swath-go, reason: registered after this plan's runs; the Go port has its own campaign plans}
