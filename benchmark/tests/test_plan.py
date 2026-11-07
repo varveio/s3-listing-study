@@ -294,6 +294,12 @@ def test_the_committed_plan_matches_the_registered_tools() -> None:
     bench.check_roster(bench.Plan.load(bench.default_path("noaa-ghcn-pds")), registered)
 
 
+def test_every_registered_tool_has_a_default_mode() -> None:
+    """A plan row that names no mode needs one, for every tool a plan may run."""
+    defaults = bench.load_default_modes(bench.bench_dir() / "tools.yaml")
+    assert set(defaults) == bench_cli.registered_tools()
+
+
 def test_every_default_mode_is_one_its_adapter_implements() -> None:
     """The drift guard for benchmark/plans/tools.yaml, read from the adapters themselves.
 

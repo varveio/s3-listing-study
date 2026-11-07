@@ -25,6 +25,7 @@ default_modes:
   s5cmd: recursive
   s7cmd: recursive-tsv
   swath: recursive-tsv
+  swath-go: recursive-parquet-sorted
 
 # s4cmd remains retired from comparative and replay work. The one-shot real-S3
 # capsule qualification has an explicit executor flag that removes only this
