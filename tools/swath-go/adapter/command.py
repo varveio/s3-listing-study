@@ -212,7 +212,9 @@ def _duration_option(request: CommandRequest, key: str, flag: str) -> tuple[str,
     if value is None:
         return ()
     if not isinstance(value, str) or DURATION_RE.fullmatch(value) is None:
-        raise CommandAdapterError(f"{TOOL} {key} must be a Go duration such as '2h'; got: {value!r}")
+        raise CommandAdapterError(
+            f"{TOOL} {key} must be a Go duration such as '2h'; got: {value!r}"
+        )
     return flag, value
 
 

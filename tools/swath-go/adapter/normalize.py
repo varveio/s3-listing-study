@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""tools/swath-go/adapter/normalize.py <mode> [prefix] [--dataset DIR | --input FILE] — Swath (Go port).
+"""tools/swath-go/adapter/normalize.py <mode> [prefix] [--dataset DIR | --input FILE].
+
+Swath (Go port) output adapter.
 
 Reads one Swath (Go port) product and writes contract v2 on stdout, one record
 per line::

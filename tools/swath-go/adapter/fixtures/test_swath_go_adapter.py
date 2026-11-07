@@ -53,7 +53,12 @@ FIXTURE_BASE = {
 FIXTURE_REQUESTS = {
     "format2-dataset": {
         "mode": "recursive-parquet-sorted",
-        "config": {"concurrency": 4, "part_size": "30", "part_interval": "0s", "max_duration": "60s"},
+        "config": {
+            "concurrency": 4,
+            "part_size": "30",
+            "part_interval": "0s",
+            "max_duration": "60s",
+        },
     },
     "tsv-file": {"mode": "recursive-tsv", "config": {"concurrency": 4, "max_duration": "60s"}},
     "tsv-zstd-file": {
@@ -534,7 +539,9 @@ def test_tsv_unescapes_keys_to_their_own_bytes(normalizer: ModuleType) -> None:
 
 
 @pytest.mark.parametrize("escape", [b"\\t", b"\\n", b"\\r", b"\\x41", b"\\u0009", b"\\"])
-def test_tsv_refuses_an_unframeable_or_unknown_escape(normalizer: ModuleType, escape: bytes) -> None:
+def test_tsv_refuses_an_unframeable_or_unknown_escape(
+    normalizer: ModuleType, escape: bytes
+) -> None:
     payload = HEADER + b"a/" + escape + b'\t2026-01-01T00:00:00+00:00\t"e"\t\t\t1\tSTANDARD\t\t\n'
     with pytest.raises(ContractViolation):
         _tsv(normalizer, payload)
