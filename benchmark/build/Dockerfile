@@ -25,10 +25,14 @@ RUN /usr/bin/python3 -m zipfile -e /tmp/aws.zip /tmp/aws \
     && chmod 0755 /tmp/aws/aws/install /tmp/aws/aws/dist/aws /tmp/aws/aws/dist/aws_completer \
     && /tmp/aws/aws/install --install-dir /opt/aws-cli --bin-dir /usr/local/bin
 
-FROM runtime_base AS minio_mc_install
-ADD --checksum=sha256:01f866e9c5f9b87c2b09116fa5d7c06695b106242d829a8bb32990c00312e891 \
-    https://dl.min.io/client/mc/release/linux-amd64/archive/mc.RELEASE.2025-08-13T08-35-41Z /usr/bin/mc
-RUN chmod 0755 /usr/bin/mc
+# dl.min.io answers 410 Gone for every community mc release since MinIO archived the
+# project (checked 2026-11-07), so the pinned release binary is taken from the
+# published 2026-09-scale-diagnostics toolbox, which installed it from that URL
+# under ADD --checksum, and its bytes are checked again here.
+FROM us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:0f376b395cce0029b0bbf68a71e0414df72fa0a3b172edf601aa848809997f8f AS minio_mc_install
+USER root
+RUN printf '%s  %s\n' 01f866e9c5f9b87c2b09116fa5d7c06695b106242d829a8bb32990c00312e891 /usr/bin/mc | sha256sum -c - \
+    && chmod 0755 /usr/bin/mc
 
 FROM runtime_base AS ps3_install
 ADD --checksum=sha256:3bc7bbbb0d45d6f96b0130f98859ea7cfe693b13a8438461240423511322a9c2 \
