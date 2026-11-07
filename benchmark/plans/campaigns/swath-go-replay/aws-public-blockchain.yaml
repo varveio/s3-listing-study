@@ -1,0 +1,91 @@
+# Swath (Go port) beside the Java capsule on the release fixture of aws-public-blockchain-replay.
+# Replay image, fixture, latency deadlines, warm-up, machine, subject and replay
+# allocation and timeout are copied from the release plan campaigns/aws-public-blockchain-replay/capacity/aws-public-blockchain.yaml
+# (that file is the record and is not edited). Every row writes its product.
+# The Go rows state max_duration 30 s below timeout_s, as upstream asks of a hosted
+# runner (tools/swath-go/docs/running.md). The Java rows keep the release rows'
+# 4g heap; its sorted mode takes sort_merge_parallelism 8 as the release's sorted rows did.
+spec_version: 3
+bucket: aws-public-blockchain
+region: us-east-2
+auth_role: public-read
+
+replay:
+  capacity_status: uncalibrated
+  # 2026-09-01: replay image built from swath fix/replay-delimiter-seek at dce690a (key-only
+  # delimiter readers, bare objects via the range pool, independent delimiter-pool width,
+  # default 32 on this host). A new server image is a new treatment identity; the 0.3.1
+  # release image rows (cold and warmed) remain in the ledger unchanged.
+  server_image_uri: us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:5797514c7599c795197e53f4e55651829fca7c1630c351242407690bff9881ad
+  fixture_uri: gs://s3-listing-study-results-29c02004/fixtures/aws-public-blockchain/current-eba31d9/part-*.parquet
+  fixture_sha256: f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0
+  serving_mode: sorted
+  latency_model:
+    deadlines_ms: {worker_page: 94, pivot_probe: 46, structure_probe: 55}
+    scale: 1.0
+    jitter: none
+  # 2026-09-01: declared warm-up (see docs/methodology.md, "Replay warm-up"). A local isolation
+  # study attributed the structure-probe overruns to a cold delimiter path (JIT, lazy per-file
+  # reader pools) rather than to scan cost; the walk below warms it identically for every tool.
+  # This is a new treatment identity; the cold-server A row remains in the ledger unchanged.
+  warmup:
+    structure_probes: 2000
+    pivot_probes: 200
+    worker_pages: 200
+    in_flight: 64
+
+defaults:
+  reps: 1
+  timeout_s: 7200
+  vcpus: 80
+  memory_gb: 160
+  container_memory_gb: 8
+  subject_vcpus: 8
+  replay_vcpus: 64
+  replay_memory_gb: 20
+  replay_parquet_connections: 128
+  replay_max_concurrent_requests: 512
+  replay_prefetch: false
+  replay_prefetch_max_windows: 96
+  replay_heap_percent: 75
+
+tools:
+  swath-go:
+    cases:
+      - mode: recursive-tsv-zstd
+        concurrency: 256
+        purpose: diagnostic
+        config: {max_duration: 7170s}
+      - mode: recursive-parquet-sorted
+        concurrency: 256
+        purpose: diagnostic
+        config: {max_duration: 7170s}
+      - mode: recursive-parquet-sorted
+        concurrency: 64
+        purpose: diagnostic
+        config: {max_duration: 7170s}
+  swath:
+    cases:
+      - mode: recursive-parquet-sorted
+        concurrency: 256
+        purpose: diagnostic
+        config: {jvm_max_heap: 4g, sort_merge_parallelism: 8}
+      - mode: recursive-parquet-sorted
+        concurrency: 64
+        purpose: diagnostic
+        config: {jvm_max_heap: 4g, sort_merge_parallelism: 8}
+      - mode: recursive-tsv-zstd
+        concurrency: 256
+        purpose: diagnostic
+        config: {jvm_max_heap: 4g, text_writers: 3, text_part_size: 1gb, writeback_size: 32mb, part_rotation_interval: "0", part_rotation_max_rows: 0}
+
+exclude:
+  - {tool: aws-cli, reason: outside this Swath Go-and-Java side-by-side diagnostic}
+  - {tool: minio-mc, reason: outside this Swath Go-and-Java side-by-side diagnostic}
+  - {tool: ps3, reason: outside this Swath Go-and-Java side-by-side diagnostic}
+  - {tool: rclone, reason: outside this Swath Go-and-Java side-by-side diagnostic}
+  - {tool: s3-fast-list, reason: outside this Swath Go-and-Java side-by-side diagnostic}
+  - {tool: s3kor, reason: outside this Swath Go-and-Java side-by-side diagnostic}
+  - {tool: s3p, reason: outside this Swath Go-and-Java side-by-side diagnostic}
+  - {tool: s5cmd, reason: outside this Swath Go-and-Java side-by-side diagnostic}
+  - {tool: s7cmd, reason: outside this Swath Go-and-Java side-by-side diagnostic}
