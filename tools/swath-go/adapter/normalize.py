@@ -294,9 +294,21 @@ def _normalize_dataset(out: IO[bytes], prefix: str, dataset: str) -> int:
     import duckdb
 
     try:
-        paths, _expected = committed_parts(dataset, prefix)
+        paths, expected = committed_parts(dataset, prefix)
+        counted = _count_dataset(paths)
     except DatasetRefused as exc:
         print(f"normalize.py: {exc}", file=sys.stderr)
+        return UNREADABLE_EXIT
+    except duckdb.Error as exc:
+        print(f"normalize.py: dataset is not readable Parquet: {exc}", file=sys.stderr)
+        return UNREADABLE_EXIT
+    # The same row check count_rows makes, before anything is emitted: a dataset
+    # the worker would refuse to count must not verify either.
+    if counted != expected:
+        print(
+            f"normalize.py: dataset parts hold {counted} rows; the manifest says {expected}",
+            file=sys.stderr,
+        )
         return UNREADABLE_EXIT
     if not paths:
         return 0
@@ -356,6 +368,42 @@ def _decoded(data: Any, mode: str) -> Iterator[Any]:
         reader.close()
 
 
+class _Framing:
+    """The physical framing both TSV entry points require, checked as bytes stream past.
+
+    One implementation for ``normalize`` and ``count_rows``, plain and decoded
+    zstd alike: every line ends with LF (so the file does too), and no line is
+    empty, since the port writes neither a blank line nor an unterminated row.
+    It counts the LF-terminated lines, which ``count_rows`` holds DuckDB's row
+    count to. Memory is one chunk; nothing is buffered beyond it.
+    """
+
+    def __init__(self, stream: Any) -> None:
+        self._stream = stream
+        self._last = b""
+        self.lines = 0
+
+    def read(self, size: int = -1) -> bytes:
+        chunk: bytes = self._stream.read(size)
+        if chunk:
+            if (self._last == b"\n" and chunk[:1] == b"\n") or b"\n\n" in chunk:
+                raise ContractViolation("native TSV has an empty line; the port writes none")
+            self.lines += chunk.count(b"\n")
+            self._last = chunk[-1:]
+        return chunk
+
+    def finish(self) -> int:
+        """Drain what is left and return the LF-terminated line count."""
+        while self.read(LINE_CHUNK):
+            pass
+        if self._last != b"\n":
+            raise ContractViolation("native TSV's last line is not terminated by LF")
+        return self.lines
+
+
+LINE_CHUNK = 1 << 20
+
+
 def _check_header(line: bytes) -> None:
     if line != TSV_HEADER:
         raise ContractViolation(
@@ -412,9 +460,9 @@ def _normalize_tsv(out: IO[bytes], data: Any, mode: str) -> int:
     if empty:
         return 0
     with _decoded(data, mode) as stream:
-        lines = iter_lf_lines(stream)
-        header = next(lines)
-        _check_header(header)
+        framing = _Framing(stream)
+        lines = iter_lf_lines(framing)
+        _check_header(next(lines))
         pending: bytes | None = None
         number = 1
         for line in lines:
@@ -422,10 +470,9 @@ def _normalize_tsv(out: IO[bytes], data: Any, mode: str) -> int:
                 _emit_row(out, pending, number)
             number += 1
             pending = line
-        # The file ends with LF, so the last framing remainder is empty; an empty
-        # line anywhere else, or a missing final LF, is not this writer's output.
-        if pending:
-            raise ContractViolation(f"native TSV line {number} is not terminated by LF")
+        # The last framing remainder after the final LF is empty; _Framing
+        # refuses an unterminated last row before it would be emitted.
+        framing.finish()
     return 0
 
 
@@ -456,7 +503,9 @@ def _count_tsv(data: Any, mode: str) -> int:
     if empty:
         return 0
     with _decoded(head, mode) as stream:
-        _check_header(next(iter_lf_lines(stream)))
+        framing = _Framing(stream)
+        _check_header(next(iter_lf_lines(framing)))
+        lines = framing.finish()
     sql = TSV_COUNT_QUERY.format(compression=TSV_COMPRESSION[mode], columns=TSV_READ_COLUMNS)
     with staged(data) as path:
         try:
@@ -470,6 +519,10 @@ def _count_tsv(data: Any, mode: str) -> int:
             f"{row[1]} TSV key(s) are empty, carry an unknown escape or one that unescapes "
             "to a tab, LF or CR, which the contract cannot frame",
             field="key",
+        )
+    if row[0] != lines - 1:
+        raise ContractViolation(
+            f"DuckDB read {row[0]} TSV rows where the file has {lines - 1} lines under its header"
         )
     return row[0]
 

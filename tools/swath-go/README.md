@@ -132,9 +132,9 @@ observation.
 **Firsthand, from public material only.** Every claim resolves to a public
 source line or document at commit `7b05605`, checked mechanically; no
 Swath-internal notes or benchmark history were used. The derivation was not
-blind (its author had read the Java Swath pages) and has not yet had an
-independent review; [`research/derivation.md`](research/derivation.md) says so
-in full. The executions, a local build used to make the adapter's test
+blind (its author had read the Java Swath pages); it has had one independent
+review, whose findings are addressed, and awaits the owner's review;
+[`research/derivation.md`](research/derivation.md) says so in full. The executions, a local build used to make the adapter's test
 fixtures over a synthetic store and a local toolbox build, are described in
 [`docs/running.md`](docs/running.md#adapter-fixtures); each is not a run record.
 

@@ -53,7 +53,7 @@ fields and the run report at `SINK/swath-go-report.json`:
 | Mode | Product, channel | argv after the executable |
 | --- | --- | --- |
 | `recursive-parquet-sorted` | `parquet-sorted`, `dataset` | `list s3://BUCKET[/PREFIX] -o SINK/listing --report SINK/swath-go-report.json --region REGION [--anonymous] --workers N [--endpoint URL]` plus any stated knob |
-| `resume-parquet-sorted` | `parquet-sorted`, `dataset` | `resume SINK/listing --report SINK/swath-go-report.json --workers N` |
+| `resume-parquet-sorted` | `parquet-sorted`, `dataset` | `resume SINK/listing --report SINK/swath-go-report.json --workers N --anonymous[=false]` plus any stated runtime or operational knob |
 | `recursive-tsv` | `text`, `file` (gzipped for upload) | as the sorted mode with `-o SINK/listing.tsv` |
 | `recursive-tsv-zstd` | `text`, `file`, `product_compress=False` | as the sorted mode with `-o SINK/listing.tsv.zst` |
 
@@ -94,8 +94,12 @@ fields and the run report at `SINK/swath-go-report.json`:
   claim `report-is-written-on-failure-too`. `RUN_REPORT_NAMES` in
   `benchmark/src/benchmark/measure.py` lists `swath-go-report.json`, so the
   worker keeps it on every attempt, retained products or not.
-- **Resume** replays the recorded command and restates only `--workers` — claim
-  `resume-replays-the-recorded-command`. It writes the report to the same path
+- **Resume** replays the recorded command. The adapter restates what `swath
+  resume` accepts again and the case states: `--workers`, the signing choice
+  (`--anonymous`, or `--anonymous=false` to undo a recorded one), and any
+  stated `limiter`, `row_budget`, `spill_max`, `max_duration` or
+  `part_interval`; it refuses `seed`, `structure` and `part_size`, which the
+  journal freezes — claim `resume-replays-the-recorded-command`. It writes the report to the same path
   as the list step: the killed step's report has to be copied out before the
   resume runs, or a resume that dies before writing its own leaves the earlier
   one looking current. Run alone on an empty sink it is refused (exit 2), so
@@ -212,8 +216,8 @@ uv run s3-listing-study check-links
 uv run python -m benchmark.plan_cli --path benchmark/plans/campaigns/swath-go-replay/<bucket>.yaml
 ```
 
-The repository's default `uv run pytest` collects `benchmark/tests` and `tests`
-only, so the capsule's tests run when their path is given.
+The capsule's tests are in the repository's configured `testpaths`, so the
+default `uv run pytest`, which CI runs, collects them.
 
 ## Deferred coverage
 

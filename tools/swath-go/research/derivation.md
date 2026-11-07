@@ -81,5 +81,8 @@ executed, outside the harness, on the author's workstation (Linux amd64):
   as contaminated for derivation. The ledger here is restricted to what the
   cited public files state, and every runtime proposition is `unverified`; the
   departure is stated so a reviewer weighs it.
-- **One writer, no independent review yet.** The repository requires a
-  different reviewer before the owner's review; that review has not happened.
+- **One writer, one independent review.** The repository requires a
+  different reviewer before the owner's review. One independent review was
+  made on 2026-11-07; its findings (normalizer refusals, resume overrides, test
+  discovery, plan provenance notes, this claim's anchors) are addressed in the
+  same branch. The owner's review is pending.

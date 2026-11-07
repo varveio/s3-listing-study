@@ -284,29 +284,52 @@ def _list_tail(request: CommandRequest, output: str, report: str) -> tuple[str, 
     )
 
 
-def _resume_tail(request: CommandRequest, dataset: str, report: str) -> tuple[str, ...]:
-    """``swath resume DIR --report PATH``: the journal replays the recorded command.
+RESUME_FROZEN_KEYS = frozenset({"seed", "structure", "part_size"})
+"""Config a resume may not restate: the seed and structure policy and the part
+size are part of the recorded command and its resume identity, and ``swath
+resume`` accepts only the runtime and operational flags (``go/docs/cli.md:29-41``,
+``go/cmd/swath/main.go:319-328`` @7b05605), so a case stating one on the resume
+mode is refused rather than silently run at the journal's value."""
 
-    Every other list flag is refused on a resume except the runtime and
-    operational ones (``go/cmd/swath/main.go:319-328``), and the recorded values
-    already carry what the list step rendered from this same config, so only the
-    concurrency is restated: ``--workers`` is a runtime flag a resume may change,
-    and rendering it keeps the declared axis true of the resumed step too. The
-    rest of the config is still validated, so a malformed value fails here as it
-    would on the list step. The report goes to the same path the list step
-    used; the killed step's report must therefore be copied out before the
-    resume starts, since a resume that dies before writing its own would leave
-    the earlier one there.
+
+def _resume_tail(request: CommandRequest, dataset: str, report: str) -> tuple[str, ...]:
+    """``swath resume DIR``: the journal replays the recorded command, with overrides.
+
+    ``swath resume`` takes the runtime flags (``--workers``, ``--row-budget``,
+    ``--spill-max``, ``--part-interval``, ``--report``, ``--max-duration`` and
+    others) and the operational ones (``--anonymous``, ``--limiter`` and others)
+    again, the last value winning; anything else is a usage error. So every
+    stated key of that kind is rendered, and the signing choice always is
+    (``--anonymous`` or ``--anonymous=false``, which undoes a recorded one), so
+    the resumed step runs at what the case says rather than at whatever the
+    journal recorded. A frozen key is refused (:data:`RESUME_FROZEN_KEYS`). The
+    source, endpoint and region are frozen in the journal's identity and cannot
+    be restated; the port's identity check refuses a resume that would resolve
+    another route. The report goes to the same path the list step used; the
+    killed step's report must therefore be copied out before the resume starts,
+    since a resume that dies before writing its own would leave the earlier one
+    there.
     """
-    workers = _concurrency(request)
-    _structure(request)
-    for key in ("limiter", "seed"):
-        _bool_option(request, key, "")
-    for key in ("row_budget", "spill_max", "part_size"):
-        _size_option(request, key, "")
-    for key in ("max_duration", "part_interval"):
-        _duration_option(request, key, "")
-    return ("resume", dataset, "--report", report, "--workers", workers)
+    frozen = sorted(RESUME_FROZEN_KEYS & set(request.config))
+    if frozen:
+        raise CommandAdapterError(
+            f"{TOOL} mode {request.mode!r} cannot restate {', '.join(frozen)}: "
+            "it is frozen in the journal's recorded command"
+        )
+    return (
+        "resume",
+        dataset,
+        "--report",
+        report,
+        "--workers",
+        _concurrency(request),
+        "--anonymous=false" if request.signed else "--anonymous",
+        *_bool_option(request, "limiter", "--limiter"),
+        *_size_option(request, "row_budget", "--row-budget"),
+        *_size_option(request, "spill_max", "--spill-max"),
+        *_duration_option(request, "max_duration", "--max-duration"),
+        *_duration_option(request, "part_interval", "--part-interval"),
+    )
 
 
 def build_command(request: CommandRequest) -> tuple[str, ...]:

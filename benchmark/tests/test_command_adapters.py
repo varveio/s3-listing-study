@@ -447,7 +447,7 @@ def _swath_go(mode: str, prefix: str) -> tuple[str, ...]:
     # No row states one here, so the capsule renders the port's declared 64.
     tail = ("--region", REGION, "--anonymous", "--workers", "64")
     if mode == "resume-parquet-sorted":
-        return ("resume", f"{SINK}/listing", *report, "--workers", "64")
+        return ("resume", f"{SINK}/listing", *report, "--workers", "64", "--anonymous")
     output = {
         "recursive-parquet-sorted": "listing",
         "recursive-tsv": "listing.tsv",

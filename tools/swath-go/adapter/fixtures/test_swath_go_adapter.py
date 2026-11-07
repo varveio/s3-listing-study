@@ -197,8 +197,15 @@ def test_structure_runs_the_diagnostic_list(adapter: LoadedCommandAdapter) -> No
     assert adapter.compile(_request())[1:3] == ("list", "s3://bucket")
 
 
-def test_resume_argv_reuses_the_dataset_and_report_paths(adapter: LoadedCommandAdapter) -> None:
-    config = {"concurrency": 8, "limiter": False, "max_duration": "2h"}
+def test_resume_restates_what_a_resume_may_change(adapter: LoadedCommandAdapter) -> None:
+    config = {
+        "concurrency": 8,
+        "limiter": False,
+        "row_budget": "256MiB",
+        "spill_max": "10GiB",
+        "max_duration": "2h",
+        "part_interval": "1m",
+    }
     listed = adapter.compile(_request(config=config))
     resumed = adapter.compile(_request("resume-parquet-sorted", config=config))
     assert resumed == (
@@ -209,9 +216,31 @@ def test_resume_argv_reuses_the_dataset_and_report_paths(adapter: LoadedCommandA
         "/sink/swath-go-report.json",
         "--workers",
         "8",
+        "--anonymous",
+        "--limiter=false",
+        "--row-budget",
+        "256MiB",
+        "--spill-max",
+        "10GiB",
+        "--max-duration",
+        "2h",
+        "--part-interval",
+        "1m",
     )
     assert listed[listed.index("-o") + 1] == resumed[2]
     assert listed[listed.index("--report") + 1] == resumed[4]
+    signed = adapter.compile(_request("resume-parquet-sorted", signed=True))
+    assert signed[-1] == "--anonymous=false"
+
+
+@pytest.mark.parametrize(
+    "config", [{"seed": False}, {"structure": "off"}, {"part_size": "64MiB"}]
+)
+def test_resume_refuses_what_the_journal_freezes(
+    adapter: LoadedCommandAdapter, config: dict[str, object]
+) -> None:
+    with pytest.raises(CommandAdapterError, match="frozen in the journal"):
+        adapter.compile(_request("resume-parquet-sorted", config=config))
 
 
 def test_modes_declare_their_products_channels_and_a_ceiling(
@@ -433,9 +462,18 @@ def test_part_path_size_and_row_mismatches_are_refused(
         _rewrite_manifest(scratch, parts=parts)
         assert _normalize(normalizer, scratch)[0] == 1
 
-    parts = [dict(part) for part in good]
+
+
+def test_a_manifest_row_count_the_parts_do_not_hold_is_refused_by_both_entry_points(
+    normalizer: ModuleType, scratch: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    manifest = json.loads((scratch / "manifest.json").read_text())
+    parts = [dict(part) for part in manifest["parts"]]
     parts[0]["rows"] += 1
     _rewrite_manifest(scratch, parts=parts)
+    assert sum(part["rows"] for part in parts) == 11
+    assert _normalize(normalizer, scratch) == (1, b"")
+    assert "manifest says 11" in capsys.readouterr().err
     with pytest.raises(ValueError, match="manifest says"):
         normalizer.count_rows(b"", "recursive-parquet-sorted", "a/", str(scratch))
 
@@ -519,6 +557,31 @@ def test_tsv_refuses_an_unframeable_or_unknown_escape(normalizer: ModuleType, es
 def test_tsv_refuses_what_the_port_does_not_write(normalizer: ModuleType, payload: bytes) -> None:
     with pytest.raises(ContractViolation):
         _tsv(normalizer, payload)
+
+
+ROW = b'a/x\t2026-01-01T00:00:00+00:00\t"e"\t\t\t1\tSTANDARD\t\t\n'
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        HEADER + b"\n" + ROW,
+        HEADER + ROW + b"\n" + ROW,
+        HEADER + ROW + b"\n",
+        HEADER + ROW + ROW[:-1],
+    ],
+    ids=["blank-after-header", "blank-between-rows", "blank-at-end", "unterminated-last-row"],
+)
+@pytest.mark.parametrize("mode", ["recursive-tsv", "recursive-tsv-zstd"])
+def test_both_entry_points_refuse_the_same_framing(
+    normalizer: ModuleType, payload: bytes, mode: str
+) -> None:
+    if mode == "recursive-tsv-zstd":
+        payload = zstandard.ZstdCompressor().compress(payload)
+    with pytest.raises(ContractViolation):
+        normalizer.normalize(io.BytesIO(), payload, mode, "a/")
+    with pytest.raises(ContractViolation):
+        normalizer.count_rows(payload, mode, "a/")
 
 
 def test_tsv_count_refuses_a_foreign_header_and_a_short_row(normalizer: ModuleType) -> None:

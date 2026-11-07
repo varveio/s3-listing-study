@@ -495,7 +495,7 @@
       "scope": "operability",
       "status": "supported",
       "disposition": "retained",
-      "qualification": "The flag sets are read from source and the behaviour from the CLI page. The source and output identity is frozen, so a resume that resolves another route is refused. --workers is a runtime flag, so the capsule restates it on the resume step.",
+      "qualification": "The flag sets are read from source and the behaviour from the CLI page. The source and output identity is frozen, so a resume that resolves another route is refused. The capsule's resume step restates the case's runtime and operational settings that a resume accepts (workers, the signing choice, limiter, row budget, spill cap, deadline, part interval) and refuses the seed, structure and part size, which are frozen.",
       "evidence": [
         {
           "kind": "source",
@@ -677,15 +677,19 @@
       "scope": "structure",
       "status": "supported",
       "disposition": "retained",
-      "qualification": "Only public files at the pinned revision were read; no Swath-internal material is used, and the port's measurements page was not cited. This capsule was authored by one writer and has not yet had the independent review the repository requires before the owner's review.",
+      "qualification": "Only public files at the pinned revision were read; no Swath-internal material is used, and the port's measurements page was not cited. The reading is recorded in research/derivation.md and the shared ownership in the repository's maintainer disclosure. This capsule was authored by one writer; one independent review has been made and its findings addressed, and the owner's review is pending.",
       "evidence": [
         {
-          "kind": "source",
-          "subject": "upstream",
-          "repository": "https://github.com/varveio/swath",
-          "commit": "7b05605444766de4e7a736db0bc410409af47429",
-          "path": "go/internal/source/s3/register.go",
-          "lines": "1-2"
+          "kind": "documentation",
+          "path": "../research/derivation.md"
+        },
+        {
+          "kind": "documentation",
+          "path": "../../../AGENTS.md"
+        },
+        {
+          "kind": "documentation",
+          "path": "../README.md"
         }
       ]
     }
