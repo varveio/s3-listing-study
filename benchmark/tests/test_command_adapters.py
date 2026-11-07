@@ -49,6 +49,7 @@ TOOLS = (
     "s5cmd",
     "s7cmd",
     "swath",
+    "swath-go",
 )
 BUCKET = "bucket-x"
 REGION = "region-y"
@@ -440,6 +441,21 @@ def _swath(mode: str, prefix: str) -> tuple[str, ...]:
     }[mode]
 
 
+def _swath_go(mode: str, prefix: str) -> tuple[str, ...]:
+    uri = f"s3://{BUCKET}" + (f"/{prefix}" if prefix else "")
+    report = ("--report", f"{SINK}/swath-go-report.json")
+    # No row states one here, so the capsule renders the port's declared 64.
+    tail = ("--region", REGION, "--anonymous", "--workers", "64")
+    if mode == "resume-parquet-sorted":
+        return ("resume", f"{SINK}/listing", *report, "--workers", "64")
+    output = {
+        "recursive-parquet-sorted": "listing",
+        "recursive-tsv": "listing.tsv",
+        "recursive-tsv-zstd": "listing.tsv.zst",
+    }[mode]
+    return ("list", uri, "-o", f"{SINK}/{output}", *report, *tail)
+
+
 EXPECTED: dict[str, Callable[[str, str], tuple[str, ...]]] = {
     "aws-cli": _aws,
     "minio-mc": _minio,
@@ -452,6 +468,7 @@ EXPECTED: dict[str, Callable[[str, str], tuple[str, ...]]] = {
     "s5cmd": _s5cmd,
     "s7cmd": _s7cmd,
     "swath": _swath,
+    "swath-go": _swath_go,
 }
 FIXED_PREFIXES = {
     "aws-cli": ("/usr/local/bin/aws",),
@@ -465,6 +482,7 @@ FIXED_PREFIXES = {
     "s5cmd": ("/s5cmd",),
     "s7cmd": ("/usr/local/bin/s7cmd",),
     "swath": ("/opt/java/openjdk/bin/java", "-jar", "/opt/swath/swath.jar"),
+    "swath-go": ("/opt/swath-go/swath",),
 }
 EXPECTED_MODES = {
     "aws-cli": {
@@ -536,6 +554,12 @@ EXPECTED_MODES = {
         "seed-none",
         "recursive-parquet",
         "recursive-parquet-sorted",
+    },
+    "swath-go": {
+        "recursive-parquet-sorted",
+        "resume-parquet-sorted",
+        "recursive-tsv",
+        "recursive-tsv-zstd",
     },
 }
 
@@ -660,6 +684,7 @@ def test_an_empty_endpoint_is_byte_identical_for_every_capsule_mode(tool: str) -
             ("--endpoint-url", ENDPOINT),
             {"JAVA_TOOL_OPTIONS": f"-XX:MaxRAMPercentage={HEAP_PERCENT}"},
         ),
+        ("swath-go", "recursive-tsv", "p/", ("--endpoint", ENDPOINT), {}),
     ],
 )
 def test_compatible_capsules_render_the_receipted_endpoint_mechanism(

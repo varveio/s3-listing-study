@@ -75,3 +75,6 @@ tools:
     cases:
       - {mode: recursive-tsv, concurrency: 64, purpose: diagnostic}
       - {mode: recursive-parquet, concurrency: 64, purpose: diagnostic}
+
+exclude:
+  - {tool: swath-go, reason: registered after this plan's runs; the Go port has its own campaign plans}

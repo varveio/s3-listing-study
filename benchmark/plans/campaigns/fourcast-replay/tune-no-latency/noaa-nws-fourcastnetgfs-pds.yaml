@@ -49,3 +49,4 @@ exclude:
   - {tool: s5cmd, reason: focused s3-fast-list mode correction}
   - {tool: s7cmd, reason: focused s3-fast-list mode correction}
   - {tool: swath, reason: focused s3-fast-list mode correction}
+  - {tool: swath-go, reason: registered after this plan's runs; the Go port has its own campaign plans}

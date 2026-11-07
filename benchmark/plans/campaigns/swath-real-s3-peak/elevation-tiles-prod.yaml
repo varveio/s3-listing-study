@@ -31,3 +31,4 @@ exclude:
   - {tool: s3p, reason: outside this Swath-only real-S3 diagnostic}
   - {tool: s5cmd, reason: outside this Swath-only real-S3 diagnostic}
   - {tool: s7cmd, reason: outside this Swath-only real-S3 diagnostic}
+  - {tool: swath-go, reason: registered after this plan's runs; the Go port has its own campaign plans}

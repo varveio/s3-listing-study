@@ -141,3 +141,6 @@ tools:
         replay_vcpus: 16
         replay_memory_gb: 16
         config: *swath_tsv
+
+exclude:
+  - {tool: swath-go, reason: registered after this plan's runs; the Go port has its own campaign plans}

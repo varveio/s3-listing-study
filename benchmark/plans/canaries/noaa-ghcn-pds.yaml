@@ -34,3 +34,4 @@ exclude:
   - {tool: s3p, reason: representative runner canary already covers stdout and file subjects}
   - {tool: s5cmd, reason: representative runner canary already covers stdout and file subjects}
   - {tool: s7cmd, reason: representative runner canary already covers stdout and file subjects}
+  - {tool: swath-go, reason: not in this plan's roster; the Go port has its own campaign plans}

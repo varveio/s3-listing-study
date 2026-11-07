@@ -66,6 +66,7 @@ directories; the cost is probe requests and guesses that can land badly.
 | [`S3P`](s3p/) | Recursive bisection of the keyspace using synthetic midpoint keys | Completed 143M, count matched, in 4,238.8 s at c16 in its key-only mode. The release does not establish CPU or width effects. |
 | [`PS3`](ps3/) | Brute-force character expansion of the keyspace | Completed 4.08M, count matched, in 369.3 s. It issues about 115 replay requests per page; the wider arm reached the 1,800 s cap without a count. |
 | [`Swath`](swath/) | Range splitting with work stealing: a cheap initial division, then idle workers steal and re-split busy ranges while the run proceeds. The tool we build; same rules as every other subject. | Completed 143M, count matched, in 173.7 s at c256 on a larger replay server than the other tools had. Every replay row on the small-directory fixtures failed the timing gate because of the instrument's structure-probe defect. On live S3, once each: 1.07 billion rows in 5 m 41 s, 960 million in 9 m 45 s. |
+| [`Swath (Go port)`](swath-go/) | Owner-side range splitting: workers expand key ranges into ascending rows and child ranges, walked in key order, so the output is sorted with no sort afterwards. A separate tool from the Java Swath, pinned to an unreleased upstream commit. The tool we build; same rules as every other subject. | Not in the release: registered after it was cut, and never run. |
 
 ### Supplied partitions
 

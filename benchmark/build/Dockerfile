@@ -98,6 +98,18 @@ RUN tar xzf /tmp/s7cmd.tar.gz -C /tmp \
 
 FROM ghcr.io/varveio/swath@sha256:0bbc96c10b4b63d184cce76734679dd4a2f54a1c81c7c94c1000f7114eab8e43 AS swath_install
 
+FROM golang:1.26.0-bookworm@sha256:2a0ba12e116687098780d3ce700f9ce3cb340783779646aafbabed748fa6677c AS swath_go_build
+ADD --checksum=sha256:ffa2a7493cfad80fcc680eddbe2389449375c429aa379bbcdf4046c1c5cdeb69 \
+    https://github.com/varveio/swath/archive/7b05605444766de4e7a736db0bc410409af47429.tar.gz \
+    /tmp/swath.tar.gz
+RUN mkdir -p /src /out \
+    && tar xzf /tmp/swath.tar.gz -C /src --strip-components=1
+WORKDIR /src/go
+RUN GOTOOLCHAIN=local GOFLAGS=-mod=readonly CGO_ENABLED=0 \
+    go build -trimpath \
+      -ldflags="-s -w -X github.com/varveio/swath/go/internal/listing.revision=7b05605444766de4e7a736db0bc410409af47429" \
+      -o /out/swath ./cmd/swath
+
 # Only subject runtime binaries and closures cross into the final toolbox.
 FROM runtime_base AS toolbox
 COPY --from=aws_cli_install /opt/aws-cli/ /opt/aws-cli/
@@ -115,6 +127,7 @@ COPY --from=s5cmd_install /s5cmd /s5cmd
 COPY --from=s7cmd_install /usr/local/bin/s7cmd /usr/local/bin/s7cmd
 COPY --from=swath_install /opt/java/openjdk/ /opt/java/openjdk/
 COPY --from=swath_install /opt/swath/swath.jar /opt/swath/swath.jar
+COPY --from=swath_go_build /out/swath /opt/swath-go/swath
 # Per-tool work stays in its own instruction so a `# slice:` marker can attribute
 # it; an unmarked line is platform, which over-invalidates rather than hides.
 # slice: aws-cli

@@ -80,3 +80,4 @@ exclude:
   - {tool: s3p, reason: stopped after blockchain}
   - {tool: s3-fast-list, reason: stopped after the NBM memory control; no hints companion on a flat namespace}
   - {tool: s5cmd, reason: assisted fanout has nothing to shard on a flat namespace}
+  - {tool: swath-go, reason: registered after this plan's runs; the Go port has its own campaign plans}

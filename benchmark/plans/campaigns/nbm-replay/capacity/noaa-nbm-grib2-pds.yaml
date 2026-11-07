@@ -106,3 +106,4 @@ exclude:
   - {tool: minio-mc, reason: stopped after FourCast}
   - {tool: ps3, reason: stopped after FourCast}
   - {tool: s3kor, reason: stopped after FourCast}
+  - {tool: swath-go, reason: registered after this plan's runs; the Go port has its own campaign plans}

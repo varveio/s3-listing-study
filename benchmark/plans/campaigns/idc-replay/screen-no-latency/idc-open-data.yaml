@@ -176,3 +176,6 @@ tools:
           writeback_size: 32mb
           part_rotation_interval: "0"
           part_rotation_max_rows: 0
+
+exclude:
+  - {tool: swath-go, reason: registered after this plan's runs; the Go port has its own campaign plans}
