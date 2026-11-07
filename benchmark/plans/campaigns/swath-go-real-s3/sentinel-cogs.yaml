@@ -2,6 +2,9 @@
 # The Java sorted capture of this bucket ran at 32 vCPU with a 14400 s timeout
 # (campaigns/swath-real-s3-peak/sentinel-cogs.yaml); the Go rows take the same box and timeout.
 # Submit with --retain-products and --boot-disk-gb 200: a billion-row sorted dataset is kept.
+# One subject per bucket at a time: submit the two cases one after the other, each with its
+# own --case, waiting for the first subject to stop before submitting the second, or submit
+# the plan with --stagger-seconds long enough that they cannot overlap.
 spec_version: 2
 
 bucket: sentinel-cogs

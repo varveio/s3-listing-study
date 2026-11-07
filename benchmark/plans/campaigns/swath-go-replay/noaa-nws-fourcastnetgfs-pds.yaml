@@ -3,8 +3,11 @@
 # allocation and timeout are copied from the release plan campaigns/fourcast-replay/screen-s3-latency/noaa-nws-fourcastnetgfs-pds.yaml
 # (that file is the record and is not edited). Every row writes its product.
 # The Go rows state max_duration 30 s below timeout_s, as upstream asks of a hosted
-# runner (tools/swath-go/docs/running.md). The Java rows keep the release rows'
-# 4g heap; its sorted mode takes sort_merge_parallelism 8 as the release's sorted rows did.
+# runner (tools/swath-go/docs/running.md). The Java recursive-parquet-sorted rows are a
+# new replay treatment: the release has no Java sorted replay rows. They combine the
+# release replay rows' 4g heap with sort_merge_parallelism 8, borrowed from the release's
+# live sorted rows (which ran with a 16g heap on larger boxes). Any Java TSV row keeps the
+# release replay rows' heap and text-writer settings unchanged.
 spec_version: 3
 bucket: noaa-nws-fourcastnetgfs-pds
 region: us-east-1
