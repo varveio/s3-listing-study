@@ -21,6 +21,9 @@ R=${R:-us-east-1}
 P=${P:-parquet/by_station/STATION=ACW00011604/}
 OUT=${OUT:-/tmp/replay-pilot/compat}
 mkdir -p "$OUT"
+# The toolbox runs as uid 10001; this dedicated scratch directory is shared
+# with the invoking shell, like /tmp, so both can retain their evidence.
+chmod 1777 "$OUT"
 cp "$(dirname "$0")/probe.py" "$OUT/probe.py"
 DUMMY="-e AWS_ACCESS_KEY_ID=REPLAYDUMMYACCESSKEY -e AWS_SECRET_ACCESS_KEY=replay-only-dummy-secret-not-a-credential -e AWS_DEFAULT_REGION=$R -e AWS_REGION=$R -e AWS_EC2_METADATA_DISABLED=true"
 
