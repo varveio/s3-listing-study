@@ -74,7 +74,8 @@ def test_dockerfile_is_self_contained_and_checksum_pinned() -> None:
     source = (ROOT / "benchmark/build/Dockerfile").read_text()
     assert "_PARENT" not in source
     assert "SHARED_BASE" not in source
-    assert source.count("ADD --checksum=sha256:") == 10
+    assert source.count("ADD --checksum=sha256:") == 9
+    assert "COPY --from=minio_mc_archive /usr/bin/mc /usr/bin/mc" in source
     assert (
         "FROM ghcr.io/varveio/swath@sha256:"
         "0bbc96c10b4b63d184cce76734679dd4a2f54a1c81c7c94c1000f7114eab8e43 "
@@ -168,6 +169,14 @@ def test_declared_artifact_must_appear_in_executed_stage() -> None:
     )
     with pytest.raises(build_image.BuildError, match="swath"):
         build_image.validate_executed_sources(selections, ROOT, broken_swath)
+
+    for broken_archive in (
+        source.replace(selections["minio-mc"].tool_artifact_sha256, "0" * 64),
+        source.replace("| sha256sum -c -", "| cat"),
+        source.replace("AS minio_mc_archive", "AS unbound_archive"),
+    ):
+        with pytest.raises(build_image.BuildError, match="minio-mc"):
+            build_image.validate_executed_sources(selections, ROOT, broken_archive)
 
 
 def test_a_pinned_base_digest_moves_only_the_slice_that_reaches_it() -> None:
