@@ -498,6 +498,12 @@ def test_list_index_line_parses_the_server_format_and_refuses_ambiguity() -> Non
         "error": 'open: "x" gone',
     }
     assert replay.parse_list_index_line("swath_replay listening port=1") is None
+    # The merged server (swath 545a10cb) adds has_index before seconds.
+    merged = REAL_LIST_INDEX_LINE.replace(" seconds=", " has_index=true seconds=")
+    merged_line = replay.parse_list_index_line(merged)
+    assert merged_line is not None and merged_line["has_index"] is True
+    with pytest.raises(replay.ReplayError):
+        replay.parse_list_index_line(merged.replace("has_index=true", "has_index=1"))
     for bad in (
         REAL_LIST_INDEX_LINE + "\n" + REAL_LIST_INDEX_LINE,
         REAL_LIST_INDEX_LINE.replace("state=built", "state=maybe"),
@@ -570,6 +576,8 @@ def test_timing_gate_and_list_index_summary_read_one_go_evidence() -> None:
     assert line is not None
     assert replay.list_index_line_disagreements(line, summary) == []
     assert replay.list_index_line_disagreements({**line, "entries": 1}, summary)
+    assert replay.list_index_line_disagreements({**line, "has_index": True}, summary) == []
+    assert replay.list_index_line_disagreements({**line, "has_index": False}, summary)
     replay.attach_list_index_line(summary, line)
     assert _delivered(summary) is True
 

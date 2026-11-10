@@ -546,6 +546,12 @@ def parse_list_index_line(text: str) -> dict[str, object] | None:
         if exhausted not in ("true", "false"):
             raise ReplayError("list_index budget_exhausted is not a boolean")
         parsed["budget_exhausted"] = exhausted == "true"
+        if "has_index" in raw:
+            # Added when the index merged (swath 545a10cb): any row group indexed.
+            has_index = raw.pop("has_index")
+            if has_index not in ("true", "false"):
+                raise ReplayError("list_index has_index is not a boolean")
+            parsed["has_index"] = has_index == "true"
         seconds = float(raw.pop("seconds"))
         if not math.isfinite(seconds) or seconds < 0:
             raise ReplayError(f"list_index seconds is not a finite duration: {seconds!r}")
@@ -723,6 +729,11 @@ def list_index_line_disagreements(
     exhausted = 1 if line.get("budget_exhausted") is True else 0
     if build.get("budget_exhausted") != exhausted:
         errors.append("list_index line and meters disagree on budget_exhausted")
+    groups_indexed = build.get("groups_indexed")
+    if "has_index" in line and line["has_index"] != (
+        isinstance(groups_indexed, int) and groups_indexed > 0
+    ):
+        errors.append("list_index line has_index disagrees with the indexed-groups gauge")
     ran = line.get("state") in ("built", "failed")
     if ran != (build.get("builds_recorded") == 1):
         errors.append(f"list_index state={line.get('state')!r} disagrees with the build timer")
