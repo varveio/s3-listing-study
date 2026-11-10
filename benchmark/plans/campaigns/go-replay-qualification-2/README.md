@@ -66,9 +66,11 @@ cross-wave, cross-day comparisons; report them as such.
 
 Before results are inspected: an index-on cell qualifies if every repetition
 completes with the fixture's row count, zero server errors and refusals, grades
-TIMING_VALID, and its receipt's `list_index` block reports the index delivered
-(one recorded build, `max_bytes` 67108864, and on blockchain a non-zero
-interval `skips`). The agreement band stays ±10% of the subject wall time
+TIMING_VALID, and its receipt's `list_index` block reports `delivered: true`.
+That requires the job's exported `state=built` server line attached with
+`receipt --server-log` and agreeing with the meters; the meter conditions alone
+(one recorded build, `max_bytes` 67108864, and on blockchain a non-zero interval
+`skips`) are necessary but leave `delivered` null, which does not qualify. The agreement band stays ±10% of the subject wall time
 against the wave-1 Java median of the same cell (blockchain 155.3 s, NARA Swath
 64.5 s, NARA s7cmd 602.2 s, FourCast s5cmd 420.6 s). Report every repetition,
 the structure-probe overrun fraction, list-index skips and declines by reason,

@@ -546,7 +546,10 @@ def parse_list_index_line(text: str) -> dict[str, object] | None:
         if exhausted not in ("true", "false"):
             raise ReplayError("list_index budget_exhausted is not a boolean")
         parsed["budget_exhausted"] = exhausted == "true"
-        parsed["seconds"] = float(raw.pop("seconds"))
+        seconds = float(raw.pop("seconds"))
+        if not math.isfinite(seconds) or seconds < 0:
+            raise ReplayError(f"list_index seconds is not a finite duration: {seconds!r}")
+        parsed["seconds"] = seconds
     except KeyError as exc:
         raise ReplayError(f"list_index line is missing {exc.args[0]}") from None
     except ValueError as exc:

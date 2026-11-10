@@ -503,6 +503,9 @@ def test_list_index_line_parses_the_server_format_and_refuses_ambiguity() -> Non
         REAL_LIST_INDEX_LINE.replace("state=built", "state=maybe"),
         REAL_LIST_INDEX_LINE.replace(" pages=139818", ""),
         REAL_LIST_INDEX_LINE + " surprise=1",
+        REAL_LIST_INDEX_LINE.replace("seconds=9.719", "seconds=NaN"),
+        REAL_LIST_INDEX_LINE.replace("seconds=9.719", "seconds=Inf"),
+        REAL_LIST_INDEX_LINE.replace("seconds=9.719", "seconds=-1.000"),
     ):
         with pytest.raises(replay.ReplayError):
             replay.parse_list_index_line(bad)
