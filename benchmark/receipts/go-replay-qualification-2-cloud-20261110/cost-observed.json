@@ -44,6 +44,17 @@
     "create_to_update_compute_usd": 0.15902083612333334
   },
   {
+    "attempt_id": "swath.98f424ce32cc.s1",
+    "job_name": "go-replay-qualify-swath-98f424ce32cc-s1",
+    "job_uid": "go-replay-qualify-1f6b1303-1996-430d00",
+    "machine": "n4-highcpu-80",
+    "state": "SUCCEEDED",
+    "run_duration_s": 235.691287055,
+    "create_to_update_s": 281.792489,
+    "run_duration_compute_usd": 0.11829607576498288,
+    "create_to_update_compute_usd": 0.14143478125675554
+  },
+  {
     "attempt_id": "s5cmd.c6cfb2bf8dd8.s1",
     "job_name": "go-replay-qualify-s5cmd-c6cfb2bf8dd8-s1",
     "job_uid": "go-replay-qualify-debfc701-df16-4d7400",

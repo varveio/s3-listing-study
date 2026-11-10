@@ -31,3 +31,15 @@ create-to-terminal. These are execution-based estimates, not an invoice.
 
 Interpretation, per-job tables and the cross-wave comparison are in the wave
 README's *Results* section.
+
+## Follow-up beyond wave 2
+
+One owner-approved job outside the seven-job wave, group
+`goq2-followup-blockchain-javaera-go` (`swath.98f424ce32cc.s1`, job UID
+`go-replay-qualify-1f6b1303-1996-430d00`), submitted 18:07 UTC and SUCCEEDED
+by 18:12 UTC: blockchain Swath c256 at replay 64/20 with the same Go image,
+on wave 1's Java-era fixture (`current-eba31d9/part-*.parquet`,
+`f4a839f2…d4b0`), index off. Its receipt, metrics row, server line and cost
+are in the same files. With it, observed compute for the eight jobs is $1.0172
+create-to-terminal ($0.8446 by `runDuration`).
+

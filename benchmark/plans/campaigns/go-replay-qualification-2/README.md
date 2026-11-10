@@ -219,3 +219,33 @@ one repetition does not establish a shift.
 These are cross-day comparisons with wave 1 and single repetitions except the
 two 64/20 index-on runs; they support bounded diagnostic statements, not
 precision claims.
+
+## Follow-up beyond wave 2: Java-era fixture (2026-11-10)
+
+One owner-approved job outside the seven-job wave
+(`followup-blockchain-javaera-go/`): blockchain Swath c256, replay 64/20, the
+same Go image at Swath `545a10cb`, index off, on wave 1's Java-era fixture
+instead of its SeekParquet conversion. It differs from the wave-2 index-off
+control only in the fixture. Submitted 18:07 UTC, SUCCEEDED 18:12 UTC, expected
+rows, zero server errors and refusals, server line `state=off` (the Java-era
+parts have no index), cost $0.141.
+
+| Job | Server | Fixture | Index | Grade | worker_page | pivot_probe | structure_probe | CPU mean / p90 | Server RSS | Wall s |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| wave 1 `swath.58e78e55aa7d.s1` | `a93035d` | Java-era | n/a | PRESSURE_DEGRADED | 4.7/94 ms, 0% | 0.5/46 ms, 0% | 5.0/55 ms, 2.54% | 6.7% / 12.3% | 1.92 GiB | 147.3 |
+| wave 1 `swath.58e78e55aa7d.s2` | `a93035d` | Java-era | n/a | PRESSURE_DEGRADED | 5.0/94 ms, 0% | 0.7/46 ms, 0% | 4.3/55 ms, 1.87% | 6.4% / 11.3% | 1.88 GiB | 155.9 |
+| follow-up `swath.98f424ce32cc.s1` | `545a10cb` | Java-era | off | PRESSURE_DEGRADED | 5.1/94 ms, 0% | 0.7/46 ms, 0% | 6.2/55 ms, 3.27% | 6.9% / 11.7% | 1.98 GiB | 147.8 |
+| wave 2 `swath.2076e4dd8761.s1` | `545a10cb` | SeekParquet | off | PRESSURE_DEGRADED | 13.2/94 ms, 2.56% | 2.2/46 ms, 0.19% | 9.3/55 ms, 2.55% | 14.8% / 25.4% | 2.55 GiB | 150.0 |
+| wave 2 `swath.954f110b5470.s1/.s2` | `545a10cb` | SeekParquet | on | PRESSURE_DEGRADED | 13.8-14.1/94 ms, 2.81-3.00% | 1.6-2.2/46 ms, 0.18-0.28% | 0.9-1.0/55 ms, 0% | 14-15% / 25-28% | 2.37-2.56 GiB | 146.2-152.3 |
+
+**The worker-page regression is the SeekParquet read path, not the server
+change.** On the Java-era parts the `545a10cb` server reproduces wave 1:
+5.1 ms worker pages with no overrun, half the server CPU, and the same
+structure-probe overruns wave 1 had (3.27%, no index on that path). On the
+SeekParquet conversion of the same bytes the same server, index off, takes
+13.2 ms per worker page with 2.56% overrun, about twice the CPU and 0.6 GiB
+more peak RSS. The list index removes the structure-probe overruns only on the
+SeekParquet path, where worker pages now overrun instead, so no blockchain
+configuration in this wave or follow-up grades TIMING_VALID. One repetition of
+the follow-up; a diagnostic attribution, not a precision claim.
+
