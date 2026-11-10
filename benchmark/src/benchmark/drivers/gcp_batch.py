@@ -401,7 +401,23 @@ def render_batch_job(
             "--max-concurrent-requests",
             str(allocation.replay_max_concurrent_requests),
         ]
-        if allocation.replay_delimiter_connections is not None:
+        if backend.server_implementation == "go":
+            server_commands.extend(
+                (
+                    "--prefetch-window-rows",
+                    "12500" if allocation.replay_prefetch else "0",
+                    "--prefetch-max-windows",
+                    str(allocation.replay_prefetch_max_windows),
+                )
+            )
+            if allocation.replay_response_buffer_budget_bytes is not None:
+                server_commands.extend(
+                    (
+                        "--response-buffer-budget",
+                        str(allocation.replay_response_buffer_budget_bytes),
+                    )
+                )
+        elif allocation.replay_delimiter_connections is not None:
             server_commands.extend(
                 ("--delimiter-connections", str(allocation.replay_delimiter_connections))
             )
@@ -485,6 +501,18 @@ def render_batch_job(
                 }
             },
         }
+        if backend.server_implementation == "go":
+            server_runnable["environment"] = {
+                "variables": {
+                    "GOMAXPROCS": str(allocation.replay_vcpus),
+                    "GOMEMLIMIT": str(
+                        allocation.replay_memory_gb
+                        * 1024**3
+                        * allocation.replay_heap_percent
+                        // 100
+                    ),
+                }
+            }
         container["options"] = subject_options
         runnables = [output_initializer, server_runnable, subject_runnable]
         if staging_runnable is not None:

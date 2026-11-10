@@ -2114,3 +2114,41 @@ def test_renderer_passes_a_stated_delimiter_width_to_the_server(tmp_path: Path) 
             options=context(plan, case, images).options,
         )
     )
+
+
+@pytest.mark.parametrize("prefetch,window_rows", [(True, "12500"), (False, "0")])
+def test_go_renderer_uses_go_flags_and_allocation_limits(
+    tmp_path: Path, prefetch: bool, window_rows: str
+) -> None:
+    plan = Plan.load(REPLAY_CANARY)
+    case = plan.cases[0]
+    images = image_set(tmp_path)
+    attempt = campaign.planned_attempt(case, context(plan, case, images))[2](1)[0]
+    replay = json.loads(attempt.replay or "null")
+    replay["backend"]["server_implementation"] = "go"
+    replay["backend"]["serving_mode"] = "sorted"
+    replay["allocation"].update(
+        replay_prefetch=prefetch,
+        replay_prefetch_max_windows=192,
+        replay_response_buffer_budget_bytes=1073741824,
+    )
+    stated = replace(attempt, replay=json.dumps(replay, sort_keys=True, separators=(",", ":")))
+    request = gcp_batch.render_batch_job(
+        stated,
+        images.image_for(case.tool),
+        suite=SUITE,
+        options=context(plan, case, images).options,
+    )
+    server = request["taskGroups"][0]["taskSpec"]["runnables"][2]
+    commands = server["container"]["commands"]
+    assert "--delimiter-connections" not in commands
+    assert commands[commands.index("--prefetch-window-rows") + 1] == window_rows
+    assert commands[commands.index("--prefetch-max-windows") + 1] == "192"
+    assert commands[commands.index("--response-buffer-budget") + 1] == "1073741824"
+    allocation = replay["allocation"]
+    assert server["environment"]["variables"] == {
+        "GOMAXPROCS": str(allocation["replay_vcpus"]),
+        "GOMEMLIMIT": str(
+            allocation["replay_memory_gb"] * 1024**3 * allocation["replay_heap_percent"] // 100
+        ),
+    }

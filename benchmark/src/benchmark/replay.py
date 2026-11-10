@@ -21,7 +21,7 @@ REPLAY_BLOCK_FIELDS = (
     "latency_model",
 )
 REPLAY_FIXTURE_FIELDS = ("fixture_sha256", "fixture_uri")
-REPLAY_OPTIONAL_FIELDS = ("warmup",)
+REPLAY_OPTIONAL_FIELDS = ("warmup", "server_implementation")
 LATENCY_MODEL_FIELDS = ("deadlines_ms", "scale", "jitter")
 WARMUP_COUNT_FIELDS = ("structure_probes", "pivot_probes", "worker_pages")
 WARMUP_FIELDS = (*WARMUP_COUNT_FIELDS, "in_flight")
@@ -40,7 +40,10 @@ REPLAY_BOOLEAN_FIELDS = ("replay_prefetch",)
 REPLAY_FIELDS = (*REPLAY_INTEGER_FIELDS, *REPLAY_BOOLEAN_FIELDS)
 # Stated only when a case pins it; absent means the server's own default, and an
 # absent field is omitted from the identity so every earlier identity holds.
-REPLAY_OPTIONAL_INTEGER_FIELDS = ("replay_delimiter_connections",)
+REPLAY_OPTIONAL_INTEGER_FIELDS = (
+    "replay_delimiter_connections",
+    "replay_response_buffer_budget_bytes",
+)
 CAPACITY_STATUSES = ("uncalibrated", "calibrated")
 _HEX64_RE = re.compile(r"[0-9a-f]{64}")
 _PINNED_IMAGE_RE = re.compile(r"[^\s@]+@sha256:[0-9a-f]{64}")
@@ -93,6 +96,7 @@ class ReplayBackend:
     latency_scale: float | None
     latency_jitter: str | None
     warmup: tuple[tuple[str, int], ...] | None = None
+    server_implementation: str | None = None
 
     @property
     def profile_spec(self) -> str | None:
@@ -118,6 +122,8 @@ class ReplayBackend:
         }
         if self.fixture_uri is not None:
             document["fixture_uri"] = self.fixture_uri
+        if self.server_implementation is not None:
+            document["server_implementation"] = self.server_implementation
         if self.warmup is not None:
             # Declared warm-up is part of the treatment: a warmed server is a different
             # instrument from a cold one. Absent means none, so earlier identities hold.
@@ -138,6 +144,7 @@ class ReplayAllocation:
     replay_prefetch_max_windows: int
     replay_prefetch: bool
     replay_delimiter_connections: int | None = None
+    replay_response_buffer_budget_bytes: int | None = None
 
     def as_dict(self) -> dict[str, object]:
         document: dict[str, object] = {field: getattr(self, field) for field in REPLAY_FIELDS}
@@ -163,6 +170,15 @@ class ReplayConfig:
     backend: ReplayBackend
     allocation: ReplayAllocation
     capacity_status: str
+
+    def __post_init__(self) -> None:
+        if self.backend.server_implementation == "go":
+            if self.allocation.replay_delimiter_connections is not None:
+                raise ReplayError("Go replay does not support replay_delimiter_connections")
+            if self.allocation.replay_max_concurrent_requests < 8:
+                raise ReplayError("Go replay requires at least 8 concurrent requests")
+        elif self.allocation.replay_response_buffer_budget_bytes is not None:
+            raise ReplayError("replay_response_buffer_budget_bytes requires Go replay")
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -513,6 +529,11 @@ def parse_backend(value: object) -> ReplayBackend:
     mode = value.get("serving_mode")
     if mode not in SERVING_MODES:
         raise ReplayError(f"replay serving_mode must be one of {', '.join(SERVING_MODES)}")
+    implementation = value.get("server_implementation")
+    if "server_implementation" in value and implementation not in ("java", "go"):
+        raise ReplayError("replay server_implementation must be java or go")
+    if implementation == "go" and mode != "sorted":
+        raise ReplayError("Go replay supports only sorted serving")
     latency = value.get("latency_model")
     if latency == "none":
         return ReplayBackend(
@@ -524,6 +545,7 @@ def parse_backend(value: object) -> ReplayBackend:
             latency_scale=None,
             latency_jitter=None,
             warmup=warmup,
+            server_implementation=implementation,
         )
     if not isinstance(latency, Mapping) or set(latency) != set(LATENCY_MODEL_FIELDS):
         raise ReplayError("replay latency_model has invalid fields")
@@ -552,6 +574,7 @@ def parse_backend(value: object) -> ReplayBackend:
         latency_scale=float(scale),
         latency_jitter="none",
         warmup=warmup,
+        server_implementation=implementation,
     )
 
 

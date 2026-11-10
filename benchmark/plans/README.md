@@ -180,6 +180,22 @@ Reader-pool size and request-admission width are separate fields, and
 `replay_prefetch_max_windows` defaults to 96 when omitted; state it explicitly
 when a diagnostic varies cache capacity.
 
+`replay.server_implementation: go` selects the Go server launch contract; omitted
+means Java and preserves existing case identities and launch commands. Go requires
+`serving_mode: sorted` and refuses `replay_delimiter_connections`. Its cache is
+controlled by the same explicit `replay_prefetch` and `replay_prefetch_max_windows`
+fields: enabled uses 12,500-row windows, disabled passes a zero window size.
+`replay_response_buffer_budget_bytes` optionally pins Go's response byte budget;
+it is a positive integer and is refused for Java. These stated settings enter case
+identity. Go gets `GOMAXPROCS=replay_vcpus` and a byte-valued `GOMEMLIMIT` equal to
+`replay_memory_gb * 2^30 * replay_heap_percent / 100` (rounded down), leaving the
+remaining cgroup allowance for memory outside Go's runtime budget. The percentage
+is a soft Go memory limit, not a JVM heap limit, for this backend. No Java options
+are sent to Go. The existing 600-second readiness ceiling remains an allowance,
+not a delay: both servers are probed until ready before subject timing begins.
+Worker images must include this replay contract before running Go plans; old
+workers reject the new fields rather than silently treating Go as Java.
+
 `capacity_status` is a simple plan fact, not another control surface:
 `uncalibrated` permits diagnostic replay work only, while `calibrated` permits
 replay measurements. Set it to `calibrated` only after a real diagnostic

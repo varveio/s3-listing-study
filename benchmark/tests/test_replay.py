@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 
 import duckdb
@@ -31,6 +32,31 @@ def config() -> replay.ReplayConfig:
             "capacity_status": "calibrated",
         }
     )
+
+
+def test_go_backend_roundtrip_and_incompatible_controls() -> None:
+    legacy = json.loads(config().canonical_json())
+    assert "server_implementation" not in legacy["backend"]
+    document = json.loads(config().canonical_json())
+    document["backend"]["server_implementation"] = "go"
+    document["allocation"]["replay_response_buffer_budget_bytes"] = 1073741824
+    go = replay.parse_document(document)
+    assert replay.parse_document(go.canonical_json()) == go
+    assert go.canonical_json() != config().canonical_json()
+    for section, field, value in (
+        ("backend", "server_implementation", "rust"),
+        ("backend", "serving_mode", "duckdb"),
+        ("allocation", "replay_delimiter_connections", 16),
+        ("allocation", "replay_max_concurrent_requests", 4),
+        ("allocation", "replay_response_buffer_budget_bytes", 0),
+    ):
+        changed = json.loads(go.canonical_json())
+        changed[section][field] = value
+        with pytest.raises(replay.ReplayError):
+            replay.parse_document(changed)
+    document["backend"]["server_implementation"] = "java"
+    with pytest.raises(replay.ReplayError, match="requires Go"):
+        replay.parse_document(document)
 
 
 def metrics(requests: int, errors: int = 0) -> dict[str, object]:

@@ -988,6 +988,7 @@ def test_every_key_a_row_may_state_changes_the_case_it_resolves_to(tmp_path: Pat
         "replay_prefetch_max_windows": (96, 1024),
         "replay_heap_percent": (50, 75),
         "replay_delimiter_connections": (16, 32),
+        "replay_response_buffer_budget_bytes": (268435456, 1073741824),
     }
     assert set(pairs) == set(bench.ROW_FIELDS), "a row key with no coverage here"
 
@@ -1079,7 +1080,13 @@ def test_every_key_a_row_may_state_changes_the_case_it_resolves_to(tmp_path: Pat
         document = document.replace("  vcpus: 2\n  memory_gb: 8\n", "  vcpus: 4\n  memory_gb: 16\n")
         document = document.replace("tools:\n", case_defaults + "tools:\n", 1)
         path.write_text(
-            "auth_role: fixture-role\n" + replay_block + document,
+            "auth_role: fixture-role\n"
+            + (
+                replay_block.replace("replay:\n", "replay:\n  server_implementation: go\n")
+                if field == "replay_response_buffer_budget_bytes"
+                else replay_block
+            )
+            + document,
             encoding="utf-8",
         )
         return load(path, adapters=adapters, instances={**INSTANCES, (6, 16): "six-vcpu"}).cases[0]
