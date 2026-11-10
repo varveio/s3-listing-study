@@ -1,0 +1,61 @@
+# Input cell: release s7cmd.d144b6bc57c5.s1. Fresh paired runs; diagnostic qualification only.
+spec_version: 3
+bucket: nara-1950-census
+region: us-east-2
+auth_role: public-read
+replay:
+  capacity_status: uncalibrated
+  fixture_sha256: 48468b7c1ea8bf657fcb089dbcb1d940d3af62b748a7cb66f6dccc8876905db4
+  fixture_uri: gs://s3-listing-study-results-29c02004/fixtures/nara-1950-census/current-eba31d9/part-*.parquet
+  latency_model:
+    deadlines_ms:
+      pivot_probe: 44
+      structure_probe: 50
+      worker_page: 86
+    jitter: none
+    scale: 1.0
+  server_image_uri: ghcr.io/varveio/swath-replay@sha256:8fb53a327f946f10db17d4fd082a7b2e06bc678a1e828a197a1ef5717473a46a
+  serving_mode: sorted
+defaults:
+  reps: 2
+  timeout_s: 1800
+  vcpus: 32
+  memory_gb: 64
+  container_memory_gb: 8
+  replay_heap_percent: 75
+  replay_max_concurrent_requests: 512
+  replay_memory_gb: 20
+  replay_parquet_connections: 64
+  replay_prefetch: false
+  replay_prefetch_max_windows: 96
+  replay_vcpus: 20
+  subject_vcpus: 8
+tools:
+  s7cmd:
+    cases:
+    - mode: recursive-one-nosort
+      purpose: diagnostic
+      concurrency: 64
+      config:
+        parallel_depth: 1
+exclude:
+- tool: aws-cli
+  reason: Outside the bounded replay qualification cell
+- tool: minio-mc
+  reason: Outside the bounded replay qualification cell
+- tool: ps3
+  reason: Outside the bounded replay qualification cell
+- tool: rclone
+  reason: Outside the bounded replay qualification cell
+- tool: s3-fast-list
+  reason: Outside the bounded replay qualification cell
+- tool: s3kor
+  reason: Outside the bounded replay qualification cell
+- tool: s3p
+  reason: Outside the bounded replay qualification cell
+- tool: s4cmd
+  reason: Outside the bounded replay qualification cell
+- tool: s5cmd
+  reason: Outside the bounded replay qualification cell
+- tool: swath
+  reason: Outside the bounded replay qualification cell

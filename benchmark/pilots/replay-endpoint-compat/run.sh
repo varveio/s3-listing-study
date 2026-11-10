@@ -14,18 +14,38 @@
 # No latency injection: this asks whether a tool can speak to the server at all,
 # and answers nothing about speed.
 set -u
-IMG=s3ls-toolbox:pilot
-EP=http://127.0.0.1:19090
-B=noaa-ghcn-pds
-R=us-east-1
-P='parquet/by_station/STATION=ACW00011604/'
-OUT=/tmp/replay-pilot/compat
+IMG=${IMG:-s3ls-toolbox:pilot}
+EP=${EP:-http://127.0.0.1:19090}
+B=${B:-noaa-ghcn-pds}
+R=${R:-us-east-1}
+P=${P:-parquet/by_station/STATION=ACW00011604/}
+OUT=${OUT:-/tmp/replay-pilot/compat}
+mkdir -p "$OUT"
+cp "$(dirname "$0")/probe.py" "$OUT/probe.py"
 DUMMY="-e AWS_ACCESS_KEY_ID=REPLAYDUMMYACCESSKEY -e AWS_SECRET_ACCESS_KEY=replay-only-dummy-secret-not-a-credential -e AWS_DEFAULT_REGION=$R -e AWS_REGION=$R -e AWS_EC2_METADATA_DISABLED=true"
 
 run() { # name, then docker args
   local name="$1"; shift
   echo "### $name"
-  timeout 120 docker run --rm --network host -v "$OUT:/out" "$@" > "$OUT/$name.out" 2> "$OUT/$name.err"
+  local executable="" arg
+  local -a options=() command=()
+  while [[ $# -gt 0 ]]; do
+    arg="$1"; shift
+    if [[ "$arg" == --entrypoint ]]; then
+      executable="$1"; shift
+    elif [[ "$arg" == "$IMG" ]]; then
+      command=("$executable" "$@"); break
+    else
+      options+=("$arg")
+    fi
+  done
+  printf '%q ' docker run --rm --network host -v "$OUT:/out" "${options[@]}" \
+    --entrypoint /usr/bin/python3 "$IMG" /out/probe.py "$name" "${command[@]}" > "$OUT/$name.command"
+  docker run --rm --network host -v "$OUT:/out" "${options[@]}" \
+    -e "PILOT_IMAGE=$IMG" -e "PILOT_BUCKET=$B" -e "PILOT_PREFIX=$P" \
+    -e "PILOT_FIXTURE_SHA256=${PILOT_FIXTURE_SHA256:-unrecorded}" \
+    --entrypoint /usr/bin/python3 "$IMG" /out/probe.py "$name" "${command[@]}" \
+    > "$OUT/$name.out" 2> "$OUT/$name.err"
   echo "exit=$? lines=$(wc -l < "$OUT/$name.out")" | tee "$OUT/$name.status"
 }
 
@@ -66,8 +86,14 @@ run s3kor $DUMMY --entrypoint /usr/local/bin/s3kor $IMG \
 run s5cmd $DUMMY --entrypoint /s5cmd $IMG \
   --endpoint-url $EP --no-sign-request ls -e -s "s3://$B/$P*"
 
-run ps3 $DUMMY --entrypoint /usr/local/bin/pS3 $IMG \
-  list-objects-v2 --bucket $B --region $R --endpoint-url $EP
+if [[ ${SKIP_UNSCOPED_PS3:-false} == true ]]; then
+  echo 'not-run: ps3 cannot scope to the requested prefix' > "$OUT/ps3.status"
+else
+  run ps3 $DUMMY --entrypoint /usr/local/bin/pS3 $IMG \
+    list-objects-v2 --bucket $B --region $R --endpoint-url $EP
+fi
 
-run s4cmd $DUMMY -e AWS_CONFIG_FILE=/out/aws-config --entrypoint /usr/local/bin/s4cmd $IMG \
-  ls -r -c 4 --endpoint-url $EP "s3://$B/$P"
+if [[ ${SKIP_RETIRED_S4CMD:-false} != true ]]; then
+  run s4cmd $DUMMY -e AWS_CONFIG_FILE=/out/aws-config --entrypoint /usr/local/bin/s4cmd $IMG \
+    ls -r -c 4 --endpoint-url $EP "s3://$B/$P"
+fi

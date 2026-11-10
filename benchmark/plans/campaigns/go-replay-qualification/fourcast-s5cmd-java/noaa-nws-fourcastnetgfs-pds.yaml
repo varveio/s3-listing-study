@@ -1,0 +1,58 @@
+# Input cell: release s5cmd.9305315fcfd5.s1. Fresh paired runs; diagnostic qualification only.
+spec_version: 3
+bucket: noaa-nws-fourcastnetgfs-pds
+region: us-east-1
+auth_role: public-read
+replay:
+  capacity_status: uncalibrated
+  fixture_sha256: 1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4
+  fixture_uri: gs://s3-listing-study-results-29c02004/fixtures/noaa-nws-fourcastnetgfs-pds/1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4/part-00000.parquet
+  latency_model:
+    deadlines_ms:
+      pivot_probe: 35
+      structure_probe: 37
+      worker_page: 85
+    jitter: none
+    scale: 1.0
+  server_image_uri: us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:ace5350d99c217bf5919b795fc53ed955d1dc2fb6bef1eecf36e8a90e9732f07
+  serving_mode: sorted
+defaults:
+  reps: 3
+  timeout_s: 1800
+  vcpus: 16
+  memory_gb: 32
+  container_memory_gb: 16
+  replay_heap_percent: 75
+  replay_max_concurrent_requests: 4096
+  replay_memory_gb: 8
+  replay_parquet_connections: 8
+  replay_prefetch: true
+  replay_prefetch_max_windows: 256
+  replay_vcpus: 8
+  subject_vcpus: 6
+tools:
+  s5cmd:
+    cases:
+    - mode: recursive
+      purpose: diagnostic
+exclude:
+- tool: aws-cli
+  reason: Outside the bounded replay qualification cell
+- tool: minio-mc
+  reason: Outside the bounded replay qualification cell
+- tool: ps3
+  reason: Outside the bounded replay qualification cell
+- tool: rclone
+  reason: Outside the bounded replay qualification cell
+- tool: s3-fast-list
+  reason: Outside the bounded replay qualification cell
+- tool: s3kor
+  reason: Outside the bounded replay qualification cell
+- tool: s3p
+  reason: Outside the bounded replay qualification cell
+- tool: s4cmd
+  reason: Outside the bounded replay qualification cell
+- tool: s7cmd
+  reason: Outside the bounded replay qualification cell
+- tool: swath
+  reason: Outside the bounded replay qualification cell
