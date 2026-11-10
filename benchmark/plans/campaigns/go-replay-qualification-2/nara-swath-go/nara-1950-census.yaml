@@ -1,0 +1,76 @@
+# Input cell: release swath.d8cacc6c9bd2.s1. Wave 2: Go replay with the SeekParquet list index, on the
+# converted fixture; diagnostic qualification only.
+spec_version: 3
+bucket: nara-1950-census
+region: us-east-2
+auth_role: public-read
+replay:
+  capacity_status: uncalibrated
+  # SeekParquet dataset root: fixture_sha256 is its manifest.json; the adopted
+  # digest is the wave-1 release fixture's staging digest it was converted from.
+  fixture_sha256: 6ce6d7d12442a6b6ab9524644666b95e3e8bf4ff800a12c040d3373269c2c5a0
+  fixture_uri: gs://s3-listing-study-results-29c02004/fixtures/nara-1950-census/seekparquet-6ce6d7d12442/
+  fixture_adopted_sha256: 48468b7c1ea8bf657fcb089dbcb1d940d3af62b748a7cb66f6dccc8876905db4
+  latency_model:
+    deadlines_ms:
+      pivot_probe: 44
+      structure_probe: 50
+      worker_page: 86
+    jitter: none
+    scale: 1.0
+  # PLACEHOLDER: the Go replay image with the list index (swath go/replay-list-index)
+  # is not built yet. campaign submit refuses this plan until a digest replaces it.
+  server_image_uri: us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:REPLAY_GO_IMAGE_TBD
+  serving_mode: sorted
+  server_implementation: go
+defaults:
+  reps: 1
+  timeout_s: 1800
+  vcpus: 32
+  memory_gb: 64
+  container_memory_gb: 8
+  replay_heap_percent: 75
+  replay_max_concurrent_requests: 4096
+  replay_memory_gb: 20
+  replay_parquet_connections: 64
+  replay_prefetch: true
+  replay_prefetch_max_windows: 192
+  replay_vcpus: 20
+  subject_vcpus: 8
+  replay_response_buffer_budget_bytes: 1073741824
+  replay_list_index: true
+  replay_list_index_max_bytes: 67108864
+tools:
+  swath:
+    cases:
+    - mode: recursive-tsv-dataset
+      purpose: diagnostic
+      concurrency: 128
+      config:
+        jvm_max_heap: 4g
+        part_rotation_interval: '0'
+        part_rotation_max_rows: 0
+        text_part_size: 1gb
+        text_writers: 3
+        writeback_size: 32mb
+exclude:
+- tool: aws-cli
+  reason: Outside the bounded replay qualification cell
+- tool: minio-mc
+  reason: Outside the bounded replay qualification cell
+- tool: ps3
+  reason: Outside the bounded replay qualification cell
+- tool: rclone
+  reason: Outside the bounded replay qualification cell
+- tool: s3-fast-list
+  reason: Outside the bounded replay qualification cell
+- tool: s3kor
+  reason: Outside the bounded replay qualification cell
+- tool: s3p
+  reason: Outside the bounded replay qualification cell
+- tool: s4cmd
+  reason: Outside the bounded replay qualification cell
+- tool: s5cmd
+  reason: Outside the bounded replay qualification cell
+- tool: s7cmd
+  reason: Outside the bounded replay qualification cell

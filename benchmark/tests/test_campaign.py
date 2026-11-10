@@ -2178,6 +2178,7 @@ def test_go_renderer_uses_go_flags_and_allocation_limits(
     }
 
 
+WAVE2 = ROOT / "benchmark/plans/campaigns/go-replay-qualification-2"
 SEEKPARQUET_ROOT = "gs://fixtures/aws-public-blockchain/seekparquet-c4a42eb4e7fb/"
 
 
@@ -2361,3 +2362,57 @@ def test_java_era_fixture_render_is_unchanged_by_the_seekparquet_branch(tmp_path
     assert "gcloud storage cp 'gs://fixtures/case/part-*.parquet' /fixtures/source/" in script
     assert "gs://fixtures/case/s3-fast-list-hints.input" in script
     assert "manifest.json" not in script
+
+
+def _wave2_plans() -> list[Path]:
+    return sorted(WAVE2.glob("*/*.yaml"))
+
+
+def test_wave2_plans_dry_render_and_refuse_submission_while_the_image_is_a_placeholder(
+    tmp_path: Path,
+) -> None:
+    """Drift guard on the committed wave-2 plans: every row renders the Go list-index
+    contract over its SeekParquet root, and submission refuses the placeholder."""
+    images = image_set(tmp_path)
+    assert len(_wave2_plans()) == 5
+    attempts = 0
+    for path in _wave2_plans():
+        plan = campaign.load_campaign_plan(path)
+        assert plan.replay is not None and plan.replay.backend.image_is_placeholder
+        assert plan.replay.backend.fixture_layout == "seekparquet"
+        assert plan.replay.backend.fixture_adopted_sha256 is not None
+        with pytest.raises(ledger.CampaignError, match="REPLAY_GO_IMAGE_TBD"):
+            campaign.refuse_placeholder_images(plan)
+        for case in plan.cases:
+            assert case.replay is not None and case.replay.list_index_enabled
+            for ordinal in range(1, case.reps + 1):
+                attempt = campaign.planned_attempt(case, context(plan, case, images))[2](ordinal)[0]
+                request = gcp_batch.render_batch_job(
+                    attempt,
+                    images.image_for(case.tool),
+                    suite=SUITE,
+                    options=context(plan, case, images).options,
+                )
+                server = request["taskGroups"][0]["taskSpec"]["runnables"][2]["container"]
+                assert server["imageUri"].endswith("@sha256:REPLAY_GO_IMAGE_TBD")
+                assert "--list-index=true" in server["commands"]
+                attempts += 1
+    assert attempts == 6
+
+
+def test_submit_refuses_a_placeholder_image_before_touching_a_ledger(tmp_path: Path) -> None:
+    args = argparse.Namespace(
+        executor="gcp-batch",
+        image=None,
+        results_root=None,
+        seed=None,
+        repeat=False,
+        skip_measured=False,
+        suite=SUITE,
+        plan=str(_wave2_plans()[0]),
+        dry_run=False,
+        state=str(tmp_path / "campaign.db"),
+    )
+    with pytest.raises(ledger.CampaignError, match="placeholder"):
+        campaign.cmd_submit(args)
+    assert not (tmp_path / "campaign.db").exists()
