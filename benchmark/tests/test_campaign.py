@@ -2365,7 +2365,10 @@ def test_java_era_fixture_render_is_unchanged_by_the_seekparquet_branch(tmp_path
 
 
 def _wave2_plans() -> list[Path]:
-    return sorted(WAVE2.glob("*/*.yaml"))
+    # A follow-up beyond the wave (``followup-*``) is a separate, Java-era-fixture cell.
+    return sorted(
+        path for path in WAVE2.glob("*/*.yaml") if not path.parent.name.startswith("followup-")
+    )
 
 
 WAVE2_REPLAY_IMAGE = (
