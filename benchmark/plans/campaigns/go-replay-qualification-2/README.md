@@ -168,3 +168,54 @@ owner-authorized spend is $10; seven jobs stopped at 90 minutes would exceed
 it ($13.55), so any job still running at 60 minutes is stopped (seven jobs at
 60 minutes: $9.04).
 
+
+## Results (2026-11-10)
+
+Seven Spot jobs, submitted 17:48 UTC, all SUCCEEDED by 18:03 UTC with no
+preemption or retry. Receipt:
+[`../../../receipts/go-replay-qualification-2-cloud-20261110/`](../../../receipts/go-replay-qualification-2-cloud-20261110/README.md).
+Every subject exited zero with the expected rows, with zero server errors and
+refusals, and every receipt reports `list_index.delivered: true` with no
+disagreement between the attached server line and the meters (index-on jobs
+`state=built`, the control `state=off` with zero builds and skips).
+
+Per-shape cells are mean server service time / deadline, then overrun %.
+
+| Job | Replay | Grade | worker_page | pivot_probe | structure_probe | Index skips / dense-page declines | Build s | CPU mean / p90 | Server RSS | Wall s | vs wave-1 Java median | Cost |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| blockchain c256 `swath.954f110b5470.s1` | 64/20, index on | PRESSURE_DEGRADED | 13.8/94 ms, 2.81% | 2.2/46 ms, 0.28% | 0.9/55 ms, 0% | 11,419 / 61,509 | 3.20 | 15% / 28% | 2.56 GiB | 146.2 | −5.9% | $0.150 |
+| blockchain c256 `swath.954f110b5470.s2` | 64/20, index on | PRESSURE_DEGRADED | 14.1/94 ms, 3.00% | 1.6/46 ms, 0.18% | 1.0/55 ms, 0% | 11,328 / 61,475 | 3.33 | 14% / 25% | 2.37 GiB | 152.3 | −1.9% | $0.160 |
+| blockchain c256 `swath.2076e4dd8761.s1` | 64/20, index **off** | PRESSURE_DEGRADED | 13.2/94 ms, 2.56% | 2.2/46 ms, 0.19% | 9.3/55 ms, 2.55% | 0 / 0 | – | 15% / 25% | 2.55 GiB | 150.0 | −3.4% | $0.159 |
+| blockchain c256 `swath.5d9e6e396e48.s1` | 16/5, index on | PRESSURE_DEGRADED | 23.1/94 ms, 8.28% | 6.1/46 ms, 4.57% | 1.0/55 ms, 0% | 11,273 / 61,453 | 3.10 | 52% / 84% | 2.28 GiB | 138.8 | −10.6% | $0.159 |
+| NARA Swath c128 `swath.773bf96d14ef.s1` | 20/20 | TIMING_VALID | 0.8/86 ms, 0% | 0.7/44 ms, 0% | 1.3/50 ms, 0% | 224 / 50,406 | 0.59 | 4% / 9% | 1.04 GiB | 64.5 | −0.1% | $0.038 |
+| NARA s7cmd c64 `s7cmd.8b7670175058.s1` | 20/20 | TIMING_VALID | 1.3/86 ms, 0% | – | 3.3/50 ms, 0% | 4 / 261 | 0.58 | 0.3% / 0.2% | 1.13 GiB | 603.3 | +0.2% | $0.151 |
+| FourCast s5cmd `s5cmd.c6cfb2bf8dd8.s1` | 8/8 | TIMING_VALID | 0.2/85 ms, 0% | – | – | 0 / 0 | 0.17 | 0.5% / 0.6% | 0.98 GiB | 445.1 | +5.8% | $0.058 |
+
+Server RSS is the lifetime VmHWM (includes startup, index build and warm-up); costs charge create-to-terminal
+time at N4 Spot rates (total $0.8757; $0.7263 by `runDuration`).
+
+**The list index fixed the probe it targeted.** On blockchain at 64/20, structure
+probes went from 9.3 ms mean and 2.55% overrun with the index off to 0.9-1.0 ms
+and 0% with it on, matching wave 1's index-free 4.3-5.0 ms / 1.9-2.5%. The build
+took 3.1-3.3 s and retained 1.17 MB. Wall time did not separate: 146.2 and
+152.3 s on versus 150.0 s off, inside run-to-run spread.
+
+**Blockchain still does not qualify, for a different shape.** Every blockchain
+job, index on or off, overran worker pages: 2.6-3.0% at 64/20 (13-14 ms mean)
+and 8.3% at 16/5, against the 1% validity threshold. Wave 1's Go server, at
+Swath `a93035d` on the Java-era parts, served the same worker pages at 4.7-5.0
+ms with 0% overrun at 64/20. Because the index-off control shows the same
+regression, it is not the index: it is either the server change between
+`a93035d` and `545a10cb` or reading the SeekParquet dataset rather than the
+legacy parts. This wave does not separate those two. The 16/5 rung is also
+CPU-bound (p90 84%) and its 10.6% wall gap is outside the ±10% band.
+
+**NARA and FourCast qualify** on the SeekParquet datasets with the index on:
+TIMING_VALID, zero overruns, walls within 0.2% of wave 1's Java medians for
+NARA Swath and s7cmd. The single FourCast repetition is 5.8% above the wave-1
+Java median (inside the band) and 7.5% above wave 1's three Go repetitions;
+one repetition does not establish a shift.
+
+These are cross-day comparisons with wave 1 and single repetitions except the
+two 64/20 index-on runs; they support bounded diagnostic statements, not
+precision claims.

@@ -1,0 +1,403 @@
+{
+  "attempts": [
+    {
+      "attempt_id": "s7cmd.8b7670175058.s1",
+      "case_id": "s7cmd.8b7670175058",
+      "evidence": {
+        "argv": [
+          "/usr/local/bin/s7cmd",
+          "ls",
+          "-r",
+          "-vv",
+          "--disable-color-tracing",
+          "--no-sort",
+          "-1",
+          "--max-parallel-listings",
+          "64",
+          "--max-parallel-listing-max-depth",
+          "1",
+          "--target-no-sign-request",
+          "--target-region",
+          "us-east-2",
+          "--target-endpoint-url",
+          "http://127.0.0.1:19090",
+          "--target-force-path-style",
+          "--connect-timeout-milliseconds",
+          "15000",
+          "s3://nara-1950-census/"
+        ],
+        "binding_errors": [],
+        "replay": {
+          "errors": {
+            "after": 0.0,
+            "before": 0.0
+          },
+          "list_index": {
+            "build": {
+              "budget_exhausted": 0,
+              "builds_recorded": 1,
+              "bytes": 2104768,
+              "entries": 15956,
+              "groups_failed": 0,
+              "groups_indexed": 40,
+              "groups_skipped": 0,
+              "max_bytes": 67108864,
+              "pages": 13234,
+              "seconds": 0.575455
+            },
+            "delivered": true,
+            "inconclusive": [],
+            "interval": {
+              "declines": {
+                "dense_page": 261.0,
+                "missing_group": 0.0,
+                "unsafe_run": 0.0
+              },
+              "skips": 4.0
+            },
+            "provenance": "replay /metrics swath.replay.delimiter.index.* meters in replay_evidence; the server's list_index stderr line is in the job's Cloud Logging",
+            "reasons": [],
+            "requested": {
+              "enabled": true,
+              "max_bytes": 67108864
+            },
+            "server_line": {
+              "budget_exhausted": false,
+              "bytes": 2104768,
+              "entries": 15956,
+              "groups_failed": 0,
+              "groups_indexed": 40,
+              "groups_skipped": 0,
+              "has_index": true,
+              "line": "swath_replay list_index state=built max_bytes=67108864 workers=8 groups_indexed=40 groups_skipped=0 groups_failed=0 parts_failed=0 pages=13234 entries=15956 bytes=2104768 budget_exhausted=false has_index=true seconds=0.575",
+              "max_bytes": 67108864,
+              "pages": 13234,
+              "parts_failed": 0,
+              "seconds": 0.575,
+              "state": "built",
+              "workers": 8
+            },
+            "server_line_disagreements": [],
+            "server_line_provenance": "operator export of the job's Cloud Logging"
+          },
+          "readiness": "ready",
+          "refusals": [],
+          "requests": {
+            "after": 13724.0,
+            "before": 0.0
+          },
+          "resource_sample_count": 60,
+          "sample_count": 60,
+          "state": "COMPLETE"
+        },
+        "result": {
+          "artifacts_size_bytes": 333,
+          "exit_code": 0,
+          "finished_at": "2026-11-10T18:00:02.881035+00:00",
+          "max_rss_kb": 162864,
+          "product": {
+            "artifact": "listing",
+            "channel": "stdout",
+            "name": "native/listing.txt.gz",
+            "sha256": null,
+            "size_bytes": 39213104
+          },
+          "product_error": null,
+          "row_count": 13540310,
+          "row_count_error": null,
+          "started_at": "2026-11-10T17:49:59.614719+00:00",
+          "stderr": {
+            "name": "stderr.log.gz",
+            "sha256": null,
+            "size_bytes": 333
+          },
+          "stdout": null,
+          "timed_out": false,
+          "wall_seconds": 603.264876,
+          "worker_exit_code": 0
+        },
+        "result_sha256": "8c233aa3dd851c8221a0076549e3530bc5d20dc3ac7ae5348c2c268e9a0736b8",
+        "result_uri": "gs://s3-listing-study-results-29c02004/go-replay-qualify/nara-1950-census/s7cmd.8b7670175058.s1/result.json",
+        "state": "BOUND",
+        "verification": null
+      },
+      "group_id": "goq2-nara-s7cmd-go",
+      "mode": "recursive-one-nosort",
+      "origin": "planned",
+      "purpose": "diagnostic",
+      "recorded_at": "2026-11-10T17:48:23.002985+00:00",
+      "request": {
+        "allocationPolicy": {
+          "instances": [
+            {
+              "policy": {
+                "bootDisk": {
+                  "image": "batch-cos",
+                  "sizeGb": "200",
+                  "type": "hyperdisk-balanced"
+                },
+                "machineType": "n4-highcpu-32",
+                "provisioningModel": "SPOT"
+              }
+            }
+          ],
+          "location": {
+            "allowedLocations": [
+              "zones/us-east1-b"
+            ]
+          },
+          "network": {
+            "networkInterfaces": [
+              {
+                "network": "projects/varve-oss/global/networks/s3-listing-study",
+                "subnetwork": "projects/varve-oss/regions/us-east1/subnetworks/s3-listing-study-us-east1"
+              }
+            ]
+          },
+          "serviceAccount": {
+            "email": "s3-listing-study-worker@varve-oss.iam.gserviceaccount.com"
+          }
+        },
+        "labels": {
+          "suite": "go-replay-qualify"
+        },
+        "logsPolicy": {
+          "destination": "CLOUD_LOGGING"
+        },
+        "taskGroups": [
+          {
+            "parallelism": "1",
+            "taskCount": "1",
+            "taskSpec": {
+              "computeResource": {
+                "cpuMilli": "32000",
+                "memoryMib": "65536"
+              },
+              "maxRetryCount": 0,
+              "maxRunDuration": "3005s",
+              "runnables": [
+                {
+                  "container": {
+                    "commands": [
+                      "-ceu",
+                      "set -o pipefail\nmkdir -p /fixtures/source\nmkdir -p /fixtures/source/data\ngcloud storage cp gs://s3-listing-study-results-29c02004/fixtures/nara-1950-census/seekparquet-6ce6d7d12442/manifest.json /fixtures/source/manifest.json\nactual=\"$(sha256sum /fixtures/source/manifest.json)\"; actual=\"${actual%% *}\"\n[[ \"$actual\" == 6ce6d7d12442a6b6ab9524644666b95e3e8bf4ff800a12c040d3373269c2c5a0 ]] || { echo \"fixture manifest digest mismatch: $actual\" >&2; exit 1; }\nparts=\"$(\"${CLOUDSDK_PYTHON:-python3}\" -c '\nimport hashlib, json, os, re, sys\n\n# argv: list|verify ROOT [ADOPTED_SHA256]. The manifest'\"'\"'s own digest was\n# checked by the caller before this runs, so its contents are the identity.\ncommand, root = sys.argv[1], sys.argv[2]\nadopted_expected = sys.argv[3] if len(sys.argv) > 3 else \"\"\nwith open(os.path.join(root, \"manifest.json\"), \"rb\") as source:\n    manifest = json.load(source)\nif manifest.get(\"format\") != \"seekparquet\":\n    sys.exit(\"fixture manifest is not a SeekParquet manifest\")\nparts = manifest.get(\"parts\")\nif not isinstance(parts, list) or not parts:\n    sys.exit(\"fixture manifest names no parts\")\nnames = []\nfor part in parts:\n    path = part.get(\"path\") if isinstance(part, dict) else None\n    if not isinstance(path, str) or not re.fullmatch(r\"data/[A-Za-z0-9._-]+\\.parquet\", path):\n        sys.exit(\"fixture manifest part path is not data/<name>.parquet: %r\" % (path,))\n    names.append(path)\nif len(set(names)) != len(names):\n    sys.exit(\"fixture manifest names a part twice\")\nif command == \"list\":\n    print(\"\\n\".join(names))\n    sys.exit(0)\nstaged = sorted(\n    \"data/\" + name for name in os.listdir(os.path.join(root, \"data\")) if name.endswith(\".parquet\")\n)\nif staged != sorted(names):\n    sys.exit(\"staged data/ parts differ from the manifest: %r\" % (staged,))\nfor part in parts:\n    digest = hashlib.sha256()\n    with open(os.path.join(root, part[\"path\"]), \"rb\") as source:\n        for chunk in iter(lambda: source.read(1 << 20), b\"\"):\n            digest.update(chunk)\n    size = os.path.getsize(os.path.join(root, part[\"path\"]))\n    if size != part.get(\"bytes\") or digest.hexdigest() != part.get(\"sha256\"):\n        sys.exit(\"fixture part %s does not match its manifest entry\" % part[\"path\"])\nif adopted_expected:\n    adopted = manifest.get(\"extensions\", {}).get(\"swath-replay\", {}).get(\"adopted_from\", {})\n    rows = sorted(\n        \"%s\\t%s\\t%s\\n\" % (item[\"input\"], item[\"input_bytes\"], item[\"input_sha256\"])\n        for item in adopted.get(\"parts\", [])\n    )\n    actual = hashlib.sha256(\"\".join(rows).encode()).hexdigest() if rows else \"\"\n    if actual != adopted_expected:\n        sys.exit(\"fixture adopted_from digest mismatch: %s\" % actual)\nprint(\"seekparquet fixture verified: %d part(s)\" % len(parts))\n' list /fixtures/source)\"\nwhile IFS= read -r part; do\n  gcloud storage cp gs://s3-listing-study-results-29c02004/fixtures/nara-1950-census/seekparquet-6ce6d7d12442/\"$part\" /fixtures/source/\"$part\"\ndone <<< \"$parts\"\n\"${CLOUDSDK_PYTHON:-python3}\" -c '\nimport hashlib, json, os, re, sys\n\n# argv: list|verify ROOT [ADOPTED_SHA256]. The manifest'\"'\"'s own digest was\n# checked by the caller before this runs, so its contents are the identity.\ncommand, root = sys.argv[1], sys.argv[2]\nadopted_expected = sys.argv[3] if len(sys.argv) > 3 else \"\"\nwith open(os.path.join(root, \"manifest.json\"), \"rb\") as source:\n    manifest = json.load(source)\nif manifest.get(\"format\") != \"seekparquet\":\n    sys.exit(\"fixture manifest is not a SeekParquet manifest\")\nparts = manifest.get(\"parts\")\nif not isinstance(parts, list) or not parts:\n    sys.exit(\"fixture manifest names no parts\")\nnames = []\nfor part in parts:\n    path = part.get(\"path\") if isinstance(part, dict) else None\n    if not isinstance(path, str) or not re.fullmatch(r\"data/[A-Za-z0-9._-]+\\.parquet\", path):\n        sys.exit(\"fixture manifest part path is not data/<name>.parquet: %r\" % (path,))\n    names.append(path)\nif len(set(names)) != len(names):\n    sys.exit(\"fixture manifest names a part twice\")\nif command == \"list\":\n    print(\"\\n\".join(names))\n    sys.exit(0)\nstaged = sorted(\n    \"data/\" + name for name in os.listdir(os.path.join(root, \"data\")) if name.endswith(\".parquet\")\n)\nif staged != sorted(names):\n    sys.exit(\"staged data/ parts differ from the manifest: %r\" % (staged,))\nfor part in parts:\n    digest = hashlib.sha256()\n    with open(os.path.join(root, part[\"path\"]), \"rb\") as source:\n        for chunk in iter(lambda: source.read(1 << 20), b\"\"):\n            digest.update(chunk)\n    size = os.path.getsize(os.path.join(root, part[\"path\"]))\n    if size != part.get(\"bytes\") or digest.hexdigest() != part.get(\"sha256\"):\n        sys.exit(\"fixture part %s does not match its manifest entry\" % part[\"path\"])\nif adopted_expected:\n    adopted = manifest.get(\"extensions\", {}).get(\"swath-replay\", {}).get(\"adopted_from\", {})\n    rows = sorted(\n        \"%s\\t%s\\t%s\\n\" % (item[\"input\"], item[\"input_bytes\"], item[\"input_sha256\"])\n        for item in adopted.get(\"parts\", [])\n    )\n    actual = hashlib.sha256(\"\".join(rows).encode()).hexdigest() if rows else \"\"\n    if actual != adopted_expected:\n        sys.exit(\"fixture adopted_from digest mismatch: %s\" % actual)\nprint(\"seekparquet fixture verified: %d part(s)\" % len(parts))\n' verify /fixtures/source 48468b7c1ea8bf657fcb089dbcb1d940d3af62b748a7cb66f6dccc8876905db4"
+                    ],
+                    "imageUri": "gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:cf72dd63b7643c117ef53378a41bef6db6a01fa3d561f2b456d7abd8bbeb9ba6",
+                    "options": "--entrypoint /bin/bash --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
+                  },
+                  "environment": {
+                    "variables": {
+                      "CLOUDSDK_PYTHON": "/usr/lib/google-cloud-sdk/platform/bundledpythonunix/bin/python3"
+                    }
+                  }
+                },
+                {
+                  "container": {
+                    "commands": [
+                      "10001:10001",
+                      "/tmp/attempt"
+                    ],
+                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:a878e4296bb7c07816eb4437b78f1209c9698e5c3ce891caf53cffe1a7a40e85",
+                    "options": "--user 0:0 --entrypoint /bin/chown --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
+                  }
+                },
+                {
+                  "background": true,
+                  "container": {
+                    "commands": [
+                      "serve",
+                      "--fixture",
+                      "/fixtures/source",
+                      "--bucket",
+                      "nara-1950-census",
+                      "--host",
+                      "127.0.0.1",
+                      "--port",
+                      "19090",
+                      "--metrics-port",
+                      "19192",
+                      "--serving-mode",
+                      "sorted",
+                      "--parquet-connections",
+                      "64",
+                      "--max-concurrent-requests",
+                      "4096",
+                      "--prefetch-window-rows",
+                      "12500",
+                      "--prefetch-max-windows",
+                      "192",
+                      "--response-buffer-budget",
+                      "1073741824",
+                      "--list-index=true",
+                      "--list-index-max-bytes",
+                      "67108864",
+                      "--inject-latency",
+                      "worker_page=86ms,pivot_probe=44ms,structure_probe=50ms",
+                      "--latency-scale",
+                      "1.0"
+                    ],
+                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:3b3584460761de559c07e73b79c4aa7bffd77318108fdbf12ae36c41a98933b5",
+                    "options": "--network host --cpuset-cpus=0-9,16-25 --memory=20g --memory-swap=20g --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
+                  },
+                  "environment": {
+                    "variables": {
+                      "GOMAXPROCS": "20",
+                      "GOMEMLIMIT": "16106127360"
+                    }
+                  }
+                },
+                {
+                  "container": {
+                    "commands": [
+                      "--tool",
+                      "s7cmd",
+                      "--mode",
+                      "recursive-one-nosort",
+                      "--purpose",
+                      "diagnostic",
+                      "--bucket",
+                      "nara-1950-census",
+                      "--region",
+                      "us-east-2",
+                      "--prefix",
+                      "",
+                      "--output",
+                      "/tmp/attempt",
+                      "--destination",
+                      "gs://s3-listing-study-results-29c02004/go-replay-qualify/nara-1950-census/s7cmd.8b7670175058.s1/",
+                      "--timeout",
+                      "1800",
+                      "--term-grace",
+                      "5.0",
+                      "--retain-products",
+                      "false",
+                      "--image",
+                      "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:a878e4296bb7c07816eb4437b78f1209c9698e5c3ce891caf53cffe1a7a40e85",
+                      "--toolbox-manifest-sha256",
+                      "e44c4056b74c806353bfea06d053ae64589c6623bb7410d8405d6cf71d75125f",
+                      "--toolbox-recipe-sha256",
+                      "405bc76f129181d8a6d5f6cc9c26d89daa5e0068ae688b040aa345ea99fbd0ee",
+                      "--tool-recipe-sha256",
+                      "b9659559aba674572f5339874f1d51ce1946590599250cd56d12aecd808b191e",
+                      "--tool-build-inputs-sha256",
+                      "0909db648831bb5ffd2930f0f1d83a390f75da06c77d8f1d3be635e5b42a2ce2",
+                      "--tool-version",
+                      "1.5.0",
+                      "--tool-build-sha256",
+                      "ec001c1dae71537eb8bc99359334b3be91c1bcaed1e7cca2271dede602f43d60",
+                      "--adapter-bundle-sha256",
+                      "a14af75adc0e7eae7b0bdd4ca1dc8c4291c97970bcb7da80f184f630408a6ed8",
+                      "--harness-revision",
+                      "1a0f845d7798b84771f85425a6f3dc8dcc6f5e33",
+                      "--subject-workdir",
+                      "/home/s7cmd",
+                      "--image-set-sha256",
+                      "6ca20d5bd623f8ba818ca3d016651fc8e1ab70e2627e39d261304e53c412d916",
+                      "--group-id",
+                      "goq2-nara-s7cmd-go",
+                      "--job-name",
+                      "go-replay-qualify-s7cmd-8b7670175058-s1",
+                      "--case-id",
+                      "s7cmd.8b7670175058",
+                      "--attempt-id",
+                      "s7cmd.8b7670175058.s1",
+                      "--machine-type",
+                      "n4-highcpu-32",
+                      "--vcpus",
+                      "32",
+                      "--memory-gb",
+                      "64",
+                      "--container-memory-gb",
+                      "8",
+                      "--config",
+                      "{\"concurrency\":64,\"mode\":\"recursive-one-nosort\",\"parallel_depth\":1}",
+                      "--endpoint-url",
+                      "http://127.0.0.1:19090",
+                      "--replay-config",
+                      "{\"allocation\":{\"replay_heap_percent\":75,\"replay_list_index\":true,\"replay_list_index_max_bytes\":67108864,\"replay_max_concurrent_requests\":4096,\"replay_memory_gb\":20,\"replay_parquet_connections\":64,\"replay_prefetch\":true,\"replay_prefetch_max_windows\":192,\"replay_response_buffer_budget_bytes\":1073741824,\"replay_vcpus\":20,\"subject_vcpus\":8},\"backend\":{\"fixture_adopted_sha256\":\"48468b7c1ea8bf657fcb089dbcb1d940d3af62b748a7cb66f6dccc8876905db4\",\"fixture_sha256\":\"6ce6d7d12442a6b6ab9524644666b95e3e8bf4ff800a12c040d3373269c2c5a0\",\"fixture_uri\":\"gs://s3-listing-study-results-29c02004/fixtures/nara-1950-census/seekparquet-6ce6d7d12442/\",\"latency_model\":{\"deadlines_ms\":{\"pivot_probe\":44,\"structure_probe\":50,\"worker_page\":86},\"jitter\":\"none\",\"scale\":1.0},\"server_image_uri\":\"us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:3b3584460761de559c07e73b79c4aa7bffd77318108fdbf12ae36c41a98933b5\",\"server_implementation\":\"go\",\"serving_mode\":\"sorted\"},\"capacity_status\":\"uncalibrated\"}"
+                    ],
+                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:a878e4296bb7c07816eb4437b78f1209c9698e5c3ce891caf53cffe1a7a40e85",
+                    "options": "--network host --cpuset-cpus=10-13,26-29 --memory=8g --memory-swap=8g --volume=/mnt/stateful_partition/attempt:/tmp/attempt --volume=/proc:/replay-host-proc:ro --ulimit nofile=1048576:1048576"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "result_prefix": "gs://s3-listing-study-results-29c02004/go-replay-qualify/nara-1950-census/s7cmd.8b7670175058.s1/",
+      "settled_at": "2026-11-10T18:03:32.474507+00:00",
+      "state": "SUCCEEDED",
+      "state_detail": null,
+      "statistic": "timing",
+      "tool": "s7cmd"
+    }
+  ],
+  "group_id": "goq2-nara-s7cmd-go",
+  "kind": "campaign-receipt-draft",
+  "ledger_created_at": "2026-11-10T17:48:20.507235+00:00",
+  "ledger_schema_version": 3,
+  "purposes": [
+    "diagnostic"
+  ],
+  "resolved_cases": {
+    "s7cmd.8b7670175058": {
+      "config": {
+        "concurrency": 64,
+        "mode": "recursive-one-nosort",
+        "parallel_depth": 1
+      },
+      "environment": {
+        "auth_role": null,
+        "container_memory_gb": 8,
+        "location": "us-east1",
+        "machine_type": "n4-highcpu-32",
+        "memory_gb": 64,
+        "output_target": "file",
+        "target_bucket": "nara-1950-census",
+        "target_prefix": "",
+        "target_region": "us-east-2",
+        "timeout_s": 1800,
+        "vcpus": 32
+      },
+      "platform_sha256": "acca01f47266edcdb907eb89a77c0472bf0840728a6cda02c7984b376ebcdff2",
+      "replay": {
+        "allocation": {
+          "replay_heap_percent": 75,
+          "replay_list_index": true,
+          "replay_list_index_max_bytes": 67108864,
+          "replay_max_concurrent_requests": 4096,
+          "replay_memory_gb": 20,
+          "replay_parquet_connections": 64,
+          "replay_prefetch": true,
+          "replay_prefetch_max_windows": 192,
+          "replay_response_buffer_budget_bytes": 1073741824,
+          "replay_vcpus": 20,
+          "subject_vcpus": 8
+        },
+        "backend": {
+          "fixture_adopted_sha256": "48468b7c1ea8bf657fcb089dbcb1d940d3af62b748a7cb66f6dccc8876905db4",
+          "fixture_sha256": "6ce6d7d12442a6b6ab9524644666b95e3e8bf4ff800a12c040d3373269c2c5a0",
+          "fixture_uri": "gs://s3-listing-study-results-29c02004/fixtures/nara-1950-census/seekparquet-6ce6d7d12442/",
+          "latency_model": {
+            "deadlines_ms": {
+              "pivot_probe": 44,
+              "structure_probe": 50,
+              "worker_page": 86
+            },
+            "jitter": "none",
+            "scale": 1.0
+          },
+          "server_image_uri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:3b3584460761de559c07e73b79c4aa7bffd77318108fdbf12ae36c41a98933b5",
+          "server_implementation": "go",
+          "serving_mode": "sorted"
+        },
+        "capacity_status": "uncalibrated"
+      },
+      "tool_slice_sha256": "db0dce60302ee7407c02357cad495e4efae624e78be6c262c3e66968bbcb3839"
+    }
+  },
+  "schema_version": 1,
+  "slots": [],
+  "suite": "go-replay-qualify"
+}
