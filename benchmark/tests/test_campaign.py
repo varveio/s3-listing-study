@@ -2374,7 +2374,7 @@ def test_wave2_plans_dry_render_and_refuse_submission_while_the_image_is_a_place
     """Drift guard on the committed wave-2 plans: every row renders the Go list-index
     contract over its SeekParquet root, and submission refuses the placeholder."""
     images = image_set(tmp_path)
-    assert len(_wave2_plans()) == 5
+    assert len(_wave2_plans()) == 6
     attempts = 0
     for path in _wave2_plans():
         plan = campaign.load_campaign_plan(path)
@@ -2384,7 +2384,9 @@ def test_wave2_plans_dry_render_and_refuse_submission_while_the_image_is_a_place
         with pytest.raises(ledger.CampaignError, match="REPLAY_GO_IMAGE_TBD"):
             campaign.refuse_placeholder_images(plan)
         for case in plan.cases:
-            assert case.replay is not None and case.replay.list_index_enabled
+            assert case.replay is not None
+            index_on = path.parent.name != "blockchain-swath-go-index-off"
+            assert case.replay.list_index_enabled is index_on
             for ordinal in range(1, case.reps + 1):
                 attempt = campaign.planned_attempt(case, context(plan, case, images))[2](ordinal)[0]
                 request = gcp_batch.render_batch_job(
@@ -2395,9 +2397,11 @@ def test_wave2_plans_dry_render_and_refuse_submission_while_the_image_is_a_place
                 )
                 server = request["taskGroups"][0]["taskSpec"]["runnables"][2]["container"]
                 assert server["imageUri"].endswith("@sha256:REPLAY_GO_IMAGE_TBD")
-                assert "--list-index=true" in server["commands"]
+                assert f"--list-index={str(index_on).lower()}" in server["commands"]
+                if not index_on:
+                    assert "--list-index-max-bytes" not in server["commands"]
                 attempts += 1
-    assert attempts == 6
+    assert attempts == 7
 
 
 def test_submit_refuses_a_placeholder_image_before_touching_a_ledger(tmp_path: Path) -> None:
