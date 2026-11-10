@@ -21,7 +21,7 @@ REPLAY_BLOCK_FIELDS = (
     "latency_model",
 )
 REPLAY_FIXTURE_FIELDS = ("fixture_sha256", "fixture_uri")
-REPLAY_OPTIONAL_FIELDS = ("warmup", "server_implementation")
+REPLAY_OPTIONAL_FIELDS = ("warmup", "server_implementation", "fixture_adopted_sha256")
 LATENCY_MODEL_FIELDS = ("deadlines_ms", "scale", "jitter")
 WARMUP_COUNT_FIELDS = ("structure_probes", "pivot_probes", "worker_pages")
 WARMUP_FIELDS = (*WARMUP_COUNT_FIELDS, "in_flight")
@@ -43,12 +43,51 @@ REPLAY_FIELDS = (*REPLAY_INTEGER_FIELDS, *REPLAY_BOOLEAN_FIELDS)
 REPLAY_OPTIONAL_INTEGER_FIELDS = (
     "replay_delimiter_connections",
     "replay_response_buffer_budget_bytes",
+    "replay_list_index_max_bytes",
+)
+# Go-only, like the budget above: stated, it is rendered as ``--list-index=...``
+# and enters identity; absent, the Go server's own default (on) applies.
+REPLAY_OPTIONAL_BOOLEAN_FIELDS = ("replay_list_index",)
+REPLAY_OPTIONAL_ALLOCATION_FIELDS = (
+    *REPLAY_OPTIONAL_INTEGER_FIELDS,
+    *REPLAY_OPTIONAL_BOOLEAN_FIELDS,
+)
+# Go-only allocation fields: each is refused for the Java server.
+GO_ONLY_ALLOCATION_FIELDS = (
+    "replay_response_buffer_budget_bytes",
+    "replay_list_index",
+    "replay_list_index_max_bytes",
 )
 CAPACITY_STATUSES = ("uncalibrated", "calibrated")
 _HEX64_RE = re.compile(r"[0-9a-f]{64}")
 _PINNED_IMAGE_RE = re.compile(r"[^\s@]+@sha256:[0-9a-f]{64}")
+# A plan may name a server image that is not built yet. It loads and dry-renders
+# so the plan can be reviewed, and ``campaign submit`` refuses it.
+REPLAY_IMAGE_PLACEHOLDER = "REPLAY_GO_IMAGE_TBD"
+_PLACEHOLDER_IMAGE_RE = re.compile(r"[^\s@]+@sha256:" + REPLAY_IMAGE_PLACEHOLDER)
+# A staged fixture is either Java-era Parquet parts (one object or the bounded
+# ``part-*.parquet`` set) or one SeekParquet dataset root: its ``manifest.json``
+# plus the ``data/`` parts that manifest names.
+FIXTURE_LAYOUT_PARTS = "parts"
+FIXTURE_LAYOUT_SEEKPARQUET = "seekparquet"
+SEEKPARQUET_MANIFEST_NAME = "manifest.json"
 _GCS_PATTERN_META = frozenset("*?[]")
 REQUEST_COUNTER = "swath.replay.http.requests"
+LIST_INDEX_SKIPS_COUNTER = "swath.replay.delimiter.index.skips"
+LIST_INDEX_DECLINES_COUNTER = "swath.replay.delimiter.index.declines"
+LIST_INDEX_DECLINE_REASONS = ("missing_group", "dense_page", "unsafe_run")
+LIST_INDEX_BUILD_LATENCY_TIMER = "swath.replay.delimiter.index.build.latency"
+LIST_INDEX_BUILD_GAUGES: tuple[tuple[str, str, dict[str, str]], ...] = (
+    ("groups_indexed", "swath.replay.delimiter.index.build.groups", {"outcome": "indexed"}),
+    ("groups_skipped", "swath.replay.delimiter.index.build.groups", {"outcome": "skipped"}),
+    ("groups_failed", "swath.replay.delimiter.index.build.groups", {"outcome": "failed"}),
+    ("pages", "swath.replay.delimiter.index.build.pages", {}),
+    ("entries", "swath.replay.delimiter.index.entries", {}),
+    ("bytes", "swath.replay.delimiter.index.bytes", {}),
+    ("max_bytes", "swath.replay.delimiter.index.max_bytes", {}),
+    ("budget_exhausted", "swath.replay.delimiter.index.budget_exhausted", {}),
+)
+LIST_INDEX_LINE_PREFIX = "swath_replay list_index "
 ERROR_COUNTER = "swath.replay.http.errors"
 REQUEST_LATENCY_TIMER = "swath.replay.request.latency"
 INJECT_OVERRUN_COUNTER = "swath.replay.inject.overrun"
@@ -97,6 +136,17 @@ class ReplayBackend:
     latency_jitter: str | None
     warmup: tuple[tuple[str, int], ...] | None = None
     server_implementation: str | None = None
+    fixture_adopted_sha256: str | None = None
+
+    @property
+    def fixture_layout(self) -> str | None:
+        """How a staged fixture is laid out, or ``None`` for an image-bundled one."""
+        return None if self.fixture_uri is None else fixture_layout(self.fixture_uri)
+
+    @property
+    def image_is_placeholder(self) -> bool:
+        """The plan names a server image that has not been built yet."""
+        return _PLACEHOLDER_IMAGE_RE.fullmatch(self.server_image_uri) is not None
 
     @property
     def profile_spec(self) -> str | None:
@@ -122,6 +172,10 @@ class ReplayBackend:
         }
         if self.fixture_uri is not None:
             document["fixture_uri"] = self.fixture_uri
+        if self.fixture_adopted_sha256 is not None:
+            # The Java-era staging digest this SeekParquet dataset was converted
+            # from, so a converted case stays linkable to the release fixture.
+            document["fixture_adopted_sha256"] = self.fixture_adopted_sha256
         if self.server_implementation is not None:
             document["server_implementation"] = self.server_implementation
         if self.warmup is not None:
@@ -145,10 +199,12 @@ class ReplayAllocation:
     replay_prefetch: bool
     replay_delimiter_connections: int | None = None
     replay_response_buffer_budget_bytes: int | None = None
+    replay_list_index_max_bytes: int | None = None
+    replay_list_index: bool | None = None
 
     def as_dict(self) -> dict[str, object]:
         document: dict[str, object] = {field: getattr(self, field) for field in REPLAY_FIELDS}
-        for field in REPLAY_OPTIONAL_INTEGER_FIELDS:
+        for field in REPLAY_OPTIONAL_ALLOCATION_FIELDS:
             value = getattr(self, field)
             if value is not None:
                 document[field] = value
@@ -172,13 +228,35 @@ class ReplayConfig:
     capacity_status: str
 
     def __post_init__(self) -> None:
+        allocation = self.allocation
         if self.backend.server_implementation == "go":
-            if self.allocation.replay_delimiter_connections is not None:
+            if allocation.replay_delimiter_connections is not None:
                 raise ReplayError("Go replay does not support replay_delimiter_connections")
-            if self.allocation.replay_max_concurrent_requests < 8:
+            if allocation.replay_max_concurrent_requests < 8:
                 raise ReplayError("Go replay requires at least 8 concurrent requests")
-        elif self.allocation.replay_response_buffer_budget_bytes is not None:
-            raise ReplayError("replay_response_buffer_budget_bytes requires Go replay")
+            if (
+                allocation.replay_list_index is False
+                and allocation.replay_list_index_max_bytes is not None
+            ):
+                raise ReplayError("replay_list_index_max_bytes requires replay_list_index on")
+        else:
+            for field in GO_ONLY_ALLOCATION_FIELDS:
+                if getattr(allocation, field) is not None:
+                    raise ReplayError(f"{field} requires Go replay")
+            if self.backend.fixture_layout == FIXTURE_LAYOUT_SEEKPARQUET:
+                raise ReplayError("a SeekParquet dataset fixture requires Go replay")
+
+    @property
+    def list_index_enabled(self) -> bool:
+        """Whether the server is asked to build the SeekParquet list index.
+
+        Go builds it unless the case turns it off; Java has no such index. The
+        server reports ``state=unsupported`` for a fixture that is not a
+        SeekParquet dataset, so this is the request, not the outcome.
+        """
+        if self.backend.server_implementation != "go":
+            return False
+        return self.allocation.replay_list_index is not False
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -417,6 +495,174 @@ def replay_timing_assessment(config: ReplayConfig, evidence: object) -> dict[str
     return assessment
 
 
+_LIST_INDEX_PAIR_RE = re.compile(r'([a-z_]+)=("(?:[^"\\]|\\.)*"|\S+)')
+_LIST_INDEX_INT_FIELDS = (
+    "max_bytes",
+    "workers",
+    "groups_indexed",
+    "groups_skipped",
+    "groups_failed",
+    "parts_failed",
+    "pages",
+    "entries",
+    "bytes",
+)
+_LIST_INDEX_STATES = ("built", "off", "unsupported", "failed")
+
+
+def parse_list_index_line(text: str) -> dict[str, object] | None:
+    """The Go server's one ``swath_replay list_index ...`` line, typed.
+
+    ``text`` is server output as exported from the job's logs; a log
+    exporter may prefix each line, so the line is found by its marker. Absent
+    returns ``None`` (a server that predates the index); more than one, or a
+    malformed one, is refused rather than guessed at.
+    """
+    found = [
+        line[line.index(LIST_INDEX_LINE_PREFIX) + len(LIST_INDEX_LINE_PREFIX) :]
+        for line in text.splitlines()
+        if LIST_INDEX_LINE_PREFIX in line
+    ]
+    if not found:
+        return None
+    if len(found) != 1:
+        raise ReplayError(f"server output has {len(found)} list_index lines, expected one")
+    body = found[0].strip()
+    pairs = _LIST_INDEX_PAIR_RE.findall(body)
+    if " ".join(f"{key}={value}" for key, value in pairs) != body:
+        raise ReplayError("list_index line is not a sequence of key=value pairs")
+    raw = dict(pairs)
+    if len(raw) != len(pairs):
+        raise ReplayError("list_index line repeats a key")
+    parsed: dict[str, object] = {"line": LIST_INDEX_LINE_PREFIX + body}
+    try:
+        state = raw.pop("state")
+        if state not in _LIST_INDEX_STATES:
+            raise ReplayError(f"list_index state {state!r} is not one of the server's states")
+        parsed["state"] = state
+        for field in _LIST_INDEX_INT_FIELDS:
+            parsed[field] = int(raw.pop(field))
+        exhausted = raw.pop("budget_exhausted")
+        if exhausted not in ("true", "false"):
+            raise ReplayError("list_index budget_exhausted is not a boolean")
+        parsed["budget_exhausted"] = exhausted == "true"
+        parsed["seconds"] = float(raw.pop("seconds"))
+    except KeyError as exc:
+        raise ReplayError(f"list_index line is missing {exc.args[0]}") from None
+    except ValueError as exc:
+        if isinstance(exc, ReplayError):
+            raise
+        raise ReplayError(f"list_index line has a malformed number: {exc}") from None
+    if "error" in raw:
+        quoted = raw.pop("error")
+        try:
+            parsed["error"] = json.loads(quoted)
+        except json.JSONDecodeError:
+            parsed["error"] = quoted
+    if raw:
+        raise ReplayError(f"list_index line has unknown field(s): {', '.join(sorted(raw))}")
+    return parsed
+
+
+def _gauge(observation: object, name: str, tags: Mapping[str, str]) -> int | float | None:
+    meter = _meter(observation, name, "gauge", tags)
+    value = _finite_nonnegative(meter.get("value") if meter is not None else None)
+    if value is None:
+        return None
+    return int(value) if value.is_integer() else value
+
+
+def list_index_summary(config: ReplayConfig, evidence: object) -> dict[str, object] | None:
+    """What the Go server's list index request, build and use look like in raw meters.
+
+    Derived, like the timing assessment, from the ``before``/``after`` metrics
+    observations the worker already retains; never persisted as a verdict. The
+    build gauges are fixed at server open, so they are read from ``before``
+    (the scrape taken just before the subject clock). Skips and declines are
+    interval deltas over the subject run. ``None`` for the Java server, which
+    has no list index.
+    """
+    if config.backend.server_implementation != "go":
+        return None
+    observations = evidence if isinstance(evidence, Mapping) else {}
+    before, after = observations.get("before"), observations.get("after")
+    build: dict[str, object] = {
+        field: _gauge(before, name, tags) for field, name, tags in LIST_INDEX_BUILD_GAUGES
+    }
+    latency = _meter(before, LIST_INDEX_BUILD_LATENCY_TIMER, "timer", {})
+    recorded = _finite_nonnegative(latency.get("count") if latency is not None else None)
+    total_ms = _finite_nonnegative(latency.get("sum_ms") if latency is not None else None)
+    build["builds_recorded"] = None if recorded is None else int(recorded)
+    build["seconds"] = round(total_ms / 1000, 6) if recorded == 1 and total_ms is not None else None
+    interval: dict[str, object] = {
+        "skips": _meter_delta(
+            before, after, name=LIST_INDEX_SKIPS_COUNTER, kind="counter", tags={}, field="count"
+        ),
+        "declines": {
+            reason: _meter_delta(
+                before,
+                after,
+                name=LIST_INDEX_DECLINES_COUNTER,
+                kind="counter",
+                tags={"reason": reason},
+                field="count",
+            )
+            for reason in LIST_INDEX_DECLINE_REASONS
+        },
+    }
+    requested_max = config.allocation.replay_list_index_max_bytes
+    reasons: list[str] = []
+    if any(build[field] is None for field, _name, _tags in LIST_INDEX_BUILD_GAUGES):
+        reasons.append("list-index build meters are absent; the server predates the list index")
+    elif config.list_index_enabled:
+        if config.backend.fixture_layout == FIXTURE_LAYOUT_SEEKPARQUET and recorded != 1:
+            reasons.append("list index was requested over a SeekParquet dataset but not built")
+        if requested_max is not None and build["max_bytes"] != requested_max:
+            reasons.append("list-index max_bytes differs from the requested budget")
+    elif recorded:
+        reasons.append("list index was turned off but the server recorded a build")
+    return {
+        "requested": {"enabled": config.list_index_enabled, "max_bytes": requested_max},
+        "build": build,
+        "interval": interval,
+        "delivered": not reasons,
+        "reasons": reasons,
+        "provenance": (
+            "replay /metrics swath.replay.delimiter.index.* meters in replay_evidence; "
+            "the server's list_index stderr line is in the job's Cloud Logging"
+        ),
+    }
+
+
+def list_index_line_disagreements(
+    line: Mapping[str, object], summary: Mapping[str, object]
+) -> list[str]:
+    """Where an exported list_index line and the meters disagree about one build."""
+    build = summary.get("build")
+    if not isinstance(build, Mapping):
+        return ["list-index summary has no build"]
+    errors = [
+        f"list_index line {field}={line.get(field)!r} but meters say {build.get(field)!r}"
+        for field in (
+            "groups_indexed",
+            "groups_skipped",
+            "groups_failed",
+            "pages",
+            "entries",
+            "bytes",
+            "max_bytes",
+        )
+        if line.get(field) != build.get(field)
+    ]
+    exhausted = 1 if line.get("budget_exhausted") is True else 0
+    if build.get("budget_exhausted") != exhausted:
+        errors.append("list_index line and meters disagree on budget_exhausted")
+    ran = line.get("state") in ("built", "failed")
+    if ran != (build.get("builds_recorded") == 1):
+        errors.append(f"list_index state={line.get('state')!r} disagrees with the build timer")
+    return errors
+
+
 def evidence_errors(config: ReplayConfig, evidence: object, *, purpose: str) -> tuple[str, ...]:
     """Return every reason raw replay evidence cannot support this attempt.
 
@@ -487,6 +733,51 @@ def replay_refusals(
     return evidence_errors(config, evidence, purpose=purpose)
 
 
+def fixture_layout(uri: str) -> str:
+    """``seekparquet`` for a dataset root (``.../`` or ``.../manifest.json``), else ``parts``."""
+    if uri.endswith("/") or uri.endswith("/" + SEEKPARQUET_MANIFEST_NAME):
+        return FIXTURE_LAYOUT_SEEKPARQUET
+    return FIXTURE_LAYOUT_PARTS
+
+
+def fixture_root(uri: str) -> str:
+    """The directory a staged fixture's companions live in, with a trailing slash.
+
+    For Java-era parts it is the parts' parent; for a SeekParquet dataset it is
+    the dataset root that holds ``manifest.json`` and ``data/``.
+    """
+    if fixture_layout(uri) == FIXTURE_LAYOUT_SEEKPARQUET:
+        return uri.removesuffix(SEEKPARQUET_MANIFEST_NAME)
+    parent, separator, _leaf = uri.rpartition("/")
+    if not separator:
+        raise ReplayError("replay fixture_uri has no parent directory")
+    return parent + "/"
+
+
+def _valid_fixture_uri(uri: object) -> bool:
+    if (
+        not isinstance(uri, str)
+        or not uri.startswith("gs://")
+        or any(character.isspace() for character in uri)
+    ):
+        return False
+    pattern_meta = {character for character in uri if character in _GCS_PATTERN_META}
+    if fixture_layout(uri) == FIXTURE_LAYOUT_SEEKPARQUET:
+        # One dataset root below a bucket: no wildcard, no empty or dot segment.
+        root = uri.removeprefix("gs://").removesuffix(SEEKPARQUET_MANIFEST_NAME).rstrip("/")
+        segments = root.split("/")
+        return (
+            not pattern_meta
+            and len(segments) >= 2
+            and all(segment not in ("", ".", "..") for segment in segments)
+        )
+    if not uri.endswith(".parquet"):
+        return False
+    return not pattern_meta or (
+        pattern_meta == {"*"} and uri.count("*") == 1 and uri.endswith("/part-*.parquet")
+    )
+
+
 def parse_backend(value: object) -> ReplayBackend:
     if not isinstance(value, Mapping):
         raise ReplayError("replay backend is not an object")
@@ -499,32 +790,29 @@ def parse_backend(value: object) -> ReplayBackend:
     if missing:
         raise ReplayError(f"replay backend is missing {', '.join(missing)}")
     image = value.get("server_image_uri")
-    if not isinstance(image, str) or _PINNED_IMAGE_RE.fullmatch(image) is None:
+    if not isinstance(image, str) or (
+        _PINNED_IMAGE_RE.fullmatch(image) is None and _PLACEHOLDER_IMAGE_RE.fullmatch(image) is None
+    ):
         raise ReplayError("replay server_image_uri is not digest-pinned")
     fixture_sha256 = value.get("fixture_sha256")
     fixture_uri = value.get("fixture_uri")
     if not isinstance(fixture_sha256, str) or _HEX64_RE.fullmatch(fixture_sha256) is None:
         raise ReplayError("replay fixture_sha256 is not a sha256 digest")
-    if fixture_uri is not None:
-        valid_uri = (
-            isinstance(fixture_uri, str)
-            and fixture_uri.startswith("gs://")
-            and fixture_uri.endswith(".parquet")
-            and not any(character.isspace() for character in fixture_uri)
+    if fixture_uri is not None and not _valid_fixture_uri(fixture_uri):
+        raise ReplayError(
+            "replay fixture_uri must name one exact gs://*.parquet object, one "
+            "bounded gs://.../part-*.parquet set, or one SeekParquet dataset root "
+            "(gs://.../ or gs://.../manifest.json)"
         )
-        if valid_uri:
-            pattern_meta = {
-                character for character in fixture_uri if character in _GCS_PATTERN_META
-            }
-            valid_uri = not pattern_meta or (
-                pattern_meta == {"*"}
-                and fixture_uri.count("*") == 1
-                and fixture_uri.endswith("/part-*.parquet")
-            )
-        if not valid_uri:
+    adopted = value.get("fixture_adopted_sha256")
+    if "fixture_adopted_sha256" in value:
+        if not isinstance(adopted, str) or _HEX64_RE.fullmatch(adopted) is None:
+            raise ReplayError("replay fixture_adopted_sha256 is not a sha256 digest")
+        if not isinstance(fixture_uri, str) or (
+            fixture_layout(fixture_uri) != FIXTURE_LAYOUT_SEEKPARQUET
+        ):
             raise ReplayError(
-                "replay fixture_uri must name one exact gs://*.parquet object or one "
-                "bounded gs://.../part-*.parquet set"
+                "replay fixture_adopted_sha256 requires a SeekParquet dataset fixture_uri"
             )
     mode = value.get("serving_mode")
     if mode not in SERVING_MODES:
@@ -546,6 +834,7 @@ def parse_backend(value: object) -> ReplayBackend:
             latency_jitter=None,
             warmup=warmup,
             server_implementation=implementation,
+            fixture_adopted_sha256=adopted,
         )
     if not isinstance(latency, Mapping) or set(latency) != set(LATENCY_MODEL_FIELDS):
         raise ReplayError("replay latency_model has invalid fields")
@@ -575,6 +864,7 @@ def parse_backend(value: object) -> ReplayBackend:
         latency_jitter="none",
         warmup=warmup,
         server_implementation=implementation,
+        fixture_adopted_sha256=adopted,
     )
 
 
@@ -605,7 +895,7 @@ def parse_warmup(value: object) -> tuple[tuple[str, int], ...] | None:
 
 def parse_allocation(value: object) -> ReplayAllocation:
     if not isinstance(value, Mapping) or not (
-        set(REPLAY_FIELDS) <= set(value) <= {*REPLAY_FIELDS, *REPLAY_OPTIONAL_INTEGER_FIELDS}
+        set(REPLAY_FIELDS) <= set(value) <= {*REPLAY_FIELDS, *REPLAY_OPTIONAL_ALLOCATION_FIELDS}
     ):
         raise ReplayError("replay allocation has invalid fields")
     integers = {field: _positive(value[field], field) for field in REPLAY_INTEGER_FIELDS}
@@ -614,11 +904,18 @@ def parse_allocation(value: object) -> ReplayAllocation:
         for field in REPLAY_OPTIONAL_INTEGER_FIELDS
         if field in value
     }
-    if not isinstance(value["replay_prefetch"], bool):
-        raise ReplayError("replay_prefetch must be a boolean")
+    for field in ("replay_prefetch", *REPLAY_OPTIONAL_BOOLEAN_FIELDS):
+        if field in value and not isinstance(value[field], bool):
+            raise ReplayError(f"{field} must be a boolean")
     if integers["replay_heap_percent"] > 100:
         raise ReplayError("replay_heap_percent must be between 1 and 100")
-    return ReplayAllocation(**integers, **optional, replay_prefetch=value["replay_prefetch"])
+    list_index = value.get("replay_list_index")
+    return ReplayAllocation(
+        **integers,
+        **optional,
+        replay_prefetch=value["replay_prefetch"],
+        replay_list_index=list_index if isinstance(list_index, bool) else None,
+    )
 
 
 def parse_document(raw: str | Mapping[str, object]) -> ReplayConfig:

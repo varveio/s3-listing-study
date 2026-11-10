@@ -215,29 +215,68 @@ def _subject_ulimit(tool: str) -> tuple[str, ...]:
     return ("--ulimit", S7CMD_NOFILE) if tool == "s7cmd" else ()
 
 
-def _fixture_staging_script(
-    uri: str,
-    expected_sha256: str,
-    *,
-    hints_uri: str | None = None,
-    hints_sha256: str | None = None,
-    s5cmd_shards_uri: str | None = None,
-    s5cmd_shards_sha256: str | None = None,
-) -> str:
-    """Download a staged fixture and refuse bytes outside its recorded identity.
+# Verifies a staged SeekParquet dataset against its own, already digest-checked
+# manifest. Runs in the staging image under its bundled interpreter
+# (``CLOUDSDK_PYTHON``). ``list`` prints the manifest's part paths for download;
+# ``verify`` refuses a staged ``data/`` whose parts are not exactly the
+# manifest's, by name, size and SHA-256, and recomputes the Java-era digest
+# from ``adopted_from`` when the case records one.
+SEEKPARQUET_STAGING_PY = r"""
+import hashlib, json, os, re, sys
 
-    The digest is over sorted ``name<TAB>size<TAB>sha256<NL>`` rows for the
-    immediate ``*.parquet`` children. The check runs before the replay server
-    starts, so mutable storage can serve only the bytes the case named. The
-    s3-fast-list hints companion and the s5cmd shards companion are each
-    digest-bound the same way: neither is trusted on emptiness alone.
-    """
-    destination = shlex.quote(REPLAY_FIXTURE_CONTAINER_DIR)
+# argv: list|verify ROOT [ADOPTED_SHA256]. The manifest's own digest was
+# checked by the caller before this runs, so its contents are the identity.
+command, root = sys.argv[1], sys.argv[2]
+adopted_expected = sys.argv[3] if len(sys.argv) > 3 else ""
+with open(os.path.join(root, "manifest.json"), "rb") as source:
+    manifest = json.load(source)
+if manifest.get("format") != "seekparquet":
+    sys.exit("fixture manifest is not a SeekParquet manifest")
+parts = manifest.get("parts")
+if not isinstance(parts, list) or not parts:
+    sys.exit("fixture manifest names no parts")
+names = []
+for part in parts:
+    path = part.get("path") if isinstance(part, dict) else None
+    if not isinstance(path, str) or not re.fullmatch(r"data/[A-Za-z0-9._-]+\.parquet", path):
+        sys.exit("fixture manifest part path is not data/<name>.parquet: %r" % (path,))
+    names.append(path)
+if len(set(names)) != len(names):
+    sys.exit("fixture manifest names a part twice")
+if command == "list":
+    print("\n".join(names))
+    sys.exit(0)
+staged = sorted(
+    "data/" + name for name in os.listdir(os.path.join(root, "data")) if name.endswith(".parquet")
+)
+if staged != sorted(names):
+    sys.exit("staged data/ parts differ from the manifest: %r" % (staged,))
+for part in parts:
+    digest = hashlib.sha256()
+    with open(os.path.join(root, part["path"]), "rb") as source:
+        for chunk in iter(lambda: source.read(1 << 20), b""):
+            digest.update(chunk)
+    size = os.path.getsize(os.path.join(root, part["path"]))
+    if size != part.get("bytes") or digest.hexdigest() != part.get("sha256"):
+        sys.exit("fixture part %s does not match its manifest entry" % part["path"])
+if adopted_expected:
+    adopted = manifest.get("extensions", {}).get("swath-replay", {}).get("adopted_from", {})
+    rows = sorted(
+        "%s\t%s\t%s\n" % (item["input"], item["input_bytes"], item["input_sha256"])
+        for item in adopted.get("parts", [])
+    )
+    actual = hashlib.sha256("".join(rows).encode()).hexdigest() if rows else ""
+    if actual != adopted_expected:
+        sys.exit("fixture adopted_from digest mismatch: %s" % actual)
+print("seekparquet fixture verified: %d part(s)" % len(parts))
+"""
+
+
+def _parts_staging_commands(destination: str, uri: str, expected_sha256: str) -> list[str]:
+    """Java-era parts: the digest is over sorted ``name<TAB>size<TAB>sha256<NL>`` rows."""
     source = shlex.quote(uri)
     expected = shlex.quote(expected_sha256)
-    commands = [
-        "set -o pipefail",
-        f"mkdir -p {destination}",
+    return [
         f"gcloud storage cp {source} {destination}/",
         'manifest="$(mktemp)"',
         f"files=({destination}/*.parquet)",
@@ -252,6 +291,66 @@ def _fixture_staging_script(
         '{ echo "fixture digest mismatch: $actual" >&2; exit 1; }',
         'rm -f "$manifest"',
     ]
+
+
+def _seekparquet_staging_commands(
+    destination: str, uri: str, expected_sha256: str, adopted_sha256: str | None
+) -> list[str]:
+    """A SeekParquet dataset: ``manifest.json`` is the identity, then its named parts.
+
+    The manifest's SHA-256 is checked before it is read, so every part path,
+    size and digest the rest of staging trusts comes from the bytes the case
+    named. Only the parts the manifest lists are downloaded, preserving the
+    ``data/`` layout the Go server opens as one dataset.
+    """
+    root = replay_contract.fixture_root(uri)
+    manifest = f"{destination}/{replay_contract.SEEKPARQUET_MANIFEST_NAME}"
+    python = '"${CLOUDSDK_PYTHON:-python3}"'
+    script = shlex.quote(SEEKPARQUET_STAGING_PY)
+    adopted = f" {shlex.quote(adopted_sha256)}" if adopted_sha256 is not None else ""
+    return [
+        f"mkdir -p {destination}/data",
+        f"gcloud storage cp {shlex.quote(root + replay_contract.SEEKPARQUET_MANIFEST_NAME)} "
+        f"{manifest}",
+        f'actual="$(sha256sum {manifest})"; actual="${{actual%% *}}"',
+        f'[[ "$actual" == {shlex.quote(expected_sha256)} ]] || '
+        '{ echo "fixture manifest digest mismatch: $actual" >&2; exit 1; }',
+        f'parts="$({python} -c {script} list {destination})"',
+        "while IFS= read -r part; do",
+        f'  gcloud storage cp {shlex.quote(root)}"$part" {destination}/"$part"',
+        'done <<< "$parts"',
+        f"{python} -c {script} verify {destination}{adopted}",
+    ]
+
+
+def _fixture_staging_script(
+    uri: str,
+    expected_sha256: str,
+    *,
+    adopted_sha256: str | None = None,
+    hints_uri: str | None = None,
+    hints_sha256: str | None = None,
+    s5cmd_shards_uri: str | None = None,
+    s5cmd_shards_sha256: str | None = None,
+) -> str:
+    """Download a staged fixture and refuse bytes outside its recorded identity.
+
+    Java-era parts are bound by the digest over their sorted manifest rows; a
+    SeekParquet dataset by its ``manifest.json`` digest and that manifest's
+    per-part sizes and digests. The check runs before the replay server
+    starts, so mutable storage can serve only the bytes the case named. The
+    s3-fast-list hints companion and the s5cmd shards companion are each
+    digest-bound the same way: neither is trusted on emptiness alone.
+    """
+    destination = shlex.quote(REPLAY_FIXTURE_CONTAINER_DIR)
+    commands = ["set -o pipefail", f"mkdir -p {destination}"]
+    if replay_contract.fixture_layout(uri) == replay_contract.FIXTURE_LAYOUT_SEEKPARQUET:
+        commands.extend(
+            _seekparquet_staging_commands(destination, uri, expected_sha256, adopted_sha256)
+        )
+    else:
+        assert adopted_sha256 is None
+        commands.extend(_parts_staging_commands(destination, uri, expected_sha256))
     if hints_uri is not None:
         assert hints_sha256 is not None
         hints_source = shlex.quote(hints_uri)
@@ -290,11 +389,19 @@ def _fixture_staging_script(
 
 
 def _fixture_companion_uri(uri: str, name: str) -> str:
-    """The fixed companion object beside a staged multipart fixture."""
+    """The fixed companion object beside a staged fixture.
+
+    Beside the parts for a Java-era multipart fixture; at the dataset root (next
+    to ``manifest.json``) for a SeekParquet dataset. Either way it is staged to
+    the same container path, and its digest is bound by the subject config.
+    """
+    if replay_contract.fixture_layout(uri) == replay_contract.FIXTURE_LAYOUT_SEEKPARQUET:
+        return replay_contract.fixture_root(uri) + name
     parent, separator, leaf = uri.rpartition("/")
     if not separator or leaf != "part-*.parquet":
         raise CampaignError(
-            "fixture-backed companion requires fixture_uri ending in part-*.parquet"
+            "fixture-backed companion requires fixture_uri ending in part-*.parquet "
+            "or naming a SeekParquet dataset root"
         )
     return f"{parent}/{name}"
 
@@ -356,7 +463,8 @@ def render_batch_job(
             # instead of a refusal here, before anything is spent.
             raise CampaignError(
                 f"fixture-companion mode {mode!r} requires a staged fixture bundle: "
-                "replay.backend.fixture_uri must end in part-*.parquet"
+                "replay.backend.fixture_uri must end in part-*.parquet or name a "
+                "SeekParquet dataset root"
             )
         hints_file_sha256 = subject_config.get("hints_file_sha256")
         if fixture_hints and (
@@ -417,6 +525,16 @@ def render_batch_job(
                         str(allocation.replay_response_buffer_budget_bytes),
                     )
                 )
+            if allocation.replay_list_index is not None:
+                # Go's flag package reads a separate "false" as a positional
+                # argument, so a boolean is always spelled with "=".
+                server_commands.append(
+                    f"--list-index={'true' if allocation.replay_list_index else 'false'}"
+                )
+            if allocation.replay_list_index_max_bytes is not None:
+                server_commands.extend(
+                    ("--list-index-max-bytes", str(allocation.replay_list_index_max_bytes))
+                )
         elif allocation.replay_delimiter_connections is not None:
             server_commands.extend(
                 ("--delimiter-connections", str(allocation.replay_delimiter_connections))
@@ -463,6 +581,7 @@ def render_batch_job(
                         _fixture_staging_script(
                             backend.fixture_uri,
                             backend.fixture_sha256,
+                            adopted_sha256=backend.fixture_adopted_sha256,
                             hints_uri=hints_uri,
                             hints_sha256=(hints_file_sha256 if fixture_hints else None),
                             s5cmd_shards_uri=s5cmd_shards_uri,

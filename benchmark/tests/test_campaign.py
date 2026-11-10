@@ -2176,3 +2176,188 @@ def test_go_renderer_uses_go_flags_and_allocation_limits(
             allocation["replay_memory_gb"] * 1024**3 * allocation["replay_heap_percent"] // 100
         ),
     }
+
+
+SEEKPARQUET_ROOT = "gs://fixtures/aws-public-blockchain/seekparquet-c4a42eb4e7fb/"
+
+
+def _seekparquet_dataset(root: Path) -> tuple[str, str]:
+    """A converted dataset on disk: manifest digest and its adopted Java-era digest."""
+    (root / "data").mkdir(parents=True)
+    parts, adopted = [], []
+    for index in range(2):
+        name = f"part-{index:05d}.parquet"
+        converted, original = b"seekparquet %d" % index, b"java-era %d" % index
+        (root / "data" / name).write_bytes(converted)
+        parts.append(
+            {
+                "path": f"data/{name}",
+                "bytes": len(converted),
+                "sha256": hashlib.sha256(converted).hexdigest(),
+            }
+        )
+        adopted.append(
+            {
+                "input": name,
+                "input_bytes": len(original),
+                "input_sha256": hashlib.sha256(original).hexdigest(),
+            }
+        )
+    manifest = json.dumps(
+        {
+            "format": "seekparquet",
+            "parts": parts,
+            "extensions": {"swath-replay": {"adopted_from": {"parts": adopted}}},
+        }
+    ).encode()
+    (root / "manifest.json").write_bytes(manifest)
+    rows = "".join(
+        sorted(f"{a['input']}\t{a['input_bytes']}\t{a['input_sha256']}\n" for a in adopted)
+    )
+    return hashlib.sha256(manifest).hexdigest(), hashlib.sha256(rows.encode()).hexdigest()
+
+
+def _go_seekparquet_attempt(
+    tmp_path: Path, *, manifest_sha256: str, adopted_sha256: str, **allocation: object
+) -> tuple[ledger.Attempt, campaign.ImageSet, gcp_batch.BatchOptions]:
+    attempt, images, options, _ = _fixture_backed_attempt(
+        tmp_path, tool="s3-fast-list", mode="list-hinted-fixture"
+    )
+    replay = json.loads(attempt.replay or "null")
+    replay["backend"].update(
+        server_implementation="go",
+        serving_mode="sorted",
+        fixture_uri=SEEKPARQUET_ROOT,
+        fixture_sha256=manifest_sha256,
+        fixture_adopted_sha256=adopted_sha256,
+    )
+    replay["allocation"].update(allocation)
+    config = json.loads(attempt.config)
+    config["hints_file_sha256"] = "c" * 64
+    respelled = replace(
+        attempt,
+        config=json.dumps(config, sort_keys=True, separators=(",", ":")),
+        replay=json.dumps(replay, sort_keys=True, separators=(",", ":")),
+    )
+    return respelled, images, options
+
+
+def _run_staging(script: str, tmp_path: Path, bucket_root: Path) -> tuple[int, Path, str]:
+    """Run a rendered staging script with GCS replaced by a local copy.
+
+    Only the transport is local: `gcloud storage cp gs://X Y` copies
+    `bucket_root/X` to `Y`. Every digest, layout and manifest check is the
+    rendered script's own.
+    """
+    import shutil
+    import subprocess
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    gcloud = bin_dir / "gcloud"
+    gcloud.write_text(
+        "#!/bin/bash\nset -eu\n"
+        '[[ "$1 $2" == "storage cp" ]]\n'
+        'src="${3#gs://}"; dst="$4"\n'
+        '[[ "$dst" == */ ]] && dst="$dst${src##*/}"\n'
+        f'cp "{bucket_root}/$src" "$dst"\n'
+    )
+    gcloud.chmod(0o755)
+    staged = tmp_path / "staged"
+    script = script.replace(gcp_batch.REPLAY_FIXTURE_CONTAINER_DIR, str(staged))
+    python = shutil.which("python3") or "python3"
+    completed = subprocess.run(
+        ["bash", "-ceu", script],
+        env={"PATH": f"{bin_dir}:/usr/bin:/bin", "CLOUDSDK_PYTHON": python},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return completed.returncode, staged, completed.stderr
+
+
+def test_seekparquet_fixture_renders_go_list_index_and_stages_the_dataset_layout(
+    tmp_path: Path,
+) -> None:
+    bucket_root = tmp_path / "gcs"
+    dataset = bucket_root / SEEKPARQUET_ROOT.removeprefix("gs://")
+    manifest_sha256, adopted_sha256 = _seekparquet_dataset(dataset)
+    (dataset / "s3-fast-list-hints.input").write_text("a/\n")
+    attempt, images, options = _go_seekparquet_attempt(
+        tmp_path,
+        manifest_sha256=manifest_sha256,
+        adopted_sha256=adopted_sha256,
+        replay_list_index=True,
+        replay_list_index_max_bytes=67108864,
+    )
+    hints_sha256 = hashlib.sha256(b"a/\n").hexdigest()
+    config = json.loads(attempt.config)
+    config["hints_file_sha256"] = hints_sha256
+    attempt = replace(attempt, config=json.dumps(config, sort_keys=True, separators=(",", ":")))
+
+    request = gcp_batch.render_batch_job(
+        attempt, images.image_for("s3-fast-list"), suite=SUITE, options=options
+    )
+
+    runnables = request["taskGroups"][0]["taskSpec"]["runnables"]
+    server = runnables[2]["container"]["commands"]
+    assert server[server.index("--fixture") + 1] == gcp_batch.REPLAY_FIXTURE_CONTAINER_DIR
+    assert "--list-index=true" in server
+    assert server[server.index("--list-index-max-bytes") + 1] == "67108864"
+    script = runnables[0]["container"]["commands"][1]
+    # The companion resolves at the dataset root, beside manifest.json.
+    assert f"{SEEKPARQUET_ROOT}s3-fast-list-hints.input" in script
+
+    code, staged, stderr = _run_staging(script, tmp_path, bucket_root)
+    assert code == 0, stderr
+    assert sorted(str(path.relative_to(staged)) for path in staged.rglob("*")) == [
+        "data",
+        "data/part-00000.parquet",
+        "data/part-00001.parquet",
+        "manifest.json",
+        "s3-fast-list-hints.input",
+    ]
+
+
+@pytest.mark.parametrize("tamper", ("manifest", "part", "extra-part", "adopted"))
+def test_seekparquet_staging_refuses_bytes_outside_the_recorded_identity(
+    tmp_path: Path, tamper: str
+) -> None:
+    bucket_root = tmp_path / "gcs"
+    dataset = bucket_root / SEEKPARQUET_ROOT.removeprefix("gs://")
+    manifest_sha256, adopted_sha256 = _seekparquet_dataset(dataset)
+    if tamper == "manifest":
+        manifest_sha256 = "0" * 64
+    elif tamper == "part":
+        (dataset / "data" / "part-00001.parquet").write_bytes(b"changed")
+    elif tamper == "adopted":
+        adopted_sha256 = "0" * 64
+    script = gcp_batch._fixture_staging_script(
+        SEEKPARQUET_ROOT, manifest_sha256, adopted_sha256=adopted_sha256
+    )
+    if tamper == "extra-part":
+        # A part the manifest does not name is never downloaded; one already in
+        # the staging directory is refused rather than served.
+        staged_data = tmp_path / "staged" / "data"
+        staged_data.mkdir(parents=True)
+        (staged_data / "part-00009.parquet").write_bytes(b"stray")
+
+    code, _staged, stderr = _run_staging(script, tmp_path, bucket_root)
+
+    assert code != 0
+    assert "mismatch" in stderr or "does not match" in stderr or "differ" in stderr
+
+
+def test_java_era_fixture_render_is_unchanged_by_the_seekparquet_branch(tmp_path: Path) -> None:
+    attempt, images, options, _ = _fixture_backed_attempt(
+        tmp_path, tool="s3-fast-list", mode="list-hinted-fixture"
+    )
+    config = json.loads(attempt.config)
+    config["hints_file_sha256"] = "c" * 64
+    attempt = replace(attempt, config=json.dumps(config, sort_keys=True, separators=(",", ":")))
+    script = gcp_batch.render_batch_job(
+        attempt, images.image_for("s3-fast-list"), suite=SUITE, options=options
+    )["taskGroups"][0]["taskSpec"]["runnables"][0]["container"]["commands"][1]
+    assert "gcloud storage cp 'gs://fixtures/case/part-*.parquet' /fixtures/source/" in script
+    assert "gs://fixtures/case/s3-fast-list-hints.input" in script
+    assert "manifest.json" not in script

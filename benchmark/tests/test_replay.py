@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from typing import Any
 
 import duckdb
 import pytest
@@ -404,3 +405,221 @@ def test_delimiter_connections_is_optional_and_identity_bearing_only_when_stated
         replay.parse_allocation({**allocation, "replay_delimiter_connections": 0})
     with pytest.raises(replay.ReplayError):
         replay.parse_allocation({**allocation, "replay_reader_width": 8})
+
+
+SEEKPARQUET_ROOT = "gs://fixtures/aws-public-blockchain/seekparquet-c4a42eb4e7fb/"
+REAL_LIST_INDEX_LINE = (
+    "swath_replay list_index state=built max_bytes=67108864 workers=4 groups_indexed=371 "
+    "groups_skipped=0 groups_failed=0 parts_failed=0 pages=139818 entries=8288 bytes=725664 "
+    "budget_exhausted=false seconds=9.719"
+)
+
+
+def go_document(**allocation: object) -> dict[str, Any]:
+    document: dict[str, Any] = json.loads(config().canonical_json())
+    document["backend"]["server_implementation"] = "go"
+    document["allocation"]["replay_max_concurrent_requests"] = 32
+    document["allocation"].update(allocation)
+    return document
+
+
+def seekparquet_document(uri: str = SEEKPARQUET_ROOT, **backend: object) -> dict[str, Any]:
+    document = go_document()
+    document["backend"].update(
+        {"fixture_uri": uri, "fixture_sha256": "c" * 64, "fixture_adopted_sha256": "f" * 64}
+    )
+    document["backend"].update(backend)
+    return document
+
+
+def test_seekparquet_root_is_identified_by_its_manifest_and_links_its_source() -> None:
+    root = replay.parse_document(seekparquet_document())
+    manifest = replay.parse_document(seekparquet_document(SEEKPARQUET_ROOT + "manifest.json"))
+    assert root.backend.fixture_layout == manifest.backend.fixture_layout == "seekparquet"
+    assert replay.fixture_root(manifest.backend.fixture_uri or "") == SEEKPARQUET_ROOT
+    assert replay.parse_document(root.canonical_json()) == root
+    # The adopted Java-era digest is identity: a dataset converted from another
+    # release fixture is another treatment even with the same manifest.
+    relinked = replay.parse_document(seekparquet_document(fixture_adopted_sha256="e" * 64))
+    assert relinked.canonical_json() != root.canonical_json()
+    unlinked = seekparquet_document()
+    del unlinked["backend"]["fixture_adopted_sha256"]
+    assert "fixture_adopted_sha256" not in replay.parse_document(unlinked).canonical_json()
+
+
+@pytest.mark.parametrize(
+    ("backend", "match"),
+    (
+        ({"fixture_uri": "gs://fixtures/"}, "SeekParquet dataset root"),
+        ({"fixture_uri": "gs://fixtures/*/"}, "SeekParquet dataset root"),
+        ({"fixture_uri": "gs://fixtures/a/../b/"}, "SeekParquet dataset root"),
+        ({"fixture_uri": "gs://fixtures/a/part-*.parquet"}, "requires a SeekParquet"),
+        ({"server_implementation": "java"}, "requires Go"),
+        ({"fixture_adopted_sha256": "F" * 64}, "sha256"),
+    ),
+)
+def test_seekparquet_fixture_refusals(backend: dict[str, Any], match: str) -> None:
+    with pytest.raises(replay.ReplayError, match=match):
+        replay.parse_document(seekparquet_document(**backend))
+
+
+def test_list_index_controls_are_go_only_optional_and_identity_bearing() -> None:
+    wave1 = replay.parse_document(go_document())
+    assert wave1.list_index_enabled
+    assert "replay_list_index" not in wave1.canonical_json()
+    stated = replay.parse_document(
+        go_document(replay_list_index=True, replay_list_index_max_bytes=67108864)
+    )
+    assert stated.canonical_json() != wave1.canonical_json()
+    assert not replay.parse_document(go_document(replay_list_index=False)).list_index_enabled
+    for allocation in (
+        {"replay_list_index": 1},
+        {"replay_list_index_max_bytes": 0},
+        {"replay_list_index": False, "replay_list_index_max_bytes": 1024},
+    ):
+        with pytest.raises(replay.ReplayError):
+            replay.parse_document(go_document(**allocation))
+    for field, value in (("replay_list_index", True), ("replay_list_index_max_bytes", 1024)):
+        java = json.loads(config().canonical_json())
+        java["allocation"][field] = value
+        with pytest.raises(replay.ReplayError, match="requires Go"):
+            replay.parse_document(java)
+
+
+def test_list_index_line_parses_the_server_format_and_refuses_ambiguity() -> None:
+    parsed = replay.parse_list_index_line("2026-11-10T14:00:00Z " + REAL_LIST_INDEX_LINE + "\n")
+    assert parsed is not None
+    assert (parsed["state"], parsed["groups_indexed"], parsed["bytes"]) == ("built", 371, 725664)
+    assert parsed["budget_exhausted"] is False and parsed["seconds"] == 9.719
+    failed = REAL_LIST_INDEX_LINE.replace("built", "failed") + ' error="open: \\"x\\" gone"'
+    assert replay.parse_list_index_line(failed) == {
+        **replay.parse_list_index_line(failed.replace(' error="open: \\"x\\" gone"', "")),  # type: ignore[dict-item]
+        "line": failed,
+        "error": 'open: "x" gone',
+    }
+    assert replay.parse_list_index_line("swath_replay listening port=1") is None
+    for bad in (
+        REAL_LIST_INDEX_LINE + "\n" + REAL_LIST_INDEX_LINE,
+        REAL_LIST_INDEX_LINE.replace("state=built", "state=maybe"),
+        REAL_LIST_INDEX_LINE.replace(" pages=139818", ""),
+        REAL_LIST_INDEX_LINE + " surprise=1",
+    ):
+        with pytest.raises(replay.ReplayError):
+            replay.parse_list_index_line(bad)
+
+
+def list_index_meters(*, skips: int, dense: int, built: bool = True) -> list[dict[str, object]]:
+    values = dict.fromkeys((field for field, _name, _tags in replay.LIST_INDEX_BUILD_GAUGES), 0)
+    if built:
+        values.update(groups_indexed=371, pages=139818, entries=8288, bytes=725664)
+    values["max_bytes"] = 67108864
+    meters: list[dict[str, object]] = [
+        {"name": name, "type": "gauge", "tags": tags, "value": float(values[field])}
+        for field, name, tags in replay.LIST_INDEX_BUILD_GAUGES
+    ]
+    meters.append(
+        {
+            "name": replay.LIST_INDEX_BUILD_LATENCY_TIMER,
+            "type": "timer",
+            "tags": {},
+            "count": 1 if built else 0,
+            "sum_ms": 9719.0 if built else 0.0,
+        }
+    )
+    meters.append(
+        {"name": replay.LIST_INDEX_SKIPS_COUNTER, "type": "counter", "tags": {}, "count": skips}
+    )
+    meters.extend(
+        {
+            "name": replay.LIST_INDEX_DECLINES_COUNTER,
+            "type": "counter",
+            "tags": {"reason": reason},
+            "count": dense if reason == "dense_page" else 0,
+        }
+        for reason in replay.LIST_INDEX_DECLINE_REASONS
+    )
+    return meters
+
+
+def test_timing_gate_and_list_index_summary_read_one_go_evidence() -> None:
+    """The new meters sit beside the timing meters without moving the grade."""
+    document = seekparquet_document(
+        latency_model=timing_config().backend.as_dict()["latency_model"]
+    )
+    document["allocation"].update(replay_list_index=True, replay_list_index_max_bytes=67108864)
+    go = replay.parse_document(document)
+    observed = timing_evidence(mean_ratio=1.05, overruns=0, cpu=(0.5,) * 5)
+    for phase, (skips, dense) in (("before", (0, 0)), ("after", (4096, 7))):
+        observation = observed[phase]
+        assert isinstance(observation, dict)
+        observation["metrics"]["meters"].extend(list_index_meters(skips=skips, dense=dense))
+
+    assert replay.replay_timing_assessment(go, observed)["state"] == replay.TIMING_VALID
+    summary = replay.list_index_summary(go, observed)
+    assert summary is not None and summary["delivered"] is True
+    assert summary["interval"] == {
+        "skips": 4096.0,
+        "declines": {"missing_group": 0.0, "dense_page": 7.0, "unsafe_run": 0.0},
+    }
+    line = replay.parse_list_index_line(REAL_LIST_INDEX_LINE)
+    assert line is not None
+    assert replay.list_index_line_disagreements(line, summary) == []
+    assert replay.list_index_line_disagreements({**line, "entries": 1}, summary)
+
+    # An old Go image publishes none of these meters; a requested index that
+    # never built over a SeekParquet dataset is not the treatment asked for.
+    assert replay.list_index_summary(go, timing_evidence(mean_ratio=1.0, overruns=0, cpu=()))[
+        "reasons"  # type: ignore[index]
+    ] == ["list-index build meters are absent; the server predates the list index"]
+    unbuilt = timing_evidence(mean_ratio=1.0, overruns=0, cpu=())
+    for phase in ("before", "after"):
+        observation = unbuilt[phase]
+        assert isinstance(observation, dict)
+        observation["metrics"]["meters"].extend(list_index_meters(skips=0, dense=0, built=False))
+    assert replay.list_index_summary(go, unbuilt)["delivered"] is False  # type: ignore[index]
+    assert replay.list_index_summary(timing_config(), observed) is None
+
+
+def test_seekparquet_identity_recomputes_the_release_fixture_digest(tmp_path: Path) -> None:
+    """A footer-only conversion keeps a link to the parts it was adopted from."""
+    original = tmp_path / "current"
+    dataset = tmp_path / "seekparquet"
+    original.mkdir()
+    (dataset / "data").mkdir(parents=True)
+    parts = []
+    adopted = []
+    for index in range(2):
+        name = f"part-{index:05d}.parquet"
+        (original / name).write_bytes(b"java-era footer %d" % index)
+        (dataset / "data" / name).write_bytes(b"seekparquet footer %d" % index)
+        source = (original / name).read_bytes()
+        converted = (dataset / "data" / name).read_bytes()
+        adopted.append(
+            {
+                "input": name,
+                "input_bytes": len(source),
+                "input_sha256": hashlib.sha256(source).hexdigest(),
+            }
+        )
+        parts.append(
+            {
+                "path": f"data/{name}",
+                "bytes": len(converted),
+                "sha256": hashlib.sha256(converted).hexdigest(),
+            }
+        )
+    manifest = {
+        "format": "seekparquet",
+        "parts": parts,
+        "extensions": {"swath-replay": {"adopted_from": {"parts": adopted}}},
+    }
+    raw = json.dumps(manifest).encode()
+    (dataset / "manifest.json").write_bytes(raw)
+
+    digest, adopted_sha256 = replay_fixture.seekparquet_identity(dataset)
+
+    assert digest == hashlib.sha256(raw).hexdigest()
+    assert adopted_sha256 == replay_fixture.fixture_manifest(original)[0]
+    (dataset / "data" / "part-00001.parquet").write_bytes(b"tampered")
+    with pytest.raises(replay.ReplayError, match="does not match"):
+        replay_fixture.seekparquet_identity(dataset)

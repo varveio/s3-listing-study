@@ -13,6 +13,7 @@ import pytest
 
 import benchmark.plan as bench
 import benchmark.plan_cli as bench_cli
+import benchmark.replay as replay_contract
 from benchmark.runtime import command_adapter as capsule
 
 ROOT = Path(__file__).parents[2]
@@ -989,6 +990,8 @@ def test_every_key_a_row_may_state_changes_the_case_it_resolves_to(tmp_path: Pat
         "replay_heap_percent": (50, 75),
         "replay_delimiter_connections": (16, 32),
         "replay_response_buffer_budget_bytes": (268435456, 1073741824),
+        "replay_list_index": (False, True),
+        "replay_list_index_max_bytes": (33554432, 67108864),
     }
     assert set(pairs) == set(bench.ROW_FIELDS), "a row key with no coverage here"
 
@@ -1083,7 +1086,7 @@ def test_every_key_a_row_may_state_changes_the_case_it_resolves_to(tmp_path: Pat
             "auth_role: fixture-role\n"
             + (
                 replay_block.replace("replay:\n", "replay:\n  server_implementation: go\n")
-                if field == "replay_response_buffer_budget_bytes"
+                if field in replay_contract.GO_ONLY_ALLOCATION_FIELDS
                 else replay_block
             )
             + document,
@@ -1306,7 +1309,7 @@ def test_a_tool_body_is_the_defaults_vocabulary_plus_its_rows() -> None:
     assert set(bench.ROW_FIELDS) & set(bench.LAYER_FIELDS) == {
         *bench.RESOURCE_FIELDS,
         *bench.REPLAY_FIELDS,
-        *bench.REPLAY_OPTIONAL_INTEGER_FIELDS,
+        *bench.REPLAY_OPTIONAL_ALLOCATION_FIELDS,
         "signed",
     }
 

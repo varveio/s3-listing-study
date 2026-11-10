@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import sys
 from pathlib import Path
 
@@ -31,6 +32,45 @@ def fixture_manifest(directory: Path) -> tuple[str, tuple[str, ...]]:
     return hashlib.sha256("".join(rows).encode()).hexdigest(), rows
 
 
+def seekparquet_identity(directory: Path) -> tuple[str, str | None]:
+    """Return a SeekParquet dataset's ``(manifest sha256, adopted Java-era digest)``.
+
+    ``fixture_sha256`` for a dataset root is the SHA-256 of its ``manifest.json``
+    bytes; the manifest names every part's path, size and SHA-256, which are
+    checked here against ``data/`` exactly as staging checks them. The second
+    value recomputes the Java-era staging digest from
+    ``extensions["swath-replay"].adopted_from`` (``None`` when the dataset was
+    not converted from one), which a plan records as ``fixture_adopted_sha256``.
+    """
+    manifest_path = directory / "manifest.json"
+    raw = manifest_path.read_bytes()
+    manifest = json.loads(raw)
+    if not isinstance(manifest, dict) or manifest.get("format") != "seekparquet":
+        raise ReplayError(f"{manifest_path} is not a SeekParquet manifest")
+    parts = manifest.get("parts")
+    if not isinstance(parts, list) or not parts:
+        raise ReplayError(f"{manifest_path} names no parts")
+    named = sorted(str(part.get("path")) for part in parts if isinstance(part, dict))
+    staged = sorted(f"data/{path.name}" for path in (directory / "data").glob("*.parquet"))
+    if named != staged or len(named) != len(parts):
+        raise ReplayError(f"{directory}/data parts differ from the manifest")
+    for part in parts:
+        path = directory / str(part["path"])
+        if path.stat().st_size != part.get("bytes") or _sha256_file(path) != part.get("sha256"):
+            raise ReplayError(f"{path} does not match its manifest entry")
+    extensions = manifest.get("extensions")
+    replay_extension = extensions.get("swath-replay") if isinstance(extensions, dict) else None
+    adopted = replay_extension.get("adopted_from") if isinstance(replay_extension, dict) else None
+    adopted_sha256 = None
+    if isinstance(adopted, dict):
+        rows = sorted(
+            f"{item['input']}\t{item['input_bytes']}\t{item['input_sha256']}\n"
+            for item in adopted.get("parts", [])
+        )
+        adopted_sha256 = hashlib.sha256("".join(rows).encode()).hexdigest()
+    return hashlib.sha256(raw).hexdigest(), adopted_sha256
+
+
 def generate_parquet(query_path: Path, output_path: Path) -> None:
     """Materialize one deterministic fixture part from a committed SELECT."""
     if duckdb.__version__ != DUCKDB_WRITER_VERSION:
@@ -53,7 +93,8 @@ def generate_parquet(query_path: Path, output_path: Path) -> None:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Hash immediate *.parquet children using the replay staging-manifest contract."
+            "Hash immediate *.parquet children using the replay staging-manifest contract, "
+            "or identify a SeekParquet dataset root by its manifest.json."
         )
     )
     parser.add_argument("directory", type=Path)
@@ -76,6 +117,19 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.generate_query is not None:
             generate_parquet(args.generate_query, args.directory / "part-00000.parquet")
+        if (args.directory / "manifest.json").is_file():
+            digest, adopted = seekparquet_identity(args.directory)
+            if args.expect is not None and digest != args.expect:
+                print(
+                    f"replay-fixture: manifest digest {digest} does not match expected "
+                    f"{args.expect}",
+                    file=sys.stderr,
+                )
+                return 1
+            if adopted is not None:
+                print(f"fixture_adopted_sha256 {adopted}")
+            print(digest)
+            return 0
         digest, rows = fixture_manifest(args.directory)
     except (OSError, ReplayError, duckdb.Error) as exc:
         print(f"replay-fixture: {exc}", file=sys.stderr)
