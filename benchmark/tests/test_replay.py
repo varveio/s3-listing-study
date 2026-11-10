@@ -7,7 +7,27 @@ from pathlib import Path
 import duckdb
 import pytest
 
-from benchmark import replay, replay_fixture
+from benchmark import replay, replay_fixture, replay_runtime
+
+
+def test_server_rss_binds_process_to_replay_cpu_allocation(tmp_path: Path) -> None:
+    process = tmp_path / "123"
+    process.mkdir()
+    (process / "cmdline").write_bytes(
+        b"\0".join((b"/opt/swath-replay/swath-replay", b"serve", b"--metrics-port", b"19192", b""))
+    )
+    # Two replay threads on a six-vCPU N4 are SMT siblings 0 and 3.
+    status = "Cpus_allowed_list:\t0,3\nVmRSS:\t1024 kB\nVmHWM:\t2048 kB\n"
+    (process / "status").write_text(status)
+    assert replay_runtime.server_memory(config(), 6, tmp_path)["peak_rss_kb"] == 2048
+    (process / "status").write_text(status.replace("0,3", "1,4"))
+    assert replay_runtime.server_memory(config(), 6, tmp_path)["state"] == "unavailable"
+    (process / "status").write_text(status)
+    other = tmp_path / "456"
+    other.mkdir()
+    (other / "status").write_text(status)
+    (other / "cmdline").write_bytes((process / "cmdline").read_bytes())
+    assert replay_runtime.server_memory(config(), 6, tmp_path)["state"] == "unavailable"
 
 
 def config() -> replay.ReplayConfig:

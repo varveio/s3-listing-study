@@ -271,7 +271,8 @@ def test_replay_case_slot_attempt_and_request_keep_one_canonical_document(
     ]
     assert subject["container"]["options"] == (
         "--network host --cpuset-cpus=1 --memory=2g --memory-swap=2g "
-        "--volume=/mnt/stateful_partition/attempt:/tmp/attempt"
+        "--volume=/mnt/stateful_partition/attempt:/tmp/attempt "
+        "--volume=/proc:/replay-host-proc:ro"
     )
     uncapped = replace(attempt, container_memory_gb=None)
     uncapped_request = gcp_batch.render_batch_job(
@@ -279,7 +280,8 @@ def test_replay_case_slot_attempt_and_request_keep_one_canonical_document(
     )
     uncapped_subject = uncapped_request["taskGroups"][0]["taskSpec"]["runnables"][-1]
     assert uncapped_subject["container"]["options"] == (
-        "--network host --cpuset-cpus=1 --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
+        "--network host --cpuset-cpus=1 --volume=/mnt/stateful_partition/attempt:/tmp/attempt "
+        "--volume=/proc:/replay-host-proc:ro"
     )
     uncapped_commands = uncapped_subject["container"]["commands"]
     assert uncapped_commands[uncapped_commands.index("--container-memory-gb") + 1] == "none"

@@ -196,6 +196,13 @@ not a delay: both servers are probed until ready before subject timing begins.
 Worker images must include this replay contract before running Go plans; old
 workers reject the new fields rather than silently treating Go as Java.
 
+Replay workers also read the server's `VmRSS` and lifetime `VmHWM` from a
+read-only host `/proc` mount, matching the serving process and exact replay
+cpuset. Observations before/after the subject and in the 10-second resource
+samples distinguish missing or ambiguous processes from measured memory.
+The lifetime peak includes startup and declared warm-up; it is not an
+interval-reset memory peak and does not change the delivered-treatment gate.
+
 `capacity_status` is a simple plan fact, not another control surface:
 `uncalibrated` permits diagnostic replay work only, while `calibrated` permits
 replay measurements. Set it to `calibrated` only after a real diagnostic

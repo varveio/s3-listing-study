@@ -438,6 +438,7 @@ def render_batch_job(
             for part in (
                 _runnable_options(summary.subject_cpuset, container_memory),
                 output_volume,
+                "--volume=/proc:/replay-host-proc:ro",
                 shlex.join(_subject_ulimit(attempt.tool)),
             )
             if part
