@@ -129,3 +129,42 @@ the $1 non-compute reserve wave 1 used, the planning estimate is about $1.96. If
 job ran to its provider deadline the compute ceiling would be $18.38, so the
 90-minute stop rule is what bounds it (seven jobs stopped at 90 minutes: about
 $13.55). These are estimates, not an invoice.
+
+## Pre-submit record
+
+Images, recorded before submission:
+
+- Go replay: `us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:3b3584460761de559c07e73b79c4aa7bffd77318108fdbf12ae36c41a98933b5`
+  (tag `go-545a10cb`), built from a clean detached worktree of Swath main
+  `545a10cbdada373419e105202dc8cd9be57f4fa3` (PR #425, pins seekparquet
+  `6acba1a`) with `docker build -f Dockerfile.go --target swath-replay
+  --platform linux/amd64 --build-arg SWATH_REVISION=<sha>`. `--version` prints
+  `swath-replay devel (545a10cb…)`; `serve --help` lists `-list-index` and
+  `-list-index-max-bytes`. A local smoke over the staged NARA dataset printed
+  `state=built ... has_index=true seconds=1.094`. The merged line adds
+  `has_index`, which the harness reads since `1a0f845`.
+- Toolbox worker: `us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:a878e4296bb7c07816eb4437b78f1209c9698e5c3ce891caf53cffe1a7a40e85`
+  (tag `go-replay-qualification-2`), built by `benchmark/src/benchmark/build_image.py`
+  at clean harness revision `1a0f845d7798b84771f85425a6f3dc8dcc6f5e33`, toolbox
+  manifest `e44c4056…125f`; the image set was emitted by the same tool.
+
+Pre-submit estimate (N4 Spot us-east1 rates from the wave-1 receipt, wave-1
+create-to-terminal durations of the matching cells; the index-off control
+priced as the mean of the two wave-1 64/20 Go repetitions):
+
+| Plan | Jobs | Machine | Estimated compute |
+| --- | --- | --- | --- |
+| blockchain-swath-go | 2 | n4-highcpu-80 | $0.2947 |
+| blockchain-swath-go-index-off | 1 | n4-highcpu-80 | $0.1473 |
+| blockchain-ladder-go (16/5) | 1 | n4-highcpu-80 | $0.1360 |
+| nara-swath-go | 1 | n4-highcpu-32 | $0.0286 |
+| nara-s7cmd-go | 1 | n4-highcpu-32 | $0.1409 |
+| fourcast-s5cmd-go | 1 | n4-highcpu-16 | $0.0526 |
+| **Total** | 7 | | **$0.80** |
+
+The list-index build (about 10 s on blockchain) adds under $0.01 per job. With
+one preemption resubmission and the $1 non-compute reserve, about $1.96. The
+owner-authorized spend is $10; seven jobs stopped at 90 minutes would exceed
+it ($13.55), so any job still running at 60 minutes is stopped (seven jobs at
+60 minutes: $9.04).
+

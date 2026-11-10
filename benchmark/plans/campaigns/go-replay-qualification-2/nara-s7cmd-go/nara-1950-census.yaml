@@ -18,9 +18,9 @@ replay:
       worker_page: 86
     jitter: none
     scale: 1.0
-  # PLACEHOLDER: the Go replay image with the list index (swath go/replay-list-index)
-  # is not built yet. campaign submit refuses this plan until a digest replaces it.
-  server_image_uri: us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:REPLAY_GO_IMAGE_TBD
+  # Go replay with the list index: swath main 545a10cb (PR #425), Dockerfile.go
+  # target swath-replay, tag swath-replay:go-545a10cb.
+  server_image_uri: us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:3b3584460761de559c07e73b79c4aa7bffd77318108fdbf12ae36c41a98933b5
   serving_mode: sorted
   server_implementation: go
 defaults:

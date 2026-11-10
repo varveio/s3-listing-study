@@ -2368,21 +2368,24 @@ def _wave2_plans() -> list[Path]:
     return sorted(WAVE2.glob("*/*.yaml"))
 
 
-def test_wave2_plans_dry_render_and_refuse_submission_while_the_image_is_a_placeholder(
-    tmp_path: Path,
-) -> None:
+WAVE2_REPLAY_IMAGE = (
+    "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:"
+    "3b3584460761de559c07e73b79c4aa7bffd77318108fdbf12ae36c41a98933b5"
+)
+
+
+def test_wave2_plans_render_the_pinned_list_index_image(tmp_path: Path) -> None:
     """Drift guard on the committed wave-2 plans: every row renders the Go list-index
-    contract over its SeekParquet root, and submission refuses the placeholder."""
+    contract over its SeekParquet root with the pinned swath 545a10cb image."""
     images = image_set(tmp_path)
     assert len(_wave2_plans()) == 6
     attempts = 0
     for path in _wave2_plans():
         plan = campaign.load_campaign_plan(path)
-        assert plan.replay is not None and plan.replay.backend.image_is_placeholder
+        assert plan.replay is not None and not plan.replay.backend.image_is_placeholder
         assert plan.replay.backend.fixture_layout == "seekparquet"
         assert plan.replay.backend.fixture_adopted_sha256 is not None
-        with pytest.raises(ledger.CampaignError, match="REPLAY_GO_IMAGE_TBD"):
-            campaign.refuse_placeholder_images(plan)
+        campaign.refuse_placeholder_images(plan)
         for case in plan.cases:
             assert case.replay is not None
             index_on = path.parent.name != "blockchain-swath-go-index-off"
@@ -2396,7 +2399,7 @@ def test_wave2_plans_dry_render_and_refuse_submission_while_the_image_is_a_place
                     options=context(plan, case, images).options,
                 )
                 server = request["taskGroups"][0]["taskSpec"]["runnables"][2]["container"]
-                assert server["imageUri"].endswith("@sha256:REPLAY_GO_IMAGE_TBD")
+                assert server["imageUri"] == WAVE2_REPLAY_IMAGE
                 assert f"--list-index={str(index_on).lower()}" in server["commands"]
                 if not index_on:
                     assert "--list-index-max-bytes" not in server["commands"]
@@ -2405,6 +2408,12 @@ def test_wave2_plans_dry_render_and_refuse_submission_while_the_image_is_a_place
 
 
 def test_submit_refuses_a_placeholder_image_before_touching_a_ledger(tmp_path: Path) -> None:
+    source = _wave2_plans()[0]
+    placeholder = tmp_path / source.parent.name / source.name
+    placeholder.parent.mkdir()
+    placeholder.write_text(
+        source.read_text().replace(WAVE2_REPLAY_IMAGE.split("@")[1], "sha256:REPLAY_GO_IMAGE_TBD")
+    )
     args = argparse.Namespace(
         executor="gcp-batch",
         image=None,
@@ -2413,7 +2422,7 @@ def test_submit_refuses_a_placeholder_image_before_touching_a_ledger(tmp_path: P
         repeat=False,
         skip_measured=False,
         suite=SUITE,
-        plan=str(_wave2_plans()[0]),
+        plan=str(placeholder),
         dry_run=False,
         state=str(tmp_path / "campaign.db"),
     )
