@@ -217,13 +217,20 @@ other meter in the `before`/`after` observations: build gauges
 `declines{reason}` counters. `benchmark.receipt` derives a `list_index` block
 from them for each Go attempt: what was requested, the build as the gauges show
 it, the skips and declines over the subject interval, and whether the requested
-index was delivered (a SeekParquet dataset with the index on must show one
-recorded build, and a stated budget must match the `max_bytes` gauge). The
+index was delivered: `true`, `false`, or `null` when the evidence is
+inconclusive. With the index on over a SeekParquet dataset the meters show one
+build attempt, but a failed build records it too, so meters alone are
+inconclusive until a `state=built` server line confirms it; `state=failed`
+refuses delivery. With it off, delivery needs an observed zero build count (a
+missing build timer is inconclusive). A stated budget must match the
+`max_bytes` gauge. The
 server's own `swath_replay list_index ...` line goes to stderr, which the worker
 cannot read (the server is a separate scratch-image container whose output goes
 to Cloud Logging, and the worker identity has no log-read role). Export it and
 attach it with `receipt --server-log ATTEMPT_ID=PATH`; the receipt parses the
-line and lists every field on which it disagrees with the meters. The timing
+line and lists every field on which it disagrees with the meters (build
+`seconds` within the line's three-decimal precision); any disagreement refuses
+delivery. The timing
 grader is unchanged: it reads only `request.latency{shape}`,
 `inject.overrun{shape}`, `http.requests` and `http.errors`, and the new meters do
 not move it.

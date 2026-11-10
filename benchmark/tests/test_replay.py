@@ -556,7 +556,9 @@ def test_timing_gate_and_list_index_summary_read_one_go_evidence() -> None:
 
     assert replay.replay_timing_assessment(go, observed)["state"] == replay.TIMING_VALID
     summary = replay.list_index_summary(go, observed)
-    assert summary is not None and summary["delivered"] is True
+    # A build attempt alone cannot tell built from failed: inconclusive.
+    assert summary is not None
+    assert _delivered(summary) is None
     assert summary["interval"] == {
         "skips": 4096.0,
         "declines": {"missing_group": 0.0, "dense_page": 7.0, "unsafe_run": 0.0},
@@ -565,6 +567,8 @@ def test_timing_gate_and_list_index_summary_read_one_go_evidence() -> None:
     assert line is not None
     assert replay.list_index_line_disagreements(line, summary) == []
     assert replay.list_index_line_disagreements({**line, "entries": 1}, summary)
+    replay.attach_list_index_line(summary, line)
+    assert _delivered(summary) is True
 
     # An old Go image publishes none of these meters; a requested index that
     # never built over a SeekParquet dataset is not the treatment asked for.
@@ -623,3 +627,84 @@ def test_seekparquet_identity_recomputes_the_release_fixture_digest(tmp_path: Pa
     (dataset / "data" / "part-00001.parquet").write_bytes(b"tampered")
     with pytest.raises(replay.ReplayError, match="does not match"):
         replay_fixture.seekparquet_identity(dataset)
+
+
+def _go_list_index(
+    *, enabled: bool, built: bool, timer: bool = True, entries: int = 8288
+) -> tuple[replay.ReplayConfig, dict[str, object]]:
+    allocation: dict[str, object] = {"replay_list_index": enabled}
+    document = seekparquet_document()
+    document["allocation"].update(allocation)
+    go = replay.parse_document(document)
+    meters = list_index_meters(skips=0, dense=0, built=built)
+    for meter in meters:
+        if meter["name"] == "swath.replay.delimiter.index.entries" and built:
+            meter["value"] = float(entries)
+        if meter["name"] == "swath.replay.delimiter.index.max_bytes" and not enabled:
+            meter["value"] = 0.0
+    if not timer:
+        meters = [m for m in meters if m["name"] != replay.LIST_INDEX_BUILD_LATENCY_TIMER]
+    observation = {"metrics": {"meters": meters}}
+    return go, {"before": observation, "after": observation, "errors": []}
+
+
+def _delivered(summary: dict[str, object]) -> object:
+    return summary["delivered"]
+
+
+def _summary(go: replay.ReplayConfig, observed: dict[str, object]) -> dict[str, object]:
+    summary = replay.list_index_summary(go, observed)
+    assert summary is not None
+    return summary
+
+
+def test_a_failed_list_index_build_is_never_delivered() -> None:
+    go, observed = _go_list_index(enabled=True, built=True)
+    summary = _summary(go, observed)
+    assert _delivered(summary) is None
+    failed = REAL_LIST_INDEX_LINE.replace("state=built", "state=failed") + ' error="build failed"'
+    replay.attach_list_index_line(summary, replay.parse_list_index_line(failed))
+    assert _delivered(summary) is False
+    assert summary["server_line_disagreements"] == []
+
+    # A flat fixture builds an empty index; a built line still confirms it.
+    flat, flat_observed = _go_list_index(enabled=True, built=True, entries=0)
+    flat_summary = _summary(flat, flat_observed)
+    replay.attach_list_index_line(
+        flat_summary, replay.parse_list_index_line(REAL_LIST_INDEX_LINE.replace("8288", "0"))
+    )
+    assert _delivered(flat_summary) is True
+
+
+@pytest.mark.parametrize(
+    ("seconds", "agrees"), (("9.720", True), ("9.719", False), ("999.000", False))
+)
+def test_list_index_line_seconds_are_compared_at_log_precision(seconds: str, agrees: bool) -> None:
+    go, observed = _go_list_index(enabled=True, built=True)
+    summary = _summary(go, observed)  # meters: 9.719 s
+    build = summary["build"]
+    assert isinstance(build, dict)
+    build["seconds"] = 9.7196
+    line = replay.parse_list_index_line(
+        REAL_LIST_INDEX_LINE.replace("seconds=9.719", f"seconds={seconds}")
+    )
+    assert line is not None
+    disagreements = replay.list_index_line_disagreements(line, summary)
+    assert (disagreements == []) is agrees
+    replay.attach_list_index_line(summary, line)
+    assert (_delivered(summary) is True) is agrees
+
+
+def test_index_off_delivery_needs_an_observed_zero_build_count() -> None:
+    go, observed = _go_list_index(enabled=False, built=False)
+    assert _summary(go, observed)["delivered"] is True
+    missing, missing_observed = _go_list_index(enabled=False, built=False, timer=False)
+    summary = _summary(missing, missing_observed)
+    assert _delivered(summary) is None
+    assert summary["build"]["builds_recorded"] is None  # type: ignore[index]
+    off_line = REAL_LIST_INDEX_LINE.replace("state=built", "state=off")
+    for field in ("groups_indexed=371", "pages=139818", "entries=8288", "bytes=725664"):
+        off_line = off_line.replace(field, field.split("=")[0] + "=0")
+    off_line = off_line.replace("max_bytes=67108864", "max_bytes=0")
+    replay.attach_list_index_line(summary, replay.parse_list_index_line(off_line))
+    assert _delivered(summary) is None

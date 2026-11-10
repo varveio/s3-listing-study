@@ -612,26 +612,89 @@ def list_index_summary(config: ReplayConfig, evidence: object) -> dict[str, obje
     }
     requested_max = config.allocation.replay_list_index_max_bytes
     reasons: list[str] = []
+    inconclusive: list[str] = []
     if any(build[field] is None for field, _name, _tags in LIST_INDEX_BUILD_GAUGES):
         reasons.append("list-index build meters are absent; the server predates the list index")
+    elif recorded is None:
+        inconclusive.append(LIST_INDEX_TIMER_MISSING)
     elif config.list_index_enabled:
-        if config.backend.fixture_layout == FIXTURE_LAYOUT_SEEKPARQUET and recorded != 1:
-            reasons.append("list index was requested over a SeekParquet dataset but not built")
+        if config.backend.fixture_layout == FIXTURE_LAYOUT_SEEKPARQUET:
+            if recorded != 1:
+                reasons.append("list index was requested over a SeekParquet dataset but not built")
+            else:
+                # The build timer records a failed build too, and a valid flat
+                # fixture builds an empty index: only the server line can say
+                # the build succeeded.
+                inconclusive.append(LIST_INDEX_BUILD_UNCONFIRMED)
         if requested_max is not None and build["max_bytes"] != requested_max:
             reasons.append("list-index max_bytes differs from the requested budget")
-    elif recorded:
+    elif recorded != 0:
         reasons.append("list index was turned off but the server recorded a build")
     return {
         "requested": {"enabled": config.list_index_enabled, "max_bytes": requested_max},
         "build": build,
         "interval": interval,
-        "delivered": not reasons,
+        "delivered": _delivered(reasons, inconclusive),
         "reasons": reasons,
+        "inconclusive": inconclusive,
         "provenance": (
             "replay /metrics swath.replay.delimiter.index.* meters in replay_evidence; "
             "the server's list_index stderr line is in the job's Cloud Logging"
         ),
     }
+
+
+LIST_INDEX_TIMER_MISSING = "list-index build timer is missing; the build count is unobserved"
+LIST_INDEX_BUILD_UNCONFIRMED = (
+    "meters record one build attempt but cannot tell built from failed; attach the server line"
+)
+# The server logs build seconds with three decimals.
+LIST_INDEX_SECONDS_TOLERANCE = 0.0005 + 1e-9
+
+
+def _delivered(reasons: list[str], inconclusive: list[str]) -> bool | None:
+    """``False`` on any refusal, ``None`` while the evidence is inconclusive, else ``True``."""
+    if reasons:
+        return False
+    return None if inconclusive else True
+
+
+def attach_list_index_line(summary: dict[str, object], line: Mapping[str, object] | None) -> None:
+    """Fold an exported server line into a meter summary and revise its delivery.
+
+    A line that disagrees with the meters, or whose state is not the requested
+    outcome (``built`` over a SeekParquet dataset with the index on, ``off``
+    with it off), refuses delivery. Only a ``built`` line confirms a build the
+    meters alone cannot tell from a failed one.
+    """
+    reasons = _str_list(summary.get("reasons"))
+    inconclusive = _str_list(summary.get("inconclusive"))
+    if line is None:
+        disagreements = ["server log has no list_index line"]
+    else:
+        disagreements = list_index_line_disagreements(line, summary)
+        requested = summary.get("requested")
+        enabled = isinstance(requested, Mapping) and requested.get("enabled") is True
+        expected = None
+        if not enabled:
+            expected = "off"
+        elif LIST_INDEX_BUILD_UNCONFIRMED in inconclusive or line.get("state") == "failed":
+            expected = "built"
+        state = line.get("state")
+        if expected is not None and state != expected:
+            reasons.append(f"server line reports state={state!r}, not {expected!r}")
+        elif state == "built" and LIST_INDEX_BUILD_UNCONFIRMED in inconclusive:
+            inconclusive.remove(LIST_INDEX_BUILD_UNCONFIRMED)
+    reasons.extend(disagreements)
+    summary["server_line"] = line
+    summary["server_line_disagreements"] = disagreements
+    summary["reasons"] = reasons
+    summary["inconclusive"] = inconclusive
+    summary["delivered"] = _delivered(reasons, inconclusive)
+
+
+def _str_list(value: object) -> list[str]:
+    return [str(item) for item in value] if isinstance(value, list) else []
 
 
 def list_index_line_disagreements(
@@ -660,6 +723,13 @@ def list_index_line_disagreements(
     ran = line.get("state") in ("built", "failed")
     if ran != (build.get("builds_recorded") == 1):
         errors.append(f"list_index state={line.get('state')!r} disagrees with the build timer")
+    line_seconds, meter_seconds = line.get("seconds"), build.get("seconds")
+    if ran and (
+        not isinstance(line_seconds, int | float)
+        or not isinstance(meter_seconds, int | float)
+        or abs(line_seconds - meter_seconds) > LIST_INDEX_SECONDS_TOLERANCE
+    ):
+        errors.append(f"list_index line seconds={line_seconds!r} but meters say {meter_seconds!r}")
     return errors
 
 

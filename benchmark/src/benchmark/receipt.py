@@ -63,14 +63,10 @@ def _list_index(
             raise ReceiptError("a server log was given for an attempt without Go replay")
         return None
     if server_log is not None:
-        line = replay_contract.parse_list_index_line(server_log)
-        summary["server_line"] = line
-        summary["server_line_provenance"] = "operator export of the job's Cloud Logging"
-        summary["server_line_disagreements"] = (
-            ["server log has no list_index line"]
-            if line is None
-            else replay_contract.list_index_line_disagreements(line, summary)
+        replay_contract.attach_list_index_line(
+            summary, replay_contract.parse_list_index_line(server_log)
         )
+        summary["server_line_provenance"] = "operator export of the job's Cloud Logging"
     return summary
 
 
