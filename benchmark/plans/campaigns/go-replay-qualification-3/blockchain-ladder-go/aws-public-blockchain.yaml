@@ -18,10 +18,9 @@ replay:
       worker_page: 94
     jitter: none
     scale: 1.0
-  # PLACEHOLDER: the Go replay image from swath main after PR #443 (window fills from
-  # borrowed batches) is not built yet. campaign submit refuses this plan until a
-  # digest replaces it.
-  server_image_uri: us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:REPLAY_GO_IMAGE_TBD
+  # Go replay with window fills from borrowed batches: swath main 43ffab2f (PR #443),
+  # Dockerfile.go target swath-replay, tag swath-replay:go-43ffab2f.
+  server_image_uri: us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90
   serving_mode: sorted
   warmup:
     in_flight: 64

@@ -2460,7 +2460,7 @@ def test_wave3_plans_differ_from_their_wave2_cells_only_in_the_replay_image() ->
         wave2 = campaign.load_campaign_plan(WAVE2 / path.parent.name / path.name)
         assert wave3.replay is not None and wave2.replay is not None
         assert wave2.replay.backend.server_image_uri == WAVE2_REPLAY_IMAGE
-        assert wave3.replay.backend.server_image_uri != WAVE2_REPLAY_IMAGE
+        assert wave3.replay.backend.server_image_uri == WAVE3_REPLAY_IMAGE
         assert _with_wave2_image(wave3.replay) == wave2.replay
         assert len(wave3.cases) == len(wave2.cases) == 1
         for case3, case2 in zip(wave3.cases, wave2.cases, strict=True):
@@ -2468,21 +2468,24 @@ def test_wave3_plans_differ_from_their_wave2_cells_only_in_the_replay_image() ->
             assert replace(case3, replay=_with_wave2_image(case3.replay)) == case2
 
 
-def test_wave3_plans_dry_render_and_refuse_submission_while_the_image_is_a_placeholder(
-    tmp_path: Path,
-) -> None:
+WAVE3_REPLAY_IMAGE = (
+    "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:"
+    "f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90"
+)
+
+
+def test_wave3_plans_render_the_pinned_window_fill_image(tmp_path: Path) -> None:
     """Drift guard on the committed wave-3 plans: four blockchain Swath c256 attempts
     (64/20 index on twice, 64/20 index off once, 16/5 index on once) render over the
-    SeekParquet root, and submission refuses the placeholder image."""
+    SeekParquet root with the pinned swath 43ffab2f image."""
     images = image_set(tmp_path)
     allocations = []
     for path in _wave3_plans():
         plan = campaign.load_campaign_plan(path)
-        assert plan.replay is not None and plan.replay.backend.image_is_placeholder
+        assert plan.replay is not None and not plan.replay.backend.image_is_placeholder
         assert plan.replay.backend.fixture_layout == "seekparquet"
         assert plan.replay.backend.fixture_adopted_sha256 is not None
-        with pytest.raises(ledger.CampaignError, match="REPLAY_GO_IMAGE_TBD"):
-            campaign.refuse_placeholder_images(plan)
+        campaign.refuse_placeholder_images(plan)
         for case in plan.cases:
             assert case.replay is not None
             index_on = path.parent.name != "blockchain-swath-go-index-off"
@@ -2496,7 +2499,7 @@ def test_wave3_plans_dry_render_and_refuse_submission_while_the_image_is_a_place
                     options=context(plan, case, images).options,
                 )
                 server = request["taskGroups"][0]["taskSpec"]["runnables"][2]["container"]
-                assert server["imageUri"].endswith("@sha256:REPLAY_GO_IMAGE_TBD")
+                assert server["imageUri"] == WAVE3_REPLAY_IMAGE
                 assert f"--list-index={str(index_on).lower()}" in server["commands"]
                 if not index_on:
                     assert "--list-index-max-bytes" not in server["commands"]

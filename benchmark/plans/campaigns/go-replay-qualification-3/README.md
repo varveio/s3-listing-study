@@ -2,7 +2,7 @@
 
 Bounded diagnostic qualification of the replay instrument. Varve maintains this
 study and builds Swath; Swath here is the Java 0.3.2 listing subject, never
-Swath-Go. This is not a calibrated benchmark or a ranking. **Not submitted.**
+Swath-Go. This is not a calibrated benchmark or a ranking.
 
 ## Why a third wave
 
@@ -45,14 +45,12 @@ set back to wave 2's `3b358446…` digest.
 - `blockchain-ladder-go`: the same as `blockchain-swath-go` at replay
   16 vCPU / 5 GiB, 1 rep (the downsizing input).
 
-Four jobs, all on n4-highcpu-80. The image is the placeholder
-`swath-replay@sha256:REPLAY_GO_IMAGE_TBD`; `campaign submit` refuses the plans
-until it is replaced by the digest of the Go replay image built from Swath main
-after PR #443 merges.
+Four jobs, all on n4-highcpu-80. The image is the Go replay image built from
+Swath main `43ffab2f`, where PR #443 merged (see *Pre-submit record*).
 
 **What the new image contains.** It is built from Swath main, so besides #443 it
-carries every Swath main commit since wave 2's `545a10cb`. As of Swath
-`origin/main` `4121c6fd` (2026-11-10, before #443), those are:
+carries every Swath main commit since wave 2's `545a10cb`
+(`git log --oneline 545a10cb..43ffab2f`):
 
 | Commit | PR | Subject |
 | --- | --- | --- |
@@ -68,24 +66,27 @@ carries every Swath main commit since wave 2's `545a10cb`. As of Swath
 | `2a37d77a` | #441 | reader: borrowed column-batch scans with field selection |
 | `c370b4d6` | #432 | ci: bump the actions group |
 | `4121c6fd` | #440 | go/azblob: list in the Arrow format, XML when the service answers XML |
+| `5803bf93` | #442 | ci: DuckDB 2.0.0, OSV-Scanner 2.7.1, Syft 1.57.1 (CI files only) |
+| `43ffab2f` | #443 | go/replay: fill the window cache from SeekParquet's borrowed batches |
 
-Of these, `git diff --stat 545a10cb origin/main -- go/internal/replay` shows only
-`go/internal/replay/azure` (3 files, +28/−32, from #434 and #440): the Azure
-endpoint, which an S3 subject does not call. The `swath-replay` binary also links
+`git diff --stat 545a10cb 43ffab2f -- go/internal/replay` shows 8 files,
++463/−56. Three are `go/internal/replay/azure` (+28/−32, from #434 and #440):
+the Azure endpoint, which an S3 subject does not call. The other five are #443:
+`store/seek.go` (+32/−18, the fill path), its tests
+(`store/seekscan_test.go`, `store/columntypes_test.go`) and comment-only edits to
+`legacy/scan.go` and `metrics/defs.go` (no meter renamed). The `swath-replay` binary also links
 `go/reader` (changed by #433, #438 and #441), but the replay uses it only for
 product-name constants (`store/sorted.go`; source reading). The changes that
-reach the S3 serving path in the binary are therefore #443 itself
-(`go/internal/replay/store/seek.go`; comment-only edits to `legacy/scan.go` and
-`metrics/defs.go`, no meter renamed), the seekparquet pin `6acba1a` → `b1c848a`
+reach the S3 serving path in the binary are therefore #443's `store/seek.go`,
+the seekparquet pin `6acba1a` → `b1c848a`
 (#42, #43, #48, #50, #54, plus CI and the Go 1.27.4 toolchain bump #51), and the
 build: the Go toolchain moves from 1.26.10 to 1.27.4 (#428, #438) and linked
 modules move with it (klauspost/compress 1.20.3 → 1.20.4, andybalholm/brotli
 1.2.8 → 1.3.0, parquet-go/bitpack 1.0.0 → 1.1.0, golang.org/x/sync 0.24 → 0.25,
 golang.org/x/sys 0.49 → 0.50; from `go list -deps ./cmd/swath-replay` at
-`4121c6fd` against the `545a10cb` `go.mod`). The one variable is the server
-build; the toolchain and dependency bumps are inside it and this wave does not
-separate them from #443. Re-check the list against the commit actually built
-before pinning it.
+`4121c6fd` against the `545a10cb` `go.mod`; #443 changes only the seekparquet
+line of `go.mod`). The one variable is the server build; the toolchain and
+dependency bumps are inside it and this wave does not separate them from #443.
 
 Unchanged: the SeekParquet blockchain fixture (`seekparquet-c4a42eb4e7fb/`,
 manifest `c4a42eb4…2b29`, adopted from `f4a839f2…d4b0`), the subject (Swath Java
@@ -166,13 +167,12 @@ control with `2076e4dd8761`; the 16/5 rung with `5d9e6e396e48`.
 
 ## Before submitting
 
-1. After swath PR #443 merges, build the Go replay image from a clean detached
-   worktree of that Swath main commit, push it, and replace
-   `REPLAY_GO_IMAGE_TBD` in all three plans with its `@sha256:` digest. In the
-   same commit, turn the placeholder drift guard into a pinned-image guard, as
-   wave 2 did, and record the image under *Pre-submit record*.
-2. Reuse wave 2's toolbox worker and image set (harness `1a0f845`), unless a
-   harness source change lands first; then rebuild as wave 2 did.
+1. Build the Go replay image from a clean detached worktree of the Swath main
+   commit where PR #443 merged, push it, and pin its `@sha256:` digest in all
+   three plans; the drift guard checks the pinned image (done, see *Pre-submit
+   record*).
+2. Reuse wave 2's toolbox worker and image set (harness `1a0f845`): no harness
+   source changed since.
 3. Dry-run each plan, then submit with Spot and the study VPC, as wave 2 did:
 
    ```sh
@@ -194,7 +194,10 @@ control with `2076e4dd8761`; the 16/5 rung with `5d9e6e396e48`.
 ## Budget
 
 Retain failures; only a preempted job may be resubmitted once; poll at least
-five minutes apart; stop any job still running at 60 minutes.
+five minutes apart. The owner-approved spend cap for this wave is **$3**. Four
+n4-highcpu-80 jobs running together cost $7.23 an hour, so the 60-minute stop
+rule alone would not hold the cap: any job still running at 20 minutes is
+stopped (four jobs at 20 minutes: $2.41 of compute).
 
 Pre-submit estimate: each wave-3 job is priced at the observed create-to-terminal
 duration of its wave-2 counterpart, at the us-east1 N4 Spot rate the wave-1
@@ -212,6 +215,26 @@ The three 64/20 jobs are $0.47 of that; by `runDuration` instead of
 create-to-terminal the four come to $0.51. A faster server shortens the subject
 run but not provisioning, so this is an upper-leaning estimate. With one
 preemption resubmission of the largest job and wave 2's $1 non-compute reserve,
-the planning estimate is about $1.79. Four jobs stopped at 60 minutes would
-cost $7.23 of compute; at 90 minutes $10.84; at the provider deadline
-(`maxRunDuration` 8,405 s) $16.87. These are estimates, not an invoice.
+the planning estimate is about $1.79, under the $3 cap. Four jobs stopped at
+60 minutes would cost $7.23 of compute and at the provider deadline
+(`maxRunDuration` 8,405 s) $16.87, which is why the 20-minute stop applies.
+These are estimates, not an invoice.
+
+## Pre-submit record
+
+Images, recorded before submission:
+
+- Go replay: `us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90`
+  (tag `go-43ffab2f`), built from a clean detached worktree of Swath main
+  `43ffab2f8c2c11041daba71273451bdf66190fc7` (PR #443, pins seekparquet
+  `b1c848a`) with `docker build -f Dockerfile.go --target swath-replay
+  --platform linux/amd64 --build-arg SWATH_REVISION=<sha>`; the digest is the
+  registry's (`gcloud artifacts docker images describe`). `--version` prints
+  `swath-replay devel (43ffab2f…)`; `serve --help` lists `-list-index` and
+  `-list-index-max-bytes`. A local smoke over the staged NARA SeekParquet
+  dataset printed `state=built ... has_index=true seconds=0.684` and served a
+  flat and a `delimiter=/` ListObjectsV2 page.
+- Toolbox worker: wave 2's, unchanged:
+  `us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:a878e4296bb7c07816eb4437b78f1209c9698e5c3ce891caf53cffe1a7a40e85`
+  (harness `1a0f845d7798b84771f85425a6f3dc8dcc6f5e33`), with wave 2's emitted
+  image set copied unchanged.
