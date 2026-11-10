@@ -678,6 +678,28 @@ def test_a_preparation_attempt_always_retains_products(tmp_path: Path) -> None:
     assert retain_products_flag(preparation, retain_products=True) == "true"
 
 
+def test_dry_run_allocates_distinct_ordinals_for_repetitions(tmp_path: Path) -> None:
+    plan = Plan.load(REPLAY_CANARY)
+    case = plan.cases[0]
+    images = image_set(tmp_path)
+    launch = context(plan, case, images)
+    lines = campaign.render_launch(
+        [campaign.Step(case, None), campaign.Step(case, None)],
+        suite=SUITE,
+        group_id="repetitions",
+        plan=plan,
+        image_set=images,
+        results_bucket="results",
+        options=launch.options,
+    )
+    first, second = [line.split(" ", 2) for line in lines]
+    assert first[0].endswith(".s1")
+    assert second[0].endswith(".s2")
+    assert first[1] != second[1]
+    for attempt, _, request in (first, second):
+        assert gcp_batch.request_argument(json.loads(request), "--attempt-id") == attempt
+
+
 def test_a_dry_run_renders_every_planned_attempt_and_writes_nothing(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

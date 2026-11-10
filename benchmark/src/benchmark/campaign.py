@@ -1410,6 +1410,7 @@ def render_launch(
     expanded = list(steps)
     lines: list[str] = []
     booked: dict[int, str] = {}
+    ordinals: dict[str, int] = {}
     slot = 0
     for index, step in enumerate(expanded):
         if step.waits_for is None:
@@ -1422,8 +1423,9 @@ def render_launch(
                 results_bucket=results_bucket,
                 options=options,
             )
-            _, _, build = planned_attempt(step.case, context)
-            attempt, request = build(1)
+            case_id, _, build = planned_attempt(step.case, context)
+            ordinals[case_id] = ordinals.get(case_id, 0) + 1
+            attempt, request = build(ordinals[case_id])
             lines.append(f"{attempt.attempt_id} {attempt.job_name} {request}")
             continue
         slot += 1
