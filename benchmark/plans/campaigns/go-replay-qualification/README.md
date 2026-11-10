@@ -4,8 +4,9 @@ Bounded diagnostic qualification of the replay instrument. Varve maintains this
 study and builds Swath; Swath here is the Java 0.3.2 listing subject.
 
 Each Java/Go pair takes its subject settings, fixture, deadline profile and
-warm-up from the release attempt named at the top of its plan. The Java image
-is that attempt's exact digest. Use one rebuilt toolbox image on both sides.
+warm-up from the release attempt named at the top of its plan. Java images use the source attempt's exact digest except s7cmd NARA: its
+unavailable image is replaced by the retained release digest disclosed in that
+plan. That pair tests treatment delivery, not exact release-server reproduction. Use one rebuilt toolbox image on both sides.
 All jobs use Spot provisioning with the study VPC and subnet. Retain failures;
 only a preempted job may be resubmitted once. No ranking or calibrated benchmark
 claim follows from these diagnostic plans.
