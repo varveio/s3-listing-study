@@ -238,3 +238,82 @@ Images, recorded before submission:
   `us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:a878e4296bb7c07816eb4437b78f1209c9698e5c3ce891caf53cffe1a7a40e85`
   (harness `1a0f845d7798b84771f85425a6f3dc8dcc6f5e33`), with wave 2's emitted
   image set copied unchanged.
+
+## Results (2026-11-10)
+
+Four Spot jobs, submitted 21:06 UTC with owner approval, all SUCCEEDED by
+21:13 UTC with no preemption or retry. Receipt (job UIDs, create and terminal
+times):
+[`../../../receipts/go-replay-qualification-3-cloud-20261110/`](../../../receipts/go-replay-qualification-3-cloud-20261110/README.md).
+Every subject exited zero with the expected 143,008,674 rows, with zero server
+errors and refusals, and every receipt reports `list_index.delivered: true` with
+no disagreement between the attached server line and the meters (index-on jobs
+`state=built`, the control `state=off` with zero builds and skips). Observed
+compute is $0.6150 charging create-to-terminal ($0.5076 by `runDuration`),
+against the $0.63 estimate and the $3 cap.
+
+Per-shape cells are mean server service time / deadline, then overrun %.
+
+| Job | Replay | Grade | worker_page | pivot_probe | structure_probe | Index skips / dense-page declines | Build s | CPU mean / p90 | Server RSS | Wall s | vs wave-1 Java median | Cost |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `swath.e40733239507.s1` | 64/20, index on | TIMING_VALID | 4.3/94 ms, 0% | 0.6/46 ms, 0% | 0.6/55 ms, 0% | 10,204 / 61,447 | 2.37 | 7.0% / 12.4% | 1.67 GiB | 148.7 | −4.2% | $0.152 |
+| `swath.e40733239507.s2` | 64/20, index on | TIMING_VALID | 4.4/94 ms, 0% | 0.7/46 ms, 0% | 0.5/55 ms, 0% | 11,233 / 61,535 | 2.64 | 6.6% / 12.0% | 1.67 GiB | 152.3 | −2.0% | $0.160 |
+| `swath.dc15bf8aa437.s1` | 64/20, index **off** | PRESSURE_DEGRADED | 4.4/94 ms, 0% | 0.7/46 ms, 0% | 7.5/55 ms, 3.55% | 0 / 0 | – | 7.1% / 12.3% | 1.83 GiB | 148.2 | −4.6% | $0.148 |
+| `swath.07cb7eabf980.s1` | 16/5, index on | TIMING_VALID | 8.0/94 ms, 0.056% | 1.2/46 ms, 0% | 0.5/55 ms, 0% | 11,150 / 61,520 | 2.86 | 29.4% / 48.0% | 1.72 GiB | 149.3 | −3.9% | $0.154 |
+
+Server RSS is the lifetime VmHWM (includes startup, index build and warm-up).
+
+Window-cache meters at the end of each run (`replay_evidence.after` in the
+bound `result.json`; lifetime timers, so the 400 warm-up fills are included).
+Hit share is hits / (hits + misses).
+
+| Attempt | Wave | Server / fixture / replay | fill count | fill mean / p50 / p99 / max ms | hit | miss cold / continuation | Hit share |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `swath.e40733239507.s1` | 3 | `43ffab2f` / SeekParquet / 64/20 on | 56,069 | 10.8 / 7.9 / 22.5 / 45.9 | 100,682 | 7,836 / 42,684 | 66.6% |
+| `swath.e40733239507.s2` | 3 | `43ffab2f` / SeekParquet / 64/20 on | 54,814 | 11.2 / 7.9 / 24.6 / 45.2 | 102,621 | 7,950 / 40,718 | 67.8% |
+| `swath.dc15bf8aa437.s1` | 3 | `43ffab2f` / SeekParquet / 64/20 off | 56,523 | 10.8 / 7.7 / 24.6 / 52.7 | 100,233 | 8,157 / 42,825 | 66.3% |
+| `swath.07cb7eabf980.s1` | 3 | `43ffab2f` / SeekParquet / 16/5 on | 58,856 | 12.9 / 9.4 / 43.0 / 138.0 | 97,986 | 9,618 / 43,674 | 64.8% |
+| `swath.954f110b5470.s1` | 2 | `545a10cb` / SeekParquet / 64/20 on | 46,403 | 41.8 / 23.1 / 92.3 / 169.5 | 111,456 | 7,877 / 31,931 | 73.7% |
+| `swath.954f110b5470.s2` | 2 | `545a10cb` / SeekParquet / 64/20 on | 46,806 | 42.1 / 26.2 / 100.7 / 175.0 | 110,791 | 8,219 / 32,270 | 73.2% |
+| `swath.2076e4dd8761.s1` | 2 | `545a10cb` / SeekParquet / 64/20 off | 45,960 | 40.6 / 23.6 / 96.5 / 190.6 | 112,006 | 8,194 / 31,197 | 74.0% |
+| `swath.5d9e6e396e48.s1` | 2 | `545a10cb` / SeekParquet / 16/5 on | 50,346 | 34.8 / 21.5 / 130.0 / 409.3 | 108,108 | 11,438 / 31,579 | 71.5% |
+| `swath.98f424ce32cc.s1` | 2 follow-up | `545a10cb` / Java-era / 64/20 off | 55,642 | 11.9 / 6.7 / 27.3 / 70.8 | 101,157 | 8,287 / 41,751 | 66.9% |
+
+**The blockchain index-on cell qualifies at 64/20.** Both repetitions grade
+TIMING_VALID with no overrun on any shape, the index delivered, and walls
+within −4.2% and −2.0% of the wave-1 Java median (inside ±10%). Worker pages
+took 4.3-4.4 ms against 13.8-14.1 ms and 2.8-3.0% overrun in wave 2, and the
+server used about half the CPU (7% mean against 14-15%) and 0.7-0.9 GiB less
+peak RSS. These levels are those of wave 1 and the Java-era follow-up
+(4.7-5.1 ms, 6.4-6.9% CPU).
+
+**Window fills moved to the Java-era cost.** A fill took 10.8-11.2 ms on average
+(p99 22.5-24.6 ms) at 64/20, against 40.6-42.1 ms (p99 92-101 ms) on the same
+cell with the wave-2 server and 11.9 ms (p99 27.3 ms) on the Java-era parts.
+The fill count, hit count and hit share moved with it: about 55-56 thousand
+fills and a 66-68% hit share, as on the Java-era parts, against about 46
+thousand and 73-74% with the slower wave-2 fills. This wave does not explain
+the hit-share change; it is reported, not interpreted.
+
+**The list index is still required for structure probes.** The index-off control,
+which differs from the index-on cell only in the index, kept worker pages at
+4.4 ms with no overrun but overran 3.55% of structure probes (7.5 ms mean),
+as every index-free blockchain run in waves 1 and 2 did (1.9-3.3%). With the
+server's read path fixed, the index is what separates TIMING_VALID from
+PRESSURE_DEGRADED on this cell.
+
+**The 16/5 rung qualifies with headroom.** It grades TIMING_VALID (worker-page
+overrun 0.056%, under the 1% threshold), wall −3.9% against the wave-1 Java
+median and −0.8% against the median of this wave's two 64/20 index-on
+repetitions (150.5 s), and meets wave 1's headroom conditions: replay cpuset
+mean 29.4% (< 60%), p90 48.0% (< 80%), server peak RSS 1.72 GiB of the 5 GiB
+container (34%, < 75%), response-buffer peak 128 MiB of the 1 GiB budget
+(12.5%, < 75%). That supports a bounded, fit-based recommendation that replay
+16 vCPU / 5 GiB serves this cell on SeekParquet fixtures; it is one repetition
+on n4-highcpu-80, not a measurement on a smaller VM.
+
+The server build is the only planned difference from wave 2, and it bundles
+#443, the seekparquet pin and the Go 1.27.4 toolchain and dependency bumps;
+this wave does not attribute the change among them. Comparisons with waves 1
+and 2 are cross-day; with the Java-era follow-up cross-fixture as well. These
+support bounded diagnostic statements, not precision claims.
