@@ -15,7 +15,7 @@ import sqlite3
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, TypeVar, cast
 
 import pytest
 from google.api_core.exceptions import AlreadyExists, BadRequest, GoogleAPIError, NotFound
@@ -26,6 +26,7 @@ from benchmark import plan as bench
 from benchmark.contract import CREDENTIAL_ENV_VAR, TOOLBOX_TOOLS
 from benchmark.drivers import gcp_batch
 from benchmark.plan import Case, Plan
+from benchmark.replay import ReplayConfig, ReplayPlan
 from benchmark.runtime.command_adapter import HEAP_PERCENT
 
 ROOT = Path(__file__).parents[2]
@@ -2179,6 +2180,7 @@ def test_go_renderer_uses_go_flags_and_allocation_limits(
 
 
 WAVE2 = ROOT / "benchmark/plans/campaigns/go-replay-qualification-2"
+WAVE3 = ROOT / "benchmark/plans/campaigns/go-replay-qualification-3"
 SEEKPARQUET_ROOT = "gs://fixtures/aws-public-blockchain/seekparquet-c4a42eb4e7fb/"
 
 
@@ -2432,3 +2434,74 @@ def test_submit_refuses_a_placeholder_image_before_touching_a_ledger(tmp_path: P
     with pytest.raises(ledger.CampaignError, match="placeholder"):
         campaign.cmd_submit(args)
     assert not (tmp_path / "campaign.db").exists()
+
+
+def _wave3_plans() -> list[Path]:
+    return sorted(WAVE3.glob("*/*.yaml"))
+
+
+_R = TypeVar("_R", ReplayPlan, ReplayConfig)
+
+
+def _with_wave2_image(config: _R) -> _R:
+    return replace(config, backend=replace(config.backend, server_image_uri=WAVE2_REPLAY_IMAGE))
+
+
+def test_wave3_plans_differ_from_their_wave2_cells_only_in_the_replay_image() -> None:
+    """One variable: each wave-3 plan resolves to wave 2's cases of the same name
+    once the server image is set back to wave 2's pinned digest."""
+    assert [path.parent.name for path in _wave3_plans()] == [
+        "blockchain-ladder-go",
+        "blockchain-swath-go",
+        "blockchain-swath-go-index-off",
+    ]
+    for path in _wave3_plans():
+        wave3 = campaign.load_campaign_plan(path)
+        wave2 = campaign.load_campaign_plan(WAVE2 / path.parent.name / path.name)
+        assert wave3.replay is not None and wave2.replay is not None
+        assert wave2.replay.backend.server_image_uri == WAVE2_REPLAY_IMAGE
+        assert wave3.replay.backend.server_image_uri != WAVE2_REPLAY_IMAGE
+        assert _with_wave2_image(wave3.replay) == wave2.replay
+        assert len(wave3.cases) == len(wave2.cases) == 1
+        for case3, case2 in zip(wave3.cases, wave2.cases, strict=True):
+            assert case3.replay is not None
+            assert replace(case3, replay=_with_wave2_image(case3.replay)) == case2
+
+
+def test_wave3_plans_dry_render_and_refuse_submission_while_the_image_is_a_placeholder(
+    tmp_path: Path,
+) -> None:
+    """Drift guard on the committed wave-3 plans: four blockchain Swath c256 attempts
+    (64/20 index on twice, 64/20 index off once, 16/5 index on once) render over the
+    SeekParquet root, and submission refuses the placeholder image."""
+    images = image_set(tmp_path)
+    allocations = []
+    for path in _wave3_plans():
+        plan = campaign.load_campaign_plan(path)
+        assert plan.replay is not None and plan.replay.backend.image_is_placeholder
+        assert plan.replay.backend.fixture_layout == "seekparquet"
+        assert plan.replay.backend.fixture_adopted_sha256 is not None
+        with pytest.raises(ledger.CampaignError, match="REPLAY_GO_IMAGE_TBD"):
+            campaign.refuse_placeholder_images(plan)
+        for case in plan.cases:
+            assert case.replay is not None
+            index_on = path.parent.name != "blockchain-swath-go-index-off"
+            assert case.replay.list_index_enabled is index_on
+            for ordinal in range(1, case.reps + 1):
+                attempt = campaign.planned_attempt(case, context(plan, case, images))[2](ordinal)[0]
+                request = gcp_batch.render_batch_job(
+                    attempt,
+                    images.image_for(case.tool),
+                    suite=SUITE,
+                    options=context(plan, case, images).options,
+                )
+                server = request["taskGroups"][0]["taskSpec"]["runnables"][2]["container"]
+                assert server["imageUri"].endswith("@sha256:REPLAY_GO_IMAGE_TBD")
+                assert f"--list-index={str(index_on).lower()}" in server["commands"]
+                if not index_on:
+                    assert "--list-index-max-bytes" not in server["commands"]
+                allocation = json.loads(attempt.replay or "null")["allocation"]
+                allocations.append(
+                    (allocation["replay_vcpus"], allocation["replay_memory_gb"], index_on)
+                )
+    assert sorted(allocations) == [(16, 5, True), (64, 20, False), (64, 20, True), (64, 20, True)]
