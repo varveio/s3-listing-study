@@ -53,6 +53,7 @@ CONFIG_KEYS = frozenset(
     {
         "engine_readahead",
         "final_file_bytes",
+        "gc_collector",
         "gc_log",
         "jfr",
         "jvm_max_heap",
@@ -68,7 +69,7 @@ CONFIG_KEYS = frozenset(
 )
 """Output controls whose retained values must remain visible in case identity."""
 
-ENV_CONFIG_KEYS = frozenset({"jvm_max_heap"})
+ENV_CONFIG_KEYS = frozenset({"gc_collector", "jvm_max_heap"})
 """Declared controls consumed by :func:`build_env`, independent of output mode."""
 
 DIAGNOSTIC_CONFIG_KEYS = frozenset({"gc_log", "jfr"})
@@ -84,6 +85,14 @@ JAVA_LONG_MAX = 2**63 - 1
 """The largest value ``SortConfig`` reads with ``Long.parseLong``
 (``SortConfig.java:416-418`` @v0.3.2); a larger one would compile here and
 fail at the JVM's startup."""
+
+GC_COLLECTORS = {"g1": "-XX:+UseG1GC", "parallel": "-XX:+UseParallelGC"}
+"""``gc_collector``'s values and the HotSpot option each renders. Unstated, the
+JVM's ergonomics choose: G1 on a "server-class" machine (at least two active
+processors and 1792 MB), Serial otherwise -- so G1 in every replay container
+the study runs (4 to 8 subject vCPUs, 8 or 16 GiB), and ``g1`` states that
+default explicitly. Nothing else in the capsule or the harness selects a
+collector for the subject."""
 
 GC_LOG_NAME = "swath-gc.log"
 JFR_NAME = "swath.jfr"
@@ -240,12 +249,14 @@ def build_env(request: CommandRequest) -> dict[str, str]:
 
 
 def _jvm_options(request: CommandRequest) -> tuple[str, ...]:
-    """The JVM options rendered from ``jvm_max_heap``, ``final_file_bytes``, ``gc_log``, ``jfr``.
+    """The JVM options rendered from the stated JVM config keys, in a fixed order.
 
     - ``jvm_max_heap`` → ``-Xmx``: an explicit maximum heap, which HotSpot takes
       over the ``MaxRAMPercentage`` share. Swath sizes its sort segments and
       merge budget from it (8 % of ``Runtime.maxMemory()`` each,
       ``SortConfig.java:125,269-270,277,411-414`` @v0.3.2).
+    - ``gc_collector`` (``g1`` or ``parallel``) → ``-XX:+UseG1GC`` or
+      ``-XX:+UseParallelGC`` (:data:`GC_COLLECTORS`); every mode takes it.
     - ``final_file_bytes`` → ``-Dswath.sort.final-file-bytes=N``: the sorted
       output's roll threshold, read once by ``SortConfig.fromSystemProperties``
       (``SortConfig.java:256-258,274``; ``SortOptions.java:25-26``) and used by
@@ -272,6 +283,14 @@ def _jvm_options(request: CommandRequest) -> tuple[str, ...]:
                 f"{TOOL} jvm_max_heap must be a positive JVM size such as '4g'; got: {maximum!r}"
             )
         options.append(f"-Xmx{maximum}")
+    collector = request.config.get("gc_collector")
+    if collector is not None:
+        if not isinstance(collector, str) or collector not in GC_COLLECTORS:
+            raise CommandAdapterError(
+                f"{TOOL} gc_collector must be one of {', '.join(sorted(GC_COLLECTORS))}; "
+                f"got: {collector!r}"
+            )
+        options.append(GC_COLLECTORS[collector])
     final_bytes = request.config.get("final_file_bytes")
     if final_bytes is not None:
         if request.mode != "recursive-parquet-sorted":

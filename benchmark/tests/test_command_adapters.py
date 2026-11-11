@@ -1224,6 +1224,39 @@ def test_swath_renders_jvm_recordings_and_the_sorted_final_size_into_java_tool_o
     assert options({"gc_log": "off", "jfr": "off"}) == [share]
 
 
+def test_swath_renders_the_stated_collector_in_every_mode_and_nothing_unstated() -> None:
+    adapter = load_command_adapter(adapter_path("swath"))
+    share = f"-XX:MaxRAMPercentage={HEAP_PERCENT}"
+    for mode in ("recursive-tsv", "recursive-tsv-zstd", "recursive-parquet-sorted"):
+        for collector, option in (("g1", "-XX:+UseG1GC"), ("parallel", "-XX:+UseParallelGC")):
+            request = CommandRequest(
+                mode,
+                BUCKET,
+                REGION,
+                tool="swath",
+                sink_dir=SINK,
+                config={"jvm_max_heap": "4g", "gc_collector": collector},
+            )
+            argv = adapter.compile(request)
+            assert not [word for word in argv if word.startswith("-XX:")]
+            assert adapter.build_env(request) == {"JAVA_TOOL_OPTIONS": f"{share} -Xmx4g {option}"}
+        silent = CommandRequest(mode, BUCKET, REGION, tool="swath", sink_dir=SINK)
+        assert "GC" not in adapter.build_env(silent)["JAVA_TOOL_OPTIONS"]
+    for bad in ("G1", "serial", "zgc", "-XX:+UseZGC", "", 1, True):
+        request = CommandRequest(
+            "recursive-parquet-sorted",
+            BUCKET,
+            REGION,
+            tool="swath",
+            sink_dir=SINK,
+            config={"gc_collector": bad},
+        )
+        with pytest.raises(CommandAdapterError, match="gc_collector must be one of g1, parallel"):
+            adapter.compile(request)
+        with pytest.raises(CommandAdapterError, match="gc_collector"):
+            adapter.build_env(request)
+
+
 @pytest.mark.parametrize(
     ("mode", "config", "message"),
     [

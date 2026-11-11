@@ -206,7 +206,7 @@ capsule also renders the harness's heap share into
 reads is Swath's business and the share is the harness's.
 
 **JVM and sorted-output controls.** Besides the heap share, `build_env`
-renders four config keys into the same `JAVA_TOOL_OPTIONS`, each from a
+renders five config keys into the same `JAVA_TOOL_OPTIONS`, each from a
 checked value and none verbatim (references at v0.3.2, `acf0d509`):
 
 - `jvm_max_heap` (`4g`, `512m`, …) → `-Xmx`, which HotSpot takes over the
@@ -214,6 +214,19 @@ checked value and none verbatim (references at v0.3.2, `acf0d509`):
   each 8% of the maximum heap (`SortConfig.java:125,269-270,277,411-414`) —
   claim `sort-budgets-follow-the-max-heap`. Unstated in an 8 GiB container, the
   75% share gives 6 GiB.
+- `gc_collector` (`g1` or `parallel`; every mode) → `-XX:+UseG1GC` or
+  `-XX:+UseParallelGC`. Unstated, HotSpot's ergonomics pick G1 on a
+  server-class machine (at least two active processors and 1792 MB) and Serial
+  otherwise, so every replay container the study runs gets G1 and `g1` states
+  that default. Nothing else in the capsule or the harness sets a collector for
+  the subject (`benchmark/src/benchmark/drivers/gcp_batch.py` sets
+  `JAVA_TOOL_OPTIONS` for the replay *server* only) — claim
+  `gc-collector-is-a-jvm-option`. Local check, 2026-11-11, on the toolbox
+  image's Temurin 25.0.4 with 4 CPUs and an 8 GiB limit: no flag and
+  `-XX:+UseG1GC` both log `Using G1`, `-XX:+UseParallelGC` logs
+  `Using Parallel`, and `swath --version` runs under each; one CPU selects
+  Serial. An adapter check, not a run record; what a collector does to a
+  run's wall is unmeasured.
 - `final_file_bytes` (a positive byte count; sorted mode only) →
   `-Dswath.sort.final-file-bytes=N`, the sorted output's roll threshold,
   default 1 GiB (`SortConfig.java:140,256-258,274`, `SortOptions.java:25-26`,

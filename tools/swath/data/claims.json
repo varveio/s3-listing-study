@@ -4639,6 +4639,28 @@
           "lines": "125,133-140,269-270,277,411-414"
         }
       ]
+    },
+    {
+      "id": "gc-collector-is-a-jvm-option",
+      "statement": "Swath's collector is the JVM's: -XX:+UseG1GC or -XX:+UseParallelGC selects it, and unstated HotSpot's ergonomics choose G1 on a server-class machine (at least two active processors and 1792 MB of memory) and Serial otherwise. Swath itself selects none.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The mechanism is the JDK's, from its documentation; the capsule exposes it as gc_collector (g1 or parallel), and no other part of the capsule or the harness sets a collector for the subject. A local check on the toolbox image's Temurin 25.0.4 (4 CPUs, 8 GiB) logged Using G1 with no flag and with -XX:+UseG1GC, Using Parallel with -XX:+UseParallelGC, and Serial with one CPU; swath --version ran under each. That is an adapter check, not a run record: whether a collector changes a run's wall or memory is unverified.",
+      "evidence": [
+        {
+          "kind": "documentation",
+          "url": "https://docs.oracle.com/en/java/javase/25/gctuning/ergonomics.html"
+        },
+        {
+          "kind": "documentation",
+          "url": "https://docs.oracle.com/en/java/javase/25/docs/specs/man/java.html"
+        },
+        {
+          "kind": "documentation",
+          "path": "../docs/running.md"
+        }
+      ]
     }
   ]
 }
