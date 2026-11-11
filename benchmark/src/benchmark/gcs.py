@@ -40,6 +40,13 @@ def blob_exists(uri: str) -> bool:
     return cast(bool, client().bucket(bucket_name).blob(name).exists())
 
 
+def blob_md5(uri: str) -> str | None:
+    """The stored base64 MD5 of an object, or None when there is no object or no MD5."""
+    bucket_name, name = parse_gs_uri(uri)
+    blob = client().bucket(bucket_name).get_blob(name)
+    return None if blob is None else cast("str | None", blob.md5_hash)
+
+
 def download_bytes(uri: str) -> bytes:
     bucket_name, name = parse_gs_uri(uri)
     return cast(bytes, client().bucket(bucket_name).blob(name).download_as_bytes())

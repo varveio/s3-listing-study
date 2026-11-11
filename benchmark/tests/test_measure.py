@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import gzip
 import hashlib
 import json
@@ -1143,7 +1144,7 @@ def test_a_failed_profile_upload_is_dropped_from_the_marker_not_fatal(
             sent[uri] = Path(path).read_bytes()
 
         monkeypatch.setattr(gcs, "upload_file", upload_file)
-        monkeypatch.setattr(gcs, "blob_exists", lambda _uri: False)
+        monkeypatch.setattr(gcs, "blob_md5", lambda _uri: None)
         assert measure.upload(attempt, "gs://bucket/leaf/", {})
         published = json.loads(sent["gs://bucket/leaf/result.json"])
         assert "gs://bucket/leaf/native/swath-go-cpu.pprof" in sent
@@ -1154,23 +1155,95 @@ def test_a_failed_profile_upload_is_dropped_from_the_marker_not_fatal(
     assert published["postprocessing_seconds"]["artifact_upload"] >= 0
 
 
-def test_a_profile_upload_that_landed_before_failing_stays_bound(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("stored", "kept"),
+    [
+        (b"jfr", True),  # the failed call had committed these very bytes
+        (b"another run's jfr", False),  # a create-only collision: not this upload
+        (None, False),  # nothing there, or no MD5 to compare
+    ],
+)
+def test_a_failed_profile_upload_stays_bound_only_if_the_stored_bytes_are_its_own(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stored: bytes | None, kept: bool
 ) -> None:
+    """An object existing after a failed transfer proves nothing; its stored MD5
+    matching the local file does."""
     attempt = _profiled_attempt(tmp_path, bind={"native_manifest": {"swath.jfr": "0" * 64}})
     sent: dict[str, bytes] = {}
 
     def upload_file(path: Path, uri: str, **_kwargs: object) -> None:
-        sent[uri] = Path(path).read_bytes()
         if uri.endswith("/native/swath.jfr"):
-            raise OSError("response lost after commit")
+            raise OSError("response lost, or the object already exists")
+        sent[uri] = Path(path).read_bytes()
+
+    def blob_md5(uri: str) -> str | None:
+        assert uri == "gs://bucket/leaf/native/swath.jfr"
+        if stored is None:
+            return None
+        return base64.b64encode(hashlib.md5(stored).digest()).decode()
 
     monkeypatch.setattr(gcs, "upload_file", upload_file)
-    monkeypatch.setattr(gcs, "blob_exists", lambda uri: uri.endswith("/native/swath.jfr"))
+    monkeypatch.setattr(gcs, "blob_md5", blob_md5)
     assert measure.upload(attempt, "gs://bucket/leaf/", {})
     published = json.loads(sent["gs://bucket/leaf/result.json"])
-    assert published["native_manifest"] == {"swath.jfr": "0" * 64}
-    assert "profile_omissions" not in published
+    if kept:
+        assert published["native_manifest"] == {"swath.jfr": "0" * 64}
+        assert "profile_omissions" not in published
+    else:
+        assert published["native_manifest"] == {}
+        assert published["profile_omissions"]["swath.jfr"].startswith("upload failed:")
+
+
+SECRET = b"AKIA" + b"Q" * 16
+
+
+@pytest.mark.parametrize("shape", ["outside-link", "file", "directory"])
+def test_a_profile_name_in_inline_gets_no_exemption(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shape: str
+) -> None:
+    """Only native/'s top level exempts profile names. A setup that leaves
+    inline/swath.jfr -- a link to a secret outside the attempt, a file or a
+    directory holding one -- meets the strict walk and the secret scan like any
+    other inline output, and the attempt is refused with nothing published."""
+    outside = tmp_path / "outside-secret"
+    outside.write_bytes(SECRET)
+    leave = {
+        "outside-link": f"Path(sys.argv[2], 'swath.jfr').symlink_to({str(outside)!r})",
+        "file": f"Path(sys.argv[2], 'swath.jfr').write_bytes({SECRET!r})",
+        "directory": (
+            "Path(sys.argv[2], 'swath.jfr').mkdir(); "
+            f"Path(sys.argv[2], 'swath.jfr', 'chunk').write_bytes({SECRET!r})"
+        ),
+    }[shape]
+    split = (
+        "import sys\n"
+        "from pathlib import Path\n"
+        "Path(sys.argv[2], 'hints.input').write_text(Path(sys.argv[1]).read_text())\n"
+        f"{leave}\n"
+    )
+    uploaded: list[tuple[str, bytes]] = []
+    code = run_inline_worker(tmp_path, monkeypatch, split=split, uploaded=uploaded)
+
+    assert code == measure.EXIT_SECRET_DETECTED
+    assert not (tmp_path / "attempt/result.json").exists()
+    assert not [uri for uri, body in uploaded if SECRET in body]
+    assert measure.scan_for_secrets([tmp_path / "attempt/inline"]) is not None
+    assert (
+        measure.scan_for_secrets(
+            [tmp_path / "attempt/inline"], native_root=tmp_path / "attempt/native"
+        )
+        is not None
+    )
+
+
+def test_the_profile_exemption_holds_at_the_native_top_only(tmp_path: Path) -> None:
+    native = tmp_path / "native"
+    (native / "listing").mkdir(parents=True)
+    (native / "swath.jfr").write_bytes(SECRET)  # left to screen_profiles
+    assert measure.scan_for_secrets([native], native_root=native) is None
+    assert measure.scan_for_secrets([native]) is not None
+    (native / "listing/swath.jfr").write_bytes(SECRET)  # product, not profile
+    assert measure.scan_for_secrets([native], native_root=native) is not None
 
 
 def test_settle_omits_and_removes_every_profile_that_cannot_travel(

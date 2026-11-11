@@ -14,6 +14,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import base64
 import contextlib
 import gzip
 import hashlib
@@ -231,10 +232,18 @@ def retained_files(source: Path, *, skip_top: frozenset[str] = frozenset()) -> I
                 )
 
 
-def scan_for_secrets(paths: list[Path], *, skip_top: frozenset[str] = frozenset()) -> str | None:
-    """Scan every retained regular file as bounded binary chunks, failing closed."""
+def scan_for_secrets(paths: list[Path], *, native_root: Path | None = None) -> str | None:
+    """Scan every retained regular file as bounded binary chunks, failing closed.
+
+    The profiles directly in ``native_root`` -- and nowhere else, not in
+    ``inline/`` or any other tree -- are left to :func:`screen_profiles`.
+    """
     try:
-        files = (path for source in paths for path in retained_files(source, skip_top=skip_top))
+        files = (
+            path
+            for source in paths
+            for path in retained_files(source, skip_top=_profile_names_under(source, native_root))
+        )
         for path in files:
             flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
             descriptor = os.open(path, flags)
@@ -1040,6 +1049,17 @@ PROFILE_OMISSIONS = "profile_omissions"
 """The ``result.json`` field naming each profile that did not travel, and why."""
 
 
+def _profile_names_under(source: Path, native_root: Path | None) -> frozenset[str]:
+    """The profile exemption for a walk of ``source``: only the native root has one."""
+    if native_root is None or source.is_symlink() or native_root.is_symlink():
+        return frozenset()
+    try:
+        same = os.path.samefile(source, native_root)
+    except OSError:
+        return frozenset()
+    return PROFILE_NAMES if same else frozenset()
+
+
 def run_report_files(native_root: Path) -> list[Path]:
     """The run reports under ``native/``, in path order (profiles are not walked)."""
     return sorted(
@@ -1137,6 +1157,15 @@ def bind_profiles(
     return bound
 
 
+def md5_base64(path: Path) -> str:
+    """The base64 MD5 GCS stores for an object with ``path``'s bytes."""
+    digest = hashlib.md5(usedforsecurity=False)
+    with open(path, "rb") as source:
+        for chunk in iter(lambda: source.read(1 << 20), b""):
+            digest.update(chunk)
+    return base64.b64encode(digest.digest()).decode()
+
+
 def bound_profile_names(result: Mapping[str, object]) -> list[str]:
     """The profiles ``result.json`` binds, in either evidence profile's map."""
     names: set[str] = set()
@@ -1229,12 +1258,14 @@ def upload(
             def send(path: Path, name: str) -> None:
                 gcs.upload_file(path, destination.rstrip("/") + "/" + name, create_only=True)
 
-            def landed(name: str) -> bool:
-                # A GCS object appears whole or not at all, and create-only means
-                # one that is there now is this upload's: a call that failed
-                # after the commit still delivered the bytes the manifest binds.
+            def landed(path: Path, name: str) -> bool:
+                # A call that failed after the commit may still have delivered
+                # the bytes, but an object being there proves nothing (create-only
+                # also fails on a collision): it stays bound only if its stored
+                # MD5 is this file's.
                 try:
-                    return gcs.blob_exists(destination.rstrip("/") + "/" + name)
+                    stored = gcs.blob_md5(destination.rstrip("/") + "/" + name)
+                    return stored is not None and stored == md5_base64(path)
                 except Exception:
                     return False
 
@@ -1257,7 +1288,7 @@ def upload(
                         target.unlink()
                     raise
 
-            def landed(name: str) -> bool:
+            def landed(path: Path, name: str) -> bool:
                 return False  # send() removes a partial copy before it re-raises
 
         for path in artifacts:
@@ -1286,7 +1317,7 @@ def upload(
                     raise OSError(problem)
                 send(path, "native/" + name)
             except Exception as exc:
-                if problem is None and landed("native/" + name):
+                if problem is None and landed(path, "native/" + name):
                     continue
                 omissions[name] = f"upload failed: {exc}"
                 print(f"measure: profile {name} upload failed: {exc}", file=sys.stderr)
@@ -1805,7 +1836,7 @@ def main(argv: list[str] | None = None) -> int:
         scanned.append(native_root)
     else:
         scanned.extend(run_report_files(native_root))
-    secret_hit = scan_for_secrets(scanned, skip_top=PROFILE_NAMES)
+    secret_hit = scan_for_secrets(scanned, native_root=native_root)
     if not secret_hit:
         screen_profiles(native_root, profile_omissions)
     postprocessing_seconds["secret_scan"] = time.monotonic() - phase_started
@@ -1896,7 +1927,7 @@ def main(argv: list[str] | None = None) -> int:
             path.stat().st_size
             for root in attempt_dir.iterdir()
             if root.name != "native" or retain_products
-            for path in retained_files(root, skip_top=PROFILE_NAMES)
+            for path in retained_files(root, skip_top=_profile_names_under(root, native_root))
         ) + (0 if retain_products else sum(p.stat().st_size for p in run_report_files(native_root)))
         artifacts_size_bytes += sum(
             os.lstat(path).st_size for path in profile_files(native_root, profile_omissions)
