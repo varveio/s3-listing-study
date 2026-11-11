@@ -445,7 +445,7 @@ def _swath_go(mode: str, prefix: str) -> tuple[str, ...]:
     uri = f"s3://{BUCKET}" + (f"/{prefix}" if prefix else "")
     report = ("--report", f"{SINK}/swath-go-report.json")
     # No row states one here, so the capsule renders the port's declared 64.
-    tail = ("--region", REGION, "--anonymous", "--workers", "64")
+    tail = ("--s3-region", REGION, "--anonymous", "--workers", "64")
     if mode == "resume-parquet-sorted":
         return ("resume", f"{SINK}/listing", *report, "--workers", "64", "--anonymous")
     output = {
@@ -684,7 +684,7 @@ def test_an_empty_endpoint_is_byte_identical_for_every_capsule_mode(tool: str) -
             ("--endpoint-url", ENDPOINT),
             {"JAVA_TOOL_OPTIONS": f"-XX:MaxRAMPercentage={HEAP_PERCENT}"},
         ),
-        ("swath-go", "recursive-tsv", "p/", ("--endpoint", ENDPOINT), {}),
+        ("swath-go", "recursive-tsv", "p/", ("--endpoint-url", ENDPOINT), {}),
     ],
 )
 def test_compatible_capsules_render_the_receipted_endpoint_mechanism(

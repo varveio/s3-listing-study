@@ -109,7 +109,7 @@ UNEXERCISED = {
         "recursive-tsv-dataset",
         "recursive-tsv-zstd",
     },
-    # No receipts yet: the Go port has never run in this study.
+    # No receipts yet: the Go port has no committed run record in this study.
     "swath-go": {
         "recursive-parquet-sorted",
         "resume-parquet-sorted",
@@ -527,15 +527,16 @@ FIXTURES[("s3-fast-list", "list")] = (
 FIXTURES[("s3-fast-list", "list-hinted")] = FIXTURES[("s3-fast-list", "list")]
 FIXTURES[("s3-fast-list", "list-hinted-fixture")] = FIXTURES[("s3-fast-list", "list")]
 
-# The Go port's TSV file: S3's nine columns under one header, ETag quoted,
-# LastModified in the AWS CLI's +00:00 spelling (a fraction only when not zero),
-# and keys under JSON's string escapes, here an escaped backslash.
+# The Go port's TSV file: the S3 schema's nine column names under one header,
+# the ETag bare, times in UTC with six fraction digits, \N for a null, and
+# fields under the port's TSV escapes, here an escaped backslash.
 SWATH_GO_TSV = (
-    b"Key\tLastModified\tETag\tChecksumAlgorithm\tChecksumType\tSize\tStorageClass"
-    b"\tOwner.DisplayName\tOwner.ID\n"
-    b'normals-hourly/access/A.csv\t2026-03-16T14:41:50.123000+00:00\t"8f60"\tCRC64NVME'
-    b"\tFULL_OBJECT\t3184153\tSTANDARD\t\t\n"
-    b'normals-hourly/back\\\\slash\t2026-03-16T14:41:51+00:00\t"8f61"\t\t\t7\tSTANDARD\t\t\n'
+    b"key\tsize\tlast_modified\tetag\tstorage_class\towner_id\towner_display_name"
+    b"\tchecksum_algorithm\tchecksum_type\n"
+    b"normals-hourly/access/A.csv\t3184153\t2026-03-16T14:41:50.123000Z\t8f60\tSTANDARD"
+    b"\t\\N\t\\N\tCRC64NVME\tFULL_OBJECT\n"
+    b"normals-hourly/back\\\\slash\t7\t2026-03-16T14:41:51.000000Z\t8f61\tSTANDARD"
+    b"\t\\N\t\\N\t\\N\t\\N\n"
 )
 FIXTURES[("swath-go", "recursive-tsv")] = (
     SWATH_GO_TSV,

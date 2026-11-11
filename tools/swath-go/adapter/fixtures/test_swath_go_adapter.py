@@ -2,8 +2,8 @@
 
 Run with ``uv run pytest tools/swath-go``. Nothing here contacts a network or
 runs the subject. The normalizer cases read three committed products the Go
-binary built from the pull request's head revision wrote over a synthetic local S3 store
-(``format2-dataset/``, ``tsv-file/``, ``tsv-zstd-file/``); ``docs/running.md``
+binary built from the pinned revision wrote over a synthetic local S3 store
+(``seekparquet-dataset/``, ``tsv-file/``, ``tsv-zstd-file/``); ``docs/running.md``
 § Adapter fixtures says exactly how. They are adapter test input, not run
 records: they show the normalizer reads what the binary writes, never how the
 tool behaves against S3.
@@ -39,13 +39,10 @@ ADAPTER = HERE.parent
 CAPSULE = ADAPTER.parent
 REPO = CAPSULE.parents[1]
 BUILD = CAPSULE / "build"
-DATASET = HERE / "format2-dataset"
+DATASET = HERE / "seekparquet-dataset"
 TSV = HERE / "tsv-file" / "listing.tsv"
 TSV_ZSTD = HERE / "tsv-zstd-file" / "listing.tsv.zst"
-PIN = "a2efe16e45d66088f6447e9723a119e5aebd4a91"
-# The fixtures were written by the pull-request-head binary; the merge changed no
-# command-line or output-format file, so they were kept (docs/running.md).
-FIXTURE_REVISION = "7b05605444766de4e7a736db0bc410409af47429"
+PIN = "8c8f870801c700f22413581f35683096782329a0"
 
 FIXTURE_BASE = {
     "bucket": "fixture-bucket",
@@ -54,7 +51,7 @@ FIXTURE_BASE = {
     "endpoint_url": "http://127.0.0.1:5055",
 }
 FIXTURE_REQUESTS = {
-    "format2-dataset": {
+    "seekparquet-dataset": {
         "mode": "recursive-parquet-sorted",
         "config": {
             "concurrency": 4,
@@ -85,9 +82,47 @@ FIXTURE_KEYS = [
 ]
 
 HEADER = (
-    b"Key\tLastModified\tETag\tChecksumAlgorithm\tChecksumType\tSize\tStorageClass"
-    b"\tOwner.DisplayName\tOwner.ID\n"
+    b"key\tsize\tlast_modified\tetag\tstorage_class\towner_id\towner_display_name"
+    b"\tchecksum_algorithm\tchecksum_type\n"
 )
+
+VALUE_FLAGS = {
+    "-o": "--output",
+    "--report": "--report",
+    "--s3-region": "--s3-region",
+    "--workers": "--workers",
+    "--endpoint-url": "--endpoint-url",
+    "--max-duration": "--max-duration",
+    "--part-size": "--part-size",
+    "--part-interval": "--part-interval",
+    "--sort-buffer": "--sort-buffer",
+    "--spill-budget": "--spill-budget",
+}
+"""The flags the adapter renders with a separate value word, by their canonical name."""
+
+
+def _canonical(argv: tuple[str, ...]) -> list[str]:
+    """The report's ``invocation.argv`` spelling of a compiled argv (after the executable).
+
+    The port records the command canonically: the command word, then each flag
+    as ``--name=value`` (or bare, for a switch) in the order given, then the
+    operands (``go/docs/reference/run-report.md:75``).
+    """
+    words = list(argv)
+    command = [words.pop(0)]
+    if command == ["diag"]:
+        command.append(words.pop(0))
+    flags: list[str] = []
+    operands: list[str] = []
+    while words:
+        word = words.pop(0)
+        if word in VALUE_FLAGS:
+            flags.append(f"{VALUE_FLAGS[word]}={words.pop(0)}")
+        elif word.startswith("-"):
+            flags.append(word)
+        else:
+            operands.append(word)
+    return command + flags + operands
 
 
 def _module(name: str, path: Path) -> ModuleType:
@@ -141,7 +176,7 @@ def test_unsigned_whole_bucket_argv_at_the_declared_default(
         output,
         "--report",
         "/sink/swath-go-report.json",
-        "--region",
+        "--s3-region",
         "us-west-2",
         "--anonymous",
         "--workers",
@@ -158,59 +193,72 @@ def test_signed_prefix_endpoint_and_every_knob(adapter: LoadedCommandAdapter) ->
             endpoint_url="http://127.0.0.1:19090",
             config={
                 "concurrency": 256,
-                "limiter": False,
+                "adaptive_limit": False,
                 "seed": False,
-                "row_budget": "256MiB",
-                "spill_max": "0",
+                "sort_buffer": "256MiB",
+                "spill_budget": "0",
                 "max_duration": "1h59m30s",
-                "part_size": "64mb",
+                "part_size": "64MiB",
                 "part_interval": "1m30s",
             },
         )
     )
     assert argv == (
         "/opt/swath-go/swath",
+        "diag",
         "list",
         "s3://bucket/logs/2026/",
         "-o",
         "/sink/listing",
         "--report",
         "/sink/swath-go-report.json",
-        "--region",
+        "--s3-region",
         "us-west-2",
         "--workers",
         "256",
-        "--endpoint",
+        "--endpoint-url",
         "http://127.0.0.1:19090",
-        "--limiter=false",
-        "--seed=false",
-        "--row-budget",
+        "--no-adaptive-limit",
+        "--no-seed",
+        "--sort-buffer",
         "256MiB",
-        "--spill-max",
+        "--spill-budget",
         "0",
         "--max-duration",
         "1h59m30s",
         "--part-size",
-        "64mb",
+        "64MiB",
         "--part-interval",
         "1m30s",
     )
     assert "--anonymous" not in argv
 
 
-def test_structure_runs_the_diagnostic_list(adapter: LoadedCommandAdapter) -> None:
+def test_seed_on_and_adaptive_limit_on_render_on_the_plain_list(
+    adapter: LoadedCommandAdapter,
+) -> None:
+    argv = adapter.compile(_request(config={"seed": True, "adaptive_limit": True}))
+    assert argv[1:3] == ("list", "s3://bucket")
+    assert "--adaptive-limit" in argv
+    assert not any("seed" in word for word in argv)
+
+
+def test_structure_and_no_seed_run_the_diagnostic_list(adapter: LoadedCommandAdapter) -> None:
     argv = adapter.compile(_request("recursive-tsv", config={"structure": "off"}))
     assert argv[1:4] == ("diag", "list", "s3://bucket")
     assert "--structure=off" in argv
+    argv = adapter.compile(_request("recursive-tsv", config={"seed": False}))
+    assert argv[1:4] == ("diag", "list", "s3://bucket")
+    assert "--no-seed" in argv
     assert adapter.compile(_request())[1:3] == ("list", "s3://bucket")
 
 
 def test_resume_restates_what_a_resume_may_change(adapter: LoadedCommandAdapter) -> None:
     config = {
         "concurrency": 8,
-        "limiter": False,
-        "row_budget": "256MiB",
-        "spill_max": "10GiB",
+        "adaptive_limit": False,
+        "sort_buffer": "256MiB",
+        "spill_budget": "10GiB",
         "max_duration": "2h",
         "part_interval": "1m",
     }
@@ -225,10 +273,10 @@ def test_resume_restates_what_a_resume_may_change(adapter: LoadedCommandAdapter)
         "--workers",
         "8",
         "--anonymous",
-        "--limiter=false",
-        "--row-budget",
+        "--no-adaptive-limit",
+        "--sort-buffer",
         "256MiB",
-        "--spill-max",
+        "--spill-budget",
         "10GiB",
         "--max-duration",
         "2h",
@@ -238,7 +286,11 @@ def test_resume_restates_what_a_resume_may_change(adapter: LoadedCommandAdapter)
     assert listed[listed.index("-o") + 1] == resumed[2]
     assert listed[listed.index("--report") + 1] == resumed[4]
     signed = adapter.compile(_request("resume-parquet-sorted", signed=True))
-    assert signed[-1] == "--anonymous=false"
+    assert signed[-1] == "--no-anonymous"
+    undone = adapter.compile(
+        _request("resume-parquet-sorted", config={"adaptive_limit": True})
+    )
+    assert undone[-1] == "--adaptive-limit"
 
 
 @pytest.mark.parametrize(
@@ -281,7 +333,7 @@ def test_modes_declare_their_products_channels_and_a_ceiling(
     [
         ({"concurrency": 0}, "concurrency"),
         ({"concurrency": True}, "concurrency"),
-        ({"limiter": "false"}, "limiter"),
+        ({"adaptive_limit": "false"}, "adaptive_limit"),
         ({"seed": 1}, "seed"),
         ({"structure": "true"}, "structure"),
         ({"part_interval": "30"}, "part_interval"),
@@ -290,8 +342,8 @@ def test_modes_declare_their_products_channels_and_a_ceiling(
         ({"part_size": "0"}, "part_size"),
         ({"part_size": "12XB"}, "part_size"),
         ({"part_size": 64}, "part_size"),
-        ({"row_budget": "0mib"}, "row_budget"),
-        ({"spill_max": "-1"}, "spill_max"),
+        ({"sort_buffer": "0mib"}, "sort_buffer"),
+        ({"spill_budget": "-1"}, "spill_budget"),
     ],
 )
 def test_malformed_values_are_refused(
@@ -313,6 +365,9 @@ def test_text_modes_refuse_part_controls(adapter: LoadedCommandAdapter, key: str
 def test_undeclared_key_and_missing_sink_are_refused(adapter: LoadedCommandAdapter) -> None:
     with pytest.raises(CommandAdapterError):
         adapter.compile(_request(config={"workers": 8}))
+    for renamed in ("limiter", "row_budget", "spill_max"):
+        with pytest.raises(CommandAdapterError):
+            adapter.compile(_request(config={renamed: "1"}))
     for mode in adapter.modes:
         with pytest.raises(CommandAdapterError, match="sink directory"):
             adapter.compile(_request(mode, sink_dir=""))
@@ -323,10 +378,10 @@ def test_fixture_was_written_by_the_compiled_argv(adapter: LoadedCommandAdapter,
     report = json.loads((HERE / sink / "swath-go-report.json").read_text())
     request = CommandRequest(**FIXTURE_BASE, sink_dir=sink, **FIXTURE_REQUESTS[sink])
     argv = adapter.compile(request)
-    assert report["invocation"]["argv"] == list(argv[1:])
+    assert report["invocation"]["argv"] == _canonical(argv[1:])
     assert report["outcome"]["class"] == "completed"
     assert report["outcome"]["exit_code"] == 0
-    assert report["build"]["revision"] == FIXTURE_REVISION
+    assert report["build"] == {"tool": "swath", "version": "devel", "revision": PIN}
 
 
 # --- build facts ------------------------------------------------------------------------------
@@ -349,13 +404,14 @@ def test_dockerfiles_pin_the_recorded_archive_and_stamp_its_revision() -> None:
     assert artifact["kind"] == "source-archive"
     assert artifact["locator"] == f"https://github.com/varveio/swath/archive/{PIN}.tar.gz"
     assert image["tool_version"] == f"main-{PIN[:7]}"
-    stamp = f'-ldflags="-s -w -X github.com/varveio/swath/go/internal/listing.revision={PIN}"'
+    buildinfo = "github.com/varveio/swath/go/internal/buildinfo"
+    stamp = f'-ldflags="-s -w -X {buildinfo}.Version= -X {buildinfo}.Revision={PIN}"'
     toolbox = (REPO / "benchmark/build/Dockerfile").read_text()
     stage = toolbox[toolbox.index("FROM golang:") : toolbox.index("AS toolbox")]
     for recipe in ((BUILD / "Dockerfile").read_text(), stage):
         assert f"--checksum=sha256:{artifact['sha256']}" in recipe
         assert artifact["locator"] in recipe
-        assert re.search(r"FROM golang:1\.26\.0-bookworm@sha256:[0-9a-f]{64} AS ", recipe)
+        assert re.search(r"FROM golang:1\.27\.4-bookworm@sha256:[0-9a-f]{64} AS ", recipe)
         assert "GOTOOLCHAIN=local GOFLAGS=-mod=readonly CGO_ENABLED=0" in recipe
         assert "go build -trimpath" in recipe
         assert stamp in recipe
@@ -385,7 +441,7 @@ def test_dataset_normalizes_in_manifest_order(normalizer: ModuleType, dataset: P
     assert keys == sorted(keys) and len(set(keys)) == len(keys)
     first = records[0]
     assert (first.size, first.storage_class) == ("22", "STANDARD")
-    assert first.etag == "5ea828cb42c7a041e9b6fe17ed4ac5ce"
+    assert first.etag == "e892e734f6499999266d295f470308a7"
     assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", first.mtime or "")
     assert records[1].storage_class == "STANDARD_IA"
 
@@ -420,6 +476,14 @@ def _rewrite_manifest(root: Path, **changes: Any) -> dict[str, Any]:
     return manifest
 
 
+def _rewrite_extension(root: Path, **changes: Any) -> None:
+    """Change members of the manifest's ``extensions.swath``."""
+    manifest = json.loads((root / "manifest.json").read_text())
+    swath = dict(manifest["extensions"]["swath"])
+    swath.update(changes)
+    _rewrite_manifest(root, extensions={"swath": swath})
+
+
 def test_uncommitted_dataset_is_refused(normalizer: ModuleType, scratch: Path) -> None:
     (scratch / "manifest.json").unlink()
     assert _normalize(normalizer, scratch) == (1, b"")
@@ -436,6 +500,36 @@ def test_format_one_manifest_is_refused(normalizer: ModuleType, scratch: Path) -
 
 
 @pytest.mark.parametrize(
+    "changes",
+    [
+        {"format": "swath-dataset", "format_version": 2},
+        {"format_version": 1},
+        {"draft_revision": 2},
+        {"schema_id": "swath/s3-versions/v1"},
+        {"key": {"column": "name", "unique": True}},
+        {"extensions": {}},
+        {"extensions": {"swath": {"version": 2}}},
+    ],
+    ids=[
+        "earlier-format-2",
+        "format-version",
+        "draft-revision",
+        "schema",
+        "key",
+        "no-extension",
+        "extension-v2",
+    ],
+)
+def test_a_manifest_this_revision_does_not_write_is_refused(
+    normalizer: ModuleType, scratch: Path, changes: dict[str, Any]
+) -> None:
+    _rewrite_manifest(scratch, **changes)
+    with pytest.raises(ValueError):
+        normalizer.committed_parts(str(scratch), "a/")
+    assert _normalize(normalizer, scratch) == (1, b"")
+
+
+@pytest.mark.parametrize(
     "coverage",
     [
         {"complete": False, "stop_reason": "max_keys", "skipped_entries": 0, "filters": []},
@@ -447,14 +541,14 @@ def test_format_one_manifest_is_refused(normalizer: ModuleType, scratch: Path) -
 def test_incomplete_coverage_is_refused(
     normalizer: ModuleType, scratch: Path, coverage: dict[str, object]
 ) -> None:
-    _rewrite_manifest(scratch, coverage=coverage)
+    _rewrite_extension(scratch, coverage=coverage)
     assert _normalize(normalizer, scratch)[0] == 1
 
 
 def test_scope_must_be_the_case_scope(normalizer: ModuleType, scratch: Path) -> None:
     assert _normalize(normalizer, scratch, prefix="")[0] == 1
     assert _normalize(normalizer, scratch, prefix="b/")[0] == 1
-    _rewrite_manifest(scratch, scope={"kind": "whole"})
+    _rewrite_extension(scratch, scope={"kind": "whole"})
     assert _normalize(normalizer, scratch, prefix="")[0] == 0
 
 
@@ -523,8 +617,16 @@ def test_cli_reads_the_tsv_file_by_path(
     assert len(capsysbinary.readouterr().out.splitlines()) == 10
 
 
-def test_tsv_cuts_the_fraction_and_unquotes_the_etag(normalizer: ModuleType) -> None:
-    row = b'a/x\t2026-03-16T14:41:50.999000+00:00\t"abc-2"\tCRC32\tFULL_OBJECT\t5\tGLACIER\t\t\n'
+def _row(key: bytes = b"a/x", mtime: bytes = b"2026-01-01T00:00:00.000000Z", etag: bytes = b"e",
+         size: bytes = b"1", storage_class: bytes = b"STANDARD") -> bytes:
+    return b"\t".join(
+        (key, size, mtime, etag, storage_class, b"\\N", b"\\N", b"\\N", b"\\N")
+    ) + b"\n"
+
+
+def test_tsv_cuts_the_fraction_and_reads_nulls(normalizer: ModuleType) -> None:
+    row = _row(mtime=b"2026-03-16T14:41:50.999000Z", etag=b"abc-2", size=b"5",
+               storage_class=b"GLACIER")
     (record,) = _records(_tsv(normalizer, HEADER + row))
     assert (record.mtime, record.etag, record.size, record.storage_class) == (
         "2026-03-16T14:41:50Z",
@@ -532,20 +634,35 @@ def test_tsv_cuts_the_fraction_and_unquotes_the_etag(normalizer: ModuleType) -> 
         "5",
         "GLACIER",
     )
+    row = _row(mtime=b"\\N", etag=b"\\N", storage_class=b"\\N")
+    (record,) = _records(_tsv(normalizer, HEADER + row))
+    assert (record.mtime, record.etag, record.storage_class) == (None, None, None)
 
 
 def test_tsv_unescapes_keys_to_their_own_bytes(normalizer: ModuleType) -> None:
-    row = b'a/\\\\\\u0001\\b\\f\\u007f\t2026-01-01T00:00:00+00:00\t"e"\t\t\t1\tSTANDARD\t\t\n'
+    # Written: a/ \\ \x01 \x08 \x0c \x7f \\N é (a backslash, four control bytes, a
+    # backslash then N, which is not a null inside a field, and UTF-8 as itself).
+    row = _row(key=b"a/\\\\\\x01\\x08\\x0c\\x7f\\\\N\xc3\xa9")
     (record,) = _records(_tsv(normalizer, HEADER + row))
-    assert record.key == b"a/\\\x01\b\f\x7f"
+    assert record.key == b"a/\\\x01\b\f\x7f\\N\xc3\xa9"
     assert normalizer.count_rows(HEADER + row, "recursive-tsv") == 1
 
 
-@pytest.mark.parametrize("escape", [b"\\t", b"\\n", b"\\r", b"\\x41", b"\\u0009", b"\\"])
+@pytest.mark.parametrize(
+    "escape", [b"\\t", b"\\n", b"\\r", b"\\x09", b"\\x0a", b"\\x4A", b"\\u0041", b"\\b", b"\\"]
+)
 def test_tsv_refuses_an_unframeable_or_unknown_escape(
     normalizer: ModuleType, escape: bytes
 ) -> None:
-    payload = HEADER + b"a/" + escape + b'\t2026-01-01T00:00:00+00:00\t"e"\t\t\t1\tSTANDARD\t\t\n'
+    payload = HEADER + _row(key=b"a/" + escape)
+    with pytest.raises(ContractViolation):
+        _tsv(normalizer, payload)
+    with pytest.raises(ContractViolation):
+        normalizer.count_rows(payload, "recursive-tsv")
+
+
+def test_tsv_refuses_a_null_key(normalizer: ModuleType) -> None:
+    payload = HEADER + _row(key=b"\\N")
     with pytest.raises(ContractViolation):
         _tsv(normalizer, payload)
     with pytest.raises(ContractViolation):
@@ -555,21 +672,31 @@ def test_tsv_refuses_an_unframeable_or_unknown_escape(
 @pytest.mark.parametrize(
     "payload",
     [
-        b"key\tsize\tlast_modified\tetag\tstorage_class\trow_type\n",
-        HEADER + b'a/x\t2026-01-01T00:00:00+00:00\t"e"\t\t\t1\tSTANDARD\t\n',
-        HEADER + b'a/x\t2026-01-01T00:00:00Z\t"e"\t\t\t1\tSTANDARD\t\t\n',
-        HEADER + b"a/x\t2026-01-01T00:00:00+00:00\te\t\t\t1\tSTANDARD\t\t\n",
-        HEADER + b'a/x\t2026-01-01T00:00:00+00:00\t"e"\t\t\t1\tSTANDARD\t\t',
-        HEADER + b'\n\na/x\t2026-01-01T00:00:00+00:00\t"e"\t\t\t1\tSTANDARD\t\t\n',
+        b"Key\tLastModified\tETag\tChecksumAlgorithm\tChecksumType\tSize\tStorageClass"
+        b"\tOwner.DisplayName\tOwner.ID\n" + _row(),
+        HEADER + _row()[:-4] + b"\n",
+        HEADER + _row(mtime=b"2026-01-01T00:00:00+00:00"),
+        HEADER + _row(mtime=b"2026-01-01T00:00:00Z"),
+        HEADER + _row(etag=b'"e"'),
+        HEADER + _row()[:-1],
+        HEADER + b"\n\n" + _row(),
     ],
-    ids=["java-header", "eight-fields", "zulu-mtime", "bare-etag", "no-final-lf", "blank-line"],
+    ids=[
+        "earlier-s3-api-header",
+        "eight-fields",
+        "offset-mtime",
+        "no-fraction-mtime",
+        "quoted-etag",
+        "no-final-lf",
+        "blank-line",
+    ],
 )
 def test_tsv_refuses_what_the_port_does_not_write(normalizer: ModuleType, payload: bytes) -> None:
     with pytest.raises(ContractViolation):
         _tsv(normalizer, payload)
 
 
-ROW = b'a/x\t2026-01-01T00:00:00+00:00\t"e"\t\t\t1\tSTANDARD\t\t\n'
+ROW = _row()
 
 
 @pytest.mark.parametrize(
@@ -597,7 +724,7 @@ def test_both_entry_points_refuse_the_same_framing(
 def test_tsv_count_refuses_a_foreign_header_and_a_short_row(normalizer: ModuleType) -> None:
     with pytest.raises(ContractViolation):
         normalizer.count_rows(b"key\tsize\n", "recursive-tsv")
-    short = HEADER + b'a/x\t2026-01-01T00:00:00+00:00\t"e"\t\t\t1\tSTANDARD\t\n'
+    short = HEADER + _row()[:-4] + b"\n"
     with pytest.raises(ValueError):
         normalizer.count_rows(short, "recursive-tsv")
 

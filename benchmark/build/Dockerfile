@@ -101,16 +101,16 @@ RUN tar xzf /tmp/s7cmd.tar.gz -C /tmp \
 
 FROM ghcr.io/varveio/swath@sha256:0bbc96c10b4b63d184cce76734679dd4a2f54a1c81c7c94c1000f7114eab8e43 AS swath_install
 
-FROM golang:1.26.0-bookworm@sha256:2a0ba12e116687098780d3ce700f9ce3cb340783779646aafbabed748fa6677c AS swath_go_build
-ADD --checksum=sha256:7f83c4e8845e14f68fe173f06a9525bfd28e513c38b408c43edc250a4a2770f4 \
-    https://github.com/varveio/swath/archive/a2efe16e45d66088f6447e9723a119e5aebd4a91.tar.gz \
+FROM golang:1.27.4-bookworm@sha256:4fa7c968ba93f1635670522dbb01a2c78150443e1385746924566079f36570ea AS swath_go_build
+ADD --checksum=sha256:8aa439ac53df3f8a704851f9c9e1eaee49b52f51a3c2dfa0d958160ceb7e5f4d \
+    https://github.com/varveio/swath/archive/8c8f870801c700f22413581f35683096782329a0.tar.gz \
     /tmp/swath.tar.gz
 RUN mkdir -p /src /out \
     && tar xzf /tmp/swath.tar.gz -C /src --strip-components=1
 WORKDIR /src/go
 RUN GOTOOLCHAIN=local GOFLAGS=-mod=readonly CGO_ENABLED=0 \
     go build -trimpath \
-      -ldflags="-s -w -X github.com/varveio/swath/go/internal/listing.revision=a2efe16e45d66088f6447e9723a119e5aebd4a91" \
+      -ldflags="-s -w -X github.com/varveio/swath/go/internal/buildinfo.Version= -X github.com/varveio/swath/go/internal/buildinfo.Revision=8c8f870801c700f22413581f35683096782329a0" \
       -o /out/swath ./cmd/swath
 
 # Only subject runtime binaries and closures cross into the final toolbox.

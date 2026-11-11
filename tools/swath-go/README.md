@@ -1,11 +1,12 @@
 # Swath (Go port)
 
-The [Go port of Swath](https://github.com/varveio/swath/tree/a2efe16e45d66088f6447e9723a119e5aebd4a91/go)
+The [Go port of Swath](https://github.com/varveio/swath/tree/8c8f870801c700f22413581f35683096782329a0/go)
 lists an S3 bucket and writes the listing as a globally key-sorted Parquet
 dataset or as one TSV file, by expanding a tree of key ranges in parallel and
 walking it in key order, so rows arrive sorted with no sort afterwards. It is a
 separate tool from the Java [Swath](../swath/README.md), with its own command
-line and output format, and it has no release yet: the subject here is a pinned
+line and output format. Upstream means it to replace the Java tool at release; it
+has a release candidate but no release, and the subject here is a pinned
 unreleased commit on upstream's main. Swath is built by Varve, which also
 maintains this study; see [Varve and Swath](#varve-and-swath).
 
@@ -28,9 +29,9 @@ layer.
 
 | Question | Current answer |
 | --- | --- |
-| Tested subject | Upstream source at commit `a2efe16` (the merge of pull request varveio/swath#255 into main), built from GitHub's checksum-pinned archive of that commit with upstream's own static build line, the revision stamped in; no fork, no patch. Rows run before the pin moved name the pull request's head, `7b05605`, in their receipts. Canonical identity: [`data/tool.json`](data/tool.json). |
-| How it runs | `swath list s3://… -o <sink>/listing` (the sorted dataset), `-o <sink>/listing.tsv` or `-o <sink>/listing.tsv.zst` (one TSV file), each with `--report <sink>/swath-go-report.json --workers N`, and `swath resume <sink>/listing` for a killed dataset run ([`docs/running.md`](docs/running.md#adapter-and-harness-contract)). The port is registered in the toolbox. |
-| Exercised coverage | No committed run record. Twenty replay rows and three live S3 rows were run through the harness on 2026-11-07 from the earlier `7b05605` bundle (campaign ledger); until their receipts are committed, nothing on this page rests on them. |
+| Tested subject | Upstream source at commit `8c8f870` on main (2026-11-11), built from GitHub's checksum-pinned archive of that commit with upstream's own static build line and Go toolchain, the revision stamped in; no fork, no patch. It is newer than the port's first release candidate, `v0.4.0-rc.1`, which the capsule does not select. Rows run at the capsule's earlier pins name `7b05605` (the head of pull request varveio/swath#255) in their receipts. Canonical identity: [`data/tool.json`](data/tool.json). |
+| How it runs | `swath list s3://… -o <sink>/listing` (the sorted dataset), `-o <sink>/listing.tsv` or `-o <sink>/listing.tsv.zst` (one TSV file), each with `--report <sink>/swath-go-report.json --s3-region R --workers N`, and `swath resume <sink>/listing` for a killed dataset run ([`docs/running.md`](docs/running.md#adapter-and-harness-contract)). The port is registered in the toolbox. |
+| Exercised coverage | No committed run record. Twenty replay rows and three live S3 rows were run through the harness on 2026-11-07 from the earlier `7b05605` bundle (campaign ledger), whose command line and products this pin no longer shares; until their receipts are committed, nothing on this page rests on them. |
 | Correctness and verifier state | No verifier verdict and no completeness check exist. |
 | Results | None. Nothing here is a benchmark result or a comparison. |
 
@@ -39,24 +40,25 @@ layer.
 Workers expand key ranges into rows that are already ascending plus child
 ranges that sort between them; the order stage walks that tree depth-first, so
 rows stream to the writer in global key order. `--workers` (default 64) is both
-the goroutine count and the maximum of an AIMD request limiter that starts at
-that maximum and backs off on throttle answers, so it is a ceiling, not a
-setpoint. Rows beyond `--row-budget` spill to disk. A dataset's parts are
-published as they close and `manifest.json`, written last, is the commit; a
-journal lets `swath resume` continue an interrupted dataset run. A TSV run
-writes one file and keeps no journal. Full account:
+the worker count and the maximum of an adaptive request limiter that starts at
+that maximum and backs off when throttle answers pass a share of recent
+answers, so it is a ceiling, not a setpoint. Rows beyond `--sort-buffer` spill
+to disk. A dataset is a SeekParquet dataset: its parts are published as they
+close and `manifest.json`, written last, is the commit; a journal lets `swath
+resume` continue an interrupted dataset run. A TSV run writes one file of the
+dataset's columns and keeps no journal. Full account:
 [`docs/mechanism.md`](docs/mechanism.md).
 
 ## Modes and study coverage
 
 | Mode | Upstream purpose | What this study exercised |
 | --- | --- | --- |
-| `swath list s3://… -o DIR` (adapter mode `recursive-parquet-sorted`) | List a bucket or prefix into a format-2 sorted dataset. | Not run against S3 in either layer. |
-| `swath resume DIR` (adapter mode `resume-parquet-sorted`) | Continue an interrupted S3 dataset run from its journal. | Not run in either layer. |
-| `swath list s3://… -o FILE.tsv[.zst]` (adapter modes `recursive-tsv`, `recursive-tsv-zstd`) | List into one TSV file shaped as the S3 API's object, optionally zstd-compressed. | Not run against S3 in either layer. |
-| `swath list --count-only`, stdout, JSONL, the table | Count only; other text renderings. | Not adapted: the worker refuses a run that publishes no product, and the TSV file carries every field the others do. |
-| `swath list` on a local directory or `gs://` | List a filesystem tree or a GCS bucket. | Out of scope: the study lists S3. |
-| `swath show`, `swath diag list` | Inspect a dataset; diagnostic comparisons. | `diag list` only when a plan states `structure`; never run. |
+| `swath list s3://… -o DIR` (adapter mode `recursive-parquet-sorted`) | List a bucket or prefix into a sorted swath (SeekParquet) dataset. | Not run against S3 in either layer at this pin. |
+| `swath resume DIR` (adapter mode `resume-parquet-sorted`) | Continue an interrupted object-store dataset run from its journal. | Not run in either layer. |
+| `swath list s3://… -o FILE.tsv[.zst]` (adapter modes `recursive-tsv`, `recursive-tsv-zstd`) | List into one TSV file of the dataset's columns, optionally zstd-compressed. | Not run against S3 in either layer at this pin. |
+| `swath diag count`, `swath du`, stdout, JSONL, the table | Count only; totals; other text renderings. | Not adapted: the worker refuses a run that publishes no product, and the TSV file carries every field the others do. |
+| `swath list` on a local directory, `gs://` or `az://`; `--all-versions` | List a filesystem tree, a GCS bucket or an Azure container; S3 versions. | Out of scope: the study lists S3 current objects. |
+| `swath show`, `swath diag list` | Inspect a dataset; diagnostic comparisons. | `diag list` only when a plan states `structure` or `seed: false`; never run. |
 
 ## What we learned
 
@@ -66,8 +68,8 @@ observation.
 
 - **`--workers` is a ceiling, not a setpoint, and the port does not start where
   Java does.** The limit starts at `--workers` rather than Java's `min(4, N)`
-  and falls by x0.7 on each throttle answer, so a run's achieved width is a fact
-  about the run.
+  and falls by x0.7 when throttle answers reach 15 % of a recent window, so a
+  run's achieved width is a fact about the run.
   [`Concurrency and the request limiter`](docs/mechanism.md#concurrency-and-the-request-limiter)
   · `workers-default-64-is-the-limiter-maximum`, `limiter-is-aimd-on-throttle-answers`
 - **The manifest is the commit, and its coverage block is the tool's own word on
@@ -76,15 +78,22 @@ observation.
   not a verification.
   [`Output`](docs/mechanism.md#output)
   · `manifest-is-the-commit`, `coverage-states-completeness`
-- **The port's products are not the Java tool's.** Format 2 has no `_SUCCESS`
-  and no `row_type`, and the TSV output is one file in the S3 API's shape where
-  Java wrote a directory of parts, so each needs its own reader.
+- **The port's products are not the Java tool's, nor its own earlier pins'.**
+  The dataset is a SeekParquet dataset with no `_SUCCESS` and no `row_type`, and
+  the TSV output is one file of the dataset's columns where Java wrote a
+  directory of parts, so each needs its own reader. Both changed shape between
+  the capsule's `a2efe16` pin and this one.
   [`Output`](docs/mechanism.md#output)
-  · `output-is-a-format-2-sorted-dataset`, `text-output-is-one-file-shaped-as-the-s3-api`
-- **TSV keys are escaped, reversibly.** Control bytes and backslashes are
-  written as JSON string escapes, which the normalizer reverses exactly and
-  refuses anything else.
-  [`Output`](docs/mechanism.md#output) · `text-keys-use-reversible-json-escapes`
+  · `output-is-a-seekparquet-sorted-dataset`, `text-output-is-one-file-of-the-dataset-columns`
+- **TSV fields are escaped, reversibly.** Control bytes, backslashes and bytes
+  outside UTF-8 are written in the port's TSV escapes and a null as `\N`, which
+  the normalizer reverses exactly and refuses anything else.
+  [`Output`](docs/mechanism.md#output) · `text-fields-use-reversible-tsv-escapes`
+- **The sort buffer now follows the box.** Its default is 1/16 of the memory
+  the process can see, at most 1 GiB, where the earlier pins' was a fixed
+  128 MiB; the same plan row buffers more at this pin.
+  [`Memory and spill`](docs/mechanism.md#memory-and-spill)
+  · `sort-buffer-and-spill-budget-bound-the-reorder-stage`
 
 ## Limitations and open questions
 
@@ -130,10 +139,11 @@ observation.
 ## Provenance
 
 **Firsthand, from public material only.** Every claim resolves to a public
-source line or document at commit `a2efe16`, checked mechanically; no
+source line or document at commit `8c8f870`, checked mechanically; no
 Swath-internal notes or benchmark history were used. The derivation was not
-blind (its author had read the Java Swath pages); it has had one independent
-review, whose findings are addressed, and awaits the owner's review;
+blind (its author had read the Java Swath pages); the `a2efe16` capsule had one
+independent review, whose findings are addressed, the move to `8c8f870`
+awaits its own, and both await the owner's review;
 [`research/derivation.md`](research/derivation.md) says so in full. The executions, a local build used to make the adapter's test
 fixtures over a synthetic store and a local toolbox build, are described in
 [`docs/running.md`](docs/running.md#adapter-fixtures); each is not a run record.

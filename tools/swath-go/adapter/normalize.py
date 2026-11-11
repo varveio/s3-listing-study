@@ -11,66 +11,71 @@ per line::
 Two products, read differently.
 
 **The sorted dataset** (``recursive-parquet-sorted``, ``resume-parquet-sorted``)
-is a directory, so those modes read ``--dataset`` and never stdin. Format 2
-(``go/docs/upgrade.md`` and ``go/docs/internals/parquet-output.md`` at the
-pinned revision) is read the way upstream specifies a reader should, not by
-globbing the directory:
+is a directory, so those modes read ``--dataset`` and never stdin. It is a swath
+dataset: a SeekParquet dataset (``format`` ``seekparquet``, ``format_version``
+0, ``draft_revision`` 1) carrying a registered swath schema id and the
+``extensions.swath`` member (``go/docs/dataset.md`` at the pinned revision). It
+is read the way upstream specifies a reader should, not by globbing the
+directory:
 
 - ``manifest.json`` is the commit. It is installed last, by an atomic rename;
   without it there is no dataset, only a killed run's early-published parts,
   which would normalize into a short listing the verifier would blame on the
   tool. So a missing manifest is refused, and there is no ``_SUCCESS`` to look
-  for: format 2 removed it.
-- The manifest must say ``"format": "swath-dataset"``, ``"format_version": 2``,
-  schema ``swath/s3-objects/v1`` and source kind ``s3``. A format-1 (Java)
-  manifest is refused rather than read through a fallback: it is the other
-  capsule's product.
-- Coverage is accepted only when ``complete`` is true, ``stop_reason`` is
-  ``completed``, ``skipped_entries`` is 0 and ``filters`` is present and empty;
-  a missing field refuses. The scope must be the case's own: ``whole`` for an
-  empty prefix, otherwise ``prefix`` with exactly that prefix.
+  for.
+- The manifest must say ``"format": "seekparquet"``, ``"format_version": 0``,
+  ``"draft_revision": 1``, schema ``swath/s3-objects/v1`` and key column
+  ``key``, and carry ``extensions.swath`` version 1 with source kind ``s3``. A
+  Java (format-1) manifest, and the ``swath-dataset`` format-2 manifest the
+  port wrote at the capsule's earlier pins, are refused rather than read
+  through a fallback: neither is this revision's product.
+- Coverage (``extensions.swath.coverage``) is accepted only when ``complete`` is
+  true, ``stop_reason`` is ``completed``, ``skipped_entries`` is 0 and
+  ``filters`` is present and empty; a missing field refuses. The scope
+  (``extensions.swath.scope``) must be the case's own: ``whole`` for an empty
+  prefix, otherwise ``prefix`` with exactly that prefix.
 - The parts are the manifest's ``parts``, read in manifest order (which is key
   order: parts are disjoint and ascending), each a relative path under ``data/``
-  whose size on disk equals the manifest's ``bytes``. DuckDB reads that list,
-  and the count must equal the sum of the manifest's ``rows``.
+  whose size on disk equals the manifest's ``bytes``. DuckDB reads that list by
+  column name (``union_by_name``, as upstream tells a DuckDB reader to), and
+  the count must equal the sum of the manifest's ``rows``.
 
 Columns: ``key`` is BYTE_ARRAY annotated STRING in the S3 schema (S3 keys are
 UTF-8), so DuckDB returns VARCHAR and the emit boundary re-encodes it exactly.
 ``last_modified`` is ``TIMESTAMP(MICROS, UTC)``; rendering it through UTC with
-whole seconds gives the contract's ``YYYY-MM-DDTHH:MM:SSZ``. Format 2 carries no
+whole seconds gives the contract's ``YYYY-MM-DDTHH:MM:SSZ``. The schema has no
 ``row_type``: every row is a current object, so there is nothing to filter.
 
-What this does not check: the per-part ``md5`` and the key bounds in the
+What this does not check: the per-part ``sha256`` and the key bounds in the
 manifest, and the Parquet footer stamps. The row count and file sizes are
 checked against the manifest; byte-level part integrity is not.
 
 **The TSV file** (``recursive-tsv``, plain; ``recursive-tsv-zstd``, one zstd
 stream) is one file the port wrote itself, so it arrives as the input stream
-(``--input`` or stdin), never as a dataset. Its shape is ``go/docs/cli.md``
-§ Text output at the pinned revision and ``go/internal/textout/sink.go``:
+(``--input`` or stdin), never as a dataset. Its shape is ``go/docs/output.md``
+§ TSV at the pinned revision and ``go/internal/textout/textout.go``:
 
-- One header line, exactly ``Key LastModified ETag ChecksumAlgorithm
-  ChecksumType Size StorageClass Owner.DisplayName Owner.ID`` (tab-separated:
-  S3's nine columns). Anything else is refused rather than guessed at, and a
-  file without it is not this tool's output.
-- Every row has those nine fields. ``Key`` is unescaped: the port writes JSON's
-  string escapes (``\\\\``, ``\\b``, ``\\f``, ``\\n``, ``\\r``, ``\\t``,
-  ``\\u00xx``) so a row stays on one line, and that is reversible, so the
-  contract gets the key's own bytes. Any other backslash sequence is refused.
-  A key whose bytes the contract cannot frame (a tab, LF or CR) is refused at
-  the emit boundary, as it is for every tool.
-- ``LastModified`` is printed as the AWS CLI does, UTC with ``+00:00`` and a
-  microsecond fraction only when it is not zero; it is cut to whole seconds and
-  written with ``Z``, as the dataset's timestamp is. ``ETag`` keeps S3's quotes
-  in this format; exactly one surrounding pair is removed, and an unquoted one
-  is refused.
+- One header line, exactly the S3 schema's nine column names, ``key size
+  last_modified etag storage_class owner_id owner_display_name
+  checksum_algorithm checksum_type`` (tab-separated). Anything else is refused
+  rather than guessed at, and a file without it is not this tool's output.
+- Every row has those nine fields. A field that is exactly ``\\N`` is null.
+  Fields are unescaped by the port's TSV grammar: ``\\\\`` a backslash,
+  ``\\t``, ``\\n`` and ``\\r`` those bytes, ``\\xHH`` (two lowercase hex
+  digits) the byte HH; any other backslash is refused. A key whose bytes the
+  contract cannot frame (a tab, LF or CR) is refused at the emit boundary, as
+  it is for every tool, and a null key is refused.
+- ``last_modified`` is printed in UTC with six fraction digits and ``Z``; it is
+  cut to whole seconds. ``etag`` is stored without S3's quotes, as in the
+  dataset, and a quoted one is refused.
 - There is no ``row_type``: every row is an object. The checksum and owner
   columns have no contract field and are ignored.
 
 ``count_rows`` counts the data rows with DuckDB, which reads the zstd stream
 directly, and refuses the same files ``normalize`` refuses for their header or
-for a key escape that is unknown or would unescape to an unframeable byte, so
-the two never disagree about whether a listing is usable.
+for a key that is null or carries an escape that is unknown or would unescape
+to an unframeable byte, so the two never disagree about whether a listing is
+usable.
 
 ``prefix`` is not used to rebuild keys: the port lists ``s3://bucket/prefix``
 and stores whole keys. Everything here runs after the timed window.
@@ -106,48 +111,55 @@ MODES = DATASET_MODES | frozenset(TSV_COMPRESSION)
 
 DATASET_NAME = "listing"
 MANIFEST = "manifest.json"
-FORMAT = "swath-dataset"
-FORMAT_VERSION = 2
+FORMAT = "seekparquet"
+FORMAT_VERSION = 0
+DRAFT_REVISION = 1
+SWATH_EXTENSION_VERSION = 1
 SCHEMA_ID = "swath/s3-objects/v1"
+KEY_COLUMN = "key"
 
 TSV_COLUMNS = (
-    "Key",
-    "LastModified",
-    "ETag",
-    "ChecksumAlgorithm",
-    "ChecksumType",
-    "Size",
-    "StorageClass",
-    "Owner.DisplayName",
-    "Owner.ID",
+    "key",
+    "size",
+    "last_modified",
+    "etag",
+    "storage_class",
+    "owner_id",
+    "owner_display_name",
+    "checksum_algorithm",
+    "checksum_type",
 )
 TSV_HEADER = "\t".join(TSV_COLUMNS).encode("ascii")
 
-ESCAPE = re.compile(rb"\\(?:([\\bfnrt])|u00([0-9a-fA-F]{2}))")
-SIMPLE_ESCAPES = {b"\\": b"\\", b"b": b"\b", b"f": b"\f", b"n": b"\n", b"r": b"\r", b"t": b"\t"}
+NULL = b"\\N"
+"""The port's TSV null: a field that is exactly backslash-N."""
 
-SAFE_KEY_RE = r"^(?:[^\\]|\\[\\bf]|\\u00(?:0[0-8bcefBCEF]|[1-9a-fA-F][0-9a-fA-F]))*$"
+ESCAPE = re.compile(rb"\\(?:([\\tnr])|x([0-9a-f]{2}))")
+SIMPLE_ESCAPES = {b"\\": b"\\", b"t": b"\t", b"n": b"\n", b"r": b"\r"}
+
+SAFE_KEY_RE = r"^(?:[^\\]|\\\\|\\x(?:0[0-8bcef]|[1-9a-f][0-9a-f]))*$"
 """A key whose escapes are all known and none unescapes to a tab, LF or CR: the
-keys ``normalize`` can emit, as an RE2 pattern DuckDB applies while counting."""
+keys ``normalize`` can emit, as an RE2 pattern DuckDB applies while counting.
+The null field ``\\N`` does not match, so a null key is refused too."""
 
 LAST_MODIFIED_RE = re.compile(
-    rb"\A([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2})(?:\.[0-9]{1,6})?\+00:00\Z"
+    rb"\A([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2})\.[0-9]{6}Z\Z"
 )
 
 PARQUET_QUERY = """
     SELECT "key", CAST("size" AS VARCHAR), "etag",
            strftime("last_modified" AT TIME ZONE 'UTC', '%Y-%m-%dT%H:%M:%SZ'),
            "storage_class"
-    FROM read_parquet($paths)
+    FROM read_parquet($paths, union_by_name = true)
 """
 
-COUNT_QUERY = "SELECT count(*) FROM read_parquet($paths)"
+COUNT_QUERY = "SELECT count(*) FROM read_parquet($paths, union_by_name = true)"
 
 TSV_READ_COLUMNS = "{" + ", ".join(f"'{name}': 'VARCHAR'" for name in TSV_COLUMNS) + "}"
 
 TSV_COUNT_QUERY = """
     SELECT count(*),
-           count(*) FILTER (WHERE "Key" IS NULL OR NOT regexp_full_match("Key", $safe_key))
+           count(*) FILTER (WHERE "key" IS NULL OR NOT regexp_full_match("key", $safe_key))
     FROM read_csv($path, delim = '\t', quote = '', escape = '', header = true,
                   auto_detect = false, strict_mode = true, compression = '{compression}',
                   columns = {columns})
@@ -158,7 +170,7 @@ anything but the port's header."""
 
 
 class DatasetRefused(ValueError):
-    """The directory is not a committed, whole-scope format-2 S3 dataset."""
+    """The directory is not a committed, whole-scope swath S3 dataset."""
 
 
 # --- the sorted dataset ---------------------------------------------------------------------
@@ -187,8 +199,8 @@ def _mapping(value: Any, where: str) -> Mapping[str, Any]:
     return value
 
 
-def _check_coverage(manifest: Mapping[str, Any]) -> None:
-    coverage = _mapping(_field(manifest, "coverage", "manifest"), "manifest coverage")
+def _check_coverage(swath: Mapping[str, Any]) -> None:
+    coverage = _mapping(_field(swath, "coverage", "extensions.swath"), "manifest coverage")
     complete = _field(coverage, "complete", "coverage")
     stop_reason = _field(coverage, "stop_reason", "coverage")
     skipped = _field(coverage, "skipped_entries", "coverage")
@@ -204,8 +216,8 @@ def _check_coverage(manifest: Mapping[str, Any]) -> None:
         raise DatasetRefused(f"dataset was filtered: {filters!r}")
 
 
-def _check_scope(manifest: Mapping[str, Any], prefix: str) -> None:
-    scope = _mapping(_field(manifest, "scope", "manifest"), "manifest scope")
+def _check_scope(swath: Mapping[str, Any], prefix: str) -> None:
+    scope = _mapping(_field(swath, "scope", "extensions.swath"), "manifest scope")
     kind = _field(scope, "kind", "scope")
     if not prefix:
         if kind != "whole":
@@ -247,8 +259,8 @@ def committed_parts(dataset: str, prefix: str = "") -> tuple[list[Path], int]:
     manifest_path = root / MANIFEST
     if not manifest_path.is_file():
         raise DatasetRefused(
-            f"no {MANIFEST} under {root}: the run did not commit (in format 2 the manifest "
-            "is the commit, and parts published before it are not a dataset)"
+            f"no {MANIFEST} under {root}: the run did not commit (the manifest is the "
+            "commit, and parts published before it are not a dataset)"
         )
     try:
         manifest = _mapping(json.loads(manifest_path.read_text(encoding="utf-8")), "manifest")
@@ -256,21 +268,37 @@ def committed_parts(dataset: str, prefix: str = "") -> tuple[list[Path], int]:
         raise DatasetRefused(f"{manifest_path} is unreadable: {exc}") from exc
     if "format" not in manifest:
         raise DatasetRefused(
-            f"{manifest_path} is not a format-2 manifest (no 'format' field); "
+            f"{manifest_path} is not a SeekParquet manifest (no 'format' field); "
             "a format-1 dataset is the Java capsule's product"
         )
-    if manifest["format"] != FORMAT or manifest.get("format_version") != FORMAT_VERSION:
+    identity = (
+        manifest["format"],
+        manifest.get("format_version"),
+        manifest.get("draft_revision"),
+    )
+    if identity != (FORMAT, FORMAT_VERSION, DRAFT_REVISION):
         raise DatasetRefused(
-            f"manifest format {manifest['format']!r} version "
-            f"{manifest.get('format_version')!r}; want {FORMAT!r} version {FORMAT_VERSION}"
+            f"manifest format {identity[0]!r} version {identity[1]!r} draft revision "
+            f"{identity[2]!r}; want {FORMAT!r} version {FORMAT_VERSION} draft revision "
+            f"{DRAFT_REVISION} (a 'swath-dataset' manifest is an earlier build's format)"
         )
     if manifest.get("schema_id") != SCHEMA_ID:
         raise DatasetRefused(f"manifest schema {manifest.get('schema_id')!r}; want {SCHEMA_ID!r}")
-    source = _mapping(_field(manifest, "source", "manifest"), "manifest source")
+    key = _mapping(_field(manifest, "key", "manifest"), "manifest key")
+    if key.get("column") != KEY_COLUMN:
+        raise DatasetRefused(f"manifest key column {key.get('column')!r}; want {KEY_COLUMN!r}")
+    extensions = _mapping(_field(manifest, "extensions", "manifest"), "manifest extensions")
+    swath = _mapping(_field(extensions, "swath", "manifest extensions"), "extensions.swath")
+    version = _field(swath, "version", "extensions.swath")
+    if isinstance(version, bool) or version != SWATH_EXTENSION_VERSION:
+        raise DatasetRefused(
+            f"extensions.swath version {version!r}; want {SWATH_EXTENSION_VERSION}"
+        )
+    source = _mapping(_field(swath, "source", "extensions.swath"), "manifest source")
     if source.get("kind") != "s3":
         raise DatasetRefused(f"manifest source kind {source.get('kind')!r}; want 's3'")
-    _check_coverage(manifest)
-    _check_scope(manifest, prefix)
+    _check_coverage(swath)
+    _check_scope(swath, prefix)
     parts = _field(manifest, "parts", "manifest")
     if not isinstance(parts, list):
         raise DatasetRefused("manifest parts is not a list")
@@ -413,8 +441,8 @@ def _check_header(line: bytes) -> None:
         )
 
 
-def unescape_key(field: bytes, number: int) -> bytes:
-    """Reverse the port's JSON-style escapes; refuse any other backslash."""
+def unescape_field(field: bytes, number: int, name: str = "key") -> bytes:
+    """Reverse the port's TSV escapes; refuse any other backslash."""
     parts: list[bytes] = []
     position = 0
     for match in ESCAPE.finditer(field):
@@ -427,34 +455,48 @@ def unescape_key(field: bytes, number: int) -> bytes:
     rest = field[position:]
     if b"\\" in rest:
         raise ContractViolation(
-            f"native TSV line {number}: key has a backslash that is not one of the port's "
+            f"native TSV line {number}: {name} has a backslash that is not one of the port's "
             f"escapes: {field[:200]!r}",
-            field="key",
+            field="key" if name == "key" else None,
         )
     parts.append(rest)
     return b"".join(parts)
 
 
+def _key(value: bytes, number: int) -> bytes:
+    if value == NULL:
+        raise ContractViolation(f"native TSV line {number}: key is null", field="key")
+    return unescape_field(value, number)
+
+
 def _mtime(value: bytes, number: int) -> str | None:
-    if not value:
+    if value == NULL:
         return None
     match = LAST_MODIFIED_RE.fullmatch(value)
     if match is None:
         raise ContractViolation(
-            f"native TSV line {number}: LastModified {value!r} is not UTC +00:00", field="mtime"
+            f"native TSV line {number}: last_modified {value!r} is not UTC with six "
+            "fraction digits and Z",
+            field="mtime",
         )
     return match.group(1).decode("ascii") + "Z"
 
 
-def _etag(value: bytes, number: int) -> str | None:
-    if not value:
+def _text(value: bytes, number: int, name: str) -> str | None:
+    """A nullable ASCII field: ``\\N`` is null, anything else unescaped."""
+    if value == NULL:
         return None
-    if len(value) < 2 or value[:1] != b'"' or value[-1:] != b'"':
+    return unescape_field(value, number, name).decode("ascii")
+
+
+def _etag(value: bytes, number: int) -> str | None:
+    etag = _text(value, number, "etag")
+    if etag is not None and etag[:1] == '"':
         raise ContractViolation(
-            f"native TSV line {number}: ETag {value!r} lacks S3's surrounding quotes",
+            f"native TSV line {number}: etag {etag!r} keeps S3's quotes; the port strips them",
             field="etag",
         )
-    return value[1:-1].decode("ascii")
+    return etag
 
 
 def _normalize_tsv(out: IO[bytes], data: Any, mode: str) -> int:
@@ -484,15 +526,15 @@ def _emit_row(out: IO[bytes], line: bytes, number: int) -> None:
         raise ContractViolation(
             f"native TSV line {number} has {len(fields)} fields, expected {len(TSV_COLUMNS)}"
         )
-    key, last_modified, etag, _algorithm, _type, size, storage_class, _name, _id = fields
+    key, size, last_modified, etag, storage_class, _id, _name, _algorithm, _type = fields
     try:
         emit(
             out,
-            unescape_key(key, number),
-            size=size.decode("ascii"),
+            _key(key, number),
+            size=_text(size, number, "size"),
             etag=_etag(etag, number),
             mtime=_mtime(last_modified, number),
-            storage_class=storage_class.decode("ascii") or None,
+            storage_class=_text(storage_class, number, "storage_class"),
         )
     except UnicodeDecodeError as exc:
         raise ContractViolation(f"native TSV line {number} has a non-ASCII field: {exc}") from exc

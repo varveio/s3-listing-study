@@ -1,0 +1,85 @@
+{
+  "format": "seekparquet",
+  "format_version": 0,
+  "draft_revision": 1,
+  "schema_id": "swath/s3-objects/v1",
+  "parts": [
+    {
+      "path": "data/part-00000.parquet",
+      "rows": 5,
+      "bytes": 2629,
+      "min_key_base64": "YS9iL2MvZm91cg==",
+      "max_key_base64": "YS9vbmUudHh0",
+      "sha256": "01e3965ad7c4a31b3d96f7d3eccf86b217b6e63d49d43879f0386fbed2cc0fe7"
+    },
+    {
+      "path": "data/part-00001.parquet",
+      "rows": 1,
+      "bytes": 2384,
+      "min_key_base64": "YS9wbHVzK3NpZ24=",
+      "max_key_base64": "YS9wbHVzK3NpZ24=",
+      "sha256": "eceb734c34d8a3633eee02c2b71842634c6f53cb4020f697312f059388a25666"
+    },
+    {
+      "path": "data/part-00002.parquet",
+      "rows": 1,
+      "bytes": 2405,
+      "min_key_base64": "YS9zcGFjZSBrZXkudHh0",
+      "max_key_base64": "YS9zcGFjZSBrZXkudHh0",
+      "sha256": "a429cceacabb3642a29b7dbf2fff876c2b8804f660800dffb51a32cd73f38b85"
+    },
+    {
+      "path": "data/part-00003.parquet",
+      "rows": 1,
+      "bytes": 2374,
+      "min_key_base64": "YS90d28udHh0",
+      "max_key_base64": "YS90d28udHh0",
+      "sha256": "c9bd4567c1660a25ab60841288fafb37680b2a161c9d25e94c0af815bacbd0ee"
+    },
+    {
+      "path": "data/part-00004.parquet",
+      "rows": 1,
+      "bytes": 2421,
+      "min_key_base64": "YS91bmljb2RlLcOpw6gudHh0",
+      "max_key_base64": "YS91bmljb2RlLcOpw6gudHh0",
+      "sha256": "060520fbb3b9021a6e7b216931d3c29348005b6a1ebf1cb23b0772a03a765dd1"
+    },
+    {
+      "path": "data/part-00005.parquet",
+      "rows": 1,
+      "bytes": 2367,
+      "min_key_base64": "YS96LWxhc3Q=",
+      "max_key_base64": "YS96LWxhc3Q=",
+      "sha256": "50b2060c8d70ce9929d65ec89c6c7669695d3330c59054cd5a046f557284830b"
+    }
+  ],
+  "extensions": {
+    "swath": {
+      "version": 1,
+      "published_at": "2026-11-11T06:13:16.12649719Z",
+      "source": {
+        "kind": "s3",
+        "uri": "s3://fixture-bucket/a/",
+        "container": "fixture-bucket"
+      },
+      "scope": {
+        "kind": "prefix",
+        "prefix": "a/"
+      },
+      "coverage": {
+        "complete": true,
+        "stop_reason": "completed",
+        "skipped_entries": 0,
+        "exclusions": [],
+        "filters": [],
+        "snapshot": false,
+        "listing_started_at": "2026-11-11T06:13:16.087339273Z",
+        "listing_finished_at": "2026-11-11T06:13:16.113674949Z"
+      }
+    }
+  },
+  "key": {
+    "column": "key",
+    "unique": true
+  }
+}
