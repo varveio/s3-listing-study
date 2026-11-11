@@ -1,0 +1,396 @@
+{
+  "attempts": [
+    {
+      "attempt_id": "swath-go.7d43994649c5.s3",
+      "case_id": "swath-go.7d43994649c5",
+      "evidence": {
+        "argv": [
+          "/opt/swath-go/swath",
+          "list",
+          "s3://aws-public-blockchain",
+          "-o",
+          "/tmp/attempt/native/listing",
+          "--report",
+          "/tmp/attempt/native/swath-go-report.json",
+          "--s3-region",
+          "us-east-2",
+          "--anonymous",
+          "--workers",
+          "256",
+          "--endpoint-url",
+          "http://127.0.0.1:19090",
+          "--sort-buffer",
+          "128mib",
+          "--max-duration",
+          "7170s"
+        ],
+        "binding_errors": [],
+        "replay": {
+          "errors": {
+            "after": 0.0,
+            "before": 0.0
+          },
+          "list_index": {
+            "build": {
+              "budget_exhausted": 0,
+              "builds_recorded": 1,
+              "bytes": 1173440,
+              "entries": 8288,
+              "groups_failed": 0,
+              "groups_indexed": 371,
+              "groups_skipped": 0,
+              "max_bytes": 67108864,
+              "pages": 139818,
+              "seconds": 2.612196
+            },
+            "delivered": null,
+            "inconclusive": [
+              "meters record one build attempt but cannot tell built from failed; attach the server line"
+            ],
+            "interval": {
+              "declines": {
+                "dense_page": 27980.0,
+                "missing_group": 0.0,
+                "unsafe_run": 0.0
+              },
+              "skips": 103019.0
+            },
+            "provenance": "replay /metrics swath.replay.delimiter.index.* meters in replay_evidence; the server's list_index stderr line is in the job's Cloud Logging",
+            "reasons": [],
+            "requested": {
+              "enabled": true,
+              "max_bytes": 67108864
+            }
+          },
+          "readiness": "ready",
+          "refusals": [],
+          "requests": {
+            "after": 158526.0,
+            "before": 2400.0
+          },
+          "resource_sample_count": 9,
+          "sample_count": 9,
+          "state": "COMPLETE"
+        },
+        "result": {
+          "artifacts_size_bytes": 46397,
+          "exit_code": 0,
+          "finished_at": "2026-11-11T10:26:17.391467+00:00",
+          "max_rss_kb": 1148656,
+          "product": {
+            "artifact": "listing",
+            "channel": "dataset",
+            "name": "native/listing",
+            "sha256": null,
+            "size_bytes": 3317491338
+          },
+          "product_error": null,
+          "row_count": 143008674,
+          "row_count_error": null,
+          "started_at": "2026-11-11T10:24:39.432521+00:00",
+          "stderr": {
+            "name": "stderr.log.gz",
+            "sha256": null,
+            "size_bytes": 160
+          },
+          "stdout": {
+            "name": "stdout.log.gz",
+            "sha256": null,
+            "size_bytes": 31
+          },
+          "timed_out": false,
+          "wall_seconds": 97.957196,
+          "worker_exit_code": 0
+        },
+        "result_sha256": "250ff8e6863b3b350565293addfde46d330519d16cac58895ec7ac2f6ab2b098",
+        "result_uri": "gs://s3-listing-study-results-29c02004/scale-study/aws-public-blockchain/swath-go.7d43994649c5.s3/result.json",
+        "state": "BOUND",
+        "verification": null
+      },
+      "group_id": "sgc-b3-08",
+      "mode": "recursive-parquet-sorted",
+      "origin": "planned",
+      "purpose": "diagnostic",
+      "recorded_at": "2026-11-11T10:22:52.532512+00:00",
+      "request": {
+        "allocationPolicy": {
+          "instances": [
+            {
+              "policy": {
+                "bootDisk": {
+                  "image": "batch-cos",
+                  "sizeGb": "100",
+                  "type": "hyperdisk-balanced"
+                },
+                "machineType": "n4-highcpu-80",
+                "provisioningModel": "SPOT"
+              }
+            }
+          ],
+          "location": {
+            "allowedLocations": [
+              "zones/us-east1-b"
+            ]
+          },
+          "network": {
+            "networkInterfaces": [
+              {
+                "network": "projects/varve-oss/global/networks/s3-listing-study",
+                "subnetwork": "projects/varve-oss/regions/us-east1/subnetworks/s3-listing-study-us-east1"
+              }
+            ]
+          },
+          "serviceAccount": {
+            "email": "s3-listing-study-worker@varve-oss.iam.gserviceaccount.com"
+          }
+        },
+        "labels": {
+          "suite": "scale-study"
+        },
+        "logsPolicy": {
+          "destination": "CLOUD_LOGGING"
+        },
+        "taskGroups": [
+          {
+            "parallelism": "1",
+            "taskCount": "1",
+            "taskSpec": {
+              "computeResource": {
+                "cpuMilli": "80000",
+                "memoryMib": "163840"
+              },
+              "maxRetryCount": 0,
+              "maxRunDuration": "8405s",
+              "runnables": [
+                {
+                  "container": {
+                    "commands": [
+                      "-ceu",
+                      "set -o pipefail\nmkdir -p /fixtures/source\nmkdir -p /fixtures/source/data\ngcloud storage cp gs://s3-listing-study-results-29c02004/fixtures/aws-public-blockchain/seekparquet-c4a42eb4e7fb/manifest.json /fixtures/source/manifest.json\nactual=\"$(sha256sum /fixtures/source/manifest.json)\"; actual=\"${actual%% *}\"\n[[ \"$actual\" == c4a42eb4e7fb2a9627972cc1e457ed55d60ef3d3560813eff8e13e65ef182b29 ]] || { echo \"fixture manifest digest mismatch: $actual\" >&2; exit 1; }\nparts=\"$(\"${CLOUDSDK_PYTHON:-python3}\" -c '\nimport hashlib, json, os, re, sys\n\n# argv: list|verify ROOT [ADOPTED_SHA256]. The manifest'\"'\"'s own digest was\n# checked by the caller before this runs, so its contents are the identity.\ncommand, root = sys.argv[1], sys.argv[2]\nadopted_expected = sys.argv[3] if len(sys.argv) > 3 else \"\"\nwith open(os.path.join(root, \"manifest.json\"), \"rb\") as source:\n    manifest = json.load(source)\nif manifest.get(\"format\") != \"seekparquet\":\n    sys.exit(\"fixture manifest is not a SeekParquet manifest\")\nparts = manifest.get(\"parts\")\nif not isinstance(parts, list) or not parts:\n    sys.exit(\"fixture manifest names no parts\")\nnames = []\nfor part in parts:\n    path = part.get(\"path\") if isinstance(part, dict) else None\n    if not isinstance(path, str) or not re.fullmatch(r\"data/[A-Za-z0-9._-]+\\.parquet\", path):\n        sys.exit(\"fixture manifest part path is not data/<name>.parquet: %r\" % (path,))\n    names.append(path)\nif len(set(names)) != len(names):\n    sys.exit(\"fixture manifest names a part twice\")\nif command == \"list\":\n    print(\"\\n\".join(names))\n    sys.exit(0)\nstaged = sorted(\n    \"data/\" + name for name in os.listdir(os.path.join(root, \"data\")) if name.endswith(\".parquet\")\n)\nif staged != sorted(names):\n    sys.exit(\"staged data/ parts differ from the manifest: %r\" % (staged,))\nfor part in parts:\n    digest = hashlib.sha256()\n    with open(os.path.join(root, part[\"path\"]), \"rb\") as source:\n        for chunk in iter(lambda: source.read(1 << 20), b\"\"):\n            digest.update(chunk)\n    size = os.path.getsize(os.path.join(root, part[\"path\"]))\n    if size != part.get(\"bytes\") or digest.hexdigest() != part.get(\"sha256\"):\n        sys.exit(\"fixture part %s does not match its manifest entry\" % part[\"path\"])\nif adopted_expected:\n    adopted = manifest.get(\"extensions\", {}).get(\"swath-replay\", {}).get(\"adopted_from\", {})\n    rows = sorted(\n        \"%s\\t%s\\t%s\\n\" % (item[\"input\"], item[\"input_bytes\"], item[\"input_sha256\"])\n        for item in adopted.get(\"parts\", [])\n    )\n    actual = hashlib.sha256(\"\".join(rows).encode()).hexdigest() if rows else \"\"\n    if actual != adopted_expected:\n        sys.exit(\"fixture adopted_from digest mismatch: %s\" % actual)\nprint(\"seekparquet fixture verified: %d part(s)\" % len(parts))\n' list /fixtures/source)\"\nwhile IFS= read -r part; do\n  gcloud storage cp gs://s3-listing-study-results-29c02004/fixtures/aws-public-blockchain/seekparquet-c4a42eb4e7fb/\"$part\" /fixtures/source/\"$part\"\ndone <<< \"$parts\"\n\"${CLOUDSDK_PYTHON:-python3}\" -c '\nimport hashlib, json, os, re, sys\n\n# argv: list|verify ROOT [ADOPTED_SHA256]. The manifest'\"'\"'s own digest was\n# checked by the caller before this runs, so its contents are the identity.\ncommand, root = sys.argv[1], sys.argv[2]\nadopted_expected = sys.argv[3] if len(sys.argv) > 3 else \"\"\nwith open(os.path.join(root, \"manifest.json\"), \"rb\") as source:\n    manifest = json.load(source)\nif manifest.get(\"format\") != \"seekparquet\":\n    sys.exit(\"fixture manifest is not a SeekParquet manifest\")\nparts = manifest.get(\"parts\")\nif not isinstance(parts, list) or not parts:\n    sys.exit(\"fixture manifest names no parts\")\nnames = []\nfor part in parts:\n    path = part.get(\"path\") if isinstance(part, dict) else None\n    if not isinstance(path, str) or not re.fullmatch(r\"data/[A-Za-z0-9._-]+\\.parquet\", path):\n        sys.exit(\"fixture manifest part path is not data/<name>.parquet: %r\" % (path,))\n    names.append(path)\nif len(set(names)) != len(names):\n    sys.exit(\"fixture manifest names a part twice\")\nif command == \"list\":\n    print(\"\\n\".join(names))\n    sys.exit(0)\nstaged = sorted(\n    \"data/\" + name for name in os.listdir(os.path.join(root, \"data\")) if name.endswith(\".parquet\")\n)\nif staged != sorted(names):\n    sys.exit(\"staged data/ parts differ from the manifest: %r\" % (staged,))\nfor part in parts:\n    digest = hashlib.sha256()\n    with open(os.path.join(root, part[\"path\"]), \"rb\") as source:\n        for chunk in iter(lambda: source.read(1 << 20), b\"\"):\n            digest.update(chunk)\n    size = os.path.getsize(os.path.join(root, part[\"path\"]))\n    if size != part.get(\"bytes\") or digest.hexdigest() != part.get(\"sha256\"):\n        sys.exit(\"fixture part %s does not match its manifest entry\" % part[\"path\"])\nif adopted_expected:\n    adopted = manifest.get(\"extensions\", {}).get(\"swath-replay\", {}).get(\"adopted_from\", {})\n    rows = sorted(\n        \"%s\\t%s\\t%s\\n\" % (item[\"input\"], item[\"input_bytes\"], item[\"input_sha256\"])\n        for item in adopted.get(\"parts\", [])\n    )\n    actual = hashlib.sha256(\"\".join(rows).encode()).hexdigest() if rows else \"\"\n    if actual != adopted_expected:\n        sys.exit(\"fixture adopted_from digest mismatch: %s\" % actual)\nprint(\"seekparquet fixture verified: %d part(s)\" % len(parts))\n' verify /fixtures/source f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0"
+                    ],
+                    "imageUri": "gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:cf72dd63b7643c117ef53378a41bef6db6a01fa3d561f2b456d7abd8bbeb9ba6",
+                    "options": "--entrypoint /bin/bash --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
+                  },
+                  "environment": {
+                    "variables": {
+                      "CLOUDSDK_PYTHON": "/usr/lib/google-cloud-sdk/platform/bundledpythonunix/bin/python3"
+                    }
+                  }
+                },
+                {
+                  "container": {
+                    "commands": [
+                      "10001:10001",
+                      "/tmp/attempt"
+                    ],
+                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:1e4319d4d3641eacfc7ad8582b9132b47fb9ed337ce2fd84ef806a3ddd80796a",
+                    "options": "--user 0:0 --entrypoint /bin/chown --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
+                  }
+                },
+                {
+                  "background": true,
+                  "container": {
+                    "commands": [
+                      "serve",
+                      "--fixture",
+                      "/fixtures/source",
+                      "--bucket",
+                      "aws-public-blockchain",
+                      "--host",
+                      "127.0.0.1",
+                      "--port",
+                      "19090",
+                      "--metrics-port",
+                      "19192",
+                      "--serving-mode",
+                      "sorted",
+                      "--parquet-connections",
+                      "128",
+                      "--max-concurrent-requests",
+                      "4096",
+                      "--prefetch-window-rows",
+                      "12500",
+                      "--prefetch-max-windows",
+                      "192",
+                      "--response-buffer-budget",
+                      "1073741824",
+                      "--list-index=true",
+                      "--list-index-max-bytes",
+                      "67108864",
+                      "--inject-latency",
+                      "worker_page=94ms,pivot_probe=46ms,structure_probe=55ms",
+                      "--latency-scale",
+                      "1.0"
+                    ],
+                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90",
+                    "options": "--network host --cpuset-cpus=0-31,40-71 --memory=20g --memory-swap=20g --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
+                  },
+                  "environment": {
+                    "variables": {
+                      "GOMAXPROCS": "64",
+                      "GOMEMLIMIT": "16106127360"
+                    }
+                  }
+                },
+                {
+                  "container": {
+                    "commands": [
+                      "--tool",
+                      "swath-go",
+                      "--mode",
+                      "recursive-parquet-sorted",
+                      "--purpose",
+                      "diagnostic",
+                      "--bucket",
+                      "aws-public-blockchain",
+                      "--region",
+                      "us-east-2",
+                      "--prefix",
+                      "",
+                      "--output",
+                      "/tmp/attempt",
+                      "--destination",
+                      "gs://s3-listing-study-results-29c02004/scale-study/aws-public-blockchain/swath-go.7d43994649c5.s3/",
+                      "--timeout",
+                      "7200",
+                      "--term-grace",
+                      "5.0",
+                      "--retain-products",
+                      "false",
+                      "--image",
+                      "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:1e4319d4d3641eacfc7ad8582b9132b47fb9ed337ce2fd84ef806a3ddd80796a",
+                      "--toolbox-manifest-sha256",
+                      "45606cd3f2c2c9fcd39698cb508cd4c2749606b32486cf8b0fdcaebaddc23b15",
+                      "--toolbox-recipe-sha256",
+                      "a01ceedee08da2fed76f6e51d34787edb2d4c40017d55065ab84c4392e7fd1f9",
+                      "--tool-recipe-sha256",
+                      "797da4a1098a9a7c221143b85189321b75b64ad5067073036d91bac387b7e8dd",
+                      "--tool-build-inputs-sha256",
+                      "0a8c9964cfee25b6808a6bd16f9061cce10b0535f37480659cd3061c73ece3d8",
+                      "--tool-version",
+                      "list-parser-cpu-c54179e",
+                      "--tool-build-sha256",
+                      "a815f991f2476dfc268885b984b7c5c36a5252f8c2e48ce4c0a2c0d141506185",
+                      "--adapter-bundle-sha256",
+                      "af7e6324f842d2624855acea715d653d04cfcfd72d70c0bfb0800ba56f645842",
+                      "--harness-revision",
+                      "e00dfb422b9d81dbe8775abb0f1c9d839e95f364",
+                      "--subject-workdir",
+                      "/opt/swath-go",
+                      "--image-set-sha256",
+                      "287e474ffb8d3e7305bb95ca0a4483ab3a1b44f237e9eb982c1a09ed0964f95e",
+                      "--group-id",
+                      "sgc-b3-08",
+                      "--job-name",
+                      "scale-study-swath-go-7d43994649c5-s3",
+                      "--case-id",
+                      "swath-go.7d43994649c5",
+                      "--attempt-id",
+                      "swath-go.7d43994649c5.s3",
+                      "--machine-type",
+                      "n4-highcpu-80",
+                      "--vcpus",
+                      "80",
+                      "--memory-gb",
+                      "160",
+                      "--container-memory-gb",
+                      "8",
+                      "--config",
+                      "{\"concurrency\":256,\"max_duration\":\"7170s\",\"mode\":\"recursive-parquet-sorted\",\"sort_buffer\":\"128mib\"}",
+                      "--endpoint-url",
+                      "http://127.0.0.1:19090",
+                      "--replay-config",
+                      "{\"allocation\":{\"replay_heap_percent\":75,\"replay_list_index\":true,\"replay_list_index_max_bytes\":67108864,\"replay_max_concurrent_requests\":4096,\"replay_memory_gb\":20,\"replay_parquet_connections\":128,\"replay_prefetch\":true,\"replay_prefetch_max_windows\":192,\"replay_response_buffer_budget_bytes\":1073741824,\"replay_vcpus\":64,\"subject_vcpus\":8},\"backend\":{\"fixture_adopted_sha256\":\"f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0\",\"fixture_sha256\":\"c4a42eb4e7fb2a9627972cc1e457ed55d60ef3d3560813eff8e13e65ef182b29\",\"fixture_uri\":\"gs://s3-listing-study-results-29c02004/fixtures/aws-public-blockchain/seekparquet-c4a42eb4e7fb/\",\"latency_model\":{\"deadlines_ms\":{\"pivot_probe\":46,\"structure_probe\":55,\"worker_page\":94},\"jitter\":\"none\",\"scale\":1.0},\"server_image_uri\":\"us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90\",\"server_implementation\":\"go\",\"serving_mode\":\"sorted\",\"warmup\":{\"in_flight\":64,\"pivot_probes\":200,\"structure_probes\":2000,\"worker_pages\":200}},\"capacity_status\":\"uncalibrated\"}"
+                    ],
+                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:1e4319d4d3641eacfc7ad8582b9132b47fb9ed337ce2fd84ef806a3ddd80796a",
+                    "options": "--network host --cpuset-cpus=32-35,72-75 --memory=8g --memory-swap=8g --volume=/mnt/stateful_partition/attempt:/tmp/attempt --volume=/proc:/replay-host-proc:ro"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "result_prefix": "gs://s3-listing-study-results-29c02004/scale-study/aws-public-blockchain/swath-go.7d43994649c5.s3/",
+      "settled_at": "2026-11-11T10:32:42.787393+00:00",
+      "state": "SUCCEEDED",
+      "state_detail": null,
+      "statistic": "timing",
+      "tool": "swath-go"
+    }
+  ],
+  "group_id": "sgc-b3-08",
+  "kind": "campaign-receipt-draft",
+  "ledger_created_at": "2026-08-29T08:27:27.033764+00:00",
+  "ledger_schema_version": 3,
+  "purposes": [
+    "diagnostic"
+  ],
+  "resolved_cases": {
+    "swath-go.7d43994649c5": {
+      "config": {
+        "concurrency": 256,
+        "max_duration": "7170s",
+        "mode": "recursive-parquet-sorted",
+        "sort_buffer": "128mib"
+      },
+      "environment": {
+        "auth_role": null,
+        "container_memory_gb": 8,
+        "location": "us-east1",
+        "machine_type": "n4-highcpu-80",
+        "memory_gb": 160,
+        "output_target": "file",
+        "target_bucket": "aws-public-blockchain",
+        "target_prefix": "",
+        "target_region": "us-east-2",
+        "timeout_s": 7200,
+        "vcpus": 80
+      },
+      "platform_sha256": "70ae098be26103bf2c676a9056d68ef28dc969063cedea0e7f6d5ccf642bc388",
+      "replay": {
+        "allocation": {
+          "replay_heap_percent": 75,
+          "replay_list_index": true,
+          "replay_list_index_max_bytes": 67108864,
+          "replay_max_concurrent_requests": 4096,
+          "replay_memory_gb": 20,
+          "replay_parquet_connections": 128,
+          "replay_prefetch": true,
+          "replay_prefetch_max_windows": 192,
+          "replay_response_buffer_budget_bytes": 1073741824,
+          "replay_vcpus": 64,
+          "subject_vcpus": 8
+        },
+        "backend": {
+          "fixture_adopted_sha256": "f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0",
+          "fixture_sha256": "c4a42eb4e7fb2a9627972cc1e457ed55d60ef3d3560813eff8e13e65ef182b29",
+          "fixture_uri": "gs://s3-listing-study-results-29c02004/fixtures/aws-public-blockchain/seekparquet-c4a42eb4e7fb/",
+          "latency_model": {
+            "deadlines_ms": {
+              "pivot_probe": 46,
+              "structure_probe": 55,
+              "worker_page": 94
+            },
+            "jitter": "none",
+            "scale": 1.0
+          },
+          "server_image_uri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90",
+          "server_implementation": "go",
+          "serving_mode": "sorted",
+          "warmup": {
+            "in_flight": 64,
+            "pivot_probes": 200,
+            "structure_probes": 2000,
+            "worker_pages": 200
+          }
+        },
+        "capacity_status": "uncalibrated"
+      },
+      "tool_slice_sha256": "cd7f23355d02f93b1f71cd4e8498daa648ac9d4b1aac1c350343ab2948a0e1a1"
+    }
+  },
+  "schema_version": 1,
+  "slots": [],
+  "suite": "scale-study"
+}

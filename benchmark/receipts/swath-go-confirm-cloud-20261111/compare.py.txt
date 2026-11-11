@@ -1,0 +1,62 @@
+"""Blockchain content equality for the confirmation campaign's retained products.
+
+Per dataset (local copy of native/listing): row count, an order-insensitive multiset fingerprint over the nine
+shared S3 columns (count, bit_xor and sum of a 64-bit row hash), and strict key order within every part plus across
+consecutive parts in manifest order (unsigned byte order). Every dataset's fingerprint must equal the Java one.
+"""
+import json
+import os
+import sys
+
+import duckdb
+
+COLS = "key,size,last_modified,etag,storage_class,owner_id,owner_display_name,checksum_algorithm,checksum_type"
+root = sys.argv[1]
+names = sys.argv[2:]
+con = duckdb.connect()
+con.execute("SET threads=4")
+con.execute("SET memory_limit='12GB'")
+
+
+def parts(ds):
+    m = json.load(open(os.path.join(ds, "manifest.json")))
+    if "parts" in m:  # SeekParquet
+        return [os.path.join(ds, p["path"]) for p in m["parts"]]
+    return [os.path.join(ds, (f.get("path") or f.get("key")) if isinstance(f, dict) else f) for f in m["files"]] if "files" in m else sorted(
+        os.path.join(ds, "data", f) for f in os.listdir(os.path.join(ds, "data")))
+
+
+def encode_ge(a, b):
+    return a.encode('utf-8') >= b.encode('utf-8')
+
+
+res = {}
+for n in names:
+    ds = os.path.join(root, n)
+    ps = parts(ds)
+    ps = [p if os.path.exists(p) else os.path.join(ds, "data", os.path.basename(p)) for p in ps]
+    lst = "[" + ",".join(f"'{p}'" for p in ps) + "]"
+    cnt, x, s = con.execute(
+        f"select count(*), bit_xor(h), sum(h::hugeint) from (select hash({COLS}) h from read_parquet({lst}))").fetchone()
+    viol, prev_last = 0, None
+    for p in ps:
+        v, first, last = con.execute(
+            f"""select count(*) filter (where p is not null and encode(p) >= encode(k)), min_by(k, rn), max_by(k, rn)
+                from (select key k, lag(key) over (order by file_row_number) p, file_row_number rn
+                      from read_parquet('{p}', file_row_number=true))""").fetchone()
+        viol += v
+        if prev_last is not None and encode_ge(prev_last, first):
+            viol += 1
+        prev_last = last
+    res[n] = (cnt, x, int(s), viol, len(ps))
+    print(n, "rows", cnt, "xor", x, "sum", s, "order_violations", viol, "parts", len(ps), flush=True)
+
+
+def _enc(s):
+    return s.encode("utf-8")
+
+
+ref = names[-1]
+for n in names[:-1]:
+    same = res[n][:3] == res[ref][:3]
+    print(f"{n} vs {ref}: fingerprint {'IDENTICAL' if same else 'DIFFERENT'}")

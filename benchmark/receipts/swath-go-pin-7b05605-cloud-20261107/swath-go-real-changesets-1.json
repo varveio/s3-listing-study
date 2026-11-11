@@ -1,0 +1,987 @@
+{
+  "attempts": [
+    {
+      "attempt_id": "swath-go.27479f9f6ea6.s1",
+      "case_id": "swath-go.27479f9f6ea6",
+      "evidence": {
+        "argv": [
+          "/opt/swath-go/swath",
+          "list",
+          "s3://real-changesets",
+          "-o",
+          "/tmp/attempt/native/listing",
+          "--report",
+          "/tmp/attempt/native/swath-go-report.json",
+          "--region",
+          "us-west-2",
+          "--anonymous",
+          "--workers",
+          "64",
+          "--endpoint",
+          "http://127.0.0.1:19090",
+          "--max-duration",
+          "5370s"
+        ],
+        "binding_errors": [],
+        "replay": {
+          "errors": {
+            "after": 0.0,
+            "before": 0.0
+          },
+          "readiness": "ready",
+          "refusals": [],
+          "requests": {
+            "after": 14090.0,
+            "before": 0.0
+          },
+          "resource_sample_count": 3,
+          "sample_count": 3,
+          "state": "COMPLETE"
+        },
+        "result": {
+          "artifacts_size_bytes": 8491,
+          "exit_code": 0,
+          "finished_at": "2026-11-07T11:07:15.598449+00:00",
+          "max_rss_kb": 409856,
+          "product": {
+            "artifact": "listing",
+            "channel": "dataset",
+            "name": "native/listing",
+            "sha256": null,
+            "size_bytes": 321385350
+          },
+          "product_error": null,
+          "row_count": 13868442,
+          "row_count_error": null,
+          "started_at": "2026-11-07T11:06:41.771314+00:00",
+          "stderr": {
+            "name": "stderr.log.gz",
+            "sha256": null,
+            "size_bytes": 170
+          },
+          "stdout": {
+            "name": "stdout.log.gz",
+            "sha256": null,
+            "size_bytes": 213
+          },
+          "timed_out": false,
+          "wall_seconds": 33.825913,
+          "worker_exit_code": 0
+        },
+        "result_sha256": "042c06bc8bdf47637f1246833555ae9d9f97b03a2a6acca0ea5a21ea2402ef77",
+        "result_uri": "gs://s3-listing-study-results-29c02004/scale-study/real-changesets/swath-go.27479f9f6ea6.s1/result.json",
+        "state": "BOUND",
+        "verification": null
+      },
+      "group_id": "swath-go-real-changesets-1",
+      "mode": "recursive-parquet-sorted",
+      "origin": "planned",
+      "purpose": "diagnostic",
+      "recorded_at": "2026-11-07T11:05:26.207857+00:00",
+      "request": {
+        "allocationPolicy": {
+          "instances": [
+            {
+              "policy": {
+                "bootDisk": {
+                  "image": "batch-cos",
+                  "sizeGb": "100",
+                  "type": "hyperdisk-balanced"
+                },
+                "machineType": "n4-highcpu-32",
+                "provisioningModel": "SPOT"
+              }
+            }
+          ],
+          "network": {
+            "networkInterfaces": [
+              {
+                "network": "projects/varve-oss/global/networks/s3-listing-study",
+                "subnetwork": "projects/varve-oss/regions/us-east1/subnetworks/s3-listing-study-us-east1"
+              }
+            ]
+          },
+          "serviceAccount": {
+            "email": "s3-listing-study-worker@varve-oss.iam.gserviceaccount.com"
+          }
+        },
+        "labels": {
+          "suite": "scale-study"
+        },
+        "logsPolicy": {
+          "destination": "CLOUD_LOGGING"
+        },
+        "taskGroups": [
+          {
+            "parallelism": "1",
+            "taskCount": "1",
+            "taskSpec": {
+              "computeResource": {
+                "cpuMilli": "32000",
+                "memoryMib": "65536"
+              },
+              "maxRetryCount": 0,
+              "maxRunDuration": "6605s",
+              "runnables": [
+                {
+                  "container": {
+                    "commands": [
+                      "-ceu",
+                      "set -o pipefail\nmkdir -p /fixtures/source\ngcloud storage cp 'gs://s3-listing-study-results-29c02004/fixtures/real-changesets/current-2908fdf/part-*.parquet' /fixtures/source/\nmanifest=\"$(mktemp)\"\nfiles=(/fixtures/source/*.parquet)\n[[ -f \"${files[0]}\" ]] || { echo \"no staged parquet files\" >&2; exit 1; }\nfor file in \"${files[@]}\"; do\n  digest=\"$(sha256sum \"$file\")\"; digest=\"${digest%% *}\"\n  size=\"$(stat -c %s \"$file\")\"\n  printf '%s\\t%s\\t%s\\n' \"${file##*/}\" \"$size\" \"$digest\"\ndone | LC_ALL=C sort > \"$manifest\"\nactual=\"$(sha256sum \"$manifest\")\"; actual=\"${actual%% *}\"\n[[ \"$actual\" == 295177c95d43a602f1bf54f9dab7f6c05bb9cff9f1822f734a8bcb190bc57edd ]] || { echo \"fixture digest mismatch: $actual\" >&2; exit 1; }\nrm -f \"$manifest\""
+                    ],
+                    "imageUri": "gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:cf72dd63b7643c117ef53378a41bef6db6a01fa3d561f2b456d7abd8bbeb9ba6",
+                    "options": "--entrypoint /bin/bash --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
+                  },
+                  "environment": {
+                    "variables": {
+                      "CLOUDSDK_PYTHON": "/usr/lib/google-cloud-sdk/platform/bundledpythonunix/bin/python3"
+                    }
+                  }
+                },
+                {
+                  "container": {
+                    "commands": [
+                      "10001:10001",
+                      "/tmp/attempt"
+                    ],
+                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
+                    "options": "--user 0:0 --entrypoint /bin/chown --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
+                  }
+                },
+                {
+                  "background": true,
+                  "container": {
+                    "commands": [
+                      "serve",
+                      "--fixture",
+                      "/fixtures/source",
+                      "--bucket",
+                      "real-changesets",
+                      "--host",
+                      "127.0.0.1",
+                      "--port",
+                      "19090",
+                      "--metrics-port",
+                      "19192",
+                      "--serving-mode",
+                      "sorted",
+                      "--parquet-connections",
+                      "64",
+                      "--max-concurrent-requests",
+                      "512",
+                      "--inject-latency",
+                      "worker_page=122ms,pivot_probe=88ms,structure_probe=88ms",
+                      "--latency-scale",
+                      "1.0"
+                    ],
+                    "imageUri": "ghcr.io/varveio/swath-replay@sha256:3955f242f25294d3ebc6d63d3cf23e2a2694f7f1c9a5334dc6ec1054b0a69097",
+                    "options": "--network host --cpuset-cpus=0-9,16-25 --memory=20g --memory-swap=20g --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
+                  },
+                  "environment": {
+                    "variables": {
+                      "JAVA_TOOL_OPTIONS": "-XX:MaxRAMPercentage=75 -Dswath.replay.prefetch.enabled=false -Dswath.replay.prefetch.max-windows=96"
+                    }
+                  }
+                },
+                {
+                  "container": {
+                    "commands": [
+                      "--tool",
+                      "swath-go",
+                      "--mode",
+                      "recursive-parquet-sorted",
+                      "--purpose",
+                      "diagnostic",
+                      "--bucket",
+                      "real-changesets",
+                      "--region",
+                      "us-west-2",
+                      "--prefix",
+                      "",
+                      "--output",
+                      "/tmp/attempt",
+                      "--destination",
+                      "gs://s3-listing-study-results-29c02004/scale-study/real-changesets/swath-go.27479f9f6ea6.s1/",
+                      "--timeout",
+                      "5400",
+                      "--term-grace",
+                      "5.0",
+                      "--retain-products",
+                      "false",
+                      "--image",
+                      "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
+                      "--toolbox-manifest-sha256",
+                      "315959dfbad61d38ad992e26eeab2692c8cac85c24c71485bf111b5430c34bc2",
+                      "--toolbox-recipe-sha256",
+                      "c978c1b3a9635ca068cf8a67e24d1444477da5165891c62dd898aaacdfdd3729",
+                      "--tool-recipe-sha256",
+                      "c776fc4adf95cb071747798f8b2bec22d4b107f537ff3be117b8fc03ca3ccb5a",
+                      "--tool-build-inputs-sha256",
+                      "c173709a2f071d00cb9768f2e8d8c1ca084458d6d0bf3bbbe6a80286c6519df4",
+                      "--tool-version",
+                      "provisional-7b05605",
+                      "--tool-build-sha256",
+                      "15ae352315a2f4ffcbf7a8853cae1b3d326c7131fd9d9f5ab0ed448c0c08785d",
+                      "--adapter-bundle-sha256",
+                      "3a21555fc322cd0122988a67fed3247bcebe276df24b3a43fd32f97bc21f9e2f",
+                      "--harness-revision",
+                      "2479097ea6f428ffe4480efe0f41079f74cf638c",
+                      "--subject-workdir",
+                      "/opt/swath-go",
+                      "--image-set-sha256",
+                      "c4ef060d2a54a42dee7e451b452c2d6acb0a08f0e65488bf39e2130860b18750",
+                      "--group-id",
+                      "swath-go-real-changesets-1",
+                      "--job-name",
+                      "scale-study-swath-go-27479f9f6ea6-s1",
+                      "--case-id",
+                      "swath-go.27479f9f6ea6",
+                      "--attempt-id",
+                      "swath-go.27479f9f6ea6.s1",
+                      "--machine-type",
+                      "n4-highcpu-32",
+                      "--vcpus",
+                      "32",
+                      "--memory-gb",
+                      "64",
+                      "--container-memory-gb",
+                      "8",
+                      "--config",
+                      "{\"concurrency\":64,\"max_duration\":\"5370s\",\"mode\":\"recursive-parquet-sorted\"}",
+                      "--endpoint-url",
+                      "http://127.0.0.1:19090",
+                      "--replay-config",
+                      "{\"allocation\":{\"replay_heap_percent\":75,\"replay_max_concurrent_requests\":512,\"replay_memory_gb\":20,\"replay_parquet_connections\":64,\"replay_prefetch\":false,\"replay_prefetch_max_windows\":96,\"replay_vcpus\":20,\"subject_vcpus\":8},\"backend\":{\"fixture_sha256\":\"295177c95d43a602f1bf54f9dab7f6c05bb9cff9f1822f734a8bcb190bc57edd\",\"fixture_uri\":\"gs://s3-listing-study-results-29c02004/fixtures/real-changesets/current-2908fdf/part-*.parquet\",\"latency_model\":{\"deadlines_ms\":{\"pivot_probe\":88,\"structure_probe\":88,\"worker_page\":122},\"jitter\":\"none\",\"scale\":1.0},\"server_image_uri\":\"ghcr.io/varveio/swath-replay@sha256:3955f242f25294d3ebc6d63d3cf23e2a2694f7f1c9a5334dc6ec1054b0a69097\",\"serving_mode\":\"sorted\"},\"capacity_status\":\"uncalibrated\"}"
+                    ],
+                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
+                    "options": "--network host --cpuset-cpus=10-13,26-29 --memory=8g --memory-swap=8g --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "result_prefix": "gs://s3-listing-study-results-29c02004/scale-study/real-changesets/swath-go.27479f9f6ea6.s1/",
+      "settled_at": "2026-11-07T11:15:44.986602+00:00",
+      "state": "SUCCEEDED",
+      "state_detail": null,
+      "statistic": "timing",
+      "tool": "swath-go"
+    },
+    {
+      "attempt_id": "swath-go.284df7e8a6ed.s1",
+      "case_id": "swath-go.284df7e8a6ed",
+      "evidence": {
+        "argv": [
+          "/opt/swath-go/swath",
+          "list",
+          "s3://real-changesets",
+          "-o",
+          "/tmp/attempt/native/listing.tsv",
+          "--report",
+          "/tmp/attempt/native/swath-go-report.json",
+          "--region",
+          "us-west-2",
+          "--anonymous",
+          "--workers",
+          "64",
+          "--endpoint",
+          "http://127.0.0.1:19090",
+          "--max-duration",
+          "5370s"
+        ],
+        "binding_errors": [],
+        "replay": {
+          "errors": {
+            "after": 0.0,
+            "before": 0.0
+          },
+          "readiness": "ready",
+          "refusals": [],
+          "requests": {
+            "after": 14094.0,
+            "before": 0.0
+          },
+          "resource_sample_count": 3,
+          "sample_count": 3,
+          "state": "COMPLETE"
+        },
+        "result": {
+          "artifacts_size_bytes": 8543,
+          "exit_code": 0,
+          "finished_at": "2026-11-07T11:07:22.148020+00:00",
+          "max_rss_kb": 348696,
+          "product": {
+            "artifact": "listing",
+            "channel": "file",
+            "name": "native/listing.tsv.gz",
+            "sha256": null,
+            "size_bytes": 398149226
+          },
+          "product_error": null,
+          "row_count": 13868442,
+          "row_count_error": null,
+          "started_at": "2026-11-07T11:06:42.203021+00:00",
+          "stderr": {
+            "name": "stderr.log.gz",
+            "sha256": null,
+            "size_bytes": 167
+          },
+          "stdout": {
+            "name": "stdout.log.gz",
+            "sha256": null,
+            "size_bytes": 214
+          },
+          "timed_out": false,
+          "wall_seconds": 39.943669,
+          "worker_exit_code": 0
+        },
+        "result_sha256": "a005abe377fa7009ef064ebb76d83379adf052e78f7cbe9362c85e0d24aea83e",
+        "result_uri": "gs://s3-listing-study-results-29c02004/scale-study/real-changesets/swath-go.284df7e8a6ed.s1/result.json",
+        "state": "BOUND",
+        "verification": null
+      },
+      "group_id": "swath-go-real-changesets-1",
+      "mode": "recursive-tsv",
+      "origin": "planned",
+      "purpose": "diagnostic",
+      "recorded_at": "2026-11-07T11:05:26.470818+00:00",
+      "request": {
+        "allocationPolicy": {
+          "instances": [
+            {
+              "policy": {
+                "bootDisk": {
+                  "image": "batch-cos",
+                  "sizeGb": "100",
+                  "type": "hyperdisk-balanced"
+                },
+                "machineType": "n4-highcpu-32",
+                "provisioningModel": "SPOT"
+              }
+            }
+          ],
+          "network": {
+            "networkInterfaces": [
+              {
+                "network": "projects/varve-oss/global/networks/s3-listing-study",
+                "subnetwork": "projects/varve-oss/regions/us-east1/subnetworks/s3-listing-study-us-east1"
+              }
+            ]
+          },
+          "serviceAccount": {
+            "email": "s3-listing-study-worker@varve-oss.iam.gserviceaccount.com"
+          }
+        },
+        "labels": {
+          "suite": "scale-study"
+        },
+        "logsPolicy": {
+          "destination": "CLOUD_LOGGING"
+        },
+        "taskGroups": [
+          {
+            "parallelism": "1",
+            "taskCount": "1",
+            "taskSpec": {
+              "computeResource": {
+                "cpuMilli": "32000",
+                "memoryMib": "65536"
+              },
+              "maxRetryCount": 0,
+              "maxRunDuration": "6605s",
+              "runnables": [
+                {
+                  "container": {
+                    "commands": [
+                      "-ceu",
+                      "set -o pipefail\nmkdir -p /fixtures/source\ngcloud storage cp 'gs://s3-listing-study-results-29c02004/fixtures/real-changesets/current-2908fdf/part-*.parquet' /fixtures/source/\nmanifest=\"$(mktemp)\"\nfiles=(/fixtures/source/*.parquet)\n[[ -f \"${files[0]}\" ]] || { echo \"no staged parquet files\" >&2; exit 1; }\nfor file in \"${files[@]}\"; do\n  digest=\"$(sha256sum \"$file\")\"; digest=\"${digest%% *}\"\n  size=\"$(stat -c %s \"$file\")\"\n  printf '%s\\t%s\\t%s\\n' \"${file##*/}\" \"$size\" \"$digest\"\ndone | LC_ALL=C sort > \"$manifest\"\nactual=\"$(sha256sum \"$manifest\")\"; actual=\"${actual%% *}\"\n[[ \"$actual\" == 295177c95d43a602f1bf54f9dab7f6c05bb9cff9f1822f734a8bcb190bc57edd ]] || { echo \"fixture digest mismatch: $actual\" >&2; exit 1; }\nrm -f \"$manifest\""
+                    ],
+                    "imageUri": "gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:cf72dd63b7643c117ef53378a41bef6db6a01fa3d561f2b456d7abd8bbeb9ba6",
+                    "options": "--entrypoint /bin/bash --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
+                  },
+                  "environment": {
+                    "variables": {
+                      "CLOUDSDK_PYTHON": "/usr/lib/google-cloud-sdk/platform/bundledpythonunix/bin/python3"
+                    }
+                  }
+                },
+                {
+                  "container": {
+                    "commands": [
+                      "10001:10001",
+                      "/tmp/attempt"
+                    ],
+                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
+                    "options": "--user 0:0 --entrypoint /bin/chown --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
+                  }
+                },
+                {
+                  "background": true,
+                  "container": {
+                    "commands": [
+                      "serve",
+                      "--fixture",
+                      "/fixtures/source",
+                      "--bucket",
+                      "real-changesets",
+                      "--host",
+                      "127.0.0.1",
+                      "--port",
+                      "19090",
+                      "--metrics-port",
+                      "19192",
+                      "--serving-mode",
+                      "sorted",
+                      "--parquet-connections",
+                      "64",
+                      "--max-concurrent-requests",
+                      "512",
+                      "--inject-latency",
+                      "worker_page=122ms,pivot_probe=88ms,structure_probe=88ms",
+                      "--latency-scale",
+                      "1.0"
+                    ],
+                    "imageUri": "ghcr.io/varveio/swath-replay@sha256:3955f242f25294d3ebc6d63d3cf23e2a2694f7f1c9a5334dc6ec1054b0a69097",
+                    "options": "--network host --cpuset-cpus=0-9,16-25 --memory=20g --memory-swap=20g --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
+                  },
+                  "environment": {
+                    "variables": {
+                      "JAVA_TOOL_OPTIONS": "-XX:MaxRAMPercentage=75 -Dswath.replay.prefetch.enabled=false -Dswath.replay.prefetch.max-windows=96"
+                    }
+                  }
+                },
+                {
+                  "container": {
+                    "commands": [
+                      "--tool",
+                      "swath-go",
+                      "--mode",
+                      "recursive-tsv",
+                      "--purpose",
+                      "diagnostic",
+                      "--bucket",
+                      "real-changesets",
+                      "--region",
+                      "us-west-2",
+                      "--prefix",
+                      "",
+                      "--output",
+                      "/tmp/attempt",
+                      "--destination",
+                      "gs://s3-listing-study-results-29c02004/scale-study/real-changesets/swath-go.284df7e8a6ed.s1/",
+                      "--timeout",
+                      "5400",
+                      "--term-grace",
+                      "5.0",
+                      "--retain-products",
+                      "false",
+                      "--image",
+                      "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
+                      "--toolbox-manifest-sha256",
+                      "315959dfbad61d38ad992e26eeab2692c8cac85c24c71485bf111b5430c34bc2",
+                      "--toolbox-recipe-sha256",
+                      "c978c1b3a9635ca068cf8a67e24d1444477da5165891c62dd898aaacdfdd3729",
+                      "--tool-recipe-sha256",
+                      "c776fc4adf95cb071747798f8b2bec22d4b107f537ff3be117b8fc03ca3ccb5a",
+                      "--tool-build-inputs-sha256",
+                      "c173709a2f071d00cb9768f2e8d8c1ca084458d6d0bf3bbbe6a80286c6519df4",
+                      "--tool-version",
+                      "provisional-7b05605",
+                      "--tool-build-sha256",
+                      "15ae352315a2f4ffcbf7a8853cae1b3d326c7131fd9d9f5ab0ed448c0c08785d",
+                      "--adapter-bundle-sha256",
+                      "3a21555fc322cd0122988a67fed3247bcebe276df24b3a43fd32f97bc21f9e2f",
+                      "--harness-revision",
+                      "2479097ea6f428ffe4480efe0f41079f74cf638c",
+                      "--subject-workdir",
+                      "/opt/swath-go",
+                      "--image-set-sha256",
+                      "c4ef060d2a54a42dee7e451b452c2d6acb0a08f0e65488bf39e2130860b18750",
+                      "--group-id",
+                      "swath-go-real-changesets-1",
+                      "--job-name",
+                      "scale-study-swath-go-284df7e8a6ed-s1",
+                      "--case-id",
+                      "swath-go.284df7e8a6ed",
+                      "--attempt-id",
+                      "swath-go.284df7e8a6ed.s1",
+                      "--machine-type",
+                      "n4-highcpu-32",
+                      "--vcpus",
+                      "32",
+                      "--memory-gb",
+                      "64",
+                      "--container-memory-gb",
+                      "8",
+                      "--config",
+                      "{\"concurrency\":64,\"max_duration\":\"5370s\",\"mode\":\"recursive-tsv\"}",
+                      "--endpoint-url",
+                      "http://127.0.0.1:19090",
+                      "--replay-config",
+                      "{\"allocation\":{\"replay_heap_percent\":75,\"replay_max_concurrent_requests\":512,\"replay_memory_gb\":20,\"replay_parquet_connections\":64,\"replay_prefetch\":false,\"replay_prefetch_max_windows\":96,\"replay_vcpus\":20,\"subject_vcpus\":8},\"backend\":{\"fixture_sha256\":\"295177c95d43a602f1bf54f9dab7f6c05bb9cff9f1822f734a8bcb190bc57edd\",\"fixture_uri\":\"gs://s3-listing-study-results-29c02004/fixtures/real-changesets/current-2908fdf/part-*.parquet\",\"latency_model\":{\"deadlines_ms\":{\"pivot_probe\":88,\"structure_probe\":88,\"worker_page\":122},\"jitter\":\"none\",\"scale\":1.0},\"server_image_uri\":\"ghcr.io/varveio/swath-replay@sha256:3955f242f25294d3ebc6d63d3cf23e2a2694f7f1c9a5334dc6ec1054b0a69097\",\"serving_mode\":\"sorted\"},\"capacity_status\":\"uncalibrated\"}"
+                    ],
+                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
+                    "options": "--network host --cpuset-cpus=10-13,26-29 --memory=8g --memory-swap=8g --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "result_prefix": "gs://s3-listing-study-results-29c02004/scale-study/real-changesets/swath-go.284df7e8a6ed.s1/",
+      "settled_at": "2026-11-07T11:15:44.987988+00:00",
+      "state": "SUCCEEDED",
+      "state_detail": null,
+      "statistic": "timing",
+      "tool": "swath-go"
+    },
+    {
+      "attempt_id": "swath.cebbe320f3ad.s1",
+      "case_id": "swath.cebbe320f3ad",
+      "evidence": {
+        "argv": [
+          "/opt/java/openjdk/bin/java",
+          "-jar",
+          "/opt/swath/swath.jar",
+          "-v",
+          "--color",
+          "never",
+          "list",
+          "s3://real-changesets",
+          "--region",
+          "us-west-2",
+          "--no-sign-request",
+          "--concurrency",
+          "64",
+          "--endpoint-url",
+          "http://127.0.0.1:19090",
+          "--checkpoint",
+          "auto",
+          "--format",
+          "parquet",
+          "-o",
+          "/tmp/attempt/native/listing",
+          "--report",
+          "/tmp/attempt/native/listing/_swath_summary.json",
+          "--sort",
+          "--tune",
+          "sort.ignore-disk-check=on",
+          "--tune",
+          "sort.merge-parallelism=8"
+        ],
+        "binding_errors": [],
+        "replay": {
+          "errors": {
+            "after": 0.0,
+            "before": 0.0
+          },
+          "readiness": "ready",
+          "refusals": [],
+          "requests": {
+            "after": 14823.0,
+            "before": 0.0
+          },
+          "resource_sample_count": 6,
+          "sample_count": 6,
+          "state": "COMPLETE"
+        },
+        "result": {
+          "artifacts_size_bytes": 58382,
+          "exit_code": 0,
+          "finished_at": "2026-11-07T11:07:50.770975+00:00",
+          "max_rss_kb": 717864,
+          "product": {
+            "artifact": "listing",
+            "channel": "dataset",
+            "name": "native/listing",
+            "sha256": null,
+            "size_bytes": 317723850
+          },
+          "product_error": null,
+          "row_count": 13868442,
+          "row_count_error": null,
+          "started_at": "2026-11-07T11:06:47.640344+00:00",
+          "stderr": {
+            "name": "stderr.log.gz",
+            "sha256": null,
+            "size_bytes": 2374
+          },
+          "stdout": {
+            "name": "stdout.log.gz",
+            "sha256": null,
+            "size_bytes": 31
+          },
+          "timed_out": false,
+          "wall_seconds": 63.129336,
+          "worker_exit_code": 0
+        },
+        "result_sha256": "68b4a12b3867f8d512c76d9605d832598506e14cf2726a4deb76c5d4ebcfe5af",
+        "result_uri": "gs://s3-listing-study-results-29c02004/scale-study/real-changesets/swath.cebbe320f3ad.s1/result.json",
+        "state": "BOUND",
+        "verification": null
+      },
+      "group_id": "swath-go-real-changesets-1",
+      "mode": "recursive-parquet-sorted",
+      "origin": "planned",
+      "purpose": "diagnostic",
+      "recorded_at": "2026-11-07T11:05:26.720898+00:00",
+      "request": {
+        "allocationPolicy": {
+          "instances": [
+            {
+              "policy": {
+                "bootDisk": {
+                  "image": "batch-cos",
+                  "sizeGb": "100",
+                  "type": "hyperdisk-balanced"
+                },
+                "machineType": "n4-highcpu-32",
+                "provisioningModel": "SPOT"
+              }
+            }
+          ],
+          "network": {
+            "networkInterfaces": [
+              {
+                "network": "projects/varve-oss/global/networks/s3-listing-study",
+                "subnetwork": "projects/varve-oss/regions/us-east1/subnetworks/s3-listing-study-us-east1"
+              }
+            ]
+          },
+          "serviceAccount": {
+            "email": "s3-listing-study-worker@varve-oss.iam.gserviceaccount.com"
+          }
+        },
+        "labels": {
+          "suite": "scale-study"
+        },
+        "logsPolicy": {
+          "destination": "CLOUD_LOGGING"
+        },
+        "taskGroups": [
+          {
+            "parallelism": "1",
+            "taskCount": "1",
+            "taskSpec": {
+              "computeResource": {
+                "cpuMilli": "32000",
+                "memoryMib": "65536"
+              },
+              "maxRetryCount": 0,
+              "maxRunDuration": "6605s",
+              "runnables": [
+                {
+                  "container": {
+                    "commands": [
+                      "-ceu",
+                      "set -o pipefail\nmkdir -p /fixtures/source\ngcloud storage cp 'gs://s3-listing-study-results-29c02004/fixtures/real-changesets/current-2908fdf/part-*.parquet' /fixtures/source/\nmanifest=\"$(mktemp)\"\nfiles=(/fixtures/source/*.parquet)\n[[ -f \"${files[0]}\" ]] || { echo \"no staged parquet files\" >&2; exit 1; }\nfor file in \"${files[@]}\"; do\n  digest=\"$(sha256sum \"$file\")\"; digest=\"${digest%% *}\"\n  size=\"$(stat -c %s \"$file\")\"\n  printf '%s\\t%s\\t%s\\n' \"${file##*/}\" \"$size\" \"$digest\"\ndone | LC_ALL=C sort > \"$manifest\"\nactual=\"$(sha256sum \"$manifest\")\"; actual=\"${actual%% *}\"\n[[ \"$actual\" == 295177c95d43a602f1bf54f9dab7f6c05bb9cff9f1822f734a8bcb190bc57edd ]] || { echo \"fixture digest mismatch: $actual\" >&2; exit 1; }\nrm -f \"$manifest\""
+                    ],
+                    "imageUri": "gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:cf72dd63b7643c117ef53378a41bef6db6a01fa3d561f2b456d7abd8bbeb9ba6",
+                    "options": "--entrypoint /bin/bash --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
+                  },
+                  "environment": {
+                    "variables": {
+                      "CLOUDSDK_PYTHON": "/usr/lib/google-cloud-sdk/platform/bundledpythonunix/bin/python3"
+                    }
+                  }
+                },
+                {
+                  "container": {
+                    "commands": [
+                      "10001:10001",
+                      "/tmp/attempt"
+                    ],
+                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
+                    "options": "--user 0:0 --entrypoint /bin/chown --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
+                  }
+                },
+                {
+                  "background": true,
+                  "container": {
+                    "commands": [
+                      "serve",
+                      "--fixture",
+                      "/fixtures/source",
+                      "--bucket",
+                      "real-changesets",
+                      "--host",
+                      "127.0.0.1",
+                      "--port",
+                      "19090",
+                      "--metrics-port",
+                      "19192",
+                      "--serving-mode",
+                      "sorted",
+                      "--parquet-connections",
+                      "64",
+                      "--max-concurrent-requests",
+                      "512",
+                      "--inject-latency",
+                      "worker_page=122ms,pivot_probe=88ms,structure_probe=88ms",
+                      "--latency-scale",
+                      "1.0"
+                    ],
+                    "imageUri": "ghcr.io/varveio/swath-replay@sha256:3955f242f25294d3ebc6d63d3cf23e2a2694f7f1c9a5334dc6ec1054b0a69097",
+                    "options": "--network host --cpuset-cpus=0-9,16-25 --memory=20g --memory-swap=20g --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
+                  },
+                  "environment": {
+                    "variables": {
+                      "JAVA_TOOL_OPTIONS": "-XX:MaxRAMPercentage=75 -Dswath.replay.prefetch.enabled=false -Dswath.replay.prefetch.max-windows=96"
+                    }
+                  }
+                },
+                {
+                  "container": {
+                    "commands": [
+                      "--tool",
+                      "swath",
+                      "--mode",
+                      "recursive-parquet-sorted",
+                      "--purpose",
+                      "diagnostic",
+                      "--bucket",
+                      "real-changesets",
+                      "--region",
+                      "us-west-2",
+                      "--prefix",
+                      "",
+                      "--output",
+                      "/tmp/attempt",
+                      "--destination",
+                      "gs://s3-listing-study-results-29c02004/scale-study/real-changesets/swath.cebbe320f3ad.s1/",
+                      "--timeout",
+                      "5400",
+                      "--term-grace",
+                      "5.0",
+                      "--retain-products",
+                      "false",
+                      "--image",
+                      "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
+                      "--toolbox-manifest-sha256",
+                      "315959dfbad61d38ad992e26eeab2692c8cac85c24c71485bf111b5430c34bc2",
+                      "--toolbox-recipe-sha256",
+                      "c978c1b3a9635ca068cf8a67e24d1444477da5165891c62dd898aaacdfdd3729",
+                      "--tool-recipe-sha256",
+                      "f9d55d7e2466aa20378f8c7f4b1ad666b60d4cb5918f9ac9b4302af7f472de84",
+                      "--tool-build-inputs-sha256",
+                      "0d05dc949a1c322e39dc2831353ac427dda3d4b923595fd7b89166b3130653e1",
+                      "--tool-version",
+                      "0.3.2",
+                      "--tool-build-sha256",
+                      "c28b5c8bb5ca95cdca56191fe18ad2f147689a642e9a9b7dd66ef960fe7725d7",
+                      "--adapter-bundle-sha256",
+                      "f657a7c498f0ea0fba6284aa255c754363823116fefdb8d3a52b6c86236043d9",
+                      "--harness-revision",
+                      "2479097ea6f428ffe4480efe0f41079f74cf638c",
+                      "--subject-workdir",
+                      "/opt/swath",
+                      "--image-set-sha256",
+                      "c4ef060d2a54a42dee7e451b452c2d6acb0a08f0e65488bf39e2130860b18750",
+                      "--group-id",
+                      "swath-go-real-changesets-1",
+                      "--job-name",
+                      "scale-study-swath-cebbe320f3ad-s1",
+                      "--case-id",
+                      "swath.cebbe320f3ad",
+                      "--attempt-id",
+                      "swath.cebbe320f3ad.s1",
+                      "--machine-type",
+                      "n4-highcpu-32",
+                      "--vcpus",
+                      "32",
+                      "--memory-gb",
+                      "64",
+                      "--container-memory-gb",
+                      "8",
+                      "--config",
+                      "{\"concurrency\":64,\"heap_percent\":75,\"jvm_max_heap\":\"4g\",\"mode\":\"recursive-parquet-sorted\",\"sort_merge_parallelism\":8}",
+                      "--endpoint-url",
+                      "http://127.0.0.1:19090",
+                      "--replay-config",
+                      "{\"allocation\":{\"replay_heap_percent\":75,\"replay_max_concurrent_requests\":512,\"replay_memory_gb\":20,\"replay_parquet_connections\":64,\"replay_prefetch\":false,\"replay_prefetch_max_windows\":96,\"replay_vcpus\":20,\"subject_vcpus\":8},\"backend\":{\"fixture_sha256\":\"295177c95d43a602f1bf54f9dab7f6c05bb9cff9f1822f734a8bcb190bc57edd\",\"fixture_uri\":\"gs://s3-listing-study-results-29c02004/fixtures/real-changesets/current-2908fdf/part-*.parquet\",\"latency_model\":{\"deadlines_ms\":{\"pivot_probe\":88,\"structure_probe\":88,\"worker_page\":122},\"jitter\":\"none\",\"scale\":1.0},\"server_image_uri\":\"ghcr.io/varveio/swath-replay@sha256:3955f242f25294d3ebc6d63d3cf23e2a2694f7f1c9a5334dc6ec1054b0a69097\",\"serving_mode\":\"sorted\"},\"capacity_status\":\"uncalibrated\"}"
+                    ],
+                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
+                    "options": "--network host --cpuset-cpus=10-13,26-29 --memory=8g --memory-swap=8g --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "result_prefix": "gs://s3-listing-study-results-29c02004/scale-study/real-changesets/swath.cebbe320f3ad.s1/",
+      "settled_at": "2026-11-07T11:15:44.989485+00:00",
+      "state": "SUCCEEDED",
+      "state_detail": null,
+      "statistic": "timing",
+      "tool": "swath"
+    }
+  ],
+  "group_id": "swath-go-real-changesets-1",
+  "kind": "campaign-receipt-draft",
+  "ledger_created_at": "2026-08-29T08:27:27.033764+00:00",
+  "ledger_schema_version": 3,
+  "purposes": [
+    "diagnostic"
+  ],
+  "resolved_cases": {
+    "swath-go.27479f9f6ea6": {
+      "config": {
+        "concurrency": 64,
+        "max_duration": "5370s",
+        "mode": "recursive-parquet-sorted"
+      },
+      "environment": {
+        "auth_role": null,
+        "container_memory_gb": 8,
+        "location": "us-east1",
+        "machine_type": "n4-highcpu-32",
+        "memory_gb": 64,
+        "output_target": "file",
+        "target_bucket": "real-changesets",
+        "target_prefix": "",
+        "target_region": "us-west-2",
+        "timeout_s": 5400,
+        "vcpus": 32
+      },
+      "platform_sha256": "ac1531ad2ad180658a761aeae62c82c51103a94bd1981ea511917ef0e62fbf35",
+      "replay": {
+        "allocation": {
+          "replay_heap_percent": 75,
+          "replay_max_concurrent_requests": 512,
+          "replay_memory_gb": 20,
+          "replay_parquet_connections": 64,
+          "replay_prefetch": false,
+          "replay_prefetch_max_windows": 96,
+          "replay_vcpus": 20,
+          "subject_vcpus": 8
+        },
+        "backend": {
+          "fixture_sha256": "295177c95d43a602f1bf54f9dab7f6c05bb9cff9f1822f734a8bcb190bc57edd",
+          "fixture_uri": "gs://s3-listing-study-results-29c02004/fixtures/real-changesets/current-2908fdf/part-*.parquet",
+          "latency_model": {
+            "deadlines_ms": {
+              "pivot_probe": 88,
+              "structure_probe": 88,
+              "worker_page": 122
+            },
+            "jitter": "none",
+            "scale": 1.0
+          },
+          "server_image_uri": "ghcr.io/varveio/swath-replay@sha256:3955f242f25294d3ebc6d63d3cf23e2a2694f7f1c9a5334dc6ec1054b0a69097",
+          "serving_mode": "sorted"
+        },
+        "capacity_status": "uncalibrated"
+      },
+      "tool_slice_sha256": "271283d9fcf1e41800d6a4a01ec3abb8f46b0c323fb7d880db04a42c765bba70"
+    },
+    "swath-go.284df7e8a6ed": {
+      "config": {
+        "concurrency": 64,
+        "max_duration": "5370s",
+        "mode": "recursive-tsv"
+      },
+      "environment": {
+        "auth_role": null,
+        "container_memory_gb": 8,
+        "location": "us-east1",
+        "machine_type": "n4-highcpu-32",
+        "memory_gb": 64,
+        "output_target": "file",
+        "target_bucket": "real-changesets",
+        "target_prefix": "",
+        "target_region": "us-west-2",
+        "timeout_s": 5400,
+        "vcpus": 32
+      },
+      "platform_sha256": "ac1531ad2ad180658a761aeae62c82c51103a94bd1981ea511917ef0e62fbf35",
+      "replay": {
+        "allocation": {
+          "replay_heap_percent": 75,
+          "replay_max_concurrent_requests": 512,
+          "replay_memory_gb": 20,
+          "replay_parquet_connections": 64,
+          "replay_prefetch": false,
+          "replay_prefetch_max_windows": 96,
+          "replay_vcpus": 20,
+          "subject_vcpus": 8
+        },
+        "backend": {
+          "fixture_sha256": "295177c95d43a602f1bf54f9dab7f6c05bb9cff9f1822f734a8bcb190bc57edd",
+          "fixture_uri": "gs://s3-listing-study-results-29c02004/fixtures/real-changesets/current-2908fdf/part-*.parquet",
+          "latency_model": {
+            "deadlines_ms": {
+              "pivot_probe": 88,
+              "structure_probe": 88,
+              "worker_page": 122
+            },
+            "jitter": "none",
+            "scale": 1.0
+          },
+          "server_image_uri": "ghcr.io/varveio/swath-replay@sha256:3955f242f25294d3ebc6d63d3cf23e2a2694f7f1c9a5334dc6ec1054b0a69097",
+          "serving_mode": "sorted"
+        },
+        "capacity_status": "uncalibrated"
+      },
+      "tool_slice_sha256": "271283d9fcf1e41800d6a4a01ec3abb8f46b0c323fb7d880db04a42c765bba70"
+    },
+    "swath.cebbe320f3ad": {
+      "config": {
+        "concurrency": 64,
+        "heap_percent": 75,
+        "jvm_max_heap": "4g",
+        "mode": "recursive-parquet-sorted",
+        "sort_merge_parallelism": 8
+      },
+      "environment": {
+        "auth_role": null,
+        "container_memory_gb": 8,
+        "location": "us-east1",
+        "machine_type": "n4-highcpu-32",
+        "memory_gb": 64,
+        "output_target": "file",
+        "target_bucket": "real-changesets",
+        "target_prefix": "",
+        "target_region": "us-west-2",
+        "timeout_s": 5400,
+        "vcpus": 32
+      },
+      "platform_sha256": "ac1531ad2ad180658a761aeae62c82c51103a94bd1981ea511917ef0e62fbf35",
+      "replay": {
+        "allocation": {
+          "replay_heap_percent": 75,
+          "replay_max_concurrent_requests": 512,
+          "replay_memory_gb": 20,
+          "replay_parquet_connections": 64,
+          "replay_prefetch": false,
+          "replay_prefetch_max_windows": 96,
+          "replay_vcpus": 20,
+          "subject_vcpus": 8
+        },
+        "backend": {
+          "fixture_sha256": "295177c95d43a602f1bf54f9dab7f6c05bb9cff9f1822f734a8bcb190bc57edd",
+          "fixture_uri": "gs://s3-listing-study-results-29c02004/fixtures/real-changesets/current-2908fdf/part-*.parquet",
+          "latency_model": {
+            "deadlines_ms": {
+              "pivot_probe": 88,
+              "structure_probe": 88,
+              "worker_page": 122
+            },
+            "jitter": "none",
+            "scale": 1.0
+          },
+          "server_image_uri": "ghcr.io/varveio/swath-replay@sha256:3955f242f25294d3ebc6d63d3cf23e2a2694f7f1c9a5334dc6ec1054b0a69097",
+          "serving_mode": "sorted"
+        },
+        "capacity_status": "uncalibrated"
+      },
+      "tool_slice_sha256": "52ed7d8880d61d8772b13b8850a61877487fadceb54dc6de0307d0313be0b93e"
+    }
+  },
+  "schema_version": 1,
+  "slots": [],
+  "suite": "scale-study"
+}

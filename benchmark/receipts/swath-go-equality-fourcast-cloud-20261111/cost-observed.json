@@ -1,0 +1,28 @@
+[
+  {
+    "attempt_id": "swath-go.a7eba8b1b911.s2",
+    "job_name": "scale-study-swath-go-a7eba8b1b911-s2",
+    "machine": "n4-highcpu-16",
+    "ledger_state": "SUCCEEDED",
+    "spot_list_rate_usd_per_hour": 0.361376,
+    "job_uid": "scale-study-swath-16dd795c-8a87-4d3b00",
+    "provider_state": "SUCCEEDED",
+    "run_duration_s": 38.62272669,
+    "create_to_update_s": 89.590099,
+    "run_duration_compute_usd": 0.0038770351334237335,
+    "create_to_update_compute_usd": 0.008993253226728887
+  },
+  {
+    "attempt_id": "swath.a0995929aac2.s2",
+    "job_name": "scale-study-swath-a0995929aac2-s2",
+    "machine": "n4-highcpu-16",
+    "ledger_state": "SUCCEEDED",
+    "spot_list_rate_usd_per_hour": 0.361376,
+    "job_uid": "scale-study-swath-90b5e295-2c06-450300",
+    "provider_state": "SUCCEEDED",
+    "run_duration_s": 88.516860945,
+    "create_to_update_s": 141.787844,
+    "run_duration_compute_usd": 0.008885519205794532,
+    "create_to_update_compute_usd": 0.014232978864817777
+  }
+]
