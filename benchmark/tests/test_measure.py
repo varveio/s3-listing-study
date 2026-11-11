@@ -1065,6 +1065,50 @@ def test_default_upload_keeps_the_run_report_out_of_a_dropped_native_tree(
     assert not (local / "native/listing/data").exists()
 
 
+def test_default_upload_keeps_bounded_profiles_at_the_sink_top_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A profile or JVM recording a capsule aimed at the sink's top level travels
+    with the run reports; one inside the product, or over the bound, stays behind."""
+    attempt = tmp_path / "attempt"
+    (attempt / "native/listing/data").mkdir(parents=True)
+    (attempt / "native/listing/data/part-0.parquet").write_bytes(b"rows")
+    (attempt / "native/listing/swath.jfr").write_bytes(b"product, not profile")
+    (attempt / "native/swath-go-report.json").write_text("{}")
+    (attempt / "native/swath-go-cpu.pprof").write_bytes(b"pprof")
+    (attempt / "native/swath-gc.log").write_text("[gc] pause\n")
+    (attempt / "native/swath.jfr").write_bytes(b"jfr")
+    (attempt / "result.json").write_text("{}")
+    monkeypatch.setattr(measure, "PROFILE_MAX_BYTES", 4)
+    uploaded: list[str] = []
+    monkeypatch.setattr(gcs, "upload_file", lambda _path, uri, **_kwargs: uploaded.append(uri))
+    monkeypatch.setattr(gcs, "upload_tree", lambda _path, uri, **_kwargs: uploaded.append(uri))
+
+    assert measure.upload(attempt, "gs://bucket/leaf/")
+
+    assert sorted(uri for uri in uploaded if "/native/" in uri) == [
+        "gs://bucket/leaf/native/swath-go-report.json",
+        "gs://bucket/leaf/native/swath.jfr",
+    ]
+    assert set(measure.run_report_manifest(attempt / "native")) == {
+        "swath-go-report.json",
+        "swath.jfr",
+    }
+    assert [path.name for path in measure.oversized_profiles(attempt / "native")] == [
+        "swath-gc.log",
+        "swath-go-cpu.pprof",
+    ]
+
+    monkeypatch.setattr(measure, "PROFILE_MAX_BYTES", 512 * 1024 * 1024)
+    assert set(measure.run_report_manifest(attempt / "native")) == {
+        "swath-gc.log",
+        "swath-go-cpu.pprof",
+        "swath-go-report.json",
+        "swath.jfr",
+    }
+    assert measure.oversized_profiles(attempt / "native") == []
+
+
 def test_local_publication_is_create_only(tmp_path: Path) -> None:
     """A second execution cannot merge with or replace a local evidence leaf."""
     attempt = tmp_path / "attempt"

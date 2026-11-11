@@ -1008,9 +1008,48 @@ not: a report the size of a log is evidence about the run, and dropping it with
 the dataset left every live-S3 row without a listing-phase figure."""
 
 
+PROFILE_NAMES = frozenset({"swath-go-cpu.pprof", "swath-gc.log", "swath.jfr"})
+"""Profiles and recordings a capsule asks its subject to write at the top of
+the sink (``native/``) when a case states a diagnostic control: the Go port's
+CPU profile, the JVM's GC log and its flight recording. They travel with the
+run reports on every attempt, retained products or not, because a profile
+whose dataset was dropped is the only record of where the run's CPU went. Only
+the sink's top level is searched, so a file of the same name inside a product
+is product, not profile."""
+
+PROFILE_MAX_BYTES = 512 * 1024 * 1024
+"""The bound on one retained profile. The capsules bound their own (JFR's
+``maxsize``); this is the harness's backstop, and a larger file is left behind
+with the dataset, named on the worker's stderr, rather than uploaded."""
+
+
 def run_report_files(native_root: Path) -> list[Path]:
-    """The run reports under ``native/``, in path order."""
-    return sorted(path for path in retained_files(native_root) if path.name in RUN_REPORT_NAMES)
+    """The run reports and bounded profiles under ``native/``, in path order."""
+    top = native_root.resolve()
+    return sorted(
+        path
+        for path in retained_files(native_root)
+        if path.name in RUN_REPORT_NAMES
+        or (
+            path.name in PROFILE_NAMES
+            and path.parent == top
+            and path.stat().st_size <= PROFILE_MAX_BYTES
+        )
+    )
+
+
+def oversized_profiles(native_root: Path) -> list[Path]:
+    """Profiles at the sink's top level that :data:`PROFILE_MAX_BYTES` keeps back."""
+    if not native_root.is_dir():
+        return []
+    return sorted(
+        path
+        for path in native_root.iterdir()
+        if path.name in PROFILE_NAMES
+        and path.is_file()
+        and not path.is_symlink()
+        and path.stat().st_size > PROFILE_MAX_BYTES
+    )
 
 
 def run_report_manifest(native_root: Path) -> dict[str, str]:
@@ -1062,7 +1101,8 @@ def upload(
     "incomplete", never as a passing (or failing) verdict.
 
     ``native/`` travels whole only when the attempt retains its products;
-    otherwise just its run reports (:data:`RUN_REPORT_NAMES`) go, at their
+    otherwise just its run reports (:data:`RUN_REPORT_NAMES`) and bounded
+    profiles (:data:`PROFILE_NAMES`) go, at their
     native-relative paths, so a reader finds them where a retained tree would
     have had them.
 
@@ -1593,6 +1633,13 @@ def main(argv: list[str] | None = None) -> int:
 
     stderr_path = attempt_dir / "stderr.log"
     retain_products = args.retain_products == "true"
+    if not retain_products:
+        for path in oversized_profiles(native_root):
+            print(
+                f"measure: profile {path.name} is {path.stat().st_size} bytes, over the "
+                f"{PROFILE_MAX_BYTES}-byte bound; it is not uploaded",
+                file=sys.stderr,
+            )
 
     # Scan the uncompressed captures before any upload. A retained credential
     # turns the whole attempt into a refusal rather than public evidence that a
