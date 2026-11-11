@@ -102,13 +102,18 @@ fields and the run report at `SINK/swath-go-report.json`:
   the flag — claim `structure-is-a-diagnostic-flag`), `sort_buffer` and
   `spill_budget` (sizes; state binary units, since `kb`, `mb` and `gb` are
   decimal at this pin — claim
-  `sort-buffer-and-spill-budget-bound-the-reorder-stage`), `max_duration` (a
+  `sort-buffer-and-spill-budget-bound-the-reorder-stage`), `encoders` (a
+  positive integer rendered as `--encoders N` in every mode, resume included:
+  the Parquet encoders, a `.zst` file's compression jobs, a TSV file's
+  formatters; unset, the least of GOMAXPROCS and what the sort buffer admits
+  — claim `encoders-bound-the-output-workers`), `cpu_profile` (a boolean, see
+  below), `max_duration` (a
   duration), and, for the sorted mode only, `part_size` and `part_interval`.
   Absent keys render nothing, so the tool's own default applies. Anything else
   is refused, the earlier pins' `limiter`, `row_budget` and `spill_max`
-  included, and a TSV mode refuses the two part controls. No plan states any
-  of them but `max_duration`, so every plan row runs at the port's own
-  defaults. Two of those changed since the earlier pins and move with the
+  included, and a TSV mode refuses the two part controls. The release-mirroring
+  plans (`swath-go-replay`, `swath-go-real-s3`) state none of them but
+  `max_duration`, so those rows run at the port's own defaults. Two of those changed since the earlier pins and move with the
   version in any comparison with the 2026-11-07 rows:
   - the sort buffer is sized from the box's memory: 512 MiB on the four replay plans with 8 GiB subject containers
     (aws-public-blockchain, nara-1950-census, noaa-nbm-grib2-pds,
@@ -135,11 +140,24 @@ fields and the run report at `SINK/swath-go-report.json`:
   claim `report-is-written-on-failure-too`. `RUN_REPORT_NAMES` in
   `benchmark/src/benchmark/measure.py` lists `swath-go-report.json`, so the
   worker keeps it on every attempt, retained products or not.
+- **CPU profile.** The pin has no profiling flag; its one hook is the
+  environment variable `SWATH_CPUPROFILE=FILE` (`go/cmd/swath/main.go:1154-1167`,
+  `go/docs/commands/swath.md:213` @8c8f870). `cpu_profile: true` has the
+  capsule's `build_env` set it to `SINK/swath-go-cpu.pprof`, beside the report;
+  the argv is unchanged. The port checks the path as it checks `--report`
+  (`go/cmd/swath/sidepaths.go:28-57`), starts the profile before the listing
+  and stops it when `listing.Run` returns, before the report is written
+  (`main.go:849-852,913-917`) — claim `cpu-profile-is-an-environment-hook`.
+  `PROFILE_NAMES` in `measure.py` keeps the file on every attempt, retained
+  products or not, while it is at most `PROFILE_MAX_BYTES` (512 MiB; a larger
+  one is named on the worker's stderr and left behind). The profiler's cost on
+  the wall is unmeasured: a profiled row is diagnostic, not a timing row. The
+  heap profile (`SWATH_MEMPROFILE`) is not exposed.
 - **Resume** replays the recorded command. The adapter restates what `swath
   resume` accepts again and the case states: `--workers`, the signing choice
   (`--anonymous`, or `--no-anonymous` to undo a recorded one), and any
-  stated `adaptive_limit`, `sort_buffer`, `spill_budget`, `max_duration` or
-  `part_interval`; it refuses `seed`, `structure` and `part_size`, which the
+  stated `adaptive_limit`, `encoders`, `sort_buffer`, `spill_budget`,
+  `max_duration` or `part_interval`; it refuses `seed`, `structure` and `part_size`, which the
   journal freezes — claim `resume-replays-the-recorded-command`. It writes the report to the same path
   as the list step: the killed step's report has to be copied out before the
   resume runs, or a resume that dies before writing its own leaves the earlier

@@ -205,6 +205,48 @@ capsule also renders the harness's heap share into
 `JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=<percent>`, since which variable a JVM
 reads is Swath's business and the share is the harness's.
 
+**JVM and sorted-output controls.** Besides the heap share, `build_env`
+renders four config keys into the same `JAVA_TOOL_OPTIONS`, each from a
+checked value and none verbatim (references at v0.3.2, `acf0d509`):
+
+- `jvm_max_heap` (`4g`, `512m`, …) → `-Xmx`, which HotSpot takes over the
+  `MaxRAMPercentage` share. The sorted staging segment and the merge budget are
+  each 8% of the maximum heap (`SortConfig.java:125,269-270,277,411-414`) —
+  claim `sort-budgets-follow-the-max-heap`. Unstated in an 8 GiB container, the
+  75% share gives 6 GiB.
+- `final_file_bytes` (a positive byte count; sorted mode only) →
+  `-Dswath.sort.final-file-bytes=N`, the sorted output's roll threshold,
+  default 1 GiB (`SortConfig.java:140,256-258,274`, `SortOptions.java:25-26`,
+  used at `SortFinalizer.java:120`). `parquet_part_size` does not reach this
+  path: the sorted publish is handed the `SortConfig`, not the part size
+  (`ListRunner.java:846-848,988-991,1020-1022`) — claim
+  `sorted-final-file-size-is-a-system-property`. The capsule still renders
+  `parquet_part_size` on the sorted mode, unchanged, for the identity of the
+  rows that stated it; it is inert there.
+- `gc_log: true` → `-Xlog:gc*:file=SINK/swath-gc.log:time,uptime,level,tags:filecount=0`
+  (GC events at info, one unrotated file).
+- `jfr: true` → `-XX:StartFlightRecording=settings=profile,maxsize=256m,dumponexit=true,filename=SINK/swath.jfr,jdk.InitialEnvironmentVariable#enabled=false`:
+  JFR's profiling settings, the recording bounded by JFR's `maxsize`, dumped at
+  exit, with the environment-variable event off so the file carries no
+  environment; refused on a signed case regardless.
+
+The two recordings are taken only by the modes whose listing lands in the sink
+(`recursive-parquet`, `recursive-parquet-sorted`, `recursive-tsv-dataset`,
+`recursive-tsv-zstd`): JFR prints its `Started recording` lines on stdout,
+which is the product in the stdout modes. They are written at the sink's top
+level, beside `listing/`, where `PROFILE_NAMES` in
+`benchmark/src/benchmark/measure.py` keeps them on every attempt, retained
+products or not, up to `PROFILE_MAX_BYTES` (512 MiB). A sink path the options
+cannot carry (whitespace, `:`, `,`, quotes) is refused rather than escaped.
+Provenance of the option spellings: a local check on 2026-11-11 ran
+`swath --version` from the toolbox image's Temurin 25.0.4 with these options,
+which wrote both files and recorded no `jdk.InitialEnvironmentVariable` event
+(seven without the setting); that is an adapter check, not a run record. The
+recordings' cost on a run's wall is unmeasured, so a recorded row is
+diagnostic. `sort_merge_parallelism` renders `--tune sort.merge-parallelism=N`
+(1–16), which replaces the core-derived default `max(1, min(8, cores/2))` —
+claim `sort-merge-parallelism-tune`.
+
 **What the benchmark can publish.** Stream modes flow through captured raw
 streams. For the Parquet and text-dataset modes, `command.py` directs the
 dataset into the benchmark worker's native sink directory; the worker

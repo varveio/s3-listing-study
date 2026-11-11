@@ -161,6 +161,8 @@ TEXT_MODES = {TSV_MODE: TSV_NAME, TSV_ZSTD_MODE: TSV_ZSTD_NAME}
 CONFIG_KEYS = frozenset(
     {
         "adaptive_limit",
+        "cpu_profile",
+        "encoders",
         "max_duration",
         "part_interval",
         "part_size",
@@ -195,6 +197,13 @@ coming to a whole number of bytes, which only the binary can check. ``k``,
 ``m``, ``g``, ``t`` and the ``-ib`` units are binary; ``kb``, ``mb``, ``gb`` and
 ``tb`` are decimal at this pin (they were binary at the capsule's earlier
 pins), so a plan states sizes in ``KiB``/``MiB``/``GiB``."""
+
+CPU_PROFILE_NAME = "swath-go-cpu.pprof"
+"""Where ``cpu_profile: true`` has the port write its Go CPU profile: the sink's
+top level, beside the run report and outside the dataset directory, where the
+port's side-path check accepts a profile (``go/cmd/swath/sidepaths.go:28-57``)
+and ``PROFILE_NAMES`` in ``benchmark/src/benchmark/measure.py`` keeps it on
+every attempt, retained products or not, up to that module's size bound."""
 
 POSITIVE_SIZE_KEYS = frozenset({"part_size", "sort_buffer"})
 """Sizes whose flag refuses 0 (``(*size).Set``, ``go/cmd/swath/main.go:1221-1231``);
@@ -237,6 +246,26 @@ def _adaptive_limit(request: CommandRequest) -> tuple[str, ...]:
     if value is None:
         return ()
     return ("--adaptive-limit" if value else "--no-adaptive-limit",)
+
+
+def _encoders(request: CommandRequest) -> tuple[str, ...]:
+    """``--encoders N``: the Parquet encoders, or a ``.zst`` file's compression jobs.
+
+    Registered on ``list`` and ``diag list`` (``go/cmd/swath/flags.go:130-132``)
+    and accepted again by ``swath resume`` (``go/cmd/swath/main.go:562``); a
+    count below 1 is refused by the flag (``go/internal/source/flags.go:291,301-306``).
+    Absent, the port takes ``min(GOMAXPROCS, what the sort buffer admits)`` and
+    may raise a Parquet run's maximum after listing; an explicit count is kept
+    as the maximum too (``go/internal/listing/listing.go:315-321``). A TSV file's
+    rows are formatted by as many goroutines (``listing.go:679``), so every mode
+    takes it.
+    """
+    value = request.config.get("encoders")
+    if value is None:
+        return ()
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise CommandAdapterError(f"{TOOL} encoders must be a positive integer; got: {value!r}")
+    return "--encoders", str(value)
 
 
 def _no_seed(request: CommandRequest) -> tuple[str, ...]:
@@ -316,6 +345,7 @@ def _list_tail(request: CommandRequest, output: str, report: str) -> tuple[str, 
         *_adaptive_limit(request),
         *no_seed,
         *structure,
+        *_encoders(request),
         *_size_option(request, "sort_buffer", "--sort-buffer"),
         *_size_option(request, "spill_budget", "--spill-budget"),
         *_duration_option(request, "max_duration", "--max-duration"),
@@ -367,6 +397,7 @@ def _resume_tail(request: CommandRequest, dataset: str, report: str) -> tuple[st
         _concurrency(request),
         "--no-anonymous" if request.signed else "--anonymous",
         *_adaptive_limit(request),
+        *_encoders(request),
         *_size_option(request, "sort_buffer", "--sort-buffer"),
         *_size_option(request, "spill_budget", "--spill-budget"),
         *_duration_option(request, "max_duration", "--max-duration"),
@@ -374,11 +405,33 @@ def _resume_tail(request: CommandRequest, dataset: str, report: str) -> tuple[st
     )
 
 
+def build_env(request: CommandRequest) -> dict[str, str]:
+    """``SWATH_CPUPROFILE=SINK/swath-go-cpu.pprof`` for ``cpu_profile: true``; else nothing.
+
+    The pin's one profiling hook is this environment variable (and
+    ``SWATH_MEMPROFILE``, not exposed here): there is no flag. The command reads
+    it with the report's side-path check (``go/cmd/swath/sidepaths.go:28-57``),
+    starts ``pprof.StartCPUProfile`` before the listing begins and stops it when
+    ``listing.Run`` returns, before the outcome is classified and the report
+    written (``go/cmd/swath/main.go:849-852,913-917,1154-1167``); upstream
+    documents it in ``go/docs/commands/swath.md:213``. It is a development
+    hook: Go's sampling profiler at its default 100 Hz, and a profiled wall is
+    diagnostic, never a timing row.
+    """
+    value = _bool_value(request, "cpu_profile")
+    if not value:
+        return {}
+    return {"SWATH_CPUPROFILE": f"{_sink(request)}/{CPU_PROFILE_NAME}"}
+
+
 def build_command(request: CommandRequest) -> tuple[str, ...]:
     if request.mode not in MODES:
         raise CommandAdapterError(f"unknown mode: {request.mode}")
     sink = _sink(request)
     report = f"{sink}/{REPORT_NAME}"
+    # The profile rides in the environment (build_env); a malformed value is
+    # refused here too, so compiling a case is enough to reject it.
+    _bool_value(request, "cpu_profile")
     if request.mode == RESUME_MODE:
         return *SWATH_GO.argv, *_resume_tail(request, f"{sink}/{DATASET_NAME}", report)
     output = f"{sink}/{TEXT_MODES.get(request.mode, DATASET_NAME)}"

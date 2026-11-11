@@ -1155,6 +1155,114 @@ def test_swath_renders_retained_output_controls_and_refuses_the_wrong_mode() -> 
         )
 
 
+def test_swath_renders_jvm_recordings_and_the_sorted_final_size_into_java_tool_options() -> None:
+    """GC log, JFR and the sorted finalizer's roll size reach the JVM through the
+    capsule's one environment variable, from checked values only."""
+    adapter = load_command_adapter(adapter_path("swath"))
+    request = CommandRequest(
+        "recursive-parquet-sorted",
+        BUCKET,
+        REGION,
+        tool="swath",
+        sink_dir="/tmp/attempt/native/",
+        config={
+            "jvm_max_heap": "4g",
+            "sort_merge_parallelism": 8,
+            "final_file_bytes": 268435456,
+            "gc_log": True,
+            "jfr": True,
+        },
+    )
+    argv = adapter.compile(request)
+    assert argv[argv.index("--tune", argv.index("sort.ignore-disk-check=on")) + 1] == (
+        "sort.merge-parallelism=8"
+    )
+    assert not [word for word in argv if "Xlog" in word or "FlightRecording" in word]
+    assert adapter.build_env(request) == {
+        "JAVA_TOOL_OPTIONS": " ".join(
+            (
+                f"-XX:MaxRAMPercentage={HEAP_PERCENT}",
+                "-Xmx4g",
+                "-Dswath.sort.final-file-bytes=268435456",
+                "-Xlog:gc*:file=/tmp/attempt/native/swath-gc.log"
+                ":time,uptime,level,tags:filecount=0",
+                "-XX:StartFlightRecording=settings=profile,maxsize=256m,dumponexit=true,"
+                "filename=/tmp/attempt/native/swath.jfr,"
+                "jdk.InitialEnvironmentVariable#enabled=false",
+            )
+        )
+    }
+
+    # Each alone renders only itself, in any directory mode; off renders nothing.
+    def options(config: dict[str, object]) -> list[str]:
+        request = CommandRequest(
+            "recursive-tsv-zstd", BUCKET, REGION, tool="swath", sink_dir=SINK, config=config
+        )
+        return adapter.build_env(request)["JAVA_TOOL_OPTIONS"].split(" ")
+
+    share = f"-XX:MaxRAMPercentage={HEAP_PERCENT}"
+    assert options({"gc_log": True}) == [
+        share,
+        f"-Xlog:gc*:file={SINK}/swath-gc.log:time,uptime,level,tags:filecount=0",
+    ]
+    jfr = options({"jfr": True})
+    assert jfr[0] == share and len(jfr) == 2
+    assert jfr[1].startswith("-XX:StartFlightRecording=") and f"filename={SINK}/swath.jfr" in jfr[1]
+    assert options({"gc_log": False, "jfr": False}) == [share]
+
+
+@pytest.mark.parametrize(
+    ("mode", "config", "message"),
+    [
+        ("recursive-tsv", {"gc_log": True}, "prints its listing on stdout"),
+        ("recursive-jsonl", {"jfr": True}, "prints its listing on stdout"),
+        ("recursive-parquet", {"final_file_bytes": 1 << 28}, "final_file_bytes"),
+        ("recursive-tsv-zstd", {"final_file_bytes": 1 << 28}, "final_file_bytes"),
+        ("recursive-parquet-sorted", {"final_file_bytes": 0}, "positive integer"),
+        ("recursive-parquet-sorted", {"final_file_bytes": "256m"}, "positive integer"),
+        ("recursive-parquet-sorted", {"final_file_bytes": True}, "positive integer"),
+        ("recursive-parquet-sorted", {"gc_log": "true"}, "true or false"),
+        ("recursive-parquet-sorted", {"jfr": 1}, "true or false"),
+    ],
+)
+def test_swath_refuses_a_misplaced_or_malformed_jvm_control(
+    mode: str, config: dict[str, object], message: str
+) -> None:
+    adapter = load_command_adapter(adapter_path("swath"))
+    request = CommandRequest(mode, BUCKET, REGION, tool="swath", sink_dir=SINK, config=config)
+    with pytest.raises(CommandAdapterError, match=message):
+        adapter.compile(request)
+    with pytest.raises(CommandAdapterError, match=message):
+        adapter.build_env(request)
+
+
+def test_swath_refuses_a_recording_it_cannot_place_or_a_jfr_on_a_signed_case() -> None:
+    adapter = load_command_adapter(adapter_path("swath"))
+    for sink in ("/sink with space", "/sink:colon", "/sink,comma", "relative/sink"):
+        with pytest.raises(CommandAdapterError, match="cannot place a JVM recording"):
+            adapter.build_env(
+                CommandRequest(
+                    "recursive-parquet-sorted",
+                    BUCKET,
+                    REGION,
+                    tool="swath",
+                    sink_dir=sink,
+                    config={"gc_log": True},
+                )
+            )
+    signed = CommandRequest(
+        "recursive-parquet-sorted",
+        BUCKET,
+        REGION,
+        tool="swath",
+        sink_dir=SINK,
+        signed=True,
+        config={"jfr": True},
+    )
+    with pytest.raises(CommandAdapterError, match="signed"):
+        adapter.build_env(signed)
+
+
 def test_swath_asks_every_directory_mode_for_its_run_report_beside_the_manifest() -> None:
     """Swath writes `_swath_summary.json` unprompted only for Parquet directories;
     the adapter asks for it explicitly, at that same path, in every directory mode."""

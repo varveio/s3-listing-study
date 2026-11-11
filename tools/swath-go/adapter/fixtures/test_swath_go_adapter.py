@@ -195,6 +195,7 @@ def test_signed_prefix_endpoint_and_every_knob(adapter: LoadedCommandAdapter) ->
                 "concurrency": 256,
                 "adaptive_limit": False,
                 "seed": False,
+                "encoders": 8,
                 "sort_buffer": "256MiB",
                 "spill_budget": "0",
                 "max_duration": "1h59m30s",
@@ -220,6 +221,8 @@ def test_signed_prefix_endpoint_and_every_knob(adapter: LoadedCommandAdapter) ->
         "http://127.0.0.1:19090",
         "--no-adaptive-limit",
         "--no-seed",
+        "--encoders",
+        "8",
         "--sort-buffer",
         "256MiB",
         "--spill-budget",
@@ -257,6 +260,7 @@ def test_resume_restates_what_a_resume_may_change(adapter: LoadedCommandAdapter)
     config = {
         "concurrency": 8,
         "adaptive_limit": False,
+        "encoders": 4,
         "sort_buffer": "256MiB",
         "spill_budget": "10GiB",
         "max_duration": "2h",
@@ -274,6 +278,8 @@ def test_resume_restates_what_a_resume_may_change(adapter: LoadedCommandAdapter)
         "8",
         "--anonymous",
         "--no-adaptive-limit",
+        "--encoders",
+        "4",
         "--sort-buffer",
         "256MiB",
         "--spill-budget",
@@ -344,6 +350,11 @@ def test_modes_declare_their_products_channels_and_a_ceiling(
         ({"part_size": 64}, "part_size"),
         ({"sort_buffer": "0mib"}, "sort_buffer"),
         ({"spill_budget": "-1"}, "spill_budget"),
+        ({"encoders": 0}, "encoders"),
+        ({"encoders": True}, "encoders"),
+        ({"encoders": "8"}, "encoders"),
+        ({"cpu_profile": "true"}, "cpu_profile"),
+        ({"cpu_profile": 1}, "cpu_profile"),
     ],
 )
 def test_malformed_values_are_refused(
@@ -352,6 +363,30 @@ def test_malformed_values_are_refused(
     for mode in ("recursive-parquet-sorted", "resume-parquet-sorted"):
         with pytest.raises(CommandAdapterError, match=message):
             adapter.compile(_request(mode, config=config))
+
+
+@pytest.mark.parametrize(
+    "mode", ["recursive-tsv", "recursive-tsv-zstd", "recursive-parquet-sorted"]
+)
+def test_encoders_render_in_every_list_mode(adapter: LoadedCommandAdapter, mode: str) -> None:
+    """A Parquet run's encoders, a .zst file's jobs, a TSV file's formatters: one flag."""
+    argv = adapter.compile(_request(mode, config={"encoders": 8}))
+    assert argv[1:3] == ("list", "s3://bucket")
+    assert argv[argv.index("--encoders") + 1] == "8"
+    assert "--encoders" not in adapter.compile(_request(mode))
+
+
+def test_cpu_profile_is_the_environment_hook_into_the_sink(adapter: LoadedCommandAdapter) -> None:
+    """The pin has no profiling flag: ``SWATH_CPUPROFILE`` is the hook, aimed at the
+    sink's top level, and the argv is the unprofiled one."""
+    for mode in adapter.modes:
+        request = _request(mode, sink_dir="/sink/", config={"cpu_profile": True})
+        assert adapter.build_env(request) == {"SWATH_CPUPROFILE": "/sink/swath-go-cpu.pprof"}
+        assert adapter.compile(request) == adapter.compile(_request(mode, sink_dir="/sink/"))
+        assert adapter.build_env(_request(mode, config={"cpu_profile": False})) == {}
+        assert adapter.build_env(_request(mode)) == {}
+    effective = adapter.effective_config("recursive-parquet-sorted", {"cpu_profile": True})
+    assert effective["cpu_profile"] is True
 
 
 @pytest.mark.parametrize("key", ["part_size", "part_interval"])

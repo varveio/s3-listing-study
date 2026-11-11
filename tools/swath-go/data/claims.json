@@ -512,6 +512,90 @@
       ]
     },
     {
+      "id": "encoders-bound-the-output-workers",
+      "statement": "--encoders N sets the Parquet encoders, a .zst file's compression jobs and a TSV file's row formatters; unset, the port takes the least of GOMAXPROCS and what the sort buffer admits, and may raise a Parquet run's maximum after listing, while an explicit count is kept as the maximum. It is accepted on list, diag list and resume, and a count below 1 is refused.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Read from the flag table and the limits at the pin. The capsule exposes it as encoders, rendered on every mode including resume. GOMAXPROCS follows the subject container's cpuset, so the automatic count moves with the CPUs a row gives the subject. What a stated count does to wall and memory is a run question.",
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/varveio/swath",
+          "commit": "8c8f870801c700f22413581f35683096782329a0",
+          "path": "go/cmd/swath/flags.go",
+          "lines": "34,130-132"
+        },
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/varveio/swath",
+          "commit": "8c8f870801c700f22413581f35683096782329a0",
+          "path": "go/internal/listing/listing.go",
+          "lines": "315-321,439,679"
+        },
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/varveio/swath",
+          "commit": "8c8f870801c700f22413581f35683096782329a0",
+          "path": "go/cmd/swath/main.go",
+          "lines": "562,634"
+        },
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/varveio/swath",
+          "commit": "8c8f870801c700f22413581f35683096782329a0",
+          "path": "go/internal/source/flags.go",
+          "lines": "291,301-306"
+        }
+      ]
+    },
+    {
+      "id": "cpu-profile-is-an-environment-hook",
+      "statement": "The pin has no profiling flag: SWATH_CPUPROFILE=FILE (and SWATH_MEMPROFILE=FILE) make the command write a Go pprof CPU (allocation) profile. The path is checked as --report's is, the CPU profile starts before the listing runs and stops when listing.Run returns, before the outcome is classified and the report is written.",
+      "scope": "operability",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Read from the command and its help at the pin; upstream calls it a development hook. The capsule's cpu_profile: true sets SWATH_CPUPROFILE to swath-go-cpu.pprof at the sink's top level, which the harness keeps on every attempt up to its size bound. The profiler's cost on a run's wall is unmeasured, so a profiled row is diagnostic.",
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/varveio/swath",
+          "commit": "8c8f870801c700f22413581f35683096782329a0",
+          "path": "go/cmd/swath/sidepaths.go",
+          "lines": "28-57"
+        },
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/varveio/swath",
+          "commit": "8c8f870801c700f22413581f35683096782329a0",
+          "path": "go/cmd/swath/main.go",
+          "lines": "849-852,913-917,1154-1167"
+        },
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/varveio/swath",
+          "commit": "8c8f870801c700f22413581f35683096782329a0",
+          "path": "go/cmd/swath/help.go",
+          "lines": "316"
+        },
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/varveio/swath",
+          "commit": "8c8f870801c700f22413581f35683096782329a0",
+          "path": "go/docs/commands/swath.md",
+          "lines": "213"
+        }
+      ]
+    },
+    {
       "id": "report-is-written-on-failure-too",
       "statement": "--report FILE writes the JSON run report, with the outcome and a random attempt id, to FILE when the attempt ends, on failure too, though not for a command line that does not parse; FILE may not be a directory, the text output file or one of the dataset directory's own entries.",
       "scope": "operability",
