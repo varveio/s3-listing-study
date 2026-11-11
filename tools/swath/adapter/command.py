@@ -80,6 +80,11 @@ would land in the product."""
 SORTED_ENV_CONFIG_KEYS = frozenset({"final_file_bytes"})
 """Sorted-finalizer properties rendered by :func:`build_env`; the sorted mode alone takes them."""
 
+JAVA_LONG_MAX = 2**63 - 1
+"""The largest value ``SortConfig`` reads with ``Long.parseLong``
+(``SortConfig.java:416-418`` @v0.3.2); a larger one would compile here and
+fail at the JVM's startup."""
+
 GC_LOG_NAME = "swath-gc.log"
 JFR_NAME = "swath.jfr"
 """The recordings' names in the sink's top level, beside the ``listing``
@@ -273,10 +278,14 @@ def _jvm_options(request: CommandRequest) -> tuple[str, ...]:
             raise CommandAdapterError(
                 f"{TOOL} mode {request.mode!r} does not use config key(s): final_file_bytes"
             )
-        if isinstance(final_bytes, bool) or not isinstance(final_bytes, int) or final_bytes < 1:
+        if (
+            isinstance(final_bytes, bool)
+            or not isinstance(final_bytes, int)
+            or not 1 <= final_bytes <= JAVA_LONG_MAX
+        ):
             raise CommandAdapterError(
-                f"{TOOL} final_file_bytes must be a positive integer byte count; "
-                f"got: {final_bytes!r}"
+                f"{TOOL} final_file_bytes must be a positive integer byte count at most "
+                f"{JAVA_LONG_MAX}; got: {final_bytes!r}"
             )
         options.append(f"-Dswath.sort.final-file-bytes={final_bytes}")
     recordings = {key: _flag(request, key) for key in sorted(DIAGNOSTIC_CONFIG_KEYS)}

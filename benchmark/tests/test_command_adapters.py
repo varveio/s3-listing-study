@@ -1193,6 +1193,19 @@ def test_swath_renders_jvm_recordings_and_the_sorted_final_size_into_java_tool_o
         )
     }
 
+    widest = CommandRequest(
+        "recursive-parquet-sorted",
+        BUCKET,
+        REGION,
+        tool="swath",
+        sink_dir=SINK,
+        config={"final_file_bytes": 2**63 - 1},
+    )
+    adapter.compile(widest)
+    assert f"-Dswath.sort.final-file-bytes={2**63 - 1}" in adapter.build_env(widest)[
+        "JAVA_TOOL_OPTIONS"
+    ].split(" ")
+
     # Each alone renders only itself, in any directory mode; off renders nothing.
     def options(config: dict[str, object]) -> list[str]:
         request = CommandRequest(
@@ -1221,6 +1234,7 @@ def test_swath_renders_jvm_recordings_and_the_sorted_final_size_into_java_tool_o
         ("recursive-parquet-sorted", {"final_file_bytes": 0}, "positive integer"),
         ("recursive-parquet-sorted", {"final_file_bytes": "256m"}, "positive integer"),
         ("recursive-parquet-sorted", {"final_file_bytes": True}, "positive integer"),
+        ("recursive-parquet-sorted", {"final_file_bytes": 2**63}, "positive integer"),
         ("recursive-parquet-sorted", {"gc_log": True}, "'on' or 'off'"),
         ("recursive-parquet-sorted", {"gc_log": "true"}, "'on' or 'off'"),
         ("recursive-parquet-sorted", {"jfr": 1}, "'on' or 'off'"),

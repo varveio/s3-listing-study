@@ -199,6 +199,11 @@ coming to a whole number of bytes, which only the binary can check. ``k``,
 pins), so a plan states sizes in ``kib``/``mib``/``gib``: lowercase, since a
 config value becomes part of the case label, which refuses capitals."""
 
+INT64_MAX = 2**63 - 1
+"""The largest count the flag's ``strconv.Atoi`` reads into a Go ``int`` on the
+image's amd64 build (``go/internal/source/flags.go:301-306``); a larger one
+would compile here and fail at the subject's startup."""
+
 CPU_PROFILE_NAME = "swath-go-cpu.pprof"
 """Where ``cpu_profile: on`` has the port write its Go CPU profile: the sink's
 top level, beside the run report and outside the dataset directory, where the
@@ -264,8 +269,10 @@ def _encoders(request: CommandRequest) -> tuple[str, ...]:
     value = request.config.get("encoders")
     if value is None:
         return ()
-    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-        raise CommandAdapterError(f"{TOOL} encoders must be a positive integer; got: {value!r}")
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= INT64_MAX:
+        raise CommandAdapterError(
+            f"{TOOL} encoders must be a positive integer at most {INT64_MAX}; got: {value!r}"
+        )
     return "--encoders", str(value)
 
 

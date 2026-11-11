@@ -353,6 +353,7 @@ def test_modes_declare_their_products_channels_and_a_ceiling(
         ({"encoders": 0}, "encoders"),
         ({"encoders": True}, "encoders"),
         ({"encoders": "8"}, "encoders"),
+        ({"encoders": 2**63}, "encoders"),
         ({"cpu_profile": True}, "cpu_profile"),
         ({"cpu_profile": "true"}, "cpu_profile"),
         ({"cpu_profile": 1}, "cpu_profile"),
@@ -374,6 +375,8 @@ def test_encoders_render_in_every_list_mode(adapter: LoadedCommandAdapter, mode:
     argv = adapter.compile(_request(mode, config={"encoders": 8}))
     assert argv[1:3] == ("list", "s3://bucket")
     assert argv[argv.index("--encoders") + 1] == "8"
+    widest = adapter.compile(_request(mode, config={"encoders": 2**63 - 1}))
+    assert widest[widest.index("--encoders") + 1] == str(2**63 - 1)
     assert "--encoders" not in adapter.compile(_request(mode))
 
 
