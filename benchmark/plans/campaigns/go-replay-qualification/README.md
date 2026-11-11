@@ -6,7 +6,7 @@ study and builds Swath; Swath here is the Java 0.3.2 listing subject.
 Each Java/Go pair takes its subject settings, fixture, deadline profile and
 warm-up from the release attempt named at the top of its plan. Java images use the source attempt's exact digest except s7cmd NARA: its
 unavailable image is replaced by the retained release digest disclosed in that
-plan. That pair tests treatment delivery, not exact release-server reproduction. Use one rebuilt toolbox image on both sides.
+plan. That pair tests the server-side timing grade, not exact release-server reproduction. Use one rebuilt toolbox image on both sides.
 All jobs use Spot provisioning with the study VPC and subnet. Retain failures;
 only a preempted job may be resubmitted once. No ranking or calibrated benchmark
 claim follows from these diagnostic plans.
@@ -27,7 +27,7 @@ the s5cmd Go median versus the Java median. Retain and report individual
 repetitions and their range. A single ladder repetition supports a bounded
 diagnostic recommendation, not a precision claim about run-to-run variation.
 
-Use the existing per-attempt delivered-treatment grader without weakening its
+Use the existing per-attempt timing grader without weakening its
 requirements. Require completed row counts matching the fixture, TIMING_VALID,
 zero server errors/refusals and the agreement band for a recommended ladder
 rung. Headroom additionally requires mean replay cpuset utilization below 60%,

@@ -59,7 +59,7 @@ the subjects (tool, mode, concurrency, capsule config), `subject_vcpus`, the
 subject memory ceiling, timeouts, list index on with `max_bytes` 67108864,
 reader-decode ceiling (128 blockchain, 64 NARA, 8 FourCast), 4,096 request
 slots, 1 GiB response budget, 192 cache windows of 12,500 rows, heap share 75%,
-latency deadlines, declared warm-up, and the delivered-treatment grader and its
+latency deadlines, declared warm-up, and the timing grader and its
 thresholds. GOMAXPROCS and GOMEMLIMIT follow the allocation, as in every ladder.
 The toolbox worker and image set are wave 2's (harness `1a0f845`; no harness
 source has changed since).
@@ -208,16 +208,18 @@ parquet-reader error counts, plus:
    `aws-public-blockchain`, `nara-1950-census` or `noaa-nws-fourcastnetgfs-pds`:
 
    ```sh
-   gcloud storage cat gs://s3-listing-study-results-29c02004/go-replay-qualify/BUCKET/ATTEMPT_ID/result.json \
+   gcloud storage cat <result-store>/go-replay-qualify/BUCKET/ATTEMPT_ID/result.json \
      | jq -c '.replay_evidence as $e | ("before","after") as $w
          | $e[$w].metrics.meters[]
          | select(.name | test("^swath\\.replay\\.prefetch\\.window\\.(fill|hit|miss)$"))
          | {at: $w, name, tags, count, mean_ms, p50_ms, p99_ms, max_ms}'
    ```
 
-   Timer quantiles are server-lifetime values (they include the warm-up fills
-   recorded in `before`); counts are compared as `after − before`. Hit share is
-   hits / (hits + misses).
+   Timer windows differ by statistic (swath `go/internal/replay/metrics/window.go`): count and sum are cumulative
+   over the server's life, so `sum / count` is the lifetime mean and includes
+   the warm-up fills recorded in `before`; the exported max covers roughly the
+   last 2–3 minutes and p50 / p99 roughly the last 40–60 seconds; counts are compared as
+   `after − before`. Hit share is hits / (hits + misses).
 3. **Host-side samples**, for the host-shape change: from the same file,
    `.replay_evidence.resource_samples[]` gives `subject_cpuset_utilization`,
    `host_mem_available_kb` and `host_load1` per 10-second sample. Report subject
@@ -238,7 +240,8 @@ are the grader's `after − before` deltas, `headroom.cache_fills_delta` and
 | NARA s7cmd `s7cmd.8b7670175058.s1` | 2 / `545a10cb` | n4-highcpu-32 | 20/20 | 1.3/86 ms, 0% | – | 3.3/50 ms, 0% | 0.3% / 0.2% | 1.13 GiB | 73 MiB | 0 | 1,400 / 13,355 | 603.3 |
 | FourCast s5cmd `s5cmd.c6cfb2bf8dd8.s1` | 2 / `545a10cb` | n4-highcpu-16 | 8/8 | 0.2/85 ms, 0% | – | – | 0.5% / 0.6% | 0.98 GiB | 0.5 MiB | 0 | 316 / 4,080 | 445.1 |
 
-Wave 3's README holds the lifetime fill timer (mean / p50 / p99 / max) for
+Wave 3's README holds the fill timer (lifetime mean; end-of-run windowed p50 /
+p99 / max) for
 `swath.07cb7eabf980.s1`: 12.9 / 9.4 / 43.0 / 138.0 ms over 58,856 fills.
 
 ## Before submitting
@@ -398,7 +401,7 @@ EOF
 check() {
   uv run python benchmark/src/benchmark/campaign.py --state "$STATE/campaign.db" poll
   uv run python benchmark/src/benchmark/campaign.py --state "$STATE/campaign.db" status | grep goq4-
-  gcloud batch jobs list --project varve-oss --location us-east1 \
+  gcloud batch jobs list --project <project> --location us-east1 \
     --filter='labels.suite=go-replay-qualify' --format=json > "$STATE/jobs-now.json"
   python3 -I "$STATE/accrue.py" "$STATE/jobs-now.json" "$(cat "$STATE/wave4-start.txt")"
 }
@@ -407,11 +410,11 @@ submit_stage() {
     uv run python benchmark/src/benchmark/campaign.py --state "$STATE/campaign.db" submit \
       --suite go-replay-qualify --group "goq4-$plan" \
       --plan "$W4/$plan"/*.yaml \
-      --project varve-oss --location us-east1 --zone us-east1-b \
-      --results-bucket s3-listing-study-results-29c02004 --image-set "$STATE/images.json" \
-      --anonymous-worker-sa s3-listing-study-worker@varve-oss.iam.gserviceaccount.com \
-      --network projects/varve-oss/global/networks/s3-listing-study \
-      --subnetwork projects/varve-oss/regions/us-east1/subnetworks/s3-listing-study-us-east1 \
+      --project <project> --location us-east1 --zone us-east1-b \
+      --results-bucket <result-store> --image-set "$STATE/images.json" \
+      --anonymous-worker-sa <anonymous-worker-sa> \
+      --network <network> \
+      --subnetwork <subnetwork> \
       --provisioning SPOT --boot-disk-gb 200 || return 1
   done
 }
@@ -438,11 +441,11 @@ uv run python benchmark/src/benchmark/campaign.py --state "$STATE/campaign.db" c
 
 uv run python benchmark/src/benchmark/campaign.py --state "$STATE/campaign.db" retry \
   --group goq4-PLAN \
-  --project varve-oss --location us-east1 --zone us-east1-b \
-  --results-bucket s3-listing-study-results-29c02004 --image-set "$STATE/images.json" \
-  --anonymous-worker-sa s3-listing-study-worker@varve-oss.iam.gserviceaccount.com \
-  --network projects/varve-oss/global/networks/s3-listing-study \
-  --subnetwork projects/varve-oss/regions/us-east1/subnetworks/s3-listing-study-us-east1 \
+  --project <project> --location us-east1 --zone us-east1-b \
+  --results-bucket <result-store> --image-set "$STATE/images.json" \
+  --anonymous-worker-sa <anonymous-worker-sa> \
+  --network <network> \
+  --subnetwork <subnetwork> \
   --provisioning SPOT --boot-disk-gb 200
 ```
 
@@ -545,10 +548,11 @@ holds 400.
 `s7cmd.5c9e1f4d4685.s1` the lifetime mean (`sum_ms` / `count`, 14.1 ms) exceeds
 the exported `max_ms` (13.9 ms), and across the run's last interval samples
 `max_ms` falls from 19.7 to 13.9 ms while the count rises: the server's timer
-max (and, by the same evidence, its quantiles) decays over a recent window.
-Only count and mean are lifetime figures here. This also applies to the p50 /
-p99 / max columns in wave 3's README, which call them lifetime; read those as
-end-of-run windowed values.
+max decays over a recent window. Per the server's meter registry (swath
+`go/internal/replay/metrics/window.go`), the max covers roughly the last 2–3
+minutes and the percentiles roughly the last 40–60 seconds; only count and
+mean (`sum / count`) are lifetime figures. Wave 3's p50 / p99 / max columns
+are the same end-of-run windowed values.
 
 Host-side samples (`replay_evidence.resource_samples[]`):
 

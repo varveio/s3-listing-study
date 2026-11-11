@@ -30,7 +30,7 @@ The s7cmd Java side uses the explicitly authorized retained release image
 Its original image
 `ghcr.io/varveio/swath-replay@sha256:8fb53a327f946f10db17d4fd082a7b2e06bc678a1e828a197a1ef5717473a46a`
 returned manifest unknown and was absent from the project registry. This pair
-measures treatment delivery on that cell, not reproduction of its exact release
+grades server-side timing on that cell, not reproduction of its exact release
 server. All other Java server digests are the source row's exact image.
 
 All pairs share worker digest

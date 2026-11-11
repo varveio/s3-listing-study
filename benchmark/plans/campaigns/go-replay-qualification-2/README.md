@@ -15,7 +15,7 @@ delimited listing decoded a key page per emitted common prefix. The fix is the
 SeekParquet list boundary index (seekparquet PR #33, unmerged), which the Go
 server builds at startup over a SeekParquet dataset (swath branch
 `go/replay-list-index`, `bcd2a9d4`). This wave asks whether the index lets the
-same cells, at the same allocations, deliver their treatment. A same-wave index-off control separates the index
+same cells, at the same allocations, pass the timing grade. A same-wave index-off control separates the index
 effect from the fixture-format change.
 
 ## What changes from wave 1, and what does not
@@ -54,7 +54,7 @@ changes; the added index-off control is described below:
 Unchanged: subject settings, concurrency, machine shapes (n4-highcpu-80 /
 -32 / -16), subject and replay cpusets and memory, reader-decode ceiling 128 on
 blockchain, 4,096 request slots, 1 GiB response budget, 192 cache windows of
-12,500 rows, latency deadlines, declared warm-up, the delivered-treatment grader
+12,500 rows, latency deadlines, declared warm-up, the timing grader
 and its thresholds.
 
 There is no Java replay-server arm: the Java server does not serve a
@@ -102,11 +102,11 @@ index-on blockchain repetition.
    uv run python benchmark/src/benchmark/campaign.py --state "$STATE/campaign.db" submit \
      --suite go-replay-qualify --group goq2-<plan> \
      --plan benchmark/plans/campaigns/go-replay-qualification-2/<plan>/<bucket>.yaml \
-     --project varve-oss --location us-east1 --zone us-east1-b \
-     --results-bucket s3-listing-study-results-29c02004 --image-set "$STATE/images.json" \
-     --anonymous-worker-sa s3-listing-study-worker@varve-oss.iam.gserviceaccount.com \
-     --network projects/varve-oss/global/networks/s3-listing-study \
-     --subnetwork projects/varve-oss/regions/us-east1/subnetworks/s3-listing-study-us-east1 \
+     --project <project> --location us-east1 --zone us-east1-b \
+     --results-bucket <result-store> --image-set "$STATE/images.json" \
+     --anonymous-worker-sa <anonymous-worker-sa> \
+     --network <network> \
+     --subnetwork <subnetwork> \
      --provisioning SPOT --boot-disk-gb 200 --dry-run
    ```
 
@@ -134,7 +134,7 @@ $13.55). These are estimates, not an invoice.
 
 Images, recorded before submission:
 
-- Go replay: `us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:3b3584460761de559c07e73b79c4aa7bffd77318108fdbf12ae36c41a98933b5`
+- Go replay: `<study-registry>/swath-replay@sha256:3b3584460761de559c07e73b79c4aa7bffd77318108fdbf12ae36c41a98933b5`
   (tag `go-545a10cb`), built from a clean detached worktree of Swath main
   `545a10cbdada373419e105202dc8cd9be57f4fa3` (PR #425, pins seekparquet
   `6acba1a`) with `docker build -f Dockerfile.go --target swath-replay
@@ -143,7 +143,7 @@ Images, recorded before submission:
   `-list-index-max-bytes`. A local smoke over the staged NARA dataset printed
   `state=built ... has_index=true seconds=1.094`. The merged line adds
   `has_index`, which the harness reads since `1a0f845`.
-- Toolbox worker: `us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:a878e4296bb7c07816eb4437b78f1209c9698e5c3ce891caf53cffe1a7a40e85`
+- Toolbox worker: `<study-registry>/benchmark-toolbox@sha256:a878e4296bb7c07816eb4437b78f1209c9698e5c3ce891caf53cffe1a7a40e85`
   (tag `go-replay-qualification-2`), built by `benchmark/src/benchmark/build_image.py`
   at clean harness revision `1a0f845d7798b84771f85425a6f3dc8dcc6f5e33`, toolbox
   manifest `e44c4056…125f`; the image set was emitted by the same tool.

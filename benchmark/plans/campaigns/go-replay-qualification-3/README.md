@@ -25,7 +25,7 @@ caches each checked value-column OffsetIndex instead of reloading it per request
 SeekParquet's borrowed batches instead of an owning read and a copy (it pins
 seekparquet `b1c848a`). The diagnosis behind these changes comes from local
 profiling in private working notes, not from a committed run. This wave asks whether the rebuilt server
-delivers the blockchain treatment at the same allocations, and whether the
+passes the timing grade on blockchain at the same allocations, and whether the
 16 vCPU / 5 GiB rung now leaves enough headroom for the replay downsizing
 decision on SeekParquet fixtures (wave 1's ladder showed 16-vCPU headroom on the
 Java-era parts only).
@@ -94,7 +94,7 @@ manifest `c4a42eb4…2b29`, adopted from `f4a839f2…d4b0`), the subject (Swath 
 be reused: no harness source changed since `1a0f845`), machine shape, subject and
 replay cpusets and memory, list-index settings, reader-decode ceiling 128, 4,096
 request slots, 1 GiB response budget, 192 cache windows of 12,500 rows, latency
-deadlines, declared warm-up, and the delivered-treatment grader and its
+deadlines, declared warm-up, and the timing grader and its
 thresholds.
 
 ## Predeclared reading
@@ -138,15 +138,18 @@ cost):
    (counters, by `reason`):
 
    ```sh
-   gcloud storage cat gs://s3-listing-study-results-29c02004/go-replay-qualify/aws-public-blockchain/ATTEMPT_ID/result.json \
+   gcloud storage cat <result-store>/go-replay-qualify/aws-public-blockchain/ATTEMPT_ID/result.json \
      | jq -c '.replay_evidence as $e | ("before","after") as $w
          | $e[$w].metrics.meters[]
          | select(.name | test("^swath\\.replay\\.prefetch\\.window\\.(fill|hit|miss)$"))
          | {at: $w, name, tags, count, mean_ms, p50_ms, p99_ms, max_ms}'
    ```
 
-   Timer quantiles are server-lifetime values (they include the 400 warm-up
-   fills recorded in `before`); counts are compared as `after − before`.
+   Timer windows differ by statistic (swath `go/internal/replay/metrics/window.go`): count and sum are cumulative
+   over the server's life, so `sum / count` is the lifetime mean and includes
+   the warm-up fills recorded in `before`; the exported max covers roughly the
+   last 2–3 minutes and p50 / p99 roughly the last 40–60 seconds; counts are compared as
+   `after − before`.
 3. **The `list_index` server lines**, exported from Cloud Logging and attached
    with `benchmark.receipt --server-log`, as in wave 2.
 
@@ -179,11 +182,11 @@ control with `2076e4dd8761`; the 16/5 rung with `5d9e6e396e48`.
    uv run python benchmark/src/benchmark/campaign.py --state "$STATE/campaign.db" submit \
      --suite go-replay-qualify --group goq3-<plan> \
      --plan benchmark/plans/campaigns/go-replay-qualification-3/<plan>/aws-public-blockchain.yaml \
-     --project varve-oss --location us-east1 --zone us-east1-b \
-     --results-bucket s3-listing-study-results-29c02004 --image-set "$STATE/images.json" \
-     --anonymous-worker-sa s3-listing-study-worker@varve-oss.iam.gserviceaccount.com \
-     --network projects/varve-oss/global/networks/s3-listing-study \
-     --subnetwork projects/varve-oss/regions/us-east1/subnetworks/s3-listing-study-us-east1 \
+     --project <project> --location us-east1 --zone us-east1-b \
+     --results-bucket <result-store> --image-set "$STATE/images.json" \
+     --anonymous-worker-sa <anonymous-worker-sa> \
+     --network <network> \
+     --subnetwork <subnetwork> \
      --provisioning SPOT --boot-disk-gb 200 --dry-run
    ```
 
@@ -224,7 +227,7 @@ These are estimates, not an invoice.
 
 Images, recorded before submission:
 
-- Go replay: `us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90`
+- Go replay: `<study-registry>/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90`
   (tag `go-43ffab2f`), built from a clean detached worktree of Swath main
   `43ffab2f8c2c11041daba71273451bdf66190fc7` (PR #443, pins seekparquet
   `b1c848a`) with `docker build -f Dockerfile.go --target swath-replay
@@ -235,7 +238,7 @@ Images, recorded before submission:
   dataset printed `state=built ... has_index=true seconds=0.684` and served a
   flat and a `delimiter=/` ListObjectsV2 page.
 - Toolbox worker: wave 2's, unchanged:
-  `us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:a878e4296bb7c07816eb4437b78f1209c9698e5c3ce891caf53cffe1a7a40e85`
+  `<study-registry>/benchmark-toolbox@sha256:a878e4296bb7c07816eb4437b78f1209c9698e5c3ce891caf53cffe1a7a40e85`
   (harness `1a0f845d7798b84771f85425a6f3dc8dcc6f5e33`), with wave 2's emitted
   image set copied unchanged.
 
@@ -264,7 +267,10 @@ Per-shape cells are mean server service time / deadline, then overrun %.
 Server RSS is the lifetime VmHWM (includes startup, index build and warm-up).
 
 Window-cache meters at the end of each run (`replay_evidence.after` in the
-bound `result.json`; lifetime timers, so the 400 warm-up fills are included).
+bound `result.json`). Count and mean are cumulative over the server's life and
+include the 400 warm-up fills; p50 / p99 cover roughly the last 40–60 seconds
+and max roughly the last 2–3 minutes of the run, not the whole run (see wave
+4's README).
 Hit share is hits / (hits + misses).
 
 | Attempt | Wave | Server / fixture / replay | fill count | fill mean / p50 / p99 / max ms | hit | miss cold / continuation | Hit share |
