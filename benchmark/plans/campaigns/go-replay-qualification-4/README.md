@@ -2,7 +2,8 @@
 
 Bounded diagnostic qualification of the replay instrument. Varve maintains this
 study and builds Swath; Swath here is the Java 0.3.2 listing subject, never
-Swath-Go. This is not a calibrated benchmark or a ranking. **Not submitted.**
+Swath-Go. This is not a calibrated benchmark or a ranking. Results are at the
+end (*Results (2026-11-11)*).
 
 ## Why a fourth wave
 
@@ -462,3 +463,172 @@ it changes; job names are `go-replay-qualify-<tool>-<case>-s<n>`):
 | B | nara-s7cmd-go-16-5 | `s7cmd.3f553acb0aca.s1` | n4-highcpu-32 | 3005s |
 | B | nara-s7cmd-go-8-4 | `s7cmd.5c9e1f4d4685.s1` | n4-highcpu-32 | 3005s |
 | B | fourcast-s5cmd-go-8-4 | `s5cmd.37412f5e21c0.s1` | n4-highcpu-16 | 3005s |
+
+## Results (2026-11-11)
+
+Eleven Spot jobs in two stages: stage A (three controls, blockchain 16/5 pair)
+submitted 00:18 UTC; stage B (six rungs) submitted 00:34 UTC once stage A was
+terminal at $0.3470 of compute (gate $0.60). All SUCCEEDED by 00:47 UTC with no
+preemption, resubmission or cancellation, and neither stop rule fired. Receipt
+(job UIDs, create and terminal times):
+[`../../../receipts/go-replay-qualification-4-cloud-20261111/`](../../../receipts/go-replay-qualification-4-cloud-20261111/README.md).
+Every subject exited zero with the expected rows (blockchain 143,008,674, NARA
+13,540,310, FourCast 4,081,170), with zero HTTP errors and zero admission and
+serving refusals, and every receipt reports `list_index.delivered: true` with no
+disagreement between the attached `state=built` server line and the meters.
+Observed compute is $0.8313 charging create-to-terminal ($0.7243 by
+`runDuration`), against the $0.87 estimate and the $3 cap.
+
+Per-shape cells are mean server service time / deadline, then overrun %.
+
+| Job | Host | Replay | Grade | worker_page | pivot_probe | structure_probe | Index skips / dense-page declines | Build s | CPU mean / p90 | Server RSS (of ceiling) | Resp. peak | Parquet errors | Wall s | Cost |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| NARA Swath `swath.ca43fae5e517.s1` (control) | n4-highcpu-32 | 20/20 | TIMING_VALID | 0.3/86 ms, 0% | 0.3/44 ms, 0% | 0.7/50 ms, 0% | 190 / 50,679 | 0.34 | 1.8% / 3.8% | 1.03 GiB (5%) | 63 MiB | 0 | 63.9 | $0.029 |
+| NARA Swath `swath.73401a67238f.s1` | n4-highcpu-32 | 16/5 | TIMING_VALID | 0.4/86 ms, 0% | 0.4/44 ms, 0% | 1.0/50 ms, 0% | 254 / 50,585 | 0.42 | 2.8% / 5.5% | 1.02 GiB (20%) | 63 MiB | 0 | 64.4 | $0.036 |
+| NARA Swath `swath.bc04b205a545.s1` | n4-highcpu-32 | 8/4 | TIMING_VALID | 0.5/86 ms, 0% | 0.4/44 ms, 0% | 1.1/50 ms, 0% | 257 / 50,734 | 0.50 | 6.6% / 12.9% | 1.02 GiB (26%) | 62 MiB | 0 | 66.0 | $0.030 |
+| NARA s7cmd `s7cmd.f93baa7f7142.s1` (control) | n4-highcpu-32 | 20/20 | TIMING_VALID | 0.6/86 ms, 0% | – | 2.5/50 ms, 0% | 4 / 261 | 0.42 | 0.2% / 0.2% | 1.04 GiB (5%) | 74 MiB | 0 | 603.5 | $0.147 |
+| NARA s7cmd `s7cmd.3f553acb0aca.s1` | n4-highcpu-32 | 16/5 | TIMING_VALID | 0.9/86 ms, 0% | – | 2.8/50 ms, 0% | 4 / 261 | 0.51 | 0.3% / 0.2% | 1.00 GiB (20%) | 75 MiB | 0 | 607.4 | $0.149 |
+| NARA s7cmd `s7cmd.5c9e1f4d4685.s1` | n4-highcpu-32 | 8/4 | TIMING_VALID | 1.1/86 ms, 0% | – | 2.7/50 ms, 0% | 4 / 261 | 0.48 | 0.6% / 0.5% | 0.99 GiB (25%) | 71 MiB | 0 | 604.1 | $0.151 |
+| FourCast s5cmd `s5cmd.55ee5e4c62b8.s1` (control) | n4-highcpu-16 | 8/8 | TIMING_VALID | 0.2/85 ms, 0% | – | – | 0 / 0 | 0.12 | 0.3% / 0.5% | 0.97 GiB (12%) | 0.5 MiB | 0 | 435.2 | $0.056 |
+| FourCast s5cmd `s5cmd.37412f5e21c0.s1` | n4-highcpu-16 | 8/4 | TIMING_VALID | 0.2/85 ms, 0% | – | – | 0 / 0 | 0.12 | 0.4% / 0.5% | 0.99 GiB (25%) | 0.5 MiB | 0 | 444.8 | $0.057 |
+| blockchain c256 `swath.b9c1ed5ae8a2.s1` | n4-highcpu-32 | 16/5 | TIMING_VALID | 7.9/94 ms, 0.164% | 1.5/46 ms, 0.091% | 0.7/55 ms, 0% | 11,363 / 61,481 | 3.15 | 28.9% / 47.4% | 1.79 GiB (36%) | 128 MiB | 2 | 154.1 | $0.060 |
+| blockchain c256 `swath.b9c1ed5ae8a2.s2` | n4-highcpu-32 | 16/5 | TIMING_VALID | 7.0/94 ms, 0.029% | 1.3/46 ms, 0.181% | 0.5/55 ms, 0% | 11,092 / 61,526 | 2.49 | 29.4% / 50.6% | 1.76 GiB (35%) | 128 MiB | 0 | 138.2 | $0.056 |
+| blockchain c256 `swath.c1505ec66d66.s1` | n4-highcpu-32 | 8/4 | PRESSURE_DEGRADED | 13.6/94 ms, 3.88% | 3.7/46 ms, 2.59% | 0.8/55 ms, 0% | 10,435 / 61,522 | 3.82 | 51.3% / 82.6% | 1.50 GiB (37%) | 128 MiB | 16 | 146.7 | $0.061 |
+
+Server RSS is the lifetime VmHWM (includes startup, index build and warm-up),
+shown against the replay container ceiling. Response-buffer peaks are against
+the 1 GiB budget (128 MiB is 12.5%). Parquet errors are
+`headroom.parquet_errors_delta`, reported, not gated.
+
+Wall-time agreement (each against both predeclared references; the band is
+±10%):
+
+| Cell | Rung | Wall s | vs wave-1 Java median | vs second reference |
+| --- | --- | --- | --- | --- |
+| NARA Swath | control 20/20 | 63.9 | −1.0% (64.5 s) | – |
+| NARA Swath | 16/5 | 64.4 | −0.2% | +0.8% vs control |
+| NARA Swath | 8/4 | 66.0 | +2.2% | +3.2% vs control |
+| NARA s7cmd | control 20/20 | 603.5 | +0.2% (602.2 s) | – |
+| NARA s7cmd | 16/5 | 607.4 | +0.9% | +0.6% vs control |
+| NARA s7cmd | 8/4 | 604.1 | +0.3% | +0.1% vs control |
+| FourCast s5cmd | control 8/8 | 435.2 | +3.5% (420.6 s) | – |
+| FourCast s5cmd | 8/4 | 444.8 | +5.8% | +2.2% vs control |
+| blockchain c256 | 16/5 s1 | 154.1 | −0.8% (155.3 s) | +2.4% vs wave-3 Go 64/20 median (150.5 s) |
+| blockchain c256 | 16/5 s2 | 138.2 | **−11.0%** | −8.2% vs 150.5 s |
+| blockchain c256 | 8/4 | 146.7 | −5.5% | −2.5% vs 150.5 s |
+
+Against wave 2's Go runs (cross-image), the controls are −0.9% (NARA Swath),
++0.0% (s7cmd) and −2.2% (FourCast). Blockchain against wave 3's 16/5 rung on
+n4-highcpu-80 (149.3 s): +3.3% (s1), −7.4% (s2), −1.7% (8/4).
+
+Window-cache meters at the end of each run (`replay_evidence.after` in the bound
+`result.json`). Hit share is hits / (hits + misses). The NARA and FourCast plans
+declare no warm-up, so their `before` holds no fills; each blockchain `before`
+holds 400.
+
+| Attempt | Replay | fill count | fill mean ms (sum / count) | fill p50 / p99 / max ms (exported) | hit | miss cold / continuation | Hit share |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| NARA Swath `swath.ca43fae5e517.s1` | 20/20 | 3,139 | 3.3 | 2.2 / 10.5 / 21.0 | 13,104 | 1,474 / 536 | 86.7% |
+| NARA Swath `swath.73401a67238f.s1` | 16/5 | 3,150 | 4.1 | 2.8 / 12.6 / 26.3 | 13,093 | 1,471 / 548 | 86.6% |
+| NARA Swath `swath.bc04b205a545.s1` | 8/4 | 3,229 | 4.3 | 2.9 / 13.4 / 31.7 | 13,075 | 1,538 / 551 | 86.2% |
+| NARA s7cmd `s7cmd.f93baa7f7142.s1` | 20/20 | 1,385 | 8.7 | 7.2 / 9.2 / 13.1 | 13,370 | 256 / 88 | 97.5% |
+| NARA s7cmd `s7cmd.3f553acb0aca.s1` | 16/5 | 1,385 | 9.7 | 8.4 / 10.4 / 14.3 | 13,370 | 256 / 88 | 97.5% |
+| NARA s7cmd `s7cmd.5c9e1f4d4685.s1` | 8/4 | 1,388 | 14.1 | 7.5 / 8.6 / 13.9 | 13,367 | 256 / 91 | 97.5% |
+| FourCast s5cmd `s5cmd.55ee5e4c62b8.s1` | 8/8 | 316 | 16.4 | 14.9 / 18.5 / 18.5 | 4,080 | 1 / 1 | 99.95% |
+| FourCast s5cmd `s5cmd.37412f5e21c0.s1` | 8/4 | 316 | 16.8 | 16.0 / 19.3 / 19.3 | 4,080 | 1 / 1 | 99.95% |
+| blockchain `swath.b9c1ed5ae8a2.s1` | 16/5 | 58,091 | 13.7 | 10.2 / 40.9 / 129.0 | 98,723 | 10,026 / 42,501 | 65.3% |
+| blockchain `swath.b9c1ed5ae8a2.s2` | 16/5 | 60,766 | 12.2 | 8.0 / 32.5 / 123.8 | 95,554 | 9,098 / 46,661 | 63.1% |
+| blockchain `swath.c1505ec66d66.s1` | 8/4 | 56,104 | 15.3 | 9.4 / 67.1 / 256.3 | 101,977 | 12,906 / 36,407 | 67.4% |
+| wave 3 `swath.07cb7eabf980.s1` (n4-highcpu-80) | 16/5 | 58,856 | 12.9 | 9.4 / 43.0 / 138.0 | 97,986 | 9,618 / 43,674 | 64.8% |
+
+**The exported timer quantiles and max are not lifetime values.** On
+`s7cmd.5c9e1f4d4685.s1` the lifetime mean (`sum_ms` / `count`, 14.1 ms) exceeds
+the exported `max_ms` (13.9 ms), and across the run's last interval samples
+`max_ms` falls from 19.7 to 13.9 ms while the count rises: the server's timer
+max (and, by the same evidence, its quantiles) decays over a recent window.
+Only count and mean are lifetime figures here. This also applies to the p50 /
+p99 / max columns in wave 3's README, which call them lifetime; read those as
+end-of-run windowed values.
+
+Host-side samples (`replay_evidence.resource_samples[]`):
+
+| Attempt | Host | Subject cpuset mean / max | Min available host memory | Max load1 | Parquet readers peak / pool |
+| --- | --- | --- | --- | --- | --- |
+| NARA Swath `swath.ca43fae5e517.s1` | n4-highcpu-32 | 15.8% / 32.1% | 60.2 GiB | 0.96 | 16 / 64 |
+| NARA Swath `swath.73401a67238f.s1` | n4-highcpu-32 | 18.5% / 35.0% | 59.9 GiB | 1.83 | 17 / 64 |
+| NARA Swath `swath.bc04b205a545.s1` | n4-highcpu-32 | 19.8% / 37.6% | 60.0 GiB | 2.24 | 11 / 64 |
+| NARA s7cmd `s7cmd.f93baa7f7142.s1` | n4-highcpu-32 | 2.3% / 38.6% | 60.4 GiB | 1.13 | 64 / 64 |
+| NARA s7cmd `s7cmd.3f553acb0aca.s1` | n4-highcpu-32 | 2.6% / 43.8% | 60.4 GiB | 1.15 | 44 / 64 |
+| NARA s7cmd `s7cmd.5c9e1f4d4685.s1` | n4-highcpu-32 | 2.2% / 37.3% | 60.5 GiB | 1.23 | 64 / 64 |
+| FourCast s5cmd `s5cmd.55ee5e4c62b8.s1` | n4-highcpu-16 | 5.2% / 5.6% | 29.4 GiB | 0.86 | 1 / 8 |
+| FourCast s5cmd `s5cmd.37412f5e21c0.s1` | n4-highcpu-16 | 5.7% / 6.2% | 29.4 GiB | 0.70 | 1 / 8 |
+| blockchain `swath.b9c1ed5ae8a2.s1` | n4-highcpu-32 | 70.9% / 90.2% | 58.1 GiB | 16.79 | 64 / 128 |
+| blockchain `swath.b9c1ed5ae8a2.s2` | n4-highcpu-32 | 65.7% / 85.3% | 58.5 GiB | 12.27 | 65 / 128 |
+| blockchain `swath.c1505ec66d66.s1` | n4-highcpu-32 | 69.3% / 89.1% | 58.4 GiB | 11.54 | 79 / 128 |
+| wave 3 `swath.07cb7eabf980.s1` | n4-highcpu-80 | 69.2% / 86.7% | 151.9 GiB | 14.86 | 68 / 128 |
+
+Reader peaks are sampled gauges, not true peaks; one-minute load counts every
+runnable thread on the box, the replay and subject included.
+
+### Reading, per cell
+
+Every control qualified (TIMING_VALID, expected rows, index delivered, within
+±10% of the wave-1 Java median), so each NARA and FourCast rung is compared
+against a same-image control.
+
+| Cell | Tested rungs (host) | Smallest qualifying tested rung on the smallest fitting catalogued N4 highcpu host | Recommendation headroom |
+| --- | --- | --- | --- |
+| blockchain Swath c256 | 16/5 ×2 TIMING_VALID; 8/4 PRESSURE_DEGRADED (n4-highcpu-32) | **16/5 on n4-highcpu-32** | **Not met as predeclared**: CPU (28.9-29.4% / 47.4-50.6%), RSS (35-36%) and response buffer (12.5%) are inside, but `s2`'s wall is −11.0% against the Java median (−8.2% against the Go median) |
+| NARA Swath c128 | control 20/20, 16/5, 8/4 all TIMING_VALID (n4-highcpu-32) | **8/4 on n4-highcpu-32** | Met: 6.6% / 12.9% CPU, 26% RSS, 6% response buffer, +2.2% / +3.2% wall |
+| NARA s7cmd c64 | control 20/20, 16/5, 8/4 all TIMING_VALID (n4-highcpu-32) | **8/4 on n4-highcpu-32** | Met: 0.6% / 0.5% CPU (max 9.6%), 25% RSS, 7% response buffer, +0.3% / +0.1% wall |
+| FourCast s5cmd | control 8/8, 8/4 TIMING_VALID (n4-highcpu-16) | **8/4 on n4-highcpu-16** (memory only) | Met: 0.4% / 0.5% CPU, 25% RSS, under 0.1% response buffer, +5.8% / +2.2% wall |
+
+**Blockchain.** Both 16/5 repetitions on n4-highcpu-32 grade TIMING_VALID:
+worker pages 7.9 and 7.0 ms (0.164% and 0.029% overrun), pivot probes 0.091%
+and 0.181%, all under the 1% threshold, against wave 3's single 16/5 run on
+n4-highcpu-80 (8.0 ms, 0.056%; pivot 0%). Replay CPU (28.9-29.4% mean), server
+RSS (1.76-1.79 GiB), subject cpuset use (65.7-70.9% mean) and window-fill means
+(12.2-13.7 ms) sit at wave 3's levels. This tests the combined host-shape
+change at a fixed allocation; it does not separate disk limits, page cache,
+memory bandwidth, placement or background host work, and it is cross-day. The
+rung qualifies, but the predeclared recommendation condition requires each
+repetition's wall within ±10% of both references, and `s2` (138.2 s) is 11.0%
+under the wave-1 Java median while `s1` (154.1 s) is within 1%. The rung's
+median, 146.1 s (−5.9% and −2.9%), would be inside both bands; that reading was
+not predeclared, so this wave makes no blockchain downsizing recommendation and
+leaves the choice between the two readings to the owner. The two repetitions,
+identical in configuration and host shape, differ by 16 s (11%); this wave does
+not explain that spread.
+
+The 8/4 rung **failed the timing gate**: PRESSURE_DEGRADED with 3.88% of worker
+pages and 2.59% of pivot probes over their deadlines, replay cpuset p90 82.6%
+(also over the 80% headroom limit), server RSS 1.50 GiB of 4 GiB, and 16
+parquet-reader errors against 0-2 at 16/5. The 16/5 → 8/4 step changes CPU and
+memory together, with GOMAXPROCS, GOMEMLIMIT and placement; no separate CPU or
+memory effect is inferred. Since 16/5 qualified and 8/4 failed, the result is
+monotonic.
+
+**NARA Swath and s7cmd.** Both rungs qualify on the unchanged n4-highcpu-32
+host, with zero overrun on every shape and walls within 0.1-3.2% of the
+control. Service times rise as the replay shrinks (NARA Swath worker pages
+0.3 → 0.4 → 0.5 ms; s7cmd 0.6 → 0.9 → 1.1 ms) and stay under 2% of their
+deadlines. The s7cmd 8/4 window-fill mean rose to 14.1 ms against 8.7 ms in
+its control with the median unchanged (7.5 against 7.2 ms), so a few fills were
+slow; worker pages were unaffected. Sampled parquet readers reached the
+64-reader pool in the s7cmd control and 8/4 runs, as in wave 2 (64). NARA Swath
+runs had six resource samples each, enough for the grader.
+
+**FourCast.** 8/4 differs from its control only in replay memory (and
+GOMEMLIMIT) on the same host and cpusets; it qualifies with 0.99 GiB peak RSS
+of 4 GiB and a wall 2.2% above the control.
+
+**What the result supports.** For NARA Swath, NARA s7cmd and FourCast, replay
+8 vCPU / 4 GiB is the smallest qualifying tested rung on the smallest fitting
+catalogued host and meets recommendation headroom: a bounded, single-repetition
+diagnostic input to a separate run-spec review, with NARA staying on
+n4-highcpu-32 and FourCast on n4-highcpu-16 (neither host shrinks). For
+blockchain, 16/5 is the smallest qualifying tested rung on n4-highcpu-32 (two
+repetitions); it does not meet the predeclared recommendation condition
+because of one repetition's wall. Smaller replay allocations were not tested.
+Comparisons with waves 1-3 are cross-day; with wave 2 also cross-image. These
+support bounded diagnostic statements, not precision claims.
