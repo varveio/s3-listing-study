@@ -2515,8 +2515,15 @@ def test_wave3_plans_render_the_pinned_window_fill_image(tmp_path: Path) -> None
 WAVE4 = ROOT / "benchmark/plans/campaigns/go-replay-qualification-4"
 # Each wave-4 plan: its counterpart plan, then the host vCPUs, replay vCPUs, replay
 # GiB and repetitions it declares. Blockchain's counterpart is wave 3's 16/5 rung
-# (same image); NARA and FourCast last ran in wave 2, on the wave-2 image.
+# (same image); NARA and FourCast last ran in wave 2, on the wave-2 image, so each
+# gets a same-image control at its wave-2 allocation.
+WAVE4_CONTROLS = {
+    "fourcast-s5cmd-go-8-8": (WAVE2 / "fourcast-s5cmd-go", 16, 8, 8, 1),
+    "nara-s7cmd-go-20-20": (WAVE2 / "nara-s7cmd-go", 32, 20, 20, 1),
+    "nara-swath-go-20-20": (WAVE2 / "nara-swath-go", 32, 20, 20, 1),
+}
 WAVE4_CELLS = {
+    **WAVE4_CONTROLS,
     "blockchain-swath-go-16-5": (WAVE3 / "blockchain-ladder-go", 32, 16, 5, 2),
     "blockchain-swath-go-8-4": (WAVE3 / "blockchain-ladder-go", 32, 8, 4, 1),
     "fourcast-s5cmd-go-8-4": (WAVE2 / "fourcast-s5cmd-go", 16, 8, 4, 1),
@@ -2584,6 +2591,34 @@ def test_wave4_plans_differ_from_their_counterparts_only_in_replay_allocation_an
             assert case4 == expected
 
 
+def test_wave4_controls_differ_from_their_wave2_cells_only_in_the_replay_image() -> None:
+    """Each same-image control is its wave-2 case with only wave 3's server image, and
+    every downsized NARA or FourCast rung has the control of its own cell."""
+    for name, (source, *_) in WAVE4_CONTROLS.items():
+        (path,) = (WAVE4 / name).glob("*.yaml")
+        control = campaign.load_campaign_plan(path)
+        wave2 = campaign.load_campaign_plan(source / path.name)
+        assert control.replay is not None and wave2.replay is not None
+        assert _with_wave2_image(control.replay) == wave2.replay
+        for case4, case2 in zip(control.cases, wave2.cases, strict=True):
+            assert case4.replay is not None
+            assert replace(case4, replay=_with_wave2_image(case4.replay)) == case2
+    wave2_cells = {source for source, *_ in WAVE4_CELLS.values() if source.parent == WAVE2}
+    assert wave2_cells == {source for source, *_ in WAVE4_CONTROLS.values()}
+
+
+def test_wave4_readme_stages_submit_every_plan_once() -> None:
+    """The README's staged submit loop names every wave-4 plan exactly once, with the
+    controls and the blockchain 16/5 pair in stage A."""
+    readme = (WAVE4 / "README.md").read_text()
+    stages = {}
+    for stage in ("STAGE_A", "STAGE_B"):
+        (line,) = [row for row in readme.splitlines() if row.startswith(f"{stage}=(")]
+        stages[stage] = line.split("(", 1)[1].rstrip(")").split()
+    assert sorted(stages["STAGE_A"] + stages["STAGE_B"]) == sorted(WAVE4_CELLS)
+    assert sorted(stages["STAGE_A"]) == sorted([*WAVE4_CONTROLS, "blockchain-swath-go-16-5"])
+
+
 def test_wave4_hosts_are_the_smallest_n4_highcpu_shape_that_fits() -> None:
     """Every smaller N4 highcpu box in the catalogue refuses the wave-4 allocation, so
     the declared host is the smallest one the subject and replay cpusets fit."""
@@ -2615,7 +2650,7 @@ def test_wave4_hosts_are_the_smallest_n4_highcpu_shape_that_fits() -> None:
 
 
 def test_wave4_plans_render_the_downsized_replay_on_the_declared_hosts(tmp_path: Path) -> None:
-    """Dry render of the committed wave-4 plans: eight attempts on wave 3's image with
+    """Dry render of the committed wave-4 plans: eleven attempts on wave 3's image with
     the list index on; the server gets the declared cpuset and memory, and the subject
     keeps its vCPU count as whole N4 cores and its memory ceiling."""
     images = image_set(tmp_path)
@@ -2667,6 +2702,9 @@ def test_wave4_plans_render_the_downsized_replay_on_the_declared_hosts(tmp_path:
             ("blockchain-swath-go-16-5", 16, 5, 32),
             ("blockchain-swath-go-8-4", 8, 4, 32),
             ("fourcast-s5cmd-go-8-4", 8, 4, 16),
+            ("fourcast-s5cmd-go-8-8", 8, 8, 16),
+            ("nara-s7cmd-go-20-20", 20, 20, 32),
+            ("nara-swath-go-20-20", 20, 20, 32),
             ("nara-s7cmd-go-16-5", 16, 5, 32),
             ("nara-s7cmd-go-8-4", 8, 4, 32),
             ("nara-swath-go-16-5", 16, 5, 32),

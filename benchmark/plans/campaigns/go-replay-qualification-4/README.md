@@ -15,43 +15,43 @@ wave 1's headroom conditions (replay cpuset mean 29.4%, p90 48.0%, server RSS
 on the host the cell already ran on (n4-highcpu-80 for blockchain), not a
 measurement on a smaller VM.
 
-This wave asks, for each heavy cell, what the smallest replay allocation and
-host shape are at which the cell still grades TIMING_VALID, measured on the
-smallest N4 highcpu host the subject and replay cpusets fit. It only measures:
-changing the study's run specs is a separate reviewed change.
+This wave asks, for each heavy cell, which of two tested replay rungs (16/5 and
+8/4) is the smallest that still qualifies, measured on the smallest catalogued
+N4 highcpu host the subject and replay cpusets fit. Smaller replay allocations
+are not tested. It only measures: changing the study's run specs is a separate
+reviewed change.
 
 ## What changes, and what does not
 
-Seven plans, eight jobs. Each plan is a copy of its counterpart with only the
-replay allocation (`replay_vcpus`, `replay_memory_gb`) and the host
-(`vcpus`/`memory_gb`, which resolve the machine type) changed, plus the
-repetitions; blockchain's counterpart is wave 3's `blockchain-ladder-go`, the
-others wave 2's plan of the same cell.
+Ten plans, eleven jobs, one submission group per plan (`goq4-<plan>`), every
+one on wave 3's Go replay image,
+`swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90`
+(Swath main `43ffab2f`, PR #443). Each plan is a copy of its counterpart:
+blockchain's is wave 3's `blockchain-ladder-go` (same image), the others are
+wave 2's plan of the same cell (image `3b358446…`, Swath `545a10cb`).
 
-| Plan | Counterpart | Replay vCPU / GiB | Host | Server cpuset | Subject cpuset | Host remainder | Reps |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `blockchain-swath-go-16-5` | w3 `blockchain-ladder-go` (`swath.07cb7eabf980.s1`) | 16/5 (unchanged) | n4-highcpu-80 → **-32** | `0-7,16-23` | `8-11,24-27` (was `8-11,48-51`) | 8 vCPU / 51 GiB (was 56 / 147) | 2 |
-| `blockchain-swath-go-8-4` | w3 `blockchain-ladder-go` | 16/5 → **8/4** | n4-highcpu-80 → **-32** | `0-3,16-19` | `4-7,20-23` | 16 vCPU / 52 GiB | 1 |
-| `nara-swath-go-16-5` | w2 `nara-swath-go` (`swath.773bf96d14ef.s1`) | 20/20 → **16/5** | n4-highcpu-32 (unchanged) | `0-7,16-23` | `8-11,24-27` (was `10-13,26-29`) | 8 vCPU / 51 GiB (was 4 / 36) | 1 |
-| `nara-swath-go-8-4` | w2 `nara-swath-go` | 20/20 → **8/4** | n4-highcpu-32 | `0-3,16-19` | `4-7,20-23` | 16 vCPU / 52 GiB | 1 |
-| `nara-s7cmd-go-16-5` | w2 `nara-s7cmd-go` (`s7cmd.8b7670175058.s1`) | 20/20 → **16/5** | n4-highcpu-32 | `0-7,16-23` | `8-11,24-27` (was `10-13,26-29`) | 8 vCPU / 51 GiB | 1 |
-| `nara-s7cmd-go-8-4` | w2 `nara-s7cmd-go` | 20/20 → **8/4** | n4-highcpu-32 | `0-3,16-19` | `4-7,20-23` | 16 vCPU / 52 GiB | 1 |
-| `fourcast-s5cmd-go-8-4` | w2 `fourcast-s5cmd-go` (`s5cmd.c6cfb2bf8dd8.s1`) | 8/8 → **8/4** | n4-highcpu-16 (unchanged) | `0-3,8-11` | `4-6,12-14` (unchanged) | 2 vCPU / 12 GiB (was 2 / 8) | 1 |
+| Plan | Role | Counterpart | Replay vCPU / GiB | Host | Server cpuset | Subject cpuset | Host remainder | Reps |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `blockchain-swath-go-16-5` | host change | w3 `blockchain-ladder-go` (`swath.07cb7eabf980.s1`) | 16/5 (unchanged) | n4-highcpu-80 → **-32** | `0-7,16-23` | `8-11,24-27` (was `8-11,48-51`) | 8 vCPU / 51 GiB (was 56 / 147) | 2 |
+| `blockchain-swath-go-8-4` | downsizing rung | w3 `blockchain-ladder-go` | 16/5 → **8/4** | n4-highcpu-80 → **-32** | `0-3,16-19` | `4-7,20-23` | 16 vCPU / 52 GiB | 1 |
+| `nara-swath-go-20-20` | same-image control | w2 `nara-swath-go` (`swath.773bf96d14ef.s1`) | 20/20 (unchanged) | n4-highcpu-32 (unchanged) | `0-9,16-25` | `10-13,26-29` (unchanged) | 4 vCPU / 36 GiB | 1 |
+| `nara-swath-go-16-5` | downsizing rung | w2 `nara-swath-go` | 20/20 → **16/5** | n4-highcpu-32 | `0-7,16-23` | `8-11,24-27` | 8 vCPU / 51 GiB | 1 |
+| `nara-swath-go-8-4` | downsizing rung | w2 `nara-swath-go` | 20/20 → **8/4** | n4-highcpu-32 | `0-3,16-19` | `4-7,20-23` | 16 vCPU / 52 GiB | 1 |
+| `nara-s7cmd-go-20-20` | same-image control | w2 `nara-s7cmd-go` (`s7cmd.8b7670175058.s1`) | 20/20 (unchanged) | n4-highcpu-32 (unchanged) | `0-9,16-25` | `10-13,26-29` (unchanged) | 4 vCPU / 36 GiB | 1 |
+| `nara-s7cmd-go-16-5` | downsizing rung | w2 `nara-s7cmd-go` | 20/20 → **16/5** | n4-highcpu-32 | `0-7,16-23` | `8-11,24-27` | 8 vCPU / 51 GiB | 1 |
+| `nara-s7cmd-go-8-4` | downsizing rung | w2 `nara-s7cmd-go` | 20/20 → **8/4** | n4-highcpu-32 | `0-3,16-19` | `4-7,20-23` | 16 vCPU / 52 GiB | 1 |
+| `fourcast-s5cmd-go-8-8` | same-image control | w2 `fourcast-s5cmd-go` (`s5cmd.c6cfb2bf8dd8.s1`) | 8/8 (unchanged) | n4-highcpu-16 (unchanged) | `0-3,8-11` | `4-6,12-14` (unchanged) | 2 vCPU / 8 GiB | 1 |
+| `fourcast-s5cmd-go-8-4` | downsizing rung | w2 `fourcast-s5cmd-go` | 8/8 → **8/4** | n4-highcpu-16 | `0-3,8-11` | `4-6,12-14` | 2 vCPU / 12 GiB | 1 |
 
 Cpusets are as rendered by the dry run; host remainder is the derived
 `derived_host_headroom` (box minus replay minus subject, `replay.allocation_summary`).
 
-**The NARA and FourCast cells also change server image.** They last ran in
-wave 2, on the `545a10cb` image (`3b358446…`); this wave runs every cell on
-wave 3's image, `swath-replay@sha256:f8b70f0f…9f90` (Swath main `43ffab2f`,
-PR #443), so for those five jobs the image is a second difference from their
-counterpart. There is no same-image run of NARA or FourCast at the wave-2
-allocation. The TIMING_VALID gate is absolute (deadlines, overrun threshold), so
-the per-cell verdict does not depend on a baseline; wall-time and headroom
-comparisons with wave 2 are cross-image and cross-day and are reported as such.
-A same-image control of the three cells at their wave-2 allocations (three jobs,
-about $0.25 at the same pricing as below) would remove that difference; it is
-not part of this wave.
+**Same-image controls.** NARA and FourCast last ran on the wave-2 image, so
+each of their cells gets one control at its wave-2 allocation and host, with
+only the server image changed to wave 3's. Each downsizing rung then differs
+from its cell's control only in the replay allocation (and the host remainder
+that follows from it). The controls also answer, on one repetition, whether
+wave 3's server changes NARA and FourCast at all.
 
 Unchanged in every plan: the SeekParquet fixtures and their adopted digests,
 the subjects (tool, mode, concurrency, capsule config), `subject_vcpus`, the
@@ -63,15 +63,22 @@ thresholds. GOMAXPROCS and GOMEMLIMIT follow the allocation, as in every ladder.
 The toolbox worker and image set are wave 2's (harness `1a0f845`; no harness
 source has changed since).
 
-Three tests in `benchmark/tests/test_campaign.py` check this:
-`test_wave4_plans_differ_from_their_counterparts_only_in_replay_allocation_and_host`
-resolves each wave-4 case and checks it equals its counterpart case once the
-replay vCPUs and memory, host shape and repetitions are set back and the
-counterpart is moved to wave 3's image;
-`test_wave4_hosts_are_the_smallest_n4_highcpu_shape_that_fits` checks that every
-smaller N4 highcpu box in `benchmark/plans/instances.yaml` refuses the
-allocation. `test_wave4_plans_render_the_downsized_replay_on_the_declared_hosts`
-dry-renders the eight attempts.
+Tests in `benchmark/tests/test_campaign.py`:
+
+- `test_wave4_plans_differ_from_their_counterparts_only_in_replay_allocation_and_host`
+  resolves each wave-4 case and checks it equals its counterpart case once the
+  replay vCPUs and memory, host shape and repetitions are set back and the
+  counterpart is moved to wave 3's image;
+- `test_wave4_controls_differ_from_their_wave2_cells_only_in_the_replay_image`
+  checks each control against its wave-2 case and that every wave-2 cell in
+  this wave has its control;
+- `test_wave4_hosts_are_the_smallest_n4_highcpu_shape_that_fits` checks that every
+  smaller N4 highcpu box in `benchmark/plans/instances.yaml` refuses the
+  allocation;
+- `test_wave4_plans_render_the_downsized_replay_on_the_declared_hosts`
+  dry-renders the eleven attempts;
+- `test_wave4_readme_stages_submit_every_plan_once` checks the staged submit
+  lists below.
 
 ### Host shapes, and why
 
@@ -92,66 +99,90 @@ positive. The catalogue has no N4 highcpu size between 16 and 32.
 - **FourCast → n4-highcpu-16, as in wave 2.** The subject's 16 GiB ceiling plus
   any replay memory exceeds n4-highcpu-8's 16 GiB, so 16 is already the floor.
 
-**Disclosed confounds of the blockchain host change.** Moving blockchain from
-n4-highcpu-80 to -32 changes more than cpuset placement: the server and subject
-share the boot disk, page cache and memory bandwidth
-([`docs/instrument.md`](../../../../docs/instrument.md), *What the server shares
-with the subject*), and the subject writes a 22.6 GB product to that disk in
-about 150 s (`swath.07cb7eabf980.s1` receipt, `product.size_bytes`). On -32 the
-host keeps 8 or 16 vCPUs instead of 56 for the Batch agent, Docker, the worker's
-sampler and unbound kernel work such as writeback; host memory, and with it the
-page cache, is 64 GiB instead of 160; and the provider's per-VM Hyperdisk and
-network limits scale with vCPU count (provider documentation, not measured
-here; no disk metric is exported). Whether n4-highcpu-80 spans more than one
-NUMA node is not recorded in any committed run. The 16/5 pair isolates this:
-it differs from wave 3's 16/5 rung only in the host, so a change between them
-is attributed to the host shape (cross-day; two repetitions against one). The
-NARA and FourCast hosts do not change, so their rungs carry no host confound
-beyond the larger host remainder the smaller replay leaves.
+### What each comparison can and cannot show
+
+- **Blockchain 16/5, n4-highcpu-80 → -32.** The replay allocation is fixed, so
+  this tests the combined host-shape change. It does not separate its parts.
+  The server and subject share the boot disk, page cache and memory bandwidth
+  ([`docs/instrument.md`](../../../../docs/instrument.md), *What the server
+  shares with the subject*), and the subject writes a 22.6 GB product to that
+  disk in about 150 s (`swath.07cb7eabf980.s1` receipt, `product.size_bytes`).
+  On -32 the host keeps 8 vCPUs instead of 56 for the Batch agent, Docker, the
+  worker's sampler and unbound kernel work such as writeback; host memory, and
+  with it the page cache, is 64 GiB instead of 160; the provider's per-VM
+  Hyperdisk and network limits scale with vCPU count (provider documentation,
+  not measured here; no disk metric is exported); and whether n4-highcpu-80
+  spans more than one NUMA node is not recorded in any committed run. The
+  comparison is also cross-day and cross-VM, two new repetitions against one.
+- **16/5 → 8/4 within a cell** (blockchain, NARA Swath, NARA s7cmd). Host and
+  image are fixed, but CPU and memory change together, with GOMAXPROCS,
+  GOMEMLIMIT, the derived cpuset placement and the host remainder. No separate
+  CPU or memory effect is inferred.
+- **FourCast 8/8 → 8/4.** Memory (and GOMEMLIMIT) alone, against the
+  same-image control on the same host and cpusets.
 
 ### Deviation from the requested matrix
 
 FourCast has no 16/5 rung. Its wave-2 allocation is already replay 8 vCPU /
 8 GiB (CPU mean 0.5%, p90 0.6%, RSS 0.98 GiB); 16 vCPU would be an upsizing and
-would need an n4-highcpu-32 host (6 + 16 = 22 vCPUs). Its 8/4 rung changes only
-replay memory, on the same host and cpusets.
+would need an n4-highcpu-32 host (6 + 16 = 22 vCPUs).
 
 ## Predeclared reading
 
-Before results are inspected, wave 2's per-repetition reading applies
-unchanged: a repetition qualifies if it completes with the fixture's row count
-(blockchain 143,008,674), zero server errors and refusals, grades
-TIMING_VALID, and its receipt's `list_index` block reports `delivered: true`
-(the `state=built` server line attached with `receipt --server-log` and
-agreeing with the meters). A rung qualifies when every repetition does. Runs
-too short for the grader's five 10-second resource samples keep their
-INSUFFICIENT_EVIDENCE grade (wave 2's NARA Swath run had six); the workload is
-not stretched and the gate is not relaxed.
+Before results are inspected, wave 2's per-repetition reading applies, with the
+error condition stated precisely: a repetition **qualifies** if it completes
+with the fixture's row count (blockchain 143,008,674), zero HTTP errors
+(`http_errors`), zero admission and serving refusals, grades TIMING_VALID, and
+its receipt's `list_index` block reports `delivered: true` (the `state=built`
+server line attached with `receipt --server-log` and agreeing with the meters).
+Parquet-reader errors (`headroom.parquet_errors_delta`) are not a gate and are
+reported for every attempt: the counterparts recorded 2 (`swath.07cb7eabf980.s1`)
+and 0 (NARA, FourCast); wave 2's 16/5 blockchain rung recorded 55. A rung
+qualifies when every repetition does.
 
-Per cell, the **smallest TIMING_VALID allocation** is the smallest qualifying
-rung, read from 16/5 down to 8/4. If 8/4 qualifies and 16/5 does not, the cell
-gets no downsizing recommendation from this wave; the result is reported as
-non-monotonic, not as support for 8/4.
+Each rung's outcome is one of:
 
-A qualifying rung supports a downsizing recommendation only if it also meets
-wave 1's headroom conditions: replay cpuset mean utilization below 60%, p90
-below 80%, server lifetime peak RSS below 75% of the replay container ceiling
-(3.75 GiB at 5 GiB, 3.0 GiB at 4 GiB), response-buffer peak below 75% of the
-1 GiB budget, and subject wall within ±10% of the cell's reference:
+- **failed timing gate**: graded PRESSURE_DEGRADED or CAPACITY_FAILED, or a
+  completed run that misses another qualifying condition;
+- **not evaluable**: INSUFFICIENT_EVIDENCE (fewer than the grader's five
+  10-second resource samples; wave 2's NARA Swath run had six; the workload is
+  not stretched and the gate is not relaxed), a preemption without a qualifying
+  resubmission, a job stopped by the 20-minute or spend rule, or binding or
+  collection errors;
+- **TIMING_VALID**: qualifies as above;
+- **meets recommendation headroom**: qualifies and also meets wave 1's
+  conditions: replay cpuset mean utilization below 60%, p90 below 80%, server
+  lifetime peak RSS below 75% of the replay container ceiling (3.75 GiB at
+  5 GiB, 3.0 GiB at 4 GiB), response-buffer peak below 75% of the 1 GiB budget,
+  and subject wall within ±10% of **both** of the cell's references:
 
-| Cell | Reference wall (±10%) | Same-image? |
-| --- | --- | --- |
-| blockchain Swath c256 | 150.5 s, median of wave 3's two 64/20 index-on repetitions; also reported against the wave-1 Java median 155.3 s and wave 3's 16/5 rung (149.3 s) | yes |
-| NARA Swath c128 | 64.5 s, wave-1 Java median (wave 2's Go run 64.5 s) | no (wave 2 image) |
-| NARA s7cmd c64 | 602.2 s, wave-1 Java median (wave 2's Go run 603.3 s) | no |
-| FourCast s5cmd | 420.6 s, wave-1 Java median (wave 2's Go run 445.1 s) | no |
+| Cell | Reference walls (±10% of each) |
+| --- | --- |
+| blockchain Swath c256 | wave-1 Java median 155.3 s and wave 3's Go 64/20 index-on median 150.5 s, as wave 3 required; also reported against wave 3's 16/5 rung (149.3 s, n4-highcpu-80) |
+| NARA Swath c128 | wave-1 Java median 64.5 s and this wave's control `nara-swath-go-20-20`; also reported against wave 2's Go run (64.5 s, cross-image) |
+| NARA s7cmd c64 | wave-1 Java median 602.2 s and `nara-s7cmd-go-20-20`; also wave 2's Go run (603.3 s) |
+| FourCast s5cmd | wave-1 Java median 420.6 s and `fourcast-s5cmd-go-8-8`; also wave 2's Go run (445.1 s) |
 
-For blockchain the recommendation is stated for the measured host: a rung that
-qualifies on n4-highcpu-32 supports "replay R on n4-highcpu-32 with subject
-8/8". If the 16/5 pair does not qualify on -32 while wave 3's 16/5 did on -80,
-the reading is that the host shape, not the allocation, failed, and the
-blockchain recommendation remains wave 3's fit-based one on n4-highcpu-80.
-Report the per-shape overruns of both hosts side by side either way.
+Per cell, the result is the **smallest qualifying tested rung on the smallest
+fitting catalogued N4 highcpu host**. A downsizing recommendation for a rung
+requires that rung to meet recommendation headroom and every larger tested
+rung of the cell to qualify. So:
+
+- if 8/4 qualifies and 16/5 has a failed timing gate, the result is reported as
+  non-monotonic and the cell gets no recommendation;
+- if 16/5 is not evaluable, the cell gets no recommendation from this wave, and
+  the result is not called non-monotonic;
+- if the 16/5 blockchain pair does not qualify, the statement is "16/5 did not
+  qualify on the measured n4-highcpu-32 runs; cause unresolved", and blockchain
+  keeps wave 3's fit-based statement on n4-highcpu-80. The per-shape overruns
+  of both hosts are reported side by side either way.
+
+**Controls.** Each control is expected to qualify, as its cell did in wave 2,
+and to fall within ±10% of the wave-1 Java median. If a control does not
+qualify (failed timing gate or not evaluable), attribution for that cell is
+unresolved: its downsizing rungs are still graded and reported, even if one
+qualifies independently, but the cell gets no control comparison and no
+recommendation from this wave.
 
 Single repetitions support bounded diagnostic statements, not precision claims;
 comparisons with waves 1-3 are cross-day.
@@ -161,13 +192,14 @@ comparisons with waves 1-3 are cross-day.
 For every attempt, the columns of wave 3's Results table (grade, per-shape
 service time / deadline and overrun, index skips and declines, build seconds,
 replay CPU mean/p90, server RSS against the replay ceiling, response-buffer
-peak against the budget, wall, cost), plus:
+peak against the budget, wall, cost), the HTTP error, refusal and
+parquet-reader error counts, plus:
 
 1. **Per-shape overruns.** `uv run python benchmark/src/benchmark/report.py
    --state "$STATE/campaign.db" --group goq4-<plan>` prints each shape's mean
    against its deadline and its overrun fraction (`replay_timing_assessment`).
-   Compare `worker_page`, `pivot_probe` and `structure_probe` with the
-   counterpart baselines below.
+   Compare `worker_page`, `pivot_probe` and `structure_probe` with the cell's
+   control and the counterpart baselines below.
 2. **Window-cache meters.** From each attempt's bound `result.json`, the
    `before` and `after` values of `swath.replay.prefetch.window.fill` (timer:
    count, mean, p50, p99, max), `swath.replay.prefetch.window.hit` and
@@ -185,7 +217,7 @@ peak against the budget, wall, cost), plus:
    Timer quantiles are server-lifetime values (they include the warm-up fills
    recorded in `before`); counts are compared as `after − before`. Hit share is
    hits / (hits + misses).
-3. **Host-side samples**, for the host-shape confound: from the same file,
+3. **Host-side samples**, for the host-shape change: from the same file,
    `.replay_evidence.resource_samples[]` gives `subject_cpuset_utilization`,
    `host_mem_available_kb` and `host_load1` per 10-second sample. Report subject
    cpuset mean/max, minimum available host memory and maximum one-minute load
@@ -198,97 +230,199 @@ Counterpart baselines (bound receipts' `metrics.jsonl`; window-cache figures
 are the grader's `after − before` deltas, `headroom.cache_fills_delta` and
 `cache_hits_delta`):
 
-| Attempt | Wave / image | Host | Replay | worker_page | pivot_probe | structure_probe | CPU mean / p90 | Server RSS | Resp. peak | Fills / hits | Wall s |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| blockchain `swath.07cb7eabf980.s1` | 3 / `43ffab2f` | n4-highcpu-80 | 16/5 | 8.0/94 ms, 0.056% | 1.2/46 ms, 0% | 0.5/55 ms, 0% | 29.4% / 48.0% | 1.72 GiB | 128 MiB | 58,456 / 97,986 | 149.3 |
-| NARA Swath `swath.773bf96d14ef.s1` | 2 / `545a10cb` | n4-highcpu-32 | 20/20 | 0.8/86 ms, 0% | 0.7/44 ms, 0% | 1.3/50 ms, 0% | 4.1% / 9.3% | 1.04 GiB | 62 MiB | 3,163 / 13,094 | 64.5 |
-| NARA s7cmd `s7cmd.8b7670175058.s1` | 2 / `545a10cb` | n4-highcpu-32 | 20/20 | 1.3/86 ms, 0% | – | 3.3/50 ms, 0% | 0.3% / 0.2% | 1.13 GiB | 73 MiB | 1,400 / 13,355 | 603.3 |
-| FourCast s5cmd `s5cmd.c6cfb2bf8dd8.s1` | 2 / `545a10cb` | n4-highcpu-16 | 8/8 | 0.2/85 ms, 0% | – | – | 0.5% / 0.6% | 0.98 GiB | 0.5 MiB | 316 / 4,080 | 445.1 |
+| Attempt | Wave / image | Host | Replay | worker_page | pivot_probe | structure_probe | CPU mean / p90 | Server RSS | Resp. peak | Parquet errors | Fills / hits | Wall s |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| blockchain `swath.07cb7eabf980.s1` | 3 / `43ffab2f` | n4-highcpu-80 | 16/5 | 8.0/94 ms, 0.056% | 1.2/46 ms, 0% | 0.5/55 ms, 0% | 29.4% / 48.0% | 1.72 GiB | 128 MiB | 2 | 58,456 / 97,986 | 149.3 |
+| NARA Swath `swath.773bf96d14ef.s1` | 2 / `545a10cb` | n4-highcpu-32 | 20/20 | 0.8/86 ms, 0% | 0.7/44 ms, 0% | 1.3/50 ms, 0% | 4.1% / 9.3% | 1.04 GiB | 62 MiB | 0 | 3,163 / 13,094 | 64.5 |
+| NARA s7cmd `s7cmd.8b7670175058.s1` | 2 / `545a10cb` | n4-highcpu-32 | 20/20 | 1.3/86 ms, 0% | – | 3.3/50 ms, 0% | 0.3% / 0.2% | 1.13 GiB | 73 MiB | 0 | 1,400 / 13,355 | 603.3 |
+| FourCast s5cmd `s5cmd.c6cfb2bf8dd8.s1` | 2 / `545a10cb` | n4-highcpu-16 | 8/8 | 0.2/85 ms, 0% | – | – | 0.5% / 0.6% | 0.98 GiB | 0.5 MiB | 0 | 316 / 4,080 | 445.1 |
 
 Wave 3's README holds the lifetime fill timer (mean / p50 / p99 / max) for
 `swath.07cb7eabf980.s1`: 12.9 / 9.4 / 43.0 / 138.0 ms over 58,856 fills.
 
 ## Before submitting
 
-1. No image is built. The Go replay image is wave 3's, already pinned in all
-   seven plans:
-   `us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90`.
+1. No image is built. The Go replay image is wave 3's, pinned in all ten plans.
    The toolbox worker is wave 2's
    (`benchmark-toolbox@sha256:a878e4296bb7c07816eb4437b78f1209c9698e5c3ce891caf53cffe1a7a40e85`,
    harness `1a0f845d7798b84771f85425a6f3dc8dcc6f5e33`); wave 3's
    `images.json` is copied unchanged (SHA-256 `e4d43a73…b30d`) into the new
    state directory `~/s3-listing-study-state/2026-11-11-go-replay-qualification-4/`.
 2. Dry-run every plan (done; outputs `dryrun-<plan>.txt` in the state
-   directory): eight attempts, zero slots.
-3. Submit with Spot and the study VPC, as waves 2 and 3 did, one group per plan:
-
-   ```sh
-   STATE=~/s3-listing-study-state/2026-11-11-go-replay-qualification-4
-   W4=benchmark/plans/campaigns/go-replay-qualification-4
-   for plan in blockchain-swath-go-16-5 blockchain-swath-go-8-4 \
-       nara-swath-go-16-5 nara-swath-go-8-4 nara-s7cmd-go-16-5 nara-s7cmd-go-8-4 \
-       fourcast-s5cmd-go-8-4; do
-     uv run python benchmark/src/benchmark/campaign.py --state "$STATE/campaign.db" submit \
-       --suite go-replay-qualify --group "goq4-$plan" \
-       --plan "$W4/$plan"/*.yaml \
-       --project varve-oss --location us-east1 --zone us-east1-b \
-       --results-bucket s3-listing-study-results-29c02004 --image-set "$STATE/images.json" \
-       --anonymous-worker-sa s3-listing-study-worker@varve-oss.iam.gserviceaccount.com \
-       --network projects/varve-oss/global/networks/s3-listing-study \
-       --subnetwork projects/varve-oss/regions/us-east1/subnetworks/s3-listing-study-us-east1 \
-       --provisioning SPOT --boot-disk-gb 200
-   done
-   ```
-
-   Add `--dry-run` to repeat the inspection pass.
+   directory): eleven attempts, zero slots. Add `--dry-run` to `submit_stage`'s
+   command to repeat it.
+3. Submit in two stages (below), with the spend checks running from the first
+   submission until every job is terminal.
 4. After settlement, export each job's `swath_replay list_index` line and attach
    it with `benchmark.receipt --server-log` (`benchmark/docs/running.md`,
    *Export a receipt draft*).
 
 ## Budget
 
-Retain failures; only a preempted job may be resubmitted once; poll at least
-five minutes apart. The owner approved about $1 for this wave, with a hard cap
-of **$3**. Any job still running at 20 minutes is stopped and retained as a
-failure.
+The owner approved about $1 of compute, with a hard cap of **$3 in total**.
+Wave 2's $1 non-compute reserve stays inside that cap, so compute may not
+exceed **$2.00**. Retain failures; only a preempted job may be resubmitted, at
+most once.
 
 Pre-submit estimate: each job is priced at the observed create-to-terminal
 duration of its counterpart, at the us-east1 N4 Spot rates the wave-1 receipt
-records ($0.722752/hour for n4-highcpu-32, $0.361376/hour for n4-highcpu-16):
+records ($0.722752/hour for n4-highcpu-32, $0.361376/hour for n4-highcpu-16).
+The 20-minute ceiling is the cost of a job stopped at 20 minutes.
 
-| Plan | Jobs | Host | Counterpart duration | Estimated compute |
-| --- | --- | --- | --- | --- |
-| blockchain-swath-go-16-5 | 2 | n4-highcpu-32 | 307.4 s (`swath.07cb7eabf980.s1`) | $0.1234 |
-| blockchain-swath-go-8-4 | 1 | n4-highcpu-32 | 307.4 s (same) | $0.0617 |
-| nara-swath-go-16-5 | 1 | n4-highcpu-32 | 189.4 s (`swath.773bf96d14ef.s1`) | $0.0380 |
-| nara-swath-go-8-4 | 1 | n4-highcpu-32 | 189.4 s (same) | $0.0380 |
-| nara-s7cmd-go-16-5 | 1 | n4-highcpu-32 | 753.5 s (`s7cmd.8b7670175058.s1`) | $0.1513 |
-| nara-s7cmd-go-8-4 | 1 | n4-highcpu-32 | 753.5 s (same) | $0.1513 |
-| fourcast-s5cmd-go-8-4 | 1 | n4-highcpu-16 | 576.0 s (`s5cmd.c6cfb2bf8dd8.s1`) | $0.0578 |
-| **Total** | 8 | | | **$0.62** |
+| Stage | Plan | Jobs | Host | Counterpart duration | Estimate | 20-min ceiling |
+| --- | --- | --- | --- | --- | --- | --- |
+| A | nara-swath-go-20-20 | 1 | n4-highcpu-32 | 189.4 s (`swath.773bf96d14ef.s1`) | $0.0380 | $0.2409 |
+| A | nara-s7cmd-go-20-20 | 1 | n4-highcpu-32 | 753.5 s (`s7cmd.8b7670175058.s1`) | $0.1513 | $0.2409 |
+| A | fourcast-s5cmd-go-8-8 | 1 | n4-highcpu-16 | 576.0 s (`s5cmd.c6cfb2bf8dd8.s1`) | $0.0578 | $0.1205 |
+| A | blockchain-swath-go-16-5 | 2 | n4-highcpu-32 | 307.4 s (`swath.07cb7eabf980.s1`) | $0.1234 | $0.4818 |
+| **A** | | **5** | | | **$0.3705** | **$1.0841** |
+| B | blockchain-swath-go-8-4 | 1 | n4-highcpu-32 | 307.4 s (same) | $0.0617 | $0.2409 |
+| B | nara-swath-go-16-5 | 1 | n4-highcpu-32 | 189.4 s (same) | $0.0380 | $0.2409 |
+| B | nara-swath-go-8-4 | 1 | n4-highcpu-32 | 189.4 s (same) | $0.0380 | $0.2409 |
+| B | nara-s7cmd-go-16-5 | 1 | n4-highcpu-32 | 753.5 s (same) | $0.1513 | $0.2409 |
+| B | nara-s7cmd-go-8-4 | 1 | n4-highcpu-32 | 753.5 s (same) | $0.1513 | $0.2409 |
+| B | fourcast-s5cmd-go-8-4 | 1 | n4-highcpu-16 | 576.0 s (same) | $0.0578 | $0.1205 |
+| **B** | | **6** | | | **$0.4982** | **$1.3250** |
+| **Total** | | **11** | | | **$0.87** | **$2.41** |
 
-By `runDuration` instead of create-to-terminal the eight come to $0.53. The
-estimate does not model fixture staging on a smaller host (the blockchain
-counterpart staged on n4-highcpu-80) or a slower subject at a smaller replay,
-so the blockchain rows may run longer. With one preemption resubmission of the
-largest job ($0.15) and wave 2's $1 non-compute reserve, the planning estimate
-is about $1.77, under the $3 cap. All eight jobs stopped at 20 minutes would
-cost $1.81 of compute; at the provider deadlines (`maxRunDuration` 8,405 s for
-blockchain, 3,005 s for the others) $7.78, which is why the 20-minute stop
-applies. The longest counterpart, NARA s7cmd, took 12.6 minutes create to
-terminal. These are estimates, not an invoice.
+By `runDuration` instead of create-to-terminal the eleven come to about $0.75.
+The estimate does not model fixture staging on a smaller host (the blockchain
+counterpart staged on n4-highcpu-80) or a slower subject at a smaller replay.
+With one resubmission of the largest job ($0.15) and the $1 reserve, the
+planning figure is about $2.02. Eleven jobs at the 20-minute ceiling would be
+$2.41 of compute, over the $2.00 compute limit, so the rules below, not the
+estimate, enforce the cap. The rendered `maxRunDuration` (8,405 s blockchain,
+3,005 s others) does not.
+
+**Rules.**
+
+- **Clock.** A job's age is measured from its Batch `createTime` (the start of
+  the create-to-terminal span the estimate charges), to its `updateTime` once
+  terminal or to now while it runs.
+- **Check cadence.** From the first stage-A submission until every job is
+  terminal, run the check below every 5 minutes: not more often (the polling
+  rule), not less (the stop rules).
+- **20-minute stop.** A job that is not terminal at 20 minutes of age is
+  cancelled at that check (`cancel --group goq4-<plan>`; it cancels every
+  non-terminal job in the group, both blockchain 16/5 repetitions included) and
+  retained as a failure, not resubmitted. With 5-minute checks a job may run
+  up to 25 minutes ($0.3012 on -32, $0.1506 on -16).
+- **Aggregate spend stop.** When accrued compute reaches **$1.50**, cancel every
+  non-terminal wave-4 group and submit nothing further. Between two checks at
+  most six jobs run (stage B), adding at most $0.33; allowing about two minutes
+  for a cancellation to take effect on six jobs ($0.13, an allowance: `cancel`
+  is `VERIFIED: no` in `running.md`), the worst case is about $1.96 of compute,
+  inside $2.00, and $2.96 with the reserve, inside $3.
+- **Resubmissions, budgeted one at a time.** A preempted job may be resubmitted
+  once, through `retry --group goq4-<plan>`, only if accrued compute plus that
+  job's 25-minute ceiling stays at or below $1.50 at the time (accrued at most
+  $1.1988 for a -32 job, $1.3494 for a -16 job). `retry` acts on each case's
+  latest ordinal (`running.md`, *retry*); a group whose job failed for any other
+  reason is not retried.
+- **Stage gate.** Stage B is submitted only when every stage-A job, including
+  any resubmission, is terminal and stage-A accrued compute is at most
+  **$0.60**. Otherwise stage B is not submitted without new owner approval.
+  Stage B's own 20-minute ceiling ($1.33) is bounded by the aggregate stop, not
+  by the gate.
+
+These are estimates, not an invoice.
+
+### Commands
+
+Setup and the spend check (writes `accrue.py` into the state directory; it reads
+a `gcloud batch jobs list` export and prints each wave-4 job's age and accrued
+compute, flagging the stop rules):
+
+```sh
+STATE=~/s3-listing-study-state/2026-11-11-go-replay-qualification-4
+W4=benchmark/plans/campaigns/go-replay-qualification-4
+cat > "$STATE/accrue.py" <<'EOF'
+import datetime as dt, json, sys
+RATE = {"n4-highcpu-32": 0.722752, "n4-highcpu-16": 0.361376}  # USD/hour, N4 Spot us-east1
+TERMINAL = {"SUCCEEDED", "FAILED", "CANCELLED", "DELETION_IN_PROGRESS"}
+def when(value):
+    return dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+jobs, start = json.load(open(sys.argv[1])), when(sys.argv[2])
+now, total = dt.datetime.now(dt.timezone.utc), 0.0
+for job in sorted(jobs, key=lambda j: j["createTime"]):
+    created = when(job["createTime"])
+    if created < start:
+        continue
+    state = job.get("status", {}).get("state", "?")
+    machine = job["allocationPolicy"]["instances"][0]["policy"]["machineType"]
+    end = when(job["updateTime"]) if state in TERMINAL else now
+    minutes = (end - created).total_seconds() / 60
+    usd = minutes / 60 * RATE[machine]
+    total += usd
+    flag = "  STOP: past 20 min" if state not in TERMINAL and minutes >= 20 else ""
+    print(f"{job['name'].rsplit('/', 1)[-1]} {state} {machine} {minutes:.1f} min ${usd:.4f}{flag}")
+print(f"accrued compute ${total:.4f}" + ("  STOP ALL: at or past $1.50" if total >= 1.50 else ""))
+EOF
+check() {
+  uv run python benchmark/src/benchmark/campaign.py --state "$STATE/campaign.db" poll
+  uv run python benchmark/src/benchmark/campaign.py --state "$STATE/campaign.db" status | grep goq4-
+  gcloud batch jobs list --project varve-oss --location us-east1 \
+    --filter='labels.suite=go-replay-qualify' --format=json > "$STATE/jobs-now.json"
+  python3 -I "$STATE/accrue.py" "$STATE/jobs-now.json" "$(cat "$STATE/wave4-start.txt")"
+}
+submit_stage() {
+  for plan in "$@"; do
+    uv run python benchmark/src/benchmark/campaign.py --state "$STATE/campaign.db" submit \
+      --suite go-replay-qualify --group "goq4-$plan" \
+      --plan "$W4/$plan"/*.yaml \
+      --project varve-oss --location us-east1 --zone us-east1-b \
+      --results-bucket s3-listing-study-results-29c02004 --image-set "$STATE/images.json" \
+      --anonymous-worker-sa s3-listing-study-worker@varve-oss.iam.gserviceaccount.com \
+      --network projects/varve-oss/global/networks/s3-listing-study \
+      --subnetwork projects/varve-oss/regions/us-east1/subnetworks/s3-listing-study-us-east1 \
+      --provisioning SPOT --boot-disk-gb 200 || return 1
+  done
+}
+```
+
+The stages:
+
+```sh
+STAGE_A=(nara-swath-go-20-20 nara-s7cmd-go-20-20 fourcast-s5cmd-go-8-8 blockchain-swath-go-16-5)
+STAGE_B=(blockchain-swath-go-8-4 nara-swath-go-16-5 nara-swath-go-8-4 nara-s7cmd-go-16-5 nara-s7cmd-go-8-4 fourcast-s5cmd-go-8-4)
+
+# Stage A; then run `check` every 5 minutes.
+date -u +%Y-%m-%dT%H:%M:%SZ > "$STATE/wave4-start.txt"
+submit_stage "${STAGE_A[@]}"
+
+# Stage B, only once the stage gate holds; keep running `check` every 5 minutes.
+submit_stage "${STAGE_B[@]}"
+```
+
+Stop and resubmit, by group:
+
+```sh
+uv run python benchmark/src/benchmark/campaign.py --state "$STATE/campaign.db" cancel --group goq4-PLAN
+
+uv run python benchmark/src/benchmark/campaign.py --state "$STATE/campaign.db" retry \
+  --group goq4-PLAN \
+  --project varve-oss --location us-east1 --zone us-east1-b \
+  --results-bucket s3-listing-study-results-29c02004 --image-set "$STATE/images.json" \
+  --anonymous-worker-sa s3-listing-study-worker@varve-oss.iam.gserviceaccount.com \
+  --network projects/varve-oss/global/networks/s3-listing-study \
+  --subnetwork projects/varve-oss/regions/us-east1/subnetworks/s3-listing-study-us-east1 \
+  --provisioning SPOT --boot-disk-gb 200
+```
 
 ## Pre-submit record
 
-Dry-run attempts (group `dry-run`; case IDs are minted from the frozen image
-set and change if it changes):
+Dry-run attempts (case IDs are minted from the frozen image set and change if
+it changes; job names are `go-replay-qualify-<tool>-<case>-s<n>`):
 
-| Plan | Attempts | Machine | `maxRunDuration` |
-| --- | --- | --- | --- |
-| blockchain-swath-go-16-5 | `swath.b9c1ed5ae8a2.s1`, `.s2` | n4-highcpu-32 | 8405s |
-| blockchain-swath-go-8-4 | `swath.c1505ec66d66.s1` | n4-highcpu-32 | 8405s |
-| nara-swath-go-16-5 | `swath.73401a67238f.s1` | n4-highcpu-32 | 3005s |
-| nara-swath-go-8-4 | `swath.bc04b205a545.s1` | n4-highcpu-32 | 3005s |
-| nara-s7cmd-go-16-5 | `s7cmd.3f553acb0aca.s1` | n4-highcpu-32 | 3005s |
-| nara-s7cmd-go-8-4 | `s7cmd.5c9e1f4d4685.s1` | n4-highcpu-32 | 3005s |
-| fourcast-s5cmd-go-8-4 | `s5cmd.37412f5e21c0.s1` | n4-highcpu-16 | 3005s |
+| Stage | Plan | Attempts | Machine | `maxRunDuration` |
+| --- | --- | --- | --- | --- |
+| A | nara-swath-go-20-20 | `swath.ca43fae5e517.s1` | n4-highcpu-32 | 3005s |
+| A | nara-s7cmd-go-20-20 | `s7cmd.f93baa7f7142.s1` | n4-highcpu-32 | 3005s |
+| A | fourcast-s5cmd-go-8-8 | `s5cmd.55ee5e4c62b8.s1` | n4-highcpu-16 | 3005s |
+| A | blockchain-swath-go-16-5 | `swath.b9c1ed5ae8a2.s1`, `.s2` | n4-highcpu-32 | 8405s |
+| B | blockchain-swath-go-8-4 | `swath.c1505ec66d66.s1` | n4-highcpu-32 | 8405s |
+| B | nara-swath-go-16-5 | `swath.73401a67238f.s1` | n4-highcpu-32 | 3005s |
+| B | nara-swath-go-8-4 | `swath.bc04b205a545.s1` | n4-highcpu-32 | 3005s |
+| B | nara-s7cmd-go-16-5 | `s7cmd.3f553acb0aca.s1` | n4-highcpu-32 | 3005s |
+| B | nara-s7cmd-go-8-4 | `s7cmd.5c9e1f4d4685.s1` | n4-highcpu-32 | 3005s |
+| B | fourcast-s5cmd-go-8-4 | `s5cmd.37412f5e21c0.s1` | n4-highcpu-16 | 3005s |
