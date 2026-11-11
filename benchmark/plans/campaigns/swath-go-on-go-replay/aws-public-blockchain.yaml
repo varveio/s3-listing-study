@@ -1,0 +1,110 @@
+# Scratch diagnostic (branch scratch/swath-go-on-go-replay, never merged): the subject rows of
+# campaigns/swath-go-replay/aws-public-blockchain.yaml (Swath-Go at varveio/swath main 8c8f8708
+# beside Java Swath 0.3.2) with only the replay instrument changed to the qualified Go replay
+# server.
+#
+# Subject rows, machine (80 vCPU / 160 GiB), subject_vcpus 8, container memory 8 GiB and
+# timeout are identical to campaigns/swath-go-replay/aws-public-blockchain.yaml.
+#
+# Replay section and replay knobs are wave 3's index-on cell
+# campaigns/go-replay-qualification-3/blockchain-swath-go/ (receipt
+# benchmark/receipts/go-replay-qualification-3-cloud-20261110/, swath.e40733239507.s1 and .s2,
+# both TIMING_VALID at 64/20, list_index delivered). Wave 4 ran the same image only at 16/5 and
+# 8/4 on n4-highcpu-32, so wave 3 is the latest wave that qualified the release allocation.
+# The qualified cell was Java Swath recursive-tsv-dataset c256, not the rows below.
+#
+# Differs from the release plan campaigns/aws-public-blockchain-replay/capacity/aws-public-blockchain.yaml
+# and from the swath-go-replay plan (whose replay section equals the release's) in:
+#   server_implementation       java (default)                      -> go
+#   server_image_uri            swath-replay@5797514c (Java, dce690a) -> swath-replay@f8b70f0f (Go, swath 43ffab2f, PR #443)
+#   fixture                     release parts current-eba31d9 (f4a839f2) -> SeekParquet root seekparquet-c4a42eb4e7fb
+#                               (manifest c4a42eb4; adopted digest f4a839f2, the release fixture)
+#   replay_max_concurrent_requests 512 -> 4096
+#   replay_prefetch             false -> true
+#   replay_prefetch_max_windows 96 -> 192
+#   added: replay_response_buffer_budget_bytes 1 GiB, replay_list_index on, list_index_max_bytes 64 MiB
+# Unchanged from the release: latency deadlines (94/46/55 ms), scale 1.0, jitter none, the
+# declared warm-up (2000 structure / 200 pivot / 200 worker pages, 64 in flight), replay
+# allocation 64 vCPU / 20 GiB, replay_parquet_connections 128, heap share 75%. No second
+# change: the qualified allocation equals the release allocation.
+spec_version: 3
+bucket: aws-public-blockchain
+region: us-east-2
+auth_role: public-read
+
+replay:
+  capacity_status: uncalibrated
+  server_implementation: go
+  server_image_uri: us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90
+  fixture_uri: gs://s3-listing-study-results-29c02004/fixtures/aws-public-blockchain/seekparquet-c4a42eb4e7fb/
+  fixture_sha256: c4a42eb4e7fb2a9627972cc1e457ed55d60ef3d3560813eff8e13e65ef182b29
+  fixture_adopted_sha256: f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0
+  serving_mode: sorted
+  latency_model:
+    deadlines_ms: {worker_page: 94, pivot_probe: 46, structure_probe: 55}
+    scale: 1.0
+    jitter: none
+  warmup:
+    structure_probes: 2000
+    pivot_probes: 200
+    worker_pages: 200
+    in_flight: 64
+
+defaults:
+  reps: 1
+  timeout_s: 7200
+  vcpus: 80
+  memory_gb: 160
+  container_memory_gb: 8
+  subject_vcpus: 8
+  replay_vcpus: 64
+  replay_memory_gb: 20
+  replay_parquet_connections: 128
+  replay_max_concurrent_requests: 4096
+  replay_prefetch: true
+  replay_prefetch_max_windows: 192
+  replay_heap_percent: 75
+  replay_response_buffer_budget_bytes: 1073741824
+  replay_list_index: true
+  replay_list_index_max_bytes: 67108864
+
+tools:
+  swath-go:
+    cases:
+      - mode: recursive-tsv-zstd
+        concurrency: 256
+        purpose: diagnostic
+        config: {max_duration: 7170s}
+      - mode: recursive-parquet-sorted
+        concurrency: 256
+        purpose: diagnostic
+        config: {max_duration: 7170s}
+      - mode: recursive-parquet-sorted
+        concurrency: 64
+        purpose: diagnostic
+        config: {max_duration: 7170s}
+  swath:
+    cases:
+      - mode: recursive-parquet-sorted
+        concurrency: 256
+        purpose: diagnostic
+        config: {jvm_max_heap: 4g, sort_merge_parallelism: 8}
+      - mode: recursive-parquet-sorted
+        concurrency: 64
+        purpose: diagnostic
+        config: {jvm_max_heap: 4g, sort_merge_parallelism: 8}
+      - mode: recursive-tsv-zstd
+        concurrency: 256
+        purpose: diagnostic
+        config: {jvm_max_heap: 4g, text_writers: 3, text_part_size: 1gb, writeback_size: 32mb, part_rotation_interval: "0", part_rotation_max_rows: 0}
+
+exclude:
+  - {tool: aws-cli, reason: outside this Swath Go-and-Java side-by-side diagnostic}
+  - {tool: minio-mc, reason: outside this Swath Go-and-Java side-by-side diagnostic}
+  - {tool: ps3, reason: outside this Swath Go-and-Java side-by-side diagnostic}
+  - {tool: rclone, reason: outside this Swath Go-and-Java side-by-side diagnostic}
+  - {tool: s3-fast-list, reason: outside this Swath Go-and-Java side-by-side diagnostic}
+  - {tool: s3kor, reason: outside this Swath Go-and-Java side-by-side diagnostic}
+  - {tool: s3p, reason: outside this Swath Go-and-Java side-by-side diagnostic}
+  - {tool: s5cmd, reason: outside this Swath Go-and-Java side-by-side diagnostic}
+  - {tool: s7cmd, reason: outside this Swath Go-and-Java side-by-side diagnostic}

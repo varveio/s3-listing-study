@@ -1,0 +1,94 @@
+# Scratch diagnostic (branch scratch/swath-go-on-go-replay, never merged): the subject rows of
+# campaigns/swath-go-replay/nara-1950-census.yaml (Swath-Go at varveio/swath main 8c8f8708 beside
+# Java Swath 0.3.2) with only the replay instrument changed to the qualified Go replay server.
+#
+# Subject rows, machine (32 vCPU / 64 GiB), subject_vcpus 8, container memory 8 GiB and
+# timeout are identical to campaigns/swath-go-replay/nara-1950-census.yaml.
+#
+# Replay section and replay knobs are the wave-4 same-image control
+# campaigns/go-replay-qualification-4/nara-swath-go-20-20/ (receipt
+# benchmark/receipts/go-replay-qualification-4-cloud-20261111/, swath.ca43fae5e517.s1 and
+# s7cmd.f93baa7f7142.s1, both TIMING_VALID, list_index delivered; first qualified in wave 2,
+# go-replay-qualification-2-cloud-20261110). The qualified cells were Java Swath
+# recursive-tsv-dataset c128 and s7cmd c64, not the parquet-sorted and TSV c64 rows below.
+#
+# Differs from the release plan campaigns/nara-replay/config-selection/nara-1950-census.yaml
+# and from the swath-go-replay plan (whose replay section equals the release's) in:
+#   server_implementation       java (default)                      -> go
+#   server_image_uri            ghcr.io/varveio/swath-replay@3955f242 -> swath-replay@f8b70f0f (swath 43ffab2f, PR #443)
+#   fixture                     release parts current-eba31d9 (48468b7c) -> SeekParquet root seekparquet-6ce6d7d12442
+#                               (manifest 6ce6d7d1; adopted digest 48468b7c, the release fixture)
+#   replay_max_concurrent_requests 512 -> 4096
+#   replay_prefetch             false -> true
+#   replay_prefetch_max_windows 96 -> 192
+#   added: replay_response_buffer_budget_bytes 1 GiB, replay_list_index on, list_index_max_bytes 64 MiB
+# Unchanged from the release: latency deadlines (86/44/50 ms), scale 1.0, jitter none, no
+# warm-up, replay allocation 20 vCPU / 20 GiB, replay_parquet_connections 64, heap share 75%.
+# No second change: the qualified allocation equals the release allocation.
+spec_version: 3
+bucket: nara-1950-census
+region: us-east-2
+auth_role: public-read
+
+replay:
+  capacity_status: uncalibrated
+  server_implementation: go
+  server_image_uri: us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90
+  fixture_uri: gs://s3-listing-study-results-29c02004/fixtures/nara-1950-census/seekparquet-6ce6d7d12442/
+  fixture_sha256: 6ce6d7d12442a6b6ab9524644666b95e3e8bf4ff800a12c040d3373269c2c5a0
+  fixture_adopted_sha256: 48468b7c1ea8bf657fcb089dbcb1d940d3af62b748a7cb66f6dccc8876905db4
+  serving_mode: sorted
+  latency_model:
+    deadlines_ms:
+      worker_page: 86
+      pivot_probe: 44
+      structure_probe: 50
+    scale: 1.0
+    jitter: none
+
+defaults:
+  reps: 1
+  timeout_s: 1800
+  vcpus: 32
+  memory_gb: 64
+  container_memory_gb: 8
+  subject_vcpus: 8
+  replay_vcpus: 20
+  replay_memory_gb: 20
+  replay_parquet_connections: 64
+  replay_max_concurrent_requests: 4096
+  replay_prefetch: true
+  replay_prefetch_max_windows: 192
+  replay_heap_percent: 75
+  replay_response_buffer_budget_bytes: 1073741824
+  replay_list_index: true
+  replay_list_index_max_bytes: 67108864
+
+tools:
+  swath-go:
+    cases:
+      - mode: recursive-parquet-sorted
+        concurrency: 64
+        purpose: diagnostic
+        config: {max_duration: 1770s}
+      - mode: recursive-tsv
+        concurrency: 64
+        purpose: diagnostic
+        config: {max_duration: 1770s}
+  swath:
+    cases:
+      - mode: recursive-parquet-sorted
+        concurrency: 64
+        purpose: diagnostic
+        config: {jvm_max_heap: 4g, sort_merge_parallelism: 8}
+
+exclude:
+  - {tool: aws-cli, reason: outside this Swath Go-and-Java side-by-side diagnostic}
+  - {tool: minio-mc, reason: outside this Swath Go-and-Java side-by-side diagnostic}
+  - {tool: ps3, reason: outside this Swath Go-and-Java side-by-side diagnostic}
+  - {tool: rclone, reason: outside this Swath Go-and-Java side-by-side diagnostic}
+  - {tool: s3-fast-list, reason: outside this Swath Go-and-Java side-by-side diagnostic}
+  - {tool: s3kor, reason: outside this Swath Go-and-Java side-by-side diagnostic}
+  - {tool: s3p, reason: outside this Swath Go-and-Java side-by-side diagnostic}
+  - {tool: s5cmd, reason: outside this Swath Go-and-Java side-by-side diagnostic}
+  - {tool: s7cmd, reason: outside this Swath Go-and-Java side-by-side diagnostic}

@@ -1,0 +1,94 @@
+# Scratch diagnostic (branch scratch/swath-go-on-go-replay, never merged): the subject rows of
+# campaigns/swath-go-replay/noaa-nws-fourcastnetgfs-pds.yaml (Swath-Go at varveio/swath main
+# 8c8f8708 beside Java Swath 0.3.2) with only the replay instrument changed to the qualified Go
+# replay server.
+#
+# Subject rows, machine (16 vCPU / 32 GiB), subject_vcpus 6, container memory 16 GiB and
+# timeout are identical to campaigns/swath-go-replay/noaa-nws-fourcastnetgfs-pds.yaml.
+#
+# Replay section and replay knobs are the wave-4 same-image control
+# campaigns/go-replay-qualification-4/fourcast-s5cmd-go-8-8/ (receipt
+# benchmark/receipts/go-replay-qualification-4-cloud-20261111/, s5cmd.55ee5e4c62b8.s1,
+# TIMING_VALID, list_index delivered; first qualified in wave 2,
+# go-replay-qualification-2-cloud-20261110). The only qualified FourCast cell is s5cmd, a
+# light client (replay CPU mean 0.3%); no Swath workload has qualified this server on FourCast.
+#
+# Differs from the release plan campaigns/fourcast-replay/screen-s3-latency/noaa-nws-fourcastnetgfs-pds.yaml
+# and from the swath-go-replay plan (whose replay section equals the release's) in:
+#   server_implementation       java (default)                      -> go
+#   server_image_uri            ghcr.io/varveio/swath-replay@3955f242 -> swath-replay@f8b70f0f (swath 43ffab2f, PR #443)
+#   fixture                     release part 1b8be9d0 -> SeekParquet root seekparquet-eb0e7f5af5a2
+#                               (manifest eb0e7f5a; adopted digest 1b8be9d0, the release fixture)
+#   replay_prefetch_max_windows 256 -> 192
+#   added: replay_response_buffer_budget_bytes 1 GiB, replay_list_index on, list_index_max_bytes 64 MiB
+# Unchanged from the release: latency deadlines (85/35/37 ms), scale 1.0, jitter none, no
+# warm-up, replay allocation 8 vCPU / 8 GiB, replay_parquet_connections 8, 4096 request slots,
+# prefetch on, heap share 75%. No second change: the qualified allocation equals the release
+# allocation (wave 4 also qualified 8/4; not used here).
+spec_version: 3
+bucket: noaa-nws-fourcastnetgfs-pds
+region: us-east-1
+auth_role: public-read
+
+replay:
+  capacity_status: uncalibrated
+  server_implementation: go
+  server_image_uri: us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90
+  fixture_uri: gs://s3-listing-study-results-29c02004/fixtures/noaa-nws-fourcastnetgfs-pds/seekparquet-eb0e7f5af5a2/
+  fixture_sha256: eb0e7f5af5a2dca9bf1b733572dcb3deef8b6573478021280c0627b6401f6684
+  fixture_adopted_sha256: 1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4
+  serving_mode: sorted
+  latency_model:
+    deadlines_ms:
+      worker_page: 85
+      pivot_probe: 35
+      structure_probe: 37
+    scale: 1.0
+    jitter: none
+
+defaults:
+  reps: 1
+  timeout_s: 1800
+  vcpus: 16
+  memory_gb: 32
+  subject_vcpus: 6
+  container_memory_gb: 16
+  replay_vcpus: 8
+  replay_memory_gb: 8
+  replay_parquet_connections: 8
+  replay_max_concurrent_requests: 4096
+  replay_prefetch: true
+  replay_prefetch_max_windows: 192
+  replay_heap_percent: 75
+  replay_response_buffer_budget_bytes: 1073741824
+  replay_list_index: true
+  replay_list_index_max_bytes: 67108864
+
+tools:
+  swath-go:
+    cases:
+      - mode: recursive-parquet-sorted
+        concurrency: 64
+        purpose: diagnostic
+        config: {max_duration: 1770s}
+      - mode: recursive-tsv
+        concurrency: 64
+        purpose: diagnostic
+        config: {max_duration: 1770s}
+  swath:
+    cases:
+      - mode: recursive-parquet-sorted
+        concurrency: 64
+        purpose: diagnostic
+        config: {jvm_max_heap: 4g, sort_merge_parallelism: 8}
+
+exclude:
+  - {tool: aws-cli, reason: outside this Swath Go-and-Java side-by-side diagnostic}
+  - {tool: minio-mc, reason: outside this Swath Go-and-Java side-by-side diagnostic}
+  - {tool: ps3, reason: outside this Swath Go-and-Java side-by-side diagnostic}
+  - {tool: rclone, reason: outside this Swath Go-and-Java side-by-side diagnostic}
+  - {tool: s3-fast-list, reason: outside this Swath Go-and-Java side-by-side diagnostic}
+  - {tool: s3kor, reason: outside this Swath Go-and-Java side-by-side diagnostic}
+  - {tool: s3p, reason: outside this Swath Go-and-Java side-by-side diagnostic}
+  - {tool: s5cmd, reason: outside this Swath Go-and-Java side-by-side diagnostic}
+  - {tool: s7cmd, reason: outside this Swath Go-and-Java side-by-side diagnostic}
