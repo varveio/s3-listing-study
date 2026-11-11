@@ -205,8 +205,10 @@ way upstream specifies:
   with DuckDB, which reads the zstd stream directly, and refuses a foreign
   header or a key whose escapes `normalize` would refuse, so the two never
   disagree about whether a listing is usable. A zero-byte or newline-only
-  input is the harness's empty listing and normalizes to nothing; the port
-  itself always writes the header.
+  input is the harness's empty listing and normalizes to nothing, but
+  `count_rows` refuses it: the port always writes the header, so a native
+  product that does not decode (zstd mode) or has no header is broken, not
+  empty.
 
 ## Plans
 

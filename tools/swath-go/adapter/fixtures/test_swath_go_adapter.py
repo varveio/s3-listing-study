@@ -775,6 +775,22 @@ def test_a_header_only_file_is_an_empty_listing(normalizer: ModuleType) -> None:
     assert normalizer.count_rows(packed, "recursive-tsv-zstd") == 0
 
 
+@pytest.mark.parametrize("payload", [b"", b"\n"])
+def test_count_refuses_a_plain_tsv_product_with_no_header(
+    normalizer: ModuleType, payload: bytes
+) -> None:
+    with pytest.raises(ContractViolation, match="header"):
+        normalizer.count_rows(payload, "recursive-tsv")
+
+
+@pytest.mark.parametrize("payload", [b"", b"\n"])
+def test_count_refuses_a_zstd_product_that_does_not_decode_to_a_header(
+    normalizer: ModuleType, payload: bytes
+) -> None:
+    with pytest.raises((ContractViolation, zstandard.ZstdError)):
+        normalizer.count_rows(payload, "recursive-tsv-zstd")
+
+
 def test_unknown_mode_is_refused(normalizer: ModuleType) -> None:
     assert normalizer.normalize(io.BytesIO(), b"", "recursive-jsonl", "a/", str(DATASET)) == 2
     with pytest.raises(ValueError, match="unknown mode"):

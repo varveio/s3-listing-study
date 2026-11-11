@@ -543,10 +543,10 @@ def _emit_row(out: IO[bytes], line: bytes, number: int) -> None:
 def _count_tsv(data: Any, mode: str) -> int:
     import duckdb
 
-    empty, head = _empty_input(data)
-    if empty:
-        return 0
-    with _decoded(head, mode) as stream:
+    # No empty-input shortcut here: a native product the port wrote always
+    # decodes and starts with the header, so a zero-byte or LF-only file is a
+    # broken product, not an empty listing.
+    with _decoded(data, mode) as stream:
         framing = _Framing(stream)
         _check_header(next(iter_lf_lines(framing)))
         lines = framing.finish()
