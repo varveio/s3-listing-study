@@ -138,7 +138,6 @@
           "worker_exit_code": 0
         },
         "result_sha256": "2a8df74904c0148a6112afcc4776ac140a60ec3b24bdb580382ba461a303805b",
-        "result_uri": "gs://s3-listing-study-results-29c02004/go-replay-qualify/aws-public-blockchain/swath.98f424ce32cc.s1/result.json",
         "state": "BOUND",
         "verification": null
       },
@@ -161,23 +160,7 @@
                 "provisioningModel": "SPOT"
               }
             }
-          ],
-          "location": {
-            "allowedLocations": [
-              "zones/us-east1-b"
-            ]
-          },
-          "network": {
-            "networkInterfaces": [
-              {
-                "network": "projects/varve-oss/global/networks/s3-listing-study",
-                "subnetwork": "projects/varve-oss/regions/us-east1/subnetworks/s3-listing-study-us-east1"
-              }
-            ]
-          },
-          "serviceAccount": {
-            "email": "s3-listing-study-worker@varve-oss.iam.gserviceaccount.com"
-          }
+          ]
         },
         "labels": {
           "suite": "go-replay-qualify"
@@ -201,7 +184,7 @@
                   "container": {
                     "commands": [
                       "-ceu",
-                      "set -o pipefail\nmkdir -p /fixtures/source\ngcloud storage cp 'gs://s3-listing-study-results-29c02004/fixtures/aws-public-blockchain/current-eba31d9/part-*.parquet' /fixtures/source/\nmanifest=\"$(mktemp)\"\nfiles=(/fixtures/source/*.parquet)\n[[ -f \"${files[0]}\" ]] || { echo \"no staged parquet files\" >&2; exit 1; }\nfor file in \"${files[@]}\"; do\n  digest=\"$(sha256sum \"$file\")\"; digest=\"${digest%% *}\"\n  size=\"$(stat -c %s \"$file\")\"\n  printf '%s\\t%s\\t%s\\n' \"${file##*/}\" \"$size\" \"$digest\"\ndone | LC_ALL=C sort > \"$manifest\"\nactual=\"$(sha256sum \"$manifest\")\"; actual=\"${actual%% *}\"\n[[ \"$actual\" == f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0 ]] || { echo \"fixture digest mismatch: $actual\" >&2; exit 1; }\nrm -f \"$manifest\""
+                      "set -o pipefail\nmkdir -p /fixtures/source\ngcloud storage cp '<fixture-store>/aws-public-blockchain/current-eba31d9/part-*.parquet' /fixtures/source/\nmanifest=\"$(mktemp)\"\nfiles=(/fixtures/source/*.parquet)\n[[ -f \"${files[0]}\" ]] || { echo \"no staged parquet files\" >&2; exit 1; }\nfor file in \"${files[@]}\"; do\n  digest=\"$(sha256sum \"$file\")\"; digest=\"${digest%% *}\"\n  size=\"$(stat -c %s \"$file\")\"\n  printf '%s\\t%s\\t%s\\n' \"${file##*/}\" \"$size\" \"$digest\"\ndone | LC_ALL=C sort > \"$manifest\"\nactual=\"$(sha256sum \"$manifest\")\"; actual=\"${actual%% *}\"\n[[ \"$actual\" == f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0 ]] || { echo \"fixture digest mismatch: $actual\" >&2; exit 1; }\nrm -f \"$manifest\""
                     ],
                     "imageUri": "gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:cf72dd63b7643c117ef53378a41bef6db6a01fa3d561f2b456d7abd8bbeb9ba6",
                     "options": "--entrypoint /bin/bash --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
@@ -218,7 +201,7 @@
                       "10001:10001",
                       "/tmp/attempt"
                     ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:a878e4296bb7c07816eb4437b78f1209c9698e5c3ce891caf53cffe1a7a40e85",
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:a878e4296bb7c07816eb4437b78f1209c9698e5c3ce891caf53cffe1a7a40e85",
                     "options": "--user 0:0 --entrypoint /bin/chown --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
                   }
                 },
@@ -255,7 +238,7 @@
                       "--latency-scale",
                       "1.0"
                     ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:3b3584460761de559c07e73b79c4aa7bffd77318108fdbf12ae36c41a98933b5",
+                    "imageUri": "<study-registry>/swath-replay@sha256:3b3584460761de559c07e73b79c4aa7bffd77318108fdbf12ae36c41a98933b5",
                     "options": "--network host --cpuset-cpus=0-31,40-71 --memory=20g --memory-swap=20g --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
                   },
                   "environment": {
@@ -283,7 +266,7 @@
                       "--output",
                       "/tmp/attempt",
                       "--destination",
-                      "gs://s3-listing-study-results-29c02004/go-replay-qualify/aws-public-blockchain/swath.98f424ce32cc.s1/",
+                      "<result-store>/go-replay-qualify/aws-public-blockchain/swath.98f424ce32cc.s1/",
                       "--timeout",
                       "7200",
                       "--term-grace",
@@ -291,7 +274,7 @@
                       "--retain-products",
                       "false",
                       "--image",
-                      "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:a878e4296bb7c07816eb4437b78f1209c9698e5c3ce891caf53cffe1a7a40e85",
+                      "<study-registry>/benchmark-toolbox@sha256:a878e4296bb7c07816eb4437b78f1209c9698e5c3ce891caf53cffe1a7a40e85",
                       "--toolbox-manifest-sha256",
                       "e44c4056b74c806353bfea06d053ae64589c6623bb7410d8405d6cf71d75125f",
                       "--toolbox-recipe-sha256",
@@ -314,8 +297,6 @@
                       "6ca20d5bd623f8ba818ca3d016651fc8e1ab70e2627e39d261304e53c412d916",
                       "--group-id",
                       "goq2-followup-blockchain-javaera-go",
-                      "--job-name",
-                      "go-replay-qualify-swath-98f424ce32cc-s1",
                       "--case-id",
                       "swath.98f424ce32cc",
                       "--attempt-id",
@@ -333,9 +314,9 @@
                       "--endpoint-url",
                       "http://127.0.0.1:19090",
                       "--replay-config",
-                      "{\"allocation\":{\"replay_heap_percent\":75,\"replay_list_index\":false,\"replay_max_concurrent_requests\":4096,\"replay_memory_gb\":20,\"replay_parquet_connections\":128,\"replay_prefetch\":true,\"replay_prefetch_max_windows\":192,\"replay_response_buffer_budget_bytes\":1073741824,\"replay_vcpus\":64,\"subject_vcpus\":8},\"backend\":{\"fixture_sha256\":\"f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0\",\"fixture_uri\":\"gs://s3-listing-study-results-29c02004/fixtures/aws-public-blockchain/current-eba31d9/part-*.parquet\",\"latency_model\":{\"deadlines_ms\":{\"pivot_probe\":46,\"structure_probe\":55,\"worker_page\":94},\"jitter\":\"none\",\"scale\":1.0},\"server_image_uri\":\"us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:3b3584460761de559c07e73b79c4aa7bffd77318108fdbf12ae36c41a98933b5\",\"server_implementation\":\"go\",\"serving_mode\":\"sorted\",\"warmup\":{\"in_flight\":64,\"pivot_probes\":200,\"structure_probes\":2000,\"worker_pages\":200}},\"capacity_status\":\"uncalibrated\"}"
+                      "{\"allocation\":{\"replay_heap_percent\":75,\"replay_list_index\":false,\"replay_max_concurrent_requests\":4096,\"replay_memory_gb\":20,\"replay_parquet_connections\":128,\"replay_prefetch\":true,\"replay_prefetch_max_windows\":192,\"replay_response_buffer_budget_bytes\":1073741824,\"replay_vcpus\":64,\"subject_vcpus\":8},\"backend\":{\"fixture_sha256\":\"f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0\",\"fixture_uri\":\"<fixture-store>/aws-public-blockchain/current-eba31d9/part-*.parquet\",\"latency_model\":{\"deadlines_ms\":{\"pivot_probe\":46,\"structure_probe\":55,\"worker_page\":94},\"jitter\":\"none\",\"scale\":1.0},\"server_image_uri\":\"<study-registry>/swath-replay@sha256:3b3584460761de559c07e73b79c4aa7bffd77318108fdbf12ae36c41a98933b5\",\"server_implementation\":\"go\",\"serving_mode\":\"sorted\",\"warmup\":{\"in_flight\":64,\"pivot_probes\":200,\"structure_probes\":2000,\"worker_pages\":200}},\"capacity_status\":\"uncalibrated\"}"
                     ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:a878e4296bb7c07816eb4437b78f1209c9698e5c3ce891caf53cffe1a7a40e85",
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:a878e4296bb7c07816eb4437b78f1209c9698e5c3ce891caf53cffe1a7a40e85",
                     "options": "--network host --cpuset-cpus=32-35,72-75 --memory=8g --memory-swap=8g --volume=/mnt/stateful_partition/attempt:/tmp/attempt --volume=/proc:/replay-host-proc:ro"
                   }
                 }
@@ -344,7 +325,6 @@
           }
         ]
       },
-      "result_prefix": "gs://s3-listing-study-results-29c02004/go-replay-qualify/aws-public-blockchain/swath.98f424ce32cc.s1/",
       "settled_at": "2026-11-10T18:12:34.693220+00:00",
       "state": "SUCCEEDED",
       "state_detail": null,
@@ -401,7 +381,7 @@
         },
         "backend": {
           "fixture_sha256": "f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0",
-          "fixture_uri": "gs://s3-listing-study-results-29c02004/fixtures/aws-public-blockchain/current-eba31d9/part-*.parquet",
+          "fixture_uri": "<fixture-store>/aws-public-blockchain/current-eba31d9/part-*.parquet",
           "latency_model": {
             "deadlines_ms": {
               "pivot_probe": 46,
@@ -411,7 +391,7 @@
             "jitter": "none",
             "scale": 1.0
           },
-          "server_image_uri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:3b3584460761de559c07e73b79c4aa7bffd77318108fdbf12ae36c41a98933b5",
+          "server_image_uri": "<study-registry>/swath-replay@sha256:3b3584460761de559c07e73b79c4aa7bffd77318108fdbf12ae36c41a98933b5",
           "server_implementation": "go",
           "serving_mode": "sorted",
           "warmup": {

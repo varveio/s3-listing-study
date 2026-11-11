@@ -20,12 +20,12 @@ cancellations or follow-up jobs.
 - Fixture: the blockchain SeekParquet conversion named in the plans
   (`seekparquet-c4a42eb4e7fb/`), the same as wave 2.
 
-| Group | Attempt | Job UID | Created (UTC) | Terminal (UTC) |
-| --- | --- | --- | --- | --- |
-| `goq3-blockchain-swath-go` | `swath.e40733239507.s1` | `go-replay-qualify-7fea3191-ed5f-4f4000` | 21:06:49 | 21:11:52 |
-| `goq3-blockchain-swath-go` | `swath.e40733239507.s2` | `go-replay-qualify-65bd0884-3ebf-4a7600` | 21:06:49 | 21:12:08 |
-| `goq3-blockchain-swath-go-index-off` | `swath.dc15bf8aa437.s1` | `go-replay-qualify-e3ab1883-81c7-43b700` | 21:06:50 | 21:11:45 |
-| `goq3-blockchain-ladder-go` | `swath.07cb7eabf980.s1` | `go-replay-qualify-6d2c5892-0dae-47c100` | 21:06:50 | 21:11:58 |
+| Group | Attempt | Created (UTC) | Terminal (UTC) |
+| --- | --- | --- | --- |
+| `goq3-blockchain-swath-go` | `swath.e40733239507.s1` | 21:06:49 | 21:11:52 |
+| `goq3-blockchain-swath-go` | `swath.e40733239507.s2` | 21:06:49 | 21:12:08 |
+| `goq3-blockchain-swath-go-index-off` | `swath.dc15bf8aa437.s1` | 21:06:50 | 21:11:45 |
+| `goq3-blockchain-ladder-go` | `swath.07cb7eabf980.s1` | 21:06:50 | 21:11:58 |
 
 Files: one `goq3-*.json` receipt per group, exported with
 `benchmark.receipt --server-log`, so each attempt's `list_index` block carries
@@ -41,3 +41,23 @@ estimates, not an invoice.
 
 Interpretation, per-job tables and the comparison with wave 2 are in the wave
 README's *Results* section.
+
+Public projection (2026-11-11): the receipt files were first committed as
+raw exports carrying the study's estate. Every JSON and JSONL file here is now
+a projection of that export, checked with the release exporter's
+forbidden-pattern list (`benchmark.public_export.FORBIDDEN_PATTERNS`) plus
+cloud project, network and secret resource paths, the results bucket and Batch
+job UIDs.
+Dropped wherever they occur: service accounts, secret resources, project,
+network, subnetwork and zone, Batch job names and UIDs (including the worker's
+job argument), result-store prefixes and URIs, and the executor
+environment apart from boot disk, provisioning and product retention.
+Substituted in every string: the results bucket becomes `<result-store>/` or
+`<fixture-store>/`, the study's registry path `<study-registry>/` (digests
+kept). Everything else is verbatim, including each `result.json` SHA-256.
+Where s7cmd ran, the only remaining pattern hit is the s7cmd container's
+public subject working directory (`subject_workdir` in
+`tools/s7cmd/build/image.json`), which the home-directory pattern matches. Case ids are
+carried from the ledger and are not recomputable from the projected case
+documents. The raw exports remain in this branch's earlier commits until the
+squash merge.

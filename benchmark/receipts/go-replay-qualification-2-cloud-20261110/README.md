@@ -35,11 +35,29 @@ README's *Results* section.
 ## Follow-up beyond wave 2
 
 One owner-approved job outside the seven-job wave, group
-`goq2-followup-blockchain-javaera-go` (`swath.98f424ce32cc.s1`, job UID
-`go-replay-qualify-1f6b1303-1996-430d00`), submitted 18:07 UTC and SUCCEEDED
+`goq2-followup-blockchain-javaera-go` (`swath.98f424ce32cc.s1`), submitted 18:07 UTC and SUCCEEDED
 by 18:12 UTC: blockchain Swath c256 at replay 64/20 with the same Go image,
 on wave 1's Java-era fixture (`current-eba31d9/part-*.parquet`,
 `f4a839f2…d4b0`), index off. Its receipt, metrics row, server line and cost
 are in the same files. With it, observed compute for the eight jobs is $1.0172
 create-to-terminal ($0.8446 by `runDuration`).
 
+Public projection (2026-11-11): the receipt files were first committed as
+raw exports carrying the study's estate. Every JSON and JSONL file here is now
+a projection of that export, checked with the release exporter's
+forbidden-pattern list (`benchmark.public_export.FORBIDDEN_PATTERNS`) plus
+cloud project, network and secret resource paths, the results bucket and Batch
+job UIDs.
+Dropped wherever they occur: service accounts, secret resources, project,
+network, subnetwork and zone, Batch job names and UIDs (including the worker's
+job argument), result-store prefixes and URIs, and the executor
+environment apart from boot disk, provisioning and product retention.
+Substituted in every string: the results bucket becomes `<result-store>/` or
+`<fixture-store>/`, the study's registry path `<study-registry>/` (digests
+kept). Everything else is verbatim, including each `result.json` SHA-256.
+Where s7cmd ran, the only remaining pattern hit is the s7cmd container's
+public subject working directory (`subject_workdir` in
+`tools/s7cmd/build/image.json`), which the home-directory pattern matches. Case ids are
+carried from the ledger and are not recomputable from the projected case
+documents. The raw exports remain in this branch's earlier commits until the
+squash merge.

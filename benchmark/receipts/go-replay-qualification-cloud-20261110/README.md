@@ -26,7 +26,7 @@ The s5cmd median wall difference is −1.57%, inside the predeclared ±10% band.
 These results do not qualify a blanket instrument switch.
 
 The s7cmd Java side uses the explicitly authorized retained release image
-`us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:f51c4d12ac0e1f52fd02f1a77a74e962d610d518e64ab8425635512370973612`.
+`<study-registry>/swath-replay@sha256:f51c4d12ac0e1f52fd02f1a77a74e962d610d518e64ab8425635512370973612`.
 Its original image
 `ghcr.io/varveio/swath-replay@sha256:8fb53a327f946f10db17d4fd082a7b2e06bc678a1e828a197a1ef5717473a46a`
 returned manifest unknown and was absent from the project registry. This pair
@@ -50,3 +50,23 @@ estimate was $4.2055 compute, $9.4111 including preemption and other reserves.
 Rates: [Google Spot VM pricing](https://cloud.google.com/spot-vms/pricing),
 us-east1 table retrieved 2026-11-10. Raw worker evidence remains at the immutable
 result paths referenced in each receipt; the diagnostic release was not edited.
+
+Public projection (2026-11-11): the receipt files were first committed as
+raw exports carrying the study's estate. Every JSON and JSONL file here is now
+a projection of that export, checked with the release exporter's
+forbidden-pattern list (`benchmark.public_export.FORBIDDEN_PATTERNS`) plus
+cloud project, network and secret resource paths, the results bucket and Batch
+job UIDs.
+Dropped wherever they occur: service accounts, secret resources, project,
+network, subnetwork and zone, Batch job names and UIDs (including the worker's
+job argument), result-store prefixes and URIs, and the executor
+environment apart from boot disk, provisioning and product retention.
+Substituted in every string: the results bucket becomes `<result-store>/` or
+`<fixture-store>/`, the study's registry path `<study-registry>/` (digests
+kept). Everything else is verbatim, including each `result.json` SHA-256.
+Where s7cmd ran, the only remaining pattern hit is the s7cmd container's
+public subject working directory (`subject_workdir` in
+`tools/s7cmd/build/image.json`), which the home-directory pattern matches. Case ids are
+carried from the ledger and are not recomputable from the projected case
+documents. The raw exports remain in this branch's earlier commits until the
+squash merge.

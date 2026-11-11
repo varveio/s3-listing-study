@@ -242,7 +242,7 @@ Images, recorded before submission:
 ## Results (2026-11-10)
 
 Four Spot jobs, submitted 21:06 UTC with owner approval, all SUCCEEDED by
-21:13 UTC with no preemption or retry. Receipt (job UIDs, create and terminal
+21:13 UTC with no preemption or retry. Receipt (create and terminal
 times):
 [`../../../receipts/go-replay-qualification-3-cloud-20261110/`](../../../receipts/go-replay-qualification-3-cloud-20261110/README.md).
 Every subject exited zero with the expected 143,008,674 rows, with zero server

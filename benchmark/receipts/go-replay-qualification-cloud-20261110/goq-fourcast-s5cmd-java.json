@@ -1,10 +1,736 @@
 {
-  "schema_version": 1,
-  "kind": "campaign-receipt-draft",
-  "suite": "go-replay-qualify",
-  "ledger_schema_version": 3,
-  "ledger_created_at": "2026-11-10T11:27:16.458789+00:00",
+  "attempts": [
+    {
+      "attempt_id": "s5cmd.a3f174d2d894.s1",
+      "case_id": "s5cmd.a3f174d2d894",
+      "evidence": {
+        "argv": [
+          "/s5cmd",
+          "--endpoint-url",
+          "http://127.0.0.1:19090",
+          "--no-sign-request",
+          "ls",
+          "-e",
+          "-s",
+          "s3://noaa-nws-fourcastnetgfs-pds/*"
+        ],
+        "binding_errors": [],
+        "replay": {
+          "errors": {
+            "after": 0.0,
+            "before": 0.0
+          },
+          "readiness": "ready",
+          "refusals": [],
+          "requests": {
+            "after": 4082.0,
+            "before": 0.0
+          },
+          "resource_sample_count": 41,
+          "sample_count": 41,
+          "state": "COMPLETE"
+        },
+        "result": {
+          "artifacts_size_bytes": 31,
+          "exit_code": 0,
+          "finished_at": "2026-11-10T11:35:41.318023+00:00",
+          "max_rss_kb": 51148,
+          "product": {
+            "artifact": "listing",
+            "channel": "stdout",
+            "name": "native/listing.txt.gz",
+            "sha256": null,
+            "size_bytes": 113721347
+          },
+          "product_error": null,
+          "row_count": 4081170,
+          "row_count_error": null,
+          "started_at": "2026-11-10T11:28:40.699687+00:00",
+          "stderr": {
+            "name": "stderr.log.gz",
+            "sha256": null,
+            "size_bytes": 31
+          },
+          "stdout": null,
+          "timed_out": false,
+          "wall_seconds": 420.617072,
+          "worker_exit_code": 0
+        },
+        "result_sha256": "3a87249f645ab1b2aba96ddeaeb8d1b271af855755bef8a2801fdb660f362b97",
+        "state": "BOUND",
+        "verification": null
+      },
+      "group_id": "goq-fourcast-s5cmd-java",
+      "mode": "recursive",
+      "origin": "planned",
+      "purpose": "diagnostic",
+      "recorded_at": "2026-11-10T11:27:24.661209+00:00",
+      "request": {
+        "allocationPolicy": {
+          "instances": [
+            {
+              "policy": {
+                "bootDisk": {
+                  "image": "batch-cos",
+                  "sizeGb": "100",
+                  "type": "hyperdisk-balanced"
+                },
+                "machineType": "n4-highcpu-16",
+                "provisioningModel": "SPOT"
+              }
+            }
+          ]
+        },
+        "labels": {
+          "suite": "go-replay-qualify"
+        },
+        "logsPolicy": {
+          "destination": "CLOUD_LOGGING"
+        },
+        "taskGroups": [
+          {
+            "parallelism": "1",
+            "taskCount": "1",
+            "taskSpec": {
+              "computeResource": {
+                "cpuMilli": "16000",
+                "memoryMib": "32768"
+              },
+              "maxRetryCount": 0,
+              "maxRunDuration": "3005s",
+              "runnables": [
+                {
+                  "container": {
+                    "commands": [
+                      "-ceu",
+                      "set -o pipefail\nmkdir -p /fixtures/source\ngcloud storage cp <fixture-store>/noaa-nws-fourcastnetgfs-pds/1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4/part-00000.parquet /fixtures/source/\nmanifest=\"$(mktemp)\"\nfiles=(/fixtures/source/*.parquet)\n[[ -f \"${files[0]}\" ]] || { echo \"no staged parquet files\" >&2; exit 1; }\nfor file in \"${files[@]}\"; do\n  digest=\"$(sha256sum \"$file\")\"; digest=\"${digest%% *}\"\n  size=\"$(stat -c %s \"$file\")\"\n  printf '%s\\t%s\\t%s\\n' \"${file##*/}\" \"$size\" \"$digest\"\ndone | LC_ALL=C sort > \"$manifest\"\nactual=\"$(sha256sum \"$manifest\")\"; actual=\"${actual%% *}\"\n[[ \"$actual\" == 1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4 ]] || { echo \"fixture digest mismatch: $actual\" >&2; exit 1; }\nrm -f \"$manifest\""
+                    ],
+                    "imageUri": "gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:cf72dd63b7643c117ef53378a41bef6db6a01fa3d561f2b456d7abd8bbeb9ba6",
+                    "options": "--entrypoint /bin/bash --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
+                  },
+                  "environment": {
+                    "variables": {
+                      "CLOUDSDK_PYTHON": "/usr/lib/google-cloud-sdk/platform/bundledpythonunix/bin/python3"
+                    }
+                  }
+                },
+                {
+                  "container": {
+                    "commands": [
+                      "10001:10001",
+                      "/tmp/attempt"
+                    ],
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:7e6534d514f1a59318ffc397997c44cef87c0e1aa76d5b5ab32d386fa8ec95e2",
+                    "options": "--user 0:0 --entrypoint /bin/chown --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
+                  }
+                },
+                {
+                  "background": true,
+                  "container": {
+                    "commands": [
+                      "serve",
+                      "--fixture",
+                      "/fixtures/source",
+                      "--bucket",
+                      "noaa-nws-fourcastnetgfs-pds",
+                      "--host",
+                      "127.0.0.1",
+                      "--port",
+                      "19090",
+                      "--metrics-port",
+                      "19192",
+                      "--serving-mode",
+                      "sorted",
+                      "--parquet-connections",
+                      "8",
+                      "--max-concurrent-requests",
+                      "4096",
+                      "--inject-latency",
+                      "worker_page=85ms,pivot_probe=35ms,structure_probe=37ms",
+                      "--latency-scale",
+                      "1.0"
+                    ],
+                    "imageUri": "<study-registry>/swath-replay@sha256:ace5350d99c217bf5919b795fc53ed955d1dc2fb6bef1eecf36e8a90e9732f07",
+                    "options": "--network host --cpuset-cpus=0-3,8-11 --memory=8g --memory-swap=8g --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
+                  },
+                  "environment": {
+                    "variables": {
+                      "JAVA_TOOL_OPTIONS": "-XX:MaxRAMPercentage=75 -Dswath.replay.prefetch.enabled=true -Dswath.replay.prefetch.max-windows=256"
+                    }
+                  }
+                },
+                {
+                  "container": {
+                    "commands": [
+                      "--tool",
+                      "s5cmd",
+                      "--mode",
+                      "recursive",
+                      "--purpose",
+                      "diagnostic",
+                      "--bucket",
+                      "noaa-nws-fourcastnetgfs-pds",
+                      "--region",
+                      "us-east-1",
+                      "--prefix",
+                      "",
+                      "--output",
+                      "/tmp/attempt",
+                      "--destination",
+                      "<result-store>/go-replay-qualify/noaa-nws-fourcastnetgfs-pds/s5cmd.a3f174d2d894.s1/",
+                      "--timeout",
+                      "1800",
+                      "--term-grace",
+                      "5.0",
+                      "--retain-products",
+                      "false",
+                      "--image",
+                      "<study-registry>/benchmark-toolbox@sha256:7e6534d514f1a59318ffc397997c44cef87c0e1aa76d5b5ab32d386fa8ec95e2",
+                      "--toolbox-manifest-sha256",
+                      "2beadc0892566c9fb1f598337d891a2605d4a1488d9387bea054113ee46d079c",
+                      "--toolbox-recipe-sha256",
+                      "405bc76f129181d8a6d5f6cc9c26d89daa5e0068ae688b040aa345ea99fbd0ee",
+                      "--tool-recipe-sha256",
+                      "ce03fd41132edea03c2c28866dc89b08ea10ee0fb8265dbf4bfd814ce489e1cb",
+                      "--tool-build-inputs-sha256",
+                      "f40337116a30ee7a72aae5a5e0bb23cf46695b69fcf4231096d47c4a7707c595",
+                      "--tool-version",
+                      "v2.3.0",
+                      "--tool-build-sha256",
+                      "c3d87debb28e7c9d545996083089af85b26706f00c12386b488398600d4f83f5",
+                      "--adapter-bundle-sha256",
+                      "a9b7390a620c3f501428b93e5f347ab4b5ab01513864a9cacdc0c74afaebb6f6",
+                      "--harness-revision",
+                      "35f1d9fde4c656dea6aff1fee9370a56eb9f99dc",
+                      "--subject-workdir",
+                      "/aws",
+                      "--image-set-sha256",
+                      "02298c4180be71d25af8365667662aa49c34fcf378f17718196f1f90d817d9a2",
+                      "--group-id",
+                      "goq-fourcast-s5cmd-java",
+                      "--case-id",
+                      "s5cmd.a3f174d2d894",
+                      "--attempt-id",
+                      "s5cmd.a3f174d2d894.s1",
+                      "--machine-type",
+                      "n4-highcpu-16",
+                      "--vcpus",
+                      "16",
+                      "--memory-gb",
+                      "32",
+                      "--container-memory-gb",
+                      "16",
+                      "--config",
+                      "{\"mode\":\"recursive\"}",
+                      "--endpoint-url",
+                      "http://127.0.0.1:19090",
+                      "--replay-config",
+                      "{\"allocation\":{\"replay_heap_percent\":75,\"replay_max_concurrent_requests\":4096,\"replay_memory_gb\":8,\"replay_parquet_connections\":8,\"replay_prefetch\":true,\"replay_prefetch_max_windows\":256,\"replay_vcpus\":8,\"subject_vcpus\":6},\"backend\":{\"fixture_sha256\":\"1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4\",\"fixture_uri\":\"<fixture-store>/noaa-nws-fourcastnetgfs-pds/1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4/part-00000.parquet\",\"latency_model\":{\"deadlines_ms\":{\"pivot_probe\":35,\"structure_probe\":37,\"worker_page\":85},\"jitter\":\"none\",\"scale\":1.0},\"server_image_uri\":\"<study-registry>/swath-replay@sha256:ace5350d99c217bf5919b795fc53ed955d1dc2fb6bef1eecf36e8a90e9732f07\",\"serving_mode\":\"sorted\"},\"capacity_status\":\"uncalibrated\"}"
+                    ],
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:7e6534d514f1a59318ffc397997c44cef87c0e1aa76d5b5ab32d386fa8ec95e2",
+                    "options": "--network host --cpuset-cpus=4-6,12-14 --memory=16g --memory-swap=16g --volume=/mnt/stateful_partition/attempt:/tmp/attempt --volume=/proc:/replay-host-proc:ro"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "settled_at": "2026-11-10T11:37:55.938811+00:00",
+      "state": "SUCCEEDED",
+      "state_detail": null,
+      "statistic": "timing",
+      "tool": "s5cmd"
+    },
+    {
+      "attempt_id": "s5cmd.a3f174d2d894.s2",
+      "case_id": "s5cmd.a3f174d2d894",
+      "evidence": {
+        "argv": [
+          "/s5cmd",
+          "--endpoint-url",
+          "http://127.0.0.1:19090",
+          "--no-sign-request",
+          "ls",
+          "-e",
+          "-s",
+          "s3://noaa-nws-fourcastnetgfs-pds/*"
+        ],
+        "binding_errors": [],
+        "replay": {
+          "errors": {
+            "after": 0.0,
+            "before": 0.0
+          },
+          "readiness": "ready",
+          "refusals": [],
+          "requests": {
+            "after": 4082.0,
+            "before": 0.0
+          },
+          "resource_sample_count": 41,
+          "sample_count": 41,
+          "state": "COMPLETE"
+        },
+        "result": {
+          "artifacts_size_bytes": 31,
+          "exit_code": 0,
+          "finished_at": "2026-11-10T11:35:30.508558+00:00",
+          "max_rss_kb": 51160,
+          "product": {
+            "artifact": "listing",
+            "channel": "stdout",
+            "name": "native/listing.txt.gz",
+            "sha256": null,
+            "size_bytes": 113721347
+          },
+          "product_error": null,
+          "row_count": 4081170,
+          "row_count_error": null,
+          "started_at": "2026-11-10T11:28:37.858532+00:00",
+          "stderr": {
+            "name": "stderr.log.gz",
+            "sha256": null,
+            "size_bytes": 31
+          },
+          "stdout": null,
+          "timed_out": false,
+          "wall_seconds": 412.649036,
+          "worker_exit_code": 0
+        },
+        "result_sha256": "a594f454089595321302f520dce38d2185af178cccf00c28c850ee0fcf55ed66",
+        "state": "BOUND",
+        "verification": null
+      },
+      "group_id": "goq-fourcast-s5cmd-java",
+      "mode": "recursive",
+      "origin": "planned",
+      "purpose": "diagnostic",
+      "recorded_at": "2026-11-10T11:27:25.082939+00:00",
+      "request": {
+        "allocationPolicy": {
+          "instances": [
+            {
+              "policy": {
+                "bootDisk": {
+                  "image": "batch-cos",
+                  "sizeGb": "100",
+                  "type": "hyperdisk-balanced"
+                },
+                "machineType": "n4-highcpu-16",
+                "provisioningModel": "SPOT"
+              }
+            }
+          ]
+        },
+        "labels": {
+          "suite": "go-replay-qualify"
+        },
+        "logsPolicy": {
+          "destination": "CLOUD_LOGGING"
+        },
+        "taskGroups": [
+          {
+            "parallelism": "1",
+            "taskCount": "1",
+            "taskSpec": {
+              "computeResource": {
+                "cpuMilli": "16000",
+                "memoryMib": "32768"
+              },
+              "maxRetryCount": 0,
+              "maxRunDuration": "3005s",
+              "runnables": [
+                {
+                  "container": {
+                    "commands": [
+                      "-ceu",
+                      "set -o pipefail\nmkdir -p /fixtures/source\ngcloud storage cp <fixture-store>/noaa-nws-fourcastnetgfs-pds/1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4/part-00000.parquet /fixtures/source/\nmanifest=\"$(mktemp)\"\nfiles=(/fixtures/source/*.parquet)\n[[ -f \"${files[0]}\" ]] || { echo \"no staged parquet files\" >&2; exit 1; }\nfor file in \"${files[@]}\"; do\n  digest=\"$(sha256sum \"$file\")\"; digest=\"${digest%% *}\"\n  size=\"$(stat -c %s \"$file\")\"\n  printf '%s\\t%s\\t%s\\n' \"${file##*/}\" \"$size\" \"$digest\"\ndone | LC_ALL=C sort > \"$manifest\"\nactual=\"$(sha256sum \"$manifest\")\"; actual=\"${actual%% *}\"\n[[ \"$actual\" == 1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4 ]] || { echo \"fixture digest mismatch: $actual\" >&2; exit 1; }\nrm -f \"$manifest\""
+                    ],
+                    "imageUri": "gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:cf72dd63b7643c117ef53378a41bef6db6a01fa3d561f2b456d7abd8bbeb9ba6",
+                    "options": "--entrypoint /bin/bash --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
+                  },
+                  "environment": {
+                    "variables": {
+                      "CLOUDSDK_PYTHON": "/usr/lib/google-cloud-sdk/platform/bundledpythonunix/bin/python3"
+                    }
+                  }
+                },
+                {
+                  "container": {
+                    "commands": [
+                      "10001:10001",
+                      "/tmp/attempt"
+                    ],
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:7e6534d514f1a59318ffc397997c44cef87c0e1aa76d5b5ab32d386fa8ec95e2",
+                    "options": "--user 0:0 --entrypoint /bin/chown --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
+                  }
+                },
+                {
+                  "background": true,
+                  "container": {
+                    "commands": [
+                      "serve",
+                      "--fixture",
+                      "/fixtures/source",
+                      "--bucket",
+                      "noaa-nws-fourcastnetgfs-pds",
+                      "--host",
+                      "127.0.0.1",
+                      "--port",
+                      "19090",
+                      "--metrics-port",
+                      "19192",
+                      "--serving-mode",
+                      "sorted",
+                      "--parquet-connections",
+                      "8",
+                      "--max-concurrent-requests",
+                      "4096",
+                      "--inject-latency",
+                      "worker_page=85ms,pivot_probe=35ms,structure_probe=37ms",
+                      "--latency-scale",
+                      "1.0"
+                    ],
+                    "imageUri": "<study-registry>/swath-replay@sha256:ace5350d99c217bf5919b795fc53ed955d1dc2fb6bef1eecf36e8a90e9732f07",
+                    "options": "--network host --cpuset-cpus=0-3,8-11 --memory=8g --memory-swap=8g --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
+                  },
+                  "environment": {
+                    "variables": {
+                      "JAVA_TOOL_OPTIONS": "-XX:MaxRAMPercentage=75 -Dswath.replay.prefetch.enabled=true -Dswath.replay.prefetch.max-windows=256"
+                    }
+                  }
+                },
+                {
+                  "container": {
+                    "commands": [
+                      "--tool",
+                      "s5cmd",
+                      "--mode",
+                      "recursive",
+                      "--purpose",
+                      "diagnostic",
+                      "--bucket",
+                      "noaa-nws-fourcastnetgfs-pds",
+                      "--region",
+                      "us-east-1",
+                      "--prefix",
+                      "",
+                      "--output",
+                      "/tmp/attempt",
+                      "--destination",
+                      "<result-store>/go-replay-qualify/noaa-nws-fourcastnetgfs-pds/s5cmd.a3f174d2d894.s2/",
+                      "--timeout",
+                      "1800",
+                      "--term-grace",
+                      "5.0",
+                      "--retain-products",
+                      "false",
+                      "--image",
+                      "<study-registry>/benchmark-toolbox@sha256:7e6534d514f1a59318ffc397997c44cef87c0e1aa76d5b5ab32d386fa8ec95e2",
+                      "--toolbox-manifest-sha256",
+                      "2beadc0892566c9fb1f598337d891a2605d4a1488d9387bea054113ee46d079c",
+                      "--toolbox-recipe-sha256",
+                      "405bc76f129181d8a6d5f6cc9c26d89daa5e0068ae688b040aa345ea99fbd0ee",
+                      "--tool-recipe-sha256",
+                      "ce03fd41132edea03c2c28866dc89b08ea10ee0fb8265dbf4bfd814ce489e1cb",
+                      "--tool-build-inputs-sha256",
+                      "f40337116a30ee7a72aae5a5e0bb23cf46695b69fcf4231096d47c4a7707c595",
+                      "--tool-version",
+                      "v2.3.0",
+                      "--tool-build-sha256",
+                      "c3d87debb28e7c9d545996083089af85b26706f00c12386b488398600d4f83f5",
+                      "--adapter-bundle-sha256",
+                      "a9b7390a620c3f501428b93e5f347ab4b5ab01513864a9cacdc0c74afaebb6f6",
+                      "--harness-revision",
+                      "35f1d9fde4c656dea6aff1fee9370a56eb9f99dc",
+                      "--subject-workdir",
+                      "/aws",
+                      "--image-set-sha256",
+                      "02298c4180be71d25af8365667662aa49c34fcf378f17718196f1f90d817d9a2",
+                      "--group-id",
+                      "goq-fourcast-s5cmd-java",
+                      "--case-id",
+                      "s5cmd.a3f174d2d894",
+                      "--attempt-id",
+                      "s5cmd.a3f174d2d894.s2",
+                      "--machine-type",
+                      "n4-highcpu-16",
+                      "--vcpus",
+                      "16",
+                      "--memory-gb",
+                      "32",
+                      "--container-memory-gb",
+                      "16",
+                      "--config",
+                      "{\"mode\":\"recursive\"}",
+                      "--endpoint-url",
+                      "http://127.0.0.1:19090",
+                      "--replay-config",
+                      "{\"allocation\":{\"replay_heap_percent\":75,\"replay_max_concurrent_requests\":4096,\"replay_memory_gb\":8,\"replay_parquet_connections\":8,\"replay_prefetch\":true,\"replay_prefetch_max_windows\":256,\"replay_vcpus\":8,\"subject_vcpus\":6},\"backend\":{\"fixture_sha256\":\"1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4\",\"fixture_uri\":\"<fixture-store>/noaa-nws-fourcastnetgfs-pds/1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4/part-00000.parquet\",\"latency_model\":{\"deadlines_ms\":{\"pivot_probe\":35,\"structure_probe\":37,\"worker_page\":85},\"jitter\":\"none\",\"scale\":1.0},\"server_image_uri\":\"<study-registry>/swath-replay@sha256:ace5350d99c217bf5919b795fc53ed955d1dc2fb6bef1eecf36e8a90e9732f07\",\"serving_mode\":\"sorted\"},\"capacity_status\":\"uncalibrated\"}"
+                    ],
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:7e6534d514f1a59318ffc397997c44cef87c0e1aa76d5b5ab32d386fa8ec95e2",
+                    "options": "--network host --cpuset-cpus=4-6,12-14 --memory=16g --memory-swap=16g --volume=/mnt/stateful_partition/attempt:/tmp/attempt --volume=/proc:/replay-host-proc:ro"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "settled_at": "2026-11-10T11:37:55.940281+00:00",
+      "state": "SUCCEEDED",
+      "state_detail": null,
+      "statistic": "timing",
+      "tool": "s5cmd"
+    },
+    {
+      "attempt_id": "s5cmd.a3f174d2d894.s3",
+      "case_id": "s5cmd.a3f174d2d894",
+      "evidence": {
+        "argv": [
+          "/s5cmd",
+          "--endpoint-url",
+          "http://127.0.0.1:19090",
+          "--no-sign-request",
+          "ls",
+          "-e",
+          "-s",
+          "s3://noaa-nws-fourcastnetgfs-pds/*"
+        ],
+        "binding_errors": [],
+        "replay": {
+          "errors": {
+            "after": 0.0,
+            "before": 0.0
+          },
+          "readiness": "ready",
+          "refusals": [],
+          "requests": {
+            "after": 4082.0,
+            "before": 0.0
+          },
+          "resource_sample_count": 43,
+          "sample_count": 43,
+          "state": "COMPLETE"
+        },
+        "result": {
+          "artifacts_size_bytes": 31,
+          "exit_code": 0,
+          "finished_at": "2026-11-10T11:35:56.424383+00:00",
+          "max_rss_kb": 51036,
+          "product": {
+            "artifact": "listing",
+            "channel": "stdout",
+            "name": "native/listing.txt.gz",
+            "sha256": null,
+            "size_bytes": 113721347
+          },
+          "product_error": null,
+          "row_count": 4081170,
+          "row_count_error": null,
+          "started_at": "2026-11-10T11:28:42.577050+00:00",
+          "stderr": {
+            "name": "stderr.log.gz",
+            "sha256": null,
+            "size_bytes": 31
+          },
+          "stdout": null,
+          "timed_out": false,
+          "wall_seconds": 433.846008,
+          "worker_exit_code": 0
+        },
+        "result_sha256": "b141ce685ad01f2ae77bd70c0895813c5a0178fa3380fb43e1b08cc4f60da0db",
+        "state": "BOUND",
+        "verification": null
+      },
+      "group_id": "goq-fourcast-s5cmd-java",
+      "mode": "recursive",
+      "origin": "planned",
+      "purpose": "diagnostic",
+      "recorded_at": "2026-11-10T11:27:25.322552+00:00",
+      "request": {
+        "allocationPolicy": {
+          "instances": [
+            {
+              "policy": {
+                "bootDisk": {
+                  "image": "batch-cos",
+                  "sizeGb": "100",
+                  "type": "hyperdisk-balanced"
+                },
+                "machineType": "n4-highcpu-16",
+                "provisioningModel": "SPOT"
+              }
+            }
+          ]
+        },
+        "labels": {
+          "suite": "go-replay-qualify"
+        },
+        "logsPolicy": {
+          "destination": "CLOUD_LOGGING"
+        },
+        "taskGroups": [
+          {
+            "parallelism": "1",
+            "taskCount": "1",
+            "taskSpec": {
+              "computeResource": {
+                "cpuMilli": "16000",
+                "memoryMib": "32768"
+              },
+              "maxRetryCount": 0,
+              "maxRunDuration": "3005s",
+              "runnables": [
+                {
+                  "container": {
+                    "commands": [
+                      "-ceu",
+                      "set -o pipefail\nmkdir -p /fixtures/source\ngcloud storage cp <fixture-store>/noaa-nws-fourcastnetgfs-pds/1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4/part-00000.parquet /fixtures/source/\nmanifest=\"$(mktemp)\"\nfiles=(/fixtures/source/*.parquet)\n[[ -f \"${files[0]}\" ]] || { echo \"no staged parquet files\" >&2; exit 1; }\nfor file in \"${files[@]}\"; do\n  digest=\"$(sha256sum \"$file\")\"; digest=\"${digest%% *}\"\n  size=\"$(stat -c %s \"$file\")\"\n  printf '%s\\t%s\\t%s\\n' \"${file##*/}\" \"$size\" \"$digest\"\ndone | LC_ALL=C sort > \"$manifest\"\nactual=\"$(sha256sum \"$manifest\")\"; actual=\"${actual%% *}\"\n[[ \"$actual\" == 1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4 ]] || { echo \"fixture digest mismatch: $actual\" >&2; exit 1; }\nrm -f \"$manifest\""
+                    ],
+                    "imageUri": "gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:cf72dd63b7643c117ef53378a41bef6db6a01fa3d561f2b456d7abd8bbeb9ba6",
+                    "options": "--entrypoint /bin/bash --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
+                  },
+                  "environment": {
+                    "variables": {
+                      "CLOUDSDK_PYTHON": "/usr/lib/google-cloud-sdk/platform/bundledpythonunix/bin/python3"
+                    }
+                  }
+                },
+                {
+                  "container": {
+                    "commands": [
+                      "10001:10001",
+                      "/tmp/attempt"
+                    ],
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:7e6534d514f1a59318ffc397997c44cef87c0e1aa76d5b5ab32d386fa8ec95e2",
+                    "options": "--user 0:0 --entrypoint /bin/chown --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
+                  }
+                },
+                {
+                  "background": true,
+                  "container": {
+                    "commands": [
+                      "serve",
+                      "--fixture",
+                      "/fixtures/source",
+                      "--bucket",
+                      "noaa-nws-fourcastnetgfs-pds",
+                      "--host",
+                      "127.0.0.1",
+                      "--port",
+                      "19090",
+                      "--metrics-port",
+                      "19192",
+                      "--serving-mode",
+                      "sorted",
+                      "--parquet-connections",
+                      "8",
+                      "--max-concurrent-requests",
+                      "4096",
+                      "--inject-latency",
+                      "worker_page=85ms,pivot_probe=35ms,structure_probe=37ms",
+                      "--latency-scale",
+                      "1.0"
+                    ],
+                    "imageUri": "<study-registry>/swath-replay@sha256:ace5350d99c217bf5919b795fc53ed955d1dc2fb6bef1eecf36e8a90e9732f07",
+                    "options": "--network host --cpuset-cpus=0-3,8-11 --memory=8g --memory-swap=8g --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
+                  },
+                  "environment": {
+                    "variables": {
+                      "JAVA_TOOL_OPTIONS": "-XX:MaxRAMPercentage=75 -Dswath.replay.prefetch.enabled=true -Dswath.replay.prefetch.max-windows=256"
+                    }
+                  }
+                },
+                {
+                  "container": {
+                    "commands": [
+                      "--tool",
+                      "s5cmd",
+                      "--mode",
+                      "recursive",
+                      "--purpose",
+                      "diagnostic",
+                      "--bucket",
+                      "noaa-nws-fourcastnetgfs-pds",
+                      "--region",
+                      "us-east-1",
+                      "--prefix",
+                      "",
+                      "--output",
+                      "/tmp/attempt",
+                      "--destination",
+                      "<result-store>/go-replay-qualify/noaa-nws-fourcastnetgfs-pds/s5cmd.a3f174d2d894.s3/",
+                      "--timeout",
+                      "1800",
+                      "--term-grace",
+                      "5.0",
+                      "--retain-products",
+                      "false",
+                      "--image",
+                      "<study-registry>/benchmark-toolbox@sha256:7e6534d514f1a59318ffc397997c44cef87c0e1aa76d5b5ab32d386fa8ec95e2",
+                      "--toolbox-manifest-sha256",
+                      "2beadc0892566c9fb1f598337d891a2605d4a1488d9387bea054113ee46d079c",
+                      "--toolbox-recipe-sha256",
+                      "405bc76f129181d8a6d5f6cc9c26d89daa5e0068ae688b040aa345ea99fbd0ee",
+                      "--tool-recipe-sha256",
+                      "ce03fd41132edea03c2c28866dc89b08ea10ee0fb8265dbf4bfd814ce489e1cb",
+                      "--tool-build-inputs-sha256",
+                      "f40337116a30ee7a72aae5a5e0bb23cf46695b69fcf4231096d47c4a7707c595",
+                      "--tool-version",
+                      "v2.3.0",
+                      "--tool-build-sha256",
+                      "c3d87debb28e7c9d545996083089af85b26706f00c12386b488398600d4f83f5",
+                      "--adapter-bundle-sha256",
+                      "a9b7390a620c3f501428b93e5f347ab4b5ab01513864a9cacdc0c74afaebb6f6",
+                      "--harness-revision",
+                      "35f1d9fde4c656dea6aff1fee9370a56eb9f99dc",
+                      "--subject-workdir",
+                      "/aws",
+                      "--image-set-sha256",
+                      "02298c4180be71d25af8365667662aa49c34fcf378f17718196f1f90d817d9a2",
+                      "--group-id",
+                      "goq-fourcast-s5cmd-java",
+                      "--case-id",
+                      "s5cmd.a3f174d2d894",
+                      "--attempt-id",
+                      "s5cmd.a3f174d2d894.s3",
+                      "--machine-type",
+                      "n4-highcpu-16",
+                      "--vcpus",
+                      "16",
+                      "--memory-gb",
+                      "32",
+                      "--container-memory-gb",
+                      "16",
+                      "--config",
+                      "{\"mode\":\"recursive\"}",
+                      "--endpoint-url",
+                      "http://127.0.0.1:19090",
+                      "--replay-config",
+                      "{\"allocation\":{\"replay_heap_percent\":75,\"replay_max_concurrent_requests\":4096,\"replay_memory_gb\":8,\"replay_parquet_connections\":8,\"replay_prefetch\":true,\"replay_prefetch_max_windows\":256,\"replay_vcpus\":8,\"subject_vcpus\":6},\"backend\":{\"fixture_sha256\":\"1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4\",\"fixture_uri\":\"<fixture-store>/noaa-nws-fourcastnetgfs-pds/1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4/part-00000.parquet\",\"latency_model\":{\"deadlines_ms\":{\"pivot_probe\":35,\"structure_probe\":37,\"worker_page\":85},\"jitter\":\"none\",\"scale\":1.0},\"server_image_uri\":\"<study-registry>/swath-replay@sha256:ace5350d99c217bf5919b795fc53ed955d1dc2fb6bef1eecf36e8a90e9732f07\",\"serving_mode\":\"sorted\"},\"capacity_status\":\"uncalibrated\"}"
+                    ],
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:7e6534d514f1a59318ffc397997c44cef87c0e1aa76d5b5ab32d386fa8ec95e2",
+                    "options": "--network host --cpuset-cpus=4-6,12-14 --memory=16g --memory-swap=16g --volume=/mnt/stateful_partition/attempt:/tmp/attempt --volume=/proc:/replay-host-proc:ro"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "settled_at": "2026-11-10T11:37:55.941644+00:00",
+      "state": "SUCCEEDED",
+      "state_detail": null,
+      "statistic": "timing",
+      "tool": "s5cmd"
+    }
+  ],
   "group_id": "goq-fourcast-s5cmd-java",
+  "kind": "campaign-receipt-draft",
+  "ledger_created_at": "2026-11-10T11:27:16.458789+00:00",
+  "ledger_schema_version": 3,
   "purposes": [
     "diagnostic"
   ],
@@ -40,7 +766,7 @@
         },
         "backend": {
           "fixture_sha256": "1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4",
-          "fixture_uri": "gs://s3-listing-study-results-29c02004/fixtures/noaa-nws-fourcastnetgfs-pds/1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4/part-00000.parquet",
+          "fixture_uri": "<fixture-store>/noaa-nws-fourcastnetgfs-pds/1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4/part-00000.parquet",
           "latency_model": {
             "deadlines_ms": {
               "pivot_probe": 35,
@@ -50,7 +776,7 @@
             "jitter": "none",
             "scale": 1.0
           },
-          "server_image_uri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:ace5350d99c217bf5919b795fc53ed955d1dc2fb6bef1eecf36e8a90e9732f07",
+          "server_image_uri": "<study-registry>/swath-replay@sha256:ace5350d99c217bf5919b795fc53ed955d1dc2fb6bef1eecf36e8a90e9732f07",
           "serving_mode": "sorted"
         },
         "capacity_status": "uncalibrated"
@@ -58,793 +784,7 @@
       "tool_slice_sha256": "c05d3ac45e782b573683bb25aab3ddd63647b1e2f3e3402e71b52cca0477e96c"
     }
   },
+  "schema_version": 1,
   "slots": [],
-  "attempts": [
-    {
-      "attempt_id": "s5cmd.a3f174d2d894.s1",
-      "case_id": "s5cmd.a3f174d2d894",
-      "group_id": "goq-fourcast-s5cmd-java",
-      "tool": "s5cmd",
-      "mode": "recursive",
-      "purpose": "diagnostic",
-      "statistic": "timing",
-      "origin": "planned",
-      "state": "SUCCEEDED",
-      "state_detail": null,
-      "recorded_at": "2026-11-10T11:27:24.661209+00:00",
-      "settled_at": "2026-11-10T11:37:55.938811+00:00",
-      "result_prefix": "gs://s3-listing-study-results-29c02004/go-replay-qualify/noaa-nws-fourcastnetgfs-pds/s5cmd.a3f174d2d894.s1/",
-      "request": {
-        "allocationPolicy": {
-          "instances": [
-            {
-              "policy": {
-                "bootDisk": {
-                  "image": "batch-cos",
-                  "sizeGb": "100",
-                  "type": "hyperdisk-balanced"
-                },
-                "machineType": "n4-highcpu-16",
-                "provisioningModel": "SPOT"
-              }
-            }
-          ],
-          "location": {
-            "allowedLocations": [
-              "zones/us-east1-b"
-            ]
-          },
-          "network": {
-            "networkInterfaces": [
-              {
-                "network": "projects/varve-oss/global/networks/s3-listing-study",
-                "subnetwork": "projects/varve-oss/regions/us-east1/subnetworks/s3-listing-study-us-east1"
-              }
-            ]
-          },
-          "serviceAccount": {
-            "email": "s3-listing-study-worker@varve-oss.iam.gserviceaccount.com"
-          }
-        },
-        "labels": {
-          "suite": "go-replay-qualify"
-        },
-        "logsPolicy": {
-          "destination": "CLOUD_LOGGING"
-        },
-        "taskGroups": [
-          {
-            "parallelism": "1",
-            "taskCount": "1",
-            "taskSpec": {
-              "computeResource": {
-                "cpuMilli": "16000",
-                "memoryMib": "32768"
-              },
-              "maxRetryCount": 0,
-              "maxRunDuration": "3005s",
-              "runnables": [
-                {
-                  "container": {
-                    "commands": [
-                      "-ceu",
-                      "set -o pipefail\nmkdir -p /fixtures/source\ngcloud storage cp gs://s3-listing-study-results-29c02004/fixtures/noaa-nws-fourcastnetgfs-pds/1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4/part-00000.parquet /fixtures/source/\nmanifest=\"$(mktemp)\"\nfiles=(/fixtures/source/*.parquet)\n[[ -f \"${files[0]}\" ]] || { echo \"no staged parquet files\" >&2; exit 1; }\nfor file in \"${files[@]}\"; do\n  digest=\"$(sha256sum \"$file\")\"; digest=\"${digest%% *}\"\n  size=\"$(stat -c %s \"$file\")\"\n  printf '%s\\t%s\\t%s\\n' \"${file##*/}\" \"$size\" \"$digest\"\ndone | LC_ALL=C sort > \"$manifest\"\nactual=\"$(sha256sum \"$manifest\")\"; actual=\"${actual%% *}\"\n[[ \"$actual\" == 1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4 ]] || { echo \"fixture digest mismatch: $actual\" >&2; exit 1; }\nrm -f \"$manifest\""
-                    ],
-                    "imageUri": "gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:cf72dd63b7643c117ef53378a41bef6db6a01fa3d561f2b456d7abd8bbeb9ba6",
-                    "options": "--entrypoint /bin/bash --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
-                  },
-                  "environment": {
-                    "variables": {
-                      "CLOUDSDK_PYTHON": "/usr/lib/google-cloud-sdk/platform/bundledpythonunix/bin/python3"
-                    }
-                  }
-                },
-                {
-                  "container": {
-                    "commands": [
-                      "10001:10001",
-                      "/tmp/attempt"
-                    ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:7e6534d514f1a59318ffc397997c44cef87c0e1aa76d5b5ab32d386fa8ec95e2",
-                    "options": "--user 0:0 --entrypoint /bin/chown --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
-                  }
-                },
-                {
-                  "background": true,
-                  "container": {
-                    "commands": [
-                      "serve",
-                      "--fixture",
-                      "/fixtures/source",
-                      "--bucket",
-                      "noaa-nws-fourcastnetgfs-pds",
-                      "--host",
-                      "127.0.0.1",
-                      "--port",
-                      "19090",
-                      "--metrics-port",
-                      "19192",
-                      "--serving-mode",
-                      "sorted",
-                      "--parquet-connections",
-                      "8",
-                      "--max-concurrent-requests",
-                      "4096",
-                      "--inject-latency",
-                      "worker_page=85ms,pivot_probe=35ms,structure_probe=37ms",
-                      "--latency-scale",
-                      "1.0"
-                    ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:ace5350d99c217bf5919b795fc53ed955d1dc2fb6bef1eecf36e8a90e9732f07",
-                    "options": "--network host --cpuset-cpus=0-3,8-11 --memory=8g --memory-swap=8g --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
-                  },
-                  "environment": {
-                    "variables": {
-                      "JAVA_TOOL_OPTIONS": "-XX:MaxRAMPercentage=75 -Dswath.replay.prefetch.enabled=true -Dswath.replay.prefetch.max-windows=256"
-                    }
-                  }
-                },
-                {
-                  "container": {
-                    "commands": [
-                      "--tool",
-                      "s5cmd",
-                      "--mode",
-                      "recursive",
-                      "--purpose",
-                      "diagnostic",
-                      "--bucket",
-                      "noaa-nws-fourcastnetgfs-pds",
-                      "--region",
-                      "us-east-1",
-                      "--prefix",
-                      "",
-                      "--output",
-                      "/tmp/attempt",
-                      "--destination",
-                      "gs://s3-listing-study-results-29c02004/go-replay-qualify/noaa-nws-fourcastnetgfs-pds/s5cmd.a3f174d2d894.s1/",
-                      "--timeout",
-                      "1800",
-                      "--term-grace",
-                      "5.0",
-                      "--retain-products",
-                      "false",
-                      "--image",
-                      "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:7e6534d514f1a59318ffc397997c44cef87c0e1aa76d5b5ab32d386fa8ec95e2",
-                      "--toolbox-manifest-sha256",
-                      "2beadc0892566c9fb1f598337d891a2605d4a1488d9387bea054113ee46d079c",
-                      "--toolbox-recipe-sha256",
-                      "405bc76f129181d8a6d5f6cc9c26d89daa5e0068ae688b040aa345ea99fbd0ee",
-                      "--tool-recipe-sha256",
-                      "ce03fd41132edea03c2c28866dc89b08ea10ee0fb8265dbf4bfd814ce489e1cb",
-                      "--tool-build-inputs-sha256",
-                      "f40337116a30ee7a72aae5a5e0bb23cf46695b69fcf4231096d47c4a7707c595",
-                      "--tool-version",
-                      "v2.3.0",
-                      "--tool-build-sha256",
-                      "c3d87debb28e7c9d545996083089af85b26706f00c12386b488398600d4f83f5",
-                      "--adapter-bundle-sha256",
-                      "a9b7390a620c3f501428b93e5f347ab4b5ab01513864a9cacdc0c74afaebb6f6",
-                      "--harness-revision",
-                      "35f1d9fde4c656dea6aff1fee9370a56eb9f99dc",
-                      "--subject-workdir",
-                      "/aws",
-                      "--image-set-sha256",
-                      "02298c4180be71d25af8365667662aa49c34fcf378f17718196f1f90d817d9a2",
-                      "--group-id",
-                      "goq-fourcast-s5cmd-java",
-                      "--job-name",
-                      "go-replay-qualify-s5cmd-a3f174d2d894-s1",
-                      "--case-id",
-                      "s5cmd.a3f174d2d894",
-                      "--attempt-id",
-                      "s5cmd.a3f174d2d894.s1",
-                      "--machine-type",
-                      "n4-highcpu-16",
-                      "--vcpus",
-                      "16",
-                      "--memory-gb",
-                      "32",
-                      "--container-memory-gb",
-                      "16",
-                      "--config",
-                      "{\"mode\":\"recursive\"}",
-                      "--endpoint-url",
-                      "http://127.0.0.1:19090",
-                      "--replay-config",
-                      "{\"allocation\":{\"replay_heap_percent\":75,\"replay_max_concurrent_requests\":4096,\"replay_memory_gb\":8,\"replay_parquet_connections\":8,\"replay_prefetch\":true,\"replay_prefetch_max_windows\":256,\"replay_vcpus\":8,\"subject_vcpus\":6},\"backend\":{\"fixture_sha256\":\"1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4\",\"fixture_uri\":\"gs://s3-listing-study-results-29c02004/fixtures/noaa-nws-fourcastnetgfs-pds/1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4/part-00000.parquet\",\"latency_model\":{\"deadlines_ms\":{\"pivot_probe\":35,\"structure_probe\":37,\"worker_page\":85},\"jitter\":\"none\",\"scale\":1.0},\"server_image_uri\":\"us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:ace5350d99c217bf5919b795fc53ed955d1dc2fb6bef1eecf36e8a90e9732f07\",\"serving_mode\":\"sorted\"},\"capacity_status\":\"uncalibrated\"}"
-                    ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:7e6534d514f1a59318ffc397997c44cef87c0e1aa76d5b5ab32d386fa8ec95e2",
-                    "options": "--network host --cpuset-cpus=4-6,12-14 --memory=16g --memory-swap=16g --volume=/mnt/stateful_partition/attempt:/tmp/attempt --volume=/proc:/replay-host-proc:ro"
-                  }
-                }
-              ]
-            }
-          }
-        ]
-      },
-      "evidence": {
-        "state": "BOUND",
-        "binding_errors": [],
-        "result_uri": "gs://s3-listing-study-results-29c02004/go-replay-qualify/noaa-nws-fourcastnetgfs-pds/s5cmd.a3f174d2d894.s1/result.json",
-        "result_sha256": "3a87249f645ab1b2aba96ddeaeb8d1b271af855755bef8a2801fdb660f362b97",
-        "result": {
-          "started_at": "2026-11-10T11:28:40.699687+00:00",
-          "finished_at": "2026-11-10T11:35:41.318023+00:00",
-          "exit_code": 0,
-          "worker_exit_code": 0,
-          "timed_out": false,
-          "wall_seconds": 420.617072,
-          "max_rss_kb": 51148,
-          "row_count": 4081170,
-          "row_count_error": null,
-          "product": {
-            "artifact": "listing",
-            "name": "native/listing.txt.gz",
-            "channel": "stdout",
-            "size_bytes": 113721347,
-            "sha256": null
-          },
-          "product_error": null,
-          "stdout": null,
-          "stderr": {
-            "name": "stderr.log.gz",
-            "size_bytes": 31,
-            "sha256": null
-          },
-          "artifacts_size_bytes": 31
-        },
-        "argv": [
-          "/s5cmd",
-          "--endpoint-url",
-          "http://127.0.0.1:19090",
-          "--no-sign-request",
-          "ls",
-          "-e",
-          "-s",
-          "s3://noaa-nws-fourcastnetgfs-pds/*"
-        ],
-        "replay": {
-          "state": "COMPLETE",
-          "refusals": [],
-          "readiness": "ready",
-          "sample_count": 41,
-          "resource_sample_count": 41,
-          "requests": {
-            "before": 0.0,
-            "after": 4082.0
-          },
-          "errors": {
-            "before": 0.0,
-            "after": 0.0
-          }
-        },
-        "verification": null
-      }
-    },
-    {
-      "attempt_id": "s5cmd.a3f174d2d894.s2",
-      "case_id": "s5cmd.a3f174d2d894",
-      "group_id": "goq-fourcast-s5cmd-java",
-      "tool": "s5cmd",
-      "mode": "recursive",
-      "purpose": "diagnostic",
-      "statistic": "timing",
-      "origin": "planned",
-      "state": "SUCCEEDED",
-      "state_detail": null,
-      "recorded_at": "2026-11-10T11:27:25.082939+00:00",
-      "settled_at": "2026-11-10T11:37:55.940281+00:00",
-      "result_prefix": "gs://s3-listing-study-results-29c02004/go-replay-qualify/noaa-nws-fourcastnetgfs-pds/s5cmd.a3f174d2d894.s2/",
-      "request": {
-        "allocationPolicy": {
-          "instances": [
-            {
-              "policy": {
-                "bootDisk": {
-                  "image": "batch-cos",
-                  "sizeGb": "100",
-                  "type": "hyperdisk-balanced"
-                },
-                "machineType": "n4-highcpu-16",
-                "provisioningModel": "SPOT"
-              }
-            }
-          ],
-          "location": {
-            "allowedLocations": [
-              "zones/us-east1-b"
-            ]
-          },
-          "network": {
-            "networkInterfaces": [
-              {
-                "network": "projects/varve-oss/global/networks/s3-listing-study",
-                "subnetwork": "projects/varve-oss/regions/us-east1/subnetworks/s3-listing-study-us-east1"
-              }
-            ]
-          },
-          "serviceAccount": {
-            "email": "s3-listing-study-worker@varve-oss.iam.gserviceaccount.com"
-          }
-        },
-        "labels": {
-          "suite": "go-replay-qualify"
-        },
-        "logsPolicy": {
-          "destination": "CLOUD_LOGGING"
-        },
-        "taskGroups": [
-          {
-            "parallelism": "1",
-            "taskCount": "1",
-            "taskSpec": {
-              "computeResource": {
-                "cpuMilli": "16000",
-                "memoryMib": "32768"
-              },
-              "maxRetryCount": 0,
-              "maxRunDuration": "3005s",
-              "runnables": [
-                {
-                  "container": {
-                    "commands": [
-                      "-ceu",
-                      "set -o pipefail\nmkdir -p /fixtures/source\ngcloud storage cp gs://s3-listing-study-results-29c02004/fixtures/noaa-nws-fourcastnetgfs-pds/1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4/part-00000.parquet /fixtures/source/\nmanifest=\"$(mktemp)\"\nfiles=(/fixtures/source/*.parquet)\n[[ -f \"${files[0]}\" ]] || { echo \"no staged parquet files\" >&2; exit 1; }\nfor file in \"${files[@]}\"; do\n  digest=\"$(sha256sum \"$file\")\"; digest=\"${digest%% *}\"\n  size=\"$(stat -c %s \"$file\")\"\n  printf '%s\\t%s\\t%s\\n' \"${file##*/}\" \"$size\" \"$digest\"\ndone | LC_ALL=C sort > \"$manifest\"\nactual=\"$(sha256sum \"$manifest\")\"; actual=\"${actual%% *}\"\n[[ \"$actual\" == 1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4 ]] || { echo \"fixture digest mismatch: $actual\" >&2; exit 1; }\nrm -f \"$manifest\""
-                    ],
-                    "imageUri": "gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:cf72dd63b7643c117ef53378a41bef6db6a01fa3d561f2b456d7abd8bbeb9ba6",
-                    "options": "--entrypoint /bin/bash --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
-                  },
-                  "environment": {
-                    "variables": {
-                      "CLOUDSDK_PYTHON": "/usr/lib/google-cloud-sdk/platform/bundledpythonunix/bin/python3"
-                    }
-                  }
-                },
-                {
-                  "container": {
-                    "commands": [
-                      "10001:10001",
-                      "/tmp/attempt"
-                    ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:7e6534d514f1a59318ffc397997c44cef87c0e1aa76d5b5ab32d386fa8ec95e2",
-                    "options": "--user 0:0 --entrypoint /bin/chown --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
-                  }
-                },
-                {
-                  "background": true,
-                  "container": {
-                    "commands": [
-                      "serve",
-                      "--fixture",
-                      "/fixtures/source",
-                      "--bucket",
-                      "noaa-nws-fourcastnetgfs-pds",
-                      "--host",
-                      "127.0.0.1",
-                      "--port",
-                      "19090",
-                      "--metrics-port",
-                      "19192",
-                      "--serving-mode",
-                      "sorted",
-                      "--parquet-connections",
-                      "8",
-                      "--max-concurrent-requests",
-                      "4096",
-                      "--inject-latency",
-                      "worker_page=85ms,pivot_probe=35ms,structure_probe=37ms",
-                      "--latency-scale",
-                      "1.0"
-                    ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:ace5350d99c217bf5919b795fc53ed955d1dc2fb6bef1eecf36e8a90e9732f07",
-                    "options": "--network host --cpuset-cpus=0-3,8-11 --memory=8g --memory-swap=8g --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
-                  },
-                  "environment": {
-                    "variables": {
-                      "JAVA_TOOL_OPTIONS": "-XX:MaxRAMPercentage=75 -Dswath.replay.prefetch.enabled=true -Dswath.replay.prefetch.max-windows=256"
-                    }
-                  }
-                },
-                {
-                  "container": {
-                    "commands": [
-                      "--tool",
-                      "s5cmd",
-                      "--mode",
-                      "recursive",
-                      "--purpose",
-                      "diagnostic",
-                      "--bucket",
-                      "noaa-nws-fourcastnetgfs-pds",
-                      "--region",
-                      "us-east-1",
-                      "--prefix",
-                      "",
-                      "--output",
-                      "/tmp/attempt",
-                      "--destination",
-                      "gs://s3-listing-study-results-29c02004/go-replay-qualify/noaa-nws-fourcastnetgfs-pds/s5cmd.a3f174d2d894.s2/",
-                      "--timeout",
-                      "1800",
-                      "--term-grace",
-                      "5.0",
-                      "--retain-products",
-                      "false",
-                      "--image",
-                      "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:7e6534d514f1a59318ffc397997c44cef87c0e1aa76d5b5ab32d386fa8ec95e2",
-                      "--toolbox-manifest-sha256",
-                      "2beadc0892566c9fb1f598337d891a2605d4a1488d9387bea054113ee46d079c",
-                      "--toolbox-recipe-sha256",
-                      "405bc76f129181d8a6d5f6cc9c26d89daa5e0068ae688b040aa345ea99fbd0ee",
-                      "--tool-recipe-sha256",
-                      "ce03fd41132edea03c2c28866dc89b08ea10ee0fb8265dbf4bfd814ce489e1cb",
-                      "--tool-build-inputs-sha256",
-                      "f40337116a30ee7a72aae5a5e0bb23cf46695b69fcf4231096d47c4a7707c595",
-                      "--tool-version",
-                      "v2.3.0",
-                      "--tool-build-sha256",
-                      "c3d87debb28e7c9d545996083089af85b26706f00c12386b488398600d4f83f5",
-                      "--adapter-bundle-sha256",
-                      "a9b7390a620c3f501428b93e5f347ab4b5ab01513864a9cacdc0c74afaebb6f6",
-                      "--harness-revision",
-                      "35f1d9fde4c656dea6aff1fee9370a56eb9f99dc",
-                      "--subject-workdir",
-                      "/aws",
-                      "--image-set-sha256",
-                      "02298c4180be71d25af8365667662aa49c34fcf378f17718196f1f90d817d9a2",
-                      "--group-id",
-                      "goq-fourcast-s5cmd-java",
-                      "--job-name",
-                      "go-replay-qualify-s5cmd-a3f174d2d894-s2",
-                      "--case-id",
-                      "s5cmd.a3f174d2d894",
-                      "--attempt-id",
-                      "s5cmd.a3f174d2d894.s2",
-                      "--machine-type",
-                      "n4-highcpu-16",
-                      "--vcpus",
-                      "16",
-                      "--memory-gb",
-                      "32",
-                      "--container-memory-gb",
-                      "16",
-                      "--config",
-                      "{\"mode\":\"recursive\"}",
-                      "--endpoint-url",
-                      "http://127.0.0.1:19090",
-                      "--replay-config",
-                      "{\"allocation\":{\"replay_heap_percent\":75,\"replay_max_concurrent_requests\":4096,\"replay_memory_gb\":8,\"replay_parquet_connections\":8,\"replay_prefetch\":true,\"replay_prefetch_max_windows\":256,\"replay_vcpus\":8,\"subject_vcpus\":6},\"backend\":{\"fixture_sha256\":\"1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4\",\"fixture_uri\":\"gs://s3-listing-study-results-29c02004/fixtures/noaa-nws-fourcastnetgfs-pds/1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4/part-00000.parquet\",\"latency_model\":{\"deadlines_ms\":{\"pivot_probe\":35,\"structure_probe\":37,\"worker_page\":85},\"jitter\":\"none\",\"scale\":1.0},\"server_image_uri\":\"us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:ace5350d99c217bf5919b795fc53ed955d1dc2fb6bef1eecf36e8a90e9732f07\",\"serving_mode\":\"sorted\"},\"capacity_status\":\"uncalibrated\"}"
-                    ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:7e6534d514f1a59318ffc397997c44cef87c0e1aa76d5b5ab32d386fa8ec95e2",
-                    "options": "--network host --cpuset-cpus=4-6,12-14 --memory=16g --memory-swap=16g --volume=/mnt/stateful_partition/attempt:/tmp/attempt --volume=/proc:/replay-host-proc:ro"
-                  }
-                }
-              ]
-            }
-          }
-        ]
-      },
-      "evidence": {
-        "state": "BOUND",
-        "binding_errors": [],
-        "result_uri": "gs://s3-listing-study-results-29c02004/go-replay-qualify/noaa-nws-fourcastnetgfs-pds/s5cmd.a3f174d2d894.s2/result.json",
-        "result_sha256": "a594f454089595321302f520dce38d2185af178cccf00c28c850ee0fcf55ed66",
-        "result": {
-          "started_at": "2026-11-10T11:28:37.858532+00:00",
-          "finished_at": "2026-11-10T11:35:30.508558+00:00",
-          "exit_code": 0,
-          "worker_exit_code": 0,
-          "timed_out": false,
-          "wall_seconds": 412.649036,
-          "max_rss_kb": 51160,
-          "row_count": 4081170,
-          "row_count_error": null,
-          "product": {
-            "artifact": "listing",
-            "name": "native/listing.txt.gz",
-            "channel": "stdout",
-            "size_bytes": 113721347,
-            "sha256": null
-          },
-          "product_error": null,
-          "stdout": null,
-          "stderr": {
-            "name": "stderr.log.gz",
-            "size_bytes": 31,
-            "sha256": null
-          },
-          "artifacts_size_bytes": 31
-        },
-        "argv": [
-          "/s5cmd",
-          "--endpoint-url",
-          "http://127.0.0.1:19090",
-          "--no-sign-request",
-          "ls",
-          "-e",
-          "-s",
-          "s3://noaa-nws-fourcastnetgfs-pds/*"
-        ],
-        "replay": {
-          "state": "COMPLETE",
-          "refusals": [],
-          "readiness": "ready",
-          "sample_count": 41,
-          "resource_sample_count": 41,
-          "requests": {
-            "before": 0.0,
-            "after": 4082.0
-          },
-          "errors": {
-            "before": 0.0,
-            "after": 0.0
-          }
-        },
-        "verification": null
-      }
-    },
-    {
-      "attempt_id": "s5cmd.a3f174d2d894.s3",
-      "case_id": "s5cmd.a3f174d2d894",
-      "group_id": "goq-fourcast-s5cmd-java",
-      "tool": "s5cmd",
-      "mode": "recursive",
-      "purpose": "diagnostic",
-      "statistic": "timing",
-      "origin": "planned",
-      "state": "SUCCEEDED",
-      "state_detail": null,
-      "recorded_at": "2026-11-10T11:27:25.322552+00:00",
-      "settled_at": "2026-11-10T11:37:55.941644+00:00",
-      "result_prefix": "gs://s3-listing-study-results-29c02004/go-replay-qualify/noaa-nws-fourcastnetgfs-pds/s5cmd.a3f174d2d894.s3/",
-      "request": {
-        "allocationPolicy": {
-          "instances": [
-            {
-              "policy": {
-                "bootDisk": {
-                  "image": "batch-cos",
-                  "sizeGb": "100",
-                  "type": "hyperdisk-balanced"
-                },
-                "machineType": "n4-highcpu-16",
-                "provisioningModel": "SPOT"
-              }
-            }
-          ],
-          "location": {
-            "allowedLocations": [
-              "zones/us-east1-b"
-            ]
-          },
-          "network": {
-            "networkInterfaces": [
-              {
-                "network": "projects/varve-oss/global/networks/s3-listing-study",
-                "subnetwork": "projects/varve-oss/regions/us-east1/subnetworks/s3-listing-study-us-east1"
-              }
-            ]
-          },
-          "serviceAccount": {
-            "email": "s3-listing-study-worker@varve-oss.iam.gserviceaccount.com"
-          }
-        },
-        "labels": {
-          "suite": "go-replay-qualify"
-        },
-        "logsPolicy": {
-          "destination": "CLOUD_LOGGING"
-        },
-        "taskGroups": [
-          {
-            "parallelism": "1",
-            "taskCount": "1",
-            "taskSpec": {
-              "computeResource": {
-                "cpuMilli": "16000",
-                "memoryMib": "32768"
-              },
-              "maxRetryCount": 0,
-              "maxRunDuration": "3005s",
-              "runnables": [
-                {
-                  "container": {
-                    "commands": [
-                      "-ceu",
-                      "set -o pipefail\nmkdir -p /fixtures/source\ngcloud storage cp gs://s3-listing-study-results-29c02004/fixtures/noaa-nws-fourcastnetgfs-pds/1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4/part-00000.parquet /fixtures/source/\nmanifest=\"$(mktemp)\"\nfiles=(/fixtures/source/*.parquet)\n[[ -f \"${files[0]}\" ]] || { echo \"no staged parquet files\" >&2; exit 1; }\nfor file in \"${files[@]}\"; do\n  digest=\"$(sha256sum \"$file\")\"; digest=\"${digest%% *}\"\n  size=\"$(stat -c %s \"$file\")\"\n  printf '%s\\t%s\\t%s\\n' \"${file##*/}\" \"$size\" \"$digest\"\ndone | LC_ALL=C sort > \"$manifest\"\nactual=\"$(sha256sum \"$manifest\")\"; actual=\"${actual%% *}\"\n[[ \"$actual\" == 1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4 ]] || { echo \"fixture digest mismatch: $actual\" >&2; exit 1; }\nrm -f \"$manifest\""
-                    ],
-                    "imageUri": "gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:cf72dd63b7643c117ef53378a41bef6db6a01fa3d561f2b456d7abd8bbeb9ba6",
-                    "options": "--entrypoint /bin/bash --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
-                  },
-                  "environment": {
-                    "variables": {
-                      "CLOUDSDK_PYTHON": "/usr/lib/google-cloud-sdk/platform/bundledpythonunix/bin/python3"
-                    }
-                  }
-                },
-                {
-                  "container": {
-                    "commands": [
-                      "10001:10001",
-                      "/tmp/attempt"
-                    ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:7e6534d514f1a59318ffc397997c44cef87c0e1aa76d5b5ab32d386fa8ec95e2",
-                    "options": "--user 0:0 --entrypoint /bin/chown --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
-                  }
-                },
-                {
-                  "background": true,
-                  "container": {
-                    "commands": [
-                      "serve",
-                      "--fixture",
-                      "/fixtures/source",
-                      "--bucket",
-                      "noaa-nws-fourcastnetgfs-pds",
-                      "--host",
-                      "127.0.0.1",
-                      "--port",
-                      "19090",
-                      "--metrics-port",
-                      "19192",
-                      "--serving-mode",
-                      "sorted",
-                      "--parquet-connections",
-                      "8",
-                      "--max-concurrent-requests",
-                      "4096",
-                      "--inject-latency",
-                      "worker_page=85ms,pivot_probe=35ms,structure_probe=37ms",
-                      "--latency-scale",
-                      "1.0"
-                    ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:ace5350d99c217bf5919b795fc53ed955d1dc2fb6bef1eecf36e8a90e9732f07",
-                    "options": "--network host --cpuset-cpus=0-3,8-11 --memory=8g --memory-swap=8g --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
-                  },
-                  "environment": {
-                    "variables": {
-                      "JAVA_TOOL_OPTIONS": "-XX:MaxRAMPercentage=75 -Dswath.replay.prefetch.enabled=true -Dswath.replay.prefetch.max-windows=256"
-                    }
-                  }
-                },
-                {
-                  "container": {
-                    "commands": [
-                      "--tool",
-                      "s5cmd",
-                      "--mode",
-                      "recursive",
-                      "--purpose",
-                      "diagnostic",
-                      "--bucket",
-                      "noaa-nws-fourcastnetgfs-pds",
-                      "--region",
-                      "us-east-1",
-                      "--prefix",
-                      "",
-                      "--output",
-                      "/tmp/attempt",
-                      "--destination",
-                      "gs://s3-listing-study-results-29c02004/go-replay-qualify/noaa-nws-fourcastnetgfs-pds/s5cmd.a3f174d2d894.s3/",
-                      "--timeout",
-                      "1800",
-                      "--term-grace",
-                      "5.0",
-                      "--retain-products",
-                      "false",
-                      "--image",
-                      "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:7e6534d514f1a59318ffc397997c44cef87c0e1aa76d5b5ab32d386fa8ec95e2",
-                      "--toolbox-manifest-sha256",
-                      "2beadc0892566c9fb1f598337d891a2605d4a1488d9387bea054113ee46d079c",
-                      "--toolbox-recipe-sha256",
-                      "405bc76f129181d8a6d5f6cc9c26d89daa5e0068ae688b040aa345ea99fbd0ee",
-                      "--tool-recipe-sha256",
-                      "ce03fd41132edea03c2c28866dc89b08ea10ee0fb8265dbf4bfd814ce489e1cb",
-                      "--tool-build-inputs-sha256",
-                      "f40337116a30ee7a72aae5a5e0bb23cf46695b69fcf4231096d47c4a7707c595",
-                      "--tool-version",
-                      "v2.3.0",
-                      "--tool-build-sha256",
-                      "c3d87debb28e7c9d545996083089af85b26706f00c12386b488398600d4f83f5",
-                      "--adapter-bundle-sha256",
-                      "a9b7390a620c3f501428b93e5f347ab4b5ab01513864a9cacdc0c74afaebb6f6",
-                      "--harness-revision",
-                      "35f1d9fde4c656dea6aff1fee9370a56eb9f99dc",
-                      "--subject-workdir",
-                      "/aws",
-                      "--image-set-sha256",
-                      "02298c4180be71d25af8365667662aa49c34fcf378f17718196f1f90d817d9a2",
-                      "--group-id",
-                      "goq-fourcast-s5cmd-java",
-                      "--job-name",
-                      "go-replay-qualify-s5cmd-a3f174d2d894-s3",
-                      "--case-id",
-                      "s5cmd.a3f174d2d894",
-                      "--attempt-id",
-                      "s5cmd.a3f174d2d894.s3",
-                      "--machine-type",
-                      "n4-highcpu-16",
-                      "--vcpus",
-                      "16",
-                      "--memory-gb",
-                      "32",
-                      "--container-memory-gb",
-                      "16",
-                      "--config",
-                      "{\"mode\":\"recursive\"}",
-                      "--endpoint-url",
-                      "http://127.0.0.1:19090",
-                      "--replay-config",
-                      "{\"allocation\":{\"replay_heap_percent\":75,\"replay_max_concurrent_requests\":4096,\"replay_memory_gb\":8,\"replay_parquet_connections\":8,\"replay_prefetch\":true,\"replay_prefetch_max_windows\":256,\"replay_vcpus\":8,\"subject_vcpus\":6},\"backend\":{\"fixture_sha256\":\"1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4\",\"fixture_uri\":\"gs://s3-listing-study-results-29c02004/fixtures/noaa-nws-fourcastnetgfs-pds/1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4/part-00000.parquet\",\"latency_model\":{\"deadlines_ms\":{\"pivot_probe\":35,\"structure_probe\":37,\"worker_page\":85},\"jitter\":\"none\",\"scale\":1.0},\"server_image_uri\":\"us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:ace5350d99c217bf5919b795fc53ed955d1dc2fb6bef1eecf36e8a90e9732f07\",\"serving_mode\":\"sorted\"},\"capacity_status\":\"uncalibrated\"}"
-                    ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:7e6534d514f1a59318ffc397997c44cef87c0e1aa76d5b5ab32d386fa8ec95e2",
-                    "options": "--network host --cpuset-cpus=4-6,12-14 --memory=16g --memory-swap=16g --volume=/mnt/stateful_partition/attempt:/tmp/attempt --volume=/proc:/replay-host-proc:ro"
-                  }
-                }
-              ]
-            }
-          }
-        ]
-      },
-      "evidence": {
-        "state": "BOUND",
-        "binding_errors": [],
-        "result_uri": "gs://s3-listing-study-results-29c02004/go-replay-qualify/noaa-nws-fourcastnetgfs-pds/s5cmd.a3f174d2d894.s3/result.json",
-        "result_sha256": "b141ce685ad01f2ae77bd70c0895813c5a0178fa3380fb43e1b08cc4f60da0db",
-        "result": {
-          "started_at": "2026-11-10T11:28:42.577050+00:00",
-          "finished_at": "2026-11-10T11:35:56.424383+00:00",
-          "exit_code": 0,
-          "worker_exit_code": 0,
-          "timed_out": false,
-          "wall_seconds": 433.846008,
-          "max_rss_kb": 51036,
-          "row_count": 4081170,
-          "row_count_error": null,
-          "product": {
-            "artifact": "listing",
-            "name": "native/listing.txt.gz",
-            "channel": "stdout",
-            "size_bytes": 113721347,
-            "sha256": null
-          },
-          "product_error": null,
-          "stdout": null,
-          "stderr": {
-            "name": "stderr.log.gz",
-            "size_bytes": 31,
-            "sha256": null
-          },
-          "artifacts_size_bytes": 31
-        },
-        "argv": [
-          "/s5cmd",
-          "--endpoint-url",
-          "http://127.0.0.1:19090",
-          "--no-sign-request",
-          "ls",
-          "-e",
-          "-s",
-          "s3://noaa-nws-fourcastnetgfs-pds/*"
-        ],
-        "replay": {
-          "state": "COMPLETE",
-          "refusals": [],
-          "readiness": "ready",
-          "sample_count": 43,
-          "resource_sample_count": 43,
-          "requests": {
-            "before": 0.0,
-            "after": 4082.0
-          },
-          "errors": {
-            "before": 0.0,
-            "after": 0.0
-          }
-        },
-        "verification": null
-      }
-    }
-  ]
+  "suite": "go-replay-qualify"
 }

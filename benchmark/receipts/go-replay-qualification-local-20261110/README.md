@@ -33,3 +33,23 @@ RSS are null, not guessed. The directory permission was corrected before the
 completed pilot. `<pilot-output>` replaces the private host scratch path in
 those commands; arguments inside containers are unchanged. These are recorder
 failures, not evidence of tool incompatibility.
+
+Public projection (2026-11-11): the receipt files were first committed as
+raw exports carrying the study's estate. Every JSON and JSONL file here is now
+a projection of that export, checked with the release exporter's
+forbidden-pattern list (`benchmark.public_export.FORBIDDEN_PATTERNS`) plus
+cloud project, network and secret resource paths, the results bucket and Batch
+job UIDs.
+Dropped wherever they occur: service accounts, secret resources, project,
+network, subnetwork and zone, Batch job names and UIDs (including the worker's
+job argument), result-store prefixes and URIs, and the executor
+environment apart from boot disk, provisioning and product retention.
+Substituted in every string: the results bucket becomes `<result-store>/` or
+`<fixture-store>/`, the study's registry path `<study-registry>/` (digests
+kept). Everything else is verbatim, including each `result.json` SHA-256.
+Where s7cmd ran, the only remaining pattern hit is the s7cmd container's
+public subject working directory (`subject_workdir` in
+`tools/s7cmd/build/image.json`), which the home-directory pattern matches. Case ids are
+carried from the ledger and are not recomputable from the projected case
+documents. The raw exports remain in this branch's earlier commits until the
+squash merge.

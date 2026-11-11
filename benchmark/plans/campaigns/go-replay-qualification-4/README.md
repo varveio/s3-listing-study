@@ -470,7 +470,7 @@ Eleven Spot jobs in two stages: stage A (three controls, blockchain 16/5 pair)
 submitted 00:18 UTC; stage B (six rungs) submitted 00:34 UTC once stage A was
 terminal at $0.3470 of compute (gate $0.60). All SUCCEEDED by 00:47 UTC with no
 preemption, resubmission or cancellation, and neither stop rule fired. Receipt
-(job UIDs, create and terminal times):
+(create and terminal times):
 [`../../../receipts/go-replay-qualification-4-cloud-20261111/`](../../../receipts/go-replay-qualification-4-cloud-20261111/README.md).
 Every subject exited zero with the expected rows (blockchain 143,008,674, NARA
 13,540,310, FourCast 4,081,170), with zero HTTP errors and zero admission and

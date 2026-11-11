@@ -22,19 +22,19 @@ preemptions, resubmissions, cancellations or follow-up jobs; neither the
 - Fixtures: the SeekParquet conversions named in the plans, the same as waves 2
   and 3.
 
-| Stage | Group | Attempt | Job UID | Machine | Created (UTC) | Terminal (UTC) |
-| --- | --- | --- | --- | --- | --- | --- |
-| A | `goq4-nara-swath-go-20-20` | `swath.ca43fae5e517.s1` | `go-replay-qualify-22dede5b-be92-49f800` | n4-highcpu-32 | 00:18:05 | 00:20:27 |
-| A | `goq4-nara-s7cmd-go-20-20` | `s7cmd.f93baa7f7142.s1` | `go-replay-qualify-622fe59d-9ebf-490500` | n4-highcpu-32 | 00:18:05 | 00:30:15 |
-| A | `goq4-fourcast-s5cmd-go-8-8` | `s5cmd.55ee5e4c62b8.s1` | `go-replay-qualify-05b74fd1-1120-4ad800` | n4-highcpu-16 | 00:18:06 | 00:27:22 |
-| A | `goq4-blockchain-swath-go-16-5` | `swath.b9c1ed5ae8a2.s1` | `go-replay-qualify-31269ec6-3c4b-4c5200` | n4-highcpu-32 | 00:18:06 | 00:23:06 |
-| A | `goq4-blockchain-swath-go-16-5` | `swath.b9c1ed5ae8a2.s2` | `go-replay-qualify-c93987d2-5eb8-42de00` | n4-highcpu-32 | 00:18:07 | 00:22:45 |
-| B | `goq4-blockchain-swath-go-8-4` | `swath.c1505ec66d66.s1` | `go-replay-qualify-6b9f8bd0-f45b-484c00` | n4-highcpu-32 | 00:34:01 | 00:39:05 |
-| B | `goq4-nara-swath-go-16-5` | `swath.73401a67238f.s1` | `go-replay-qualify-ea2640aa-6dd6-40eb00` | n4-highcpu-32 | 00:34:01 | 00:37:03 |
-| B | `goq4-nara-swath-go-8-4` | `swath.bc04b205a545.s1` | `go-replay-qualify-6d101364-59bc-4d0b00` | n4-highcpu-32 | 00:34:02 | 00:36:31 |
-| B | `goq4-nara-s7cmd-go-16-5` | `s7cmd.3f553acb0aca.s1` | `go-replay-qualify-212d1c95-572a-4bf500` | n4-highcpu-32 | 00:34:02 | 00:46:24 |
-| B | `goq4-nara-s7cmd-go-8-4` | `s7cmd.5c9e1f4d4685.s1` | `go-replay-qualify-055db792-0183-402300` | n4-highcpu-32 | 00:34:03 | 00:46:34 |
-| B | `goq4-fourcast-s5cmd-go-8-4` | `s5cmd.37412f5e21c0.s1` | `go-replay-qualify-6796a69b-7cb1-4bd700` | n4-highcpu-16 | 00:34:03 | 00:43:33 |
+| Stage | Group | Attempt | Machine | Created (UTC) | Terminal (UTC) |
+| --- | --- | --- | --- | --- | --- |
+| A | `goq4-nara-swath-go-20-20` | `swath.ca43fae5e517.s1` | n4-highcpu-32 | 00:18:05 | 00:20:27 |
+| A | `goq4-nara-s7cmd-go-20-20` | `s7cmd.f93baa7f7142.s1` | n4-highcpu-32 | 00:18:05 | 00:30:15 |
+| A | `goq4-fourcast-s5cmd-go-8-8` | `s5cmd.55ee5e4c62b8.s1` | n4-highcpu-16 | 00:18:06 | 00:27:22 |
+| A | `goq4-blockchain-swath-go-16-5` | `swath.b9c1ed5ae8a2.s1` | n4-highcpu-32 | 00:18:06 | 00:23:06 |
+| A | `goq4-blockchain-swath-go-16-5` | `swath.b9c1ed5ae8a2.s2` | n4-highcpu-32 | 00:18:07 | 00:22:45 |
+| B | `goq4-blockchain-swath-go-8-4` | `swath.c1505ec66d66.s1` | n4-highcpu-32 | 00:34:01 | 00:39:05 |
+| B | `goq4-nara-swath-go-16-5` | `swath.73401a67238f.s1` | n4-highcpu-32 | 00:34:01 | 00:37:03 |
+| B | `goq4-nara-swath-go-8-4` | `swath.bc04b205a545.s1` | n4-highcpu-32 | 00:34:02 | 00:36:31 |
+| B | `goq4-nara-s7cmd-go-16-5` | `s7cmd.3f553acb0aca.s1` | n4-highcpu-32 | 00:34:02 | 00:46:24 |
+| B | `goq4-nara-s7cmd-go-8-4` | `s7cmd.5c9e1f4d4685.s1` | n4-highcpu-32 | 00:34:03 | 00:46:34 |
+| B | `goq4-fourcast-s5cmd-go-8-4` | `s5cmd.37412f5e21c0.s1` | n4-highcpu-16 | 00:34:03 | 00:43:33 |
 
 Files: one `goq4-*.json` receipt per group, exported with
 `benchmark.receipt --server-log`, so each attempt's `list_index` block carries
@@ -52,3 +52,23 @@ are execution-based estimates, not an invoice.
 
 Interpretation, per-job tables and the comparison with waves 2 and 3 are in the
 wave README's *Results* section.
+
+Public projection (2026-11-11): the receipt files were first committed as
+raw exports carrying the study's estate. Every JSON and JSONL file here is now
+a projection of that export, checked with the release exporter's
+forbidden-pattern list (`benchmark.public_export.FORBIDDEN_PATTERNS`) plus
+cloud project, network and secret resource paths, the results bucket and Batch
+job UIDs.
+Dropped wherever they occur: service accounts, secret resources, project,
+network, subnetwork and zone, Batch job names and UIDs (including the worker's
+job argument), result-store prefixes and URIs, and the executor
+environment apart from boot disk, provisioning and product retention.
+Substituted in every string: the results bucket becomes `<result-store>/` or
+`<fixture-store>/`, the study's registry path `<study-registry>/` (digests
+kept). Everything else is verbatim, including each `result.json` SHA-256.
+Where s7cmd ran, the only remaining pattern hit is the s7cmd container's
+public subject working directory (`subject_workdir` in
+`tools/s7cmd/build/image.json`), which the home-directory pattern matches. Case ids are
+carried from the ledger and are not recomputable from the projected case
+documents. The raw exports remain in this branch's earlier commits until the
+squash merge.
