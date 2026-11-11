@@ -170,6 +170,12 @@ def test_declared_artifact_must_appear_in_executed_stage() -> None:
     with pytest.raises(build_image.BuildError, match="swath"):
         build_image.validate_executed_sources(selections, ROOT, broken_swath)
 
+    # This branch keeps the capsule's GitHub release-asset ADD for mc, so the
+    # archived-image variants of the replay-go branch do not apply here.
+    broken_mc = source.replace(selections["minio-mc"].tool_artifact_sha256, "0" * 64)
+    with pytest.raises(build_image.BuildError, match="minio-mc"):
+        build_image.validate_executed_sources(selections, ROOT, broken_mc)
+
 
 def test_a_pinned_base_digest_moves_only_the_slice_that_reaches_it() -> None:
     match = re.search(r"^FROM (?P<base>\S+) AS swath_install$", RECIPE, re.MULTILINE)

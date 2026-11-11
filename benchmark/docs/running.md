@@ -75,7 +75,13 @@ tool enforces for you; a missing item surfaces as a provider error mid-campaign.
    [`../README.md`](../README.md) § *Campaign image set*.
 5. **Replay fixture identity pinned.** The replay server image and fixture digest
    in the plan bind what is served. A staged `fixture_uri` also requires that
-   digest; staging recomputes it before the server starts. No correctness
+   digest; staging recomputes it before the server starts. For a SeekParquet
+   dataset root the digest is its `manifest.json`, and staging also checks every
+   part the manifest names and any declared `fixture_adopted_sha256`
+   ([`../plans/README.md`](../plans/README.md#a-plan-may-state-the-backend-it-measures-against)).
+   A plan may name a server image not yet built as
+   `...@sha256:REPLAY_GO_IMAGE_TBD`; it loads and dry-renders, and `submit`
+   refuses it until the digest is pinned. No correctness
    manifest is generated or bound. The worker counts rows inside the container
    after timing, retains logs, computes its final completion code, and publishes
    `result.json` last. Native products are uploaded only with
@@ -492,6 +498,24 @@ digests, both exit codes, timing/RSS/row counts, replay evidence summary, and an
 existing verification record. It copies no listing product and makes no claim:
 the output is a factual draft for review and commit, with `diagnostic`, `canary`,
 `preparation`, and `measurement` labels left intact.
+
+For a Go replay attempt the replay summary also carries a `list_index` block
+derived from the bound `swath.replay.delimiter.index.*` meters. The server's
+`swath_replay list_index ...` stderr line is not in `result.json` (the worker
+cannot read the server container's output); export it from the job's Cloud
+Logging with an identity that holds `roles/logging.viewer` and attach it:
+
+```sh
+gcloud logging read --project varve-oss \
+  'logName="projects/varve-oss/logs/batch_task_logs" AND
+   labels.task_group_name:"/jobs/JOB_NAME/" AND textPayload:"swath_replay list_index"' \
+  --format='value(textPayload)' > /tmp/ATTEMPT_ID.server.log
+uv run python -m benchmark.receipt ... --server-log ATTEMPT_ID=/tmp/ATTEMPT_ID.server.log
+```
+
+The receipt parses the line, refuses a malformed or repeated one, and records
+every field on which it disagrees with the meters under
+`server_line_disagreements`, with the line's provenance.
 
 ## Prune
 

@@ -140,6 +140,8 @@ REPLAY_INTEGER_FIELDS = replay_contract.REPLAY_INTEGER_FIELDS
 REPLAY_BOOLEAN_FIELDS = replay_contract.REPLAY_BOOLEAN_FIELDS
 REPLAY_FIELDS = replay_contract.REPLAY_FIELDS
 REPLAY_OPTIONAL_INTEGER_FIELDS = replay_contract.REPLAY_OPTIONAL_INTEGER_FIELDS
+REPLAY_OPTIONAL_BOOLEAN_FIELDS = replay_contract.REPLAY_OPTIONAL_BOOLEAN_FIELDS
+REPLAY_OPTIONAL_ALLOCATION_FIELDS = replay_contract.REPLAY_OPTIONAL_ALLOCATION_FIELDS
 ReplayBackend = replay_contract.ReplayBackend
 ReplayPlan = replay_contract.ReplayPlan
 ReplayConfig = replay_contract.ReplayConfig
@@ -194,7 +196,7 @@ ROW_FIELDS = (
     "segments",
     *RESOURCE_FIELDS,
     *REPLAY_FIELDS,
-    *REPLAY_OPTIONAL_INTEGER_FIELDS,
+    *REPLAY_OPTIONAL_ALLOCATION_FIELDS,
 )
 
 # The row axes resolution lifts into the config blob; `mode` travels separately
@@ -222,7 +224,7 @@ LAYER_FIELDS = (
     *RESOURCE_FIELDS,
     *SCHEDULE_FIELDS,
     *REPLAY_FIELDS,
-    *REPLAY_OPTIONAL_INTEGER_FIELDS,
+    *REPLAY_OPTIONAL_ALLOCATION_FIELDS,
 )
 
 TOOL_FIELDS = ("cases", *LAYER_FIELDS)
@@ -717,11 +719,13 @@ def _replay_shape(
         if field not in table:
             continue
         resolved[field] = _positive_int(table[field], field, where, path)
-    if "replay_prefetch" in table:
-        value = table["replay_prefetch"]
+    for field in ("replay_prefetch", *REPLAY_OPTIONAL_BOOLEAN_FIELDS):
+        if field not in table:
+            continue
+        value = table[field]
         if not isinstance(value, bool):
-            raise PlanError(f"'{where}' 'replay_prefetch' in {path} is not a boolean: {value!r}")
-        resolved["replay_prefetch"] = value
+            raise PlanError(f"'{where}' '{field}' in {path} is not a boolean: {value!r}")
+        resolved[field] = value
     return resolved
 
 
@@ -1211,7 +1215,7 @@ def _row_field_value(key: str, value: Any, label: str, path: Path) -> str | int:
         return str(value)
     if key == "signed":
         return _signed({key: value}, label, path, complete=False)[key]
-    if key == "replay_prefetch":
+    if key in ("replay_prefetch", *REPLAY_OPTIONAL_BOOLEAN_FIELDS):
         if not isinstance(value, bool):
             raise PlanError(f"'{label}' '{key}' in {path} is not a boolean: {value!r}")
         return value
@@ -1470,7 +1474,7 @@ def _case_replay(
     if context.replay is None:
         stated = sorted(
             field
-            for field in (*REPLAY_FIELDS, *REPLAY_OPTIONAL_INTEGER_FIELDS)
+            for field in (*REPLAY_FIELDS, *REPLAY_OPTIONAL_ALLOCATION_FIELDS)
             if field in resolved
         )
         if stated:
@@ -1485,7 +1489,7 @@ def _case_replay(
             context.replay,
             {
                 field: resolved[field]
-                for field in (*REPLAY_FIELDS, *REPLAY_OPTIONAL_INTEGER_FIELDS)
+                for field in (*REPLAY_FIELDS, *REPLAY_OPTIONAL_ALLOCATION_FIELDS)
                 if field in resolved
             },
         )

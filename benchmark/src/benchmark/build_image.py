@@ -317,6 +317,23 @@ def validate_executed_sources(
             if pinned_parent not in match.group(0):
                 raise BuildError(f"{tool}: toolbox stage does not use the declared image digest")
             continue
+        if tool == "minio-mc" and "COPY --from=minio_mc_archive" in stage:
+            # The upstream URL is gone. An immutable archived image can supply
+            # the same release binary only when the executed stage verifies the
+            # capsule's original byte digest. The parent enters recipe identity.
+            archive = re.search(
+                r"^FROM [^\s@]+@sha256:[0-9a-f]{64} AS minio_mc_archive$",
+                dockerfile,
+                re.MULTILINE,
+            )
+            expected = (
+                "COPY --from=minio_mc_archive /usr/bin/mc /usr/bin/mc\n"
+                f"RUN echo '{selection.tool_artifact_sha256}  /usr/bin/mc' | sha256sum -c - \\\n"
+                "    && chmod 0755 /usr/bin/mc"
+            )
+            if archive is None or stage.strip() != expected:
+                raise BuildError("minio-mc: archived binary must verify the declared artifact")
+            continue
         checksum = f"--checksum=sha256:{selection.tool_artifact_sha256}"
         if checksum not in stage or selection.tool_artifact_locator not in stage:
             raise BuildError(f"{tool}: toolbox stage does not use the declared artifact")

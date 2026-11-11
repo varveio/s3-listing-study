@@ -1,0 +1,4 @@
+swath.07cb7eabf980.s1	swath_replay list_index state=built max_bytes=67108864 workers=8 groups_indexed=371 groups_skipped=0 groups_failed=0 parts_failed=0 pages=139818 entries=8288 bytes=1173440 budget_exhausted=false has_index=true seconds=2.864
+swath.dc15bf8aa437.s1	swath_replay list_index state=off max_bytes=0 workers=0 groups_indexed=0 groups_skipped=0 groups_failed=0 parts_failed=0 pages=0 entries=0 bytes=0 budget_exhausted=false has_index=false seconds=0.000
+swath.e40733239507.s1	swath_replay list_index state=built max_bytes=67108864 workers=8 groups_indexed=371 groups_skipped=0 groups_failed=0 parts_failed=0 pages=139818 entries=8288 bytes=1173440 budget_exhausted=false has_index=true seconds=2.374
+swath.e40733239507.s2	swath_replay list_index state=built max_bytes=67108864 workers=8 groups_indexed=371 groups_skipped=0 groups_failed=0 parts_failed=0 pages=139818 entries=8288 bytes=1173440 budget_exhausted=false has_index=true seconds=2.636

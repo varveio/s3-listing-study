@@ -1,0 +1,123 @@
+[
+  {
+    "attempt_id": "swath.b9c1ed5ae8a2.s1",
+    "job_name": "go-replay-qualify-swath-b9c1ed5ae8a2-s1",
+    "job_uid": "go-replay-qualify-31269ec6-3c4b-4c5200",
+    "machine": "n4-highcpu-32",
+    "state": "SUCCEEDED",
+    "run_duration_s": 248.343028412,
+    "create_to_update_s": 299.566909,
+    "run_duration_compute_usd": 0.049858450130786054,
+    "create_to_update_compute_usd": 0.06014238405932444
+  },
+  {
+    "attempt_id": "swath.b9c1ed5ae8a2.s2",
+    "job_name": "go-replay-qualify-swath-b9c1ed5ae8a2-s2",
+    "job_uid": "go-replay-qualify-c93987d2-5eb8-42de00",
+    "machine": "n4-highcpu-32",
+    "state": "SUCCEEDED",
+    "run_duration_s": 228.440150626,
+    "create_to_update_s": 278.41272,
+    "run_duration_compute_usd": 0.04586265992923409,
+    "create_to_update_compute_usd": 0.05589537505706666
+  },
+  {
+    "attempt_id": "swath.c1505ec66d66.s1",
+    "job_name": "go-replay-qualify-swath-c1505ec66d66-s1",
+    "job_uid": "go-replay-qualify-6b9f8bd0-f45b-484c00",
+    "machine": "n4-highcpu-32",
+    "state": "SUCCEEDED",
+    "run_duration_s": 254.454994668,
+    "create_to_update_s": 304.120699,
+    "run_duration_compute_usd": 0.05108551564063509,
+    "create_to_update_compute_usd": 0.06105662317879111
+  },
+  {
+    "attempt_id": "s5cmd.37412f5e21c0.s1",
+    "job_name": "go-replay-qualify-s5cmd-37412f5e21c0-s1",
+    "job_uid": "go-replay-qualify-6796a69b-7cb1-4bd700",
+    "machine": "n4-highcpu-16",
+    "state": "SUCCEEDED",
+    "run_duration_s": 512.936857294,
+    "create_to_update_s": 569.224763,
+    "run_duration_compute_usd": 0.05148974159485459,
+    "create_to_update_compute_usd": 0.05714004665385778
+  },
+  {
+    "attempt_id": "s5cmd.55ee5e4c62b8.s1",
+    "job_name": "go-replay-qualify-s5cmd-55ee5e4c62b8-s1",
+    "job_uid": "go-replay-qualify-05b74fd1-1120-4ad800",
+    "machine": "n4-highcpu-16",
+    "state": "SUCCEEDED",
+    "run_duration_s": 501.391517308,
+    "create_to_update_s": 556.196688,
+    "run_duration_compute_usd": 0.05033079471074883,
+    "create_to_update_compute_usd": 0.05583225953408
+  },
+  {
+    "attempt_id": "s7cmd.3f553acb0aca.s1",
+    "job_name": "go-replay-qualify-s7cmd-3f553acb0aca-s1",
+    "job_uid": "go-replay-qualify-212d1c95-572a-4bf500",
+    "machine": "n4-highcpu-32",
+    "state": "SUCCEEDED",
+    "run_duration_s": 686.635151465,
+    "create_to_update_s": 741.325695,
+    "run_duration_compute_usd": 0.13785192471989768,
+    "create_to_update_compute_usd": 0.14883184130906665
+  },
+  {
+    "attempt_id": "s7cmd.f93baa7f7142.s1",
+    "job_name": "go-replay-qualify-s7cmd-f93baa7f7142-s1",
+    "job_uid": "go-replay-qualify-622fe59d-9ebf-490500",
+    "machine": "n4-highcpu-32",
+    "state": "SUCCEEDED",
+    "run_duration_s": 677.334823833,
+    "create_to_update_s": 730.179545,
+    "run_duration_compute_usd": 0.13598474960970788,
+    "create_to_update_compute_usd": 0.14659409069662221
+  },
+  {
+    "attempt_id": "s7cmd.5c9e1f4d4685.s1",
+    "job_name": "go-replay-qualify-s7cmd-5c9e1f4d4685-s1",
+    "job_uid": "go-replay-qualify-055db792-0183-402300",
+    "machine": "n4-highcpu-32",
+    "state": "SUCCEEDED",
+    "run_duration_s": 692.883464383,
+    "create_to_update_s": 750.916126,
+    "run_duration_compute_usd": 0.139106363791595,
+    "create_to_update_compute_usd": 0.15075725886076444
+  },
+  {
+    "attempt_id": "swath.73401a67238f.s1",
+    "job_name": "go-replay-qualify-swath-73401a67238f-s1",
+    "job_uid": "go-replay-qualify-ea2640aa-6dd6-40eb00",
+    "machine": "n4-highcpu-32",
+    "state": "SUCCEEDED",
+    "run_duration_s": 125.38965731,
+    "create_to_update_s": 181.39095,
+    "run_duration_compute_usd": 0.02517378488892142,
+    "create_to_update_compute_usd": 0.036416853304
+  },
+  {
+    "attempt_id": "swath.ca43fae5e517.s1",
+    "job_name": "go-replay-qualify-swath-ca43fae5e517-s1",
+    "job_uid": "go-replay-qualify-22dede5b-be92-49f800",
+    "machine": "n4-highcpu-32",
+    "state": "SUCCEEDED",
+    "run_duration_s": 94.321065756,
+    "create_to_update_s": 142.319769,
+    "run_duration_compute_usd": 0.01893631636591125,
+    "create_to_update_compute_usd": 0.028572749356746665
+  },
+  {
+    "attempt_id": "swath.bc04b205a545.s1",
+    "job_name": "go-replay-qualify-swath-bc04b205a545-s1",
+    "job_uid": "go-replay-qualify-6d101364-59bc-4d0b00",
+    "machine": "n4-highcpu-32",
+    "state": "SUCCEEDED",
+    "run_duration_s": 92.523938479,
+    "create_to_update_s": 149.675228,
+    "run_duration_compute_usd": 0.018575517106548388,
+    "create_to_update_compute_usd": 0.030049463996515553
+  }
+]

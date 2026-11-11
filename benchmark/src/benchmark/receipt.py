@@ -48,19 +48,48 @@ def _digest(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
-def _replay_summary(row: sqlite3.Row, result: Mapping[str, object]) -> dict[str, object] | None:
+def _list_index(
+    config: replay_contract.ReplayConfig, evidence: object, server_log: str | None
+) -> dict[str, object] | None:
+    """The Go list index as the meters show it, plus the exported stderr line if given.
+
+    The worker cannot read the server's stderr (a separate scratch-image
+    container whose output goes to Cloud Logging), so the line is attached here
+    from an operator export and checked against the meters the worker bound.
+    """
+    summary = replay_contract.list_index_summary(config, evidence)
+    if summary is None:
+        if server_log is not None:
+            raise ReceiptError("a server log was given for an attempt without Go replay")
+        return None
+    if server_log is not None:
+        replay_contract.attach_list_index_line(
+            summary, replay_contract.parse_list_index_line(server_log)
+        )
+        summary["server_line_provenance"] = "operator export of the job's Cloud Logging"
+    return summary
+
+
+def _replay_summary(
+    row: sqlite3.Row, result: Mapping[str, object], server_log: str | None = None
+) -> dict[str, object] | None:
     if row["replay"] is None:
+        if server_log is not None:
+            raise ReceiptError(f"{row['attempt_id']}: a server log was given for a non-replay row")
         return None
     evidence = result.get("replay_evidence")
-    refusals = replay_contract.replay_refusals(
-        str(row["replay"]), evidence, purpose=str(row["purpose"])
-    )
+    config = replay_contract.parse_document(str(row["replay"]))
+    refusals = replay_contract.replay_refusals(config, evidence, purpose=str(row["purpose"]))
+    list_index = _list_index(config, evidence, server_log)
     if not isinstance(evidence, Mapping):
-        return {"state": "REFUSED", "refusals": list(refusals)}
+        refused: dict[str, object] = {"state": "REFUSED", "refusals": list(refusals)}
+        if list_index is not None:
+            refused["list_index"] = list_index
+        return refused
     samples = evidence.get("samples")
     resources = evidence.get("resource_samples")
     readiness = evidence.get("readiness")
-    return {
+    summary: dict[str, object] = {
         "state": "REFUSED" if refusals else "COMPLETE",
         "refusals": list(refusals),
         "readiness": readiness.get("state") if isinstance(readiness, Mapping) else None,
@@ -83,6 +112,9 @@ def _replay_summary(row: sqlite3.Row, result: Mapping[str, object]) -> dict[str,
             ),
         },
     }
+    if list_index is not None:
+        summary["list_index"] = list_index
+    return summary
 
 
 def _verification_summary(
@@ -117,7 +149,7 @@ def _verification_summary(
     return summary
 
 
-def _evidence(row: sqlite3.Row) -> dict[str, object]:
+def _evidence(row: sqlite3.Row, server_log: str | None = None) -> dict[str, object]:
     loaded = load_json_at(str(row["result_prefix"]), "result.json")
     if loaded is None:
         result_uri = f"{str(row['result_prefix']).rstrip('/')}/result.json"
@@ -134,15 +166,24 @@ def _evidence(row: sqlite3.Row) -> dict[str, object]:
         "result_sha256": result_sha256,
         "result": {field: result.get(field) for field in RESULT_FIELDS},
         "argv": result.get("argv"),
-        "replay": _replay_summary(row, result),
+        "replay": _replay_summary(row, result, server_log),
         "verification": _verification_summary(
             row, result_sha256, load_json_at(str(row["result_prefix"]), "verify.json")
         ),
     }
 
 
-def build_receipt(con: sqlite3.Connection, group_id: str) -> dict[str, object]:
+def build_receipt(
+    con: sqlite3.Connection,
+    group_id: str,
+    *,
+    server_logs: Mapping[str, str] | None = None,
+) -> dict[str, object]:
     rows = attempt_rows(con, group_id=group_id)
+    logs = dict(server_logs or {})
+    unknown_logs = sorted(set(logs) - {str(row["attempt_id"]) for row in rows})
+    if unknown_logs:
+        raise ReceiptError(f"server logs name attempts outside group: {', '.join(unknown_logs)}")
     slots = pending_rows(con, group_id=group_id)
     if not rows and not slots:
         raise ReceiptError(f"group {group_id!r} is not in this ledger")
@@ -174,7 +215,7 @@ def build_receipt(con: sqlite3.Connection, group_id: str) -> dict[str, object]:
                 "settled_at": row["settled_at"],
                 "result_prefix": row["result_prefix"],
                 "request": json.loads(row["request_json"]),
-                "evidence": _evidence(row),
+                "evidence": _evidence(row, logs.get(str(row["attempt_id"]))),
             }
         )
     meta = con.execute("SELECT suite, schema_version, created_at FROM meta WHERE id=1").fetchone()
@@ -235,7 +276,27 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--state", default=STATE_FILENAME)
     parser.add_argument("--group", required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--server-log",
+        action="append",
+        default=[],
+        metavar="ATTEMPT_ID=PATH",
+        help="an exported replay server log for one Go attempt; its list_index line is "
+        "attached and checked against the bound meters (repeatable)",
+    )
     return parser.parse_args(argv)
+
+
+def _server_logs(specs: list[str]) -> dict[str, str]:
+    logs: dict[str, str] = {}
+    for spec in specs:
+        attempt_id, separator, path = spec.partition("=")
+        if not separator or not attempt_id or not path:
+            raise ReceiptError("--server-log must be ATTEMPT_ID=PATH")
+        if attempt_id in logs:
+            raise ReceiptError(f"--server-log names {attempt_id} more than once")
+        logs[attempt_id] = Path(path).read_text(encoding="utf-8")
+    return logs
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -244,7 +305,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.output.exists() and any(args.output.iterdir()):
             raise ReceiptError(f"output directory {args.output} is not empty")
         with ledger(args.state, readonly=True) as con:
-            document = build_receipt(con, args.group)
+            document = build_receipt(con, args.group, server_logs=_server_logs(args.server_log))
         args.output.mkdir(parents=True, exist_ok=True)
         payload = json.dumps(document, indent=2, sort_keys=True, ensure_ascii=True) + "\n"
         (args.output / "receipt.json").write_text(payload)

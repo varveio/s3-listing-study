@@ -1,0 +1,212 @@
+[
+  {
+    "attempt_id": "swath.239e19cf2866.s1",
+    "job_name": "go-replay-qualify-swath-239e19cf2866-s1",
+    "machine": "n4-highcpu-80",
+    "state": "SUCCEEDED",
+    "run_duration_s": 219.893770764,
+    "create_to_update_s": 270.927735,
+    "run_duration_compute_usd": 0.1103671268105712,
+    "create_to_update_compute_usd": 0.13598164050466666
+  },
+  {
+    "attempt_id": "swath.4ab360c41e46.s1",
+    "job_name": "go-replay-qualify-swath-4ab360c41e46-s1",
+    "machine": "n4-highcpu-80",
+    "state": "SUCCEEDED",
+    "run_duration_s": 222.144243372,
+    "create_to_update_s": 285.022075,
+    "run_duration_compute_usd": 0.1114966640177776,
+    "create_to_update_compute_usd": 0.14305574635444443
+  },
+  {
+    "attempt_id": "swath.e2f0d987ee37.s1",
+    "job_name": "go-replay-qualify-swath-e2f0d987ee37-s1",
+    "machine": "n4-highcpu-80",
+    "state": "SUCCEEDED",
+    "run_duration_s": 220.875857613,
+    "create_to_update_s": 280.948157,
+    "run_duration_compute_usd": 0.1108600471121604,
+    "create_to_update_compute_usd": 0.14101100164448888
+  },
+  {
+    "attempt_id": "swath.58e78e55aa7d.s1",
+    "job_name": "go-replay-qualify-swath-58e78e55aa7d-s1",
+    "machine": "n4-highcpu-80",
+    "state": "SUCCEEDED",
+    "run_duration_s": 232.06662957,
+    "create_to_update_s": 282.640263,
+    "run_duration_compute_usd": 0.11647681989928933,
+    "create_to_update_compute_usd": 0.1418602884470667
+  },
+  {
+    "attempt_id": "swath.58e78e55aa7d.s2",
+    "job_name": "go-replay-qualify-swath-58e78e55aa7d-s2",
+    "machine": "n4-highcpu-80",
+    "state": "SUCCEEDED",
+    "run_duration_s": 242.607146038,
+    "create_to_update_s": 304.430421,
+    "run_duration_compute_usd": 0.12176722223142818,
+    "create_to_update_compute_usd": 0.15279701086013334
+  },
+  {
+    "attempt_id": "swath.1427ad68b833.s1",
+    "job_name": "go-replay-qualify-swath-1427ad68b833-s1",
+    "machine": "n4-highcpu-80",
+    "state": "SUCCEEDED",
+    "run_duration_s": 261.125164144,
+    "create_to_update_s": 315.969174,
+    "run_duration_compute_usd": 0.13106162127458632,
+    "create_to_update_compute_usd": 0.15858843919920002
+  },
+  {
+    "attempt_id": "swath.1427ad68b833.s2",
+    "job_name": "go-replay-qualify-swath-1427ad68b833-s2",
+    "machine": "n4-highcpu-80",
+    "state": "SUCCEEDED",
+    "run_duration_s": 263.889282539,
+    "create_to_update_s": 318.662698,
+    "run_duration_compute_usd": 0.13244896300946343,
+    "create_to_update_compute_usd": 0.15994034882284444
+  },
+  {
+    "attempt_id": "s5cmd.c915bb5be2cb.s1",
+    "job_name": "go-replay-qualify-s5cmd-c915bb5be2cb-s1",
+    "machine": "n4-highcpu-16",
+    "state": "SUCCEEDED",
+    "run_duration_s": 465.228266227,
+    "create_to_update_s": 526.045134,
+    "run_duration_compute_usd": 0.04670064720445787,
+    "create_to_update_compute_usd": 0.05280557954010666
+  },
+  {
+    "attempt_id": "s5cmd.c915bb5be2cb.s2",
+    "job_name": "go-replay-qualify-s5cmd-c915bb5be2cb-s2",
+    "machine": "n4-highcpu-16",
+    "state": "SUCCEEDED",
+    "run_duration_s": 465.691467208,
+    "create_to_update_s": 521.305981,
+    "run_duration_compute_usd": 0.04674714434826616,
+    "create_to_update_compute_usd": 0.05232985283051555
+  },
+  {
+    "attempt_id": "s5cmd.c915bb5be2cb.s3",
+    "job_name": "go-replay-qualify-s5cmd-c915bb5be2cb-s3",
+    "machine": "n4-highcpu-16",
+    "state": "SUCCEEDED",
+    "run_duration_s": 465.805830818,
+    "create_to_update_s": 525.166967,
+    "run_duration_compute_usd": 0.046758624421579326,
+    "create_to_update_compute_usd": 0.052717427185164444
+  },
+  {
+    "attempt_id": "s5cmd.a3f174d2d894.s1",
+    "job_name": "go-replay-qualify-s5cmd-a3f174d2d894-s1",
+    "machine": "n4-highcpu-16",
+    "state": "SUCCEEDED",
+    "run_duration_s": 482.494258966,
+    "create_to_update_s": 540.514793,
+    "run_duration_compute_usd": 0.04843384592447145,
+    "create_to_update_compute_usd": 0.05425807606532444
+  },
+  {
+    "attempt_id": "s5cmd.a3f174d2d894.s2",
+    "job_name": "go-replay-qualify-s5cmd-a3f174d2d894-s2",
+    "machine": "n4-highcpu-16",
+    "state": "SUCCEEDED",
+    "run_duration_s": 466.405536116,
+    "create_to_update_s": 526.856621,
+    "run_duration_compute_usd": 0.046818824172071005,
+    "create_to_update_compute_usd": 0.05288703840847111
+  },
+  {
+    "attempt_id": "s5cmd.a3f174d2d894.s3",
+    "job_name": "go-replay-qualify-s5cmd-a3f174d2d894-s3",
+    "machine": "n4-highcpu-16",
+    "state": "SUCCEEDED",
+    "run_duration_s": 501.061485402,
+    "create_to_update_s": 560.189253,
+    "run_duration_compute_usd": 0.05029766537462032,
+    "create_to_update_compute_usd": 0.05623304208114666
+  },
+  {
+    "attempt_id": "s7cmd.d657b29454ca.s1",
+    "job_name": "go-replay-qualify-s7cmd-d657b29454ca-s1",
+    "machine": "n4-highcpu-32",
+    "state": "SUCCEEDED",
+    "run_duration_s": 644.776307278,
+    "create_to_update_s": 704.458516,
+    "run_duration_compute_usd": 0.12944815712160807,
+    "create_to_update_compute_usd": 0.14143022259889776
+  },
+  {
+    "attempt_id": "s7cmd.d657b29454ca.s2",
+    "job_name": "go-replay-qualify-s7cmd-d657b29454ca-s2",
+    "machine": "n4-highcpu-32",
+    "state": "SUCCEEDED",
+    "run_duration_s": 645.619524192,
+    "create_to_update_s": 699.552924,
+    "run_duration_compute_usd": 0.12961744509689344,
+    "create_to_update_compute_usd": 0.14044535414634665
+  },
+  {
+    "attempt_id": "s7cmd.2cb23bfcd973.s1",
+    "job_name": "go-replay-qualify-s7cmd-2cb23bfcd973-s1",
+    "machine": "n4-highcpu-32",
+    "state": "SUCCEEDED",
+    "run_duration_s": 657.815785633,
+    "create_to_update_s": 715.723591,
+    "run_duration_compute_usd": 0.132066020749395,
+    "create_to_update_compute_usd": 0.14369184912289779
+  },
+  {
+    "attempt_id": "s7cmd.2cb23bfcd973.s2",
+    "job_name": "go-replay-qualify-s7cmd-2cb23bfcd973-s2",
+    "machine": "n4-highcpu-32",
+    "state": "SUCCEEDED",
+    "run_duration_s": 673.411081857,
+    "create_to_update_s": 735.797053,
+    "run_duration_compute_usd": 0.1351970017317529,
+    "create_to_update_compute_usd": 0.14772188656940444
+  },
+  {
+    "attempt_id": "swath.74f49a8fbd47.s1",
+    "job_name": "go-replay-qualify-swath-74f49a8fbd47-s1",
+    "machine": "n4-highcpu-32",
+    "state": "SUCCEEDED",
+    "run_duration_s": 88.567153927,
+    "create_to_update_s": 143.345389,
+    "run_duration_compute_usd": 0.017781135454179753,
+    "create_to_update_compute_usd": 0.02877865738625778
+  },
+  {
+    "attempt_id": "swath.74f49a8fbd47.s2",
+    "job_name": "go-replay-qualify-swath-74f49a8fbd47-s2",
+    "machine": "n4-highcpu-32",
+    "state": "SUCCEEDED",
+    "run_duration_s": 89.279350918,
+    "create_to_update_s": 141.489848,
+    "run_duration_compute_usd": 0.01792411928741287,
+    "create_to_update_compute_usd": 0.028406130728248883
+  },
+  {
+    "attempt_id": "swath.f39b7946ea5f.s1",
+    "job_name": "go-replay-qualify-swath-f39b7946ea5f-s1",
+    "machine": "n4-highcpu-32",
+    "state": "SUCCEEDED",
+    "run_duration_s": 94.308528197,
+    "create_to_update_s": 152.29091,
+    "run_duration_compute_usd": 0.01893379926984393,
+    "create_to_update_compute_usd": 0.030574599940088886
+  },
+  {
+    "attempt_id": "swath.f39b7946ea5f.s2",
+    "job_name": "go-replay-qualify-swath-f39b7946ea5f-s2",
+    "machine": "n4-highcpu-32",
+    "state": "SUCCEEDED",
+    "run_duration_s": 88.561375234,
+    "create_to_update_s": 150.539723,
+    "run_duration_compute_usd": 0.01777997529808999,
+    "create_to_update_compute_usd": 0.030223023854915557
+  }
+]

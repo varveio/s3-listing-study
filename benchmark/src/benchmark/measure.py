@@ -1317,6 +1317,7 @@ def _replay_phase(
         # requests warm the server without entering any treatment meter delta.
         replay_evidence["warmup"] = replay_runtime.warm_up(replay_config, bucket)
     replay_evidence["before"] = replay_runtime.scrape_metrics(replay_evidence, "before")
+    replay_evidence["server_memory_before"] = replay_runtime.server_memory(replay_config, box_vcpus)
     if replay_evidence["before"] is None:
         return (
             publish_failure(exit_code=EXIT_REPLAY_EVIDENCE_FAILED, setup=None, started_at=None),
@@ -1341,6 +1342,9 @@ def _replay_phase(
             errors.append({"phase": "sample", "error": "metrics sampler did not stop"})
         else:
             replay_evidence["after"] = replay_runtime.scrape_metrics(replay_evidence, "after")
+            replay_evidence["server_memory_after"] = replay_runtime.server_memory(
+                replay_config, box_vcpus
+            )
 
     return None, finalize
 

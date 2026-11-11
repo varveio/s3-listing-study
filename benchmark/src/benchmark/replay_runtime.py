@@ -272,6 +272,68 @@ def _host_memory_and_load(proc_root: Path = Path("/proc")) -> tuple[int, float]:
     return available_kb, load1
 
 
+def server_memory(
+    replay: ReplayConfig, box_vcpus: int, proc_root: Path = Path("/replay-host-proc")
+) -> dict[str, object]:
+    """Read the isolated server's Linux RSS high-water mark, including startup.
+
+    Batch mounts host proc read-only in the worker. Bind the process by executable,
+    serving command, metrics port and exact CPU allocation; never choose the first
+    of multiple matches. Missing proc evidence remains explicit and does not alter
+    the delivered-treatment gate, which has no memory criterion.
+    """
+    expected, _ = allocation_cpu_sets(replay.allocation, box_vcpus=box_vcpus)
+    matches: list[dict[str, object]] = []
+    try:
+        processes = list(proc_root.iterdir())
+    except OSError as exc:
+        return {"state": "unavailable", "error": str(exc)}
+    for process in processes:
+        if not process.name.isdigit():
+            continue
+        try:
+            argv = process.joinpath("cmdline").read_bytes().split(b"\0")
+            if not argv or argv[0].rsplit(b"/", 1)[-1] not in (b"java", b"swath-replay"):
+                continue
+            if b"serve" not in argv or b"--metrics-port" not in argv:
+                continue
+            if argv[argv.index(b"--metrics-port") + 1] != b"19192":
+                continue
+            status = dict(
+                line.split(":", 1)
+                for line in process.joinpath("status").read_text().splitlines()
+                if ":" in line
+            )
+            cpus: set[int] = set()
+            for part in status["Cpus_allowed_list"].strip().split(","):
+                ends = part.split("-")
+                cpus.update(range(int(ends[0]), int(ends[-1]) + 1))
+            if cpus != set(expected):
+                continue
+            rss = int(status["VmRSS"].split()[0])
+            peak = int(status["VmHWM"].split()[0])
+            if rss < 0 or peak < rss:
+                raise ValueError("invalid server RSS high-water mark")
+            matches.append(
+                {
+                    "state": "observed",
+                    "pid": int(process.name),
+                    "rss_kb": rss,
+                    "peak_rss_kb": peak,
+                    "provenance": "host /proc/PID/status VmRSS and VmHWM; lifetime peak",
+                }
+            )
+        except (OSError, ValueError, KeyError, IndexError):
+            # Processes can exit between the directory scan and either read.
+            continue
+    if len(matches) != 1:
+        return {
+            "state": "unavailable",
+            "error": f"expected one replay process, found {len(matches)}",
+        }
+    return matches[0]
+
+
 def _resource_sample(
     *,
     server_cpus: set[int],
@@ -357,6 +419,7 @@ def sample_metrics(
             errors.append({"phase": "resource-sample", "error": str(exc)})
             return
         resource_samples = evidence["resource_samples"]
+        resource["server_memory"] = server_memory(replay, box_vcpus)
         assert isinstance(resource_samples, list)
         resource_samples.append(resource)
         previous_at = observed

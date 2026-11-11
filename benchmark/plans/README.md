@@ -180,6 +180,68 @@ Reader-pool size and request-admission width are separate fields, and
 `replay_prefetch_max_windows` defaults to 96 when omitted; state it explicitly
 when a diagnostic varies cache capacity.
 
+`replay.server_implementation: go` selects the Go server launch contract; omitted
+means Java and preserves existing case identities and launch commands. Go requires
+`serving_mode: sorted` and refuses `replay_delimiter_connections`. Its cache is
+controlled by the same explicit `replay_prefetch` and `replay_prefetch_max_windows`
+fields: enabled uses 12,500-row windows, disabled passes a zero window size.
+`replay_response_buffer_budget_bytes` optionally pins Go's response byte budget;
+it is a positive integer and is refused for Java. These stated settings enter case
+identity. Go gets `GOMAXPROCS=replay_vcpus` and a byte-valued `GOMEMLIMIT` equal to
+`replay_memory_gb * 2^30 * replay_heap_percent / 100` (rounded down), leaving the
+remaining cgroup allowance for memory outside Go's runtime budget. The percentage
+is a soft Go memory limit, not a JVM heap limit, for this backend. No Java options
+are sent to Go. The existing 600-second readiness ceiling remains an allowance,
+not a delay: both servers are probed until ready before subject timing begins.
+Worker images must include this replay contract before running Go plans; old
+workers reject the new fields rather than silently treating Go as Java.
+
+Go also builds the SeekParquet **list boundary index** at startup (swath
+`go/replay-list-index`, flags `--list-index` and `--list-index-max-bytes`). Two
+optional, Go-only allocation fields control it: `replay_list_index` (YAML
+boolean) and `replay_list_index_max_bytes` (positive integer). Stated, they are
+rendered as `--list-index=true|false` (always with `=`: Go's flag parser reads a
+separate `false` as a positional argument) and `--list-index-max-bytes N`, and
+they enter case identity; omitted, the server's own default applies (on, 64 MiB)
+and the fields are absent from identity, so wave-1 Go cases keep theirs. Both are
+refused for Java, and a budget with the index turned off is refused. Server
+images that predate the list index refuse to start with either flag, so state
+them only with an image built from that branch or later. The index only exists
+over a SeekParquet dataset; over Java-era parts the server reports
+`state=unsupported`.
+
+The worker retains the raw `swath.replay.delimiter.index.*` meters with every
+other meter in the `before`/`after` observations: build gauges
+(`build.groups{outcome}`, `build.pages`, `entries`, `bytes`, `max_bytes`,
+`budget_exhausted`), the `build.latency` timer, and the `skips` and
+`declines{reason}` counters. `benchmark.receipt` derives a `list_index` block
+from them for each Go attempt: what was requested, the build as the gauges show
+it, the skips and declines over the subject interval, and whether the requested
+index was delivered: `true`, `false`, or `null` when the evidence is
+inconclusive. With the index on over a SeekParquet dataset the meters show one
+build attempt, but a failed build records it too, so meters alone are
+inconclusive until a `state=built` server line confirms it; `state=failed`
+refuses delivery. With it off, delivery needs an observed zero build count (a
+missing build timer is inconclusive). A stated budget must match the
+`max_bytes` gauge. The
+server's own `swath_replay list_index ...` line goes to stderr, which the worker
+cannot read (the server is a separate scratch-image container whose output goes
+to Cloud Logging, and the worker identity has no log-read role). Export it and
+attach it with `receipt --server-log ATTEMPT_ID=PATH`; the receipt parses the
+line and lists every field on which it disagrees with the meters (build
+`seconds` within the line's three-decimal precision); any disagreement refuses
+delivery. The timing
+grader is unchanged: it reads only `request.latency{shape}`,
+`inject.overrun{shape}`, `http.requests` and `http.errors`, and the new meters do
+not move it.
+
+Replay workers also read the server's `VmRSS` and lifetime `VmHWM` from a
+read-only host `/proc` mount, matching the serving process and exact replay
+cpuset. Observations before/after the subject and in the 10-second resource
+samples distinguish missing or ambiguous processes from measured memory.
+The lifetime peak includes startup and declared warm-up; it is not an
+interval-reset memory peak and does not change the delivered-treatment gate.
+
 `capacity_status` is a simple plan fact, not another control surface:
 `uncalibrated` permits diagnostic replay work only, while `calibrated` permits
 replay measurements. Set it to `calibrated` only after a real diagnostic
@@ -195,9 +257,10 @@ retains logs and `result.json`, and routine reporting reads that marker only.
 Native product upload is an operator opt-in, not a plan axis.
 
 An image-bundled fixture states `fixture_sha256` alone. A staged fixture states
-both `fixture_uri` and `fixture_sha256`. `fixture_uri` names either one exact
-Parquet object or the bounded multipart shape `gs://.../part-*.parquet`; broader
-wildcards are refused. An exact object needs `storage.objects.get`; expanding
+both `fixture_uri` and `fixture_sha256`. `fixture_uri` names one exact Parquet
+object, the bounded multipart shape `gs://.../part-*.parquet`, or one
+**SeekParquet dataset root** (`gs://.../root/` or `gs://.../root/manifest.json`);
+broader wildcards are refused. An exact object needs `storage.objects.get`; expanding
 the bounded part set also needs `storage.objects.list` plus
 `storage.objects.get` for its matches. Worker IAM currently grants broader
 bucket-wide object administration. The digest is over the UTF-8 bytes of the
@@ -209,6 +272,35 @@ staged directory with:
 ```sh
 uv run python -m benchmark.replay_fixture /path/to/fixture
 ```
+
+A SeekParquet dataset root is identified differently, and only the Go server
+serves it (Java refuses it). `fixture_sha256` is the SHA-256 of the dataset's
+`manifest.json` bytes; the manifest names every part's `data/` path, size and
+SHA-256. Staging downloads `manifest.json`, checks its digest before reading it,
+downloads exactly the parts it names into `data/` (preserving the dataset
+layout the Go server opens as `--fixture /fixtures/source`), and refuses a part
+whose size or digest differs or a `data/` holding any part the manifest does not
+name. A dataset converted from a Java-era fixture records the original parts
+under `extensions["swath-replay"].adopted_from`; state the original fixture's
+staging digest, recomputed from those rows, as `fixture_adopted_sha256`. It is
+part of the identity, staging recomputes and checks it, and it is the link from
+the converted case back to the release fixture it came from. The same command
+prints both values for a staged dataset root:
+
+```sh
+uv run python -m benchmark.replay_fixture /path/to/dataset-root
+# fixture_adopted_sha256 <original staging digest>
+# <manifest sha256>
+```
+
+Companion inputs (`s3-fast-list-hints.input`, `s5cmd-shards.input`) resolve
+beside a Java-era fixture's parts and, for a dataset root, at the root beside
+`manifest.json`. They stage to the same container path either way and stay
+bound by the digests in the subject config. Because the companions are derived
+from the keys alone and a footer-only conversion keeps every key, the original
+fixture's companion bytes (and digests) carry over: copy them once,
+create-only, into the dataset root before a companion mode runs there. None of
+the current SeekParquet roots carry companions yet.
 
 #### Fixture preparation and sorted eligibility
 
