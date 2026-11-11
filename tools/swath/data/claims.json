@@ -4563,6 +4563,104 @@
           "lines": "2698-2702"
         }
       ]
+    },
+    {
+      "id": "sorted-final-file-size-is-a-system-property",
+      "statement": "The sorted output's final-part roll threshold is the JVM system property swath.sort.final-file-bytes (default 1 GiB), read once into SortConfig and used by the finalizer; --parquet-part-size does not reach the sorted publish, which is handed the SortConfig and not the dataset spec's part size.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Read from the tested variant's source. The capsule exposes it as final_file_bytes, rendered as -Dswath.sort.final-file-bytes=N in JAVA_TOOL_OPTIONS, sorted mode only. The capsule still renders parquet_part_size on the sorted mode for the identity of rows that stated it; it is inert there.",
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/varveio/swath",
+          "commit": "acf0d509f238832ffe2f0fb608951be33e99ae6f",
+          "path": "swath-core/src/main/java/io/varve/swath/sort/SortConfig.java",
+          "lines": "109,140,256-258,274"
+        },
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/varveio/swath",
+          "commit": "acf0d509f238832ffe2f0fb608951be33e99ae6f",
+          "path": "swath-cli/src/main/java/io/varve/swath/cli/SortOptions.java",
+          "lines": "25-26"
+        },
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/varveio/swath",
+          "commit": "acf0d509f238832ffe2f0fb608951be33e99ae6f",
+          "path": "swath-core/src/main/java/io/varve/swath/runtime/ListRunner.java",
+          "lines": "846-848,988-991,1020-1022"
+        },
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/varveio/swath",
+          "commit": "acf0d509f238832ffe2f0fb608951be33e99ae6f",
+          "path": "swath-core/src/main/java/io/varve/swath/sort/finalize/SortFinalizer.java",
+          "lines": "120"
+        },
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/varveio/swath",
+          "commit": "acf0d509f238832ffe2f0fb608951be33e99ae6f",
+          "path": "swath-core/src/main/java/io/varve/swath/sort/finalize/FinalizationPlanner.java",
+          "lines": "172-173"
+        },
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/varveio/swath",
+          "commit": "acf0d509f238832ffe2f0fb608951be33e99ae6f",
+          "path": "swath-cli/src/main/java/io/varve/swath/cli/ListCommand.java",
+          "lines": "1798-1803"
+        }
+      ]
+    },
+    {
+      "id": "sort-budgets-follow-the-max-heap",
+      "statement": "The sorted staging segment size and the merge residency budget each default to 8% of the JVM's maximum heap (Runtime.maxMemory), so -Xmx (or the MaxRAMPercentage share when none is set) sizes both.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "Read from the tested variant's source. The capsule's jvm_max_heap renders -Xmx; without it the harness share (75% of an 8 GiB container: 6 GiB) applies. The merge width is the separate sort.merge-parallelism tune (claim sort-merge-parallelism-tune). Whether a larger heap changes wall is a run question.",
+      "evidence": [
+        {
+          "kind": "source",
+          "subject": "tested-variant",
+          "repository": "https://github.com/varveio/swath",
+          "commit": "acf0d509f238832ffe2f0fb608951be33e99ae6f",
+          "path": "swath-core/src/main/java/io/varve/swath/sort/SortConfig.java",
+          "lines": "125,133-140,269-270,277,411-414"
+        }
+      ]
+    },
+    {
+      "id": "gc-collector-is-a-jvm-option",
+      "statement": "Swath's collector is the JVM's: -XX:+UseG1GC or -XX:+UseParallelGC selects it, and unstated HotSpot's ergonomics choose G1 on a server-class machine (at least two active processors and 1792 MB of memory) and Serial otherwise. Swath itself selects none.",
+      "scope": "mechanism",
+      "status": "supported",
+      "disposition": "retained",
+      "qualification": "The mechanism is the JDK's, from its documentation; the capsule exposes it as gc_collector (g1 or parallel), and no other part of the capsule or the harness sets a collector for the subject. A local check on the toolbox image's Temurin 25.0.4 (4 CPUs, 8 GiB) logged Using G1 with no flag and with -XX:+UseG1GC, Using Parallel with -XX:+UseParallelGC, and Serial with one CPU; swath --version ran under each. That is an adapter check, not a run record: whether a collector changes a run's wall or memory is unverified.",
+      "evidence": [
+        {
+          "kind": "documentation",
+          "url": "https://docs.oracle.com/en/java/javase/25/gctuning/ergonomics.html"
+        },
+        {
+          "kind": "documentation",
+          "url": "https://docs.oracle.com/en/java/javase/25/docs/specs/man/java.html"
+        },
+        {
+          "kind": "documentation",
+          "path": "../docs/running.md"
+        }
+      ]
     }
   ]
 }

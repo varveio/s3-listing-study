@@ -60,6 +60,7 @@ TOOLBOX_TOOLS = frozenset(
         "s5cmd",
         "s7cmd",
         "swath",
+        "swath-go",
     }
 )
 

@@ -1,0 +1,24 @@
+[
+  {
+    "attempt_id": "swath-go.a0b2455731f9.s1",
+    "create_to_update_compute_usd": 0.10316000861186668,
+    "create_to_update_s": 205.534419,
+    "ledger_state": "SUCCEEDED",
+    "machine": "n4-highcpu-80",
+    "provider_state": "SUCCEEDED",
+    "run_duration_compute_usd": 0.0771010382857685,
+    "run_duration_s": 153.614926187,
+    "spot_list_rate_usd_per_hour": 1.80688
+  },
+  {
+    "attempt_id": "swath.383a82eab611.s1",
+    "create_to_update_compute_usd": 0.16180586057311114,
+    "create_to_update_s": 322.379515,
+    "ledger_state": "SUCCEEDED",
+    "machine": "n4-highcpu-80",
+    "provider_state": "SUCCEEDED",
+    "run_duration_compute_usd": 0.13541325514967326,
+    "run_duration_s": 269.795292736,
+    "spot_list_rate_usd_per_hour": 1.80688
+  }
+]

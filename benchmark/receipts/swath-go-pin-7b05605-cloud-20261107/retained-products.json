@@ -1,0 +1,80 @@
+[
+  {
+    "attempt_id": "swath-go.a821996ad2bd.s1",
+    "listing_uri": "<result-store>/scale-study/real-changesets/swath-go.a821996ad2bd.s1/native/listing/",
+    "manifest_format": "swath-dataset",
+    "manifest_parts": [
+      {
+        "bytes": 218599725,
+        "path": "data/part-00000.parquet",
+        "rows": 9429962,
+        "sha256": null
+      },
+      {
+        "bytes": 63295238,
+        "path": "data/part-00001.parquet",
+        "rows": 2736541,
+        "sha256": null
+      },
+      {
+        "bytes": 39478659,
+        "path": "data/part-00002.parquet",
+        "rows": 1701939,
+        "sha256": null
+      }
+    ],
+    "manifest_rows": 13868442,
+    "manifest_sha256": "e7aa8e6cf9262dba7834b81bd3d729581e1cb5858554745753dc3822078a6247",
+    "manifest_vs_objects_mismatches": [],
+    "objects": [
+      {
+        "gcs_crc32c_base64": "eFoIug==",
+        "gcs_md5_hex": "4786aa902a1855619327cb8aaeb23596",
+        "path": ".swath/journal",
+        "size": 1453
+      },
+      {
+        "gcs_crc32c_base64": "AAAAAA==",
+        "gcs_md5_hex": "d41d8cd98f00b204e9800998ecf8427e",
+        "path": ".swath/lock",
+        "size": 0
+      },
+      {
+        "gcs_crc32c_base64": "4yVMRg==",
+        "gcs_md5_hex": "c8841dc1f5c70670d6ee5960d6b1a65a",
+        "path": ".swath/progress.json",
+        "size": 878
+      },
+      {
+        "gcs_crc32c_base64": "xkjg5w==",
+        "gcs_md5_hex": "9d5ac661cb06ecadf0ab83e06fb13009",
+        "path": "data/part-00000.parquet",
+        "size": 218599725
+      },
+      {
+        "gcs_crc32c_base64": "liBXlg==",
+        "gcs_md5_hex": "9228b669f2e14f0ebf92e166a677c7aa",
+        "path": "data/part-00001.parquet",
+        "size": 63295238
+      },
+      {
+        "gcs_crc32c_base64": "EUkD2A==",
+        "gcs_md5_hex": "f707f5e15f9d8b0c4caf4d7aa68ac80a",
+        "path": "data/part-00002.parquet",
+        "size": 39478659
+      },
+      {
+        "gcs_crc32c_base64": "8opgYA==",
+        "gcs_md5_hex": "5cad37513127548103942749392f61b1",
+        "path": "manifest.json",
+        "size": 1330
+      },
+      {
+        "gcs_crc32c_base64": "Qv1/Sg==",
+        "gcs_md5_hex": "6cca9ec927b8b7b997d59a5f28f22711",
+        "path": "run.json",
+        "size": 8138
+      }
+    ]
+  }
+]

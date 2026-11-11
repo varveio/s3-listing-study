@@ -1,0 +1,251 @@
+[
+  {
+    "attempt_id": "swath-go.1e68489008c5.s1",
+    "create_to_update_compute_usd": 0.023941039139804443,
+    "create_to_update_s": 119.249398,
+    "ledger_state": "SUCCEEDED",
+    "machine": "n4-highcpu-32",
+    "provider_state": "SUCCEEDED",
+    "run_duration_compute_usd": 0.011535049894952496,
+    "run_duration_s": 57.455641246,
+    "spot_list_rate_usd_per_hour": 0.722752
+  },
+  {
+    "attempt_id": "swath-go.dd9186c83853.s1",
+    "create_to_update_compute_usd": 0.04240279879991111,
+    "create_to_update_s": 211.206715,
+    "ledger_state": "SUCCEEDED",
+    "machine": "n4-highcpu-32",
+    "provider_state": "SUCCEEDED",
+    "run_duration_compute_usd": 0.02903393614614213,
+    "run_duration_s": 144.616922715,
+    "spot_list_rate_usd_per_hour": 0.722752
+  },
+  {
+    "attempt_id": "swath.2acc474986d3.s1",
+    "create_to_update_compute_usd": 0.03594398076213333,
+    "create_to_update_s": 179.03559,
+    "ledger_state": "SUCCEEDED",
+    "machine": "n4-highcpu-32",
+    "provider_state": "SUCCEEDED",
+    "run_duration_compute_usd": 0.022765762721446026,
+    "run_duration_s": 113.395391223,
+    "spot_list_rate_usd_per_hour": 0.722752
+  },
+  {
+    "attempt_id": "swath-go.80accc514a76.s1",
+    "create_to_update_compute_usd": 0.010268304599635554,
+    "create_to_update_s": 102.292063,
+    "ledger_state": "SUCCEEDED",
+    "machine": "n4-highcpu-16",
+    "provider_state": "SUCCEEDED",
+    "run_duration_compute_usd": 0.00411796446052536,
+    "run_duration_s": 41.022846171,
+    "spot_list_rate_usd_per_hour": 0.361376
+  },
+  {
+    "attempt_id": "swath-go.f773dff17176.s1",
+    "create_to_update_compute_usd": 0.012841658176906665,
+    "create_to_update_s": 127.927614,
+    "ledger_state": "SUCCEEDED",
+    "machine": "n4-highcpu-16",
+    "provider_state": "SUCCEEDED",
+    "run_duration_compute_usd": 0.006395415713948586,
+    "run_duration_s": 63.710640912,
+    "spot_list_rate_usd_per_hour": 0.361376
+  },
+  {
+    "attempt_id": "swath.66fe952ba987.s1",
+    "create_to_update_compute_usd": 0.014272679732559999,
+    "create_to_update_s": 142.183341,
+    "ledger_state": "SUCCEEDED",
+    "machine": "n4-highcpu-16",
+    "provider_state": "SUCCEEDED",
+    "run_duration_compute_usd": 0.008119972718574977,
+    "run_duration_s": 80.890545545,
+    "spot_list_rate_usd_per_hour": 0.361376
+  },
+  {
+    "attempt_id": "swath-go.27479f9f6ea6.s1",
+    "create_to_update_compute_usd": 0.024041055569208887,
+    "create_to_update_s": 119.747576,
+    "ledger_state": "SUCCEEDED",
+    "machine": "n4-highcpu-32",
+    "provider_state": "SUCCEEDED",
+    "run_duration_compute_usd": 0.012063888315530772,
+    "run_duration_s": 60.089765142,
+    "spot_list_rate_usd_per_hour": 0.722752
+  },
+  {
+    "attempt_id": "swath-go.284df7e8a6ed.s1",
+    "create_to_update_compute_usd": 0.03999888308584888,
+    "create_to_update_s": 199.232903,
+    "ledger_state": "SUCCEEDED",
+    "machine": "n4-highcpu-32",
+    "provider_state": "SUCCEEDED",
+    "run_duration_compute_usd": 0.02807218809762441,
+    "run_duration_s": 139.826492561,
+    "spot_list_rate_usd_per_hour": 0.722752
+  },
+  {
+    "attempt_id": "swath.cebbe320f3ad.s1",
+    "create_to_update_compute_usd": 0.031015851078133334,
+    "create_to_update_s": 154.488765,
+    "ledger_state": "SUCCEEDED",
+    "machine": "n4-highcpu-32",
+    "provider_state": "SUCCEEDED",
+    "run_duration_compute_usd": 0.018304258834378986,
+    "run_duration_s": 91.172811426,
+    "spot_list_rate_usd_per_hour": 0.722752
+  },
+  {
+    "attempt_id": "swath-go.6a71f007adb7.s1",
+    "create_to_update_compute_usd": 0.04063130032101333,
+    "create_to_update_s": 202.382949,
+    "ledger_state": "SUCCEEDED",
+    "machine": "n4-highcpu-32",
+    "provider_state": "SUCCEEDED",
+    "run_duration_compute_usd": 0.027744092566215232,
+    "run_duration_s": 138.192261299,
+    "spot_list_rate_usd_per_hour": 0.722752
+  },
+  {
+    "attempt_id": "swath-go.d28e1fcb1334.s1",
+    "create_to_update_compute_usd": 0.10177377419077333,
+    "create_to_update_s": 506.931267,
+    "ledger_state": "SUCCEEDED",
+    "machine": "n4-highcpu-32",
+    "provider_state": "SUCCEEDED",
+    "run_duration_compute_usd": 0.08988511594063706,
+    "run_duration_s": 447.714316095,
+    "spot_list_rate_usd_per_hour": 0.722752
+  },
+  {
+    "attempt_id": "swath.eac26552f657.s1",
+    "create_to_update_compute_usd": 0.05166740635395555,
+    "create_to_update_s": 257.35337,
+    "ledger_state": "SUCCEEDED",
+    "machine": "n4-highcpu-32",
+    "provider_state": "SUCCEEDED",
+    "run_duration_compute_usd": 0.03949330797022332,
+    "run_duration_s": 196.714652734,
+    "spot_list_rate_usd_per_hour": 0.722752
+  },
+  {
+    "attempt_id": "swath-go.e6212e6f7aff.s1",
+    "create_to_update_compute_usd": 0.019559941572746667,
+    "create_to_update_s": 194.854638,
+    "ledger_state": "SUCCEEDED",
+    "machine": "n4-highcpu-16",
+    "provider_state": "SUCCEEDED",
+    "run_duration_compute_usd": 0.012363081475993465,
+    "run_duration_s": 123.160069605,
+    "spot_list_rate_usd_per_hour": 0.361376
+  },
+  {
+    "attempt_id": "swath.cb395f3e542c.s1",
+    "create_to_update_compute_usd": 0.023408409562959996,
+    "create_to_update_s": 233.192781,
+    "ledger_state": "SUCCEEDED",
+    "machine": "n4-highcpu-16",
+    "provider_state": "SUCCEEDED",
+    "run_duration_compute_usd": 0.016777783220317387,
+    "run_duration_s": 167.138989842,
+    "spot_list_rate_usd_per_hour": 0.361376
+  },
+  {
+    "attempt_id": "swath-go.770e8457adf2.s1",
+    "create_to_update_compute_usd": 0.21785264464551113,
+    "create_to_update_s": 434.046268,
+    "ledger_state": "SUCCEEDED",
+    "machine": "n4-highcpu-80",
+    "provider_state": "SUCCEEDED",
+    "run_duration_compute_usd": 0.18399679331045266,
+    "run_duration_s": 366.592389045,
+    "spot_list_rate_usd_per_hour": 1.80688
+  },
+  {
+    "attempt_id": "swath-go.12e06554532f.s1",
+    "create_to_update_compute_usd": 0.15242825877444444,
+    "create_to_update_s": 303.695725,
+    "ledger_state": "SUCCEEDED",
+    "machine": "n4-highcpu-80",
+    "provider_state": "SUCCEEDED",
+    "run_duration_compute_usd": 0.11719929078188746,
+    "run_duration_s": 233.506069476,
+    "spot_list_rate_usd_per_hour": 1.80688
+  },
+  {
+    "attempt_id": "swath-go.ac47460bdf7b.s1",
+    "create_to_update_compute_usd": 0.19498376955093333,
+    "create_to_update_s": 388.482672,
+    "ledger_state": "SUCCEEDED",
+    "machine": "n4-highcpu-80",
+    "provider_state": "SUCCEEDED",
+    "run_duration_compute_usd": 0.16026651044567092,
+    "run_duration_s": 319.312537415,
+    "spot_list_rate_usd_per_hour": 1.80688
+  },
+  {
+    "attempt_id": "swath.8096eafd2244.s1",
+    "create_to_update_compute_usd": 0.17804395736222223,
+    "create_to_update_s": 354.73205,
+    "ledger_state": "SUCCEEDED",
+    "machine": "n4-highcpu-80",
+    "provider_state": "SUCCEEDED",
+    "run_duration_compute_usd": 0.14245604854651134,
+    "run_duration_s": 283.827246285,
+    "spot_list_rate_usd_per_hour": 1.80688
+  },
+  {
+    "attempt_id": "swath.9cd087042de8.s1",
+    "create_to_update_compute_usd": 0.230937942622,
+    "create_to_update_s": 460.117215,
+    "ledger_state": "SUCCEEDED",
+    "machine": "n4-highcpu-80",
+    "provider_state": "SUCCEEDED",
+    "run_duration_compute_usd": 0.1960569294535548,
+    "run_duration_s": 390.620819331,
+    "spot_list_rate_usd_per_hour": 1.80688
+  },
+  {
+    "attempt_id": "swath.6ee941ec8c3d.s1",
+    "create_to_update_compute_usd": 0.15580362304253334,
+    "create_to_update_s": 310.420749,
+    "ledger_state": "SUCCEEDED",
+    "machine": "n4-highcpu-80",
+    "provider_state": "SUCCEEDED",
+    "run_duration_compute_usd": 0.12021352344304413,
+    "run_duration_s": 239.511580401,
+    "spot_list_rate_usd_per_hour": 1.80688
+  },
+  {
+    "attempt_id": "swath-go.03a72c2faf2e.s1",
+    "ledger_interval_upper_bound_usd": 1.7146045434538135,
+    "ledger_recorded_to_settled_s": 8540.379489,
+    "ledger_state": "CANCELLED",
+    "machine": "n4-highcpu-32",
+    "provider_record": "absent (job deleted by the campaign cancel)",
+    "spot_list_rate_usd_per_hour": 0.722752
+  },
+  {
+    "attempt_id": "swath-go.4753553039c7.s1",
+    "ledger_interval_upper_bound_usd": 1.2327480834051734,
+    "ledger_recorded_to_settled_s": 6140.270937,
+    "ledger_state": "CANCELLED",
+    "machine": "n4-highcpu-32",
+    "provider_record": "absent (job deleted by the campaign cancel)",
+    "spot_list_rate_usd_per_hour": 0.722752
+  },
+  {
+    "attempt_id": "swath-go.a821996ad2bd.s1",
+    "create_to_update_compute_usd": 0.02148990583681778,
+    "create_to_update_s": 107.040397,
+    "ledger_state": "SUCCEEDED",
+    "machine": "n4-highcpu-32",
+    "provider_state": "SUCCEEDED",
+    "run_duration_compute_usd": 0.01129957600605088,
+    "run_duration_s": 56.282754834,
+    "spot_list_rate_usd_per_hour": 0.722752
+  }
+]

@@ -65,3 +65,6 @@ tools:
   swath:
     cases:
       - {purpose: diagnostic}
+
+exclude:
+  - {tool: swath-go, reason: registered after this plan's runs; the Go port has its own campaign plans}

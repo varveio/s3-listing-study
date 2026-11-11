@@ -1,0 +1,33 @@
+{
+  "$schema": "../../../schemas/tool.schema.json",
+  "schema_version": 1,
+  "slug": "swath-go",
+  "display_name": "Swath (Go port)",
+  "entry_type": "runnable_lister",
+  "upstream": {
+    "repository": "https://github.com/varveio/swath"
+  },
+  "language": "Go",
+  "license": "Apache-2.0",
+  "tested": {
+    "variant": "upstream",
+    "repository": "https://github.com/varveio/swath",
+    "revision": {
+      "value": "8c8f870801c700f22413581f35683096782329a0",
+      "provenance": {
+        "kind": "documentation",
+        "reference": "../research/derivation.md"
+      }
+    }
+  },
+  "study": {
+    "groundwork_status": "in-progress",
+    "smoke_execution_status": "not-run",
+    "verification_status": "not-attempted",
+    "auth_status": "anonymous",
+    "benchmark_eligibility": "undecided"
+  },
+  "evidence_roots": [
+    "../receipts"
+  ]
+}

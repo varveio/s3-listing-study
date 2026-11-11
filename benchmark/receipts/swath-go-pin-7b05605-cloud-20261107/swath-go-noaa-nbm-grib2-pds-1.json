@@ -1,0 +1,942 @@
+{
+  "attempts": [
+    {
+      "attempt_id": "swath-go.6a71f007adb7.s1",
+      "case_id": "swath-go.6a71f007adb7",
+      "evidence": {
+        "argv": [
+          "/opt/swath-go/swath",
+          "list",
+          "s3://noaa-nbm-grib2-pds",
+          "-o",
+          "/tmp/attempt/native/listing",
+          "--report",
+          "/tmp/attempt/native/swath-go-report.json",
+          "--region",
+          "us-east-1",
+          "--anonymous",
+          "--workers",
+          "64",
+          "--endpoint",
+          "http://127.0.0.1:19090",
+          "--max-duration",
+          "7170s"
+        ],
+        "binding_errors": [],
+        "replay": {
+          "errors": {
+            "after": 0.0,
+            "before": 0.0
+          },
+          "readiness": "ready",
+          "refusals": [],
+          "requests": {
+            "after": 66940.0,
+            "before": 0.0
+          },
+          "resource_sample_count": 10,
+          "sample_count": 10,
+          "state": "COMPLETE"
+        },
+        "result": {
+          "artifacts_size_bytes": 8546,
+          "exit_code": 0,
+          "finished_at": "2026-11-07T11:08:39.308383+00:00",
+          "max_rss_kb": 502488,
+          "product": {
+            "artifact": "listing",
+            "channel": "dataset",
+            "name": "native/listing",
+            "sha256": null,
+            "size_bytes": 1636843065
+          },
+          "product_error": null,
+          "row_count": 66405936,
+          "row_count_error": null,
+          "started_at": "2026-11-07T11:06:53.996904+00:00",
+          "stderr": {
+            "name": "stderr.log.gz",
+            "sha256": null,
+            "size_bytes": 168
+          },
+          "stdout": {
+            "name": "stdout.log.gz",
+            "sha256": null,
+            "size_bytes": 222
+          },
+          "timed_out": false,
+          "wall_seconds": 105.310227,
+          "worker_exit_code": 0
+        },
+        "result_sha256": "4208c33ece1976f815b139ecbd6894a63f66dc36117a33806a4d71c0ead39ff8",
+        "state": "BOUND",
+        "verification": null
+      },
+      "group_id": "swath-go-noaa-nbm-grib2-pds-1",
+      "mode": "recursive-parquet-sorted",
+      "origin": "planned",
+      "purpose": "diagnostic",
+      "recorded_at": "2026-11-07T11:05:27.249906+00:00",
+      "request": {
+        "allocationPolicy": {
+          "instances": [
+            {
+              "policy": {
+                "bootDisk": {
+                  "image": "batch-cos",
+                  "sizeGb": "100",
+                  "type": "hyperdisk-balanced"
+                },
+                "machineType": "n4-highcpu-32",
+                "provisioningModel": "SPOT"
+              }
+            }
+          ]
+        },
+        "labels": {
+          "suite": "scale-study"
+        },
+        "logsPolicy": {
+          "destination": "CLOUD_LOGGING"
+        },
+        "taskGroups": [
+          {
+            "parallelism": "1",
+            "taskCount": "1",
+            "taskSpec": {
+              "computeResource": {
+                "cpuMilli": "32000",
+                "memoryMib": "65536"
+              },
+              "maxRetryCount": 0,
+              "maxRunDuration": "8405s",
+              "runnables": [
+                {
+                  "container": {
+                    "commands": [
+                      "-ceu",
+                      "set -o pipefail\nmkdir -p /fixtures/source\ngcloud storage cp '<fixture-store>/noaa-nbm-grib2-pds/current-eba31d9/part-*.parquet' /fixtures/source/\nmanifest=\"$(mktemp)\"\nfiles=(/fixtures/source/*.parquet)\n[[ -f \"${files[0]}\" ]] || { echo \"no staged parquet files\" >&2; exit 1; }\nfor file in \"${files[@]}\"; do\n  digest=\"$(sha256sum \"$file\")\"; digest=\"${digest%% *}\"\n  size=\"$(stat -c %s \"$file\")\"\n  printf '%s\\t%s\\t%s\\n' \"${file##*/}\" \"$size\" \"$digest\"\ndone | LC_ALL=C sort > \"$manifest\"\nactual=\"$(sha256sum \"$manifest\")\"; actual=\"${actual%% *}\"\n[[ \"$actual\" == de7e0487fe7237590b421299853ff7f88f27a006f5d8528ece23f3be26a2624a ]] || { echo \"fixture digest mismatch: $actual\" >&2; exit 1; }\nrm -f \"$manifest\""
+                    ],
+                    "imageUri": "gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:cf72dd63b7643c117ef53378a41bef6db6a01fa3d561f2b456d7abd8bbeb9ba6",
+                    "options": "--entrypoint /bin/bash --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
+                  },
+                  "environment": {
+                    "variables": {
+                      "CLOUDSDK_PYTHON": "/usr/lib/google-cloud-sdk/platform/bundledpythonunix/bin/python3"
+                    }
+                  }
+                },
+                {
+                  "container": {
+                    "commands": [
+                      "10001:10001",
+                      "/tmp/attempt"
+                    ],
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
+                    "options": "--user 0:0 --entrypoint /bin/chown --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
+                  }
+                },
+                {
+                  "background": true,
+                  "container": {
+                    "commands": [
+                      "serve",
+                      "--fixture",
+                      "/fixtures/source",
+                      "--bucket",
+                      "noaa-nbm-grib2-pds",
+                      "--host",
+                      "127.0.0.1",
+                      "--port",
+                      "19090",
+                      "--metrics-port",
+                      "19192",
+                      "--serving-mode",
+                      "sorted",
+                      "--parquet-connections",
+                      "64",
+                      "--max-concurrent-requests",
+                      "512",
+                      "--inject-latency",
+                      "worker_page=87ms,pivot_probe=37ms,structure_probe=51ms",
+                      "--latency-scale",
+                      "1.0"
+                    ],
+                    "imageUri": "ghcr.io/varveio/swath-replay@sha256:3955f242f25294d3ebc6d63d3cf23e2a2694f7f1c9a5334dc6ec1054b0a69097",
+                    "options": "--network host --cpuset-cpus=0-9,16-25 --memory=20g --memory-swap=20g --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
+                  },
+                  "environment": {
+                    "variables": {
+                      "JAVA_TOOL_OPTIONS": "-XX:MaxRAMPercentage=75 -Dswath.replay.prefetch.enabled=false -Dswath.replay.prefetch.max-windows=96"
+                    }
+                  }
+                },
+                {
+                  "container": {
+                    "commands": [
+                      "--tool",
+                      "swath-go",
+                      "--mode",
+                      "recursive-parquet-sorted",
+                      "--purpose",
+                      "diagnostic",
+                      "--bucket",
+                      "noaa-nbm-grib2-pds",
+                      "--region",
+                      "us-east-1",
+                      "--prefix",
+                      "",
+                      "--output",
+                      "/tmp/attempt",
+                      "--destination",
+                      "<result-store>/scale-study/noaa-nbm-grib2-pds/swath-go.6a71f007adb7.s1/",
+                      "--timeout",
+                      "7200",
+                      "--term-grace",
+                      "5.0",
+                      "--retain-products",
+                      "false",
+                      "--image",
+                      "<study-registry>/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
+                      "--toolbox-manifest-sha256",
+                      "315959dfbad61d38ad992e26eeab2692c8cac85c24c71485bf111b5430c34bc2",
+                      "--toolbox-recipe-sha256",
+                      "c978c1b3a9635ca068cf8a67e24d1444477da5165891c62dd898aaacdfdd3729",
+                      "--tool-recipe-sha256",
+                      "c776fc4adf95cb071747798f8b2bec22d4b107f537ff3be117b8fc03ca3ccb5a",
+                      "--tool-build-inputs-sha256",
+                      "c173709a2f071d00cb9768f2e8d8c1ca084458d6d0bf3bbbe6a80286c6519df4",
+                      "--tool-version",
+                      "provisional-7b05605",
+                      "--tool-build-sha256",
+                      "15ae352315a2f4ffcbf7a8853cae1b3d326c7131fd9d9f5ab0ed448c0c08785d",
+                      "--adapter-bundle-sha256",
+                      "3a21555fc322cd0122988a67fed3247bcebe276df24b3a43fd32f97bc21f9e2f",
+                      "--harness-revision",
+                      "2479097ea6f428ffe4480efe0f41079f74cf638c",
+                      "--subject-workdir",
+                      "/opt/swath-go",
+                      "--image-set-sha256",
+                      "c4ef060d2a54a42dee7e451b452c2d6acb0a08f0e65488bf39e2130860b18750",
+                      "--group-id",
+                      "swath-go-noaa-nbm-grib2-pds-1",
+                      "--case-id",
+                      "swath-go.6a71f007adb7",
+                      "--attempt-id",
+                      "swath-go.6a71f007adb7.s1",
+                      "--machine-type",
+                      "n4-highcpu-32",
+                      "--vcpus",
+                      "32",
+                      "--memory-gb",
+                      "64",
+                      "--container-memory-gb",
+                      "8",
+                      "--config",
+                      "{\"concurrency\":64,\"max_duration\":\"7170s\",\"mode\":\"recursive-parquet-sorted\"}",
+                      "--endpoint-url",
+                      "http://127.0.0.1:19090",
+                      "--replay-config",
+                      "{\"allocation\":{\"replay_heap_percent\":75,\"replay_max_concurrent_requests\":512,\"replay_memory_gb\":20,\"replay_parquet_connections\":64,\"replay_prefetch\":false,\"replay_prefetch_max_windows\":96,\"replay_vcpus\":20,\"subject_vcpus\":8},\"backend\":{\"fixture_sha256\":\"de7e0487fe7237590b421299853ff7f88f27a006f5d8528ece23f3be26a2624a\",\"fixture_uri\":\"<fixture-store>/noaa-nbm-grib2-pds/current-eba31d9/part-*.parquet\",\"latency_model\":{\"deadlines_ms\":{\"pivot_probe\":37,\"structure_probe\":51,\"worker_page\":87},\"jitter\":\"none\",\"scale\":1.0},\"server_image_uri\":\"ghcr.io/varveio/swath-replay@sha256:3955f242f25294d3ebc6d63d3cf23e2a2694f7f1c9a5334dc6ec1054b0a69097\",\"serving_mode\":\"sorted\"},\"capacity_status\":\"uncalibrated\"}"
+                    ],
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
+                    "options": "--network host --cpuset-cpus=10-13,26-29 --memory=8g --memory-swap=8g --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "settled_at": "2026-11-07T11:15:44.990906+00:00",
+      "state": "SUCCEEDED",
+      "state_detail": null,
+      "statistic": "timing",
+      "tool": "swath-go"
+    },
+    {
+      "attempt_id": "swath-go.d28e1fcb1334.s1",
+      "case_id": "swath-go.d28e1fcb1334",
+      "evidence": {
+        "argv": [
+          "/opt/swath-go/swath",
+          "list",
+          "s3://noaa-nbm-grib2-pds",
+          "-o",
+          "/tmp/attempt/native/listing.tsv",
+          "--report",
+          "/tmp/attempt/native/swath-go-report.json",
+          "--region",
+          "us-east-1",
+          "--anonymous",
+          "--workers",
+          "64",
+          "--endpoint",
+          "http://127.0.0.1:19090",
+          "--max-duration",
+          "7170s"
+        ],
+        "binding_errors": [],
+        "replay": {
+          "errors": {
+            "after": 0.0,
+            "before": 0.0
+          },
+          "readiness": "ready",
+          "refusals": [],
+          "requests": {
+            "after": 66899.0,
+            "before": 0.0
+          },
+          "resource_sample_count": 11,
+          "sample_count": 11,
+          "state": "COMPLETE"
+        },
+        "result": {
+          "artifacts_size_bytes": 8590,
+          "exit_code": 0,
+          "finished_at": "2026-11-07T11:08:46.328371+00:00",
+          "max_rss_kb": 386336,
+          "product": {
+            "artifact": "listing",
+            "channel": "file",
+            "name": "native/listing.tsv.gz",
+            "sha256": null,
+            "size_bytes": 1993010406
+          },
+          "product_error": null,
+          "row_count": 66405936,
+          "row_count_error": null,
+          "started_at": "2026-11-07T11:06:53.958046+00:00",
+          "stderr": {
+            "name": "stderr.log.gz",
+            "sha256": null,
+            "size_bytes": 168
+          },
+          "stdout": {
+            "name": "stdout.log.gz",
+            "sha256": null,
+            "size_bytes": 220
+          },
+          "timed_out": false,
+          "wall_seconds": 112.36891,
+          "worker_exit_code": 0
+        },
+        "result_sha256": "a7e24b635b098e430c845ec83f84a81e209bcd95cd219529189622add56b506d",
+        "state": "BOUND",
+        "verification": null
+      },
+      "group_id": "swath-go-noaa-nbm-grib2-pds-1",
+      "mode": "recursive-tsv",
+      "origin": "planned",
+      "purpose": "diagnostic",
+      "recorded_at": "2026-11-07T11:05:27.462267+00:00",
+      "request": {
+        "allocationPolicy": {
+          "instances": [
+            {
+              "policy": {
+                "bootDisk": {
+                  "image": "batch-cos",
+                  "sizeGb": "100",
+                  "type": "hyperdisk-balanced"
+                },
+                "machineType": "n4-highcpu-32",
+                "provisioningModel": "SPOT"
+              }
+            }
+          ]
+        },
+        "labels": {
+          "suite": "scale-study"
+        },
+        "logsPolicy": {
+          "destination": "CLOUD_LOGGING"
+        },
+        "taskGroups": [
+          {
+            "parallelism": "1",
+            "taskCount": "1",
+            "taskSpec": {
+              "computeResource": {
+                "cpuMilli": "32000",
+                "memoryMib": "65536"
+              },
+              "maxRetryCount": 0,
+              "maxRunDuration": "8405s",
+              "runnables": [
+                {
+                  "container": {
+                    "commands": [
+                      "-ceu",
+                      "set -o pipefail\nmkdir -p /fixtures/source\ngcloud storage cp '<fixture-store>/noaa-nbm-grib2-pds/current-eba31d9/part-*.parquet' /fixtures/source/\nmanifest=\"$(mktemp)\"\nfiles=(/fixtures/source/*.parquet)\n[[ -f \"${files[0]}\" ]] || { echo \"no staged parquet files\" >&2; exit 1; }\nfor file in \"${files[@]}\"; do\n  digest=\"$(sha256sum \"$file\")\"; digest=\"${digest%% *}\"\n  size=\"$(stat -c %s \"$file\")\"\n  printf '%s\\t%s\\t%s\\n' \"${file##*/}\" \"$size\" \"$digest\"\ndone | LC_ALL=C sort > \"$manifest\"\nactual=\"$(sha256sum \"$manifest\")\"; actual=\"${actual%% *}\"\n[[ \"$actual\" == de7e0487fe7237590b421299853ff7f88f27a006f5d8528ece23f3be26a2624a ]] || { echo \"fixture digest mismatch: $actual\" >&2; exit 1; }\nrm -f \"$manifest\""
+                    ],
+                    "imageUri": "gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:cf72dd63b7643c117ef53378a41bef6db6a01fa3d561f2b456d7abd8bbeb9ba6",
+                    "options": "--entrypoint /bin/bash --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
+                  },
+                  "environment": {
+                    "variables": {
+                      "CLOUDSDK_PYTHON": "/usr/lib/google-cloud-sdk/platform/bundledpythonunix/bin/python3"
+                    }
+                  }
+                },
+                {
+                  "container": {
+                    "commands": [
+                      "10001:10001",
+                      "/tmp/attempt"
+                    ],
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
+                    "options": "--user 0:0 --entrypoint /bin/chown --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
+                  }
+                },
+                {
+                  "background": true,
+                  "container": {
+                    "commands": [
+                      "serve",
+                      "--fixture",
+                      "/fixtures/source",
+                      "--bucket",
+                      "noaa-nbm-grib2-pds",
+                      "--host",
+                      "127.0.0.1",
+                      "--port",
+                      "19090",
+                      "--metrics-port",
+                      "19192",
+                      "--serving-mode",
+                      "sorted",
+                      "--parquet-connections",
+                      "64",
+                      "--max-concurrent-requests",
+                      "512",
+                      "--inject-latency",
+                      "worker_page=87ms,pivot_probe=37ms,structure_probe=51ms",
+                      "--latency-scale",
+                      "1.0"
+                    ],
+                    "imageUri": "ghcr.io/varveio/swath-replay@sha256:3955f242f25294d3ebc6d63d3cf23e2a2694f7f1c9a5334dc6ec1054b0a69097",
+                    "options": "--network host --cpuset-cpus=0-9,16-25 --memory=20g --memory-swap=20g --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
+                  },
+                  "environment": {
+                    "variables": {
+                      "JAVA_TOOL_OPTIONS": "-XX:MaxRAMPercentage=75 -Dswath.replay.prefetch.enabled=false -Dswath.replay.prefetch.max-windows=96"
+                    }
+                  }
+                },
+                {
+                  "container": {
+                    "commands": [
+                      "--tool",
+                      "swath-go",
+                      "--mode",
+                      "recursive-tsv",
+                      "--purpose",
+                      "diagnostic",
+                      "--bucket",
+                      "noaa-nbm-grib2-pds",
+                      "--region",
+                      "us-east-1",
+                      "--prefix",
+                      "",
+                      "--output",
+                      "/tmp/attempt",
+                      "--destination",
+                      "<result-store>/scale-study/noaa-nbm-grib2-pds/swath-go.d28e1fcb1334.s1/",
+                      "--timeout",
+                      "7200",
+                      "--term-grace",
+                      "5.0",
+                      "--retain-products",
+                      "false",
+                      "--image",
+                      "<study-registry>/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
+                      "--toolbox-manifest-sha256",
+                      "315959dfbad61d38ad992e26eeab2692c8cac85c24c71485bf111b5430c34bc2",
+                      "--toolbox-recipe-sha256",
+                      "c978c1b3a9635ca068cf8a67e24d1444477da5165891c62dd898aaacdfdd3729",
+                      "--tool-recipe-sha256",
+                      "c776fc4adf95cb071747798f8b2bec22d4b107f537ff3be117b8fc03ca3ccb5a",
+                      "--tool-build-inputs-sha256",
+                      "c173709a2f071d00cb9768f2e8d8c1ca084458d6d0bf3bbbe6a80286c6519df4",
+                      "--tool-version",
+                      "provisional-7b05605",
+                      "--tool-build-sha256",
+                      "15ae352315a2f4ffcbf7a8853cae1b3d326c7131fd9d9f5ab0ed448c0c08785d",
+                      "--adapter-bundle-sha256",
+                      "3a21555fc322cd0122988a67fed3247bcebe276df24b3a43fd32f97bc21f9e2f",
+                      "--harness-revision",
+                      "2479097ea6f428ffe4480efe0f41079f74cf638c",
+                      "--subject-workdir",
+                      "/opt/swath-go",
+                      "--image-set-sha256",
+                      "c4ef060d2a54a42dee7e451b452c2d6acb0a08f0e65488bf39e2130860b18750",
+                      "--group-id",
+                      "swath-go-noaa-nbm-grib2-pds-1",
+                      "--case-id",
+                      "swath-go.d28e1fcb1334",
+                      "--attempt-id",
+                      "swath-go.d28e1fcb1334.s1",
+                      "--machine-type",
+                      "n4-highcpu-32",
+                      "--vcpus",
+                      "32",
+                      "--memory-gb",
+                      "64",
+                      "--container-memory-gb",
+                      "8",
+                      "--config",
+                      "{\"concurrency\":64,\"max_duration\":\"7170s\",\"mode\":\"recursive-tsv\"}",
+                      "--endpoint-url",
+                      "http://127.0.0.1:19090",
+                      "--replay-config",
+                      "{\"allocation\":{\"replay_heap_percent\":75,\"replay_max_concurrent_requests\":512,\"replay_memory_gb\":20,\"replay_parquet_connections\":64,\"replay_prefetch\":false,\"replay_prefetch_max_windows\":96,\"replay_vcpus\":20,\"subject_vcpus\":8},\"backend\":{\"fixture_sha256\":\"de7e0487fe7237590b421299853ff7f88f27a006f5d8528ece23f3be26a2624a\",\"fixture_uri\":\"<fixture-store>/noaa-nbm-grib2-pds/current-eba31d9/part-*.parquet\",\"latency_model\":{\"deadlines_ms\":{\"pivot_probe\":37,\"structure_probe\":51,\"worker_page\":87},\"jitter\":\"none\",\"scale\":1.0},\"server_image_uri\":\"ghcr.io/varveio/swath-replay@sha256:3955f242f25294d3ebc6d63d3cf23e2a2694f7f1c9a5334dc6ec1054b0a69097\",\"serving_mode\":\"sorted\"},\"capacity_status\":\"uncalibrated\"}"
+                    ],
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
+                    "options": "--network host --cpuset-cpus=10-13,26-29 --memory=8g --memory-swap=8g --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "settled_at": "2026-11-07T11:15:44.992801+00:00",
+      "state": "SUCCEEDED",
+      "state_detail": null,
+      "statistic": "timing",
+      "tool": "swath-go"
+    },
+    {
+      "attempt_id": "swath.eac26552f657.s1",
+      "case_id": "swath.eac26552f657",
+      "evidence": {
+        "argv": [
+          "/opt/java/openjdk/bin/java",
+          "-jar",
+          "/opt/swath/swath.jar",
+          "-v",
+          "--color",
+          "never",
+          "list",
+          "s3://noaa-nbm-grib2-pds",
+          "--region",
+          "us-east-1",
+          "--no-sign-request",
+          "--concurrency",
+          "64",
+          "--endpoint-url",
+          "http://127.0.0.1:19090",
+          "--checkpoint",
+          "auto",
+          "--format",
+          "parquet",
+          "-o",
+          "/tmp/attempt/native/listing",
+          "--report",
+          "/tmp/attempt/native/listing/_swath_summary.json",
+          "--sort",
+          "--tune",
+          "sort.ignore-disk-check=on",
+          "--tune",
+          "sort.merge-parallelism=8"
+        ],
+        "binding_errors": [],
+        "replay": {
+          "errors": {
+            "after": 0.0,
+            "before": 0.0
+          },
+          "readiness": "ready",
+          "refusals": [],
+          "requests": {
+            "after": 67391.0,
+            "before": 0.0
+          },
+          "resource_sample_count": 15,
+          "sample_count": 15,
+          "state": "COMPLETE"
+        },
+        "result": {
+          "artifacts_size_bytes": 60077,
+          "exit_code": 0,
+          "finished_at": "2026-11-07T11:09:34.276157+00:00",
+          "max_rss_kb": 1175492,
+          "product": {
+            "artifact": "listing",
+            "channel": "dataset",
+            "name": "native/listing",
+            "sha256": null,
+            "size_bytes": 1614468834
+          },
+          "product_error": null,
+          "row_count": 66405936,
+          "row_count_error": null,
+          "started_at": "2026-11-07T11:06:55.246764+00:00",
+          "stderr": {
+            "name": "stderr.log.gz",
+            "sha256": null,
+            "size_bytes": 2697
+          },
+          "stdout": {
+            "name": "stdout.log.gz",
+            "sha256": null,
+            "size_bytes": 31
+          },
+          "timed_out": false,
+          "wall_seconds": 159.028092,
+          "worker_exit_code": 0
+        },
+        "result_sha256": "f722a9e3d9dcce116d9a282bd0d221ebf00a1329f8b8d9d07e950588f0c92c85",
+        "state": "BOUND",
+        "verification": null
+      },
+      "group_id": "swath-go-noaa-nbm-grib2-pds-1",
+      "mode": "recursive-parquet-sorted",
+      "origin": "planned",
+      "purpose": "diagnostic",
+      "recorded_at": "2026-11-07T11:05:27.613983+00:00",
+      "request": {
+        "allocationPolicy": {
+          "instances": [
+            {
+              "policy": {
+                "bootDisk": {
+                  "image": "batch-cos",
+                  "sizeGb": "100",
+                  "type": "hyperdisk-balanced"
+                },
+                "machineType": "n4-highcpu-32",
+                "provisioningModel": "SPOT"
+              }
+            }
+          ]
+        },
+        "labels": {
+          "suite": "scale-study"
+        },
+        "logsPolicy": {
+          "destination": "CLOUD_LOGGING"
+        },
+        "taskGroups": [
+          {
+            "parallelism": "1",
+            "taskCount": "1",
+            "taskSpec": {
+              "computeResource": {
+                "cpuMilli": "32000",
+                "memoryMib": "65536"
+              },
+              "maxRetryCount": 0,
+              "maxRunDuration": "8405s",
+              "runnables": [
+                {
+                  "container": {
+                    "commands": [
+                      "-ceu",
+                      "set -o pipefail\nmkdir -p /fixtures/source\ngcloud storage cp '<fixture-store>/noaa-nbm-grib2-pds/current-eba31d9/part-*.parquet' /fixtures/source/\nmanifest=\"$(mktemp)\"\nfiles=(/fixtures/source/*.parquet)\n[[ -f \"${files[0]}\" ]] || { echo \"no staged parquet files\" >&2; exit 1; }\nfor file in \"${files[@]}\"; do\n  digest=\"$(sha256sum \"$file\")\"; digest=\"${digest%% *}\"\n  size=\"$(stat -c %s \"$file\")\"\n  printf '%s\\t%s\\t%s\\n' \"${file##*/}\" \"$size\" \"$digest\"\ndone | LC_ALL=C sort > \"$manifest\"\nactual=\"$(sha256sum \"$manifest\")\"; actual=\"${actual%% *}\"\n[[ \"$actual\" == de7e0487fe7237590b421299853ff7f88f27a006f5d8528ece23f3be26a2624a ]] || { echo \"fixture digest mismatch: $actual\" >&2; exit 1; }\nrm -f \"$manifest\""
+                    ],
+                    "imageUri": "gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:cf72dd63b7643c117ef53378a41bef6db6a01fa3d561f2b456d7abd8bbeb9ba6",
+                    "options": "--entrypoint /bin/bash --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
+                  },
+                  "environment": {
+                    "variables": {
+                      "CLOUDSDK_PYTHON": "/usr/lib/google-cloud-sdk/platform/bundledpythonunix/bin/python3"
+                    }
+                  }
+                },
+                {
+                  "container": {
+                    "commands": [
+                      "10001:10001",
+                      "/tmp/attempt"
+                    ],
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
+                    "options": "--user 0:0 --entrypoint /bin/chown --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
+                  }
+                },
+                {
+                  "background": true,
+                  "container": {
+                    "commands": [
+                      "serve",
+                      "--fixture",
+                      "/fixtures/source",
+                      "--bucket",
+                      "noaa-nbm-grib2-pds",
+                      "--host",
+                      "127.0.0.1",
+                      "--port",
+                      "19090",
+                      "--metrics-port",
+                      "19192",
+                      "--serving-mode",
+                      "sorted",
+                      "--parquet-connections",
+                      "64",
+                      "--max-concurrent-requests",
+                      "512",
+                      "--inject-latency",
+                      "worker_page=87ms,pivot_probe=37ms,structure_probe=51ms",
+                      "--latency-scale",
+                      "1.0"
+                    ],
+                    "imageUri": "ghcr.io/varveio/swath-replay@sha256:3955f242f25294d3ebc6d63d3cf23e2a2694f7f1c9a5334dc6ec1054b0a69097",
+                    "options": "--network host --cpuset-cpus=0-9,16-25 --memory=20g --memory-swap=20g --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
+                  },
+                  "environment": {
+                    "variables": {
+                      "JAVA_TOOL_OPTIONS": "-XX:MaxRAMPercentage=75 -Dswath.replay.prefetch.enabled=false -Dswath.replay.prefetch.max-windows=96"
+                    }
+                  }
+                },
+                {
+                  "container": {
+                    "commands": [
+                      "--tool",
+                      "swath",
+                      "--mode",
+                      "recursive-parquet-sorted",
+                      "--purpose",
+                      "diagnostic",
+                      "--bucket",
+                      "noaa-nbm-grib2-pds",
+                      "--region",
+                      "us-east-1",
+                      "--prefix",
+                      "",
+                      "--output",
+                      "/tmp/attempt",
+                      "--destination",
+                      "<result-store>/scale-study/noaa-nbm-grib2-pds/swath.eac26552f657.s1/",
+                      "--timeout",
+                      "7200",
+                      "--term-grace",
+                      "5.0",
+                      "--retain-products",
+                      "false",
+                      "--image",
+                      "<study-registry>/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
+                      "--toolbox-manifest-sha256",
+                      "315959dfbad61d38ad992e26eeab2692c8cac85c24c71485bf111b5430c34bc2",
+                      "--toolbox-recipe-sha256",
+                      "c978c1b3a9635ca068cf8a67e24d1444477da5165891c62dd898aaacdfdd3729",
+                      "--tool-recipe-sha256",
+                      "f9d55d7e2466aa20378f8c7f4b1ad666b60d4cb5918f9ac9b4302af7f472de84",
+                      "--tool-build-inputs-sha256",
+                      "0d05dc949a1c322e39dc2831353ac427dda3d4b923595fd7b89166b3130653e1",
+                      "--tool-version",
+                      "0.3.2",
+                      "--tool-build-sha256",
+                      "c28b5c8bb5ca95cdca56191fe18ad2f147689a642e9a9b7dd66ef960fe7725d7",
+                      "--adapter-bundle-sha256",
+                      "f657a7c498f0ea0fba6284aa255c754363823116fefdb8d3a52b6c86236043d9",
+                      "--harness-revision",
+                      "2479097ea6f428ffe4480efe0f41079f74cf638c",
+                      "--subject-workdir",
+                      "/opt/swath",
+                      "--image-set-sha256",
+                      "c4ef060d2a54a42dee7e451b452c2d6acb0a08f0e65488bf39e2130860b18750",
+                      "--group-id",
+                      "swath-go-noaa-nbm-grib2-pds-1",
+                      "--case-id",
+                      "swath.eac26552f657",
+                      "--attempt-id",
+                      "swath.eac26552f657.s1",
+                      "--machine-type",
+                      "n4-highcpu-32",
+                      "--vcpus",
+                      "32",
+                      "--memory-gb",
+                      "64",
+                      "--container-memory-gb",
+                      "8",
+                      "--config",
+                      "{\"concurrency\":64,\"heap_percent\":75,\"jvm_max_heap\":\"4g\",\"mode\":\"recursive-parquet-sorted\",\"sort_merge_parallelism\":8}",
+                      "--endpoint-url",
+                      "http://127.0.0.1:19090",
+                      "--replay-config",
+                      "{\"allocation\":{\"replay_heap_percent\":75,\"replay_max_concurrent_requests\":512,\"replay_memory_gb\":20,\"replay_parquet_connections\":64,\"replay_prefetch\":false,\"replay_prefetch_max_windows\":96,\"replay_vcpus\":20,\"subject_vcpus\":8},\"backend\":{\"fixture_sha256\":\"de7e0487fe7237590b421299853ff7f88f27a006f5d8528ece23f3be26a2624a\",\"fixture_uri\":\"<fixture-store>/noaa-nbm-grib2-pds/current-eba31d9/part-*.parquet\",\"latency_model\":{\"deadlines_ms\":{\"pivot_probe\":37,\"structure_probe\":51,\"worker_page\":87},\"jitter\":\"none\",\"scale\":1.0},\"server_image_uri\":\"ghcr.io/varveio/swath-replay@sha256:3955f242f25294d3ebc6d63d3cf23e2a2694f7f1c9a5334dc6ec1054b0a69097\",\"serving_mode\":\"sorted\"},\"capacity_status\":\"uncalibrated\"}"
+                    ],
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
+                    "options": "--network host --cpuset-cpus=10-13,26-29 --memory=8g --memory-swap=8g --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "settled_at": "2026-11-07T11:15:44.994280+00:00",
+      "state": "SUCCEEDED",
+      "state_detail": null,
+      "statistic": "timing",
+      "tool": "swath"
+    }
+  ],
+  "group_id": "swath-go-noaa-nbm-grib2-pds-1",
+  "kind": "campaign-receipt-draft",
+  "ledger_created_at": "2026-08-29T08:27:27.033764+00:00",
+  "ledger_schema_version": 3,
+  "purposes": [
+    "diagnostic"
+  ],
+  "resolved_cases": {
+    "swath-go.6a71f007adb7": {
+      "config": {
+        "concurrency": 64,
+        "max_duration": "7170s",
+        "mode": "recursive-parquet-sorted"
+      },
+      "environment": {
+        "auth_role": null,
+        "container_memory_gb": 8,
+        "location": "us-east1",
+        "machine_type": "n4-highcpu-32",
+        "memory_gb": 64,
+        "output_target": "file",
+        "target_bucket": "noaa-nbm-grib2-pds",
+        "target_prefix": "",
+        "target_region": "us-east-1",
+        "timeout_s": 7200,
+        "vcpus": 32
+      },
+      "platform_sha256": "ac1531ad2ad180658a761aeae62c82c51103a94bd1981ea511917ef0e62fbf35",
+      "replay": {
+        "allocation": {
+          "replay_heap_percent": 75,
+          "replay_max_concurrent_requests": 512,
+          "replay_memory_gb": 20,
+          "replay_parquet_connections": 64,
+          "replay_prefetch": false,
+          "replay_prefetch_max_windows": 96,
+          "replay_vcpus": 20,
+          "subject_vcpus": 8
+        },
+        "backend": {
+          "fixture_sha256": "de7e0487fe7237590b421299853ff7f88f27a006f5d8528ece23f3be26a2624a",
+          "fixture_uri": "<fixture-store>/noaa-nbm-grib2-pds/current-eba31d9/part-*.parquet",
+          "latency_model": {
+            "deadlines_ms": {
+              "pivot_probe": 37,
+              "structure_probe": 51,
+              "worker_page": 87
+            },
+            "jitter": "none",
+            "scale": 1.0
+          },
+          "server_image_uri": "ghcr.io/varveio/swath-replay@sha256:3955f242f25294d3ebc6d63d3cf23e2a2694f7f1c9a5334dc6ec1054b0a69097",
+          "serving_mode": "sorted"
+        },
+        "capacity_status": "uncalibrated"
+      },
+      "tool_slice_sha256": "271283d9fcf1e41800d6a4a01ec3abb8f46b0c323fb7d880db04a42c765bba70"
+    },
+    "swath-go.d28e1fcb1334": {
+      "config": {
+        "concurrency": 64,
+        "max_duration": "7170s",
+        "mode": "recursive-tsv"
+      },
+      "environment": {
+        "auth_role": null,
+        "container_memory_gb": 8,
+        "location": "us-east1",
+        "machine_type": "n4-highcpu-32",
+        "memory_gb": 64,
+        "output_target": "file",
+        "target_bucket": "noaa-nbm-grib2-pds",
+        "target_prefix": "",
+        "target_region": "us-east-1",
+        "timeout_s": 7200,
+        "vcpus": 32
+      },
+      "platform_sha256": "ac1531ad2ad180658a761aeae62c82c51103a94bd1981ea511917ef0e62fbf35",
+      "replay": {
+        "allocation": {
+          "replay_heap_percent": 75,
+          "replay_max_concurrent_requests": 512,
+          "replay_memory_gb": 20,
+          "replay_parquet_connections": 64,
+          "replay_prefetch": false,
+          "replay_prefetch_max_windows": 96,
+          "replay_vcpus": 20,
+          "subject_vcpus": 8
+        },
+        "backend": {
+          "fixture_sha256": "de7e0487fe7237590b421299853ff7f88f27a006f5d8528ece23f3be26a2624a",
+          "fixture_uri": "<fixture-store>/noaa-nbm-grib2-pds/current-eba31d9/part-*.parquet",
+          "latency_model": {
+            "deadlines_ms": {
+              "pivot_probe": 37,
+              "structure_probe": 51,
+              "worker_page": 87
+            },
+            "jitter": "none",
+            "scale": 1.0
+          },
+          "server_image_uri": "ghcr.io/varveio/swath-replay@sha256:3955f242f25294d3ebc6d63d3cf23e2a2694f7f1c9a5334dc6ec1054b0a69097",
+          "serving_mode": "sorted"
+        },
+        "capacity_status": "uncalibrated"
+      },
+      "tool_slice_sha256": "271283d9fcf1e41800d6a4a01ec3abb8f46b0c323fb7d880db04a42c765bba70"
+    },
+    "swath.eac26552f657": {
+      "config": {
+        "concurrency": 64,
+        "heap_percent": 75,
+        "jvm_max_heap": "4g",
+        "mode": "recursive-parquet-sorted",
+        "sort_merge_parallelism": 8
+      },
+      "environment": {
+        "auth_role": null,
+        "container_memory_gb": 8,
+        "location": "us-east1",
+        "machine_type": "n4-highcpu-32",
+        "memory_gb": 64,
+        "output_target": "file",
+        "target_bucket": "noaa-nbm-grib2-pds",
+        "target_prefix": "",
+        "target_region": "us-east-1",
+        "timeout_s": 7200,
+        "vcpus": 32
+      },
+      "platform_sha256": "ac1531ad2ad180658a761aeae62c82c51103a94bd1981ea511917ef0e62fbf35",
+      "replay": {
+        "allocation": {
+          "replay_heap_percent": 75,
+          "replay_max_concurrent_requests": 512,
+          "replay_memory_gb": 20,
+          "replay_parquet_connections": 64,
+          "replay_prefetch": false,
+          "replay_prefetch_max_windows": 96,
+          "replay_vcpus": 20,
+          "subject_vcpus": 8
+        },
+        "backend": {
+          "fixture_sha256": "de7e0487fe7237590b421299853ff7f88f27a006f5d8528ece23f3be26a2624a",
+          "fixture_uri": "<fixture-store>/noaa-nbm-grib2-pds/current-eba31d9/part-*.parquet",
+          "latency_model": {
+            "deadlines_ms": {
+              "pivot_probe": 37,
+              "structure_probe": 51,
+              "worker_page": 87
+            },
+            "jitter": "none",
+            "scale": 1.0
+          },
+          "server_image_uri": "ghcr.io/varveio/swath-replay@sha256:3955f242f25294d3ebc6d63d3cf23e2a2694f7f1c9a5334dc6ec1054b0a69097",
+          "serving_mode": "sorted"
+        },
+        "capacity_status": "uncalibrated"
+      },
+      "tool_slice_sha256": "52ed7d8880d61d8772b13b8850a61877487fadceb54dc6de0307d0313be0b93e"
+    }
+  },
+  "schema_version": 1,
+  "slots": [],
+  "suite": "scale-study"
+}

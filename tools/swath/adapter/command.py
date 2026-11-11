@@ -52,6 +52,10 @@ AXES = {"concurrency": CONCURRENCY, "heap_percent": Fixed(HEAP_PERCENT)}
 CONFIG_KEYS = frozenset(
     {
         "engine_readahead",
+        "final_file_bytes",
+        "gc_collector",
+        "gc_log",
+        "jfr",
         "jvm_max_heap",
         "parquet_part_size",
         "parquet_writers",
@@ -65,8 +69,46 @@ CONFIG_KEYS = frozenset(
 )
 """Output controls whose retained values must remain visible in case identity."""
 
-ENV_CONFIG_KEYS = frozenset({"jvm_max_heap"})
+ENV_CONFIG_KEYS = frozenset({"gc_collector", "jvm_max_heap"})
 """Declared controls consumed by :func:`build_env`, independent of output mode."""
+
+DIAGNOSTIC_CONFIG_KEYS = frozenset({"gc_log", "jfr"})
+"""JVM recordings rendered by :func:`build_env` into files in the sink, so only a
+mode whose listing lands in the sink takes them: in a stdout mode the
+recording's own startup lines (JFR prints ``Started recording`` on stdout)
+would land in the product."""
+
+SORTED_ENV_CONFIG_KEYS = frozenset({"final_file_bytes"})
+"""Sorted-finalizer properties rendered by :func:`build_env`; the sorted mode alone takes them."""
+
+JAVA_LONG_MAX = 2**63 - 1
+"""The largest value ``SortConfig`` reads with ``Long.parseLong``
+(``SortConfig.java:416-418`` @v0.3.2); a larger one would compile here and
+fail at the JVM's startup."""
+
+GC_COLLECTORS = {"g1": "-XX:+UseG1GC", "parallel": "-XX:+UseParallelGC"}
+"""``gc_collector``'s values and the HotSpot option each renders. Unstated, the
+JVM's ergonomics choose: G1 on a "server-class" machine (at least two active
+processors and 1792 MB), Serial otherwise -- so G1 in every replay container
+the study runs (4 to 8 subject vCPUs, 8 or 16 GiB), and ``g1`` states that
+default explicitly. Nothing else in the capsule or the harness selects a
+collector for the subject."""
+
+GC_LOG_NAME = "swath-gc.log"
+JFR_NAME = "swath.jfr"
+"""The recordings' names in the sink's top level, beside the ``listing``
+dataset, where ``PROFILE_NAMES`` in ``benchmark/src/benchmark/measure.py`` keeps
+them on every attempt, retained products or not, up to its size bound."""
+
+JFR_MAX_SIZE = "256m"
+"""JFR's own bound on the recording it keeps (``maxsize``): older chunks are
+dropped past it, so the dumped file stays near this size however long the run."""
+
+SINK_PATH_RE = re.compile(r"\A/[A-Za-z0-9._/-]+\Z")
+"""What a sink path must look like to be spliced into a JVM option: the
+``-Xlog`` output spec is colon-separated, the ``StartFlightRecording`` one
+comma-separated, and ``JAVA_TOOL_OPTIONS`` is split on whitespace, so any of
+those (or a quote) in the path is refused rather than escaped."""
 
 ENGINE_CONFIG_KEYS = frozenset({"engine_readahead"})
 """Declared listing-engine controls rendered into the common head, so every mode consumes them."""
@@ -191,21 +233,115 @@ AND a directory-dataset destination, refusing both stdout and a single file.
 
 
 def build_env(request: CommandRequest) -> dict[str, str]:
-    """Render the harness's heap share into what this runtime reads.
+    """Render the harness's heap share, and the stated JVM controls, into what this runtime reads.
 
     The share is the harness's methodology decision and arrives on the request;
     that Swath is a JVM told through ``JAVA_TOOL_OPTIONS`` is this capsule's
-    knowledge and lives nowhere else.
+    knowledge and lives nowhere else. Each further option comes from a closed
+    set of config keys with checked values (:func:`_jvm_options`); nothing a
+    plan writes reaches the JVM verbatim.
     """
-    options = f"-XX:MaxRAMPercentage={request.heap_percent}"
+    return {
+        "JAVA_TOOL_OPTIONS": " ".join(
+            (f"-XX:MaxRAMPercentage={request.heap_percent}", *_jvm_options(request))
+        )
+    }
+
+
+def _jvm_options(request: CommandRequest) -> tuple[str, ...]:
+    """The JVM options rendered from the stated JVM config keys, in a fixed order.
+
+    - ``jvm_max_heap`` → ``-Xmx``: an explicit maximum heap, which HotSpot takes
+      over the ``MaxRAMPercentage`` share. Swath sizes its sort segments and
+      merge budget from it (8 % of ``Runtime.maxMemory()`` each,
+      ``SortConfig.java:125,269-270,277,411-414`` @v0.3.2).
+    - ``gc_collector`` (``g1`` or ``parallel``) → ``-XX:+UseG1GC`` or
+      ``-XX:+UseParallelGC`` (:data:`GC_COLLECTORS`); every mode takes it.
+    - ``final_file_bytes`` → ``-Dswath.sort.final-file-bytes=N``: the sorted
+      output's roll threshold, read once by ``SortConfig.fromSystemProperties``
+      (``SortConfig.java:256-258,274``; ``SortOptions.java:25-26``) and used by
+      the finalizer (``SortFinalizer.java:120``, ``FinalizationPlanner.java:173``).
+      Default 1 GiB (``SortConfig.java:140``). ``parquet_part_size``
+      does not reach this path: the sorted publish is handed the ``SortConfig``,
+      not the dataset spec's part size (``ListRunner.java:846-848,988-991,1020-1022``).
+      Sorted mode only.
+    - ``gc_log: on`` → ``-Xlog:gc*:file=SINK/swath-gc.log:...:filecount=0``:
+      unified GC logging at info to one unrotated file (a rotated file would be
+      renamed out of the retained name).
+    - ``jfr: on`` → ``-XX:StartFlightRecording=settings=profile,...`` dumping to
+      ``SINK/swath.jfr`` at exit, bounded by :data:`JFR_MAX_SIZE`, with the
+      ``jdk.InitialEnvironmentVariable`` event off so the recording carries no
+      environment. Refused on a signed case regardless.
+
+    The two recordings are sink-mode only (:data:`DIAGNOSTIC_CONFIG_KEYS`).
+    """
+    options: list[str] = []
     maximum = request.config.get("jvm_max_heap")
     if maximum is not None:
         if not isinstance(maximum, str) or JVM_MAX_HEAP_RE.fullmatch(maximum) is None:
             raise CommandAdapterError(
                 f"{TOOL} jvm_max_heap must be a positive JVM size such as '4g'; got: {maximum!r}"
             )
-        options = f"{options} -Xmx{maximum}"
-    return {"JAVA_TOOL_OPTIONS": options}
+        options.append(f"-Xmx{maximum}")
+    collector = request.config.get("gc_collector")
+    if collector is not None:
+        if not isinstance(collector, str) or collector not in GC_COLLECTORS:
+            raise CommandAdapterError(
+                f"{TOOL} gc_collector must be one of {', '.join(sorted(GC_COLLECTORS))}; "
+                f"got: {collector!r}"
+            )
+        options.append(GC_COLLECTORS[collector])
+    final_bytes = request.config.get("final_file_bytes")
+    if final_bytes is not None:
+        if request.mode != "recursive-parquet-sorted":
+            raise CommandAdapterError(
+                f"{TOOL} mode {request.mode!r} does not use config key(s): final_file_bytes"
+            )
+        if (
+            isinstance(final_bytes, bool)
+            or not isinstance(final_bytes, int)
+            or not 1 <= final_bytes <= JAVA_LONG_MAX
+        ):
+            raise CommandAdapterError(
+                f"{TOOL} final_file_bytes must be a positive integer byte count at most "
+                f"{JAVA_LONG_MAX}; got: {final_bytes!r}"
+            )
+        options.append(f"-Dswath.sort.final-file-bytes={final_bytes}")
+    recordings = {key: _flag(request, key) for key in sorted(DIAGNOSTIC_CONFIG_KEYS)}
+    if any(recordings.values()):
+        stated = ", ".join(key for key, on in recordings.items() if on)
+        if request.mode not in SINK_MODES:
+            raise CommandAdapterError(
+                f"{TOOL} mode {request.mode!r} prints its listing on stdout and does not "
+                f"take: {stated}"
+            )
+        sink = request.sink_dir.rstrip("/")
+        if SINK_PATH_RE.fullmatch(sink) is None:
+            raise CommandAdapterError(
+                f"{TOOL} cannot place a JVM recording under sink {request.sink_dir!r}"
+            )
+        if recordings["gc_log"]:
+            options.append(
+                f"-Xlog:gc*:file={sink}/{GC_LOG_NAME}:time,uptime,level,tags:filecount=0"
+            )
+        if recordings["jfr"]:
+            if request.signed:
+                raise CommandAdapterError(f"{TOOL} jfr is refused on a signed case")
+            options.append(
+                "-XX:StartFlightRecording=settings=profile,"
+                f"maxsize={JFR_MAX_SIZE},dumponexit=true,filename={sink}/{JFR_NAME},"
+                "jdk.InitialEnvironmentVariable#enabled=false"
+            )
+    return tuple(options)
+
+
+def _flag(request: CommandRequest, key: str) -> bool:
+    """``on`` or ``off`` (absent is off), as ``engine_readahead`` is: a plan's
+    ``config`` carries only strings and integers."""
+    value = request.config.get(key, "off")
+    if value not in ("on", "off"):
+        raise CommandAdapterError(f"{TOOL} {key} must be 'on' or 'off'; got: {value!r}")
+    return value == "on"
 
 
 def _concurrency(request: CommandRequest) -> str:
@@ -251,7 +387,12 @@ def _engine_readahead(request: CommandRequest) -> tuple[str, ...]:
 def _mode_config(request: CommandRequest, allowed: frozenset[str]) -> None:
     """Refuse a declared Swath knob neither the mode argv nor environment consumes."""
     unused = sorted(
-        (set(request.config) & CONFIG_KEYS) - allowed - ENV_CONFIG_KEYS - ENGINE_CONFIG_KEYS
+        (set(request.config) & CONFIG_KEYS)
+        - allowed
+        - ENV_CONFIG_KEYS
+        - ENGINE_CONFIG_KEYS
+        - DIAGNOSTIC_CONFIG_KEYS
+        - SORTED_ENV_CONFIG_KEYS
     )
     if unused:
         raise CommandAdapterError(
@@ -426,7 +567,11 @@ def _build_tail(request: CommandRequest) -> tuple[str, ...]:
 
 
 def build_command(request: CommandRequest) -> tuple[str, ...]:
-    return *SWATH.argv, *_build_tail(request)
+    argv = (*SWATH.argv, *_build_tail(request))
+    # The JVM controls ride in the environment (build_env); checking them here
+    # too means compiling a case is enough to refuse a bad or misplaced one.
+    _jvm_options(request)
+    return argv
 
 
 if __name__ == "__main__":

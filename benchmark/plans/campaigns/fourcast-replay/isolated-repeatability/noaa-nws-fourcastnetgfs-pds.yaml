@@ -63,3 +63,4 @@ exclude:
   - {tool: s3p, reason: not a repeatability control}
   - {tool: s5cmd, reason: not a repeatability control}
   - {tool: s7cmd, reason: not a repeatability control}
+  - {tool: swath-go, reason: registered after this plan's runs; the Go port has its own campaign plans}

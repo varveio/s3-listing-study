@@ -53,3 +53,4 @@ exclude:
   - {tool: s3p, reason: capacity diagnostic uses the widest-demand representative clients}
   - {tool: s5cmd, reason: capacity diagnostic uses the widest-demand representative clients}
   - {tool: s7cmd, reason: capacity diagnostic uses the widest-demand representative clients}
+  - {tool: swath-go, reason: registered after this plan's runs; the Go port has its own campaign plans}

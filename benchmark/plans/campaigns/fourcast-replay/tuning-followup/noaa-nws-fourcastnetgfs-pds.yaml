@@ -92,3 +92,4 @@ exclude:
   - {tool: s3kor, reason: focused tuning follow-up}
   - {tool: s5cmd, reason: focused tuning follow-up}
   - {tool: s7cmd, reason: focused tuning follow-up}
+  - {tool: swath-go, reason: registered after this plan's runs; the Go port has its own campaign plans}

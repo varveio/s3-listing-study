@@ -42,6 +42,7 @@ TOOL_STAGES = {
     "s5cmd": "s5cmd_install",
     "s7cmd": "s7cmd_install",
     "swath": "swath_install",
+    "swath-go": "swath_go_build",
 }
 SLICE_DOMAIN = b"s3-listing-study-image-slice-v1\0"
 TOOL_SLICE_FACTS = (

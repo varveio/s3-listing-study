@@ -1,0 +1,328 @@
+{
+  "attempts": [
+    {
+      "attempt_id": "swath-go.03a72c2faf2e.s1",
+      "case_id": "swath-go.03a72c2faf2e",
+      "evidence": {
+        "state": "MISSING"
+      },
+      "group_id": "swath-go-live-cogs-1",
+      "mode": "recursive-parquet-sorted",
+      "origin": "planned",
+      "purpose": "diagnostic",
+      "recorded_at": "2026-11-07T11:05:30.089681+00:00",
+      "request": {
+        "allocationPolicy": {
+          "instances": [
+            {
+              "policy": {
+                "bootDisk": {
+                  "image": "batch-cos",
+                  "sizeGb": "200",
+                  "type": "hyperdisk-balanced"
+                },
+                "machineType": "n4-highcpu-32",
+                "provisioningModel": "SPOT"
+              }
+            }
+          ]
+        },
+        "labels": {
+          "suite": "scale-study"
+        },
+        "logsPolicy": {
+          "destination": "CLOUD_LOGGING"
+        },
+        "taskGroups": [
+          {
+            "parallelism": "1",
+            "taskCount": "1",
+            "taskSpec": {
+              "computeResource": {
+                "cpuMilli": "32000",
+                "memoryMib": "65536"
+              },
+              "maxRetryCount": 0,
+              "maxRunDuration": "15005s",
+              "runnables": [
+                {
+                  "container": {
+                    "commands": [
+                      "10001:10001",
+                      "/tmp/attempt"
+                    ],
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
+                    "options": "--user 0:0 --entrypoint /bin/chown --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
+                  }
+                },
+                {
+                  "container": {
+                    "commands": [
+                      "--tool",
+                      "swath-go",
+                      "--mode",
+                      "recursive-parquet-sorted",
+                      "--purpose",
+                      "diagnostic",
+                      "--bucket",
+                      "sentinel-cogs",
+                      "--region",
+                      "us-west-2",
+                      "--prefix",
+                      "",
+                      "--output",
+                      "/tmp/attempt",
+                      "--destination",
+                      "<result-store>/scale-study/sentinel-cogs/swath-go.03a72c2faf2e.s1/",
+                      "--timeout",
+                      "14400",
+                      "--term-grace",
+                      "5.0",
+                      "--retain-products",
+                      "true",
+                      "--image",
+                      "<study-registry>/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
+                      "--toolbox-manifest-sha256",
+                      "315959dfbad61d38ad992e26eeab2692c8cac85c24c71485bf111b5430c34bc2",
+                      "--toolbox-recipe-sha256",
+                      "c978c1b3a9635ca068cf8a67e24d1444477da5165891c62dd898aaacdfdd3729",
+                      "--tool-recipe-sha256",
+                      "c776fc4adf95cb071747798f8b2bec22d4b107f537ff3be117b8fc03ca3ccb5a",
+                      "--tool-build-inputs-sha256",
+                      "c173709a2f071d00cb9768f2e8d8c1ca084458d6d0bf3bbbe6a80286c6519df4",
+                      "--tool-version",
+                      "provisional-7b05605",
+                      "--tool-build-sha256",
+                      "15ae352315a2f4ffcbf7a8853cae1b3d326c7131fd9d9f5ab0ed448c0c08785d",
+                      "--adapter-bundle-sha256",
+                      "3a21555fc322cd0122988a67fed3247bcebe276df24b3a43fd32f97bc21f9e2f",
+                      "--harness-revision",
+                      "2479097ea6f428ffe4480efe0f41079f74cf638c",
+                      "--subject-workdir",
+                      "/opt/swath-go",
+                      "--image-set-sha256",
+                      "c4ef060d2a54a42dee7e451b452c2d6acb0a08f0e65488bf39e2130860b18750",
+                      "--group-id",
+                      "swath-go-live-cogs-1",
+                      "--case-id",
+                      "swath-go.03a72c2faf2e",
+                      "--attempt-id",
+                      "swath-go.03a72c2faf2e.s1",
+                      "--machine-type",
+                      "n4-highcpu-32",
+                      "--vcpus",
+                      "32",
+                      "--memory-gb",
+                      "64",
+                      "--container-memory-gb",
+                      "none",
+                      "--config",
+                      "{\"concurrency\":64,\"max_duration\":\"14370s\",\"mode\":\"recursive-parquet-sorted\"}"
+                    ],
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
+                    "options": "--volume=/mnt/stateful_partition/attempt:/tmp/attempt"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "settled_at": "2026-11-07T13:27:50.469170+00:00",
+      "state": "CANCELLED",
+      "state_detail": "cancelled by the operator",
+      "statistic": "timing",
+      "tool": "swath-go"
+    },
+    {
+      "attempt_id": "swath-go.4753553039c7.s1",
+      "case_id": "swath-go.4753553039c7",
+      "evidence": {
+        "state": "MISSING"
+      },
+      "group_id": "swath-go-live-cogs-1",
+      "mode": "recursive-parquet-sorted",
+      "origin": "planned",
+      "purpose": "diagnostic",
+      "recorded_at": "2026-11-07T11:45:30.326688+00:00",
+      "request": {
+        "allocationPolicy": {
+          "instances": [
+            {
+              "policy": {
+                "bootDisk": {
+                  "image": "batch-cos",
+                  "sizeGb": "200",
+                  "type": "hyperdisk-balanced"
+                },
+                "machineType": "n4-highcpu-32",
+                "provisioningModel": "SPOT"
+              }
+            }
+          ]
+        },
+        "labels": {
+          "suite": "scale-study"
+        },
+        "logsPolicy": {
+          "destination": "CLOUD_LOGGING"
+        },
+        "taskGroups": [
+          {
+            "parallelism": "1",
+            "taskCount": "1",
+            "taskSpec": {
+              "computeResource": {
+                "cpuMilli": "32000",
+                "memoryMib": "65536"
+              },
+              "maxRetryCount": 0,
+              "maxRunDuration": "15005s",
+              "runnables": [
+                {
+                  "container": {
+                    "commands": [
+                      "10001:10001",
+                      "/tmp/attempt"
+                    ],
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
+                    "options": "--user 0:0 --entrypoint /bin/chown --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
+                  }
+                },
+                {
+                  "container": {
+                    "commands": [
+                      "--tool",
+                      "swath-go",
+                      "--mode",
+                      "recursive-parquet-sorted",
+                      "--purpose",
+                      "diagnostic",
+                      "--bucket",
+                      "sentinel-cogs",
+                      "--region",
+                      "us-west-2",
+                      "--prefix",
+                      "",
+                      "--output",
+                      "/tmp/attempt",
+                      "--destination",
+                      "<result-store>/scale-study/sentinel-cogs/swath-go.4753553039c7.s1/",
+                      "--timeout",
+                      "14400",
+                      "--term-grace",
+                      "5.0",
+                      "--retain-products",
+                      "true",
+                      "--image",
+                      "<study-registry>/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
+                      "--toolbox-manifest-sha256",
+                      "315959dfbad61d38ad992e26eeab2692c8cac85c24c71485bf111b5430c34bc2",
+                      "--toolbox-recipe-sha256",
+                      "c978c1b3a9635ca068cf8a67e24d1444477da5165891c62dd898aaacdfdd3729",
+                      "--tool-recipe-sha256",
+                      "c776fc4adf95cb071747798f8b2bec22d4b107f537ff3be117b8fc03ca3ccb5a",
+                      "--tool-build-inputs-sha256",
+                      "c173709a2f071d00cb9768f2e8d8c1ca084458d6d0bf3bbbe6a80286c6519df4",
+                      "--tool-version",
+                      "provisional-7b05605",
+                      "--tool-build-sha256",
+                      "15ae352315a2f4ffcbf7a8853cae1b3d326c7131fd9d9f5ab0ed448c0c08785d",
+                      "--adapter-bundle-sha256",
+                      "3a21555fc322cd0122988a67fed3247bcebe276df24b3a43fd32f97bc21f9e2f",
+                      "--harness-revision",
+                      "2479097ea6f428ffe4480efe0f41079f74cf638c",
+                      "--subject-workdir",
+                      "/opt/swath-go",
+                      "--image-set-sha256",
+                      "c4ef060d2a54a42dee7e451b452c2d6acb0a08f0e65488bf39e2130860b18750",
+                      "--group-id",
+                      "swath-go-live-cogs-1",
+                      "--case-id",
+                      "swath-go.4753553039c7",
+                      "--attempt-id",
+                      "swath-go.4753553039c7.s1",
+                      "--machine-type",
+                      "n4-highcpu-32",
+                      "--vcpus",
+                      "32",
+                      "--memory-gb",
+                      "64",
+                      "--container-memory-gb",
+                      "none",
+                      "--config",
+                      "{\"concurrency\":256,\"max_duration\":\"14370s\",\"mode\":\"recursive-parquet-sorted\"}"
+                    ],
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
+                    "options": "--volume=/mnt/stateful_partition/attempt:/tmp/attempt"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "settled_at": "2026-11-07T13:27:50.597625+00:00",
+      "state": "CANCELLED",
+      "state_detail": "cancelled by the operator",
+      "statistic": "timing",
+      "tool": "swath-go"
+    }
+  ],
+  "group_id": "swath-go-live-cogs-1",
+  "kind": "campaign-receipt-draft",
+  "ledger_created_at": "2026-08-29T08:27:27.033764+00:00",
+  "ledger_schema_version": 3,
+  "purposes": [
+    "diagnostic"
+  ],
+  "resolved_cases": {
+    "swath-go.03a72c2faf2e": {
+      "config": {
+        "concurrency": 64,
+        "max_duration": "14370s",
+        "mode": "recursive-parquet-sorted"
+      },
+      "environment": {
+        "auth_role": null,
+        "container_memory_gb": null,
+        "location": "us-east1",
+        "machine_type": "n4-highcpu-32",
+        "memory_gb": 64,
+        "output_target": "file",
+        "target_bucket": "sentinel-cogs",
+        "target_prefix": "",
+        "target_region": "us-west-2",
+        "timeout_s": 14400,
+        "vcpus": 32
+      },
+      "platform_sha256": "ac1531ad2ad180658a761aeae62c82c51103a94bd1981ea511917ef0e62fbf35",
+      "tool_slice_sha256": "271283d9fcf1e41800d6a4a01ec3abb8f46b0c323fb7d880db04a42c765bba70"
+    },
+    "swath-go.4753553039c7": {
+      "config": {
+        "concurrency": 256,
+        "max_duration": "14370s",
+        "mode": "recursive-parquet-sorted"
+      },
+      "environment": {
+        "auth_role": null,
+        "container_memory_gb": null,
+        "location": "us-east1",
+        "machine_type": "n4-highcpu-32",
+        "memory_gb": 64,
+        "output_target": "file",
+        "target_bucket": "sentinel-cogs",
+        "target_prefix": "",
+        "target_region": "us-west-2",
+        "timeout_s": 14400,
+        "vcpus": 32
+      },
+      "platform_sha256": "ac1531ad2ad180658a761aeae62c82c51103a94bd1981ea511917ef0e62fbf35",
+      "tool_slice_sha256": "271283d9fcf1e41800d6a4a01ec3abb8f46b0c323fb7d880db04a42c765bba70"
+    }
+  },
+  "schema_version": 1,
+  "slots": [],
+  "suite": "scale-study"
+}

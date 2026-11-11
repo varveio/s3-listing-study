@@ -25,6 +25,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import zstandard
 
 from benchmark.runtime import duckdb_adapter
 from benchmark.runtime.contract import FIELD_COUNT, MTIME_RE, ContractViolation, Record, parse_line
@@ -49,6 +50,7 @@ PORTED = (
     "s5cmd",
     "s7cmd",
     "swath",
+    "swath-go",
 )
 
 
@@ -73,6 +75,8 @@ DATASET_MODES = {
     ("swath", "recursive-parquet-sorted"),
     ("swath", "recursive-tsv-dataset"),
     ("swath", "recursive-tsv-zstd"),
+    ("swath-go", "recursive-parquet-sorted"),
+    ("swath-go", "resume-parquet-sorted"),
 }
 
 UNEXERCISED = {
@@ -103,6 +107,13 @@ UNEXERCISED = {
         "recursive-parquet",
         "recursive-parquet-sorted",
         "recursive-tsv-dataset",
+        "recursive-tsv-zstd",
+    },
+    # No receipts yet: the Go port has no committed run record in this study.
+    "swath-go": {
+        "recursive-parquet-sorted",
+        "resume-parquet-sorted",
+        "recursive-tsv",
         "recursive-tsv-zstd",
     },
 }
@@ -515,6 +526,28 @@ FIXTURES[("s3-fast-list", "list")] = (
 # the hints only shape how the keyspace was walked — so one payload serves both.
 FIXTURES[("s3-fast-list", "list-hinted")] = FIXTURES[("s3-fast-list", "list")]
 FIXTURES[("s3-fast-list", "list-hinted-fixture")] = FIXTURES[("s3-fast-list", "list")]
+
+# The Go port's TSV file: the S3 schema's nine column names under one header,
+# the ETag bare, times in UTC with six fraction digits, \N for a null, and
+# fields under the port's TSV escapes, here an escaped backslash.
+SWATH_GO_TSV = (
+    b"key\tsize\tlast_modified\tetag\tstorage_class\towner_id\towner_display_name"
+    b"\tchecksum_algorithm\tchecksum_type\n"
+    b"normals-hourly/access/A.csv\t3184153\t2026-03-16T14:41:50.123000Z\t8f60\tSTANDARD"
+    b"\t\\N\t\\N\tCRC64NVME\tFULL_OBJECT\n"
+    b"normals-hourly/back\\\\slash\t7\t2026-03-16T14:41:51.000000Z\t8f61\tSTANDARD"
+    b"\t\\N\t\\N\t\\N\t\\N\n"
+)
+FIXTURES[("swath-go", "recursive-tsv")] = (
+    SWATH_GO_TSV,
+    "normals-hourly/",
+    [b"normals-hourly/access/A.csv", b"normals-hourly/back\\slash"],
+)
+FIXTURES[("swath-go", "recursive-tsv-zstd")] = (
+    zstandard.ZstdCompressor().compress(SWATH_GO_TSV),
+    "normals-hourly/",
+    [b"normals-hourly/access/A.csv", b"normals-hourly/back\\slash"],
+)
 
 
 def adapter_path(tool: str) -> Path:

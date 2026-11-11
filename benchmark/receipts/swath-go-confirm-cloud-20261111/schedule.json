@@ -1,0 +1,129 @@
+{
+  "blocks": {
+    "1": [
+      "GN128@64",
+      "JPAR@256",
+      "GO512@64",
+      "GN128@256",
+      "GN512@256/4",
+      "JG1@64",
+      "JPAR@64",
+      "GO512@256/4",
+      "GO512@256",
+      "JG1@256",
+      "GN512@64",
+      "GN512@256"
+    ],
+    "2": [
+      "GN128@64",
+      "GN512@256/4",
+      "JPAR@256",
+      "GN128@256",
+      "JPAR@64",
+      "JG1@64",
+      "GO512@256",
+      "GO512@256/4",
+      "GN512@64",
+      "JG1@256",
+      "GO512@64",
+      "GN512@256"
+    ],
+    "3": [
+      "GO512@256/4",
+      "JG1@256",
+      "GN512@256",
+      "GO512@256",
+      "GN128@64",
+      "GO512@64",
+      "GN512@64",
+      "GN128@256",
+      "JG1@64",
+      "GN512@256/4",
+      "JPAR@64",
+      "JPAR@256"
+    ]
+  },
+  "cells": {
+    "GN128@256": {
+      "image": "new",
+      "label": "recursive-parquet-sorted.purpose-diagnostic.concurrency-256.subject_vcpus-8.max_duration-7170s.sort_buffer-128mib",
+      "plan": "benchmark/plans/campaigns/swath-go-confirm/new/aws-public-blockchain.yaml",
+      "tool": "swath-go"
+    },
+    "GN128@64": {
+      "image": "new",
+      "label": "recursive-parquet-sorted.purpose-diagnostic.concurrency-64.subject_vcpus-8.max_duration-7170s.sort_buffer-128mib",
+      "plan": "benchmark/plans/campaigns/swath-go-confirm/new/aws-public-blockchain.yaml",
+      "tool": "swath-go"
+    },
+    "GN512@256": {
+      "image": "new",
+      "label": "recursive-parquet-sorted.purpose-diagnostic.concurrency-256.subject_vcpus-8.max_duration-7170s.sort_buffer-512mib",
+      "plan": "benchmark/plans/campaigns/swath-go-confirm/new/aws-public-blockchain.yaml",
+      "tool": "swath-go"
+    },
+    "GN512@256/4": {
+      "image": "new",
+      "label": "recursive-parquet-sorted.purpose-diagnostic.concurrency-256.subject_vcpus-4.max_duration-7170s.sort_buffer-512mib",
+      "plan": "benchmark/plans/campaigns/swath-go-confirm/new/aws-public-blockchain.yaml",
+      "tool": "swath-go"
+    },
+    "GN512@64": {
+      "image": "new",
+      "label": "recursive-parquet-sorted.purpose-diagnostic.concurrency-64.subject_vcpus-8.max_duration-7170s.sort_buffer-512mib",
+      "plan": "benchmark/plans/campaigns/swath-go-confirm/new/aws-public-blockchain.yaml",
+      "tool": "swath-go"
+    },
+    "GO512@256": {
+      "image": "old",
+      "label": "recursive-parquet-sorted.purpose-diagnostic.concurrency-256.subject_vcpus-8.max_duration-7170s.sort_buffer-512mib",
+      "plan": "benchmark/plans/campaigns/swath-go-confirm/old/aws-public-blockchain.yaml",
+      "tool": "swath-go"
+    },
+    "GO512@256/4": {
+      "image": "old",
+      "label": "recursive-parquet-sorted.purpose-diagnostic.concurrency-256.subject_vcpus-4.max_duration-7170s.sort_buffer-512mib",
+      "plan": "benchmark/plans/campaigns/swath-go-confirm/old/aws-public-blockchain.yaml",
+      "tool": "swath-go"
+    },
+    "GO512@64": {
+      "image": "old",
+      "label": "recursive-parquet-sorted.purpose-diagnostic.concurrency-64.subject_vcpus-8.max_duration-7170s.sort_buffer-512mib",
+      "plan": "benchmark/plans/campaigns/swath-go-confirm/old/aws-public-blockchain.yaml",
+      "tool": "swath-go"
+    },
+    "JG1@256": {
+      "image": "old",
+      "label": "recursive-parquet-sorted.purpose-diagnostic.concurrency-256.gc_collector-g1.jvm_max_heap-4g.sort_merge_parallelism-8",
+      "plan": "benchmark/plans/campaigns/swath-go-confirm/old/aws-public-blockchain.yaml",
+      "tool": "swath"
+    },
+    "JG1@64": {
+      "image": "old",
+      "label": "recursive-parquet-sorted.purpose-diagnostic.concurrency-64.gc_collector-g1.jvm_max_heap-4g.sort_merge_parallelism-8",
+      "plan": "benchmark/plans/campaigns/swath-go-confirm/old/aws-public-blockchain.yaml",
+      "tool": "swath"
+    },
+    "JPAR@256": {
+      "image": "old",
+      "label": "recursive-parquet-sorted.purpose-diagnostic.concurrency-256.gc_collector-parallel.jvm_max_heap-4g.sort_merge_parallelism-8",
+      "plan": "benchmark/plans/campaigns/swath-go-confirm/old/aws-public-blockchain.yaml",
+      "tool": "swath"
+    },
+    "JPAR@64": {
+      "image": "old",
+      "label": "recursive-parquet-sorted.purpose-diagnostic.concurrency-64.gc_collector-parallel.jvm_max_heap-4g.sort_merge_parallelism-8",
+      "plan": "benchmark/plans/campaigns/swath-go-confirm/old/aws-public-blockchain.yaml",
+      "tool": "swath"
+    }
+  },
+  "method": "random.Random(seed); for blocks 1,2,3 in turn: rng.sample(cell ids in table order, 12)",
+  "retain_products": [
+    "GN128@256",
+    "GN512@256",
+    "GO512@256",
+    "JG1@256"
+  ],
+  "retain_products_block": 1,
+  "seed": 20261111
+}

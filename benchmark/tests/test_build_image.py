@@ -74,7 +74,7 @@ def test_dockerfile_is_self_contained_and_checksum_pinned() -> None:
     source = (ROOT / "benchmark/build/Dockerfile").read_text()
     assert "_PARENT" not in source
     assert "SHARED_BASE" not in source
-    assert source.count("ADD --checksum=sha256:") == 10
+    assert source.count("ADD --checksum=sha256:") == 11
     assert (
         "FROM ghcr.io/varveio/swath@sha256:"
         "0bbc96c10b4b63d184cce76734679dd4a2f54a1c81c7c94c1000f7114eab8e43 "
@@ -91,6 +91,7 @@ def test_dockerfile_is_self_contained_and_checksum_pinned() -> None:
         "s5cmd_install",
         "s7cmd_install",
         "swath_install",
+        "swath_go_build",
     ):
         assert f"AS {stage}" in source
     final_stage = source.index("FROM runtime_base AS toolbox")

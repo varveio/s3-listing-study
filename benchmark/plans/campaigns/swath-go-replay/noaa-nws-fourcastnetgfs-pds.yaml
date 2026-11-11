@@ -1,0 +1,75 @@
+# Swath (Go port) beside the Java capsule on the release fixture of fourcast-replay.
+# Replay image, fixture, latency deadlines, warm-up, machine, subject and replay
+# allocation and timeout are copied from the release plan campaigns/fourcast-replay/screen-s3-latency/noaa-nws-fourcastnetgfs-pds.yaml
+# (that file is the record and is not edited). Every row writes its product.
+# The Go rows state max_duration 30 s below timeout_s, as upstream asks of a hosted
+# runner (tools/swath-go/docs/running.md). The Java recursive-parquet-sorted rows are a
+# new replay treatment: the release has no Java sorted replay rows. They combine the
+# release replay rows' 4g heap with sort_merge_parallelism 8, borrowed from the release's
+# live sorted rows (which ran with a 16g heap on larger boxes). Any Java TSV row keeps the
+# release replay rows' heap and text-writer settings unchanged.
+spec_version: 3
+bucket: noaa-nws-fourcastnetgfs-pds
+region: us-east-1
+auth_role: public-read
+
+replay:
+  capacity_status: uncalibrated
+  server_image_uri: ghcr.io/varveio/swath-replay@sha256:3955f242f25294d3ebc6d63d3cf23e2a2694f7f1c9a5334dc6ec1054b0a69097
+  fixture_uri: gs://s3-listing-study-results-29c02004/fixtures/noaa-nws-fourcastnetgfs-pds/1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4/part-00000.parquet
+  fixture_sha256: 1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4
+  serving_mode: sorted
+  latency_model:
+    deadlines_ms:
+      worker_page: 85
+      pivot_probe: 35
+      structure_probe: 37
+    scale: 1.0
+    jitter: none
+
+defaults:
+  reps: 1
+  timeout_s: 1800
+  vcpus: 16
+  memory_gb: 32
+  subject_vcpus: 6
+  container_memory_gb: 16
+  replay_vcpus: 8
+  replay_memory_gb: 8
+  replay_parquet_connections: 8
+  replay_max_concurrent_requests: 4096
+  replay_prefetch: true
+  replay_prefetch_max_windows: 256
+  replay_heap_percent: 75
+
+# Each tool gets its best-supported representative mode. Qualification pairs
+# remain where the prior evidence does not justify silently replacing a mode.
+
+tools:
+  swath-go:
+    cases:
+      - mode: recursive-parquet-sorted
+        concurrency: 64
+        purpose: diagnostic
+        config: {max_duration: 1770s}
+      - mode: recursive-tsv
+        concurrency: 64
+        purpose: diagnostic
+        config: {max_duration: 1770s}
+  swath:
+    cases:
+      - mode: recursive-parquet-sorted
+        concurrency: 64
+        purpose: diagnostic
+        config: {jvm_max_heap: 4g, sort_merge_parallelism: 8}
+
+exclude:
+  - {tool: aws-cli, reason: outside this Swath Go-and-Java side-by-side diagnostic}
+  - {tool: minio-mc, reason: outside this Swath Go-and-Java side-by-side diagnostic}
+  - {tool: ps3, reason: outside this Swath Go-and-Java side-by-side diagnostic}
+  - {tool: rclone, reason: outside this Swath Go-and-Java side-by-side diagnostic}
+  - {tool: s3-fast-list, reason: outside this Swath Go-and-Java side-by-side diagnostic}
+  - {tool: s3kor, reason: outside this Swath Go-and-Java side-by-side diagnostic}
+  - {tool: s3p, reason: outside this Swath Go-and-Java side-by-side diagnostic}
+  - {tool: s5cmd, reason: outside this Swath Go-and-Java side-by-side diagnostic}
+  - {tool: s7cmd, reason: outside this Swath Go-and-Java side-by-side diagnostic}

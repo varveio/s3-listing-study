@@ -38,3 +38,6 @@ tools:
     cases: [{purpose: canary}]
   swath:
     cases: [{purpose: canary}]
+
+exclude:
+  - {tool: swath-go, reason: not in this plan's roster; the Go port has its own campaign plans}

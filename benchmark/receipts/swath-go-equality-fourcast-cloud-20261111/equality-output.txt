@@ -1,0 +1,12 @@
+duckdb 1.5.5
+manifest part digests: verified
+rows: go 4081170, java 4081170
+row counts equal: True (ok)
+go EXCEPT ALL java: 0 (ok)
+java EXCEPT ALL go: 0 (ok)
+positional mismatches: 0 (ok)
+go key order violations (unsigned bytes): 0 (ok)
+java version_id not null: 0 (ok)
+java is_delete_marker true: 0 (ok)
+java row_type other than OBJECT: 0 (ok)
+IDENTICAL
