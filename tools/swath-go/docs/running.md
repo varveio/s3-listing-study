@@ -106,7 +106,7 @@ fields and the run report at `SINK/swath-go-report.json`:
   positive integer rendered as `--encoders N` in every mode, resume included:
   the Parquet encoders, a `.zst` file's compression jobs, a TSV file's
   formatters; unset, the least of GOMAXPROCS and what the sort buffer admits
-  — claim `encoders-bound-the-output-workers`), `cpu_profile` (a boolean, see
+  — claim `encoders-bound-the-output-workers`), `cpu_profile` (`on` or `off`, see
   below), `max_duration` (a
   duration), and, for the sorted mode only, `part_size` and `part_interval`.
   Absent keys render nothing, so the tool's own default applies. Anything else
@@ -142,7 +142,7 @@ fields and the run report at `SINK/swath-go-report.json`:
   worker keeps it on every attempt, retained products or not.
 - **CPU profile.** The pin has no profiling flag; its one hook is the
   environment variable `SWATH_CPUPROFILE=FILE` (`go/cmd/swath/main.go:1154-1167`,
-  `go/docs/commands/swath.md:213` @8c8f870). `cpu_profile: true` has the
+  `go/docs/commands/swath.md:213` @8c8f870). `cpu_profile: on` has the
   capsule's `build_env` set it to `SINK/swath-go-cpu.pprof`, beside the report;
   the argv is unchanged. The port checks the path as it checks `--report`
   (`go/cmd/swath/sidepaths.go:28-57`), starts the profile before the listing

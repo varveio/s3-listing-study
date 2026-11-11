@@ -196,10 +196,11 @@ port's one size syntax: a decimal number and an optional unit in any case,
 coming to a whole number of bytes, which only the binary can check. ``k``,
 ``m``, ``g``, ``t`` and the ``-ib`` units are binary; ``kb``, ``mb``, ``gb`` and
 ``tb`` are decimal at this pin (they were binary at the capsule's earlier
-pins), so a plan states sizes in ``KiB``/``MiB``/``GiB``."""
+pins), so a plan states sizes in ``kib``/``mib``/``gib``: lowercase, since a
+config value becomes part of the case label, which refuses capitals."""
 
 CPU_PROFILE_NAME = "swath-go-cpu.pprof"
-"""Where ``cpu_profile: true`` has the port write its Go CPU profile: the sink's
+"""Where ``cpu_profile: on`` has the port write its Go CPU profile: the sink's
 top level, beside the run report and outside the dataset directory, where the
 port's side-path check accepts a profile (``go/cmd/swath/sidepaths.go:28-57``)
 and ``PROFILE_NAMES`` in ``benchmark/src/benchmark/measure.py`` keeps it on
@@ -405,8 +406,18 @@ def _resume_tail(request: CommandRequest, dataset: str, report: str) -> tuple[st
     )
 
 
+def _cpu_profile(request: CommandRequest) -> bool:
+    """``cpu_profile``: ``on`` or ``off`` (absent is off). A string, as the Java
+    capsule's ``engine_readahead`` is, because a plan's ``config`` carries only
+    strings and integers."""
+    value = request.config.get("cpu_profile", "off")
+    if value not in ("on", "off"):
+        raise CommandAdapterError(f"{TOOL} cpu_profile must be 'on' or 'off'; got: {value!r}")
+    return value == "on"
+
+
 def build_env(request: CommandRequest) -> dict[str, str]:
-    """``SWATH_CPUPROFILE=SINK/swath-go-cpu.pprof`` for ``cpu_profile: true``; else nothing.
+    """``SWATH_CPUPROFILE=SINK/swath-go-cpu.pprof`` for ``cpu_profile: on``; else nothing.
 
     The pin's one profiling hook is this environment variable (and
     ``SWATH_MEMPROFILE``, not exposed here): there is no flag. The command reads
@@ -418,8 +429,7 @@ def build_env(request: CommandRequest) -> dict[str, str]:
     hook: Go's sampling profiler at its default 100 Hz, and a profiled wall is
     diagnostic, never a timing row.
     """
-    value = _bool_value(request, "cpu_profile")
-    if not value:
+    if not _cpu_profile(request):
         return {}
     return {"SWATH_CPUPROFILE": f"{_sink(request)}/{CPU_PROFILE_NAME}"}
 
@@ -431,7 +441,7 @@ def build_command(request: CommandRequest) -> tuple[str, ...]:
     report = f"{sink}/{REPORT_NAME}"
     # The profile rides in the environment (build_env); a malformed value is
     # refused here too, so compiling a case is enough to reject it.
-    _bool_value(request, "cpu_profile")
+    _cpu_profile(request)
     if request.mode == RESUME_MODE:
         return *SWATH_GO.argv, *_resume_tail(request, f"{sink}/{DATASET_NAME}", report)
     output = f"{sink}/{TEXT_MODES.get(request.mode, DATASET_NAME)}"

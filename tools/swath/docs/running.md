@@ -223,9 +223,9 @@ checked value and none verbatim (references at v0.3.2, `acf0d509`):
   `sorted-final-file-size-is-a-system-property`. The capsule still renders
   `parquet_part_size` on the sorted mode, unchanged, for the identity of the
   rows that stated it; it is inert there.
-- `gc_log: true` → `-Xlog:gc*:file=SINK/swath-gc.log:time,uptime,level,tags:filecount=0`
+- `gc_log: on` → `-Xlog:gc*:file=SINK/swath-gc.log:time,uptime,level,tags:filecount=0`
   (GC events at info, one unrotated file).
-- `jfr: true` → `-XX:StartFlightRecording=settings=profile,maxsize=256m,dumponexit=true,filename=SINK/swath.jfr,jdk.InitialEnvironmentVariable#enabled=false`:
+- `jfr: on` → `-XX:StartFlightRecording=settings=profile,maxsize=256m,dumponexit=true,filename=SINK/swath.jfr,jdk.InitialEnvironmentVariable#enabled=false`:
   JFR's profiling settings, the recording bounded by JFR's `maxsize`, dumped at
   exit, with the environment-variable event off so the file carries no
   environment; refused on a signed case regardless.

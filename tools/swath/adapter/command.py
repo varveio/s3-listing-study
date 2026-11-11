@@ -249,10 +249,10 @@ def _jvm_options(request: CommandRequest) -> tuple[str, ...]:
       does not reach this path: the sorted publish is handed the ``SortConfig``,
       not the dataset spec's part size (``ListRunner.java:846-848,988-991,1020-1022``).
       Sorted mode only.
-    - ``gc_log: true`` → ``-Xlog:gc*:file=SINK/swath-gc.log:...:filecount=0``:
+    - ``gc_log: on`` → ``-Xlog:gc*:file=SINK/swath-gc.log:...:filecount=0``:
       unified GC logging at info to one unrotated file (a rotated file would be
       renamed out of the retained name).
-    - ``jfr: true`` → ``-XX:StartFlightRecording=settings=profile,...`` dumping to
+    - ``jfr: on`` → ``-XX:StartFlightRecording=settings=profile,...`` dumping to
       ``SINK/swath.jfr`` at exit, bounded by :data:`JFR_MAX_SIZE`, with the
       ``jdk.InitialEnvironmentVariable`` event off so the recording carries no
       environment. Refused on a signed case regardless.
@@ -308,10 +308,12 @@ def _jvm_options(request: CommandRequest) -> tuple[str, ...]:
 
 
 def _flag(request: CommandRequest, key: str) -> bool:
-    value = request.config.get(key, False)
-    if not isinstance(value, bool):
-        raise CommandAdapterError(f"{TOOL} {key} must be true or false; got: {value!r}")
-    return value
+    """``on`` or ``off`` (absent is off), as ``engine_readahead`` is: a plan's
+    ``config`` carries only strings and integers."""
+    value = request.config.get(key, "off")
+    if value not in ("on", "off"):
+        raise CommandAdapterError(f"{TOOL} {key} must be 'on' or 'off'; got: {value!r}")
+    return value == "on"
 
 
 def _concurrency(request: CommandRequest) -> str:

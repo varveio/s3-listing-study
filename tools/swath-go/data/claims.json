@@ -559,7 +559,7 @@
       "scope": "operability",
       "status": "supported",
       "disposition": "retained",
-      "qualification": "Read from the command and its help at the pin; upstream calls it a development hook. The capsule's cpu_profile: true sets SWATH_CPUPROFILE to swath-go-cpu.pprof at the sink's top level, which the harness keeps on every attempt up to its size bound. The profiler's cost on a run's wall is unmeasured, so a profiled row is diagnostic.",
+      "qualification": "Read from the command and its help at the pin; upstream calls it a development hook. The capsule's cpu_profile: on sets SWATH_CPUPROFILE to swath-go-cpu.pprof at the sink's top level, which the harness keeps on every attempt up to its size bound. The profiler's cost on a run's wall is unmeasured, so a profiled row is diagnostic.",
       "evidence": [
         {
           "kind": "source",

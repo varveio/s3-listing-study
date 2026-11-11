@@ -353,6 +353,7 @@ def test_modes_declare_their_products_channels_and_a_ceiling(
         ({"encoders": 0}, "encoders"),
         ({"encoders": True}, "encoders"),
         ({"encoders": "8"}, "encoders"),
+        ({"cpu_profile": True}, "cpu_profile"),
         ({"cpu_profile": "true"}, "cpu_profile"),
         ({"cpu_profile": 1}, "cpu_profile"),
     ],
@@ -380,13 +381,13 @@ def test_cpu_profile_is_the_environment_hook_into_the_sink(adapter: LoadedComman
     """The pin has no profiling flag: ``SWATH_CPUPROFILE`` is the hook, aimed at the
     sink's top level, and the argv is the unprofiled one."""
     for mode in adapter.modes:
-        request = _request(mode, sink_dir="/sink/", config={"cpu_profile": True})
+        request = _request(mode, sink_dir="/sink/", config={"cpu_profile": "on"})
         assert adapter.build_env(request) == {"SWATH_CPUPROFILE": "/sink/swath-go-cpu.pprof"}
         assert adapter.compile(request) == adapter.compile(_request(mode, sink_dir="/sink/"))
-        assert adapter.build_env(_request(mode, config={"cpu_profile": False})) == {}
+        assert adapter.build_env(_request(mode, config={"cpu_profile": "off"})) == {}
         assert adapter.build_env(_request(mode)) == {}
-    effective = adapter.effective_config("recursive-parquet-sorted", {"cpu_profile": True})
-    assert effective["cpu_profile"] is True
+    effective = adapter.effective_config("recursive-parquet-sorted", {"cpu_profile": "on"})
+    assert effective["cpu_profile"] == "on"
 
 
 @pytest.mark.parametrize("key", ["part_size", "part_interval"])

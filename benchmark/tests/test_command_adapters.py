@@ -1169,8 +1169,8 @@ def test_swath_renders_jvm_recordings_and_the_sorted_final_size_into_java_tool_o
             "jvm_max_heap": "4g",
             "sort_merge_parallelism": 8,
             "final_file_bytes": 268435456,
-            "gc_log": True,
-            "jfr": True,
+            "gc_log": "on",
+            "jfr": "on",
         },
     )
     argv = adapter.compile(request)
@@ -1201,28 +1201,29 @@ def test_swath_renders_jvm_recordings_and_the_sorted_final_size_into_java_tool_o
         return adapter.build_env(request)["JAVA_TOOL_OPTIONS"].split(" ")
 
     share = f"-XX:MaxRAMPercentage={HEAP_PERCENT}"
-    assert options({"gc_log": True}) == [
+    assert options({"gc_log": "on"}) == [
         share,
         f"-Xlog:gc*:file={SINK}/swath-gc.log:time,uptime,level,tags:filecount=0",
     ]
-    jfr = options({"jfr": True})
+    jfr = options({"jfr": "on"})
     assert jfr[0] == share and len(jfr) == 2
     assert jfr[1].startswith("-XX:StartFlightRecording=") and f"filename={SINK}/swath.jfr" in jfr[1]
-    assert options({"gc_log": False, "jfr": False}) == [share]
+    assert options({"gc_log": "off", "jfr": "off"}) == [share]
 
 
 @pytest.mark.parametrize(
     ("mode", "config", "message"),
     [
-        ("recursive-tsv", {"gc_log": True}, "prints its listing on stdout"),
-        ("recursive-jsonl", {"jfr": True}, "prints its listing on stdout"),
+        ("recursive-tsv", {"gc_log": "on"}, "prints its listing on stdout"),
+        ("recursive-jsonl", {"jfr": "on"}, "prints its listing on stdout"),
         ("recursive-parquet", {"final_file_bytes": 1 << 28}, "final_file_bytes"),
         ("recursive-tsv-zstd", {"final_file_bytes": 1 << 28}, "final_file_bytes"),
         ("recursive-parquet-sorted", {"final_file_bytes": 0}, "positive integer"),
         ("recursive-parquet-sorted", {"final_file_bytes": "256m"}, "positive integer"),
         ("recursive-parquet-sorted", {"final_file_bytes": True}, "positive integer"),
-        ("recursive-parquet-sorted", {"gc_log": "true"}, "true or false"),
-        ("recursive-parquet-sorted", {"jfr": 1}, "true or false"),
+        ("recursive-parquet-sorted", {"gc_log": True}, "'on' or 'off'"),
+        ("recursive-parquet-sorted", {"gc_log": "true"}, "'on' or 'off'"),
+        ("recursive-parquet-sorted", {"jfr": 1}, "'on' or 'off'"),
     ],
 )
 def test_swath_refuses_a_misplaced_or_malformed_jvm_control(
@@ -1247,7 +1248,7 @@ def test_swath_refuses_a_recording_it_cannot_place_or_a_jfr_on_a_signed_case() -
                     REGION,
                     tool="swath",
                     sink_dir=sink,
-                    config={"gc_log": True},
+                    config={"gc_log": "on"},
                 )
             )
     signed = CommandRequest(
@@ -1257,7 +1258,7 @@ def test_swath_refuses_a_recording_it_cannot_place_or_a_jfr_on_a_signed_case() -
         tool="swath",
         sink_dir=SINK,
         signed=True,
-        config={"jfr": True},
+        config={"jfr": "on"},
     )
     with pytest.raises(CommandAdapterError, match="signed"):
         adapter.build_env(signed)
