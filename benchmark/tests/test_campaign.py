@@ -15,17 +15,20 @@ import sqlite3
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, TypeVar, cast
 
 import pytest
+import yaml
 from google.api_core.exceptions import AlreadyExists, BadRequest, GoogleAPIError, NotFound
 from google.cloud import batch_v1
 
 from benchmark import adapters, batch_client, campaign, gcs, identity, ledger, measure, report
 from benchmark import plan as bench
+from benchmark import replay as replay_contract
 from benchmark.contract import CREDENTIAL_ENV_VAR, TOOLBOX_TOOLS
 from benchmark.drivers import gcp_batch
 from benchmark.plan import Case, Plan
+from benchmark.replay import ReplayConfig, ReplayPlan
 from benchmark.runtime.command_adapter import HEAP_PERCENT
 
 ROOT = Path(__file__).parents[2]
@@ -271,7 +274,8 @@ def test_replay_case_slot_attempt_and_request_keep_one_canonical_document(
     ]
     assert subject["container"]["options"] == (
         "--network host --cpuset-cpus=1 --memory=2g --memory-swap=2g "
-        "--volume=/mnt/stateful_partition/attempt:/tmp/attempt"
+        "--volume=/mnt/stateful_partition/attempt:/tmp/attempt "
+        "--volume=/proc:/replay-host-proc:ro"
     )
     uncapped = replace(attempt, container_memory_gb=None)
     uncapped_request = gcp_batch.render_batch_job(
@@ -279,7 +283,8 @@ def test_replay_case_slot_attempt_and_request_keep_one_canonical_document(
     )
     uncapped_subject = uncapped_request["taskGroups"][0]["taskSpec"]["runnables"][-1]
     assert uncapped_subject["container"]["options"] == (
-        "--network host --cpuset-cpus=1 --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
+        "--network host --cpuset-cpus=1 --volume=/mnt/stateful_partition/attempt:/tmp/attempt "
+        "--volume=/proc:/replay-host-proc:ro"
     )
     uncapped_commands = uncapped_subject["container"]["commands"]
     assert uncapped_commands[uncapped_commands.index("--container-memory-gb") + 1] == "none"
@@ -674,6 +679,28 @@ def test_a_preparation_attempt_always_retains_products(tmp_path: Path) -> None:
     assert retain_products_flag(preparation, retain_products=False) == "true"
     # The operator flag still works, and does not double up with purpose.
     assert retain_products_flag(preparation, retain_products=True) == "true"
+
+
+def test_dry_run_allocates_distinct_ordinals_for_repetitions(tmp_path: Path) -> None:
+    plan = Plan.load(REPLAY_CANARY)
+    case = plan.cases[0]
+    images = image_set(tmp_path)
+    launch = context(plan, case, images)
+    lines = campaign.render_launch(
+        [campaign.Step(case, None), campaign.Step(case, None)],
+        suite=SUITE,
+        group_id="repetitions",
+        plan=plan,
+        image_set=images,
+        results_bucket="results",
+        options=launch.options,
+    )
+    first, second = [line.split(" ", 2) for line in lines]
+    assert first[0].endswith(".s1")
+    assert second[0].endswith(".s2")
+    assert first[1] != second[1]
+    for attempt, _, request in (first, second):
+        assert gcp_batch.request_argument(json.loads(request), "--attempt-id") == attempt
 
 
 def test_a_dry_run_renders_every_planned_attempt_and_writes_nothing(
@@ -2114,3 +2141,583 @@ def test_renderer_passes_a_stated_delimiter_width_to_the_server(tmp_path: Path) 
             options=context(plan, case, images).options,
         )
     )
+
+
+@pytest.mark.parametrize("prefetch,window_rows", [(True, "12500"), (False, "0")])
+def test_go_renderer_uses_go_flags_and_allocation_limits(
+    tmp_path: Path, prefetch: bool, window_rows: str
+) -> None:
+    plan = Plan.load(REPLAY_CANARY)
+    case = plan.cases[0]
+    images = image_set(tmp_path)
+    attempt = campaign.planned_attempt(case, context(plan, case, images))[2](1)[0]
+    replay = json.loads(attempt.replay or "null")
+    replay["backend"]["server_implementation"] = "go"
+    replay["backend"]["serving_mode"] = "sorted"
+    replay["allocation"].update(
+        replay_prefetch=prefetch,
+        replay_prefetch_max_windows=192,
+        replay_response_buffer_budget_bytes=1073741824,
+    )
+    stated = replace(attempt, replay=json.dumps(replay, sort_keys=True, separators=(",", ":")))
+    request = gcp_batch.render_batch_job(
+        stated,
+        images.image_for(case.tool),
+        suite=SUITE,
+        options=context(plan, case, images).options,
+    )
+    server = request["taskGroups"][0]["taskSpec"]["runnables"][2]
+    commands = server["container"]["commands"]
+    assert "--delimiter-connections" not in commands
+    assert commands[commands.index("--prefetch-window-rows") + 1] == window_rows
+    assert commands[commands.index("--prefetch-max-windows") + 1] == "192"
+    assert commands[commands.index("--response-buffer-budget") + 1] == "1073741824"
+    allocation = replay["allocation"]
+    assert server["environment"]["variables"] == {
+        "GOMAXPROCS": str(allocation["replay_vcpus"]),
+        "GOMEMLIMIT": str(
+            allocation["replay_memory_gb"] * 1024**3 * allocation["replay_heap_percent"] // 100
+        ),
+    }
+
+
+WAVE2 = ROOT / "benchmark/plans/campaigns/go-replay-qualification-2"
+WAVE3 = ROOT / "benchmark/plans/campaigns/go-replay-qualification-3"
+SEEKPARQUET_ROOT = "gs://fixtures/aws-public-blockchain/seekparquet-c4a42eb4e7fb/"
+
+
+def _seekparquet_dataset(root: Path) -> tuple[str, str]:
+    """A converted dataset on disk: manifest digest and its adopted Java-era digest."""
+    (root / "data").mkdir(parents=True)
+    parts, adopted = [], []
+    for index in range(2):
+        name = f"part-{index:05d}.parquet"
+        converted, original = b"seekparquet %d" % index, b"java-era %d" % index
+        (root / "data" / name).write_bytes(converted)
+        parts.append(
+            {
+                "path": f"data/{name}",
+                "bytes": len(converted),
+                "sha256": hashlib.sha256(converted).hexdigest(),
+            }
+        )
+        adopted.append(
+            {
+                "input": name,
+                "input_bytes": len(original),
+                "input_sha256": hashlib.sha256(original).hexdigest(),
+            }
+        )
+    manifest = json.dumps(
+        {
+            "format": "seekparquet",
+            "parts": parts,
+            "extensions": {"swath-replay": {"adopted_from": {"parts": adopted}}},
+        }
+    ).encode()
+    (root / "manifest.json").write_bytes(manifest)
+    rows = "".join(
+        sorted(f"{a['input']}\t{a['input_bytes']}\t{a['input_sha256']}\n" for a in adopted)
+    )
+    return hashlib.sha256(manifest).hexdigest(), hashlib.sha256(rows.encode()).hexdigest()
+
+
+def _go_seekparquet_attempt(
+    tmp_path: Path, *, manifest_sha256: str, adopted_sha256: str, **allocation: object
+) -> tuple[ledger.Attempt, campaign.ImageSet, gcp_batch.BatchOptions]:
+    attempt, images, options, _ = _fixture_backed_attempt(
+        tmp_path, tool="s3-fast-list", mode="list-hinted-fixture"
+    )
+    replay = json.loads(attempt.replay or "null")
+    replay["backend"].update(
+        server_implementation="go",
+        serving_mode="sorted",
+        fixture_uri=SEEKPARQUET_ROOT,
+        fixture_sha256=manifest_sha256,
+        fixture_adopted_sha256=adopted_sha256,
+    )
+    replay["allocation"].update(allocation)
+    config = json.loads(attempt.config)
+    config["hints_file_sha256"] = "c" * 64
+    respelled = replace(
+        attempt,
+        config=json.dumps(config, sort_keys=True, separators=(",", ":")),
+        replay=json.dumps(replay, sort_keys=True, separators=(",", ":")),
+    )
+    return respelled, images, options
+
+
+def _run_staging(script: str, tmp_path: Path, bucket_root: Path) -> tuple[int, Path, str]:
+    """Run a rendered staging script with GCS replaced by a local copy.
+
+    Only the transport is local: `gcloud storage cp gs://X Y` copies
+    `bucket_root/X` to `Y`. Every digest, layout and manifest check is the
+    rendered script's own.
+    """
+    import shutil
+    import subprocess
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    gcloud = bin_dir / "gcloud"
+    gcloud.write_text(
+        "#!/bin/bash\nset -eu\n"
+        '[[ "$1 $2" == "storage cp" ]]\n'
+        'src="${3#gs://}"; dst="$4"\n'
+        '[[ "$dst" == */ ]] && dst="$dst${src##*/}"\n'
+        f'cp "{bucket_root}/$src" "$dst"\n'
+    )
+    gcloud.chmod(0o755)
+    staged = tmp_path / "staged"
+    script = script.replace(gcp_batch.REPLAY_FIXTURE_CONTAINER_DIR, str(staged))
+    python = shutil.which("python3") or "python3"
+    completed = subprocess.run(
+        ["bash", "-ceu", script],
+        env={"PATH": f"{bin_dir}:/usr/bin:/bin", "CLOUDSDK_PYTHON": python},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return completed.returncode, staged, completed.stderr
+
+
+def test_seekparquet_fixture_renders_go_list_index_and_stages_the_dataset_layout(
+    tmp_path: Path,
+) -> None:
+    bucket_root = tmp_path / "gcs"
+    dataset = bucket_root / SEEKPARQUET_ROOT.removeprefix("gs://")
+    manifest_sha256, adopted_sha256 = _seekparquet_dataset(dataset)
+    (dataset / "s3-fast-list-hints.input").write_text("a/\n")
+    attempt, images, options = _go_seekparquet_attempt(
+        tmp_path,
+        manifest_sha256=manifest_sha256,
+        adopted_sha256=adopted_sha256,
+        replay_list_index=True,
+        replay_list_index_max_bytes=67108864,
+    )
+    hints_sha256 = hashlib.sha256(b"a/\n").hexdigest()
+    config = json.loads(attempt.config)
+    config["hints_file_sha256"] = hints_sha256
+    attempt = replace(attempt, config=json.dumps(config, sort_keys=True, separators=(",", ":")))
+
+    request = gcp_batch.render_batch_job(
+        attempt, images.image_for("s3-fast-list"), suite=SUITE, options=options
+    )
+
+    runnables = request["taskGroups"][0]["taskSpec"]["runnables"]
+    server = runnables[2]["container"]["commands"]
+    assert server[server.index("--fixture") + 1] == gcp_batch.REPLAY_FIXTURE_CONTAINER_DIR
+    assert "--list-index=true" in server
+    assert server[server.index("--list-index-max-bytes") + 1] == "67108864"
+    script = runnables[0]["container"]["commands"][1]
+    # The companion resolves at the dataset root, beside manifest.json.
+    assert f"{SEEKPARQUET_ROOT}s3-fast-list-hints.input" in script
+
+    code, staged, stderr = _run_staging(script, tmp_path, bucket_root)
+    assert code == 0, stderr
+    assert sorted(str(path.relative_to(staged)) for path in staged.rglob("*")) == [
+        "data",
+        "data/part-00000.parquet",
+        "data/part-00001.parquet",
+        "manifest.json",
+        "s3-fast-list-hints.input",
+    ]
+
+
+@pytest.mark.parametrize("tamper", ("manifest", "part", "extra-part", "adopted"))
+def test_seekparquet_staging_refuses_bytes_outside_the_recorded_identity(
+    tmp_path: Path, tamper: str
+) -> None:
+    bucket_root = tmp_path / "gcs"
+    dataset = bucket_root / SEEKPARQUET_ROOT.removeprefix("gs://")
+    manifest_sha256, adopted_sha256 = _seekparquet_dataset(dataset)
+    if tamper == "manifest":
+        manifest_sha256 = "0" * 64
+    elif tamper == "part":
+        (dataset / "data" / "part-00001.parquet").write_bytes(b"changed")
+    elif tamper == "adopted":
+        adopted_sha256 = "0" * 64
+    script = gcp_batch._fixture_staging_script(
+        SEEKPARQUET_ROOT, manifest_sha256, adopted_sha256=adopted_sha256
+    )
+    if tamper == "extra-part":
+        # A part the manifest does not name is never downloaded; one already in
+        # the staging directory is refused rather than served.
+        staged_data = tmp_path / "staged" / "data"
+        staged_data.mkdir(parents=True)
+        (staged_data / "part-00009.parquet").write_bytes(b"stray")
+
+    code, _staged, stderr = _run_staging(script, tmp_path, bucket_root)
+
+    assert code != 0
+    assert "mismatch" in stderr or "does not match" in stderr or "differ" in stderr
+
+
+def test_java_era_fixture_render_is_unchanged_by_the_seekparquet_branch(tmp_path: Path) -> None:
+    attempt, images, options, _ = _fixture_backed_attempt(
+        tmp_path, tool="s3-fast-list", mode="list-hinted-fixture"
+    )
+    config = json.loads(attempt.config)
+    config["hints_file_sha256"] = "c" * 64
+    attempt = replace(attempt, config=json.dumps(config, sort_keys=True, separators=(",", ":")))
+    script = gcp_batch.render_batch_job(
+        attempt, images.image_for("s3-fast-list"), suite=SUITE, options=options
+    )["taskGroups"][0]["taskSpec"]["runnables"][0]["container"]["commands"][1]
+    assert "gcloud storage cp 'gs://fixtures/case/part-*.parquet' /fixtures/source/" in script
+    assert "gs://fixtures/case/s3-fast-list-hints.input" in script
+    assert "manifest.json" not in script
+
+
+def _wave2_plans() -> list[Path]:
+    # A follow-up beyond the wave (``followup-*``) is a separate, Java-era-fixture cell.
+    return sorted(
+        path for path in WAVE2.glob("*/*.yaml") if not path.parent.name.startswith("followup-")
+    )
+
+
+WAVE2_REPLAY_IMAGE = (
+    "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:"
+    "3b3584460761de559c07e73b79c4aa7bffd77318108fdbf12ae36c41a98933b5"
+)
+
+
+def test_wave2_plans_render_the_pinned_list_index_image(tmp_path: Path) -> None:
+    """Drift guard on the committed wave-2 plans: every row renders the Go list-index
+    contract over its SeekParquet root with the pinned swath 545a10cb image."""
+    images = image_set(tmp_path)
+    assert len(_wave2_plans()) == 6
+    attempts = 0
+    for path in _wave2_plans():
+        plan = campaign.load_campaign_plan(path)
+        assert plan.replay is not None and not plan.replay.backend.image_is_placeholder
+        assert plan.replay.backend.fixture_layout == "seekparquet"
+        assert plan.replay.backend.fixture_adopted_sha256 is not None
+        campaign.refuse_placeholder_images(plan)
+        for case in plan.cases:
+            assert case.replay is not None
+            index_on = path.parent.name != "blockchain-swath-go-index-off"
+            assert case.replay.list_index_enabled is index_on
+            for ordinal in range(1, case.reps + 1):
+                attempt = campaign.planned_attempt(case, context(plan, case, images))[2](ordinal)[0]
+                request = gcp_batch.render_batch_job(
+                    attempt,
+                    images.image_for(case.tool),
+                    suite=SUITE,
+                    options=context(plan, case, images).options,
+                )
+                server = request["taskGroups"][0]["taskSpec"]["runnables"][2]["container"]
+                assert server["imageUri"] == WAVE2_REPLAY_IMAGE
+                assert f"--list-index={str(index_on).lower()}" in server["commands"]
+                if not index_on:
+                    assert "--list-index-max-bytes" not in server["commands"]
+                attempts += 1
+    assert attempts == 7
+
+
+def test_submit_refuses_a_placeholder_image_before_touching_a_ledger(tmp_path: Path) -> None:
+    source = _wave2_plans()[0]
+    placeholder = tmp_path / source.parent.name / source.name
+    placeholder.parent.mkdir()
+    placeholder.write_text(
+        source.read_text().replace(WAVE2_REPLAY_IMAGE.split("@")[1], "sha256:REPLAY_GO_IMAGE_TBD")
+    )
+    args = argparse.Namespace(
+        executor="gcp-batch",
+        image=None,
+        results_root=None,
+        seed=None,
+        repeat=False,
+        skip_measured=False,
+        suite=SUITE,
+        plan=str(placeholder),
+        dry_run=False,
+        state=str(tmp_path / "campaign.db"),
+    )
+    with pytest.raises(ledger.CampaignError, match="placeholder"):
+        campaign.cmd_submit(args)
+    assert not (tmp_path / "campaign.db").exists()
+
+
+def _wave3_plans() -> list[Path]:
+    return sorted(WAVE3.glob("*/*.yaml"))
+
+
+_R = TypeVar("_R", ReplayPlan, ReplayConfig)
+
+
+def _with_wave2_image(config: _R) -> _R:
+    return replace(config, backend=replace(config.backend, server_image_uri=WAVE2_REPLAY_IMAGE))
+
+
+def test_wave3_plans_differ_from_their_wave2_cells_only_in_the_replay_image() -> None:
+    """One variable: each wave-3 plan resolves to wave 2's cases of the same name
+    once the server image is set back to wave 2's pinned digest."""
+    assert [path.parent.name for path in _wave3_plans()] == [
+        "blockchain-ladder-go",
+        "blockchain-swath-go",
+        "blockchain-swath-go-index-off",
+    ]
+    for path in _wave3_plans():
+        wave3 = campaign.load_campaign_plan(path)
+        wave2 = campaign.load_campaign_plan(WAVE2 / path.parent.name / path.name)
+        assert wave3.replay is not None and wave2.replay is not None
+        assert wave2.replay.backend.server_image_uri == WAVE2_REPLAY_IMAGE
+        assert wave3.replay.backend.server_image_uri == WAVE3_REPLAY_IMAGE
+        assert _with_wave2_image(wave3.replay) == wave2.replay
+        assert len(wave3.cases) == len(wave2.cases) == 1
+        for case3, case2 in zip(wave3.cases, wave2.cases, strict=True):
+            assert case3.replay is not None
+            assert replace(case3, replay=_with_wave2_image(case3.replay)) == case2
+
+
+WAVE3_REPLAY_IMAGE = (
+    "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:"
+    "f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90"
+)
+
+
+def test_wave3_plans_render_the_pinned_window_fill_image(tmp_path: Path) -> None:
+    """Drift guard on the committed wave-3 plans: four blockchain Swath c256 attempts
+    (64/20 index on twice, 64/20 index off once, 16/5 index on once) render over the
+    SeekParquet root with the pinned swath 43ffab2f image."""
+    images = image_set(tmp_path)
+    allocations = []
+    for path in _wave3_plans():
+        plan = campaign.load_campaign_plan(path)
+        assert plan.replay is not None and not plan.replay.backend.image_is_placeholder
+        assert plan.replay.backend.fixture_layout == "seekparquet"
+        assert plan.replay.backend.fixture_adopted_sha256 is not None
+        campaign.refuse_placeholder_images(plan)
+        for case in plan.cases:
+            assert case.replay is not None
+            index_on = path.parent.name != "blockchain-swath-go-index-off"
+            assert case.replay.list_index_enabled is index_on
+            for ordinal in range(1, case.reps + 1):
+                attempt = campaign.planned_attempt(case, context(plan, case, images))[2](ordinal)[0]
+                request = gcp_batch.render_batch_job(
+                    attempt,
+                    images.image_for(case.tool),
+                    suite=SUITE,
+                    options=context(plan, case, images).options,
+                )
+                server = request["taskGroups"][0]["taskSpec"]["runnables"][2]["container"]
+                assert server["imageUri"] == WAVE3_REPLAY_IMAGE
+                assert f"--list-index={str(index_on).lower()}" in server["commands"]
+                if not index_on:
+                    assert "--list-index-max-bytes" not in server["commands"]
+                allocation = json.loads(attempt.replay or "null")["allocation"]
+                allocations.append(
+                    (allocation["replay_vcpus"], allocation["replay_memory_gb"], index_on)
+                )
+    assert sorted(allocations) == [(16, 5, True), (64, 20, False), (64, 20, True), (64, 20, True)]
+
+
+WAVE4 = ROOT / "benchmark/plans/campaigns/go-replay-qualification-4"
+# Each wave-4 plan: its counterpart plan, then the host vCPUs, replay vCPUs, replay
+# GiB and repetitions it declares. Blockchain's counterpart is wave 3's 16/5 rung
+# (same image); NARA and FourCast last ran in wave 2, on the wave-2 image, so each
+# gets a same-image control at its wave-2 allocation.
+WAVE4_CONTROLS = {
+    "fourcast-s5cmd-go-8-8": (WAVE2 / "fourcast-s5cmd-go", 16, 8, 8, 1),
+    "nara-s7cmd-go-20-20": (WAVE2 / "nara-s7cmd-go", 32, 20, 20, 1),
+    "nara-swath-go-20-20": (WAVE2 / "nara-swath-go", 32, 20, 20, 1),
+}
+WAVE4_CELLS = {
+    **WAVE4_CONTROLS,
+    "blockchain-swath-go-16-5": (WAVE3 / "blockchain-ladder-go", 32, 16, 5, 2),
+    "blockchain-swath-go-8-4": (WAVE3 / "blockchain-ladder-go", 32, 8, 4, 1),
+    "fourcast-s5cmd-go-8-4": (WAVE2 / "fourcast-s5cmd-go", 16, 8, 4, 1),
+    "nara-s7cmd-go-16-5": (WAVE2 / "nara-s7cmd-go", 32, 16, 5, 1),
+    "nara-s7cmd-go-8-4": (WAVE2 / "nara-s7cmd-go", 32, 8, 4, 1),
+    "nara-swath-go-16-5": (WAVE2 / "nara-swath-go", 32, 16, 5, 1),
+    "nara-swath-go-8-4": (WAVE2 / "nara-swath-go", 32, 8, 4, 1),
+}
+
+
+def _wave4_plans() -> list[Path]:
+    return sorted(WAVE4.glob("*/*.yaml"))
+
+
+def _with_wave3_image(config: _R) -> _R:
+    return replace(config, backend=replace(config.backend, server_image_uri=WAVE3_REPLAY_IMAGE))
+
+
+def test_wave4_plans_differ_from_their_counterparts_only_in_replay_allocation_and_host() -> None:
+    """One variable: each wave-4 case is its wave-3 (blockchain) or wave-2 (NARA, FourCast)
+    case once the replay vCPUs and memory, the host shape and the repetitions are set
+    back, with every counterpart moved to wave 3's server image."""
+    assert [path.parent.name for path in _wave4_plans()] == sorted(WAVE4_CELLS)
+    for path in _wave4_plans():
+        source, host_vcpus, replay_vcpus, replay_memory_gb, reps = WAVE4_CELLS[path.parent.name]
+        wave4 = campaign.load_campaign_plan(path)
+        counterpart = campaign.load_campaign_plan(source / path.name)
+        assert wave4.replay is not None and counterpart.replay is not None
+        assert wave4.replay.backend.server_image_uri == WAVE3_REPLAY_IMAGE
+        assert counterpart.replay.backend.server_image_uri == (
+            WAVE3_REPLAY_IMAGE if source.parent == WAVE3 else WAVE2_REPLAY_IMAGE
+        )
+        assert wave4.replay == _with_wave3_image(counterpart.replay)
+        assert wave4.exclusions == counterpart.exclusions
+        assert len(wave4.cases) == len(counterpart.cases) == 1
+        for case4, case in zip(wave4.cases, counterpart.cases, strict=True):
+            assert case4.replay is not None and case.replay is not None
+            assert case4.replay.list_index_enabled is True
+            moved: dict[str, int] = {
+                "replay_vcpus": replay_vcpus,
+                "replay_memory_gb": replay_memory_gb,
+            }
+            expected = replace(
+                case,
+                resources=replace(
+                    case.resources,
+                    vcpus=host_vcpus,
+                    memory_gb=2 * host_vcpus,
+                    machine_type=f"n4-highcpu-{host_vcpus}",
+                ),
+                reps=reps,
+                axes=tuple((key, moved.get(key, value)) for key, value in case.axes),
+                label=case4.label,
+                replay=_with_wave3_image(
+                    replace(
+                        case.replay,
+                        allocation=replace(
+                            case.replay.allocation,
+                            replay_vcpus=replay_vcpus,
+                            replay_memory_gb=replay_memory_gb,
+                        ),
+                    )
+                ),
+            )
+            assert case4 == expected
+
+
+def test_wave4_controls_differ_from_their_wave2_cells_only_in_the_replay_image() -> None:
+    """Each same-image control is its wave-2 case with only wave 3's server image, and
+    every downsized NARA or FourCast rung has the control of its own cell."""
+    for name, (source, *_) in WAVE4_CONTROLS.items():
+        (path,) = (WAVE4 / name).glob("*.yaml")
+        control = campaign.load_campaign_plan(path)
+        wave2 = campaign.load_campaign_plan(source / path.name)
+        assert control.replay is not None and wave2.replay is not None
+        assert _with_wave2_image(control.replay) == wave2.replay
+        for case4, case2 in zip(control.cases, wave2.cases, strict=True):
+            assert case4.replay is not None
+            assert replace(case4, replay=_with_wave2_image(case4.replay)) == case2
+    wave2_cells = {source for source, *_ in WAVE4_CELLS.values() if source.parent == WAVE2}
+    assert wave2_cells == {source for source, *_ in WAVE4_CONTROLS.values()}
+
+
+def test_wave4_readme_stages_submit_every_plan_once() -> None:
+    """The README's staged submit loop names every wave-4 plan exactly once, with the
+    controls and the blockchain 16/5 pair in stage A."""
+    readme = (WAVE4 / "README.md").read_text()
+    stages = {}
+    for stage in ("STAGE_A", "STAGE_B"):
+        (line,) = [row for row in readme.splitlines() if row.startswith(f"{stage}=(")]
+        stages[stage] = line.split("(", 1)[1].rstrip(")").split()
+    assert sorted(stages["STAGE_A"] + stages["STAGE_B"]) == sorted(WAVE4_CELLS)
+    assert sorted(stages["STAGE_A"]) == sorted([*WAVE4_CONTROLS, "blockchain-swath-go-16-5"])
+
+
+def test_wave4_hosts_are_the_smallest_n4_highcpu_shape_that_fits() -> None:
+    """Every smaller N4 highcpu box in the catalogue refuses the wave-4 allocation, so
+    the declared host is the smallest one the subject and replay cpusets fit."""
+    instances = yaml.safe_load((ROOT / "benchmark/plans/instances.yaml").read_text())
+    highcpu = sorted(
+        (row["vcpus"], row["memory_gb"])
+        for row in instances["instances"]
+        if row["machine_type"].startswith("n4-highcpu-")
+    )
+    for path in _wave4_plans():
+        (case,) = campaign.load_campaign_plan(path).cases
+        assert case.replay is not None
+        replay_contract.allocation_summary(
+            case.replay,
+            box_vcpus=case.resources.vcpus,
+            box_memory_gb=case.resources.memory_gb,
+            container_memory_gb=case.resources.container_memory_gb,
+        )
+        for vcpus, memory_gb in highcpu:
+            if vcpus >= case.resources.vcpus:
+                break
+            with pytest.raises(replay_contract.ReplayError):
+                replay_contract.allocation_summary(
+                    case.replay,
+                    box_vcpus=vcpus,
+                    box_memory_gb=memory_gb,
+                    container_memory_gb=case.resources.container_memory_gb,
+                )
+
+
+def test_wave4_plans_render_the_downsized_replay_on_the_declared_hosts(tmp_path: Path) -> None:
+    """Dry render of the committed wave-4 plans: eleven attempts on wave 3's image with
+    the list index on; the server gets the declared cpuset and memory, and the subject
+    keeps its vCPU count as whole N4 cores and its memory ceiling."""
+    images = image_set(tmp_path)
+    rendered = []
+    for path in _wave4_plans():
+        _, host_vcpus, replay_vcpus, replay_memory_gb, _ = WAVE4_CELLS[path.parent.name]
+        plan = campaign.load_campaign_plan(path)
+        assert plan.replay is not None and not plan.replay.backend.image_is_placeholder
+        assert plan.replay.backend.fixture_layout == "seekparquet"
+        campaign.refuse_placeholder_images(plan)
+        for case in plan.cases:
+            assert case.replay is not None
+            subject_vcpus = case.replay.allocation.subject_vcpus
+            for ordinal in range(1, case.reps + 1):
+                attempt = campaign.planned_attempt(case, context(plan, case, images))[2](ordinal)[0]
+                request = gcp_batch.render_batch_job(
+                    attempt,
+                    images.image_for(case.tool),
+                    suite=SUITE,
+                    options=context(plan, case, images).options,
+                )
+                policy = request["allocationPolicy"]["instances"][0]["policy"]
+                assert policy["machineType"] == f"n4-highcpu-{host_vcpus}"
+                runnables = request["taskGroups"][0]["taskSpec"]["runnables"]
+                server, subject = runnables[2], runnables[3]["container"]
+                assert server["container"]["imageUri"] == WAVE3_REPLAY_IMAGE
+                assert "--list-index=true" in server["container"]["commands"]
+                assert server["environment"]["variables"]["GOMAXPROCS"] == str(replay_vcpus)
+                assert f"--memory={replay_memory_gb}g" in server["container"]["options"]
+                assert f"--memory={case.resources.container_memory_gb}g" in subject["options"]
+                cpus = {
+                    name: replay_cpuset(options)
+                    for name, options in (
+                        ("server", server["container"]["options"]),
+                        ("subject", subject["options"]),
+                    )
+                }
+                assert len(cpus["server"]) == replay_vcpus
+                assert len(cpus["subject"]) == subject_vcpus
+                assert not cpus["server"] & cpus["subject"]
+                stride = host_vcpus // 2
+                cores = {cpu % stride for cpu in cpus["subject"]}
+                assert len(cores) == (subject_vcpus + 1) // 2
+                assert not cores & {cpu % stride for cpu in cpus["server"]}
+                rendered.append((path.parent.name, replay_vcpus, replay_memory_gb, host_vcpus))
+    assert sorted(rendered) == sorted(
+        [
+            ("blockchain-swath-go-16-5", 16, 5, 32),
+            ("blockchain-swath-go-16-5", 16, 5, 32),
+            ("blockchain-swath-go-8-4", 8, 4, 32),
+            ("fourcast-s5cmd-go-8-4", 8, 4, 16),
+            ("fourcast-s5cmd-go-8-8", 8, 8, 16),
+            ("nara-s7cmd-go-20-20", 20, 20, 32),
+            ("nara-swath-go-20-20", 20, 20, 32),
+            ("nara-s7cmd-go-16-5", 16, 5, 32),
+            ("nara-s7cmd-go-8-4", 8, 4, 32),
+            ("nara-swath-go-16-5", 16, 5, 32),
+            ("nara-swath-go-8-4", 8, 4, 32),
+        ]
+    )
+
+
+def replay_cpuset(options: str) -> set[int]:
+    """The CPUs a rendered ``--cpuset-cpus=`` option names."""
+    (spec,) = [item.split("=", 1)[1] for item in options.split() if item.startswith("--cpuset")]
+    cpus: set[int] = set()
+    for part in spec.split(","):
+        low, _, high = part.partition("-")
+        cpus.update(range(int(low), int(high or low) + 1))
+    return cpus

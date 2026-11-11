@@ -214,6 +214,20 @@ def load_campaign_plan(
     return loaded
 
 
+def refuse_placeholder_images(loaded: Plan) -> None:
+    """Refuse to create jobs for a plan whose replay server image is not built yet.
+
+    A plan may carry ``...@sha256:REPLAY_GO_IMAGE_TBD`` so it can be reviewed and
+    dry-rendered before the server image exists. Submission needs the digest.
+    """
+    if loaded.replay is not None and loaded.replay.backend.image_is_placeholder:
+        raise CampaignError(
+            f"replay server_image_uri {loaded.replay.backend.server_image_uri!r} is the "
+            f"{replay_contract.REPLAY_IMAGE_PLACEHOLDER} placeholder; pin the built image "
+            "digest before submitting (dry-run only until then)"
+        )
+
+
 def job_name_for(suite: str, case_id: str, attempt: int) -> str:
     """`<suite>-<tool>-<hash12>-s<attempt>`, which is what `gcloud` is given.
 
@@ -1410,6 +1424,7 @@ def render_launch(
     expanded = list(steps)
     lines: list[str] = []
     booked: dict[int, str] = {}
+    ordinals: dict[str, int] = {}
     slot = 0
     for index, step in enumerate(expanded):
         if step.waits_for is None:
@@ -1422,8 +1437,9 @@ def render_launch(
                 results_bucket=results_bucket,
                 options=options,
             )
-            _, _, build = planned_attempt(step.case, context)
-            attempt, request = build(1)
+            case_id, _, build = planned_attempt(step.case, context)
+            ordinals[case_id] = ordinals.get(case_id, 0) + 1
+            attempt, request = build(ordinals[case_id])
             lines.append(f"{attempt.attempt_id} {attempt.job_name} {request}")
             continue
         slot += 1
@@ -1465,6 +1481,8 @@ def cmd_submit(args: argparse.Namespace) -> int:
         Path(args.plan),
         allow_s4cmd_canary=getattr(args, "allow_retired_s4cmd_s3_canary", False),
     )
+    if not args.dry_run:
+        refuse_placeholder_images(loaded)
     cases = selected_cases(loaded.cases, args.case)
     from benchmark.drivers.gcp_batch import _options
 

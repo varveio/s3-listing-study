@@ -1,0 +1,68 @@
+# Input cell: release swath.d8cacc6c9bd2.s1. Fresh paired runs; diagnostic qualification only.
+spec_version: 3
+bucket: nara-1950-census
+region: us-east-2
+auth_role: public-read
+replay:
+  capacity_status: uncalibrated
+  fixture_sha256: 48468b7c1ea8bf657fcb089dbcb1d940d3af62b748a7cb66f6dccc8876905db4
+  fixture_uri: gs://s3-listing-study-results-29c02004/fixtures/nara-1950-census/current-eba31d9/part-*.parquet
+  latency_model:
+    deadlines_ms:
+      pivot_probe: 44
+      structure_probe: 50
+      worker_page: 86
+    jitter: none
+    scale: 1.0
+  server_image_uri: us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:38ea98e22d01d421f5965cf87a3bd4f483d713b6f8d543999247b83dd38eafed
+  serving_mode: sorted
+  server_implementation: go
+defaults:
+  reps: 2
+  timeout_s: 1800
+  vcpus: 32
+  memory_gb: 64
+  container_memory_gb: 8
+  replay_heap_percent: 75
+  replay_max_concurrent_requests: 4096
+  replay_memory_gb: 20
+  replay_parquet_connections: 64
+  replay_prefetch: true
+  replay_prefetch_max_windows: 192
+  replay_vcpus: 20
+  subject_vcpus: 8
+  replay_response_buffer_budget_bytes: 1073741824
+tools:
+  swath:
+    cases:
+    - mode: recursive-tsv-dataset
+      purpose: diagnostic
+      concurrency: 128
+      config:
+        jvm_max_heap: 4g
+        part_rotation_interval: '0'
+        part_rotation_max_rows: 0
+        text_part_size: 1gb
+        text_writers: 3
+        writeback_size: 32mb
+exclude:
+- tool: aws-cli
+  reason: Outside the bounded replay qualification cell
+- tool: minio-mc
+  reason: Outside the bounded replay qualification cell
+- tool: ps3
+  reason: Outside the bounded replay qualification cell
+- tool: rclone
+  reason: Outside the bounded replay qualification cell
+- tool: s3-fast-list
+  reason: Outside the bounded replay qualification cell
+- tool: s3kor
+  reason: Outside the bounded replay qualification cell
+- tool: s3p
+  reason: Outside the bounded replay qualification cell
+- tool: s4cmd
+  reason: Outside the bounded replay qualification cell
+- tool: s5cmd
+  reason: Outside the bounded replay qualification cell
+- tool: s7cmd
+  reason: Outside the bounded replay qualification cell

@@ -13,6 +13,7 @@ import pytest
 
 import benchmark.plan as bench
 import benchmark.plan_cli as bench_cli
+import benchmark.replay as replay_contract
 from benchmark.runtime import command_adapter as capsule
 
 ROOT = Path(__file__).parents[2]
@@ -988,6 +989,9 @@ def test_every_key_a_row_may_state_changes_the_case_it_resolves_to(tmp_path: Pat
         "replay_prefetch_max_windows": (96, 1024),
         "replay_heap_percent": (50, 75),
         "replay_delimiter_connections": (16, 32),
+        "replay_response_buffer_budget_bytes": (268435456, 1073741824),
+        "replay_list_index": (False, True),
+        "replay_list_index_max_bytes": (33554432, 67108864),
     }
     assert set(pairs) == set(bench.ROW_FIELDS), "a row key with no coverage here"
 
@@ -1079,7 +1083,13 @@ def test_every_key_a_row_may_state_changes_the_case_it_resolves_to(tmp_path: Pat
         document = document.replace("  vcpus: 2\n  memory_gb: 8\n", "  vcpus: 4\n  memory_gb: 16\n")
         document = document.replace("tools:\n", case_defaults + "tools:\n", 1)
         path.write_text(
-            "auth_role: fixture-role\n" + replay_block + document,
+            "auth_role: fixture-role\n"
+            + (
+                replay_block.replace("replay:\n", "replay:\n  server_implementation: go\n")
+                if field in replay_contract.GO_ONLY_ALLOCATION_FIELDS
+                else replay_block
+            )
+            + document,
             encoding="utf-8",
         )
         return load(path, adapters=adapters, instances={**INSTANCES, (6, 16): "six-vcpu"}).cases[0]
@@ -1299,7 +1309,7 @@ def test_a_tool_body_is_the_defaults_vocabulary_plus_its_rows() -> None:
     assert set(bench.ROW_FIELDS) & set(bench.LAYER_FIELDS) == {
         *bench.RESOURCE_FIELDS,
         *bench.REPLAY_FIELDS,
-        *bench.REPLAY_OPTIONAL_INTEGER_FIELDS,
+        *bench.REPLAY_OPTIONAL_ALLOCATION_FIELDS,
         "signed",
     }
 

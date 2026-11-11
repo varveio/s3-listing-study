@@ -1,0 +1,74 @@
+[
+  {
+    "attempt_id": "swath.5d9e6e396e48.s1",
+    "create_to_update_compute_usd": 0.1588307633893778,
+    "create_to_update_s": 316.451977,
+    "machine": "n4-highcpu-80",
+    "run_duration_compute_usd": 0.1285948676425653,
+    "run_duration_s": 256.21044204,
+    "state": "SUCCEEDED"
+  },
+  {
+    "attempt_id": "swath.954f110b5470.s1",
+    "create_to_update_compute_usd": 0.15031788868480003,
+    "create_to_update_s": 299.491056,
+    "machine": "n4-highcpu-80",
+    "run_duration_compute_usd": 0.12620308394068336,
+    "run_duration_s": 251.445088875,
+    "state": "SUCCEEDED"
+  },
+  {
+    "attempt_id": "swath.954f110b5470.s2",
+    "create_to_update_compute_usd": 0.16044188952355556,
+    "create_to_update_s": 319.66196,
+    "machine": "n4-highcpu-80",
+    "run_duration_compute_usd": 0.12994183057786055,
+    "run_duration_s": 258.894110334,
+    "state": "SUCCEEDED"
+  },
+  {
+    "attempt_id": "swath.2076e4dd8761.s1",
+    "create_to_update_compute_usd": 0.15902083612333334,
+    "create_to_update_s": 316.830675,
+    "machine": "n4-highcpu-80",
+    "run_duration_compute_usd": 0.1266619779122888,
+    "run_duration_s": 252.359382186,
+    "state": "SUCCEEDED"
+  },
+  {
+    "attempt_id": "swath.98f424ce32cc.s1",
+    "create_to_update_compute_usd": 0.14143478125675554,
+    "create_to_update_s": 281.792489,
+    "machine": "n4-highcpu-80",
+    "run_duration_compute_usd": 0.11829607576498288,
+    "run_duration_s": 235.691287055,
+    "state": "SUCCEEDED"
+  },
+  {
+    "attempt_id": "s5cmd.c6cfb2bf8dd8.s1",
+    "create_to_update_compute_usd": 0.05782115559087999,
+    "create_to_update_s": 576.009918,
+    "machine": "n4-highcpu-16",
+    "run_duration_compute_usd": 0.05156518016261025,
+    "run_duration_s": 513.688370521,
+    "state": "SUCCEEDED"
+  },
+  {
+    "attempt_id": "s7cmd.8b7670175058.s1",
+    "create_to_update_compute_usd": 0.1512753359264711,
+    "create_to_update_s": 753.496648,
+    "machine": "n4-highcpu-32",
+    "run_duration_compute_usd": 0.13799414114830766,
+    "run_duration_s": 687.343526042,
+    "state": "SUCCEEDED"
+  },
+  {
+    "attempt_id": "swath.773bf96d14ef.s1",
+    "create_to_update_compute_usd": 0.03802218467363555,
+    "create_to_update_s": 189.387044,
+    "machine": "n4-highcpu-32",
+    "run_duration_compute_usd": 0.025373422902289774,
+    "run_duration_s": 126.3840466,
+    "state": "SUCCEEDED"
+  }
+]

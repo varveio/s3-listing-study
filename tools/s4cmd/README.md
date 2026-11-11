@@ -20,7 +20,7 @@ s4cmd has no attempt in the release: the replay instrument serves `ListObjectsV2
 
 Largest fixture attempted: none. The report lists s4cmd in the roster with no attempt; that is a study decision, not a measured limit of the tool.
 
-A timing grade (`TIMING_VALID`, `PRESSURE_DEGRADED`, `CAPACITY_FAILED`, `INSUFFICIENT_EVIDENCE`, `NOT_APPLICABLE`) describes how well the replay instrument delivered its declared latency treatment on that row, not whether the tool succeeded; the definitions are in [`docs/instrument.md`](../../docs/instrument.md#how-a-release-grades-the-delivered-treatment).
+A timing grade (`TIMING_VALID`, `PRESSURE_DEGRADED`, `CAPACITY_FAILED`, `INSUFFICIENT_EVIDENCE`, `NOT_APPLICABLE`) is the replay instrument's server-work pressure check on that row, not whether the tool succeeded: it grades the server's per-request work against the declared latency, while admission queueing and the response write are not graded; the definitions are in [`docs/instrument.md`](../../docs/instrument.md#how-a-release-grades-the-delivered-treatment).
 
 Report: [`results/2026-09-scale-diagnostics/REPORT.md`](../../results/2026-09-scale-diagnostics/REPORT.md); findings page: [`RESULTS.md`](../../RESULTS.md); rows: [`results/2026-09-scale-diagnostics/attempts.jsonl`](../../results/2026-09-scale-diagnostics/attempts.jsonl).
 

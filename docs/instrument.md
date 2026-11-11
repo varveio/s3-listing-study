@@ -151,10 +151,13 @@ three small-directory fixtures (NARA, NBM, blockchain) failed the study's timing
 nothing, so the cost is per seek, not cold start. The numbers are in the
 [release report](../results/2026-09-scale-diagnostics/REPORT.md#the-instrument-in-this-release).
 
-## How a release grades the delivered treatment
+<a id="how-a-release-grades-the-delivered-treatment"></a>
 
-Declaring a deadline does not prove the server delivered it. Every
-latency-injected run is graded afterwards from the server's own meters:
+## How a release grades the injected latency
+
+Declaring a deadline does not prove the server kept to it. Every
+latency-injected run is graded afterwards from the server's own per-shape
+timers and overrun counters:
 
 | grade | meaning |
 | --- | --- |
@@ -164,6 +167,13 @@ latency-injected run is graded afterwards from the server's own meters:
 | `INSUFFICIENT_EVIDENCE` | too few meters or resource samples to grade |
 | `NOT_APPLICABLE` | no latency was injected |
 
-`TIMING_VALID` means the synthetic treatment was delivered as declared. It
-does not mean the treatment matches S3. The thresholds are in
-[`methodology.md`](methodology.md).
+The grade is a server-work pressure check. On the Go replay server a shape's
+timer starts after the request has been admitted (and has waited for a slot,
+if all were taken) and stops once its page is built; the overrun check runs
+before the injected sleep. Admission queueing, timer wake-up and the response
+write are therefore outside what is graded. `TIMING_VALID` means the server
+did its per-request work within the gate while CPU stayed below saturation; it
+does not certify that every client saw the declared latency end to end, and
+it does not mean the treatment matches S3. Admission-to-response timing is not
+yet measured. Grades already recorded keep exactly this meaning. The
+thresholds are in [`methodology.md`](methodology.md).

@@ -1,0 +1,101 @@
+[
+  {
+    "attempt_id": "swath.b9c1ed5ae8a2.s1",
+    "create_to_update_compute_usd": 0.06014238405932444,
+    "create_to_update_s": 299.566909,
+    "machine": "n4-highcpu-32",
+    "run_duration_compute_usd": 0.049858450130786054,
+    "run_duration_s": 248.343028412,
+    "state": "SUCCEEDED"
+  },
+  {
+    "attempt_id": "swath.b9c1ed5ae8a2.s2",
+    "create_to_update_compute_usd": 0.05589537505706666,
+    "create_to_update_s": 278.41272,
+    "machine": "n4-highcpu-32",
+    "run_duration_compute_usd": 0.04586265992923409,
+    "run_duration_s": 228.440150626,
+    "state": "SUCCEEDED"
+  },
+  {
+    "attempt_id": "swath.c1505ec66d66.s1",
+    "create_to_update_compute_usd": 0.06105662317879111,
+    "create_to_update_s": 304.120699,
+    "machine": "n4-highcpu-32",
+    "run_duration_compute_usd": 0.05108551564063509,
+    "run_duration_s": 254.454994668,
+    "state": "SUCCEEDED"
+  },
+  {
+    "attempt_id": "s5cmd.37412f5e21c0.s1",
+    "create_to_update_compute_usd": 0.05714004665385778,
+    "create_to_update_s": 569.224763,
+    "machine": "n4-highcpu-16",
+    "run_duration_compute_usd": 0.05148974159485459,
+    "run_duration_s": 512.936857294,
+    "state": "SUCCEEDED"
+  },
+  {
+    "attempt_id": "s5cmd.55ee5e4c62b8.s1",
+    "create_to_update_compute_usd": 0.05583225953408,
+    "create_to_update_s": 556.196688,
+    "machine": "n4-highcpu-16",
+    "run_duration_compute_usd": 0.05033079471074883,
+    "run_duration_s": 501.391517308,
+    "state": "SUCCEEDED"
+  },
+  {
+    "attempt_id": "s7cmd.3f553acb0aca.s1",
+    "create_to_update_compute_usd": 0.14883184130906665,
+    "create_to_update_s": 741.325695,
+    "machine": "n4-highcpu-32",
+    "run_duration_compute_usd": 0.13785192471989768,
+    "run_duration_s": 686.635151465,
+    "state": "SUCCEEDED"
+  },
+  {
+    "attempt_id": "s7cmd.f93baa7f7142.s1",
+    "create_to_update_compute_usd": 0.14659409069662221,
+    "create_to_update_s": 730.179545,
+    "machine": "n4-highcpu-32",
+    "run_duration_compute_usd": 0.13598474960970788,
+    "run_duration_s": 677.334823833,
+    "state": "SUCCEEDED"
+  },
+  {
+    "attempt_id": "s7cmd.5c9e1f4d4685.s1",
+    "create_to_update_compute_usd": 0.15075725886076444,
+    "create_to_update_s": 750.916126,
+    "machine": "n4-highcpu-32",
+    "run_duration_compute_usd": 0.139106363791595,
+    "run_duration_s": 692.883464383,
+    "state": "SUCCEEDED"
+  },
+  {
+    "attempt_id": "swath.73401a67238f.s1",
+    "create_to_update_compute_usd": 0.036416853304,
+    "create_to_update_s": 181.39095,
+    "machine": "n4-highcpu-32",
+    "run_duration_compute_usd": 0.02517378488892142,
+    "run_duration_s": 125.38965731,
+    "state": "SUCCEEDED"
+  },
+  {
+    "attempt_id": "swath.ca43fae5e517.s1",
+    "create_to_update_compute_usd": 0.028572749356746665,
+    "create_to_update_s": 142.319769,
+    "machine": "n4-highcpu-32",
+    "run_duration_compute_usd": 0.01893631636591125,
+    "run_duration_s": 94.321065756,
+    "state": "SUCCEEDED"
+  },
+  {
+    "attempt_id": "swath.bc04b205a545.s1",
+    "create_to_update_compute_usd": 0.030049463996515553,
+    "create_to_update_s": 149.675228,
+    "machine": "n4-highcpu-32",
+    "run_duration_compute_usd": 0.018575517106548388,
+    "run_duration_s": 92.523938479,
+    "state": "SUCCEEDED"
+  }
+]

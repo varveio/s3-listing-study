@@ -1,0 +1,38 @@
+[
+  {
+    "attempt_id": "swath.07cb7eabf980.s1",
+    "create_to_update_compute_usd": 0.1543006963961333,
+    "create_to_update_s": 307.426341,
+    "machine": "n4-highcpu-80",
+    "run_duration_compute_usd": 0.12800511654340158,
+    "run_duration_s": 255.035430995,
+    "state": "SUCCEEDED"
+  },
+  {
+    "attempt_id": "swath.e40733239507.s1",
+    "create_to_update_compute_usd": 0.1521876747100889,
+    "create_to_update_s": 303.216389,
+    "machine": "n4-highcpu-80",
+    "run_duration_compute_usd": 0.12490535039357721,
+    "run_duration_s": 248.859504459,
+    "state": "SUCCEEDED"
+  },
+  {
+    "attempt_id": "swath.e40733239507.s2",
+    "create_to_update_compute_usd": 0.1601245110515556,
+    "create_to_update_s": 319.02962,
+    "machine": "n4-highcpu-80",
+    "run_duration_compute_usd": 0.1334650065002245,
+    "run_duration_s": 265.913632007,
+    "state": "SUCCEEDED"
+  },
+  {
+    "attempt_id": "swath.dc15bf8aa437.s1",
+    "create_to_update_compute_usd": 0.14836157318395557,
+    "create_to_update_s": 295.593323,
+    "machine": "n4-highcpu-80",
+    "run_duration_compute_usd": 0.1212443314516944,
+    "run_duration_s": 241.565346468,
+    "state": "SUCCEEDED"
+  }
+]

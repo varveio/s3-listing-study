@@ -1,0 +1,68 @@
+# Input cell: release s5cmd.9305315fcfd5.s1. Wave 2: Go replay with the SeekParquet list index, on the
+# converted fixture; diagnostic qualification only.
+spec_version: 3
+bucket: noaa-nws-fourcastnetgfs-pds
+region: us-east-1
+auth_role: public-read
+replay:
+  capacity_status: uncalibrated
+  # SeekParquet dataset root: fixture_sha256 is its manifest.json; the adopted
+  # digest is the wave-1 release fixture's staging digest it was converted from.
+  fixture_sha256: eb0e7f5af5a2dca9bf1b733572dcb3deef8b6573478021280c0627b6401f6684
+  fixture_uri: gs://s3-listing-study-results-29c02004/fixtures/noaa-nws-fourcastnetgfs-pds/seekparquet-eb0e7f5af5a2/
+  fixture_adopted_sha256: 1b8be9d08d1006a5dc15dd0f190862c3871d664d3a8b68b4f7d2ddd7be8b0ad4
+  latency_model:
+    deadlines_ms:
+      pivot_probe: 35
+      structure_probe: 37
+      worker_page: 85
+    jitter: none
+    scale: 1.0
+  # Go replay with the list index: swath main 545a10cb (PR #425), Dockerfile.go
+  # target swath-replay, tag swath-replay:go-545a10cb.
+  server_image_uri: us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:3b3584460761de559c07e73b79c4aa7bffd77318108fdbf12ae36c41a98933b5
+  serving_mode: sorted
+  server_implementation: go
+defaults:
+  reps: 1
+  timeout_s: 1800
+  vcpus: 16
+  memory_gb: 32
+  container_memory_gb: 16
+  replay_heap_percent: 75
+  replay_max_concurrent_requests: 4096
+  replay_memory_gb: 8
+  replay_parquet_connections: 8
+  replay_prefetch: true
+  replay_prefetch_max_windows: 192
+  replay_vcpus: 8
+  subject_vcpus: 6
+  replay_response_buffer_budget_bytes: 1073741824
+  replay_list_index: true
+  replay_list_index_max_bytes: 67108864
+tools:
+  s5cmd:
+    cases:
+    - mode: recursive
+      purpose: diagnostic
+exclude:
+- tool: aws-cli
+  reason: Outside the bounded replay qualification cell
+- tool: minio-mc
+  reason: Outside the bounded replay qualification cell
+- tool: ps3
+  reason: Outside the bounded replay qualification cell
+- tool: rclone
+  reason: Outside the bounded replay qualification cell
+- tool: s3-fast-list
+  reason: Outside the bounded replay qualification cell
+- tool: s3kor
+  reason: Outside the bounded replay qualification cell
+- tool: s3p
+  reason: Outside the bounded replay qualification cell
+- tool: s4cmd
+  reason: Outside the bounded replay qualification cell
+- tool: s7cmd
+  reason: Outside the bounded replay qualification cell
+- tool: swath
+  reason: Outside the bounded replay qualification cell

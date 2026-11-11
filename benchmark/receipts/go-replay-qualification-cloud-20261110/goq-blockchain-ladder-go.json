@@ -1,0 +1,1054 @@
+{
+  "attempts": [
+    {
+      "attempt_id": "swath.4ab360c41e46.s1",
+      "case_id": "swath.4ab360c41e46",
+      "evidence": {
+        "argv": [
+          "/opt/java/openjdk/bin/java",
+          "-jar",
+          "/opt/swath/swath.jar",
+          "-v",
+          "--color",
+          "never",
+          "list",
+          "s3://aws-public-blockchain",
+          "--region",
+          "us-east-2",
+          "--no-sign-request",
+          "--concurrency",
+          "256",
+          "--endpoint-url",
+          "http://127.0.0.1:19090",
+          "--checkpoint",
+          "none",
+          "--format",
+          "tsv",
+          "--output-type",
+          "dir",
+          "-o",
+          "/tmp/attempt/native/listing",
+          "--report",
+          "/tmp/attempt/native/listing/_swath_summary.json",
+          "--text-writers",
+          "3",
+          "--compression",
+          "none",
+          "--text-part-size",
+          "1gb",
+          "--writeback-size",
+          "32mb",
+          "--part-rotation-interval",
+          "0",
+          "--part-rotation-max-rows",
+          "0"
+        ],
+        "binding_errors": [],
+        "replay": {
+          "errors": {
+            "after": 0.0,
+            "before": 0.0
+          },
+          "readiness": "ready",
+          "refusals": [],
+          "requests": {
+            "after": 153992.0,
+            "before": 2400.0
+          },
+          "resource_sample_count": 13,
+          "sample_count": 13,
+          "state": "COMPLETE"
+        },
+        "result": {
+          "artifacts_size_bytes": 106926,
+          "exit_code": 0,
+          "finished_at": "2026-11-10T11:31:07.338411+00:00",
+          "max_rss_kb": 2554952,
+          "product": {
+            "artifact": "listing",
+            "channel": "dataset",
+            "name": "native/listing",
+            "sha256": null,
+            "size_bytes": 22600253280
+          },
+          "product_error": null,
+          "row_count": 143008674,
+          "row_count_error": null,
+          "started_at": "2026-11-10T11:28:49.908447+00:00",
+          "stderr": {
+            "name": "stderr.log.gz",
+            "sha256": null,
+            "size_bytes": 2766
+          },
+          "stdout": {
+            "name": "stdout.log.gz",
+            "sha256": null,
+            "size_bytes": 31
+          },
+          "timed_out": false,
+          "wall_seconds": 137.428654,
+          "worker_exit_code": 0
+        },
+        "result_sha256": "4ebcf2e381791b66da09d478004121e837fd8149edbc38267ca18b130080bcf4",
+        "state": "BOUND",
+        "verification": null
+      },
+      "group_id": "goq-blockchain-ladder-go",
+      "mode": "recursive-tsv-dataset",
+      "origin": "planned",
+      "purpose": "diagnostic",
+      "recorded_at": "2026-11-10T11:27:21.643249+00:00",
+      "request": {
+        "allocationPolicy": {
+          "instances": [
+            {
+              "policy": {
+                "bootDisk": {
+                  "image": "batch-cos",
+                  "sizeGb": "200",
+                  "type": "hyperdisk-balanced"
+                },
+                "machineType": "n4-highcpu-80",
+                "provisioningModel": "SPOT"
+              }
+            }
+          ]
+        },
+        "labels": {
+          "suite": "go-replay-qualify"
+        },
+        "logsPolicy": {
+          "destination": "CLOUD_LOGGING"
+        },
+        "taskGroups": [
+          {
+            "parallelism": "1",
+            "taskCount": "1",
+            "taskSpec": {
+              "computeResource": {
+                "cpuMilli": "80000",
+                "memoryMib": "163840"
+              },
+              "maxRetryCount": 0,
+              "maxRunDuration": "8405s",
+              "runnables": [
+                {
+                  "container": {
+                    "commands": [
+                      "-ceu",
+                      "set -o pipefail\nmkdir -p /fixtures/source\ngcloud storage cp '<fixture-store>/aws-public-blockchain/current-eba31d9/part-*.parquet' /fixtures/source/\nmanifest=\"$(mktemp)\"\nfiles=(/fixtures/source/*.parquet)\n[[ -f \"${files[0]}\" ]] || { echo \"no staged parquet files\" >&2; exit 1; }\nfor file in \"${files[@]}\"; do\n  digest=\"$(sha256sum \"$file\")\"; digest=\"${digest%% *}\"\n  size=\"$(stat -c %s \"$file\")\"\n  printf '%s\\t%s\\t%s\\n' \"${file##*/}\" \"$size\" \"$digest\"\ndone | LC_ALL=C sort > \"$manifest\"\nactual=\"$(sha256sum \"$manifest\")\"; actual=\"${actual%% *}\"\n[[ \"$actual\" == f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0 ]] || { echo \"fixture digest mismatch: $actual\" >&2; exit 1; }\nrm -f \"$manifest\""
+                    ],
+                    "imageUri": "gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:cf72dd63b7643c117ef53378a41bef6db6a01fa3d561f2b456d7abd8bbeb9ba6",
+                    "options": "--entrypoint /bin/bash --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
+                  },
+                  "environment": {
+                    "variables": {
+                      "CLOUDSDK_PYTHON": "/usr/lib/google-cloud-sdk/platform/bundledpythonunix/bin/python3"
+                    }
+                  }
+                },
+                {
+                  "container": {
+                    "commands": [
+                      "10001:10001",
+                      "/tmp/attempt"
+                    ],
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:7e6534d514f1a59318ffc397997c44cef87c0e1aa76d5b5ab32d386fa8ec95e2",
+                    "options": "--user 0:0 --entrypoint /bin/chown --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
+                  }
+                },
+                {
+                  "background": true,
+                  "container": {
+                    "commands": [
+                      "serve",
+                      "--fixture",
+                      "/fixtures/source",
+                      "--bucket",
+                      "aws-public-blockchain",
+                      "--host",
+                      "127.0.0.1",
+                      "--port",
+                      "19090",
+                      "--metrics-port",
+                      "19192",
+                      "--serving-mode",
+                      "sorted",
+                      "--parquet-connections",
+                      "128",
+                      "--max-concurrent-requests",
+                      "4096",
+                      "--prefetch-window-rows",
+                      "12500",
+                      "--prefetch-max-windows",
+                      "192",
+                      "--response-buffer-budget",
+                      "1073741824",
+                      "--inject-latency",
+                      "worker_page=94ms,pivot_probe=46ms,structure_probe=55ms",
+                      "--latency-scale",
+                      "1.0"
+                    ],
+                    "imageUri": "<study-registry>/swath-replay@sha256:38ea98e22d01d421f5965cf87a3bd4f483d713b6f8d543999247b83dd38eafed",
+                    "options": "--network host --cpuset-cpus=0-15,40-55 --memory=10g --memory-swap=10g --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
+                  },
+                  "environment": {
+                    "variables": {
+                      "GOMAXPROCS": "32",
+                      "GOMEMLIMIT": "8053063680"
+                    }
+                  }
+                },
+                {
+                  "container": {
+                    "commands": [
+                      "--tool",
+                      "swath",
+                      "--mode",
+                      "recursive-tsv-dataset",
+                      "--purpose",
+                      "diagnostic",
+                      "--bucket",
+                      "aws-public-blockchain",
+                      "--region",
+                      "us-east-2",
+                      "--prefix",
+                      "",
+                      "--output",
+                      "/tmp/attempt",
+                      "--destination",
+                      "<result-store>/go-replay-qualify/aws-public-blockchain/swath.4ab360c41e46.s1/",
+                      "--timeout",
+                      "7200",
+                      "--term-grace",
+                      "5.0",
+                      "--retain-products",
+                      "false",
+                      "--image",
+                      "<study-registry>/benchmark-toolbox@sha256:7e6534d514f1a59318ffc397997c44cef87c0e1aa76d5b5ab32d386fa8ec95e2",
+                      "--toolbox-manifest-sha256",
+                      "2beadc0892566c9fb1f598337d891a2605d4a1488d9387bea054113ee46d079c",
+                      "--toolbox-recipe-sha256",
+                      "405bc76f129181d8a6d5f6cc9c26d89daa5e0068ae688b040aa345ea99fbd0ee",
+                      "--tool-recipe-sha256",
+                      "f9d55d7e2466aa20378f8c7f4b1ad666b60d4cb5918f9ac9b4302af7f472de84",
+                      "--tool-build-inputs-sha256",
+                      "0d05dc949a1c322e39dc2831353ac427dda3d4b923595fd7b89166b3130653e1",
+                      "--tool-version",
+                      "0.3.2",
+                      "--tool-build-sha256",
+                      "c28b5c8bb5ca95cdca56191fe18ad2f147689a642e9a9b7dd66ef960fe7725d7",
+                      "--adapter-bundle-sha256",
+                      "f657a7c498f0ea0fba6284aa255c754363823116fefdb8d3a52b6c86236043d9",
+                      "--harness-revision",
+                      "35f1d9fde4c656dea6aff1fee9370a56eb9f99dc",
+                      "--subject-workdir",
+                      "/opt/swath",
+                      "--image-set-sha256",
+                      "02298c4180be71d25af8365667662aa49c34fcf378f17718196f1f90d817d9a2",
+                      "--group-id",
+                      "goq-blockchain-ladder-go",
+                      "--case-id",
+                      "swath.4ab360c41e46",
+                      "--attempt-id",
+                      "swath.4ab360c41e46.s1",
+                      "--machine-type",
+                      "n4-highcpu-80",
+                      "--vcpus",
+                      "80",
+                      "--memory-gb",
+                      "160",
+                      "--container-memory-gb",
+                      "8",
+                      "--config",
+                      "{\"concurrency\":256,\"heap_percent\":75,\"jvm_max_heap\":\"4g\",\"mode\":\"recursive-tsv-dataset\",\"part_rotation_interval\":\"0\",\"part_rotation_max_rows\":0,\"text_part_size\":\"1gb\",\"text_writers\":3,\"writeback_size\":\"32mb\"}",
+                      "--endpoint-url",
+                      "http://127.0.0.1:19090",
+                      "--replay-config",
+                      "{\"allocation\":{\"replay_heap_percent\":75,\"replay_max_concurrent_requests\":4096,\"replay_memory_gb\":10,\"replay_parquet_connections\":128,\"replay_prefetch\":true,\"replay_prefetch_max_windows\":192,\"replay_response_buffer_budget_bytes\":1073741824,\"replay_vcpus\":32,\"subject_vcpus\":8},\"backend\":{\"fixture_sha256\":\"f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0\",\"fixture_uri\":\"<fixture-store>/aws-public-blockchain/current-eba31d9/part-*.parquet\",\"latency_model\":{\"deadlines_ms\":{\"pivot_probe\":46,\"structure_probe\":55,\"worker_page\":94},\"jitter\":\"none\",\"scale\":1.0},\"server_image_uri\":\"<study-registry>/swath-replay@sha256:38ea98e22d01d421f5965cf87a3bd4f483d713b6f8d543999247b83dd38eafed\",\"server_implementation\":\"go\",\"serving_mode\":\"sorted\",\"warmup\":{\"in_flight\":64,\"pivot_probes\":200,\"structure_probes\":2000,\"worker_pages\":200}},\"capacity_status\":\"uncalibrated\"}"
+                    ],
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:7e6534d514f1a59318ffc397997c44cef87c0e1aa76d5b5ab32d386fa8ec95e2",
+                    "options": "--network host --cpuset-cpus=16-19,56-59 --memory=8g --memory-swap=8g --volume=/mnt/stateful_partition/attempt:/tmp/attempt --volume=/proc:/replay-host-proc:ro"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "settled_at": "2026-11-10T11:32:59.660693+00:00",
+      "state": "SUCCEEDED",
+      "state_detail": null,
+      "statistic": "timing",
+      "tool": "swath"
+    },
+    {
+      "attempt_id": "swath.239e19cf2866.s1",
+      "case_id": "swath.239e19cf2866",
+      "evidence": {
+        "argv": [
+          "/opt/java/openjdk/bin/java",
+          "-jar",
+          "/opt/swath/swath.jar",
+          "-v",
+          "--color",
+          "never",
+          "list",
+          "s3://aws-public-blockchain",
+          "--region",
+          "us-east-2",
+          "--no-sign-request",
+          "--concurrency",
+          "256",
+          "--endpoint-url",
+          "http://127.0.0.1:19090",
+          "--checkpoint",
+          "none",
+          "--format",
+          "tsv",
+          "--output-type",
+          "dir",
+          "-o",
+          "/tmp/attempt/native/listing",
+          "--report",
+          "/tmp/attempt/native/listing/_swath_summary.json",
+          "--text-writers",
+          "3",
+          "--compression",
+          "none",
+          "--text-part-size",
+          "1gb",
+          "--writeback-size",
+          "32mb",
+          "--part-rotation-interval",
+          "0",
+          "--part-rotation-max-rows",
+          "0"
+        ],
+        "binding_errors": [],
+        "replay": {
+          "errors": {
+            "after": 0.0,
+            "before": 0.0
+          },
+          "readiness": "ready",
+          "refusals": [],
+          "requests": {
+            "after": 153949.0,
+            "before": 2400.0
+          },
+          "resource_sample_count": 13,
+          "sample_count": 13,
+          "state": "COMPLETE"
+        },
+        "result": {
+          "artifacts_size_bytes": 107418,
+          "exit_code": 0,
+          "finished_at": "2026-11-10T11:30:53.013170+00:00",
+          "max_rss_kb": 2227956,
+          "product": {
+            "artifact": "listing",
+            "channel": "dataset",
+            "name": "native/listing",
+            "sha256": null,
+            "size_bytes": 22600253531
+          },
+          "product_error": null,
+          "row_count": 143008674,
+          "row_count_error": null,
+          "started_at": "2026-11-10T11:28:34.813513+00:00",
+          "stderr": {
+            "name": "stderr.log.gz",
+            "sha256": null,
+            "size_bytes": 2777
+          },
+          "stdout": {
+            "name": "stdout.log.gz",
+            "sha256": null,
+            "size_bytes": 31
+          },
+          "timed_out": false,
+          "wall_seconds": 138.198445,
+          "worker_exit_code": 0
+        },
+        "result_sha256": "47bc5938e0904a0f3753c03ffcf15ee12c0a895f72f248548649f04cf5a6675f",
+        "state": "BOUND",
+        "verification": null
+      },
+      "group_id": "goq-blockchain-ladder-go",
+      "mode": "recursive-tsv-dataset",
+      "origin": "planned",
+      "purpose": "diagnostic",
+      "recorded_at": "2026-11-10T11:27:21.893368+00:00",
+      "request": {
+        "allocationPolicy": {
+          "instances": [
+            {
+              "policy": {
+                "bootDisk": {
+                  "image": "batch-cos",
+                  "sizeGb": "200",
+                  "type": "hyperdisk-balanced"
+                },
+                "machineType": "n4-highcpu-80",
+                "provisioningModel": "SPOT"
+              }
+            }
+          ]
+        },
+        "labels": {
+          "suite": "go-replay-qualify"
+        },
+        "logsPolicy": {
+          "destination": "CLOUD_LOGGING"
+        },
+        "taskGroups": [
+          {
+            "parallelism": "1",
+            "taskCount": "1",
+            "taskSpec": {
+              "computeResource": {
+                "cpuMilli": "80000",
+                "memoryMib": "163840"
+              },
+              "maxRetryCount": 0,
+              "maxRunDuration": "8405s",
+              "runnables": [
+                {
+                  "container": {
+                    "commands": [
+                      "-ceu",
+                      "set -o pipefail\nmkdir -p /fixtures/source\ngcloud storage cp '<fixture-store>/aws-public-blockchain/current-eba31d9/part-*.parquet' /fixtures/source/\nmanifest=\"$(mktemp)\"\nfiles=(/fixtures/source/*.parquet)\n[[ -f \"${files[0]}\" ]] || { echo \"no staged parquet files\" >&2; exit 1; }\nfor file in \"${files[@]}\"; do\n  digest=\"$(sha256sum \"$file\")\"; digest=\"${digest%% *}\"\n  size=\"$(stat -c %s \"$file\")\"\n  printf '%s\\t%s\\t%s\\n' \"${file##*/}\" \"$size\" \"$digest\"\ndone | LC_ALL=C sort > \"$manifest\"\nactual=\"$(sha256sum \"$manifest\")\"; actual=\"${actual%% *}\"\n[[ \"$actual\" == f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0 ]] || { echo \"fixture digest mismatch: $actual\" >&2; exit 1; }\nrm -f \"$manifest\""
+                    ],
+                    "imageUri": "gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:cf72dd63b7643c117ef53378a41bef6db6a01fa3d561f2b456d7abd8bbeb9ba6",
+                    "options": "--entrypoint /bin/bash --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
+                  },
+                  "environment": {
+                    "variables": {
+                      "CLOUDSDK_PYTHON": "/usr/lib/google-cloud-sdk/platform/bundledpythonunix/bin/python3"
+                    }
+                  }
+                },
+                {
+                  "container": {
+                    "commands": [
+                      "10001:10001",
+                      "/tmp/attempt"
+                    ],
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:7e6534d514f1a59318ffc397997c44cef87c0e1aa76d5b5ab32d386fa8ec95e2",
+                    "options": "--user 0:0 --entrypoint /bin/chown --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
+                  }
+                },
+                {
+                  "background": true,
+                  "container": {
+                    "commands": [
+                      "serve",
+                      "--fixture",
+                      "/fixtures/source",
+                      "--bucket",
+                      "aws-public-blockchain",
+                      "--host",
+                      "127.0.0.1",
+                      "--port",
+                      "19090",
+                      "--metrics-port",
+                      "19192",
+                      "--serving-mode",
+                      "sorted",
+                      "--parquet-connections",
+                      "128",
+                      "--max-concurrent-requests",
+                      "4096",
+                      "--prefetch-window-rows",
+                      "12500",
+                      "--prefetch-max-windows",
+                      "192",
+                      "--response-buffer-budget",
+                      "1073741824",
+                      "--inject-latency",
+                      "worker_page=94ms,pivot_probe=46ms,structure_probe=55ms",
+                      "--latency-scale",
+                      "1.0"
+                    ],
+                    "imageUri": "<study-registry>/swath-replay@sha256:38ea98e22d01d421f5965cf87a3bd4f483d713b6f8d543999247b83dd38eafed",
+                    "options": "--network host --cpuset-cpus=0-7,40-47 --memory=5g --memory-swap=5g --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
+                  },
+                  "environment": {
+                    "variables": {
+                      "GOMAXPROCS": "16",
+                      "GOMEMLIMIT": "4026531840"
+                    }
+                  }
+                },
+                {
+                  "container": {
+                    "commands": [
+                      "--tool",
+                      "swath",
+                      "--mode",
+                      "recursive-tsv-dataset",
+                      "--purpose",
+                      "diagnostic",
+                      "--bucket",
+                      "aws-public-blockchain",
+                      "--region",
+                      "us-east-2",
+                      "--prefix",
+                      "",
+                      "--output",
+                      "/tmp/attempt",
+                      "--destination",
+                      "<result-store>/go-replay-qualify/aws-public-blockchain/swath.239e19cf2866.s1/",
+                      "--timeout",
+                      "7200",
+                      "--term-grace",
+                      "5.0",
+                      "--retain-products",
+                      "false",
+                      "--image",
+                      "<study-registry>/benchmark-toolbox@sha256:7e6534d514f1a59318ffc397997c44cef87c0e1aa76d5b5ab32d386fa8ec95e2",
+                      "--toolbox-manifest-sha256",
+                      "2beadc0892566c9fb1f598337d891a2605d4a1488d9387bea054113ee46d079c",
+                      "--toolbox-recipe-sha256",
+                      "405bc76f129181d8a6d5f6cc9c26d89daa5e0068ae688b040aa345ea99fbd0ee",
+                      "--tool-recipe-sha256",
+                      "f9d55d7e2466aa20378f8c7f4b1ad666b60d4cb5918f9ac9b4302af7f472de84",
+                      "--tool-build-inputs-sha256",
+                      "0d05dc949a1c322e39dc2831353ac427dda3d4b923595fd7b89166b3130653e1",
+                      "--tool-version",
+                      "0.3.2",
+                      "--tool-build-sha256",
+                      "c28b5c8bb5ca95cdca56191fe18ad2f147689a642e9a9b7dd66ef960fe7725d7",
+                      "--adapter-bundle-sha256",
+                      "f657a7c498f0ea0fba6284aa255c754363823116fefdb8d3a52b6c86236043d9",
+                      "--harness-revision",
+                      "35f1d9fde4c656dea6aff1fee9370a56eb9f99dc",
+                      "--subject-workdir",
+                      "/opt/swath",
+                      "--image-set-sha256",
+                      "02298c4180be71d25af8365667662aa49c34fcf378f17718196f1f90d817d9a2",
+                      "--group-id",
+                      "goq-blockchain-ladder-go",
+                      "--case-id",
+                      "swath.239e19cf2866",
+                      "--attempt-id",
+                      "swath.239e19cf2866.s1",
+                      "--machine-type",
+                      "n4-highcpu-80",
+                      "--vcpus",
+                      "80",
+                      "--memory-gb",
+                      "160",
+                      "--container-memory-gb",
+                      "8",
+                      "--config",
+                      "{\"concurrency\":256,\"heap_percent\":75,\"jvm_max_heap\":\"4g\",\"mode\":\"recursive-tsv-dataset\",\"part_rotation_interval\":\"0\",\"part_rotation_max_rows\":0,\"text_part_size\":\"1gb\",\"text_writers\":3,\"writeback_size\":\"32mb\"}",
+                      "--endpoint-url",
+                      "http://127.0.0.1:19090",
+                      "--replay-config",
+                      "{\"allocation\":{\"replay_heap_percent\":75,\"replay_max_concurrent_requests\":4096,\"replay_memory_gb\":5,\"replay_parquet_connections\":128,\"replay_prefetch\":true,\"replay_prefetch_max_windows\":192,\"replay_response_buffer_budget_bytes\":1073741824,\"replay_vcpus\":16,\"subject_vcpus\":8},\"backend\":{\"fixture_sha256\":\"f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0\",\"fixture_uri\":\"<fixture-store>/aws-public-blockchain/current-eba31d9/part-*.parquet\",\"latency_model\":{\"deadlines_ms\":{\"pivot_probe\":46,\"structure_probe\":55,\"worker_page\":94},\"jitter\":\"none\",\"scale\":1.0},\"server_image_uri\":\"<study-registry>/swath-replay@sha256:38ea98e22d01d421f5965cf87a3bd4f483d713b6f8d543999247b83dd38eafed\",\"server_implementation\":\"go\",\"serving_mode\":\"sorted\",\"warmup\":{\"in_flight\":64,\"pivot_probes\":200,\"structure_probes\":2000,\"worker_pages\":200}},\"capacity_status\":\"uncalibrated\"}"
+                    ],
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:7e6534d514f1a59318ffc397997c44cef87c0e1aa76d5b5ab32d386fa8ec95e2",
+                    "options": "--network host --cpuset-cpus=8-11,48-51 --memory=8g --memory-swap=8g --volume=/mnt/stateful_partition/attempt:/tmp/attempt --volume=/proc:/replay-host-proc:ro"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "settled_at": "2026-11-10T11:32:59.662138+00:00",
+      "state": "SUCCEEDED",
+      "state_detail": null,
+      "statistic": "timing",
+      "tool": "swath"
+    },
+    {
+      "attempt_id": "swath.e2f0d987ee37.s1",
+      "case_id": "swath.e2f0d987ee37",
+      "evidence": {
+        "argv": [
+          "/opt/java/openjdk/bin/java",
+          "-jar",
+          "/opt/swath/swath.jar",
+          "-v",
+          "--color",
+          "never",
+          "list",
+          "s3://aws-public-blockchain",
+          "--region",
+          "us-east-2",
+          "--no-sign-request",
+          "--concurrency",
+          "256",
+          "--endpoint-url",
+          "http://127.0.0.1:19090",
+          "--checkpoint",
+          "none",
+          "--format",
+          "tsv",
+          "--output-type",
+          "dir",
+          "-o",
+          "/tmp/attempt/native/listing",
+          "--report",
+          "/tmp/attempt/native/listing/_swath_summary.json",
+          "--text-writers",
+          "3",
+          "--compression",
+          "none",
+          "--text-part-size",
+          "1gb",
+          "--writeback-size",
+          "32mb",
+          "--part-rotation-interval",
+          "0",
+          "--part-rotation-max-rows",
+          "0"
+        ],
+        "binding_errors": [],
+        "replay": {
+          "errors": {
+            "after": 0.0,
+            "before": 0.0
+          },
+          "readiness": "ready",
+          "refusals": [],
+          "requests": {
+            "after": 154066.0,
+            "before": 2400.0
+          },
+          "resource_sample_count": 13,
+          "sample_count": 13,
+          "state": "COMPLETE"
+        },
+        "result": {
+          "artifacts_size_bytes": 108673,
+          "exit_code": 0,
+          "finished_at": "2026-11-10T11:31:03.990247+00:00",
+          "max_rss_kb": 2270596,
+          "product": {
+            "artifact": "listing",
+            "channel": "dataset",
+            "name": "native/listing",
+            "sha256": null,
+            "size_bytes": 22600255071
+          },
+          "product_error": null,
+          "row_count": 143008674,
+          "row_count_error": null,
+          "started_at": "2026-11-10T11:28:48.046153+00:00",
+          "stderr": {
+            "name": "stderr.log.gz",
+            "sha256": null,
+            "size_bytes": 2725
+          },
+          "stdout": {
+            "name": "stdout.log.gz",
+            "sha256": null,
+            "size_bytes": 31
+          },
+          "timed_out": false,
+          "wall_seconds": 135.943016,
+          "worker_exit_code": 0
+        },
+        "result_sha256": "244d59e8b699471050c36c0a33ff32bb52d5fd49892076ec5c8f091f8034eab4",
+        "state": "BOUND",
+        "verification": null
+      },
+      "group_id": "goq-blockchain-ladder-go",
+      "mode": "recursive-tsv-dataset",
+      "origin": "planned",
+      "purpose": "diagnostic",
+      "recorded_at": "2026-11-10T11:27:22.063459+00:00",
+      "request": {
+        "allocationPolicy": {
+          "instances": [
+            {
+              "policy": {
+                "bootDisk": {
+                  "image": "batch-cos",
+                  "sizeGb": "200",
+                  "type": "hyperdisk-balanced"
+                },
+                "machineType": "n4-highcpu-80",
+                "provisioningModel": "SPOT"
+              }
+            }
+          ]
+        },
+        "labels": {
+          "suite": "go-replay-qualify"
+        },
+        "logsPolicy": {
+          "destination": "CLOUD_LOGGING"
+        },
+        "taskGroups": [
+          {
+            "parallelism": "1",
+            "taskCount": "1",
+            "taskSpec": {
+              "computeResource": {
+                "cpuMilli": "80000",
+                "memoryMib": "163840"
+              },
+              "maxRetryCount": 0,
+              "maxRunDuration": "8405s",
+              "runnables": [
+                {
+                  "container": {
+                    "commands": [
+                      "-ceu",
+                      "set -o pipefail\nmkdir -p /fixtures/source\ngcloud storage cp '<fixture-store>/aws-public-blockchain/current-eba31d9/part-*.parquet' /fixtures/source/\nmanifest=\"$(mktemp)\"\nfiles=(/fixtures/source/*.parquet)\n[[ -f \"${files[0]}\" ]] || { echo \"no staged parquet files\" >&2; exit 1; }\nfor file in \"${files[@]}\"; do\n  digest=\"$(sha256sum \"$file\")\"; digest=\"${digest%% *}\"\n  size=\"$(stat -c %s \"$file\")\"\n  printf '%s\\t%s\\t%s\\n' \"${file##*/}\" \"$size\" \"$digest\"\ndone | LC_ALL=C sort > \"$manifest\"\nactual=\"$(sha256sum \"$manifest\")\"; actual=\"${actual%% *}\"\n[[ \"$actual\" == f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0 ]] || { echo \"fixture digest mismatch: $actual\" >&2; exit 1; }\nrm -f \"$manifest\""
+                    ],
+                    "imageUri": "gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:cf72dd63b7643c117ef53378a41bef6db6a01fa3d561f2b456d7abd8bbeb9ba6",
+                    "options": "--entrypoint /bin/bash --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
+                  },
+                  "environment": {
+                    "variables": {
+                      "CLOUDSDK_PYTHON": "/usr/lib/google-cloud-sdk/platform/bundledpythonunix/bin/python3"
+                    }
+                  }
+                },
+                {
+                  "container": {
+                    "commands": [
+                      "10001:10001",
+                      "/tmp/attempt"
+                    ],
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:7e6534d514f1a59318ffc397997c44cef87c0e1aa76d5b5ab32d386fa8ec95e2",
+                    "options": "--user 0:0 --entrypoint /bin/chown --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
+                  }
+                },
+                {
+                  "background": true,
+                  "container": {
+                    "commands": [
+                      "serve",
+                      "--fixture",
+                      "/fixtures/source",
+                      "--bucket",
+                      "aws-public-blockchain",
+                      "--host",
+                      "127.0.0.1",
+                      "--port",
+                      "19090",
+                      "--metrics-port",
+                      "19192",
+                      "--serving-mode",
+                      "sorted",
+                      "--parquet-connections",
+                      "128",
+                      "--max-concurrent-requests",
+                      "4096",
+                      "--prefetch-window-rows",
+                      "12500",
+                      "--prefetch-max-windows",
+                      "192",
+                      "--response-buffer-budget",
+                      "1073741824",
+                      "--inject-latency",
+                      "worker_page=94ms,pivot_probe=46ms,structure_probe=55ms",
+                      "--latency-scale",
+                      "1.0"
+                    ],
+                    "imageUri": "<study-registry>/swath-replay@sha256:38ea98e22d01d421f5965cf87a3bd4f483d713b6f8d543999247b83dd38eafed",
+                    "options": "--network host --cpuset-cpus=0-3,40-43 --memory=4g --memory-swap=4g --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
+                  },
+                  "environment": {
+                    "variables": {
+                      "GOMAXPROCS": "8",
+                      "GOMEMLIMIT": "3221225472"
+                    }
+                  }
+                },
+                {
+                  "container": {
+                    "commands": [
+                      "--tool",
+                      "swath",
+                      "--mode",
+                      "recursive-tsv-dataset",
+                      "--purpose",
+                      "diagnostic",
+                      "--bucket",
+                      "aws-public-blockchain",
+                      "--region",
+                      "us-east-2",
+                      "--prefix",
+                      "",
+                      "--output",
+                      "/tmp/attempt",
+                      "--destination",
+                      "<result-store>/go-replay-qualify/aws-public-blockchain/swath.e2f0d987ee37.s1/",
+                      "--timeout",
+                      "7200",
+                      "--term-grace",
+                      "5.0",
+                      "--retain-products",
+                      "false",
+                      "--image",
+                      "<study-registry>/benchmark-toolbox@sha256:7e6534d514f1a59318ffc397997c44cef87c0e1aa76d5b5ab32d386fa8ec95e2",
+                      "--toolbox-manifest-sha256",
+                      "2beadc0892566c9fb1f598337d891a2605d4a1488d9387bea054113ee46d079c",
+                      "--toolbox-recipe-sha256",
+                      "405bc76f129181d8a6d5f6cc9c26d89daa5e0068ae688b040aa345ea99fbd0ee",
+                      "--tool-recipe-sha256",
+                      "f9d55d7e2466aa20378f8c7f4b1ad666b60d4cb5918f9ac9b4302af7f472de84",
+                      "--tool-build-inputs-sha256",
+                      "0d05dc949a1c322e39dc2831353ac427dda3d4b923595fd7b89166b3130653e1",
+                      "--tool-version",
+                      "0.3.2",
+                      "--tool-build-sha256",
+                      "c28b5c8bb5ca95cdca56191fe18ad2f147689a642e9a9b7dd66ef960fe7725d7",
+                      "--adapter-bundle-sha256",
+                      "f657a7c498f0ea0fba6284aa255c754363823116fefdb8d3a52b6c86236043d9",
+                      "--harness-revision",
+                      "35f1d9fde4c656dea6aff1fee9370a56eb9f99dc",
+                      "--subject-workdir",
+                      "/opt/swath",
+                      "--image-set-sha256",
+                      "02298c4180be71d25af8365667662aa49c34fcf378f17718196f1f90d817d9a2",
+                      "--group-id",
+                      "goq-blockchain-ladder-go",
+                      "--case-id",
+                      "swath.e2f0d987ee37",
+                      "--attempt-id",
+                      "swath.e2f0d987ee37.s1",
+                      "--machine-type",
+                      "n4-highcpu-80",
+                      "--vcpus",
+                      "80",
+                      "--memory-gb",
+                      "160",
+                      "--container-memory-gb",
+                      "8",
+                      "--config",
+                      "{\"concurrency\":256,\"heap_percent\":75,\"jvm_max_heap\":\"4g\",\"mode\":\"recursive-tsv-dataset\",\"part_rotation_interval\":\"0\",\"part_rotation_max_rows\":0,\"text_part_size\":\"1gb\",\"text_writers\":3,\"writeback_size\":\"32mb\"}",
+                      "--endpoint-url",
+                      "http://127.0.0.1:19090",
+                      "--replay-config",
+                      "{\"allocation\":{\"replay_heap_percent\":75,\"replay_max_concurrent_requests\":4096,\"replay_memory_gb\":4,\"replay_parquet_connections\":128,\"replay_prefetch\":true,\"replay_prefetch_max_windows\":192,\"replay_response_buffer_budget_bytes\":1073741824,\"replay_vcpus\":8,\"subject_vcpus\":8},\"backend\":{\"fixture_sha256\":\"f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0\",\"fixture_uri\":\"<fixture-store>/aws-public-blockchain/current-eba31d9/part-*.parquet\",\"latency_model\":{\"deadlines_ms\":{\"pivot_probe\":46,\"structure_probe\":55,\"worker_page\":94},\"jitter\":\"none\",\"scale\":1.0},\"server_image_uri\":\"<study-registry>/swath-replay@sha256:38ea98e22d01d421f5965cf87a3bd4f483d713b6f8d543999247b83dd38eafed\",\"server_implementation\":\"go\",\"serving_mode\":\"sorted\",\"warmup\":{\"in_flight\":64,\"pivot_probes\":200,\"structure_probes\":2000,\"worker_pages\":200}},\"capacity_status\":\"uncalibrated\"}"
+                    ],
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:7e6534d514f1a59318ffc397997c44cef87c0e1aa76d5b5ab32d386fa8ec95e2",
+                    "options": "--network host --cpuset-cpus=4-7,44-47 --memory=8g --memory-swap=8g --volume=/mnt/stateful_partition/attempt:/tmp/attempt --volume=/proc:/replay-host-proc:ro"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "settled_at": "2026-11-10T11:32:59.663680+00:00",
+      "state": "SUCCEEDED",
+      "state_detail": null,
+      "statistic": "timing",
+      "tool": "swath"
+    }
+  ],
+  "group_id": "goq-blockchain-ladder-go",
+  "kind": "campaign-receipt-draft",
+  "ledger_created_at": "2026-11-10T11:27:16.458789+00:00",
+  "ledger_schema_version": 3,
+  "purposes": [
+    "diagnostic"
+  ],
+  "resolved_cases": {
+    "swath.239e19cf2866": {
+      "config": {
+        "concurrency": 256,
+        "heap_percent": 75,
+        "jvm_max_heap": "4g",
+        "mode": "recursive-tsv-dataset",
+        "part_rotation_interval": "0",
+        "part_rotation_max_rows": 0,
+        "text_part_size": "1gb",
+        "text_writers": 3,
+        "writeback_size": "32mb"
+      },
+      "environment": {
+        "auth_role": null,
+        "container_memory_gb": 8,
+        "location": "us-east1",
+        "machine_type": "n4-highcpu-80",
+        "memory_gb": 160,
+        "output_target": "file",
+        "target_bucket": "aws-public-blockchain",
+        "target_prefix": "",
+        "target_region": "us-east-2",
+        "timeout_s": 7200,
+        "vcpus": 80
+      },
+      "platform_sha256": "0f04d4f21a6abe82450535265894bc1a88fe103bf4fcd67b4ad5299c9ca4fc77",
+      "replay": {
+        "allocation": {
+          "replay_heap_percent": 75,
+          "replay_max_concurrent_requests": 4096,
+          "replay_memory_gb": 5,
+          "replay_parquet_connections": 128,
+          "replay_prefetch": true,
+          "replay_prefetch_max_windows": 192,
+          "replay_response_buffer_budget_bytes": 1073741824,
+          "replay_vcpus": 16,
+          "subject_vcpus": 8
+        },
+        "backend": {
+          "fixture_sha256": "f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0",
+          "fixture_uri": "<fixture-store>/aws-public-blockchain/current-eba31d9/part-*.parquet",
+          "latency_model": {
+            "deadlines_ms": {
+              "pivot_probe": 46,
+              "structure_probe": 55,
+              "worker_page": 94
+            },
+            "jitter": "none",
+            "scale": 1.0
+          },
+          "server_image_uri": "<study-registry>/swath-replay@sha256:38ea98e22d01d421f5965cf87a3bd4f483d713b6f8d543999247b83dd38eafed",
+          "server_implementation": "go",
+          "serving_mode": "sorted",
+          "warmup": {
+            "in_flight": 64,
+            "pivot_probes": 200,
+            "structure_probes": 2000,
+            "worker_pages": 200
+          }
+        },
+        "capacity_status": "uncalibrated"
+      },
+      "tool_slice_sha256": "52ed7d8880d61d8772b13b8850a61877487fadceb54dc6de0307d0313be0b93e"
+    },
+    "swath.4ab360c41e46": {
+      "config": {
+        "concurrency": 256,
+        "heap_percent": 75,
+        "jvm_max_heap": "4g",
+        "mode": "recursive-tsv-dataset",
+        "part_rotation_interval": "0",
+        "part_rotation_max_rows": 0,
+        "text_part_size": "1gb",
+        "text_writers": 3,
+        "writeback_size": "32mb"
+      },
+      "environment": {
+        "auth_role": null,
+        "container_memory_gb": 8,
+        "location": "us-east1",
+        "machine_type": "n4-highcpu-80",
+        "memory_gb": 160,
+        "output_target": "file",
+        "target_bucket": "aws-public-blockchain",
+        "target_prefix": "",
+        "target_region": "us-east-2",
+        "timeout_s": 7200,
+        "vcpus": 80
+      },
+      "platform_sha256": "0f04d4f21a6abe82450535265894bc1a88fe103bf4fcd67b4ad5299c9ca4fc77",
+      "replay": {
+        "allocation": {
+          "replay_heap_percent": 75,
+          "replay_max_concurrent_requests": 4096,
+          "replay_memory_gb": 10,
+          "replay_parquet_connections": 128,
+          "replay_prefetch": true,
+          "replay_prefetch_max_windows": 192,
+          "replay_response_buffer_budget_bytes": 1073741824,
+          "replay_vcpus": 32,
+          "subject_vcpus": 8
+        },
+        "backend": {
+          "fixture_sha256": "f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0",
+          "fixture_uri": "<fixture-store>/aws-public-blockchain/current-eba31d9/part-*.parquet",
+          "latency_model": {
+            "deadlines_ms": {
+              "pivot_probe": 46,
+              "structure_probe": 55,
+              "worker_page": 94
+            },
+            "jitter": "none",
+            "scale": 1.0
+          },
+          "server_image_uri": "<study-registry>/swath-replay@sha256:38ea98e22d01d421f5965cf87a3bd4f483d713b6f8d543999247b83dd38eafed",
+          "server_implementation": "go",
+          "serving_mode": "sorted",
+          "warmup": {
+            "in_flight": 64,
+            "pivot_probes": 200,
+            "structure_probes": 2000,
+            "worker_pages": 200
+          }
+        },
+        "capacity_status": "uncalibrated"
+      },
+      "tool_slice_sha256": "52ed7d8880d61d8772b13b8850a61877487fadceb54dc6de0307d0313be0b93e"
+    },
+    "swath.e2f0d987ee37": {
+      "config": {
+        "concurrency": 256,
+        "heap_percent": 75,
+        "jvm_max_heap": "4g",
+        "mode": "recursive-tsv-dataset",
+        "part_rotation_interval": "0",
+        "part_rotation_max_rows": 0,
+        "text_part_size": "1gb",
+        "text_writers": 3,
+        "writeback_size": "32mb"
+      },
+      "environment": {
+        "auth_role": null,
+        "container_memory_gb": 8,
+        "location": "us-east1",
+        "machine_type": "n4-highcpu-80",
+        "memory_gb": 160,
+        "output_target": "file",
+        "target_bucket": "aws-public-blockchain",
+        "target_prefix": "",
+        "target_region": "us-east-2",
+        "timeout_s": 7200,
+        "vcpus": 80
+      },
+      "platform_sha256": "0f04d4f21a6abe82450535265894bc1a88fe103bf4fcd67b4ad5299c9ca4fc77",
+      "replay": {
+        "allocation": {
+          "replay_heap_percent": 75,
+          "replay_max_concurrent_requests": 4096,
+          "replay_memory_gb": 4,
+          "replay_parquet_connections": 128,
+          "replay_prefetch": true,
+          "replay_prefetch_max_windows": 192,
+          "replay_response_buffer_budget_bytes": 1073741824,
+          "replay_vcpus": 8,
+          "subject_vcpus": 8
+        },
+        "backend": {
+          "fixture_sha256": "f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0",
+          "fixture_uri": "<fixture-store>/aws-public-blockchain/current-eba31d9/part-*.parquet",
+          "latency_model": {
+            "deadlines_ms": {
+              "pivot_probe": 46,
+              "structure_probe": 55,
+              "worker_page": 94
+            },
+            "jitter": "none",
+            "scale": 1.0
+          },
+          "server_image_uri": "<study-registry>/swath-replay@sha256:38ea98e22d01d421f5965cf87a3bd4f483d713b6f8d543999247b83dd38eafed",
+          "server_implementation": "go",
+          "serving_mode": "sorted",
+          "warmup": {
+            "in_flight": 64,
+            "pivot_probes": 200,
+            "structure_probes": 2000,
+            "worker_pages": 200
+          }
+        },
+        "capacity_status": "uncalibrated"
+      },
+      "tool_slice_sha256": "52ed7d8880d61d8772b13b8850a61877487fadceb54dc6de0307d0313be0b93e"
+    }
+  },
+  "schema_version": 1,
+  "slots": [],
+  "suite": "go-replay-qualify"
+}

@@ -82,8 +82,10 @@ equal across the blockchain rows.
 What `TIMING_VALID`, `PRESSURE_DEGRADED`, `CAPACITY_FAILED`,
 `INSUFFICIENT_EVIDENCE` and `NOT_APPLICABLE` mean is on
 [`docs/instrument.md`](../../docs/instrument.md#how-a-release-grades-the-delivered-treatment);
-a grade describes how the replay instrument delivered its latency treatment
-during the run, not whether the tool succeeded.
+a grade is the replay instrument's server-work pressure check during the run
+(the server's per-request work against the declared latency; admission
+queueing and the response write are not graded), not whether the tool
+succeeded.
 
 Report:
 [`results/2026-09-scale-diagnostics/REPORT.md`](../../results/2026-09-scale-diagnostics/REPORT.md).

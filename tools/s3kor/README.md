@@ -22,7 +22,7 @@ Three of the nine rows returned 4,081,171 rows and six returned 4,081,170; the c
 
 Largest fixture attempted: FourCast 4.08M. No larger one was scheduled because s3kor's listing is serial and its parallelism is in transfers (a reading of the tool's source, not a release field); "not carried further" is a study decision, not a measured limit of the tool.
 
-A timing grade (`TIMING_VALID`, `PRESSURE_DEGRADED`, `CAPACITY_FAILED`, `INSUFFICIENT_EVIDENCE`, `NOT_APPLICABLE`) describes how well the replay instrument delivered its declared latency treatment on that row, not whether the tool succeeded; the definitions are in [`docs/instrument.md`](../../docs/instrument.md#how-a-release-grades-the-delivered-treatment).
+A timing grade (`TIMING_VALID`, `PRESSURE_DEGRADED`, `CAPACITY_FAILED`, `INSUFFICIENT_EVIDENCE`, `NOT_APPLICABLE`) is the replay instrument's server-work pressure check on that row, not whether the tool succeeded: it grades the server's per-request work against the declared latency, while admission queueing and the response write are not graded; the definitions are in [`docs/instrument.md`](../../docs/instrument.md#how-a-release-grades-the-delivered-treatment).
 
 Report: [`results/2026-09-scale-diagnostics/REPORT.md`](../../results/2026-09-scale-diagnostics/REPORT.md); findings page: [`RESULTS.md`](../../RESULTS.md); rows: [`results/2026-09-scale-diagnostics/attempts.jsonl`](../../results/2026-09-scale-diagnostics/attempts.jsonl).
 
