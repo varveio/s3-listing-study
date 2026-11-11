@@ -236,7 +236,10 @@ The two recordings are taken only by the modes whose listing lands in the sink
 which is the product in the stdout modes. They are written at the sink's top
 level, beside `listing/`, where `PROFILE_NAMES` in
 `benchmark/src/benchmark/measure.py` keeps them on every attempt, retained
-products or not, up to `PROFILE_MAX_BYTES` (512 MiB). A sink path the options
+products or not, as optional evidence: one over `PROFILE_MAX_BYTES` (512 MiB;
+the GC log has no bound of its own), not a regular readable file, hit by the
+secret scan or not uploaded is removed, left out of the manifest and named in
+`result.json`'s `profile_omissions`, and the attempt keeps its record. A sink path the options
 cannot carry (whitespace, `:`, `,`, quotes) is refused rather than escaped.
 Provenance of the option spellings: a local check on 2026-11-11 ran
 `swath --version` from the toolbox image's Temurin 25.0.4 with these options,

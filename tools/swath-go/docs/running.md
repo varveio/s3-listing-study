@@ -149,8 +149,10 @@ fields and the run report at `SINK/swath-go-report.json`:
   and stops it when `listing.Run` returns, before the report is written
   (`main.go:849-852,913-917`) — claim `cpu-profile-is-an-environment-hook`.
   `PROFILE_NAMES` in `measure.py` keeps the file on every attempt, retained
-  products or not, while it is at most `PROFILE_MAX_BYTES` (512 MiB; a larger
-  one is named on the worker's stderr and left behind). The profiler's cost on
+  products or not, as optional evidence: one that is over `PROFILE_MAX_BYTES`
+  (512 MiB), not a regular readable file, hit by the secret scan or not
+  uploaded is removed, left out of the manifest and named in `result.json`'s
+  `profile_omissions`, and the attempt keeps its record. The profiler's cost on
   the wall is unmeasured: a profiled row is diagnostic, not a timing row. The
   heap profile (`SWATH_MEMPROFILE`) is not exposed.
 - **Resume** replays the recorded command. The adapter restates what `swath

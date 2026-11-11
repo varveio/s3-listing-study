@@ -184,8 +184,14 @@ class ArtifactSafetyError(RuntimeError):
     """A retained path cannot be proven to be a contained regular file."""
 
 
-def retained_files(source: Path) -> Iterator[Path]:
-    """Yield contained regular files without following links or special files."""
+def retained_files(source: Path, *, skip_top: frozenset[str] = frozenset()) -> Iterator[Path]:
+    """Yield contained regular files without following links or special files.
+
+    ``skip_top`` names entries directly in ``source`` that this walk leaves to
+    someone else: the profiles (:data:`PROFILE_NAMES`), which are optional
+    evidence with their own tolerant path (:func:`settle_profiles`) rather than
+    a reason to refuse the attempt.
+    """
     if source.is_symlink():
         raise ArtifactSafetyError(f"symlink is not publishable: {source}")
     if not source.exists():
@@ -207,6 +213,8 @@ def retained_files(source: Path) -> Iterator[Path]:
             ) from exc
         for entry in entries:
             path = Path(entry.path)
+            if directory == root and entry.name in skip_top:
+                continue
             if entry.is_symlink():
                 raise ArtifactSafetyError(f"symlink is not publishable: {path.relative_to(root)}")
             if entry.is_dir(follow_symlinks=False):
@@ -223,10 +231,10 @@ def retained_files(source: Path) -> Iterator[Path]:
                 )
 
 
-def scan_for_secrets(paths: list[Path]) -> str | None:
+def scan_for_secrets(paths: list[Path], *, skip_top: frozenset[str] = frozenset()) -> str | None:
     """Scan every retained regular file as bounded binary chunks, failing closed."""
     try:
-        files = (path for source in paths for path in retained_files(source))
+        files = (path for source in paths for path in retained_files(source, skip_top=skip_top))
         for path in files:
             flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
             descriptor = os.open(path, flags)
@@ -989,7 +997,7 @@ def native_manifest(native_root: Path) -> dict[str, str]:
     """Content hashes for every native-output file, keyed by relative path."""
     return {
         path.relative_to(native_root).as_posix(): sha256_of(path)
-        for path in sorted(retained_files(native_root))
+        for path in sorted(retained_files(native_root, skip_top=PROFILE_NAMES))
     }
 
 
@@ -997,7 +1005,7 @@ def native_inventory(native_root: Path) -> dict[str, int]:
     """File sizes for minimal replay evidence, keyed by relative path."""
     return {
         path.relative_to(native_root).as_posix(): path.stat().st_size
-        for path in sorted(retained_files(native_root))
+        for path in sorted(retained_files(native_root, skip_top=PROFILE_NAMES))
     }
 
 
@@ -1011,45 +1019,132 @@ the dataset left every live-S3 row without a listing-phase figure."""
 PROFILE_NAMES = frozenset({"swath-go-cpu.pprof", "swath-gc.log", "swath.jfr"})
 """Profiles and recordings a capsule asks its subject to write at the top of
 the sink (``native/``) when a case states a diagnostic control: the Go port's
-CPU profile, the JVM's GC log and its flight recording. They travel with the
-run reports on every attempt, retained products or not, because a profile
-whose dataset was dropped is the only record of where the run's CPU went. Only
-the sink's top level is searched, so a file of the same name inside a product
-is product, not profile."""
+CPU profile, the JVM's GC log and its flight recording. They travel on every
+attempt, retained products or not, because a profile whose dataset was dropped
+is the only record of where the run's CPU went. Only the sink's top level is
+searched, so a file of the same name inside a product is product, not profile.
+
+They are *optional* evidence. Every strict walk of ``native/`` skips them
+(``skip_top``); :func:`settle_profiles`, :func:`screen_profiles` and
+:func:`bind_profiles` decide which travel, and one that cannot -- a link, a
+directory, an unreadable or oversized file, a secret-scan hit, a read or upload
+failure -- is removed from ``native/`` and named in ``result.json``'s
+``profile_omissions`` instead of costing the attempt its record."""
 
 PROFILE_MAX_BYTES = 512 * 1024 * 1024
-"""The bound on one retained profile. The capsules bound their own (JFR's
-``maxsize``); this is the harness's backstop, and a larger file is left behind
-with the dataset, named on the worker's stderr, rather than uploaded."""
+"""The bound on one profile, in both retention modes. The capsules bound what
+they can (JFR's ``maxsize``); the GC log has no producer-side bound, so this is
+the one that holds for it."""
+
+PROFILE_OMISSIONS = "profile_omissions"
+"""The ``result.json`` field naming each profile that did not travel, and why."""
 
 
 def run_report_files(native_root: Path) -> list[Path]:
-    """The run reports and bounded profiles under ``native/``, in path order."""
-    top = native_root.resolve()
+    """The run reports under ``native/``, in path order (profiles are not walked)."""
     return sorted(
         path
-        for path in retained_files(native_root)
+        for path in retained_files(native_root, skip_top=PROFILE_NAMES)
         if path.name in RUN_REPORT_NAMES
-        or (
-            path.name in PROFILE_NAMES
-            and path.parent == top
-            and path.stat().st_size <= PROFILE_MAX_BYTES
-        )
     )
 
 
-def oversized_profiles(native_root: Path) -> list[Path]:
-    """Profiles at the sink's top level that :data:`PROFILE_MAX_BYTES` keeps back."""
-    if not native_root.is_dir():
+def profile_problem(path: Path) -> str | None:
+    """Why the profile entry ``path`` cannot travel, or None. Never follows a link."""
+    try:
+        status = os.lstat(path)
+    except OSError as exc:
+        return f"cannot be inspected: {exc.strerror or exc}"
+    if stat.S_ISLNK(status.st_mode):
+        return "is a symbolic link"
+    if not stat.S_ISREG(status.st_mode):
+        return "is not a regular file"
+    if status.st_size > PROFILE_MAX_BYTES:
+        return f"is {status.st_size} bytes, over the {PROFILE_MAX_BYTES}-byte bound"
+    try:
+        os.close(os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)))
+    except OSError as exc:
+        return f"cannot be read: {exc.strerror or exc}"
+    return None
+
+
+def profile_entries(native_root: Path) -> list[Path]:
+    """The entries directly in ``native/`` named as profiles, whatever they are."""
+    if native_root.is_symlink() or not native_root.is_dir():
         return []
     return sorted(
-        path
-        for path in native_root.iterdir()
-        if path.name in PROFILE_NAMES
-        and path.is_file()
-        and not path.is_symlink()
-        and path.stat().st_size > PROFILE_MAX_BYTES
+        Path(entry.path) for entry in os.scandir(native_root) if entry.name in PROFILE_NAMES
     )
+
+
+def omit_profile(path: Path, omissions: dict[str, str], reason: str) -> None:
+    """Record why ``path`` does not travel and take it out of ``native/``.
+
+    Removed, not just skipped, so no later walk -- a retained-products upload
+    included -- can carry the rejected bytes. A removal that fails is recorded
+    too; every walk still skips the name.
+    """
+    try:
+        if stat.S_ISDIR(os.lstat(path).st_mode):
+            shutil.rmtree(path)
+        else:
+            os.unlink(path)
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        reason = f"{reason}; it could not be removed ({exc.strerror or exc})"
+    omissions[path.name] = reason
+    print(f"measure: profile {path.name} {reason}; it is not uploaded", file=sys.stderr)
+
+
+def profile_files(native_root: Path, omissions: Mapping[str, str]) -> list[Path]:
+    """The profiles still fit to travel: present, not omitted, and sound now."""
+    return [
+        path
+        for path in profile_entries(native_root)
+        if path.name not in omissions and profile_problem(path) is None
+    ]
+
+
+def settle_profiles(native_root: Path) -> dict[str, str]:
+    """Omit every profile entry that cannot travel; return ``{name: reason}``."""
+    omissions: dict[str, str] = {}
+    for path in profile_entries(native_root):
+        problem = profile_problem(path)
+        if problem is not None:
+            omit_profile(path, omissions, problem)
+    return omissions
+
+
+def screen_profiles(native_root: Path, omissions: dict[str, str]) -> None:
+    """Secret-scan each profile alone; a hit omits that profile, not the attempt."""
+    for path in profile_files(native_root, omissions):
+        hit = scan_for_secrets([path])
+        if hit:
+            omit_profile(path, omissions, f"was refused by the secret scan ({hit})")
+
+
+def bind_profiles(
+    native_root: Path, omissions: dict[str, str], *, hashes: bool
+) -> dict[str, str | int]:
+    """``{name: sha256 or size}`` for each profile that travels; a failed read omits it."""
+    bound: dict[str, str | int] = {}
+    for path in profile_files(native_root, omissions):
+        try:
+            bound[path.name] = sha256_of(path) if hashes else os.lstat(path).st_size
+        except OSError as exc:
+            omit_profile(path, omissions, f"could not be read ({exc.strerror or exc})")
+    return bound
+
+
+def bound_profile_names(result: Mapping[str, object]) -> list[str]:
+    """The profiles ``result.json`` binds, in either evidence profile's map."""
+    names: set[str] = set()
+    for field in ("native_manifest", "native_files"):
+        listed = result.get(field)
+        if isinstance(listed, dict):
+            names.update(name for name in listed if name in PROFILE_NAMES)
+    return sorted(names)
 
 
 def run_report_manifest(native_root: Path) -> dict[str, str]:
@@ -1101,70 +1196,124 @@ def upload(
     "incomplete", never as a passing (or failing) verdict.
 
     ``native/`` travels whole only when the attempt retains its products;
-    otherwise just its run reports (:data:`RUN_REPORT_NAMES`) and bounded
-    profiles (:data:`PROFILE_NAMES`) go, at their
+    otherwise just its run reports (:data:`RUN_REPORT_NAMES`) go, at their
     native-relative paths, so a reader finds them where a retained tree would
-    have had them.
+    have had them. Profiles (:data:`PROFILE_NAMES`) travel in both modes, and
+    only those ``result.json`` binds; a profile whose upload fails is dropped
+    from the manifest and named in ``profile_omissions`` before the marker is
+    published, so the marker never binds bytes that are not there and a failed
+    profile never costs the attempt its record.
 
     A ``gs://`` destination uses the production uploader. An absolute local
     destination gets the same create-only, marker-last contract so the Docker
     executor does not need a second measurement worker.
     """
     artifacts = sorted(
-        path
-        for path in attempt_dir.iterdir()
-        if path.name != "result.json" and (retain_products or path.name != "native")
+        path for path in attempt_dir.iterdir() if path.name not in {"result.json", "native"}
     )
     native_root = attempt_dir / "native"
-    reports = [] if retain_products else run_report_files(native_root)
+    result_path = attempt_dir / "result.json"
     try:
         upload_started = time.monotonic()
+        result = json.loads(result_path.read_text())
+        if not isinstance(result, dict):
+            raise ValueError("result.json is not an object")
+        required = (
+            list(retained_files(native_root, skip_top=PROFILE_NAMES))
+            if retain_products
+            else run_report_files(native_root)
+        )
         local_destination: Path | None = None
         if destination.startswith("gs://"):
-            for path in artifacts:
-                if path.is_dir():
-                    gcs.upload_tree(
-                        path, destination.rstrip("/") + "/" + path.name, create_only=True
-                    )
-                else:
-                    gcs.upload_file(
-                        path, destination.rstrip("/") + "/" + path.name, create_only=True
-                    )
-            for path in reports:
-                relative = path.relative_to(native_root).as_posix()
-                gcs.upload_file(
-                    path, destination.rstrip("/") + "/native/" + relative, create_only=True
-                )
+
+            def send(path: Path, name: str) -> None:
+                gcs.upload_file(path, destination.rstrip("/") + "/" + name, create_only=True)
+
+            def landed(name: str) -> bool:
+                # A GCS object appears whole or not at all, and create-only means
+                # one that is there now is this upload's: a call that failed
+                # after the commit still delivered the bytes the manifest binds.
+                try:
+                    return gcs.blob_exists(destination.rstrip("/") + "/" + name)
+                except Exception:
+                    return False
+
         else:
             local_destination = Path(destination)
             if not local_destination.is_absolute():
                 raise ValueError("local destination must be an absolute path")
             local_destination.mkdir(parents=True, exist_ok=False)
-            for path in artifacts:
-                target = local_destination / path.name
-                if path.is_dir():
-                    shutil.copytree(path, target)
-                else:
-                    shutil.copy2(path, target)
-            for path in reports:
-                target = local_destination / "native" / path.relative_to(native_root)
+            local_root = local_destination
+
+            def send(path: Path, name: str) -> None:
+                target = local_root / name
                 target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(path, target)
+                if target.exists() or target.is_symlink():
+                    raise FileExistsError(f"{target} already exists")
+                try:
+                    shutil.copy2(path, target, follow_symlinks=False)
+                except BaseException:
+                    with contextlib.suppress(OSError):
+                        target.unlink()
+                    raise
+
+            def landed(name: str) -> bool:
+                return False  # send() removes a partial copy before it re-raises
+
+        for path in artifacts:
+            if path.is_dir():
+                if local_destination is not None:
+                    shutil.copytree(path, local_destination / path.name)
+                else:
+                    gcs.upload_tree(
+                        path, destination.rstrip("/") + "/" + path.name, create_only=True
+                    )
+            else:
+                send(path, path.name)
+        for path in required:
+            send(path, "native/" + path.relative_to(native_root.resolve()).as_posix())
+        omissions = result.get(PROFILE_OMISSIONS)
+        omissions = dict(omissions) if isinstance(omissions, dict) else {}
+        failed: dict[str, int] = {}
+        for name in bound_profile_names(result):
+            path = native_root / name
+            size, problem = 0, None
+            with contextlib.suppress(OSError):
+                size = os.lstat(path).st_size
+            try:
+                problem = profile_problem(path)
+                if problem is not None:
+                    raise OSError(problem)
+                send(path, "native/" + name)
+            except Exception as exc:
+                if problem is None and landed("native/" + name):
+                    continue
+                omissions[name] = f"upload failed: {exc}"
+                print(f"measure: profile {name} upload failed: {exc}", file=sys.stderr)
+                failed[name] = size
+        if failed:
+            for field in ("native_manifest", "native_files"):
+                listed = result.get(field)
+                if isinstance(listed, dict):
+                    for name in failed:
+                        listed.pop(name, None)
+            if isinstance(result.get("artifacts_size_bytes"), int):
+                result["artifacts_size_bytes"] -= sum(failed.values())
+            result[PROFILE_OMISSIONS] = omissions
         if postprocessing_seconds is not None:
             postprocessing_seconds["artifact_upload"] = time.monotonic() - upload_started
-            result_path = attempt_dir / "result.json"
-            result = json.loads(result_path.read_text())
             result["postprocessing_seconds"] = postprocessing_seconds
+        if failed or postprocessing_seconds is not None:
             write_result_atomic(result_path, result)
         if local_destination is None:
             gcs.upload_file(
-                attempt_dir / "result.json",
+                result_path,
                 destination.rstrip("/") + "/result.json",
                 create_only=True,
             )
         else:
             pending = local_destination / ".result.json.pending"
-            shutil.copy2(attempt_dir / "result.json", pending)
+            shutil.copy2(result_path, pending)
             os.replace(pending, local_destination / "result.json")
     except Exception as exc:
         print(f"measure: publish failed: {exc}", file=sys.stderr)
@@ -1410,6 +1559,7 @@ def _result_document(
     native_files: Mapping[str, str],
     native_sizes: Mapping[str, int] | None,
     artifacts_size_bytes: int,
+    profile_omissions: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
     return {
         **attempt_identity(args, config, attempt_destination),
@@ -1443,6 +1593,7 @@ def _result_document(
         "native_manifest": native_files,
         "native_files": native_sizes,
         "artifacts_size_bytes": artifacts_size_bytes,
+        PROFILE_OMISSIONS: dict(profile_omissions or {}),
     }
 
 
@@ -1633,13 +1784,9 @@ def main(argv: list[str] | None = None) -> int:
 
     stderr_path = attempt_dir / "stderr.log"
     retain_products = args.retain_products == "true"
-    if not retain_products:
-        for path in oversized_profiles(native_root):
-            print(
-                f"measure: profile {path.name} is {path.stat().st_size} bytes, over the "
-                f"{PROFILE_MAX_BYTES}-byte bound; it is not uploaded",
-                file=sys.stderr,
-            )
+    # Profiles first: whatever cannot travel leaves native/ now, in both
+    # retention modes, so no walk below meets it and no upload carries it.
+    profile_omissions = settle_profiles(native_root)
 
     # Scan the uncompressed captures before any upload. A retained credential
     # turns the whole attempt into a refusal rather than public evidence that a
@@ -1658,7 +1805,9 @@ def main(argv: list[str] | None = None) -> int:
         scanned.append(native_root)
     else:
         scanned.extend(run_report_files(native_root))
-    secret_hit = scan_for_secrets(scanned)
+    secret_hit = scan_for_secrets(scanned, skip_top=PROFILE_NAMES)
+    if not secret_hit:
+        screen_profiles(native_root, profile_omissions)
     postprocessing_seconds["secret_scan"] = time.monotonic() - phase_started
     if secret_hit:
         print(
@@ -1730,6 +1879,14 @@ def main(argv: list[str] | None = None) -> int:
             if minimal_evidence and retain_products
             else ({} if minimal_evidence else None)
         )
+        # Profiles bind in whichever map this evidence profile fills: hashes in
+        # the manifest, or sizes in the inventory of a minimal retained tree.
+        hashes = not (minimal_evidence and retain_products)
+        profiles = bind_profiles(native_root, profile_omissions, hashes=hashes)
+        if hashes:
+            native_files = {**native_files, **{k: str(v) for k, v in profiles.items()}}
+        elif native_sizes is not None:
+            native_sizes = {**native_sizes, **{k: int(v) for k, v in profiles.items()}}
         postprocessing_seconds["native_inventory" if minimal_evidence else "native_manifest"] = (
             time.monotonic() - phase_started
         )
@@ -1739,8 +1896,11 @@ def main(argv: list[str] | None = None) -> int:
             path.stat().st_size
             for root in attempt_dir.iterdir()
             if root.name != "native" or retain_products
-            for path in retained_files(root)
+            for path in retained_files(root, skip_top=PROFILE_NAMES)
         ) + (0 if retain_products else sum(p.stat().st_size for p in run_report_files(native_root)))
+        artifacts_size_bytes += sum(
+            os.lstat(path).st_size for path in profile_files(native_root, profile_omissions)
+        )
     except (OSError, ArtifactSafetyError) as exc:
         print(f"measure: retained output is not publishable: {exc}", file=sys.stderr)
         return EXIT_ARTIFACT_UNUSABLE
@@ -1791,6 +1951,7 @@ def main(argv: list[str] | None = None) -> int:
         native_files=native_files,
         native_sizes=native_sizes,
         artifacts_size_bytes=artifacts_size_bytes,
+        profile_omissions=profile_omissions,
     )
     write_result_atomic(attempt_dir / "result.json", result)
     if not upload(

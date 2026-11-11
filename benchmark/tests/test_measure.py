@@ -4,6 +4,7 @@ import gzip
 import hashlib
 import json
 import os
+import shutil
 import signal
 import sys
 import tomllib
@@ -1065,48 +1066,224 @@ def test_default_upload_keeps_the_run_report_out_of_a_dropped_native_tree(
     assert not (local / "native/listing/data").exists()
 
 
-def test_default_upload_keeps_bounded_profiles_at_the_sink_top_only(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A profile or JVM recording a capsule aimed at the sink's top level travels
-    with the run reports; one inside the product, or over the bound, stays behind."""
+def _profiled_attempt(tmp_path: Path, *, bind: dict[str, object]) -> Path:
     attempt = tmp_path / "attempt"
     (attempt / "native/listing/data").mkdir(parents=True)
     (attempt / "native/listing/data/part-0.parquet").write_bytes(b"rows")
     (attempt / "native/listing/swath.jfr").write_bytes(b"product, not profile")
     (attempt / "native/swath-go-report.json").write_text("{}")
     (attempt / "native/swath-go-cpu.pprof").write_bytes(b"pprof")
-    (attempt / "native/swath-gc.log").write_text("[gc] pause\n")
     (attempt / "native/swath.jfr").write_bytes(b"jfr")
-    (attempt / "result.json").write_text("{}")
-    monkeypatch.setattr(measure, "PROFILE_MAX_BYTES", 4)
+    (attempt / "result.json").write_text(json.dumps(bind))
+    return attempt
+
+
+@pytest.mark.parametrize("retain_products", [False, True])
+def test_upload_sends_the_profiles_result_json_binds_in_both_modes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, retain_products: bool
+) -> None:
+    """Profiles travel by what the marker binds, never by a walk of native/: an
+    unbound one (here the pprof) stays behind with or without retained products,
+    and a same-named file inside the product is product."""
+    attempt = _profiled_attempt(
+        tmp_path, bind={"native_manifest": {"swath.jfr": "0" * 64}, "artifacts_size_bytes": 9}
+    )
     uploaded: list[str] = []
     monkeypatch.setattr(gcs, "upload_file", lambda _path, uri, **_kwargs: uploaded.append(uri))
     monkeypatch.setattr(gcs, "upload_tree", lambda _path, uri, **_kwargs: uploaded.append(uri))
 
-    assert measure.upload(attempt, "gs://bucket/leaf/")
+    assert measure.upload(attempt, "gs://bucket/leaf/", retain_products=retain_products)
 
-    assert sorted(uri for uri in uploaded if "/native/" in uri) == [
-        "gs://bucket/leaf/native/swath-go-report.json",
-        "gs://bucket/leaf/native/swath.jfr",
-    ]
-    assert set(measure.run_report_manifest(attempt / "native")) == {
-        "swath-go-report.json",
-        "swath.jfr",
-    }
-    assert [path.name for path in measure.oversized_profiles(attempt / "native")] == [
-        "swath-gc.log",
-        "swath-go-cpu.pprof",
-    ]
+    native = sorted(uri for uri in uploaded if "/native/" in uri)
+    expected = ["gs://bucket/leaf/native/swath-go-report.json", "gs://bucket/leaf/native/swath.jfr"]
+    if retain_products:
+        expected += [
+            "gs://bucket/leaf/native/listing/data/part-0.parquet",
+            "gs://bucket/leaf/native/listing/swath.jfr",
+        ]
+    assert native == sorted(expected)
+    assert uploaded[-1] == "gs://bucket/leaf/result.json"
 
-    monkeypatch.setattr(measure, "PROFILE_MAX_BYTES", 512 * 1024 * 1024)
-    assert set(measure.run_report_manifest(attempt / "native")) == {
-        "swath-gc.log",
-        "swath-go-cpu.pprof",
-        "swath-go-report.json",
-        "swath.jfr",
+
+@pytest.mark.parametrize("local", [False, True])
+def test_a_failed_profile_upload_is_dropped_from_the_marker_not_fatal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, local: bool
+) -> None:
+    """The marker is reconciled before it is published: it stops binding the
+    profile whose upload failed, names it, and the attempt keeps its record."""
+    attempt = _profiled_attempt(
+        tmp_path,
+        bind={
+            "native_manifest": {"swath.jfr": "0" * 64, "swath-go-cpu.pprof": "1" * 64},
+            "artifacts_size_bytes": 100,
+            "profile_omissions": {"swath-gc.log": "is a symbolic link"},
+        },
+    )
+    if local:
+        real_copy = shutil.copy2
+
+        def copy2(source: Any, target: Any, **kwargs: Any) -> Any:
+            if Path(source).name == "swath.jfr" and Path(source).parent.name == "native":
+                Path(target).write_bytes(b"partial")
+                raise OSError("disk full")
+            return real_copy(source, target, **kwargs)
+
+        monkeypatch.setattr(shutil, "copy2", copy2)
+        destination = tmp_path / "results" / "leaf"
+        assert measure.upload(attempt, str(destination), {})
+        published = json.loads((destination / "result.json").read_text())
+        assert not (destination / "native/swath.jfr").exists()
+        assert (destination / "native/swath-go-cpu.pprof").read_bytes() == b"pprof"
+    else:
+        sent: dict[str, bytes] = {}
+
+        def upload_file(path: Path, uri: str, **_kwargs: object) -> None:
+            if uri.endswith("/native/swath.jfr"):
+                raise OSError("connection reset")
+            sent[uri] = Path(path).read_bytes()
+
+        monkeypatch.setattr(gcs, "upload_file", upload_file)
+        monkeypatch.setattr(gcs, "blob_exists", lambda _uri: False)
+        assert measure.upload(attempt, "gs://bucket/leaf/", {})
+        published = json.loads(sent["gs://bucket/leaf/result.json"])
+        assert "gs://bucket/leaf/native/swath-go-cpu.pprof" in sent
+    assert published["native_manifest"] == {"swath-go-cpu.pprof": "1" * 64}
+    assert published["artifacts_size_bytes"] == 100 - len(b"jfr")
+    assert published["profile_omissions"]["swath-gc.log"] == "is a symbolic link"
+    assert published["profile_omissions"]["swath.jfr"].startswith("upload failed:")
+    assert published["postprocessing_seconds"]["artifact_upload"] >= 0
+
+
+def test_a_profile_upload_that_landed_before_failing_stays_bound(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    attempt = _profiled_attempt(tmp_path, bind={"native_manifest": {"swath.jfr": "0" * 64}})
+    sent: dict[str, bytes] = {}
+
+    def upload_file(path: Path, uri: str, **_kwargs: object) -> None:
+        sent[uri] = Path(path).read_bytes()
+        if uri.endswith("/native/swath.jfr"):
+            raise OSError("response lost after commit")
+
+    monkeypatch.setattr(gcs, "upload_file", upload_file)
+    monkeypatch.setattr(gcs, "blob_exists", lambda uri: uri.endswith("/native/swath.jfr"))
+    assert measure.upload(attempt, "gs://bucket/leaf/", {})
+    published = json.loads(sent["gs://bucket/leaf/result.json"])
+    assert published["native_manifest"] == {"swath.jfr": "0" * 64}
+    assert "profile_omissions" not in published
+
+
+def test_settle_omits_and_removes_every_profile_that_cannot_travel(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    native = tmp_path / "native"
+    native.mkdir()
+    (native / "listing.parquet").write_bytes(b"rows")
+    (native / "swath-gc.log").write_text("[gc]\n")
+    (native / "swath.jfr").mkdir()
+    (native / "swath.jfr/inner").write_bytes(b"x")
+    (native / "swath-go-cpu.pprof").symlink_to(native / "listing.parquet")
+    # A strict walk meets none of them, link included, so it cannot refuse.
+    assert measure.native_manifest(native) == {
+        "listing.parquet": sha256_of(native / "listing.parquet")
     }
-    assert measure.oversized_profiles(attempt / "native") == []
+
+    omissions = measure.settle_profiles(native)
+
+    assert omissions == {
+        "swath.jfr": "is not a regular file",
+        "swath-go-cpu.pprof": "is a symbolic link",
+    }
+    assert sorted(path.name for path in native.iterdir()) == ["listing.parquet", "swath-gc.log"]
+    assert (native / "listing.parquet").read_bytes() == b"rows"
+
+    (native / "swath.jfr").write_bytes(b"x" * 7)
+    monkeypatch.setattr(measure, "PROFILE_MAX_BYTES", 6)
+    assert measure.settle_profiles(native) == {
+        "swath.jfr": "is 7 bytes, over the 6-byte bound",
+    }
+    assert (native / "swath-gc.log").exists()
+    assert not (native / "swath.jfr").exists()
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads a mode-000 file")
+def test_settle_omits_an_unreadable_profile(tmp_path: Path) -> None:
+    native = tmp_path / "native"
+    native.mkdir()
+    (native / "swath-gc.log").write_text("[gc]\n")
+    (native / "swath-gc.log").chmod(0)
+    omissions = measure.settle_profiles(native)
+    assert omissions["swath-gc.log"].startswith("cannot be read")
+    assert not (native / "swath-gc.log").exists()
+
+
+def test_a_secret_or_a_read_failure_omits_the_profile_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    native = tmp_path / "native"
+    native.mkdir()
+    (native / "swath.jfr").write_bytes(b"... AKIA" + b"A" * 16 + b" ...")
+    (native / "swath-gc.log").write_text("[gc]\n")
+    (native / "swath-go-cpu.pprof").write_bytes(b"pprof")
+    omissions: dict[str, str] = {}
+
+    measure.screen_profiles(native, omissions)
+    assert omissions["swath.jfr"].startswith("was refused by the secret scan")
+    assert "AKIA" not in omissions["swath.jfr"]
+    assert not (native / "swath.jfr").exists()
+
+    real = sha256_of
+
+    def sha256_of_or_fail(path: Path) -> str:
+        if path.name == "swath-go-cpu.pprof":
+            raise OSError(5, "Input/output error")
+        return real(path)
+
+    monkeypatch.setattr(measure, "sha256_of", sha256_of_or_fail)
+    bound = measure.bind_profiles(native, omissions, hashes=True)
+    assert bound == {"swath-gc.log": sha256_of(native / "swath-gc.log")}
+    assert omissions["swath-go-cpu.pprof"] == "could not be read (Input/output error)"
+    assert not (native / "swath-go-cpu.pprof").exists()
+    assert measure.bind_profiles(native, omissions, hashes=False) == {"swath-gc.log": 5}
+
+
+@pytest.mark.parametrize("retain_products", [True, False])
+def test_an_attempt_keeps_its_record_when_profiles_cannot_travel(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, retain_products: bool
+) -> None:
+    """End to end, in both retention modes: an oversized profile and a linked
+    one are omitted and removed, the sound one is bound and sent, and the
+    attempt publishes its marker -- under retained products too, where the
+    whole native tree used to go up unfiltered."""
+    monkeypatch.setattr(measure, "PROFILE_MAX_BYTES", 32)
+    uploaded: list[tuple[str, bytes]] = []
+    code = run_inline_worker(
+        tmp_path,
+        monkeypatch,
+        mode="profiles",
+        uploaded=uploaded,
+        retain_products=retain_products,
+    )
+    assert code == 0
+    native = tmp_path / "attempt/native"
+    result = json.loads((tmp_path / "attempt/result.json").read_text())
+    assert result["profile_omissions"] == {
+        "swath-go-cpu.pprof": "is a symbolic link",
+        "swath.jfr": "is 64 bytes, over the 32-byte bound",
+    }
+    gc_log = {"swath-gc.log": sha256_of(native / "swath-gc.log")}
+    if retain_products:
+        assert result["native_manifest"] == {
+            **gc_log,
+            "listing.parquet": sha256_of(native / "listing.parquet"),
+        }
+    else:
+        assert result["native_manifest"] == gc_log
+    sent = sorted(uri for uri, _body in uploaded if "/native/" in uri)
+    assert "gs://results/job/native/swath-gc.log" in sent
+    assert not [uri for uri in sent if uri.endswith(("swath.jfr", "swath-go-cpu.pprof"))]
+    assert sorted(path.name for path in native.iterdir()) == ["listing.parquet", "swath-gc.log"]
+    assert uploaded[-1][0] == "gs://results/job/result.json"
 
 
 def test_local_publication_is_create_only(tmp_path: Path) -> None:
@@ -1218,6 +1395,14 @@ MODES = {
         product_artifact="listing",
         product_channel="file",
     ),
+    "profiles": Mode(
+        product="parquet",
+        fields=("key",),
+        axes={"segments": Stated()},
+        artifacts={"listing": "listing.parquet"},
+        product_artifact="listing",
+        product_channel="file",
+    ),
 }
 
 
@@ -1248,6 +1433,13 @@ def build_command(request: CommandRequest) -> tuple[str, ...]:
         return (
             sys.executable,
             str(here / "symlinks.py"),
+            request.artifact_path,
+            request.sink_dir + "/listing.parquet",
+        )
+    if request.mode == "profiles":
+        return (
+            sys.executable,
+            str(here / "profiles.py"),
             request.artifact_path,
             request.sink_dir + "/listing.parquet",
         )
@@ -1317,6 +1509,21 @@ product.with_name("stray-link").symlink_to(product)
 print("wrote the listing")
 """
 
+PROFILES_SUBJECT = """\
+import sys
+from pathlib import Path
+
+# Writes its product and three profiles at the sink's top level: one that can
+# travel, one over the bound the test sets, and one a symbolic link -- the two
+# a profile may not be, and which must cost the profile, not the attempt.
+product = Path(sys.argv[2])
+product.write_text(Path(sys.argv[1]).read_text())
+product.with_name("swath-gc.log").write_text("[gc] pause\\n")
+product.with_name("swath.jfr").write_bytes(b"x" * 64)
+product.with_name("swath-go-cpu.pprof").symlink_to(product)
+print("wrote the listing")
+"""
+
 INLINE_SPLIT = (
     """\
 import sys
@@ -1341,6 +1548,7 @@ def inline_capsule(tmp_path: Path, split: str = INLINE_SPLIT) -> Path:
     (adapter / "prints.py").write_text(PRINTS_SUBJECT, encoding="utf-8")
     (adapter / "writes.py").write_text(WRITES_SUBJECT, encoding="utf-8")
     (adapter / "symlinks.py").write_text(SYMLINKS_SUBJECT, encoding="utf-8")
+    (adapter / "profiles.py").write_text(PROFILES_SUBJECT, encoding="utf-8")
     return tmp_path / "tools"
 
 
@@ -1353,6 +1561,7 @@ def run_inline_worker(
     split: str = INLINE_SPLIT,
     auth_role: str | None = None,
     uploaded: list[tuple[str, bytes]] | None = None,
+    retain_products: bool = True,
 ) -> int:
     """Run one attempt of the fixture capsule against a staged `.ks`.
 
@@ -1436,7 +1645,7 @@ def run_inline_worker(
             "--config",
             json.dumps({"mode": mode, "segments": 2}),
             "--retain-products",
-            "true",
+            "true" if retain_products else "false",
             "--input-artifact",
             "gs://results/prep/native/keyspace.ks",
             "--input-artifact-sha256",
@@ -1669,7 +1878,7 @@ def test_a_symlink_left_in_native_refuses_cleanly_instead_of_crashing(
     would refuse this same symlink first (a real, and separately tested,
     defense) -- disabled here to isolate the guard this test targets.
     """
-    monkeypatch.setattr(measure, "scan_for_secrets", lambda _paths: None)
+    monkeypatch.setattr(measure, "scan_for_secrets", lambda _paths, **_kwargs: None)
     code = run_inline_worker(tmp_path, monkeypatch, mode="symlinks")
     assert code == measure.EXIT_ARTIFACT_UNUSABLE
     assert "measure: retained output is not publishable" in capsys.readouterr().err
