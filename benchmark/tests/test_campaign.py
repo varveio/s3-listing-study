@@ -18,11 +18,13 @@ from types import SimpleNamespace
 from typing import Any, TypeVar, cast
 
 import pytest
+import yaml
 from google.api_core.exceptions import AlreadyExists, BadRequest, GoogleAPIError, NotFound
 from google.cloud import batch_v1
 
 from benchmark import adapters, batch_client, campaign, gcs, identity, ledger, measure, report
 from benchmark import plan as bench
+from benchmark import replay as replay_contract
 from benchmark.contract import CREDENTIAL_ENV_VAR, TOOLBOX_TOOLS
 from benchmark.drivers import gcp_batch
 from benchmark.plan import Case, Plan
@@ -2508,3 +2510,176 @@ def test_wave3_plans_render_the_pinned_window_fill_image(tmp_path: Path) -> None
                     (allocation["replay_vcpus"], allocation["replay_memory_gb"], index_on)
                 )
     assert sorted(allocations) == [(16, 5, True), (64, 20, False), (64, 20, True), (64, 20, True)]
+
+
+WAVE4 = ROOT / "benchmark/plans/campaigns/go-replay-qualification-4"
+# Each wave-4 plan: its counterpart plan, then the host vCPUs, replay vCPUs, replay
+# GiB and repetitions it declares. Blockchain's counterpart is wave 3's 16/5 rung
+# (same image); NARA and FourCast last ran in wave 2, on the wave-2 image.
+WAVE4_CELLS = {
+    "blockchain-swath-go-16-5": (WAVE3 / "blockchain-ladder-go", 32, 16, 5, 2),
+    "blockchain-swath-go-8-4": (WAVE3 / "blockchain-ladder-go", 32, 8, 4, 1),
+    "fourcast-s5cmd-go-8-4": (WAVE2 / "fourcast-s5cmd-go", 16, 8, 4, 1),
+    "nara-s7cmd-go-16-5": (WAVE2 / "nara-s7cmd-go", 32, 16, 5, 1),
+    "nara-s7cmd-go-8-4": (WAVE2 / "nara-s7cmd-go", 32, 8, 4, 1),
+    "nara-swath-go-16-5": (WAVE2 / "nara-swath-go", 32, 16, 5, 1),
+    "nara-swath-go-8-4": (WAVE2 / "nara-swath-go", 32, 8, 4, 1),
+}
+
+
+def _wave4_plans() -> list[Path]:
+    return sorted(WAVE4.glob("*/*.yaml"))
+
+
+def _with_wave3_image(config: _R) -> _R:
+    return replace(config, backend=replace(config.backend, server_image_uri=WAVE3_REPLAY_IMAGE))
+
+
+def test_wave4_plans_differ_from_their_counterparts_only_in_replay_allocation_and_host() -> None:
+    """One variable: each wave-4 case is its wave-3 (blockchain) or wave-2 (NARA, FourCast)
+    case once the replay vCPUs and memory, the host shape and the repetitions are set
+    back, with every counterpart moved to wave 3's server image."""
+    assert [path.parent.name for path in _wave4_plans()] == sorted(WAVE4_CELLS)
+    for path in _wave4_plans():
+        source, host_vcpus, replay_vcpus, replay_memory_gb, reps = WAVE4_CELLS[path.parent.name]
+        wave4 = campaign.load_campaign_plan(path)
+        counterpart = campaign.load_campaign_plan(source / path.name)
+        assert wave4.replay is not None and counterpart.replay is not None
+        assert wave4.replay.backend.server_image_uri == WAVE3_REPLAY_IMAGE
+        assert counterpart.replay.backend.server_image_uri == (
+            WAVE3_REPLAY_IMAGE if source.parent == WAVE3 else WAVE2_REPLAY_IMAGE
+        )
+        assert wave4.replay == _with_wave3_image(counterpart.replay)
+        assert wave4.exclusions == counterpart.exclusions
+        assert len(wave4.cases) == len(counterpart.cases) == 1
+        for case4, case in zip(wave4.cases, counterpart.cases, strict=True):
+            assert case4.replay is not None and case.replay is not None
+            assert case4.replay.list_index_enabled is True
+            moved: dict[str, int] = {
+                "replay_vcpus": replay_vcpus,
+                "replay_memory_gb": replay_memory_gb,
+            }
+            expected = replace(
+                case,
+                resources=replace(
+                    case.resources,
+                    vcpus=host_vcpus,
+                    memory_gb=2 * host_vcpus,
+                    machine_type=f"n4-highcpu-{host_vcpus}",
+                ),
+                reps=reps,
+                axes=tuple((key, moved.get(key, value)) for key, value in case.axes),
+                label=case4.label,
+                replay=_with_wave3_image(
+                    replace(
+                        case.replay,
+                        allocation=replace(
+                            case.replay.allocation,
+                            replay_vcpus=replay_vcpus,
+                            replay_memory_gb=replay_memory_gb,
+                        ),
+                    )
+                ),
+            )
+            assert case4 == expected
+
+
+def test_wave4_hosts_are_the_smallest_n4_highcpu_shape_that_fits() -> None:
+    """Every smaller N4 highcpu box in the catalogue refuses the wave-4 allocation, so
+    the declared host is the smallest one the subject and replay cpusets fit."""
+    instances = yaml.safe_load((ROOT / "benchmark/plans/instances.yaml").read_text())
+    highcpu = sorted(
+        (row["vcpus"], row["memory_gb"])
+        for row in instances["instances"]
+        if row["machine_type"].startswith("n4-highcpu-")
+    )
+    for path in _wave4_plans():
+        (case,) = campaign.load_campaign_plan(path).cases
+        assert case.replay is not None
+        replay_contract.allocation_summary(
+            case.replay,
+            box_vcpus=case.resources.vcpus,
+            box_memory_gb=case.resources.memory_gb,
+            container_memory_gb=case.resources.container_memory_gb,
+        )
+        for vcpus, memory_gb in highcpu:
+            if vcpus >= case.resources.vcpus:
+                break
+            with pytest.raises(replay_contract.ReplayError):
+                replay_contract.allocation_summary(
+                    case.replay,
+                    box_vcpus=vcpus,
+                    box_memory_gb=memory_gb,
+                    container_memory_gb=case.resources.container_memory_gb,
+                )
+
+
+def test_wave4_plans_render_the_downsized_replay_on_the_declared_hosts(tmp_path: Path) -> None:
+    """Dry render of the committed wave-4 plans: eight attempts on wave 3's image with
+    the list index on; the server gets the declared cpuset and memory, and the subject
+    keeps its vCPU count as whole N4 cores and its memory ceiling."""
+    images = image_set(tmp_path)
+    rendered = []
+    for path in _wave4_plans():
+        _, host_vcpus, replay_vcpus, replay_memory_gb, _ = WAVE4_CELLS[path.parent.name]
+        plan = campaign.load_campaign_plan(path)
+        assert plan.replay is not None and not plan.replay.backend.image_is_placeholder
+        assert plan.replay.backend.fixture_layout == "seekparquet"
+        campaign.refuse_placeholder_images(plan)
+        for case in plan.cases:
+            assert case.replay is not None
+            subject_vcpus = case.replay.allocation.subject_vcpus
+            for ordinal in range(1, case.reps + 1):
+                attempt = campaign.planned_attempt(case, context(plan, case, images))[2](ordinal)[0]
+                request = gcp_batch.render_batch_job(
+                    attempt,
+                    images.image_for(case.tool),
+                    suite=SUITE,
+                    options=context(plan, case, images).options,
+                )
+                policy = request["allocationPolicy"]["instances"][0]["policy"]
+                assert policy["machineType"] == f"n4-highcpu-{host_vcpus}"
+                runnables = request["taskGroups"][0]["taskSpec"]["runnables"]
+                server, subject = runnables[2], runnables[3]["container"]
+                assert server["container"]["imageUri"] == WAVE3_REPLAY_IMAGE
+                assert "--list-index=true" in server["container"]["commands"]
+                assert server["environment"]["variables"]["GOMAXPROCS"] == str(replay_vcpus)
+                assert f"--memory={replay_memory_gb}g" in server["container"]["options"]
+                assert f"--memory={case.resources.container_memory_gb}g" in subject["options"]
+                cpus = {
+                    name: replay_cpuset(options)
+                    for name, options in (
+                        ("server", server["container"]["options"]),
+                        ("subject", subject["options"]),
+                    )
+                }
+                assert len(cpus["server"]) == replay_vcpus
+                assert len(cpus["subject"]) == subject_vcpus
+                assert not cpus["server"] & cpus["subject"]
+                stride = host_vcpus // 2
+                cores = {cpu % stride for cpu in cpus["subject"]}
+                assert len(cores) == (subject_vcpus + 1) // 2
+                assert not cores & {cpu % stride for cpu in cpus["server"]}
+                rendered.append((path.parent.name, replay_vcpus, replay_memory_gb, host_vcpus))
+    assert sorted(rendered) == sorted(
+        [
+            ("blockchain-swath-go-16-5", 16, 5, 32),
+            ("blockchain-swath-go-16-5", 16, 5, 32),
+            ("blockchain-swath-go-8-4", 8, 4, 32),
+            ("fourcast-s5cmd-go-8-4", 8, 4, 16),
+            ("nara-s7cmd-go-16-5", 16, 5, 32),
+            ("nara-s7cmd-go-8-4", 8, 4, 32),
+            ("nara-swath-go-16-5", 16, 5, 32),
+            ("nara-swath-go-8-4", 8, 4, 32),
+        ]
+    )
+
+
+def replay_cpuset(options: str) -> set[int]:
+    """The CPUs a rendered ``--cpuset-cpus=`` option names."""
+    (spec,) = [item.split("=", 1)[1] for item in options.split() if item.startswith("--cpuset")]
+    cpus: set[int] = set()
+    for part in spec.split(","):
+        low, _, high = part.partition("-")
+        cpus.update(range(int(low), int(high or low) + 1))
+    return cpus
