@@ -31,9 +31,9 @@ layer.
 | --- | --- |
 | Tested subject | Upstream source at commit `8c8f870` on main (2026-11-11), built from GitHub's checksum-pinned archive of that commit with upstream's own static build line and Go toolchain, the revision stamped in; no fork, no patch. It is newer than the port's first release candidate, `v0.4.0-rc.1`, which the capsule does not select. Rows run at the capsule's earlier pins name `7b05605` (the head of pull request varveio/swath#255) in their receipts. Canonical identity: [`data/tool.json`](data/tool.json). |
 | How it runs | `swath list s3://… -o <sink>/listing` (the sorted dataset), `-o <sink>/listing.tsv` or `-o <sink>/listing.tsv.zst` (one TSV file), each with `--report <sink>/swath-go-report.json --s3-region R --workers N`, and `swath resume <sink>/listing` for a killed dataset run ([`docs/running.md`](docs/running.md#adapter-and-harness-contract)). The port is registered in the toolbox. |
-| Exercised coverage | No committed run record. Twenty replay rows and three live S3 rows were run through the harness on 2026-11-07 from the earlier `7b05605` bundle (campaign ledger), whose command line and products this pin no longer shares; until their receipts are committed, nothing on this page rests on them. |
-| Correctness and verifier state | No verifier verdict and no completeness check exist. |
-| Results | None. Nothing here is a benchmark result or a comparison. |
+| Exercised coverage | 111 harness attempts in seven diagnostic receipts under [`benchmark/receipts/`](../../benchmark/receipts/swath-go-main-8c8f870-cloud-20261111/README.md) (`swath-go-*`): 23 on 2026-11-07 from the earlier `7b05605` bundle, whose command line and products this pin no longer shares (one live S3 row on real-changesets; two live sentinel-cogs attempts cancelled with no result); 21 at this pin beside Java 0.3.2 on the release Java replay; and 67 on the qualified Go replay instrument (setting exploration, CPU profiles, a content check and 36 seeded confirmation attempts, 15 of them a later Swath-Go build, `c54179e`), run from unmerged scratch harness revisions that each receipt names verbatim. The claim ledger has not been re-evaluated against them (see [Coverage gaps](#coverage-gaps)). |
+| Correctness and verifier state | No verifier verdict and no completeness check exist. Two content checks against Java 0.3.2 exist: an exact nine-column comparison of one FourCast pair, and on blockchain a probabilistic fingerprint plus key-order check of four retained products (not a row-by-row comparison, not all 36 attempts). |
+| Results | Diagnostic only: per-attempt wall clock, subject CPU, peak RSS (GiB) and the replay instrument's timing grade, and Go/Java ratios computed from them for the configurations run. `TIMING_VALID` is the instrument's evidence rule, not calibration; nothing here is a calibrated benchmark, a ranking, or a claim that either tool is fully tuned. Each receipt's README states what it supports. |
 
 ## How it works
 
@@ -106,15 +106,20 @@ observation.
 
 ### Coverage gaps
 
-- Nothing has run: every runtime proposition is `unverified` — claims
-  `lists-a-bucket-completely`, `resume-after-kill-completes`,
-  `throughput-and-memory-at-scale`, `signed-path-unexercised`.
+- The runtime claims stay `unverified` although harness attempts exist: the
+  receipts sit under `benchmark/receipts/`, while the claim schema takes run
+  evidence only from this capsule's `receipts/`, and the ledger has not been
+  re-evaluated against them — claims `lists-a-bucket-completely`,
+  `throughput-and-memory-at-scale`, `go-and-java-datasets-agree`. Kill and
+  resume and the signed path have not run at all — claims
+  `resume-after-kill-completes`, `signed-path-unexercised`.
 
 ### Harness and verifier blockers
 
-- No image built from this recipe is recorded, and no harness attempt exists —
-  claims `image-builds-from-the-pinned-recipe`, `adapter-runs-under-the-harness`.
-  Kill-and-resume needs a harness field that is not on `main`
+- Toolbox images built from this recipe at `8c8f870` ran harness attempts
+  whose digests the receipts bind; the two claims are not yet re-evaluated
+  against them — claims `image-builds-from-the-pinned-recipe`,
+  `adapter-runs-under-the-harness`. Kill-and-resume needs a harness field that is not on `main`
   ([`docs/running.md`](docs/running.md#what-the-harness-cannot-do-yet)).
 
 ### Tool risks
@@ -141,7 +146,7 @@ observation.
 | Integrate the subject with the shared harness | [`adapter/`](adapter/) |
 | See the pinned build recipe | [`build/`](build/) |
 | See what was read and executed, and how this derivation departs from the usual method | [`research/derivation.md`](research/derivation.md) |
-| Find run records | [`receipts/`](receipts/) (empty: no receipt committed yet) |
+| Find run records | [`benchmark/receipts/`](../../benchmark/receipts/swath-go-main-8c8f870-cloud-20261111/README.md), the `swath-go-*` directories; this capsule's [`receipts/`](receipts/) is empty |
 
 ## Provenance
 
@@ -158,9 +163,10 @@ fixtures over a synthetic store and a local toolbox build, are described in
 ## Evidence boundary
 
 Source and documentation establish mechanisms and risks, never observed
-behaviour. This page has no receipt, no smoke observation and no benchmark: no
-claim is `confirmed`, and every runtime claim is `unverified` because nobody has
-run the port against S3.
+behaviour. The run records are the diagnostic receipts above; there is no
+capsule smoke observation and no benchmark, no claim is `confirmed`, and the
+runtime claims stay `unverified` until the ledger is re-evaluated against
+those receipts.
 
 ## Varve and Swath
 
@@ -169,4 +175,4 @@ participants in the space we study. The Go port gets exactly the rules every
 other tool gets: the same harness, run records and evidence vocabulary, and no
 number from Varve's own development of the port is used here. The port is
 added before it is released, which is why this page says plainly that it has
-no committed run record and that its pin is an unreleased commit — claim `first-party-source-basis`.
+diagnostic run records only and that its pin is an unreleased commit — claim `first-party-source-basis`.

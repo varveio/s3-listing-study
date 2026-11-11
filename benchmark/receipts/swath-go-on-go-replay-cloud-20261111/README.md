@@ -7,6 +7,8 @@ Twelve attempts in three groups (`sgo-goreplay-{blockchain,nara,fourcast}`,
 scale-study ledger), created 07:14 UTC, terminal by 07:22 UTC. All
 SUCCEEDED, exit 0, full row counts.
 
+**Harness availability.** `c25a6e7d90c9a9c0c87e10da121cffc24dc51db0` is published as tag `receipts/swath-go-on-go-replay-20261111`.
+
 - Harness: `c25a6e7d90c9a9c0c87e10da121cffc24dc51db0`, **on the unmerged
   branch `scratch/swath-go-on-go-replay`**: a merge of PR #36 (`9ee6365`) and
   PR #37 (`89e6cd7`) plus the plans in
@@ -76,6 +78,7 @@ Cost: $0.8779 by `runDuration`, $1.0970 create-to-terminal.
   CPU seconds (rusage), cgroup memory peak and OOM deltas, evidence profile,
   product retention, native file manifest (SHA-256 of retained profiles and
   reports) and profile omissions.
+- `server-lines.txt`: each Go-replay attempt's `swath_replay list_index` line, read from the job's Cloud Logging (`batch_task_logs`) with `gcloud logging read` on 2026-11-11 and attached to the group files through the `benchmark.receipt --server-log` path, which cross-checks it against the bound meters. Every attempt here reports `delivered: true` with no disagreement.
 - `cost-observed.json`: each job's provider `runDuration` and
   create-to-terminal span, priced at the published us-east1 N4 Spot list rates
   used by the Go replay qualification receipts ($1.80688/h n4-highcpu-80,
@@ -85,9 +88,11 @@ Cost: $0.8779 by `runDuration`, $1.0970 create-to-terminal.
 
 Export: `benchmark.receipt` and `benchmark.report` (for the timing
 assessment and declared cpusets) imported from study commit
-`73fe22707cbac030c327ec21a08444bb5ef2c369` on the unmerged branch
-`scratch/swath-go-on-go-replay`, read-only against the scale-study ledger and
-the results bucket. That commit is used because it contains both this
+`73fe22707cbac030c327ec21a08444bb5ef2c369` (an unmerged scratch revision, not
+published), read-only against the scale-study ledger and the results bucket.
+Its `receipt.py`, `report.py`, `replay.py`, `verify.py` and `ledger.py` are
+byte-identical to PR #37's head `89e6cd7`, so that head reproduces the
+export. That commit is used because it contains both this
 branch's capsule and PR #37's Go replay contract: the exporter on this branch
 alone refuses Go replay documents (`fixture_adopted_sha256`,
 `server_implementation` are unknown to it). Provider durations come from the

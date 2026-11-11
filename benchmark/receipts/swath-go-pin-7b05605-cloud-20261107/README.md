@@ -13,6 +13,8 @@ live `s3://sentinel-cogs` at 64 and 256 workers, cancelled 13:27 UTC): no
 result marker exists, the Batch jobs were deleted by the cancel, and nothing
 about their runtime behaviour is recorded or claimed.
 
+**Harness availability.** `2479097ea6f428ffe4480efe0f41079f74cf638c` is published as tag `receipts/swath-go-pin-7b05605-20261107`.
+
 - Harness: `2479097ea6f428ffe4480efe0f41079f74cf638c` (on
   `capsule/swath-go-v2`, PR #36), toolbox
   `benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112`,
@@ -109,9 +111,11 @@ between manifest and objects).
 
 Export: `benchmark.receipt` and `benchmark.report` (for the timing
 assessment and declared cpusets) imported from study commit
-`73fe22707cbac030c327ec21a08444bb5ef2c369` on the unmerged branch
-`scratch/swath-go-on-go-replay`, read-only against the scale-study ledger and
-the results bucket. That commit is used because it contains both this
+`73fe22707cbac030c327ec21a08444bb5ef2c369` (an unmerged scratch revision, not
+published), read-only against the scale-study ledger and the results bucket.
+Its `receipt.py`, `report.py`, `replay.py`, `verify.py` and `ledger.py` are
+byte-identical to PR #37's head `89e6cd7`, so that head reproduces the
+export. That commit is used because it contains both this
 branch's capsule and PR #37's Go replay contract: the exporter on this branch
 alone refuses Go replay documents (`fixture_adopted_sha256`,
 `server_implementation` are unknown to it). Provider durations come from the

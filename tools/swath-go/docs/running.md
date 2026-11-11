@@ -6,10 +6,13 @@ harness cannot do yet, and how the adapter was checked. Claim IDs resolve in
 [`mechanism.md`](mechanism.md). The canonical tested identity is
 [`../data/tool.json`](../data/tool.json).
 
-**Nothing at this pin has run.** No harness attempt, no capsule smoke, no run
-against S3 and no verifier verdict exist for commit `8c8f870`; the rows run on
-2026-11-07 ran from the earlier `7b05605` bundle and have no committed
-receipt. Every runtime statement about the port is `unverified`.
+**Run records are diagnostic receipts.** Harness attempts at this pin, on the
+release Java replay and on the qualified Go replay, and the 2026-11-07 rows
+from the earlier `7b05605` bundle are committed as receipts under
+[`benchmark/receipts/`](../../../benchmark/receipts/swath-go-main-8c8f870-cloud-20261111/README.md)
+(`swath-go-*`). No capsule smoke, no run against S3 at this pin and no
+verifier verdict exist, and the claim ledger has not been re-evaluated against
+the receipts, so every runtime statement about the port stays `unverified`.
 
 ## Build
 
@@ -299,7 +302,8 @@ default `uv run pytest`, which CI runs, collects them.
 
 ## Deferred coverage
 
-All `unverified`, each with its reason in the ledger: the image build
+All `unverified`, each with its reason in the ledger (the receipts above are
+not yet weighed against these claims): the image build
 (`image-builds-from-the-pinned-recipe`), a harness attempt
 (`adapter-runs-under-the-harness`), completeness against S3
 (`lists-a-bucket-completely`), kill and resume

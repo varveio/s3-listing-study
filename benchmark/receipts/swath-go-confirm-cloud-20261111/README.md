@@ -12,6 +12,8 @@ replay instrument, n4-highcpu-80, subject on 8 vCPUs unless the cell says
 by 10:31 UTC. **All 36 SUCCEEDED, exit 0, 143,008,674 rows, `TIMING_VALID`.**
 No preemption, retry or cancellation.
 
+**Harness availability.** `73fe22707cbac030c327ec21a08444bb5ef2c369` (Go-old, Java) and `e00dfb422b9d81dbe8775abb0f1c9d839e95f364` (Go-new): each an unmerged scratch revision, not published; the exact harness is carried by the recorded image digest (`benchmark-toolbox@sha256:1015b240…` and `@sha256:1e4319d4…` respectively).
+
 - Go-old (`GO*`) and Java (`JG1`, `JPAR`): harness
   `73fe22707cbac030c327ec21a08444bb5ef2c369`, **unmerged branch
   `scratch/swath-go-on-go-replay`**, toolbox
@@ -53,9 +55,14 @@ No preemption, retry or cancellation.
 
 `compare.py.txt` (the comparator script `compare.py` verbatim, stored as text so the
 repository linters skip it; SHA-256
-`2a2e98b55e366888f3476f093fd71ff4f8107f76dac38fc47b430c83266b1f95`, DuckDB,
-version not recorded) over local copies of the four retained products;
-`compare-output.txt` is its output verbatim. Per dataset: row count; an
+`2a2e98b55e366888f3476f093fd71ff4f8107f76dac38fc47b430c83266b1f95`) over
+local copies of the four retained products. `compare-output.txt` is the
+output of the first run, whose DuckDB version was not recorded.
+`compare-output-rerun.txt` is a re-run of the same script on 2026-11-11 under
+DuckDB 1.5.5 (the version `uv.lock` pins), over fresh read-only downloads of
+the retained products (integrity-checked by `gcloud storage cp`), one product
+per invocation to fit the local disk, each deleted after its run; its four
+lines equal the first run's. Per dataset: row count; an
 order-insensitive fingerprint over the nine shared S3 columns (count,
 `bit_xor` and sum of DuckDB's 64-bit row hash); strict unsigned-byte key order
 within every part and across consecutive parts in manifest order. All four
@@ -140,6 +147,7 @@ Cost: $5.0538 by `runDuration`, $6.0490 create-to-terminal.
   CPU seconds (rusage), cgroup memory peak and OOM deltas, evidence profile,
   product retention, native file manifest (SHA-256 of retained profiles and
   reports) and profile omissions.
+- `server-lines.txt`: each Go-replay attempt's `swath_replay list_index` line, read from the job's Cloud Logging (`batch_task_logs`) with `gcloud logging read` on 2026-11-11 and attached to the group files through the `benchmark.receipt --server-log` path, which cross-checks it against the bound meters. Every attempt here reports `delivered: true` with no disagreement.
 - `cost-observed.json`: each job's provider `runDuration` and
   create-to-terminal span, priced at the published us-east1 N4 Spot list rates
   used by the Go replay qualification receipts ($1.80688/h n4-highcpu-80,
@@ -149,9 +157,11 @@ Cost: $5.0538 by `runDuration`, $6.0490 create-to-terminal.
 
 Export: `benchmark.receipt` and `benchmark.report` (for the timing
 assessment and declared cpusets) imported from study commit
-`73fe22707cbac030c327ec21a08444bb5ef2c369` on the unmerged branch
-`scratch/swath-go-on-go-replay`, read-only against the scale-study ledger and
-the results bucket. That commit is used because it contains both this
+`73fe22707cbac030c327ec21a08444bb5ef2c369` (an unmerged scratch revision, not
+published), read-only against the scale-study ledger and the results bucket.
+Its `receipt.py`, `report.py`, `replay.py`, `verify.py` and `ledger.py` are
+byte-identical to PR #37's head `89e6cd7`, so that head reproduces the
+export. That commit is used because it contains both this
 branch's capsule and PR #37's Go replay contract: the exporter on this branch
 alone refuses Go replay documents (`fixture_adopted_sha256`,
 `server_implementation` are unknown to it). Provider durations come from the

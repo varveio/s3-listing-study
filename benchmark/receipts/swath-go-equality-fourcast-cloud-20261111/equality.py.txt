@@ -1,0 +1,142 @@
+"""Exact content comparison of two retained sorted-Parquet listings (Swath-Go vs Swath Java).
+
+usage: python equality_fourcast.py GO_LISTING_DIR JAVA_LISTING_DIR
+
+Each argument is a local copy of an attempt's native/listing/ directory.
+Before comparing, every part named by each manifest is checked against the
+manifest (SeekParquet: sha256 and bytes; Swath Java: MD5checksum and size), so
+the comparison is bound to the retained products. Then, over the nine S3
+columns both tools write:
+
+  1. row counts;
+  2. multiset difference in each direction (EXCEPT ALL);
+  3. positional comparison: row n of one against row n of the other, in file
+     order, IS DISTINCT FROM per column;
+  4. strict key order in the Swath-Go product (unsigned bytes, file order);
+  5. the Swath-only columns: version_id null, is_delete_marker false,
+     row_type OBJECT.
+
+Prints one line per check and exits 1 if any check differs.
+"""
+
+import hashlib
+import json
+import os
+import sys
+
+import duckdb
+
+COLS = (
+    "key",
+    "size",
+    "last_modified",
+    "etag",
+    "storage_class",
+    "owner_id",
+    "owner_display_name",
+    "checksum_algorithm",
+    "checksum_type",
+)
+
+
+def parts(root: str) -> list[str]:
+    with open(os.path.join(root, "manifest.json"), "rb") as handle:
+        manifest = json.load(handle)
+    out = []
+    if "parts" in manifest:  # SeekParquet
+        for part in manifest["parts"]:
+            path = os.path.join(root, part["path"])
+            digest = hashlib.sha256(open(path, "rb").read()).hexdigest()
+            assert os.path.getsize(path) == part["bytes"], path
+            assert digest == part["sha256"], path
+            out.append(path)
+    else:  # Swath Java manifest
+        for part in manifest["files"]:
+            path = os.path.join(root, part["key"])
+            digest = hashlib.md5(open(path, "rb").read()).hexdigest()
+            assert os.path.getsize(path) == part["size"], path
+            assert digest == part["MD5checksum"], path
+            out.append(path)
+    return out
+
+
+def scan(paths: list[str]) -> str:
+    listed = ", ".join("'" + p.replace("'", "''") + "'" for p in paths)
+    return f"read_parquet([{listed}], filename=true, file_row_number=true)"
+
+
+def main() -> int:
+    go_root, java_root = sys.argv[1], sys.argv[2]
+    con = duckdb.connect()
+    print(f"duckdb {duckdb.__version__}")
+    go, java = scan(parts(go_root)), scan(parts(java_root))
+    print("manifest part digests: verified")
+    cols = ", ".join(COLS)
+    # File order: parts in manifest order, then file_row_number.
+    con.execute(
+        f"CREATE TEMP TABLE g AS SELECT row_number() OVER (ORDER BY list_position("
+        f"{[os.path.abspath(p) for p in parts(go_root)]}, filename), file_row_number) AS n, "
+        f"{cols} FROM {go}"
+    )
+    con.execute(
+        f"CREATE TEMP TABLE j AS SELECT row_number() OVER (ORDER BY list_position("
+        f"{[os.path.abspath(p) for p in parts(java_root)]}, filename), file_row_number) AS n, "
+        f"{cols}, version_id, is_delete_marker, row_type FROM {java}"
+    )
+    failed = False
+
+    def report(name: str, value: object, expected: object) -> None:
+        nonlocal failed
+        ok = value == expected
+        failed |= not ok
+        print(f"{name}: {value} ({'ok' if ok else 'DIFFERS'})")
+
+    go_rows = con.execute("SELECT count(*) FROM g").fetchone()[0]
+    java_rows = con.execute("SELECT count(*) FROM j").fetchone()[0]
+    print(f"rows: go {go_rows}, java {java_rows}")
+    report("row counts equal", go_rows == java_rows, True)
+    report(
+        "go EXCEPT ALL java",
+        con.execute(f"SELECT count(*) FROM (SELECT {cols} FROM g EXCEPT ALL SELECT {cols} FROM j)").fetchone()[0],
+        0,
+    )
+    report(
+        "java EXCEPT ALL go",
+        con.execute(f"SELECT count(*) FROM (SELECT {cols} FROM j EXCEPT ALL SELECT {cols} FROM g)").fetchone()[0],
+        0,
+    )
+    distinct = " OR ".join(f"g.{c} IS DISTINCT FROM j.{c}" for c in COLS)
+    report(
+        "positional mismatches",
+        con.execute(f"SELECT count(*) FROM g FULL JOIN j USING (n) WHERE {distinct}").fetchone()[0],
+        0,
+    )
+    report(
+        "go key order violations (unsigned bytes)",
+        con.execute(
+            "SELECT count(*) FROM (SELECT key, lag(key) OVER (ORDER BY n) AS p FROM g) "
+            "WHERE p IS NOT NULL AND encode(p) >= encode(key)"
+        ).fetchone()[0],
+        0,
+    )
+    report(
+        "java version_id not null",
+        con.execute("SELECT count(*) FROM j WHERE version_id IS NOT NULL").fetchone()[0],
+        0,
+    )
+    report(
+        "java is_delete_marker true",
+        con.execute("SELECT count(*) FROM j WHERE is_delete_marker").fetchone()[0],
+        0,
+    )
+    report(
+        "java row_type other than OBJECT",
+        con.execute("SELECT count(*) FROM j WHERE row_type IS DISTINCT FROM 'OBJECT'").fetchone()[0],
+        0,
+    )
+    print("IDENTICAL" if not failed else "DIFFERENT")
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

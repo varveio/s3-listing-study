@@ -8,6 +8,8 @@ UTC, terminal 07:54 UTC, both SUCCEEDED with exit 0 and 4,081,170 rows, run
 with products retained. They are second attempts (`.s2`) of the
 `sgo-goreplay-fourcast` cases, repeated with retention on.
 
+**Harness availability.** `c25a6e7d90c9a9c0c87e10da121cffc24dc51db0` is published as tag `receipts/swath-go-on-go-replay-20261111`.
+
 - Harness `c25a6e7d90c9a9c0c87e10da121cffc24dc51db0` on the unmerged branch
   `scratch/swath-go-on-go-replay` (see `swath-go-on-go-replay-cloud-20261111`),
   same toolbox `d5503f58…`, same Go replay instrument and FourCast fixture.
@@ -17,21 +19,30 @@ with products retained. They are second attempts (`.s2`) of the
 
 ## Comparator and output
 
-The comparison was a direct DuckDB session over local copies of the two
-retained datasets, not a committed script, on the nine S3 columns both tools
-write (`key, size, last_modified, etag, storage_class, owner_id,
-owner_display_name, checksum_algorithm, checksum_type`). The pinned
-`go/bench/diffds.py` could not be used: it reads SeekParquet/swath-dataset
-manifests only, and Swath 0.3.2's manifest has no `schema_id`. DuckDB version
-was not recorded. Output as recorded by the operator:
+`equality.py.txt` is the comparator, stored as text so the repository linters
+skip it (SHA-256
+`8ea6530483487de2c6175ac3319ca460f82cd35f57fa14750b1f09686c046dd6`);
+`equality-output.txt` is its output verbatim. It was run on 2026-11-11 under
+DuckDB 1.5.5 (the version `uv.lock` pins) over fresh read-only downloads of the
+two retained listings, deleted afterwards, after checking every part against
+its manifest (Swath-Go: SHA-256 and size; Swath: MD5 and size). It compares the
+nine S3 columns both tools write (`key, size, last_modified, etag,
+storage_class, owner_id, owner_display_name, checksum_algorithm,
+checksum_type`). The pinned `go/bench/diffds.py` could not be used: it reads
+SeekParquet/swath-dataset manifests only, and Swath 0.3.2's manifest has no
+`schema_id`.
 
 - row count: 4,081,170 in both;
 - multiset difference (`EXCEPT ALL`) in each direction: 0 and 0 rows;
-- positional comparison (row n against row n, `IS DISTINCT FROM` per column):
-  0 mismatches;
+- positional comparison (row n against row n in file order, `IS DISTINCT
+  FROM` per column): 0 mismatches;
 - Swath-Go key order strictly ascending by unsigned bytes: 0 violations;
 - Swath-only columns: `version_id` all NULL, `is_delete_marker` never true,
   `row_type` `OBJECT` on every row.
+
+The same checks were first made shortly after the runs, in an
+interactive DuckDB session with no saved script and no recorded version, with
+the same results; the committed script and output above replace that record.
 
 Scope: exact equality of the nine shared columns, including microsecond
 timestamps, on this fixture and these two products. It says nothing about
@@ -67,6 +78,7 @@ Cost: $0.0128 by `runDuration`, $0.0232 create-to-terminal.
   CPU seconds (rusage), cgroup memory peak and OOM deltas, evidence profile,
   product retention, native file manifest (SHA-256 of retained profiles and
   reports) and profile omissions.
+- `server-lines.txt`: each Go-replay attempt's `swath_replay list_index` line, read from the job's Cloud Logging (`batch_task_logs`) with `gcloud logging read` on 2026-11-11 and attached to the group files through the `benchmark.receipt --server-log` path, which cross-checks it against the bound meters. Every attempt here reports `delivered: true` with no disagreement.
 - `cost-observed.json`: each job's provider `runDuration` and
   create-to-terminal span, priced at the published us-east1 N4 Spot list rates
   used by the Go replay qualification receipts ($1.80688/h n4-highcpu-80,
@@ -76,9 +88,11 @@ Cost: $0.0128 by `runDuration`, $0.0232 create-to-terminal.
 
 Export: `benchmark.receipt` and `benchmark.report` (for the timing
 assessment and declared cpusets) imported from study commit
-`73fe22707cbac030c327ec21a08444bb5ef2c369` on the unmerged branch
-`scratch/swath-go-on-go-replay`, read-only against the scale-study ledger and
-the results bucket. That commit is used because it contains both this
+`73fe22707cbac030c327ec21a08444bb5ef2c369` (an unmerged scratch revision, not
+published), read-only against the scale-study ledger and the results bucket.
+Its `receipt.py`, `report.py`, `replay.py`, `verify.py` and `ledger.py` are
+byte-identical to PR #37's head `89e6cd7`, so that head reproduces the
+export. That commit is used because it contains both this
 branch's capsule and PR #37's Go replay contract: the exporter on this branch
 alone refuses Go replay documents (`fixture_adopted_sha256`,
 `server_implementation` are unknown to it). Provider durations come from the

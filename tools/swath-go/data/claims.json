@@ -713,11 +713,11 @@
       "scope": "operability",
       "status": "unverified",
       "disposition": "retained",
-      "qualification": "A local toolbox build of this tree is described in docs/running.md; it is not a committed record, and no pushed image digest exists.",
+      "qualification": "Toolbox images built from this recipe at 8c8f870 ran the attempts in benchmark/receipts/swath-go-main-8c8f870-cloud-20261111 and later receipts, which bind the image digests; no image digest is recorded inside this capsule.",
       "evidence": [
         {
           "kind": "none",
-          "reason": "No committed build record or image set binds this recipe to an image digest."
+          "reason": "The image digests are bound in receipts outside this capsule's receipts/; the claim has not been re-evaluated against them."
         }
       ]
     },
@@ -727,11 +727,11 @@
       "scope": "runtime",
       "status": "unverified",
       "disposition": "retained",
-      "qualification": "The adapter's argv ran against a scratch build of the subject over a synthetic local S3 store to make the adapter fixtures, and the normalizer reads those fixtures; no harness attempt exists.",
+      "qualification": "The adapter's argv ran against a scratch build of the subject over a synthetic local S3 store to make the adapter fixtures, and the normalizer reads those fixtures. Harness attempts at this pin are committed as diagnostic receipts under benchmark/receipts/.",
       "evidence": [
         {
           "kind": "none",
-          "reason": "No harness attempt of this subject has run."
+          "reason": "Harness attempts exist only as receipts outside this capsule's receipts/; the claim has not been re-evaluated against them."
         }
       ]
     },
@@ -741,11 +741,11 @@
       "scope": "correctness",
       "status": "unverified",
       "disposition": "retained",
-      "qualification": "The coverage block is the tool's own claim of completeness and is not evidence of it. No run against S3, no reference manifest and no verifier verdict exist.",
+      "qualification": "The coverage block is the tool's own claim of completeness and is not evidence of it. One live S3 run (real-changesets, earlier 7b05605 bundle) has a receipt under benchmark/receipts/; no reference manifest and no verifier verdict exist.",
       "evidence": [
         {
           "kind": "none",
-          "reason": "Nobody has run the port against S3 in this study."
+          "reason": "No verifier verdict or reference manifest; the one live receipt is outside this capsule's receipts/ and from an earlier pin."
         }
       ]
     },
@@ -783,11 +783,11 @@
       "scope": "performance",
       "status": "unverified",
       "disposition": "retained",
-      "qualification": "--sort-buffer bounds rows held between listing and encoding, not the process; peak RSS is a run fact. Nothing here is comparative.",
+      "qualification": "--sort-buffer bounds rows held between listing and encoding, not the process; peak RSS is a run fact. Diagnostic wall clock and peak RSS at up to 143M objects are in receipts under benchmark/receipts/. Nothing here is comparative.",
       "evidence": [
         {
           "kind": "none",
-          "reason": "No run at any scale."
+          "reason": "The diagnostic receipts are outside this capsule's receipts/; the claim has not been re-evaluated against them."
         }
       ]
     },
@@ -811,11 +811,11 @@
       "scope": "correctness",
       "status": "unverified",
       "disposition": "retained",
-      "qualification": "The swath-go-replay plans pair each Go case with a Java case on the same fixture; no such pair has a committed run record.",
+      "qualification": "Receipts under benchmark/receipts/ hold one exact nine-column comparison (FourCast) and one probabilistic fingerprint plus order check of four products (blockchain), each against Java 0.3.2; neither covers every fixture.",
       "evidence": [
         {
           "kind": "none",
-          "reason": "No run of the port, so nothing to compare."
+          "reason": "The comparisons are in receipts outside this capsule's receipts/; the claim has not been re-evaluated against them."
         }
       ]
     },

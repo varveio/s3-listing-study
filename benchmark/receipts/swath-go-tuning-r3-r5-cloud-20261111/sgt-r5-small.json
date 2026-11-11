@@ -43,10 +43,8 @@
               "pages": 346,
               "seconds": 0.109286
             },
-            "delivered": null,
-            "inconclusive": [
-              "meters record one build attempt but cannot tell built from failed; attach the server line"
-            ],
+            "delivered": true,
+            "inconclusive": [],
             "interval": {
               "declines": {
                 "dense_page": 762.0,
@@ -60,7 +58,25 @@
             "requested": {
               "enabled": true,
               "max_bytes": 67108864
-            }
+            },
+            "server_line": {
+              "budget_exhausted": false,
+              "bytes": 132128,
+              "entries": 1056,
+              "groups_failed": 0,
+              "groups_indexed": 12,
+              "groups_skipped": 0,
+              "has_index": true,
+              "line": "swath_replay list_index state=built max_bytes=67108864 workers=8 groups_indexed=12 groups_skipped=0 groups_failed=0 parts_failed=0 pages=346 entries=1056 bytes=132128 budget_exhausted=false has_index=true seconds=0.109",
+              "max_bytes": 67108864,
+              "pages": 346,
+              "parts_failed": 0,
+              "seconds": 0.109,
+              "state": "built",
+              "workers": 8
+            },
+            "server_line_disagreements": [],
+            "server_line_provenance": "operator export of the job's Cloud Logging"
           },
           "readiness": "ready",
           "refusals": [],
@@ -361,10 +377,8 @@
               "pages": 346,
               "seconds": 0.126686
             },
-            "delivered": null,
-            "inconclusive": [
-              "meters record one build attempt but cannot tell built from failed; attach the server line"
-            ],
+            "delivered": true,
+            "inconclusive": [],
             "interval": {
               "declines": {
                 "dense_page": 765.0,
@@ -378,7 +392,25 @@
             "requested": {
               "enabled": true,
               "max_bytes": 67108864
-            }
+            },
+            "server_line": {
+              "budget_exhausted": false,
+              "bytes": 132128,
+              "entries": 1056,
+              "groups_failed": 0,
+              "groups_indexed": 12,
+              "groups_skipped": 0,
+              "has_index": true,
+              "line": "swath_replay list_index state=built max_bytes=67108864 workers=8 groups_indexed=12 groups_skipped=0 groups_failed=0 parts_failed=0 pages=346 entries=1056 bytes=132128 budget_exhausted=false has_index=true seconds=0.127",
+              "max_bytes": 67108864,
+              "pages": 346,
+              "parts_failed": 0,
+              "seconds": 0.127,
+              "state": "built",
+              "workers": 8
+            },
+            "server_line_disagreements": [],
+            "server_line_provenance": "operator export of the job's Cloud Logging"
           },
           "readiness": "ready",
           "refusals": [],
@@ -689,10 +721,8 @@
               "pages": 346,
               "seconds": 0.125222
             },
-            "delivered": null,
-            "inconclusive": [
-              "meters record one build attempt but cannot tell built from failed; attach the server line"
-            ],
+            "delivered": true,
+            "inconclusive": [],
             "interval": {
               "declines": {
                 "dense_page": 3012.0,
@@ -706,7 +736,25 @@
             "requested": {
               "enabled": true,
               "max_bytes": 67108864
-            }
+            },
+            "server_line": {
+              "budget_exhausted": false,
+              "bytes": 132128,
+              "entries": 1056,
+              "groups_failed": 0,
+              "groups_indexed": 12,
+              "groups_skipped": 0,
+              "has_index": true,
+              "line": "swath_replay list_index state=built max_bytes=67108864 workers=8 groups_indexed=12 groups_skipped=0 groups_failed=0 parts_failed=0 pages=346 entries=1056 bytes=132128 budget_exhausted=false has_index=true seconds=0.125",
+              "max_bytes": 67108864,
+              "pages": 346,
+              "parts_failed": 0,
+              "seconds": 0.125,
+              "state": "built",
+              "workers": 8
+            },
+            "server_line_disagreements": [],
+            "server_line_provenance": "operator export of the job's Cloud Logging"
           },
           "readiness": "ready",
           "refusals": [],
@@ -1017,10 +1065,8 @@
               "pages": 346,
               "seconds": 0.124524
             },
-            "delivered": null,
-            "inconclusive": [
-              "meters record one build attempt but cannot tell built from failed; attach the server line"
-            ],
+            "delivered": true,
+            "inconclusive": [],
             "interval": {
               "declines": {
                 "dense_page": 2993.0,
@@ -1034,7 +1080,25 @@
             "requested": {
               "enabled": true,
               "max_bytes": 67108864
-            }
+            },
+            "server_line": {
+              "budget_exhausted": false,
+              "bytes": 132128,
+              "entries": 1056,
+              "groups_failed": 0,
+              "groups_indexed": 12,
+              "groups_skipped": 0,
+              "has_index": true,
+              "line": "swath_replay list_index state=built max_bytes=67108864 workers=8 groups_indexed=12 groups_skipped=0 groups_failed=0 parts_failed=0 pages=346 entries=1056 bytes=132128 budget_exhausted=false has_index=true seconds=0.125",
+              "max_bytes": 67108864,
+              "pages": 346,
+              "parts_failed": 0,
+              "seconds": 0.125,
+              "state": "built",
+              "workers": 8
+            },
+            "server_line_disagreements": [],
+            "server_line_provenance": "operator export of the job's Cloud Logging"
           },
           "readiness": "ready",
           "refusals": [],

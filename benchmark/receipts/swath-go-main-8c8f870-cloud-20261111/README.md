@@ -11,6 +11,8 @@ equal to the fixture's. FourCast Go sorted Parquet ran twice
 fixture group was submitted, so the second is a repeat of the same case, kept
 as data.
 
+**Harness availability.** `9ee636509151c82b8bf6f34dd12ab802cf44fa19` is published as tag `receipts/swath-go-main-8c8f870-20261111`.
+
 - Harness: `9ee636509151c82b8bf6f34dd12ab802cf44fa19` (on
   `capsule/swath-go-v2`, PR #36), toolbox
   `benchmark-toolbox@sha256:c839fffb27891a1fc39ccd067f422b8057415de342f5ad793376e8d50d7e87f4`,
@@ -99,9 +101,11 @@ Cost: $1.2206 by `runDuration`, $1.5264 create-to-terminal.
 
 Export: `benchmark.receipt` and `benchmark.report` (for the timing
 assessment and declared cpusets) imported from study commit
-`73fe22707cbac030c327ec21a08444bb5ef2c369` on the unmerged branch
-`scratch/swath-go-on-go-replay`, read-only against the scale-study ledger and
-the results bucket. That commit is used because it contains both this
+`73fe22707cbac030c327ec21a08444bb5ef2c369` (an unmerged scratch revision, not
+published), read-only against the scale-study ledger and the results bucket.
+Its `receipt.py`, `report.py`, `replay.py`, `verify.py` and `ledger.py` are
+byte-identical to PR #37's head `89e6cd7`, so that head reproduces the
+export. That commit is used because it contains both this
 branch's capsule and PR #37's Go replay contract: the exporter on this branch
 alone refuses Go replay documents (`fixture_adopted_sha256`,
 `server_implementation` are unknown to it). Provider durations come from the
