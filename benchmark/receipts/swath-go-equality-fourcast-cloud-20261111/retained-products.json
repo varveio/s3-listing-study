@@ -1,7 +1,7 @@
 [
   {
     "attempt_id": "swath-go.a7eba8b1b911.s2",
-    "listing_uri": "gs://s3-listing-study-results-29c02004/scale-study/noaa-nws-fourcastnetgfs-pds/swath-go.a7eba8b1b911.s2/native/listing/",
+    "listing_uri": "<result-store>/scale-study/noaa-nws-fourcastnetgfs-pds/swath-go.a7eba8b1b911.s2/native/listing/",
     "manifest_format": "seekparquet",
     "manifest_parts": [
       {
@@ -55,7 +55,7 @@
   },
   {
     "attempt_id": "swath.a0995929aac2.s2",
-    "listing_uri": "gs://s3-listing-study-results-29c02004/scale-study/noaa-nws-fourcastnetgfs-pds/swath.a0995929aac2.s2/native/listing/",
+    "listing_uri": "<result-store>/scale-study/noaa-nws-fourcastnetgfs-pds/swath.a0995929aac2.s2/native/listing/",
     "manifest_format": "swath-java-manifest-v1",
     "manifest_parts": [
       {

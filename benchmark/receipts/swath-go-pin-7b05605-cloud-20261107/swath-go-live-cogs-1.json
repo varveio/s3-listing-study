@@ -4,7 +4,6 @@
       "attempt_id": "swath-go.03a72c2faf2e.s1",
       "case_id": "swath-go.03a72c2faf2e",
       "evidence": {
-        "result_uri": "gs://s3-listing-study-results-29c02004/scale-study/sentinel-cogs/swath-go.03a72c2faf2e.s1/result.json",
         "state": "MISSING"
       },
       "group_id": "swath-go-live-cogs-1",
@@ -26,18 +25,7 @@
                 "provisioningModel": "SPOT"
               }
             }
-          ],
-          "network": {
-            "networkInterfaces": [
-              {
-                "network": "projects/varve-oss/global/networks/s3-listing-study",
-                "subnetwork": "projects/varve-oss/regions/us-east1/subnetworks/s3-listing-study-us-east1"
-              }
-            ]
-          },
-          "serviceAccount": {
-            "email": "s3-listing-study-worker@varve-oss.iam.gserviceaccount.com"
-          }
+          ]
         },
         "labels": {
           "suite": "scale-study"
@@ -63,7 +51,7 @@
                       "10001:10001",
                       "/tmp/attempt"
                     ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
                     "options": "--user 0:0 --entrypoint /bin/chown --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
                   }
                 },
@@ -85,7 +73,7 @@
                       "--output",
                       "/tmp/attempt",
                       "--destination",
-                      "gs://s3-listing-study-results-29c02004/scale-study/sentinel-cogs/swath-go.03a72c2faf2e.s1/",
+                      "<result-store>/scale-study/sentinel-cogs/swath-go.03a72c2faf2e.s1/",
                       "--timeout",
                       "14400",
                       "--term-grace",
@@ -93,7 +81,7 @@
                       "--retain-products",
                       "true",
                       "--image",
-                      "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
+                      "<study-registry>/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
                       "--toolbox-manifest-sha256",
                       "315959dfbad61d38ad992e26eeab2692c8cac85c24c71485bf111b5430c34bc2",
                       "--toolbox-recipe-sha256",
@@ -116,8 +104,6 @@
                       "c4ef060d2a54a42dee7e451b452c2d6acb0a08f0e65488bf39e2130860b18750",
                       "--group-id",
                       "swath-go-live-cogs-1",
-                      "--job-name",
-                      "scale-study-swath-go-03a72c2faf2e-s1",
                       "--case-id",
                       "swath-go.03a72c2faf2e",
                       "--attempt-id",
@@ -133,7 +119,7 @@
                       "--config",
                       "{\"concurrency\":64,\"max_duration\":\"14370s\",\"mode\":\"recursive-parquet-sorted\"}"
                     ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
                     "options": "--volume=/mnt/stateful_partition/attempt:/tmp/attempt"
                   }
                 }
@@ -142,7 +128,6 @@
           }
         ]
       },
-      "result_prefix": "gs://s3-listing-study-results-29c02004/scale-study/sentinel-cogs/swath-go.03a72c2faf2e.s1/",
       "settled_at": "2026-11-07T13:27:50.469170+00:00",
       "state": "CANCELLED",
       "state_detail": "cancelled by the operator",
@@ -153,7 +138,6 @@
       "attempt_id": "swath-go.4753553039c7.s1",
       "case_id": "swath-go.4753553039c7",
       "evidence": {
-        "result_uri": "gs://s3-listing-study-results-29c02004/scale-study/sentinel-cogs/swath-go.4753553039c7.s1/result.json",
         "state": "MISSING"
       },
       "group_id": "swath-go-live-cogs-1",
@@ -175,18 +159,7 @@
                 "provisioningModel": "SPOT"
               }
             }
-          ],
-          "network": {
-            "networkInterfaces": [
-              {
-                "network": "projects/varve-oss/global/networks/s3-listing-study",
-                "subnetwork": "projects/varve-oss/regions/us-east1/subnetworks/s3-listing-study-us-east1"
-              }
-            ]
-          },
-          "serviceAccount": {
-            "email": "s3-listing-study-worker@varve-oss.iam.gserviceaccount.com"
-          }
+          ]
         },
         "labels": {
           "suite": "scale-study"
@@ -212,7 +185,7 @@
                       "10001:10001",
                       "/tmp/attempt"
                     ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
                     "options": "--user 0:0 --entrypoint /bin/chown --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
                   }
                 },
@@ -234,7 +207,7 @@
                       "--output",
                       "/tmp/attempt",
                       "--destination",
-                      "gs://s3-listing-study-results-29c02004/scale-study/sentinel-cogs/swath-go.4753553039c7.s1/",
+                      "<result-store>/scale-study/sentinel-cogs/swath-go.4753553039c7.s1/",
                       "--timeout",
                       "14400",
                       "--term-grace",
@@ -242,7 +215,7 @@
                       "--retain-products",
                       "true",
                       "--image",
-                      "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
+                      "<study-registry>/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
                       "--toolbox-manifest-sha256",
                       "315959dfbad61d38ad992e26eeab2692c8cac85c24c71485bf111b5430c34bc2",
                       "--toolbox-recipe-sha256",
@@ -265,8 +238,6 @@
                       "c4ef060d2a54a42dee7e451b452c2d6acb0a08f0e65488bf39e2130860b18750",
                       "--group-id",
                       "swath-go-live-cogs-1",
-                      "--job-name",
-                      "scale-study-swath-go-4753553039c7-s1",
                       "--case-id",
                       "swath-go.4753553039c7",
                       "--attempt-id",
@@ -282,7 +253,7 @@
                       "--config",
                       "{\"concurrency\":256,\"max_duration\":\"14370s\",\"mode\":\"recursive-parquet-sorted\"}"
                     ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
                     "options": "--volume=/mnt/stateful_partition/attempt:/tmp/attempt"
                   }
                 }
@@ -291,7 +262,6 @@
           }
         ]
       },
-      "result_prefix": "gs://s3-listing-study-results-29c02004/scale-study/sentinel-cogs/swath-go.4753553039c7.s1/",
       "settled_at": "2026-11-07T13:27:50.597625+00:00",
       "state": "CANCELLED",
       "state_detail": "cancelled by the operator",

@@ -59,13 +59,12 @@ Cost: $0.8779 by `runDuration`, $1.0970 create-to-terminal.
 
 ## Files
 
-- `<group>.json`: one per ledger group, the deterministic `benchmark.receipt`
-  export (`build_receipt`, byte-identical to the module's `receipt.json`,
-  renamed per group). It carries the resolved case documents (config, machine,
+- `<group>.json`: one per ledger group, the `benchmark.receipt` export
+  (`build_receipt`) after the public projection below. It carries the resolved case documents (config, machine,
   container memory, replay backend and allocation), the rendered Batch request
   (every runnable's container command line, `--cpuset-cpus`/`--memory` options
   and environment variables, boot disk, Spot provisioning), attempt states and
-  timestamps, the `result.json` URI and SHA-256, both exit codes, wall clock,
+  timestamps, the `result.json` SHA-256, both exit codes, wall clock,
   peak RSS, row count and the replay evidence summary.
 - `attempts.jsonl`: one line per attempt with the `result.json` bindings the
   receipt does not copy: harness revision, toolbox image, image set,
@@ -73,18 +72,33 @@ Cost: $0.8779 by `runDuration`, $1.0970 create-to-terminal.
   adapter bundle hash, the ledger's platform and tool-slice hashes, executor
   settings (boot disk, retention), declared server and subject cpusets, the
   harness's replay timing assessment (per request shape: count, mean,
-  deadline, overrun fraction; replay CPU samples; reasons), list-index meters
-  where the Go replay ran, replay server memory before/after, subject user+system
+  deadline, overrun fraction; replay CPU samples; reasons), the list-index summary
+  where the Go replay ran (meters, plus the attached server line), replay server memory before/after, subject user+system
   CPU seconds (rusage), cgroup memory peak and OOM deltas, evidence profile,
   product retention, native file manifest (SHA-256 of retained profiles and
   reports) and profile omissions.
-- `server-lines.txt`: each Go-replay attempt's `swath_replay list_index` line, read from the job's Cloud Logging (`batch_task_logs`) with `gcloud logging read` on 2026-11-11 and attached to the group files through the `benchmark.receipt --server-log` path, which cross-checks it against the bound meters. Every attempt here reports `delivered: true` with no disagreement.
+- `server-lines.txt`: each Go-replay attempt's `swath_replay list_index` line, read from the job's Cloud Logging (`batch_task_logs`) with `gcloud logging read` on 2026-11-11 and attached to the group files and `attempts.jsonl` through the `benchmark.receipt --server-log` path, which cross-checks it against the bound meters. Every attempt here reports `delivered: true` with no disagreement.
 - `cost-observed.json`: each job's provider `runDuration` and
   create-to-terminal span, priced at the published us-east1 N4 Spot list rates
   used by the Go replay qualification receipts ($1.80688/h n4-highcpu-80,
   $0.722752/h n4-highcpu-32, $0.361376/h n4-highcpu-16; Google Spot VM pricing,
   us-east1 table retrieved 2026-11-10). Execution-based estimates at list
   rates, not an invoice; compute only.
+
+Public projection: the ledger and the raw export carry the study's estate,
+so every JSON file here is a projection of it, made after export and checked
+with the release exporter's forbidden-pattern list
+(`benchmark.public_export.FORBIDDEN_PATTERNS`) plus cloud project, network and
+secret resource paths, the results bucket and Batch job UIDs, all with no hit. Dropped
+wherever they occur: service accounts, secret resources, project, network,
+subnetwork and zone, Batch job names and UIDs (including the worker's
+job argument), result-store prefixes and URIs, and the executor
+environment apart from boot disk, provisioning and product retention.
+Substituted in every string: the results bucket becomes `<result-store>/` or
+`<fixture-store>/`, the study's registry path `<study-registry>/` (digests
+kept). Everything else is verbatim, including the `result.json` SHA-256 that
+binds each attempt to its original evidence. Case ids are carried from the
+ledger; they are not recomputable from the projected case documents.
 
 Export: `benchmark.receipt` and `benchmark.report` (for the timing
 assessment and declared cpusets) imported from study commit

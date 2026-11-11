@@ -69,7 +69,6 @@
           "worker_exit_code": 0
         },
         "result_sha256": "c231c244b8327b77734557a1c3746998631e7118668b297488dc04ee0a278233",
-        "result_uri": "gs://s3-listing-study-results-29c02004/scale-study/nara-1950-census/swath-go.1e68489008c5.s1/result.json",
         "state": "BOUND",
         "verification": null
       },
@@ -92,18 +91,7 @@
                 "provisioningModel": "SPOT"
               }
             }
-          ],
-          "network": {
-            "networkInterfaces": [
-              {
-                "network": "projects/varve-oss/global/networks/s3-listing-study",
-                "subnetwork": "projects/varve-oss/regions/us-east1/subnetworks/s3-listing-study-us-east1"
-              }
-            ]
-          },
-          "serviceAccount": {
-            "email": "s3-listing-study-worker@varve-oss.iam.gserviceaccount.com"
-          }
+          ]
         },
         "labels": {
           "suite": "scale-study"
@@ -127,7 +115,7 @@
                   "container": {
                     "commands": [
                       "-ceu",
-                      "set -o pipefail\nmkdir -p /fixtures/source\ngcloud storage cp 'gs://s3-listing-study-results-29c02004/fixtures/nara-1950-census/current-eba31d9/part-*.parquet' /fixtures/source/\nmanifest=\"$(mktemp)\"\nfiles=(/fixtures/source/*.parquet)\n[[ -f \"${files[0]}\" ]] || { echo \"no staged parquet files\" >&2; exit 1; }\nfor file in \"${files[@]}\"; do\n  digest=\"$(sha256sum \"$file\")\"; digest=\"${digest%% *}\"\n  size=\"$(stat -c %s \"$file\")\"\n  printf '%s\\t%s\\t%s\\n' \"${file##*/}\" \"$size\" \"$digest\"\ndone | LC_ALL=C sort > \"$manifest\"\nactual=\"$(sha256sum \"$manifest\")\"; actual=\"${actual%% *}\"\n[[ \"$actual\" == 48468b7c1ea8bf657fcb089dbcb1d940d3af62b748a7cb66f6dccc8876905db4 ]] || { echo \"fixture digest mismatch: $actual\" >&2; exit 1; }\nrm -f \"$manifest\""
+                      "set -o pipefail\nmkdir -p /fixtures/source\ngcloud storage cp '<fixture-store>/nara-1950-census/current-eba31d9/part-*.parquet' /fixtures/source/\nmanifest=\"$(mktemp)\"\nfiles=(/fixtures/source/*.parquet)\n[[ -f \"${files[0]}\" ]] || { echo \"no staged parquet files\" >&2; exit 1; }\nfor file in \"${files[@]}\"; do\n  digest=\"$(sha256sum \"$file\")\"; digest=\"${digest%% *}\"\n  size=\"$(stat -c %s \"$file\")\"\n  printf '%s\\t%s\\t%s\\n' \"${file##*/}\" \"$size\" \"$digest\"\ndone | LC_ALL=C sort > \"$manifest\"\nactual=\"$(sha256sum \"$manifest\")\"; actual=\"${actual%% *}\"\n[[ \"$actual\" == 48468b7c1ea8bf657fcb089dbcb1d940d3af62b748a7cb66f6dccc8876905db4 ]] || { echo \"fixture digest mismatch: $actual\" >&2; exit 1; }\nrm -f \"$manifest\""
                     ],
                     "imageUri": "gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:cf72dd63b7643c117ef53378a41bef6db6a01fa3d561f2b456d7abd8bbeb9ba6",
                     "options": "--entrypoint /bin/bash --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
@@ -144,7 +132,7 @@
                       "10001:10001",
                       "/tmp/attempt"
                     ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
                     "options": "--user 0:0 --entrypoint /bin/chown --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
                   }
                 },
@@ -201,7 +189,7 @@
                       "--output",
                       "/tmp/attempt",
                       "--destination",
-                      "gs://s3-listing-study-results-29c02004/scale-study/nara-1950-census/swath-go.1e68489008c5.s1/",
+                      "<result-store>/scale-study/nara-1950-census/swath-go.1e68489008c5.s1/",
                       "--timeout",
                       "1800",
                       "--term-grace",
@@ -209,7 +197,7 @@
                       "--retain-products",
                       "false",
                       "--image",
-                      "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
+                      "<study-registry>/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
                       "--toolbox-manifest-sha256",
                       "315959dfbad61d38ad992e26eeab2692c8cac85c24c71485bf111b5430c34bc2",
                       "--toolbox-recipe-sha256",
@@ -232,8 +220,6 @@
                       "c4ef060d2a54a42dee7e451b452c2d6acb0a08f0e65488bf39e2130860b18750",
                       "--group-id",
                       "swath-go-nara-1950-census-1",
-                      "--job-name",
-                      "scale-study-swath-go-1e68489008c5-s1",
                       "--case-id",
                       "swath-go.1e68489008c5",
                       "--attempt-id",
@@ -251,9 +237,9 @@
                       "--endpoint-url",
                       "http://127.0.0.1:19090",
                       "--replay-config",
-                      "{\"allocation\":{\"replay_heap_percent\":75,\"replay_max_concurrent_requests\":512,\"replay_memory_gb\":20,\"replay_parquet_connections\":64,\"replay_prefetch\":false,\"replay_prefetch_max_windows\":96,\"replay_vcpus\":20,\"subject_vcpus\":8},\"backend\":{\"fixture_sha256\":\"48468b7c1ea8bf657fcb089dbcb1d940d3af62b748a7cb66f6dccc8876905db4\",\"fixture_uri\":\"gs://s3-listing-study-results-29c02004/fixtures/nara-1950-census/current-eba31d9/part-*.parquet\",\"latency_model\":{\"deadlines_ms\":{\"pivot_probe\":44,\"structure_probe\":50,\"worker_page\":86},\"jitter\":\"none\",\"scale\":1.0},\"server_image_uri\":\"ghcr.io/varveio/swath-replay@sha256:3955f242f25294d3ebc6d63d3cf23e2a2694f7f1c9a5334dc6ec1054b0a69097\",\"serving_mode\":\"sorted\"},\"capacity_status\":\"uncalibrated\"}"
+                      "{\"allocation\":{\"replay_heap_percent\":75,\"replay_max_concurrent_requests\":512,\"replay_memory_gb\":20,\"replay_parquet_connections\":64,\"replay_prefetch\":false,\"replay_prefetch_max_windows\":96,\"replay_vcpus\":20,\"subject_vcpus\":8},\"backend\":{\"fixture_sha256\":\"48468b7c1ea8bf657fcb089dbcb1d940d3af62b748a7cb66f6dccc8876905db4\",\"fixture_uri\":\"<fixture-store>/nara-1950-census/current-eba31d9/part-*.parquet\",\"latency_model\":{\"deadlines_ms\":{\"pivot_probe\":44,\"structure_probe\":50,\"worker_page\":86},\"jitter\":\"none\",\"scale\":1.0},\"server_image_uri\":\"ghcr.io/varveio/swath-replay@sha256:3955f242f25294d3ebc6d63d3cf23e2a2694f7f1c9a5334dc6ec1054b0a69097\",\"serving_mode\":\"sorted\"},\"capacity_status\":\"uncalibrated\"}"
                     ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
                     "options": "--network host --cpuset-cpus=10-13,26-29 --memory=8g --memory-swap=8g --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
                   }
                 }
@@ -262,7 +248,6 @@
           }
         ]
       },
-      "result_prefix": "gs://s3-listing-study-results-29c02004/scale-study/nara-1950-census/swath-go.1e68489008c5.s1/",
       "settled_at": "2026-11-07T11:15:44.975590+00:00",
       "state": "SUCCEEDED",
       "state_detail": null,
@@ -338,7 +323,6 @@
           "worker_exit_code": 0
         },
         "result_sha256": "1ea5aa30e9d65279bcc8439b6c1ad5de8944ea0652b950c285de22b79ddc58ec",
-        "result_uri": "gs://s3-listing-study-results-29c02004/scale-study/nara-1950-census/swath-go.dd9186c83853.s1/result.json",
         "state": "BOUND",
         "verification": null
       },
@@ -361,18 +345,7 @@
                 "provisioningModel": "SPOT"
               }
             }
-          ],
-          "network": {
-            "networkInterfaces": [
-              {
-                "network": "projects/varve-oss/global/networks/s3-listing-study",
-                "subnetwork": "projects/varve-oss/regions/us-east1/subnetworks/s3-listing-study-us-east1"
-              }
-            ]
-          },
-          "serviceAccount": {
-            "email": "s3-listing-study-worker@varve-oss.iam.gserviceaccount.com"
-          }
+          ]
         },
         "labels": {
           "suite": "scale-study"
@@ -396,7 +369,7 @@
                   "container": {
                     "commands": [
                       "-ceu",
-                      "set -o pipefail\nmkdir -p /fixtures/source\ngcloud storage cp 'gs://s3-listing-study-results-29c02004/fixtures/nara-1950-census/current-eba31d9/part-*.parquet' /fixtures/source/\nmanifest=\"$(mktemp)\"\nfiles=(/fixtures/source/*.parquet)\n[[ -f \"${files[0]}\" ]] || { echo \"no staged parquet files\" >&2; exit 1; }\nfor file in \"${files[@]}\"; do\n  digest=\"$(sha256sum \"$file\")\"; digest=\"${digest%% *}\"\n  size=\"$(stat -c %s \"$file\")\"\n  printf '%s\\t%s\\t%s\\n' \"${file##*/}\" \"$size\" \"$digest\"\ndone | LC_ALL=C sort > \"$manifest\"\nactual=\"$(sha256sum \"$manifest\")\"; actual=\"${actual%% *}\"\n[[ \"$actual\" == 48468b7c1ea8bf657fcb089dbcb1d940d3af62b748a7cb66f6dccc8876905db4 ]] || { echo \"fixture digest mismatch: $actual\" >&2; exit 1; }\nrm -f \"$manifest\""
+                      "set -o pipefail\nmkdir -p /fixtures/source\ngcloud storage cp '<fixture-store>/nara-1950-census/current-eba31d9/part-*.parquet' /fixtures/source/\nmanifest=\"$(mktemp)\"\nfiles=(/fixtures/source/*.parquet)\n[[ -f \"${files[0]}\" ]] || { echo \"no staged parquet files\" >&2; exit 1; }\nfor file in \"${files[@]}\"; do\n  digest=\"$(sha256sum \"$file\")\"; digest=\"${digest%% *}\"\n  size=\"$(stat -c %s \"$file\")\"\n  printf '%s\\t%s\\t%s\\n' \"${file##*/}\" \"$size\" \"$digest\"\ndone | LC_ALL=C sort > \"$manifest\"\nactual=\"$(sha256sum \"$manifest\")\"; actual=\"${actual%% *}\"\n[[ \"$actual\" == 48468b7c1ea8bf657fcb089dbcb1d940d3af62b748a7cb66f6dccc8876905db4 ]] || { echo \"fixture digest mismatch: $actual\" >&2; exit 1; }\nrm -f \"$manifest\""
                     ],
                     "imageUri": "gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:cf72dd63b7643c117ef53378a41bef6db6a01fa3d561f2b456d7abd8bbeb9ba6",
                     "options": "--entrypoint /bin/bash --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
@@ -413,7 +386,7 @@
                       "10001:10001",
                       "/tmp/attempt"
                     ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
                     "options": "--user 0:0 --entrypoint /bin/chown --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
                   }
                 },
@@ -470,7 +443,7 @@
                       "--output",
                       "/tmp/attempt",
                       "--destination",
-                      "gs://s3-listing-study-results-29c02004/scale-study/nara-1950-census/swath-go.dd9186c83853.s1/",
+                      "<result-store>/scale-study/nara-1950-census/swath-go.dd9186c83853.s1/",
                       "--timeout",
                       "1800",
                       "--term-grace",
@@ -478,7 +451,7 @@
                       "--retain-products",
                       "false",
                       "--image",
-                      "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
+                      "<study-registry>/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
                       "--toolbox-manifest-sha256",
                       "315959dfbad61d38ad992e26eeab2692c8cac85c24c71485bf111b5430c34bc2",
                       "--toolbox-recipe-sha256",
@@ -501,8 +474,6 @@
                       "c4ef060d2a54a42dee7e451b452c2d6acb0a08f0e65488bf39e2130860b18750",
                       "--group-id",
                       "swath-go-nara-1950-census-1",
-                      "--job-name",
-                      "scale-study-swath-go-dd9186c83853-s1",
                       "--case-id",
                       "swath-go.dd9186c83853",
                       "--attempt-id",
@@ -520,9 +491,9 @@
                       "--endpoint-url",
                       "http://127.0.0.1:19090",
                       "--replay-config",
-                      "{\"allocation\":{\"replay_heap_percent\":75,\"replay_max_concurrent_requests\":512,\"replay_memory_gb\":20,\"replay_parquet_connections\":64,\"replay_prefetch\":false,\"replay_prefetch_max_windows\":96,\"replay_vcpus\":20,\"subject_vcpus\":8},\"backend\":{\"fixture_sha256\":\"48468b7c1ea8bf657fcb089dbcb1d940d3af62b748a7cb66f6dccc8876905db4\",\"fixture_uri\":\"gs://s3-listing-study-results-29c02004/fixtures/nara-1950-census/current-eba31d9/part-*.parquet\",\"latency_model\":{\"deadlines_ms\":{\"pivot_probe\":44,\"structure_probe\":50,\"worker_page\":86},\"jitter\":\"none\",\"scale\":1.0},\"server_image_uri\":\"ghcr.io/varveio/swath-replay@sha256:3955f242f25294d3ebc6d63d3cf23e2a2694f7f1c9a5334dc6ec1054b0a69097\",\"serving_mode\":\"sorted\"},\"capacity_status\":\"uncalibrated\"}"
+                      "{\"allocation\":{\"replay_heap_percent\":75,\"replay_max_concurrent_requests\":512,\"replay_memory_gb\":20,\"replay_parquet_connections\":64,\"replay_prefetch\":false,\"replay_prefetch_max_windows\":96,\"replay_vcpus\":20,\"subject_vcpus\":8},\"backend\":{\"fixture_sha256\":\"48468b7c1ea8bf657fcb089dbcb1d940d3af62b748a7cb66f6dccc8876905db4\",\"fixture_uri\":\"<fixture-store>/nara-1950-census/current-eba31d9/part-*.parquet\",\"latency_model\":{\"deadlines_ms\":{\"pivot_probe\":44,\"structure_probe\":50,\"worker_page\":86},\"jitter\":\"none\",\"scale\":1.0},\"server_image_uri\":\"ghcr.io/varveio/swath-replay@sha256:3955f242f25294d3ebc6d63d3cf23e2a2694f7f1c9a5334dc6ec1054b0a69097\",\"serving_mode\":\"sorted\"},\"capacity_status\":\"uncalibrated\"}"
                     ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
                     "options": "--network host --cpuset-cpus=10-13,26-29 --memory=8g --memory-swap=8g --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
                   }
                 }
@@ -531,7 +502,6 @@
           }
         ]
       },
-      "result_prefix": "gs://s3-listing-study-results-29c02004/scale-study/nara-1950-census/swath-go.dd9186c83853.s1/",
       "settled_at": "2026-11-07T11:15:44.978292+00:00",
       "state": "SUCCEEDED",
       "state_detail": null,
@@ -619,7 +589,6 @@
           "worker_exit_code": 0
         },
         "result_sha256": "8dbe58530b8f8294b93e08ba432b2b6013d3edc3622c2c58a74f2198cb5fb3e8",
-        "result_uri": "gs://s3-listing-study-results-29c02004/scale-study/nara-1950-census/swath.2acc474986d3.s1/result.json",
         "state": "BOUND",
         "verification": null
       },
@@ -642,18 +611,7 @@
                 "provisioningModel": "SPOT"
               }
             }
-          ],
-          "network": {
-            "networkInterfaces": [
-              {
-                "network": "projects/varve-oss/global/networks/s3-listing-study",
-                "subnetwork": "projects/varve-oss/regions/us-east1/subnetworks/s3-listing-study-us-east1"
-              }
-            ]
-          },
-          "serviceAccount": {
-            "email": "s3-listing-study-worker@varve-oss.iam.gserviceaccount.com"
-          }
+          ]
         },
         "labels": {
           "suite": "scale-study"
@@ -677,7 +635,7 @@
                   "container": {
                     "commands": [
                       "-ceu",
-                      "set -o pipefail\nmkdir -p /fixtures/source\ngcloud storage cp 'gs://s3-listing-study-results-29c02004/fixtures/nara-1950-census/current-eba31d9/part-*.parquet' /fixtures/source/\nmanifest=\"$(mktemp)\"\nfiles=(/fixtures/source/*.parquet)\n[[ -f \"${files[0]}\" ]] || { echo \"no staged parquet files\" >&2; exit 1; }\nfor file in \"${files[@]}\"; do\n  digest=\"$(sha256sum \"$file\")\"; digest=\"${digest%% *}\"\n  size=\"$(stat -c %s \"$file\")\"\n  printf '%s\\t%s\\t%s\\n' \"${file##*/}\" \"$size\" \"$digest\"\ndone | LC_ALL=C sort > \"$manifest\"\nactual=\"$(sha256sum \"$manifest\")\"; actual=\"${actual%% *}\"\n[[ \"$actual\" == 48468b7c1ea8bf657fcb089dbcb1d940d3af62b748a7cb66f6dccc8876905db4 ]] || { echo \"fixture digest mismatch: $actual\" >&2; exit 1; }\nrm -f \"$manifest\""
+                      "set -o pipefail\nmkdir -p /fixtures/source\ngcloud storage cp '<fixture-store>/nara-1950-census/current-eba31d9/part-*.parquet' /fixtures/source/\nmanifest=\"$(mktemp)\"\nfiles=(/fixtures/source/*.parquet)\n[[ -f \"${files[0]}\" ]] || { echo \"no staged parquet files\" >&2; exit 1; }\nfor file in \"${files[@]}\"; do\n  digest=\"$(sha256sum \"$file\")\"; digest=\"${digest%% *}\"\n  size=\"$(stat -c %s \"$file\")\"\n  printf '%s\\t%s\\t%s\\n' \"${file##*/}\" \"$size\" \"$digest\"\ndone | LC_ALL=C sort > \"$manifest\"\nactual=\"$(sha256sum \"$manifest\")\"; actual=\"${actual%% *}\"\n[[ \"$actual\" == 48468b7c1ea8bf657fcb089dbcb1d940d3af62b748a7cb66f6dccc8876905db4 ]] || { echo \"fixture digest mismatch: $actual\" >&2; exit 1; }\nrm -f \"$manifest\""
                     ],
                     "imageUri": "gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:cf72dd63b7643c117ef53378a41bef6db6a01fa3d561f2b456d7abd8bbeb9ba6",
                     "options": "--entrypoint /bin/bash --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
@@ -694,7 +652,7 @@
                       "10001:10001",
                       "/tmp/attempt"
                     ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
                     "options": "--user 0:0 --entrypoint /bin/chown --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
                   }
                 },
@@ -751,7 +709,7 @@
                       "--output",
                       "/tmp/attempt",
                       "--destination",
-                      "gs://s3-listing-study-results-29c02004/scale-study/nara-1950-census/swath.2acc474986d3.s1/",
+                      "<result-store>/scale-study/nara-1950-census/swath.2acc474986d3.s1/",
                       "--timeout",
                       "1800",
                       "--term-grace",
@@ -759,7 +717,7 @@
                       "--retain-products",
                       "false",
                       "--image",
-                      "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
+                      "<study-registry>/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
                       "--toolbox-manifest-sha256",
                       "315959dfbad61d38ad992e26eeab2692c8cac85c24c71485bf111b5430c34bc2",
                       "--toolbox-recipe-sha256",
@@ -782,8 +740,6 @@
                       "c4ef060d2a54a42dee7e451b452c2d6acb0a08f0e65488bf39e2130860b18750",
                       "--group-id",
                       "swath-go-nara-1950-census-1",
-                      "--job-name",
-                      "scale-study-swath-2acc474986d3-s1",
                       "--case-id",
                       "swath.2acc474986d3",
                       "--attempt-id",
@@ -801,9 +757,9 @@
                       "--endpoint-url",
                       "http://127.0.0.1:19090",
                       "--replay-config",
-                      "{\"allocation\":{\"replay_heap_percent\":75,\"replay_max_concurrent_requests\":512,\"replay_memory_gb\":20,\"replay_parquet_connections\":64,\"replay_prefetch\":false,\"replay_prefetch_max_windows\":96,\"replay_vcpus\":20,\"subject_vcpus\":8},\"backend\":{\"fixture_sha256\":\"48468b7c1ea8bf657fcb089dbcb1d940d3af62b748a7cb66f6dccc8876905db4\",\"fixture_uri\":\"gs://s3-listing-study-results-29c02004/fixtures/nara-1950-census/current-eba31d9/part-*.parquet\",\"latency_model\":{\"deadlines_ms\":{\"pivot_probe\":44,\"structure_probe\":50,\"worker_page\":86},\"jitter\":\"none\",\"scale\":1.0},\"server_image_uri\":\"ghcr.io/varveio/swath-replay@sha256:3955f242f25294d3ebc6d63d3cf23e2a2694f7f1c9a5334dc6ec1054b0a69097\",\"serving_mode\":\"sorted\"},\"capacity_status\":\"uncalibrated\"}"
+                      "{\"allocation\":{\"replay_heap_percent\":75,\"replay_max_concurrent_requests\":512,\"replay_memory_gb\":20,\"replay_parquet_connections\":64,\"replay_prefetch\":false,\"replay_prefetch_max_windows\":96,\"replay_vcpus\":20,\"subject_vcpus\":8},\"backend\":{\"fixture_sha256\":\"48468b7c1ea8bf657fcb089dbcb1d940d3af62b748a7cb66f6dccc8876905db4\",\"fixture_uri\":\"<fixture-store>/nara-1950-census/current-eba31d9/part-*.parquet\",\"latency_model\":{\"deadlines_ms\":{\"pivot_probe\":44,\"structure_probe\":50,\"worker_page\":86},\"jitter\":\"none\",\"scale\":1.0},\"server_image_uri\":\"ghcr.io/varveio/swath-replay@sha256:3955f242f25294d3ebc6d63d3cf23e2a2694f7f1c9a5334dc6ec1054b0a69097\",\"serving_mode\":\"sorted\"},\"capacity_status\":\"uncalibrated\"}"
                     ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
                     "options": "--network host --cpuset-cpus=10-13,26-29 --memory=8g --memory-swap=8g --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
                   }
                 }
@@ -812,7 +768,6 @@
           }
         ]
       },
-      "result_prefix": "gs://s3-listing-study-results-29c02004/scale-study/nara-1950-census/swath.2acc474986d3.s1/",
       "settled_at": "2026-11-07T11:15:44.980140+00:00",
       "state": "SUCCEEDED",
       "state_detail": null,
@@ -861,7 +816,7 @@
         },
         "backend": {
           "fixture_sha256": "48468b7c1ea8bf657fcb089dbcb1d940d3af62b748a7cb66f6dccc8876905db4",
-          "fixture_uri": "gs://s3-listing-study-results-29c02004/fixtures/nara-1950-census/current-eba31d9/part-*.parquet",
+          "fixture_uri": "<fixture-store>/nara-1950-census/current-eba31d9/part-*.parquet",
           "latency_model": {
             "deadlines_ms": {
               "pivot_probe": 44,
@@ -911,7 +866,7 @@
         },
         "backend": {
           "fixture_sha256": "48468b7c1ea8bf657fcb089dbcb1d940d3af62b748a7cb66f6dccc8876905db4",
-          "fixture_uri": "gs://s3-listing-study-results-29c02004/fixtures/nara-1950-census/current-eba31d9/part-*.parquet",
+          "fixture_uri": "<fixture-store>/nara-1950-census/current-eba31d9/part-*.parquet",
           "latency_model": {
             "deadlines_ms": {
               "pivot_probe": 44,
@@ -963,7 +918,7 @@
         },
         "backend": {
           "fixture_sha256": "48468b7c1ea8bf657fcb089dbcb1d940d3af62b748a7cb66f6dccc8876905db4",
-          "fixture_uri": "gs://s3-listing-study-results-29c02004/fixtures/nara-1950-census/current-eba31d9/part-*.parquet",
+          "fixture_uri": "<fixture-store>/nara-1950-census/current-eba31d9/part-*.parquet",
           "latency_model": {
             "deadlines_ms": {
               "pivot_probe": 44,

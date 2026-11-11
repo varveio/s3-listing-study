@@ -1,7 +1,7 @@
 [
   {
     "attempt_id": "swath-go.22e636276e1e.s1",
-    "listing_uri": "gs://s3-listing-study-results-29c02004/scale-study/aws-public-blockchain/swath-go.22e636276e1e.s1/native/listing/",
+    "listing_uri": "<result-store>/scale-study/aws-public-blockchain/swath-go.22e636276e1e.s1/native/listing/",
     "manifest_format": "seekparquet",
     "manifest_parts": [
       {
@@ -631,7 +631,7 @@
   },
   {
     "attempt_id": "swath-go.5f0e2acdc882.s1",
-    "listing_uri": "gs://s3-listing-study-results-29c02004/scale-study/aws-public-blockchain/swath-go.5f0e2acdc882.s1/native/listing/",
+    "listing_uri": "<result-store>/scale-study/aws-public-blockchain/swath-go.5f0e2acdc882.s1/native/listing/",
     "manifest_format": "seekparquet",
     "manifest_parts": [
       {
@@ -1261,7 +1261,7 @@
   },
   {
     "attempt_id": "swath-go.7d43994649c5.s1",
-    "listing_uri": "gs://s3-listing-study-results-29c02004/scale-study/aws-public-blockchain/swath-go.7d43994649c5.s1/native/listing/",
+    "listing_uri": "<result-store>/scale-study/aws-public-blockchain/swath-go.7d43994649c5.s1/native/listing/",
     "manifest_format": "seekparquet",
     "manifest_parts": [
       {
@@ -1891,7 +1891,7 @@
   },
   {
     "attempt_id": "swath.c07a24197a7b.s1",
-    "listing_uri": "gs://s3-listing-study-results-29c02004/scale-study/aws-public-blockchain/swath.c07a24197a7b.s1/native/listing/",
+    "listing_uri": "<result-store>/scale-study/aws-public-blockchain/swath.c07a24197a7b.s1/native/listing/",
     "manifest_format": "swath-java-manifest-v1",
     "manifest_parts": [
       {

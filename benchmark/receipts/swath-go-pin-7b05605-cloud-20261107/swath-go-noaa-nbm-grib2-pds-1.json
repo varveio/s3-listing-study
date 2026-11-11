@@ -69,7 +69,6 @@
           "worker_exit_code": 0
         },
         "result_sha256": "4208c33ece1976f815b139ecbd6894a63f66dc36117a33806a4d71c0ead39ff8",
-        "result_uri": "gs://s3-listing-study-results-29c02004/scale-study/noaa-nbm-grib2-pds/swath-go.6a71f007adb7.s1/result.json",
         "state": "BOUND",
         "verification": null
       },
@@ -92,18 +91,7 @@
                 "provisioningModel": "SPOT"
               }
             }
-          ],
-          "network": {
-            "networkInterfaces": [
-              {
-                "network": "projects/varve-oss/global/networks/s3-listing-study",
-                "subnetwork": "projects/varve-oss/regions/us-east1/subnetworks/s3-listing-study-us-east1"
-              }
-            ]
-          },
-          "serviceAccount": {
-            "email": "s3-listing-study-worker@varve-oss.iam.gserviceaccount.com"
-          }
+          ]
         },
         "labels": {
           "suite": "scale-study"
@@ -127,7 +115,7 @@
                   "container": {
                     "commands": [
                       "-ceu",
-                      "set -o pipefail\nmkdir -p /fixtures/source\ngcloud storage cp 'gs://s3-listing-study-results-29c02004/fixtures/noaa-nbm-grib2-pds/current-eba31d9/part-*.parquet' /fixtures/source/\nmanifest=\"$(mktemp)\"\nfiles=(/fixtures/source/*.parquet)\n[[ -f \"${files[0]}\" ]] || { echo \"no staged parquet files\" >&2; exit 1; }\nfor file in \"${files[@]}\"; do\n  digest=\"$(sha256sum \"$file\")\"; digest=\"${digest%% *}\"\n  size=\"$(stat -c %s \"$file\")\"\n  printf '%s\\t%s\\t%s\\n' \"${file##*/}\" \"$size\" \"$digest\"\ndone | LC_ALL=C sort > \"$manifest\"\nactual=\"$(sha256sum \"$manifest\")\"; actual=\"${actual%% *}\"\n[[ \"$actual\" == de7e0487fe7237590b421299853ff7f88f27a006f5d8528ece23f3be26a2624a ]] || { echo \"fixture digest mismatch: $actual\" >&2; exit 1; }\nrm -f \"$manifest\""
+                      "set -o pipefail\nmkdir -p /fixtures/source\ngcloud storage cp '<fixture-store>/noaa-nbm-grib2-pds/current-eba31d9/part-*.parquet' /fixtures/source/\nmanifest=\"$(mktemp)\"\nfiles=(/fixtures/source/*.parquet)\n[[ -f \"${files[0]}\" ]] || { echo \"no staged parquet files\" >&2; exit 1; }\nfor file in \"${files[@]}\"; do\n  digest=\"$(sha256sum \"$file\")\"; digest=\"${digest%% *}\"\n  size=\"$(stat -c %s \"$file\")\"\n  printf '%s\\t%s\\t%s\\n' \"${file##*/}\" \"$size\" \"$digest\"\ndone | LC_ALL=C sort > \"$manifest\"\nactual=\"$(sha256sum \"$manifest\")\"; actual=\"${actual%% *}\"\n[[ \"$actual\" == de7e0487fe7237590b421299853ff7f88f27a006f5d8528ece23f3be26a2624a ]] || { echo \"fixture digest mismatch: $actual\" >&2; exit 1; }\nrm -f \"$manifest\""
                     ],
                     "imageUri": "gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:cf72dd63b7643c117ef53378a41bef6db6a01fa3d561f2b456d7abd8bbeb9ba6",
                     "options": "--entrypoint /bin/bash --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
@@ -144,7 +132,7 @@
                       "10001:10001",
                       "/tmp/attempt"
                     ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
                     "options": "--user 0:0 --entrypoint /bin/chown --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
                   }
                 },
@@ -201,7 +189,7 @@
                       "--output",
                       "/tmp/attempt",
                       "--destination",
-                      "gs://s3-listing-study-results-29c02004/scale-study/noaa-nbm-grib2-pds/swath-go.6a71f007adb7.s1/",
+                      "<result-store>/scale-study/noaa-nbm-grib2-pds/swath-go.6a71f007adb7.s1/",
                       "--timeout",
                       "7200",
                       "--term-grace",
@@ -209,7 +197,7 @@
                       "--retain-products",
                       "false",
                       "--image",
-                      "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
+                      "<study-registry>/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
                       "--toolbox-manifest-sha256",
                       "315959dfbad61d38ad992e26eeab2692c8cac85c24c71485bf111b5430c34bc2",
                       "--toolbox-recipe-sha256",
@@ -232,8 +220,6 @@
                       "c4ef060d2a54a42dee7e451b452c2d6acb0a08f0e65488bf39e2130860b18750",
                       "--group-id",
                       "swath-go-noaa-nbm-grib2-pds-1",
-                      "--job-name",
-                      "scale-study-swath-go-6a71f007adb7-s1",
                       "--case-id",
                       "swath-go.6a71f007adb7",
                       "--attempt-id",
@@ -251,9 +237,9 @@
                       "--endpoint-url",
                       "http://127.0.0.1:19090",
                       "--replay-config",
-                      "{\"allocation\":{\"replay_heap_percent\":75,\"replay_max_concurrent_requests\":512,\"replay_memory_gb\":20,\"replay_parquet_connections\":64,\"replay_prefetch\":false,\"replay_prefetch_max_windows\":96,\"replay_vcpus\":20,\"subject_vcpus\":8},\"backend\":{\"fixture_sha256\":\"de7e0487fe7237590b421299853ff7f88f27a006f5d8528ece23f3be26a2624a\",\"fixture_uri\":\"gs://s3-listing-study-results-29c02004/fixtures/noaa-nbm-grib2-pds/current-eba31d9/part-*.parquet\",\"latency_model\":{\"deadlines_ms\":{\"pivot_probe\":37,\"structure_probe\":51,\"worker_page\":87},\"jitter\":\"none\",\"scale\":1.0},\"server_image_uri\":\"ghcr.io/varveio/swath-replay@sha256:3955f242f25294d3ebc6d63d3cf23e2a2694f7f1c9a5334dc6ec1054b0a69097\",\"serving_mode\":\"sorted\"},\"capacity_status\":\"uncalibrated\"}"
+                      "{\"allocation\":{\"replay_heap_percent\":75,\"replay_max_concurrent_requests\":512,\"replay_memory_gb\":20,\"replay_parquet_connections\":64,\"replay_prefetch\":false,\"replay_prefetch_max_windows\":96,\"replay_vcpus\":20,\"subject_vcpus\":8},\"backend\":{\"fixture_sha256\":\"de7e0487fe7237590b421299853ff7f88f27a006f5d8528ece23f3be26a2624a\",\"fixture_uri\":\"<fixture-store>/noaa-nbm-grib2-pds/current-eba31d9/part-*.parquet\",\"latency_model\":{\"deadlines_ms\":{\"pivot_probe\":37,\"structure_probe\":51,\"worker_page\":87},\"jitter\":\"none\",\"scale\":1.0},\"server_image_uri\":\"ghcr.io/varveio/swath-replay@sha256:3955f242f25294d3ebc6d63d3cf23e2a2694f7f1c9a5334dc6ec1054b0a69097\",\"serving_mode\":\"sorted\"},\"capacity_status\":\"uncalibrated\"}"
                     ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
                     "options": "--network host --cpuset-cpus=10-13,26-29 --memory=8g --memory-swap=8g --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
                   }
                 }
@@ -262,7 +248,6 @@
           }
         ]
       },
-      "result_prefix": "gs://s3-listing-study-results-29c02004/scale-study/noaa-nbm-grib2-pds/swath-go.6a71f007adb7.s1/",
       "settled_at": "2026-11-07T11:15:44.990906+00:00",
       "state": "SUCCEEDED",
       "state_detail": null,
@@ -338,7 +323,6 @@
           "worker_exit_code": 0
         },
         "result_sha256": "a7e24b635b098e430c845ec83f84a81e209bcd95cd219529189622add56b506d",
-        "result_uri": "gs://s3-listing-study-results-29c02004/scale-study/noaa-nbm-grib2-pds/swath-go.d28e1fcb1334.s1/result.json",
         "state": "BOUND",
         "verification": null
       },
@@ -361,18 +345,7 @@
                 "provisioningModel": "SPOT"
               }
             }
-          ],
-          "network": {
-            "networkInterfaces": [
-              {
-                "network": "projects/varve-oss/global/networks/s3-listing-study",
-                "subnetwork": "projects/varve-oss/regions/us-east1/subnetworks/s3-listing-study-us-east1"
-              }
-            ]
-          },
-          "serviceAccount": {
-            "email": "s3-listing-study-worker@varve-oss.iam.gserviceaccount.com"
-          }
+          ]
         },
         "labels": {
           "suite": "scale-study"
@@ -396,7 +369,7 @@
                   "container": {
                     "commands": [
                       "-ceu",
-                      "set -o pipefail\nmkdir -p /fixtures/source\ngcloud storage cp 'gs://s3-listing-study-results-29c02004/fixtures/noaa-nbm-grib2-pds/current-eba31d9/part-*.parquet' /fixtures/source/\nmanifest=\"$(mktemp)\"\nfiles=(/fixtures/source/*.parquet)\n[[ -f \"${files[0]}\" ]] || { echo \"no staged parquet files\" >&2; exit 1; }\nfor file in \"${files[@]}\"; do\n  digest=\"$(sha256sum \"$file\")\"; digest=\"${digest%% *}\"\n  size=\"$(stat -c %s \"$file\")\"\n  printf '%s\\t%s\\t%s\\n' \"${file##*/}\" \"$size\" \"$digest\"\ndone | LC_ALL=C sort > \"$manifest\"\nactual=\"$(sha256sum \"$manifest\")\"; actual=\"${actual%% *}\"\n[[ \"$actual\" == de7e0487fe7237590b421299853ff7f88f27a006f5d8528ece23f3be26a2624a ]] || { echo \"fixture digest mismatch: $actual\" >&2; exit 1; }\nrm -f \"$manifest\""
+                      "set -o pipefail\nmkdir -p /fixtures/source\ngcloud storage cp '<fixture-store>/noaa-nbm-grib2-pds/current-eba31d9/part-*.parquet' /fixtures/source/\nmanifest=\"$(mktemp)\"\nfiles=(/fixtures/source/*.parquet)\n[[ -f \"${files[0]}\" ]] || { echo \"no staged parquet files\" >&2; exit 1; }\nfor file in \"${files[@]}\"; do\n  digest=\"$(sha256sum \"$file\")\"; digest=\"${digest%% *}\"\n  size=\"$(stat -c %s \"$file\")\"\n  printf '%s\\t%s\\t%s\\n' \"${file##*/}\" \"$size\" \"$digest\"\ndone | LC_ALL=C sort > \"$manifest\"\nactual=\"$(sha256sum \"$manifest\")\"; actual=\"${actual%% *}\"\n[[ \"$actual\" == de7e0487fe7237590b421299853ff7f88f27a006f5d8528ece23f3be26a2624a ]] || { echo \"fixture digest mismatch: $actual\" >&2; exit 1; }\nrm -f \"$manifest\""
                     ],
                     "imageUri": "gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:cf72dd63b7643c117ef53378a41bef6db6a01fa3d561f2b456d7abd8bbeb9ba6",
                     "options": "--entrypoint /bin/bash --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
@@ -413,7 +386,7 @@
                       "10001:10001",
                       "/tmp/attempt"
                     ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
                     "options": "--user 0:0 --entrypoint /bin/chown --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
                   }
                 },
@@ -470,7 +443,7 @@
                       "--output",
                       "/tmp/attempt",
                       "--destination",
-                      "gs://s3-listing-study-results-29c02004/scale-study/noaa-nbm-grib2-pds/swath-go.d28e1fcb1334.s1/",
+                      "<result-store>/scale-study/noaa-nbm-grib2-pds/swath-go.d28e1fcb1334.s1/",
                       "--timeout",
                       "7200",
                       "--term-grace",
@@ -478,7 +451,7 @@
                       "--retain-products",
                       "false",
                       "--image",
-                      "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
+                      "<study-registry>/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
                       "--toolbox-manifest-sha256",
                       "315959dfbad61d38ad992e26eeab2692c8cac85c24c71485bf111b5430c34bc2",
                       "--toolbox-recipe-sha256",
@@ -501,8 +474,6 @@
                       "c4ef060d2a54a42dee7e451b452c2d6acb0a08f0e65488bf39e2130860b18750",
                       "--group-id",
                       "swath-go-noaa-nbm-grib2-pds-1",
-                      "--job-name",
-                      "scale-study-swath-go-d28e1fcb1334-s1",
                       "--case-id",
                       "swath-go.d28e1fcb1334",
                       "--attempt-id",
@@ -520,9 +491,9 @@
                       "--endpoint-url",
                       "http://127.0.0.1:19090",
                       "--replay-config",
-                      "{\"allocation\":{\"replay_heap_percent\":75,\"replay_max_concurrent_requests\":512,\"replay_memory_gb\":20,\"replay_parquet_connections\":64,\"replay_prefetch\":false,\"replay_prefetch_max_windows\":96,\"replay_vcpus\":20,\"subject_vcpus\":8},\"backend\":{\"fixture_sha256\":\"de7e0487fe7237590b421299853ff7f88f27a006f5d8528ece23f3be26a2624a\",\"fixture_uri\":\"gs://s3-listing-study-results-29c02004/fixtures/noaa-nbm-grib2-pds/current-eba31d9/part-*.parquet\",\"latency_model\":{\"deadlines_ms\":{\"pivot_probe\":37,\"structure_probe\":51,\"worker_page\":87},\"jitter\":\"none\",\"scale\":1.0},\"server_image_uri\":\"ghcr.io/varveio/swath-replay@sha256:3955f242f25294d3ebc6d63d3cf23e2a2694f7f1c9a5334dc6ec1054b0a69097\",\"serving_mode\":\"sorted\"},\"capacity_status\":\"uncalibrated\"}"
+                      "{\"allocation\":{\"replay_heap_percent\":75,\"replay_max_concurrent_requests\":512,\"replay_memory_gb\":20,\"replay_parquet_connections\":64,\"replay_prefetch\":false,\"replay_prefetch_max_windows\":96,\"replay_vcpus\":20,\"subject_vcpus\":8},\"backend\":{\"fixture_sha256\":\"de7e0487fe7237590b421299853ff7f88f27a006f5d8528ece23f3be26a2624a\",\"fixture_uri\":\"<fixture-store>/noaa-nbm-grib2-pds/current-eba31d9/part-*.parquet\",\"latency_model\":{\"deadlines_ms\":{\"pivot_probe\":37,\"structure_probe\":51,\"worker_page\":87},\"jitter\":\"none\",\"scale\":1.0},\"server_image_uri\":\"ghcr.io/varveio/swath-replay@sha256:3955f242f25294d3ebc6d63d3cf23e2a2694f7f1c9a5334dc6ec1054b0a69097\",\"serving_mode\":\"sorted\"},\"capacity_status\":\"uncalibrated\"}"
                     ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
                     "options": "--network host --cpuset-cpus=10-13,26-29 --memory=8g --memory-swap=8g --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
                   }
                 }
@@ -531,7 +502,6 @@
           }
         ]
       },
-      "result_prefix": "gs://s3-listing-study-results-29c02004/scale-study/noaa-nbm-grib2-pds/swath-go.d28e1fcb1334.s1/",
       "settled_at": "2026-11-07T11:15:44.992801+00:00",
       "state": "SUCCEEDED",
       "state_detail": null,
@@ -619,7 +589,6 @@
           "worker_exit_code": 0
         },
         "result_sha256": "f722a9e3d9dcce116d9a282bd0d221ebf00a1329f8b8d9d07e950588f0c92c85",
-        "result_uri": "gs://s3-listing-study-results-29c02004/scale-study/noaa-nbm-grib2-pds/swath.eac26552f657.s1/result.json",
         "state": "BOUND",
         "verification": null
       },
@@ -642,18 +611,7 @@
                 "provisioningModel": "SPOT"
               }
             }
-          ],
-          "network": {
-            "networkInterfaces": [
-              {
-                "network": "projects/varve-oss/global/networks/s3-listing-study",
-                "subnetwork": "projects/varve-oss/regions/us-east1/subnetworks/s3-listing-study-us-east1"
-              }
-            ]
-          },
-          "serviceAccount": {
-            "email": "s3-listing-study-worker@varve-oss.iam.gserviceaccount.com"
-          }
+          ]
         },
         "labels": {
           "suite": "scale-study"
@@ -677,7 +635,7 @@
                   "container": {
                     "commands": [
                       "-ceu",
-                      "set -o pipefail\nmkdir -p /fixtures/source\ngcloud storage cp 'gs://s3-listing-study-results-29c02004/fixtures/noaa-nbm-grib2-pds/current-eba31d9/part-*.parquet' /fixtures/source/\nmanifest=\"$(mktemp)\"\nfiles=(/fixtures/source/*.parquet)\n[[ -f \"${files[0]}\" ]] || { echo \"no staged parquet files\" >&2; exit 1; }\nfor file in \"${files[@]}\"; do\n  digest=\"$(sha256sum \"$file\")\"; digest=\"${digest%% *}\"\n  size=\"$(stat -c %s \"$file\")\"\n  printf '%s\\t%s\\t%s\\n' \"${file##*/}\" \"$size\" \"$digest\"\ndone | LC_ALL=C sort > \"$manifest\"\nactual=\"$(sha256sum \"$manifest\")\"; actual=\"${actual%% *}\"\n[[ \"$actual\" == de7e0487fe7237590b421299853ff7f88f27a006f5d8528ece23f3be26a2624a ]] || { echo \"fixture digest mismatch: $actual\" >&2; exit 1; }\nrm -f \"$manifest\""
+                      "set -o pipefail\nmkdir -p /fixtures/source\ngcloud storage cp '<fixture-store>/noaa-nbm-grib2-pds/current-eba31d9/part-*.parquet' /fixtures/source/\nmanifest=\"$(mktemp)\"\nfiles=(/fixtures/source/*.parquet)\n[[ -f \"${files[0]}\" ]] || { echo \"no staged parquet files\" >&2; exit 1; }\nfor file in \"${files[@]}\"; do\n  digest=\"$(sha256sum \"$file\")\"; digest=\"${digest%% *}\"\n  size=\"$(stat -c %s \"$file\")\"\n  printf '%s\\t%s\\t%s\\n' \"${file##*/}\" \"$size\" \"$digest\"\ndone | LC_ALL=C sort > \"$manifest\"\nactual=\"$(sha256sum \"$manifest\")\"; actual=\"${actual%% *}\"\n[[ \"$actual\" == de7e0487fe7237590b421299853ff7f88f27a006f5d8528ece23f3be26a2624a ]] || { echo \"fixture digest mismatch: $actual\" >&2; exit 1; }\nrm -f \"$manifest\""
                     ],
                     "imageUri": "gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:cf72dd63b7643c117ef53378a41bef6db6a01fa3d561f2b456d7abd8bbeb9ba6",
                     "options": "--entrypoint /bin/bash --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
@@ -694,7 +652,7 @@
                       "10001:10001",
                       "/tmp/attempt"
                     ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
                     "options": "--user 0:0 --entrypoint /bin/chown --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
                   }
                 },
@@ -751,7 +709,7 @@
                       "--output",
                       "/tmp/attempt",
                       "--destination",
-                      "gs://s3-listing-study-results-29c02004/scale-study/noaa-nbm-grib2-pds/swath.eac26552f657.s1/",
+                      "<result-store>/scale-study/noaa-nbm-grib2-pds/swath.eac26552f657.s1/",
                       "--timeout",
                       "7200",
                       "--term-grace",
@@ -759,7 +717,7 @@
                       "--retain-products",
                       "false",
                       "--image",
-                      "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
+                      "<study-registry>/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
                       "--toolbox-manifest-sha256",
                       "315959dfbad61d38ad992e26eeab2692c8cac85c24c71485bf111b5430c34bc2",
                       "--toolbox-recipe-sha256",
@@ -782,8 +740,6 @@
                       "c4ef060d2a54a42dee7e451b452c2d6acb0a08f0e65488bf39e2130860b18750",
                       "--group-id",
                       "swath-go-noaa-nbm-grib2-pds-1",
-                      "--job-name",
-                      "scale-study-swath-eac26552f657-s1",
                       "--case-id",
                       "swath.eac26552f657",
                       "--attempt-id",
@@ -801,9 +757,9 @@
                       "--endpoint-url",
                       "http://127.0.0.1:19090",
                       "--replay-config",
-                      "{\"allocation\":{\"replay_heap_percent\":75,\"replay_max_concurrent_requests\":512,\"replay_memory_gb\":20,\"replay_parquet_connections\":64,\"replay_prefetch\":false,\"replay_prefetch_max_windows\":96,\"replay_vcpus\":20,\"subject_vcpus\":8},\"backend\":{\"fixture_sha256\":\"de7e0487fe7237590b421299853ff7f88f27a006f5d8528ece23f3be26a2624a\",\"fixture_uri\":\"gs://s3-listing-study-results-29c02004/fixtures/noaa-nbm-grib2-pds/current-eba31d9/part-*.parquet\",\"latency_model\":{\"deadlines_ms\":{\"pivot_probe\":37,\"structure_probe\":51,\"worker_page\":87},\"jitter\":\"none\",\"scale\":1.0},\"server_image_uri\":\"ghcr.io/varveio/swath-replay@sha256:3955f242f25294d3ebc6d63d3cf23e2a2694f7f1c9a5334dc6ec1054b0a69097\",\"serving_mode\":\"sorted\"},\"capacity_status\":\"uncalibrated\"}"
+                      "{\"allocation\":{\"replay_heap_percent\":75,\"replay_max_concurrent_requests\":512,\"replay_memory_gb\":20,\"replay_parquet_connections\":64,\"replay_prefetch\":false,\"replay_prefetch_max_windows\":96,\"replay_vcpus\":20,\"subject_vcpus\":8},\"backend\":{\"fixture_sha256\":\"de7e0487fe7237590b421299853ff7f88f27a006f5d8528ece23f3be26a2624a\",\"fixture_uri\":\"<fixture-store>/noaa-nbm-grib2-pds/current-eba31d9/part-*.parquet\",\"latency_model\":{\"deadlines_ms\":{\"pivot_probe\":37,\"structure_probe\":51,\"worker_page\":87},\"jitter\":\"none\",\"scale\":1.0},\"server_image_uri\":\"ghcr.io/varveio/swath-replay@sha256:3955f242f25294d3ebc6d63d3cf23e2a2694f7f1c9a5334dc6ec1054b0a69097\",\"serving_mode\":\"sorted\"},\"capacity_status\":\"uncalibrated\"}"
                     ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:78bd9762ea63bdf353fb4261ca035539fe006c8050043128425d368ede224112",
                     "options": "--network host --cpuset-cpus=10-13,26-29 --memory=8g --memory-swap=8g --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
                   }
                 }
@@ -812,7 +768,6 @@
           }
         ]
       },
-      "result_prefix": "gs://s3-listing-study-results-29c02004/scale-study/noaa-nbm-grib2-pds/swath.eac26552f657.s1/",
       "settled_at": "2026-11-07T11:15:44.994280+00:00",
       "state": "SUCCEEDED",
       "state_detail": null,
@@ -861,7 +816,7 @@
         },
         "backend": {
           "fixture_sha256": "de7e0487fe7237590b421299853ff7f88f27a006f5d8528ece23f3be26a2624a",
-          "fixture_uri": "gs://s3-listing-study-results-29c02004/fixtures/noaa-nbm-grib2-pds/current-eba31d9/part-*.parquet",
+          "fixture_uri": "<fixture-store>/noaa-nbm-grib2-pds/current-eba31d9/part-*.parquet",
           "latency_model": {
             "deadlines_ms": {
               "pivot_probe": 37,
@@ -911,7 +866,7 @@
         },
         "backend": {
           "fixture_sha256": "de7e0487fe7237590b421299853ff7f88f27a006f5d8528ece23f3be26a2624a",
-          "fixture_uri": "gs://s3-listing-study-results-29c02004/fixtures/noaa-nbm-grib2-pds/current-eba31d9/part-*.parquet",
+          "fixture_uri": "<fixture-store>/noaa-nbm-grib2-pds/current-eba31d9/part-*.parquet",
           "latency_model": {
             "deadlines_ms": {
               "pivot_probe": 37,
@@ -963,7 +918,7 @@
         },
         "backend": {
           "fixture_sha256": "de7e0487fe7237590b421299853ff7f88f27a006f5d8528ece23f3be26a2624a",
-          "fixture_uri": "gs://s3-listing-study-results-29c02004/fixtures/noaa-nbm-grib2-pds/current-eba31d9/part-*.parquet",
+          "fixture_uri": "<fixture-store>/noaa-nbm-grib2-pds/current-eba31d9/part-*.parquet",
           "latency_model": {
             "deadlines_ms": {
               "pivot_probe": 37,

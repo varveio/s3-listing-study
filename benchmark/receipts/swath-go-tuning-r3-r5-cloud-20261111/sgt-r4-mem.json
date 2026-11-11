@@ -119,7 +119,6 @@
           "worker_exit_code": 0
         },
         "result_sha256": "52f6b55756fe0493c6312d4e4885c2f04c34c30c802865f94f8848afb60b7b01",
-        "result_uri": "gs://s3-listing-study-results-29c02004/scale-study/aws-public-blockchain/swath-go.a635be2b1eea.s1/result.json",
         "state": "BOUND",
         "verification": null
       },
@@ -142,23 +141,7 @@
                 "provisioningModel": "SPOT"
               }
             }
-          ],
-          "location": {
-            "allowedLocations": [
-              "zones/us-east1-b"
-            ]
-          },
-          "network": {
-            "networkInterfaces": [
-              {
-                "network": "projects/varve-oss/global/networks/s3-listing-study",
-                "subnetwork": "projects/varve-oss/regions/us-east1/subnetworks/s3-listing-study-us-east1"
-              }
-            ]
-          },
-          "serviceAccount": {
-            "email": "s3-listing-study-worker@varve-oss.iam.gserviceaccount.com"
-          }
+          ]
         },
         "labels": {
           "suite": "scale-study"
@@ -182,7 +165,7 @@
                   "container": {
                     "commands": [
                       "-ceu",
-                      "set -o pipefail\nmkdir -p /fixtures/source\nmkdir -p /fixtures/source/data\ngcloud storage cp gs://s3-listing-study-results-29c02004/fixtures/aws-public-blockchain/seekparquet-c4a42eb4e7fb/manifest.json /fixtures/source/manifest.json\nactual=\"$(sha256sum /fixtures/source/manifest.json)\"; actual=\"${actual%% *}\"\n[[ \"$actual\" == c4a42eb4e7fb2a9627972cc1e457ed55d60ef3d3560813eff8e13e65ef182b29 ]] || { echo \"fixture manifest digest mismatch: $actual\" >&2; exit 1; }\nparts=\"$(\"${CLOUDSDK_PYTHON:-python3}\" -c '\nimport hashlib, json, os, re, sys\n\n# argv: list|verify ROOT [ADOPTED_SHA256]. The manifest'\"'\"'s own digest was\n# checked by the caller before this runs, so its contents are the identity.\ncommand, root = sys.argv[1], sys.argv[2]\nadopted_expected = sys.argv[3] if len(sys.argv) > 3 else \"\"\nwith open(os.path.join(root, \"manifest.json\"), \"rb\") as source:\n    manifest = json.load(source)\nif manifest.get(\"format\") != \"seekparquet\":\n    sys.exit(\"fixture manifest is not a SeekParquet manifest\")\nparts = manifest.get(\"parts\")\nif not isinstance(parts, list) or not parts:\n    sys.exit(\"fixture manifest names no parts\")\nnames = []\nfor part in parts:\n    path = part.get(\"path\") if isinstance(part, dict) else None\n    if not isinstance(path, str) or not re.fullmatch(r\"data/[A-Za-z0-9._-]+\\.parquet\", path):\n        sys.exit(\"fixture manifest part path is not data/<name>.parquet: %r\" % (path,))\n    names.append(path)\nif len(set(names)) != len(names):\n    sys.exit(\"fixture manifest names a part twice\")\nif command == \"list\":\n    print(\"\\n\".join(names))\n    sys.exit(0)\nstaged = sorted(\n    \"data/\" + name for name in os.listdir(os.path.join(root, \"data\")) if name.endswith(\".parquet\")\n)\nif staged != sorted(names):\n    sys.exit(\"staged data/ parts differ from the manifest: %r\" % (staged,))\nfor part in parts:\n    digest = hashlib.sha256()\n    with open(os.path.join(root, part[\"path\"]), \"rb\") as source:\n        for chunk in iter(lambda: source.read(1 << 20), b\"\"):\n            digest.update(chunk)\n    size = os.path.getsize(os.path.join(root, part[\"path\"]))\n    if size != part.get(\"bytes\") or digest.hexdigest() != part.get(\"sha256\"):\n        sys.exit(\"fixture part %s does not match its manifest entry\" % part[\"path\"])\nif adopted_expected:\n    adopted = manifest.get(\"extensions\", {}).get(\"swath-replay\", {}).get(\"adopted_from\", {})\n    rows = sorted(\n        \"%s\\t%s\\t%s\\n\" % (item[\"input\"], item[\"input_bytes\"], item[\"input_sha256\"])\n        for item in adopted.get(\"parts\", [])\n    )\n    actual = hashlib.sha256(\"\".join(rows).encode()).hexdigest() if rows else \"\"\n    if actual != adopted_expected:\n        sys.exit(\"fixture adopted_from digest mismatch: %s\" % actual)\nprint(\"seekparquet fixture verified: %d part(s)\" % len(parts))\n' list /fixtures/source)\"\nwhile IFS= read -r part; do\n  gcloud storage cp gs://s3-listing-study-results-29c02004/fixtures/aws-public-blockchain/seekparquet-c4a42eb4e7fb/\"$part\" /fixtures/source/\"$part\"\ndone <<< \"$parts\"\n\"${CLOUDSDK_PYTHON:-python3}\" -c '\nimport hashlib, json, os, re, sys\n\n# argv: list|verify ROOT [ADOPTED_SHA256]. The manifest'\"'\"'s own digest was\n# checked by the caller before this runs, so its contents are the identity.\ncommand, root = sys.argv[1], sys.argv[2]\nadopted_expected = sys.argv[3] if len(sys.argv) > 3 else \"\"\nwith open(os.path.join(root, \"manifest.json\"), \"rb\") as source:\n    manifest = json.load(source)\nif manifest.get(\"format\") != \"seekparquet\":\n    sys.exit(\"fixture manifest is not a SeekParquet manifest\")\nparts = manifest.get(\"parts\")\nif not isinstance(parts, list) or not parts:\n    sys.exit(\"fixture manifest names no parts\")\nnames = []\nfor part in parts:\n    path = part.get(\"path\") if isinstance(part, dict) else None\n    if not isinstance(path, str) or not re.fullmatch(r\"data/[A-Za-z0-9._-]+\\.parquet\", path):\n        sys.exit(\"fixture manifest part path is not data/<name>.parquet: %r\" % (path,))\n    names.append(path)\nif len(set(names)) != len(names):\n    sys.exit(\"fixture manifest names a part twice\")\nif command == \"list\":\n    print(\"\\n\".join(names))\n    sys.exit(0)\nstaged = sorted(\n    \"data/\" + name for name in os.listdir(os.path.join(root, \"data\")) if name.endswith(\".parquet\")\n)\nif staged != sorted(names):\n    sys.exit(\"staged data/ parts differ from the manifest: %r\" % (staged,))\nfor part in parts:\n    digest = hashlib.sha256()\n    with open(os.path.join(root, part[\"path\"]), \"rb\") as source:\n        for chunk in iter(lambda: source.read(1 << 20), b\"\"):\n            digest.update(chunk)\n    size = os.path.getsize(os.path.join(root, part[\"path\"]))\n    if size != part.get(\"bytes\") or digest.hexdigest() != part.get(\"sha256\"):\n        sys.exit(\"fixture part %s does not match its manifest entry\" % part[\"path\"])\nif adopted_expected:\n    adopted = manifest.get(\"extensions\", {}).get(\"swath-replay\", {}).get(\"adopted_from\", {})\n    rows = sorted(\n        \"%s\\t%s\\t%s\\n\" % (item[\"input\"], item[\"input_bytes\"], item[\"input_sha256\"])\n        for item in adopted.get(\"parts\", [])\n    )\n    actual = hashlib.sha256(\"\".join(rows).encode()).hexdigest() if rows else \"\"\n    if actual != adopted_expected:\n        sys.exit(\"fixture adopted_from digest mismatch: %s\" % actual)\nprint(\"seekparquet fixture verified: %d part(s)\" % len(parts))\n' verify /fixtures/source f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0"
+                      "set -o pipefail\nmkdir -p /fixtures/source\nmkdir -p /fixtures/source/data\ngcloud storage cp <fixture-store>/aws-public-blockchain/seekparquet-c4a42eb4e7fb/manifest.json /fixtures/source/manifest.json\nactual=\"$(sha256sum /fixtures/source/manifest.json)\"; actual=\"${actual%% *}\"\n[[ \"$actual\" == c4a42eb4e7fb2a9627972cc1e457ed55d60ef3d3560813eff8e13e65ef182b29 ]] || { echo \"fixture manifest digest mismatch: $actual\" >&2; exit 1; }\nparts=\"$(\"${CLOUDSDK_PYTHON:-python3}\" -c '\nimport hashlib, json, os, re, sys\n\n# argv: list|verify ROOT [ADOPTED_SHA256]. The manifest'\"'\"'s own digest was\n# checked by the caller before this runs, so its contents are the identity.\ncommand, root = sys.argv[1], sys.argv[2]\nadopted_expected = sys.argv[3] if len(sys.argv) > 3 else \"\"\nwith open(os.path.join(root, \"manifest.json\"), \"rb\") as source:\n    manifest = json.load(source)\nif manifest.get(\"format\") != \"seekparquet\":\n    sys.exit(\"fixture manifest is not a SeekParquet manifest\")\nparts = manifest.get(\"parts\")\nif not isinstance(parts, list) or not parts:\n    sys.exit(\"fixture manifest names no parts\")\nnames = []\nfor part in parts:\n    path = part.get(\"path\") if isinstance(part, dict) else None\n    if not isinstance(path, str) or not re.fullmatch(r\"data/[A-Za-z0-9._-]+\\.parquet\", path):\n        sys.exit(\"fixture manifest part path is not data/<name>.parquet: %r\" % (path,))\n    names.append(path)\nif len(set(names)) != len(names):\n    sys.exit(\"fixture manifest names a part twice\")\nif command == \"list\":\n    print(\"\\n\".join(names))\n    sys.exit(0)\nstaged = sorted(\n    \"data/\" + name for name in os.listdir(os.path.join(root, \"data\")) if name.endswith(\".parquet\")\n)\nif staged != sorted(names):\n    sys.exit(\"staged data/ parts differ from the manifest: %r\" % (staged,))\nfor part in parts:\n    digest = hashlib.sha256()\n    with open(os.path.join(root, part[\"path\"]), \"rb\") as source:\n        for chunk in iter(lambda: source.read(1 << 20), b\"\"):\n            digest.update(chunk)\n    size = os.path.getsize(os.path.join(root, part[\"path\"]))\n    if size != part.get(\"bytes\") or digest.hexdigest() != part.get(\"sha256\"):\n        sys.exit(\"fixture part %s does not match its manifest entry\" % part[\"path\"])\nif adopted_expected:\n    adopted = manifest.get(\"extensions\", {}).get(\"swath-replay\", {}).get(\"adopted_from\", {})\n    rows = sorted(\n        \"%s\\t%s\\t%s\\n\" % (item[\"input\"], item[\"input_bytes\"], item[\"input_sha256\"])\n        for item in adopted.get(\"parts\", [])\n    )\n    actual = hashlib.sha256(\"\".join(rows).encode()).hexdigest() if rows else \"\"\n    if actual != adopted_expected:\n        sys.exit(\"fixture adopted_from digest mismatch: %s\" % actual)\nprint(\"seekparquet fixture verified: %d part(s)\" % len(parts))\n' list /fixtures/source)\"\nwhile IFS= read -r part; do\n  gcloud storage cp <fixture-store>/aws-public-blockchain/seekparquet-c4a42eb4e7fb/\"$part\" /fixtures/source/\"$part\"\ndone <<< \"$parts\"\n\"${CLOUDSDK_PYTHON:-python3}\" -c '\nimport hashlib, json, os, re, sys\n\n# argv: list|verify ROOT [ADOPTED_SHA256]. The manifest'\"'\"'s own digest was\n# checked by the caller before this runs, so its contents are the identity.\ncommand, root = sys.argv[1], sys.argv[2]\nadopted_expected = sys.argv[3] if len(sys.argv) > 3 else \"\"\nwith open(os.path.join(root, \"manifest.json\"), \"rb\") as source:\n    manifest = json.load(source)\nif manifest.get(\"format\") != \"seekparquet\":\n    sys.exit(\"fixture manifest is not a SeekParquet manifest\")\nparts = manifest.get(\"parts\")\nif not isinstance(parts, list) or not parts:\n    sys.exit(\"fixture manifest names no parts\")\nnames = []\nfor part in parts:\n    path = part.get(\"path\") if isinstance(part, dict) else None\n    if not isinstance(path, str) or not re.fullmatch(r\"data/[A-Za-z0-9._-]+\\.parquet\", path):\n        sys.exit(\"fixture manifest part path is not data/<name>.parquet: %r\" % (path,))\n    names.append(path)\nif len(set(names)) != len(names):\n    sys.exit(\"fixture manifest names a part twice\")\nif command == \"list\":\n    print(\"\\n\".join(names))\n    sys.exit(0)\nstaged = sorted(\n    \"data/\" + name for name in os.listdir(os.path.join(root, \"data\")) if name.endswith(\".parquet\")\n)\nif staged != sorted(names):\n    sys.exit(\"staged data/ parts differ from the manifest: %r\" % (staged,))\nfor part in parts:\n    digest = hashlib.sha256()\n    with open(os.path.join(root, part[\"path\"]), \"rb\") as source:\n        for chunk in iter(lambda: source.read(1 << 20), b\"\"):\n            digest.update(chunk)\n    size = os.path.getsize(os.path.join(root, part[\"path\"]))\n    if size != part.get(\"bytes\") or digest.hexdigest() != part.get(\"sha256\"):\n        sys.exit(\"fixture part %s does not match its manifest entry\" % part[\"path\"])\nif adopted_expected:\n    adopted = manifest.get(\"extensions\", {}).get(\"swath-replay\", {}).get(\"adopted_from\", {})\n    rows = sorted(\n        \"%s\\t%s\\t%s\\n\" % (item[\"input\"], item[\"input_bytes\"], item[\"input_sha256\"])\n        for item in adopted.get(\"parts\", [])\n    )\n    actual = hashlib.sha256(\"\".join(rows).encode()).hexdigest() if rows else \"\"\n    if actual != adopted_expected:\n        sys.exit(\"fixture adopted_from digest mismatch: %s\" % actual)\nprint(\"seekparquet fixture verified: %d part(s)\" % len(parts))\n' verify /fixtures/source f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0"
                     ],
                     "imageUri": "gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:cf72dd63b7643c117ef53378a41bef6db6a01fa3d561f2b456d7abd8bbeb9ba6",
                     "options": "--entrypoint /bin/bash --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
@@ -199,7 +182,7 @@
                       "10001:10001",
                       "/tmp/attempt"
                     ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:dab1c147072fa82d30b9fe1e187012760e355d3ffd127a83d8b04b07827b9ee5",
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:dab1c147072fa82d30b9fe1e187012760e355d3ffd127a83d8b04b07827b9ee5",
                     "options": "--user 0:0 --entrypoint /bin/chown --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
                   }
                 },
@@ -238,7 +221,7 @@
                       "--latency-scale",
                       "1.0"
                     ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90",
+                    "imageUri": "<study-registry>/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90",
                     "options": "--network host --cpuset-cpus=0-31,40-71 --memory=20g --memory-swap=20g --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
                   },
                   "environment": {
@@ -266,7 +249,7 @@
                       "--output",
                       "/tmp/attempt",
                       "--destination",
-                      "gs://s3-listing-study-results-29c02004/scale-study/aws-public-blockchain/swath-go.a635be2b1eea.s1/",
+                      "<result-store>/scale-study/aws-public-blockchain/swath-go.a635be2b1eea.s1/",
                       "--timeout",
                       "7200",
                       "--term-grace",
@@ -274,7 +257,7 @@
                       "--retain-products",
                       "false",
                       "--image",
-                      "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:dab1c147072fa82d30b9fe1e187012760e355d3ffd127a83d8b04b07827b9ee5",
+                      "<study-registry>/benchmark-toolbox@sha256:dab1c147072fa82d30b9fe1e187012760e355d3ffd127a83d8b04b07827b9ee5",
                       "--toolbox-manifest-sha256",
                       "358aa5d00157235e4b438d92ae5e29a7e0d2af385f01a8740c30461e165a3e1e",
                       "--toolbox-recipe-sha256",
@@ -297,8 +280,6 @@
                       "2bfc3cb8c59c75eb6baeb7b963c853f8eace0b961550297721843628ad10e9b8",
                       "--group-id",
                       "sgt-r4-mem",
-                      "--job-name",
-                      "scale-study-swath-go-a635be2b1eea-s1",
                       "--case-id",
                       "swath-go.a635be2b1eea",
                       "--attempt-id",
@@ -316,9 +297,9 @@
                       "--endpoint-url",
                       "http://127.0.0.1:19090",
                       "--replay-config",
-                      "{\"allocation\":{\"replay_heap_percent\":75,\"replay_list_index\":true,\"replay_list_index_max_bytes\":67108864,\"replay_max_concurrent_requests\":4096,\"replay_memory_gb\":20,\"replay_parquet_connections\":128,\"replay_prefetch\":true,\"replay_prefetch_max_windows\":192,\"replay_response_buffer_budget_bytes\":1073741824,\"replay_vcpus\":64,\"subject_vcpus\":8},\"backend\":{\"fixture_adopted_sha256\":\"f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0\",\"fixture_sha256\":\"c4a42eb4e7fb2a9627972cc1e457ed55d60ef3d3560813eff8e13e65ef182b29\",\"fixture_uri\":\"gs://s3-listing-study-results-29c02004/fixtures/aws-public-blockchain/seekparquet-c4a42eb4e7fb/\",\"latency_model\":{\"deadlines_ms\":{\"pivot_probe\":46,\"structure_probe\":55,\"worker_page\":94},\"jitter\":\"none\",\"scale\":1.0},\"server_image_uri\":\"us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90\",\"server_implementation\":\"go\",\"serving_mode\":\"sorted\",\"warmup\":{\"in_flight\":64,\"pivot_probes\":200,\"structure_probes\":2000,\"worker_pages\":200}},\"capacity_status\":\"uncalibrated\"}"
+                      "{\"allocation\":{\"replay_heap_percent\":75,\"replay_list_index\":true,\"replay_list_index_max_bytes\":67108864,\"replay_max_concurrent_requests\":4096,\"replay_memory_gb\":20,\"replay_parquet_connections\":128,\"replay_prefetch\":true,\"replay_prefetch_max_windows\":192,\"replay_response_buffer_budget_bytes\":1073741824,\"replay_vcpus\":64,\"subject_vcpus\":8},\"backend\":{\"fixture_adopted_sha256\":\"f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0\",\"fixture_sha256\":\"c4a42eb4e7fb2a9627972cc1e457ed55d60ef3d3560813eff8e13e65ef182b29\",\"fixture_uri\":\"<fixture-store>/aws-public-blockchain/seekparquet-c4a42eb4e7fb/\",\"latency_model\":{\"deadlines_ms\":{\"pivot_probe\":46,\"structure_probe\":55,\"worker_page\":94},\"jitter\":\"none\",\"scale\":1.0},\"server_image_uri\":\"<study-registry>/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90\",\"server_implementation\":\"go\",\"serving_mode\":\"sorted\",\"warmup\":{\"in_flight\":64,\"pivot_probes\":200,\"structure_probes\":2000,\"worker_pages\":200}},\"capacity_status\":\"uncalibrated\"}"
                     ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:dab1c147072fa82d30b9fe1e187012760e355d3ffd127a83d8b04b07827b9ee5",
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:dab1c147072fa82d30b9fe1e187012760e355d3ffd127a83d8b04b07827b9ee5",
                     "options": "--network host --cpuset-cpus=32-35,72-75 --memory=8g --memory-swap=8g --volume=/mnt/stateful_partition/attempt:/tmp/attempt --volume=/proc:/replay-host-proc:ro"
                   }
                 }
@@ -327,7 +308,6 @@
           }
         ]
       },
-      "result_prefix": "gs://s3-listing-study-results-29c02004/scale-study/aws-public-blockchain/swath-go.a635be2b1eea.s1/",
       "settled_at": "2026-11-11T08:24:45.845969+00:00",
       "state": "SUCCEEDED",
       "state_detail": null,
@@ -453,7 +433,6 @@
           "worker_exit_code": 0
         },
         "result_sha256": "c398d68f1589f76db3a26fb4cebaaaf2b66fc4f401983f4ac6cab379ede335f0",
-        "result_uri": "gs://s3-listing-study-results-29c02004/scale-study/aws-public-blockchain/swath-go.70456c8205c4.s1/result.json",
         "state": "BOUND",
         "verification": null
       },
@@ -476,23 +455,7 @@
                 "provisioningModel": "SPOT"
               }
             }
-          ],
-          "location": {
-            "allowedLocations": [
-              "zones/us-east1-b"
-            ]
-          },
-          "network": {
-            "networkInterfaces": [
-              {
-                "network": "projects/varve-oss/global/networks/s3-listing-study",
-                "subnetwork": "projects/varve-oss/regions/us-east1/subnetworks/s3-listing-study-us-east1"
-              }
-            ]
-          },
-          "serviceAccount": {
-            "email": "s3-listing-study-worker@varve-oss.iam.gserviceaccount.com"
-          }
+          ]
         },
         "labels": {
           "suite": "scale-study"
@@ -516,7 +479,7 @@
                   "container": {
                     "commands": [
                       "-ceu",
-                      "set -o pipefail\nmkdir -p /fixtures/source\nmkdir -p /fixtures/source/data\ngcloud storage cp gs://s3-listing-study-results-29c02004/fixtures/aws-public-blockchain/seekparquet-c4a42eb4e7fb/manifest.json /fixtures/source/manifest.json\nactual=\"$(sha256sum /fixtures/source/manifest.json)\"; actual=\"${actual%% *}\"\n[[ \"$actual\" == c4a42eb4e7fb2a9627972cc1e457ed55d60ef3d3560813eff8e13e65ef182b29 ]] || { echo \"fixture manifest digest mismatch: $actual\" >&2; exit 1; }\nparts=\"$(\"${CLOUDSDK_PYTHON:-python3}\" -c '\nimport hashlib, json, os, re, sys\n\n# argv: list|verify ROOT [ADOPTED_SHA256]. The manifest'\"'\"'s own digest was\n# checked by the caller before this runs, so its contents are the identity.\ncommand, root = sys.argv[1], sys.argv[2]\nadopted_expected = sys.argv[3] if len(sys.argv) > 3 else \"\"\nwith open(os.path.join(root, \"manifest.json\"), \"rb\") as source:\n    manifest = json.load(source)\nif manifest.get(\"format\") != \"seekparquet\":\n    sys.exit(\"fixture manifest is not a SeekParquet manifest\")\nparts = manifest.get(\"parts\")\nif not isinstance(parts, list) or not parts:\n    sys.exit(\"fixture manifest names no parts\")\nnames = []\nfor part in parts:\n    path = part.get(\"path\") if isinstance(part, dict) else None\n    if not isinstance(path, str) or not re.fullmatch(r\"data/[A-Za-z0-9._-]+\\.parquet\", path):\n        sys.exit(\"fixture manifest part path is not data/<name>.parquet: %r\" % (path,))\n    names.append(path)\nif len(set(names)) != len(names):\n    sys.exit(\"fixture manifest names a part twice\")\nif command == \"list\":\n    print(\"\\n\".join(names))\n    sys.exit(0)\nstaged = sorted(\n    \"data/\" + name for name in os.listdir(os.path.join(root, \"data\")) if name.endswith(\".parquet\")\n)\nif staged != sorted(names):\n    sys.exit(\"staged data/ parts differ from the manifest: %r\" % (staged,))\nfor part in parts:\n    digest = hashlib.sha256()\n    with open(os.path.join(root, part[\"path\"]), \"rb\") as source:\n        for chunk in iter(lambda: source.read(1 << 20), b\"\"):\n            digest.update(chunk)\n    size = os.path.getsize(os.path.join(root, part[\"path\"]))\n    if size != part.get(\"bytes\") or digest.hexdigest() != part.get(\"sha256\"):\n        sys.exit(\"fixture part %s does not match its manifest entry\" % part[\"path\"])\nif adopted_expected:\n    adopted = manifest.get(\"extensions\", {}).get(\"swath-replay\", {}).get(\"adopted_from\", {})\n    rows = sorted(\n        \"%s\\t%s\\t%s\\n\" % (item[\"input\"], item[\"input_bytes\"], item[\"input_sha256\"])\n        for item in adopted.get(\"parts\", [])\n    )\n    actual = hashlib.sha256(\"\".join(rows).encode()).hexdigest() if rows else \"\"\n    if actual != adopted_expected:\n        sys.exit(\"fixture adopted_from digest mismatch: %s\" % actual)\nprint(\"seekparquet fixture verified: %d part(s)\" % len(parts))\n' list /fixtures/source)\"\nwhile IFS= read -r part; do\n  gcloud storage cp gs://s3-listing-study-results-29c02004/fixtures/aws-public-blockchain/seekparquet-c4a42eb4e7fb/\"$part\" /fixtures/source/\"$part\"\ndone <<< \"$parts\"\n\"${CLOUDSDK_PYTHON:-python3}\" -c '\nimport hashlib, json, os, re, sys\n\n# argv: list|verify ROOT [ADOPTED_SHA256]. The manifest'\"'\"'s own digest was\n# checked by the caller before this runs, so its contents are the identity.\ncommand, root = sys.argv[1], sys.argv[2]\nadopted_expected = sys.argv[3] if len(sys.argv) > 3 else \"\"\nwith open(os.path.join(root, \"manifest.json\"), \"rb\") as source:\n    manifest = json.load(source)\nif manifest.get(\"format\") != \"seekparquet\":\n    sys.exit(\"fixture manifest is not a SeekParquet manifest\")\nparts = manifest.get(\"parts\")\nif not isinstance(parts, list) or not parts:\n    sys.exit(\"fixture manifest names no parts\")\nnames = []\nfor part in parts:\n    path = part.get(\"path\") if isinstance(part, dict) else None\n    if not isinstance(path, str) or not re.fullmatch(r\"data/[A-Za-z0-9._-]+\\.parquet\", path):\n        sys.exit(\"fixture manifest part path is not data/<name>.parquet: %r\" % (path,))\n    names.append(path)\nif len(set(names)) != len(names):\n    sys.exit(\"fixture manifest names a part twice\")\nif command == \"list\":\n    print(\"\\n\".join(names))\n    sys.exit(0)\nstaged = sorted(\n    \"data/\" + name for name in os.listdir(os.path.join(root, \"data\")) if name.endswith(\".parquet\")\n)\nif staged != sorted(names):\n    sys.exit(\"staged data/ parts differ from the manifest: %r\" % (staged,))\nfor part in parts:\n    digest = hashlib.sha256()\n    with open(os.path.join(root, part[\"path\"]), \"rb\") as source:\n        for chunk in iter(lambda: source.read(1 << 20), b\"\"):\n            digest.update(chunk)\n    size = os.path.getsize(os.path.join(root, part[\"path\"]))\n    if size != part.get(\"bytes\") or digest.hexdigest() != part.get(\"sha256\"):\n        sys.exit(\"fixture part %s does not match its manifest entry\" % part[\"path\"])\nif adopted_expected:\n    adopted = manifest.get(\"extensions\", {}).get(\"swath-replay\", {}).get(\"adopted_from\", {})\n    rows = sorted(\n        \"%s\\t%s\\t%s\\n\" % (item[\"input\"], item[\"input_bytes\"], item[\"input_sha256\"])\n        for item in adopted.get(\"parts\", [])\n    )\n    actual = hashlib.sha256(\"\".join(rows).encode()).hexdigest() if rows else \"\"\n    if actual != adopted_expected:\n        sys.exit(\"fixture adopted_from digest mismatch: %s\" % actual)\nprint(\"seekparquet fixture verified: %d part(s)\" % len(parts))\n' verify /fixtures/source f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0"
+                      "set -o pipefail\nmkdir -p /fixtures/source\nmkdir -p /fixtures/source/data\ngcloud storage cp <fixture-store>/aws-public-blockchain/seekparquet-c4a42eb4e7fb/manifest.json /fixtures/source/manifest.json\nactual=\"$(sha256sum /fixtures/source/manifest.json)\"; actual=\"${actual%% *}\"\n[[ \"$actual\" == c4a42eb4e7fb2a9627972cc1e457ed55d60ef3d3560813eff8e13e65ef182b29 ]] || { echo \"fixture manifest digest mismatch: $actual\" >&2; exit 1; }\nparts=\"$(\"${CLOUDSDK_PYTHON:-python3}\" -c '\nimport hashlib, json, os, re, sys\n\n# argv: list|verify ROOT [ADOPTED_SHA256]. The manifest'\"'\"'s own digest was\n# checked by the caller before this runs, so its contents are the identity.\ncommand, root = sys.argv[1], sys.argv[2]\nadopted_expected = sys.argv[3] if len(sys.argv) > 3 else \"\"\nwith open(os.path.join(root, \"manifest.json\"), \"rb\") as source:\n    manifest = json.load(source)\nif manifest.get(\"format\") != \"seekparquet\":\n    sys.exit(\"fixture manifest is not a SeekParquet manifest\")\nparts = manifest.get(\"parts\")\nif not isinstance(parts, list) or not parts:\n    sys.exit(\"fixture manifest names no parts\")\nnames = []\nfor part in parts:\n    path = part.get(\"path\") if isinstance(part, dict) else None\n    if not isinstance(path, str) or not re.fullmatch(r\"data/[A-Za-z0-9._-]+\\.parquet\", path):\n        sys.exit(\"fixture manifest part path is not data/<name>.parquet: %r\" % (path,))\n    names.append(path)\nif len(set(names)) != len(names):\n    sys.exit(\"fixture manifest names a part twice\")\nif command == \"list\":\n    print(\"\\n\".join(names))\n    sys.exit(0)\nstaged = sorted(\n    \"data/\" + name for name in os.listdir(os.path.join(root, \"data\")) if name.endswith(\".parquet\")\n)\nif staged != sorted(names):\n    sys.exit(\"staged data/ parts differ from the manifest: %r\" % (staged,))\nfor part in parts:\n    digest = hashlib.sha256()\n    with open(os.path.join(root, part[\"path\"]), \"rb\") as source:\n        for chunk in iter(lambda: source.read(1 << 20), b\"\"):\n            digest.update(chunk)\n    size = os.path.getsize(os.path.join(root, part[\"path\"]))\n    if size != part.get(\"bytes\") or digest.hexdigest() != part.get(\"sha256\"):\n        sys.exit(\"fixture part %s does not match its manifest entry\" % part[\"path\"])\nif adopted_expected:\n    adopted = manifest.get(\"extensions\", {}).get(\"swath-replay\", {}).get(\"adopted_from\", {})\n    rows = sorted(\n        \"%s\\t%s\\t%s\\n\" % (item[\"input\"], item[\"input_bytes\"], item[\"input_sha256\"])\n        for item in adopted.get(\"parts\", [])\n    )\n    actual = hashlib.sha256(\"\".join(rows).encode()).hexdigest() if rows else \"\"\n    if actual != adopted_expected:\n        sys.exit(\"fixture adopted_from digest mismatch: %s\" % actual)\nprint(\"seekparquet fixture verified: %d part(s)\" % len(parts))\n' list /fixtures/source)\"\nwhile IFS= read -r part; do\n  gcloud storage cp <fixture-store>/aws-public-blockchain/seekparquet-c4a42eb4e7fb/\"$part\" /fixtures/source/\"$part\"\ndone <<< \"$parts\"\n\"${CLOUDSDK_PYTHON:-python3}\" -c '\nimport hashlib, json, os, re, sys\n\n# argv: list|verify ROOT [ADOPTED_SHA256]. The manifest'\"'\"'s own digest was\n# checked by the caller before this runs, so its contents are the identity.\ncommand, root = sys.argv[1], sys.argv[2]\nadopted_expected = sys.argv[3] if len(sys.argv) > 3 else \"\"\nwith open(os.path.join(root, \"manifest.json\"), \"rb\") as source:\n    manifest = json.load(source)\nif manifest.get(\"format\") != \"seekparquet\":\n    sys.exit(\"fixture manifest is not a SeekParquet manifest\")\nparts = manifest.get(\"parts\")\nif not isinstance(parts, list) or not parts:\n    sys.exit(\"fixture manifest names no parts\")\nnames = []\nfor part in parts:\n    path = part.get(\"path\") if isinstance(part, dict) else None\n    if not isinstance(path, str) or not re.fullmatch(r\"data/[A-Za-z0-9._-]+\\.parquet\", path):\n        sys.exit(\"fixture manifest part path is not data/<name>.parquet: %r\" % (path,))\n    names.append(path)\nif len(set(names)) != len(names):\n    sys.exit(\"fixture manifest names a part twice\")\nif command == \"list\":\n    print(\"\\n\".join(names))\n    sys.exit(0)\nstaged = sorted(\n    \"data/\" + name for name in os.listdir(os.path.join(root, \"data\")) if name.endswith(\".parquet\")\n)\nif staged != sorted(names):\n    sys.exit(\"staged data/ parts differ from the manifest: %r\" % (staged,))\nfor part in parts:\n    digest = hashlib.sha256()\n    with open(os.path.join(root, part[\"path\"]), \"rb\") as source:\n        for chunk in iter(lambda: source.read(1 << 20), b\"\"):\n            digest.update(chunk)\n    size = os.path.getsize(os.path.join(root, part[\"path\"]))\n    if size != part.get(\"bytes\") or digest.hexdigest() != part.get(\"sha256\"):\n        sys.exit(\"fixture part %s does not match its manifest entry\" % part[\"path\"])\nif adopted_expected:\n    adopted = manifest.get(\"extensions\", {}).get(\"swath-replay\", {}).get(\"adopted_from\", {})\n    rows = sorted(\n        \"%s\\t%s\\t%s\\n\" % (item[\"input\"], item[\"input_bytes\"], item[\"input_sha256\"])\n        for item in adopted.get(\"parts\", [])\n    )\n    actual = hashlib.sha256(\"\".join(rows).encode()).hexdigest() if rows else \"\"\n    if actual != adopted_expected:\n        sys.exit(\"fixture adopted_from digest mismatch: %s\" % actual)\nprint(\"seekparquet fixture verified: %d part(s)\" % len(parts))\n' verify /fixtures/source f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0"
                     ],
                     "imageUri": "gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:cf72dd63b7643c117ef53378a41bef6db6a01fa3d561f2b456d7abd8bbeb9ba6",
                     "options": "--entrypoint /bin/bash --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
@@ -533,7 +496,7 @@
                       "10001:10001",
                       "/tmp/attempt"
                     ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:dab1c147072fa82d30b9fe1e187012760e355d3ffd127a83d8b04b07827b9ee5",
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:dab1c147072fa82d30b9fe1e187012760e355d3ffd127a83d8b04b07827b9ee5",
                     "options": "--user 0:0 --entrypoint /bin/chown --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
                   }
                 },
@@ -572,7 +535,7 @@
                       "--latency-scale",
                       "1.0"
                     ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90",
+                    "imageUri": "<study-registry>/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90",
                     "options": "--network host --cpuset-cpus=0-31,40-71 --memory=20g --memory-swap=20g --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
                   },
                   "environment": {
@@ -600,7 +563,7 @@
                       "--output",
                       "/tmp/attempt",
                       "--destination",
-                      "gs://s3-listing-study-results-29c02004/scale-study/aws-public-blockchain/swath-go.70456c8205c4.s1/",
+                      "<result-store>/scale-study/aws-public-blockchain/swath-go.70456c8205c4.s1/",
                       "--timeout",
                       "7200",
                       "--term-grace",
@@ -608,7 +571,7 @@
                       "--retain-products",
                       "false",
                       "--image",
-                      "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:dab1c147072fa82d30b9fe1e187012760e355d3ffd127a83d8b04b07827b9ee5",
+                      "<study-registry>/benchmark-toolbox@sha256:dab1c147072fa82d30b9fe1e187012760e355d3ffd127a83d8b04b07827b9ee5",
                       "--toolbox-manifest-sha256",
                       "358aa5d00157235e4b438d92ae5e29a7e0d2af385f01a8740c30461e165a3e1e",
                       "--toolbox-recipe-sha256",
@@ -631,8 +594,6 @@
                       "2bfc3cb8c59c75eb6baeb7b963c853f8eace0b961550297721843628ad10e9b8",
                       "--group-id",
                       "sgt-r4-mem",
-                      "--job-name",
-                      "scale-study-swath-go-70456c8205c4-s1",
                       "--case-id",
                       "swath-go.70456c8205c4",
                       "--attempt-id",
@@ -650,9 +611,9 @@
                       "--endpoint-url",
                       "http://127.0.0.1:19090",
                       "--replay-config",
-                      "{\"allocation\":{\"replay_heap_percent\":75,\"replay_list_index\":true,\"replay_list_index_max_bytes\":67108864,\"replay_max_concurrent_requests\":4096,\"replay_memory_gb\":20,\"replay_parquet_connections\":128,\"replay_prefetch\":true,\"replay_prefetch_max_windows\":192,\"replay_response_buffer_budget_bytes\":1073741824,\"replay_vcpus\":64,\"subject_vcpus\":8},\"backend\":{\"fixture_adopted_sha256\":\"f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0\",\"fixture_sha256\":\"c4a42eb4e7fb2a9627972cc1e457ed55d60ef3d3560813eff8e13e65ef182b29\",\"fixture_uri\":\"gs://s3-listing-study-results-29c02004/fixtures/aws-public-blockchain/seekparquet-c4a42eb4e7fb/\",\"latency_model\":{\"deadlines_ms\":{\"pivot_probe\":46,\"structure_probe\":55,\"worker_page\":94},\"jitter\":\"none\",\"scale\":1.0},\"server_image_uri\":\"us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90\",\"server_implementation\":\"go\",\"serving_mode\":\"sorted\",\"warmup\":{\"in_flight\":64,\"pivot_probes\":200,\"structure_probes\":2000,\"worker_pages\":200}},\"capacity_status\":\"uncalibrated\"}"
+                      "{\"allocation\":{\"replay_heap_percent\":75,\"replay_list_index\":true,\"replay_list_index_max_bytes\":67108864,\"replay_max_concurrent_requests\":4096,\"replay_memory_gb\":20,\"replay_parquet_connections\":128,\"replay_prefetch\":true,\"replay_prefetch_max_windows\":192,\"replay_response_buffer_budget_bytes\":1073741824,\"replay_vcpus\":64,\"subject_vcpus\":8},\"backend\":{\"fixture_adopted_sha256\":\"f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0\",\"fixture_sha256\":\"c4a42eb4e7fb2a9627972cc1e457ed55d60ef3d3560813eff8e13e65ef182b29\",\"fixture_uri\":\"<fixture-store>/aws-public-blockchain/seekparquet-c4a42eb4e7fb/\",\"latency_model\":{\"deadlines_ms\":{\"pivot_probe\":46,\"structure_probe\":55,\"worker_page\":94},\"jitter\":\"none\",\"scale\":1.0},\"server_image_uri\":\"<study-registry>/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90\",\"server_implementation\":\"go\",\"serving_mode\":\"sorted\",\"warmup\":{\"in_flight\":64,\"pivot_probes\":200,\"structure_probes\":2000,\"worker_pages\":200}},\"capacity_status\":\"uncalibrated\"}"
                     ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:dab1c147072fa82d30b9fe1e187012760e355d3ffd127a83d8b04b07827b9ee5",
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:dab1c147072fa82d30b9fe1e187012760e355d3ffd127a83d8b04b07827b9ee5",
                     "options": "--network host --cpuset-cpus=32-35,72-75 --memory=8g --memory-swap=8g --volume=/mnt/stateful_partition/attempt:/tmp/attempt --volume=/proc:/replay-host-proc:ro"
                   }
                 }
@@ -661,7 +622,6 @@
           }
         ]
       },
-      "result_prefix": "gs://s3-listing-study-results-29c02004/scale-study/aws-public-blockchain/swath-go.70456c8205c4.s1/",
       "settled_at": "2026-11-11T08:24:45.847686+00:00",
       "state": "SUCCEEDED",
       "state_detail": null,
@@ -789,7 +749,6 @@
           "worker_exit_code": 0
         },
         "result_sha256": "9f03b95b31d22f8e02a032b9c6a3e455502cdaed96b0448f3a1395ccc8a63c57",
-        "result_uri": "gs://s3-listing-study-results-29c02004/scale-study/aws-public-blockchain/swath-go.67b9c10b631d.s1/result.json",
         "state": "BOUND",
         "verification": null
       },
@@ -812,23 +771,7 @@
                 "provisioningModel": "SPOT"
               }
             }
-          ],
-          "location": {
-            "allowedLocations": [
-              "zones/us-east1-b"
-            ]
-          },
-          "network": {
-            "networkInterfaces": [
-              {
-                "network": "projects/varve-oss/global/networks/s3-listing-study",
-                "subnetwork": "projects/varve-oss/regions/us-east1/subnetworks/s3-listing-study-us-east1"
-              }
-            ]
-          },
-          "serviceAccount": {
-            "email": "s3-listing-study-worker@varve-oss.iam.gserviceaccount.com"
-          }
+          ]
         },
         "labels": {
           "suite": "scale-study"
@@ -852,7 +795,7 @@
                   "container": {
                     "commands": [
                       "-ceu",
-                      "set -o pipefail\nmkdir -p /fixtures/source\nmkdir -p /fixtures/source/data\ngcloud storage cp gs://s3-listing-study-results-29c02004/fixtures/aws-public-blockchain/seekparquet-c4a42eb4e7fb/manifest.json /fixtures/source/manifest.json\nactual=\"$(sha256sum /fixtures/source/manifest.json)\"; actual=\"${actual%% *}\"\n[[ \"$actual\" == c4a42eb4e7fb2a9627972cc1e457ed55d60ef3d3560813eff8e13e65ef182b29 ]] || { echo \"fixture manifest digest mismatch: $actual\" >&2; exit 1; }\nparts=\"$(\"${CLOUDSDK_PYTHON:-python3}\" -c '\nimport hashlib, json, os, re, sys\n\n# argv: list|verify ROOT [ADOPTED_SHA256]. The manifest'\"'\"'s own digest was\n# checked by the caller before this runs, so its contents are the identity.\ncommand, root = sys.argv[1], sys.argv[2]\nadopted_expected = sys.argv[3] if len(sys.argv) > 3 else \"\"\nwith open(os.path.join(root, \"manifest.json\"), \"rb\") as source:\n    manifest = json.load(source)\nif manifest.get(\"format\") != \"seekparquet\":\n    sys.exit(\"fixture manifest is not a SeekParquet manifest\")\nparts = manifest.get(\"parts\")\nif not isinstance(parts, list) or not parts:\n    sys.exit(\"fixture manifest names no parts\")\nnames = []\nfor part in parts:\n    path = part.get(\"path\") if isinstance(part, dict) else None\n    if not isinstance(path, str) or not re.fullmatch(r\"data/[A-Za-z0-9._-]+\\.parquet\", path):\n        sys.exit(\"fixture manifest part path is not data/<name>.parquet: %r\" % (path,))\n    names.append(path)\nif len(set(names)) != len(names):\n    sys.exit(\"fixture manifest names a part twice\")\nif command == \"list\":\n    print(\"\\n\".join(names))\n    sys.exit(0)\nstaged = sorted(\n    \"data/\" + name for name in os.listdir(os.path.join(root, \"data\")) if name.endswith(\".parquet\")\n)\nif staged != sorted(names):\n    sys.exit(\"staged data/ parts differ from the manifest: %r\" % (staged,))\nfor part in parts:\n    digest = hashlib.sha256()\n    with open(os.path.join(root, part[\"path\"]), \"rb\") as source:\n        for chunk in iter(lambda: source.read(1 << 20), b\"\"):\n            digest.update(chunk)\n    size = os.path.getsize(os.path.join(root, part[\"path\"]))\n    if size != part.get(\"bytes\") or digest.hexdigest() != part.get(\"sha256\"):\n        sys.exit(\"fixture part %s does not match its manifest entry\" % part[\"path\"])\nif adopted_expected:\n    adopted = manifest.get(\"extensions\", {}).get(\"swath-replay\", {}).get(\"adopted_from\", {})\n    rows = sorted(\n        \"%s\\t%s\\t%s\\n\" % (item[\"input\"], item[\"input_bytes\"], item[\"input_sha256\"])\n        for item in adopted.get(\"parts\", [])\n    )\n    actual = hashlib.sha256(\"\".join(rows).encode()).hexdigest() if rows else \"\"\n    if actual != adopted_expected:\n        sys.exit(\"fixture adopted_from digest mismatch: %s\" % actual)\nprint(\"seekparquet fixture verified: %d part(s)\" % len(parts))\n' list /fixtures/source)\"\nwhile IFS= read -r part; do\n  gcloud storage cp gs://s3-listing-study-results-29c02004/fixtures/aws-public-blockchain/seekparquet-c4a42eb4e7fb/\"$part\" /fixtures/source/\"$part\"\ndone <<< \"$parts\"\n\"${CLOUDSDK_PYTHON:-python3}\" -c '\nimport hashlib, json, os, re, sys\n\n# argv: list|verify ROOT [ADOPTED_SHA256]. The manifest'\"'\"'s own digest was\n# checked by the caller before this runs, so its contents are the identity.\ncommand, root = sys.argv[1], sys.argv[2]\nadopted_expected = sys.argv[3] if len(sys.argv) > 3 else \"\"\nwith open(os.path.join(root, \"manifest.json\"), \"rb\") as source:\n    manifest = json.load(source)\nif manifest.get(\"format\") != \"seekparquet\":\n    sys.exit(\"fixture manifest is not a SeekParquet manifest\")\nparts = manifest.get(\"parts\")\nif not isinstance(parts, list) or not parts:\n    sys.exit(\"fixture manifest names no parts\")\nnames = []\nfor part in parts:\n    path = part.get(\"path\") if isinstance(part, dict) else None\n    if not isinstance(path, str) or not re.fullmatch(r\"data/[A-Za-z0-9._-]+\\.parquet\", path):\n        sys.exit(\"fixture manifest part path is not data/<name>.parquet: %r\" % (path,))\n    names.append(path)\nif len(set(names)) != len(names):\n    sys.exit(\"fixture manifest names a part twice\")\nif command == \"list\":\n    print(\"\\n\".join(names))\n    sys.exit(0)\nstaged = sorted(\n    \"data/\" + name for name in os.listdir(os.path.join(root, \"data\")) if name.endswith(\".parquet\")\n)\nif staged != sorted(names):\n    sys.exit(\"staged data/ parts differ from the manifest: %r\" % (staged,))\nfor part in parts:\n    digest = hashlib.sha256()\n    with open(os.path.join(root, part[\"path\"]), \"rb\") as source:\n        for chunk in iter(lambda: source.read(1 << 20), b\"\"):\n            digest.update(chunk)\n    size = os.path.getsize(os.path.join(root, part[\"path\"]))\n    if size != part.get(\"bytes\") or digest.hexdigest() != part.get(\"sha256\"):\n        sys.exit(\"fixture part %s does not match its manifest entry\" % part[\"path\"])\nif adopted_expected:\n    adopted = manifest.get(\"extensions\", {}).get(\"swath-replay\", {}).get(\"adopted_from\", {})\n    rows = sorted(\n        \"%s\\t%s\\t%s\\n\" % (item[\"input\"], item[\"input_bytes\"], item[\"input_sha256\"])\n        for item in adopted.get(\"parts\", [])\n    )\n    actual = hashlib.sha256(\"\".join(rows).encode()).hexdigest() if rows else \"\"\n    if actual != adopted_expected:\n        sys.exit(\"fixture adopted_from digest mismatch: %s\" % actual)\nprint(\"seekparquet fixture verified: %d part(s)\" % len(parts))\n' verify /fixtures/source f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0"
+                      "set -o pipefail\nmkdir -p /fixtures/source\nmkdir -p /fixtures/source/data\ngcloud storage cp <fixture-store>/aws-public-blockchain/seekparquet-c4a42eb4e7fb/manifest.json /fixtures/source/manifest.json\nactual=\"$(sha256sum /fixtures/source/manifest.json)\"; actual=\"${actual%% *}\"\n[[ \"$actual\" == c4a42eb4e7fb2a9627972cc1e457ed55d60ef3d3560813eff8e13e65ef182b29 ]] || { echo \"fixture manifest digest mismatch: $actual\" >&2; exit 1; }\nparts=\"$(\"${CLOUDSDK_PYTHON:-python3}\" -c '\nimport hashlib, json, os, re, sys\n\n# argv: list|verify ROOT [ADOPTED_SHA256]. The manifest'\"'\"'s own digest was\n# checked by the caller before this runs, so its contents are the identity.\ncommand, root = sys.argv[1], sys.argv[2]\nadopted_expected = sys.argv[3] if len(sys.argv) > 3 else \"\"\nwith open(os.path.join(root, \"manifest.json\"), \"rb\") as source:\n    manifest = json.load(source)\nif manifest.get(\"format\") != \"seekparquet\":\n    sys.exit(\"fixture manifest is not a SeekParquet manifest\")\nparts = manifest.get(\"parts\")\nif not isinstance(parts, list) or not parts:\n    sys.exit(\"fixture manifest names no parts\")\nnames = []\nfor part in parts:\n    path = part.get(\"path\") if isinstance(part, dict) else None\n    if not isinstance(path, str) or not re.fullmatch(r\"data/[A-Za-z0-9._-]+\\.parquet\", path):\n        sys.exit(\"fixture manifest part path is not data/<name>.parquet: %r\" % (path,))\n    names.append(path)\nif len(set(names)) != len(names):\n    sys.exit(\"fixture manifest names a part twice\")\nif command == \"list\":\n    print(\"\\n\".join(names))\n    sys.exit(0)\nstaged = sorted(\n    \"data/\" + name for name in os.listdir(os.path.join(root, \"data\")) if name.endswith(\".parquet\")\n)\nif staged != sorted(names):\n    sys.exit(\"staged data/ parts differ from the manifest: %r\" % (staged,))\nfor part in parts:\n    digest = hashlib.sha256()\n    with open(os.path.join(root, part[\"path\"]), \"rb\") as source:\n        for chunk in iter(lambda: source.read(1 << 20), b\"\"):\n            digest.update(chunk)\n    size = os.path.getsize(os.path.join(root, part[\"path\"]))\n    if size != part.get(\"bytes\") or digest.hexdigest() != part.get(\"sha256\"):\n        sys.exit(\"fixture part %s does not match its manifest entry\" % part[\"path\"])\nif adopted_expected:\n    adopted = manifest.get(\"extensions\", {}).get(\"swath-replay\", {}).get(\"adopted_from\", {})\n    rows = sorted(\n        \"%s\\t%s\\t%s\\n\" % (item[\"input\"], item[\"input_bytes\"], item[\"input_sha256\"])\n        for item in adopted.get(\"parts\", [])\n    )\n    actual = hashlib.sha256(\"\".join(rows).encode()).hexdigest() if rows else \"\"\n    if actual != adopted_expected:\n        sys.exit(\"fixture adopted_from digest mismatch: %s\" % actual)\nprint(\"seekparquet fixture verified: %d part(s)\" % len(parts))\n' list /fixtures/source)\"\nwhile IFS= read -r part; do\n  gcloud storage cp <fixture-store>/aws-public-blockchain/seekparquet-c4a42eb4e7fb/\"$part\" /fixtures/source/\"$part\"\ndone <<< \"$parts\"\n\"${CLOUDSDK_PYTHON:-python3}\" -c '\nimport hashlib, json, os, re, sys\n\n# argv: list|verify ROOT [ADOPTED_SHA256]. The manifest'\"'\"'s own digest was\n# checked by the caller before this runs, so its contents are the identity.\ncommand, root = sys.argv[1], sys.argv[2]\nadopted_expected = sys.argv[3] if len(sys.argv) > 3 else \"\"\nwith open(os.path.join(root, \"manifest.json\"), \"rb\") as source:\n    manifest = json.load(source)\nif manifest.get(\"format\") != \"seekparquet\":\n    sys.exit(\"fixture manifest is not a SeekParquet manifest\")\nparts = manifest.get(\"parts\")\nif not isinstance(parts, list) or not parts:\n    sys.exit(\"fixture manifest names no parts\")\nnames = []\nfor part in parts:\n    path = part.get(\"path\") if isinstance(part, dict) else None\n    if not isinstance(path, str) or not re.fullmatch(r\"data/[A-Za-z0-9._-]+\\.parquet\", path):\n        sys.exit(\"fixture manifest part path is not data/<name>.parquet: %r\" % (path,))\n    names.append(path)\nif len(set(names)) != len(names):\n    sys.exit(\"fixture manifest names a part twice\")\nif command == \"list\":\n    print(\"\\n\".join(names))\n    sys.exit(0)\nstaged = sorted(\n    \"data/\" + name for name in os.listdir(os.path.join(root, \"data\")) if name.endswith(\".parquet\")\n)\nif staged != sorted(names):\n    sys.exit(\"staged data/ parts differ from the manifest: %r\" % (staged,))\nfor part in parts:\n    digest = hashlib.sha256()\n    with open(os.path.join(root, part[\"path\"]), \"rb\") as source:\n        for chunk in iter(lambda: source.read(1 << 20), b\"\"):\n            digest.update(chunk)\n    size = os.path.getsize(os.path.join(root, part[\"path\"]))\n    if size != part.get(\"bytes\") or digest.hexdigest() != part.get(\"sha256\"):\n        sys.exit(\"fixture part %s does not match its manifest entry\" % part[\"path\"])\nif adopted_expected:\n    adopted = manifest.get(\"extensions\", {}).get(\"swath-replay\", {}).get(\"adopted_from\", {})\n    rows = sorted(\n        \"%s\\t%s\\t%s\\n\" % (item[\"input\"], item[\"input_bytes\"], item[\"input_sha256\"])\n        for item in adopted.get(\"parts\", [])\n    )\n    actual = hashlib.sha256(\"\".join(rows).encode()).hexdigest() if rows else \"\"\n    if actual != adopted_expected:\n        sys.exit(\"fixture adopted_from digest mismatch: %s\" % actual)\nprint(\"seekparquet fixture verified: %d part(s)\" % len(parts))\n' verify /fixtures/source f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0"
                     ],
                     "imageUri": "gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:cf72dd63b7643c117ef53378a41bef6db6a01fa3d561f2b456d7abd8bbeb9ba6",
                     "options": "--entrypoint /bin/bash --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
@@ -869,7 +812,7 @@
                       "10001:10001",
                       "/tmp/attempt"
                     ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:dab1c147072fa82d30b9fe1e187012760e355d3ffd127a83d8b04b07827b9ee5",
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:dab1c147072fa82d30b9fe1e187012760e355d3ffd127a83d8b04b07827b9ee5",
                     "options": "--user 0:0 --entrypoint /bin/chown --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
                   }
                 },
@@ -908,7 +851,7 @@
                       "--latency-scale",
                       "1.0"
                     ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90",
+                    "imageUri": "<study-registry>/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90",
                     "options": "--network host --cpuset-cpus=0-31,40-71 --memory=20g --memory-swap=20g --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
                   },
                   "environment": {
@@ -936,7 +879,7 @@
                       "--output",
                       "/tmp/attempt",
                       "--destination",
-                      "gs://s3-listing-study-results-29c02004/scale-study/aws-public-blockchain/swath-go.67b9c10b631d.s1/",
+                      "<result-store>/scale-study/aws-public-blockchain/swath-go.67b9c10b631d.s1/",
                       "--timeout",
                       "7200",
                       "--term-grace",
@@ -944,7 +887,7 @@
                       "--retain-products",
                       "false",
                       "--image",
-                      "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:dab1c147072fa82d30b9fe1e187012760e355d3ffd127a83d8b04b07827b9ee5",
+                      "<study-registry>/benchmark-toolbox@sha256:dab1c147072fa82d30b9fe1e187012760e355d3ffd127a83d8b04b07827b9ee5",
                       "--toolbox-manifest-sha256",
                       "358aa5d00157235e4b438d92ae5e29a7e0d2af385f01a8740c30461e165a3e1e",
                       "--toolbox-recipe-sha256",
@@ -967,8 +910,6 @@
                       "2bfc3cb8c59c75eb6baeb7b963c853f8eace0b961550297721843628ad10e9b8",
                       "--group-id",
                       "sgt-r4-mem",
-                      "--job-name",
-                      "scale-study-swath-go-67b9c10b631d-s1",
                       "--case-id",
                       "swath-go.67b9c10b631d",
                       "--attempt-id",
@@ -986,9 +927,9 @@
                       "--endpoint-url",
                       "http://127.0.0.1:19090",
                       "--replay-config",
-                      "{\"allocation\":{\"replay_heap_percent\":75,\"replay_list_index\":true,\"replay_list_index_max_bytes\":67108864,\"replay_max_concurrent_requests\":4096,\"replay_memory_gb\":20,\"replay_parquet_connections\":128,\"replay_prefetch\":true,\"replay_prefetch_max_windows\":192,\"replay_response_buffer_budget_bytes\":1073741824,\"replay_vcpus\":64,\"subject_vcpus\":8},\"backend\":{\"fixture_adopted_sha256\":\"f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0\",\"fixture_sha256\":\"c4a42eb4e7fb2a9627972cc1e457ed55d60ef3d3560813eff8e13e65ef182b29\",\"fixture_uri\":\"gs://s3-listing-study-results-29c02004/fixtures/aws-public-blockchain/seekparquet-c4a42eb4e7fb/\",\"latency_model\":{\"deadlines_ms\":{\"pivot_probe\":46,\"structure_probe\":55,\"worker_page\":94},\"jitter\":\"none\",\"scale\":1.0},\"server_image_uri\":\"us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90\",\"server_implementation\":\"go\",\"serving_mode\":\"sorted\",\"warmup\":{\"in_flight\":64,\"pivot_probes\":200,\"structure_probes\":2000,\"worker_pages\":200}},\"capacity_status\":\"uncalibrated\"}"
+                      "{\"allocation\":{\"replay_heap_percent\":75,\"replay_list_index\":true,\"replay_list_index_max_bytes\":67108864,\"replay_max_concurrent_requests\":4096,\"replay_memory_gb\":20,\"replay_parquet_connections\":128,\"replay_prefetch\":true,\"replay_prefetch_max_windows\":192,\"replay_response_buffer_budget_bytes\":1073741824,\"replay_vcpus\":64,\"subject_vcpus\":8},\"backend\":{\"fixture_adopted_sha256\":\"f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0\",\"fixture_sha256\":\"c4a42eb4e7fb2a9627972cc1e457ed55d60ef3d3560813eff8e13e65ef182b29\",\"fixture_uri\":\"<fixture-store>/aws-public-blockchain/seekparquet-c4a42eb4e7fb/\",\"latency_model\":{\"deadlines_ms\":{\"pivot_probe\":46,\"structure_probe\":55,\"worker_page\":94},\"jitter\":\"none\",\"scale\":1.0},\"server_image_uri\":\"<study-registry>/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90\",\"server_implementation\":\"go\",\"serving_mode\":\"sorted\",\"warmup\":{\"in_flight\":64,\"pivot_probes\":200,\"structure_probes\":2000,\"worker_pages\":200}},\"capacity_status\":\"uncalibrated\"}"
                     ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:dab1c147072fa82d30b9fe1e187012760e355d3ffd127a83d8b04b07827b9ee5",
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:dab1c147072fa82d30b9fe1e187012760e355d3ffd127a83d8b04b07827b9ee5",
                     "options": "--network host --cpuset-cpus=32-35,72-75 --memory=8g --memory-swap=8g --volume=/mnt/stateful_partition/attempt:/tmp/attempt --volume=/proc:/replay-host-proc:ro"
                   }
                 }
@@ -997,7 +938,6 @@
           }
         ]
       },
-      "result_prefix": "gs://s3-listing-study-results-29c02004/scale-study/aws-public-blockchain/swath-go.67b9c10b631d.s1/",
       "settled_at": "2026-11-11T08:24:45.849935+00:00",
       "state": "SUCCEEDED",
       "state_detail": null,
@@ -1133,7 +1073,6 @@
           "worker_exit_code": 0
         },
         "result_sha256": "9c620d575ff066dc2d8588aa6bf4107a2c8673d635a293f7528cba1458c6caa8",
-        "result_uri": "gs://s3-listing-study-results-29c02004/scale-study/aws-public-blockchain/swath.43ab7c33ccf5.s2/result.json",
         "state": "BOUND",
         "verification": null
       },
@@ -1156,23 +1095,7 @@
                 "provisioningModel": "SPOT"
               }
             }
-          ],
-          "location": {
-            "allowedLocations": [
-              "zones/us-east1-b"
-            ]
-          },
-          "network": {
-            "networkInterfaces": [
-              {
-                "network": "projects/varve-oss/global/networks/s3-listing-study",
-                "subnetwork": "projects/varve-oss/regions/us-east1/subnetworks/s3-listing-study-us-east1"
-              }
-            ]
-          },
-          "serviceAccount": {
-            "email": "s3-listing-study-worker@varve-oss.iam.gserviceaccount.com"
-          }
+          ]
         },
         "labels": {
           "suite": "scale-study"
@@ -1196,7 +1119,7 @@
                   "container": {
                     "commands": [
                       "-ceu",
-                      "set -o pipefail\nmkdir -p /fixtures/source\nmkdir -p /fixtures/source/data\ngcloud storage cp gs://s3-listing-study-results-29c02004/fixtures/aws-public-blockchain/seekparquet-c4a42eb4e7fb/manifest.json /fixtures/source/manifest.json\nactual=\"$(sha256sum /fixtures/source/manifest.json)\"; actual=\"${actual%% *}\"\n[[ \"$actual\" == c4a42eb4e7fb2a9627972cc1e457ed55d60ef3d3560813eff8e13e65ef182b29 ]] || { echo \"fixture manifest digest mismatch: $actual\" >&2; exit 1; }\nparts=\"$(\"${CLOUDSDK_PYTHON:-python3}\" -c '\nimport hashlib, json, os, re, sys\n\n# argv: list|verify ROOT [ADOPTED_SHA256]. The manifest'\"'\"'s own digest was\n# checked by the caller before this runs, so its contents are the identity.\ncommand, root = sys.argv[1], sys.argv[2]\nadopted_expected = sys.argv[3] if len(sys.argv) > 3 else \"\"\nwith open(os.path.join(root, \"manifest.json\"), \"rb\") as source:\n    manifest = json.load(source)\nif manifest.get(\"format\") != \"seekparquet\":\n    sys.exit(\"fixture manifest is not a SeekParquet manifest\")\nparts = manifest.get(\"parts\")\nif not isinstance(parts, list) or not parts:\n    sys.exit(\"fixture manifest names no parts\")\nnames = []\nfor part in parts:\n    path = part.get(\"path\") if isinstance(part, dict) else None\n    if not isinstance(path, str) or not re.fullmatch(r\"data/[A-Za-z0-9._-]+\\.parquet\", path):\n        sys.exit(\"fixture manifest part path is not data/<name>.parquet: %r\" % (path,))\n    names.append(path)\nif len(set(names)) != len(names):\n    sys.exit(\"fixture manifest names a part twice\")\nif command == \"list\":\n    print(\"\\n\".join(names))\n    sys.exit(0)\nstaged = sorted(\n    \"data/\" + name for name in os.listdir(os.path.join(root, \"data\")) if name.endswith(\".parquet\")\n)\nif staged != sorted(names):\n    sys.exit(\"staged data/ parts differ from the manifest: %r\" % (staged,))\nfor part in parts:\n    digest = hashlib.sha256()\n    with open(os.path.join(root, part[\"path\"]), \"rb\") as source:\n        for chunk in iter(lambda: source.read(1 << 20), b\"\"):\n            digest.update(chunk)\n    size = os.path.getsize(os.path.join(root, part[\"path\"]))\n    if size != part.get(\"bytes\") or digest.hexdigest() != part.get(\"sha256\"):\n        sys.exit(\"fixture part %s does not match its manifest entry\" % part[\"path\"])\nif adopted_expected:\n    adopted = manifest.get(\"extensions\", {}).get(\"swath-replay\", {}).get(\"adopted_from\", {})\n    rows = sorted(\n        \"%s\\t%s\\t%s\\n\" % (item[\"input\"], item[\"input_bytes\"], item[\"input_sha256\"])\n        for item in adopted.get(\"parts\", [])\n    )\n    actual = hashlib.sha256(\"\".join(rows).encode()).hexdigest() if rows else \"\"\n    if actual != adopted_expected:\n        sys.exit(\"fixture adopted_from digest mismatch: %s\" % actual)\nprint(\"seekparquet fixture verified: %d part(s)\" % len(parts))\n' list /fixtures/source)\"\nwhile IFS= read -r part; do\n  gcloud storage cp gs://s3-listing-study-results-29c02004/fixtures/aws-public-blockchain/seekparquet-c4a42eb4e7fb/\"$part\" /fixtures/source/\"$part\"\ndone <<< \"$parts\"\n\"${CLOUDSDK_PYTHON:-python3}\" -c '\nimport hashlib, json, os, re, sys\n\n# argv: list|verify ROOT [ADOPTED_SHA256]. The manifest'\"'\"'s own digest was\n# checked by the caller before this runs, so its contents are the identity.\ncommand, root = sys.argv[1], sys.argv[2]\nadopted_expected = sys.argv[3] if len(sys.argv) > 3 else \"\"\nwith open(os.path.join(root, \"manifest.json\"), \"rb\") as source:\n    manifest = json.load(source)\nif manifest.get(\"format\") != \"seekparquet\":\n    sys.exit(\"fixture manifest is not a SeekParquet manifest\")\nparts = manifest.get(\"parts\")\nif not isinstance(parts, list) or not parts:\n    sys.exit(\"fixture manifest names no parts\")\nnames = []\nfor part in parts:\n    path = part.get(\"path\") if isinstance(part, dict) else None\n    if not isinstance(path, str) or not re.fullmatch(r\"data/[A-Za-z0-9._-]+\\.parquet\", path):\n        sys.exit(\"fixture manifest part path is not data/<name>.parquet: %r\" % (path,))\n    names.append(path)\nif len(set(names)) != len(names):\n    sys.exit(\"fixture manifest names a part twice\")\nif command == \"list\":\n    print(\"\\n\".join(names))\n    sys.exit(0)\nstaged = sorted(\n    \"data/\" + name for name in os.listdir(os.path.join(root, \"data\")) if name.endswith(\".parquet\")\n)\nif staged != sorted(names):\n    sys.exit(\"staged data/ parts differ from the manifest: %r\" % (staged,))\nfor part in parts:\n    digest = hashlib.sha256()\n    with open(os.path.join(root, part[\"path\"]), \"rb\") as source:\n        for chunk in iter(lambda: source.read(1 << 20), b\"\"):\n            digest.update(chunk)\n    size = os.path.getsize(os.path.join(root, part[\"path\"]))\n    if size != part.get(\"bytes\") or digest.hexdigest() != part.get(\"sha256\"):\n        sys.exit(\"fixture part %s does not match its manifest entry\" % part[\"path\"])\nif adopted_expected:\n    adopted = manifest.get(\"extensions\", {}).get(\"swath-replay\", {}).get(\"adopted_from\", {})\n    rows = sorted(\n        \"%s\\t%s\\t%s\\n\" % (item[\"input\"], item[\"input_bytes\"], item[\"input_sha256\"])\n        for item in adopted.get(\"parts\", [])\n    )\n    actual = hashlib.sha256(\"\".join(rows).encode()).hexdigest() if rows else \"\"\n    if actual != adopted_expected:\n        sys.exit(\"fixture adopted_from digest mismatch: %s\" % actual)\nprint(\"seekparquet fixture verified: %d part(s)\" % len(parts))\n' verify /fixtures/source f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0"
+                      "set -o pipefail\nmkdir -p /fixtures/source\nmkdir -p /fixtures/source/data\ngcloud storage cp <fixture-store>/aws-public-blockchain/seekparquet-c4a42eb4e7fb/manifest.json /fixtures/source/manifest.json\nactual=\"$(sha256sum /fixtures/source/manifest.json)\"; actual=\"${actual%% *}\"\n[[ \"$actual\" == c4a42eb4e7fb2a9627972cc1e457ed55d60ef3d3560813eff8e13e65ef182b29 ]] || { echo \"fixture manifest digest mismatch: $actual\" >&2; exit 1; }\nparts=\"$(\"${CLOUDSDK_PYTHON:-python3}\" -c '\nimport hashlib, json, os, re, sys\n\n# argv: list|verify ROOT [ADOPTED_SHA256]. The manifest'\"'\"'s own digest was\n# checked by the caller before this runs, so its contents are the identity.\ncommand, root = sys.argv[1], sys.argv[2]\nadopted_expected = sys.argv[3] if len(sys.argv) > 3 else \"\"\nwith open(os.path.join(root, \"manifest.json\"), \"rb\") as source:\n    manifest = json.load(source)\nif manifest.get(\"format\") != \"seekparquet\":\n    sys.exit(\"fixture manifest is not a SeekParquet manifest\")\nparts = manifest.get(\"parts\")\nif not isinstance(parts, list) or not parts:\n    sys.exit(\"fixture manifest names no parts\")\nnames = []\nfor part in parts:\n    path = part.get(\"path\") if isinstance(part, dict) else None\n    if not isinstance(path, str) or not re.fullmatch(r\"data/[A-Za-z0-9._-]+\\.parquet\", path):\n        sys.exit(\"fixture manifest part path is not data/<name>.parquet: %r\" % (path,))\n    names.append(path)\nif len(set(names)) != len(names):\n    sys.exit(\"fixture manifest names a part twice\")\nif command == \"list\":\n    print(\"\\n\".join(names))\n    sys.exit(0)\nstaged = sorted(\n    \"data/\" + name for name in os.listdir(os.path.join(root, \"data\")) if name.endswith(\".parquet\")\n)\nif staged != sorted(names):\n    sys.exit(\"staged data/ parts differ from the manifest: %r\" % (staged,))\nfor part in parts:\n    digest = hashlib.sha256()\n    with open(os.path.join(root, part[\"path\"]), \"rb\") as source:\n        for chunk in iter(lambda: source.read(1 << 20), b\"\"):\n            digest.update(chunk)\n    size = os.path.getsize(os.path.join(root, part[\"path\"]))\n    if size != part.get(\"bytes\") or digest.hexdigest() != part.get(\"sha256\"):\n        sys.exit(\"fixture part %s does not match its manifest entry\" % part[\"path\"])\nif adopted_expected:\n    adopted = manifest.get(\"extensions\", {}).get(\"swath-replay\", {}).get(\"adopted_from\", {})\n    rows = sorted(\n        \"%s\\t%s\\t%s\\n\" % (item[\"input\"], item[\"input_bytes\"], item[\"input_sha256\"])\n        for item in adopted.get(\"parts\", [])\n    )\n    actual = hashlib.sha256(\"\".join(rows).encode()).hexdigest() if rows else \"\"\n    if actual != adopted_expected:\n        sys.exit(\"fixture adopted_from digest mismatch: %s\" % actual)\nprint(\"seekparquet fixture verified: %d part(s)\" % len(parts))\n' list /fixtures/source)\"\nwhile IFS= read -r part; do\n  gcloud storage cp <fixture-store>/aws-public-blockchain/seekparquet-c4a42eb4e7fb/\"$part\" /fixtures/source/\"$part\"\ndone <<< \"$parts\"\n\"${CLOUDSDK_PYTHON:-python3}\" -c '\nimport hashlib, json, os, re, sys\n\n# argv: list|verify ROOT [ADOPTED_SHA256]. The manifest'\"'\"'s own digest was\n# checked by the caller before this runs, so its contents are the identity.\ncommand, root = sys.argv[1], sys.argv[2]\nadopted_expected = sys.argv[3] if len(sys.argv) > 3 else \"\"\nwith open(os.path.join(root, \"manifest.json\"), \"rb\") as source:\n    manifest = json.load(source)\nif manifest.get(\"format\") != \"seekparquet\":\n    sys.exit(\"fixture manifest is not a SeekParquet manifest\")\nparts = manifest.get(\"parts\")\nif not isinstance(parts, list) or not parts:\n    sys.exit(\"fixture manifest names no parts\")\nnames = []\nfor part in parts:\n    path = part.get(\"path\") if isinstance(part, dict) else None\n    if not isinstance(path, str) or not re.fullmatch(r\"data/[A-Za-z0-9._-]+\\.parquet\", path):\n        sys.exit(\"fixture manifest part path is not data/<name>.parquet: %r\" % (path,))\n    names.append(path)\nif len(set(names)) != len(names):\n    sys.exit(\"fixture manifest names a part twice\")\nif command == \"list\":\n    print(\"\\n\".join(names))\n    sys.exit(0)\nstaged = sorted(\n    \"data/\" + name for name in os.listdir(os.path.join(root, \"data\")) if name.endswith(\".parquet\")\n)\nif staged != sorted(names):\n    sys.exit(\"staged data/ parts differ from the manifest: %r\" % (staged,))\nfor part in parts:\n    digest = hashlib.sha256()\n    with open(os.path.join(root, part[\"path\"]), \"rb\") as source:\n        for chunk in iter(lambda: source.read(1 << 20), b\"\"):\n            digest.update(chunk)\n    size = os.path.getsize(os.path.join(root, part[\"path\"]))\n    if size != part.get(\"bytes\") or digest.hexdigest() != part.get(\"sha256\"):\n        sys.exit(\"fixture part %s does not match its manifest entry\" % part[\"path\"])\nif adopted_expected:\n    adopted = manifest.get(\"extensions\", {}).get(\"swath-replay\", {}).get(\"adopted_from\", {})\n    rows = sorted(\n        \"%s\\t%s\\t%s\\n\" % (item[\"input\"], item[\"input_bytes\"], item[\"input_sha256\"])\n        for item in adopted.get(\"parts\", [])\n    )\n    actual = hashlib.sha256(\"\".join(rows).encode()).hexdigest() if rows else \"\"\n    if actual != adopted_expected:\n        sys.exit(\"fixture adopted_from digest mismatch: %s\" % actual)\nprint(\"seekparquet fixture verified: %d part(s)\" % len(parts))\n' verify /fixtures/source f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0"
                     ],
                     "imageUri": "gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:cf72dd63b7643c117ef53378a41bef6db6a01fa3d561f2b456d7abd8bbeb9ba6",
                     "options": "--entrypoint /bin/bash --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
@@ -1213,7 +1136,7 @@
                       "10001:10001",
                       "/tmp/attempt"
                     ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:dab1c147072fa82d30b9fe1e187012760e355d3ffd127a83d8b04b07827b9ee5",
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:dab1c147072fa82d30b9fe1e187012760e355d3ffd127a83d8b04b07827b9ee5",
                     "options": "--user 0:0 --entrypoint /bin/chown --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
                   }
                 },
@@ -1252,7 +1175,7 @@
                       "--latency-scale",
                       "1.0"
                     ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90",
+                    "imageUri": "<study-registry>/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90",
                     "options": "--network host --cpuset-cpus=0-31,40-71 --memory=20g --memory-swap=20g --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
                   },
                   "environment": {
@@ -1280,7 +1203,7 @@
                       "--output",
                       "/tmp/attempt",
                       "--destination",
-                      "gs://s3-listing-study-results-29c02004/scale-study/aws-public-blockchain/swath.43ab7c33ccf5.s2/",
+                      "<result-store>/scale-study/aws-public-blockchain/swath.43ab7c33ccf5.s2/",
                       "--timeout",
                       "7200",
                       "--term-grace",
@@ -1288,7 +1211,7 @@
                       "--retain-products",
                       "false",
                       "--image",
-                      "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:dab1c147072fa82d30b9fe1e187012760e355d3ffd127a83d8b04b07827b9ee5",
+                      "<study-registry>/benchmark-toolbox@sha256:dab1c147072fa82d30b9fe1e187012760e355d3ffd127a83d8b04b07827b9ee5",
                       "--toolbox-manifest-sha256",
                       "358aa5d00157235e4b438d92ae5e29a7e0d2af385f01a8740c30461e165a3e1e",
                       "--toolbox-recipe-sha256",
@@ -1311,8 +1234,6 @@
                       "2bfc3cb8c59c75eb6baeb7b963c853f8eace0b961550297721843628ad10e9b8",
                       "--group-id",
                       "sgt-r4-mem",
-                      "--job-name",
-                      "scale-study-swath-43ab7c33ccf5-s2",
                       "--case-id",
                       "swath.43ab7c33ccf5",
                       "--attempt-id",
@@ -1330,9 +1251,9 @@
                       "--endpoint-url",
                       "http://127.0.0.1:19090",
                       "--replay-config",
-                      "{\"allocation\":{\"replay_heap_percent\":75,\"replay_list_index\":true,\"replay_list_index_max_bytes\":67108864,\"replay_max_concurrent_requests\":4096,\"replay_memory_gb\":20,\"replay_parquet_connections\":128,\"replay_prefetch\":true,\"replay_prefetch_max_windows\":192,\"replay_response_buffer_budget_bytes\":1073741824,\"replay_vcpus\":64,\"subject_vcpus\":8},\"backend\":{\"fixture_adopted_sha256\":\"f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0\",\"fixture_sha256\":\"c4a42eb4e7fb2a9627972cc1e457ed55d60ef3d3560813eff8e13e65ef182b29\",\"fixture_uri\":\"gs://s3-listing-study-results-29c02004/fixtures/aws-public-blockchain/seekparquet-c4a42eb4e7fb/\",\"latency_model\":{\"deadlines_ms\":{\"pivot_probe\":46,\"structure_probe\":55,\"worker_page\":94},\"jitter\":\"none\",\"scale\":1.0},\"server_image_uri\":\"us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90\",\"server_implementation\":\"go\",\"serving_mode\":\"sorted\",\"warmup\":{\"in_flight\":64,\"pivot_probes\":200,\"structure_probes\":2000,\"worker_pages\":200}},\"capacity_status\":\"uncalibrated\"}"
+                      "{\"allocation\":{\"replay_heap_percent\":75,\"replay_list_index\":true,\"replay_list_index_max_bytes\":67108864,\"replay_max_concurrent_requests\":4096,\"replay_memory_gb\":20,\"replay_parquet_connections\":128,\"replay_prefetch\":true,\"replay_prefetch_max_windows\":192,\"replay_response_buffer_budget_bytes\":1073741824,\"replay_vcpus\":64,\"subject_vcpus\":8},\"backend\":{\"fixture_adopted_sha256\":\"f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0\",\"fixture_sha256\":\"c4a42eb4e7fb2a9627972cc1e457ed55d60ef3d3560813eff8e13e65ef182b29\",\"fixture_uri\":\"<fixture-store>/aws-public-blockchain/seekparquet-c4a42eb4e7fb/\",\"latency_model\":{\"deadlines_ms\":{\"pivot_probe\":46,\"structure_probe\":55,\"worker_page\":94},\"jitter\":\"none\",\"scale\":1.0},\"server_image_uri\":\"<study-registry>/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90\",\"server_implementation\":\"go\",\"serving_mode\":\"sorted\",\"warmup\":{\"in_flight\":64,\"pivot_probes\":200,\"structure_probes\":2000,\"worker_pages\":200}},\"capacity_status\":\"uncalibrated\"}"
                     ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:dab1c147072fa82d30b9fe1e187012760e355d3ffd127a83d8b04b07827b9ee5",
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:dab1c147072fa82d30b9fe1e187012760e355d3ffd127a83d8b04b07827b9ee5",
                     "options": "--network host --cpuset-cpus=32-35,72-75 --memory=8g --memory-swap=8g --volume=/mnt/stateful_partition/attempt:/tmp/attempt --volume=/proc:/replay-host-proc:ro"
                   }
                 }
@@ -1341,7 +1262,6 @@
           }
         ]
       },
-      "result_prefix": "gs://s3-listing-study-results-29c02004/scale-study/aws-public-blockchain/swath.43ab7c33ccf5.s2/",
       "settled_at": "2026-11-11T08:24:45.852267+00:00",
       "state": "SUCCEEDED",
       "state_detail": null,
@@ -1477,7 +1397,6 @@
           "worker_exit_code": 0
         },
         "result_sha256": "faebda90d81f35726f7c7967ff02051efce18bd237f8a3f65c199589412e44ea",
-        "result_uri": "gs://s3-listing-study-results-29c02004/scale-study/aws-public-blockchain/swath.1bbe26879078.s1/result.json",
         "state": "BOUND",
         "verification": null
       },
@@ -1500,23 +1419,7 @@
                 "provisioningModel": "SPOT"
               }
             }
-          ],
-          "location": {
-            "allowedLocations": [
-              "zones/us-east1-b"
-            ]
-          },
-          "network": {
-            "networkInterfaces": [
-              {
-                "network": "projects/varve-oss/global/networks/s3-listing-study",
-                "subnetwork": "projects/varve-oss/regions/us-east1/subnetworks/s3-listing-study-us-east1"
-              }
-            ]
-          },
-          "serviceAccount": {
-            "email": "s3-listing-study-worker@varve-oss.iam.gserviceaccount.com"
-          }
+          ]
         },
         "labels": {
           "suite": "scale-study"
@@ -1540,7 +1443,7 @@
                   "container": {
                     "commands": [
                       "-ceu",
-                      "set -o pipefail\nmkdir -p /fixtures/source\nmkdir -p /fixtures/source/data\ngcloud storage cp gs://s3-listing-study-results-29c02004/fixtures/aws-public-blockchain/seekparquet-c4a42eb4e7fb/manifest.json /fixtures/source/manifest.json\nactual=\"$(sha256sum /fixtures/source/manifest.json)\"; actual=\"${actual%% *}\"\n[[ \"$actual\" == c4a42eb4e7fb2a9627972cc1e457ed55d60ef3d3560813eff8e13e65ef182b29 ]] || { echo \"fixture manifest digest mismatch: $actual\" >&2; exit 1; }\nparts=\"$(\"${CLOUDSDK_PYTHON:-python3}\" -c '\nimport hashlib, json, os, re, sys\n\n# argv: list|verify ROOT [ADOPTED_SHA256]. The manifest'\"'\"'s own digest was\n# checked by the caller before this runs, so its contents are the identity.\ncommand, root = sys.argv[1], sys.argv[2]\nadopted_expected = sys.argv[3] if len(sys.argv) > 3 else \"\"\nwith open(os.path.join(root, \"manifest.json\"), \"rb\") as source:\n    manifest = json.load(source)\nif manifest.get(\"format\") != \"seekparquet\":\n    sys.exit(\"fixture manifest is not a SeekParquet manifest\")\nparts = manifest.get(\"parts\")\nif not isinstance(parts, list) or not parts:\n    sys.exit(\"fixture manifest names no parts\")\nnames = []\nfor part in parts:\n    path = part.get(\"path\") if isinstance(part, dict) else None\n    if not isinstance(path, str) or not re.fullmatch(r\"data/[A-Za-z0-9._-]+\\.parquet\", path):\n        sys.exit(\"fixture manifest part path is not data/<name>.parquet: %r\" % (path,))\n    names.append(path)\nif len(set(names)) != len(names):\n    sys.exit(\"fixture manifest names a part twice\")\nif command == \"list\":\n    print(\"\\n\".join(names))\n    sys.exit(0)\nstaged = sorted(\n    \"data/\" + name for name in os.listdir(os.path.join(root, \"data\")) if name.endswith(\".parquet\")\n)\nif staged != sorted(names):\n    sys.exit(\"staged data/ parts differ from the manifest: %r\" % (staged,))\nfor part in parts:\n    digest = hashlib.sha256()\n    with open(os.path.join(root, part[\"path\"]), \"rb\") as source:\n        for chunk in iter(lambda: source.read(1 << 20), b\"\"):\n            digest.update(chunk)\n    size = os.path.getsize(os.path.join(root, part[\"path\"]))\n    if size != part.get(\"bytes\") or digest.hexdigest() != part.get(\"sha256\"):\n        sys.exit(\"fixture part %s does not match its manifest entry\" % part[\"path\"])\nif adopted_expected:\n    adopted = manifest.get(\"extensions\", {}).get(\"swath-replay\", {}).get(\"adopted_from\", {})\n    rows = sorted(\n        \"%s\\t%s\\t%s\\n\" % (item[\"input\"], item[\"input_bytes\"], item[\"input_sha256\"])\n        for item in adopted.get(\"parts\", [])\n    )\n    actual = hashlib.sha256(\"\".join(rows).encode()).hexdigest() if rows else \"\"\n    if actual != adopted_expected:\n        sys.exit(\"fixture adopted_from digest mismatch: %s\" % actual)\nprint(\"seekparquet fixture verified: %d part(s)\" % len(parts))\n' list /fixtures/source)\"\nwhile IFS= read -r part; do\n  gcloud storage cp gs://s3-listing-study-results-29c02004/fixtures/aws-public-blockchain/seekparquet-c4a42eb4e7fb/\"$part\" /fixtures/source/\"$part\"\ndone <<< \"$parts\"\n\"${CLOUDSDK_PYTHON:-python3}\" -c '\nimport hashlib, json, os, re, sys\n\n# argv: list|verify ROOT [ADOPTED_SHA256]. The manifest'\"'\"'s own digest was\n# checked by the caller before this runs, so its contents are the identity.\ncommand, root = sys.argv[1], sys.argv[2]\nadopted_expected = sys.argv[3] if len(sys.argv) > 3 else \"\"\nwith open(os.path.join(root, \"manifest.json\"), \"rb\") as source:\n    manifest = json.load(source)\nif manifest.get(\"format\") != \"seekparquet\":\n    sys.exit(\"fixture manifest is not a SeekParquet manifest\")\nparts = manifest.get(\"parts\")\nif not isinstance(parts, list) or not parts:\n    sys.exit(\"fixture manifest names no parts\")\nnames = []\nfor part in parts:\n    path = part.get(\"path\") if isinstance(part, dict) else None\n    if not isinstance(path, str) or not re.fullmatch(r\"data/[A-Za-z0-9._-]+\\.parquet\", path):\n        sys.exit(\"fixture manifest part path is not data/<name>.parquet: %r\" % (path,))\n    names.append(path)\nif len(set(names)) != len(names):\n    sys.exit(\"fixture manifest names a part twice\")\nif command == \"list\":\n    print(\"\\n\".join(names))\n    sys.exit(0)\nstaged = sorted(\n    \"data/\" + name for name in os.listdir(os.path.join(root, \"data\")) if name.endswith(\".parquet\")\n)\nif staged != sorted(names):\n    sys.exit(\"staged data/ parts differ from the manifest: %r\" % (staged,))\nfor part in parts:\n    digest = hashlib.sha256()\n    with open(os.path.join(root, part[\"path\"]), \"rb\") as source:\n        for chunk in iter(lambda: source.read(1 << 20), b\"\"):\n            digest.update(chunk)\n    size = os.path.getsize(os.path.join(root, part[\"path\"]))\n    if size != part.get(\"bytes\") or digest.hexdigest() != part.get(\"sha256\"):\n        sys.exit(\"fixture part %s does not match its manifest entry\" % part[\"path\"])\nif adopted_expected:\n    adopted = manifest.get(\"extensions\", {}).get(\"swath-replay\", {}).get(\"adopted_from\", {})\n    rows = sorted(\n        \"%s\\t%s\\t%s\\n\" % (item[\"input\"], item[\"input_bytes\"], item[\"input_sha256\"])\n        for item in adopted.get(\"parts\", [])\n    )\n    actual = hashlib.sha256(\"\".join(rows).encode()).hexdigest() if rows else \"\"\n    if actual != adopted_expected:\n        sys.exit(\"fixture adopted_from digest mismatch: %s\" % actual)\nprint(\"seekparquet fixture verified: %d part(s)\" % len(parts))\n' verify /fixtures/source f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0"
+                      "set -o pipefail\nmkdir -p /fixtures/source\nmkdir -p /fixtures/source/data\ngcloud storage cp <fixture-store>/aws-public-blockchain/seekparquet-c4a42eb4e7fb/manifest.json /fixtures/source/manifest.json\nactual=\"$(sha256sum /fixtures/source/manifest.json)\"; actual=\"${actual%% *}\"\n[[ \"$actual\" == c4a42eb4e7fb2a9627972cc1e457ed55d60ef3d3560813eff8e13e65ef182b29 ]] || { echo \"fixture manifest digest mismatch: $actual\" >&2; exit 1; }\nparts=\"$(\"${CLOUDSDK_PYTHON:-python3}\" -c '\nimport hashlib, json, os, re, sys\n\n# argv: list|verify ROOT [ADOPTED_SHA256]. The manifest'\"'\"'s own digest was\n# checked by the caller before this runs, so its contents are the identity.\ncommand, root = sys.argv[1], sys.argv[2]\nadopted_expected = sys.argv[3] if len(sys.argv) > 3 else \"\"\nwith open(os.path.join(root, \"manifest.json\"), \"rb\") as source:\n    manifest = json.load(source)\nif manifest.get(\"format\") != \"seekparquet\":\n    sys.exit(\"fixture manifest is not a SeekParquet manifest\")\nparts = manifest.get(\"parts\")\nif not isinstance(parts, list) or not parts:\n    sys.exit(\"fixture manifest names no parts\")\nnames = []\nfor part in parts:\n    path = part.get(\"path\") if isinstance(part, dict) else None\n    if not isinstance(path, str) or not re.fullmatch(r\"data/[A-Za-z0-9._-]+\\.parquet\", path):\n        sys.exit(\"fixture manifest part path is not data/<name>.parquet: %r\" % (path,))\n    names.append(path)\nif len(set(names)) != len(names):\n    sys.exit(\"fixture manifest names a part twice\")\nif command == \"list\":\n    print(\"\\n\".join(names))\n    sys.exit(0)\nstaged = sorted(\n    \"data/\" + name for name in os.listdir(os.path.join(root, \"data\")) if name.endswith(\".parquet\")\n)\nif staged != sorted(names):\n    sys.exit(\"staged data/ parts differ from the manifest: %r\" % (staged,))\nfor part in parts:\n    digest = hashlib.sha256()\n    with open(os.path.join(root, part[\"path\"]), \"rb\") as source:\n        for chunk in iter(lambda: source.read(1 << 20), b\"\"):\n            digest.update(chunk)\n    size = os.path.getsize(os.path.join(root, part[\"path\"]))\n    if size != part.get(\"bytes\") or digest.hexdigest() != part.get(\"sha256\"):\n        sys.exit(\"fixture part %s does not match its manifest entry\" % part[\"path\"])\nif adopted_expected:\n    adopted = manifest.get(\"extensions\", {}).get(\"swath-replay\", {}).get(\"adopted_from\", {})\n    rows = sorted(\n        \"%s\\t%s\\t%s\\n\" % (item[\"input\"], item[\"input_bytes\"], item[\"input_sha256\"])\n        for item in adopted.get(\"parts\", [])\n    )\n    actual = hashlib.sha256(\"\".join(rows).encode()).hexdigest() if rows else \"\"\n    if actual != adopted_expected:\n        sys.exit(\"fixture adopted_from digest mismatch: %s\" % actual)\nprint(\"seekparquet fixture verified: %d part(s)\" % len(parts))\n' list /fixtures/source)\"\nwhile IFS= read -r part; do\n  gcloud storage cp <fixture-store>/aws-public-blockchain/seekparquet-c4a42eb4e7fb/\"$part\" /fixtures/source/\"$part\"\ndone <<< \"$parts\"\n\"${CLOUDSDK_PYTHON:-python3}\" -c '\nimport hashlib, json, os, re, sys\n\n# argv: list|verify ROOT [ADOPTED_SHA256]. The manifest'\"'\"'s own digest was\n# checked by the caller before this runs, so its contents are the identity.\ncommand, root = sys.argv[1], sys.argv[2]\nadopted_expected = sys.argv[3] if len(sys.argv) > 3 else \"\"\nwith open(os.path.join(root, \"manifest.json\"), \"rb\") as source:\n    manifest = json.load(source)\nif manifest.get(\"format\") != \"seekparquet\":\n    sys.exit(\"fixture manifest is not a SeekParquet manifest\")\nparts = manifest.get(\"parts\")\nif not isinstance(parts, list) or not parts:\n    sys.exit(\"fixture manifest names no parts\")\nnames = []\nfor part in parts:\n    path = part.get(\"path\") if isinstance(part, dict) else None\n    if not isinstance(path, str) or not re.fullmatch(r\"data/[A-Za-z0-9._-]+\\.parquet\", path):\n        sys.exit(\"fixture manifest part path is not data/<name>.parquet: %r\" % (path,))\n    names.append(path)\nif len(set(names)) != len(names):\n    sys.exit(\"fixture manifest names a part twice\")\nif command == \"list\":\n    print(\"\\n\".join(names))\n    sys.exit(0)\nstaged = sorted(\n    \"data/\" + name for name in os.listdir(os.path.join(root, \"data\")) if name.endswith(\".parquet\")\n)\nif staged != sorted(names):\n    sys.exit(\"staged data/ parts differ from the manifest: %r\" % (staged,))\nfor part in parts:\n    digest = hashlib.sha256()\n    with open(os.path.join(root, part[\"path\"]), \"rb\") as source:\n        for chunk in iter(lambda: source.read(1 << 20), b\"\"):\n            digest.update(chunk)\n    size = os.path.getsize(os.path.join(root, part[\"path\"]))\n    if size != part.get(\"bytes\") or digest.hexdigest() != part.get(\"sha256\"):\n        sys.exit(\"fixture part %s does not match its manifest entry\" % part[\"path\"])\nif adopted_expected:\n    adopted = manifest.get(\"extensions\", {}).get(\"swath-replay\", {}).get(\"adopted_from\", {})\n    rows = sorted(\n        \"%s\\t%s\\t%s\\n\" % (item[\"input\"], item[\"input_bytes\"], item[\"input_sha256\"])\n        for item in adopted.get(\"parts\", [])\n    )\n    actual = hashlib.sha256(\"\".join(rows).encode()).hexdigest() if rows else \"\"\n    if actual != adopted_expected:\n        sys.exit(\"fixture adopted_from digest mismatch: %s\" % actual)\nprint(\"seekparquet fixture verified: %d part(s)\" % len(parts))\n' verify /fixtures/source f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0"
                     ],
                     "imageUri": "gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:cf72dd63b7643c117ef53378a41bef6db6a01fa3d561f2b456d7abd8bbeb9ba6",
                     "options": "--entrypoint /bin/bash --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
@@ -1557,7 +1460,7 @@
                       "10001:10001",
                       "/tmp/attempt"
                     ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:dab1c147072fa82d30b9fe1e187012760e355d3ffd127a83d8b04b07827b9ee5",
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:dab1c147072fa82d30b9fe1e187012760e355d3ffd127a83d8b04b07827b9ee5",
                     "options": "--user 0:0 --entrypoint /bin/chown --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
                   }
                 },
@@ -1596,7 +1499,7 @@
                       "--latency-scale",
                       "1.0"
                     ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90",
+                    "imageUri": "<study-registry>/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90",
                     "options": "--network host --cpuset-cpus=0-31,40-71 --memory=20g --memory-swap=20g --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
                   },
                   "environment": {
@@ -1624,7 +1527,7 @@
                       "--output",
                       "/tmp/attempt",
                       "--destination",
-                      "gs://s3-listing-study-results-29c02004/scale-study/aws-public-blockchain/swath.1bbe26879078.s1/",
+                      "<result-store>/scale-study/aws-public-blockchain/swath.1bbe26879078.s1/",
                       "--timeout",
                       "7200",
                       "--term-grace",
@@ -1632,7 +1535,7 @@
                       "--retain-products",
                       "false",
                       "--image",
-                      "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:dab1c147072fa82d30b9fe1e187012760e355d3ffd127a83d8b04b07827b9ee5",
+                      "<study-registry>/benchmark-toolbox@sha256:dab1c147072fa82d30b9fe1e187012760e355d3ffd127a83d8b04b07827b9ee5",
                       "--toolbox-manifest-sha256",
                       "358aa5d00157235e4b438d92ae5e29a7e0d2af385f01a8740c30461e165a3e1e",
                       "--toolbox-recipe-sha256",
@@ -1655,8 +1558,6 @@
                       "2bfc3cb8c59c75eb6baeb7b963c853f8eace0b961550297721843628ad10e9b8",
                       "--group-id",
                       "sgt-r4-mem",
-                      "--job-name",
-                      "scale-study-swath-1bbe26879078-s1",
                       "--case-id",
                       "swath.1bbe26879078",
                       "--attempt-id",
@@ -1674,9 +1575,9 @@
                       "--endpoint-url",
                       "http://127.0.0.1:19090",
                       "--replay-config",
-                      "{\"allocation\":{\"replay_heap_percent\":75,\"replay_list_index\":true,\"replay_list_index_max_bytes\":67108864,\"replay_max_concurrent_requests\":4096,\"replay_memory_gb\":20,\"replay_parquet_connections\":128,\"replay_prefetch\":true,\"replay_prefetch_max_windows\":192,\"replay_response_buffer_budget_bytes\":1073741824,\"replay_vcpus\":64,\"subject_vcpus\":8},\"backend\":{\"fixture_adopted_sha256\":\"f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0\",\"fixture_sha256\":\"c4a42eb4e7fb2a9627972cc1e457ed55d60ef3d3560813eff8e13e65ef182b29\",\"fixture_uri\":\"gs://s3-listing-study-results-29c02004/fixtures/aws-public-blockchain/seekparquet-c4a42eb4e7fb/\",\"latency_model\":{\"deadlines_ms\":{\"pivot_probe\":46,\"structure_probe\":55,\"worker_page\":94},\"jitter\":\"none\",\"scale\":1.0},\"server_image_uri\":\"us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90\",\"server_implementation\":\"go\",\"serving_mode\":\"sorted\",\"warmup\":{\"in_flight\":64,\"pivot_probes\":200,\"structure_probes\":2000,\"worker_pages\":200}},\"capacity_status\":\"uncalibrated\"}"
+                      "{\"allocation\":{\"replay_heap_percent\":75,\"replay_list_index\":true,\"replay_list_index_max_bytes\":67108864,\"replay_max_concurrent_requests\":4096,\"replay_memory_gb\":20,\"replay_parquet_connections\":128,\"replay_prefetch\":true,\"replay_prefetch_max_windows\":192,\"replay_response_buffer_budget_bytes\":1073741824,\"replay_vcpus\":64,\"subject_vcpus\":8},\"backend\":{\"fixture_adopted_sha256\":\"f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0\",\"fixture_sha256\":\"c4a42eb4e7fb2a9627972cc1e457ed55d60ef3d3560813eff8e13e65ef182b29\",\"fixture_uri\":\"<fixture-store>/aws-public-blockchain/seekparquet-c4a42eb4e7fb/\",\"latency_model\":{\"deadlines_ms\":{\"pivot_probe\":46,\"structure_probe\":55,\"worker_page\":94},\"jitter\":\"none\",\"scale\":1.0},\"server_image_uri\":\"<study-registry>/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90\",\"server_implementation\":\"go\",\"serving_mode\":\"sorted\",\"warmup\":{\"in_flight\":64,\"pivot_probes\":200,\"structure_probes\":2000,\"worker_pages\":200}},\"capacity_status\":\"uncalibrated\"}"
                     ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:dab1c147072fa82d30b9fe1e187012760e355d3ffd127a83d8b04b07827b9ee5",
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:dab1c147072fa82d30b9fe1e187012760e355d3ffd127a83d8b04b07827b9ee5",
                     "options": "--network host --cpuset-cpus=32-35,72-75 --memory=8g --memory-swap=8g --volume=/mnt/stateful_partition/attempt:/tmp/attempt --volume=/proc:/replay-host-proc:ro"
                   }
                 }
@@ -1685,7 +1586,6 @@
           }
         ]
       },
-      "result_prefix": "gs://s3-listing-study-results-29c02004/scale-study/aws-public-blockchain/swath.1bbe26879078.s1/",
       "settled_at": "2026-11-11T08:24:45.854538+00:00",
       "state": "SUCCEEDED",
       "state_detail": null,
@@ -1821,7 +1721,6 @@
           "worker_exit_code": 0
         },
         "result_sha256": "bb1f11f54674d3b95b19c30bc1cfea756ab58819ab7a3dd020b23a6bf6af3d91",
-        "result_uri": "gs://s3-listing-study-results-29c02004/scale-study/aws-public-blockchain/swath.1070280ec98c.s1/result.json",
         "state": "BOUND",
         "verification": null
       },
@@ -1844,23 +1743,7 @@
                 "provisioningModel": "SPOT"
               }
             }
-          ],
-          "location": {
-            "allowedLocations": [
-              "zones/us-east1-b"
-            ]
-          },
-          "network": {
-            "networkInterfaces": [
-              {
-                "network": "projects/varve-oss/global/networks/s3-listing-study",
-                "subnetwork": "projects/varve-oss/regions/us-east1/subnetworks/s3-listing-study-us-east1"
-              }
-            ]
-          },
-          "serviceAccount": {
-            "email": "s3-listing-study-worker@varve-oss.iam.gserviceaccount.com"
-          }
+          ]
         },
         "labels": {
           "suite": "scale-study"
@@ -1884,7 +1767,7 @@
                   "container": {
                     "commands": [
                       "-ceu",
-                      "set -o pipefail\nmkdir -p /fixtures/source\nmkdir -p /fixtures/source/data\ngcloud storage cp gs://s3-listing-study-results-29c02004/fixtures/aws-public-blockchain/seekparquet-c4a42eb4e7fb/manifest.json /fixtures/source/manifest.json\nactual=\"$(sha256sum /fixtures/source/manifest.json)\"; actual=\"${actual%% *}\"\n[[ \"$actual\" == c4a42eb4e7fb2a9627972cc1e457ed55d60ef3d3560813eff8e13e65ef182b29 ]] || { echo \"fixture manifest digest mismatch: $actual\" >&2; exit 1; }\nparts=\"$(\"${CLOUDSDK_PYTHON:-python3}\" -c '\nimport hashlib, json, os, re, sys\n\n# argv: list|verify ROOT [ADOPTED_SHA256]. The manifest'\"'\"'s own digest was\n# checked by the caller before this runs, so its contents are the identity.\ncommand, root = sys.argv[1], sys.argv[2]\nadopted_expected = sys.argv[3] if len(sys.argv) > 3 else \"\"\nwith open(os.path.join(root, \"manifest.json\"), \"rb\") as source:\n    manifest = json.load(source)\nif manifest.get(\"format\") != \"seekparquet\":\n    sys.exit(\"fixture manifest is not a SeekParquet manifest\")\nparts = manifest.get(\"parts\")\nif not isinstance(parts, list) or not parts:\n    sys.exit(\"fixture manifest names no parts\")\nnames = []\nfor part in parts:\n    path = part.get(\"path\") if isinstance(part, dict) else None\n    if not isinstance(path, str) or not re.fullmatch(r\"data/[A-Za-z0-9._-]+\\.parquet\", path):\n        sys.exit(\"fixture manifest part path is not data/<name>.parquet: %r\" % (path,))\n    names.append(path)\nif len(set(names)) != len(names):\n    sys.exit(\"fixture manifest names a part twice\")\nif command == \"list\":\n    print(\"\\n\".join(names))\n    sys.exit(0)\nstaged = sorted(\n    \"data/\" + name for name in os.listdir(os.path.join(root, \"data\")) if name.endswith(\".parquet\")\n)\nif staged != sorted(names):\n    sys.exit(\"staged data/ parts differ from the manifest: %r\" % (staged,))\nfor part in parts:\n    digest = hashlib.sha256()\n    with open(os.path.join(root, part[\"path\"]), \"rb\") as source:\n        for chunk in iter(lambda: source.read(1 << 20), b\"\"):\n            digest.update(chunk)\n    size = os.path.getsize(os.path.join(root, part[\"path\"]))\n    if size != part.get(\"bytes\") or digest.hexdigest() != part.get(\"sha256\"):\n        sys.exit(\"fixture part %s does not match its manifest entry\" % part[\"path\"])\nif adopted_expected:\n    adopted = manifest.get(\"extensions\", {}).get(\"swath-replay\", {}).get(\"adopted_from\", {})\n    rows = sorted(\n        \"%s\\t%s\\t%s\\n\" % (item[\"input\"], item[\"input_bytes\"], item[\"input_sha256\"])\n        for item in adopted.get(\"parts\", [])\n    )\n    actual = hashlib.sha256(\"\".join(rows).encode()).hexdigest() if rows else \"\"\n    if actual != adopted_expected:\n        sys.exit(\"fixture adopted_from digest mismatch: %s\" % actual)\nprint(\"seekparquet fixture verified: %d part(s)\" % len(parts))\n' list /fixtures/source)\"\nwhile IFS= read -r part; do\n  gcloud storage cp gs://s3-listing-study-results-29c02004/fixtures/aws-public-blockchain/seekparquet-c4a42eb4e7fb/\"$part\" /fixtures/source/\"$part\"\ndone <<< \"$parts\"\n\"${CLOUDSDK_PYTHON:-python3}\" -c '\nimport hashlib, json, os, re, sys\n\n# argv: list|verify ROOT [ADOPTED_SHA256]. The manifest'\"'\"'s own digest was\n# checked by the caller before this runs, so its contents are the identity.\ncommand, root = sys.argv[1], sys.argv[2]\nadopted_expected = sys.argv[3] if len(sys.argv) > 3 else \"\"\nwith open(os.path.join(root, \"manifest.json\"), \"rb\") as source:\n    manifest = json.load(source)\nif manifest.get(\"format\") != \"seekparquet\":\n    sys.exit(\"fixture manifest is not a SeekParquet manifest\")\nparts = manifest.get(\"parts\")\nif not isinstance(parts, list) or not parts:\n    sys.exit(\"fixture manifest names no parts\")\nnames = []\nfor part in parts:\n    path = part.get(\"path\") if isinstance(part, dict) else None\n    if not isinstance(path, str) or not re.fullmatch(r\"data/[A-Za-z0-9._-]+\\.parquet\", path):\n        sys.exit(\"fixture manifest part path is not data/<name>.parquet: %r\" % (path,))\n    names.append(path)\nif len(set(names)) != len(names):\n    sys.exit(\"fixture manifest names a part twice\")\nif command == \"list\":\n    print(\"\\n\".join(names))\n    sys.exit(0)\nstaged = sorted(\n    \"data/\" + name for name in os.listdir(os.path.join(root, \"data\")) if name.endswith(\".parquet\")\n)\nif staged != sorted(names):\n    sys.exit(\"staged data/ parts differ from the manifest: %r\" % (staged,))\nfor part in parts:\n    digest = hashlib.sha256()\n    with open(os.path.join(root, part[\"path\"]), \"rb\") as source:\n        for chunk in iter(lambda: source.read(1 << 20), b\"\"):\n            digest.update(chunk)\n    size = os.path.getsize(os.path.join(root, part[\"path\"]))\n    if size != part.get(\"bytes\") or digest.hexdigest() != part.get(\"sha256\"):\n        sys.exit(\"fixture part %s does not match its manifest entry\" % part[\"path\"])\nif adopted_expected:\n    adopted = manifest.get(\"extensions\", {}).get(\"swath-replay\", {}).get(\"adopted_from\", {})\n    rows = sorted(\n        \"%s\\t%s\\t%s\\n\" % (item[\"input\"], item[\"input_bytes\"], item[\"input_sha256\"])\n        for item in adopted.get(\"parts\", [])\n    )\n    actual = hashlib.sha256(\"\".join(rows).encode()).hexdigest() if rows else \"\"\n    if actual != adopted_expected:\n        sys.exit(\"fixture adopted_from digest mismatch: %s\" % actual)\nprint(\"seekparquet fixture verified: %d part(s)\" % len(parts))\n' verify /fixtures/source f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0"
+                      "set -o pipefail\nmkdir -p /fixtures/source\nmkdir -p /fixtures/source/data\ngcloud storage cp <fixture-store>/aws-public-blockchain/seekparquet-c4a42eb4e7fb/manifest.json /fixtures/source/manifest.json\nactual=\"$(sha256sum /fixtures/source/manifest.json)\"; actual=\"${actual%% *}\"\n[[ \"$actual\" == c4a42eb4e7fb2a9627972cc1e457ed55d60ef3d3560813eff8e13e65ef182b29 ]] || { echo \"fixture manifest digest mismatch: $actual\" >&2; exit 1; }\nparts=\"$(\"${CLOUDSDK_PYTHON:-python3}\" -c '\nimport hashlib, json, os, re, sys\n\n# argv: list|verify ROOT [ADOPTED_SHA256]. The manifest'\"'\"'s own digest was\n# checked by the caller before this runs, so its contents are the identity.\ncommand, root = sys.argv[1], sys.argv[2]\nadopted_expected = sys.argv[3] if len(sys.argv) > 3 else \"\"\nwith open(os.path.join(root, \"manifest.json\"), \"rb\") as source:\n    manifest = json.load(source)\nif manifest.get(\"format\") != \"seekparquet\":\n    sys.exit(\"fixture manifest is not a SeekParquet manifest\")\nparts = manifest.get(\"parts\")\nif not isinstance(parts, list) or not parts:\n    sys.exit(\"fixture manifest names no parts\")\nnames = []\nfor part in parts:\n    path = part.get(\"path\") if isinstance(part, dict) else None\n    if not isinstance(path, str) or not re.fullmatch(r\"data/[A-Za-z0-9._-]+\\.parquet\", path):\n        sys.exit(\"fixture manifest part path is not data/<name>.parquet: %r\" % (path,))\n    names.append(path)\nif len(set(names)) != len(names):\n    sys.exit(\"fixture manifest names a part twice\")\nif command == \"list\":\n    print(\"\\n\".join(names))\n    sys.exit(0)\nstaged = sorted(\n    \"data/\" + name for name in os.listdir(os.path.join(root, \"data\")) if name.endswith(\".parquet\")\n)\nif staged != sorted(names):\n    sys.exit(\"staged data/ parts differ from the manifest: %r\" % (staged,))\nfor part in parts:\n    digest = hashlib.sha256()\n    with open(os.path.join(root, part[\"path\"]), \"rb\") as source:\n        for chunk in iter(lambda: source.read(1 << 20), b\"\"):\n            digest.update(chunk)\n    size = os.path.getsize(os.path.join(root, part[\"path\"]))\n    if size != part.get(\"bytes\") or digest.hexdigest() != part.get(\"sha256\"):\n        sys.exit(\"fixture part %s does not match its manifest entry\" % part[\"path\"])\nif adopted_expected:\n    adopted = manifest.get(\"extensions\", {}).get(\"swath-replay\", {}).get(\"adopted_from\", {})\n    rows = sorted(\n        \"%s\\t%s\\t%s\\n\" % (item[\"input\"], item[\"input_bytes\"], item[\"input_sha256\"])\n        for item in adopted.get(\"parts\", [])\n    )\n    actual = hashlib.sha256(\"\".join(rows).encode()).hexdigest() if rows else \"\"\n    if actual != adopted_expected:\n        sys.exit(\"fixture adopted_from digest mismatch: %s\" % actual)\nprint(\"seekparquet fixture verified: %d part(s)\" % len(parts))\n' list /fixtures/source)\"\nwhile IFS= read -r part; do\n  gcloud storage cp <fixture-store>/aws-public-blockchain/seekparquet-c4a42eb4e7fb/\"$part\" /fixtures/source/\"$part\"\ndone <<< \"$parts\"\n\"${CLOUDSDK_PYTHON:-python3}\" -c '\nimport hashlib, json, os, re, sys\n\n# argv: list|verify ROOT [ADOPTED_SHA256]. The manifest'\"'\"'s own digest was\n# checked by the caller before this runs, so its contents are the identity.\ncommand, root = sys.argv[1], sys.argv[2]\nadopted_expected = sys.argv[3] if len(sys.argv) > 3 else \"\"\nwith open(os.path.join(root, \"manifest.json\"), \"rb\") as source:\n    manifest = json.load(source)\nif manifest.get(\"format\") != \"seekparquet\":\n    sys.exit(\"fixture manifest is not a SeekParquet manifest\")\nparts = manifest.get(\"parts\")\nif not isinstance(parts, list) or not parts:\n    sys.exit(\"fixture manifest names no parts\")\nnames = []\nfor part in parts:\n    path = part.get(\"path\") if isinstance(part, dict) else None\n    if not isinstance(path, str) or not re.fullmatch(r\"data/[A-Za-z0-9._-]+\\.parquet\", path):\n        sys.exit(\"fixture manifest part path is not data/<name>.parquet: %r\" % (path,))\n    names.append(path)\nif len(set(names)) != len(names):\n    sys.exit(\"fixture manifest names a part twice\")\nif command == \"list\":\n    print(\"\\n\".join(names))\n    sys.exit(0)\nstaged = sorted(\n    \"data/\" + name for name in os.listdir(os.path.join(root, \"data\")) if name.endswith(\".parquet\")\n)\nif staged != sorted(names):\n    sys.exit(\"staged data/ parts differ from the manifest: %r\" % (staged,))\nfor part in parts:\n    digest = hashlib.sha256()\n    with open(os.path.join(root, part[\"path\"]), \"rb\") as source:\n        for chunk in iter(lambda: source.read(1 << 20), b\"\"):\n            digest.update(chunk)\n    size = os.path.getsize(os.path.join(root, part[\"path\"]))\n    if size != part.get(\"bytes\") or digest.hexdigest() != part.get(\"sha256\"):\n        sys.exit(\"fixture part %s does not match its manifest entry\" % part[\"path\"])\nif adopted_expected:\n    adopted = manifest.get(\"extensions\", {}).get(\"swath-replay\", {}).get(\"adopted_from\", {})\n    rows = sorted(\n        \"%s\\t%s\\t%s\\n\" % (item[\"input\"], item[\"input_bytes\"], item[\"input_sha256\"])\n        for item in adopted.get(\"parts\", [])\n    )\n    actual = hashlib.sha256(\"\".join(rows).encode()).hexdigest() if rows else \"\"\n    if actual != adopted_expected:\n        sys.exit(\"fixture adopted_from digest mismatch: %s\" % actual)\nprint(\"seekparquet fixture verified: %d part(s)\" % len(parts))\n' verify /fixtures/source f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0"
                     ],
                     "imageUri": "gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:cf72dd63b7643c117ef53378a41bef6db6a01fa3d561f2b456d7abd8bbeb9ba6",
                     "options": "--entrypoint /bin/bash --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
@@ -1901,7 +1784,7 @@
                       "10001:10001",
                       "/tmp/attempt"
                     ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:dab1c147072fa82d30b9fe1e187012760e355d3ffd127a83d8b04b07827b9ee5",
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:dab1c147072fa82d30b9fe1e187012760e355d3ffd127a83d8b04b07827b9ee5",
                     "options": "--user 0:0 --entrypoint /bin/chown --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
                   }
                 },
@@ -1940,7 +1823,7 @@
                       "--latency-scale",
                       "1.0"
                     ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90",
+                    "imageUri": "<study-registry>/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90",
                     "options": "--network host --cpuset-cpus=0-31,40-71 --memory=20g --memory-swap=20g --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
                   },
                   "environment": {
@@ -1968,7 +1851,7 @@
                       "--output",
                       "/tmp/attempt",
                       "--destination",
-                      "gs://s3-listing-study-results-29c02004/scale-study/aws-public-blockchain/swath.1070280ec98c.s1/",
+                      "<result-store>/scale-study/aws-public-blockchain/swath.1070280ec98c.s1/",
                       "--timeout",
                       "7200",
                       "--term-grace",
@@ -1976,7 +1859,7 @@
                       "--retain-products",
                       "false",
                       "--image",
-                      "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:dab1c147072fa82d30b9fe1e187012760e355d3ffd127a83d8b04b07827b9ee5",
+                      "<study-registry>/benchmark-toolbox@sha256:dab1c147072fa82d30b9fe1e187012760e355d3ffd127a83d8b04b07827b9ee5",
                       "--toolbox-manifest-sha256",
                       "358aa5d00157235e4b438d92ae5e29a7e0d2af385f01a8740c30461e165a3e1e",
                       "--toolbox-recipe-sha256",
@@ -1999,8 +1882,6 @@
                       "2bfc3cb8c59c75eb6baeb7b963c853f8eace0b961550297721843628ad10e9b8",
                       "--group-id",
                       "sgt-r4-mem",
-                      "--job-name",
-                      "scale-study-swath-1070280ec98c-s1",
                       "--case-id",
                       "swath.1070280ec98c",
                       "--attempt-id",
@@ -2018,9 +1899,9 @@
                       "--endpoint-url",
                       "http://127.0.0.1:19090",
                       "--replay-config",
-                      "{\"allocation\":{\"replay_heap_percent\":75,\"replay_list_index\":true,\"replay_list_index_max_bytes\":67108864,\"replay_max_concurrent_requests\":4096,\"replay_memory_gb\":20,\"replay_parquet_connections\":128,\"replay_prefetch\":true,\"replay_prefetch_max_windows\":192,\"replay_response_buffer_budget_bytes\":1073741824,\"replay_vcpus\":64,\"subject_vcpus\":8},\"backend\":{\"fixture_adopted_sha256\":\"f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0\",\"fixture_sha256\":\"c4a42eb4e7fb2a9627972cc1e457ed55d60ef3d3560813eff8e13e65ef182b29\",\"fixture_uri\":\"gs://s3-listing-study-results-29c02004/fixtures/aws-public-blockchain/seekparquet-c4a42eb4e7fb/\",\"latency_model\":{\"deadlines_ms\":{\"pivot_probe\":46,\"structure_probe\":55,\"worker_page\":94},\"jitter\":\"none\",\"scale\":1.0},\"server_image_uri\":\"us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90\",\"server_implementation\":\"go\",\"serving_mode\":\"sorted\",\"warmup\":{\"in_flight\":64,\"pivot_probes\":200,\"structure_probes\":2000,\"worker_pages\":200}},\"capacity_status\":\"uncalibrated\"}"
+                      "{\"allocation\":{\"replay_heap_percent\":75,\"replay_list_index\":true,\"replay_list_index_max_bytes\":67108864,\"replay_max_concurrent_requests\":4096,\"replay_memory_gb\":20,\"replay_parquet_connections\":128,\"replay_prefetch\":true,\"replay_prefetch_max_windows\":192,\"replay_response_buffer_budget_bytes\":1073741824,\"replay_vcpus\":64,\"subject_vcpus\":8},\"backend\":{\"fixture_adopted_sha256\":\"f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0\",\"fixture_sha256\":\"c4a42eb4e7fb2a9627972cc1e457ed55d60ef3d3560813eff8e13e65ef182b29\",\"fixture_uri\":\"<fixture-store>/aws-public-blockchain/seekparquet-c4a42eb4e7fb/\",\"latency_model\":{\"deadlines_ms\":{\"pivot_probe\":46,\"structure_probe\":55,\"worker_page\":94},\"jitter\":\"none\",\"scale\":1.0},\"server_image_uri\":\"<study-registry>/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90\",\"server_implementation\":\"go\",\"serving_mode\":\"sorted\",\"warmup\":{\"in_flight\":64,\"pivot_probes\":200,\"structure_probes\":2000,\"worker_pages\":200}},\"capacity_status\":\"uncalibrated\"}"
                     ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:dab1c147072fa82d30b9fe1e187012760e355d3ffd127a83d8b04b07827b9ee5",
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:dab1c147072fa82d30b9fe1e187012760e355d3ffd127a83d8b04b07827b9ee5",
                     "options": "--network host --cpuset-cpus=32-35,72-75 --memory=8g --memory-swap=8g --volume=/mnt/stateful_partition/attempt:/tmp/attempt --volume=/proc:/replay-host-proc:ro"
                   }
                 }
@@ -2029,7 +1910,6 @@
           }
         ]
       },
-      "result_prefix": "gs://s3-listing-study-results-29c02004/scale-study/aws-public-blockchain/swath.1070280ec98c.s1/",
       "settled_at": "2026-11-11T08:24:45.856250+00:00",
       "state": "SUCCEEDED",
       "state_detail": null,
@@ -2165,7 +2045,6 @@
           "worker_exit_code": 0
         },
         "result_sha256": "46531997abdc4b6b58355beb390617cc28ee783704df8494f6cdebb1aabd82cf",
-        "result_uri": "gs://s3-listing-study-results-29c02004/scale-study/aws-public-blockchain/swath.35b13c754842.s1/result.json",
         "state": "BOUND",
         "verification": null
       },
@@ -2188,23 +2067,7 @@
                 "provisioningModel": "SPOT"
               }
             }
-          ],
-          "location": {
-            "allowedLocations": [
-              "zones/us-east1-b"
-            ]
-          },
-          "network": {
-            "networkInterfaces": [
-              {
-                "network": "projects/varve-oss/global/networks/s3-listing-study",
-                "subnetwork": "projects/varve-oss/regions/us-east1/subnetworks/s3-listing-study-us-east1"
-              }
-            ]
-          },
-          "serviceAccount": {
-            "email": "s3-listing-study-worker@varve-oss.iam.gserviceaccount.com"
-          }
+          ]
         },
         "labels": {
           "suite": "scale-study"
@@ -2228,7 +2091,7 @@
                   "container": {
                     "commands": [
                       "-ceu",
-                      "set -o pipefail\nmkdir -p /fixtures/source\nmkdir -p /fixtures/source/data\ngcloud storage cp gs://s3-listing-study-results-29c02004/fixtures/aws-public-blockchain/seekparquet-c4a42eb4e7fb/manifest.json /fixtures/source/manifest.json\nactual=\"$(sha256sum /fixtures/source/manifest.json)\"; actual=\"${actual%% *}\"\n[[ \"$actual\" == c4a42eb4e7fb2a9627972cc1e457ed55d60ef3d3560813eff8e13e65ef182b29 ]] || { echo \"fixture manifest digest mismatch: $actual\" >&2; exit 1; }\nparts=\"$(\"${CLOUDSDK_PYTHON:-python3}\" -c '\nimport hashlib, json, os, re, sys\n\n# argv: list|verify ROOT [ADOPTED_SHA256]. The manifest'\"'\"'s own digest was\n# checked by the caller before this runs, so its contents are the identity.\ncommand, root = sys.argv[1], sys.argv[2]\nadopted_expected = sys.argv[3] if len(sys.argv) > 3 else \"\"\nwith open(os.path.join(root, \"manifest.json\"), \"rb\") as source:\n    manifest = json.load(source)\nif manifest.get(\"format\") != \"seekparquet\":\n    sys.exit(\"fixture manifest is not a SeekParquet manifest\")\nparts = manifest.get(\"parts\")\nif not isinstance(parts, list) or not parts:\n    sys.exit(\"fixture manifest names no parts\")\nnames = []\nfor part in parts:\n    path = part.get(\"path\") if isinstance(part, dict) else None\n    if not isinstance(path, str) or not re.fullmatch(r\"data/[A-Za-z0-9._-]+\\.parquet\", path):\n        sys.exit(\"fixture manifest part path is not data/<name>.parquet: %r\" % (path,))\n    names.append(path)\nif len(set(names)) != len(names):\n    sys.exit(\"fixture manifest names a part twice\")\nif command == \"list\":\n    print(\"\\n\".join(names))\n    sys.exit(0)\nstaged = sorted(\n    \"data/\" + name for name in os.listdir(os.path.join(root, \"data\")) if name.endswith(\".parquet\")\n)\nif staged != sorted(names):\n    sys.exit(\"staged data/ parts differ from the manifest: %r\" % (staged,))\nfor part in parts:\n    digest = hashlib.sha256()\n    with open(os.path.join(root, part[\"path\"]), \"rb\") as source:\n        for chunk in iter(lambda: source.read(1 << 20), b\"\"):\n            digest.update(chunk)\n    size = os.path.getsize(os.path.join(root, part[\"path\"]))\n    if size != part.get(\"bytes\") or digest.hexdigest() != part.get(\"sha256\"):\n        sys.exit(\"fixture part %s does not match its manifest entry\" % part[\"path\"])\nif adopted_expected:\n    adopted = manifest.get(\"extensions\", {}).get(\"swath-replay\", {}).get(\"adopted_from\", {})\n    rows = sorted(\n        \"%s\\t%s\\t%s\\n\" % (item[\"input\"], item[\"input_bytes\"], item[\"input_sha256\"])\n        for item in adopted.get(\"parts\", [])\n    )\n    actual = hashlib.sha256(\"\".join(rows).encode()).hexdigest() if rows else \"\"\n    if actual != adopted_expected:\n        sys.exit(\"fixture adopted_from digest mismatch: %s\" % actual)\nprint(\"seekparquet fixture verified: %d part(s)\" % len(parts))\n' list /fixtures/source)\"\nwhile IFS= read -r part; do\n  gcloud storage cp gs://s3-listing-study-results-29c02004/fixtures/aws-public-blockchain/seekparquet-c4a42eb4e7fb/\"$part\" /fixtures/source/\"$part\"\ndone <<< \"$parts\"\n\"${CLOUDSDK_PYTHON:-python3}\" -c '\nimport hashlib, json, os, re, sys\n\n# argv: list|verify ROOT [ADOPTED_SHA256]. The manifest'\"'\"'s own digest was\n# checked by the caller before this runs, so its contents are the identity.\ncommand, root = sys.argv[1], sys.argv[2]\nadopted_expected = sys.argv[3] if len(sys.argv) > 3 else \"\"\nwith open(os.path.join(root, \"manifest.json\"), \"rb\") as source:\n    manifest = json.load(source)\nif manifest.get(\"format\") != \"seekparquet\":\n    sys.exit(\"fixture manifest is not a SeekParquet manifest\")\nparts = manifest.get(\"parts\")\nif not isinstance(parts, list) or not parts:\n    sys.exit(\"fixture manifest names no parts\")\nnames = []\nfor part in parts:\n    path = part.get(\"path\") if isinstance(part, dict) else None\n    if not isinstance(path, str) or not re.fullmatch(r\"data/[A-Za-z0-9._-]+\\.parquet\", path):\n        sys.exit(\"fixture manifest part path is not data/<name>.parquet: %r\" % (path,))\n    names.append(path)\nif len(set(names)) != len(names):\n    sys.exit(\"fixture manifest names a part twice\")\nif command == \"list\":\n    print(\"\\n\".join(names))\n    sys.exit(0)\nstaged = sorted(\n    \"data/\" + name for name in os.listdir(os.path.join(root, \"data\")) if name.endswith(\".parquet\")\n)\nif staged != sorted(names):\n    sys.exit(\"staged data/ parts differ from the manifest: %r\" % (staged,))\nfor part in parts:\n    digest = hashlib.sha256()\n    with open(os.path.join(root, part[\"path\"]), \"rb\") as source:\n        for chunk in iter(lambda: source.read(1 << 20), b\"\"):\n            digest.update(chunk)\n    size = os.path.getsize(os.path.join(root, part[\"path\"]))\n    if size != part.get(\"bytes\") or digest.hexdigest() != part.get(\"sha256\"):\n        sys.exit(\"fixture part %s does not match its manifest entry\" % part[\"path\"])\nif adopted_expected:\n    adopted = manifest.get(\"extensions\", {}).get(\"swath-replay\", {}).get(\"adopted_from\", {})\n    rows = sorted(\n        \"%s\\t%s\\t%s\\n\" % (item[\"input\"], item[\"input_bytes\"], item[\"input_sha256\"])\n        for item in adopted.get(\"parts\", [])\n    )\n    actual = hashlib.sha256(\"\".join(rows).encode()).hexdigest() if rows else \"\"\n    if actual != adopted_expected:\n        sys.exit(\"fixture adopted_from digest mismatch: %s\" % actual)\nprint(\"seekparquet fixture verified: %d part(s)\" % len(parts))\n' verify /fixtures/source f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0"
+                      "set -o pipefail\nmkdir -p /fixtures/source\nmkdir -p /fixtures/source/data\ngcloud storage cp <fixture-store>/aws-public-blockchain/seekparquet-c4a42eb4e7fb/manifest.json /fixtures/source/manifest.json\nactual=\"$(sha256sum /fixtures/source/manifest.json)\"; actual=\"${actual%% *}\"\n[[ \"$actual\" == c4a42eb4e7fb2a9627972cc1e457ed55d60ef3d3560813eff8e13e65ef182b29 ]] || { echo \"fixture manifest digest mismatch: $actual\" >&2; exit 1; }\nparts=\"$(\"${CLOUDSDK_PYTHON:-python3}\" -c '\nimport hashlib, json, os, re, sys\n\n# argv: list|verify ROOT [ADOPTED_SHA256]. The manifest'\"'\"'s own digest was\n# checked by the caller before this runs, so its contents are the identity.\ncommand, root = sys.argv[1], sys.argv[2]\nadopted_expected = sys.argv[3] if len(sys.argv) > 3 else \"\"\nwith open(os.path.join(root, \"manifest.json\"), \"rb\") as source:\n    manifest = json.load(source)\nif manifest.get(\"format\") != \"seekparquet\":\n    sys.exit(\"fixture manifest is not a SeekParquet manifest\")\nparts = manifest.get(\"parts\")\nif not isinstance(parts, list) or not parts:\n    sys.exit(\"fixture manifest names no parts\")\nnames = []\nfor part in parts:\n    path = part.get(\"path\") if isinstance(part, dict) else None\n    if not isinstance(path, str) or not re.fullmatch(r\"data/[A-Za-z0-9._-]+\\.parquet\", path):\n        sys.exit(\"fixture manifest part path is not data/<name>.parquet: %r\" % (path,))\n    names.append(path)\nif len(set(names)) != len(names):\n    sys.exit(\"fixture manifest names a part twice\")\nif command == \"list\":\n    print(\"\\n\".join(names))\n    sys.exit(0)\nstaged = sorted(\n    \"data/\" + name for name in os.listdir(os.path.join(root, \"data\")) if name.endswith(\".parquet\")\n)\nif staged != sorted(names):\n    sys.exit(\"staged data/ parts differ from the manifest: %r\" % (staged,))\nfor part in parts:\n    digest = hashlib.sha256()\n    with open(os.path.join(root, part[\"path\"]), \"rb\") as source:\n        for chunk in iter(lambda: source.read(1 << 20), b\"\"):\n            digest.update(chunk)\n    size = os.path.getsize(os.path.join(root, part[\"path\"]))\n    if size != part.get(\"bytes\") or digest.hexdigest() != part.get(\"sha256\"):\n        sys.exit(\"fixture part %s does not match its manifest entry\" % part[\"path\"])\nif adopted_expected:\n    adopted = manifest.get(\"extensions\", {}).get(\"swath-replay\", {}).get(\"adopted_from\", {})\n    rows = sorted(\n        \"%s\\t%s\\t%s\\n\" % (item[\"input\"], item[\"input_bytes\"], item[\"input_sha256\"])\n        for item in adopted.get(\"parts\", [])\n    )\n    actual = hashlib.sha256(\"\".join(rows).encode()).hexdigest() if rows else \"\"\n    if actual != adopted_expected:\n        sys.exit(\"fixture adopted_from digest mismatch: %s\" % actual)\nprint(\"seekparquet fixture verified: %d part(s)\" % len(parts))\n' list /fixtures/source)\"\nwhile IFS= read -r part; do\n  gcloud storage cp <fixture-store>/aws-public-blockchain/seekparquet-c4a42eb4e7fb/\"$part\" /fixtures/source/\"$part\"\ndone <<< \"$parts\"\n\"${CLOUDSDK_PYTHON:-python3}\" -c '\nimport hashlib, json, os, re, sys\n\n# argv: list|verify ROOT [ADOPTED_SHA256]. The manifest'\"'\"'s own digest was\n# checked by the caller before this runs, so its contents are the identity.\ncommand, root = sys.argv[1], sys.argv[2]\nadopted_expected = sys.argv[3] if len(sys.argv) > 3 else \"\"\nwith open(os.path.join(root, \"manifest.json\"), \"rb\") as source:\n    manifest = json.load(source)\nif manifest.get(\"format\") != \"seekparquet\":\n    sys.exit(\"fixture manifest is not a SeekParquet manifest\")\nparts = manifest.get(\"parts\")\nif not isinstance(parts, list) or not parts:\n    sys.exit(\"fixture manifest names no parts\")\nnames = []\nfor part in parts:\n    path = part.get(\"path\") if isinstance(part, dict) else None\n    if not isinstance(path, str) or not re.fullmatch(r\"data/[A-Za-z0-9._-]+\\.parquet\", path):\n        sys.exit(\"fixture manifest part path is not data/<name>.parquet: %r\" % (path,))\n    names.append(path)\nif len(set(names)) != len(names):\n    sys.exit(\"fixture manifest names a part twice\")\nif command == \"list\":\n    print(\"\\n\".join(names))\n    sys.exit(0)\nstaged = sorted(\n    \"data/\" + name for name in os.listdir(os.path.join(root, \"data\")) if name.endswith(\".parquet\")\n)\nif staged != sorted(names):\n    sys.exit(\"staged data/ parts differ from the manifest: %r\" % (staged,))\nfor part in parts:\n    digest = hashlib.sha256()\n    with open(os.path.join(root, part[\"path\"]), \"rb\") as source:\n        for chunk in iter(lambda: source.read(1 << 20), b\"\"):\n            digest.update(chunk)\n    size = os.path.getsize(os.path.join(root, part[\"path\"]))\n    if size != part.get(\"bytes\") or digest.hexdigest() != part.get(\"sha256\"):\n        sys.exit(\"fixture part %s does not match its manifest entry\" % part[\"path\"])\nif adopted_expected:\n    adopted = manifest.get(\"extensions\", {}).get(\"swath-replay\", {}).get(\"adopted_from\", {})\n    rows = sorted(\n        \"%s\\t%s\\t%s\\n\" % (item[\"input\"], item[\"input_bytes\"], item[\"input_sha256\"])\n        for item in adopted.get(\"parts\", [])\n    )\n    actual = hashlib.sha256(\"\".join(rows).encode()).hexdigest() if rows else \"\"\n    if actual != adopted_expected:\n        sys.exit(\"fixture adopted_from digest mismatch: %s\" % actual)\nprint(\"seekparquet fixture verified: %d part(s)\" % len(parts))\n' verify /fixtures/source f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0"
                     ],
                     "imageUri": "gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:cf72dd63b7643c117ef53378a41bef6db6a01fa3d561f2b456d7abd8bbeb9ba6",
                     "options": "--entrypoint /bin/bash --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
@@ -2245,7 +2108,7 @@
                       "10001:10001",
                       "/tmp/attempt"
                     ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:dab1c147072fa82d30b9fe1e187012760e355d3ffd127a83d8b04b07827b9ee5",
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:dab1c147072fa82d30b9fe1e187012760e355d3ffd127a83d8b04b07827b9ee5",
                     "options": "--user 0:0 --entrypoint /bin/chown --volume=/mnt/stateful_partition/attempt:/tmp/attempt"
                   }
                 },
@@ -2284,7 +2147,7 @@
                       "--latency-scale",
                       "1.0"
                     ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90",
+                    "imageUri": "<study-registry>/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90",
                     "options": "--network host --cpuset-cpus=0-31,40-71 --memory=20g --memory-swap=20g --volume=/mnt/stateful_partition/replay-fixture:/fixtures/source"
                   },
                   "environment": {
@@ -2312,7 +2175,7 @@
                       "--output",
                       "/tmp/attempt",
                       "--destination",
-                      "gs://s3-listing-study-results-29c02004/scale-study/aws-public-blockchain/swath.35b13c754842.s1/",
+                      "<result-store>/scale-study/aws-public-blockchain/swath.35b13c754842.s1/",
                       "--timeout",
                       "7200",
                       "--term-grace",
@@ -2320,7 +2183,7 @@
                       "--retain-products",
                       "false",
                       "--image",
-                      "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:dab1c147072fa82d30b9fe1e187012760e355d3ffd127a83d8b04b07827b9ee5",
+                      "<study-registry>/benchmark-toolbox@sha256:dab1c147072fa82d30b9fe1e187012760e355d3ffd127a83d8b04b07827b9ee5",
                       "--toolbox-manifest-sha256",
                       "358aa5d00157235e4b438d92ae5e29a7e0d2af385f01a8740c30461e165a3e1e",
                       "--toolbox-recipe-sha256",
@@ -2343,8 +2206,6 @@
                       "2bfc3cb8c59c75eb6baeb7b963c853f8eace0b961550297721843628ad10e9b8",
                       "--group-id",
                       "sgt-r4-mem",
-                      "--job-name",
-                      "scale-study-swath-35b13c754842-s1",
                       "--case-id",
                       "swath.35b13c754842",
                       "--attempt-id",
@@ -2362,9 +2223,9 @@
                       "--endpoint-url",
                       "http://127.0.0.1:19090",
                       "--replay-config",
-                      "{\"allocation\":{\"replay_heap_percent\":75,\"replay_list_index\":true,\"replay_list_index_max_bytes\":67108864,\"replay_max_concurrent_requests\":4096,\"replay_memory_gb\":20,\"replay_parquet_connections\":128,\"replay_prefetch\":true,\"replay_prefetch_max_windows\":192,\"replay_response_buffer_budget_bytes\":1073741824,\"replay_vcpus\":64,\"subject_vcpus\":8},\"backend\":{\"fixture_adopted_sha256\":\"f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0\",\"fixture_sha256\":\"c4a42eb4e7fb2a9627972cc1e457ed55d60ef3d3560813eff8e13e65ef182b29\",\"fixture_uri\":\"gs://s3-listing-study-results-29c02004/fixtures/aws-public-blockchain/seekparquet-c4a42eb4e7fb/\",\"latency_model\":{\"deadlines_ms\":{\"pivot_probe\":46,\"structure_probe\":55,\"worker_page\":94},\"jitter\":\"none\",\"scale\":1.0},\"server_image_uri\":\"us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90\",\"server_implementation\":\"go\",\"serving_mode\":\"sorted\",\"warmup\":{\"in_flight\":64,\"pivot_probes\":200,\"structure_probes\":2000,\"worker_pages\":200}},\"capacity_status\":\"uncalibrated\"}"
+                      "{\"allocation\":{\"replay_heap_percent\":75,\"replay_list_index\":true,\"replay_list_index_max_bytes\":67108864,\"replay_max_concurrent_requests\":4096,\"replay_memory_gb\":20,\"replay_parquet_connections\":128,\"replay_prefetch\":true,\"replay_prefetch_max_windows\":192,\"replay_response_buffer_budget_bytes\":1073741824,\"replay_vcpus\":64,\"subject_vcpus\":8},\"backend\":{\"fixture_adopted_sha256\":\"f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0\",\"fixture_sha256\":\"c4a42eb4e7fb2a9627972cc1e457ed55d60ef3d3560813eff8e13e65ef182b29\",\"fixture_uri\":\"<fixture-store>/aws-public-blockchain/seekparquet-c4a42eb4e7fb/\",\"latency_model\":{\"deadlines_ms\":{\"pivot_probe\":46,\"structure_probe\":55,\"worker_page\":94},\"jitter\":\"none\",\"scale\":1.0},\"server_image_uri\":\"<study-registry>/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90\",\"server_implementation\":\"go\",\"serving_mode\":\"sorted\",\"warmup\":{\"in_flight\":64,\"pivot_probes\":200,\"structure_probes\":2000,\"worker_pages\":200}},\"capacity_status\":\"uncalibrated\"}"
                     ],
-                    "imageUri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/benchmark-toolbox@sha256:dab1c147072fa82d30b9fe1e187012760e355d3ffd127a83d8b04b07827b9ee5",
+                    "imageUri": "<study-registry>/benchmark-toolbox@sha256:dab1c147072fa82d30b9fe1e187012760e355d3ffd127a83d8b04b07827b9ee5",
                     "options": "--network host --cpuset-cpus=32-35,72-75 --memory=8g --memory-swap=8g --volume=/mnt/stateful_partition/attempt:/tmp/attempt --volume=/proc:/replay-host-proc:ro"
                   }
                 }
@@ -2373,7 +2234,6 @@
           }
         ]
       },
-      "result_prefix": "gs://s3-listing-study-results-29c02004/scale-study/aws-public-blockchain/swath.35b13c754842.s1/",
       "settled_at": "2026-11-11T08:24:45.858221+00:00",
       "state": "SUCCEEDED",
       "state_detail": null,
@@ -2428,7 +2288,7 @@
         "backend": {
           "fixture_adopted_sha256": "f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0",
           "fixture_sha256": "c4a42eb4e7fb2a9627972cc1e457ed55d60ef3d3560813eff8e13e65ef182b29",
-          "fixture_uri": "gs://s3-listing-study-results-29c02004/fixtures/aws-public-blockchain/seekparquet-c4a42eb4e7fb/",
+          "fixture_uri": "<fixture-store>/aws-public-blockchain/seekparquet-c4a42eb4e7fb/",
           "latency_model": {
             "deadlines_ms": {
               "pivot_probe": 46,
@@ -2438,7 +2298,7 @@
             "jitter": "none",
             "scale": 1.0
           },
-          "server_image_uri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90",
+          "server_image_uri": "<study-registry>/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90",
           "server_implementation": "go",
           "serving_mode": "sorted",
           "warmup": {
@@ -2490,7 +2350,7 @@
         "backend": {
           "fixture_adopted_sha256": "f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0",
           "fixture_sha256": "c4a42eb4e7fb2a9627972cc1e457ed55d60ef3d3560813eff8e13e65ef182b29",
-          "fixture_uri": "gs://s3-listing-study-results-29c02004/fixtures/aws-public-blockchain/seekparquet-c4a42eb4e7fb/",
+          "fixture_uri": "<fixture-store>/aws-public-blockchain/seekparquet-c4a42eb4e7fb/",
           "latency_model": {
             "deadlines_ms": {
               "pivot_probe": 46,
@@ -2500,7 +2360,7 @@
             "jitter": "none",
             "scale": 1.0
           },
-          "server_image_uri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90",
+          "server_image_uri": "<study-registry>/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90",
           "server_implementation": "go",
           "serving_mode": "sorted",
           "warmup": {
@@ -2552,7 +2412,7 @@
         "backend": {
           "fixture_adopted_sha256": "f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0",
           "fixture_sha256": "c4a42eb4e7fb2a9627972cc1e457ed55d60ef3d3560813eff8e13e65ef182b29",
-          "fixture_uri": "gs://s3-listing-study-results-29c02004/fixtures/aws-public-blockchain/seekparquet-c4a42eb4e7fb/",
+          "fixture_uri": "<fixture-store>/aws-public-blockchain/seekparquet-c4a42eb4e7fb/",
           "latency_model": {
             "deadlines_ms": {
               "pivot_probe": 46,
@@ -2562,7 +2422,7 @@
             "jitter": "none",
             "scale": 1.0
           },
-          "server_image_uri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90",
+          "server_image_uri": "<study-registry>/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90",
           "server_implementation": "go",
           "serving_mode": "sorted",
           "warmup": {
@@ -2615,7 +2475,7 @@
         "backend": {
           "fixture_adopted_sha256": "f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0",
           "fixture_sha256": "c4a42eb4e7fb2a9627972cc1e457ed55d60ef3d3560813eff8e13e65ef182b29",
-          "fixture_uri": "gs://s3-listing-study-results-29c02004/fixtures/aws-public-blockchain/seekparquet-c4a42eb4e7fb/",
+          "fixture_uri": "<fixture-store>/aws-public-blockchain/seekparquet-c4a42eb4e7fb/",
           "latency_model": {
             "deadlines_ms": {
               "pivot_probe": 46,
@@ -2625,7 +2485,7 @@
             "jitter": "none",
             "scale": 1.0
           },
-          "server_image_uri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90",
+          "server_image_uri": "<study-registry>/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90",
           "server_implementation": "go",
           "serving_mode": "sorted",
           "warmup": {
@@ -2678,7 +2538,7 @@
         "backend": {
           "fixture_adopted_sha256": "f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0",
           "fixture_sha256": "c4a42eb4e7fb2a9627972cc1e457ed55d60ef3d3560813eff8e13e65ef182b29",
-          "fixture_uri": "gs://s3-listing-study-results-29c02004/fixtures/aws-public-blockchain/seekparquet-c4a42eb4e7fb/",
+          "fixture_uri": "<fixture-store>/aws-public-blockchain/seekparquet-c4a42eb4e7fb/",
           "latency_model": {
             "deadlines_ms": {
               "pivot_probe": 46,
@@ -2688,7 +2548,7 @@
             "jitter": "none",
             "scale": 1.0
           },
-          "server_image_uri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90",
+          "server_image_uri": "<study-registry>/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90",
           "server_implementation": "go",
           "serving_mode": "sorted",
           "warmup": {
@@ -2741,7 +2601,7 @@
         "backend": {
           "fixture_adopted_sha256": "f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0",
           "fixture_sha256": "c4a42eb4e7fb2a9627972cc1e457ed55d60ef3d3560813eff8e13e65ef182b29",
-          "fixture_uri": "gs://s3-listing-study-results-29c02004/fixtures/aws-public-blockchain/seekparquet-c4a42eb4e7fb/",
+          "fixture_uri": "<fixture-store>/aws-public-blockchain/seekparquet-c4a42eb4e7fb/",
           "latency_model": {
             "deadlines_ms": {
               "pivot_probe": 46,
@@ -2751,7 +2611,7 @@
             "jitter": "none",
             "scale": 1.0
           },
-          "server_image_uri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90",
+          "server_image_uri": "<study-registry>/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90",
           "server_implementation": "go",
           "serving_mode": "sorted",
           "warmup": {
@@ -2804,7 +2664,7 @@
         "backend": {
           "fixture_adopted_sha256": "f4a839f23a1be94047491339dfd1ae5dd40d075c5a7c2eac1e07156dd985d4b0",
           "fixture_sha256": "c4a42eb4e7fb2a9627972cc1e457ed55d60ef3d3560813eff8e13e65ef182b29",
-          "fixture_uri": "gs://s3-listing-study-results-29c02004/fixtures/aws-public-blockchain/seekparquet-c4a42eb4e7fb/",
+          "fixture_uri": "<fixture-store>/aws-public-blockchain/seekparquet-c4a42eb4e7fb/",
           "latency_model": {
             "deadlines_ms": {
               "pivot_probe": 46,
@@ -2814,7 +2674,7 @@
             "jitter": "none",
             "scale": 1.0
           },
-          "server_image_uri": "us-east1-docker.pkg.dev/varve-oss/s3-listing-study/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90",
+          "server_image_uri": "<study-registry>/swath-replay@sha256:f8b70f0f1c337271007b6aa8b00bf87f68bdd8d361dbbb7a19401edb5f629f90",
           "server_implementation": "go",
           "serving_mode": "sorted",
           "warmup": {

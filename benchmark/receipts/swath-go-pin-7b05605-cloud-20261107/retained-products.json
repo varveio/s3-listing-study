@@ -1,7 +1,7 @@
 [
   {
     "attempt_id": "swath-go.a821996ad2bd.s1",
-    "listing_uri": "gs://s3-listing-study-results-29c02004/scale-study/real-changesets/swath-go.a821996ad2bd.s1/native/listing/",
+    "listing_uri": "<result-store>/scale-study/real-changesets/swath-go.a821996ad2bd.s1/native/listing/",
     "manifest_format": "swath-dataset",
     "manifest_parts": [
       {
