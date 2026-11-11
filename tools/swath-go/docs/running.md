@@ -108,15 +108,27 @@ fields and the run report at `SINK/swath-go-report.json`:
   is refused, the earlier pins' `limiter`, `row_budget` and `spill_max`
   included, and a TSV mode refuses the two part controls. No plan states any
   of them but `max_duration`, so every plan row runs at the port's own
-  defaults, which at this pin include a sort buffer sized from the box's
-  memory (512 MiB in the replay plans' 8 GiB subject container, 1 GiB on the
-  live plans' uncapped boxes; 128 MiB at the earlier pins).
+  defaults. Two of those changed since the earlier pins and move with the
+  version in any comparison with the 2026-11-07 rows:
+  - the sort buffer is sized from the box's memory: 512 MiB on the four replay plans with 8 GiB subject containers
+    (aws-public-blockchain, nara-1950-census, noaa-nbm-grib2-pds,
+    real-changesets), 1 GiB on the two with 16 GiB (idc-open-data,
+    noaa-nws-fourcastnetgfs-pds) and on the live plans' uncapped boxes, where
+    the 2026-11-07 rows at the earlier pin had 128 MiB — claim
+    `sort-buffer-and-spill-budget-bound-the-reorder-stage`;
+  - the seed sends the scope's first data page beside its first delimiter
+    wave (a scope that fits in one page is then listed with no tiles; a
+    truncated first page is discarded, one request more) and stops following
+    a level's pages once a page holds no folder — claim `seed-is-on-by-default`.
+  The limiter's cut rule changed too (claim
+  `limiter-is-aimd-on-throttle-answers`), though it only acts under throttling.
 - **`max_duration`** is stated by every plan row 30 s below the row's
   `timeout_s`, so the port stops itself, resumably, before the worker's kill
   deadline, with the 20 s upstream asks for to spare — claim
   `hosted-runner-needs-a-finite-max-duration`. The adapter cannot see
   `timeout_s`, so the plan keeps that relation.
-- **No count-only mode.** `swath list --count-only` exists, but it publishes no
+- **No count-only mode.** `swath diag count` exists (the earlier pins'
+  `swath list --count-only` is gone), but it publishes no
   product and the worker settles a clean exit with nothing at the declared path
   as unusable.
 - **The report** goes beside the product, not inside it, as upstream requires —

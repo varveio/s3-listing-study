@@ -33,9 +33,15 @@ order stage walks the tree depth-first, which is global key order, and streams
 rows at the frontier to the writer. There is no external sort and no merge
 pass, and splits are made by the range's owner when workers are idle rather
 than stolen — claim `ranges-expand-in-key-order-without-a-sort`. By default the
-scope is first tiled from delimiter listings of the folder hierarchy; turning
-that off is the diagnostic `swath diag list --no-seed` — claim
-`seed-is-on-by-default`. Structure probes, which let a split pivot on folder
+scope is first tiled from delimiter listings of the folder hierarchy, within a
+delimiter budget of 64 requests and 6 round trips, and a level's pages stop
+being followed once a page holds no folder. The first delimiter wave also
+carries the scope's first data page, outside that budget: if it is not
+truncated the scope fits in one page and is listed with no tiles; if it is, it
+is discarded, one request more. Turning the seed off is the diagnostic `swath
+diag list --no-seed` — claim `seed-is-on-by-default`. The first-page shortcut
+and the stop on folderless pages are new since the capsule's earlier pins, so
+startup and request counts differ from theirs, flat fixtures included. Structure probes, which let a split pivot on folder
 boundaries, run at `auto`; changing them is a diagnostic flag on `swath diag
 list` too — claim `structure-is-a-diagnostic-flag`.
 
@@ -70,8 +76,9 @@ pin with the capsule's earlier ones: there, every throttle answer cut the limit.
 `--sort-buffer` is one budget for rows and scheduler metadata held between
 listing and encoding. Its default is 1/16 of the least of physical memory, the
 cgroup's limit and `GOMEMLIMIT`, at most 1 GiB (128 MiB when none is found), so
-it follows the box: 512 MiB in a subject container capped at 8 GiB, 1 GiB on an
-uncapped 64 GiB machine, where the capsule's earlier pins had a fixed 128 MiB
+it follows the box: 512 MiB in a subject container capped at 8 GiB, 1 GiB in
+one capped at 16 GiB or on an uncapped 64 GiB machine, where the capsule's
+earlier pins had a fixed 128 MiB
 `--row-budget`. When it is full, rows of ranges ahead of the frontier spill to
 disposable files instead of stalling the workers, up to `--spill-budget` —
 claim `sort-buffer-and-spill-budget-bound-the-reorder-stage`. A dataset run

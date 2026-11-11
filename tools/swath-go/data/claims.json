@@ -211,11 +211,11 @@
     },
     {
       "id": "seed-is-on-by-default",
-      "statement": "The seed, on by default, tiles the scope from delimiter listings of the folder hierarchy before any range lists (at most 64 requests in at most 6 round trips); the switch that turns it off, --no-seed, is a diagnostic flag registered only on swath diag list.",
+      "statement": "The seed, on by default, tiles the scope from delimiter listings of the folder hierarchy before any range lists, within a delimiter budget of 64 requests and 6 round trips, and stops following a level's pages once a page holds no folder; its first wave also sends the scope's first data page, outside that budget: an untruncated page is the whole listing and no tiles are made, a truncated one is discarded at one request more. The switch that turns the seed off, --no-seed, is a diagnostic flag registered only on swath diag list.",
       "scope": "mechanism",
       "status": "supported",
       "disposition": "retained",
-      "qualification": "Read from the flag registration and the range-engine page. It changes the request pattern, not the output. The capsule exposes it as the seed config key: false runs swath diag list --no-seed, and true renders nothing, since swath list has no seed switch at this pin and always seeds.",
+      "qualification": "Read from the flag registration, the policy and the range-engine page. It changes the request pattern, not the output. The first-page shortcut (SeedFirstPage, set with the seed) and the stop on folderless pages are absent at the capsule's earlier pin, so startup and request counts differ from runs at that pin, flat fixtures included. The capsule exposes it as the seed config key: false runs swath diag list --no-seed, and true renders nothing, since swath list has no seed switch at this pin and always seeds.",
       "evidence": [
         {
           "kind": "source",
@@ -223,7 +223,7 @@
           "repository": "https://github.com/varveio/swath",
           "commit": "8c8f870801c700f22413581f35683096782329a0",
           "path": "go/internal/source/keyrange/flags.go",
-          "lines": "61-69,79-83"
+          "lines": "41-44,61-69,79-83"
         },
         {
           "kind": "source",
@@ -231,7 +231,15 @@
           "repository": "https://github.com/varveio/swath",
           "commit": "8c8f870801c700f22413581f35683096782329a0",
           "path": "go/docs/internals/range-engine.md",
-          "lines": "71-72,90-96"
+          "lines": "71-96"
+        },
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/varveio/swath",
+          "commit": "8c8f870801c700f22413581f35683096782329a0",
+          "path": "go/internal/source/keyrange/seed.go",
+          "lines": "326-335"
         }
       ]
     },
@@ -467,7 +475,7 @@
       "scope": "mechanism",
       "status": "supported",
       "disposition": "retained",
-      "qualification": "Read from the flags and the limits. The capsule's earlier pins named these --row-budget (a fixed 128 MiB default) and --spill-max; a journal that recorded --row-budget resumes under --sort-buffer. The default now follows the box: a subject container capped at 8 GiB gets 512 MiB, an uncapped 64 GiB box 1 GiB, where the earlier pins' runs had 128 MiB. The capsule exposes both as sort_buffer and spill_budget. Peak memory and spill at scale are run questions.",
+      "qualification": "Read from the flags and the limits. The capsule's earlier pins named these --row-budget (a fixed 128 MiB default) and --spill-max; a journal that recorded --row-budget resumes under --sort-buffer. The default now follows the box: a subject container capped at 8 GiB gets 512 MiB, one capped at 16 GiB or an uncapped 64 GiB box 1 GiB (so four swath-go replay plans run at 512 MiB, idc-open-data, noaa-nws-fourcastnetgfs-pds and the live plans at 1 GiB), where the earlier pins' runs had 128 MiB. The capsule exposes both as sort_buffer and spill_budget. Peak memory and spill at scale are run questions.",
       "evidence": [
         {
           "kind": "source",
@@ -492,6 +500,14 @@
           "commit": "8c8f870801c700f22413581f35683096782329a0",
           "path": "go/cmd/swath/commands.go",
           "lines": "158-163"
+        },
+        {
+          "kind": "source",
+          "subject": "upstream",
+          "repository": "https://github.com/varveio/swath",
+          "commit": "8c8f870801c700f22413581f35683096782329a0",
+          "path": "go/internal/listing/rowbudget.go",
+          "lines": "78-105"
         }
       ]
     },

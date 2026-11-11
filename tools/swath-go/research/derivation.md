@@ -46,7 +46,11 @@ because of how it was written, and may be renamed in review.
   - **Meaning.** `--no-adaptive-limit` removes the limiter rather than holding
     a fixed `--workers` in flight; the limiter cuts on a throttle share of a
     window rather than on every throttle answer; the sort buffer's default is
-    1/16 of the visible memory, at most 1 GiB, rather than a fixed 128 MiB;
+    1/16 of the visible memory, at most 1 GiB, rather than a fixed 128 MiB
+    (512 MiB in an 8 GiB container, 1 GiB in a 16 GiB one); the seed's first
+    wave also fetches the first data page (listing a one-page scope with no
+    tiles, otherwise discarding it at one request more) and stops following
+    folderless pages, neither of which the earlier pin did;
     `kb`, `mb`, `gb` and `tb` are decimal sizes rather than binary; durations
     accept `d` and `w`; a text run spills beside its file rather than in the
     temporary directory; page fetches go through the AWS SDK's S3 client.

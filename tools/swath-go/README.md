@@ -91,9 +91,16 @@ observation.
   [`Output`](docs/mechanism.md#output) · `text-fields-use-reversible-tsv-escapes`
 - **The sort buffer now follows the box.** Its default is 1/16 of the memory
   the process can see, at most 1 GiB, where the earlier pins' was a fixed
-  128 MiB; the same plan row buffers more at this pin.
+  128 MiB: 512 MiB in four replay plans' 8 GiB containers, 1 GiB in the
+  16 GiB ones (idc-open-data, noaa-nws-fourcastnetgfs-pds) and on live boxes.
   [`Memory and spill`](docs/mechanism.md#memory-and-spill)
   · `sort-buffer-and-spill-budget-bound-the-reorder-stage`
+- **The seed starts differently.** Its first wave now also fetches the scope's
+  first data page (a scope of one page is listed with no tiles; otherwise the
+  page is discarded, one request more), and it stops following folderless
+  pages, so startup and request counts differ from the earlier pins'.
+  [`Listing, ranges and order`](docs/mechanism.md#listing-ranges-and-order)
+  · `seed-is-on-by-default`
 
 ## Limitations and open questions
 
