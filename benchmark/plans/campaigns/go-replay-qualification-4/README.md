@@ -337,25 +337,61 @@ compute, flagging the stop rules):
 STATE=~/s3-listing-study-state/2026-11-11-go-replay-qualification-4
 W4=benchmark/plans/campaigns/go-replay-qualification-4
 cat > "$STATE/accrue.py" <<'EOF'
-import datetime as dt, json, sys
+import datetime as dt, json, os, sys
+# Wave-4 spend check. Usage: accrue.py JOBS_JSON START_ISO
+# Keeps every wave-4 job it has ever seen in costs.json beside this script, so a
+# job that cancellation deleted from Batch still counts. Only SUCCEEDED, FAILED
+# and CANCELLED settle a job's cost; anything else (including
+# DELETION_IN_PROGRESS, or a job no longer listed) keeps accruing to now, capped
+# at its 25-minute ceiling -- conservative by construction.
 RATE = {"n4-highcpu-32": 0.722752, "n4-highcpu-16": 0.361376}  # USD/hour, N4 Spot us-east1
-TERMINAL = {"SUCCEEDED", "FAILED", "CANCELLED", "DELETION_IN_PROGRESS"}
+SETTLED = {"SUCCEEDED", "FAILED", "CANCELLED"}
+CEILING_MIN = 25.0
+LEDGER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "costs.json")
+
+
 def when(value):
     return dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
 jobs, start = json.load(open(sys.argv[1])), when(sys.argv[2])
-now, total = dt.datetime.now(dt.timezone.utc), 0.0
-for job in sorted(jobs, key=lambda j: j["createTime"]):
+now = dt.datetime.now(dt.timezone.utc)
+seen = json.load(open(LEDGER)) if os.path.exists(LEDGER) else {}
+
+listed = set()
+for job in jobs:
     created = when(job["createTime"])
     if created < start:
         continue
+    name = job["name"].rsplit("/", 1)[-1]
+    listed.add(name)
     state = job.get("status", {}).get("state", "?")
     machine = job["allocationPolicy"]["instances"][0]["policy"]["machineType"]
-    end = when(job["updateTime"]) if state in TERMINAL else now
+    rec = seen.get(name, {"created": job["createTime"], "machine": machine})
+    rec["state"] = state
+    if state in SETTLED:
+        rec["end"] = job["updateTime"]
+    seen[name] = rec
+
+total = 0.0
+for name, rec in sorted(seen.items(), key=lambda kv: kv[1]["created"]):
+    created = when(rec["created"])
+    settled = rec.get("state") in SETTLED and "end" in rec
+    end = when(rec["end"]) if settled else now
     minutes = (end - created).total_seconds() / 60
-    usd = minutes / 60 * RATE[machine]
+    if not settled and name not in listed:
+        minutes = min(minutes, CEILING_MIN)
+    usd = minutes / 60 * RATE[rec["machine"]]
+    if not settled:  # an unsettled charge never goes down between checks
+        usd = max(usd, rec.get("max_usd", 0.0))
+    rec["max_usd"] = usd
     total += usd
-    flag = "  STOP: past 20 min" if state not in TERMINAL and minutes >= 20 else ""
-    print(f"{job['name'].rsplit('/', 1)[-1]} {state} {machine} {minutes:.1f} min ${usd:.4f}{flag}")
+    note = "" if name in listed else " (no longer listed)"
+    flag = "  STOP: past 20 min" if not settled and minutes >= 20 else ""
+    print(f"{name} {rec.get('state')}{note} {rec['machine']} {minutes:.1f} min ${usd:.4f}{flag}")
+
+json.dump(seen, open(LEDGER + ".tmp", "w"), indent=1)
+os.replace(LEDGER + ".tmp", LEDGER)
 print(f"accrued compute ${total:.4f}" + ("  STOP ALL: at or past $1.50" if total >= 1.50 else ""))
 EOF
 check() {
